@@ -9,18 +9,19 @@
 mod icon;
 
 use std::collections::BTreeSet;
+use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 use axcenity_assets::Assets;
 use axcenity_audio::{AudioEngine, SoundAction};
-use axcenity_core::World;
+use axcenity_core::{InstanceId, World};
 use axcenity_physics::Physics;
 use axcenity_project::ScriptFile;
-use axcenity_render::Renderer;
 use axcenity_render::glam::Vec3;
+use axcenity_render::{Renderer, UiRectangle, UiText};
 use axcenity_scene::{FlyCamera, MoveKeys};
 use axcenity_script::{CameraState, KeyEvent, OutputKind, ScriptRuntime};
 use winit::application::ApplicationHandler;
@@ -35,7 +36,8 @@ const START_CAMERA_POSITION: Vec3 = Vec3::new(12.0, 8.0, 16.0);
 /// After a long pause (such as dragging the window), don't jump the camera
 /// by the whole pause; treat the frame as at most this long.
 const MAX_FRAME_SECONDS: f32 = 0.1;
-const USAGE: &str = "usage: axcenity-player <project-folder>\n\
+const GAME_FILE: &str = "game.axgame";
+const USAGE: &str = "usage: axcenity-player [project-folder | game.axgame]\n\
                      example: cargo run -p axcenity-player -- examples/hello-part";
 
 fn main() -> Result<()> {
@@ -48,12 +50,38 @@ fn main() -> Result<()> {
     .init();
 
     // `args_os` instead of `args` so folder names that aren't valid Unicode still work.
-    let Some(folder) = std::env::args_os().nth(1).map(PathBuf::from) else {
-        bail!("no project folder given\n\n{USAGE}");
+    let argument = std::env::args_os().nth(1).map(PathBuf::from);
+    let folder = match argument {
+        Some(path) if path.is_file() => {
+            let temporary = PackedProjectFolder::new()?;
+            let bytes = fs::read(&path)
+                .with_context(|| format!("could not read game file `{}`", path.display()))?;
+            axcenity_project::unpack_game(&bytes, &temporary.path)
+                .with_context(|| format!("could not unpack game file `{}`", path.display()))?;
+            temporary
+        }
+        Some(path) => PackedProjectFolder::from_folder(path),
+        None => {
+            let player = std::env::current_exe().context("could not locate the player program")?;
+            let bundled = player
+                .parent()
+                .context("the player program has no parent folder")?
+                .join(GAME_FILE);
+            if !bundled.is_file() {
+                bail!("no project folder or `{GAME_FILE}` found next to the player\n\n{USAGE}");
+            }
+            let temporary = PackedProjectFolder::new()?;
+            let bytes = fs::read(&bundled)
+                .with_context(|| format!("could not read game file `{}`", bundled.display()))?;
+            axcenity_project::unpack_game(&bytes, &temporary.path)
+                .with_context(|| format!("could not unpack game file `{}`", bundled.display()))?;
+            temporary
+        }
     };
-    let project = axcenity_project::load(&folder)
-        .with_context(|| format!("could not open the project in `{}`", folder.display()))?;
+    let project = axcenity_project::load(&folder.path)
+        .with_context(|| format!("could not open the project in `{}`", folder.path.display()))?;
     log::info!("loaded project \"{}\"", project.manifest.name);
+    let show_splash = project.manifest.show_splash;
     // A damaged file only takes itself out: say which, and run the rest.
     for problem in project.problems {
         eprintln!("error: {:#}", anyhow::Error::new(problem));
@@ -81,6 +109,8 @@ fn main() -> Result<()> {
 
     let mut app = App {
         title: format!("{} - Axcenity Player", project.manifest.name),
+        show_splash,
+        started_at: Instant::now(),
         world,
         stylesheets,
         scripts,
@@ -96,6 +126,10 @@ fn main() -> Result<()> {
         key_events: Vec::new(),
         held_keys: BTreeSet::new(),
         looking: false,
+        pointer: None,
+        ui_mouse_events: Vec::new(),
+        ui_mouse_down: false,
+        ui_pressed_button: None,
         last_frame: None,
     };
     event_loop.run_app(&mut app)?;
@@ -104,6 +138,46 @@ fn main() -> Result<()> {
     match app.error {
         Some(err) => Err(err),
         None => Ok(()),
+    }
+}
+
+struct PackedProjectFolder {
+    path: PathBuf,
+    remove_on_drop: bool,
+}
+
+impl PackedProjectFolder {
+    fn new() -> Result<Self> {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .context("system clock is before the Unix epoch")?
+            .as_nanos();
+        let unique = format!("axcenity-game-{}-{}", std::process::id(), timestamp);
+        Ok(Self {
+            path: std::env::temp_dir().join(unique),
+            remove_on_drop: true,
+        })
+    }
+
+    fn from_folder(path: PathBuf) -> Self {
+        Self {
+            path,
+            remove_on_drop: false,
+        }
+    }
+}
+
+impl Drop for PackedProjectFolder {
+    fn drop(&mut self) {
+        if self.remove_on_drop
+            && self.path.exists()
+            && let Err(err) = fs::remove_dir_all(&self.path)
+        {
+            log::warn!(
+                "could not remove temporary game folder `{}`: {err}",
+                self.path.display()
+            );
+        }
     }
 }
 
@@ -168,6 +242,8 @@ fn apply_audio(
 /// `None` because winit only allows creating windows once the event loop has started.
 struct App {
     title: String,
+    show_splash: bool,
+    started_at: Instant,
     world: World,
     stylesheets: Vec<axcenity_ui::Stylesheet>,
     /// Runs the scripts, and keeps the ones paused by `task.wait`.
@@ -190,6 +266,12 @@ struct App {
     held_keys: BTreeSet<axcenity_core::KeyCode>,
     /// True while the right mouse button is held, when moving the mouse turns the camera.
     looking: bool,
+    /// The mouse position in physical pixels, for on-screen UI.
+    pointer: Option<[f32; 2]>,
+    /// Left-button transitions since the last frame.
+    ui_mouse_events: Vec<bool>,
+    ui_mouse_down: bool,
+    ui_pressed_button: Option<InstanceId>,
     /// When the previous frame was drawn, to measure how much time passed.
     last_frame: Option<Instant>,
 }
@@ -199,6 +281,41 @@ impl App {
         log::error!("{err:#}");
         self.error = Some(err);
         event_loop.exit();
+    }
+
+    fn process_ui_mouse_events(
+        world: &mut World,
+        stylesheets: &[axcenity_ui::Stylesheet],
+        scripts: &mut ScriptRuntime,
+        (pointer, size): (Option<[f32; 2]>, (u32, u32)),
+        mouse_events: &mut Vec<bool>,
+        mouse_down: &mut bool,
+        pressed_button: &mut Option<InstanceId>,
+    ) {
+        let events = std::mem::take(mouse_events);
+        for pressed in events {
+            if pressed == *mouse_down {
+                continue;
+            }
+            let hit = pointer.and_then(|[x, y]| {
+                if x < 0.0 || y < 0.0 || x >= size.0 as f32 || y >= size.1 as f32 {
+                    return None;
+                }
+                axcenity_ui::layout_ui(world, size.0, size.1, stylesheets).hit_button(x, y)
+            });
+            if pressed {
+                *pressed_button = hit;
+                *mouse_down = true;
+            } else {
+                if pressed_button.is_some() && *pressed_button == hit {
+                    let button = pressed_button.expect("checked above");
+                    scripts.activate_ui_button(world, button);
+                    print_output(scripts);
+                }
+                *pressed_button = None;
+                *mouse_down = false;
+            }
+        }
     }
 }
 
@@ -358,6 +475,9 @@ impl ApplicationHandler for App {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => renderer.resize(size.width, size.height),
+            WindowEvent::CursorMoved { position, .. } => {
+                self.pointer = Some([position.x as f32, position.y as f32]);
+            }
             WindowEvent::KeyboardInput { event, .. } => {
                 if let PhysicalKey::Code(key) = event.physical_key {
                     let pressed = event.state == ElementState::Pressed;
@@ -372,6 +492,11 @@ impl ApplicationHandler for App {
                     }
                 }
             }
+            WindowEvent::MouseInput {
+                state,
+                button: MouseButton::Left,
+                ..
+            } => self.ui_mouse_events.push(state == ElementState::Pressed),
             WindowEvent::MouseInput {
                 state,
                 button: MouseButton::Right,
@@ -392,10 +517,21 @@ impl ApplicationHandler for App {
                 }
                 self.looking = false;
                 capture_mouse(window, false);
+                self.ui_mouse_events.push(false);
             }
             // One frame, in the fixed order from docs/architecture.md.
             WindowEvent::RedrawRequested => {
                 let seconds = frame_seconds(&mut self.last_frame);
+                let size = window.inner_size();
+                Self::process_ui_mouse_events(
+                    &mut self.world,
+                    &self.stylesheets,
+                    &mut self.scripts,
+                    (self.pointer, (size.width, size.height)),
+                    &mut self.ui_mouse_events,
+                    &mut self.ui_mouse_down,
+                    &mut self.ui_pressed_button,
+                );
 
                 // 1. Input: the events above have already updated the keys
                 //    and mouse look, so move the camera. Then LocalScripts
@@ -432,7 +568,6 @@ impl ApplicationHandler for App {
                 );
 
                 // 5. Lay out ScreenGuis at this window's current pixel size.
-                let size = window.inner_size();
                 let ui_size = (size.width, size.height);
 
                 // 6. Build and render, from wherever a LocalScript put the
@@ -441,13 +576,36 @@ impl ApplicationHandler for App {
                     self.camera.set_view(view.position, view.orientation);
                 }
 
-                let draw_list = axcenity_scene::build_draw_list_with_ui(
+                let mut draw_list = axcenity_scene::build_draw_list_with_ui_interaction(
                     &self.world,
                     &self.assets,
                     self.camera.to_render_camera(),
                     ui_size,
                     &self.stylesheets,
-                );
+                    self.pointer,
+                    self.ui_pressed_button,
+                )
+                .0;
+                if self.show_splash && self.started_at.elapsed().as_secs_f32() < 2.5 {
+                    draw_list
+                        .ui
+                        .push(axcenity_render::UiDrawItem::Rectangle(UiRectangle {
+                            position: [0.0, 0.0],
+                            size: [size.width as f32, size.height as f32],
+                            color: [0.025, 0.035, 0.055, 0.9],
+                            border_color: [0.0; 4],
+                            border_width: 0.0,
+                            border_radius: 0.0,
+                        }));
+                    draw_list.ui.push(axcenity_render::UiDrawItem::Text(UiText {
+                        position: [size.width as f32 * 0.2, size.height as f32 * 0.44],
+                        size: [size.width as f32 * 0.6, 48.0],
+                        text: "Made with Axcenity".to_owned(),
+                        font_size: 28.0,
+                        font_family: "Montserrat".to_owned(),
+                        color: [0.95, 0.97, 1.0, 1.0],
+                    }));
+                }
                 // Models that couldn't be loaded, by physics or for drawing.
                 for error in self.assets.take_errors() {
                     eprintln!("error: {error}");

@@ -27,6 +27,7 @@ mod side_warnings;
 mod start;
 mod surface;
 mod theme;
+mod thumbnail;
 mod tree;
 mod ui_handles;
 mod viewport;

@@ -7,32 +7,115 @@
 use std::sync::Arc;
 
 use axcenity_assets::{AlphaMode, Assets, ChannelTexture, Image, Model, ModelMaterial};
-use axcenity_core::{ClassName, Instance, PartType, TextureChannel, Value, World};
+use axcenity_core::{ClassName, Instance, InstanceId, PartType, TextureChannel, Value, World};
 use axcenity_render::glam::{Mat4, Vec3};
 use axcenity_render::{
-    AmbientLight, Camera, Channel, ChannelMap, DrawItem, DrawList, Material, MeshSource, NormalMap,
-    Shape, Sun, TextureMaps, TextureSource,
+    AmbientLight, Camera, Channel, ChannelMap, Cone, DrawItem, DrawList, Light, Material,
+    MeshSource, NormalMap, PostProcessing, Shadows, Shape, Sky, Sun, TextureMaps, TextureSource,
 };
-use axcenity_ui::{Stylesheet, build_ui_draw_data};
+use axcenity_ui::{Stylesheet, UiLayout, layout_ui_interactive};
 
 use crate::orientation::rotation_from_orientation;
 
-// Fixed lighting until the Lighting service exists.
-const SKY_COLOR: [f32; 3] = [0.63, 0.8, 0.95];
 const SUN: Sun = Sun {
     direction: Vec3::new(0.5, 1.0, 0.25),
     color: [1.0, 0.97, 0.92],
     intensity: 3.0,
 };
+// A little flat light on top of the sky's, so shadowed corners aren't black.
 const AMBIENT: AmbientLight = AmbientLight {
     color: [0.75, 0.85, 1.0],
-    intensity: 0.25,
+    intensity: 0.05,
 };
+/// How much brighter than its color a glowing part is drawn when bloom is
+/// on, so it goes past the bloom threshold and glows.
+const GLOW_BOOST: f32 = 2.5;
+
+/// Everything the Lighting service's properties set.
+struct LightingSettings {
+    shadows: Shadows,
+    sky: Sky,
+    post: PostProcessing,
+}
+
+fn lighting_settings(world: &World) -> LightingSettings {
+    let mut settings = LightingSettings {
+        shadows: Shadows::default(),
+        sky: Sky::default(),
+        post: PostProcessing::default(),
+    };
+    let Some(lighting) = world.get(world.lighting()) else {
+        return settings;
+    };
+    let bool_of = |name, default| match lighting.property(name) {
+        Some(Value::Bool(value)) => *value,
+        _ => default,
+    };
+    let number_of = |name, default: f32| match lighting.property(name) {
+        Some(Value::Number(value)) => *value as f32,
+        _ => default,
+    };
+    let color_of = |name, default| match lighting.property(name).and_then(Value::as_color3) {
+        Some(color) => [color.r, color.g, color.b],
+        None => default,
+    };
+    let (shadows, sky, post) = (&mut settings.shadows, &mut settings.sky, &mut settings.post);
+    shadows.enabled = bool_of("ShadowsEnabled", shadows.enabled);
+    shadows.distance = number_of("ShadowDistance", shadows.distance);
+    sky.top_color = color_of("SkyTopColor", sky.top_color);
+    sky.horizon_color = color_of("SkyHorizonColor", sky.horizon_color);
+    sky.ground_color = color_of("GroundColor", sky.ground_color);
+    sky.environment_intensity = number_of("EnvironmentIntensity", sky.environment_intensity);
+    post.enabled = bool_of("PostProcessingEnabled", post.enabled);
+    post.exposure = number_of("Exposure", post.exposure);
+    post.bloom_enabled = bool_of("BloomEnabled", post.bloom_enabled);
+    post.bloom_intensity = number_of("BloomIntensity", post.bloom_intensity);
+    post.bloom_threshold = number_of("BloomThreshold", post.bloom_threshold);
+    settings
+}
+
+/// The light a PointLight or SpotLight gives off from the middle of its
+/// parent part, or `None` if it's switched off or isn't inside a part.
+fn light_of(world: &World, instance: &Instance) -> Option<Light> {
+    if instance.property("Enabled").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+    let parent = world.get(instance.parent()?)?;
+    let (_, transform) = part_placement(parent)?;
+    let (_, rotation, position) = transform.to_scale_rotation_translation();
+    let color = instance.property("Color").and_then(Value::as_color3)?;
+    let number = |name| instance.property(name).and_then(Value::as_number);
+    let cone = match instance.class() {
+        ClassName::SpotLight => {
+            let direction = instance.property("Direction").and_then(Value::as_vector3)?;
+            Some(Cone {
+                // Relative to the part, so the beam turns with it.
+                direction: rotation * Vec3::new(direction.x, direction.y, direction.z),
+                angle_degrees: number("Angle")? as f32,
+            })
+        }
+        _ => None,
+    };
+    Some(Light {
+        position,
+        color: [color.r, color.g, color.b],
+        brightness: number("Brightness")? as f32,
+        range: number("Range")? as f32,
+        cone,
+    })
+}
 
 /// The draw list for everything in the Workspace, seen from `camera`.
 /// MeshParts' models come from `assets`, loaded the first time they're drawn.
 pub fn build_draw_list(world: &World, assets: &Assets, camera: Camera) -> DrawList {
+    let settings = lighting_settings(world);
+    let glow = if settings.post.enabled && settings.post.bloom_enabled {
+        GLOW_BOOST
+    } else {
+        1.0
+    };
     let mut items = Vec::new();
+    let mut lights = Vec::new();
     for instance in world
         .descendants(world.workspace())
         .into_iter()
@@ -40,15 +123,21 @@ pub fn build_draw_list(world: &World, assets: &Assets, camera: Camera) -> DrawLi
     {
         match instance.class() {
             ClassName::MeshPart => mesh_part_draw_items(world, instance, assets, &mut items),
-            _ => items.extend(part_draw_item(instance)),
+            ClassName::PointLight | ClassName::SpotLight => {
+                lights.extend(light_of(world, instance))
+            }
+            _ => items.extend(part_draw_item(instance, glow)),
         }
     }
 
     DrawList {
-        sky_color: SKY_COLOR,
+        sky: settings.sky,
         camera,
         sun: SUN,
         ambient: AMBIENT,
+        shadows: settings.shadows,
+        lights,
+        post: settings.post,
         items,
         ui: Vec::new(),
     }
@@ -62,9 +151,40 @@ pub fn build_draw_list_with_ui(
     viewport_size: (u32, u32),
     stylesheets: &[Stylesheet],
 ) -> DrawList {
+    build_draw_list_with_ui_interaction(
+        world,
+        assets,
+        camera,
+        viewport_size,
+        stylesheets,
+        None,
+        None,
+    )
+    .0
+}
+
+/// Builds a scene and interactive UI layout for the given physical-pixel
+/// pointer position and button currently held.
+pub fn build_draw_list_with_ui_interaction(
+    world: &World,
+    assets: &Assets,
+    camera: Camera,
+    viewport_size: (u32, u32),
+    stylesheets: &[Stylesheet],
+    pointer: Option<[f32; 2]>,
+    pressed_button: Option<InstanceId>,
+) -> (DrawList, UiLayout) {
     let mut list = build_draw_list(world, assets, camera);
-    list.ui = build_ui_draw_data(world, viewport_size.0, viewport_size.1, stylesheets);
-    list
+    let layout = layout_ui_interactive(
+        world,
+        viewport_size.0,
+        viewport_size.1,
+        stylesheets,
+        pointer,
+        pressed_button,
+    );
+    list.ui = layout.draw_items.clone();
+    (list, layout)
 }
 
 /// A Part's shape and the transform that places its 1×1×1 mesh in the world,
@@ -92,8 +212,9 @@ pub(crate) fn part_placement(instance: &Instance) -> Option<(PartType, Mat4)> {
     Some((shape, transform))
 }
 
-/// The draw item for a Part, or `None` for any other class.
-fn part_draw_item(instance: &Instance) -> Option<DrawItem> {
+/// The draw item for a Part, or `None` for any other class. `glow` is how
+/// much brighter than its color a glowing part is drawn.
+fn part_draw_item(instance: &Instance, glow: f32) -> Option<DrawItem> {
     let number = |name| instance.property(name).and_then(Value::as_number);
     let (shape, transform) = part_placement(instance)?;
     let color = instance.property("Color").and_then(Value::as_color3)?;
@@ -115,7 +236,11 @@ fn part_draw_item(instance: &Instance) -> Option<DrawItem> {
             // A glowing part shows its color as light, the same on every side,
             // instead of being shaded by the sun.
             base_color: if preset.glows { [0.0; 3] } else { color },
-            emissive: if preset.glows { color } else { [0.0; 3] },
+            emissive: if preset.glows {
+                color.map(|channel| channel * glow)
+            } else {
+                [0.0; 3]
+            },
             metalness: number("Metalness")? as f32,
             roughness: number("Roughness")? as f32,
             opacity: preset.opacity,
@@ -484,7 +609,8 @@ mod tests {
             let item = only_item(&world);
             assert_eq!(item.material.opacity, opacity, "{material:?}");
             let expected_glow = if glows { [0.2, 0.9, 1.0] } else { [0.0; 3] };
-            assert_eq!(item.material.emissive, expected_glow, "{material:?}");
+            let boosted = expected_glow.map(|channel| channel * GLOW_BOOST);
+            assert_eq!(item.material.emissive, boosted, "{material:?}");
         }
     }
 

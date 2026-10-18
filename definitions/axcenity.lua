@@ -168,7 +168,7 @@ function UserInputServiceClass:IsKeyDown(key) end
 ---@field Changed Signal Fires when a property (or `Name` or `Parent`) gets a different value, whether a script, physics or the editor changed it. The handler gets the property's name: `function(property) ... end`.
 ---@field ChildAdded Signal Fires when an Instance is put inside this one. The handler gets the child.
 ---@field ChildRemoved Signal Fires when an Instance is taken out of this one. The handler gets the child.
----@field [string] Workspace|Players|ReplicatedStorage|ServerScriptService|StarterPlayer|StarterPlayerScripts|Part|MeshPart|Script|LocalScript|ModuleScript|RemoteEvent|Player|Model|Folder|SurfaceAppearance|ScreenGui|Frame|TextLabel|Sound A child, found by its name.
+---@field [string] Workspace|Players|Lighting|ReplicatedStorage|ServerScriptService|StarterPlayer|StarterPlayerScripts|Part|MeshPart|Script|LocalScript|ModuleScript|RemoteEvent|Player|Model|Folder|SurfaceAppearance|ScreenGui|Frame|TextLabel|TextButton|ImageLabel|Sound|PointLight|SpotLight A child, found by its name.
 local InstanceClass = {}
 
 ---The first child with this name, or nil. With `recursive`, searches every descendant.
@@ -204,6 +204,7 @@ function ConnectionClass:Disconnect() end
 ---@class DataModel: Instance
 ---@field Workspace Workspace The service that holds the 3D world. Parts inside it are drawn.
 ---@field Players Players The service with a Player for everyone in the game.
+---@field Lighting Lighting The service for the world's lighting. It sets sun shadows, the sky colors that metal parts reflect, and post-processing (exposure, tone mapping and bloom).
 ---@field ReplicatedStorage ReplicatedStorage The service for things Scripts and LocalScripts share, such as RemoteEvents and ModuleScripts.
 ---@field ServerScriptService ServerScriptService The service that holds server scripts (`scripts/*.server.lua`).
 ---@field StarterPlayer StarterPlayer The service with what each player starts with, such as StarterPlayerScripts.
@@ -224,6 +225,20 @@ function DataModelClass:GetService(className) end
 ---The service with a Player for everyone in the game.
 ---@class Players: Instance
 ---@field LocalPlayer Player The player on this device. LocalScripts only.
+
+---The service for the world's lighting. It sets sun shadows, the sky colors that metal parts reflect, and post-processing (exposure, tone mapping and bloom).
+---@class Lighting: Instance
+---@field ShadowsEnabled boolean If false, the sun casts no shadows. Turn this off on low-end machines.
+---@field ShadowDistance number How far from the camera sun shadows reach, in studs. Shorter distances give sharper shadows.
+---@field SkyTopColor Color3 The sky's color straight up.
+---@field SkyHorizonColor Color3 The sky's color at the horizon.
+---@field GroundColor Color3 The color of the ground below the horizon, as the sky and reflections see it.
+---@field EnvironmentIntensity number How strongly the sky lights and is reflected by parts. 0 turns it off.
+---@field PostProcessingEnabled boolean If false, the scene is drawn with no tone mapping or bloom.
+---@field Exposure number Brightens or darkens the whole image before tone mapping. 1 is neutral.
+---@field BloomEnabled boolean If false, bright parts don't glow.
+---@field BloomIntensity number How strong the glow around bright parts is.
+---@field BloomThreshold number How bright a pixel must be before it glows.
 
 ---The service for things Scripts and LocalScripts share, such as RemoteEvents and ModuleScripts.
 ---@class ReplicatedStorage: Instance
@@ -352,6 +367,32 @@ function RemoteEventClass:FireAllClients(...) end
 ---@field TextSize number The text size in pixels.
 ---@field Visible boolean If false, this label is hidden.
 
+---A UI element that displays text and fires Activated when clicked.
+---@class TextButton: Instance
+---@field Class string Space-separated CSS class names used to style this UI Instance.
+---@field Id string The CSS identifier used to style this UI Instance.
+---@field Position UDim2 The top-left position relative to the parent, in scale and pixel offsets.
+---@field Size UDim2 The size relative to the parent, in scale and pixel offsets.
+---@field BackgroundColor3 Color3 The button's background color.
+---@field BackgroundTransparency number The background opacity: 0 is opaque and 1 is transparent.
+---@field Text string The text to display.
+---@field TextColor3 Color3 The text color.
+---@field TextSize number The text size in pixels.
+---@field Visible boolean If false, this button is hidden and cannot be activated.
+---@field Activated Signal Fires when the player clicks or taps this button. The handler gets no arguments; LocalScripts only.
+
+---A UI element that displays an image from the project.
+---@class ImageLabel: Instance
+---@field Class string Space-separated CSS class names used to style this UI Instance.
+---@field Id string The CSS identifier used to style this UI Instance.
+---@field Position UDim2 The top-left position relative to the parent, in scale and pixel offsets.
+---@field Size UDim2 The size relative to the parent, in scale and pixel offsets.
+---@field BackgroundColor3 Color3 The image label's background color.
+---@field BackgroundTransparency number The background opacity: 0 is opaque and 1 is transparent.
+---@field Image string The project-relative path of the image to display.
+---@field ImageTransparency number The image opacity: 0 is opaque and 1 is transparent.
+---@field Visible boolean If false, this image is hidden.
+
 ---A sound effect or music track that scripts can play.
 ---@class Sound: Instance
 ---@field SoundId string The audio file inside the project folder, such as "assets/audio/chime.wav".
@@ -367,6 +408,22 @@ function SoundClass:Play() end
 ---@return nil
 function SoundClass:Stop() end
 
+
+---A light that shines in all directions from the center of its parent part.
+---@class PointLight: Instance
+---@field Enabled boolean If false, the light is off.
+---@field Color Color3 The light's color.
+---@field Brightness number How bright the light is.
+---@field Range number How far the light reaches, in studs.
+
+---A light that shines in a cone from the center of its parent part.
+---@class SpotLight: Instance
+---@field Enabled boolean If false, the light is off.
+---@field Color Color3 The light's color.
+---@field Brightness number How bright the light is.
+---@field Range number How far the light reaches, in studs.
+---@field Angle number The full width of the cone, in degrees.
+---@field Direction Vector3 The way the beam points, relative to the parent part.
 
 -- Globals -------------------------------------------------------------------
 
@@ -410,7 +467,11 @@ Instance = {}
 ---@overload fun(className: "ScreenGui"): ScreenGui
 ---@overload fun(className: "Frame"): Frame
 ---@overload fun(className: "TextLabel"): TextLabel
+---@overload fun(className: "TextButton"): TextButton
+---@overload fun(className: "ImageLabel"): ImageLabel
 ---@overload fun(className: "Sound"): Sound
+---@overload fun(className: "PointLight"): PointLight
+---@overload fun(className: "SpotLight"): SpotLight
 function Instance.new(className) end
 
 ---Creates Vector3 values.

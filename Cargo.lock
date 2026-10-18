@@ -584,6 +584,7 @@ dependencies = [
  "egui-phosphor",
  "env_logger",
  "log",
+ "png",
  "rfd",
  "serde_json",
 ]

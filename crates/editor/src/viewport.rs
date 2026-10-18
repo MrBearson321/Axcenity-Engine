@@ -92,6 +92,8 @@ pub struct DragEdit {
 #[derive(Default)]
 pub struct ViewportOutput {
     pub clicked: Option<Clicked>,
+    /// A UI button clicked during Play, delivered to LocalScripts next frame.
+    pub activated: Option<InstanceId>,
     pub drag: Option<DragEdit>,
     /// A UI element being moved or resized.
     pub ui_drag: Option<UiDragEdit>,
@@ -256,7 +258,24 @@ impl Viewport {
         let pixels_per_point = ui.ctx().pixels_per_point();
         let pixels = size * pixels_per_point;
         let (width, height) = (pixels.x.round() as u32, pixels.y.round() as u32);
-        let ui_layout = axcenity_ui::layout_ui(world, width, height, stylesheets);
+        let pointer = ui.input(|input| input.pointer.latest_pos());
+        let pointer_pixels = pointer
+            .filter(|_| response.contains_pointer())
+            .map(|pointer| (pointer - rect.min) * pixels_per_point)
+            .map(|position| [position.x, position.y]);
+        let base_layout = axcenity_ui::layout_ui(world, width, height, stylesheets);
+        let held_button = ui
+            .input(|input| input.pointer.primary_down())
+            .then(|| pointer_pixels.and_then(|[x, y]| base_layout.hit_button(x, y)))
+            .flatten();
+        let ui_layout = axcenity_ui::layout_ui_interactive(
+            world,
+            width,
+            height,
+            stylesheets,
+            pointer_pixels,
+            held_button,
+        );
         let handles = selected
             .and_then(|id| ui_layout.element(id))
             .map(|&element| Handles::new(element, world, stylesheets, rect.min, pixels_per_point));
@@ -282,6 +301,14 @@ impl Viewport {
             Some(part) => Some(Clicked { part: Some(part) }),
             None if drag.in_use => None,
             None => self.clicked_part(ui, &response, &screen, world, &ui_scene),
+        };
+        let activated = if tool.is_none() && response.clicked_by(egui::PointerButton::Primary) {
+            response.interact_pointer_pos().and_then(|pointer| {
+                let position = (pointer - rect.min) * pixels_per_point;
+                ui_layout.hit_button(position.x, position.y)
+            })
+        } else {
+            None
         };
         let target = self.target.get_or_insert_with(|| {
             let renderer =
@@ -342,6 +369,7 @@ impl Viewport {
         self.paint_speed_popup(ui, rect);
         ViewportOutput {
             clicked,
+            activated,
             drag: drag.edit,
             ui_drag: drag.ui_edit,
             drag_released: drag.released,

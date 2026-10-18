@@ -9,7 +9,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use bytemuck::{Pod, Zeroable};
 use glam::camera::rh;
-use glam::{Mat3, Vec3};
+use glam::{Mat3, Mat4, Vec2, Vec3};
 use glyphon::{
     Attrs, Buffer, Cache as GlyphCache, Color as GlyphColor, Family, FontSystem, Metrics,
     Resolution, Shaping, SwashCache, TextArea, TextAtlas, TextBounds,
@@ -18,8 +18,8 @@ use glyphon::{
 use wgpu::util::DeviceExt;
 
 use crate::draw_list::{
-    ChannelMap, DrawItem, DrawList, MeshSource, Shape, TextureSource, UiDrawItem, UiRectangle,
-    UiText,
+    ChannelMap, DrawItem, DrawList, Light, MeshSource, PostProcessing, Shape, TextureSource,
+    UiDrawItem, UiRectangle, UiText,
 };
 use crate::mesh::{self, MeshData, Vertex};
 
@@ -48,6 +48,73 @@ struct FrameUniform {
     sun_direction: [f32; 4],
     sun_radiance: [f32; 4],
     ambient: [f32; 4],
+    /// Turns world space to the sun's view, for the shadow map.
+    light_view_proj: [[f32; 4]; 4],
+    /// 1 if shadows are on, the world size of a shadow texel, the depth
+    /// bias, and how far from the camera shadows reach.
+    shadow: [f32; 4],
+    /// Turns clip space back to world space, to find the sky's direction.
+    inv_view_proj: [[f32; 4]; 4],
+    /// The sky's colors in linear light. The top color's fourth number is
+    /// the environment intensity.
+    sky_top: [f32; 4],
+    sky_horizon: [f32; 4],
+    sky_ground: [f32; 4],
+    /// How many lights there are, the size of a light tile in pixels, and
+    /// how many tiles are across the screen.
+    lights: [u32; 4],
+}
+
+/// The most point and spot lights drawn at once.
+const MAX_LIGHTS: usize = 1024;
+/// The most lights one screen tile lists. Must match the shader.
+const LIGHTS_PER_TILE: usize = 64;
+/// Most screen tiles there can be. Tiles grow bigger on huge screens to stay under this.
+const MAX_TILES: usize = 9216;
+const MIN_TILE_SIZE: u32 = 32;
+/// Turns a light's brightness into the shader's units, so a brightness of 1
+/// is a modest lamp next to the sun's 3.
+const LIGHT_SCALE: f32 = 20.0;
+/// The scene is drawn in high dynamic range, into a texture that can hold
+/// light brighter than 1. Post-processing then brings it down to the screen.
+const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+/// The most blur levels bloom uses, each half the size of the one before.
+const MAX_BLOOM_LEVELS: usize = 5;
+
+/// One point or spot light as the GPU reads it. Must match `Light` in shader.wgsl.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+struct LightRaw {
+    /// Position, and range in the fourth number.
+    position_range: [f32; 4],
+    /// Linear color times brightness, and the cosine of the cone's edge in
+    /// the fourth number (-2 for a point light).
+    radiance_cone: [f32; 4],
+    /// Where a spot light points, and the cosine where its edge starts to fade.
+    direction_inner: [f32; 4],
+}
+
+/// Post-processing settings for the shader. Must match `Post` in post.wgsl.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct PostUniform {
+    /// Bloom threshold, bloom intensity and exposure.
+    values: [f32; 4],
+    /// 1 if bloom is on, 1 if tone mapping is on.
+    flags: [f32; 4],
+}
+
+/// The size of the shadow map, in texels per side.
+const SHADOW_MAP_SIZE: u32 = 2048;
+/// How far behind the visible area (toward the sun) things still cast shadows into it.
+const SHADOW_CASTER_RANGE: f32 = 500.0;
+
+/// The depth texture the sun's view is drawn into, with the frame bindings
+/// that read it.
+struct ShadowMap {
+    view: wgpu::TextureView,
+    /// The frame bindings with this map in place of the empty one.
+    frame_bind_group: wgpu::BindGroup,
 }
 
 /// One draw item as the GPU reads it. Must match `InstanceIn` in shader.wgsl.
@@ -217,14 +284,50 @@ pub struct TextureRenderer {
     view: wgpu::TextureView,
 }
 
+/// The bloom and tone mapping pipelines, which don't depend on the screen's size.
+struct PostPasses {
+    sampler: wgpu::Sampler,
+    /// Texture, sampler and settings, for the bloom passes.
+    layout: wgpu::BindGroupLayout,
+    /// The same plus the bloom texture, for the final pass.
+    composite_layout: wgpu::BindGroupLayout,
+    settings: wgpu::Buffer,
+    prefilter: wgpu::RenderPipeline,
+    downsample: wgpu::RenderPipeline,
+    /// Adds to what's already in the level it draws into.
+    upsample: wgpu::RenderPipeline,
+    composite: wgpu::RenderPipeline,
+}
+
+/// What post-processing draws into and reads, which depends on the screen's size.
+struct PostTargets {
+    /// Where the scene is drawn.
+    hdr_view: wgpu::TextureView,
+    /// Bloom levels from half the screen's size down, each half the one before.
+    levels: Vec<wgpu::TextureView>,
+    /// Scene to the first level.
+    prefilter_group: wgpu::BindGroup,
+    /// Level `i` is made from level `i - 1` (the entry for level 0 is unused).
+    downsample_groups: Vec<wgpu::BindGroup>,
+    /// Level `i` is added into level `i - 1`.
+    upsample_groups: Vec<wgpu::BindGroup>,
+    composite_group: wgpu::BindGroup,
+}
+
 /// The GPU objects for drawing a scene, whatever it's drawn into. Both
 /// [`Renderer`] and [`TextureRenderer`] own one.
 struct ScenePipeline {
     device: wgpu::Device,
     queue: wgpu::Queue,
     depth_view: wgpu::TextureView,
+    sky_pipeline: wgpu::RenderPipeline,
     opaque_pipeline: wgpu::RenderPipeline,
     transparent_pipeline: wgpu::RenderPipeline,
+    post: PostPasses,
+    /// The scene's HDR texture and the bloom levels, remade at each resize.
+    post_targets: PostTargets,
+    light_buffer: wgpu::Buffer,
+    tile_buffer: wgpu::Buffer,
     ui_pipeline: wgpu::RenderPipeline,
     ui_buffer: wgpu::Buffer,
     ui_capacity: usize,
@@ -234,7 +337,16 @@ struct ScenePipeline {
     text_atlas: TextAtlas,
     text_renderer: GlyphTextRenderer,
     frame_buffer: wgpu::Buffer,
+    /// The frame bindings with an empty shadow map, for when shadows are off.
     frame_bind_group: wgpu::BindGroup,
+    frame_layout: wgpu::BindGroupLayout,
+    shadow_sampler: wgpu::Sampler,
+    shadow_pipeline: wgpu::RenderPipeline,
+    /// Gives the shadow pass the frame uniform only (it can't also bind the
+    /// shadow map it's drawing into).
+    shadow_bind_group: wgpu::BindGroup,
+    /// Made when shadows are first turned on, and freed when turned off.
+    shadow_map: Option<ShadowMap>,
     meshes: Meshes,
     instance_buffer: wgpu::Buffer,
     /// How many instances fit in `instance_buffer` before it must grow.
@@ -466,6 +578,16 @@ impl ScenePipeline {
         height: u32,
     ) -> Self {
         let depth_view = create_depth_view(&device, width, height);
+        let storage_entry = |binding| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        };
         let frame_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("frame uniform"),
             size: size_of::<FrameUniform>() as u64,
@@ -474,9 +596,70 @@ impl ScenePipeline {
         });
         let frame_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("frame"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                    count: None,
+                },
+                storage_entry(3),
+                storage_entry(4),
+            ],
+        });
+        let light_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("lights"),
+            size: (MAX_LIGHTS * size_of::<LightRaw>()) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let tile_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("light tiles"),
+            size: (MAX_TILES * (LIGHTS_PER_TILE + 1) * size_of::<u32>()) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("shadow map"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            compare: Some(wgpu::CompareFunction::LessEqual),
+            ..Default::default()
+        });
+        let empty_shadow_view = create_shadow_view(&device, 1);
+        // The bind group keeps the stand-in 1×1 map alive while shadows are off.
+        let frame_bind_group = create_frame_bind_group(
+            &device,
+            &frame_layout,
+            [&frame_buffer, &light_buffer, &tile_buffer],
+            &empty_shadow_view,
+            &shadow_sampler,
+        );
+        let shadow_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("shadow pass"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                visibility: wgpu::ShaderStages::VERTEX,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -485,14 +668,15 @@ impl ScenePipeline {
                 count: None,
             }],
         });
-        let frame_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("frame"),
-            layout: &frame_layout,
+        let shadow_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("shadow pass"),
+            layout: &shadow_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: frame_buffer.as_entire_binding(),
             }],
         });
+        let shadow_pipeline = create_shadow_pipeline(&device, &shadow_layout);
 
         // Bindings 0 and 3–9 are the textures (see `material_bindings`).
         let texture_entry = |binding| wgpu::BindGroupLayoutEntry {
@@ -550,15 +734,13 @@ impl ScenePipeline {
             maps_uniform_of(&MaterialKey::default()),
         );
 
-        let opaque_pipeline = create_pipeline(
-            &device,
-            &frame_layout,
-            &material_layout,
-            color_format,
-            false,
-        );
+        let opaque_pipeline =
+            create_pipeline(&device, &frame_layout, &material_layout, HDR_FORMAT, false);
         let transparent_pipeline =
-            create_pipeline(&device, &frame_layout, &material_layout, color_format, true);
+            create_pipeline(&device, &frame_layout, &material_layout, HDR_FORMAT, true);
+        let sky_pipeline = create_sky_pipeline(&device, &frame_layout);
+        let post = PostPasses::new(&device, color_format);
+        let post_targets = PostTargets::new(&device, &post, width, height);
         let ui_pipeline = create_ui_pipeline(&device, color_format);
         let meshes = Meshes {
             block: upload_mesh(&device, "block", &mesh::block()),
@@ -595,8 +777,13 @@ impl ScenePipeline {
             device,
             queue,
             depth_view,
+            sky_pipeline,
             opaque_pipeline,
             transparent_pipeline,
+            post,
+            post_targets,
+            light_buffer,
+            tile_buffer,
             ui_pipeline,
             ui_buffer,
             ui_capacity,
@@ -607,6 +794,11 @@ impl ScenePipeline {
             text_renderer,
             frame_buffer,
             frame_bind_group,
+            frame_layout,
+            shadow_sampler,
+            shadow_pipeline,
+            shadow_bind_group,
+            shadow_map: None,
             meshes,
             instance_buffer,
             instance_capacity,
@@ -624,6 +816,7 @@ impl ScenePipeline {
     /// Call when the target changes size. Sizes are in pixels and never zero.
     fn resize(&mut self, width: u32, height: u32) {
         self.depth_view = create_depth_view(&self.device, width, height);
+        self.post_targets = PostTargets::new(&self.device, &self.post, width, height);
     }
 
     /// Draws `list` into `view`, which must be the size last given to
@@ -635,9 +828,33 @@ impl ScenePipeline {
         aspect: f32,
         viewport_size: (u32, u32),
     ) -> Result<()> {
-        let frame_uniform = frame_uniform(list, aspect);
+        let planned_lights = plan_lights(list, aspect, viewport_size);
+        let mut frame_uniform = frame_uniform(list, aspect);
+        frame_uniform.lights = [
+            planned_lights.lights.len() as u32,
+            planned_lights.tile_size,
+            planned_lights.tiles_across,
+            0,
+        ];
         self.queue
             .write_buffer(&self.frame_buffer, 0, bytemuck::bytes_of(&frame_uniform));
+        if !planned_lights.lights.is_empty() {
+            self.queue.write_buffer(
+                &self.light_buffer,
+                0,
+                bytemuck::cast_slice(&planned_lights.lights),
+            );
+            self.queue.write_buffer(
+                &self.tile_buffer,
+                0,
+                bytemuck::cast_slice(&planned_lights.tiles),
+            );
+        }
+        self.queue.write_buffer(
+            &self.post.settings,
+            0,
+            bytemuck::bytes_of(&post_uniform(&list.post)),
+        );
 
         self.frame += 1;
         self.upload_new(list);
@@ -654,22 +871,74 @@ impl ScenePipeline {
 
         let text_buffers = self.prepare_ui_text(&list.ui, viewport_size)?;
 
+        // Shadow maps cost memory, so one exists only while shadows are on.
+        let shadows_on = list.shadows.enabled;
+        if shadows_on && self.shadow_map.is_none() {
+            let view = create_shadow_view(&self.device, SHADOW_MAP_SIZE);
+            let frame_bind_group = create_frame_bind_group(
+                &self.device,
+                &self.frame_layout,
+                [&self.frame_buffer, &self.light_buffer, &self.tile_buffer],
+                &view,
+                &self.shadow_sampler,
+            );
+            self.shadow_map = Some(ShadowMap {
+                view,
+                frame_bind_group,
+            });
+        } else if !shadows_on {
+            self.shadow_map = None;
+        }
+
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("frame"),
             });
 
-        // The pass is a block so it ends (is dropped) before `encoder.finish()`,
-        // which needs the encoder back.
+        if let Some(shadow_map) = &self.shadow_map {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("shadow map"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &shadow_map.view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                ..Default::default()
+            });
+            pass.set_pipeline(&self.shadow_pipeline);
+            pass.set_bind_group(0, &self.shadow_bind_group, &[]);
+            pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+            // See-through items cast no shadow.
+            for batch in batches.iter().filter(|batch| !batch.transparent) {
+                let Some(mesh) = self.gpu_mesh(batch.mesh) else {
+                    continue;
+                };
+                pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                pass.set_index_buffer(mesh.indices.slice(..), mesh.index_format);
+                pass.draw_indexed(0..mesh.index_count, 0, batch.instances.clone());
+            }
+        }
+        let frame_bind_group = self
+            .shadow_map
+            .as_ref()
+            .map_or(&self.frame_bind_group, |map| &map.frame_bind_group);
+
+        // The scene is drawn into the HDR texture; post-processing then brings
+        // it to `view`. The pass is a block so it ends (is dropped) before
+        // `encoder.finish()`, which needs the encoder back.
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("scene"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
+                    view: &self.post_targets.hdr_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(sky_clear_color(list.sky_color)),
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -684,7 +953,9 @@ impl ScenePipeline {
                 ..Default::default()
             });
 
-            pass.set_bind_group(0, &self.frame_bind_group, &[]);
+            pass.set_bind_group(0, frame_bind_group, &[]);
+            pass.set_pipeline(&self.sky_pipeline);
+            pass.draw(0..3, 0..1);
             pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             for batch in batches {
                 let pipeline = if batch.transparent {
@@ -692,15 +963,8 @@ impl ScenePipeline {
                 } else {
                     &self.opaque_pipeline
                 };
-                let mesh = match batch.mesh {
-                    MeshKey::Custom(key) => self
-                        .custom_meshes
-                        .get(&key)
-                        .and_then(|cached| cached.gpu.as_ref()),
-                    builtin => self.meshes.get(builtin),
-                };
                 // A caller's mesh with broken data was never uploaded.
-                let Some(mesh) = mesh else {
+                let Some(mesh) = self.gpu_mesh(batch.mesh) else {
                     continue;
                 };
                 let material = self
@@ -715,6 +979,13 @@ impl ScenePipeline {
                 pass.draw_indexed(0..mesh.index_count, 0, batch.instances);
             }
         }
+
+        self.post.draw(
+            &mut encoder,
+            &self.post_targets,
+            view,
+            list.post.enabled && list.post.bloom_enabled && list.post.bloom_intensity > 0.0,
+        );
 
         if !ui_vertices.is_empty() || !text_buffers.is_empty() {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -745,6 +1016,17 @@ impl ScenePipeline {
         self.queue.submit([encoder.finish()]);
         self.forget_undrawn();
         Ok(())
+    }
+
+    /// The GPU copy of a mesh, or `None` for a caller's mesh that was never uploaded.
+    fn gpu_mesh(&self, key: MeshKey) -> Option<&GpuMesh> {
+        match key {
+            MeshKey::Custom(key) => self
+                .custom_meshes
+                .get(&key)
+                .and_then(|cached| cached.gpu.as_ref()),
+            builtin => self.meshes.get(builtin),
+        }
     }
 
     fn prepare_ui_text(
@@ -908,7 +1190,7 @@ impl ScenePipeline {
     }
 }
 
-fn frame_uniform(list: &DrawList, aspect: f32) -> FrameUniform {
+fn view_projection(list: &DrawList, aspect: f32) -> Mat4 {
     let camera = &list.camera;
     let view = rh::view::look_at_mat4(camera.position, camera.look_at, Vec3::Y);
     // wgpu uses DirectX-style clip space: depth from 0 to 1, Y up.
@@ -918,17 +1200,264 @@ fn frame_uniform(list: &DrawList, aspect: f32) -> FrameUniform {
         NEAR_PLANE,
         FAR_PLANE,
     );
+    projection * view
+}
+
+fn frame_uniform(list: &DrawList, aspect: f32) -> FrameUniform {
+    let camera = &list.camera;
+    let view_proj = view_projection(list, aspect);
     let sun_direction = list.sun.direction.normalize_or(Vec3::Y);
     let sun_radiance = linear_color(list.sun.color) * list.sun.intensity;
     let ambient = linear_color(list.ambient.color) * list.ambient.intensity;
+    let (light_view_proj, shadow) = shadow_setup(list, sun_direction, aspect);
+    let sky = &list.sky;
+    let environment = if sky.environment_intensity.is_finite() {
+        sky.environment_intensity.max(0.0)
+    } else {
+        0.0
+    };
 
     FrameUniform {
-        view_proj: (projection * view).to_cols_array_2d(),
+        view_proj: view_proj.to_cols_array_2d(),
         camera_position: camera.position.extend(1.0).to_array(),
         sun_direction: sun_direction.extend(0.0).to_array(),
         sun_radiance: sun_radiance.extend(0.0).to_array(),
         ambient: ambient.extend(0.0).to_array(),
+        light_view_proj: light_view_proj.to_cols_array_2d(),
+        shadow,
+        inv_view_proj: view_proj.inverse().to_cols_array_2d(),
+        sky_top: linear_color(sky.top_color).extend(environment).to_array(),
+        sky_horizon: linear_color(sky.horizon_color).extend(0.0).to_array(),
+        sky_ground: linear_color(sky.ground_color).extend(0.0).to_array(),
+        lights: [0; 4],
     }
+}
+
+/// The lights to draw, and which of them reach each tile of the screen.
+struct PlannedLights {
+    lights: Vec<LightRaw>,
+    /// For each tile, row by row: how many lights reach it, then up to
+    /// [`LIGHTS_PER_TILE`] indexes into `lights`.
+    tiles: Vec<u32>,
+    tile_size: u32,
+    tiles_across: u32,
+}
+
+/// Picks the lights to draw (the nearest [`MAX_LIGHTS`]) and sorts them into
+/// screen tiles, so each pixel only loops over the few lights that can
+/// reach it instead of all of them. A light goes in every tile that its
+/// sphere of reach could touch; tiles with more than [`LIGHTS_PER_TILE`]
+/// keep the nearest ones to the camera.
+fn plan_lights(list: &DrawList, aspect: f32, (width, height): (u32, u32)) -> PlannedLights {
+    let camera = list.camera.position;
+    let mut lights: Vec<&Light> = list
+        .lights
+        .iter()
+        .filter(|light| {
+            light.position.is_finite()
+                && light.range.is_finite()
+                && light.range > 0.0
+                && light.brightness.is_finite()
+                && light.brightness > 0.0
+        })
+        .collect();
+    lights.sort_by(|a, b| {
+        let (a, b) = (
+            a.position.distance_squared(camera),
+            b.position.distance_squared(camera),
+        );
+        a.total_cmp(&b)
+    });
+    lights.truncate(MAX_LIGHTS);
+
+    let mut tile_size = MIN_TILE_SIZE;
+    while (width.div_ceil(tile_size) * height.div_ceil(tile_size)) as usize > MAX_TILES {
+        tile_size *= 2;
+    }
+    let (across, down) = (width.div_ceil(tile_size), height.div_ceil(tile_size));
+    let mut planned = PlannedLights {
+        lights: Vec::new(),
+        tiles: Vec::new(),
+        tile_size,
+        tiles_across: across,
+    };
+    if lights.is_empty() || width == 0 || height == 0 {
+        return planned;
+    }
+
+    let view_proj = view_projection(list, aspect);
+    let stride = LIGHTS_PER_TILE + 1;
+    planned.tiles = vec![0; (across * down) as usize * stride];
+    for light in lights {
+        let Some((first, last)) = light_tiles(view_proj, light, (width, height), tile_size) else {
+            continue;
+        };
+        let index = planned.lights.len() as u32;
+        planned.lights.push(light_raw(light));
+        for y in first.1..=last.1 {
+            for x in first.0..=last.0 {
+                let tile = (y * across + x) as usize * stride;
+                let count = planned.tiles[tile] as usize;
+                if count < LIGHTS_PER_TILE {
+                    planned.tiles[tile + 1 + count] = index;
+                    planned.tiles[tile] += 1;
+                }
+            }
+        }
+    }
+    planned
+}
+
+/// The first and last tile (column, row) a light's sphere of reach could
+/// touch, or `None` if it's entirely out of view. Works from the sphere's
+/// bounding box, which is slightly generous but never misses.
+fn light_tiles(
+    view_proj: Mat4,
+    light: &Light,
+    (width, height): (u32, u32),
+    tile_size: u32,
+) -> Option<((u32, u32), (u32, u32))> {
+    let (mut min, mut max) = (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN));
+    let mut behind = 0;
+    for corner in 0..8 {
+        let offset = Vec3::new(
+            if corner & 1 == 0 { -1.0 } else { 1.0 },
+            if corner & 2 == 0 { -1.0 } else { 1.0 },
+            if corner & 4 == 0 { -1.0 } else { 1.0 },
+        );
+        let clip = view_proj * (light.position + offset * light.range).extend(1.0);
+        if clip.w <= NEAR_PLANE * 0.5 {
+            behind += 1;
+            continue;
+        }
+        let ndc = Vec2::new(clip.x, clip.y) / clip.w;
+        min = min.min(ndc);
+        max = max.max(ndc);
+    }
+    if behind == 8 {
+        return None;
+    }
+    // A box that reaches behind the camera could cover anywhere on screen.
+    if behind > 0 {
+        (min, max) = (Vec2::splat(-1.0), Vec2::splat(1.0));
+    }
+    if max.x < -1.0 || min.x > 1.0 || max.y < -1.0 || min.y > 1.0 {
+        return None;
+    }
+    let to_pixels = |ndc: Vec2| {
+        Vec2::new(
+            (ndc.x * 0.5 + 0.5) * width as f32,
+            (0.5 - ndc.y * 0.5) * height as f32,
+        )
+    };
+    let (a, b) = (to_pixels(min), to_pixels(max));
+    let tile = |pixel: f32, limit: u32| -> u32 {
+        ((pixel / tile_size as f32).floor().max(0.0) as u32).min(limit.div_ceil(tile_size) - 1)
+    };
+    // The screen's Y grows downward, so the NDC maximum is the top.
+    Some((
+        (tile(a.x, width), tile(b.y, height)),
+        (tile(b.x, width), tile(a.y, height)),
+    ))
+}
+
+fn light_raw(light: &Light) -> LightRaw {
+    let radiance = linear_color(light.color) * light.brightness * LIGHT_SCALE;
+    let (cone_edge, direction, cone_inner) = match light.cone {
+        None => (-2.0, Vec3::NEG_Y, 0.0),
+        Some(cone) => {
+            let half = (cone.angle_degrees.clamp(1.0, 179.0) * 0.5).to_radians();
+            (
+                half.cos(),
+                cone.direction.normalize_or(Vec3::NEG_Y),
+                (half * 0.8).cos(),
+            )
+        }
+    };
+    LightRaw {
+        position_range: light.position.extend(light.range).to_array(),
+        radiance_cone: radiance.extend(cone_edge).to_array(),
+        direction_inner: direction.extend(cone_inner).to_array(),
+    }
+}
+
+fn post_uniform(post: &PostProcessing) -> PostUniform {
+    let flag = |on: bool| if on { 1.0 } else { 0.0 };
+    let exposure = if post.enabled && post.exposure.is_finite() {
+        post.exposure.max(0.0)
+    } else {
+        1.0
+    };
+    PostUniform {
+        values: [
+            post.bloom_threshold.max(0.0),
+            post.bloom_intensity.max(0.0),
+            exposure,
+            0.0,
+        ],
+        flags: [
+            flag(post.enabled && post.bloom_enabled),
+            flag(post.enabled),
+            0.0,
+            0.0,
+        ],
+    }
+}
+
+/// The sun's view matrix and the shadow values for the shader (see
+/// [`FrameUniform::shadow`]). One shadow map covers the part of the view
+/// out to the shadow distance, so shadows are sharpest where that's small.
+/// The area is a sphere around that part of the view, so turning the camera
+/// doesn't change the map's scale, and its position is snapped to whole
+/// texels so shadow edges don't shimmer as the camera moves.
+fn shadow_setup(list: &DrawList, sun_direction: Vec3, aspect: f32) -> (Mat4, [f32; 4]) {
+    let settings = list.shadows;
+    if !settings.enabled || !settings.distance.is_finite() || settings.distance <= 0.0 {
+        return (Mat4::IDENTITY, [0.0; 4]);
+    }
+    let camera = &list.camera;
+    let forward = (camera.look_at - camera.position).normalize_or(Vec3::NEG_Z);
+    let far = settings.distance.clamp(NEAR_PLANE * 2.0, FAR_PLANE);
+
+    // The smallest sphere around the slice of the view between the near
+    // plane and `far`, centered on the view direction `center` away.
+    let tan_half = (camera.fov_y_degrees.to_radians() * 0.5).tan();
+    let k2 = tan_half * tan_half * (1.0 + aspect * aspect);
+    let center = if k2 >= (far - NEAR_PLANE) / (far + NEAR_PLANE) {
+        far
+    } else {
+        0.5 * (far + NEAR_PLANE) * (1.0 + k2)
+    };
+    let radius = ((far - center).powi(2) + far * far * k2).sqrt().max(1.0);
+    let sphere_center = camera.position + forward * center;
+
+    // Looking from the sun toward the scene.
+    let toward_sun = sun_direction;
+    let up_hint = if toward_sun.y.abs() > 0.99 {
+        Vec3::X
+    } else {
+        Vec3::Y
+    };
+    let right = (-toward_sun).cross(up_hint).normalize();
+    let up = right.cross(-toward_sun);
+    let texel = 2.0 * radius / SHADOW_MAP_SIZE as f32;
+    let snap = |distance: f32| (distance / texel).round() * texel;
+    let snapped_center = right * snap(sphere_center.dot(right))
+        + up * snap(sphere_center.dot(up))
+        + toward_sun * sphere_center.dot(toward_sun);
+
+    let back = radius + SHADOW_CASTER_RANGE;
+    let eye = snapped_center + toward_sun * back;
+    let view = rh::view::look_at_mat4(eye, snapped_center, up);
+    let (near, far_depth) = (0.1, back + radius);
+    let projection =
+        rh::proj::directx::orthographic(-radius, radius, -radius, radius, near, far_depth);
+    // Two texels of slack in world units, as depth from 0 to 1.
+    let depth_bias = 2.0 * texel / (far_depth - near);
+    (
+        projection * view,
+        [1.0, texel, depth_bias, settings.distance],
+    )
 }
 
 /// Puts the visible items in drawing order and groups them into batches.
@@ -1107,16 +1636,6 @@ fn linear_color([r, g, b]: [f32; 3]) -> Vec3 {
     Vec3::new(channel(r), channel(g), channel(b))
 }
 
-fn sky_clear_color(srgb: [f32; 3]) -> wgpu::Color {
-    let linear = linear_color(srgb);
-    wgpu::Color {
-        r: linear.x.into(),
-        g: linear.y.into(),
-        b: linear.z.into(),
-        a: 1.0,
-    }
-}
-
 fn ui_vertices(items: &[UiDrawItem], (width, height): (u32, u32)) -> Vec<UiVertex> {
     if width == 0 || height == 0 {
         return Vec::new();
@@ -1251,6 +1770,336 @@ fn create_ui_pipeline(
     })
 }
 
+/// Draws the sky as a full-screen triangle at the far plane, before any item.
+fn create_sky_pipeline(
+    device: &wgpu::Device,
+    frame_layout: &wgpu::BindGroupLayout,
+) -> wgpu::RenderPipeline {
+    let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("sky"),
+        bind_group_layouts: &[frame_layout],
+        push_constant_ranges: &[],
+    });
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("sky"),
+        layout: Some(&layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_sky"),
+            compilation_options: Default::default(),
+            buffers: &[],
+        },
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: false,
+            depth_compare: wgpu::CompareFunction::Always,
+            stencil: Default::default(),
+            bias: Default::default(),
+        }),
+        multisample: Default::default(),
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_sky"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: HDR_FORMAT,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview: None,
+        cache: None,
+    })
+}
+
+impl PostPasses {
+    fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
+        let texture_entry = |binding| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        };
+        let mut entries = vec![
+            texture_entry(0),
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+        ];
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("bloom"),
+            entries: &entries,
+        });
+        entries.push(texture_entry(3));
+        let composite_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("composite"),
+            entries: &entries,
+        });
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("post-processing"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let settings = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("post-processing settings"),
+            size: size_of::<PostUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let shader = device.create_shader_module(wgpu::include_wgsl!("post.wgsl"));
+        let pipeline = |label, layout: &wgpu::BindGroupLayout, entry, format, blend| {
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some(label),
+                bind_group_layouts: &[layout],
+                push_constant_ranges: &[],
+            });
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: Default::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some(entry),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview: None,
+                cache: None,
+            })
+        };
+        let add = wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::One,
+            dst_factor: wgpu::BlendFactor::One,
+            operation: wgpu::BlendOperation::Add,
+        };
+        Self {
+            prefilter: pipeline("bloom prefilter", &layout, "fs_prefilter", HDR_FORMAT, None),
+            downsample: pipeline(
+                "bloom downsample",
+                &layout,
+                "fs_downsample",
+                HDR_FORMAT,
+                None,
+            ),
+            upsample: pipeline(
+                "bloom upsample",
+                &layout,
+                "fs_upsample",
+                HDR_FORMAT,
+                Some(wgpu::BlendState {
+                    color: add,
+                    alpha: add,
+                }),
+            ),
+            composite: pipeline(
+                "composite",
+                &composite_layout,
+                "fs_composite",
+                color_format,
+                None,
+            ),
+            sampler,
+            layout,
+            composite_layout,
+            settings,
+        }
+    }
+
+    /// Adds bloom (if `bloom`) to the scene and draws the result, tone
+    /// mapped, into `target`.
+    fn draw(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        targets: &PostTargets,
+        target: &wgpu::TextureView,
+        bloom: bool,
+    ) {
+        let levels = &targets.levels;
+        if bloom {
+            fullscreen_pass(
+                encoder,
+                "bloom prefilter",
+                &levels[0],
+                wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                &self.prefilter,
+                &targets.prefilter_group,
+            );
+            for (level, target) in levels.iter().enumerate().skip(1) {
+                fullscreen_pass(
+                    encoder,
+                    "bloom downsample",
+                    target,
+                    wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    &self.downsample,
+                    &targets.downsample_groups[level],
+                );
+            }
+            for level in (1..levels.len()).rev() {
+                fullscreen_pass(
+                    encoder,
+                    "bloom upsample",
+                    &levels[level - 1],
+                    wgpu::LoadOp::Load,
+                    &self.upsample,
+                    &targets.upsample_groups[level],
+                );
+            }
+        }
+        fullscreen_pass(
+            encoder,
+            "composite",
+            target,
+            wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+            &self.composite,
+            &targets.composite_group,
+        );
+    }
+}
+
+/// Draws one full-screen triangle with `pipeline` into `target`.
+fn fullscreen_pass(
+    encoder: &mut wgpu::CommandEncoder,
+    label: &str,
+    target: &wgpu::TextureView,
+    load: wgpu::LoadOp<wgpu::Color>,
+    pipeline: &wgpu::RenderPipeline,
+    bind_group: &wgpu::BindGroup,
+) {
+    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some(label),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view: target,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load,
+                store: wgpu::StoreOp::Store,
+            },
+        })],
+        depth_stencil_attachment: None,
+        ..Default::default()
+    });
+    pass.set_pipeline(pipeline);
+    pass.set_bind_group(0, bind_group, &[]);
+    pass.draw(0..3, 0..1);
+}
+
+impl PostTargets {
+    /// Makes the HDR texture for a `width` × `height` screen and the bloom
+    /// levels below it, with the bind groups that connect them.
+    fn new(device: &wgpu::Device, post: &PostPasses, width: u32, height: u32) -> Self {
+        let make = |label, width: u32, height: u32| {
+            device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: Some(label),
+                    size: wgpu::Extent3d {
+                        width: width.max(1),
+                        height: height.max(1),
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: HDR_FORMAT,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                })
+                .create_view(&wgpu::TextureViewDescriptor::default())
+        };
+        let hdr_view = make("scene (HDR)", width, height);
+        let mut levels = Vec::new();
+        let (mut level_width, mut level_height) = ((width / 2).max(1), (height / 2).max(1));
+        loop {
+            levels.push(make("bloom level", level_width, level_height));
+            if levels.len() == MAX_BLOOM_LEVELS || level_width == 1 || level_height == 1 {
+                break;
+            }
+            level_width = (level_width / 2).max(1);
+            level_height = (level_height / 2).max(1);
+        }
+
+        let group = |layout: &wgpu::BindGroupLayout, source: &wgpu::TextureView, bloom| {
+            let mut entries = vec![
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(source),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&post.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: post.settings.as_entire_binding(),
+                },
+            ];
+            if let Some(bloom) = bloom {
+                entries.push(wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(bloom),
+                });
+            }
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("post-processing"),
+                layout,
+                entries: &entries,
+            })
+        };
+        let prefilter_group = group(&post.layout, &hdr_view, None);
+        // Index 0 is never used, but keeps the lists indexed by level.
+        let downsample_groups = (0..levels.len())
+            .map(|level| group(&post.layout, &levels[level.saturating_sub(1)], None))
+            .collect();
+        let upsample_groups = (0..levels.len())
+            .map(|level| group(&post.layout, &levels[level], None))
+            .collect();
+        let composite_group = group(&post.composite_layout, &hdr_view, Some(&levels[0]));
+        Self {
+            hdr_view,
+            levels,
+            prefilter_group,
+            downsample_groups,
+            upsample_groups,
+            composite_group,
+        }
+    }
+}
+
 /// The pipeline for solid items, or for see-through ones when `transparent`
 /// is true. Both use the same shader.
 fn create_pipeline(
@@ -1342,6 +2191,115 @@ fn create_pipeline(
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),
+        multiview: None,
+        cache: None,
+    })
+}
+
+/// A square depth texture the sun's view is drawn into, which the scene
+/// pass then reads.
+fn create_shadow_view(device: &wgpu::Device, size: u32) -> wgpu::TextureView {
+    device
+        .create_texture(&wgpu::TextureDescriptor {
+            label: Some("shadow map"),
+            size: wgpu::Extent3d {
+                width: size,
+                height: size,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: DEPTH_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        })
+        .create_view(&wgpu::TextureViewDescriptor::default())
+}
+
+fn create_frame_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    [frame_buffer, light_buffer, tile_buffer]: [&wgpu::Buffer; 3],
+    shadow_view: &wgpu::TextureView,
+    shadow_sampler: &wgpu::Sampler,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("frame"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: frame_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(shadow_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::Sampler(shadow_sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: light_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: tile_buffer.as_entire_binding(),
+            },
+        ],
+    })
+}
+
+/// Draws solid items' depth as the sun sees them. No color, no materials.
+fn create_shadow_pipeline(
+    device: &wgpu::Device,
+    shadow_layout: &wgpu::BindGroupLayout,
+) -> wgpu::RenderPipeline {
+    let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("shadow"),
+        bind_group_layouts: &[shadow_layout],
+        push_constant_ranges: &[],
+    });
+    // Only the position and the model matrix matter here.
+    let vertex_layout = wgpu::VertexBufferLayout {
+        array_stride: size_of::<Vertex>() as u64,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &wgpu::vertex_attr_array![0 => Float32x3],
+    };
+    let instance_layout = wgpu::VertexBufferLayout {
+        array_stride: size_of::<InstanceRaw>() as u64,
+        step_mode: wgpu::VertexStepMode::Instance,
+        attributes: &wgpu::vertex_attr_array![
+            2 => Float32x4, 3 => Float32x4, 4 => Float32x4, 5 => Float32x4,
+        ],
+    };
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("shadow"),
+        layout: Some(&layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_shadow"),
+            compilation_options: Default::default(),
+            buffers: &[vertex_layout, instance_layout],
+        },
+        primitive: wgpu::PrimitiveState {
+            front_face: wgpu::FrontFace::Ccw,
+            // Both sides are drawn, so thin and open shapes still cast shadows.
+            cull_mode: None,
+            ..Default::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: true,
+            depth_compare: wgpu::CompareFunction::Less,
+            stencil: Default::default(),
+            bias: Default::default(),
+        }),
+        multisample: Default::default(),
+        fragment: None,
         multiview: None,
         cache: None,
     })
@@ -1673,7 +2631,10 @@ fn drawable_size(width: u32, height: u32) -> Option<(u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::draw_list::{AmbientLight, Camera, Channel, DrawItem, Material, NormalMap, Sun};
+    use crate::draw_list::{
+        AmbientLight, Camera, Channel, Cone, DrawItem, Light, Material, NormalMap, PostProcessing,
+        Shadows, Sky, Sun,
+    };
     use glam::Mat4;
 
     #[test]
@@ -1717,7 +2678,12 @@ mod tests {
     /// A list seen from the origin.
     fn list_of(items: Vec<DrawItem>) -> DrawList {
         DrawList {
-            sky_color: [0.0; 3],
+            sky: Sky {
+                top_color: [0.0; 3],
+                horizon_color: [0.0; 3],
+                ground_color: [0.0; 3],
+                environment_intensity: 0.0,
+            },
             camera: Camera {
                 position: Vec3::ZERO,
                 look_at: Vec3::NEG_Z,
@@ -1733,6 +2699,12 @@ mod tests {
                 intensity: 0.0,
             },
             items,
+            shadows: Shadows::default(),
+            lights: Vec::new(),
+            post: PostProcessing {
+                enabled: false,
+                ..PostProcessing::default()
+            },
             ui: Vec::new(),
         }
     }
@@ -1941,6 +2913,216 @@ mod tests {
         pollster::block_on(adapter.request_device(&Default::default())).ok()
     }
 
+    fn point_light(position: Vec3, range: f32) -> Light {
+        Light {
+            position,
+            color: [1.0; 3],
+            brightness: 1.0,
+            range,
+            cone: None,
+        }
+    }
+
+    #[test]
+    fn lights_are_listed_only_in_the_tiles_they_can_reach() {
+        let mut list = list_of(vec![]);
+        // Straight ahead and small: the middle tile only.
+        list.lights
+            .push(point_light(Vec3::new(0.0, 0.0, -50.0), 1.0));
+        // Behind the camera: not drawn at all.
+        list.lights
+            .push(point_light(Vec3::new(0.0, 0.0, 50.0), 1.0));
+        // Not a real light.
+        list.lights.push(point_light(Vec3::ZERO, 0.0));
+        let planned = plan_lights(&list, 1.0, (320, 320));
+        assert_eq!(planned.lights.len(), 1);
+        assert_eq!((planned.tile_size, planned.tiles_across), (32, 10));
+        let count = |x: usize, y: usize| planned.tiles[(y * 10 + x) * (LIGHTS_PER_TILE + 1)];
+        assert_eq!(count(5, 5), 1);
+        assert_eq!(count(0, 0), 0);
+        assert_eq!(count(9, 9), 0);
+    }
+
+    #[test]
+    fn a_light_around_the_camera_reaches_every_tile_and_the_nearest_are_kept() {
+        let mut list = list_of(vec![]);
+        list.lights
+            .push(point_light(Vec3::new(0.0, 0.0, 0.1), 100.0));
+        let planned = plan_lights(&list, 1.0, (64, 64));
+        assert!(
+            planned
+                .tiles
+                .chunks(LIGHTS_PER_TILE + 1)
+                .all(|tile| tile[0] == 1)
+        );
+
+        list.lights = (0..MAX_LIGHTS + 10)
+            .map(|i| point_light(Vec3::new(0.0, 0.0, -1.0 - i as f32), 5.0))
+            .collect();
+        let planned = plan_lights(&list, 1.0, (64, 64));
+        assert_eq!(planned.lights.len(), MAX_LIGHTS);
+        let farthest = planned
+            .lights
+            .iter()
+            .map(|l| l.position_range[2])
+            .fold(0.0, f32::min);
+        assert_eq!(farthest, -(MAX_LIGHTS as f32));
+    }
+
+    #[test]
+    fn spot_lights_describe_their_cone() {
+        let raw = light_raw(&Light {
+            cone: Some(Cone {
+                direction: Vec3::new(0.0, -2.0, 0.0),
+                angle_degrees: 90.0,
+            }),
+            ..point_light(Vec3::ZERO, 10.0)
+        });
+        assert_eq!(raw.direction_inner[..3], [0.0, -1.0, 0.0]);
+        assert!((raw.radiance_cone[3] - 45f32.to_radians().cos()).abs() < 1e-6);
+        assert!(raw.direction_inner[3] > raw.radiance_cone[3]);
+        assert_eq!(
+            light_raw(&point_light(Vec3::ZERO, 1.0)).radiance_cone[3],
+            -2.0
+        );
+    }
+
+    /// The middle pixel of a `size` × `size` texture drawn from `list`.
+    fn middle_pixel(device: &wgpu::Device, queue: &wgpu::Queue, list: &DrawList) -> [u8; 4] {
+        let mut renderer = TextureRenderer::new(device, queue, 64, 64);
+        renderer.render(list).unwrap();
+        let pixels = renderer.read_pixels();
+        pixels[(32 * 64 + 32) * 4..][..4].try_into().unwrap()
+    }
+
+    fn big_block() -> DrawItem {
+        DrawItem {
+            shape: Shape::Block,
+            transform: Mat4::from_scale_rotation_translation(
+                Vec3::splat(4.0),
+                glam::Quat::IDENTITY,
+                Vec3::new(0.0, 0.0, -5.0),
+            ),
+            material: Material::default(),
+        }
+    }
+
+    #[test]
+    fn a_point_light_lights_the_part_in_front_of_it() {
+        let Some((device, queue)) = test_device() else {
+            eprintln!("skipped: no graphics adapter on this machine");
+            return;
+        };
+        let mut list = list_of(vec![big_block()]);
+        list.sun.intensity = 0.0;
+        let dark = middle_pixel(&device, &queue, &list);
+        assert_eq!(dark[..3], [0, 0, 0], "no light, no color");
+
+        list.lights
+            .push(point_light(Vec3::new(0.0, 0.0, -1.0), 10.0));
+        let lit = middle_pixel(&device, &queue, &list);
+        assert!(lit[0] > 40, "the front face is lit: {lit:?}");
+
+        // Out of reach, the light changes nothing.
+        list.lights[0].range = 1.0;
+        assert_eq!(middle_pixel(&device, &queue, &list)[..3], [0, 0, 0]);
+    }
+
+    #[test]
+    fn a_spot_light_lights_only_inside_its_cone() {
+        let Some((device, queue)) = test_device() else {
+            eprintln!("skipped: no graphics adapter on this machine");
+            return;
+        };
+        let mut list = list_of(vec![big_block()]);
+        list.sun.intensity = 0.0;
+        let mut light = point_light(Vec3::new(0.0, 0.0, -1.0), 10.0);
+        light.cone = Some(Cone {
+            direction: Vec3::NEG_Z,
+            angle_degrees: 40.0,
+        });
+        list.lights.push(light);
+        assert!(
+            middle_pixel(&device, &queue, &list)[0] > 40,
+            "inside the beam"
+        );
+
+        list.lights[0].cone = Some(Cone {
+            direction: Vec3::X,
+            angle_degrees: 40.0,
+        });
+        assert_eq!(middle_pixel(&device, &queue, &list)[..3], [0, 0, 0]);
+    }
+
+    #[test]
+    fn a_metal_part_reflects_the_sky() {
+        let Some((device, queue)) = test_device() else {
+            eprintln!("skipped: no graphics adapter on this machine");
+            return;
+        };
+        let mut block = big_block();
+        block.material = Material {
+            base_color: [1.0; 3],
+            metalness: 1.0,
+            roughness: 0.1,
+            ..Material::default()
+        };
+        let mut list = list_of(vec![block]);
+        list.sun.intensity = 0.0;
+        assert_eq!(middle_pixel(&device, &queue, &list)[..3], [0, 0, 0]);
+        list.sky = Sky::default();
+        let reflecting = middle_pixel(&device, &queue, &list);
+        assert!(
+            reflecting[2] > 60,
+            "the block shows the sky: {reflecting:?}"
+        );
+    }
+
+    #[test]
+    fn bloom_makes_bright_parts_glow_past_their_edges() {
+        let Some((device, queue)) = test_device() else {
+            eprintln!("skipped: no graphics adapter on this machine");
+            return;
+        };
+        let glowing = DrawItem {
+            material: Material {
+                base_color: [0.0; 3],
+                emissive: [4.0, 0.5, 0.5],
+                ..Material::default()
+            },
+            transform: Mat4::from_scale_rotation_translation(
+                Vec3::splat(2.0),
+                glam::Quat::IDENTITY,
+                Vec3::new(0.0, 0.0, -5.0),
+            ),
+            ..big_block()
+        };
+        let mut list = list_of(vec![glowing]);
+        // The block covers pixels 21 to 43 across; pixel 14 is in the sky
+        // just outside it.
+        let outside = |list: &DrawList| {
+            let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+            renderer.render(list).unwrap();
+            renderer.read_pixels()[(32 * 64 + 14) * 4..][..4].to_vec()
+        };
+        list.post.enabled = true;
+        list.post.bloom_enabled = false;
+        let without = outside(&list);
+        list.post.bloom_enabled = true;
+        let with = outside(&list);
+        assert!(
+            with[0] > without[0],
+            "bloom adds glow: {without:?} vs {with:?}"
+        );
+
+        // Tone mapping keeps the block's bright color from clipping to flat white.
+        let middle = middle_pixel(&device, &queue, &list);
+        assert!(
+            middle[0] > middle[1],
+            "still red, not clipped white: {middle:?}"
+        );
+    }
+
     #[test]
     fn texture_renderer_draws_the_sky_and_a_part_into_a_texture() {
         let Some((device, queue)) = test_device() else {
@@ -1951,7 +3133,9 @@ mod tests {
         // clear (some drivers don't when drawing through an sRGB view).
         let red = [255, 0, 0, 255];
         let mut list = list_of(vec![]);
-        list.sky_color = [1.0, 0.0, 0.0];
+        list.sky.top_color = [1.0, 0.0, 0.0];
+        list.sky.horizon_color = [1.0, 0.0, 0.0];
+        list.sky.ground_color = [1.0, 0.0, 0.0];
         let mut renderer = TextureRenderer::new(&device, &queue, 64, 32);
         renderer.render(&list).unwrap();
         let pixels = renderer.read_pixels();

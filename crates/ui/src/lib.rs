@@ -10,7 +10,7 @@ pub use style::{
     CssDeclaration, StyleWarning, Stylesheet, applied_declaration, applied_declarations,
     parse_stylesheet,
 };
-use style::{ResolvedStyles, resolve_styles, resolve_variables};
+use style::{PseudoClasses, ResolvedStyles, resolve_styles, resolve_variables};
 
 /// A rectangle in physical pixels, from the top left of the screen.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -32,6 +32,7 @@ impl UiRect {
 pub struct UiElement {
     pub id: InstanceId,
     pub rect: UiRect,
+    pub button: bool,
     /// True when its parent is a flex container: the flex layout places it,
     /// and its `Position` is ignored.
     pub in_flow: bool,
@@ -43,6 +44,8 @@ pub struct UiElement {
 pub struct UiLayout {
     pub draw_items: Vec<UiDrawItem>,
     pub elements: Vec<UiElement>,
+    pub hovered: Option<InstanceId>,
+    pub active: Option<InstanceId>,
 }
 
 impl UiLayout {
@@ -57,6 +60,15 @@ impl UiLayout {
 
     pub fn element(&self, id: InstanceId) -> Option<&UiElement> {
         self.elements.iter().find(|element| element.id == id)
+    }
+
+    /// The topmost visible button at a point in physical pixels.
+    pub fn hit_button(&self, x: f32, y: f32) -> Option<InstanceId> {
+        self.elements
+            .iter()
+            .rev()
+            .find(|element| element.rect.contains(x, y))
+            .and_then(|element| element.button.then_some(element.id))
     }
 }
 
@@ -77,6 +89,41 @@ pub fn build_ui_draw_data(
 /// [`build_ui_draw_data`], also saying where each element went, for picking
 /// and handles in the editor.
 pub fn layout_ui(world: &World, width: u32, height: u32, stylesheets: &[Stylesheet]) -> UiLayout {
+    layout_ui_with_pseudo(world, width, height, stylesheets, PseudoClasses::default())
+}
+
+/// Lays out UI with CSS pointer states. The active element is the button held
+/// from the mouse-down event; it only gets `:active` while still hovered.
+pub fn layout_ui_interactive(
+    world: &World,
+    width: u32,
+    height: u32,
+    stylesheets: &[Stylesheet],
+    pointer: Option<[f32; 2]>,
+    pressed_button: Option<InstanceId>,
+) -> UiLayout {
+    let base = layout_ui(world, width, height, stylesheets);
+    let hovered = pointer.and_then(|[x, y]| base.hit(x, y));
+    let active = pressed_button.filter(|button| hovered == Some(*button));
+    let mut layout = layout_ui_with_pseudo(
+        world,
+        width,
+        height,
+        stylesheets,
+        PseudoClasses { hovered, active },
+    );
+    layout.hovered = hovered;
+    layout.active = active;
+    layout
+}
+
+fn layout_ui_with_pseudo(
+    world: &World,
+    width: u32,
+    height: u32,
+    stylesheets: &[Stylesheet],
+    pseudo: PseudoClasses,
+) -> UiLayout {
     let mut layout = UiLayout::default();
     if width == 0 || height == 0 {
         return layout;
@@ -95,7 +142,7 @@ pub fn layout_ui(world: &World, width: u32, height: u32, stylesheets: &[Styleshe
         {
             continue;
         }
-        let styles = resolve_styles(world, id, stylesheets);
+        let styles = resolve_styles(world, id, stylesheets, pseudo);
         if css_property(&styles, "display").is_some_and(|display| display == "none") {
             continue;
         }
@@ -114,6 +161,7 @@ pub fn layout_ui(world: &World, width: u32, height: u32, stylesheets: &[Styleshe
             &mut layout,
             stylesheets,
             opacity,
+            pseudo,
         );
     }
     layout
@@ -132,6 +180,7 @@ fn layout_children(
     out: &mut UiLayout,
     stylesheets: &[Stylesheet],
     inherited_opacity: f32,
+    pseudo: PseudoClasses,
 ) {
     let Some(parent_instance) = world.get(parent) else {
         return;
@@ -142,7 +191,13 @@ fn layout_children(
         .copied()
         .filter(|&id| {
             world.get(id).is_some_and(|child| {
-                matches!(child.class(), ClassName::Frame | ClassName::TextLabel)
+                matches!(
+                    child.class(),
+                    ClassName::Frame
+                        | ClassName::TextLabel
+                        | ClassName::TextButton
+                        | ClassName::ImageLabel
+                )
             })
         })
         .collect();
@@ -150,7 +205,7 @@ fn layout_children(
         return;
     }
 
-    let parent_styles = resolve_styles(world, parent, stylesheets);
+    let parent_styles = resolve_styles(world, parent, stylesheets, pseudo);
     let flow_children =
         css_property(&parent_styles, "display").is_some_and(|display| display == "flex");
     let mut root_style = Style {
@@ -183,7 +238,7 @@ fn layout_children(
             let instance = world.get(id).expect("filtered children are live");
             let position = ui_property(instance, "Position");
             let size = ui_property(instance, "Size");
-            let styles = resolve_styles(world, id, stylesheets);
+            let styles = resolve_styles(world, id, stylesheets, pseudo);
             let hidden = css_property(&styles, "display").is_some_and(|display| display == "none");
             let node_style = Style {
                 position: if flow_children {
@@ -236,7 +291,7 @@ fn layout_children(
         let Some(instance) = world.get(id) else {
             continue;
         };
-        let styles = resolve_styles(world, id, stylesheets);
+        let styles = resolve_styles(world, id, stylesheets, pseudo);
         let hidden = css_property(&styles, "display").is_some_and(|display| display == "none");
         if hidden || !visible(instance) {
             continue;
@@ -262,10 +317,11 @@ fn layout_children(
         out.elements.push(UiElement {
             id,
             rect,
+            button: instance.class() == ClassName::TextButton,
             in_flow: flow_children,
         });
         paint_instance(instance, rect, &styles, opacity, &mut out.draw_items);
-        layout_children(world, id, rect, out, stylesheets, opacity);
+        layout_children(world, id, rect, out, stylesheets, opacity, pseudo);
     }
 }
 
@@ -359,7 +415,10 @@ fn paint_instance(
         }));
     }
 
-    if instance.class() == ClassName::TextLabel {
+    if matches!(
+        instance.class(),
+        ClassName::TextLabel | ClassName::TextButton
+    ) {
         let text = instance
             .property("Text")
             .and_then(Value::as_str)
@@ -790,6 +849,56 @@ mod tests {
             item,
             UiDrawItem::Text(text) if text.text == "After"
         )));
+    }
+
+    #[test]
+    fn buttons_draw_text_track_pointer_states_and_ignore_hidden_hit_targets() {
+        let mut world = World::new();
+        let gui = world.create(ClassName::ScreenGui).unwrap();
+        world.set_parent(gui, Some(world.workspace())).unwrap();
+        let button = world.create(ClassName::TextButton).unwrap();
+        world.set_parent(button, Some(gui)).unwrap();
+        world
+            .set_property(button, "Class", Value::String("start".into()))
+            .unwrap();
+        world
+            .set_property(button, "Text", Value::String("Start".into()))
+            .unwrap();
+        let (sheet, warnings) = parse_stylesheet(
+            "ui.css",
+            ".start { width: 120px; height: 40px; background-color: #000000 } \
+             .start:hover { background-color: #00ff00 } \
+             .start:active { background-color: #ff0000 }",
+        );
+        assert!(warnings.is_empty());
+        let hovered = layout_ui_interactive(
+            &world,
+            640,
+            480,
+            std::slice::from_ref(&sheet),
+            Some([20.0, 20.0]),
+            None,
+        );
+        assert_eq!(hovered.hovered, Some(button));
+        assert_eq!(hovered.hit_button(20.0, 20.0), Some(button));
+        assert!(hovered.draw_items.iter().any(|item| matches!(
+            item,
+            UiDrawItem::Text(text) if text.text == "Start"
+        )));
+        let active =
+            layout_ui_interactive(&world, 640, 480, &[sheet], Some([20.0, 20.0]), Some(button));
+        assert_eq!(active.active, Some(button));
+        let Some(UiDrawItem::Rectangle(rectangle)) = active.draw_items.first() else {
+            panic!("the button background should be drawn first");
+        };
+        assert_eq!(rectangle.color[..3], [1.0, 0.0, 0.0]);
+
+        world
+            .set_property(button, "Visible", Value::Bool(false))
+            .unwrap();
+        let hidden = layout_ui_interactive(&world, 640, 480, &[], Some([20.0, 20.0]), Some(button));
+        assert_eq!(hidden.hit_button(20.0, 20.0), None);
+        assert_eq!(hidden.active, None);
     }
 
     #[test]

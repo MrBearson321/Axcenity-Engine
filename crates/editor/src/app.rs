@@ -30,14 +30,15 @@ use crate::explorer::{self, Action, Explorer, ExplorerOutput};
 use crate::gizmo::{Snap, Tool};
 use crate::history::{self, Field, History, Move, Place};
 use crate::import_dialog::ImportDialog;
-use crate::output::Output;
+use crate::output::{Output, OutputKind};
 use crate::play::{self, Crash, GameKeys, Session};
 use crate::properties::{self, Edit};
 use crate::ribbon::{self, RibbonButton};
 use crate::scripts::ScriptTabs;
 use crate::side_warnings::{self, WarningCache};
-use crate::start::{self, Brand, ProjectLink, StartAction};
+use crate::start::{self, Brand, ProjectLink, StartAction, StartScreen};
 use crate::theme::{self, filled_icons, icons};
+use crate::thumbnail;
 use crate::tree::{self, Insertable};
 use crate::ui_handles::{CssEdit, UiDragEdit, apply_css_edits};
 use crate::viewport::{DragEdit, DragKind, Viewport, ViewportScene};
@@ -113,6 +114,8 @@ pub struct EditorApp {
     shown_title: String,
     /// The game, while Play is on. `world` stays as it was before Play.
     play: Option<Session>,
+    /// A button clicked in the viewport, delivered on the next Play frame.
+    pending_ui_activation: Option<InstanceId>,
     /// When the last Play frame ran, to measure how much game time passed.
     last_frame: Option<Instant>,
     /// Turns keyboard events into key presses for LocalScripts during Play.
@@ -131,8 +134,15 @@ pub struct EditorApp {
     brand: Option<Brand>,
     /// Projects opened lately, newest first, for the start screen. Saved between runs.
     recent: Vec<ProjectLink>,
-    /// The example projects, for the start screen.
-    examples: Vec<ProjectLink>,
+    /// The start screen's thumbnails, search and dialogs.
+    start: StartScreen,
+    /// The thumbnail being captured, if one was asked for.
+    thumbnail: Option<ThumbnailShot>,
+    /// Set when a thumbnail should be taken at the end of this frame. True
+    /// inside means the project closes once it's saved.
+    thumbnail_wanted: Option<bool>,
+    /// Where the viewport was drawn last frame, to crop the thumbnail to.
+    viewport_rect: Option<egui::Rect>,
     /// True while Help > About is open.
     about_open: bool,
 }
@@ -157,6 +167,17 @@ enum Discard {
     OpenAnother,
     /// Closing the tab of the script at this path.
     CloseTab(String),
+    /// Going back to the start screen.
+    CloseProject,
+}
+
+/// A screenshot asked for, to make the open project's thumbnail from.
+struct ThumbnailShot {
+    folder: PathBuf,
+    /// Where the viewport was, in points.
+    area: egui::Rect,
+    /// Close the project once it's saved.
+    then_close: bool,
 }
 
 /// The answers to "Save changes?".
@@ -181,6 +202,7 @@ struct Keys {
 /// What the editor remembers about the open project.
 struct OpenProject {
     name: String,
+    show_splash: bool,
     folder: PathBuf,
     stylesheets: Vec<axcenity_ui::Stylesheet>,
     /// Its server scripts, sorted by path, with each file's text as last
@@ -218,6 +240,7 @@ impl EditorApp {
             ui_drag_baselines: HashMap::new(),
             shown_title: String::new(),
             play: None,
+            pending_ui_activation: None,
             last_frame: None,
             tabs: ScriptTabs::default(),
             confirm_delete: None,
@@ -227,17 +250,14 @@ impl EditorApp {
             theme: egui::ThemePreference::Dark,
             brand: None,
             recent: Vec::new(),
-            examples: std::env::current_dir()
-                .map(|folder| start::find_examples(&folder))
-                .unwrap_or_default(),
+            start: StartScreen::default(),
+            thumbnail: None,
+            thumbnail_wanted: None,
+            viewport_rect: None,
             about_open: false,
         };
-        match folder {
-            Some(folder) => app.open(folder),
-            None => app.output.info(
-                "No project open. Use File > Open Project…, or start the editor with a \
-                 folder: axcenity-editor examples/hello-touched",
-            ),
+        if let Some(folder) = folder {
+            app.open(folder);
         }
         app
     }
@@ -261,6 +281,7 @@ impl EditorApp {
         };
 
         let scripts = project.scripts.len();
+        let show_splash = project.manifest.show_splash;
         self.output.info(format!(
             "Opened \"{}\" from `{}`: {} objects, {scripts} {}. Press Play (F5) \
              to run it.",
@@ -303,6 +324,9 @@ impl EditorApp {
         }
         // The game being played belongs to the old project, and so do the models.
         self.play = None;
+        self.thumbnail = None;
+        self.thumbnail_wanted = None;
+        self.pending_ui_activation = None;
         self.assets = Assets::new(&project.folder);
         self.tabs.close_all();
         self.viewport.reset_camera();
@@ -314,6 +338,7 @@ impl EditorApp {
             &mut self.recent,
             ProjectLink {
                 name: project.manifest.name.clone(),
+                description: project.manifest.description.clone(),
                 folder,
             },
         );
@@ -330,6 +355,7 @@ impl EditorApp {
             .collect();
         self.project = Some(OpenProject {
             name: project.manifest.name,
+            show_splash,
             watcher: Watcher::start(project.folder.clone()),
             folder: project.folder,
             stylesheets,
@@ -360,7 +386,7 @@ impl EditorApp {
             for link in opened.into_iter().rev() {
                 start::remember(&mut self.recent, link);
             }
-            self.recent.truncate(start::MAX_RECENT);
+            self.recent.truncate(start::MAX_TRACKED);
         }
         ctx.set_theme(self.theme);
     }
@@ -642,6 +668,7 @@ impl EditorApp {
         match Session::start(&self.world, &scripts, &mut self.output, self.assets.clone()) {
             Ok(session) => {
                 self.play = Some(session);
+                self.pending_ui_activation = None;
                 self.last_frame = None;
                 self.game_keys = GameKeys::default();
             }
@@ -662,10 +689,16 @@ impl EditorApp {
     /// Runs one frame of the game, `seconds` long, with the keys pressed and
     /// released since the last one. LocalScripts see the viewport's camera
     /// as `workspace.CurrentCamera`, and can move it. A crash stops the game.
-    fn play_frame(&mut self, seconds: f64, keys: &[KeyEvent]) {
+    fn play_frame(&mut self, seconds: f64, keys: &[KeyEvent], activation: Option<InstanceId>) {
         let Some(session) = &mut self.play else {
             return;
         };
+        if let Some(button) = activation
+            && let Err(crash) = session.activate_ui_button(button, &mut self.output)
+        {
+            self.crashed(crash);
+            return;
+        }
         let (position, orientation) = self.viewport.camera_view();
         let camera = CameraState {
             position,
@@ -916,7 +949,7 @@ impl EditorApp {
                         })
                     })
             }
-            Discard::Quit | Discard::OpenAnother => self.unsaved(),
+            Discard::Quit | Discard::OpenAnother | Discard::CloseProject => self.unsaved(),
         };
         if unsaved {
             self.asking = Some(discard);
@@ -934,7 +967,9 @@ impl EditorApp {
             // Closing a tab only needs that script saved.
             Answer::Save => match &discard {
                 Discard::CloseTab(path) => self.save_tab(path).then_some(discard),
-                Discard::Quit | Discard::OpenAnother => self.save().then_some(discard),
+                Discard::Quit | Discard::OpenAnother | Discard::CloseProject => {
+                    self.save().then_some(discard)
+                }
             },
             Answer::DontSave => {
                 if let Discard::CloseTab(path) = &discard {
@@ -981,7 +1016,73 @@ impl EditorApp {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
             Discard::OpenAnother => self.open_with_dialog(),
+            Discard::CloseProject => self.close_project(),
             Discard::CloseTab(path) => self.tabs.close(&path),
+        }
+    }
+
+    /// Goes back to the start screen. The project's thumbnail is taken first
+    /// if the viewport is showing, and the project closes once it's saved.
+    fn close_project(&mut self) {
+        self.thumbnail_wanted = Some(true);
+    }
+
+    /// Puts the open project away and shows the start screen.
+    fn finish_closing_project(&mut self) {
+        self.project = None;
+        self.play = None;
+        self.pending_ui_activation = None;
+        self.thumbnail = None;
+        self.thumbnail_wanted = None;
+        self.assets = Assets::default();
+        self.tabs.close_all();
+        self.replace_world(World::new());
+        self.start.reload_thumbnails();
+    }
+
+    /// Asks for a screenshot when a thumbnail is wanted and the viewport is
+    /// showing. Without a viewport to photograph, a pending close just happens.
+    fn start_thumbnail(&mut self, ctx: &egui::Context) {
+        let Some(then_close) = self.thumbnail_wanted.take() else {
+            return;
+        };
+        let Some(folder) = self.project.as_ref().map(|project| project.folder.clone()) else {
+            return;
+        };
+        match self.viewport_rect {
+            Some(area) if !self.playing() => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
+                self.thumbnail = Some(ThumbnailShot {
+                    folder,
+                    area,
+                    then_close,
+                });
+            }
+            _ if then_close => self.finish_closing_project(),
+            _ => {}
+        }
+    }
+
+    /// Saves the screenshot asked for by [`Self::start_thumbnail`], when it arrives.
+    fn finish_thumbnail(&mut self, ctx: &egui::Context) {
+        let screenshot = ctx.input(|input| {
+            input.events.iter().find_map(|event| match event {
+                egui::Event::Screenshot { image, .. } => Some(image.clone()),
+                _ => None,
+            })
+        });
+        let (Some(image), Some(shot)) = (screenshot, self.thumbnail.take()) else {
+            return;
+        };
+        let png = thumbnail::encode(&image, shot.area, ctx.pixels_per_point());
+        if let Some(png) = png
+            && let Err(err) =
+                std::fs::write(shot.folder.join(axcenity_project::THUMBNAIL_FILE), png)
+        {
+            log::warn!("could not save the project thumbnail: {err}");
+        }
+        if shot.then_close {
+            self.finish_closing_project();
         }
     }
 
@@ -1001,6 +1102,7 @@ impl EditorApp {
         let (name, doing) = match discard {
             Discard::Quit => (project, "closing"),
             Discard::OpenAnother => (project, "opening another project"),
+            Discard::CloseProject => (project, "closing it"),
             Discard::CloseTab(path) => (axcenity_project::script_name(path), "closing it"),
         };
         let mut answer = None;
@@ -1049,14 +1151,19 @@ impl EditorApp {
             return;
         };
         let picked = egui::CentralPanel::default()
-            .show(ctx, |ui| {
-                start::show(ui, brand, &self.recent, &self.examples)
-            })
+            .show(ctx, |ui| self.start.show(ui, brand, &mut self.recent))
             .inner;
         match picked {
             Some(StartAction::OpenDialog) => self.open_with_dialog(),
             Some(StartAction::Open(folder)) => self.open(&folder),
-            None => {}
+            None => return,
+        }
+        // Nothing opened, so say why here: Output isn't shown without a project.
+        if self.project.is_none()
+            && let Some(line) = self.output.lines().last()
+            && line.kind == OutputKind::Error
+        {
+            self.start.set_notice(line.text.clone());
         }
     }
 
@@ -1085,6 +1192,15 @@ impl EditorApp {
                 if ui
                     .add_enabled(
                         self.project.is_some() && !self.playing(),
+                        egui::Button::new(theme::with_icon(icons::HOUSE, "Close Project")),
+                    )
+                    .clicked()
+                {
+                    self.request_and_go_ahead(ui.ctx(), Discard::CloseProject);
+                }
+                if ui
+                    .add_enabled(
+                        self.project.is_some() && !self.playing(),
                         egui::Button::new("Open Stylesheet…"),
                     )
                     .clicked()
@@ -1105,6 +1221,57 @@ impl EditorApp {
                 if ui.add_enabled(self.project.is_some(), save).clicked() {
                     self.save();
                 }
+                let export_enabled = self.project.is_some() && !self.playing();
+                ui.menu_button(
+                    theme::with_icon(icons::FILE_ARROW_UP, "Export Game"),
+                    |ui| {
+                        if ui
+                            .add_enabled(export_enabled, egui::Button::new("For this OS"))
+                            .clicked()
+                        {
+                            self.export_game_with_dialog();
+                            ui.close();
+                        }
+                        ui.separator();
+                        for (target, label) in [
+                            (files::ExportTarget::Windows, "For Windows"),
+                            (files::ExportTarget::MacOS, "For macOS"),
+                            (files::ExportTarget::Linux, "For Linux"),
+                        ] {
+                            if ui
+                                .add_enabled(export_enabled, egui::Button::new(label))
+                                .clicked()
+                            {
+                                self.export_game_for_with_dialog(target);
+                                ui.close();
+                            }
+                        }
+                        if !export_enabled {
+                            ui.weak(if self.playing() {
+                                "Press Stop before exporting."
+                            } else {
+                                "Open a project first."
+                            });
+                        }
+                        ui.separator();
+                        let mut show_splash = self
+                            .project
+                            .as_ref()
+                            .is_some_and(|project| project.show_splash);
+                        if ui
+                            .add_enabled(
+                                self.project.is_some(),
+                                egui::Checkbox::new(
+                                    &mut show_splash,
+                                    "Show splash in exported games",
+                                ),
+                            )
+                            .changed()
+                        {
+                            self.set_show_splash(show_splash);
+                        }
+                    },
+                );
                 ui.separator();
                 let import =
                     egui::Button::new(theme::with_icon(icons::FILE_ARROW_DOWN, "Import Model…"));
@@ -1401,6 +1568,18 @@ impl EditorApp {
                             insert = Some(what);
                         }
                     }
+                    for what in Insertable::LIGHTS {
+                        let button = RibbonButton::new(theme::insert_icon(what), what.label())
+                            .color(theme::class_color(what.class(), ui.visuals()));
+                        if ui
+                            .add_enabled(!playing, button)
+                            .on_hover_text("Insert a light into the selected part.")
+                            .on_disabled_hover_text("Press Stop to edit.")
+                            .clicked()
+                        {
+                            insert = Some(what);
+                        }
+                    }
                     let color = theme::class_color(ClassName::MeshPart, ui.visuals());
                     let button = RibbonButton::new(icons::FILE_ARROW_DOWN, "Import").color(color);
                     import = ui
@@ -1641,7 +1820,7 @@ impl eframe::App for EditorApp {
             project.watcher.wake(ctx);
         }
         self.check_disk();
-
+        self.finish_thumbnail(ctx);
         // Taken from the input before the viewport sees it, so the S doesn't
         // also fly the camera backward.
         if ctx.input_mut(|input| input.consume_shortcut(&SAVE_SHORTCUT)) {
@@ -1666,7 +1845,8 @@ impl eframe::App for EditorApp {
             let (events, modifiers, focused) =
                 ctx.input(|input| (input.events.clone(), input.modifiers, input.focused));
             let keys = self.game_keys.read(&events, modifiers, focused, typing);
-            self.play_frame(seconds, &keys);
+            let activation = self.pending_ui_activation.take();
+            self.play_frame(seconds, &keys, activation);
             ctx.request_repaint();
         }
 
@@ -1729,11 +1909,15 @@ impl eframe::App for EditorApp {
         if let Some(id) = explorer.open {
             self.open_script_instance(id);
         }
-        let clicked_error = egui::TopBottomPanel::bottom("output")
-            .resizable(true)
-            .default_height(160.0)
-            .show(ctx, |ui| self.output.show(ui))
-            .inner;
+        let clicked_error = has_project
+            .then(|| {
+                egui::TopBottomPanel::bottom("output")
+                    .resizable(true)
+                    .default_height(160.0)
+                    .show(ctx, |ui| self.output.show(ui))
+                    .inner
+            })
+            .flatten();
         if let Some(location) = clicked_error {
             self.open_script(&location.path, Some(location.line));
         }
@@ -1762,6 +1946,7 @@ impl eframe::App for EditorApp {
             .active_path()
             .filter(|path| axcenity_project::is_block_script(path))
             .map(str::to_owned);
+        self.viewport_rect = None;
         let output = if !has_project {
             self.start_screen(ctx);
             Default::default()
@@ -1769,18 +1954,21 @@ impl eframe::App for EditorApp {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
                 .show(ctx, |ui| match frame.wgpu_render_state() {
-                    Some(render_state) => self.viewport.show(
-                        ui,
-                        render_state,
-                        ViewportScene {
-                            world,
-                            assets: &self.assets,
-                            selected: self.selected,
-                            tool,
-                            snap: self.snap,
-                            stylesheets,
-                        },
-                    ),
+                    Some(render_state) => {
+                        self.viewport_rect = Some(ui.available_rect_before_wrap());
+                        self.viewport.show(
+                            ui,
+                            render_state,
+                            ViewportScene {
+                                world,
+                                assets: &self.assets,
+                                selected: self.selected,
+                                tool,
+                                snap: self.snap,
+                                stylesheets,
+                            },
+                        )
+                    }
                     // Can't happen: main.rs always picks the wgpu renderer.
                     None => {
                         ui.label("The viewport needs the wgpu renderer.");
@@ -1842,6 +2030,9 @@ impl eframe::App for EditorApp {
             // show the new selection there.
             ctx.request_repaint();
         }
+        if output.activated.is_some() {
+            self.pending_ui_activation = output.activated;
+        }
         if let Some(edit) = output.drag {
             self.apply_drag(edit);
             // The viewport was drawn before this change, so draw it again.
@@ -1873,6 +2064,7 @@ impl eframe::App for EditorApp {
         self.unsaved_changes_prompt(ctx);
         self.delete_script_prompt(ctx);
         self.import_prompt(ctx);
+        self.start_thumbnail(ctx);
         if self.about_open
             && let Some(brand) = &self.brand
         {
@@ -2022,10 +2214,10 @@ mod tests {
     }
 
     #[test]
-    fn starting_without_a_project_explains_how_to_open_one() {
+    fn starting_without_a_project_shows_nothing_open() {
         let app = EditorApp::new(None);
         assert_eq!(app.title(), "Axcenity Editor");
-        assert!(last_line(&app).text.contains("File > Open Project"));
+        assert!(app.output.lines().is_empty());
         // Only `game`'s services.
         let world = &app.world;
         let descendants = world.descendants(world.root());
@@ -2034,6 +2226,19 @@ mod tests {
                 .iter()
                 .all(|&id| world.get(id).unwrap().class().is_service())
         );
+    }
+
+    #[test]
+    fn closing_a_project_returns_to_the_start_screen() {
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-part");
+        let mut app = EditorApp::new(Some(&root));
+        assert!(app.project.is_some());
+        app.finish_closing_project();
+        assert!(app.project.is_none());
+        assert_eq!(app.title(), "Axcenity Editor");
+        // It stays in the project list.
+        assert_eq!(app.recent.len(), 1);
     }
 
     #[test]
@@ -2178,7 +2383,14 @@ mod tests {
         let drawn_pad = list
             .items
             .iter()
-            .find(|item| item.material.emissive == [0.1, 0.725, 0.333])
+            .find(|item| {
+                let boosted = [0.25, 1.8125, 0.8325];
+                item.material
+                    .emissive
+                    .iter()
+                    .zip(boosted)
+                    .all(|(a, b)| (a - b).abs() < 1e-5)
+            })
             .expect("the pad glows in its new color");
         let center = drawn_pad.transform.transform_point3(Vec3::ZERO);
         assert!(center.abs_diff_eq(Vec3::new(1.25, 0.3, -7.1), 1e-6));
@@ -2837,7 +3049,7 @@ mod tests {
     /// Runs the game for `seconds` at 60 frames per second.
     pub(super) fn play_for(app: &mut EditorApp, seconds: f64) {
         for _ in 0..(seconds * 60.0).round() as u32 {
-            app.play_frame(1.0 / 60.0, &[]);
+            app.play_frame(1.0 / 60.0, &[], None);
         }
     }
 
@@ -3062,7 +3274,7 @@ mod tests {
         app.play();
         play_for(&mut app, 1.0);
         app.play.as_mut().unwrap().panic_next_frame();
-        app.play_frame(1.0 / 60.0, &[]);
+        app.play_frame(1.0 / 60.0, &[], None);
 
         assert!(!app.playing(), "back in edit mode");
         let line = last_line(&app);

@@ -73,7 +73,6 @@ impl Output {
         });
     }
 
-    #[cfg(test)]
     pub fn lines(&self) -> &[OutputLine] {
         &self.lines
     }

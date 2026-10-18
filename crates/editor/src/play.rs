@@ -91,6 +91,18 @@ impl Session {
         self.panic_next_frame = true;
     }
 
+    /// Fires a UI button event inside the guarded Play session.
+    pub fn activate_ui_button(
+        &mut self,
+        button: axcenity_core::InstanceId,
+        output: &mut Output,
+    ) -> Result<(), Crash> {
+        guard(|| {
+            self.scripts.activate_ui_button(&mut self.world, button);
+            self.forward_output(output);
+        })
+    }
+
     /// Runs steps 1 to 4 of one frame, `seconds` long, with the keys pressed
     /// and released since the last frame and the viewport's camera. The
     /// viewport lays out UI at step 5 and draws the result at step 6.

@@ -19,8 +19,10 @@
 //! }
 //! ```
 //!
-//! Only the Workspace and ReplicatedStorage are saved. `replicated_storage`
-//! can be left out, and is only written when it has something in it.
+//! Only the Workspace, ReplicatedStorage and the Lighting settings are saved.
+//! `replicated_storage` can be left out, and is only written when it has
+//! something in it. `lighting` (`{ "properties": { "ShadowsEnabled": false } }`)
+//! can be left out too, and is only written when a setting isn't its default.
 //!
 //! Property values are plain JSON. Their meaning comes from the class: the
 //! same `[0, 1, 0]` is a `Vector3` for `Position` and a `Color3` for `Color`,
@@ -83,6 +85,16 @@ struct WorldFile {
     workspace: ServiceNode,
     #[serde(default)]
     replicated_storage: ServiceNode,
+    #[serde(default)]
+    lighting: LightingNode,
+}
+
+/// The Lighting service only has properties; nothing is saved inside it.
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LightingNode {
+    #[serde(default)]
+    properties: Map<String, Json>,
 }
 
 #[derive(Default, Deserialize)]
@@ -116,6 +128,8 @@ pub fn parse_world(text: &str) -> Result<World, WorldError> {
     }
 
     let mut world = World::new();
+    let lighting = world.lighting();
+    apply_properties(&mut world, lighting, &file.lighting.properties)?;
     let services = [
         (world.workspace(), &file.workspace),
         (world.replicated_storage(), &file.replicated_storage),
@@ -292,6 +306,18 @@ pub fn write_world(world: &World) -> String {
         out.push_str(",\n  \"replicated_storage\": ");
         write_instance(world, replicated, 1, &mut out);
     }
+    // Left out while every setting is its default, for the same reason.
+    let lighting = world.lighting();
+    let changed = world.get(lighting).is_some_and(|instance| {
+        let defaults = ClassName::Lighting.default_properties();
+        instance
+            .properties()
+            .any(|(name, value)| defaults.iter().any(|(n, v)| *n == name && v != value))
+    });
+    if changed {
+        out.push_str(",\n  \"lighting\": ");
+        write_instance(world, lighting, 1, &mut out);
+    }
     out.push_str("\n}\n");
     out
 }
@@ -440,6 +466,28 @@ mod tests {
     fn empty_world() {
         let world = parse_world(r#"{ "format_version": 1 }"#).unwrap();
         assert!(world.get(world.workspace()).unwrap().children().is_empty());
+    }
+
+    #[test]
+    fn lighting_settings_round_trip_and_default_ones_are_not_written() {
+        let world = parse_world(r#"{ "format_version": 1 }"#).unwrap();
+        assert!(!write_world(&world).contains("lighting"));
+
+        let world = parse_world(
+            r#"{ "format_version": 1, "lighting": { "properties": { "ShadowsEnabled": false } } }"#,
+        )
+        .unwrap();
+        let lighting = world.get(world.lighting()).unwrap();
+        assert_eq!(
+            lighting.property("ShadowsEnabled"),
+            Some(&Value::Bool(false))
+        );
+        let reloaded = parse_world(&write_world(&world)).unwrap();
+        let lighting = reloaded.get(reloaded.lighting()).unwrap();
+        assert_eq!(
+            lighting.property("ShadowsEnabled"),
+            Some(&Value::Bool(false))
+        );
     }
 
     #[test]

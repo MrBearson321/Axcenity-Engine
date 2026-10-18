@@ -105,6 +105,35 @@ fn a_local_script_reads_a_key_and_a_script_moves_a_part_through_a_remote_event()
 }
 
 #[test]
+fn ui_button_activation_is_delivered_only_to_local_scripts() {
+    let mut world = World::new();
+    let button = world.create(ClassName::TextButton).unwrap();
+    world.set_name(button, "Start").unwrap();
+    world.set_parent(button, Some(world.workspace())).unwrap();
+    let mut runtime = ScriptRuntime::new();
+    start(
+        &mut runtime,
+        &mut world,
+        "scripts/button.server.lua",
+        "workspace.Start.Activated:Connect(function() print('server') end)",
+    );
+    start(
+        &mut runtime,
+        &mut world,
+        "scripts/button.client.lua",
+        "workspace.Start.Activated:Connect(function() workspace.Start.Text = 'Started' print('client') end)",
+    );
+
+    runtime.activate_ui_button(&mut world, button);
+
+    assert_eq!(lines(&mut runtime), ["client"]);
+    assert_eq!(
+        world.get(button).unwrap().property("Text"),
+        Some(&Value::String("Started".into()))
+    );
+}
+
+#[test]
 fn the_player_joins_before_the_first_local_script_starts() {
     let mut world = World::new();
     let mut runtime = ScriptRuntime::new();
@@ -475,8 +504,8 @@ fn get_service_finds_services_and_lists_them_for_a_wrong_name() {
         &mut world,
         "scripts/services.server.lua",
         r#"
-        print(game:GetService("Players") == game.Players, game:GetService("Workspace") == workspace)
-        print(pcall(game.GetService, game, "Lighting"))
+        print(game:GetService("Players") == game.Players, game:GetService("Lighting") == game.Lighting)
+        print(pcall(game.GetService, game, "Teams"))
         print(pcall(Instance.new, "Player"))
         "#,
     );
@@ -484,7 +513,7 @@ fn get_service_finds_services_and_lists_them_for_a_wrong_name() {
     assert_eq!(output[0], "true\ttrue");
     assert!(
         output[1].ends_with(
-            "there is no service named \"Lighting\"; choose from Workspace, Players, \
+            "there is no service named \"Teams\"; choose from Workspace, Players, Lighting, \
              ReplicatedStorage, ServerScriptService, StarterPlayer, RunService, \
              UserInputService"
         ),

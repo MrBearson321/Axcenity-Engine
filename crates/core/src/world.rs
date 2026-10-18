@@ -138,6 +138,7 @@ pub struct World {
     root: InstanceId,
     workspace: InstanceId,
     players: InstanceId,
+    lighting: InstanceId,
     replicated_storage: InstanceId,
     server_script_service: InstanceId,
     starter_player_scripts: InstanceId,
@@ -146,7 +147,7 @@ pub struct World {
 
 impl World {
     /// Creates a world with `game` and its services, in the order the
-    /// Explorer shows them: `Workspace`, `Players`, `ReplicatedStorage`,
+    /// Explorer shows them: `Workspace`, `Players`, `Lighting`, `ReplicatedStorage`,
     /// `ServerScriptService` and `StarterPlayer` (with
     /// `StarterPlayerScripts` inside).
     pub fn new() -> Self {
@@ -171,6 +172,7 @@ impl World {
         };
         let workspace = add_service(ClassName::Workspace, root);
         let players = add_service(ClassName::Players, root);
+        let lighting = add_service(ClassName::Lighting, root);
         let replicated_storage = add_service(ClassName::ReplicatedStorage, root);
         let server_script_service = add_service(ClassName::ServerScriptService, root);
         let starter_player = add_service(ClassName::StarterPlayer, root);
@@ -181,6 +183,7 @@ impl World {
             root,
             workspace,
             players,
+            lighting,
             replicated_storage,
             server_script_service,
             starter_player_scripts,
@@ -236,6 +239,11 @@ impl World {
         self.players
     }
 
+    /// Holds the world's lighting settings, such as shadows.
+    pub fn lighting(&self) -> InstanceId {
+        self.lighting
+    }
+
     /// Holds what Scripts and LocalScripts share, such as RemoteEvents.
     pub fn replicated_storage(&self) -> InstanceId {
         self.replicated_storage
@@ -256,6 +264,7 @@ impl World {
             ClassName::DataModel => self.root,
             ClassName::Workspace => self.workspace,
             ClassName::Players => self.players,
+            ClassName::Lighting => self.lighting,
             ClassName::ReplicatedStorage => self.replicated_storage,
             ClassName::ServerScriptService => self.server_script_service,
             ClassName::StarterPlayer => self.get(self.starter_player_scripts)?.parent?,
@@ -613,6 +622,7 @@ mod tests {
             &[
                 world.workspace(),
                 world.players(),
+                world.lighting(),
                 world.replicated_storage(),
                 world.server_script_service(),
                 starter_player,

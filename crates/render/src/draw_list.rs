@@ -12,11 +12,16 @@ use glam::{Mat4, Vec3};
 
 #[derive(Clone, Debug)]
 pub struct DrawList {
-    /// The background color where nothing is drawn.
-    pub sky_color: [f32; 3],
+    /// The sky behind the scene, which also lights and is reflected by it.
+    pub sky: Sky,
     pub camera: Camera,
     pub sun: Sun,
     pub ambient: AmbientLight,
+    pub shadows: Shadows,
+    /// Point and spot lights. When there are more than the renderer can
+    /// handle, the ones closest to the camera are used.
+    pub lights: Vec<Light>,
+    pub post: PostProcessing,
     pub items: Vec<DrawItem>,
     /// Screen-space UI, drawn after the 3D scene.
     pub ui: Vec<UiDrawItem>,
@@ -72,6 +77,101 @@ pub struct Sun {
 pub struct AmbientLight {
     pub color: [f32; 3],
     pub intensity: f32,
+}
+
+/// A procedural sky: a gradient from the ground up through the horizon to
+/// the top of the sky, with the sun in it. Surfaces are lit by it and metal
+/// and glossy surfaces reflect it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Sky {
+    /// sRGB colors, like every color in the draw list.
+    pub top_color: [f32; 3],
+    pub horizon_color: [f32; 3],
+    pub ground_color: [f32; 3],
+    /// How strongly the sky lights and is reflected by surfaces. 0 leaves
+    /// only the sun, the ambient light and point lights.
+    pub environment_intensity: f32,
+}
+
+impl Default for Sky {
+    fn default() -> Self {
+        Self {
+            top_color: [0.25, 0.5, 0.9],
+            horizon_color: [0.63, 0.8, 0.95],
+            ground_color: [0.35, 0.33, 0.3],
+            environment_intensity: 0.6,
+        }
+    }
+}
+
+/// A light at one point that shines on what's near it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Light {
+    pub position: Vec3,
+    pub color: [f32; 3],
+    /// 1 is a modest lamp; the sun's intensity is 3 for comparison.
+    pub brightness: f32,
+    /// How far the light reaches, in studs. It fades smoothly to nothing there.
+    pub range: f32,
+    /// `None` shines in every direction (a point light), `Some` in a cone.
+    pub cone: Option<Cone>,
+}
+
+/// The shape of a spot light's beam.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Cone {
+    /// The way the beam points. Doesn't need to be normalized.
+    pub direction: Vec3,
+    /// The full width of the beam, in degrees, from 1 to 179. The edge
+    /// fades over the outer fifth of it.
+    pub angle_degrees: f32,
+}
+
+/// What's done to the scene after it's drawn in high dynamic range, where
+/// brightness can go past 1.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PostProcessing {
+    /// Off draws the scene as it is, with anything brighter than 1 clipped
+    /// to white and no bloom.
+    pub enabled: bool,
+    /// Multiplies the scene's brightness before tone mapping.
+    pub exposure: f32,
+    pub bloom_enabled: bool,
+    /// How much of the bloom is added to the scene.
+    pub bloom_intensity: f32,
+    /// Only light brighter than this blooms.
+    pub bloom_threshold: f32,
+}
+
+impl Default for PostProcessing {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            exposure: 1.0,
+            bloom_enabled: true,
+            bloom_intensity: 0.35,
+            bloom_threshold: 1.0,
+        }
+    }
+}
+
+/// Shadows cast by the sun. They're drawn only near the camera, where one
+/// shadow map can keep them sharp.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Shadows {
+    /// Off for low-end machines: nothing is drawn into a shadow map.
+    pub enabled: bool,
+    /// How far from the camera shadows reach, in studs.
+    pub distance: f32,
+}
+
+impl Default for Shadows {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            distance: 150.0,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

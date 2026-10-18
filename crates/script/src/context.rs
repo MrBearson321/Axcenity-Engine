@@ -161,6 +161,20 @@ impl Context {
         });
     }
 
+    /// Fires a no-argument event on one Instance.
+    pub fn fire_instance_event(
+        &self,
+        world: &mut World,
+        instance: InstanceId,
+        event: &'static str,
+    ) {
+        with_world(&self.lua, world, || {
+            if instance::world(&self.lua).is_ok_and(|world| world.contains(instance)) {
+                events::fire(&self.lua, events::Owner::Instance(instance), event, ());
+            }
+        });
+    }
+
     /// Frame step 1 on the client: key presses and releases.
     pub fn fire_input(&self, world: &mut World, keys: &[KeyEvent]) {
         with_world(&self.lua, world, || client::fire_input(&self.lua, keys));

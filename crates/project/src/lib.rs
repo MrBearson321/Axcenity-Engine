@@ -15,6 +15,7 @@
 //! One damaged file never stops the rest from loading: [`load`] leaves it
 //! out and lists it in [`Project::problems`].
 
+mod packed;
 mod world_file;
 
 #[cfg(test)]
@@ -27,6 +28,7 @@ use std::path::{Path, PathBuf};
 use axcenity_core::{ClassName, InstanceId, World};
 use serde::Deserialize;
 
+pub use packed::{PackError, pack_game, unpack_game};
 pub use world_file::{WorldError, parse_world, write_world};
 
 pub const MANIFEST_FILE: &str = "axcenity.json";
@@ -55,6 +57,92 @@ pub const FORMAT_VERSION: u32 = 1;
 pub struct Manifest {
     pub name: String,
     pub format_version: u32,
+    #[serde(default = "default_show_splash")]
+    pub show_splash: bool,
+    #[serde(default)]
+    pub description: String,
+}
+
+fn default_show_splash() -> bool {
+    true
+}
+
+/// The picture of the project the editor saves for its project list.
+pub const THUMBNAIL_FILE: &str = "thumbnail.png";
+
+/// The manifest in `folder`, without loading anything else (for lists of
+/// projects). `None` if there is no readable manifest.
+pub fn read_manifest(folder: &Path) -> Option<Manifest> {
+    let text = fs::read_to_string(folder.join(MANIFEST_FILE)).ok()?;
+    serde_json::from_str::<Manifest>(&text).ok()
+}
+
+/// Makes a new project called `name` in a new folder inside `parent`, with a
+/// baseplate in its world, and returns the folder. The folder is named after
+/// the project (characters filesystems don't allow become `-`). Fails (see
+/// [`SaveError::already_exists`]) rather than touching a folder that exists.
+pub fn create_project(parent: &Path, name: &str) -> Result<PathBuf, SaveError> {
+    let name = name.trim();
+    let folder_name: String = name
+        .chars()
+        .map(|c| {
+            if c.is_control() || "<>:\"/\\|?*".contains(c) {
+                '-'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let folder_name = folder_name.trim().trim_end_matches('.');
+    let folder = parent.join(folder_name);
+    if name.is_empty() || folder_name.is_empty() {
+        return Err(SaveError::new(&folder)(std::io::Error::new(
+            ErrorKind::InvalidInput,
+            "the project needs a name",
+        )));
+    }
+    // `create_dir` (not `_all`) fails if the folder is already there.
+    fs::create_dir(&folder).map_err(SaveError::new(&folder))?;
+    let manifest = serde_json::json!({ "name": name, "format_version": FORMAT_VERSION });
+    let manifest_text = serde_json::to_string_pretty(&manifest).unwrap_or_default();
+    let world = r#"{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Baseplate",
+        "properties": {
+          "Anchored": true,
+          "Position": [0, -0.5, 0],
+          "Size": [40, 1, 40],
+          "Color": [0.35, 0.37, 0.4]
+        }
+      }
+    ]
+  }
+}
+"#;
+    let written = fs::create_dir(folder.join(SCRIPTS_FOLDER))
+        .map_err(SaveError::new(&folder))
+        .and_then(|()| write_through_temporary(&folder.join(MANIFEST_FILE), &manifest_text))
+        .and_then(|()| write_through_temporary(&folder.join(WORLD_FILE), world));
+    if let Err(err) = written {
+        // Don't leave a half-made project behind.
+        let _ = fs::remove_dir_all(&folder);
+        return Err(err);
+    }
+    Ok(folder)
+}
+
+/// Changes the project's name in its manifest.
+pub fn set_name(folder: &Path, name: &str) -> Result<(), SaveError> {
+    update_manifest(folder, "name", serde_json::Value::from(name.trim()))
+}
+
+/// Changes the project's description in its manifest.
+pub fn set_description(folder: &Path, description: &str) -> Result<(), SaveError> {
+    update_manifest(folder, "description", serde_json::Value::from(description))
 }
 
 pub struct Project {
@@ -76,6 +164,40 @@ pub struct Project {
     /// started empty. Saving would then replace a file that may only need a
     /// small fix, so the editor keeps it first ([`keep_world_file`]).
     pub world_loaded: bool,
+}
+
+/// Stores whether exported players show the brief engine splash screen.
+pub fn set_show_splash(folder: &Path, show: bool) -> Result<(), SaveError> {
+    update_manifest(folder, "show_splash", serde_json::Value::Bool(show))
+}
+
+/// Sets one key of the manifest, keeping the rest of the file as it was.
+fn update_manifest(folder: &Path, key: &str, value: serde_json::Value) -> Result<(), SaveError> {
+    let path = folder.join(MANIFEST_FILE);
+    let text = fs::read_to_string(&path).map_err(SaveError::new(&path))?;
+    let mut manifest: serde_json::Value = serde_json::from_str(&text).map_err(|error| {
+        SaveError::new(&path)(std::io::Error::new(
+            ErrorKind::InvalidData,
+            format!("invalid project manifest: {error}"),
+        ))
+    })?;
+    let Some(object) = manifest.as_object_mut() else {
+        return Err(SaveError::new(&path)(std::io::Error::new(
+            ErrorKind::InvalidData,
+            "project manifest must be a JSON object",
+        )));
+    };
+    object.insert(key.to_owned(), value);
+    let serialized = serde_json::to_vec_pretty(&manifest).map_err(|error| {
+        SaveError::new(&path)(std::io::Error::new(ErrorKind::InvalidData, error))
+    })?;
+    let temporary = path.with_extension("json.saving");
+    fs::write(&temporary, serialized).map_err(SaveError::new(&temporary))?;
+    if let Err(source) = fs::rename(&temporary, &path) {
+        let _ = fs::remove_file(&temporary);
+        return Err(SaveError { path, source });
+    }
+    Ok(())
 }
 
 /// A script file from the project's `scripts` folder.
@@ -169,6 +291,8 @@ pub fn load(folder: &Path) -> Result<Project, LoadError> {
             Manifest {
                 name: folder_name(folder),
                 format_version: FORMAT_VERSION,
+                show_splash: default_show_splash(),
+                description: String::new(),
             }
         }
     };
@@ -862,6 +986,36 @@ mod tests {
     }
 
     #[test]
+    fn hello_ui_example_loads_with_client_script_and_stylesheet() {
+        let project = load(&examples_folder().join("hello-ui")).unwrap();
+        assert!(project.problems.is_empty() && project.world_loaded);
+        assert_eq!(project.scripts.len(), 1);
+        assert_eq!(project.scripts[0].path, "scripts/menu.client.lua");
+        assert_eq!(project.stylesheets.len(), 1);
+        assert!(
+            project
+                .world
+                .descendants(project.world.workspace())
+                .into_iter()
+                .filter_map(|id| project.world.get(id))
+                .any(|instance| instance.class() == ClassName::TextButton)
+        );
+    }
+
+    #[test]
+    fn splash_defaults_on_and_can_be_changed_in_the_manifest() {
+        let folder = project_with_scripts("splash-setting", &[]);
+        assert!(load(&folder).unwrap().manifest.show_splash);
+
+        set_show_splash(&folder, false).unwrap();
+        assert!(!load(&folder).unwrap().manifest.show_splash);
+
+        set_show_splash(&folder, true).unwrap();
+        assert!(load(&folder).unwrap().manifest.show_splash);
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
     fn project_without_a_scripts_folder_has_no_scripts() {
         let folder = project_with_scripts("no-scripts", &[]);
         let project = load(&folder).unwrap();
@@ -1014,6 +1168,31 @@ mod tests {
             script_path("utils", ClassName::ModuleScript),
             "scripts/utils.module.lua"
         );
+    }
+
+    #[test]
+    fn a_new_project_loads_and_its_settings_can_change() {
+        let parent = temp_folder("new-project");
+        let folder = create_project(&parent, "My: Game").unwrap();
+        assert_eq!(folder.file_name().unwrap(), "My- Game");
+        assert!(
+            create_project(&parent, "My: Game")
+                .unwrap_err()
+                .already_exists()
+        );
+        assert!(create_project(&parent, "  ").is_err());
+
+        set_name(&folder, "Renamed").unwrap();
+        set_description(&folder, "A test").unwrap();
+        set_show_splash(&folder, false).unwrap();
+        let manifest = read_manifest(&folder).unwrap();
+        assert_eq!(manifest.name, "Renamed");
+        assert_eq!(manifest.description, "A test");
+        assert!(!manifest.show_splash);
+        let project = load(&folder).unwrap();
+        assert!(project.problems.is_empty(), "{:?}", project.problems);
+        assert!(project.world_loaded);
+        let _ = fs::remove_dir_all(&parent);
     }
 
     /// An empty folder in the system's temporary folder, unique to this test run.

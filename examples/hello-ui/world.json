@@ -1,0 +1,57 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "ScreenGui",
+        "name": "MainMenu",
+        "properties": {
+          "Enabled": true
+        },
+        "children": [
+          {
+            "class": "Frame",
+            "name": "Menu",
+            "properties": {
+              "Class": "menu",
+              "Position": [0.5, -180, 0.5, -110],
+              "Size": [0, 360, 0, 220]
+            },
+            "children": [
+              {
+                "class": "TextLabel",
+                "name": "Title",
+                "properties": {
+                  "Class": "title",
+                  "Text": "Axcenity UI",
+                  "Size": [1, 0, 0, 52]
+                },
+                "children": []
+              },
+              {
+                "class": "TextButton",
+                "name": "StartButton",
+                "properties": {
+                  "Class": "start-button",
+                  "Text": "Start game",
+                  "Size": [1, 0, 0, 52]
+                },
+                "children": []
+              },
+              {
+                "class": "TextLabel",
+                "name": "Status",
+                "properties": {
+                  "Id": "status",
+                  "Text": "Hover, press, then click the button.",
+                  "Size": [1, 0, 0, 44]
+                },
+                "children": []
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,40 @@
+ScreenGui {
+    --panel: #18243a;
+    --accent: #3b82f6;
+    --text: #f4f7fb;
+}
+
+.menu {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 18px;
+    background-color: var(--panel);
+    border: 1px solid #5774a0;
+    border-radius: 12px;
+}
+
+.title {
+    color: var(--text);
+    font-size: 26px;
+}
+
+.start-button {
+    background-color: var(--accent);
+    color: #ffffff;
+    border-radius: 8px;
+    font-size: 18px;
+}
+
+.start-button:hover {
+    background-color: #60a5fa;
+}
+
+.start-button:active {
+    background-color: #1d4ed8;
+}
+
+#status {
+    color: #b9c7dc;
+    font-size: 14px;
+}

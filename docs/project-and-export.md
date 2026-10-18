@@ -47,6 +47,7 @@ my-game/
 }
 ```
 
+- **Lighting** (Phase 30): the `Lighting` service's properties (`ShadowsEnabled`, `ShadowDistance`) are saved as an optional `lighting` section, `{ "properties": { ... } }`, only when one differs from its default, so older files and their saved text stay the same. Nothing can be saved inside Lighting.
 - **ReplicatedStorage** (decided in Phase 14, chosen by the developer): the optional `replicated_storage` section is written like `workspace`, and only when it has something in it, so older files and their saved text stay the same. `format_version` stays 1: older engines would reject the new field, but no older engine is in use. These two services are the only saved ones; Players (made at Play) and scripts are never in the file. A `LocalScript` or `Player` listed in the file is an error.
 
 - Property values are plain JSON, and the property's type decides how they're read: `Vector3` and `Color3` are `[a, b, c]`, `UDim2` is `[xScale, xOffset, yScale, yOffset]`, numbers are numbers, and enum items are strings (`"Shape": "Ball"`, `"Material": "Neon"`). `Color3` is sRGB from 0 to 1.
@@ -78,11 +79,11 @@ my-game/
 
 ## Export
 
-- CI (GitHub Actions) builds `player` for Windows, macOS and Linux. The editor ships with those pre-built players.
-- Export (run by the editor) translates blocks to Lua via `blocks`, then `project` packs the project into **one game file**, and pairs it with each chosen OS's player. Exporting for any OS works from any OS.
-- Export always writes a licenses and credits file that includes the engine's `NOTICE`.
-- The "Made with Axcenity" splash is on by default, with a per-project toggle to turn it off.
-- macOS builds are unsigned in v1.
+- File > Export Game translates block scripts to Lua and writes `game.axgame`, a small versioned archive containing the manifest, world, scripts, CSS and assets. Editor-only files are excluded. The player unpacks it to a private temporary folder and runs it; the archive refuses traversal and duplicate paths.
+- The editor pairs the archive with a player executable. The current-OS player is looked up beside the editor. Cross-target players are looked up under `players/windows`, `players/macos` or `players/linux` beside it; distributions must supply those binaries. Without the requested player, export reports an error rather than silently falling back to another OS.
+- Every export writes `LICENSES.txt` with the engine's `NOTICE`. macOS exports are unsigned `.app` bundles in v1.
+- The "Made with Axcenity" splash is on by default. File > Export Game > Show splash in exported games stores `show_splash` in `axcenity.json`; missing values default to true.
+- The manifest also takes an optional `description` (default empty). The editor's start screen edits `name`, `description` and `show_splash` from a project's Settings, and File > Close Project / New Project use `project::create_project`. `thumbnail.png` (320×180) in the project folder is the editor's project-list picture, written on Save and Close Project from a viewport screenshot; it isn't exported.
 
 ## Licensing
 

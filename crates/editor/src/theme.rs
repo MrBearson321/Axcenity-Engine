@@ -252,6 +252,7 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::DataModel => icons::GAME_CONTROLLER,
         ClassName::Workspace => icons::GLOBE_HEMISPHERE_WEST,
         ClassName::Players => icons::USERS,
+        ClassName::Lighting => icons::SUN,
         ClassName::ReplicatedStorage => icons::ARROWS_LEFT_RIGHT,
         ClassName::ServerScriptService => icons::HARD_DRIVES,
         ClassName::StarterPlayer => icons::USER_CIRCLE,
@@ -269,7 +270,11 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::ScreenGui => icons::GAME_CONTROLLER,
         ClassName::Frame => icons::CUBE,
         ClassName::TextLabel => icons::FILE_CODE,
+        ClassName::TextButton => icons::CURSOR,
+        ClassName::ImageLabel => icons::IMAGE,
         ClassName::Sound => icons::MUSIC_NOTE,
+        ClassName::PointLight => icons::LIGHTBULB,
+        ClassName::SpotLight => icons::FLASHLIGHT,
     }
 }
 
@@ -319,6 +324,7 @@ pub fn class_color(class: ClassName, visuals: &egui::Visuals) -> Color32 {
             pick((120, 190, 255), (0, 105, 180))
         }
         ClassName::Sound => pick((245, 166, 35), (175, 105, 0)),
+        ClassName::PointLight | ClassName::SpotLight => pick((255, 220, 90), (170, 130, 0)),
         ClassName::Script => pick((241, 137, 45), (200, 95, 0)),
         ClassName::LocalScript => pick((64, 200, 180), (0, 128, 118)),
         ClassName::ModuleScript => pick((180, 145, 255), (110, 70, 200)),

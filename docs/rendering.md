@@ -24,7 +24,7 @@ How Part properties map onto these (decided in Phase 3):
 - `Color`, `Metalness` and `Roughness` are Part properties and feed the draw list directly.
 - `Material` (Plastic, Metal, Glass, Neon) is a preset. Choosing it sets `Metalness` and `Roughness` to the preset's values, which you can then adjust (for example, a rougher Metal). See `Material::preset()` in `core`.
 - Opacity and glow aren't properties; they come from the material. Glass is drawn see-through, and Neon gives off its `Color` as emissive light instead of being shaded. If per-part transparency is needed later, add a `Transparency` property that multiplies the preset's opacity.
-- Without environment lighting (stage 4), metals reflect only the sun and ambient light, so they look darker than they will later.
+- Metals reflect the sky through environment lighting (stage 4).
 
 Transparency: opaque items are drawn first. Then see-through items are drawn, farthest to nearest by their centers, with blending on and depth writes off. Overlapping see-through items can still blend in the wrong order; that's accepted for now.
 
@@ -51,12 +51,37 @@ Built-in primitives are block, sphere, cylinder and wedge, plus imported glTF an
 ## Stages
 
 1. PBR shading with a sun and ambient light (implemented)
-2. Sun shadows (shadow maps; next)
-3. Many point and spot lights
-4. Sky and environment lighting (image-based lighting)
-5. Post-processing: HDR, tone mapping, bloom
+2. Sun shadows (implemented in Phase 30)
+3. Many point and spot lights (implemented in Phase 31)
+4. Sky and environment lighting (implemented in Phase 32)
+5. Post-processing: HDR, tone mapping, bloom (implemented in Phase 33)
 
 Each stage must leave existing scenes rendering correctly.
+
+## Lights (stage 3)
+
+- `DrawList::lights` holds `Light { position, color, brightness, range, cone }`. `scene` builds them from PointLight and SpotLight Instances parented to a Part or MeshPart; the position is the part's center and a SpotLight's `Direction` turns with the part. A light with `Enabled` false, or not inside a part, is skipped.
+- Tiled lighting: the CPU projects each light's bounding sphere onto the screen and lists it in the 32 px tiles it touches (up to 64 lights per tile, 1024 lights total; the nearest to the camera win). The shader loops over only its tile's lights. This is simpler than clustered (3D) lighting; switch to clusters if depth-heavy scenes need it.
+- Falloff is smooth to zero at `range`. Lights cast no shadows (only the sun does).
+
+## Sky and environment (stage 4)
+
+- `DrawList::sky` (`Sky`) comes from the Lighting properties `SkyTopColor`, `SkyHorizonColor`, `GroundColor` and `EnvironmentIntensity`. The sky is procedural: a gradient plus a sun disc, drawn as a full-screen triangle (which also fixes the background-clear encoding issue above). There is no HDR skybox yet.
+- Environment lighting is analytic from the same gradient: diffuse from the hemisphere, specular from the gradient blurred by roughness, combined with the split-sum approximation. Metals therefore reflect the sky. The flat ambient is kept only as a small floor (0.05).
+
+## Post-processing (stage 5)
+
+- The scene draws into an `Rgba16Float` texture. A bloom chain (prefilter above `BloomThreshold`, downsample, additive upsample) feeds a composite pass that adds bloom, applies `Exposure` and tone mapping (colors under 0.6 are unchanged, brighter ones roll off toward white) into the real target, then the UI draws on top.
+- Lighting properties `PostProcessingEnabled`, `Exposure`, `BloomEnabled`, `BloomIntensity` and `BloomThreshold` configure it. Off means a plain clamp with no bloom.
+- `scene` draws Neon parts 2.5× brighter than their color when bloom is on, so they pass the threshold and glow.
+
+## Shadows (stage 2)
+
+- `DrawList::shadows` (`Shadows { enabled, distance }`) comes from the `Lighting` service's `ShadowsEnabled` and `ShadowDistance` properties (`scene` reads them). The defaults are on, 150 studs.
+- One 2048² depth map (no cascades yet) covers a sphere around the part of the view out to `distance`, drawn from the sun in a depth-only pass before the scene. The map's position snaps to whole texels so edges don't shimmer. Casters up to 500 studs toward the sun are included.
+- The shader compares with a 3×3 filter, offsets the point along the surface normal and biases depth by two texels, and fades shadows out over the last 20% of `distance`.
+- Only the sun casts shadows, only sun light is darkened (not ambient), and only solid items cast (see-through ones don't; cut-out textures cast as solid). Shadows off allocates no shadow map and skips the pass.
+- Cascades are the next step if big scenes need sharper shadows far away.
 
 ## Platform
 

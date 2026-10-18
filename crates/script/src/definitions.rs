@@ -631,6 +631,93 @@ const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "If false, this label is hidden.",
     ),
     (
+        ClassName::TextButton,
+        "Class",
+        "Space-separated CSS class names used to style this UI Instance.",
+    ),
+    (
+        ClassName::TextButton,
+        "Id",
+        "The CSS identifier used to style this UI Instance.",
+    ),
+    (
+        ClassName::TextButton,
+        "Position",
+        "The top-left position relative to the parent, in scale and pixel offsets.",
+    ),
+    (
+        ClassName::TextButton,
+        "Size",
+        "The size relative to the parent, in scale and pixel offsets.",
+    ),
+    (
+        ClassName::TextButton,
+        "BackgroundColor3",
+        "The button's background color.",
+    ),
+    (
+        ClassName::TextButton,
+        "BackgroundTransparency",
+        "The background opacity: 0 is opaque and 1 is transparent.",
+    ),
+    (ClassName::TextButton, "Text", "The text to display."),
+    (ClassName::TextButton, "TextColor3", "The text color."),
+    (
+        ClassName::TextButton,
+        "TextSize",
+        "The text size in pixels.",
+    ),
+    (
+        ClassName::TextButton,
+        "Visible",
+        "If false, this button is hidden and cannot be activated.",
+    ),
+    (
+        ClassName::ImageLabel,
+        "Class",
+        "Space-separated CSS class names used to style this UI Instance.",
+    ),
+    (
+        ClassName::ImageLabel,
+        "Id",
+        "The CSS identifier used to style this UI Instance.",
+    ),
+    (
+        ClassName::ImageLabel,
+        "Position",
+        "The top-left position relative to the parent, in scale and pixel offsets.",
+    ),
+    (
+        ClassName::ImageLabel,
+        "Size",
+        "The size relative to the parent, in scale and pixel offsets.",
+    ),
+    (
+        ClassName::ImageLabel,
+        "BackgroundColor3",
+        "The image label's background color.",
+    ),
+    (
+        ClassName::ImageLabel,
+        "BackgroundTransparency",
+        "The background opacity: 0 is opaque and 1 is transparent.",
+    ),
+    (
+        ClassName::ImageLabel,
+        "Image",
+        "The project-relative path of the image to display.",
+    ),
+    (
+        ClassName::ImageLabel,
+        "ImageTransparency",
+        "The image opacity: 0 is opaque and 1 is transparent.",
+    ),
+    (
+        ClassName::ImageLabel,
+        "Visible",
+        "If false, this image is hidden.",
+    ),
+    (
         ClassName::Sound,
         "SoundId",
         "The audio file inside the project folder, such as \"assets/audio/chime.wav\".",
@@ -644,6 +731,103 @@ const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::Sound,
         "Looped",
         "If true, playback repeats until Stop is called or the game session stops.",
+    ),
+    (
+        ClassName::Lighting,
+        "ShadowsEnabled",
+        "If false, the sun casts no shadows. Turn this off on low-end machines.",
+    ),
+    (
+        ClassName::Lighting,
+        "ShadowDistance",
+        "How far from the camera sun shadows reach, in studs. Shorter distances give sharper shadows.",
+    ),
+    (
+        ClassName::Lighting,
+        "SkyTopColor",
+        "The sky's color straight up.",
+    ),
+    (
+        ClassName::Lighting,
+        "SkyHorizonColor",
+        "The sky's color at the horizon.",
+    ),
+    (
+        ClassName::Lighting,
+        "GroundColor",
+        "The color of the ground below the horizon, as the sky and reflections see it.",
+    ),
+    (
+        ClassName::Lighting,
+        "EnvironmentIntensity",
+        "How strongly the sky lights and is reflected by parts. 0 turns it off.",
+    ),
+    (
+        ClassName::Lighting,
+        "PostProcessingEnabled",
+        "If false, the scene is drawn with no tone mapping or bloom.",
+    ),
+    (
+        ClassName::Lighting,
+        "Exposure",
+        "Brightens or darkens the whole image before tone mapping. 1 is neutral.",
+    ),
+    (
+        ClassName::Lighting,
+        "BloomEnabled",
+        "If false, bright parts don't glow.",
+    ),
+    (
+        ClassName::Lighting,
+        "BloomIntensity",
+        "How strong the glow around bright parts is.",
+    ),
+    (
+        ClassName::Lighting,
+        "BloomThreshold",
+        "How bright a pixel must be before it glows.",
+    ),
+    (
+        ClassName::PointLight,
+        "Enabled",
+        "If false, the light is off.",
+    ),
+    (ClassName::PointLight, "Color", "The light's color."),
+    (
+        ClassName::PointLight,
+        "Brightness",
+        "How bright the light is.",
+    ),
+    (
+        ClassName::PointLight,
+        "Range",
+        "How far the light reaches, in studs.",
+    ),
+    (
+        ClassName::SpotLight,
+        "Enabled",
+        "If false, the light is off.",
+    ),
+    (ClassName::SpotLight, "Color", "The light's color."),
+    (
+        ClassName::SpotLight,
+        "Brightness",
+        "How bright the light is.",
+    ),
+    (
+        ClassName::SpotLight,
+        "Range",
+        "How far the light reaches, in studs.",
+    ),
+    (
+        ClassName::SpotLight,
+        "Angle",
+        "The full width of the cone, in degrees.",
+    ),
+    (
+        ClassName::SpotLight,
+        "Direction",
+        "The way the beam points, relative to the parent part.",
     ),
     (
         ClassName::Part,
@@ -836,6 +1020,11 @@ const EVENT_DOCS: &[(ClassName, &str, &str)] = &[
         "OnClientEvent",
         "Fires when a Script calls `FireClient` or `FireAllClients`. The handler gets the arguments.",
     ),
+    (
+        ClassName::TextButton,
+        "Activated",
+        "Fires when the player clicks or taps this button. The handler gets no arguments; LocalScripts only.",
+    ),
 ];
 
 /// What each class is. A `match` with no `_` case, so adding a class won't
@@ -845,6 +1034,9 @@ fn class_doc(class: ClassName) -> &'static str {
         ClassName::DataModel => "The root of the game, called `game` in scripts.",
         ClassName::Workspace => "The service that holds the 3D world. Parts inside it are drawn.",
         ClassName::Players => "The service with a Player for everyone in the game.",
+        ClassName::Lighting => {
+            "The service for the world's lighting. It sets sun shadows, the sky colors that metal parts reflect, and post-processing (exposure, tone mapping and bloom)."
+        }
         ClassName::ReplicatedStorage => {
             "The service for things Scripts and LocalScripts share, such as RemoteEvents and ModuleScripts."
         }
@@ -880,7 +1072,15 @@ fn class_doc(class: ClassName) -> &'static str {
         ClassName::ScreenGui => "The on-screen UI root, usually inside Workspace.",
         ClassName::Frame => "A rectangular UI element that can contain other UI elements.",
         ClassName::TextLabel => "A UI element that displays text.",
+        ClassName::TextButton => {
+            "A UI element that displays text and fires Activated when clicked."
+        }
+        ClassName::ImageLabel => "A UI element that displays an image from the project.",
         ClassName::Sound => "A sound effect or music track that scripts can play.",
+        ClassName::PointLight => {
+            "A light that shines in all directions from the center of its parent part."
+        }
+        ClassName::SpotLight => "A light that shines in a cone from the center of its parent part.",
     }
 }
 

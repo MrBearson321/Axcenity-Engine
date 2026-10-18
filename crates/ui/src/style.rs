@@ -35,6 +35,12 @@ const SUPPORTED_PROPERTIES: &[&str] = &[
 
 type Specificity = (u32, u32, u32);
 
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct PseudoClasses {
+    pub(crate) hovered: Option<InstanceId>,
+    pub(crate) active: Option<InstanceId>,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Stylesheet {
     /// The file it came from, relative to the project folder.
@@ -47,7 +53,6 @@ impl Stylesheet {
         &self.path
     }
 }
-
 /// A declaration that applies to a UI element, and where it's written, so
 /// the editor can show it and rewrite it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -104,6 +109,8 @@ struct SimpleSelector {
     class: Option<ClassName>,
     id: Option<String>,
     classes: Vec<String>,
+    hovered: bool,
+    active: bool,
 }
 
 /// Parses the supported stylesheet subset. Unsupported declarations are
@@ -173,6 +180,7 @@ pub(crate) fn resolve_styles(
     world: &World,
     id: InstanceId,
     stylesheets: &[Stylesheet],
+    pseudo: PseudoClasses,
 ) -> ResolvedStyles {
     let mut ancestors = Vec::new();
     let mut current = Some(id);
@@ -187,7 +195,7 @@ pub(crate) fn resolve_styles(
 
     let mut resolved = ResolvedStyles::default();
     for instance_id in ancestors {
-        let declarations = matching_declarations(world, instance_id, stylesheets);
+        let declarations = matching_declarations(world, instance_id, stylesheets, pseudo);
         for (name, winner) in declarations {
             let value = winner.declaration.value.clone();
             if name.starts_with("--") {
@@ -207,17 +215,18 @@ pub fn applied_declarations(
     id: InstanceId,
     stylesheets: &[Stylesheet],
 ) -> Vec<CssDeclaration> {
-    let mut applied: Vec<_> = matching_declarations(world, id, stylesheets)
-        .into_values()
-        .map(|winner| CssDeclaration {
-            property: winner.declaration.name.clone(),
-            value: winner.declaration.value.clone(),
-            path: winner.path.to_owned(),
-            selector: winner.selector.to_owned(),
-            span: winner.declaration.span.clone(),
-            line: winner.declaration.line,
-        })
-        .collect();
+    let mut applied: Vec<_> =
+        matching_declarations(world, id, stylesheets, PseudoClasses::default())
+            .into_values()
+            .map(|winner| CssDeclaration {
+                property: winner.declaration.name.clone(),
+                value: winner.declaration.value.clone(),
+                path: winner.path.to_owned(),
+                selector: winner.selector.to_owned(),
+                span: winner.declaration.span.clone(),
+                line: winner.declaration.line,
+            })
+            .collect();
     applied.sort_by(|a, b| a.property.cmp(&b.property));
     applied
 }
@@ -249,6 +258,7 @@ fn matching_declarations<'a>(
     world: &World,
     id: InstanceId,
     stylesheets: &'a [Stylesheet],
+    pseudo: PseudoClasses,
 ) -> HashMap<&'a str, Winner<'a>> {
     let mut winners: HashMap<&str, Winner> = HashMap::new();
     let mut order = 0;
@@ -256,7 +266,7 @@ fn matching_declarations<'a>(
         for rule in &stylesheet.rules {
             for declaration in &rule.declarations {
                 for selector in &rule.selectors {
-                    if !selector_matches(world, id, selector) {
+                    if !selector_matches(world, id, selector, pseudo) {
                         continue;
                     }
                     let replace = winners.get(declaration.name.as_str()).is_none_or(|old| {
@@ -282,11 +292,16 @@ fn matching_declarations<'a>(
     winners
 }
 
-fn selector_matches(world: &World, id: InstanceId, selector: &Selector) -> bool {
+fn selector_matches(
+    world: &World,
+    id: InstanceId,
+    selector: &Selector,
+    pseudo: PseudoClasses,
+) -> bool {
     let Some(last) = selector.parts.last() else {
         return false;
     };
-    if !simple_matches(world, id, last) {
+    if !simple_matches(world, id, last, pseudo) {
         return false;
     }
 
@@ -294,7 +309,7 @@ fn selector_matches(world: &World, id: InstanceId, selector: &Selector) -> bool 
     for part in selector.parts[..selector.parts.len() - 1].iter().rev() {
         let mut found = None;
         while let Some(candidate) = ancestor {
-            if simple_matches(world, candidate, part) {
+            if simple_matches(world, candidate, part, pseudo) {
                 found = world.get(candidate).and_then(|instance| instance.parent());
                 break;
             }
@@ -308,13 +323,23 @@ fn selector_matches(world: &World, id: InstanceId, selector: &Selector) -> bool 
     true
 }
 
-fn simple_matches(world: &World, id: InstanceId, selector: &SimpleSelector) -> bool {
+fn simple_matches(
+    world: &World,
+    id: InstanceId,
+    selector: &SimpleSelector,
+    pseudo: PseudoClasses,
+) -> bool {
     let Some(instance) = world.get(id) else {
         return false;
     };
     if selector
         .class
         .is_some_and(|class| class != instance.class())
+    {
+        return false;
+    }
+    if (selector.hovered && pseudo.hovered != Some(id))
+        || (selector.active && pseudo.active != Some(id))
     {
         return false;
     }
@@ -369,6 +394,24 @@ fn parse_selector(selector: &str) -> Option<Selector> {
                             return None;
                         }
                         specificity.0 += 1;
+                    }
+                }
+                b':' => {
+                    cursor += 1;
+                    let start = cursor;
+                    while cursor < raw.len() && is_identifier(bytes[cursor]) {
+                        cursor += 1;
+                    }
+                    match &raw[start..cursor] {
+                        "hover" if start != cursor && !part.hovered => {
+                            part.hovered = true;
+                            specificity.1 += 1;
+                        }
+                        "active" if start != cursor && !part.active => {
+                            part.active = true;
+                            specificity.1 += 1;
+                        }
+                        _ => return None,
                     }
                 }
                 byte => {
@@ -633,8 +676,51 @@ mod tests {
         );
         assert!(warnings.is_empty());
         assert_eq!(
-            resolve_styles(&world, frame, &[sheet]).values["opacity"],
+            resolve_styles(&world, frame, &[sheet], PseudoClasses::default()).values["opacity"],
             "0.4"
+        );
+    }
+
+    #[test]
+    fn hover_and_active_pseudo_classes_use_class_specificity() {
+        let mut world = World::new();
+        let gui = world.create(ClassName::ScreenGui).unwrap();
+        world.set_parent(gui, Some(world.workspace())).unwrap();
+        let button = world.create(ClassName::TextButton).unwrap();
+        world.set_parent(button, Some(gui)).unwrap();
+        world
+            .set_property(button, "Class", Value::String("start".into()))
+            .unwrap();
+        let (sheet, warnings) = parse_stylesheet(
+            "ui.css",
+            ".start { opacity: 0.2 } TextButton:hover { opacity: 0.5 } .start:active { opacity: 0.9 }",
+        );
+        assert!(warnings.is_empty());
+        assert_eq!(
+            resolve_styles(
+                &world,
+                button,
+                std::slice::from_ref(&sheet),
+                PseudoClasses {
+                    hovered: Some(button),
+                    active: None,
+                },
+            )
+            .values["opacity"],
+            "0.5"
+        );
+        assert_eq!(
+            resolve_styles(
+                &world,
+                button,
+                &[sheet],
+                PseudoClasses {
+                    hovered: Some(button),
+                    active: Some(button),
+                },
+            )
+            .values["opacity"],
+            "0.9"
         );
     }
 

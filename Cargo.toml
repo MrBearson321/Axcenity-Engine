@@ -46,8 +46,8 @@ gltf = "1.4"
 image = { version = "0.25", default-features = false, features = ["bmp", "jpeg", "png", "tga"] }
 kira = "0.12"
 log = "0.4"
-# Decodes the logo PNG for the player's window icon. (The editor gets PNG
-# decoding through eframe.)
+# Decodes the logo PNG for the player's window icon, and writes the editor's
+# project thumbnails. (The editor gets PNG decoding through eframe.)
 png = "0.18"
 # Lua 5.4, compiled from source (`vendored`) so no system Lua is needed on any OS.
 mlua = { version = "0.12", features = ["lua54", "vendored"] }

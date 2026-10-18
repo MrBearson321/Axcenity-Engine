@@ -245,6 +245,19 @@ impl ScriptRuntime {
         }
     }
 
+    /// Delivers a button activation only to LocalScripts.
+    pub fn activate_ui_button(&mut self, world: &mut World, button: InstanceId) {
+        self.fire_changes(world);
+        if world
+            .get(button)
+            .is_some_and(|instance| instance.class() == ClassName::TextButton)
+        {
+            self.client.fire_instance_event(world, button, "Activated");
+            self.collect(Side::Client);
+            self.fire_changes(world);
+        }
+    }
+
     /// Fires `Changed`, `GetPropertyChangedSignal`, `ChildAdded` and
     /// `ChildRemoved` for everything that changed in `world` since the last
     /// call, in the order it happened, in Scripts and then in LocalScripts.

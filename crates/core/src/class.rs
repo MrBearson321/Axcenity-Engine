@@ -18,6 +18,8 @@ pub enum ClassName {
     Workspace,
     /// The service that holds a Player for everyone in the game.
     Players,
+    /// The service for the world's lighting, such as shadows.
+    Lighting,
     /// The service for things both sides use, such as RemoteEvents.
     ReplicatedStorage,
     /// The service that holds server scripts.
@@ -59,15 +61,24 @@ pub enum ClassName {
     Frame,
     /// A UI element that displays text.
     TextLabel,
+    /// A UI element that can be activated by clicking or tapping.
+    TextButton,
+    /// A UI element that displays an image from the project.
+    ImageLabel,
     /// Plays an audio file from the project.
     Sound,
+    /// Light that shines in every direction from the center of its parent part.
+    PointLight,
+    /// Light that shines in a cone from the center of its parent part.
+    SpotLight,
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 21] = [
+    pub const ALL: [ClassName; 26] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
+        ClassName::Lighting,
         ClassName::ReplicatedStorage,
         ClassName::ServerScriptService,
         ClassName::StarterPlayer,
@@ -85,7 +96,11 @@ impl ClassName {
         ClassName::ScreenGui,
         ClassName::Frame,
         ClassName::TextLabel,
+        ClassName::TextButton,
+        ClassName::ImageLabel,
         ClassName::Sound,
+        ClassName::PointLight,
+        ClassName::SpotLight,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -93,6 +108,7 @@ impl ClassName {
             ClassName::DataModel => "DataModel",
             ClassName::Workspace => "Workspace",
             ClassName::Players => "Players",
+            ClassName::Lighting => "Lighting",
             ClassName::ReplicatedStorage => "ReplicatedStorage",
             ClassName::ServerScriptService => "ServerScriptService",
             ClassName::StarterPlayer => "StarterPlayer",
@@ -110,7 +126,11 @@ impl ClassName {
             ClassName::ScreenGui => "ScreenGui",
             ClassName::Frame => "Frame",
             ClassName::TextLabel => "TextLabel",
+            ClassName::TextButton => "TextButton",
+            ClassName::ImageLabel => "ImageLabel",
             ClassName::Sound => "Sound",
+            ClassName::PointLight => "PointLight",
+            ClassName::SpotLight => "SpotLight",
         }
     }
 
@@ -128,6 +148,7 @@ impl ClassName {
             ClassName::DataModel
                 | ClassName::Workspace
                 | ClassName::Players
+                | ClassName::Lighting
                 | ClassName::ReplicatedStorage
                 | ClassName::ServerScriptService
                 | ClassName::StarterPlayer
@@ -161,6 +182,41 @@ impl ClassName {
             | ClassName::Player
             | ClassName::Model
             | ClassName::Folder => Vec::new(),
+            ClassName::Lighting => vec![
+                ("ShadowsEnabled", Value::Bool(true)),
+                ("ShadowDistance", Value::Number(150.0)),
+                // The procedural sky, which also lights and is reflected by parts.
+                ("SkyTopColor", Value::Color3(Color3::new(0.25, 0.5, 0.9))),
+                (
+                    "SkyHorizonColor",
+                    Value::Color3(Color3::new(0.63, 0.8, 0.95)),
+                ),
+                ("GroundColor", Value::Color3(Color3::new(0.35, 0.33, 0.3))),
+                ("EnvironmentIntensity", Value::Number(0.6)),
+                // Tone mapping and bloom.
+                ("PostProcessingEnabled", Value::Bool(true)),
+                ("Exposure", Value::Number(1.0)),
+                ("BloomEnabled", Value::Bool(true)),
+                ("BloomIntensity", Value::Number(0.35)),
+                ("BloomThreshold", Value::Number(1.0)),
+            ],
+            ClassName::PointLight => vec![
+                ("Enabled", Value::Bool(true)),
+                ("Color", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
+                ("Brightness", Value::Number(1.0)),
+                // How far the light reaches, in studs.
+                ("Range", Value::Number(16.0)),
+            ],
+            ClassName::SpotLight => vec![
+                ("Enabled", Value::Bool(true)),
+                ("Color", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
+                ("Brightness", Value::Number(1.0)),
+                ("Range", Value::Number(32.0)),
+                // The width of the cone in degrees.
+                ("Angle", Value::Number(60.0)),
+                // Where the cone points, relative to the parent part.
+                ("Direction", Value::Vector3(Vector3::new(0.0, -1.0, 0.0))),
+            ],
             ClassName::ScreenGui => vec![
                 ("Class", Value::String(String::new())),
                 ("Id", Value::String(String::new())),
@@ -191,6 +247,35 @@ impl ClassName {
                 ("Text", Value::String("Label".to_owned())),
                 ("TextColor3", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
                 ("TextSize", Value::Number(16.0)),
+                ("Visible", Value::Bool(true)),
+            ],
+            ClassName::TextButton => vec![
+                ("Class", Value::String(String::new())),
+                ("Id", Value::String(String::new())),
+                ("Position", Value::UDim2(UDim2::default())),
+                ("Size", Value::UDim2(UDim2::new(0.0, 160.0, 0.0, 48.0))),
+                (
+                    "BackgroundColor3",
+                    Value::Color3(Color3::new(0.2, 0.2, 0.2)),
+                ),
+                ("BackgroundTransparency", Value::Number(0.0)),
+                ("Text", Value::String("Button".to_owned())),
+                ("TextColor3", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
+                ("TextSize", Value::Number(16.0)),
+                ("Visible", Value::Bool(true)),
+            ],
+            ClassName::ImageLabel => vec![
+                ("Class", Value::String(String::new())),
+                ("Id", Value::String(String::new())),
+                ("Position", Value::UDim2(UDim2::default())),
+                ("Size", Value::UDim2(UDim2::new(0.0, 100.0, 0.0, 100.0))),
+                (
+                    "BackgroundColor3",
+                    Value::Color3(Color3::new(0.2, 0.2, 0.2)),
+                ),
+                ("BackgroundTransparency", Value::Number(1.0)),
+                ("Image", Value::String(String::new())),
+                ("ImageTransparency", Value::Number(0.0)),
                 ("Visible", Value::Bool(true)),
             ],
             ClassName::Sound => vec![
@@ -267,6 +352,7 @@ impl ClassName {
             ClassName::DataModel
             | ClassName::Workspace
             | ClassName::Players
+            | ClassName::Lighting
             | ClassName::ReplicatedStorage
             | ClassName::ServerScriptService
             | ClassName::StarterPlayer
@@ -281,12 +367,16 @@ impl ClassName {
             | ClassName::ScreenGui
             | ClassName::Frame
             | ClassName::TextLabel
-            | ClassName::Sound => &[],
+            | ClassName::ImageLabel
+            | ClassName::Sound
+            | ClassName::PointLight
+            | ClassName::SpotLight => &[],
             // Fires on both parts when two parts start touching.
             ClassName::Part | ClassName::MeshPart => &["Touched"],
             // `OnServerEvent` fires in Scripts for each `FireServer`, and
             // `OnClientEvent` in LocalScripts for each `FireClient`.
             ClassName::RemoteEvent => &["OnServerEvent", "OnClientEvent"],
+            ClassName::TextButton => &["Activated"],
         }
     }
 }

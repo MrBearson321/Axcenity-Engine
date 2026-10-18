@@ -58,6 +58,10 @@ The editor shows the project in a 3D viewport, the **Explorer** (right) lists ev
 
 **Autocomplete in VS Code:** **File > Set Up VS Code Autocomplete** adds the engine's API to the project for the Lua extension (Lua Language Server): `.axcenity/axcenity.lua`, `.luarc.json` and `.vscode/extensions.json`. Open the project folder in VS Code and install the Lua extension when it asks; typing `Instance.new(`, `part.` or `task.` then lists what's there, and mistakes such as `part.Size = 5` are underlined. When you open the project with a newer editor, the definitions are updated.
 
+**On-screen UI:** run `examples/hello-ui` to try CSS hover/press states and a `TextButton.Activated` LocalScript. The editor previews UI while you edit and while playing; the player activates buttons on click or tap.
+
+**Exporting:** use **File > Export Game** to create a single `game.axgame` plus a player executable and `LICENSES.txt`. The current-OS player must be beside the editor. To export for another OS, provide its player executable under `players/windows`, `players/macos` or `players/linux` beside the editor. Cross-OS exports cannot be run on the build machine unless it can run that OS.
+
 **Undo and redo:** **Ctrl+Z** undoes and **Ctrl+Y** (or Ctrl+Shift+Z) redoes, also under the **Edit** menu, which names the step ("Undo Move Pad"). A whole drag or a typed name is one step. Saving keeps the history, so you can still undo after saving.
 
 In the viewport, the player's camera controls work while the mouse is over it, plus: the **mouse wheel** zooms, **middle-drag** pans, and **Alt + left-drag** orbits around the point you're looking at. To fly faster or slower, scroll with **Shift** held, or scroll while holding the **right mouse button**; the new speed pops up in the middle of the viewport.
@@ -89,3 +93,4 @@ Axcenity Engine is licensed under the [Apache License 2.0](LICENSE).
 
 - **Your games are yours.** Games you make with Axcenity belong entirely to you: no royalties, no fees, sell or share them however you like. Exported games include a credits file with the engine's [NOTICE](NOTICE); the export tool adds it for you.
 - **Forks are welcome.** You may fork and modify the engine freely. Keep the `LICENSE` and `NOTICE` files, mark files you changed, and give your fork its own name. The Apache License does not grant use of the Axcenity name.
+- **macOS builds are unsigned.** To open an export, Control-click `AxcenityPlayer.app`, choose **Open**, then confirm. If macOS still blocks it, use **System Settings > Privacy & Security > Open Anyway** after checking that you trust the source.
