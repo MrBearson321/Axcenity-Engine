@@ -6,7 +6,7 @@ Read before working in the `render` crate or changing material and light propert
 
 `render` takes a **draw list** (meshes, materials, transforms, lights, camera, UI draw data) and draws it with `wgpu`. It has no knowledge of Instances, scripts, physics or the editor. The editor viewport and the player both feed it the same way.
 
-Draw list conventions: Y up, right-handed, and colors as sRGB from 0 to 1 (the renderer converts them to linear). Built-in shapes are 1×1×1 at the origin, so a part's transform is translation × rotation × scale(Size). The Instance-to-draw-list step lives in the `scene` crate (`build_draw_list`), shared by the player and the editor.
+Draw list conventions: Y up, right-handed, and colors as sRGB from 0 to 1 (the renderer converts them to linear). Built-in shapes are 1×1×1 at the origin, so a part's transform is translation × rotation × scale(Size). The Instance-to-draw-list step lives in the `scene` crate (`build_draw_list`), shared by the player and the editor. UI entries are pixel-positioned rectangles and shaped text; the renderer draws them over the 3D scene.
 
 ## Targets (decided in Phase 8)
 

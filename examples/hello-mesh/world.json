@@ -1296,6 +1296,42 @@
             ]
           }
         ]
+      },
+      {
+        "class": "ScreenGui",
+        "name": "ScreenGui",
+        "properties": {
+          "Enabled": true
+        },
+        "children": [
+          {
+            "class": "Frame",
+            "name": "Frame",
+            "properties": {
+              "BackgroundColor3": [0.2, 0.2, 0.2],
+              "BackgroundTransparency": 0,
+              "Position": [0, 0, 0, 0],
+              "Size": [0, 200, 0, 100],
+              "Visible": true
+            },
+            "children": [
+              {
+                "class": "TextLabel",
+                "name": "TextLabel",
+                "properties": {
+                  "BackgroundColor3": [0.2, 0.2, 0.2],
+                  "BackgroundTransparency": 1,
+                  "Position": [0, 0, 0, 0],
+                  "Size": [1, 0, 1, 0],
+                  "Text": "Label",
+                  "TextColor3": [1, 1, 1],
+                  "TextSize": 16,
+                  "Visible": true
+                }
+              }
+            ]
+          }
+        ]
       }
     ]
   }

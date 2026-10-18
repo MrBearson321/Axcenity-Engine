@@ -6,7 +6,7 @@
 //! is wrapped in a small struct, such as `LuaVector3(Vector3)`.
 
 use axcenity_core::{
-    Color3, KeyCode, Material, PartType, TextureChannel, Value, ValueKind, Vector3,
+    Color3, KeyCode, Material, PartType, TextureChannel, UDim, UDim2, Value, ValueKind, Vector3,
 };
 use mlua::{FromLua, IntoLua, Lua, MetaMethod, UserData, UserDataFields, UserDataMethods};
 
@@ -139,6 +139,55 @@ impl UserData for LuaColor3 {
                 component_text(c.r),
                 component_text(c.g),
                 component_text(c.b)
+            ))
+        });
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct LuaUDim(pub UDim);
+
+impl UserData for LuaUDim {
+    fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
+        fields.add_field_method_get("Scale", |_, value| Ok(f32_to_lua(value.0.scale)));
+        fields.add_field_method_get("Offset", |_, value| Ok(f32_to_lua(value.0.offset)));
+    }
+
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_meta_method(MetaMethod::Eq, |lua, value, other: mlua::Value| {
+            Ok(LuaUDim::from_lua(other, lua).is_ok_and(|other| other.0 == value.0))
+        });
+        methods.add_meta_method(MetaMethod::ToString, |_, value, ()| {
+            Ok(format!(
+                "{}, {}",
+                component_text(value.0.scale),
+                component_text(value.0.offset)
+            ))
+        });
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct LuaUDim2(pub UDim2);
+
+impl UserData for LuaUDim2 {
+    fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
+        fields.add_field_method_get("X", |_, value| Ok(LuaUDim(value.0.x)));
+        fields.add_field_method_get("Y", |_, value| Ok(LuaUDim(value.0.y)));
+    }
+
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_meta_method(MetaMethod::Eq, |lua, value, other: mlua::Value| {
+            Ok(LuaUDim2::from_lua(other, lua).is_ok_and(|other| other.0 == value.0))
+        });
+        methods.add_meta_method(MetaMethod::ToString, |_, value, ()| {
+            let v = value.0;
+            Ok(format!(
+                "{}, {}, {}, {}",
+                component_text(v.x.scale),
+                component_text(v.x.offset),
+                component_text(v.y.scale),
+                component_text(v.y.offset)
             ))
         });
     }
@@ -332,6 +381,8 @@ macro_rules! from_lua_by_clone {
 from_lua_by_clone! {
     LuaVector3 => "Vector3",
     LuaColor3 => "Color3",
+    LuaUDim => "UDim",
+    LuaUDim2 => "UDim2",
     LuaEnumItem => "EnumItem",
 }
 
@@ -342,6 +393,7 @@ pub fn value_to_lua(lua: &Lua, value: &Value) -> mlua::Result<mlua::Value> {
         Value::Number(n) => Ok(mlua::Value::Number(*n)),
         Value::String(s) => s.as_str().into_lua(lua),
         Value::Vector3(v) => LuaVector3(*v).into_lua(lua),
+        Value::UDim2(v) => LuaUDim2(*v).into_lua(lua),
         Value::Color3(c) => LuaColor3(*c).into_lua(lua),
         Value::PartType(_) | Value::Material(_) | Value::TextureChannel(_) => {
             LuaEnumItem::from_value(value)
@@ -364,6 +416,9 @@ pub fn value_from_lua(lua: &Lua, value: mlua::Value, kind: ValueKind) -> Result<
         (ValueKind::Vector3, _) => LuaVector3::from_lua(value.clone(), lua)
             .ok()
             .map(|v| Value::Vector3(v.0)),
+        (ValueKind::UDim2, _) => LuaUDim2::from_lua(value.clone(), lua)
+            .ok()
+            .map(|v| Value::UDim2(v.0)),
         (ValueKind::Color3, _) => LuaColor3::from_lua(value.clone(), lua)
             .ok()
             .map(|c| Value::Color3(c.0)),
@@ -397,6 +452,12 @@ pub fn type_name(lua: &Lua, value: &mlua::Value) -> String {
         }
         if data.is::<LuaColor3>() {
             return "Color3".to_owned();
+        }
+        if data.is::<LuaUDim>() {
+            return "UDim".to_owned();
+        }
+        if data.is::<LuaUDim2>() {
+            return "UDim2".to_owned();
         }
         if let Ok(item) = data.borrow::<LuaEnumItem>() {
             return item.enum_type.name().to_owned();

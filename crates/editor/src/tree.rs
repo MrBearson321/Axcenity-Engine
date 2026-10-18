@@ -17,6 +17,9 @@ pub enum Insertable {
     Model,
     Folder,
     RemoteEvent,
+    ScreenGui,
+    Frame,
+    TextLabel,
 }
 
 impl Insertable {
@@ -29,6 +32,12 @@ impl Insertable {
     ];
     /// The classes that group other Instances.
     pub const GROUPS: [Insertable; 2] = [Insertable::Model, Insertable::Folder];
+    /// UI objects available in Explorer's Insert menu.
+    pub const UI: [Insertable; 3] = [
+        Insertable::ScreenGui,
+        Insertable::Frame,
+        Insertable::TextLabel,
+    ];
 
     /// What the buttons and menus call it. A Ball is a "Sphere", as in Studio.
     pub fn label(self) -> &'static str {
@@ -41,6 +50,9 @@ impl Insertable {
             Insertable::Model => "Model",
             Insertable::Folder => "Folder",
             Insertable::RemoteEvent => "RemoteEvent",
+            Insertable::ScreenGui => "ScreenGui",
+            Insertable::Frame => "Frame",
+            Insertable::TextLabel => "TextLabel",
         }
     }
 
@@ -51,6 +63,9 @@ impl Insertable {
             Insertable::Model => ClassName::Model,
             Insertable::Folder => ClassName::Folder,
             Insertable::RemoteEvent => ClassName::RemoteEvent,
+            Insertable::ScreenGui => ClassName::ScreenGui,
+            Insertable::Frame => ClassName::Frame,
+            Insertable::TextLabel => ClassName::TextLabel,
         }
     }
 }
@@ -102,7 +117,15 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
         let is_group = world.get(id).is_some_and(|instance| {
             matches!(instance.class(), ClassName::Model | ClassName::Folder)
         });
-        id == world.replicated_storage() || (is_group && is_saved(world, id))
+        let is_ui_container = matches!(
+            world.get(id).map(|instance| instance.class()),
+            Some(ClassName::ScreenGui | ClassName::Frame)
+        );
+        id == world.replicated_storage()
+            || (is_group && is_saved(world, id))
+            || (is_ui_container
+                && matches!(what, Insertable::Frame | Insertable::TextLabel)
+                && is_saved(world, id))
     })
     .unwrap_or(default)
 }
@@ -274,6 +297,24 @@ mod tests {
         assert_eq!(insert_parent(&world, Some(storage), folder), storage);
         let id = create(&mut world, remote, Vector3::new(0.0, 0.0, 0.0));
         assert_eq!(world.get(id).unwrap().class(), ClassName::RemoteEvent);
+    }
+
+    #[test]
+    fn ui_insertions_nest_under_screen_guis_and_frames() {
+        let mut world = World::new();
+        let workspace = world.workspace();
+        let gui = child(&mut world, workspace, ClassName::ScreenGui, "Hud");
+        let frame = child(&mut world, gui, ClassName::Frame, "Frame");
+
+        assert_eq!(insert_parent(&world, Some(gui), Insertable::Frame), gui);
+        assert_eq!(
+            insert_parent(&world, Some(frame), Insertable::TextLabel),
+            frame
+        );
+        assert_eq!(
+            insert_parent(&world, Some(frame), Insertable::ScreenGui),
+            workspace
+        );
     }
 
     #[test]

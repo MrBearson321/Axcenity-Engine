@@ -19,6 +19,35 @@ impl Vector3 {
     }
 }
 
+/// A scale and pixel offset on one UI axis.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct UDim {
+    pub scale: f32,
+    pub offset: f32,
+}
+
+impl UDim {
+    pub const fn new(scale: f32, offset: f32) -> Self {
+        Self { scale, offset }
+    }
+}
+
+/// A UI position or size with scale and pixel-offset components.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct UDim2 {
+    pub x: UDim,
+    pub y: UDim,
+}
+
+impl UDim2 {
+    pub const fn new(x_scale: f32, x_offset: f32, y_scale: f32, y_offset: f32) -> Self {
+        Self {
+            x: UDim::new(x_scale, x_offset),
+            y: UDim::new(y_scale, y_offset),
+        }
+    }
+}
+
 /// A color as people pick it (sRGB), with each channel from 0 to 1.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Color3 {
@@ -39,6 +68,7 @@ pub enum Value {
     Number(f64),
     String(String),
     Vector3(Vector3),
+    UDim2(UDim2),
     Color3(Color3),
     PartType(PartType),
     Material(Material),
@@ -52,6 +82,7 @@ pub enum ValueKind {
     Number,
     String,
     Vector3,
+    UDim2,
     Color3,
     PartType,
     Material,
@@ -65,6 +96,7 @@ impl Value {
             Value::Number(_) => ValueKind::Number,
             Value::String(_) => ValueKind::String,
             Value::Vector3(_) => ValueKind::Vector3,
+            Value::UDim2(_) => ValueKind::UDim2,
             Value::Color3(_) => ValueKind::Color3,
             Value::PartType(_) => ValueKind::PartType,
             Value::Material(_) => ValueKind::Material,
@@ -89,6 +121,13 @@ impl Value {
     pub fn as_vector3(&self) -> Option<Vector3> {
         match self {
             Value::Vector3(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    pub fn as_udim2(&self) -> Option<UDim2> {
+        match self {
+            Value::UDim2(value) => Some(*value),
             _ => None,
         }
     }
@@ -136,6 +175,7 @@ impl fmt::Display for ValueKind {
             ValueKind::Number => "number",
             ValueKind::String => "string",
             ValueKind::Vector3 => "Vector3",
+            ValueKind::UDim2 => "UDim2",
             ValueKind::Color3 => "Color3",
             ValueKind::PartType => "PartType",
             ValueKind::Material => "Material",

@@ -26,6 +26,16 @@
 ---@field G number Green, from 0 to 1.
 ---@field B number Blue, from 0 to 1.
 
+---One UI axis as a scale and pixel offset.
+---@class UDim
+---@field Scale number The fraction of the parent size.
+---@field Offset number The pixel offset.
+
+---A UI position or size with scale and pixel-offset components.
+---@class UDim2
+---@field X UDim The horizontal component.
+---@field Y UDim The vertical component.
+
 ---One choice of an enum, such as `Enum.Material.Neon`.
 ---@class EnumItem
 ---@field Name string The item's name, such as `"Neon"`.
@@ -158,7 +168,7 @@ function UserInputServiceClass:IsKeyDown(key) end
 ---@field Changed Signal Fires when a property (or `Name` or `Parent`) gets a different value, whether a script, physics or the editor changed it. The handler gets the property's name: `function(property) ... end`.
 ---@field ChildAdded Signal Fires when an Instance is put inside this one. The handler gets the child.
 ---@field ChildRemoved Signal Fires when an Instance is taken out of this one. The handler gets the child.
----@field [string] Workspace|Players|ReplicatedStorage|ServerScriptService|StarterPlayer|StarterPlayerScripts|Part|MeshPart|Script|LocalScript|ModuleScript|RemoteEvent|Player|Model|Folder|SurfaceAppearance A child, found by its name.
+---@field [string] Workspace|Players|ReplicatedStorage|ServerScriptService|StarterPlayer|StarterPlayerScripts|Part|MeshPart|Script|LocalScript|ModuleScript|RemoteEvent|Player|Model|Folder|SurfaceAppearance|ScreenGui|Frame|TextLabel A child, found by its name.
 local InstanceClass = {}
 
 ---The first child with this name, or nil. With `recursive`, searches every descendant.
@@ -313,6 +323,29 @@ function RemoteEventClass:FireAllClients(...) end
 ---@field InvertOpacity boolean True if OpacityMap is white where the surface is see-through.
 ---@field EmissiveStrength number Multiplies the glow.
 
+---The on-screen UI root, usually inside Workspace.
+---@class ScreenGui: Instance
+---@field Enabled boolean If true, the UI in this ScreenGui is drawn.
+
+---A rectangular UI element that can contain other UI elements.
+---@class Frame: Instance
+---@field Position UDim2 The top-left position relative to the parent, in scale and pixel offsets.
+---@field Size UDim2 The size relative to the parent, in scale and pixel offsets.
+---@field BackgroundColor3 Color3 The frame's background color.
+---@field BackgroundTransparency number The background opacity: 0 is opaque and 1 is transparent.
+---@field Visible boolean If false, this frame and its children are hidden.
+
+---A UI element that displays text.
+---@class TextLabel: Instance
+---@field Position UDim2 The top-left position relative to the parent, in scale and pixel offsets.
+---@field Size UDim2 The size relative to the parent, in scale and pixel offsets.
+---@field BackgroundColor3 Color3 The label's background color.
+---@field BackgroundTransparency number The background opacity: 0 is opaque and 1 is transparent.
+---@field Text string The text to display.
+---@field TextColor3 Color3 The text color.
+---@field TextSize number The text size in pixels.
+---@field Visible boolean If false, this label is hidden.
+
 -- Globals -------------------------------------------------------------------
 
 ---The root of the game. Every service is inside it.
@@ -352,6 +385,9 @@ Instance = {}
 ---@overload fun(className: "Model"): Model
 ---@overload fun(className: "Folder"): Folder
 ---@overload fun(className: "SurfaceAppearance"): SurfaceAppearance
+---@overload fun(className: "ScreenGui"): ScreenGui
+---@overload fun(className: "Frame"): Frame
+---@overload fun(className: "TextLabel"): TextLabel
 function Instance.new(className) end
 
 ---Creates Vector3 values.
@@ -382,6 +418,30 @@ function Color3.new(r, g, b) end
 ---@param b? number
 ---@return Color3
 function Color3.fromRGB(r, g, b) end
+
+---Creates UI positions and sizes.
+---@class UDim2Library
+UDim2 = {}
+
+---A UI value from scale and pixel offset on each axis. Left-out components are 0.
+---@param xScale? number
+---@param xOffset? number
+---@param yScale? number
+---@param yOffset? number
+---@return UDim2
+function UDim2.new(xScale, xOffset, yScale, yOffset) end
+
+---A UI value made from scale components, with no pixel offsets.
+---@param x? number
+---@param y? number
+---@return UDim2
+function UDim2.fromScale(x, y) end
+
+---A UI value made from pixel offsets, with no scale components.
+---@param x? number
+---@param y? number
+---@return UDim2
+function UDim2.fromOffset(x, y) end
 
 ---Pauses scripts and runs functions later, without stopping the game.
 ---@class taskLibrary

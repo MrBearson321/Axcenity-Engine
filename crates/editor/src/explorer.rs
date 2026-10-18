@@ -544,6 +544,12 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
             }
         }
         ui.separator();
+        for what in Insertable::UI {
+            if ui.button(insert_item(ui, what)).clicked() {
+                chosen = Some(RowCommand::Insert(what));
+            }
+        }
+        ui.separator();
         for class in SCRIPT_CLASSES {
             let icon = egui::RichText::new(theme::class_icon(class))
                 .color(theme::class_color(class, ui.visuals()));

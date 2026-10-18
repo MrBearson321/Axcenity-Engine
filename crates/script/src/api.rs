@@ -4,12 +4,12 @@
 //! Every script gets its own copy of these tables, so a script that replaces
 //! `Vector3.new` only breaks itself.
 
-use axcenity_core::{ClassName, Color3, Vector3};
+use axcenity_core::{ClassName, Color3, UDim2, Vector3};
 use mlua::{Function, Lua, MultiValue, Table};
 
 use crate::instance::{LuaInstance, world_mut};
 use crate::sandbox::ScriptIds;
-use crate::types::{LuaColor3, LuaEnum, LuaVector3};
+use crate::types::{LuaColor3, LuaEnum, LuaUDim2, LuaVector3};
 use crate::{OutputKind, push_output};
 
 pub fn install(lua: &Lua, env: &Table, ids: ScriptIds) -> mlua::Result<()> {
@@ -20,6 +20,7 @@ pub fn install(lua: &Lua, env: &Table, ids: ScriptIds) -> mlua::Result<()> {
     env.raw_set("Instance", instance_library(lua)?)?;
     env.raw_set("Vector3", vector3_library(lua)?)?;
     env.raw_set("Color3", color3_library(lua)?)?;
+    env.raw_set("UDim2", udim2_library(lua)?)?;
     env.raw_set("Enum", LuaEnum)?;
     Ok(())
 }
@@ -102,6 +103,52 @@ fn color3_library(lua: &Lua) -> mlua::Result<Table> {
             }
             let [r, g, b] = channels.map(|c| (c / 255.0) as f32);
             Ok(LuaColor3(Color3::new(r, g, b)))
+        })?,
+    )?;
+    Ok(library)
+}
+
+fn udim2_library(lua: &Lua) -> mlua::Result<Table> {
+    let library = lua.create_table()?;
+    library.raw_set(
+        "new",
+        lua.create_function(
+            |_,
+             (x_scale, x_offset, y_scale, y_offset): (
+                Option<f64>,
+                Option<f64>,
+                Option<f64>,
+                Option<f64>,
+            )| {
+                Ok(LuaUDim2(UDim2::new(
+                    x_scale.unwrap_or(0.0) as f32,
+                    x_offset.unwrap_or(0.0) as f32,
+                    y_scale.unwrap_or(0.0) as f32,
+                    y_offset.unwrap_or(0.0) as f32,
+                )))
+            },
+        )?,
+    )?;
+    library.raw_set(
+        "fromScale",
+        lua.create_function(|_, (x, y): (Option<f64>, Option<f64>)| {
+            Ok(LuaUDim2(UDim2::new(
+                x.unwrap_or(0.0) as f32,
+                0.0,
+                y.unwrap_or(0.0) as f32,
+                0.0,
+            )))
+        })?,
+    )?;
+    library.raw_set(
+        "fromOffset",
+        lua.create_function(|_, (x, y): (Option<f64>, Option<f64>)| {
+            Ok(LuaUDim2(UDim2::new(
+                0.0,
+                x.unwrap_or(0.0) as f32,
+                0.0,
+                y.unwrap_or(0.0) as f32,
+            )))
         })?,
     )?;
     Ok(library)

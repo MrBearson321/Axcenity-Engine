@@ -372,17 +372,20 @@ impl ApplicationHandler for App {
                 self.scripts.heartbeat(&mut self.world, f64::from(seconds));
                 print_output(&mut self.scripts);
 
-                // 5 (UI layout) comes in a later phase.
+                // 5. Lay out ScreenGuis at this window's current pixel size.
+                let size = window.inner_size();
+                let ui_size = (size.width, size.height);
 
-                // 6. Build the draw list and render, from wherever a
-                //    LocalScript put the camera (if one moved it).
+                // 6. Build and render, from wherever a LocalScript put the
+                //    camera (if one moved it).
                 if let Some(view) = self.scripts.take_camera_move() {
                     self.camera.set_view(view.position, view.orientation);
                 }
-                let draw_list = axcenity_scene::build_draw_list(
+                let draw_list = axcenity_scene::build_draw_list_with_ui(
                     &self.world,
                     &self.assets,
                     self.camera.to_render_camera(),
+                    ui_size,
                 );
                 // Models that couldn't be loaded, by physics or for drawing.
                 for error in self.assets.take_errors() {

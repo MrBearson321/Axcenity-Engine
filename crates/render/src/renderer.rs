@@ -10,9 +10,17 @@ use anyhow::{Context, Result};
 use bytemuck::{Pod, Zeroable};
 use glam::camera::rh;
 use glam::{Mat3, Vec3};
+use glyphon::{
+    Attrs, Buffer, Cache as GlyphCache, Color as GlyphColor, Family, FontSystem, Metrics,
+    Resolution, Shaping, SwashCache, TextArea, TextAtlas, TextBounds,
+    TextRenderer as GlyphTextRenderer, Viewport as TextViewport,
+};
 use wgpu::util::DeviceExt;
 
-use crate::draw_list::{ChannelMap, DrawItem, DrawList, MeshSource, Shape, TextureSource};
+use crate::draw_list::{
+    ChannelMap, DrawItem, DrawList, MeshSource, Shape, TextureSource, UiDrawItem, UiRectangle,
+    UiText,
+};
 use crate::mesh::{self, MeshData, Vertex};
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -54,6 +62,13 @@ struct InstanceRaw {
     emissive: [f32; 3],
     /// Metalness, roughness and alpha cutoff.
     surface: [f32; 3],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct UiVertex {
+    position: [f32; 2],
+    color: [f32; 4],
 }
 
 /// A mesh uploaded to the GPU.
@@ -206,6 +221,14 @@ struct ScenePipeline {
     depth_view: wgpu::TextureView,
     opaque_pipeline: wgpu::RenderPipeline,
     transparent_pipeline: wgpu::RenderPipeline,
+    ui_pipeline: wgpu::RenderPipeline,
+    ui_buffer: wgpu::Buffer,
+    ui_capacity: usize,
+    font_system: FontSystem,
+    swash_cache: SwashCache,
+    text_viewport: TextViewport,
+    text_atlas: TextAtlas,
+    text_renderer: GlyphTextRenderer,
     frame_buffer: wgpu::Buffer,
     frame_bind_group: wgpu::BindGroup,
     meshes: Meshes,
@@ -319,7 +342,8 @@ impl Renderer {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
         let aspect = self.config.width as f32 / self.config.height as f32;
-        self.scene.draw(list, &view, aspect);
+        self.scene
+            .draw(list, &view, aspect, (self.config.width, self.config.height))?;
         before_present();
         frame.present();
         Ok(())
@@ -379,10 +403,14 @@ impl TextureRenderer {
 
     /// Draws one frame into the texture. The GPU runs it in order with
     /// anything submitted afterward, such as egui drawing the texture.
-    pub fn render(&mut self, list: &DrawList) {
+    pub fn render(&mut self, list: &DrawList) -> Result<()> {
         let (width, height) = self.size();
-        self.scene
-            .draw(list, &self.draw_view, width as f32 / height as f32);
+        self.scene.draw(
+            list,
+            &self.draw_view,
+            width as f32 / height as f32,
+            (width, height),
+        )
     }
 
     /// Reads the texture back to the CPU as rows of RGBA bytes. Slow; for tests.
@@ -527,6 +555,7 @@ impl ScenePipeline {
         );
         let transparent_pipeline =
             create_pipeline(&device, &frame_layout, &material_layout, color_format, true);
+        let ui_pipeline = create_ui_pipeline(&device, color_format);
         let meshes = Meshes {
             block: upload_mesh(&device, "block", &mesh::block()),
             sphere: upload_mesh(&device, "sphere", &mesh::sphere()),
@@ -535,6 +564,28 @@ impl ScenePipeline {
         };
         let instance_capacity = 64;
         let instance_buffer = create_instance_buffer(&device, instance_capacity);
+        let ui_capacity = 128;
+        let ui_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("UI vertices"),
+            size: (ui_capacity * size_of::<UiVertex>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let mut font_system = FontSystem::new();
+        font_system.db_mut().load_font_data(
+            include_bytes!("../../../assets/fonts/Montserrat-Regular.ttf").to_vec(),
+        );
+        let swash_cache = SwashCache::new();
+        let glyph_cache = GlyphCache::new(&device);
+        let text_viewport = TextViewport::new(&device, &glyph_cache);
+        let mut text_atlas = TextAtlas::new(&device, &queue, &glyph_cache, color_format);
+        let text_renderer = GlyphTextRenderer::new(
+            &mut text_atlas,
+            &device,
+            wgpu::MultisampleState::default(),
+            None,
+        );
 
         Self {
             device,
@@ -542,6 +593,14 @@ impl ScenePipeline {
             depth_view,
             opaque_pipeline,
             transparent_pipeline,
+            ui_pipeline,
+            ui_buffer,
+            ui_capacity,
+            font_system,
+            swash_cache,
+            text_viewport,
+            text_atlas,
+            text_renderer,
             frame_buffer,
             frame_bind_group,
             meshes,
@@ -565,7 +624,13 @@ impl ScenePipeline {
 
     /// Draws `list` into `view`, which must be the size last given to
     /// `new` or `resize`, and sends the work to the GPU.
-    fn draw(&mut self, list: &DrawList, view: &wgpu::TextureView, aspect: f32) {
+    fn draw(
+        &mut self,
+        list: &DrawList,
+        view: &wgpu::TextureView,
+        aspect: f32,
+        viewport_size: (u32, u32),
+    ) -> Result<()> {
         let frame_uniform = frame_uniform(list, aspect);
         self.queue
             .write_buffer(&self.frame_buffer, 0, bytemuck::bytes_of(&frame_uniform));
@@ -576,6 +641,14 @@ impl ScenePipeline {
         self.ensure_instance_capacity(instances.len());
         self.queue
             .write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&instances));
+        let ui_vertices = ui_vertices(&list.ui, viewport_size);
+        self.ensure_ui_capacity(ui_vertices.len());
+        if !ui_vertices.is_empty() {
+            self.queue
+                .write_buffer(&self.ui_buffer, 0, bytemuck::cast_slice(&ui_vertices));
+        }
+
+        let text_buffers = self.prepare_ui_text(&list.ui, viewport_size)?;
 
         let mut encoder = self
             .device
@@ -639,8 +712,106 @@ impl ScenePipeline {
             }
         }
 
+        if !ui_vertices.is_empty() || !text_buffers.is_empty() {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("UI overlay"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                ..Default::default()
+            });
+            if !ui_vertices.is_empty() {
+                pass.set_pipeline(&self.ui_pipeline);
+                pass.set_vertex_buffer(0, self.ui_buffer.slice(..));
+                pass.draw(0..ui_vertices.len() as u32, 0..1);
+            }
+            if !text_buffers.is_empty() {
+                self.text_renderer
+                    .render(&self.text_atlas, &self.text_viewport, &mut pass)
+                    .context("could not render UI text")?;
+            }
+        }
+
         self.queue.submit([encoder.finish()]);
         self.forget_undrawn();
+        Ok(())
+    }
+
+    fn prepare_ui_text(
+        &mut self,
+        ui: &[UiDrawItem],
+        (width, height): (u32, u32),
+    ) -> Result<Vec<Buffer>> {
+        self.text_viewport
+            .update(&self.queue, Resolution { width, height });
+
+        let text_items: Vec<&UiText> = ui
+            .iter()
+            .filter_map(|item| match item {
+                UiDrawItem::Text(text) => Some(text),
+                UiDrawItem::Rectangle(_) => None,
+            })
+            .collect();
+        let mut buffers = Vec::with_capacity(text_items.len());
+        for text in &text_items {
+            let font_size = text.font_size.max(1.0);
+            let mut buffer = Buffer::new(
+                &mut self.font_system,
+                Metrics::new(font_size, font_size * 1.2),
+            );
+            buffer.set_size(
+                &mut self.font_system,
+                Some(text.size[0].max(0.0)),
+                Some(text.size[1].max(0.0)),
+            );
+            buffer.set_text(
+                &mut self.font_system,
+                &text.text,
+                &Attrs::new().family(Family::Name("Montserrat")),
+                Shaping::Advanced,
+            );
+            buffer.shape_until_scroll(&mut self.font_system, false);
+            buffers.push(buffer);
+        }
+
+        if !buffers.is_empty() {
+            let areas: Vec<_> = text_items
+                .iter()
+                .zip(&buffers)
+                .map(|(text, buffer)| TextArea {
+                    buffer,
+                    left: text.position[0],
+                    top: text.position[1],
+                    scale: 1.0,
+                    bounds: TextBounds {
+                        left: 0,
+                        top: 0,
+                        right: text.size[0].max(0.0) as i32,
+                        bottom: text.size[1].max(0.0) as i32,
+                    },
+                    default_color: glyph_color(text.color),
+                    custom_glyphs: &[],
+                })
+                .collect();
+            self.text_renderer
+                .prepare(
+                    &self.device,
+                    &self.queue,
+                    &mut self.font_system,
+                    &mut self.text_atlas,
+                    &self.text_viewport,
+                    areas,
+                    &mut self.swash_cache,
+                )
+                .context("could not prepare UI text")?;
+        }
+        Ok(buffers)
     }
 
     /// Uploads the callers' meshes and textures in `list` that aren't on
@@ -717,6 +888,19 @@ impl ScenePipeline {
         }
         self.instance_capacity = count.next_power_of_two();
         self.instance_buffer = create_instance_buffer(&self.device, self.instance_capacity);
+    }
+
+    fn ensure_ui_capacity(&mut self, count: usize) {
+        if count <= self.ui_capacity {
+            return;
+        }
+        self.ui_capacity = count.next_power_of_two();
+        self.ui_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("UI vertices"),
+            size: (self.ui_capacity * size_of::<UiVertex>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
     }
 }
 
@@ -927,6 +1111,102 @@ fn sky_clear_color(srgb: [f32; 3]) -> wgpu::Color {
         b: linear.z.into(),
         a: 1.0,
     }
+}
+
+fn ui_vertices(items: &[UiDrawItem], (width, height): (u32, u32)) -> Vec<UiVertex> {
+    if width == 0 || height == 0 {
+        return Vec::new();
+    }
+    let (width, height) = (width as f32, height as f32);
+    let mut vertices = Vec::new();
+    for item in items {
+        let UiDrawItem::Rectangle(UiRectangle {
+            position: [x, y],
+            size: [w, h],
+            color: [r, g, b, alpha],
+        }) = item
+        else {
+            continue;
+        };
+        if ![x, y, w, h, r, g, b, alpha]
+            .into_iter()
+            .all(|component| component.is_finite())
+            || *w <= 0.0
+            || *h <= 0.0
+            || *alpha <= 0.0
+        {
+            continue;
+        }
+        let point = |px: f32, py: f32| [px / width * 2.0 - 1.0, 1.0 - py / height * 2.0];
+        let top_left = point(*x, *y);
+        let top_right = point(*x + *w, *y);
+        let bottom_left = point(*x, *y + *h);
+        let bottom_right = point(*x + *w, *y + *h);
+        let color = linear_color([*r, *g, *b]);
+        let color = [color.x, color.y, color.z, alpha.clamp(0.0, 1.0)];
+        for position in [
+            top_left,
+            bottom_left,
+            top_right,
+            top_right,
+            bottom_left,
+            bottom_right,
+        ] {
+            vertices.push(UiVertex { position, color });
+        }
+    }
+    vertices
+}
+
+fn glyph_color([r, g, b]: [f32; 3]) -> GlyphColor {
+    let byte = |channel: f32| {
+        (if channel.is_finite() { channel } else { 1.0 })
+            .clamp(0.0, 1.0)
+            .mul_add(255.0, 0.5) as u8
+    };
+    GlyphColor::rgb(byte(r), byte(g), byte(b))
+}
+
+fn create_ui_pipeline(
+    device: &wgpu::Device,
+    color_format: wgpu::TextureFormat,
+) -> wgpu::RenderPipeline {
+    let shader = device.create_shader_module(wgpu::include_wgsl!("ui.wgsl"));
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("UI overlay"),
+        bind_group_layouts: &[],
+        push_constant_ranges: &[],
+    });
+    let vertex_layout = wgpu::VertexBufferLayout {
+        array_stride: size_of::<UiVertex>() as u64,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x4],
+    };
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("UI overlay"),
+        layout: Some(&layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            compilation_options: Default::default(),
+            buffers: &[vertex_layout],
+        },
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: None,
+        multisample: Default::default(),
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: color_format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview: None,
+        cache: None,
+    })
 }
 
 /// The pipeline for solid items, or for see-through ones when `transparent`
@@ -1393,6 +1673,7 @@ mod tests {
                 intensity: 0.0,
             },
             items,
+            ui: Vec::new(),
         }
     }
 
@@ -1612,7 +1893,7 @@ mod tests {
         let mut list = list_of(vec![]);
         list.sky_color = [1.0, 0.0, 0.0];
         let mut renderer = TextureRenderer::new(&device, &queue, 64, 32);
-        renderer.render(&list);
+        renderer.render(&list).unwrap();
         let pixels = renderer.read_pixels();
         assert_eq!(pixels.len(), 64 * 32 * 4);
         assert_eq!(pixels[..4], red);
@@ -1636,7 +1917,7 @@ mod tests {
         });
         renderer.resize(64, 64);
         assert_eq!(renderer.size(), (64, 64));
-        renderer.render(&list);
+        renderer.render(&list).unwrap();
         let pixels = renderer.read_pixels();
         let pixel = |x: usize, y: usize| &pixels[(y * 64 + x) * 4..][..4];
         assert_eq!(pixel(0, 0), red, "the corner shows the sky");
@@ -1731,7 +2012,7 @@ mod tests {
             material,
         });
         let mut renderer = TextureRenderer::new(&device, &queue, 32, 32);
-        renderer.render(&list);
+        renderer.render(&list).unwrap();
         let pixels = renderer.read_pixels();
         assert_eq!(pixels[(16 * 32 + 16) * 4..][..4], [0, 255, 0, 255]);
     }

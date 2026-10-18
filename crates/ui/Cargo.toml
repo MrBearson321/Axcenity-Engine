@@ -1,0 +1,15 @@
+[package]
+name = "axcenity-ui"
+description = "Lays out UI Instances and builds screen-space draw data."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+axcenity-core.workspace = true
+axcenity-render.workspace = true
+taffy.workspace = true
+
+[lints]
+workspace = true

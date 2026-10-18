@@ -24,8 +24,9 @@
 //!
 //! Property values are plain JSON. Their meaning comes from the class: the
 //! same `[0, 1, 0]` is a `Vector3` for `Position` and a `Color3` for `Color`,
-//! and enum items are strings such as `"Neon"`. Properties that are left out
-//! keep their default values.
+//! `[0, 0, 1, 0]` is a `UDim2` (X scale, X offset, Y scale, Y offset), and
+//! enum items are strings such as `"Neon"`. Properties that are left out keep
+//! their default values.
 //!
 //! [`write_world`] saves every property, sorted by name, so saving the same
 //! world always produces the same text.
@@ -215,6 +216,13 @@ fn json_to_value(json: &Json, kind: ValueKind) -> Result<Value, String> {
             let [x, y, z] = three_numbers(json).ok_or("expected [x, y, z]: three numbers")?;
             Ok(Value::Vector3(axcenity_core::Vector3::new(x, y, z)))
         }
+        ValueKind::UDim2 => {
+            let [x_scale, x_offset, y_scale, y_offset] =
+                four_numbers(json).ok_or("expected [x_scale, x_offset, y_scale, y_offset]")?;
+            Ok(Value::UDim2(axcenity_core::UDim2::new(
+                x_scale, x_offset, y_scale, y_offset,
+            )))
+        }
         ValueKind::Color3 => {
             const EXPECTED: &str = "expected [r, g, b]: three numbers from 0 to 1";
             let [r, g, b] = three_numbers(json).ok_or(EXPECTED)?;
@@ -257,6 +265,18 @@ fn enum_name<'a>(json: &'a Json, names: &[&str]) -> Result<&'a str, String> {
 fn three_numbers(json: &Json) -> Option<[f32; 3]> {
     match json.as_array()?.as_slice() {
         [a, b, c] => Some([a.as_f64()? as f32, b.as_f64()? as f32, c.as_f64()? as f32]),
+        _ => None,
+    }
+}
+
+fn four_numbers(json: &Json) -> Option<[f32; 4]> {
+    match json.as_array()?.as_slice() {
+        [a, b, c, d] => Some([
+            a.as_f64()? as f32,
+            b.as_f64()? as f32,
+            c.as_f64()? as f32,
+            d.as_f64()? as f32,
+        ]),
         _ => None,
     }
 }
@@ -355,6 +375,7 @@ fn json_value(value: &Value) -> String {
         Value::Number(n) => json_number(*n),
         Value::String(s) => json_string(s),
         Value::Vector3(v) => json_triple([v.x, v.y, v.z]),
+        Value::UDim2(v) => json_quad([v.x.scale, v.x.offset, v.y.scale, v.y.offset]),
         Value::Color3(c) => json_triple([c.r, c.g, c.b]),
         Value::PartType(t) => json_string(t.as_str()),
         Value::Material(m) => json_string(m.as_str()),
@@ -385,6 +406,17 @@ fn json_triple(numbers: [f32; 3]) -> String {
         }
     });
     format!("[{a}, {b}, {c}]")
+}
+
+fn json_quad(numbers: [f32; 4]) -> String {
+    let [a, b, c, d] = numbers.map(|n| {
+        if n.is_finite() {
+            n.to_string()
+        } else {
+            "null".to_owned()
+        }
+    });
+    format!("[{a}, {b}, {c}, {d}]")
 }
 
 /// A JSON string literal, with quotes and any needed escapes.
@@ -558,6 +590,44 @@ mod tests {
             .find_first_descendant(loaded.replicated_storage(), "Jump")
             .unwrap();
         assert_eq!(loaded.get(jump).unwrap().class(), ClassName::RemoteEvent);
+        assert_eq!(write_world(&loaded), written);
+    }
+
+    #[test]
+    fn ui_instances_and_udim2_properties_save_and_load() {
+        let mut world = World::new();
+        let gui = world.create(ClassName::ScreenGui).unwrap();
+        world.set_name(gui, "Hud").unwrap();
+        world.set_parent(gui, Some(world.workspace())).unwrap();
+        let frame = world.create(ClassName::Frame).unwrap();
+        world.set_parent(frame, Some(gui)).unwrap();
+        let position = axcenity_core::UDim2::new(0.5, 12.0, 0.25, -4.0);
+        world
+            .set_property(frame, "Position", Value::UDim2(position))
+            .unwrap();
+        let label = world.create(ClassName::TextLabel).unwrap();
+        world.set_parent(label, Some(frame)).unwrap();
+        world
+            .set_property(label, "Text", Value::String("Ready".to_owned()))
+            .unwrap();
+
+        let written = write_world(&world);
+        assert!(written.contains("\"Position\": [0.5, 12, 0.25, -4]"));
+        let loaded = parse_world(&written).unwrap();
+        let frame = loaded
+            .find_first_descendant(loaded.workspace(), "Frame")
+            .unwrap();
+        assert_eq!(
+            loaded.get(frame).unwrap().property("Position"),
+            Some(&Value::UDim2(position))
+        );
+        let label = loaded
+            .find_first_descendant(loaded.workspace(), "TextLabel")
+            .unwrap();
+        assert_eq!(
+            loaded.get(label).unwrap().property("Text"),
+            Some(&Value::String("Ready".to_owned()))
+        );
         assert_eq!(write_world(&loaded), written);
     }
 

@@ -12,6 +12,7 @@ authors.workspace = true
 axcenity-assets.workspace = true
 axcenity-core.workspace = true
 axcenity-render.workspace = true
+axcenity-ui.workspace = true
 
 [lints]
 workspace = true

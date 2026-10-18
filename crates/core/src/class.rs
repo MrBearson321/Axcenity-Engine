@@ -3,7 +3,7 @@
 use std::fmt;
 
 use crate::enums::{Material, PartType, TextureChannel};
-use crate::value::{Color3, Value, Vector3};
+use crate::value::{Color3, UDim2, Value, Vector3};
 
 /// Events every Instance has, whatever its class. `Changed` fires with the
 /// name of a property that got a new value, `ChildAdded` and `ChildRemoved`
@@ -53,10 +53,16 @@ pub enum ClassName {
     /// Inside a MeshPart: the texture maps of one of its model's materials,
     /// which it names in `MaterialName`, in place of the file's own.
     SurfaceAppearance,
+    /// Root of a group of in-game UI elements.
+    ScreenGui,
+    /// A colored rectangular UI element.
+    Frame,
+    /// A UI element that displays text.
+    TextLabel,
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 17] = [
+    pub const ALL: [ClassName; 20] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -74,6 +80,9 @@ impl ClassName {
         ClassName::Model,
         ClassName::Folder,
         ClassName::SurfaceAppearance,
+        ClassName::ScreenGui,
+        ClassName::Frame,
+        ClassName::TextLabel,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -95,6 +104,9 @@ impl ClassName {
             ClassName::Model => "Model",
             ClassName::Folder => "Folder",
             ClassName::SurfaceAppearance => "SurfaceAppearance",
+            ClassName::ScreenGui => "ScreenGui",
+            ClassName::Frame => "Frame",
+            ClassName::TextLabel => "TextLabel",
         }
     }
 
@@ -145,6 +157,30 @@ impl ClassName {
             | ClassName::Player
             | ClassName::Model
             | ClassName::Folder => Vec::new(),
+            ClassName::ScreenGui => vec![("Enabled", Value::Bool(true))],
+            ClassName::Frame => vec![
+                ("Position", Value::UDim2(UDim2::default())),
+                ("Size", Value::UDim2(UDim2::new(0.0, 200.0, 0.0, 100.0))),
+                (
+                    "BackgroundColor3",
+                    Value::Color3(Color3::new(0.2, 0.2, 0.2)),
+                ),
+                ("BackgroundTransparency", Value::Number(0.0)),
+                ("Visible", Value::Bool(true)),
+            ],
+            ClassName::TextLabel => vec![
+                ("Position", Value::UDim2(UDim2::default())),
+                ("Size", Value::UDim2(UDim2::new(1.0, 0.0, 1.0, 0.0))),
+                (
+                    "BackgroundColor3",
+                    Value::Color3(Color3::new(0.2, 0.2, 0.2)),
+                ),
+                ("BackgroundTransparency", Value::Number(1.0)),
+                ("Text", Value::String("Label".to_owned())),
+                ("TextColor3", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
+                ("TextSize", Value::Number(16.0)),
+                ("Visible", Value::Bool(true)),
+            ],
             ClassName::Part => {
                 let material = Material::Plastic;
                 let preset = material.preset();
@@ -224,7 +260,10 @@ impl ClassName {
             | ClassName::Player
             | ClassName::Model
             | ClassName::Folder
-            | ClassName::SurfaceAppearance => &[],
+            | ClassName::SurfaceAppearance
+            | ClassName::ScreenGui
+            | ClassName::Frame
+            | ClassName::TextLabel => &[],
             // Fires on both parts when two parts start touching.
             ClassName::Part | ClassName::MeshPart => &["Touched"],
             // `OnServerEvent` fires in Scripts for each `FireServer`, and

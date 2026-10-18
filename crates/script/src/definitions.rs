@@ -123,6 +123,42 @@ const VALUE_TYPES: &[ValueType] = &[
         methods: &[],
     },
     ValueType {
+        class: "UDim",
+        doc: "One UI axis as a scale and pixel offset.",
+        fields: &[
+            Field {
+                name: "Scale",
+                ty: "number",
+                doc: "The fraction of the parent size.",
+            },
+            Field {
+                name: "Offset",
+                ty: "number",
+                doc: "The pixel offset.",
+            },
+        ],
+        operators: &[],
+        methods: &[],
+    },
+    ValueType {
+        class: "UDim2",
+        doc: "A UI position or size with scale and pixel-offset components.",
+        fields: &[
+            Field {
+                name: "X",
+                ty: "UDim",
+                doc: "The horizontal component.",
+            },
+            Field {
+                name: "Y",
+                ty: "UDim",
+                doc: "The vertical component.",
+            },
+        ],
+        operators: &[],
+        methods: &[],
+    },
+    ValueType {
         class: "EnumItem",
         doc: "One choice of an enum, such as `Enum.Material.Neon`.",
         fields: &[Field {
@@ -425,6 +461,35 @@ const LIBRARIES: &[Library] = &[
         ],
     },
     Library {
+        global: "UDim2",
+        doc: "Creates UI positions and sizes.",
+        functions: &[
+            Function {
+                name: "new",
+                doc: "A UI value from scale and pixel offset on each axis. Left-out components are 0.",
+                params: &[
+                    ("xScale?", "number"),
+                    ("xOffset?", "number"),
+                    ("yScale?", "number"),
+                    ("yOffset?", "number"),
+                ],
+                returns: "UDim2",
+            },
+            Function {
+                name: "fromScale",
+                doc: "A UI value made from scale components, with no pixel offsets.",
+                params: &[("x?", "number"), ("y?", "number")],
+                returns: "UDim2",
+            },
+            Function {
+                name: "fromOffset",
+                doc: "A UI value made from pixel offsets, with no scale components.",
+                params: &[("x?", "number"), ("y?", "number")],
+                returns: "UDim2",
+            },
+        ],
+    },
+    Library {
         global: "task",
         doc: "Pauses scripts and runs functions later, without stopping the game.",
         functions: &[
@@ -459,6 +524,64 @@ const ENUM_GLOBAL_DOC: &str =
 
 /// What each property means. A test checks every property in `core` is here.
 const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
+    (
+        ClassName::ScreenGui,
+        "Enabled",
+        "If true, the UI in this ScreenGui is drawn.",
+    ),
+    (
+        ClassName::Frame,
+        "Position",
+        "The top-left position relative to the parent, in scale and pixel offsets.",
+    ),
+    (
+        ClassName::Frame,
+        "Size",
+        "The size relative to the parent, in scale and pixel offsets.",
+    ),
+    (
+        ClassName::Frame,
+        "BackgroundColor3",
+        "The frame's background color.",
+    ),
+    (
+        ClassName::Frame,
+        "BackgroundTransparency",
+        "The background opacity: 0 is opaque and 1 is transparent.",
+    ),
+    (
+        ClassName::Frame,
+        "Visible",
+        "If false, this frame and its children are hidden.",
+    ),
+    (
+        ClassName::TextLabel,
+        "Position",
+        "The top-left position relative to the parent, in scale and pixel offsets.",
+    ),
+    (
+        ClassName::TextLabel,
+        "Size",
+        "The size relative to the parent, in scale and pixel offsets.",
+    ),
+    (
+        ClassName::TextLabel,
+        "BackgroundColor3",
+        "The label's background color.",
+    ),
+    (
+        ClassName::TextLabel,
+        "BackgroundTransparency",
+        "The background opacity: 0 is opaque and 1 is transparent.",
+    ),
+    (ClassName::TextLabel, "Text", "The text to display."),
+    (ClassName::TextLabel, "TextColor3", "The text color."),
+    (ClassName::TextLabel, "TextSize", "The text size in pixels."),
+    (
+        ClassName::TextLabel,
+        "Visible",
+        "If false, this label is hidden.",
+    ),
     (
         ClassName::Part,
         "Anchored",
@@ -691,6 +814,9 @@ fn class_doc(class: ClassName) -> &'static str {
         ClassName::SurfaceAppearance => {
             "Inside a MeshPart: the texture maps of one of its model's materials (MaterialName), drawn in place of the file's own. Delete it to go back to the file's."
         }
+        ClassName::ScreenGui => "The on-screen UI root, usually inside Workspace.",
+        ClassName::Frame => "A rectangular UI element that can contain other UI elements.",
+        ClassName::TextLabel => "A UI element that displays text.",
     }
 }
 
@@ -701,6 +827,7 @@ fn lua_type(kind: ValueKind) -> String {
         ValueKind::Number => "number".to_owned(),
         ValueKind::String => "string".to_owned(),
         ValueKind::Vector3 => "Vector3".to_owned(),
+        ValueKind::UDim2 => "UDim2".to_owned(),
         ValueKind::Color3 => "Color3".to_owned(),
         // Enum properties read as items and also accept item names.
         ValueKind::Material | ValueKind::PartType | ValueKind::TextureChannel => {

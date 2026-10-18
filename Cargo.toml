@@ -19,6 +19,7 @@ axcenity-project = { path = "crates/project" }
 axcenity-render = { path = "crates/render" }
 axcenity-scene = { path = "crates/scene" }
 axcenity-script = { path = "crates/script" }
+axcenity-ui = { path = "crates/ui" }
 
 # Third-party crates.
 anyhow = "1"
@@ -33,6 +34,7 @@ env_logger = "0.11"
 # 0.10 is the release for egui 0.32: upgrade it with eframe.
 egui-phosphor = { version = "0.10", default-features = false, features = ["fill", "regular"] }
 glam = "0.34"
+glyphon = "0.9"
 # Loads glTF 2.0 models (.gltf and .glb), MIT OR Apache-2.0. The default
 # `import` feature reads buffers and decodes PNG and JPEG textures with the
 # `image` crate (MIT OR Apache-2.0), which eframe already uses.
@@ -59,6 +61,7 @@ rapier3d = "0.36"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+taffy = { version = "0.7", features = ["taffy_tree"] }
 wgpu = "25"
 winit = "0.30"
 

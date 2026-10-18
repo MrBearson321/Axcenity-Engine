@@ -413,9 +413,9 @@ Create the `ui` crate. Add `ScreenGui`, `Frame` and `TextLabel` Instances. `taff
 
 ### Acceptance criteria
 
-- [ ] A `ScreenGui` with a `Frame` holding a `TextLabel` appears over the 3D view in the player and in the editor's Play mode.
-- [ ] A script setting `Text` updates the label on the next frame.
-- [ ] Layout adapts when the window is resized.
+- [x] A `ScreenGui` with a `Frame` holding a `TextLabel` appears over the 3D view in the player and in the editor's Play mode.
+- [x] A script setting `Text` updates the label on the next frame.
+- [x] Layout adapts when the window is resized.
 
 ---
 

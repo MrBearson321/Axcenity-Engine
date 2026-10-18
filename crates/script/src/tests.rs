@@ -83,6 +83,42 @@ fn a_script_creates_a_new_part_and_moves_an_existing_one() {
 }
 
 #[test]
+fn a_script_creates_and_updates_ui_instances_with_udim2() {
+    let mut world = World::new();
+    let output = output_of(
+        &mut world,
+        r#"
+        local gui = Instance.new("ScreenGui")
+        gui.Name = "Hud"
+        gui.Parent = workspace
+
+        local frame = Instance.new("Frame")
+        frame.Position = UDim2.new(0.5, 12, 0.25, -4)
+        frame.Size = UDim2.fromScale(0.5, 0.75)
+        frame.Parent = gui
+
+        local label = Instance.new("TextLabel")
+        label.Text = "Ready"
+        label.Parent = frame
+        print(frame.Position.X.Scale, frame.Position.X.Offset, frame.Size.Y.Scale)
+        "#,
+    );
+    assert_eq!(output, ["0.5\t12.0\t0.75"]);
+
+    let gui = world.find_first_child(world.workspace(), "Hud").unwrap();
+    let frame = world.find_first_child(gui, "Frame").unwrap();
+    assert_eq!(
+        property(&world, frame, "Position"),
+        Value::UDim2(axcenity_core::UDim2::new(0.5, 12.0, 0.25, -4.0))
+    );
+    let label = world.find_first_child(frame, "TextLabel").unwrap();
+    assert_eq!(
+        property(&world, label, "Text"),
+        Value::String("Ready".to_owned())
+    );
+}
+
+#[test]
 fn dangerous_functions_are_unavailable() {
     let mut world = World::new();
     let output = output_of(

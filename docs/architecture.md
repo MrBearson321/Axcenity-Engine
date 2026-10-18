@@ -12,15 +12,17 @@ Read before creating a crate, adding a dependency between crates, or touching th
 | `scene` | Instance tree → draw list (`build_draw_list`), the shared `FlyCamera`, viewport picking (`pick`) | `core`, `assets`, `render` |
 | `physics` | `rapier3d` integration | `core`, `assets` |
 | `script` | Lua 5.4 (`mlua`), sandbox, scheduler, engine API | `core` |
+| `ui` | UI Instance layout (`taffy`) and screen-space draw data | `core`, `render` |
 | `project` | project folder load and save | `core` |
 | `player` | runtime shipped with games (binary) | `core`, `assets`, `render`, `scene`, `physics`, `script`, `project` |
 | `editor` | `egui` editor app (binary) | `core`, `assets`, `physics`, `project`, `render`, `scene`, `script` |
 
-`blocks`, `ui` and `audio` are planned crates, not current workspace members. The planned export flow translates blocks to Lua, then packages projects for the player.
+`blocks` and `audio` are planned crates, not current workspace members. The planned export flow translates blocks to Lua, then packages projects for the player.
 
 Rules:
 - `player` must **never** depend on `editor`, `egui` or `blocks`.
 - `render` never sees Instances, scripts or the editor. Something outside it turns the world into a draw list (meshes, materials, transforms, lights, camera).
+- `ui` reads the Instance tree and adds screen-space layout data to the render draw list; `render` remains Instance-free.
 - Don't let crates depend on each other in a cycle. If two crates need each other, move the shared type into `core`.
 - Pin dependency versions in the workspace's root `Cargo.toml` (`[workspace.dependencies]`).
 
@@ -36,10 +38,10 @@ Rules:
 2. Resume coroutines whose wait has expired, and fire queued events
 3. Step physics at a fixed 60 Hz (accumulator; may run 0–N steps per frame)
 4. Fire `Touched` and collision events, then `RunService.Heartbeat`
-5. Update UI layout (`taffy`)
+5. Update UI layout (`taffy`) and shape text
 6. Build the draw list and render
 
-The player runs these in `WindowEvent::RedrawRequested` (`crates/player/src/main.rs`), with a comment per step. Step 5 arrives with its phase. The editor runs step 6 every frame it draws, and steps 1-4 only during Play (`Session::frame` in `crates/editor/src/play.rs`), before any panel is drawn.
+The player runs these in `WindowEvent::RedrawRequested` (`crates/player/src/main.rs`), with a comment per step. The editor runs steps 1-4 only during Play (`Session::frame` in `crates/editor/src/play.rs`); its viewport lays out UI at step 5 using its current pixel size, then builds and draws step 6.
 
 Since Phase 16, change events (`Changed`, `ChildAdded`, ...) for whatever changed fire at every step that runs scripts, before and after it, so physics' changes fire at the start of step 4 (see `docs/scripting.md`, Execution model).
 

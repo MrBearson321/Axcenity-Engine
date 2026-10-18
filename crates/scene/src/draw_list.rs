@@ -13,6 +13,7 @@ use axcenity_render::{
     AmbientLight, Camera, Channel, ChannelMap, DrawItem, DrawList, Material, MeshSource, NormalMap,
     Shape, Sun, TextureMaps, TextureSource,
 };
+use axcenity_ui::build_ui_draw_data;
 
 use crate::orientation::rotation_from_orientation;
 
@@ -49,7 +50,20 @@ pub fn build_draw_list(world: &World, assets: &Assets, camera: Camera) -> DrawLi
         sun: SUN,
         ambient: AMBIENT,
         items,
+        ui: Vec::new(),
     }
+}
+
+/// Builds the shared scene list and lays out its UI for a physical-pixel viewport.
+pub fn build_draw_list_with_ui(
+    world: &World,
+    assets: &Assets,
+    camera: Camera,
+    viewport_size: (u32, u32),
+) -> DrawList {
+    let mut list = build_draw_list(world, assets, camera);
+    list.ui = build_ui_draw_data(world, viewport_size.0, viewport_size.1);
+    list
 }
 
 /// A Part's shape and the transform that places its 1×1×1 mesh in the world,

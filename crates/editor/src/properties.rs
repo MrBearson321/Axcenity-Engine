@@ -6,7 +6,7 @@
 //! and gives one place to notice unsaved changes.
 
 use axcenity_core::{
-    Color3, Instance, InstanceId, Material, PartType, TextureChannel, Value, World,
+    ClassName, Color3, Instance, InstanceId, Material, PartType, TextureChannel, Value, World,
 };
 use eframe::egui;
 
@@ -32,7 +32,7 @@ pub struct Section {
 
 /// The groups, in panel order, and which properties go in each. Name and
 /// ClassName come first, under "Data", and aren't in the property map.
-const GROUPS: [(&str, &[&str]); 5] = [
+const GROUPS: [(&str, &[&str]); 6] = [
     (
         "Appearance",
         &["Color", "Material", "Metalness", "Roughness"],
@@ -71,6 +71,20 @@ const GROUPS: [(&str, &[&str]); 5] = [
             "EmissiveStrength",
         ],
     ),
+    (
+        "UI",
+        &[
+            "Enabled",
+            "Visible",
+            "Position",
+            "Size",
+            "BackgroundColor3",
+            "BackgroundTransparency",
+            "Text",
+            "TextColor3",
+            "TextSize",
+        ],
+    ),
 ];
 
 /// True for a property that names a texture file, such as `ColorMap`.
@@ -92,6 +106,15 @@ const MAX_DECIMALS: usize = 3;
 pub fn sections(instance: &Instance) -> Vec<Section> {
     let mut sections: Vec<Section> = GROUPS
         .iter()
+        .filter(|(title, _)| match *title {
+            "Part" => matches!(instance.class(), ClassName::Part | ClassName::MeshPart),
+            "Surface" | "Map Settings" => instance.class() == ClassName::SurfaceAppearance,
+            "UI" => matches!(
+                instance.class(),
+                ClassName::ScreenGui | ClassName::Frame | ClassName::TextLabel
+            ),
+            _ => true,
+        })
         .map(|&(title, names)| Section {
             title,
             properties: names
@@ -270,10 +293,11 @@ fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
             let mut drag = egui::DragValue::new(&mut number).max_decimals(MAX_DECIMALS);
             drag = match name {
                 // These only make sense from 0 to 1.
-                "Metalness" | "Roughness" | "AmbientOcclusionStrength" => {
-                    drag.speed(0.01).range(0.0..=1.0)
-                }
-                "NormalStrength" | "EmissiveStrength" => {
+                "Metalness"
+                | "Roughness"
+                | "AmbientOcclusionStrength"
+                | "BackgroundTransparency" => drag.speed(0.01).range(0.0..=1.0),
+                "NormalStrength" | "EmissiveStrength" | "TextSize" => {
                     drag.speed(0.01).range(0.0..=f64::INFINITY)
                 }
                 _ => drag.speed(0.1),
@@ -323,6 +347,31 @@ fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
                 }
             });
             changed.then_some(Value::Vector3(vector))
+        }
+        Value::UDim2(mut value) => {
+            let mut changed = false;
+            ui.horizontal(|ui| {
+                for (prefix, component) in [("X", &mut value.x), ("Y", &mut value.y)] {
+                    ui.label(prefix);
+                    changed |= ui
+                        .add(
+                            egui::DragValue::new(&mut component.scale)
+                                .prefix("S ")
+                                .speed(0.01)
+                                .max_decimals(MAX_DECIMALS),
+                        )
+                        .changed();
+                    changed |= ui
+                        .add(
+                            egui::DragValue::new(&mut component.offset)
+                                .prefix("O ")
+                                .speed(1.0)
+                                .max_decimals(MAX_DECIMALS),
+                        )
+                        .changed();
+                }
+            });
+            changed.then_some(Value::UDim2(value))
         }
         Value::Color3(color) => color_control(ui, color).map(Value::Color3),
         Value::PartType(shape) => {
@@ -423,6 +472,21 @@ mod tests {
                 assert_eq!(instance.property(name), Some(value));
             }
         }
+    }
+
+    #[test]
+    fn ui_properties_only_appear_in_the_ui_section_for_ui_instances() {
+        let mut world = World::new();
+        let frame = world.create(ClassName::Frame).unwrap();
+        let sections = sections(world.get(frame).unwrap());
+
+        assert_eq!(titles(&sections), ["UI"]);
+        assert!(
+            sections[0]
+                .properties
+                .iter()
+                .any(|(name, _)| *name == "Position")
+        );
     }
 
     #[test]

@@ -12,7 +12,7 @@ mod renderer;
 
 pub use draw_list::{
     AmbientLight, Camera, Channel, ChannelMap, DrawItem, DrawList, Material, MeshSource, NormalMap,
-    Shape, Sun, TextureMaps, TextureSource,
+    Shape, Sun, TextureMaps, TextureSource, UiDrawItem, UiRectangle, UiText,
 };
 pub use renderer::{Renderer, TextureRenderer};
 

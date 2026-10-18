@@ -12,6 +12,7 @@
 //! (see `gizmo.rs`). With any tool, left-dragging a part by its body moves
 //! it onto the surface under the mouse (see `placing.rs`).
 //!
+//! UI is visible as an in-place preview both while editing and during Play.
 //! During Play there's no tool: the camera and selecting still work, but
 //! nothing can be dragged.
 
@@ -243,9 +244,15 @@ impl Viewport {
                 );
         }
 
-        let draw_list =
-            axcenity_scene::build_draw_list(world, assets, self.camera.to_render_camera());
-        target.renderer.render(&draw_list);
+        let draw_list = axcenity_scene::build_draw_list_with_ui(
+            world,
+            assets,
+            self.camera.to_render_camera(),
+            (width, height),
+        );
+        if let Err(error) = target.renderer.render(&draw_list) {
+            log::error!("could not render the viewport: {error:#}");
+        }
         let whole_texture = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
         ui.painter()
             .image(target.texture_id, rect, whole_texture, egui::Color32::WHITE);

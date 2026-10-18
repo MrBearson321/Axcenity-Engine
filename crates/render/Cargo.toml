@@ -10,6 +10,7 @@ authors.workspace = true
 [dependencies]
 anyhow.workspace = true
 bytemuck.workspace = true
+glyphon.workspace = true
 glam.workspace = true
 log.workspace = true
 wgpu.workspace = true

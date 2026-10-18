@@ -19,7 +19,7 @@ Read before working in the `ui` crate. This covers in-game UI; the editor's own 
 ## Layout and drawing
 
 - Layout is computed by **`taffy`** (frame order step 5). Text is shaped with `cosmic-text` or `glyphon`.
-- `ui` produces UI draw data, and `render` draws it.
+- `ui` produces UI draw data, and `render` draws it as an overlay. The editor viewport previews UI while editing as well as during Play; edit-mode scripts do not run.
 
 ## Future (don't build yet, don't block)
 

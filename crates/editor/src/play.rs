@@ -83,11 +83,10 @@ impl Session {
         self.panic_next_frame = true;
     }
 
-    /// Runs one frame of the game, `seconds` long: steps 1 to 4 of the fixed
-    /// frame order in `docs/architecture.md`, with the keys pressed and
-    /// released since the last frame and the viewport's camera. The
-    /// editor's viewport draws the result (step 6) afterward. Returns where
-    /// a LocalScript moved the camera, if one did.
+    /// Runs steps 1 to 4 of one frame, `seconds` long, with the keys pressed
+    /// and released since the last frame and the viewport's camera. The
+    /// viewport lays out UI at step 5 and draws the result at step 6.
+    /// Returns where a LocalScript moved the camera, if one did.
     pub fn frame(
         &mut self,
         seconds: f64,

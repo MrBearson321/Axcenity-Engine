@@ -18,6 +18,30 @@ pub struct DrawList {
     pub sun: Sun,
     pub ambient: AmbientLight,
     pub items: Vec<DrawItem>,
+    /// Screen-space UI, drawn after the 3D scene.
+    pub ui: Vec<UiDrawItem>,
+}
+
+#[derive(Clone, Debug)]
+pub enum UiDrawItem {
+    Rectangle(UiRectangle),
+    Text(UiText),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct UiRectangle {
+    pub position: [f32; 2],
+    pub size: [f32; 2],
+    pub color: [f32; 4],
+}
+
+#[derive(Clone, Debug)]
+pub struct UiText {
+    pub position: [f32; 2],
+    pub size: [f32; 2],
+    pub text: String,
+    pub font_size: f32,
+    pub color: [f32; 3],
 }
 
 #[derive(Clone, Copy, Debug)]
