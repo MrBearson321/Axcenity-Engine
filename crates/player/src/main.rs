@@ -5,9 +5,6 @@
 //! `Touched` for parts that started touching, then draw the Workspace, with a
 //! fly camera for looking around.
 
-mod camera;
-mod scene;
-
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -18,15 +15,14 @@ use axcenity_physics::Physics;
 use axcenity_project::ScriptFile;
 use axcenity_render::Renderer;
 use axcenity_render::glam::Vec3;
+use axcenity_scene::{FlyCamera, MoveKeys};
 use axcenity_script::{OutputKind, ScriptRuntime};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{DeviceEvent, DeviceId, ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::keyboard::PhysicalKey;
+use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window, WindowId};
-
-use crate::camera::{FlyCamera, MoveKeys};
 
 const DEFAULT_WINDOW_SIZE: LogicalSize<f64> = LogicalSize::new(1280.0, 720.0);
 const START_CAMERA_POSITION: Vec3 = Vec3::new(12.0, 8.0, 16.0);
@@ -142,6 +138,22 @@ fn frame_seconds(last_frame: &mut Option<Instant>) -> f32 {
     seconds.min(MAX_FRAME_SECONDS)
 }
 
+/// Records a key press or release. Keys are physical positions, so the same
+/// keys work on AZERTY and other layouts.
+fn set_move_key(keys: &mut MoveKeys, key: KeyCode, pressed: bool) {
+    let held = match key {
+        KeyCode::KeyW => &mut keys.forward,
+        KeyCode::KeyS => &mut keys.back,
+        KeyCode::KeyA => &mut keys.left,
+        KeyCode::KeyD => &mut keys.right,
+        KeyCode::KeyE => &mut keys.up,
+        KeyCode::KeyQ => &mut keys.down,
+        KeyCode::ShiftLeft | KeyCode::ShiftRight => &mut keys.slow,
+        _ => return,
+    };
+    *held = pressed;
+}
+
 /// While looking around, hides the cursor and keeps it from leaving the window.
 fn capture_mouse(window: &Window, captured: bool) {
     let result = if captured {
@@ -196,7 +208,7 @@ impl ApplicationHandler for App {
             WindowEvent::Resized(size) => renderer.resize(size.width, size.height),
             WindowEvent::KeyboardInput { event, .. } => {
                 if let PhysicalKey::Code(key) = event.physical_key {
-                    self.keys.set(key, event.state == ElementState::Pressed);
+                    set_move_key(&mut self.keys, key, event.state == ElementState::Pressed);
                 }
             }
             WindowEvent::MouseInput {
@@ -241,7 +253,8 @@ impl ApplicationHandler for App {
                 // 5 (UI layout) comes in a later phase.
 
                 // 6. Build the draw list and render.
-                let draw_list = scene::build_draw_list(&self.world, self.camera.to_render_camera());
+                let draw_list =
+                    axcenity_scene::build_draw_list(&self.world, self.camera.to_render_camera());
                 // `|| ...` is a closure: a small function the renderer calls at the right moment.
                 if let Err(err) = renderer.render(&draw_list, || window.pre_present_notify()) {
                     self.fail(event_loop, err);
@@ -277,6 +290,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn keys_are_recorded_and_released() {
+        let mut keys = MoveKeys::default();
+        set_move_key(&mut keys, KeyCode::KeyW, true);
+        set_move_key(&mut keys, KeyCode::ShiftRight, true);
+        set_move_key(&mut keys, KeyCode::KeyZ, true);
+        assert!(keys.forward && keys.slow);
+        set_move_key(&mut keys, KeyCode::KeyW, false);
+        assert!(!keys.forward);
+    }
+
+    #[test]
     fn hello_script_example_creates_a_part_and_moves_an_existing_one() {
         let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-script");
         let project = axcenity_project::load(&folder).unwrap();
@@ -300,7 +324,7 @@ mod tests {
         }
         // The new parts are drawn along with the ones from the world file.
         let camera = FlyCamera::looking_at(START_CAMERA_POSITION, Vec3::ZERO).to_render_camera();
-        let draw_list = scene::build_draw_list(&world, camera);
+        let draw_list = axcenity_scene::build_draw_list(&world, camera);
         assert_eq!(draw_list.items.len(), parts_before + 5);
     }
 

@@ -14,5 +14,9 @@ glam.workspace = true
 log.workspace = true
 wgpu.workspace = true
 
+[dev-dependencies]
+# GPU tests set up a device without a window.
+pollster.workspace = true
+
 [lints]
 workspace = true

@@ -9,5 +9,5 @@ Simulates Workspace Parts with rapier3d 0.36. Depends only on `core`. Design not
 - Any outside change calls `wake_up_all`, because a sleeping part may have lost its support.
 - `shapes.rs`: colliders match the render meshes (balls use the smallest side, cylinders run along X, wedges are a convex hull). Sizes are clamped to `MIN_SIZE`.
 - rapier's math is `glamx` (glam 0.33), not the workspace's glam 0.34 used by `render`. Use `rapier3d::glamx` types here and convert through `core::Vector3`, never between the two glams.
-- Orientation conversions use `EulerRot::YXZ` with (y, x, z) argument order, the same as `player/src/scene.rs`.
+- Orientation conversions use `EulerRot::YXZ` with (y, x, z) argument order, the same as `scene/src/draw_list.rs`.
 - rapier has no rolling resistance; `ANGULAR_DAMPING` stops balls rolling forever.

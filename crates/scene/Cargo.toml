@@ -1,0 +1,16 @@
+[package]
+name = "axcenity-scene"
+description = "Turns the Axcenity Instance tree into a draw list, and the camera that views it."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+# The bridge between Instances and the renderer, shared by the player and the
+# editor. No windowing or UI crates here, so both can use it.
+[dependencies]
+axcenity-core.workspace = true
+axcenity-render.workspace = true
+
+[lints]
+workspace = true

@@ -6,7 +6,14 @@ Read before working in the `render` crate or changing material and light propert
 
 `render` takes a **draw list** (meshes, materials, transforms, lights, camera, UI draw data) and draws it with `wgpu`. It has no knowledge of Instances, scripts, physics or the editor. The editor viewport and the player both feed it the same way.
 
-Draw list conventions: Y up, right-handed, and colors as sRGB from 0 to 1 (the renderer converts them to linear). Built-in shapes are 1×1×1 at the origin, so a part's transform is translation × rotation × scale(Size). The Instance-to-draw-list step currently lives in `player/src/scene.rs`.
+Draw list conventions: Y up, right-handed, and colors as sRGB from 0 to 1 (the renderer converts them to linear). Built-in shapes are 1×1×1 at the origin, so a part's transform is translation × rotation × scale(Size). The Instance-to-draw-list step lives in the `scene` crate (`build_draw_list`), shared by the player and the editor.
+
+## Targets (decided in Phase 8)
+
+- `Renderer` draws into a window surface it creates itself (the player).
+- `TextureRenderer` draws into a texture on a GPU device someone else created (the editor, where eframe owns the device and egui shows the texture). Both share the private `ScenePipeline`, so they draw identically.
+- The texture is `Rgba8Unorm` holding sRGB-encoded colors, because that's what egui 0.32 expects of native textures. Drawing goes through an `Rgba8UnormSrgb` view so the GPU encodes the shader's linear output. Sampling an sRGB texture would hand egui linear values and everything would look far too dark.
+- **Known issue (found in Phase 8):** on at least one driver (AMD, Vulkan, Windows), the background clear through an sRGB view is *not* sRGB-encoded while shaded pixels are. The player's window surface behaves the same way, so on that machine the sky shows as `(90, 154, 227)` instead of the intended `(161, 204, 242)`. Other drivers may encode it, so the sky color can differ between machines. Fix when the sky becomes a drawn pass (stage 4), or sooner by drawing the background with a full-screen triangle instead of a clear.
 
 ## Materials (PBR from day one)
 

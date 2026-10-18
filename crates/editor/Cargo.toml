@@ -1,0 +1,21 @@
+[package]
+name = "axcenity-editor"
+description = "The Axcenity Engine editor: open a project, look around it, and see its Instance tree."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+axcenity-core.workspace = true
+axcenity-project.workspace = true
+axcenity-render.workspace = true
+axcenity-scene.workspace = true
+anyhow.workspace = true
+eframe.workspace = true
+env_logger.workspace = true
+log.workspace = true
+rfd.workspace = true
+
+[lints]
+workspace = true

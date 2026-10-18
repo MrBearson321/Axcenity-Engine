@@ -4,7 +4,7 @@
 
 A free, open-source 3D game engine and editor inspired by Roblox Studio. Build worlds from parts, script them in **Lua 5.4** or with **Scratch-style blocks**, press Play to test, and export standalone games for **Windows, macOS and Linux**. Written in Rust.
 
-> **Status:** early development (Phase 7 of the [v1 plan](plans/axcenity-engine-v1.md)). Right now the player loads a project folder, runs its Lua scripts (which can pause with `task.wait` and react to parts touching with `part.Touched:Connect`), simulates physics (unanchored parts fall and collide), and draws its parts (blocks, balls, cylinders and wedges in plastic, metal, glass or neon), and you can fly around the scene.
+> **Status:** early development (Phase 8 of the [v1 plan](plans/axcenity-engine-v1.md)). Right now the player loads a project folder, runs its Lua scripts (which can pause with `task.wait` and react to parts touching with `part.Touched:Connect`), simulates physics (unanchored parts fall and collide), and draws its parts (blocks, balls, cylinders and wedges in plastic, metal, glass or neon), and you can fly around the scene. The first version of the editor opens a project and shows it in a 3D viewport, with an Explorer tree and an Output panel; editing comes next.
 
 ## Getting started
 
@@ -24,6 +24,16 @@ A free, open-source 3D game engine and editor inspired by Roblox Studio. Build w
 7. For events, run `examples/hello-touched` (the Milestone 1 demo). A red ball drops onto a pad; `scripts/pad.server.lua` connects to `pad.Touched`, so each landing changes the pad's color, makes it glow for half a second, and prints `Ball touched the pad` (a bounce counts as a second landing). A blue ball drops at 3 seconds; at 6 seconds the script calls `:Disconnect()`, and the last ball lands without any reaction.
 
 Camera controls: hold the **right mouse button** and move the mouse to look around. **W A S D** move, **E** and **Q** go up and down, and holding **Shift** moves slowly.
+
+### The editor
+
+```bash
+cargo run -p axcenity-editor -- examples/hello-touched
+```
+
+The editor shows the project in a 3D viewport, the **Explorer** (right) lists every object from `Game` down (click the arrows to open and close branches), and the **Output** panel (bottom) shows messages and load errors. Use **File > Open Project…** to open another project folder. Scripts don't run in the editor yet; Play comes in a later phase.
+
+In the viewport, the player's camera controls work while the mouse is over it, plus: the **mouse wheel** zooms, **middle-drag** pans, and **Alt + left-drag** orbits around the point you're looking at. To fly faster or slower, scroll with **Shift** held, or scroll while holding the **right mouse button**; the new speed pops up in the middle of the viewport.
 
 Useful commands:
 

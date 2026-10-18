@@ -12,6 +12,10 @@ use crate::draw_list::{DrawItem, DrawList, Shape};
 use crate::mesh::{self, MeshData, Vertex};
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+/// A [`TextureRenderer`]'s texture, as shown (see `create_target_texture`).
+const TARGET_SHOW_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+/// A [`TextureRenderer`]'s texture, as drawn into.
+const TARGET_DRAW_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const NEAR_PLANE: f32 = 0.1;
 const FAR_PLANE: f32 = 5000.0;
 
@@ -75,13 +79,33 @@ struct Batch {
     instances: Range<u32>,
 }
 
+/// Draws a scene into a window. The player uses this.
 pub struct Renderer {
     surface: wgpu::Surface<'static>,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     /// True while the window is minimized (zero-sized), when there's nothing to draw.
     minimized: bool,
+    scene: ScenePipeline,
+}
+
+/// Draws a scene into a texture instead of a window, using a GPU device that
+/// someone else set up. The editor uses this for its viewport: egui owns the
+/// window and shows the texture as an image.
+pub struct TextureRenderer {
+    scene: ScenePipeline,
+    texture: wgpu::Texture,
+    /// The texture seen as sRGB, so drawing converts linear light to sRGB
+    /// the same way a window surface does.
+    draw_view: wgpu::TextureView,
+    /// The same texture seen as plain bytes, for others to show.
+    view: wgpu::TextureView,
+}
+
+/// The GPU objects for drawing a scene, whatever it's drawn into. Both
+/// [`Renderer`] and [`TextureRenderer`] own one.
+struct ScenePipeline {
+    device: wgpu::Device,
+    queue: wgpu::Queue,
     depth_view: wgpu::TextureView,
     opaque_pipeline: wgpu::RenderPipeline,
     transparent_pipeline: wgpu::RenderPipeline,
@@ -140,6 +164,166 @@ impl Renderer {
         }
         surface.configure(&device, &config);
 
+        Ok(Self {
+            surface,
+            minimized: false,
+            scene: ScenePipeline::new(device, queue, config.format, width, height),
+            config,
+        })
+    }
+
+    /// Call when the window changes size. Sizes are in physical pixels.
+    pub fn resize(&mut self, width: u32, height: u32) {
+        let Some((width, height)) = drawable_size(width, height) else {
+            self.minimized = true;
+            return;
+        };
+        self.minimized = false;
+        self.config.width = width;
+        self.config.height = height;
+        self.surface.configure(&self.scene.device, &self.config);
+        self.scene.resize(width, height);
+    }
+
+    /// Draws one frame. `before_present` runs just before the frame is shown;
+    /// windowing libraries use that moment to pace frames (for example
+    /// `winit`'s `Window::pre_present_notify`).
+    pub fn render(&mut self, list: &DrawList, before_present: impl FnOnce()) -> Result<()> {
+        if self.minimized {
+            return Ok(());
+        }
+
+        let frame = match self.surface.get_current_texture() {
+            Ok(frame) => frame,
+            // The surface no longer matches the window (for example, it moved
+            // to another monitor). Reconfigure and draw on the next frame.
+            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                self.surface.configure(&self.scene.device, &self.config);
+                return Ok(());
+            }
+            // The GPU took too long to hand over a frame. Skip this one.
+            Err(wgpu::SurfaceError::Timeout) => return Ok(()),
+            Err(err) => return Err(err).context("could not get the next frame to draw into"),
+        };
+
+        let view = frame
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let aspect = self.config.width as f32 / self.config.height as f32;
+        self.scene.draw(list, &view, aspect);
+        before_present();
+        frame.present();
+        Ok(())
+    }
+}
+
+impl TextureRenderer {
+    /// Sets up drawing into a `width` × `height` texture on an existing
+    /// device. Sizes of zero are treated as 1, since a texture can't be empty.
+    ///
+    /// `wgpu::Device` and `wgpu::Queue` are cheap handles to shared GPU
+    /// objects, so cloning them here doesn't copy anything big.
+    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, width: u32, height: u32) -> Self {
+        let (width, height) = (width.max(1), height.max(1));
+        let scene = ScenePipeline::new(
+            device.clone(),
+            queue.clone(),
+            TARGET_DRAW_FORMAT,
+            width,
+            height,
+        );
+        let (texture, draw_view, view) = create_target_texture(device, width, height);
+        Self {
+            scene,
+            texture,
+            draw_view,
+            view,
+        }
+    }
+
+    /// The texture's size in pixels.
+    pub fn size(&self) -> (u32, u32) {
+        (self.texture.width(), self.texture.height())
+    }
+
+    /// Replaces the texture with one of a new size, unless it's already that
+    /// size. The old texture view stops being updated, so anything showing it
+    /// (such as an egui image) must switch to [`TextureRenderer::view`] again.
+    pub fn resize(&mut self, width: u32, height: u32) {
+        let (width, height) = (width.max(1), height.max(1));
+        if self.size() == (width, height) {
+            return;
+        }
+        (self.texture, self.draw_view, self.view) =
+            create_target_texture(&self.scene.device, width, height);
+        self.scene.resize(width, height);
+    }
+
+    /// The finished picture, for showing it (for example as an egui image).
+    ///
+    /// Its format is `Rgba8Unorm` holding sRGB-encoded colors, the same as
+    /// egui's own textures: sampling it gives the colors as they'd appear on
+    /// screen, not linear light.
+    pub fn view(&self) -> &wgpu::TextureView {
+        &self.view
+    }
+
+    /// Draws one frame into the texture. The GPU runs it in order with
+    /// anything submitted afterward, such as egui drawing the texture.
+    pub fn render(&mut self, list: &DrawList) {
+        let (width, height) = self.size();
+        self.scene
+            .draw(list, &self.draw_view, width as f32 / height as f32);
+    }
+
+    /// Reads the texture back to the CPU as rows of RGBA bytes. Slow; for tests.
+    #[cfg(test)]
+    fn read_pixels(&self) -> Vec<u8> {
+        let (width, height) = self.size();
+        let device = &self.scene.device;
+        // Each copied row must be a multiple of 256 bytes long.
+        let row_bytes = (width * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("read back"),
+            size: u64::from(row_bytes * height),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&Default::default());
+        encoder.copy_texture_to_buffer(
+            self.texture.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(row_bytes),
+                    rows_per_image: None,
+                },
+            },
+            self.texture.size(),
+        );
+        self.scene.queue.submit([encoder.finish()]);
+        buffer.slice(..).map_async(wgpu::MapMode::Read, |result| {
+            result.expect("could not read the texture back");
+        });
+        device.poll(wgpu::PollType::Wait).unwrap();
+        let mapped = buffer.slice(..).get_mapped_range();
+        mapped
+            .chunks(row_bytes as usize)
+            .flat_map(|row| &row[..(width * 4) as usize])
+            .copied()
+            .collect()
+    }
+}
+
+impl ScenePipeline {
+    fn new(
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        color_format: wgpu::TextureFormat,
+        width: u32,
+        height: u32,
+    ) -> Self {
         let depth_view = create_depth_view(&device, width, height);
         let frame_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("frame uniform"),
@@ -169,8 +353,8 @@ impl Renderer {
             }],
         });
 
-        let opaque_pipeline = create_pipeline(&device, &frame_layout, config.format, false);
-        let transparent_pipeline = create_pipeline(&device, &frame_layout, config.format, true);
+        let opaque_pipeline = create_pipeline(&device, &frame_layout, color_format, false);
+        let transparent_pipeline = create_pipeline(&device, &frame_layout, color_format, true);
         let meshes = Meshes {
             block: upload_mesh(&device, "block", &mesh::block()),
             sphere: upload_mesh(&device, "sphere", &mesh::sphere()),
@@ -180,12 +364,9 @@ impl Renderer {
         let instance_capacity = 64;
         let instance_buffer = create_instance_buffer(&device, instance_capacity);
 
-        Ok(Self {
-            surface,
+        Self {
             device,
             queue,
-            config,
-            minimized: false,
             depth_view,
             opaque_pipeline,
             transparent_pipeline,
@@ -194,44 +375,17 @@ impl Renderer {
             meshes,
             instance_buffer,
             instance_capacity,
-        })
+        }
     }
 
-    /// Call when the window changes size. Sizes are in physical pixels.
-    pub fn resize(&mut self, width: u32, height: u32) {
-        let Some((width, height)) = drawable_size(width, height) else {
-            self.minimized = true;
-            return;
-        };
-        self.minimized = false;
-        self.config.width = width;
-        self.config.height = height;
-        self.surface.configure(&self.device, &self.config);
+    /// Call when the target changes size. Sizes are in pixels and never zero.
+    fn resize(&mut self, width: u32, height: u32) {
         self.depth_view = create_depth_view(&self.device, width, height);
     }
 
-    /// Draws one frame. `before_present` runs just before the frame is shown;
-    /// windowing libraries use that moment to pace frames (for example
-    /// `winit`'s `Window::pre_present_notify`).
-    pub fn render(&mut self, list: &DrawList, before_present: impl FnOnce()) -> Result<()> {
-        if self.minimized {
-            return Ok(());
-        }
-
-        let frame = match self.surface.get_current_texture() {
-            Ok(frame) => frame,
-            // The surface no longer matches the window (for example, it moved
-            // to another monitor). Reconfigure and draw on the next frame.
-            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                self.surface.configure(&self.device, &self.config);
-                return Ok(());
-            }
-            // The GPU took too long to hand over a frame. Skip this one.
-            Err(wgpu::SurfaceError::Timeout) => return Ok(()),
-            Err(err) => return Err(err).context("could not get the next frame to draw into"),
-        };
-
-        let aspect = self.config.width as f32 / self.config.height as f32;
+    /// Draws `list` into `view`, which must be the size last given to
+    /// `new` or `resize`, and sends the work to the GPU.
+    fn draw(&mut self, list: &DrawList, view: &wgpu::TextureView, aspect: f32) {
         let frame_uniform = frame_uniform(list, aspect);
         self.queue
             .write_buffer(&self.frame_buffer, 0, bytemuck::bytes_of(&frame_uniform));
@@ -241,9 +395,6 @@ impl Renderer {
         self.queue
             .write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&instances));
 
-        let view = frame
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -256,7 +407,7 @@ impl Renderer {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("scene"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(sky_clear_color(list.sky_color)),
@@ -291,9 +442,6 @@ impl Renderer {
         }
 
         self.queue.submit([encoder.finish()]);
-        before_present();
-        frame.present();
-        Ok(())
     }
 
     /// Replaces the instance buffer with a bigger one if `count` won't fit.
@@ -531,6 +679,44 @@ fn create_depth_view(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Te
         .create_view(&wgpu::TextureViewDescriptor::default())
 }
 
+/// The texture a [`TextureRenderer`] draws into, with its two views: one to
+/// draw through and one to show. Others can sample it (`TEXTURE_BINDING`),
+/// and tests can copy it back (`COPY_SRC`).
+///
+/// The texture itself is plain `Rgba8Unorm`, which egui expects. Drawing goes
+/// through an `Rgba8UnormSrgb` view of the same pixels, so the GPU encodes the
+/// shader's linear colors as sRGB on the way in. (Sampling an sRGB view would
+/// decode them back to linear, which egui would then show far too dark.)
+fn create_target_texture(
+    device: &wgpu::Device,
+    width: u32,
+    height: u32,
+) -> (wgpu::Texture, wgpu::TextureView, wgpu::TextureView) {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("scene texture"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: TARGET_SHOW_FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+            | wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_SRC,
+        // Views may reinterpret the pixels in these formats too.
+        view_formats: &[TARGET_DRAW_FORMAT],
+    });
+    let draw_view = texture.create_view(&wgpu::TextureViewDescriptor {
+        format: Some(TARGET_DRAW_FORMAT),
+        ..Default::default()
+    });
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    (texture, draw_view, view)
+}
+
 fn create_instance_buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffer {
     device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("instances"),
@@ -684,5 +870,74 @@ mod tests {
         );
         let z = |i: usize| instances[i].model[3][2];
         assert_eq!([z(1), z(2), z(3)], [-9.0, -5.0, -2.0]);
+    }
+
+    /// A GPU device for tests, or `None` on machines without one (some CI
+    /// runners have no graphics adapter at all).
+    fn test_device() -> Option<(wgpu::Device, wgpu::Queue)> {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let adapter = pollster::block_on(instance.request_adapter(&Default::default())).ok()?;
+        pollster::block_on(adapter.request_device(&Default::default())).ok()
+    }
+
+    #[test]
+    fn texture_renderer_draws_the_sky_and_a_part_into_a_texture() {
+        let Some((device, queue)) = test_device() else {
+            eprintln!("skipped: no graphics adapter on this machine");
+            return;
+        };
+        // Pure red is 255 whether or not the GPU sRGB-encodes the background
+        // clear (some drivers don't when drawing through an sRGB view).
+        let red = [255, 0, 0, 255];
+        let mut list = list_of(vec![]);
+        list.sky_color = [1.0, 0.0, 0.0];
+        let mut renderer = TextureRenderer::new(&device, &queue, 64, 32);
+        renderer.render(&list);
+        let pixels = renderer.read_pixels();
+        assert_eq!(pixels.len(), 64 * 32 * 4);
+        assert_eq!(pixels[..4], red);
+
+        // A big glowing block straight ahead covers the middle of the view,
+        // after resizing to a different shape. With no sun or ambient light,
+        // its pixels are exactly its glow color.
+        list.sun.intensity = 0.0;
+        list.items.push(DrawItem {
+            shape: Shape::Block,
+            transform: Mat4::from_scale_rotation_translation(
+                Vec3::splat(4.0),
+                glam::Quat::IDENTITY,
+                Vec3::new(0.0, 0.0, -5.0),
+            ),
+            material: Material {
+                base_color: [0.0; 3],
+                emissive: [0.63, 0.8, 0.95],
+                ..Material::default()
+            },
+        });
+        renderer.resize(64, 64);
+        assert_eq!(renderer.size(), (64, 64));
+        renderer.render(&list);
+        let pixels = renderer.read_pixels();
+        let pixel = |x: usize, y: usize| &pixels[(y * 64 + x) * 4..][..4];
+        assert_eq!(pixel(0, 0), red, "the corner shows the sky");
+        // The texture holds the sRGB color as picked (0.63 × 255 ≈ 161), the
+        // way egui expects, not linear light (which would be about 90).
+        assert_eq!(
+            pixel(32, 32),
+            [161, 204, 242, 255],
+            "the middle shows the block"
+        );
+    }
+
+    #[test]
+    fn texture_renderer_never_makes_an_empty_texture() {
+        let Some((device, queue)) = test_device() else {
+            eprintln!("skipped: no graphics adapter on this machine");
+            return;
+        };
+        let mut renderer = TextureRenderer::new(&device, &queue, 0, 0);
+        assert_eq!(renderer.size(), (1, 1));
+        renderer.resize(300, 0);
+        assert_eq!(renderer.size(), (300, 1));
     }
 }

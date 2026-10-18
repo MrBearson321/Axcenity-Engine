@@ -2,7 +2,7 @@
 
 A Roblox Studio-inspired 3D game engine and editor in Rust, scripted with Lua 5.4 and Scratch-style blocks. Targets Windows, macOS and Linux. Licensed Apache-2.0.
 
-**Status:** Phase 7 (Touched events). Crates so far: `core`, `project`, `render`, `physics`, `script`, `player`.
+**Status:** Phase 8 (Editor shell). Crates so far: `core`, `project`, `render`, `scene`, `physics`, `script`, `player`, `editor`.
 
 ## Read only what the task needs
 
@@ -12,6 +12,7 @@ A Roblox Studio-inspired 3D game engine and editor in Rust, scripted with Lua 5.
 | `script` or `blocks` crates, Lua API, sandbox, scheduler | `docs/scripting.md` |
 | `render` crate, materials, lights | `docs/rendering.md` |
 | `physics` crate, Anchored, gravity, fixed step | `docs/architecture.md` (Physics) |
+| `editor` or `scene` crates, panels, viewport camera | `docs/architecture.md` (Editor) |
 | `ui` crate, CSS, layout | `docs/ui.md` |
 | `project` or `player` crates, export, CI, licenses | `docs/project-and-export.md` |
 | product scope, user stories, milestones, out of scope | `prd/axcenity-engine-v1.md` (large; grep for the section you need) |
@@ -32,6 +33,7 @@ When a crate is created, give it its own `crates/<name>/CLAUDE.md` (under 20 lin
 ## Commands
 
 - Run the player: `cargo run -p axcenity-player -- examples/hello-part`
+- Run the editor: `cargo run -p axcenity-editor -- examples/hello-touched`
 - Build: `cargo build --workspace`
 - Test: `cargo test --workspace`
 - Lint: `cargo clippy --workspace --all-targets -- -D warnings`

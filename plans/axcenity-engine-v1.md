@@ -152,7 +152,7 @@ Add a general event/signal system with `:Connect` that returns a connection you 
 
 ### Acceptance criteria
 
-- [ ] The Milestone 1 demo project runs end-to-end on all three OSes.
+- [x] The Milestone 1 demo project runs end-to-end on all three OSes.
 - [x] `Touched` fires once per new contact, not every frame while touching.
 - [x] `:Disconnect` stops further calls to the handler.
 - [x] A handler that calls `task.wait` doesn't block other handlers or the frame.
@@ -167,13 +167,13 @@ Add a general event/signal system with `:Connect` that returns a connection you 
 
 ### What to build
 
-Create the `editor` crate, an `egui` app that opens a project folder and shows a 3D viewport (the same renderer, with an orbit/fly camera), an Explorer panel showing the Instance tree, and an Output panel. The editor only displays in this phase; there's no editing yet.
+Create the `editor` crate, an `egui` app that opens a project folder and shows a 3D viewport (the same renderer, with an orbit/fly camera), an Explorer panel showing the Instance tree, and an Output panel. The editor only displays in this phase; there's no editing yet. (Added during the phase: adjustable fly speed with Shift+wheel or the wheel while flying, shown in a fading pop-up.)
 
 ### Acceptance criteria
 
-- [ ] The editor opens the Milestone 1 demo project and shows it in the viewport.
-- [ ] The Explorer shows `game → Workspace → …`, and branches expand and collapse.
-- [ ] Load errors and messages appear in the Output panel.
+- [x] The editor opens the Milestone 1 demo project and shows it in the viewport.
+- [x] The Explorer shows `game → Workspace → …`, and branches expand and collapse.
+- [x] Load errors and messages appear in the Output panel.
 - [ ] The editor runs on all three OSes, and the player still builds without `editor` or `egui`.
 
 ---

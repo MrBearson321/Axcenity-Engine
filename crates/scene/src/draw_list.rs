@@ -1,7 +1,8 @@
 //! Turns the Instance tree into a draw list for `render`.
 //!
 //! This is the only place that knows about both Instances and the renderer,
-//! which keeps `render` free of engine types.
+//! which keeps `render` free of engine types. The player and the editor
+//! viewport both use it, so they draw a world the same way.
 
 use axcenity_core::{Instance, PartType, Value, World};
 use axcenity_render::glam::{EulerRot, Mat4, Quat, Vec3};

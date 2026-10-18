@@ -11,6 +11,7 @@ axcenity-core.workspace = true
 axcenity-physics.workspace = true
 axcenity-project.workspace = true
 axcenity-render.workspace = true
+axcenity-scene.workspace = true
 axcenity-script.workspace = true
 anyhow.workspace = true
 env_logger.workspace = true
