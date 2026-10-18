@@ -17,7 +17,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use axcenity_core::{InstanceId, Vector3, World};
+use axcenity_assets::Assets;
+use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
 use axcenity_project::ScriptFile;
 use axcenity_script::{CameraState, KeyEvent};
 use eframe::egui;
@@ -37,6 +38,11 @@ use crate::theme::{self, filled_icons, icons};
 use crate::tree::{self, Insertable};
 use crate::viewport::{DragEdit, DragKind, Viewport};
 use crate::watcher::Watcher;
+
+/// The hover text of Import Model, in the File menu and the toolbar.
+const IMPORT_HOVER: &str = "Import a glTF model (.gltf or .glb), such as one exported from \
+    Blender. It's copied into the project's assets/models folder and inserted as a MeshPart \
+    at the camera's focus point.";
 
 /// F5 plays and Shift+F5 stops, as in Roblox Studio.
 const PLAY_SHORTCUT: egui::KeyboardShortcut =
@@ -76,6 +82,9 @@ pub struct EditorApp {
     /// The open project's Instances, or an empty world when none is open.
     world: World,
     project: Option<OpenProject>,
+    /// The open project's models, loaded as MeshParts are drawn, and shared
+    /// with Play's physics. Has none when no project is open.
+    assets: Assets,
     /// The Instance shown in Properties and highlighted in the Explorer and viewport.
     selected: Option<InstanceId>,
     /// Every change made to `world` since it was opened, for undo and redo.
@@ -178,6 +187,7 @@ impl EditorApp {
             explorer: Explorer::new(&world),
             world,
             project: None,
+            assets: Assets::default(),
             selected: None,
             history: History::new(),
             tool: Tool::default(),
@@ -261,8 +271,9 @@ impl EditorApp {
                 autocomplete::DEFINITIONS_FILE
             )),
         }
-        // The game being played belongs to the old project.
+        // The game being played belongs to the old project, and so do the models.
         self.play = None;
+        self.assets = Assets::new(&project.folder);
         self.tabs.close_all();
         self.viewport.reset_camera();
         let world_text = files::read_world_text(&project.folder);
@@ -498,7 +509,7 @@ impl EditorApp {
         // `project` borrows `self.project` and `output` borrows `self.output`:
         // different fields, so Rust allows both borrows at once.
         let scripts = play::read_scripts(&project.folder, &project.scripts, &mut self.output);
-        match Session::start(&self.world, &scripts, &mut self.output) {
+        match Session::start(&self.world, &scripts, &mut self.output, self.assets.clone()) {
             Ok(session) => {
                 self.play = Some(session);
                 self.last_frame = None;
@@ -618,12 +629,29 @@ impl EditorApp {
     /// Inserts `what` where [`tree::insert_parent`] says, with a name no
     /// sibling has, and selects it. A part goes at the camera's focus point.
     fn insert(&mut self, what: Insertable, near: Option<InstanceId>) {
+        self.insert_named(what, near, what.class().as_str(), Vec::new());
+    }
+
+    /// Like [`insert`](Self::insert), but named `wanted` (with a number on
+    /// the end if a sibling has that name) and with `properties` set.
+    fn insert_named(
+        &mut self,
+        what: Insertable,
+        near: Option<InstanceId>,
+        wanted: &str,
+        properties: Vec<(&'static str, Value)>,
+    ) {
         let parent = tree::insert_parent(&self.world, near, what);
         // Worked out first: `create` borrows the world mutably, and
         // `insert_position` needs to borrow `self` while that lasts.
         let position = self.insert_position();
         let id = tree::create(&mut self.world, what, position);
-        let name = tree::unique_name(&self.world, parent, what.class().as_str());
+        for (property, value) in properties {
+            self.world
+                .set_property(id, property, value)
+                .expect("callers pass properties the class has");
+        }
+        let name = tree::unique_name(&self.world, parent, wanted);
         self.world.set_name(id, &name).expect("just created");
         let end = self.world.get(parent).map_or(0, |p| p.children().len());
         let place = Place { parent, index: end };
@@ -867,6 +895,20 @@ impl EditorApp {
                     self.save();
                 }
                 ui.separator();
+                let import =
+                    egui::Button::new(theme::with_icon(icons::FILE_ARROW_DOWN, "Import Model…"));
+                if ui
+                    .add_enabled(self.project.is_some() && !self.playing(), import)
+                    .on_hover_text(IMPORT_HOVER)
+                    .on_disabled_hover_text(if self.playing() {
+                        "Press Stop to edit."
+                    } else {
+                        "Open a project first."
+                    })
+                    .clicked()
+                {
+                    self.import_model_with_dialog();
+                }
                 if ui
                     .add_enabled(
                         self.project.is_some(),
@@ -1025,6 +1067,7 @@ impl EditorApp {
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         let mut insert = None;
         let mut insert_script = None;
+        let mut import = false;
         let (mut play, mut stop) = (false, false);
         let playing = self.playing();
         let can_play = self.project.is_some();
@@ -1132,6 +1175,13 @@ impl EditorApp {
                             insert = Some(what);
                         }
                     }
+                    let color = theme::class_color(ClassName::MeshPart, ui.visuals());
+                    let button = RibbonButton::new(icons::FILE_ARROW_DOWN, "Import").color(color);
+                    import = ui
+                        .add_enabled(!playing, button)
+                        .on_hover_text(IMPORT_HOVER)
+                        .on_disabled_hover_text("Press Stop to edit.")
+                        .clicked();
                 });
                 ui.separator();
 
@@ -1162,6 +1212,9 @@ impl EditorApp {
         }
         if let Some(class) = insert_script {
             self.act(Action::InsertScript(class));
+        }
+        if import {
+            self.import_model_with_dialog();
         }
         if play {
             self.play();
@@ -1446,10 +1499,15 @@ impl eframe::App for EditorApp {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
                 .show(ctx, |ui| match frame.wgpu_render_state() {
-                    Some(render_state) => {
-                        self.viewport
-                            .show(ui, render_state, world, self.selected, tool, self.snap)
-                    }
+                    Some(render_state) => self.viewport.show(
+                        ui,
+                        render_state,
+                        world,
+                        &self.assets,
+                        self.selected,
+                        tool,
+                        self.snap,
+                    ),
                     // Can't happen: main.rs always picks the wgpu renderer.
                     None => {
                         ui.label("The viewport needs the wgpu renderer.");
@@ -1478,6 +1536,16 @@ impl eframe::App for EditorApp {
         let busy = ctx.is_using_pointer() || ctx.wants_keyboard_input();
         if output.drag_released || (!busy && !self.viewport.is_dragging()) {
             self.history.seal();
+        }
+
+        // Models that couldn't be loaded, found while drawing or playing.
+        let model_errors = self.assets.take_errors();
+        if !model_errors.is_empty() {
+            for error in model_errors {
+                self.output.error(error);
+            }
+            // Output was already drawn this frame.
+            ctx.request_repaint();
         }
 
         self.unsaved_changes_prompt(ctx);
@@ -1715,7 +1783,7 @@ mod tests {
             look_at: Vec3::ZERO,
             fov_y_degrees: 70.0,
         };
-        let list = axcenity_scene::build_draw_list(&app.world, camera);
+        let list = axcenity_scene::build_draw_list(&app.world, &app.assets, camera);
         let drawn_pad = list
             .items
             .iter()
@@ -2042,7 +2110,7 @@ mod tests {
             look_at: Vec3::ZERO,
             fov_y_degrees: 70.0,
         };
-        axcenity_scene::build_draw_list(&app.world, camera)
+        axcenity_scene::build_draw_list(&app.world, &app.assets, camera)
             .items
             .len()
     }

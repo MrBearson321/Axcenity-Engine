@@ -1,5 +1,8 @@
 //! The wgpu side: GPU setup, the window surface, buffers and drawing.
 
+use std::borrow::Cow;
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::ops::Range;
 
 use anyhow::{Context, Result};
@@ -8,7 +11,7 @@ use glam::camera::rh;
 use glam::{Mat3, Vec3};
 use wgpu::util::DeviceExt;
 
-use crate::draw_list::{DrawItem, DrawList, Shape};
+use crate::draw_list::{DrawItem, DrawList, MeshSource, Shape, TextureSource};
 use crate::mesh::{self, MeshData, Vertex};
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -16,8 +19,13 @@ const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const TARGET_SHOW_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 /// A [`TextureRenderer`]'s texture, as drawn into.
 const TARGET_DRAW_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+/// Textures are drawn through an sRGB view, so sampling gives linear light.
+const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const NEAR_PLANE: f32 = 0.1;
 const FAR_PLANE: f32 = 5000.0;
+/// A caller's mesh or texture not drawn for this many frames is taken off
+/// the GPU (about 10 seconds at 60 fps). Drawn again, it's uploaded again.
+const KEEP_UNDRAWN_FRAMES: u64 = 600;
 
 /// Per-frame values for the shader. Must match `Frame` in shader.wgsl.
 /// Every field is 16 bytes or a multiple, which is what uniform buffers need.
@@ -41,7 +49,8 @@ struct InstanceRaw {
     normal_matrix: [[f32; 3]; 3],
     base_color_opacity: [f32; 4],
     emissive: [f32; 3],
-    metalness_roughness: [f32; 2],
+    /// Metalness, roughness and alpha cutoff.
+    surface: [f32; 3],
 }
 
 /// A mesh uploaded to the GPU.
@@ -49,6 +58,45 @@ struct GpuMesh {
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
     index_count: u32,
+    /// 16-bit for the built-in shapes, 32-bit for callers' meshes, which
+    /// can have more than 65,536 corners.
+    index_format: wgpu::IndexFormat,
+}
+
+/// A texture uploaded to the GPU, ready to bind to the shader.
+struct GpuTexture {
+    /// Kept so it lives as long as the bind group that uses it.
+    _texture: wgpu::Texture,
+    bind_group: wgpu::BindGroup,
+}
+
+/// Something of a caller's on the GPU, and the frame it was last drawn in.
+/// `None` if its data was broken, so that's only reported once.
+struct Cached<T> {
+    gpu: Option<T>,
+    last_drawn: u64,
+}
+
+/// Which mesh a batch draws: a built-in shape, or a caller's by its key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum MeshKey {
+    Block,
+    Sphere,
+    Cylinder,
+    Wedge,
+    Custom(u64),
+}
+
+impl MeshKey {
+    fn of(shape: &Shape) -> Self {
+        match shape {
+            Shape::Block => MeshKey::Block,
+            Shape::Sphere => MeshKey::Sphere,
+            Shape::Cylinder => MeshKey::Cylinder,
+            Shape::Wedge => MeshKey::Wedge,
+            Shape::Mesh(mesh) => MeshKey::Custom(mesh.key()),
+        }
+    }
 }
 
 /// One uploaded mesh per [`Shape`].
@@ -60,21 +108,25 @@ struct Meshes {
 }
 
 impl Meshes {
-    fn get(&self, shape: Shape) -> &GpuMesh {
-        match shape {
-            Shape::Block => &self.block,
-            Shape::Sphere => &self.sphere,
-            Shape::Cylinder => &self.cylinder,
-            Shape::Wedge => &self.wedge,
+    /// The built-in mesh for `key`, or `None` for a caller's mesh.
+    fn get(&self, key: MeshKey) -> Option<&GpuMesh> {
+        match key {
+            MeshKey::Block => Some(&self.block),
+            MeshKey::Sphere => Some(&self.sphere),
+            MeshKey::Cylinder => Some(&self.cylinder),
+            MeshKey::Wedge => Some(&self.wedge),
+            MeshKey::Custom(_) => None,
         }
     }
 }
 
-/// Consecutive instances with the same shape and the same kind of drawing
-/// (solid or see-through), drawn with one draw call.
+/// Consecutive instances with the same mesh, the same texture and the same
+/// kind of drawing (solid or see-through), drawn with one draw call.
 #[derive(Clone, Debug, PartialEq)]
 struct Batch {
-    shape: Shape,
+    mesh: MeshKey,
+    /// The key of the base color texture, if there is one.
+    texture: Option<u64>,
     transparent: bool,
     instances: Range<u32>,
 }
@@ -115,6 +167,15 @@ struct ScenePipeline {
     instance_buffer: wgpu::Buffer,
     /// How many instances fit in `instance_buffer` before it must grow.
     instance_capacity: usize,
+    texture_layout: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
+    /// One white pixel, for items without a texture: it changes nothing.
+    white_texture: GpuTexture,
+    /// Callers' meshes and textures, by key.
+    custom_meshes: HashMap<u64, Cached<GpuMesh>>,
+    textures: HashMap<u64, Cached<GpuTexture>>,
+    /// How many frames have been drawn, to tell what wasn't drawn lately.
+    frame: u64,
 }
 
 impl Renderer {
@@ -353,8 +414,46 @@ impl ScenePipeline {
             }],
         });
 
-        let opaque_pipeline = create_pipeline(&device, &frame_layout, color_format, false);
-        let transparent_pipeline = create_pipeline(&device, &frame_layout, color_format, true);
+        let texture_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("base color texture"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        // glTF's default: smooth, blending between mipmap levels, and
+        // repeating past the edges.
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("base color texture"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            address_mode_w: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let white_texture =
+            create_texture(&device, &queue, &texture_layout, &sampler, 1, 1, &[255; 4]);
+
+        let opaque_pipeline =
+            create_pipeline(&device, &frame_layout, &texture_layout, color_format, false);
+        let transparent_pipeline =
+            create_pipeline(&device, &frame_layout, &texture_layout, color_format, true);
         let meshes = Meshes {
             block: upload_mesh(&device, "block", &mesh::block()),
             sphere: upload_mesh(&device, "sphere", &mesh::sphere()),
@@ -375,6 +474,12 @@ impl ScenePipeline {
             meshes,
             instance_buffer,
             instance_capacity,
+            texture_layout,
+            sampler,
+            white_texture,
+            custom_meshes: HashMap::new(),
+            textures: HashMap::new(),
+            frame: 0,
         }
     }
 
@@ -390,6 +495,8 @@ impl ScenePipeline {
         self.queue
             .write_buffer(&self.frame_buffer, 0, bytemuck::bytes_of(&frame_uniform));
 
+        self.frame += 1;
+        self.upload_new(list);
         let (instances, batches) = plan_draws(list);
         self.ensure_instance_capacity(instances.len());
         self.queue
@@ -433,15 +540,76 @@ impl ScenePipeline {
                 } else {
                     &self.opaque_pipeline
                 };
-                let mesh = self.meshes.get(batch.shape);
+                let mesh = match batch.mesh {
+                    MeshKey::Custom(key) => self
+                        .custom_meshes
+                        .get(&key)
+                        .and_then(|cached| cached.gpu.as_ref()),
+                    builtin => self.meshes.get(builtin),
+                };
+                // A caller's mesh with broken data was never uploaded.
+                let Some(mesh) = mesh else {
+                    continue;
+                };
+                let texture = batch
+                    .texture
+                    .and_then(|key| self.textures.get(&key)?.gpu.as_ref())
+                    .unwrap_or(&self.white_texture);
                 pass.set_pipeline(pipeline);
+                pass.set_bind_group(1, &texture.bind_group, &[]);
                 pass.set_vertex_buffer(0, mesh.vertices.slice(..));
-                pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint16);
+                pass.set_index_buffer(mesh.indices.slice(..), mesh.index_format);
                 pass.draw_indexed(0..mesh.index_count, 0, batch.instances);
             }
         }
 
         self.queue.submit([encoder.finish()]);
+        self.forget_undrawn();
+    }
+
+    /// Uploads the callers' meshes and textures in `list` that aren't on
+    /// the GPU yet, and notes that the rest were drawn this frame.
+    fn upload_new(&mut self, list: &DrawList) {
+        let frame = self.frame;
+        for item in &list.items {
+            if let Shape::Mesh(source) = &item.shape {
+                match self.custom_meshes.entry(source.key()) {
+                    Entry::Occupied(mut cached) => cached.get_mut().last_drawn = frame,
+                    Entry::Vacant(slot) => {
+                        slot.insert(Cached {
+                            gpu: upload_custom_mesh(&self.device, source.as_ref()),
+                            last_drawn: frame,
+                        });
+                    }
+                }
+            }
+            if let Some(source) = &item.material.base_color_texture {
+                match self.textures.entry(source.key()) {
+                    Entry::Occupied(mut cached) => cached.get_mut().last_drawn = frame,
+                    Entry::Vacant(slot) => {
+                        slot.insert(Cached {
+                            gpu: upload_texture(
+                                &self.device,
+                                &self.queue,
+                                &self.texture_layout,
+                                &self.sampler,
+                                source.as_ref(),
+                            ),
+                            last_drawn: frame,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    /// Frees the callers' meshes and textures that haven't been drawn lately.
+    fn forget_undrawn(&mut self) {
+        let frame = self.frame;
+        let recent = |last_drawn: u64| frame - last_drawn < KEEP_UNDRAWN_FRAMES;
+        self.custom_meshes
+            .retain(|_, cached| recent(cached.last_drawn));
+        self.textures.retain(|_, cached| recent(cached.last_drawn));
     }
 
     /// Replaces the instance buffer with a bigger one if `count` won't fit.
@@ -479,7 +647,7 @@ fn frame_uniform(list: &DrawList, aspect: f32) -> FrameUniform {
 
 /// Puts the visible items in drawing order and groups them into batches.
 ///
-/// Solid items come first, grouped by shape. See-through items come last,
+/// Solid items come first, grouped by mesh and texture. See-through items come last,
 /// farthest from the camera first, so each one blends over what's behind it.
 /// They're sorted by their centers, so two that overlap can still blend in the
 /// wrong order; that's the usual trade-off for this simple approach.
@@ -490,7 +658,7 @@ fn plan_draws(list: &DrawList) -> (Vec<InstanceRaw>, Vec<Batch>) {
         .filter(|item| item.material.opacity > 0.0)
         .partition(|item| item.material.opacity < 1.0);
 
-    opaque.sort_by_key(|item| item.shape);
+    opaque.sort_by_key(|item| (MeshKey::of(&item.shape), texture_key(item)));
     let distance = |item: &DrawItem| {
         item.transform
             .w_axis
@@ -512,18 +680,33 @@ fn plan_draws(list: &DrawList) -> (Vec<InstanceRaw>, Vec<Batch>) {
         };
         let index = instances.len() as u32;
         instances.push(raw);
+        let (mesh, texture) = (MeshKey::of(&item.shape), texture_key(item));
         match batches.last_mut() {
-            Some(last) if last.shape == item.shape && last.transparent == transparent => {
+            Some(last)
+                if last.mesh == mesh
+                    && last.texture == texture
+                    && last.transparent == transparent =>
+            {
                 last.instances.end = index + 1;
             }
             _ => batches.push(Batch {
-                shape: item.shape,
+                mesh,
+                texture,
                 transparent,
                 instances: index..index + 1,
             }),
         }
     }
     (instances, batches)
+}
+
+/// The key of the texture an item is drawn with. Only callers' meshes have
+/// texture coordinates, so the built-in shapes never use one.
+fn texture_key(item: &DrawItem) -> Option<u64> {
+    match item.shape {
+        Shape::Mesh(_) => item.material.base_color_texture.as_ref().map(|t| t.key()),
+        _ => None,
+    }
 }
 
 /// The GPU data for one item, or `None` if it can't be seen.
@@ -540,7 +723,11 @@ fn instance_raw(item: &DrawItem) -> Option<InstanceRaw> {
         normal_matrix: model3.inverse().transpose().to_cols_array_2d(),
         base_color_opacity: base_color.extend(material.opacity).to_array(),
         emissive: linear_color(material.emissive).to_array(),
-        metalness_roughness: [material.metalness, material.roughness],
+        surface: [
+            material.metalness,
+            material.roughness,
+            material.alpha_cutoff,
+        ],
     })
 }
 
@@ -572,20 +759,21 @@ fn sky_clear_color(srgb: [f32; 3]) -> wgpu::Color {
 fn create_pipeline(
     device: &wgpu::Device,
     frame_layout: &wgpu::BindGroupLayout,
+    texture_layout: &wgpu::BindGroupLayout,
     color_format: wgpu::TextureFormat,
     transparent: bool,
 ) -> wgpu::RenderPipeline {
     let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("scene"),
-        bind_group_layouts: &[frame_layout],
+        bind_group_layouts: &[frame_layout, texture_layout],
         push_constant_ranges: &[],
     });
 
     let vertex_layout = wgpu::VertexBufferLayout {
         array_stride: size_of::<Vertex>() as u64,
         step_mode: wgpu::VertexStepMode::Vertex,
-        attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3],
+        attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 12 => Float32x2],
     };
     // Advances once per drawn shape instead of once per corner.
     let instance_layout = wgpu::VertexBufferLayout {
@@ -596,7 +784,7 @@ fn create_pipeline(
             6 => Float32x3, 7 => Float32x3, 8 => Float32x3,
             9 => Float32x4,
             10 => Float32x3,
-            11 => Float32x2,
+            11 => Float32x3,
         ],
     };
 
@@ -727,21 +915,209 @@ fn create_instance_buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffe
 }
 
 fn upload_mesh(device: &wgpu::Device, name: &str, mesh: &MeshData) -> GpuMesh {
+    upload_buffers(
+        device,
+        name,
+        &mesh.vertices,
+        bytemuck::cast_slice(&mesh.indices),
+        mesh.indices.len(),
+        wgpu::IndexFormat::Uint16,
+    )
+}
+
+/// Uploads a caller's mesh, or `None` (with a warning) if its data doesn't
+/// fit together, such as an index past the last corner.
+fn upload_custom_mesh(device: &wgpu::Device, source: &dyn MeshSource) -> Option<GpuMesh> {
+    let positions = source.positions();
+    let normals = source.normals();
+    let uvs = source.uvs();
+    let indices = source.indices();
+    let count = positions.len();
+    let fits = count > 0
+        && normals.len() == count
+        && (uvs.is_empty() || uvs.len() == count)
+        && !indices.is_empty()
+        && indices.len() % 3 == 0
+        && indices.iter().all(|&index| (index as usize) < count);
+    if !fits {
+        log::warn!("mesh #{} has broken data, so it isn't drawn", source.key());
+        return None;
+    }
+    let vertices: Vec<Vertex> = (0..count)
+        .map(|i| Vertex {
+            position: positions[i],
+            normal: normals[i],
+            uv: uvs.get(i).copied().unwrap_or_default(),
+        })
+        .collect();
+    Some(upload_buffers(
+        device,
+        "mesh",
+        &vertices,
+        bytemuck::cast_slice(indices),
+        indices.len(),
+        wgpu::IndexFormat::Uint32,
+    ))
+}
+
+fn upload_buffers(
+    device: &wgpu::Device,
+    name: &str,
+    vertices: &[Vertex],
+    indices: &[u8],
+    index_count: usize,
+    index_format: wgpu::IndexFormat,
+) -> GpuMesh {
     let vertices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some(name),
-        contents: bytemuck::cast_slice(&mesh.vertices),
+        contents: bytemuck::cast_slice(vertices),
         usage: wgpu::BufferUsages::VERTEX,
     });
     let indices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some(name),
-        contents: bytemuck::cast_slice(&mesh.indices),
+        contents: indices,
         usage: wgpu::BufferUsages::INDEX,
     });
     GpuMesh {
         vertices,
         indices,
-        index_count: mesh.indices.len() as u32,
+        index_count: index_count as u32,
+        index_format,
     }
+}
+
+/// Uploads a caller's texture, or `None` (with a warning) if it has no
+/// pixels or the wrong number of them.
+fn upload_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    layout: &wgpu::BindGroupLayout,
+    sampler: &wgpu::Sampler,
+    source: &dyn TextureSource,
+) -> Option<GpuTexture> {
+    let (width, height) = source.size();
+    let rgba = source.rgba();
+    if width == 0 || height == 0 || rgba.len() != width as usize * height as usize * 4 {
+        log::warn!(
+            "texture #{} has broken data, so it isn't drawn",
+            source.key()
+        );
+        return None;
+    }
+    Some(create_texture(
+        device, queue, layout, sampler, width, height, rgba,
+    ))
+}
+
+/// Uploads RGBA pixels with a full set of mipmaps (smaller copies, so far
+/// away surfaces don't shimmer), ready to bind.
+fn create_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    layout: &wgpu::BindGroupLayout,
+    sampler: &wgpu::Sampler,
+    width: u32,
+    height: u32,
+    rgba: &[u8],
+) -> GpuTexture {
+    let mut levels = mip_levels(width, height, rgba);
+    // Leave out levels too big for this GPU, so a huge texture still shows,
+    // just less sharp. The last level is 1×1, so one is always left.
+    let max = device.limits().max_texture_dimension_2d;
+    levels.retain(|(width, height, _)| *width <= max && *height <= max);
+    let (width, height) = (levels[0].0, levels[0].1);
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("base color texture"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: levels.len() as u32,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: TEXTURE_FORMAT,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    for (level, (width, height, pixels)) in levels.iter().enumerate() {
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: level as u32,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(*height),
+            },
+            wgpu::Extent3d {
+                width: *width,
+                height: *height,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("base color texture"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            },
+        ],
+    });
+    GpuTexture {
+        _texture: texture,
+        bind_group,
+    }
+}
+
+/// The image and each half-size copy of it, down to 1×1, as (width,
+/// height, pixels). `Cow` lets the first be the caller's pixels, uncopied.
+fn mip_levels(width: u32, height: u32, rgba: &[u8]) -> Vec<(u32, u32, Cow<'_, [u8]>)> {
+    let mut levels = vec![(width, height, Cow::Borrowed(rgba))];
+    loop {
+        let (width, height, pixels) = levels.last().expect("starts with one");
+        if *width == 1 && *height == 1 {
+            return levels;
+        }
+        let half = half_size(*width, *height, pixels);
+        levels.push(half);
+    }
+}
+
+/// An image at half the size (at least 1 pixel), each pixel the average of
+/// the 2×2 it covers. Averaging the sRGB values rather than linear light is
+/// slightly off, but not visibly for textures.
+fn half_size(width: u32, height: u32, rgba: &[u8]) -> (u32, u32, Cow<'static, [u8]>) {
+    let (half_width, half_height) = ((width / 2).max(1), (height / 2).max(1));
+    let mut half = Vec::with_capacity(half_width as usize * half_height as usize * 4);
+    for y in 0..half_height {
+        for x in 0..half_width {
+            let mut sum = [0u32; 4];
+            for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                // An odd last row or column is averaged with itself.
+                let from_x = (x * 2 + dx).min(width - 1);
+                let from_y = (y * 2 + dy).min(height - 1);
+                let at = (from_y as usize * width as usize + from_x as usize) * 4;
+                for (channel, total) in sum.iter_mut().enumerate() {
+                    *total += u32::from(rgba[at + channel]);
+                }
+            }
+            half.extend(sum.map(|total| ((total + 2) / 4) as u8));
+        }
+    }
+    (half_width, half_height, Cow::Owned(half))
 }
 
 /// Returns the size to draw at, or `None` when the window has no area
@@ -752,6 +1128,8 @@ fn drawable_size(width: u32, height: u32) -> Option<(u32, u32)> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use crate::draw_list::{AmbientLight, Camera, DrawItem, Material, Sun};
     use glam::Mat4;
@@ -810,12 +1188,97 @@ mod tests {
         }
     }
 
-    fn batch(shape: Shape, transparent: bool, instances: Range<u32>) -> Batch {
+    fn batch(mesh: MeshKey, transparent: bool, instances: Range<u32>) -> Batch {
         Batch {
-            shape,
+            mesh,
+            texture: None,
             transparent,
             instances,
         }
+    }
+
+    /// A caller's mesh with no triangles, for planning tests (it's never uploaded).
+    struct TestMesh(u64);
+
+    impl MeshSource for TestMesh {
+        fn key(&self) -> u64 {
+            self.0
+        }
+        fn positions(&self) -> &[[f32; 3]] {
+            &[]
+        }
+        fn normals(&self) -> &[[f32; 3]] {
+            &[]
+        }
+        fn uvs(&self) -> &[[f32; 2]] {
+            &[]
+        }
+        fn indices(&self) -> &[u32] {
+            &[]
+        }
+    }
+
+    /// One white pixel.
+    struct TestTexture(u64);
+
+    impl TextureSource for TestTexture {
+        fn key(&self) -> u64 {
+            self.0
+        }
+        fn size(&self) -> (u32, u32) {
+            (1, 1)
+        }
+        fn rgba(&self) -> &[u8] {
+            &[255; 4]
+        }
+    }
+
+    fn textured(shape: Shape, texture: Option<u64>) -> DrawItem {
+        let mut item = item(shape, Vec3::ZERO, 1.0);
+        item.material.base_color_texture =
+            texture.map(|key| Arc::new(TestTexture(key)) as Arc<dyn TextureSource>);
+        item
+    }
+
+    #[test]
+    fn callers_meshes_are_grouped_by_mesh_then_texture() {
+        let mesh = |key| Shape::Mesh(Arc::new(TestMesh(key)));
+        let list = list_of(vec![
+            textured(mesh(7), Some(2)),
+            textured(mesh(5), None),
+            textured(mesh(7), Some(1)),
+            textured(mesh(7), Some(2)),
+            // Built-in shapes have no texture coordinates, so no texture.
+            textured(Shape::Block, Some(1)),
+        ]);
+        let (_, batches) = plan_draws(&list);
+        let with_texture = |mesh, texture, instances| Batch {
+            texture,
+            ..batch(mesh, false, instances)
+        };
+        assert_eq!(
+            batches,
+            vec![
+                with_texture(MeshKey::Block, None, 0..1),
+                with_texture(MeshKey::Custom(5), None, 1..2),
+                with_texture(MeshKey::Custom(7), Some(1), 2..3),
+                with_texture(MeshKey::Custom(7), Some(2), 3..5),
+            ]
+        );
+    }
+
+    #[test]
+    fn mipmaps_halve_down_to_one_pixel_averaging_each_square() {
+        // 3×2: an odd width, so the last column is averaged with itself.
+        let rgba: Vec<u8> = [0, 100, 200, 40, 80, 120]
+            .iter()
+            .flat_map(|&v| [v, v, v, 255])
+            .collect();
+        let levels = mip_levels(3, 2, &rgba);
+        let sizes: Vec<(u32, u32)> = levels.iter().map(|(w, h, _)| (*w, *h)).collect();
+        assert_eq!(sizes, [(3, 2), (1, 1)]);
+        // The top-left 2×2: (0 + 100 + 40 + 80) / 4 = 55.
+        assert_eq!(levels[1].2[..4], [55, 55, 55, 255]);
     }
 
     #[test]
@@ -829,7 +1292,7 @@ mod tests {
         ]);
         let (instances, batches) = plan_draws(&list);
         assert_eq!(instances.len(), 1);
-        assert_eq!(batches, vec![batch(Shape::Block, false, 0..1)]);
+        assert_eq!(batches, vec![batch(MeshKey::Block, false, 0..1)]);
     }
 
     #[test]
@@ -844,8 +1307,8 @@ mod tests {
         assert_eq!(
             batches,
             vec![
-                batch(Shape::Block, false, 0..2),
-                batch(Shape::Wedge, false, 2..4)
+                batch(MeshKey::Block, false, 0..2),
+                batch(MeshKey::Wedge, false, 2..4)
             ]
         );
     }
@@ -862,10 +1325,10 @@ mod tests {
         assert_eq!(
             batches,
             vec![
-                batch(Shape::Sphere, false, 0..1),
-                batch(Shape::Sphere, true, 1..2),
-                batch(Shape::Block, true, 2..3),
-                batch(Shape::Sphere, true, 3..4),
+                batch(MeshKey::Sphere, false, 0..1),
+                batch(MeshKey::Sphere, true, 1..2),
+                batch(MeshKey::Block, true, 2..3),
+                batch(MeshKey::Sphere, true, 3..4),
             ]
         );
         let z = |i: usize| instances[i].model[3][2];

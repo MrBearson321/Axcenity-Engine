@@ -1,0 +1,17 @@
+[package]
+name = "axcenity-assets"
+description = "Axcenity assets: loads the files a project uses, such as glTF models, and imports new ones."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+# Plain data out: no renderer, physics or UI crates, so `physics` and `scene`
+# can both read the same loaded models.
+[dependencies]
+glam.workspace = true
+gltf.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

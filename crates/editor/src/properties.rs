@@ -32,7 +32,10 @@ const GROUPS: [(&str, &[&str]); 3] = [
         &["Color", "Material", "Metalness", "Roughness"],
     ),
     ("Behavior", &["Anchored"]),
-    ("Part", &["Shape", "Position", "Orientation", "Size"]),
+    (
+        "Part",
+        &["Shape", "MeshId", "Position", "Orientation", "Size"],
+    ),
 ];
 /// Where properties that no group lists go, so a new property always shows.
 const OTHER: &str = "Other";
@@ -195,6 +198,16 @@ fn value_control(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
             // selecting a part can't change it.
             let drag = drag.clamp_existing_to_range(false);
             ui.add(drag).changed().then_some(Value::Number(number))
+        }
+        // Shown but not typed into: each half-typed path would be loaded
+        // (and fail). Importing a model sets it.
+        Value::String(mut text) if name == "MeshId" => {
+            ui.add_enabled(false, egui::TextEdit::singleline(&mut text))
+                .on_disabled_hover_text(
+                    "The model's file in the project. Import Model (in the toolbar or \
+                     the File menu) sets it; to use another model, import that one.",
+                );
+            None
         }
         Value::String(mut text) => ui
             .text_edit_singleline(&mut text)

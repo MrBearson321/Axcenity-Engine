@@ -4,9 +4,14 @@
 //! which keeps `render` free of engine types. The player and the editor
 //! viewport both use it, so they draw a world the same way.
 
-use axcenity_core::{Instance, PartType, Value, World};
+use std::sync::Arc;
+
+use axcenity_assets::{AlphaMode, Assets, Image, Model, ModelMaterial};
+use axcenity_core::{ClassName, Instance, PartType, Value, World};
 use axcenity_render::glam::{Mat4, Vec3};
-use axcenity_render::{AmbientLight, Camera, DrawItem, DrawList, Material, Shape, Sun};
+use axcenity_render::{
+    AmbientLight, Camera, DrawItem, DrawList, Material, MeshSource, Shape, Sun, TextureSource,
+};
 
 use crate::orientation::rotation_from_orientation;
 
@@ -22,13 +27,20 @@ const AMBIENT: AmbientLight = AmbientLight {
     intensity: 0.25,
 };
 
-pub fn build_draw_list(world: &World, camera: Camera) -> DrawList {
-    let items = world
+/// The draw list for everything in the Workspace, seen from `camera`.
+/// MeshParts' models come from `assets`, loaded the first time they're drawn.
+pub fn build_draw_list(world: &World, assets: &Assets, camera: Camera) -> DrawList {
+    let mut items = Vec::new();
+    for instance in world
         .descendants(world.workspace())
         .into_iter()
         .filter_map(|id| world.get(id))
-        .filter_map(part_draw_item)
-        .collect();
+    {
+        match instance.class() {
+            ClassName::MeshPart => mesh_part_draw_items(instance, assets, &mut items),
+            _ => items.extend(part_draw_item(instance)),
+        }
+    }
 
     DrawList {
         sky_color: SKY_COLOR,
@@ -40,15 +52,19 @@ pub fn build_draw_list(world: &World, camera: Camera) -> DrawList {
 }
 
 /// A Part's shape and the transform that places its 1×1×1 mesh in the world,
-/// or `None` for any other class. Drawing and picking both use this, so a
-/// click hits exactly what's drawn.
+/// or `None` for anything that isn't a part. Drawing and picking both use
+/// this, so a click hits exactly what's drawn. A MeshPart counts as a Block:
+/// its model fills that box, and it's picked and outlined by the box.
 pub(crate) fn part_placement(instance: &Instance) -> Option<(PartType, Mat4)> {
     let vector = |name| {
         let v = instance.property(name).and_then(Value::as_vector3)?;
         Some(Vec3::new(v.x, v.y, v.z))
     };
-    // Only Parts have a Shape, so anything else stops here.
-    let shape = instance.property("Shape").and_then(Value::as_part_type)?;
+    // Only parts have a Shape (or are MeshParts), so anything else stops here.
+    let shape = match instance.class() {
+        ClassName::MeshPart => PartType::Block,
+        _ => instance.property("Shape").and_then(Value::as_part_type)?,
+    };
     let orientation = instance
         .property("Orientation")
         .and_then(Value::as_vector3)?;
@@ -87,8 +103,116 @@ fn part_draw_item(instance: &Instance) -> Option<DrawItem> {
             metalness: number("Metalness")? as f32,
             roughness: number("Roughness")? as f32,
             opacity: preset.opacity,
+            ..Material::default()
         },
     })
+}
+
+/// A MeshPart's draw items, one per part of its model, each with the
+/// model's own material. Until it has a model (no `MeshId` yet, or one that
+/// can't be loaded), it's drawn as a plain grey box, so it can still be seen
+/// and picked.
+fn mesh_part_draw_items(instance: &Instance, assets: &Assets, items: &mut Vec<DrawItem>) {
+    let Some((_, transform)) = part_placement(instance) else {
+        return;
+    };
+    let mesh_id = instance
+        .property("MeshId")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let Some(model) = assets.model(mesh_id) else {
+        items.push(DrawItem {
+            shape: Shape::Block,
+            transform,
+            material: Material::default(),
+        });
+        return;
+    };
+    for (index, primitive) in model.primitives.iter().enumerate() {
+        items.push(DrawItem {
+            shape: Shape::Mesh(Arc::new(ModelMesh {
+                model: model.clone(),
+                index,
+            })),
+            transform,
+            material: model_material(&primitive.material),
+        });
+    }
+}
+
+/// glTF's material values, as the renderer takes them.
+fn model_material(material: &ModelMaterial) -> Material {
+    let [r, g, b, alpha] = material.base_color;
+    let (opacity, alpha_cutoff) = match material.alpha_mode {
+        AlphaMode::Opaque => (1.0, 0.0),
+        AlphaMode::Mask { cutoff } => (1.0, cutoff),
+        // Kept below 1 so the item is drawn see-through, even when only its
+        // texture has the transparency.
+        AlphaMode::Blend => (alpha.min(0.999), 0.0),
+    };
+    Material {
+        // glTF colors are linear light; draw lists take sRGB.
+        base_color: srgb([r, g, b]),
+        base_color_texture: material
+            .base_color_texture
+            .clone()
+            .map(|image| Arc::new(ImageTexture(image)) as Arc<dyn TextureSource>),
+        metalness: material.metalness,
+        roughness: material.roughness,
+        emissive: srgb(material.emissive),
+        opacity,
+        alpha_cutoff,
+    }
+}
+
+/// Converts linear light to sRGB, the opposite of what the renderer does.
+fn srgb(linear: [f32; 3]) -> [f32; 3] {
+    linear.map(|c| {
+        if c <= 0.0031308 {
+            c * 12.92
+        } else {
+            1.055 * c.powf(1.0 / 2.4) - 0.055
+        }
+    })
+}
+
+/// One primitive of a model, handed to the renderer without copying it.
+struct ModelMesh {
+    model: Arc<Model>,
+    index: usize,
+}
+
+impl MeshSource for ModelMesh {
+    fn key(&self) -> u64 {
+        self.model.primitives[self.index].key()
+    }
+    fn positions(&self) -> &[[f32; 3]] {
+        &self.model.primitives[self.index].positions
+    }
+    fn normals(&self) -> &[[f32; 3]] {
+        &self.model.primitives[self.index].normals
+    }
+    fn uvs(&self) -> &[[f32; 2]] {
+        &self.model.primitives[self.index].uvs
+    }
+    fn indices(&self) -> &[u32] {
+        &self.model.primitives[self.index].indices
+    }
+}
+
+/// A model's texture, handed to the renderer without copying it.
+struct ImageTexture(Arc<Image>);
+
+impl TextureSource for ImageTexture {
+    fn key(&self) -> u64 {
+        self.0.key()
+    }
+    fn size(&self) -> (u32, u32) {
+        (self.0.width, self.0.height)
+    }
+    fn rgba(&self) -> &[u8] {
+        &self.0.rgba
+    }
 }
 
 /// How much to stretch the 1×1×1 mesh. Balls stay round and cylinders stay
@@ -127,9 +251,13 @@ mod tests {
     }
 
     fn only_item(world: &World) -> DrawItem {
-        let list = build_draw_list(world, camera());
+        only_item_with(world, &Assets::default())
+    }
+
+    fn only_item_with(world: &World, assets: &Assets) -> DrawItem {
+        let list = build_draw_list(world, assets, camera());
         assert_eq!(list.items.len(), 1);
-        list.items[0]
+        list.items[0].clone()
     }
 
     fn vector(x: f32, y: f32, z: f32) -> Value {
@@ -225,10 +353,10 @@ mod tests {
         for shape in PartType::ALL {
             part(&mut world, vec![("Shape", Value::PartType(shape))]);
         }
-        let shapes: Vec<Shape> = build_draw_list(&world, camera())
+        let shapes: Vec<Shape> = build_draw_list(&world, &Assets::default(), camera())
             .items
             .iter()
-            .map(|item| item.shape)
+            .map(|item| item.shape.clone())
             .collect();
         assert_eq!(
             shapes,
@@ -240,6 +368,69 @@ mod tests {
     fn parts_outside_workspace_are_not_drawn() {
         let mut world = World::new();
         world.create(ClassName::Part).unwrap();
-        assert!(build_draw_list(&world, camera()).items.is_empty());
+        assert!(
+            build_draw_list(&world, &Assets::default(), camera())
+                .items
+                .is_empty()
+        );
+    }
+
+    fn example_assets() -> Assets {
+        Assets::new(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-mesh"),
+        )
+    }
+
+    fn mesh_part(world: &mut World, mesh_id: &str) -> InstanceId {
+        let part = world.create(ClassName::MeshPart).unwrap();
+        world.set_parent(part, Some(world.workspace())).unwrap();
+        world
+            .set_property(part, "MeshId", Value::String(mesh_id.to_owned()))
+            .unwrap();
+        world
+            .set_property(part, "Size", vector(8.0, 6.0, 8.0))
+            .unwrap();
+        part
+    }
+
+    #[test]
+    fn a_mesh_part_draws_its_model_with_the_files_material() {
+        let mut world = World::new();
+        mesh_part(&mut world, "assets/models/pyramid.gltf");
+        let assets = example_assets();
+        let item = only_item_with(&world, &assets);
+        let Shape::Mesh(mesh) = &item.shape else {
+            panic!("drawn as {:?}", item.shape);
+        };
+        assert_eq!(mesh.positions().len(), mesh.uvs().len());
+        // Size stretches the model's 1×1×1 box, like a block's.
+        assert_eq!(
+            item.transform.transform_point3(Vec3::splat(0.5)),
+            Vec3::new(4.0, 3.0, 4.0)
+        );
+        assert!(item.material.base_color_texture.is_some());
+        assert_eq!(item.material.roughness, 0.8);
+        assert_eq!(item.material.opacity, 1.0);
+        assert!(assets.take_errors().is_empty());
+    }
+
+    #[test]
+    fn a_mesh_part_without_a_model_is_a_grey_box_and_the_reason_is_reported() {
+        let assets = example_assets();
+        for mesh_id in ["", "assets/models/missing.glb"] {
+            let mut world = World::new();
+            mesh_part(&mut world, mesh_id);
+            let item = only_item_with(&world, &assets);
+            assert_eq!(item.shape, Shape::Block, "{mesh_id:?}");
+        }
+        let errors = assets.take_errors();
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].contains("missing.glb"), "{errors:?}");
+    }
+
+    #[test]
+    fn linear_to_srgb_undoes_the_renderers_conversion() {
+        let percent = srgb([0.0, 1.0, 0.214]).map(|c| (c * 100.0).round());
+        assert_eq!(percent, [0.0, 100.0, 50.0]);
     }
 }

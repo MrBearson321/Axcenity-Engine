@@ -15,6 +15,7 @@
 //! During Play there's no tool: the camera and selecting still work, but
 //! nothing can be dragged.
 
+use axcenity_assets::Assets;
 use axcenity_core::{InstanceId, Value, World};
 use axcenity_render::TextureRenderer;
 use axcenity_render::glam::Vec3;
@@ -195,6 +196,7 @@ impl Viewport {
         ui: &mut egui::Ui,
         render_state: &RenderState,
         world: &World,
+        assets: &Assets,
         selected: Option<InstanceId>,
         tool: Option<Tool>,
         snap: Snap,
@@ -241,7 +243,8 @@ impl Viewport {
                 );
         }
 
-        let draw_list = axcenity_scene::build_draw_list(world, self.camera.to_render_camera());
+        let draw_list =
+            axcenity_scene::build_draw_list(world, assets, self.camera.to_render_camera());
         target.renderer.render(&draw_list);
         let whole_texture = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
         ui.painter()

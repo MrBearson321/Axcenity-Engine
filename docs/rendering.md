@@ -30,7 +30,14 @@ Transparency: opaque items are drawn first. Then see-through items are drawn, fa
 
 ## Geometry
 
-Built-in primitives are block, sphere, cylinder and wedge. glTF/GLB mesh import is planned for Phase 17; it is not implemented yet. Part shape rules match Roblox: a Ball's diameter is the smallest of its `Size` axes, a Cylinder lies along X (`Size.X` is its length, its diameter is the smaller of Y and Z), and a Wedge's slope rises from the bottom front (-Z) edge to the top back (+Z) edge. `Orientation` is degrees, applied around Z, then X, then Y.
+Built-in primitives are block, sphere, cylinder and wedge, plus imported glTF models (MeshParts, Phase 17; see Imported models). Part shape rules match Roblox: a Ball's diameter is the smallest of its `Size` axes, a Cylinder lies along X (`Size.X` is its length, its diameter is the smaller of Y and Z), and a Wedge's slope rises from the bottom front (-Z) edge to the top back (+Z) edge. `Orientation` is degrees, applied around Z, then X, then Y.
+
+## Imported models (decided in Phase 17)
+
+- **Draw list:** `Shape::Mesh(Arc<dyn MeshSource>)` is a mesh the caller owns (positions, normals, optional texture coordinates, `u32` indices), and `Material::base_color_texture` an `Arc<dyn TextureSource>` (sRGB RGBA8). They're traits so `scene` hands over the loaded model's data without copying it each frame. The renderer uploads each on first sight, keyed by `key()`, and frees what hasn't been drawn for 600 frames. Broken data (an index past the last corner, the wrong number of pixels) is logged once and not drawn.
+- **Vertices** gained texture coordinates (location 12; the built-ins' are all 0). Textures are bound as group 1 with a repeating, mipmapped linear sampler; items without a texture (all built-in shapes) bind a 1×1 white texture. Mipmaps are made on the CPU at upload by 2×2 averaging (in sRGB, slightly off but not visibly). Levels bigger than the GPU allows are left out, so huge textures show less sharp instead of failing.
+- **Model space:** `assets` fits every model into the 1×1×1 cube centered on the origin, like the built-ins, so `Size` stretches its box. It walks the default scene's node tree (or every mesh, if there's no scene), applying node transforms (mirrored nodes get their triangles flipped back); missing normals are made smooth from the triangles. Only triangle lists are drawn; points, lines, strips and fans are skipped.
+- **Materials:** each glTF primitive is one draw item with its metallic-roughness material: base color factor × base color texture, metalness, roughness, emissive (converted from glTF's linear light to the draw list's sRGB). Alpha mode `OPAQUE` is solid, `MASK` cuts out pixels below its cutoff (`Material::alpha_cutoff`, a `discard` in the shader), `BLEND` is drawn see-through (opacity capped just below 1 so it always takes the see-through path). Solid items always write alpha 1. Not yet: metallic-roughness, normal, occlusion and emissive textures, texture transforms, vertex colors, `KHR_materials_emissive_strength`, double-sided materials (back faces are still culled), skins and animation.
 
 ## Stages
 

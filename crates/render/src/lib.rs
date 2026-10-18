@@ -10,7 +10,9 @@ mod draw_list;
 mod mesh;
 mod renderer;
 
-pub use draw_list::{AmbientLight, Camera, DrawItem, DrawList, Material, Shape, Sun};
+pub use draw_list::{
+    AmbientLight, Camera, DrawItem, DrawList, Material, MeshSource, Shape, Sun, TextureSource,
+};
 pub use renderer::{Renderer, TextureRenderer};
 
 /// Re-exported so callers build transforms with the same `glam` version.

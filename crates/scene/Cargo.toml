@@ -9,6 +9,7 @@ authors.workspace = true
 # The bridge between Instances and the renderer, shared by the player and the
 # editor. No windowing or UI crates here, so both can use it.
 [dependencies]
+axcenity-assets.workspace = true
 axcenity-core.workspace = true
 axcenity-render.workspace = true
 

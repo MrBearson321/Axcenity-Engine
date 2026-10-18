@@ -148,7 +148,7 @@ function UserInputServiceClass:IsKeyDown(key) end
 ---@field Changed Signal Fires when a property (or `Name` or `Parent`) gets a different value, whether a script, physics or the editor changed it. The handler gets the property's name: `function(property) ... end`.
 ---@field ChildAdded Signal Fires when an Instance is put inside this one. The handler gets the child.
 ---@field ChildRemoved Signal Fires when an Instance is taken out of this one. The handler gets the child.
----@field [string] Workspace|Players|ReplicatedStorage|ServerScriptService|StarterPlayer|StarterPlayerScripts|Part|Script|LocalScript|ModuleScript|RemoteEvent|Player|Model|Folder A child, found by its name.
+---@field [string] Workspace|Players|ReplicatedStorage|ServerScriptService|StarterPlayer|StarterPlayerScripts|Part|MeshPart|Script|LocalScript|ModuleScript|RemoteEvent|Player|Model|Folder A child, found by its name.
 local InstanceClass = {}
 
 ---The first child with this name, or nil. With `recursive`, searches every descendant.
@@ -230,6 +230,15 @@ function DataModelClass:GetService(className) end
 ---@field Roughness number From 0 (mirror-smooth) to 1 (matte).
 ---@field Touched Signal Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.
 
+---A solid 3D model imported from a glTF file, drawn with the file's own materials. It collides as the model's convex hull.
+---@class MeshPart: Instance
+---@field Anchored boolean If true, the part stays where it is. If false, it falls and collides with other parts.
+---@field MeshId string The model's glTF file, inside the project folder, such as "assets/models/chair.glb". The editor's Import Model sets it.
+---@field Position Vector3 Where the center of the model's box is, in studs. Setting it on an unanchored part teleports it and stops it moving.
+---@field Orientation Vector3 Rotation in degrees around X, Y and Z, applied Z first, then X, then Y.
+---@field Size Vector3 The size of the model's box in studs along X, Y and Z. The model stretches to fill it.
+---@field Touched Signal Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.
+
 ---Lua code that runs on the server, from a `.server.lua` file.
 ---@class Script: Instance
 
@@ -302,6 +311,7 @@ Instance = {}
 ---@param className string
 ---@return Instance
 ---@overload fun(className: "Part"): Part
+---@overload fun(className: "MeshPart"): MeshPart
 ---@overload fun(className: "Script"): Script
 ---@overload fun(className: "LocalScript"): LocalScript
 ---@overload fun(className: "ModuleScript"): ModuleScript

@@ -1,5 +1,6 @@
 //! The editor and the project folder: saving, script files (insert, open,
-//! rename, delete), and reacting to files changed by other programs.
+//! rename, delete), importing models, and reacting to files changed by
+//! other programs.
 //!
 //! Each script is its `.server.lua` (Script), `.client.lua` (LocalScript)
 //! or `.module.lua` (ModuleScript) file. Making, renaming or deleting a script changes its file straight
@@ -11,14 +12,15 @@
 use std::io::ErrorKind;
 use std::path::Path;
 
-use axcenity_core::{ClassName, InstanceId};
+use axcenity_core::{ClassName, InstanceId, Value, Vector3};
 use axcenity_project::{self as project, LoadError, Project, ScriptFile};
 use eframe::egui;
 
 use super::EditorApp;
 use crate::output::Output;
+use crate::properties::MIN_SIZE;
 use crate::scripts::{Disk, new_script_source};
-use crate::tree;
+use crate::tree::{self, Insertable};
 
 /// An error and its causes on one line, the way `{:#}` shows an `anyhow::Error`.
 fn chain(err: &dyn std::error::Error) -> String {
@@ -308,6 +310,66 @@ impl EditorApp {
         }
     }
 
+    /// File > Import Model… and the toolbar's Import: asks for a glTF model
+    /// with the system's file picker, then imports it.
+    pub(super) fn import_model_with_dialog(&mut self) {
+        if self.project.is_none() || self.playing() || self.viewport.is_dragging() {
+            return;
+        }
+        let dialog = rfd::FileDialog::new()
+            .set_title("Import a 3D model")
+            .add_filter("glTF model", &["gltf", "glb"]);
+        // `None` means the dialog was cancelled.
+        if let Some(file) = dialog.pick_file() {
+            self.import_model(&file);
+        }
+    }
+
+    /// Copies the model at `file` into the project's `assets/models` folder
+    /// and inserts a MeshPart showing it, at its size in the file, inside
+    /// the selected Model or Folder if there is one. The insert is an undo
+    /// step; the copied file stays. A model that can't be loaded is reported
+    /// in Output and not copied.
+    pub(super) fn import_model(&mut self, file: &Path) {
+        let Some(project) = &self.project else {
+            return;
+        };
+        if self.playing() || self.viewport.is_dragging() {
+            return;
+        }
+        let (mesh_id, model) = match axcenity_assets::import_model(&project.folder, file) {
+            Ok(imported) => imported,
+            Err(err) => {
+                let err = chain(&err);
+                self.output
+                    .error(format!("Could not import `{}`: {err}", file.display()));
+                return;
+            }
+        };
+        let model = self.assets.insert(&mesh_id, model);
+        // A flat model (a plane) still needs some thickness to be seen and picked.
+        let [x, y, z] = model.size.map(|size| size.max(MIN_SIZE));
+        let name = file
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().trim().to_owned())
+            .filter(|stem| !stem.is_empty())
+            .unwrap_or_else(|| ClassName::MeshPart.as_str().to_owned());
+        self.output.info(format!(
+            "Imported `{}` into the project as `{mesh_id}`.",
+            file.display()
+        ));
+        let near = self.selected;
+        self.insert_named(
+            Insertable::MeshPart,
+            near,
+            &name,
+            vec![
+                ("MeshId", Value::String(mesh_id)),
+                ("Size", Value::Vector3(Vector3::new(x, y, z))),
+            ],
+        );
+    }
+
     /// Renames the Script `id` and its file to `name`. Not an undo step.
     pub(super) fn rename_script(&mut self, id: InstanceId, name: &str) {
         let name = name.trim();
@@ -585,6 +647,102 @@ mod tests {
         app.world
             .find_first_child(app.world.server_script_service(), name)
             .unwrap()
+    }
+
+    fn example_model() -> std::path::PathBuf {
+        super::super::tests::example("hello-mesh").join("assets/models/pyramid.gltf")
+    }
+
+    #[test]
+    fn importing_a_model_copies_it_and_inserts_a_mesh_part_in_one_undo_step() {
+        let folder = copy_of_example("hello-part", "import-model");
+        let mut app = EditorApp::new(Some(&folder));
+        app.import_model(&example_model());
+
+        let id = app.selected.expect("the new MeshPart is selected");
+        let mesh_part = app.world.get(id).unwrap();
+        assert_eq!(mesh_part.class(), ClassName::MeshPart);
+        assert_eq!(mesh_part.name(), "pyramid");
+        let mesh_id = "assets/models/pyramid/pyramid.gltf";
+        assert_eq!(
+            mesh_part.property("MeshId"),
+            Some(&Value::String(mesh_id.to_owned()))
+        );
+        assert_eq!(
+            mesh_part.property("Size"),
+            Some(&Value::Vector3(Vector3::new(4.0, 3.0, 4.0)))
+        );
+        assert!(folder.join(mesh_id).is_file());
+        assert!(last_line(&app).text.contains(mesh_id));
+
+        // It's drawn as its model, not as a stand-in box.
+        let camera = axcenity_render::Camera {
+            position: axcenity_render::glam::Vec3::new(0.0, 20.0, 30.0),
+            look_at: axcenity_render::glam::Vec3::ZERO,
+            fov_y_degrees: 70.0,
+        };
+        let list = axcenity_scene::build_draw_list(&app.world, &app.assets, camera);
+        assert!(
+            list.items
+                .iter()
+                .any(|item| matches!(item.shape, axcenity_render::Shape::Mesh(_)))
+        );
+
+        // Saved and opened again, it's still there.
+        assert!(app.save());
+        let reopened = EditorApp::new(Some(&folder));
+        let again = part(&reopened, "pyramid");
+        assert_eq!(
+            reopened.world.get(again).unwrap().property("MeshId"),
+            Some(&Value::String(mesh_id.to_owned()))
+        );
+
+        // One undo takes it out again (the copied file stays).
+        app.undo();
+        let workspace = app.world.workspace();
+        assert!(app.world.find_first_child(workspace, "pyramid").is_none());
+        assert!(folder.join(mesh_id).is_file());
+        let _ = fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn a_broken_model_is_reported_and_nothing_is_inserted_or_copied() {
+        let folder = copy_of_example("hello-part", "import-broken");
+        let broken = folder.join("broken.glb");
+        fs::write(&broken, "glTF, but not really").unwrap();
+        let mut app = EditorApp::new(Some(&folder));
+        let before = app.world.descendants(app.world.workspace()).len();
+
+        app.import_model(&broken);
+        assert_eq!(app.world.descendants(app.world.workspace()).len(), before);
+        assert!(!folder.join(axcenity_assets::MODELS_FOLDER).exists());
+        let line = last_line(&app);
+        assert_eq!(line.kind, OutputKind::Error);
+        assert!(
+            line.text.starts_with("Could not import")
+                && line.text.contains("it isn't a valid glTF file"),
+            "{}",
+            line.text
+        );
+        let _ = fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn a_mesh_part_whose_file_is_missing_is_reported_in_output() {
+        let folder = copy_of_example("hello-mesh", "missing-model");
+        fs::remove_file(folder.join("assets/models/pyramid.gltf")).unwrap();
+        let app = EditorApp::new(Some(&folder));
+        // Drawing asks for the model, which reports it once.
+        let camera = axcenity_render::Camera {
+            position: axcenity_render::glam::Vec3::new(0.0, 20.0, 30.0),
+            look_at: axcenity_render::glam::Vec3::ZERO,
+            fov_y_degrees: 70.0,
+        };
+        axcenity_scene::build_draw_list(&app.world, &app.assets, camera);
+        let errors = app.assets.take_errors();
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].contains("pyramid.gltf") && errors[0].contains("isn't there"));
+        let _ = fs::remove_dir_all(&folder);
     }
 
     #[test]

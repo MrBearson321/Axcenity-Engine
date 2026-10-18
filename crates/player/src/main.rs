@@ -14,6 +14,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
+use axcenity_assets::Assets;
 use axcenity_core::World;
 use axcenity_physics::Physics;
 use axcenity_project::ScriptFile;
@@ -59,6 +60,9 @@ fn main() -> Result<()> {
     let mut world = project.world;
     let mut scripts = ScriptRuntime::new();
     start_scripts(&mut scripts, &mut world, &project.scripts);
+    // Models load the first time a MeshPart needs one; physics and drawing
+    // share them.
+    let assets = Assets::new(&project.folder);
 
     let event_loop = EventLoop::new()?;
     // Games redraw continuously instead of waiting for input.
@@ -68,7 +72,8 @@ fn main() -> Result<()> {
         title: format!("{} - Axcenity Player", project.manifest.name),
         world,
         scripts,
-        physics: Physics::new(),
+        physics: Physics::with_assets(assets.clone()),
+        assets,
         window: None,
         renderer: None,
         error: None,
@@ -119,6 +124,8 @@ struct App {
     scripts: ScriptRuntime,
     /// Simulates the unanchored parts.
     physics: Physics,
+    /// The project's models, for MeshParts.
+    assets: Assets,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     error: Option<anyhow::Error>,
@@ -372,8 +379,15 @@ impl ApplicationHandler for App {
                 if let Some(view) = self.scripts.take_camera_move() {
                     self.camera.set_view(view.position, view.orientation);
                 }
-                let draw_list =
-                    axcenity_scene::build_draw_list(&self.world, self.camera.to_render_camera());
+                let draw_list = axcenity_scene::build_draw_list(
+                    &self.world,
+                    &self.assets,
+                    self.camera.to_render_camera(),
+                );
+                // Models that couldn't be loaded, by physics or for drawing.
+                for error in self.assets.take_errors() {
+                    eprintln!("error: {error}");
+                }
                 // `|| ...` is a closure: a small function the renderer calls at the right moment.
                 if let Err(err) = renderer.render(&draw_list, || window.pre_present_notify()) {
                     self.fail(event_loop, err);
@@ -514,7 +528,7 @@ mod tests {
         }
         // The new parts are drawn along with the ones from the world file.
         let camera = FlyCamera::looking_at(START_CAMERA_POSITION, Vec3::ZERO).to_render_camera();
-        let draw_list = axcenity_scene::build_draw_list(&world, camera);
+        let draw_list = axcenity_scene::build_draw_list(&world, &Assets::default(), camera);
         assert_eq!(draw_list.items.len(), parts_before + 5);
     }
 
@@ -607,6 +621,48 @@ mod tests {
             .and_then(Value::as_vector3)
             .unwrap();
         assert!((orientation.y - 360.0).abs() < 0.01, "{orientation:?}");
+    }
+
+    #[test]
+    fn hello_mesh_drops_parts_onto_an_imported_model_which_reports_touches() {
+        let (mut world, mut scripts) = start_example("hello-mesh");
+        let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-mesh");
+        let assets = Assets::new(folder);
+        let mut physics = Physics::with_assets(assets.clone());
+        let mut clock = 0;
+        run_until(&mut world, &mut scripts, &mut physics, &mut clock, 5.0);
+
+        let output: Vec<String> = scripts
+            .take_output()
+            .into_iter()
+            .map(|line| match line.kind {
+                OutputKind::Print => line.text,
+                OutputKind::Error => format!("error: {}", line.text),
+            })
+            .collect();
+        // (What the script printed as it started went to the terminal then.)
+        assert!(
+            output.contains(&"Ball touched the pyramid".to_owned()),
+            "{output:?}"
+        );
+        assert!(
+            !output.iter().any(|line| line.starts_with("error")),
+            "{output:?}"
+        );
+        // The ball rolled off the pyramid's slope instead of resting on its box.
+        assert!(position_of(&world, "Ball").y < 1.5);
+        // The unanchored pyramid fell and lies on the floor.
+        assert!(position_of(&world, "FallingPyramid").y < 3.0);
+        assert!(assets.take_errors().is_empty());
+
+        // Both pyramids are drawn as their model.
+        let camera = FlyCamera::looking_at(START_CAMERA_POSITION, Vec3::ZERO).to_render_camera();
+        let meshes = axcenity_scene::build_draw_list(&world, &assets, camera)
+            .items
+            .iter()
+            .filter(|item| matches!(item.shape, axcenity_render::Shape::Mesh(_)))
+            .count();
+        assert_eq!(meshes, 2);
     }
 
     fn position_of(world: &World, name: &str) -> Vector3 {

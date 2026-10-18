@@ -5,6 +5,9 @@
 //! frame rate, and writes each moved part's `Position` and `Orientation` back
 //! into the [`World`].
 //!
+//! MeshParts collide as the convex hull of their model, which comes from
+//! the [`Assets`] given to [`Physics::with_assets`].
+//!
 //! Physics never gets told about changes. Instead, before stepping it compares
 //! every Part with what it last saw (or wrote), so a script that moves,
 //! anchors, resizes or deletes a part is noticed on the next frame.
@@ -16,11 +19,13 @@ mod shapes;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use axcenity_core::{Instance, InstanceId, PartType, Value, Vector3, World};
+use axcenity_assets::Assets;
+use axcenity_core::{ClassName, Instance, InstanceId, Value, Vector3, World};
 use rapier3d::glamx::{EulerRot, Quat, Vec3};
 use rapier3d::math::Pose;
 use rapier3d::pipeline::PhysicsWorld;
 use rapier3d::prelude::{ColliderHandle, RigidBodyBuilder, RigidBodyHandle, RigidBodyType};
+use shapes::Form;
 
 /// How long one physics step is: physics always runs at 60 steps a second.
 pub const STEP_SECONDS: f64 = 1.0 / 60.0;
@@ -67,6 +72,8 @@ pub struct Physics {
     /// Pairs that started touching since the last
     /// [`take_touches`](Self::take_touches).
     touches: Vec<(InstanceId, InstanceId)>,
+    /// Where MeshParts' models come from.
+    assets: Assets,
 }
 
 /// One Part's rapier body, plus the part's properties as physics last saw or
@@ -77,29 +84,36 @@ struct Body {
     seen: PartState,
 }
 
-/// The properties of a Part that physics cares about.
-#[derive(Clone, Copy, PartialEq)]
+/// The properties of a part that physics cares about.
+#[derive(Clone, PartialEq)]
 struct PartState {
     anchored: bool,
-    shape: PartType,
+    shape: Form,
     size: Vector3,
     position: Vector3,
     orientation: Vector3,
 }
 
 impl PartState {
-    /// Reads a Part, or `None` for other classes. A part with a NaN or
-    /// infinite Position, Orientation or Size also gives `None`, so it is
-    /// left out of physics instead of breaking the simulation.
-    fn read(instance: &Instance) -> Option<Self> {
+    /// Reads a Part or MeshPart, or `None` for other classes. A part with a
+    /// NaN or infinite Position, Orientation or Size also gives `None`, so
+    /// it is left out of physics instead of breaking the simulation.
+    fn read(instance: &Instance, assets: &Assets) -> Option<Self> {
         let vector = |name| instance.property(name).and_then(Value::as_vector3);
         let anchored = match instance.property("Anchored") {
             Some(Value::Bool(anchored)) => *anchored,
             _ => return None,
         };
+        let shape = match instance.class() {
+            ClassName::MeshPart => {
+                let mesh_id = instance.property("MeshId").and_then(Value::as_str)?;
+                Form::Mesh(assets.model(mesh_id))
+            }
+            _ => Form::Primitive(instance.property("Shape").and_then(Value::as_part_type)?),
+        };
         let state = Self {
             anchored,
-            shape: instance.property("Shape").and_then(Value::as_part_type)?,
+            shape,
             size: vector("Size")?,
             position: vector("Position")?,
             orientation: vector("Orientation")?,
@@ -127,7 +141,14 @@ impl PartState {
 }
 
 impl Physics {
+    /// Physics without models: MeshParts collide as their boxes. Fine for
+    /// worlds without MeshParts, such as in tests.
     pub fn new() -> Self {
+        Self::with_assets(Assets::default())
+    }
+
+    /// Physics whose MeshParts collide as their models from `assets`.
+    pub fn with_assets(assets: Assets) -> Self {
         let mut rapier = PhysicsWorld::new();
         rapier.gravity = Vec3::new(0.0, -GRAVITY, 0.0);
         rapier.integration_parameters.dt = STEP_SECONDS as f32;
@@ -139,6 +160,7 @@ impl Physics {
             touching: BTreeMap::new(),
             started: false,
             touches: Vec::new(),
+            assets,
         }
     }
 
@@ -188,7 +210,7 @@ impl Physics {
         let current: BTreeMap<InstanceId, PartState> = world
             .descendants(world.workspace())
             .into_iter()
-            .filter_map(|id| Some((id, PartState::read(world.get(id)?)?)))
+            .filter_map(|id| Some((id, PartState::read(world.get(id)?, &self.assets)?)))
             .collect();
         let mut anything_changed = false;
 
@@ -248,7 +270,7 @@ impl Physics {
             .build();
         let (body, collider) = self
             .rapier
-            .insert(body, shapes::collider(state.shape, to_vec3(state.size)));
+            .insert(body, shapes::collider(&state.shape, to_vec3(state.size)));
         Body {
             body,
             collider,
@@ -258,8 +280,8 @@ impl Physics {
 
     /// Applies what a script changed on a part that already has a body.
     fn apply_change(&mut self, part: &mut Body, state: PartState) {
-        let old = part.seen;
-        part.seen = state;
+        let old = std::mem::replace(&mut part.seen, state);
+        let state = &part.seen;
 
         if old.shape != state.shape || old.size != state.size {
             let rapier = &mut self.rapier;
@@ -271,7 +293,7 @@ impl Physics {
                 true,
             );
             part.collider = rapier.colliders.insert_with_parent(
-                shapes::collider(state.shape, to_vec3(state.size)),
+                shapes::collider(&state.shape, to_vec3(state.size)),
                 part.body,
                 &mut rapier.bodies,
             );

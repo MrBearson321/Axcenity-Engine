@@ -14,9 +14,15 @@ struct Frame {
 
 @group(0) @binding(0) var<uniform> frame: Frame;
 
+// The item's base color texture, sRGB so samples are linear light. Items
+// without one get a single white pixel, which changes nothing.
+@group(1) @binding(0) var base_color_texture: texture_2d<f32>;
+@group(1) @binding(1) var base_color_sampler: sampler;
+
 struct VertexIn {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
+    @location(12) uv: vec2<f32>,
 }
 
 // Per draw item. Must match `InstanceRaw` in renderer.rs.
@@ -30,7 +36,7 @@ struct InstanceIn {
     @location(8) normal_2: vec3<f32>,
     @location(9) base_color: vec4<f32>, // rgb, opacity
     @location(10) emissive: vec3<f32>,
-    @location(11) metal_rough: vec2<f32>, // metalness, roughness
+    @location(11) surface: vec3<f32>, // metalness, roughness, alpha cutoff
 }
 
 struct VertexOut {
@@ -39,7 +45,8 @@ struct VertexOut {
     @location(1) normal: vec3<f32>,
     @location(2) base_color: vec4<f32>,
     @location(3) emissive: vec3<f32>,
-    @location(4) metal_rough: vec2<f32>,
+    @location(4) surface: vec3<f32>,
+    @location(5) uv: vec2<f32>,
 }
 
 @vertex
@@ -54,7 +61,8 @@ fn vs_main(vertex: VertexIn, instance: InstanceIn) -> VertexOut {
     out.normal = normal_matrix * vertex.normal;
     out.base_color = instance.base_color;
     out.emissive = instance.emissive;
-    out.metal_rough = instance.metal_rough;
+    out.surface = instance.surface;
+    out.uv = vertex.uv;
     return out;
 }
 
@@ -96,10 +104,16 @@ fn ambient_specular(f0: vec3<f32>, roughness: f32, n_dot_v: f32) -> vec3<f32> {
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-    let base_color = in.base_color.rgb;
-    let metalness = clamp(in.metal_rough.x, 0.0, 1.0);
+    let texel = textureSample(base_color_texture, base_color_sampler, in.uv);
+    let base_color = in.base_color.rgb * texel.rgb;
+    let opacity = in.base_color.a * texel.a;
+    // Cut-out materials (leaves, fences) leave holes where the texture is clear.
+    if opacity < in.surface.z {
+        discard;
+    }
+    let metalness = clamp(in.surface.x, 0.0, 1.0);
     // Perfectly smooth surfaces make the highlight infinitely small, so keep a minimum.
-    let roughness = clamp(in.metal_rough.y, 0.04, 1.0);
+    let roughness = clamp(in.surface.y, 0.04, 1.0);
 
     let n = normalize(in.normal);
     let v = normalize(frame.camera_position.xyz - in.world_position);
@@ -122,5 +136,8 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let ambient = frame.ambient.rgb
         * (base_color * (1.0 - metalness) + ambient_specular(f0, roughness, n_dot_v));
 
-    return vec4<f32>(sun + ambient + in.emissive, in.base_color.a);
+    // Solid items stay solid whatever the texture's alpha, so the window's
+    // own alpha stays 1.
+    let alpha = select(opacity, 1.0, in.base_color.a >= 1.0);
+    return vec4<f32>(sun + ambient + in.emissive, alpha);
 }

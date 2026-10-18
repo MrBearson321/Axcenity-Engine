@@ -1,0 +1,74 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Anchored": true,
+          "Color": [0.35, 0.37, 0.4],
+          "Material": "Plastic",
+          "Metalness": 0,
+          "Orientation": [0, 0, 0],
+          "Position": [0, -0.5, 0],
+          "Roughness": 0.5,
+          "Shape": "Block",
+          "Size": [60, 1, 60]
+        }
+      },
+      {
+        "class": "MeshPart",
+        "name": "Pyramid",
+        "properties": {
+          "Anchored": true,
+          "MeshId": "assets/models/pyramid.gltf",
+          "Orientation": [0, 0, 0],
+          "Position": [0, 3, 0],
+          "Size": [8, 6, 8]
+        }
+      },
+      {
+        "class": "MeshPart",
+        "name": "FallingPyramid",
+        "properties": {
+          "Anchored": false,
+          "MeshId": "assets/models/pyramid.gltf",
+          "Orientation": [25, 30, 10],
+          "Position": [12, 8, 0],
+          "Size": [4, 3, 4]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Ball",
+        "properties": {
+          "Anchored": false,
+          "Color": [0.9, 0.2, 0.2],
+          "Material": "Plastic",
+          "Metalness": 0,
+          "Orientation": [0, 0, 0],
+          "Position": [0.3, 12, 0.2],
+          "Roughness": 0.5,
+          "Shape": "Ball",
+          "Size": [2, 2, 2]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Crate",
+        "properties": {
+          "Anchored": false,
+          "Color": [0.2, 0.5, 0.9],
+          "Material": "Plastic",
+          "Metalness": 0,
+          "Orientation": [0, 45, 0],
+          "Position": [-2, 10, 2],
+          "Roughness": 0.5,
+          "Shape": "Block",
+          "Size": [2, 2, 2]
+        }
+      }
+    ]
+  }
+}

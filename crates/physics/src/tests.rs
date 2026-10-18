@@ -357,3 +357,79 @@ fn a_bouncing_ball_is_reported_for_each_real_landing() {
     assert!(touches.iter().all(|&t| t == pair(ball, floor)));
     assert_eq!(touches_during(&mut physics, &mut world, 3.0), []);
 }
+
+/// A MeshPart showing the example project's pyramid model (4 wide, 3 tall).
+fn pyramid(world: &mut World, position: Vector3, size: Value, anchored: bool) -> InstanceId {
+    let id = world.create(ClassName::MeshPart).unwrap();
+    world.set_parent(id, Some(world.workspace())).unwrap();
+    let mesh_id = Value::String("assets/models/pyramid.gltf".to_owned());
+    set(world, id, "MeshId", mesh_id);
+    set(world, id, "Position", Value::Vector3(position));
+    set(world, id, "Size", size);
+    set(world, id, "Anchored", Value::Bool(anchored));
+    id
+}
+
+fn example_assets() -> Assets {
+    Assets::new(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-mesh"))
+}
+
+#[test]
+fn a_mesh_part_falls_and_lands_on_the_floor() {
+    let (mut world, floor) = world_with_floor();
+    let model = pyramid(
+        &mut world,
+        Vector3::new(0.0, 6.0, 0.0),
+        vector(4.0, 3.0, 4.0),
+        false,
+    );
+    let assets = example_assets();
+    let mut physics = Physics::with_assets(assets.clone());
+    let touches = touches_during(&mut physics, &mut world, 3.0);
+    assert_eq!(touches.first(), Some(&pair(model, floor)));
+    // Its flat base is on the floor, so its center is half its height up.
+    let resting = position(&world, model);
+    assert!((resting.y - 1.5).abs() < 0.05, "{resting:?}");
+    assert!(assets.take_errors().is_empty());
+}
+
+#[test]
+fn parts_slide_off_a_mesh_parts_slopes() {
+    let (mut world, _) = world_with_floor();
+    // An anchored pyramid 8 wide and 6 tall, its tip at Y = 6.
+    let model = pyramid(
+        &mut world,
+        Vector3::new(0.0, 3.0, 0.0),
+        vector(8.0, 6.0, 8.0),
+        true,
+    );
+    // A ball dropped just off the tip. On the pyramid's box it would rest on
+    // top; on its hull it rolls down a side to the floor.
+    let ball = part(&mut world, Vector3::new(0.5, 9.0, 0.3), false);
+    set(&mut world, ball, "Shape", Value::PartType(PartType::Ball));
+    set(&mut world, ball, "Size", vector(2.0, 2.0, 2.0));
+    let mut physics = Physics::with_assets(example_assets());
+    let touches = touches_during(&mut physics, &mut world, 5.0);
+    assert_eq!(touches.first(), Some(&pair(ball, model)));
+    let rolled = position(&world, ball);
+    assert!(
+        rolled.y < 1.5,
+        "the ball should reach the floor: {rolled:?}"
+    );
+}
+
+#[test]
+fn a_mesh_part_without_a_model_collides_as_its_box() {
+    let (mut world, _) = world_with_floor();
+    let model = pyramid(
+        &mut world,
+        Vector3::new(0.0, 5.0, 0.0),
+        vector(4.0, 3.0, 4.0),
+        false,
+    );
+    set(&mut world, model, "MeshId", Value::String(String::new()));
+    let mut physics = Physics::new();
+    run(&mut physics, &mut world, 3.0, 60.0);
+    let resting = position(&world, model);
+    assert!((resting.y - 1.5).abs() < 0.05, "{resting:?}");
+}

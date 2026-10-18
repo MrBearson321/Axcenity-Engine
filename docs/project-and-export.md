@@ -19,6 +19,8 @@ my-game/
   scripts/        server scripts: build.server.lua, doors/open.server.lua, ...
                   client scripts: keys.client.lua, ...
                   modules: shared/utils.module.lua, ...
+  assets/models/  imported glTF models: chair.glb, or tree/tree.gltf with
+                  the .bin and textures it uses (see Assets)
   .luarc.json, .axcenity/, .vscode/extensions.json
                   optional: written by the editor's File > Set Up VS Code
                   Autocomplete (see docs/scripting.md); the engine ignores them
@@ -53,8 +55,16 @@ my-game/
 - **Client scripts** (Phase 14): every `scripts/**/*.client.lua` becomes a `LocalScript` in `StarterPlayer.StarterPlayerScripts`, named the same way. `project.scripts` lists Scripts first, then LocalScripts, each by path (`script_order`), which is the order they start in. `script_class(path)`, `script_suffix(class)`, `script_service(world, class)` and `script_path(name, class)` pick the right ending and service.
 - **Modules** (Phase 15): every `scripts/**/*.module.lua` becomes a `ModuleScript` in `ReplicatedStorage`, named the same way, after the world file's children there. `script_order` puts modules first (they must be registered before any script requires them), then Scripts, then LocalScripts. Like other scripts, they're never written to `world.json`, and listing one there is an error.
 - **Script files** (Phase 13): `project::create_script` (never replaces a file, not even one differing only in capitals on Windows and macOS), `write_script` (through a `.saving` temporary file, like `save_world`), `rename_script` (same folder, refuses to replace another file) and `delete_script`. `check_script_name` applies Windows file name rules on every OS, so projects open everywhere.
+- **MeshParts** (Phase 17) are saved like Parts, with `Anchored`, `MeshId`, `Orientation`, `Position` and `Size`. `MeshId` is the model's path from the project folder with `/` between folders (`"MeshId": "assets/models/pyramid.gltf"`); empty means no model. `examples/hello-mesh` shows the layout. `format_version` stays 1: the new class only adds to the format.
 - `format_version` appears in both files. The engine refuses newer versions with a "please update" message.
 - Errors name the file and, for JSON syntax problems, the line and column. For bad property values they name the Instance path (for example `Workspace.Block.Color`).
+
+## Assets (decided in Phase 17)
+
+- The `assets` crate is the asset system: it reads every asset file, only from inside the project folder. A `MeshId`, or a URI inside a model, that is absolute, has a drive or scheme (`C:`, `file:`) or a `..` part is refused (`assets::safe_path`), so a world file or script can't read anything else. `data:` URIs embedded in a model are fine.
+- `Assets` is a cheap shared handle (one per open project) that loads each model the first time it's asked for, keeps it, and remembers failures so each is reported once (`take_errors`: the editor shows them in Output, the player prints `error:` lines). The project still loads and runs without the model.
+- `assets::load_model` never crashes on a bad file: errors name the problem ("it isn't a valid glTF file: …", "it uses `x.bin`, which isn't there", "a mesh in it lists a corner that isn't there"), and a panic inside the `gltf` crate is caught and reported as "the file is damaged".
+- Model files aren't checked for changes while the editor runs; they're read again when the project is opened.
 
 ## Export
 
@@ -76,3 +86,4 @@ my-game/
 - The editor and the player use `icon-256.png` as their window icon, built in with `include_bytes!` (the player decodes it with the `png` crate, the editor with eframe). Windows and X11 show window icons; macOS and Wayland ignore them, so the app bundle and desktop file icons come with export (`icon.ico` and `icon.png` are ready for it).
 - The wordmark (added after Phase 16) comes in a light-background and a dark-background version, both made from `wordmark-source.png` by `assets/branding/build.py`. The editor shows it on its start screen and About box; it's ready for splash and loading screens. The window icon is now the hexagon mark on a white rounded square.
 - Fonts (`assets/fonts/`, SIL Open Font License 1.1, compatible with Apache-2.0 for bundling) and icons (`egui-phosphor`, MIT) are credited in the editor's About box and must go in the generated credits once the editor is shipped.
+- glTF loading (Phase 17) uses `gltf` and `gltf-json` (MIT OR Apache-2.0) and, for textures, `image` (MIT OR Apache-2.0) with its PNG and JPEG decoders, which also go in the generated credits.

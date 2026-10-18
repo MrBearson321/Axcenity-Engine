@@ -30,6 +30,9 @@ pub enum ClassName {
     StarterPlayerScripts,
     /// A solid shape in the world.
     Part,
+    /// A solid 3D model imported from a glTF file, which it names in
+    /// `MeshId`. Drawn with the file's own materials.
+    MeshPart,
     /// Lua code that runs on the server. Its source lives in a
     /// `*.server.lua` file, not in a property.
     Script,
@@ -50,7 +53,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 15] = [
+    pub const ALL: [ClassName; 16] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -59,6 +62,7 @@ impl ClassName {
         ClassName::StarterPlayer,
         ClassName::StarterPlayerScripts,
         ClassName::Part,
+        ClassName::MeshPart,
         ClassName::Script,
         ClassName::LocalScript,
         ClassName::ModuleScript,
@@ -78,6 +82,7 @@ impl ClassName {
             ClassName::StarterPlayer => "StarterPlayer",
             ClassName::StarterPlayerScripts => "StarterPlayerScripts",
             ClassName::Part => "Part",
+            ClassName::MeshPart => "MeshPart",
             ClassName::Script => "Script",
             ClassName::LocalScript => "LocalScript",
             ClassName::ModuleScript => "ModuleScript",
@@ -152,6 +157,16 @@ impl ClassName {
                     ("Roughness", Value::Number(preset.roughness)),
                 ]
             }
+            ClassName::MeshPart => vec![
+                ("Anchored", Value::Bool(false)),
+                // The model's file, relative to the project folder, such as
+                // "assets/models/chair.glb". Empty means no model yet.
+                ("MeshId", Value::String(String::new())),
+                ("Position", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
+                ("Orientation", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
+                // The model is stretched so its bounding box is this size.
+                ("Size", Value::Vector3(Vector3::new(2.0, 2.0, 2.0))),
+            ],
         }
     }
 
@@ -174,7 +189,7 @@ impl ClassName {
             | ClassName::Model
             | ClassName::Folder => &[],
             // Fires on both parts when two parts start touching.
-            ClassName::Part => &["Touched"],
+            ClassName::Part | ClassName::MeshPart => &["Touched"],
             // `OnServerEvent` fires in Scripts for each `FireServer`, and
             // `OnClientEvent` in LocalScripts for each `FireClient`.
             ClassName::RemoteEvent => &["OnServerEvent", "OnClientEvent"],

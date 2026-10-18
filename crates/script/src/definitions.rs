@@ -500,6 +500,31 @@ const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "Roughness",
         "From 0 (mirror-smooth) to 1 (matte).",
     ),
+    (
+        ClassName::MeshPart,
+        "Anchored",
+        "If true, the part stays where it is. If false, it falls and collides with other parts.",
+    ),
+    (
+        ClassName::MeshPart,
+        "MeshId",
+        "The model's glTF file, inside the project folder, such as \"assets/models/chair.glb\". The editor's Import Model sets it.",
+    ),
+    (
+        ClassName::MeshPart,
+        "Position",
+        "Where the center of the model's box is, in studs. Setting it on an unanchored part teleports it and stops it moving.",
+    ),
+    (
+        ClassName::MeshPart,
+        "Orientation",
+        "Rotation in degrees around X, Y and Z, applied Z first, then X, then Y.",
+    ),
+    (
+        ClassName::MeshPart,
+        "Size",
+        "The size of the model's box in studs along X, Y and Z. The model stretches to fill it.",
+    ),
 ];
 
 /// What each event means, including what its handler receives. A test
@@ -507,6 +532,11 @@ const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
 const EVENT_DOCS: &[(ClassName, &str, &str)] = &[
     (
         ClassName::Part,
+        "Touched",
+        "Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.",
+    ),
+    (
+        ClassName::MeshPart,
         "Touched",
         "Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.",
     ),
@@ -542,6 +572,9 @@ fn class_doc(class: ClassName) -> &'static str {
             "Holds the LocalScripts (`scripts/*.client.lua`), which run on the player's side."
         }
         ClassName::Part => "A solid shape in the world.",
+        ClassName::MeshPart => {
+            "A solid 3D model imported from a glTF file, drawn with the file's own materials. It collides as the model's convex hull."
+        }
         ClassName::Script => "Lua code that runs on the server, from a `.server.lua` file.",
         ClassName::LocalScript => {
             "Lua code that runs on the player's side (input, camera), from a `.client.lua` file."

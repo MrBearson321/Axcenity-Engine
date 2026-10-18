@@ -11,6 +11,9 @@ use axcenity_core::{ClassName, InstanceId, PartType, Value, Vector3, World};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Insertable {
     Part(PartType),
+    /// An imported model. Import Model makes these (with its `MeshId`), not
+    /// the Insert buttons and menus.
+    MeshPart,
     Model,
     Folder,
     RemoteEvent,
@@ -34,6 +37,7 @@ impl Insertable {
             Insertable::Part(PartType::Ball) => "Sphere",
             Insertable::Part(PartType::Cylinder) => "Cylinder",
             Insertable::Part(PartType::Wedge) => "Wedge",
+            Insertable::MeshPart => "MeshPart",
             Insertable::Model => "Model",
             Insertable::Folder => "Folder",
             Insertable::RemoteEvent => "RemoteEvent",
@@ -43,6 +47,7 @@ impl Insertable {
     pub fn class(self) -> ClassName {
         match self {
             Insertable::Part(_) => ClassName::Part,
+            Insertable::MeshPart => ClassName::MeshPart,
             Insertable::Model => ClassName::Model,
             Insertable::Folder => ClassName::Folder,
             Insertable::RemoteEvent => ClassName::RemoteEvent,
@@ -62,22 +67,24 @@ fn new_part_size(shape: PartType) -> Vector3 {
 }
 
 /// Makes a new `what`, with no parent yet. A part gets its shape and size,
-/// and is centered on `position`.
+/// and is centered on `position`, and so is a MeshPart.
 pub fn create(world: &mut World, what: Insertable, position: Vector3) -> InstanceId {
     let id = world
         .create(what.class())
         .expect("only non-services are insertable");
-    if let Insertable::Part(shape) = what {
-        let properties = [
+    let properties = match what {
+        Insertable::Part(shape) => vec![
             ("Shape", Value::PartType(shape)),
             ("Size", Value::Vector3(new_part_size(shape))),
             ("Position", Value::Vector3(position)),
-        ];
-        for (name, value) in properties {
-            world
-                .set_property(id, name, value)
-                .expect("every Part has these properties");
-        }
+        ],
+        Insertable::MeshPart => vec![("Position", Value::Vector3(position))],
+        _ => Vec::new(),
+    };
+    for (name, value) in properties {
+        world
+            .set_property(id, name, value)
+            .expect("every part has these properties");
     }
     id
 }

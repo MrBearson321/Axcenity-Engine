@@ -12,6 +12,7 @@ authors = ["Paul Janota and contributors"]
 # Crates opt in with `name.workspace = true`. Upgrade deliberately, never by accident.
 [workspace.dependencies]
 # Engine crates. In code they're named with underscores, for example `axcenity_core`.
+axcenity-assets = { path = "crates/assets" }
 axcenity-core = { path = "crates/core" }
 axcenity-physics = { path = "crates/physics" }
 axcenity-project = { path = "crates/project" }
@@ -32,6 +33,10 @@ env_logger = "0.11"
 # 0.10 is the release for egui 0.32: upgrade it with eframe.
 egui-phosphor = { version = "0.10", default-features = false, features = ["fill", "regular"] }
 glam = "0.34"
+# Loads glTF 2.0 models (.gltf and .glb), MIT OR Apache-2.0. The default
+# `import` feature reads buffers and decodes PNG and JPEG textures with the
+# `image` crate (MIT OR Apache-2.0), which eframe already uses.
+gltf = "1.4"
 log = "0.4"
 # Decodes the logo PNG for the player's window icon. (The editor gets PNG
 # decoding through eframe.)

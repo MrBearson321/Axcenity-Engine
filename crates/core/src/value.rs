@@ -76,6 +76,13 @@ impl Value {
         }
     }
 
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            Value::String(s) => Some(s),
+            _ => None,
+        }
+    }
+
     pub fn as_vector3(&self) -> Option<Vector3> {
         match self {
             Value::Vector3(v) => Some(*v),

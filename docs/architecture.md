@@ -7,13 +7,14 @@ Read before creating a crate, adding a dependency between crates, or touching th
 | Crate | Owns | May depend on |
 |---|---|---|
 | `core` | Instance tree, arena, properties, events, services | nothing engine-internal |
+| `assets` | the asset system: loading glTF models (`Assets`, `load_model`) and importing them (`import_model`) | nothing engine-internal; plain data out |
 | `render` | `wgpu` renderer | nothing engine-internal; takes a draw list |
-| `scene` | Instance tree → draw list (`build_draw_list`), the shared `FlyCamera`, viewport picking (`pick`) | `core`, `render` |
-| `physics` | `rapier3d` integration | `core` |
+| `scene` | Instance tree → draw list (`build_draw_list`), the shared `FlyCamera`, viewport picking (`pick`) | `core`, `assets`, `render` |
+| `physics` | `rapier3d` integration | `core`, `assets` |
 | `script` | Lua 5.4 (`mlua`), sandbox, scheduler, engine API | `core` |
 | `project` | project folder load and save | `core` |
-| `player` | runtime shipped with games (binary) | `core`, `render`, `scene`, `physics`, `script`, `project` |
-| `editor` | `egui` editor app (binary) | `core`, `physics`, `project`, `render`, `scene`, `script` |
+| `player` | runtime shipped with games (binary) | `core`, `assets`, `render`, `scene`, `physics`, `script`, `project` |
+| `editor` | `egui` editor app (binary) | `core`, `assets`, `physics`, `project`, `render`, `scene`, `script` |
 
 `blocks`, `ui` and `audio` are planned crates, not current workspace members. The planned export flow translates blocks to Lua, then packages projects for the player.
 
@@ -52,6 +53,7 @@ Since Phase 14, step 1 also hands LocalScripts the camera (`set_camera`) and the
 - `physics` finds script changes by comparing each Part with what it last read or wrote, not through events. Setting `Position` or `Orientation` teleports a part **and stops it** (decided in Phase 6; Roblox keeps the speed). Toggling `Anchored` also starts the part from rest.
 - **Touched** (decided in Phase 7): after every fixed step, `physics` compares the pairs of parts with a solver contact against the pairs touching before, and queues the new ones (`Physics::take_touches`). Frame step 4 fires `Touched` on both parts of each pair. Contacts already there in the very first step (parts resting on each other when the game starts) aren't reported. A pair stops counting as touching only after 3 steps in a row apart, so resting parts that lose contact for a step don't fire again, while real bounces do. Two anchored parts never touch (rapier doesn't test fixed against fixed), as in Roblox.
 - One body per Part, no welds or joints yet. Parts with NaN or infinite numbers are left out. Friction 0.5 and bounciness 0.25 for every material, plus a little angular damping because rapier has no rolling resistance.
+- **MeshParts** (Phase 17) are bodies like Parts. They collide as the **convex hull** of their model's corners, stretched to `Size` (hollows such as under a table are filled in). A flat model, or one that isn't loaded (no `MeshId`, a missing or broken file), collides as its box. The host hands physics the project's `Assets` (`Physics::with_assets`); `Physics::new()` has none, so every MeshPart is a box. A model that loads later counts as a change, and the collider is rebuilt.
 
 ## Editor (decided in Phase 8)
 
@@ -121,6 +123,14 @@ Since Phase 14, step 1 also hands LocalScripts the camera (`set_camera`) and the
 - **Damaged files**: opening reports each file that can't be loaded in Output ("Skipped a damaged file: …", with the line for bad JSON) and loads the rest. A damaged `world.json` gives an empty Workspace with a hint; fixing the file elsewhere loads it. Saving over a world file the editor never loaded first renames it to `world.backup.json` (`world.backup2.json`… if taken), so nothing is lost.
 - **Error links**: Output lines of kind Error that start with `<path>.lua:<line>:` underline that part, and clicking opens the script at that line (cursor placed, scrolled into view, the line highlighted until the code is edited).
 
+### Importing models (decided in Phase 17)
+
+- **Import** (chosen by the developer): **File > Import Model…** and an **Import** button at the end of the toolbar's Insert group both open a file picker for `.gltf`/`.glb`. The model is loaded first, so a file that can't be loaded is reported in Output ("Could not import `…`: it isn't a valid glTF file: …") and nothing is copied or inserted. Off during Play and with no project open.
+- **Copying** (`assets::import_model`): a `.glb` goes to `assets/models/<name>.glb`; a `.gltf` goes to its own folder, `assets/models/<name>/<name>.gltf`, with the `.bin` buffers and textures it uses at the same relative paths. `<name>` is the file name with only letters, digits, spaces, `-` and `_` kept, plus a number if taken (`pyramid2`). Files the model uses must be inside its folder.
+- **The MeshPart** (chosen by the developer: the file's materials, no Color or Material override) is inserted like a part: at the camera's focus point, inside the selected Model or Folder if any, named after the file (`pyramid`, `pyramid2`…), at its size in the file (1 glTF unit = 1 stud; a flat axis gets 0.001), and selected. The insert is one undo step; undo leaves the copied file in the project.
+- It moves, scales, rotates, duplicates, saves and reloads like a Part. Picking, the selection box, handles and drag-to-place all use its box (the model fills it). `MeshId` shows in Properties under Part but is read-only (importing sets it). Explorer icon: a see-through cube, part blue.
+- **Models load when first drawn** (or simulated) through the project's shared `Assets`, made on open. A model that can't be loaded is reported once in Output ("Could not load the model `assets/models/x.glb`: the file isn't there") and drawn as a grey box. Model files aren't watched: a changed model shows after opening the project again.
+
 ### Server and client (decided in Phase 14)
 
 - **Explorer**: `game` has Workspace, Players, ReplicatedStorage, ServerScriptService and StarterPlayer (with StarterPlayerScripts), in that order, all locked like services. During Play, Players holds the Player.
@@ -153,4 +163,4 @@ Play runs in-process on a **deep copy** of the edit world, and Stop drops the co
 
 ## Portability
 
-Target Windows, macOS and Linux. All runtime file access goes through the asset system, never direct `std::fs` calls in gameplay code, so web and mobile stay possible later.
+Target Windows, macOS and Linux. All runtime file access goes through the asset system (the `assets` crate, since Phase 17), never direct `std::fs` calls in gameplay code, so web and mobile stay possible later.

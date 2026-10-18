@@ -13,6 +13,7 @@ use std::collections::BTreeSet;
 use std::panic::{self, AssertUnwindSafe};
 use std::path::Path;
 
+use axcenity_assets::Assets;
 use axcenity_core::{KeyCode, World};
 use axcenity_physics::Physics;
 use axcenity_project::ScriptFile;
@@ -38,16 +39,18 @@ pub struct Session {
 impl Session {
     /// Copies `edit_world` and starts every script in it, in the order given
     /// (Scripts, then LocalScripts, as the project lists them), the same way
-    /// the player does. Script output and errors go to `output`.
+    /// the player does. Script output and errors go to `output`. MeshParts
+    /// collide as their models from `assets`.
     pub fn start(
         edit_world: &World,
         scripts: &[ScriptFile],
         output: &mut Output,
+        assets: Assets,
     ) -> Result<Session, Crash> {
         let mut session = Session {
             world: edit_world.clone(),
             scripts: ScriptRuntime::new(),
-            physics: Physics::new(),
+            physics: Physics::with_assets(assets),
             panic_next_frame: false,
         };
         guard(|| {
@@ -323,7 +326,7 @@ mod tests {
             "local p = Instance.new('Part') p.Name = 'Made' p.Parent = workspace print('hi')",
         )];
         let mut output = Output::default();
-        let session = Session::start(&world, &scripts, &mut output).unwrap();
+        let session = Session::start(&world, &scripts, &mut output, Assets::default()).unwrap();
 
         let made = session.world().find_first_child(world.workspace(), "Made");
         assert!(made.is_some());
@@ -336,7 +339,7 @@ mod tests {
         let mut world = World::new();
         let scripts = [script(&mut world, "task.wait(1)\nerror('boom')")];
         let mut output = Output::default();
-        let mut session = Session::start(&world, &scripts, &mut output).unwrap();
+        let mut session = Session::start(&world, &scripts, &mut output, Assets::default()).unwrap();
         for _ in 0..90 {
             session
                 .frame(1.0 / 60.0, &[], CameraState::default(), &mut output)
@@ -350,7 +353,8 @@ mod tests {
     #[test]
     fn a_panic_in_a_frame_is_caught_with_its_message() {
         let mut output = Output::default();
-        let mut session = Session::start(&World::new(), &[], &mut output).unwrap();
+        let mut session =
+            Session::start(&World::new(), &[], &mut output, Assets::default()).unwrap();
         let camera = CameraState::default();
         session.frame(1.0 / 60.0, &[], camera, &mut output).unwrap();
         session.panic_next_frame();
@@ -424,7 +428,7 @@ mod tests {
             .to_string(),
         }];
         let mut output = Output::default();
-        let mut session = Session::start(&world, &scripts, &mut output).unwrap();
+        let mut session = Session::start(&world, &scripts, &mut output, Assets::default()).unwrap();
         let space = KeyEvent {
             key: KeyCode::Space,
             pressed: true,

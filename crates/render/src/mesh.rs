@@ -20,6 +20,9 @@ const ROUND_SEGMENTS: u16 = 32;
 pub struct Vertex {
     pub position: [f32; 3],
     pub normal: [f32; 3],
+    /// Where on the texture this corner is. The built-in shapes have no
+    /// texture, so theirs are all (0, 0).
+    pub uv: [f32; 2],
 }
 
 #[derive(Default)]
@@ -35,6 +38,7 @@ impl MeshData {
         self.vertices.push(Vertex {
             position: position.to_array(),
             normal: normal.to_array(),
+            uv: [0.0, 0.0],
         });
         index
     }
