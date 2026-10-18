@@ -164,7 +164,7 @@ fn model_material(material: &ModelMaterial) -> Material {
             normal: material.normal_texture.as_ref().map(|image| NormalMap {
                 texture: texture(image),
                 scale: material.normal_scale,
-                flip_green: false,
+                flip_green: material.normal_flip_green,
             }),
             metalness: material.metalness_texture.as_ref().map(channel_map),
             roughness: material.roughness_texture.as_ref().map(channel_map),

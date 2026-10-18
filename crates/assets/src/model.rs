@@ -8,12 +8,13 @@
 //! `Size` an imported MeshPart starts with.
 
 mod fbx;
+mod maps;
 mod objects;
 
 pub use objects::{ModelObject, Pick};
 
 #[cfg(test)]
-pub(crate) use fbx::tests::{checker_png, pyramid_fbx};
+pub(crate) use fbx::tests::{TestTexture, checker_png, pyramid_fbx, pyramid_fbx_with_textures};
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -157,6 +158,9 @@ pub struct ModelMaterial {
     pub normal_texture: Option<Arc<Image>>,
     /// Scales how far the normal map tips the normals.
     pub normal_scale: f32,
+    /// True if the normal map's green points down the texture (DirectX's
+    /// convention) instead.
+    pub normal_flip_green: bool,
     /// Multiplies `metalness`.
     pub metalness_texture: Option<ChannelTexture>,
     /// Multiplies `roughness`.
@@ -187,6 +191,7 @@ impl Default for ModelMaterial {
             base_color_texture: None,
             normal_texture: None,
             normal_scale: 1.0,
+            normal_flip_green: false,
             metalness_texture: None,
             roughness_texture: None,
             occlusion_texture: None,
@@ -373,6 +378,19 @@ pub(crate) fn files_used(
                 .collect()
         }
         ModelFormat::Fbx => fbx::files_used(bytes, folder),
+    }))
+    .unwrap_or(Err(ModelError::Damaged))
+}
+
+/// The image files embedded in a model, as file names and bytes, for
+/// copying out on import. Only FBX's for now; a glTF's stay inside it.
+pub(crate) fn embedded_files(
+    bytes: &[u8],
+    format: ModelFormat,
+) -> Result<Vec<(String, Vec<u8>)>, ModelError> {
+    panic::catch_unwind(AssertUnwindSafe(|| match format {
+        ModelFormat::Gltf => Ok(Vec::new()),
+        ModelFormat::Fbx => fbx::embedded_textures(bytes),
     }))
     .unwrap_or(Err(ModelError::Damaged))
 }
@@ -787,6 +805,7 @@ impl Reader<'_> {
             base_color_texture,
             normal_texture,
             normal_scale,
+            normal_flip_green: false,
             metalness_texture: metallic_roughness
                 .clone()
                 .map(|image| ChannelTexture::new(image, Channel::Blue)),

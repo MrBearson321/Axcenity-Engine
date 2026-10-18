@@ -9,6 +9,9 @@ use crate::model::{self, Model, ModelError, ModelFormat, ModelObject, Pick};
 
 /// Where imported models go, inside the project folder.
 pub const MODELS_FOLDER: &str = "assets/models";
+/// Where an imported model's embedded textures are copied out to, inside
+/// its folder.
+pub const TEXTURES_FOLDER: &str = "textures";
 
 #[derive(Debug, thiserror::Error)]
 pub enum ImportError {
@@ -32,7 +35,7 @@ pub enum ImportError {
 ///
 /// A `.glb` or `.fbx` that uses no other files is copied as one file,
 /// `<name>.glb` or `<name>.fbx`. A `.gltf`, or a model that uses other
-/// files beside it (`.bin` buffers, textures), goes into a folder of its
+/// files beside it (`.bin` buffers, textures) or embeds textures, goes into a folder of its
 /// own, `<name>/<name>.gltf`, with them at the same paths. A number goes
 /// after the name if it's taken. The model is loaded first, so a file the
 /// engine can't load is never copied. An FBX texture that isn't there is
@@ -59,10 +62,11 @@ pub fn import_picks(
     let folder = file.parent().unwrap_or(Path::new("."));
     let models = model::load_models(&bytes, folder, format, picks)?;
     let used = model::files_used(&bytes, folder, format)?;
+    let embedded = model::embedded_files(&bytes, format)?;
 
     let name = file_name(file);
     let models_folder = project.join(MODELS_FOLDER);
-    let mesh_id = if used.is_empty() && extension != "gltf" {
+    let mesh_id = if used.is_empty() && embedded.is_empty() && extension != "gltf" {
         let name = free_name(&models_folder, &name, &format!(".{extension}"));
         let mesh_id = format!("{MODELS_FOLDER}/{name}.{extension}");
         copy(file, &project.join(&mesh_id))?;
@@ -72,6 +76,13 @@ pub fn import_picks(
         let copy_folder = models_folder.join(&name);
         for path in used {
             copy(&folder.join(&path), &copy_folder.join(&path))?;
+        }
+        // Embedded textures, copied out as files too, so they can be seen
+        // and used on their own. The model still draws with its own copies.
+        let textures = copy_folder.join(TEXTURES_FOLDER);
+        for (texture, content) in embedded {
+            let texture = unique_file_name(&texture, |taken| textures.join(taken).exists());
+            write(&textures.join(texture), &content)?;
         }
         // Renamed to match its folder. Nothing in a model refers to its own file.
         copy(file, &copy_folder.join(format!("{name}.{extension}")))?;
@@ -117,6 +128,41 @@ fn file_name(file: &Path) -> String {
     }
 }
 
+/// The last part of `path` (with `/` or `\` between folders) as a file
+/// name that works on every OS: letters, digits, spaces, `-`, `_` and `.`
+/// kept, anything else `_`. `None` if nothing is left but dots and spaces.
+pub(crate) fn safe_file_name(path: &str) -> Option<String> {
+    let name = path.rsplit(['/', '\\']).next().unwrap_or_default();
+    let name: String = name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let name = name.trim_matches([' ', '.']);
+    (!name.is_empty()).then(|| name.to_owned())
+}
+
+/// `name`, or `name` with 2, 3… before its extension, the first that
+/// `taken` says isn't.
+pub(crate) fn unique_file_name(name: &str, taken: impl Fn(&str) -> bool) -> String {
+    let (stem, extension) = match name.rsplit_once('.') {
+        Some((stem, extension)) => (stem, format!(".{extension}")),
+        None => (name, String::new()),
+    };
+    (1u32..)
+        .map(|n| match n {
+            1 => name.to_owned(),
+            n => format!("{stem}{n}{extension}"),
+        })
+        .find(|name| !taken(name))
+        .expect("some number is always free")
+}
+
 /// `name`, or `name2`, `name3`… the first with nothing called that (plus
 /// `suffix`) in `folder`.
 fn free_name(folder: &Path, name: &str, suffix: &str) -> String {
@@ -127,6 +173,17 @@ fn free_name(folder: &Path, name: &str, suffix: &str) -> String {
         })
         .find(|name| !folder.join(format!("{name}{suffix}")).exists())
         .expect("some number is always free")
+}
+
+fn write(to: &Path, content: &[u8]) -> Result<(), ImportError> {
+    let error = |source| ImportError::Copy {
+        path: to.to_owned(),
+        source,
+    };
+    if let Some(parent) = to.parent() {
+        fs::create_dir_all(parent).map_err(error)?;
+    }
+    fs::write(to, content).map_err(error)
 }
 
 fn copy(from: &Path, to: &Path) -> Result<(), ImportError> {
@@ -269,6 +326,27 @@ mod tests {
         let model = assets.model(&mesh_id).unwrap();
         assert!(model.primitives[0].material.base_color_texture.is_some());
         assert!(assets.take_errors().is_empty());
+    }
+
+    #[test]
+    fn an_fbxs_embedded_textures_are_copied_out_next_to_it() {
+        let source = temp_folder("import-fbx-embedded-source");
+        let png = model::checker_png();
+        let fbx = model::pyramid_fbx_with_textures(
+            false,
+            &[model::TestTexture {
+                property: Some("DiffuseColor"),
+                path: "C:/Users/artist/Desktop/wood.png",
+                embedded: Some(&png),
+            }],
+        );
+        fs::write(source.join("crate.fbx"), fbx).unwrap();
+        let project = temp_folder("import-fbx-embedded");
+        let (mesh_id, model) = import_model(&project, &source.join("crate.fbx")).unwrap();
+        assert!(model.warnings.is_empty(), "{:?}", model.warnings);
+        assert_eq!(mesh_id, "assets/models/crate/crate.fbx");
+        let copied = project.join("assets/models/crate/textures/wood.png");
+        assert_eq!(fs::read(copied).unwrap(), png);
     }
 
     #[test]

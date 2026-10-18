@@ -18,6 +18,7 @@ use std::sync::Arc;
 use glam::{DMat3, DMat4, DVec3, Vec3};
 use ufbx::{CoordinateAxes, CoordinateAxis, ShaderType};
 
+use super::maps::{self, Role};
 use super::objects::{self, Listed, Siblings};
 use super::{
     AlphaMode, Channel, ChannelTexture, Image, MAX_NODE_DEPTH, Model, ModelError, ModelMaterial,
@@ -32,11 +33,15 @@ pub(super) fn load(bytes: &[u8], folder: &Path, picks: &[Pick]) -> Result<Vec<Mo
     let mut reader = Reader {
         folder,
         images: HashMap::new(),
+        materials: HashMap::new(),
+        loose: loose_textures(&scene),
         primitives: Vec::new(),
         warnings: Vec::new(),
     };
     let mut models = Vec::new();
     for pick in picks {
+        // Each model notes its own materials' problems.
+        reader.materials.clear();
         let wanted = pick.paths();
         let mut found = HashSet::new();
         reader.children(&scene.root_node, "", &wanted, &mut found);
@@ -49,6 +54,93 @@ pub(super) fn load(bytes: &[u8], folder: &Path, picks: &[Pick]) -> Result<Vec<Mo
         models.push(model);
     }
     Ok(models)
+}
+
+/// Textures no material links (often embedded maps an exporter didn't
+/// connect), each with the element ID of the material it's for, if any:
+/// the file's only material, or the one whose name is the longest part
+/// of the texture's name (`Bench` for `T_Bench_Normal.png`).
+fn loose_textures(scene: &ufbx::Scene) -> Vec<(&ufbx::Texture, Option<u32>)> {
+    let keys: Vec<(String, u32)> = scene
+        .materials
+        .iter()
+        .map(|material| {
+            (
+                maps::name_key(&material.element.name),
+                material.element.element_id,
+            )
+        })
+        .filter(|(key, _)| key.len() >= 3)
+        .collect();
+    let only = match scene.materials.len() {
+        1 => Some(scene.materials[0].element.element_id),
+        _ => None,
+    };
+    unlinked_textures(scene)
+        .into_iter()
+        .map(|texture| {
+            let name = maps::name_key(&texture_name(texture));
+            let owner = only.or_else(|| {
+                keys.iter()
+                    .filter(|(key, _)| name.contains(key.as_str()))
+                    .max_by_key(|(key, _)| key.len())
+                    .map(|(_, id)| *id)
+            });
+            (texture, owner)
+        })
+        .collect()
+}
+
+fn unlinked_textures(scene: &ufbx::Scene) -> Vec<&ufbx::Texture> {
+    let linked: HashSet<u32> = scene
+        .materials
+        .iter()
+        .flat_map(|material| material.textures.iter())
+        .flat_map(|link| {
+            std::iter::once(&link.texture)
+                .chain(link.texture.file_textures.iter())
+                .map(|texture| texture.element.element_id)
+        })
+        .collect();
+    scene
+        .textures
+        .iter()
+        .filter(|texture| texture.type_ == ufbx::TextureType::File)
+        .filter(|texture| !linked.contains(&texture.element.element_id))
+        .map(|texture| &**texture)
+        .collect()
+}
+
+/// The image files embedded in an FBX file, as file names (made safe, and
+/// unique) and their bytes as they are, for copying out on import.
+pub(super) fn embedded_textures(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, ModelError> {
+    let scene = parse(bytes)?;
+    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
+    for texture in &scene.textures {
+        if texture.content.is_empty() {
+            continue;
+        }
+        let content: &[u8] = &texture.content;
+        // The same image used by several textures is one file.
+        if files.iter().any(|(_, bytes)| bytes.as_slice() == content) {
+            continue;
+        }
+        let name = match crate::import::safe_file_name(file_name(texture)) {
+            Some(name) => name,
+            None => {
+                let extension = image::guess_format(content)
+                    .ok()
+                    .and_then(|format| format.extensions_str().first().copied())
+                    .unwrap_or("bin");
+                format!("embedded{}.{extension}", files.len() + 1)
+            }
+        };
+        let name = crate::import::unique_file_name(&name, |taken| {
+            files.iter().any(|(n, _)| n.eq_ignore_ascii_case(taken))
+        });
+        files.push((name, content.to_vec()));
+    }
+    Ok(files)
 }
 
 /// The objects in an FBX file: its visible nodes with meshes, and the
@@ -165,6 +257,12 @@ struct Reader<'a> {
     /// Textures decoded so far, by element ID, so shared ones decode once.
     /// `None` means it couldn't be, and was noted.
     images: HashMap<u32, Option<Arc<Image>>>,
+    /// Materials made so far for this model, by element ID, so each is
+    /// worked out (and its problems noted) once.
+    materials: HashMap<u32, ModelMaterial>,
+    /// Textures no material links, and the materials they're for (see
+    /// [`loose_textures`]).
+    loose: Vec<(&'a ufbx::Texture, Option<u32>)>,
     primitives: Vec<Primitive>,
     warnings: Vec<String>,
 }
@@ -216,7 +314,7 @@ impl Reader<'_> {
                 .get(part.index as usize)
                 .or_else(|| mesh.materials.get(part.index as usize));
             let mut material = match material {
-                Some(material) => self.material(material),
+                Some(material) => self.cached_material(material),
                 None => ModelMaterial::default(),
             };
             let want_uvs = material.has_textures() && mesh.vertex_uv.exists;
@@ -401,7 +499,7 @@ impl Reader<'_> {
             None
         };
 
-        ModelMaterial {
+        let mut result = ModelMaterial {
             name: material.element.name.to_string(),
             base_color: [base.x, base.y, base.z, opacity].map(unit),
             metalness: match metalness_texture {
@@ -424,6 +522,103 @@ impl Reader<'_> {
             emissive_texture,
             opacity_texture,
             specular_texture,
+            ..ModelMaterial::default()
+        };
+        self.named_maps(material, classic, &mut result);
+        self.loose_maps(material, &mut result);
+        result
+    }
+
+    /// [`material`](Self::material), worked out once per model.
+    fn cached_material(&mut self, material: &ufbx::Material) -> ModelMaterial {
+        let id = material.element.element_id;
+        if let Some(made) = self.materials.get(&id) {
+            return made.clone();
+        }
+        let made = self.material(material);
+        self.materials.insert(id, made.clone());
+        made
+    }
+
+    /// Goes through every texture `material` links, by its file name (or
+    /// else the property it's linked to): a packed map is split into its
+    /// channels, a map on a property not read above is used for the role
+    /// its name says, and one with no known role is noted and left out.
+    /// For Lambert and Phong (`classic`), whose few slots exporters often
+    /// misuse, the name also wins over the slot.
+    fn named_maps(&mut self, material: &ufbx::Material, classic: bool, result: &mut ModelMaterial) {
+        for link in &material.textures {
+            let texture = &link.texture;
+            let name = texture_name(texture);
+            // The property says no more than the slots read above, except
+            // that a bump or displacement map is a height map.
+            let property = link.material_prop.to_lowercase();
+            let height = ["bump", "displacement", "height"]
+                .iter()
+                .any(|word| property.contains(word));
+            let role = maps::role_from_name(&name).or(height.then_some(Role::Height));
+            // A texture that couldn't be decoded was noted already.
+            let Some(image) = self.image(texture) else {
+                continue;
+            };
+            match (result.role_of(&image), role) {
+                (Some(Role::Normal { .. }), Some(Role::Normal { flip_green })) => {
+                    result.normal_flip_green = flip_green;
+                }
+                (Some(linked), Some(named)) if linked == named => {}
+                (Some(_), Some(named)) if classic || matches!(named, Role::Packed(_)) => {
+                    result.remove_image(&image);
+                    self.use_map(result, named, image, &name);
+                }
+                // Used for its slot.
+                (Some(_), _) => {}
+                (None, Some(named)) => {
+                    if !result.has(named) {
+                        self.use_map(result, named, image, &name);
+                    }
+                }
+                (None, None) => self.note(format!(
+                    "has a texture `{name}` it doesn't know the use of, so it's left out;                      naming it like `{}_Normal` or `_Roughness` says what it's for",
+                    material.element.name
+                )),
+            }
+        }
+    }
+
+    /// Uses the textures no material links ([`loose_textures`]) that are
+    /// for `material`, for the roles their names say, where it has no map yet.
+    fn loose_maps(&mut self, material: &ufbx::Material, result: &mut ModelMaterial) {
+        let id = material.element.element_id;
+        let loose: Vec<&ufbx::Texture> = self
+            .loose
+            .iter()
+            .filter(|(_, owner)| *owner == Some(id))
+            .map(|(texture, _)| *texture)
+            .collect();
+        for texture in loose {
+            let name = texture_name(texture);
+            if let Some(role) = maps::role_from_name(&name)
+                && !result.has(role)
+                && let Some(image) = self.image(texture)
+            {
+                self.use_map(result, role, image, &name);
+            }
+        }
+    }
+
+    /// Uses `image` for `role`, noting it if that's a height map.
+    fn use_map(&mut self, result: &mut ModelMaterial, role: Role, image: Arc<Image>, name: &str) {
+        if !result.set_map(role, image) {
+            self.note(format!(
+                "has a height map `{name}`, which isn't used; a normal map gives the same bumps"
+            ));
+        }
+    }
+
+    /// Notes a problem in the model's warnings, once.
+    fn note(&mut self, warning: String) {
+        if !self.warnings.contains(&warning) {
+            self.warnings.push(warning);
         }
     }
 
@@ -462,8 +657,7 @@ impl Reader<'_> {
         let image = match image {
             Ok(image) => Some(Arc::new(image)),
             Err(reason) => {
-                self.warnings
-                    .push(format!("is drawn without its texture `{name}`: {reason}"));
+                self.note(format!("is drawn without its texture `{name}`: {reason}"));
                 None
             }
         };
@@ -623,6 +817,28 @@ pub(crate) mod tests {
     /// texture linked to that property of the material ("DiffuseColor",
     /// "NormalMap", "SpecularColor"…).
     pub(crate) fn pyramid_fbx_with_maps(z_up: bool, maps: &[(&str, &str)]) -> String {
+        let textures: Vec<TestTexture> = maps
+            .iter()
+            .map(|&(property, path)| TestTexture {
+                property: Some(property),
+                path,
+                embedded: None,
+            })
+            .collect();
+        pyramid_fbx_with_textures(z_up, &textures)
+    }
+
+    /// A texture in a test FBX file.
+    pub(crate) struct TestTexture<'a> {
+        /// The material property it's linked to, or `None` for none.
+        pub(crate) property: Option<&'a str>,
+        pub(crate) path: &'a str,
+        /// The image file's bytes, if it's embedded in the FBX file.
+        pub(crate) embedded: Option<&'a [u8]>,
+    }
+
+    /// Like [`pyramid_fbx`], with `textures`.
+    pub(crate) fn pyramid_fbx_with_textures(z_up: bool, textures: &[TestTexture]) -> String {
         let (up_axis, front_axis, front_sign, unit, vertices) = if z_up {
             (
                 2,
@@ -636,8 +852,8 @@ pub(crate) mod tests {
         };
         let mut texture_object = String::new();
         let mut texture_connection = String::new();
-        for (i, (property, path)) in maps.iter().enumerate() {
-            let id = 4000 + i;
+        for (i, texture) in textures.iter().enumerate() {
+            let (id, path) = (4000 + i, texture.path);
             texture_object.push_str(&format!(
                 "\tTexture: {id}, \"Texture::Map{i}\", \"\" {{\n\
                  \t\tType: \"TextureVideoClip\"\n\
@@ -647,7 +863,22 @@ pub(crate) mod tests {
                  \t\tRelativeFilename: \"{path}\"\n\
                  \t}}\n"
             ));
-            texture_connection.push_str(&format!("\tC: \"OP\",{id},3000, \"{property}\"\n"));
+            if let Some(property) = texture.property {
+                texture_connection.push_str(&format!("\tC: \"OP\",{id},3000, \"{property}\"\n"));
+            }
+            if let Some(content) = texture.embedded {
+                let video = 5000 + i;
+                let content = base64(content);
+                texture_object.push_str(&format!(
+                    "\tVideo: {video}, \"Video::Map{i}\", \"Clip\" {{\n\
+                     \t\tType: \"Clip\"\n\
+                     \t\tFileName: \"C:/Users/artist/Desktop/{path}\"\n\
+                     \t\tRelativeFilename: \"{path}\"\n\
+                     \t\tContent: , \"{content}\"\n\
+                     \t}}\n"
+                ));
+                texture_connection.push_str(&format!("\tC: \"OO\",{video},{id}\n"));
+            }
         }
         format!(
             r#"; FBX 7.4.0 project file
@@ -794,6 +1025,27 @@ Connections:  {
 }
 "#
         .to_owned()
+    }
+
+    /// `bytes` in base64, as ASCII FBX files embed files.
+    fn base64(bytes: &[u8]) -> String {
+        const DIGITS: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut text = String::new();
+        for chunk in bytes.chunks(3) {
+            let n = chunk
+                .iter()
+                .enumerate()
+                .fold(0u32, |n, (i, &b)| n | u32::from(b) << (16 - 8 * i));
+            for i in 0..4 {
+                if i <= chunk.len() {
+                    text.push(DIGITS[(n >> (18 - 6 * i) & 63) as usize] as char);
+                } else {
+                    text.push('=');
+                }
+            }
+        }
+        text
     }
 
     /// A 2×2 checkered PNG.
@@ -951,6 +1203,124 @@ Connections:  {
         assert!(height.primitives[0].material.normal_texture.is_none());
         // With no texture left, it needs no texture coordinates.
         assert!(height.primitives[0].uvs.is_empty());
+    }
+
+    /// A texture file in `folder`, linked to `property`.
+    fn linked<'a>(property: &'a str, path: &'a str) -> TestTexture<'a> {
+        TestTexture {
+            property: Some(property),
+            path,
+            embedded: None,
+        }
+    }
+
+    #[test]
+    fn embedded_textures_are_used_and_listed_for_copying_out() {
+        let folder = temp_folder("embedded");
+        let png = checker_png();
+        let fbx = pyramid_fbx_with_textures(
+            false,
+            &[TestTexture {
+                property: Some("DiffuseColor"),
+                path: "wood_BaseColor.png",
+                embedded: Some(&png),
+            }],
+        );
+        // Nothing is in the folder: the texture comes from the file itself.
+        let model = load_fbx(&fbx, &folder).unwrap();
+        assert!(model.warnings.is_empty(), "{:?}", model.warnings);
+        let texture = model.primitives[0].material.base_color_texture.as_ref();
+        assert_eq!(texture.map(|t| (t.width, t.height)), Some((2, 2)));
+        let files = embedded_textures(fbx.as_bytes()).unwrap();
+        assert_eq!(files, vec![("wood_BaseColor.png".to_owned(), png)]);
+    }
+
+    #[test]
+    fn packed_textures_are_split_into_maps_by_their_names() {
+        let folder = temp_folder("packed");
+        std::fs::write(folder.join("rock_ORM.png"), solid_png([255, 128, 0, 255])).unwrap();
+        std::fs::write(
+            folder.join("crate_MetallicSmoothness.png"),
+            solid_png([255, 0, 0, 128]),
+        )
+        .unwrap();
+
+        // On a property the engine doesn't read: its name says what it is.
+        let orm = load_fbx(
+            &pyramid_fbx_with_textures(false, &[linked("CustomPacked", "rock_ORM.png")]),
+            &folder,
+        )
+        .unwrap();
+        let material = &orm.primitives[0].material;
+        let channel = |map: &Option<ChannelTexture>| map.as_ref().map(|map| map.channel);
+        assert_eq!(channel(&material.occlusion_texture), Some(Channel::Red));
+        assert_eq!(channel(&material.roughness_texture), Some(Channel::Green));
+        assert_eq!(channel(&material.metalness_texture), Some(Channel::Blue));
+        assert_eq!((material.metalness, material.roughness), (1.0, 1.0));
+
+        // In a Phong material's specular slot, as Unity-made files have it:
+        // the name wins, and it's metalness and smoothness.
+        let unity = load_fbx(
+            &pyramid_fbx_with_textures(
+                false,
+                &[linked("SpecularColor", "crate_MetallicSmoothness.png")],
+            ),
+            &folder,
+        )
+        .unwrap();
+        let material = &unity.primitives[0].material;
+        assert!(material.specular_texture.is_none());
+        assert_eq!(channel(&material.metalness_texture), Some(Channel::Red));
+        let roughness = material.roughness_texture.as_ref().unwrap();
+        assert_eq!(
+            (roughness.channel, roughness.invert),
+            (Channel::Alpha, true)
+        );
+    }
+
+    #[test]
+    fn an_unlinked_embedded_texture_is_used_by_its_name() {
+        let folder = temp_folder("loose");
+        let png = solid_png([128, 128, 255, 255]);
+        let fbx = pyramid_fbx_with_textures(
+            false,
+            &[
+                linked("DiffuseColor", "color.png"),
+                TestTexture {
+                    property: None,
+                    path: "Red_Normal.png",
+                    embedded: Some(&png),
+                },
+            ],
+        );
+        std::fs::write(folder.join("color.png"), checker_png()).unwrap();
+        let model = load_fbx(&fbx, &folder).unwrap();
+        assert!(model.primitives[0].material.normal_texture.is_some());
+    }
+
+    #[test]
+    fn textures_of_unknown_use_and_height_maps_are_noted_and_left_out() {
+        let folder = temp_folder("unknown");
+        std::fs::write(folder.join("wood.png"), checker_png()).unwrap();
+        std::fs::write(folder.join("bricks.png"), solid_png([90, 90, 90, 255])).unwrap();
+        let fbx = pyramid_fbx_with_textures(
+            false,
+            &[
+                linked("CustomThing", "wood.png"),
+                linked("Bump", "bricks.png"),
+            ],
+        );
+        let model = load_fbx(&fbx, &folder).unwrap();
+        let warnings = model.warnings.join("\n");
+        assert!(
+            warnings.contains("has a texture `wood.png` it doesn't know the use of"),
+            "{warnings}"
+        );
+        assert!(
+            warnings.contains("has a height map `bricks.png`"),
+            "{warnings}"
+        );
+        assert!(!model.primitives[0].material.has_textures());
     }
 
     #[test]
