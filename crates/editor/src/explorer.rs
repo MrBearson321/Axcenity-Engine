@@ -2,7 +2,8 @@
 //! that open and close. Clicking a row selects that Instance.
 //!
 //! Right-clicking a row opens a menu to insert, rename, duplicate or delete,
-//! and dragging a row onto another moves it inside that one. The Explorer
+//! and dragging a row onto another moves it inside that one. Double-clicking
+//! a Script opens it in a script tab. The Explorer
 //! never changes the world itself: [`Explorer::show`] returns an [`Action`]
 //! and the app carries it out, so it's recorded for undo.
 //!
@@ -22,6 +23,8 @@ use crate::tree::{self, Insertable};
 const INDENT: f32 = 14.0;
 /// The size of the open/close arrow's clickable square, in points.
 const ARROW_SIZE: f32 = 16.0;
+/// The hover text of every "Insert Script" button and menu item.
+pub const SCRIPT_HOVER: &str = "Make a new server script in ServerScriptService, with its .server.lua file in the      project's scripts folder, and open it.";
 /// The outline around the row something would be dropped into: the same
 /// blue as the viewport's selection box.
 const DROP_COLOR: egui::Color32 = egui::Color32::from_rgb(25, 160, 255);
@@ -57,6 +60,8 @@ pub enum Action {
         what: Insertable,
         near: Option<InstanceId>,
     },
+    /// Make a new script file and its Script in ServerScriptService.
+    InsertScript,
     Rename(InstanceId, String),
     Duplicate(InstanceId),
     Delete(InstanceId),
@@ -73,6 +78,9 @@ pub struct ExplorerOutput {
     /// A row that was clicked (with either button), to select.
     pub clicked: Option<InstanceId>,
     pub action: Option<Action>,
+    /// A Script to open in a tab: its row was double-clicked, or Open was
+    /// picked in its menu. Works during Play too.
+    pub open: Option<InstanceId>,
 }
 
 /// What egui's drag and drop carries while a row is being dragged.
@@ -259,6 +267,9 @@ impl Explorer {
                     if row.has_children && label.double_clicked() {
                         toggled = Some(row.id);
                     }
+                    if row.class == ClassName::Script && label.double_clicked() {
+                        output.open = Some(row.id);
+                    }
 
                     if !editable {
                         return;
@@ -271,6 +282,7 @@ impl Explorer {
                     }
                     label.context_menu(|ui| match row_menu(ui, world, row.id) {
                         Some(RowCommand::Rename) => start_rename = Some(row.id),
+                        Some(RowCommand::Open) => output.open = Some(row.id),
                         Some(command) => output.action = command.action(row.id),
                         None => {}
                     });
@@ -376,6 +388,9 @@ fn paint_dragged_name(ui: &egui::Ui, world: &World, id: InstanceId) {
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum RowCommand {
     Insert(Insertable),
+    InsertScript,
+    /// Open a Script in a tab.
+    Open,
     Rename,
     Duplicate,
     Delete,
@@ -384,23 +399,32 @@ enum RowCommand {
 impl RowCommand {
     /// The tree action for this command on `id`'s row. Renaming isn't one
     /// yet: it starts a text box, and the rename comes when it's done.
+    /// Opening a script doesn't change the tree.
     fn action(self, id: InstanceId) -> Option<Action> {
         match self {
             RowCommand::Insert(what) => Some(Action::Insert {
                 what,
                 near: Some(id),
             }),
-            RowCommand::Rename => None,
+            RowCommand::InsertScript => Some(Action::InsertScript),
+            RowCommand::Open | RowCommand::Rename => None,
             RowCommand::Duplicate => Some(Action::Duplicate(id)),
             RowCommand::Delete => Some(Action::Delete(id)),
         }
     }
 }
 
-/// The right-click menu of `id`'s row: Insert ▸, then Rename, Duplicate and
-/// Delete, greyed out (with the reason on hover) where they can't be done.
+/// The right-click menu of `id`'s row: Open (for Scripts), Insert ▸, then
+/// Rename, Duplicate and Delete, greyed out (with the reason on hover) where
+/// they can't be done.
 fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowCommand> {
     let mut chosen = None;
+    let is_script = world
+        .get(id)
+        .is_some_and(|instance| instance.class() == ClassName::Script);
+    if is_script && ui.button("Open").clicked() {
+        chosen = Some(RowCommand::Open);
+    }
     ui.menu_button("Insert", |ui| {
         for what in Insertable::PARTS {
             if ui.button(what.label()).clicked() {
@@ -413,6 +437,10 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
                 chosen = Some(RowCommand::Insert(what));
             }
         }
+        ui.separator();
+        if ui.button("Script").on_hover_text(SCRIPT_HOVER).clicked() {
+            chosen = Some(RowCommand::InsertScript);
+        }
     });
     ui.separator();
 
@@ -420,7 +448,7 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
     let rename = egui::Button::new("Rename").shortcut_text(RENAME_KEY.name());
     if ui
         .add_enabled(renamable, rename)
-        .on_disabled_hover_text("Services and Scripts keep their names.")
+        .on_disabled_hover_text("Services keep their names.")
         .clicked()
     {
         chosen = Some(RowCommand::Rename);
@@ -436,10 +464,11 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
     {
         chosen = Some(RowCommand::Duplicate);
     }
+    let deletable = tree::check_delete(world, id);
     let delete = egui::Button::new("Delete").shortcut_text(DELETE_KEY_TEXT);
     if ui
-        .add_enabled(editable.is_ok(), delete)
-        .on_disabled_hover_text(reason)
+        .add_enabled(deletable.is_ok(), delete)
+        .on_disabled_hover_text(deletable.err().unwrap_or_default())
         .clicked()
     {
         chosen = Some(RowCommand::Delete);

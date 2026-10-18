@@ -97,17 +97,18 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>) -> InstanceId {
 /// "Part2", "Part3"). A number already on the end is replaced, so a copy of
 /// "Part2" is "Part3", not "Part22".
 pub fn unique_name(world: &World, parent: InstanceId, wanted: &str) -> String {
-    let taken = |name: &str| world.find_first_child(parent, name).is_some();
-    if !taken(wanted) {
-        return wanted.to_string();
-    }
+    numbered_names(wanted)
+        .find(|name| world.find_first_child(parent, name).is_none())
+        .expect("some number is always free")
+}
+
+/// `wanted`, then `wanted` with 2, 3, 4… on the end, without end. A number
+/// already on the end is replaced.
+pub fn numbered_names(wanted: &str) -> impl Iterator<Item = String> {
     let stem = wanted.trim_end_matches(|c: char| c.is_ascii_digit());
     // A name that is all digits, such as "7", keeps them: "72", "73".
-    let stem = if stem.is_empty() { wanted } else { stem };
-    (2u64..)
-        .map(|number| format!("{stem}{number}"))
-        .find(|name| !taken(name))
-        .expect("some number is always free")
+    let stem = if stem.is_empty() { wanted } else { stem }.to_string();
+    std::iter::once(wanted.to_string()).chain((2u64..).map(move |number| format!("{stem}{number}")))
 }
 
 /// Whether `id` can be deleted, duplicated or moved, or why not, in words
@@ -118,14 +119,23 @@ pub fn check_editable(world: &World, id: InstanceId) -> Result<(), &'static str>
         return Err("Services are always there, so they can't be deleted, copied or moved.");
     }
     if instance.class() == ClassName::Script {
-        // Until scripts can be edited in the editor, their files are the
-        // only place they're kept, and the world file never lists them.
-        return Err("A Script comes from its .server.lua file. Change the file to change it.");
+        // A Script is its `.server.lua` file, which always sits in
+        // ServerScriptService; copying it would mean copying the file.
+        return Err("Scripts can't be copied or moved yet. Insert a new Script instead.");
     }
     if !world.is_descendant_of(id, world.workspace()) {
         return Err("Only things in the Workspace are saved, so only those can be changed.");
     }
     Ok(())
+}
+
+/// Whether `id` can be deleted, or why not. Scripts can, unlike in
+/// [`check_editable`]: deleting one deletes its file.
+pub fn check_delete(world: &World, id: InstanceId) -> Result<(), &'static str> {
+    match world.get(id) {
+        Some(instance) if instance.class() == ClassName::Script => Ok(()),
+        _ => check_editable(world, id),
+    }
 }
 
 /// Whether `id` can be moved into `parent`, or why not.
@@ -230,13 +240,17 @@ mod tests {
     }
 
     #[test]
-    fn services_and_scripts_cannot_be_deleted_copied_or_moved() {
+    fn services_cannot_be_deleted_copied_or_moved_and_scripts_can_only_be_deleted() {
         let mut world = World::new();
         let script_service = world.server_script_service();
         let script = child(&mut world, script_service, ClassName::Script, "door");
         for id in [world.root(), world.workspace(), script_service, script] {
             assert!(check_editable(&world, id).is_err());
         }
+        for id in [world.root(), world.workspace(), script_service] {
+            assert!(check_delete(&world, id).is_err());
+        }
+        assert_eq!(check_delete(&world, script), Ok(()));
         let workspace = world.workspace();
         let part = child(&mut world, workspace, ClassName::Part, "Part");
         assert_eq!(check_editable(&world, part), Ok(()));

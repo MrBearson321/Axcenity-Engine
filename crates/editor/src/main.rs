@@ -11,13 +11,16 @@ mod app;
 mod explorer;
 mod gizmo;
 mod history;
+mod lua_syntax;
 mod output;
 mod placing;
 mod play;
 mod properties;
 mod screen;
+mod scripts;
 mod tree;
 mod viewport;
+mod watcher;
 
 use std::path::PathBuf;
 

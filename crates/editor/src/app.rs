@@ -4,22 +4,30 @@
 //!
 //! Play runs the game on a copy of the world (see `play.rs`). While it
 //! plays, every panel shows that copy and editing is off; Stop drops it.
+//!
+//! Above the viewport, tabs switch between the viewport ("World") and the
+//! open scripts. Everything that reads or writes project files (saving,
+//! scripts, outside changes) is in `app/files.rs`.
+
+mod files;
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use axcenity_core::{InstanceId, Vector3, World};
+use axcenity_core::{ClassName, InstanceId, Vector3, World};
 use axcenity_project::ScriptFile;
 use eframe::egui;
 
-use crate::explorer::{Action, Explorer, ExplorerOutput};
+use crate::explorer::{self, Action, Explorer, ExplorerOutput};
 use crate::gizmo::{Snap, Tool};
 use crate::history::{self, Field, History, Move, Place};
 use crate::output::Output;
 use crate::play::{self, Crash, Session};
 use crate::properties::{self, Edit};
+use crate::scripts::ScriptTabs;
 use crate::tree::{self, Insertable};
 use crate::viewport::{DragEdit, DragKind, Viewport};
+use crate::watcher::Watcher;
 
 /// F5 plays and Shift+F5 stops, as in Roblox Studio.
 const PLAY_SHORTCUT: egui::KeyboardShortcut =
@@ -84,14 +92,20 @@ pub struct EditorApp {
     play: Option<Session>,
     /// When the last Play frame ran, to measure how much game time passed.
     last_frame: Option<Instant>,
+    /// The open script tabs, and whether the viewport or a script is shown.
+    tabs: ScriptTabs,
+    /// A Script waiting for an answer to "Delete script?".
+    confirm_delete: Option<InstanceId>,
 }
 
-/// Something that throws the open world away, so it has to ask first if
-/// there are unsaved changes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Something that throws unsaved changes away, so it has to ask first if
+/// there are any.
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum Discard {
     Quit,
     OpenAnother,
+    /// Closing the tab of the script at this path.
+    CloseTab(String),
 }
 
 /// The answers to "Save changes?".
@@ -117,8 +131,18 @@ struct Keys {
 struct OpenProject {
     name: String,
     folder: PathBuf,
-    /// Its server scripts. Play reads their files again, for the newest code.
+    /// Its server scripts, sorted by path, with each file's text as last
+    /// read or written. Play reads their files again, for the newest code.
     scripts: Vec<ScriptFile>,
+    /// Notices files changed by other programs.
+    watcher: Watcher,
+    /// The world file's text as last read or written, to tell the editor's
+    /// own saves from changes made elsewhere. `None` if it couldn't be read.
+    world_text: Option<String>,
+    /// True when the world file holds something the editor never loaded:
+    /// it was damaged, or changed elsewhere while the world had unsaved
+    /// changes. Saving keeps it as `world.backup.json` first.
+    keep_world_file: bool,
 }
 
 impl EditorApp {
@@ -140,6 +164,8 @@ impl EditorApp {
             shown_title: String::new(),
             play: None,
             last_frame: None,
+            tabs: ScriptTabs::default(),
+            confirm_delete: None,
         };
         match folder {
             Some(folder) => app.open(folder),
@@ -179,19 +205,30 @@ impl EditorApp {
             project.world.descendants(project.world.root()).len() - 2,
             if scripts == 1 { "script" } else { "scripts" },
         ));
+        files::report_problems(&mut self.output, &project);
         // The game being played belongs to the old project.
         self.play = None;
-        self.world = project.world;
-        self.selected = None;
-        // Undo steps belong to the world they were made in.
-        self.history = History::new();
-        self.explorer = Explorer::new(&self.world);
+        self.tabs.close_all();
         self.viewport.reset_camera();
+        let world_text = files::read_world_text(&project.folder);
         self.project = Some(OpenProject {
             name: project.manifest.name,
+            watcher: Watcher::start(project.folder.clone()),
             folder: project.folder,
             scripts: project.scripts,
+            world_text,
+            keep_world_file: !project.world_loaded,
         });
+        self.replace_world(project.world);
+    }
+
+    /// Puts `world` in place of the world being edited, with nothing
+    /// selected and a new undo history (its steps belong to the old world).
+    fn replace_world(&mut self, world: World) {
+        self.world = world;
+        self.selected = None;
+        self.history = History::new();
+        self.explorer = Explorer::new(&self.world);
     }
 
     /// Asks for a project folder with the system's folder picker, then opens it.
@@ -203,31 +240,6 @@ impl EditorApp {
         // `None` means the dialog was cancelled.
         if let Some(folder) = dialog.pick_folder() {
             self.open(&folder);
-        }
-    }
-
-    /// Writes the world back to the project folder. Returns false (with the
-    /// reason in Output) if nothing is open or the file couldn't be written.
-    fn save(&mut self) -> bool {
-        let Some(project) = &self.project else {
-            return false;
-        };
-        match axcenity_project::save_world(&project.folder, &self.world) {
-            Ok(()) => {
-                self.output.info(format!(
-                    "Saved \"{}\" to `{}`.",
-                    project.name,
-                    project.folder.join(axcenity_project::WORLD_FILE).display()
-                ));
-                // The undo history stays: saving only marks this point as saved.
-                self.history.mark_saved();
-                true
-            }
-            Err(err) => {
-                let err = anyhow::Error::new(err);
-                self.output.error(format!("Could not save: {err:#}"));
-                false
-            }
         }
     }
 
@@ -244,10 +256,10 @@ impl EditorApp {
         self.play.is_some()
     }
 
-    /// True when the world has changes that aren't saved. Undoing back to
-    /// where it was saved counts as no changes.
+    /// True when the world or a script tab has changes that aren't saved.
+    /// Undoing back to where it was saved counts as no changes.
     fn unsaved(&self) -> bool {
-        !self.history.is_saved()
+        !self.history.is_saved() || self.tabs.any_unsaved()
     }
 
     /// Applies a change from the Properties panel, as an undo step such as
@@ -313,7 +325,7 @@ impl EditorApp {
         };
         match edit {
             Edit::Name(name) => {
-                if properties::can_rename(instance) {
+                if properties::can_rename_here(instance) {
                     self.world.set_name(id, name)?;
                 }
             }
@@ -373,6 +385,8 @@ impl EditorApp {
         let Some(project) = &self.project else {
             return;
         };
+        // Show the game, not a script.
+        self.tabs.show_world();
         self.output.info(format!(
             "Playing \"{}\". Press Stop (Shift+F5) to go back to editing; the world \
              will be as it was before Play.",
@@ -429,14 +443,24 @@ impl EditorApp {
         if self.viewport.is_dragging() || self.playing() {
             return;
         }
+        let is_script = |id| {
+            self.world
+                .get(id)
+                .is_some_and(|instance| instance.class() == ClassName::Script)
+        };
         match action {
             Action::Insert { what, near } => self.insert(what, near),
+            Action::InsertScript => self.insert_script(),
+            // A Script's name is its file's name, so the file is renamed.
+            Action::Rename(id, name) if is_script(id) => self.rename_script(id, &name),
             Action::Rename(id, name) => {
                 self.apply(id, Edit::Name(name));
                 // Typing in the Explorer is done, so this is one whole step.
                 self.history.seal();
             }
             Action::Duplicate(id) => self.duplicate(id),
+            // Deleting a script deletes its file, which can't be undone, so ask first.
+            Action::Delete(id) if is_script(id) => self.confirm_delete = Some(id),
             Action::Delete(id) => self.delete(id),
             Action::MoveInto { id, parent } => {
                 self.move_into(id, parent);
@@ -565,7 +589,11 @@ impl EditorApp {
     /// Asks to `discard` the open world. Returns it when it can go ahead now,
     /// or `None` after putting up "Save changes?" because there are unsaved changes.
     fn request(&mut self, discard: Discard) -> Option<Discard> {
-        if self.unsaved() {
+        let unsaved = match &discard {
+            Discard::CloseTab(path) => self.tabs.get(path).is_some_and(|tab| tab.unsaved()),
+            Discard::Quit | Discard::OpenAnother => self.unsaved(),
+        };
+        if unsaved {
             self.asking = Some(discard);
             None
         } else {
@@ -578,7 +606,11 @@ impl EditorApp {
     fn answer(&mut self, answer: Answer) -> Option<Discard> {
         let discard = self.asking.take()?;
         match answer {
-            Answer::Save => self.save().then_some(discard),
+            // Closing a tab only needs that script saved.
+            Answer::Save => match &discard {
+                Discard::CloseTab(path) => self.save_tab(path).then_some(discard),
+                Discard::Quit | Discard::OpenAnother => self.save().then_some(discard),
+            },
             Answer::DontSave => Some(discard),
             Answer::Cancel => None,
         }
@@ -591,6 +623,7 @@ impl EditorApp {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
             Discard::OpenAnother => self.open_with_dialog(),
+            Discard::CloseTab(path) => self.tabs.close(&path),
         }
     }
 
@@ -603,13 +636,14 @@ impl EditorApp {
 
     /// Shows "Save changes?" while something is waiting for an answer.
     fn unsaved_changes_prompt(&mut self, ctx: &egui::Context) {
-        let Some(discard) = self.asking else {
+        let Some(discard) = &self.asking else {
             return;
         };
-        let name = self.project.as_ref().map_or("", |project| &project.name);
-        let doing = match discard {
-            Discard::Quit => "closing",
-            Discard::OpenAnother => "opening another project",
+        let project = self.project.as_ref().map_or("", |project| &project.name);
+        let (name, doing) = match discard {
+            Discard::Quit => (project, "closing"),
+            Discard::OpenAnother => (project, "opening another project"),
+            Discard::CloseTab(path) => (axcenity_project::script_name(path), "closing it"),
         };
         let mut answer = None;
         let modal = egui::Modal::new(egui::Id::new("unsaved changes")).show(ctx, |ui| {
@@ -718,8 +752,10 @@ impl EditorApp {
                 {
                     self.act(Action::Duplicate(id));
                 }
+                let deletable =
+                    selected.is_some_and(|id| tree::check_delete(&self.world, id).is_ok()) && !busy;
                 let delete = egui::Button::new("Delete").shortcut_text(DELETE_KEY_TEXT);
-                if ui.add_enabled(editable, delete).clicked()
+                if ui.add_enabled(deletable, delete).clicked()
                     && let Some(id) = selected
                 {
                     self.act(Action::Delete(id));
@@ -755,6 +791,7 @@ impl EditorApp {
     /// settings, then buttons that insert each primitive.
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         let mut insert = None;
+        let mut insert_script = false;
         let (mut play, mut stop) = (false, false);
         let playing = self.playing();
         let can_play = self.project.is_some();
@@ -833,6 +870,16 @@ impl EditorApp {
                     insert = Some(what);
                 }
             }
+            ui.separator();
+            insert_script = ui
+                .add_enabled(!playing && can_play, egui::Button::new("Script"))
+                .on_hover_text(explorer::SCRIPT_HOVER)
+                .on_disabled_hover_text(if playing {
+                    "Press Stop to edit."
+                } else {
+                    "Open a project first."
+                })
+                .clicked();
             if playing {
                 ui.separator();
                 ui.colored_label(PLAYING_COLOR, "Playing")
@@ -842,6 +889,9 @@ impl EditorApp {
         if let Some(what) = insert {
             let near = self.selected;
             self.act(Action::Insert { what, near });
+        }
+        if insert_script {
+            self.act(Action::InsertScript);
         }
         if play {
             self.play();
@@ -943,6 +993,12 @@ impl eframe::App for EditorApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.asking = Some(Discard::Quit);
         }
+        // Files changed by other programs, such as a script saved in VS Code.
+        if let Some(project) = &self.project {
+            project.watcher.wake(ctx);
+        }
+        self.check_disk();
+
         // Taken from the input before the viewport sees it, so the S doesn't
         // also fly the camera backward.
         if ctx.input_mut(|input| input.consume_shortcut(&SAVE_SHORTCUT)) {
@@ -1003,28 +1059,48 @@ impl eframe::App for EditorApp {
             // The Explorer was drawn before this change, so draw it again.
             ctx.request_repaint();
         }
-        egui::TopBottomPanel::bottom("output")
+        if let Some(id) = explorer.open {
+            self.open_script_instance(id);
+        }
+        let clicked_error = egui::TopBottomPanel::bottom("output")
             .resizable(true)
             .default_height(160.0)
-            .show(ctx, |ui| self.output.show(ui));
+            .show(ctx, |ui| self.output.show(ui))
+            .inner;
+        if let Some(location) = clicked_error {
+            self.open_script(&location.path, Some(location.line));
+        }
+        // The tabs sit above the center only, between the panels added so far.
+        let close_tab = egui::TopBottomPanel::top("tabs")
+            .show(ctx, |ui| self.tabs.tab_bar(ui))
+            .inner;
+        if let Some(path) = close_tab {
+            self.request_and_go_ahead(ctx, Discard::CloseTab(path));
+        }
+
         // Again, as the edits above may have changed which world to show.
         let world = shown(&self.world, &self.play);
         // No tool during Play, so nothing can be dragged.
         let tool = (!self.playing()).then_some(self.tool);
-        let output = egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
-            .show(ctx, |ui| match frame.wgpu_render_state() {
-                Some(render_state) => {
-                    self.viewport
-                        .show(ui, render_state, world, self.selected, tool, self.snap)
-                }
-                // Can't happen: main.rs always picks the wgpu renderer.
-                None => {
-                    ui.label("The viewport needs the wgpu renderer.");
-                    Default::default()
-                }
-            })
-            .inner;
+        let output = if self.tabs.world_shown() {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ctx, |ui| match frame.wgpu_render_state() {
+                    Some(render_state) => {
+                        self.viewport
+                            .show(ui, render_state, world, self.selected, tool, self.snap)
+                    }
+                    // Can't happen: main.rs always picks the wgpu renderer.
+                    None => {
+                        ui.label("The viewport needs the wgpu renderer.");
+                        Default::default()
+                    }
+                })
+                .inner
+        } else {
+            egui::CentralPanel::default().show(ctx, |ui| self.tabs.show_active(ui));
+            Default::default()
+        };
         if let Some(clicked) = output.clicked {
             self.select_from_viewport(clicked.part);
             // The panels were already drawn this frame, so draw again to
@@ -1045,6 +1121,7 @@ impl eframe::App for EditorApp {
         }
 
         self.unsaved_changes_prompt(ctx);
+        self.delete_script_prompt(ctx);
     }
 }
 
@@ -1060,13 +1137,13 @@ mod tests {
 
     use super::*;
 
-    fn example(name: &str) -> PathBuf {
+    pub(super) fn example(name: &str) -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../examples")
             .join(name)
     }
 
-    fn last_line(app: &EditorApp) -> &OutputLine {
+    pub(super) fn last_line(app: &EditorApp) -> &OutputLine {
         app.output.lines().last().unwrap()
     }
 
@@ -1125,7 +1202,7 @@ mod tests {
     }
 
     #[test]
-    fn a_broken_world_file_is_reported_with_its_line_and_the_open_project_stays() {
+    fn a_broken_world_file_is_reported_with_its_line_and_the_rest_still_opens() {
         let folder = temp_project(
             "broken-world",
             &[
@@ -1142,19 +1219,27 @@ mod tests {
         let mut app = EditorApp::new(Some(&example("hello-touched")));
         app.open(&folder);
 
-        let line = last_line(&app);
-        assert_eq!(line.kind, OutputKind::Error);
+        let error = app
+            .output
+            .lines()
+            .iter()
+            .rfind(|line| line.kind == OutputKind::Error)
+            .unwrap();
         assert!(
-            line.text.contains("world.json") && line.text.contains("line 3"),
+            error.text.contains("world.json") && error.text.contains("line 3"),
             "{}",
-            line.text
+            error.text
         );
-        assert_eq!(app.title(), "Hello Touched - Axcenity Editor");
+        // The project opened anyway, with an empty Workspace.
+        assert_eq!(app.title(), "Broken - Axcenity Editor");
+        assert!(last_line(&app).text.contains("The Workspace is empty"));
+        let workspace = app.world.get(app.world.workspace()).unwrap();
+        assert!(workspace.children().is_empty());
         let _ = std::fs::remove_dir_all(&folder);
     }
 
     /// A copy of an example project in the temp directory, safe to save over.
-    fn copy_of_example(name: &str, test: &str) -> PathBuf {
+    pub(super) fn copy_of_example(name: &str, test: &str) -> PathBuf {
         fn copy_folder(from: &Path, to: &Path) {
             std::fs::create_dir_all(to).unwrap();
             for entry in std::fs::read_dir(from).unwrap() {
@@ -1176,7 +1261,7 @@ mod tests {
         folder
     }
 
-    fn part(app: &EditorApp, name: &str) -> InstanceId {
+    pub(super) fn part(app: &EditorApp, name: &str) -> InstanceId {
         app.world
             .find_first_child(app.world.workspace(), name)
             .unwrap()
@@ -1897,13 +1982,13 @@ mod tests {
     }
 
     /// Runs the game for `seconds` at 60 frames per second.
-    fn play_for(app: &mut EditorApp, seconds: f64) {
+    pub(super) fn play_for(app: &mut EditorApp, seconds: f64) {
         for _ in 0..(seconds * 60.0).round() as u32 {
             app.play_frame(1.0 / 60.0);
         }
     }
 
-    fn printed(app: &EditorApp) -> Vec<&str> {
+    pub(super) fn printed(app: &EditorApp) -> Vec<&str> {
         app.output.lines().iter().map(|l| l.text.as_str()).collect()
     }
 

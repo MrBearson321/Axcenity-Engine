@@ -72,7 +72,14 @@ pub fn sections(instance: &Instance) -> Vec<Section> {
 /// their names, and a Script is named after its file, so renaming it here
 /// would be lost on the next load.
 pub fn can_rename(instance: &Instance) -> bool {
-    !instance.class().is_service() && instance.class() != ClassName::Script
+    !instance.class().is_service()
+}
+
+/// Whether the Name box in this panel can rename `instance`. Renaming a
+/// Script renames its file, which shouldn't happen at every key typed, so
+/// Scripts are renamed in the Explorer instead, all at once.
+pub fn can_rename_here(instance: &Instance) -> bool {
+    can_rename(instance) && instance.class() != ClassName::Script
 }
 
 /// Shown when hovering a greyed-out value during Play.
@@ -91,58 +98,60 @@ pub fn show(
     let mut edit = None;
     // The scroll area fills the panel even when nothing is selected. Without
     // it the panel would shrink to fit one line of text and stay that small.
-    egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-        let Some((id, instance)) = selected.and_then(|id| Some((id, world.get(id)?))) else {
-            ui.weak("Select something in the Explorer or the viewport to see its properties.");
-            return;
-        };
-        // Widgets remember things such as half-typed numbers by ID. Mixing in
-        // the selection gives each Instance its own, so nothing typed for one
-        // part turns up on the next one selected.
-        ui.push_id(id, |ui| {
-            section(ui, "Data", |ui| {
-                ui.label("Name");
-                let mut name = instance.name().to_string();
-                if !editable {
-                    ui.add_enabled(false, egui::TextEdit::singleline(&mut name))
-                        .on_disabled_hover_text(PLAYING_HINT);
-                } else if can_rename(instance) {
-                    if ui.text_edit_singleline(&mut name).changed() {
-                        edit = Some(Edit::Name(name));
-                    }
-                } else {
-                    let hint = if instance.class() == ClassName::Script {
-                        "A Script is named after its file. Rename the .server.lua file to rename it."
-                    } else {
-                        "Services can't be renamed."
-                    };
-                    ui.add_enabled(false, egui::TextEdit::singleline(&mut name))
-                        .on_disabled_hover_text(hint);
-                }
-                ui.end_row();
-                ui.label("ClassName");
-                ui.label(instance.class().as_str());
-                ui.end_row();
-            });
-
-            for group in sections(instance) {
-                section(ui, group.title, |ui| {
-                    for (name, value) in group.properties {
-                        ui.label(name);
-                        // `add_enabled_ui` greys out (and ignores) whatever is
-                        // drawn inside it; `.inner` is what the closure returned.
-                        let changed = ui
-                            .add_enabled_ui(editable, |ui| value_control(ui, name, value))
-                            .inner;
-                        if let Some(value) = changed {
-                            edit = Some(Edit::Property(name, value));
+    egui::ScrollArea::vertical()
+        .auto_shrink(false)
+        .show(ui, |ui| {
+            let Some((id, instance)) = selected.and_then(|id| Some((id, world.get(id)?))) else {
+                ui.weak("Select something in the Explorer or the viewport to see its properties.");
+                return;
+            };
+            // Widgets remember things such as half-typed numbers by ID. Mixing in
+            // the selection gives each Instance its own, so nothing typed for one
+            // part turns up on the next one selected.
+            ui.push_id(id, |ui| {
+                section(ui, "Data", |ui| {
+                    ui.label("Name");
+                    let mut name = instance.name().to_string();
+                    if !editable {
+                        ui.add_enabled(false, egui::TextEdit::singleline(&mut name))
+                            .on_disabled_hover_text(PLAYING_HINT);
+                    } else if can_rename_here(instance) {
+                        if ui.text_edit_singleline(&mut name).changed() {
+                            edit = Some(Edit::Name(name));
                         }
-                        ui.end_row();
+                    } else {
+                        let hint = if instance.class() == ClassName::Script {
+                            "Rename a Script in the Explorer (F2). That renames its file too."
+                        } else {
+                            "Services can't be renamed."
+                        };
+                        ui.add_enabled(false, egui::TextEdit::singleline(&mut name))
+                            .on_disabled_hover_text(hint);
                     }
+                    ui.end_row();
+                    ui.label("ClassName");
+                    ui.label(instance.class().as_str());
+                    ui.end_row();
                 });
-            }
+
+                for group in sections(instance) {
+                    section(ui, group.title, |ui| {
+                        for (name, value) in group.properties {
+                            ui.label(name);
+                            // `add_enabled_ui` greys out (and ignores) whatever is
+                            // drawn inside it; `.inner` is what the closure returned.
+                            let changed = ui
+                                .add_enabled_ui(editable, |ui| value_control(ui, name, value))
+                                .inner;
+                            if let Some(value) = changed {
+                                edit = Some(Edit::Property(name, value));
+                            }
+                            ui.end_row();
+                        }
+                    });
+                }
+            });
         });
-    });
     edit
 }
 
@@ -314,12 +323,13 @@ mod tests {
     }
 
     #[test]
-    fn parts_can_be_renamed_but_services_and_scripts_cannot() {
+    fn parts_can_be_renamed_here_scripts_only_in_the_explorer_and_services_never() {
         let mut world = World::new();
         let part = world.create(ClassName::Part).unwrap();
         let script = world.create(ClassName::Script).unwrap();
-        assert!(can_rename(world.get(part).unwrap()));
-        assert!(!can_rename(world.get(script).unwrap()));
+        assert!(can_rename_here(world.get(part).unwrap()));
+        assert!(can_rename(world.get(script).unwrap()));
+        assert!(!can_rename_here(world.get(script).unwrap()));
         assert!(!can_rename(world.get(world.workspace()).unwrap()));
         assert!(!can_rename(world.get(world.root()).unwrap()));
     }

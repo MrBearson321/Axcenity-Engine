@@ -257,10 +257,10 @@ Add a script editor tab with Lua syntax highlighting, and an "Insert Script" act
 
 ### Acceptance criteria
 
-- [ ] Creating, editing and saving a script in the editor writes the matching `.lua` file.
-- [ ] Editing that file in VS Code while the editor is open updates the editor within about a second.
-- [ ] A corrupted world file or script is reported in Output, and the rest of the project still loads.
-- [ ] Script errors in Output show the path and line, and clicking one opens the script at that line.
+- [x] Creating, editing and saving a script in the editor writes the matching `.lua` file.
+- [x] Editing that file in VS Code while the editor is open updates the editor within about a second.
+- [x] A corrupted world file or script is reported in Output, and the rest of the project still loads.
+- [x] Script errors in Output show the path and line, and clicking one opens the script at that line.
 
 ---
 

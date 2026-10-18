@@ -48,6 +48,10 @@ fn main() -> Result<()> {
     let project = axcenity_project::load(&folder)
         .with_context(|| format!("could not open the project in `{}`", folder.display()))?;
     log::info!("loaded project \"{}\"", project.manifest.name);
+    // A damaged file only takes itself out: say which, and run the rest.
+    for problem in project.problems {
+        eprintln!("error: {:#}", anyhow::Error::new(problem));
+    }
     let mut world = project.world;
     let mut scripts = ScriptRuntime::new();
     start_scripts(&mut scripts, &mut world, &project.scripts);

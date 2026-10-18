@@ -14,3 +14,4 @@ Runs Lua 5.4 (mlua 0.12, vendored) against the `core` World. Depends only on `co
 - `task.rs`: `task.wait` is Lua (only Lua can yield; mlua Rust functions can't) calling a Rust `schedule`; `spawn`/`delay` are Rust.
 - `events.rs`: `LuaSignal` (`part.Touched`), `LuaConnection`, and `Connections` (app data: handlers per `(InstanceId, event)` in connect order). `fire` copies the handler list first, then runs each as a new thread via `scheduler::resume`. Host entry point: `ScriptRuntime::fire_touched(world, pairs)`. New events need a name in `core`'s `ClassName::events()`, an `EVENT_DOCS` line, and a host-side `fire_*`.
 - Not yet: `:Once`/`:Wait`, the watchdog and the shared string metatable (Phase 15).
+- The editor's Output turns errors starting `path:line:` into links to the script; keep that prefix.
