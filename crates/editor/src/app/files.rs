@@ -310,15 +310,17 @@ impl EditorApp {
         }
     }
 
-    /// File > Import Model… and the toolbar's Import: asks for a glTF model
-    /// with the system's file picker, then imports it.
+    /// File > Import Model… and the toolbar's Import: asks for a glTF or
+    /// FBX model with the system's file picker, then imports it.
     pub(super) fn import_model_with_dialog(&mut self) {
         if self.project.is_none() || self.playing() || self.viewport.is_dragging() {
             return;
         }
         let dialog = rfd::FileDialog::new()
             .set_title("Import a 3D model")
-            .add_filter("glTF model", &["gltf", "glb"]);
+            .add_filter("3D model", &["gltf", "glb", "fbx"])
+            .add_filter("glTF model", &["gltf", "glb"])
+            .add_filter("FBX model", &["fbx"]);
         // `None` means the dialog was cancelled.
         if let Some(file) = dialog.pick_file() {
             self.import_model(&file);
@@ -329,7 +331,8 @@ impl EditorApp {
     /// and inserts a MeshPart showing it, at its size in the file, inside
     /// the selected Model or Folder if there is one. The insert is an undo
     /// step; the copied file stays. A model that can't be loaded is reported
-    /// in Output and not copied.
+    /// in Output and not copied; problems that didn't stop it loading (an
+    /// FBX texture that isn't there) are reported after it's imported.
     pub(super) fn import_model(&mut self, file: &Path) {
         let Some(project) = &self.project else {
             return;
@@ -358,6 +361,10 @@ impl EditorApp {
             "Imported `{}` into the project as `{mesh_id}`.",
             file.display()
         ));
+        for warning in &model.warnings {
+            self.output
+                .error(format!("The model `{mesh_id}` {warning}."));
+        }
         let near = self.selected;
         self.insert_named(
             Insertable::MeshPart,

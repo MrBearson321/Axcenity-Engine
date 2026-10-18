@@ -7,7 +7,7 @@ Read before creating a crate, adding a dependency between crates, or touching th
 | Crate | Owns | May depend on |
 |---|---|---|
 | `core` | Instance tree, arena, properties, events, services | nothing engine-internal |
-| `assets` | the asset system: loading glTF models (`Assets`, `load_model`) and importing them (`import_model`) | nothing engine-internal; plain data out |
+| `assets` | the asset system: loading glTF and FBX models (`Assets`, `load_model`) and importing them (`import_model`) | nothing engine-internal; plain data out |
 | `render` | `wgpu` renderer | nothing engine-internal; takes a draw list |
 | `scene` | Instance tree → draw list (`build_draw_list`), the shared `FlyCamera`, viewport picking (`pick`) | `core`, `assets`, `render` |
 | `physics` | `rapier3d` integration | `core`, `assets` |
@@ -125,9 +125,9 @@ Since Phase 14, step 1 also hands LocalScripts the camera (`set_camera`) and the
 
 ### Importing models (decided in Phase 17)
 
-- **Import** (chosen by the developer): **File > Import Model…** and an **Import** button at the end of the toolbar's Insert group both open a file picker for `.gltf`/`.glb`. The model is loaded first, so a file that can't be loaded is reported in Output ("Could not import `…`: it isn't a valid glTF file: …") and nothing is copied or inserted. Off during Play and with no project open.
-- **Copying** (`assets::import_model`): a `.glb` goes to `assets/models/<name>.glb`; a `.gltf` goes to its own folder, `assets/models/<name>/<name>.gltf`, with the `.bin` buffers and textures it uses at the same relative paths. `<name>` is the file name with only letters, digits, spaces, `-` and `_` kept, plus a number if taken (`pyramid2`). Files the model uses must be inside its folder.
-- **The MeshPart** (chosen by the developer: the file's materials, no Color or Material override) is inserted like a part: at the camera's focus point, inside the selected Model or Folder if any, named after the file (`pyramid`, `pyramid2`…), at its size in the file (1 glTF unit = 1 stud; a flat axis gets 0.001), and selected. The insert is one undo step; undo leaves the copied file in the project.
+- **Import** (chosen by the developer): **File > Import Model…** and an **Import** button at the end of the toolbar's Insert group both open a file picker for `.gltf`/`.glb`/`.fbx` (FBX added after Phase 17). The model is loaded first, so a file that can't be loaded is reported in Output ("Could not import `…`: it isn't a valid glTF file: …") and nothing is copied or inserted. Off during Play and with no project open.
+- **Copying** (`assets::import_model`): a `.glb` or `.fbx` that uses no other files goes to `assets/models/<name>.glb` (or `.fbx`); a `.gltf`, or a model that uses other files, goes to its own folder, `assets/models/<name>/<name>.gltf` (or `.glb`, `.fbx`), with the `.bin` buffers and textures it uses at the same relative paths. An FBX texture that isn't found is left out, and reported in Output after the import. `<name>` is the file name with only letters, digits, spaces, `-` and `_` kept, plus a number if taken (`pyramid2`). Files the model uses must be inside its folder.
+- **The MeshPart** (chosen by the developer: the file's materials, no Color or Material override) is inserted like a part: at the camera's focus point, inside the selected Model or Folder if any, named after the file (`pyramid`, `pyramid2`…), at its size in the file (1 glTF unit, or 1 meter in an FBX file, = 1 stud; a flat axis gets 0.001), and selected. The insert is one undo step; undo leaves the copied file in the project.
 - It moves, scales, rotates, duplicates, saves and reloads like a Part. Picking, the selection box, handles and drag-to-place all use its box (the model fills it). `MeshId` shows in Properties under Part but is read-only (importing sets it). Explorer icon: a see-through cube, part blue.
 - **Models load when first drawn** (or simulated) through the project's shared `Assets`, made on open. A model that can't be loaded is reported once in Output ("Could not load the model `assets/models/x.glb`: the file isn't there") and drawn as a grey box. Model files aren't watched: a changed model shows after opening the project again.
 

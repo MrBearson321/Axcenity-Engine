@@ -37,6 +37,9 @@ glam = "0.34"
 # `import` feature reads buffers and decodes PNG and JPEG textures with the
 # `image` crate (MIT OR Apache-2.0), which eframe already uses.
 gltf = "1.4"
+# Decodes FBX models' textures. The same release `gltf` uses; the decoders are
+# pure Rust (MIT OR Apache-2.0). FBX files often use TGA or BMP textures.
+image = { version = "0.25", default-features = false, features = ["bmp", "jpeg", "png", "tga"] }
 log = "0.4"
 # Decodes the logo PNG for the player's window icon. (The editor gets PNG
 # decoding through eframe.)
@@ -47,6 +50,10 @@ pollster = "0.4"
 # Native file and folder dialogs for the editor (Windows, macOS, and the
 # desktop portal on Linux).
 rfd = "0.17"
+# Loads FBX models (binary and ASCII, every version), MIT OR Unlicense. Wraps the
+# `ufbx` C library, compiled from source with `cc` like Lua, so nothing is needed on
+# any OS beyond the C compiler `mlua` already uses.
+ufbx = "0.11"
 # Physics. Its math types come from `glamx` (glam-based), re-exported as `rapier3d::math`.
 rapier3d = "0.36"
 serde = { version = "1", features = ["derive"] }

@@ -40,7 +40,7 @@ use crate::viewport::{DragEdit, DragKind, Viewport};
 use crate::watcher::Watcher;
 
 /// The hover text of Import Model, in the File menu and the toolbar.
-const IMPORT_HOVER: &str = "Import a glTF model (.gltf or .glb), such as one exported from \
+const IMPORT_HOVER: &str = "Import a 3D model (.gltf, .glb or .fbx), such as one exported from \
     Blender. It's copied into the project's assets/models folder and inserted as a MeshPart \
     at the camera's focus point.";
 

@@ -4,7 +4,7 @@ Read before working in the `project` or `player` crates, the export pipeline, CI
 
 ## Project folder
 
-- Readable text files only (except user assets): a manifest, world and Instance data, `.lua` scripts (`*.server.lua` / `*.client.lua` / `*.module.lua`), block script files, `.css` stylesheets, and assets (glTF, textures, sounds).
+- Readable text files only (except user assets): a manifest, world and Instance data, `.lua` scripts (`*.server.lua` / `*.client.lua` / `*.module.lua`), block script files, `.css` stylesheets, and assets (glTF and FBX models, textures, sounds).
 - One damaged file must not prevent loading the rest of the project. Report it and continue. Since Phase 13, `project::load` only fails for a missing or unreadable manifest (not a project folder) or a newer `format_version`. Anything else goes in `Project::problems` and is left out: a broken manifest gives the project its folder's name, a broken `world.json` an empty Workspace (`world_loaded = false`), and an unreadable script (not UTF-8, say) no Script. The player prints problems as `error:` lines and runs the rest.
 - The editor watches the folder and reloads files changed externally (see `docs/architecture.md`, Script editing). Before saving over a world file it never loaded, it renames that file to `world.backup.json` (`project::keep_world_file`).
 
@@ -19,8 +19,8 @@ my-game/
   scripts/        server scripts: build.server.lua, doors/open.server.lua, ...
                   client scripts: keys.client.lua, ...
                   modules: shared/utils.module.lua, ...
-  assets/models/  imported glTF models: chair.glb, or tree/tree.gltf with
-                  the .bin and textures it uses (see Assets)
+  assets/models/  imported glTF and FBX models: chair.glb, robot.fbx, or
+                  tree/tree.gltf with the .bin and textures it uses (see Assets)
   .luarc.json, .axcenity/, .vscode/extensions.json
                   optional: written by the editor's File > Set Up VS Code
                   Autocomplete (see docs/scripting.md); the engine ignores them
@@ -63,7 +63,9 @@ my-game/
 
 - The `assets` crate is the asset system: it reads every asset file, only from inside the project folder. A `MeshId`, or a URI inside a model, that is absolute, has a drive or scheme (`C:`, `file:`) or a `..` part is refused (`assets::safe_path`), so a world file or script can't read anything else. `data:` URIs embedded in a model are fine.
 - `Assets` is a cheap shared handle (one per open project) that loads each model the first time it's asked for, keeps it, and remembers failures so each is reported once (`take_errors`: the editor shows them in Output, the player prints `error:` lines). The project still loads and runs without the model.
-- `assets::load_model` never crashes on a bad file: errors name the problem ("it isn't a valid glTF file: …", "it uses `x.bin`, which isn't there", "a mesh in it lists a corner that isn't there"), and a panic inside the `gltf` crate is caught and reported as "the file is damaged".
+- A `MeshId`'s extension says how it's read: `.gltf` and `.glb` are glTF 2.0, `.fbx` is FBX (binary or ASCII, any version). Anything else is refused ("MeshId must name a model file: …").
+- `assets::load_model` never crashes on a bad file: errors name the problem ("it isn't a valid glTF file: …", "it isn't a valid FBX file: …", "it uses `x.bin`, which isn't there", "a mesh in it lists a corner that isn't there"), and a panic inside the `gltf` or `ufbx` crate is caught and reported as "the file is damaged".
+- FBX textures are looked for inside the model's folder only: at the path the file gives relative to the model, then by file name next to the model, then in a `textures` folder next to it (FBX files often name a texture by where it was on another machine). Embedded textures are used as they are. PNG, JPEG, TGA and BMP decode; a texture that's missing or in another format (`.psd`, `.dds`) doesn't stop the model loading: it's reported once ("The model `…` is drawn without its texture `wood.psd`: …", `Model::warnings`) and the material's color is used.
 - Model files aren't checked for changes while the editor runs; they're read again when the project is opened.
 
 ## Export
@@ -86,4 +88,4 @@ my-game/
 - The editor and the player use `icon-256.png` as their window icon, built in with `include_bytes!` (the player decodes it with the `png` crate, the editor with eframe). Windows and X11 show window icons; macOS and Wayland ignore them, so the app bundle and desktop file icons come with export (`icon.ico` and `icon.png` are ready for it).
 - The wordmark (added after Phase 16) comes in a light-background and a dark-background version, both made from `wordmark-source.png` by `assets/branding/build.py`. The editor shows it on its start screen and About box; it's ready for splash and loading screens. The window icon is now the hexagon mark on a white rounded square.
 - Fonts (`assets/fonts/`, SIL Open Font License 1.1, compatible with Apache-2.0 for bundling) and icons (`egui-phosphor`, MIT) are credited in the editor's About box and must go in the generated credits once the editor is shipped.
-- glTF loading (Phase 17) uses `gltf` and `gltf-json` (MIT OR Apache-2.0) and, for textures, `image` (MIT OR Apache-2.0) with its PNG and JPEG decoders, which also go in the generated credits.
+- glTF loading (Phase 17) uses `gltf` and `gltf-json` (MIT OR Apache-2.0) and, for textures, `image` (MIT OR Apache-2.0) with its PNG, JPEG, TGA and BMP decoders. FBX loading uses `ufbx` (the Rust bindings and the bundled C library, MIT OR Unlicense; we take it under MIT). All of them go in the generated credits.

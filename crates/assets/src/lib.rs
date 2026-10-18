@@ -1,9 +1,9 @@
 //! Axcenity assets: the files a project uses besides its world and scripts.
 //!
-//! - [`Assets`] loads each glTF model a MeshPart names the first time
+//! - [`Assets`] loads each model a MeshPart names the first time
 //!   something asks for it, and keeps it. The player and the editor make one
 //!   per project and share it (it's a cheap handle) with `physics` and `scene`.
-//! - [`load_model`] reads a `.gltf` or `.glb` file into a [`Model`]: plain
+//! - [`load_model`] reads a `.gltf`, `.glb` or `.fbx` file into a [`Model`]: plain
 //!   triangles, materials and textures, fitted into the 1×1×1 cube that every
 //!   part's mesh fills.
 //! - [`import_model`] copies a model file (and the files it uses) into a
@@ -20,7 +20,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
 pub use import::{ImportError, MODELS_FOLDER, import_model};
-pub use model::{AlphaMode, Image, Model, ModelError, ModelMaterial, Primitive, load_model};
+pub use model::{
+    AlphaMode, Image, Model, ModelError, ModelFormat, ModelMaterial, Primitive, load_model,
+};
 
 /// The project's loaded assets. Cloning gives another handle to the same
 /// assets, so a model is loaded once however many parts use it.
@@ -56,7 +58,8 @@ impl Assets {
     /// The model at `mesh_id` (a MeshPart's `MeshId`, such as
     /// `assets/models/chair.glb`), loading it the first time. `None` if
     /// `mesh_id` is empty or the model can't be loaded; the reason goes to
-    /// [`take_errors`](Self::take_errors), once.
+    /// [`take_errors`](Self::take_errors), once, as do the model's
+    /// [warnings](Model::warnings).
     pub fn model(&self, mesh_id: &str) -> Option<Arc<Model>> {
         if mesh_id.is_empty() {
             return None;
@@ -67,7 +70,14 @@ impl Assets {
         }
         let folder = shared.folder.clone()?;
         let model = match read_model(&folder, mesh_id) {
-            Ok(model) => Some(Arc::new(model)),
+            Ok(model) => {
+                for warning in &model.warnings {
+                    shared
+                        .errors
+                        .push(format!("The model `{mesh_id}` {warning}."));
+                }
+                Some(Arc::new(model))
+            }
             Err(message) => {
                 shared
                     .errors
@@ -107,13 +117,15 @@ fn read_model(folder: &Path, mesh_id: &str) -> Result<Model, String> {
     let relative = safe_path(mesh_id).ok_or(
         "MeshId must be a path inside the project folder, such as \"assets/models/chair.glb\"",
     )?;
+    let format = ModelFormat::of(&relative)
+        .ok_or("MeshId must name a model file: a .gltf, .glb or .fbx file")?;
     let path = folder.join(relative);
     let bytes = std::fs::read(&path).map_err(|err| match err.kind() {
         std::io::ErrorKind::NotFound => "the file isn't there".to_owned(),
         _ => err.to_string(),
     })?;
     let base = path.parent().unwrap_or(folder);
-    load_model(&bytes, base).map_err(|err| with_causes(&err))
+    load_model(&bytes, base, format).map_err(|err| with_causes(&err))
 }
 
 /// An error and its causes on one line: "it isn't a valid glTF file:
@@ -191,6 +203,13 @@ mod tests {
         let assets = Assets::new(std::env::temp_dir());
         assert!(assets.model("../secret.glb").is_none());
         assert!(assets.take_errors()[0].contains("inside the project folder"));
+    }
+
+    #[test]
+    fn only_model_files_are_loaded() {
+        let assets = Assets::new(std::env::temp_dir());
+        assert!(assets.model("assets/notes.txt").is_none());
+        assert!(assets.take_errors()[0].contains(".gltf, .glb or .fbx"));
     }
 
     #[test]

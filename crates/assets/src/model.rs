@@ -1,9 +1,16 @@
-//! Reading glTF models into plain triangles, materials and textures.
+//! Reading glTF and FBX models into plain triangles, materials and
+//! textures. glTF is read here; FBX in [`fbx`].
 //!
 //! A model is fitted into the 1×1×1 cube centered on the origin, like the
 //! built-in part meshes, so a MeshPart's `Size` stretches it exactly the way
 //! it stretches a block. [`Model::size`] remembers how big it was in the
-//! file (1 glTF unit is 1 stud), which is the `Size` an imported MeshPart starts with.
+//! file (1 glTF unit, or 1 meter in an FBX file, is 1 stud), which is the
+//! `Size` an imported MeshPart starts with.
+
+mod fbx;
+
+#[cfg(test)]
+pub(crate) use fbx::tests::{checker_png, pyramid_fbx};
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -33,6 +40,28 @@ fn new_key() -> u64 {
     NEXT_KEY.fetch_add(1, Ordering::Relaxed)
 }
 
+/// The kinds of model file the engine reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModelFormat {
+    /// glTF 2.0: a `.gltf` (JSON) or `.glb` (binary) file.
+    Gltf,
+    /// FBX, binary or ASCII: a `.fbx` file.
+    Fbx,
+}
+
+impl ModelFormat {
+    /// The format of the file at `path`, by its extension (in any case), or
+    /// `None` if it isn't a model file.
+    pub fn of(path: &Path) -> Option<Self> {
+        let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+        match extension.as_str() {
+            "gltf" | "glb" => Some(Self::Gltf),
+            "fbx" => Some(Self::Fbx),
+            _ => None,
+        }
+    }
+}
+
 /// A loaded model: its triangles, fitted into the 1×1×1 cube centered on
 /// the origin, with their materials.
 pub struct Model {
@@ -45,6 +74,10 @@ pub struct Model {
     pub primitives: Vec<Primitive>,
     /// Every distinct corner, for the collision hull.
     pub hull_points: Vec<[f32; 3]>,
+    /// Problems that didn't stop it loading, such as an FBX texture that
+    /// isn't there (the model is drawn without it). They finish the sentence
+    /// "The model `…` ".
+    pub warnings: Vec<String>,
 }
 
 impl Model {
@@ -149,6 +182,9 @@ pub enum ModelError {
     /// chain (`{:#}` on an `anyhow::Error`) to see it.
     #[error("it isn't a valid glTF file")]
     Gltf(#[from] gltf::Error),
+    /// `ufbx`'s explanation, such as "Truncated file".
+    #[error("it isn't a valid FBX file: {0}")]
+    Fbx(String),
     #[error("it uses `{0}`, which isn't inside its folder; keep the files a model uses next to it")]
     OutsideFolder(String),
     #[error("it uses `{0}`, which isn't there; put it next to the model")]
@@ -167,15 +203,40 @@ pub enum ModelError {
     Damaged,
 }
 
-/// Reads a `.gltf` or `.glb` file's `bytes`. Files it uses (`.bin`
+/// Reads a model file's `bytes`, in `format`. Files it uses (`.bin`
 /// buffers, textures) are read from `folder`, the folder the model is in,
 /// and must be inside it.
-pub fn load_model(bytes: &[u8], folder: &Path) -> Result<Model, ModelError> {
+pub fn load_model(bytes: &[u8], folder: &Path, format: ModelFormat) -> Result<Model, ModelError> {
     // The `gltf` crate trusts some indices after checking the file, and
-    // panics (`unwrap`) on a few broken files. `catch_unwind` turns such a
-    // panic into an error, so a bad file can never crash the engine.
-    panic::catch_unwind(AssertUnwindSafe(|| read(bytes, folder)))
-        .unwrap_or(Err(ModelError::Damaged))
+    // panics (`unwrap`) on a few broken files; `ufbx` turns its own internal
+    // errors into panics too. `catch_unwind` turns such a panic into an
+    // error, so a bad file can never crash the engine.
+    panic::catch_unwind(AssertUnwindSafe(|| match format {
+        ModelFormat::Gltf => read(bytes, folder),
+        ModelFormat::Fbx => fbx::load(bytes, folder),
+    }))
+    .unwrap_or(Err(ModelError::Damaged))
+}
+
+/// The files a model in `folder` uses besides itself, as paths inside
+/// `folder`, for copying it with them. A glTF's must all be there; an
+/// FBX's textures are left out when they aren't.
+pub(crate) fn files_used(
+    bytes: &[u8],
+    folder: &Path,
+    format: ModelFormat,
+) -> Result<Vec<PathBuf>, ModelError> {
+    panic::catch_unwind(AssertUnwindSafe(|| match format {
+        ModelFormat::Gltf => {
+            let document = gltf::Gltf::from_slice(bytes)?;
+            external_files(&document)
+                .into_iter()
+                .map(|uri| uri_path(&uri))
+                .collect()
+        }
+        ModelFormat::Fbx => fbx::files_used(bytes, folder),
+    }))
+    .unwrap_or(Err(ModelError::Damaged))
 }
 
 fn read(bytes: &[u8], folder: &Path) -> Result<Model, ModelError> {
@@ -217,7 +278,7 @@ fn read(bytes: &[u8], folder: &Path) -> Result<Model, ModelError> {
 
 /// The URIs of the files a model uses (buffers and textures), leaving out
 /// data embedded in the file itself (`data:` URIs).
-pub(crate) fn external_files(document: &gltf::Document) -> Vec<String> {
+fn external_files(document: &gltf::Document) -> Vec<String> {
     let buffers = document
         .buffers()
         .filter_map(|buffer| match buffer.source() {
@@ -237,7 +298,7 @@ pub(crate) fn external_files(document: &gltf::Document) -> Vec<String> {
 
 /// A model's relative URI (with `%20` and the like decoded) as a path
 /// inside the model's folder.
-pub(crate) fn uri_path(uri: &str) -> Result<PathBuf, ModelError> {
+fn uri_path(uri: &str) -> Result<PathBuf, ModelError> {
     percent_decode(uri)
         .as_deref()
         .and_then(crate::safe_path)
@@ -319,7 +380,7 @@ impl Reader<'_> {
                 return Err(ModelError::BadIndex);
             }
             if mirrored {
-                for triangle in indices.chunks_exact_mut(3) {
+                for triangle in indices.as_chunks_mut::<3>().0 {
                     triangle.swap(1, 2);
                 }
             }
@@ -469,7 +530,7 @@ fn to_rgba8(data: &gltf::image::Data) -> Option<Vec<u8>> {
 /// triangles around it, weighted by their area.
 fn smooth_normals(positions: &[[f32; 3]], indices: &[u32]) -> Vec<[f32; 3]> {
     let mut sums = vec![Vec3::ZERO; positions.len()];
-    for triangle in indices.chunks_exact(3) {
+    for triangle in indices.as_chunks::<3>().0 {
         let [a, b, c] = [0, 1, 2].map(|i| Vec3::from(positions[triangle[i] as usize]));
         // The cross product's length is twice the area, so bigger triangles count more.
         let facing = (b - a).cross(c - a);
@@ -532,6 +593,7 @@ fn fit(mut primitives: Vec<Primitive>) -> Result<Model, ModelError> {
         size: Vec3::select(thick, size, Vec3::ZERO).to_array(),
         primitives,
         hull_points,
+        warnings: Vec::new(),
     })
 }
 
@@ -551,7 +613,7 @@ mod tests {
 
     #[test]
     fn the_example_pyramid_loads_fitted_into_the_unit_cube() {
-        let model = load_model(&example_bytes(), &example_folder()).unwrap();
+        let model = load_model(&example_bytes(), &example_folder(), ModelFormat::Gltf).unwrap();
         assert_eq!(model.size, [4.0, 3.0, 4.0]);
         assert_eq!(model.primitives.len(), 1);
         let primitive = &model.primitives[0];
@@ -571,14 +633,14 @@ mod tests {
 
     #[test]
     fn each_load_is_a_different_model() {
-        let a = load_model(&example_bytes(), &example_folder()).unwrap();
-        let b = load_model(&example_bytes(), &example_folder()).unwrap();
+        let a = load_model(&example_bytes(), &example_folder(), ModelFormat::Gltf).unwrap();
+        let b = load_model(&example_bytes(), &example_folder(), ModelFormat::Gltf).unwrap();
         assert_ne!(a, b);
         assert_ne!(a.primitives[0].key(), b.primitives[0].key());
     }
 
     fn error(text: &str) -> String {
-        load_model(text.as_bytes(), &example_folder())
+        load_model(text.as_bytes(), &example_folder(), ModelFormat::Gltf)
             .unwrap_err()
             .to_string()
     }
@@ -588,9 +650,15 @@ mod tests {
         assert!(error("not a model").contains("isn't a valid glTF file"));
         assert!(error("{}").contains("isn't a valid glTF file"));
         // Valid JSON, but the mesh points at an accessor that isn't there.
+        // `gltf` panics while checking it, which is caught.
         let bad_accessor = r#"{ "asset": { "version": "2.0" },
             "meshes": [ { "primitives": [ { "attributes": { "POSITION": 7 } } ] } ] }"#;
-        assert!(error(bad_accessor).contains("isn't a valid glTF file"));
+        let bad_accessor = error(bad_accessor);
+        assert!(
+            bad_accessor.contains("isn't a valid glTF file")
+                || bad_accessor == "the file is damaged",
+            "{bad_accessor}"
+        );
         // A model with nothing to draw.
         assert_eq!(
             error(r#"{ "asset": { "version": "2.0" } }"#),
@@ -612,6 +680,24 @@ mod tests {
         assert!(error(&using("C:/secret.bin")).contains("isn't inside"));
         assert!(error(&using("%2e%2e/secret.bin")).contains("isn't inside"));
         assert!(error(&using("gone%20away.bin")).contains("`gone%20away.bin`, which isn't there"));
+    }
+
+    #[test]
+    fn formats_come_from_the_extension() {
+        assert_eq!(
+            ModelFormat::of(Path::new("a/chair.GLB")),
+            Some(ModelFormat::Gltf)
+        );
+        assert_eq!(
+            ModelFormat::of(Path::new("tree.gltf")),
+            Some(ModelFormat::Gltf)
+        );
+        assert_eq!(
+            ModelFormat::of(Path::new("Robot.Fbx")),
+            Some(ModelFormat::Fbx)
+        );
+        assert_eq!(ModelFormat::of(Path::new("notes.txt")), None);
+        assert_eq!(ModelFormat::of(Path::new("fbx")), None);
     }
 
     #[test]

@@ -937,7 +937,7 @@ fn upload_custom_mesh(device: &wgpu::Device, source: &dyn MeshSource) -> Option<
         && normals.len() == count
         && (uvs.is_empty() || uvs.len() == count)
         && !indices.is_empty()
-        && indices.len() % 3 == 0
+        && indices.len().is_multiple_of(3)
         && indices.iter().all(|&index| (index as usize) < count);
     if !fits {
         log::warn!("mesh #{} has broken data, so it isn't drawn", source.key());

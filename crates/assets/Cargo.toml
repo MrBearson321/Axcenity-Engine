@@ -1,6 +1,6 @@
 [package]
 name = "axcenity-assets"
-description = "Axcenity assets: loads the files a project uses, such as glTF models, and imports new ones."
+description = "Axcenity assets: loads the files a project uses, such as glTF and FBX models, and imports new ones."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,7 +11,9 @@ authors.workspace = true
 [dependencies]
 glam.workspace = true
 gltf.workspace = true
+image.workspace = true
 thiserror.workspace = true
+ufbx.workspace = true
 
 [lints]
 workspace = true

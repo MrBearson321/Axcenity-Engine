@@ -5,15 +5,15 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::model::{self, Model, ModelError};
+use crate::model::{self, Model, ModelError, ModelFormat};
 
 /// Where imported models go, inside the project folder.
 pub const MODELS_FOLDER: &str = "assets/models";
 
 #[derive(Debug, thiserror::Error)]
 pub enum ImportError {
-    #[error("only glTF models (.gltf or .glb files) can be imported")]
-    NotGltf,
+    #[error("only glTF and FBX models (.gltf, .glb or .fbx files) can be imported")]
+    NotAModel,
     #[error("could not read it")]
     Read(#[source] io::Error),
     #[error(transparent)]
@@ -30,45 +30,41 @@ pub enum ImportError {
 /// returns its `MeshId` (its path in the project, with `/` between folders)
 /// and the model, loaded.
 ///
-/// A `.glb` is a single file, copied as `<name>.glb`. A `.gltf` can use
-/// other files beside it (`.bin` buffers, textures), so it goes into a
-/// folder of its own, `<name>/<name>.gltf`, with them. A number goes after
-/// the name if it's taken. The model is loaded first, so a file the engine
-/// can't load is never copied.
+/// A `.glb` or `.fbx` that uses no other files is copied as one file,
+/// `<name>.glb` or `<name>.fbx`. A `.gltf`, or a model that uses other
+/// files beside it (`.bin` buffers, textures), goes into a folder of its
+/// own, `<name>/<name>.gltf`, with them at the same paths. A number goes
+/// after the name if it's taken. The model is loaded first, so a file the
+/// engine can't load is never copied. An FBX texture that isn't there is
+/// left out (see [`Model::warnings`]).
 pub fn import_model(project: &Path, file: &Path) -> Result<(String, Model), ImportError> {
-    let extension = file
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map(str::to_ascii_lowercase);
-    let binary = match extension.as_deref() {
-        Some("glb") => true,
-        Some("gltf") => false,
-        _ => return Err(ImportError::NotGltf),
+    let format = ModelFormat::of(file).ok_or(ImportError::NotAModel)?;
+    let extension = match file.extension().and_then(|extension| extension.to_str()) {
+        Some(extension) => extension.to_ascii_lowercase(),
+        None => return Err(ImportError::NotAModel),
     };
     let bytes = fs::read(file).map_err(ImportError::Read)?;
     let folder = file.parent().unwrap_or(Path::new("."));
-    let model = model::load_model(&bytes, folder)?;
+    let model = model::load_model(&bytes, folder, format)?;
+    let used = model::files_used(&bytes, folder, format)?;
 
     let name = file_name(file);
     let models = project.join(MODELS_FOLDER);
-    if binary {
-        let name = free_name(&models, &name, ".glb");
-        let mesh_id = format!("{MODELS_FOLDER}/{name}.glb");
+    if used.is_empty() && extension != "gltf" {
+        let name = free_name(&models, &name, &format!(".{extension}"));
+        let mesh_id = format!("{MODELS_FOLDER}/{name}.{extension}");
         copy(file, &project.join(&mesh_id))?;
         return Ok((mesh_id, model));
     }
 
     let name = free_name(&models, &name, "");
     let copy_folder = models.join(&name);
-    // It loaded, so it reads again; the error can't happen.
-    let document = gltf::Gltf::from_slice(&bytes).map_err(ModelError::Gltf)?;
-    for uri in model::external_files(&document) {
-        let path = model::uri_path(&uri)?;
+    for path in used {
         copy(&folder.join(&path), &copy_folder.join(&path))?;
     }
     // Renamed to match its folder. Nothing in a model refers to its own file.
-    copy(file, &copy_folder.join(format!("{name}.gltf")))?;
-    Ok((format!("{MODELS_FOLDER}/{name}/{name}.gltf"), model))
+    copy(file, &copy_folder.join(format!("{name}.{extension}")))?;
+    Ok((format!("{MODELS_FOLDER}/{name}/{name}.{extension}"), model))
 }
 
 /// The model's file name without its extension, keeping only letters,
@@ -195,7 +191,7 @@ mod tests {
         // A .glb is a header and the JSON, padded to 4 bytes (this model
         // embeds its buffer, so it needs no binary chunk).
         let mut json = fs::read(example_model()).unwrap();
-        while json.len() % 4 != 0 {
+        while !json.len().is_multiple_of(4) {
             json.push(b' ');
         }
         let mut glb = Vec::new();
@@ -215,6 +211,65 @@ mod tests {
     }
 
     #[test]
+    fn an_fbx_that_uses_no_other_files_is_copied_as_one_file() {
+        let source = temp_folder("import-fbx-source");
+        fs::write(source.join("Pyramid.FBX"), model::pyramid_fbx(false, None)).unwrap();
+        let project = temp_folder("import-fbx");
+        let (mesh_id, model) = import_model(&project, &source.join("Pyramid.FBX")).unwrap();
+        assert_eq!(mesh_id, "assets/models/Pyramid.fbx");
+        assert!((model.size[1] - 3.0).abs() < 1e-4, "{:?}", model.size);
+        let (second, _) = import_model(&project, &source.join("Pyramid.FBX")).unwrap();
+        assert_eq!(second, "assets/models/Pyramid2.fbx");
+        let assets = Assets::new(&project);
+        assert!(assets.model(&mesh_id).is_some());
+        assert!(assets.take_errors().is_empty());
+    }
+
+    #[test]
+    fn an_fbx_goes_into_a_folder_with_its_textures() {
+        let source = temp_folder("import-fbx-texture-source");
+        fs::create_dir_all(source.join("textures")).unwrap();
+        fs::write(source.join("textures/checker.png"), model::checker_png()).unwrap();
+        // The file names the texture by where it was on another machine.
+        let fbx = model::pyramid_fbx(false, Some("../../maps/checker.png"));
+        fs::write(source.join("robot.fbx"), fbx).unwrap();
+        let project = temp_folder("import-fbx-texture");
+        let (mesh_id, _) = import_model(&project, &source.join("robot.fbx")).unwrap();
+        assert_eq!(mesh_id, "assets/models/robot/robot.fbx");
+        assert!(
+            project
+                .join("assets/models/robot/textures/checker.png")
+                .is_file()
+        );
+        let assets = Assets::new(&project);
+        let model = assets.model(&mesh_id).unwrap();
+        assert!(model.primitives[0].material.base_color_texture.is_some());
+        assert!(assets.take_errors().is_empty());
+    }
+
+    #[test]
+    fn an_fbx_texture_that_is_not_there_is_reported_once() {
+        let source = temp_folder("import-fbx-missing-source");
+        let fbx = model::pyramid_fbx(false, Some("wood.png"));
+        fs::write(source.join("crate.fbx"), fbx).unwrap();
+        let project = temp_folder("import-fbx-missing");
+        let (mesh_id, model) = import_model(&project, &source.join("crate.fbx")).unwrap();
+        assert_eq!(mesh_id, "assets/models/crate.fbx");
+        assert_eq!(model.warnings.len(), 1);
+        let assets = Assets::new(&project);
+        assert!(assets.model(&mesh_id).is_some());
+        assert!(assets.model(&mesh_id).is_some());
+        let errors = assets.take_errors();
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].starts_with(
+                "The model `assets/models/crate.fbx` is drawn without its texture `wood.png`"
+            ),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
     fn a_file_that_does_not_load_is_not_copied() {
         let source = temp_folder("import-broken-source");
         fs::write(source.join("broken.glb"), b"glTF and then nonsense").unwrap();
@@ -227,7 +282,7 @@ mod tests {
         );
         assert!(matches!(
             import_model(&project, &source.join("notes.txt")),
-            Err(ImportError::NotGltf)
+            Err(ImportError::NotAModel)
         ));
         assert!(!project.join(MODELS_FOLDER).exists());
     }
