@@ -1,0 +1,18 @@
+[package]
+name = "axcenity-player"
+description = "The Axcenity Engine runtime that ships with exported games."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+env_logger.workspace = true
+log.workspace = true
+pollster.workspace = true
+wgpu.workspace = true
+winit.workspace = true
+
+[lints]
+workspace = true

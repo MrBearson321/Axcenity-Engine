@@ -1,0 +1,25 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+authors = ["Paul Janota and contributors"]
+
+# Every third-party dependency is declared here, once, with a pinned major version.
+# Crates opt in with `name.workspace = true`. Upgrade deliberately, never by accident.
+[workspace.dependencies]
+anyhow = "1"
+env_logger = "0.11"
+log = "0.4"
+pollster = "0.4"
+wgpu = "25"
+winit = "0.30"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
