@@ -188,10 +188,10 @@ Clicking a part in the viewport (ray pick) or in the Explorer selects it, and th
 
 ### Acceptance criteria
 
-- [ ] Selecting in either place highlights the same Instance in both.
-- [ ] Editing Position, Size, Color, Material or Anchored updates the viewport immediately.
-- [ ] Save, close and reopen reproduces the edits exactly.
-- [ ] Unsaved changes show an indicator, and closing asks before discarding them.
+- [x] Selecting in either place highlights the same Instance in both.
+- [x] Editing Position, Size, Color, Material or Anchored updates the viewport immediately.
+- [x] Save, close and reopen reproduces the edits exactly.
+- [x] Unsaved changes show an indicator, and closing asks before discarding them.
 
 ---
 

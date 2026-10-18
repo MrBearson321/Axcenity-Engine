@@ -1,6 +1,6 @@
 [package]
 name = "axcenity-editor"
-description = "The Axcenity Engine editor: open a project, look around it, and see its Instance tree."
+description = "The Axcenity Engine editor: open a project, look around it, select and edit its parts, and save."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

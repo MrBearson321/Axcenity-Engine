@@ -6,12 +6,14 @@
 //! middle-drag to pan, and Alt+left-drag to orbit around the focus point.
 //! Shift+wheel, or the wheel while right-dragging, changes the flying speed,
 //! and a pop-up in the middle of the viewport shows the new speed.
+//!
+//! Left-clicking a part selects it, and the selected part gets a blue box.
 
-use axcenity_core::World;
+use axcenity_core::{InstanceId, World};
 use axcenity_render::TextureRenderer;
-use axcenity_render::glam::Vec3;
+use axcenity_render::glam::{Vec2, Vec3};
 use axcenity_render::wgpu;
-use axcenity_scene::{FlyCamera, MoveKeys};
+use axcenity_scene::{CameraView, FlyCamera, MoveKeys};
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 
@@ -30,6 +32,16 @@ const POINTS_PER_NOTCH: f32 = 40.0;
 /// then how long it takes to fade out, in seconds.
 const POPUP_SECONDS: f64 = 1.0;
 const POPUP_FADE_SECONDS: f64 = 0.4;
+/// The selection box: a bright blue, like Studio's, that stands out against
+/// the sky and most part colors.
+const SELECTION_COLOR: egui::Color32 = egui::Color32::from_rgb(25, 160, 255);
+const SELECTION_WIDTH: f32 = 2.0;
+
+/// A left click in the viewport, with the part under the mouse (`None` for
+/// empty space, which clears the selection).
+pub struct Clicked {
+    pub part: Option<InstanceId>,
+}
 
 pub struct Viewport {
     camera: FlyCamera,
@@ -69,11 +81,20 @@ impl Viewport {
     }
 
     /// Fills `ui` with the viewport: moves the camera from this frame's
-    /// input, then draws `world` from there.
-    pub fn show(&mut self, ui: &mut egui::Ui, render_state: &RenderState, world: &World) {
+    /// input, then draws `world` from there with a box around `selected`.
+    /// Returns what a left click picked, if there was one.
+    pub fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        render_state: &RenderState,
+        world: &World,
+        selected: Option<InstanceId>,
+    ) -> Option<Clicked> {
         let size = ui.available_size();
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
         self.handle_input(ui, &response, rect.height());
+        let view = self.camera_view(rect);
+        let clicked = self.clicked_part(ui, &response, rect, &view, world);
 
         // The texture is sized in physical pixels, so it stays sharp on
         // high-DPI screens where one point is several pixels.
@@ -111,7 +132,39 @@ impl Viewport {
         let whole_texture = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
         ui.painter()
             .image(target.texture_id, rect, whole_texture, egui::Color32::WHITE);
+        if let Some(selected) = selected {
+            paint_selection_box(ui, rect, &view, world, selected);
+        }
         self.paint_speed_popup(ui, rect);
+        clicked
+    }
+
+    /// The camera as it draws into `rect`, for turning between screen and
+    /// world positions.
+    fn camera_view(&self, rect: egui::Rect) -> CameraView {
+        // `max` keeps a zero-height (minimized) viewport from dividing by zero.
+        let aspect = rect.width() / rect.height().max(1.0);
+        CameraView::new(self.camera.to_render_camera(), aspect)
+    }
+
+    /// If this frame has a plain left click (not the end of a drag, and not
+    /// Alt for orbiting), the part under the mouse.
+    fn clicked_part(
+        &self,
+        ui: &egui::Ui,
+        response: &egui::Response,
+        rect: egui::Rect,
+        view: &CameraView,
+        world: &World,
+    ) -> Option<Clicked> {
+        if !response.clicked() || ui.input(|input| input.modifiers.alt) {
+            return None;
+        }
+        let pointer = response.interact_pointer_pos()?;
+        let ray = view.ray(to_screen_point(rect, pointer));
+        Some(Clicked {
+            part: axcenity_scene::pick(world, ray),
+        })
     }
 
     /// Shows the flying speed in the middle of the viewport for a moment
@@ -226,6 +279,39 @@ impl Viewport {
     }
 }
 
+/// Draws the blue box around the selected part, on top of everything so it
+/// shows even behind other parts. Draws nothing if `selected` isn't a part.
+fn paint_selection_box(
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    view: &CameraView,
+    world: &World,
+    selected: InstanceId,
+) {
+    let Some(edges) = axcenity_scene::part_box_edges(world, selected) else {
+        return;
+    };
+    let painter = ui.painter_at(rect);
+    let stroke = egui::Stroke::new(SELECTION_WIDTH, SELECTION_COLOR);
+    for (a, b) in edges {
+        if let Some((a, b)) = view.project_line(a, b) {
+            painter.line_segment([to_ui_point(rect, a), to_ui_point(rect, b)], stroke);
+        }
+    }
+}
+
+/// Turns a position in the viewport (egui points, Y down) into the
+/// renderer's screen coordinates (-1 to 1, Y up).
+fn to_screen_point(rect: egui::Rect, point: egui::Pos2) -> Vec2 {
+    let across = (point - rect.min) / rect.size();
+    Vec2::new(across.x * 2.0 - 1.0, 1.0 - across.y * 2.0)
+}
+
+/// The reverse of [`to_screen_point`].
+fn to_ui_point(rect: egui::Rect, screen: Vec2) -> egui::Pos2 {
+    rect.min + egui::vec2((screen.x + 1.0) / 2.0, (1.0 - screen.y) / 2.0) * rect.size()
+}
+
 fn start_camera() -> FlyCamera {
     FlyCamera::looking_at(START_CAMERA_POSITION, Vec3::ZERO)
 }
@@ -305,6 +391,34 @@ mod tests {
         assert_eq!(speed_label(20.0), "Fly speed: 20 studs/s");
         assert_eq!(speed_label(57.6), "Fly speed: 58 studs/s");
         assert_eq!(speed_label(2.4), "Fly speed: 2.4 studs/s");
+    }
+
+    #[test]
+    fn viewport_corners_map_to_screen_corners_and_back() {
+        let rect = egui::Rect::from_min_size(egui::pos2(100.0, 50.0), egui::vec2(800.0, 600.0));
+        assert_eq!(to_screen_point(rect, rect.left_top()), Vec2::new(-1.0, 1.0));
+        assert_eq!(
+            to_screen_point(rect, rect.right_bottom()),
+            Vec2::new(1.0, -1.0)
+        );
+        assert_eq!(to_screen_point(rect, rect.center()), Vec2::ZERO);
+        let point = egui::pos2(250.0, 470.0);
+        assert_eq!(to_ui_point(rect, to_screen_point(rect, point)), point);
+    }
+
+    #[test]
+    fn clicking_the_middle_of_the_view_picks_the_part_the_camera_faces() {
+        let mut world = World::new();
+        let part = world.create(axcenity_core::ClassName::Part).unwrap();
+        world.set_parent(part, Some(world.workspace())).unwrap();
+        // The start camera looks at the origin, where a new part sits.
+        let viewport = Viewport::new();
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0));
+        let view = viewport.camera_view(rect);
+        let ray = view.ray(to_screen_point(rect, rect.center()));
+        assert_eq!(axcenity_scene::pick(&world, ray), Some(part));
+        let corner = view.ray(to_screen_point(rect, rect.left_top()));
+        assert_eq!(axcenity_scene::pick(&world, corner), None);
     }
 
     #[test]

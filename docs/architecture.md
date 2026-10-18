@@ -8,7 +8,7 @@ Read before creating a crate, adding a dependency between crates, or touching th
 |---|---|---|
 | `core` | Instance tree, arena, properties, events, services | nothing engine-internal |
 | `render` | `wgpu` renderer | nothing engine-internal; takes a draw list |
-| `scene` | Instance tree → draw list (`build_draw_list`), the shared `FlyCamera` | `core`, `render` |
+| `scene` | Instance tree → draw list (`build_draw_list`), the shared `FlyCamera`, viewport picking (`pick`) | `core`, `render` |
 | `physics` | `rapier3d` integration | `core` |
 | `script` | Lua 5.4 (`mlua`), sandbox, scheduler, engine API | `core` |
 | `blocks` | block-script model and translation to Lua | `core` (not `script`) |
@@ -61,6 +61,15 @@ The player runs these in `WindowEvent::RedrawRequested` (`crates/player/src/main
 - **Output**: editor messages (project opened, with object and script counts) and load errors, one line each with the full cause chain (file and line for bad JSON). A failed open keeps the current project. Script output joins it with Play.
 - **Opening projects**: `axcenity-editor <folder>` or File > Open Project… (`rfd` native folder dialog; the desktop portal on Linux). With no folder, the editor starts empty with a hint in Output.
 - Scripts and physics don't run in the editor until Play (Phase 12).
+
+### Selecting and editing (decided in Phase 9)
+
+- **One selected Instance** (`EditorApp::selected`), shared by the Explorer, Properties and viewport. Multi-select can come later.
+- **Viewport picking**: a left click (not a drag, not Alt) casts a ray from the camera (`scene::CameraView::ray`) and picks the nearest Workspace Part whose *drawn* shape it hits (`scene::pick`: exact box, wedge slope, sphere and cylinder tests, using the same transform as the draw list). Parts the camera is inside are skipped. Clicking empty space clears the selection. Picking in the viewport opens the Explorer branches above the part and scrolls to it.
+- **Highlight**: the selected part gets a blue (25, 160, 255) wireframe box around its drawn mesh, painted by egui on top of the viewport image, so it shows through other parts. Like Studio's selection box, balls and cylinders get a box too. `render` is untouched. In the Explorer, the selected row is highlighted.
+- **Properties panel**: under the Explorer, in collapsible groups like Studio: Data (Name, ClassName), Appearance (Color, Material, Metalness, Roughness), Behavior (Anchored), Part (Shape, Position, Orientation, Size). A property no group lists goes under "Other", so new properties always show. Controls: checkbox for bools, dropdown for enums, a color picker (egui's, converted from sRGB to linear light and back) with the 0–255 values, and drag-number boxes (drag to scrub, click to type) for numbers and each vector axis. Metalness and Roughness stay within 0–1, and Size within 0.001 and up (Roblox's minimum); values already out of range are never clamped just by being shown. Numbers show up to 3 decimals.
+- **Edits apply live**: the panel returns an `Edit`, and the app applies it to the world before the viewport draws, in the same frame. Setting a value it already has doesn't count as a change. Service names, and Script names (which come from their files), are read-only.
+- **Saving**: File > Save or Ctrl+S (Cmd+S on macOS) writes `world.json` with `project::save_world`; scripts and the manifest aren't touched. Unsaved changes put `*` after the project name in the title and "Unsaved changes" at the right of the menu bar. Closing the window, File > Quit or File > Open Project… with unsaved changes asks "Save changes?" (Save / Don't Save / Cancel; Escape or clicking outside is Cancel). If saving fails, the error goes to Output and the editor stays open.
 
 ## Play mode
 

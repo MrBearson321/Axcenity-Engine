@@ -1,13 +1,15 @@
 //! Axcenity Editor: open a project folder, look around it in a 3D viewport,
 //! and see its Instance tree in the Explorer.
 //!
-//! Phase 8: the editor only shows the project; editing comes in later phases.
+//! Phase 9: select parts, edit their properties and save. Undo, transform
+//! tools and Play come in later phases.
 //! Built on eframe (egui's app framework), which owns the window and the GPU
 //! device; the viewport draws with the same renderer as the player.
 
 mod app;
 mod explorer;
 mod output;
+mod properties;
 mod viewport;
 
 use std::path::PathBuf;

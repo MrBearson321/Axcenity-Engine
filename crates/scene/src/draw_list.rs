@@ -37,21 +37,16 @@ pub fn build_draw_list(world: &World, camera: Camera) -> DrawList {
     }
 }
 
-/// The draw item for a Part, or `None` for any other class.
-fn part_draw_item(instance: &Instance) -> Option<DrawItem> {
+/// A Part's shape and the transform that places its 1×1×1 mesh in the world,
+/// or `None` for any other class. Drawing and picking both use this, so a
+/// click hits exactly what's drawn.
+pub(crate) fn part_placement(instance: &Instance) -> Option<(PartType, Mat4)> {
     let vector = |name| {
         let v = instance.property(name).and_then(Value::as_vector3)?;
         Some(Vec3::new(v.x, v.y, v.z))
     };
-    let number = |name| instance.property(name).and_then(Value::as_number);
     // Only Parts have a Shape, so anything else stops here.
     let shape = instance.property("Shape").and_then(Value::as_part_type)?;
-    let color = instance.property("Color").and_then(Value::as_color3)?;
-    let preset = instance
-        .property("Material")
-        .and_then(Value::as_material)?
-        .preset();
-
     let [x, y, z] = vector("Orientation")?.to_array().map(f32::to_radians);
     // Z first, then X, then Y, matching how `Orientation` is defined.
     let rotation = Quat::from_euler(EulerRot::YXZ, y, x, z);
@@ -60,6 +55,18 @@ fn part_draw_item(instance: &Instance) -> Option<DrawItem> {
         rotation,
         vector("Position")?,
     );
+    Some((shape, transform))
+}
+
+/// The draw item for a Part, or `None` for any other class.
+fn part_draw_item(instance: &Instance) -> Option<DrawItem> {
+    let number = |name| instance.property(name).and_then(Value::as_number);
+    let (shape, transform) = part_placement(instance)?;
+    let color = instance.property("Color").and_then(Value::as_color3)?;
+    let preset = instance
+        .property("Material")
+        .and_then(Value::as_material)?
+        .preset();
 
     let color = [color.r, color.g, color.b];
     Some(DrawItem {

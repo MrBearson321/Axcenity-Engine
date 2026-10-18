@@ -1,5 +1,5 @@
 //! The Explorer panel: the Instance tree, from `game` down, with branches
-//! that open and close.
+//! that open and close. Clicking a row selects that Instance.
 //!
 //! [`Explorer::rows`] works out which rows are visible without any UI code,
 //! so tests can check the tree; [`Explorer::show`] only draws those rows.
@@ -18,6 +18,9 @@ const ARROW_SIZE: f32 = 16.0;
 /// they simply never match a row again.
 pub struct Explorer {
     expanded: HashSet<InstanceId>,
+    /// A row to scroll into view on the next frame, after something was
+    /// selected in the viewport.
+    scroll_to: Option<InstanceId>,
 }
 
 /// One visible line in the Explorer.
@@ -37,7 +40,19 @@ impl Explorer {
     pub fn new(world: &World) -> Self {
         Self {
             expanded: HashSet::from([world.root(), world.workspace()]),
+            scroll_to: None,
         }
+    }
+
+    /// Opens every branch above `id`, so its row is visible, and scrolls to
+    /// it on the next frame. Used when a part is selected in the viewport.
+    pub fn reveal(&mut self, world: &World, id: InstanceId) {
+        let mut parent = world.get(id).and_then(|instance| instance.parent());
+        while let Some(next) = parent {
+            self.expanded.insert(next);
+            parent = world.get(next).and_then(|instance| instance.parent());
+        }
+        self.scroll_to = Some(id);
     }
 
     /// Opens a closed branch, or closes an open one.
@@ -78,13 +93,22 @@ impl Explorer {
         }
     }
 
-    pub fn show(&mut self, ui: &mut egui::Ui, world: &World) {
+    /// Draws the tree with the `selected` row highlighted, and returns the
+    /// Instance whose row was clicked, if any.
+    pub fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        world: &World,
+        selected: Option<InstanceId>,
+    ) -> Option<InstanceId> {
         ui.strong("Explorer");
         ui.separator();
 
         // Toggling while looping over the rows would change what's being
-        // looped over, so remember the click and apply it afterward.
+        // looped over, so remember the clicks and apply them afterward.
+        let mut toggled = None;
         let mut clicked = None;
+        let scroll_to = self.scroll_to.take();
         egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
             for row in self.rows(world) {
                 ui.horizontal(|ui| {
@@ -102,21 +126,31 @@ impl Explorer {
                     }
 
                     let label = ui
-                        .add(egui::Label::new(&row.name).sense(egui::Sense::click()))
+                        .add(egui::Button::selectable(
+                            selected == Some(row.id),
+                            &row.name,
+                        ))
                         .on_hover_text(row.class.as_str());
+                    if label.clicked() {
+                        clicked = Some(row.id);
+                    }
+                    if scroll_to == Some(row.id) {
+                        label.scroll_to_me(Some(egui::Align::Center));
+                    }
                     // Show the class too when the name doesn't already say it.
                     if row.name != row.class.as_str() {
                         ui.weak(row.class.as_str());
                     }
                     if row.has_children && (arrow.clicked() || label.double_clicked()) {
-                        clicked = Some(row.id);
+                        toggled = Some(row.id);
                     }
                 });
             }
         });
-        if let Some(id) = clicked {
+        if let Some(id) = toggled {
             self.toggle(id);
         }
+        clicked
     }
 }
 
@@ -212,5 +246,24 @@ mod tests {
         // The Model inside stays open, so it all comes back as it was.
         explorer.toggle(world.root());
         assert_eq!(outline(&explorer, &world), open);
+    }
+
+    #[test]
+    fn revealing_a_deep_part_opens_every_branch_above_it() {
+        let mut world = World::new();
+        let car = world.create(ClassName::Part).unwrap();
+        world.set_parent(car, Some(world.workspace())).unwrap();
+        let wheel = world.create(ClassName::Part).unwrap();
+        world.set_parent(wheel, Some(car)).unwrap();
+        let mut explorer = Explorer::new(&world);
+        explorer.toggle(world.workspace());
+        assert!(!explorer.rows(&world).iter().any(|row| row.id == wheel));
+
+        explorer.reveal(&world, wheel);
+        let rows = explorer.rows(&world);
+        assert!(rows.iter().any(|row| row.id == wheel));
+        // The wheel itself has no children, and the Script service stays closed.
+        assert!(!rows.iter().find(|row| row.id == wheel).unwrap().expanded);
+        assert_eq!(explorer.scroll_to, Some(wheel));
     }
 }
