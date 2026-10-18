@@ -8,14 +8,21 @@
 //! and a pop-up in the middle of the viewport shows the new speed.
 //!
 //! Left-clicking a part selects it, and the selected part gets a blue box.
+//! With the Move, Scale or Rotate tool, it also gets handles to drag
+//! (see `gizmo.rs`). With any tool, left-dragging a part by its body moves
+//! it onto the surface under the mouse (see `placing.rs`).
 
-use axcenity_core::{InstanceId, World};
+use axcenity_core::{InstanceId, Value, World};
 use axcenity_render::TextureRenderer;
-use axcenity_render::glam::{Vec2, Vec3};
+use axcenity_render::glam::Vec3;
 use axcenity_render::wgpu;
-use axcenity_scene::{CameraView, FlyCamera, MoveKeys};
+use axcenity_scene::{FlyCamera, MoveKeys};
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
+
+use crate::gizmo::{self, Drag, Handle, Pose, Snap, Tool};
+use crate::placing::PlaceDrag;
+use crate::screen::Screen;
 
 /// Where the camera starts, looking at the origin (the same as the player).
 const START_CAMERA_POSITION: Vec3 = Vec3::new(12.0, 8.0, 16.0);
@@ -38,9 +45,69 @@ const SELECTION_COLOR: egui::Color32 = egui::Color32::from_rgb(25, 160, 255);
 const SELECTION_WIDTH: f32 = 2.0;
 
 /// A left click in the viewport, with the part under the mouse (`None` for
-/// empty space, which clears the selection).
+/// empty space, which clears the selection). Starting to drag a part by its
+/// body counts as clicking it, so it gets selected.
 pub struct Clicked {
     pub part: Option<InstanceId>,
+}
+
+/// What a drag in the viewport does to a part, which names its undo step.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DragKind {
+    Move,
+    Resize,
+    Rotate,
+}
+
+impl DragKind {
+    pub fn of(handle: Handle) -> DragKind {
+        match handle {
+            Handle::Move(_) => DragKind::Move,
+            Handle::Scale(..) => DragKind::Resize,
+            Handle::Rotate(_) => DragKind::Rotate,
+        }
+    }
+}
+
+/// New property values for a part from dragging it or one of its handles.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DragEdit {
+    pub part: InstanceId,
+    pub kind: DragKind,
+    pub values: Vec<(&'static str, Value)>,
+}
+
+/// What happened in the viewport this frame.
+#[derive(Default)]
+pub struct ViewportOutput {
+    pub clicked: Option<Clicked>,
+    pub drag: Option<DragEdit>,
+    /// True on the frame a drag is let go, which ends that drag's undo step.
+    pub drag_released: bool,
+}
+
+/// What the left button holds, from going down on it until it's let go.
+#[derive(Clone, Copy, Debug)]
+enum Dragging {
+    /// A handle of the selected part.
+    Handle(Drag),
+    /// A part, by its body.
+    Body(PlaceDrag),
+}
+
+/// What dragging did this frame, before anything is drawn.
+#[derive(Default)]
+struct DragInput {
+    /// The handles to draw, and which one to highlight.
+    shapes: Vec<gizmo::Shape>,
+    highlighted: Option<Handle>,
+    /// True if the left button is (or just was) dragging something, so the
+    /// click that ends it doesn't also select something.
+    in_use: bool,
+    /// A part grabbed by its body this frame, to select.
+    grabbed: Option<InstanceId>,
+    edit: Option<DragEdit>,
+    released: bool,
 }
 
 pub struct Viewport {
@@ -53,6 +120,8 @@ pub struct Viewport {
     /// When the flying speed last changed (egui's clock, in seconds), to
     /// show and fade the speed pop-up.
     speed_changed_at: Option<f64>,
+    /// What's being dragged, if anything.
+    drag: Option<Dragging>,
 }
 
 /// The texture the scene is drawn into, and egui's name for it.
@@ -69,6 +138,7 @@ impl Viewport {
             looking: false,
             target: None,
             speed_changed_at: None,
+            drag: None,
         }
     }
 
@@ -78,23 +148,37 @@ impl Viewport {
         let speed = self.camera.speed();
         self.camera = start_camera();
         self.camera.set_speed(speed);
+        self.drag = None;
+    }
+
+    /// True while a part or a handle is being dragged.
+    pub fn is_dragging(&self) -> bool {
+        self.drag.is_some()
     }
 
     /// Fills `ui` with the viewport: moves the camera from this frame's
-    /// input, then draws `world` from there with a box around `selected`.
-    /// Returns what a left click picked, if there was one.
+    /// input, then draws `world` from there with a box around `selected`,
+    /// and `tool`'s handles on it. Returns what a click picked and what a
+    /// drag changed; the app applies those to the world.
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
         render_state: &RenderState,
         world: &World,
         selected: Option<InstanceId>,
-    ) -> Option<Clicked> {
+        tool: Tool,
+        snap: Snap,
+    ) -> ViewportOutput {
         let size = ui.available_size();
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
         self.handle_input(ui, &response, rect.height());
-        let view = self.camera_view(rect);
-        let clicked = self.clicked_part(ui, &response, rect, &view, world);
+        let screen = self.screen(rect);
+        let drag = self.drag_input(ui, &response, &screen, world, selected, tool, snap);
+        let clicked = match drag.grabbed {
+            Some(part) => Some(Clicked { part: Some(part) }),
+            None if drag.in_use => None,
+            None => self.clicked_part(ui, &response, &screen, world),
+        };
 
         // The texture is sized in physical pixels, so it stays sharp on
         // high-DPI screens where one point is several pixels.
@@ -133,18 +217,115 @@ impl Viewport {
         ui.painter()
             .image(target.texture_id, rect, whole_texture, egui::Color32::WHITE);
         if let Some(selected) = selected {
-            paint_selection_box(ui, rect, &view, world, selected);
+            paint_selection_box(ui, rect, &screen, world, selected);
         }
+        gizmo::paint(&ui.painter_at(rect), &drag.shapes, drag.highlighted);
         self.paint_speed_popup(ui, rect);
-        clicked
+        ViewportOutput {
+            clicked,
+            drag: drag.edit,
+            drag_released: drag.released,
+        }
     }
 
     /// The camera as it draws into `rect`, for turning between screen and
     /// world positions.
-    fn camera_view(&self, rect: egui::Rect) -> CameraView {
-        // `max` keeps a zero-height (minimized) viewport from dividing by zero.
-        let aspect = rect.width() / rect.height().max(1.0);
-        CameraView::new(self.camera.to_render_camera(), aspect)
+    fn screen(&self, rect: egui::Rect) -> Screen {
+        Screen::new(self.camera.to_render_camera(), rect)
+    }
+
+    /// Starts, continues or ends dragging a handle of the selected part, or
+    /// any part by its body.
+    #[allow(clippy::too_many_arguments)] // Each is a different thing dragging needs.
+    fn drag_input(
+        &mut self,
+        ui: &egui::Ui,
+        response: &egui::Response,
+        screen: &Screen,
+        world: &World,
+        selected: Option<InstanceId>,
+        tool: Tool,
+        snap: Snap,
+    ) -> DragInput {
+        let selected = selected.and_then(|id| Some((id, Pose::of(world.get(id)?)?)));
+        let shapes = match selected {
+            Some((_, pose)) => gizmo::shapes(tool, pose, screen),
+            None => Vec::new(),
+        };
+        let (pressed, down, pointer, press_origin, alt) = ui.input(|input| {
+            (
+                input.pointer.primary_pressed(),
+                input.pointer.primary_down(),
+                input.pointer.latest_pos(),
+                input.pointer.press_origin(),
+                input.modifiers.alt,
+            )
+        });
+        let hovered = match (&self.drag, pointer) {
+            (None, Some(pointer)) if response.contains_pointer() => {
+                gizmo::hovered(&shapes, pointer)
+            }
+            _ => None,
+        };
+        let mut input = DragInput::default();
+
+        // Alt+left-drag orbits the camera, so it never grabs anything.
+        // A handle is grabbed as soon as the button goes down on it.
+        if pressed
+            && !alt
+            && let (Some(handle), Some(pointer), Some((part, pose))) = (hovered, pointer, selected)
+        {
+            self.drag = Drag::start(handle, part, pose, screen.ray(pointer)).map(Dragging::Handle);
+        }
+        // A part's body only once the mouse has moved far enough to be a
+        // drag, so a plain click still just selects. It's grabbed where the
+        // button went down.
+        if self.drag.is_none()
+            && !alt
+            && response.drag_started_by(egui::PointerButton::Primary)
+            && let Some(origin) = press_origin
+            && let Some(hit) = axcenity_scene::pick_hit(world, screen.ray(origin), None)
+            && let Some(place) =
+                PlaceDrag::start(world, hit.part, screen.ray(origin).at(hit.distance))
+        {
+            self.drag = Some(Dragging::Body(place));
+            input.grabbed = Some(hit.part);
+        }
+
+        input.highlighted = match self.drag {
+            Some(Dragging::Handle(drag)) => Some(drag.handle),
+            _ => hovered,
+        };
+        input.in_use = self.drag.is_some();
+        if self.drag.is_some() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        } else if hovered.is_some() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+        }
+        if let Some(dragging) = &mut self.drag {
+            if !down {
+                self.drag = None;
+                input.released = true;
+            } else if let Some(pointer) = pointer {
+                let ray = screen.ray(pointer);
+                input.edit = match dragging {
+                    Dragging::Handle(drag) => drag.update(ray, &snap).map(|values| DragEdit {
+                        part: drag.part,
+                        kind: DragKind::of(drag.handle),
+                        values,
+                    }),
+                    Dragging::Body(place) => {
+                        place.update(world, ray, &snap).map(|position| DragEdit {
+                            part: place.part,
+                            kind: DragKind::Move,
+                            values: vec![("Position", position)],
+                        })
+                    }
+                };
+            }
+        }
+        input.shapes = shapes;
+        input
     }
 
     /// If this frame has a plain left click (not the end of a drag, and not
@@ -153,17 +334,15 @@ impl Viewport {
         &self,
         ui: &egui::Ui,
         response: &egui::Response,
-        rect: egui::Rect,
-        view: &CameraView,
+        screen: &Screen,
         world: &World,
     ) -> Option<Clicked> {
         if !response.clicked() || ui.input(|input| input.modifiers.alt) {
             return None;
         }
         let pointer = response.interact_pointer_pos()?;
-        let ray = view.ray(to_screen_point(rect, pointer));
         Some(Clicked {
-            part: axcenity_scene::pick(world, ray),
+            part: axcenity_scene::pick(world, screen.ray(pointer)),
         })
     }
 
@@ -284,7 +463,7 @@ impl Viewport {
 fn paint_selection_box(
     ui: &egui::Ui,
     rect: egui::Rect,
-    view: &CameraView,
+    screen: &Screen,
     world: &World,
     selected: InstanceId,
 ) {
@@ -294,22 +473,10 @@ fn paint_selection_box(
     let painter = ui.painter_at(rect);
     let stroke = egui::Stroke::new(SELECTION_WIDTH, SELECTION_COLOR);
     for (a, b) in edges {
-        if let Some((a, b)) = view.project_line(a, b) {
-            painter.line_segment([to_ui_point(rect, a), to_ui_point(rect, b)], stroke);
+        if let Some(line) = screen.line(a, b) {
+            painter.line_segment(line, stroke);
         }
     }
-}
-
-/// Turns a position in the viewport (egui points, Y down) into the
-/// renderer's screen coordinates (-1 to 1, Y up).
-fn to_screen_point(rect: egui::Rect, point: egui::Pos2) -> Vec2 {
-    let across = (point - rect.min) / rect.size();
-    Vec2::new(across.x * 2.0 - 1.0, 1.0 - across.y * 2.0)
-}
-
-/// The reverse of [`to_screen_point`].
-fn to_ui_point(rect: egui::Rect, screen: Vec2) -> egui::Pos2 {
-    rect.min + egui::vec2((screen.x + 1.0) / 2.0, (1.0 - screen.y) / 2.0) * rect.size()
 }
 
 fn start_camera() -> FlyCamera {
@@ -394,19 +561,6 @@ mod tests {
     }
 
     #[test]
-    fn viewport_corners_map_to_screen_corners_and_back() {
-        let rect = egui::Rect::from_min_size(egui::pos2(100.0, 50.0), egui::vec2(800.0, 600.0));
-        assert_eq!(to_screen_point(rect, rect.left_top()), Vec2::new(-1.0, 1.0));
-        assert_eq!(
-            to_screen_point(rect, rect.right_bottom()),
-            Vec2::new(1.0, -1.0)
-        );
-        assert_eq!(to_screen_point(rect, rect.center()), Vec2::ZERO);
-        let point = egui::pos2(250.0, 470.0);
-        assert_eq!(to_ui_point(rect, to_screen_point(rect, point)), point);
-    }
-
-    #[test]
     fn clicking_the_middle_of_the_view_picks_the_part_the_camera_faces() {
         let mut world = World::new();
         let part = world.create(axcenity_core::ClassName::Part).unwrap();
@@ -414,10 +568,12 @@ mod tests {
         // The start camera looks at the origin, where a new part sits.
         let viewport = Viewport::new();
         let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0));
-        let view = viewport.camera_view(rect);
-        let ray = view.ray(to_screen_point(rect, rect.center()));
-        assert_eq!(axcenity_scene::pick(&world, ray), Some(part));
-        let corner = view.ray(to_screen_point(rect, rect.left_top()));
+        let screen = viewport.screen(rect);
+        assert_eq!(
+            axcenity_scene::pick(&world, screen.ray(rect.center())),
+            Some(part)
+        );
+        let corner = screen.ray(rect.left_top());
         assert_eq!(axcenity_scene::pick(&world, corner), None);
     }
 

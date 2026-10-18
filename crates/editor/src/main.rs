@@ -8,8 +8,12 @@
 
 mod app;
 mod explorer;
+mod gizmo;
+mod history;
 mod output;
+mod placing;
 mod properties;
+mod screen;
 mod viewport;
 
 use std::path::PathBuf;

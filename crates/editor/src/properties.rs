@@ -36,8 +36,8 @@ const GROUPS: [(&str, &[&str]); 3] = [
 const OTHER: &str = "Other";
 
 /// The smallest a part can be on any axis, the same as Roblox. Zero would
-/// leave nothing to see or click.
-const MIN_SIZE: f32 = 0.001;
+/// leave nothing to see or click. The Scale tool stops here too.
+pub const MIN_SIZE: f32 = 0.001;
 /// Numbers show at most this many decimals, so a typed 0.3 doesn't show up
 /// as 0.30000001 (the closest a 32-bit float gets).
 const MAX_DECIMALS: usize = 3;

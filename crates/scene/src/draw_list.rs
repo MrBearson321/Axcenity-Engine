@@ -5,8 +5,10 @@
 //! viewport both use it, so they draw a world the same way.
 
 use axcenity_core::{Instance, PartType, Value, World};
-use axcenity_render::glam::{EulerRot, Mat4, Quat, Vec3};
+use axcenity_render::glam::{Mat4, Vec3};
 use axcenity_render::{AmbientLight, Camera, DrawItem, DrawList, Material, Shape, Sun};
+
+use crate::orientation::rotation_from_orientation;
 
 // Fixed lighting until the Lighting service exists.
 const SKY_COLOR: [f32; 3] = [0.63, 0.8, 0.95];
@@ -47,12 +49,12 @@ pub(crate) fn part_placement(instance: &Instance) -> Option<(PartType, Mat4)> {
     };
     // Only Parts have a Shape, so anything else stops here.
     let shape = instance.property("Shape").and_then(Value::as_part_type)?;
-    let [x, y, z] = vector("Orientation")?.to_array().map(f32::to_radians);
-    // Z first, then X, then Y, matching how `Orientation` is defined.
-    let rotation = Quat::from_euler(EulerRot::YXZ, y, x, z);
+    let orientation = instance
+        .property("Orientation")
+        .and_then(Value::as_vector3)?;
     let transform = Mat4::from_scale_rotation_translation(
         mesh_scale(shape, vector("Size")?),
-        rotation,
+        rotation_from_orientation(orientation),
         vector("Position")?,
     );
     Some((shape, transform))

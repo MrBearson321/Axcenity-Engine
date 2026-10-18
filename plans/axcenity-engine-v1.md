@@ -205,10 +205,11 @@ Add move, scale and rotate gizmos in the viewport, with configurable grid and an
 
 ### Acceptance criteria
 
-- [ ] Each gizmo moves, scales or rotates the selected part along the chosen axis.
-- [ ] Snapping can be turned on and off, and the step size can be changed.
-- [ ] Undo and redo work for gizmo drags (one step per drag) and property edits.
-- [ ] Undo history survives saving.
+- [x] Each gizmo moves, scales or rotates the selected part along the chosen axis.
+- [x] Snapping can be turned on and off, and the step size can be changed.
+- [x] Undo and redo work for gizmo drags (one step per drag) and property edits.
+- [x] Undo history survives saving.
+- [x] Dragging a part by its body (added on request, like Studio) places it on the surface under the mouse, snapped to the grid when move snapping is on, as one undo step.
 
 ---
 

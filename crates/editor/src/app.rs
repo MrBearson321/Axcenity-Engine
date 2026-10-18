@@ -8,13 +8,24 @@ use axcenity_core::{InstanceId, World};
 use eframe::egui;
 
 use crate::explorer::Explorer;
+use crate::gizmo::{Snap, Tool};
+use crate::history::{self, Field, History};
 use crate::output::Output;
 use crate::properties::{self, Edit};
-use crate::viewport::Viewport;
+use crate::viewport::{DragEdit, DragKind, Viewport};
 
 /// Ctrl+S, or Cmd+S on macOS (`COMMAND` picks the right one).
 const SAVE_SHORTCUT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::S);
+const UNDO_SHORTCUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Z);
+/// Ctrl+Y, as on Windows, and Ctrl+Shift+Z (Cmd+Shift+Z on macOS) both redo.
+const REDO_SHORTCUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Y);
+const REDO_SHIFT_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
+    egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
+    egui::Key::Z,
+);
 
 pub struct EditorApp {
     /// The open project's Instances, or an empty world when none is open.
@@ -22,8 +33,13 @@ pub struct EditorApp {
     project: Option<OpenProject>,
     /// The Instance shown in Properties and highlighted in the Explorer and viewport.
     selected: Option<InstanceId>,
-    /// True when the world has changes that aren't saved yet.
-    unsaved: bool,
+    /// Every change made to `world` since it was opened, for undo and redo.
+    /// It also knows whether the world is as saved.
+    history: History,
+    /// The tool picked in the toolbar, and its snapping settings. Both are
+    /// preferences, so they stay when another project is opened.
+    tool: Tool,
+    snap: Snap,
     /// Something waiting for an answer to "Save changes?".
     asking: Option<Discard>,
     /// Set once closing has been allowed, so the window's close request
@@ -67,7 +83,9 @@ impl EditorApp {
             world,
             project: None,
             selected: None,
-            unsaved: false,
+            history: History::new(),
+            tool: Tool::default(),
+            snap: Snap::default(),
             asking: None,
             closing: false,
             output: Output::default(),
@@ -114,7 +132,8 @@ impl EditorApp {
         ));
         self.world = project.world;
         self.selected = None;
-        self.unsaved = false;
+        // Undo steps belong to the world they were made in.
+        self.history = History::new();
         self.explorer = Explorer::new(&self.world);
         self.viewport.reset_camera();
         self.project = Some(OpenProject {
@@ -148,7 +167,8 @@ impl EditorApp {
                     project.name,
                     project.folder.join(axcenity_project::WORLD_FILE).display()
                 ));
-                self.unsaved = false;
+                // The undo history stays: saving only marks this point as saved.
+                self.history.mark_saved();
                 true
             }
             Err(err) => {
@@ -168,39 +188,102 @@ impl EditorApp {
         }
     }
 
-    /// Applies a change from the Properties panel. Only a real change counts
-    /// as unsaved: typing the same value again doesn't.
+    /// True when the world has changes that aren't saved. Undoing back to
+    /// where it was saved counts as no changes.
+    fn unsaved(&self) -> bool {
+        !self.history.is_saved()
+    }
+
+    /// Applies a change from the Properties panel, as an undo step such as
+    /// "Change Color of Pad".
     fn apply(&mut self, id: InstanceId, edit: Edit) {
         let Some(instance) = self.world.get(id) else {
             return;
         };
-        let result = match edit {
+        let (key, label) = match &edit {
+            Edit::Name(_) => (Field::Name, format!("Rename {}", instance.name())),
+            Edit::Property(name, _) => (
+                Field::Property(name),
+                format!("Change {name} of {}", instance.name()),
+            ),
+        };
+        self.change(id, key, label, vec![edit]);
+    }
+
+    /// Applies a drag from the viewport (a part or one of its handles), as
+    /// an undo step such as "Move Pad".
+    fn apply_drag(&mut self, edit: DragEdit) {
+        let Some(instance) = self.world.get(edit.part) else {
+            return;
+        };
+        let (property, verb) = match edit.kind {
+            DragKind::Move => ("Position", "Move"),
+            DragKind::Resize => ("Size", "Resize"),
+            DragKind::Rotate => ("Orientation", "Rotate"),
+        };
+        let label = format!("{verb} {}", instance.name());
+        let edits = edit
+            .values
+            .into_iter()
+            .map(|(name, value)| Edit::Property(name, value))
+            .collect();
+        self.change(edit.part, Field::Property(property), label, edits);
+    }
+
+    /// Makes `edits` to `id` and records them in the history. `key` is the
+    /// field being edited, so a drag or typing keeps adding to one undo step.
+    /// Only real changes are recorded: typing the same value again isn't one.
+    fn change(&mut self, id: InstanceId, key: Field, label: String, edits: Vec<Edit>) {
+        let before = history::snapshot(&self.world, id);
+        for edit in edits {
+            if let Err(err) = self.set(id, edit) {
+                // Can't happen from the panel or the gizmos, which only make valid values.
+                self.output.error(format!("Could not change that: {err:#}"));
+            }
+        }
+        let after = history::snapshot(&self.world, id);
+        self.history.record(id, key, label, before, after);
+    }
+
+    /// Makes one edit to the world, without recording it.
+    fn set(&mut self, id: InstanceId, edit: Edit) -> anyhow::Result<()> {
+        let Some(instance) = self.world.get(id) else {
+            return Ok(());
+        };
+        match edit {
             Edit::Name(name) => {
-                if name == instance.name() || !properties::can_rename(instance) {
-                    return;
+                if properties::can_rename(instance) {
+                    self.world.set_name(id, name)?;
                 }
-                self.world.set_name(id, name).map_err(anyhow::Error::new)
             }
             Edit::Property(name, value) => {
-                if instance.property(name) == Some(&value) {
-                    return;
+                // Setting a Material resets Metalness and Roughness, so
+                // picking the material it already has must do nothing.
+                if instance.property(name) != Some(&value) {
+                    self.world.set_property(id, name, value)?;
                 }
-                self.world
-                    .set_property(id, name, value)
-                    .map_err(anyhow::Error::new)
             }
-        };
-        match result {
-            Ok(()) => self.unsaved = true,
-            // Can't happen from the panel, which only offers valid values.
-            Err(err) => self.output.error(format!("Could not change that: {err:#}")),
+        }
+        Ok(())
+    }
+
+    /// Undoes the last step, unless a handle is being dragged.
+    fn undo(&mut self) {
+        if !self.viewport.is_dragging() {
+            self.history.undo(&mut self.world);
+        }
+    }
+
+    fn redo(&mut self) {
+        if !self.viewport.is_dragging() {
+            self.history.redo(&mut self.world);
         }
     }
 
     /// Asks to `discard` the open world. Returns it when it can go ahead now,
     /// or `None` after putting up "Save changes?" because there are unsaved changes.
     fn request(&mut self, discard: Discard) -> Option<Discard> {
-        if self.unsaved {
+        if self.unsaved() {
             self.asking = Some(discard);
             None
         } else {
@@ -278,7 +361,7 @@ impl EditorApp {
 
     fn title(&self) -> String {
         // A `*` after the name means unsaved changes, as in most editors.
-        let unsaved = if self.unsaved { "*" } else { "" };
+        let unsaved = if self.unsaved() { "*" } else { "" };
         match &self.project {
             Some(project) => format!("{}{unsaved} - Axcenity Editor", project.name),
             None => "Axcenity Editor".to_string(),
@@ -301,12 +384,107 @@ impl EditorApp {
                     self.request_and_go_ahead(ui.ctx(), Discard::Quit);
                 }
             });
-            if self.unsaved {
+            ui.menu_button("Edit", |ui| {
+                let dragging = self.viewport.is_dragging();
+                // "Undo Move Pad", so it's clear what will be undone.
+                let undo_label = self.history.undo_label().map(str::to_string);
+                let undo = egui::Button::new(match &undo_label {
+                    Some(label) => format!("Undo {label}"),
+                    None => "Undo".to_string(),
+                })
+                .shortcut_text(ui.ctx().format_shortcut(&UNDO_SHORTCUT));
+                if ui
+                    .add_enabled(undo_label.is_some() && !dragging, undo)
+                    .clicked()
+                {
+                    self.undo();
+                }
+                let redo_label = self.history.redo_label().map(str::to_string);
+                let redo = egui::Button::new(match &redo_label {
+                    Some(label) => format!("Redo {label}"),
+                    None => "Redo".to_string(),
+                })
+                .shortcut_text(ui.ctx().format_shortcut(&REDO_SHORTCUT));
+                if ui
+                    .add_enabled(redo_label.is_some() && !dragging, redo)
+                    .clicked()
+                {
+                    self.redo();
+                }
+            });
+            if self.unsaved() {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.weak("Unsaved changes");
                 });
             }
         });
+    }
+
+    /// The row under the menu bar: the tools, then the snapping settings.
+    fn toolbar(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            for tool in Tool::ALL {
+                let shortcut = ui.ctx().format_shortcut(&tool.shortcut());
+                if ui
+                    .selectable_label(self.tool == tool, tool.label())
+                    .on_hover_text(format!("{} tool ({shortcut})", tool.label()))
+                    .clicked()
+                {
+                    self.tool = tool;
+                }
+            }
+            ui.separator();
+
+            let snap = &mut self.snap;
+            ui.checkbox(&mut snap.move_on, "Snap move")
+                .on_hover_text("Move and scale in steps of this many studs.");
+            ui.add_enabled(
+                snap.move_on,
+                egui::DragValue::new(&mut snap.move_step)
+                    .range(Snap::MIN_MOVE_STEP..=1000.0)
+                    .speed(0.05)
+                    .max_decimals(3)
+                    .suffix(" studs"),
+            );
+            ui.separator();
+            ui.checkbox(&mut snap.rotate_on, "Snap rotate")
+                .on_hover_text("Rotate in steps of this many degrees.");
+            ui.add_enabled(
+                snap.rotate_on,
+                egui::DragValue::new(&mut snap.rotate_step)
+                    .range(Snap::MIN_ROTATE_STEP..=180.0)
+                    .speed(0.5)
+                    .max_decimals(2)
+                    .suffix("°"),
+            );
+        });
+    }
+
+    /// The keyboard shortcuts for undo, redo and the tools.
+    fn shortcuts(&mut self, ctx: &egui::Context) {
+        // A text box being typed in has its own undo for the text, so leave
+        // Ctrl+Z to it then.
+        let typing = ctx.wants_keyboard_input();
+        let (undo, redo, tool) = ctx.input_mut(|input| {
+            // Redo first: egui counts Ctrl+Shift+Z as Ctrl+Z too.
+            let redo = !typing
+                && (input.consume_shortcut(&REDO_SHIFT_SHORTCUT)
+                    || input.consume_shortcut(&REDO_SHORTCUT));
+            let undo = !typing && input.consume_shortcut(&UNDO_SHORTCUT);
+            let tool = Tool::ALL
+                .into_iter()
+                .find(|tool| input.consume_shortcut(&tool.shortcut()));
+            (undo, redo, tool)
+        });
+        if redo {
+            self.redo();
+        }
+        if undo {
+            self.undo();
+        }
+        if let Some(tool) = tool {
+            self.tool = tool;
+        }
     }
 }
 
@@ -316,7 +494,8 @@ impl eframe::App for EditorApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         // The window's close button: stop it and ask first if there are
         // unsaved changes. `closing` lets the close through once allowed.
-        if ctx.input(|input| input.viewport().close_requested()) && !self.closing && self.unsaved {
+        if ctx.input(|input| input.viewport().close_requested()) && !self.closing && self.unsaved()
+        {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.asking = Some(Discard::Quit);
         }
@@ -325,6 +504,7 @@ impl eframe::App for EditorApp {
         if ctx.input_mut(|input| input.consume_shortcut(&SAVE_SHORTCUT)) {
             self.save();
         }
+        self.shortcuts(ctx);
 
         let title = self.title();
         if title != self.shown_title {
@@ -336,6 +516,7 @@ impl eframe::App for EditorApp {
         // spans the whole top, then the Explorer (with Properties under it)
         // runs down the whole right side, then the Output fits under the viewport.
         egui::TopBottomPanel::top("menu bar").show(ctx, |ui| self.menu_bar(ui));
+        egui::TopBottomPanel::top("toolbar").show(ctx, |ui| self.toolbar(ui));
         let mut edit = None;
         egui::SidePanel::right("explorer")
             .default_width(300.0)
@@ -358,25 +539,41 @@ impl eframe::App for EditorApp {
             .resizable(true)
             .default_height(160.0)
             .show(ctx, |ui| self.output.show(ui));
-        let clicked = egui::CentralPanel::default()
+        let output = egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| match frame.wgpu_render_state() {
-                Some(render_state) => {
-                    self.viewport
-                        .show(ui, render_state, &self.world, self.selected)
-                }
+                Some(render_state) => self.viewport.show(
+                    ui,
+                    render_state,
+                    &self.world,
+                    self.selected,
+                    self.tool,
+                    self.snap,
+                ),
                 // Can't happen: main.rs always picks the wgpu renderer.
                 None => {
                     ui.label("The viewport needs the wgpu renderer.");
-                    None
+                    Default::default()
                 }
             })
             .inner;
-        if let Some(clicked) = clicked {
+        if let Some(clicked) = output.clicked {
             self.select_from_viewport(clicked.part);
             // The panels were already drawn this frame, so draw again to
             // show the new selection there.
             ctx.request_repaint();
+        }
+        if let Some(edit) = output.drag {
+            self.apply_drag(edit);
+            // The viewport was drawn before this change, so draw it again.
+            ctx.request_repaint();
+        }
+
+        // A drag or a typed value is one undo step: it ends when the mouse
+        // is let go and no text box is being typed in.
+        let busy = ctx.is_using_pointer() || ctx.wants_keyboard_input();
+        if output.drag_released || (!busy && !self.viewport.is_dragging()) {
+            self.history.seal();
         }
 
         self.unsaved_changes_prompt(ctx);
@@ -387,8 +584,11 @@ impl eframe::App for EditorApp {
 mod tests {
     use axcenity_core::{ClassName, Color3, Material, Value, Vector3};
     use axcenity_render::glam::Vec3;
+    use axcenity_scene::Ray;
 
+    use crate::gizmo::{Axis, Drag, Handle, Pose, Side};
     use crate::output::{OutputKind, OutputLine};
+    use crate::placing::PlaceDrag;
 
     use super::*;
 
@@ -558,9 +758,9 @@ mod tests {
     #[test]
     fn edits_show_in_the_next_draw_list_and_count_as_unsaved() {
         let mut app = EditorApp::new(Some(&example("hello-touched")));
-        assert!(!app.unsaved);
+        assert!(!app.unsaved());
         let pad = edit_the_pad(&mut app);
-        assert!(app.unsaved);
+        assert!(app.unsaved());
         assert_eq!(app.title(), "Hello Touched* - Axcenity Editor");
 
         let instance = app.world.get(pad).unwrap();
@@ -591,7 +791,7 @@ mod tests {
         let pad = part(&app, "Pad");
         app.apply(pad, Edit::Name("Pad".to_string()));
         app.apply(pad, Edit::Property("Anchored", Value::Bool(true)));
-        assert!(!app.unsaved);
+        assert!(!app.unsaved());
     }
 
     #[test]
@@ -603,7 +803,7 @@ mod tests {
             .unwrap();
         app.apply(script, Edit::Name("door".to_string()));
         assert_eq!(app.world.get(script).unwrap().name(), "pad");
-        assert!(!app.unsaved);
+        assert!(!app.unsaved());
     }
 
     #[test]
@@ -612,7 +812,7 @@ mod tests {
         let mut app = EditorApp::new(Some(&folder));
         edit_the_pad(&mut app);
         assert!(app.save());
-        assert!(!app.unsaved);
+        assert!(!app.unsaved());
         assert_eq!(app.title(), "Hello Touched - Axcenity Editor");
         assert!(last_line(&app).text.starts_with("Saved \"Hello Touched\""));
         let saved = axcenity_project::write_world(&app.world);
@@ -656,11 +856,11 @@ mod tests {
         // Cancel keeps the editor open with the changes.
         assert_eq!(app.answer(Answer::Cancel), None);
         assert_eq!(app.asking, None);
-        assert!(app.unsaved);
+        assert!(app.unsaved());
         // Don't Save goes ahead without saving.
         app.request(Discard::OpenAnother);
         assert_eq!(app.answer(Answer::DontSave), Some(Discard::OpenAnother));
-        assert!(app.unsaved);
+        assert!(app.unsaved());
     }
 
     #[test]
@@ -670,7 +870,7 @@ mod tests {
         edit_the_pad(&mut app);
         app.request(Discard::Quit);
         assert_eq!(app.answer(Answer::Save), Some(Discard::Quit));
-        assert!(!app.unsaved);
+        assert!(!app.unsaved());
         assert!(part_exists_on_disk(&folder, "Launch Pad"));
 
         // With the folder gone, saving fails: say why and stay open.
@@ -678,7 +878,7 @@ mod tests {
         app.apply(part(&app, "Floor"), Edit::Name("Ground".to_string()));
         app.request(Discard::Quit);
         assert_eq!(app.answer(Answer::Save), None);
-        assert!(app.unsaved);
+        assert!(app.unsaved());
         let line = last_line(&app);
         assert_eq!(line.kind, OutputKind::Error);
         assert!(line.text.starts_with("Could not save"), "{}", line.text);
@@ -687,5 +887,245 @@ mod tests {
     fn part_exists_on_disk(folder: &Path, name: &str) -> bool {
         let world = axcenity_project::load(folder).unwrap().world;
         world.find_first_child(world.workspace(), name).is_some()
+    }
+
+    fn property(app: &EditorApp, id: InstanceId, name: &str) -> Value {
+        app.world.get(id).unwrap().property(name).unwrap().clone()
+    }
+
+    /// Drags `handle` of `id` as the viewport does: one edit per frame as
+    /// the mouse moves along `rays`, then the mouse is let go.
+    fn drag(app: &mut EditorApp, id: InstanceId, handle: Handle, rays: &[Ray]) {
+        let pose = Pose::of(app.world.get(id).unwrap()).unwrap();
+        let mut drag = Drag::start(handle, id, pose, rays[0]).unwrap();
+        for &ray in &rays[1..] {
+            let values = drag.update(ray, &app.snap).unwrap();
+            app.apply_drag(DragEdit {
+                part: id,
+                kind: DragKind::of(handle),
+                values,
+            });
+        }
+        app.history.seal();
+    }
+
+    /// Rays from in front of the scene, straight down -Z, through (x, y).
+    fn rays_along_z(points: &[(f32, f32)]) -> Vec<Ray> {
+        points
+            .iter()
+            .map(|&(x, y)| Ray {
+                origin: Vec3::new(x, y, 50.0),
+                direction: Vec3::NEG_Z,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn each_gizmo_drag_is_one_undo_step() {
+        let mut app = EditorApp::new(Some(&example("hello-touched")));
+        let pad = part(&app, "Pad");
+        let start = (
+            property(&app, pad, "Position"),
+            property(&app, pad, "Size"),
+            property(&app, pad, "Orientation"),
+        );
+
+        // Move 5 studs right in 5 frames.
+        let steps: Vec<(f32, f32)> = (0..=5).map(|x| (x as f32, 0.25)).collect();
+        drag(&mut app, pad, Handle::Move(Axis::X), &rays_along_z(&steps));
+        assert_eq!(property(&app, pad, "Position"), vector(5.0, 0.25, 0.0));
+        assert_eq!(app.history.undo_label(), Some("Move Pad"));
+        // Pull the top face up 2 studs.
+        let steps = [(5.0, 0.5), (5.0, 1.5), (5.0, 2.5)];
+        drag(
+            &mut app,
+            pad,
+            Handle::Scale(Axis::Y, Side::Plus),
+            &rays_along_z(&steps),
+        );
+        assert_eq!(property(&app, pad, "Size"), vector(8.0, 2.5, 8.0));
+        assert_eq!(app.history.undo_label(), Some("Resize Pad"));
+        // Turn it a quarter around Z, in steps.
+        let around = [(8.0, 1.25), (7.0, 3.0), (5.0, 4.25)];
+        drag(
+            &mut app,
+            pad,
+            Handle::Rotate(Axis::Z),
+            &rays_along_z(&around),
+        );
+        assert_eq!(property(&app, pad, "Orientation"), vector(0.0, 0.0, 90.0));
+        assert_eq!(app.history.undo_label(), Some("Rotate Pad"));
+
+        // Three drags, three undos, back to the start.
+        app.undo();
+        assert_eq!(property(&app, pad, "Orientation"), start.2);
+        app.undo();
+        assert_eq!(property(&app, pad, "Size"), start.1);
+        assert_eq!(property(&app, pad, "Position"), vector(5.0, 0.25, 0.0));
+        app.undo();
+        assert_eq!(property(&app, pad, "Position"), start.0);
+        assert_eq!(app.history.undo_label(), None);
+        assert!(!app.unsaved(), "back as it was opened");
+
+        app.redo();
+        assert_eq!(property(&app, pad, "Position"), vector(5.0, 0.25, 0.0));
+        assert_eq!(app.history.redo_label(), Some("Resize Pad"));
+    }
+
+    #[test]
+    fn dragging_a_part_onto_another_stacks_it_in_one_undo_step() {
+        let mut app = EditorApp::new(Some(&example("hello-touched")));
+        let ball = part(&app, "Ball");
+        let start = property(&app, ball, "Position");
+        // Grab the ball (2 studs across, at (0, 10, 0)) on top, then drag it
+        // across the floor and onto the pad (8×0.5×8 at (0, 0.25, 0)).
+        let grabbed = Vec3::new(0.0, 11.0, 0.0);
+        let place = PlaceDrag::start(&app.world, ball, grabbed).unwrap();
+        let down = |x: f32, z: f32| Ray {
+            origin: Vec3::new(x, 50.0, z),
+            direction: Vec3::NEG_Y,
+        };
+        for (x, z) in [(12.0, 6.0), (8.0, 3.0), (2.0, 1.0)] {
+            let position = place.update(&app.world, down(x, z), &app.snap).unwrap();
+            app.apply_drag(DragEdit {
+                part: ball,
+                kind: DragKind::Move,
+                values: vec![("Position", position)],
+            });
+        }
+        app.history.seal();
+        // On top of the pad (y = 0.5) and lifted by its radius.
+        let (radius, top) = (1.0, 0.5);
+        assert_eq!(
+            property(&app, ball, "Position"),
+            vector(2.0, top + radius, 1.0)
+        );
+        assert_eq!(app.history.undo_label(), Some("Move Ball"));
+        app.undo();
+        assert_eq!(property(&app, ball, "Position"), start);
+        assert_eq!(app.history.undo_label(), None);
+    }
+
+    #[test]
+    fn property_edits_undo_and_redo_and_typing_a_name_is_one_step() {
+        let mut app = EditorApp::new(Some(&example("hello-touched")));
+        let pad = part(&app, "Pad");
+        let gray = property(&app, pad, "Color");
+        let green = Value::Color3(Color3::new(0.1, 0.725, 0.333));
+        app.apply(pad, Edit::Property("Color", green.clone()));
+        app.history.seal();
+        // Typing "Door" one letter a frame, then leaving the text box.
+        for name in ["D", "Do", "Doo", "Door"] {
+            app.apply(pad, Edit::Name(name.to_string()));
+        }
+        app.history.seal();
+        assert_eq!(app.history.undo_label(), Some("Rename Pad"));
+
+        app.undo();
+        assert_eq!(app.world.get(pad).unwrap().name(), "Pad");
+        assert_eq!(property(&app, pad, "Color"), green);
+        assert_eq!(app.history.undo_label(), Some("Change Color of Pad"));
+        app.undo();
+        assert_eq!(property(&app, pad, "Color"), gray);
+
+        app.redo();
+        app.redo();
+        assert_eq!(property(&app, pad, "Color"), green);
+        assert_eq!(app.world.get(pad).unwrap().name(), "Door");
+    }
+
+    #[test]
+    fn undo_history_survives_saving() {
+        let folder = copy_of_example("hello-touched", "undo-save");
+        let mut app = EditorApp::new(Some(&folder));
+        let pad = part(&app, "Pad");
+        let start = property(&app, pad, "Position");
+        let steps = [(0.0, 0.25), (3.0, 0.25)];
+        drag(&mut app, pad, Handle::Move(Axis::X), &rays_along_z(&steps));
+        assert!(app.save());
+        assert_eq!(app.title(), "Hello Touched - Axcenity Editor");
+
+        // Saving kept the drag in the history.
+        assert_eq!(app.history.undo_label(), Some("Move Pad"));
+        app.undo();
+        assert_eq!(property(&app, pad, "Position"), start);
+        assert!(app.unsaved(), "the file still has the moved pad");
+        assert_eq!(app.title(), "Hello Touched* - Axcenity Editor");
+        // Redoing back to what's on disk counts as saved again.
+        app.redo();
+        assert!(!app.unsaved());
+
+        // Undo, then save that: the file gets the undone position, and redo still works.
+        app.undo();
+        assert!(app.save());
+        let on_disk = axcenity_project::load(&folder).unwrap().world;
+        let saved_pad = on_disk
+            .find_first_child(on_disk.workspace(), "Pad")
+            .unwrap();
+        let saved = on_disk
+            .get(saved_pad)
+            .unwrap()
+            .property("Position")
+            .cloned();
+        assert_eq!(saved, Some(start));
+        app.redo();
+        assert_eq!(property(&app, pad, "Position"), vector(3.0, 0.25, 0.0));
+        assert!(app.unsaved());
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn opening_another_project_starts_a_new_history() {
+        let mut app = EditorApp::new(Some(&example("hello-touched")));
+        edit_the_pad(&mut app);
+        app.tool = Tool::Rotate;
+        app.open(&example("hello-part"));
+        assert_eq!(app.history.undo_label(), None);
+        assert!(!app.unsaved());
+        assert_eq!(app.tool, Tool::Rotate, "the tool is a preference");
+    }
+
+    /// Runs one egui frame in which `key` is pressed with `modifiers`, and
+    /// lets the app read its shortcuts. No window or GPU needed.
+    fn press(app: &mut EditorApp, modifiers: egui::Modifiers, key: egui::Key) {
+        let input = egui::RawInput {
+            modifiers,
+            events: vec![egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers,
+            }],
+            ..Default::default()
+        };
+        let _ = egui::Context::default().run(input, |ctx| app.shortcuts(ctx));
+    }
+
+    #[test]
+    fn ctrl_1_to_4_pick_the_tools_and_ctrl_z_and_ctrl_y_undo_and_redo() {
+        let mut app = EditorApp::new(Some(&example("hello-touched")));
+        let command = egui::Modifiers::COMMAND;
+        assert_eq!(app.tool, Tool::Select);
+        for (key, tool) in [
+            (egui::Key::Num2, Tool::Move),
+            (egui::Key::Num3, Tool::Scale),
+            (egui::Key::Num4, Tool::Rotate),
+            (egui::Key::Num1, Tool::Select),
+        ] {
+            press(&mut app, command, key);
+            assert_eq!(app.tool, tool);
+        }
+
+        let pad = part(&app, "Pad");
+        app.apply(pad, Edit::Property("Anchored", Value::Bool(false)));
+        press(&mut app, command, egui::Key::Z);
+        assert_eq!(property(&app, pad, "Anchored"), Value::Bool(true));
+        press(&mut app, command, egui::Key::Y);
+        assert_eq!(property(&app, pad, "Anchored"), Value::Bool(false));
+        // Ctrl+Shift+Z redoes too, and isn't taken as Ctrl+Z.
+        press(&mut app, command, egui::Key::Z);
+        press(&mut app, command | egui::Modifiers::SHIFT, egui::Key::Z);
+        assert_eq!(property(&app, pad, "Anchored"), Value::Bool(false));
     }
 }

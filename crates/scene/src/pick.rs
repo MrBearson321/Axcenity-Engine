@@ -7,7 +7,7 @@
 use axcenity_core::{InstanceId, PartType, World};
 use axcenity_render::Camera;
 use axcenity_render::glam::camera::rh;
-use axcenity_render::glam::{Mat4, Vec2, Vec3};
+use axcenity_render::glam::{Mat3, Mat4, Vec2, Vec3};
 
 use crate::draw_list::part_placement;
 
@@ -90,6 +90,20 @@ impl CameraView {
         Some((self.project(a), self.project(b)))
     }
 
+    /// Where `point` shows on the screen, or `None` if it's behind the camera.
+    pub fn project_point(&self, point: Vec3) -> Option<Vec2> {
+        let point = self.world_to_camera.transform_point3(point);
+        (point.z < -NEAR_CLIP).then(|| self.project(point))
+    }
+
+    /// How many studs at `point`'s distance from the camera fit between the
+    /// middle of the screen and its top edge. Things drawn this many studs
+    /// long, times a fixed share, look the same size however far away they are.
+    pub fn studs_per_half_screen(&self, point: Vec3) -> f32 {
+        let depth = -self.world_to_camera.transform_point3(point).z;
+        depth.max(NEAR_CLIP) * self.tan_half_fov
+    }
+
     /// The screen point of a camera-space point in front of the camera.
     fn project(&self, point: Vec3) -> Vec2 {
         let depth = -point.z;
@@ -103,18 +117,59 @@ impl CameraView {
 /// The Workspace Part that `ray` hits first, if any. Parts the ray starts
 /// inside of are skipped, so a camera inside a part can still pick past it.
 pub fn pick(world: &World, ray: Ray) -> Option<InstanceId> {
-    let mut nearest: Option<(InstanceId, f32)> = None;
+    pick_hit(world, ray, None).map(|hit| hit.part)
+}
+
+/// Where a ray hits a part.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Hit {
+    pub part: InstanceId,
+    /// How far along the ray, in studs.
+    pub distance: f32,
+    /// The direction the surface faces where it's hit, one stud long.
+    pub normal: Vec3,
+}
+
+/// Like [`pick`], but also says where the part is hit and which way that
+/// surface faces. `skip` is left out, so a part being dragged can look for
+/// what's behind it.
+pub fn pick_hit(world: &World, ray: Ray, skip: Option<InstanceId>) -> Option<Hit> {
+    let mut nearest: Option<Hit> = None;
     for id in world.descendants(world.workspace()) {
+        if Some(id) == skip {
+            continue;
+        }
         let Some((shape, transform)) = world.get(id).and_then(part_placement) else {
             continue;
         };
-        if let Some(distance) = hit_distance(shape, transform, ray)
-            && nearest.is_none_or(|(_, nearest)| distance < nearest)
+        if let Some((distance, normal)) = hit_surface(shape, transform, ray)
+            && nearest.is_none_or(|nearest| distance < nearest.distance)
         {
-            nearest = Some((id, distance));
+            nearest = Some(Hit {
+                part: id,
+                distance,
+                normal,
+            });
         }
     }
-    nearest.map(|(id, _)| id)
+    nearest
+}
+
+/// How far a Part's drawn box reaches from its center in `direction` (one
+/// stud long), or `None` if `id` isn't a Part. A part resting on a surface
+/// facing `direction` has its center this far above it.
+pub fn part_half_extent(world: &World, id: InstanceId, direction: Vec3) -> Option<f32> {
+    let (_, transform) = part_placement(world.get(id)?)?;
+    // Each column of the transform is one edge of the box (the 1×1×1 mesh
+    // stretched and turned); half of each counts, however much it points
+    // along `direction`.
+    let edges = [transform.x_axis, transform.y_axis, transform.z_axis];
+    Some(
+        edges
+            .iter()
+            .map(|edge| edge.truncate().dot(direction).abs() / 2.0)
+            .sum(),
+    )
 }
 
 /// The 12 edges of the box around a Part as it's drawn, in world space, or
@@ -143,12 +198,30 @@ pub fn part_box_edges(world: &World, id: InstanceId) -> Option<[(Vec3, Vec3); 12
 
 /// The stretch of a ray inside a solid: the distances where it goes in and
 /// comes out. Either can be negative (behind the ray's start) or infinite.
-type Span = (f32, f32);
+#[derive(Clone, Copy, Debug)]
+struct Span {
+    enter: f32,
+    /// Which way the surface the ray goes in through faces (in mesh space,
+    /// not yet one stud long). Zero when `enter` is minus infinity.
+    normal: Vec3,
+    exit: f32,
+}
 
-const EVERYWHERE: Span = (f32::NEG_INFINITY, f32::INFINITY);
+const EVERYWHERE: Span = Span {
+    enter: f32::NEG_INFINITY,
+    normal: Vec3::ZERO,
+    exit: f32::INFINITY,
+};
 
 /// How far along `ray` it first enters this part, if it does.
+#[cfg(test)]
 fn hit_distance(shape: PartType, transform: Mat4, ray: Ray) -> Option<f32> {
+    hit_surface(shape, transform, ray).map(|(distance, _)| distance)
+}
+
+/// How far along `ray` it first enters this part, and which way the surface
+/// faces there (in the world, one stud long), if it does.
+fn hit_surface(shape: PartType, transform: Mat4, ray: Ray) -> Option<(f32, Vec3)> {
     // A part with no size (or broken numbers) can't be hit, and its
     // transform can't be undone.
     if !transform.determinant().is_normal() {
@@ -182,14 +255,29 @@ fn hit_distance(shape: PartType, transform: Mat4, ray: Ray) -> Option<f32> {
             )
         }
     }?;
-    let (enter, _) = span;
-    (enter >= 0.0 && enter.is_finite()).then_some(enter)
+    if !(span.enter >= 0.0 && span.enter.is_finite()) {
+        return None;
+    }
+    // Directions along a surface stretch with the part, but the direction
+    // straight out of it changes the other way: normals are turned by the
+    // transpose of the inverse (the standard rule for normals).
+    let normal = Mat3::from_mat4(to_mesh).transpose() * span.normal;
+    Some((span.enter, normal.normalize_or(Vec3::Y)))
 }
 
-/// Where two spans overlap, if they do.
+/// Where two spans overlap, if they do. The later entry wins, with its surface.
 fn overlap(a: Span, b: Span) -> Option<Span> {
-    let span = (a.0.max(b.0), a.1.min(b.1));
-    (span.0 <= span.1).then_some(span)
+    let (enter, normal) = if a.enter >= b.enter {
+        (a.enter, a.normal)
+    } else {
+        (b.enter, b.normal)
+    };
+    let exit = a.exit.min(b.exit);
+    (enter <= exit).then_some(Span {
+        enter,
+        normal,
+        exit,
+    })
 }
 
 /// The span inside the 1×1×1 cube centered on the origin.
@@ -219,9 +307,16 @@ fn inside_flat_side(origin: Vec3, direction: Vec3, normal: Vec3, offset: f32) ->
     }
     let crossing = room / toward_outside;
     Some(if toward_outside < 0.0 {
-        (crossing, f32::INFINITY)
+        Span {
+            enter: crossing,
+            normal,
+            exit: f32::INFINITY,
+        }
     } else {
-        (f32::NEG_INFINITY, crossing)
+        Span {
+            exit: crossing,
+            ..EVERYWHERE
+        }
     })
 }
 
@@ -239,7 +334,13 @@ fn inside_radius(origin: Vec3, direction: Vec3) -> Option<Span> {
         return None;
     }
     let root = discriminant.sqrt();
-    Some(((-b - root) / a, (-b + root) / a))
+    let enter = (-b - root) / a;
+    Some(Span {
+        enter,
+        // On a ball around the origin, the surface faces straight out from it.
+        normal: origin + direction * enter,
+        exit: (-b + root) / a,
+    })
 }
 
 #[cfg(test)]
@@ -295,6 +396,21 @@ mod tests {
             assert!(a.abs_diff_eq(screen, 1e-4), "{a} vs {screen}");
             assert!(b.abs_diff_eq(screen, 1e-4), "{b} vs {screen}");
         }
+    }
+
+    #[test]
+    fn points_project_onto_the_screen_unless_behind_the_camera() {
+        let view = view(Vec3::ZERO, Vec3::NEG_Z);
+        assert_eq!(
+            view.project_point(Vec3::new(0.0, 0.0, -5.0)),
+            Some(Vec2::ZERO)
+        );
+        assert_eq!(view.project_point(Vec3::new(0.0, 0.0, 5.0)), None);
+        // At 10 studs away, the top edge of the view is 10·tan(35°) studs up.
+        let half = view.studs_per_half_screen(Vec3::new(3.0, 0.0, -10.0));
+        assert!((half - 10.0 * 35f32.to_radians().tan()).abs() < 1e-5);
+        let top = view.project_point(Vec3::new(0.0, half, -10.0)).unwrap();
+        assert!((top.y - 1.0).abs() < 1e-5);
     }
 
     #[test]
@@ -419,6 +535,95 @@ mod tests {
             )
             .unwrap();
         assert_eq!(pick(&world, from_above(4.0)), None);
+    }
+
+    #[test]
+    fn hits_say_which_way_the_surface_faces() {
+        let mut world = World::new();
+        let block = part(
+            &mut world,
+            PartType::Block,
+            Vec3::ZERO,
+            Vec3::new(4.0, 1.0, 2.0),
+        );
+        let down = |x: f32, z: f32| Ray {
+            origin: Vec3::new(x, 10.0, z),
+            direction: Vec3::NEG_Y,
+        };
+        let hit = pick_hit(&world, down(1.0, 0.5), None).unwrap();
+        assert_eq!(hit.part, block);
+        assert!((hit.distance - 9.5).abs() < 1e-5);
+        assert!(hit.normal.abs_diff_eq(Vec3::Y, 1e-5), "{}", hit.normal);
+        // From the side, the side faces back toward the ray.
+        let hit = pick_hit(&world, ray_along_z(0.0, 0.0), None).unwrap();
+        assert!(hit.normal.abs_diff_eq(Vec3::NEG_Z, 1e-5), "{}", hit.normal);
+
+        // A ball faces straight out from its center; a stretched wedge's
+        // slope faces up and forward at the slope's real angle.
+        world.destroy(block).unwrap();
+        let ball = part(&mut world, PartType::Ball, Vec3::ZERO, Vec3::splat(2.0));
+        let hit = pick_hit(&world, down(0.6, 0.0), None).unwrap();
+        assert!(hit.normal.abs_diff_eq(Vec3::new(0.6, 0.8, 0.0), 1e-4));
+        world.destroy(ball).unwrap();
+        part(
+            &mut world,
+            PartType::Wedge,
+            Vec3::ZERO,
+            Vec3::new(2.0, 1.0, 2.0),
+        );
+        let hit = pick_hit(&world, down(0.0, 0.0), None).unwrap();
+        // Rises 1 stud over 2: facing (0, 2, -1) scaled to one stud.
+        assert!(
+            hit.normal
+                .abs_diff_eq(Vec3::new(0.0, 2.0, -1.0).normalize(), 1e-4)
+        );
+    }
+
+    #[test]
+    fn a_skipped_part_lets_the_ray_reach_what_is_behind_it() {
+        let mut world = World::new();
+        let floor = part(
+            &mut world,
+            PartType::Block,
+            Vec3::ZERO,
+            Vec3::new(10.0, 1.0, 10.0),
+        );
+        let crate_ = part(
+            &mut world,
+            PartType::Block,
+            Vec3::new(0.0, 2.0, 0.0),
+            Vec3::ONE,
+        );
+        let down = Ray {
+            origin: Vec3::new(0.0, 10.0, 0.0),
+            direction: Vec3::NEG_Y,
+        };
+        assert_eq!(pick_hit(&world, down, None).unwrap().part, crate_);
+        assert_eq!(pick_hit(&world, down, Some(crate_)).unwrap().part, floor);
+    }
+
+    #[test]
+    fn half_extent_is_how_far_the_turned_box_reaches() {
+        let mut world = World::new();
+        let id = part(
+            &mut world,
+            PartType::Block,
+            Vec3::ZERO,
+            Vec3::new(4.0, 1.0, 2.0),
+        );
+        assert_eq!(part_half_extent(&world, id, Vec3::Y), Some(0.5));
+        assert_eq!(part_half_extent(&world, id, Vec3::NEG_X), Some(2.0));
+        // Stood on its end (turned 90° around Z), it's 4 studs tall.
+        world
+            .set_property(
+                id,
+                "Orientation",
+                Value::Vector3(Vector3::new(0.0, 0.0, 90.0)),
+            )
+            .unwrap();
+        let up = part_half_extent(&world, id, Vec3::Y).unwrap();
+        assert!((up - 2.0).abs() < 1e-5, "{up}");
+        assert_eq!(part_half_extent(&world, world.workspace(), Vec3::Y), None);
     }
 
     #[test]
