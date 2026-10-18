@@ -122,6 +122,10 @@ pub struct Primitive {
     /// Texture coordinates, one per position, or empty when the material
     /// has no texture. (0, 0) is the top left of the texture.
     pub uvs: Vec<[f32; 2]>,
+    /// One per position when the material has a normal map, else empty:
+    /// the direction U grows along the surface, and in `w` 1 or -1, the
+    /// side of the normal the texture's "up" (V shrinking) is on.
+    pub tangents: Vec<[f32; 4]>,
     /// Three per triangle, counter-clockwise seen from outside.
     pub indices: Vec<u32>,
     pub material: ModelMaterial,
@@ -135,16 +139,118 @@ impl Primitive {
 }
 
 /// A glTF metallic-roughness material. Colors are linear, as in the file.
+/// The textures all use the primitive's one set of texture coordinates.
 #[derive(Clone, Debug)]
 pub struct ModelMaterial {
+    /// Its name in the file, or "" if it has none.
+    pub name: String,
     /// Red, green, blue and alpha (opacity).
     pub base_color: [f32; 4],
     pub metalness: f32,
     pub roughness: f32,
     pub emissive: [f32; 3],
     pub alpha_mode: AlphaMode,
-    /// Multiplies `base_color`.
+    /// Multiplies `base_color` (sRGB, and alpha).
     pub base_color_texture: Option<Arc<Image>>,
+    /// A tangent-space normal map (glTF's convention: green points up the
+    /// texture).
+    pub normal_texture: Option<Arc<Image>>,
+    /// Scales how far the normal map tips the normals.
+    pub normal_scale: f32,
+    /// Multiplies `metalness`.
+    pub metalness_texture: Option<ChannelTexture>,
+    /// Multiplies `roughness`.
+    pub roughness_texture: Option<ChannelTexture>,
+    /// Ambient occlusion: how much ambient light reaches each point.
+    pub occlusion_texture: Option<ChannelTexture>,
+    /// How strongly `occlusion_texture` darkens, from 0 to 1.
+    pub occlusion_strength: f32,
+    /// Multiplies `emissive` (sRGB).
+    pub emissive_texture: Option<Arc<Image>>,
+    /// The opacity, instead of `base_color_texture`'s alpha.
+    pub opacity_texture: Option<ChannelTexture>,
+    /// How strongly the non-metal parts reflect, for older (Phong)
+    /// materials: 0.5 is the usual amount, 0 none, 1 twice that.
+    pub specular_texture: Option<Arc<Image>>,
+}
+
+impl Default for ModelMaterial {
+    /// Plain white plastic, as drawn for a mesh without a material.
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            base_color: [1.0; 4],
+            metalness: 0.0,
+            roughness: 1.0,
+            emissive: [0.0; 3],
+            alpha_mode: AlphaMode::Opaque,
+            base_color_texture: None,
+            normal_texture: None,
+            normal_scale: 1.0,
+            metalness_texture: None,
+            roughness_texture: None,
+            occlusion_texture: None,
+            occlusion_strength: 1.0,
+            emissive_texture: None,
+            opacity_texture: None,
+            specular_texture: None,
+        }
+    }
+}
+
+impl ModelMaterial {
+    /// True if it has any texture, so it needs texture coordinates.
+    pub fn has_textures(&self) -> bool {
+        self.base_color_texture.is_some()
+            || self.normal_texture.is_some()
+            || self.metalness_texture.is_some()
+            || self.roughness_texture.is_some()
+            || self.occlusion_texture.is_some()
+            || self.emissive_texture.is_some()
+            || self.opacity_texture.is_some()
+            || self.specular_texture.is_some()
+    }
+
+    /// Takes every texture off, for a mesh with no texture coordinates.
+    fn remove_textures(&mut self) {
+        self.base_color_texture = None;
+        self.normal_texture = None;
+        self.metalness_texture = None;
+        self.roughness_texture = None;
+        self.occlusion_texture = None;
+        self.emissive_texture = None;
+        self.opacity_texture = None;
+        self.specular_texture = None;
+    }
+}
+
+/// One channel of an image, used as a number from 0 to 1.
+#[derive(Clone, Debug)]
+pub struct ChannelTexture {
+    pub image: Arc<Image>,
+    pub channel: Channel,
+    /// Use 1 minus the value: a glossiness or smoothness map as roughness.
+    pub invert: bool,
+}
+
+impl ChannelTexture {
+    pub fn new(image: Arc<Image>, channel: Channel) -> Self {
+        Self {
+            image,
+            channel,
+            invert: false,
+        }
+    }
+}
+
+/// A color channel of an image.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Channel {
+    #[default]
+    Red,
+    Green,
+    Blue,
+    Alpha,
 }
 
 /// How a material's alpha is used.
@@ -163,8 +269,8 @@ pub struct Image {
     key: u64,
     pub width: u32,
     pub height: u32,
-    /// 4 bytes per pixel (red, green, blue, alpha), sRGB-encoded, rows from
-    /// the top.
+    /// 4 bytes per pixel (red, green, blue, alpha), rows from the top:
+    /// sRGB-encoded for colors, plain values for the other maps.
     pub rgba: Vec<u8>,
 }
 
@@ -602,12 +708,7 @@ impl Reader<'_> {
                 .filter(|normals: &Vec<[f32; 3]>| normals.len() == count)
                 .unwrap_or_else(|| smooth_normals(&positions, &indices));
 
-            let gltf_material = primitive.material();
-            let mut material = self.material(&gltf_material)?;
-            let uv_set = gltf_material
-                .pbr_metallic_roughness()
-                .base_color_texture()
-                .map(|info| info.tex_coord());
+            let (mut material, uv_set) = self.material(&primitive.material())?;
             let uvs: Vec<[f32; 2]> = uv_set
                 .and_then(|set| reader.read_tex_coords(set))
                 .map(|uvs| uvs.into_f32().collect())
@@ -615,7 +716,7 @@ impl Reader<'_> {
                 .unwrap_or_default();
             // A texture needs coordinates to be placed by.
             if uvs.is_empty() {
-                material.base_color_texture = None;
+                material.remove_textures();
             }
 
             self.primitives.push(Primitive {
@@ -623,6 +724,7 @@ impl Reader<'_> {
                 positions,
                 normals,
                 uvs,
+                tangents: Vec::new(),
                 indices,
                 material,
             });
@@ -630,13 +732,47 @@ impl Reader<'_> {
         Ok(())
     }
 
-    fn material(&mut self, material: &gltf::Material) -> Result<ModelMaterial, ModelError> {
+    /// The material and the texture coordinate set its textures use: the
+    /// first texture's. Textures placed by another set are left out, since
+    /// a primitive is drawn with one.
+    fn material(
+        &mut self,
+        material: &gltf::Material,
+    ) -> Result<(ModelMaterial, Option<u32>), ModelError> {
         let pbr = material.pbr_metallic_roughness();
-        let base_color_texture = match pbr.base_color_texture() {
-            Some(info) => Some(self.image(&info.texture().source())?),
-            None => None,
+        let base_color = pbr.base_color_texture();
+        let metallic_roughness = pbr.metallic_roughness_texture();
+        let normal = material.normal_texture();
+        let occlusion = material.occlusion_texture();
+        let emissive = material.emissive_texture();
+        let uv_set = [
+            base_color.as_ref().map(|info| info.tex_coord()),
+            metallic_roughness.as_ref().map(|info| info.tex_coord()),
+            normal.as_ref().map(|info| info.tex_coord()),
+            occlusion.as_ref().map(|info| info.tex_coord()),
+            emissive.as_ref().map(|info| info.tex_coord()),
+        ]
+        .into_iter()
+        .flatten()
+        .next();
+        // The image of a texture on `uv_set`, decoded.
+        let mut image = |texture: Option<(gltf::Texture, u32)>| match texture {
+            Some((texture, set)) if Some(set) == uv_set => self.image(&texture.source()).map(Some),
+            _ => Ok(None),
         };
-        Ok(ModelMaterial {
+        let base_color_texture = image(base_color.map(|i| (i.texture(), i.tex_coord())))?;
+        // glTF keeps roughness in green and metalness in blue.
+        let metallic_roughness = image(metallic_roughness.map(|i| (i.texture(), i.tex_coord())))?;
+        let normal_scale = normal.as_ref().map_or(1.0, |info| info.scale());
+        let normal_texture = image(normal.map(|i| (i.texture(), i.tex_coord())))?;
+        let occlusion_strength = occlusion.as_ref().map_or(1.0, |info| info.strength());
+        // Occlusion is in red, often in the same image as metalness and
+        // roughness (an "ORM" texture).
+        let occlusion_texture = image(occlusion.map(|i| (i.texture(), i.tex_coord())))?
+            .map(|image| ChannelTexture::new(image, Channel::Red));
+        let emissive_texture = image(emissive.map(|i| (i.texture(), i.tex_coord())))?;
+        let material = ModelMaterial {
+            name: material.name().unwrap_or_default().to_owned(),
             base_color: pbr.base_color_factor(),
             metalness: pbr.metallic_factor(),
             roughness: pbr.roughness_factor(),
@@ -649,7 +785,20 @@ impl Reader<'_> {
                 gltf::material::AlphaMode::Blend => AlphaMode::Blend,
             },
             base_color_texture,
-        })
+            normal_texture,
+            normal_scale,
+            metalness_texture: metallic_roughness
+                .clone()
+                .map(|image| ChannelTexture::new(image, Channel::Blue)),
+            roughness_texture: metallic_roughness
+                .map(|image| ChannelTexture::new(image, Channel::Green)),
+            occlusion_texture,
+            occlusion_strength,
+            emissive_texture,
+            opacity_texture: None,
+            specular_texture: None,
+        };
+        Ok((material, uv_set))
     }
 
     fn image(&mut self, image: &gltf::Image) -> Result<Arc<Image>, ModelError> {
@@ -746,6 +895,57 @@ fn smooth_normals(positions: &[[f32; 3]], indices: &[u32]) -> Vec<[f32; 3]> {
         .collect()
 }
 
+/// Tangents for a normal map (see [`Primitive::tangents`]): each corner
+/// gets the average U and V directions of the triangles around it,
+/// weighted by their area, made perpendicular to its normal.
+fn tangents(
+    positions: &[[f32; 3]],
+    normals: &[[f32; 3]],
+    uvs: &[[f32; 2]],
+    indices: &[u32],
+) -> Vec<[f32; 4]> {
+    let mut along_u = vec![Vec3::ZERO; positions.len()];
+    let mut along_v = vec![Vec3::ZERO; positions.len()];
+    for triangle in indices.as_chunks::<3>().0 {
+        let [a, b, c] = triangle.map(|i| i as usize);
+        let (pa, pb, pc) = (
+            Vec3::from(positions[a]),
+            Vec3::from(positions[b]),
+            Vec3::from(positions[c]),
+        );
+        let (ua, ub, uc) = (uvs[a], uvs[b], uvs[c]);
+        let (e1, e2) = (pb - pa, pc - pa);
+        let (du1, dv1) = (ub[0] - ua[0], ub[1] - ua[1]);
+        let (du2, dv2) = (uc[0] - ua[0], uc[1] - ua[1]);
+        // Solving e = du·U + dv·V for the directions U and V. Scaled by
+        // the area (not divided by it), so bigger triangles count more.
+        let area = du1 * dv2 - du2 * dv1;
+        if area.abs() < 1e-12 {
+            continue;
+        }
+        let sign = area.signum();
+        let u = (e1 * dv2 - e2 * dv1) * sign;
+        let v = (e2 * du1 - e1 * du2) * sign;
+        for i in [a, b, c] {
+            along_u[i] += u;
+            along_v[i] += v;
+        }
+    }
+    (0..positions.len())
+        .map(|i| {
+            let n = Vec3::from(normals[i]);
+            let t = (along_u[i] - n * n.dot(along_u[i])).normalize_or(n.any_orthonormal_vector());
+            // V grows down the texture, so "up" is -V.
+            let w = if n.cross(t).dot(-along_v[i]) < 0.0 {
+                -1.0
+            } else {
+                1.0
+            };
+            [t.x, t.y, t.z, w]
+        })
+        .collect()
+}
+
 /// Fits the primitives into the 1×1×1 cube centered on the origin and
 /// makes the model.
 fn fit(mut primitives: Vec<Primitive>) -> Result<Model, ModelError> {
@@ -789,6 +989,15 @@ fn fit(mut primitives: Vec<Primitive>) -> Result<Model, ModelError> {
             *normal = (Vec3::from(*normal) * normal_scale)
                 .normalize_or_zero()
                 .to_array();
+        }
+        // Worked out after fitting, so they match the fitted triangles.
+        if primitive.material.normal_texture.is_some() && !primitive.uvs.is_empty() {
+            primitive.tangents = tangents(
+                &primitive.positions,
+                &primitive.normals,
+                &primitive.uvs,
+                &primitive.indices,
+            );
         }
     }
     Ok(Model {
@@ -912,6 +1121,80 @@ mod tests {
         );
         assert_eq!(percent_decode("bad%2"), None);
         assert_eq!(percent_decode("bad%zz"), None);
+    }
+
+    #[test]
+    fn a_gltf_materials_maps_are_all_read() {
+        let folder = std::env::temp_dir().join("axcenity-gltf-maps");
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        // One triangle in the XY plane: positions, normals, then UVs.
+        let floats: [f32; 24] = [
+            0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, //
+            0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, //
+            0.0, 1.0, 1.0, 1.0, 0.0, 0.0,
+        ];
+        let bytes: Vec<u8> = floats.iter().flat_map(|f| f.to_le_bytes()).collect();
+        std::fs::write(folder.join("tri.bin"), bytes).unwrap();
+        for name in ["color", "orm", "normal", "glow"] {
+            std::fs::write(folder.join(format!("{name}.png")), checker_png()).unwrap();
+        }
+        let gltf = r#"{
+            "asset": { "version": "2.0" },
+            "buffers": [ { "uri": "tri.bin", "byteLength": 96 } ],
+            "bufferViews": [
+                { "buffer": 0, "byteOffset": 0, "byteLength": 36 },
+                { "buffer": 0, "byteOffset": 36, "byteLength": 36 },
+                { "buffer": 0, "byteOffset": 72, "byteLength": 24 }
+            ],
+            "accessors": [
+                { "bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3",
+                  "min": [0, 0, 0], "max": [1, 1, 0] },
+                { "bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC3" },
+                { "bufferView": 2, "componentType": 5126, "count": 3, "type": "VEC2" }
+            ],
+            "images": [ { "uri": "color.png" }, { "uri": "orm.png" },
+                        { "uri": "normal.png" }, { "uri": "glow.png" } ],
+            "textures": [ { "source": 0 }, { "source": 1 }, { "source": 2 }, { "source": 3 } ],
+            "materials": [ {
+                "name": "Rusty",
+                "pbrMetallicRoughness": {
+                    "baseColorTexture": { "index": 0 },
+                    "metallicRoughnessTexture": { "index": 1 }
+                },
+                "normalTexture": { "index": 2, "scale": 0.5 },
+                "occlusionTexture": { "index": 1, "strength": 0.7 },
+                "emissiveTexture": { "index": 3, "texCoord": 1 }
+            } ],
+            "meshes": [ { "primitives": [ {
+                "attributes": { "POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2 },
+                "material": 0
+            } ] } ]
+        }"#;
+        let model = load_model(gltf.as_bytes(), &folder, ModelFormat::Gltf).unwrap();
+        let primitive = &model.primitives[0];
+        let material = &primitive.material;
+        assert_eq!(material.name, "Rusty");
+        assert!(material.base_color_texture.is_some());
+        assert_eq!(material.normal_scale, 0.5);
+        // One "ORM" image: occlusion in red, roughness in green, metalness in blue.
+        let orm = |map: &Option<ChannelTexture>| {
+            let map = map.as_ref().unwrap();
+            (map.channel, Arc::as_ptr(&map.image))
+        };
+        let (metal, image) = orm(&material.metalness_texture);
+        assert_eq!(metal, Channel::Blue);
+        assert_eq!(orm(&material.roughness_texture), (Channel::Green, image));
+        assert_eq!(orm(&material.occlusion_texture), (Channel::Red, image));
+        assert_eq!(material.occlusion_strength, 0.7);
+        // Placed by another set of texture coordinates, so left out.
+        assert!(material.emissive_texture.is_none());
+        // Tangents point along U (+X here), with the texture's "up" along +Y.
+        assert_eq!(primitive.tangents.len(), 3);
+        for tangent in &primitive.tangents {
+            assert!((Vec3::new(tangent[0], tangent[1], tangent[2]) - Vec3::X).length() < 1e-5);
+            assert_eq!(tangent[3], 1.0);
+        }
     }
 
     #[test]

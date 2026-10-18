@@ -363,7 +363,7 @@ The draw list's material gains normal, metalness, roughness, ambient occlusion, 
 
 - [ ] A glTF sample with all its maps (such as DamagedHelmet) renders with visible normal detail, shiny metal and glowing parts.
 - [ ] An FBX with linked base color, normal, roughness, metalness, emission, opacity and AO maps renders with each one applied.
-- [ ] A glossiness map renders as the inverse roughness; a specular map gives a sensible metalness.
+- [ ] A glossiness map renders as the inverse roughness; a specular map changes how strongly non-metal parts shine.
 - [ ] Built-in parts look the same as before.
 
 ---

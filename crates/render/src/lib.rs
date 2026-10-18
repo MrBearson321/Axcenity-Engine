@@ -11,7 +11,8 @@ mod mesh;
 mod renderer;
 
 pub use draw_list::{
-    AmbientLight, Camera, DrawItem, DrawList, Material, MeshSource, Shape, Sun, TextureSource,
+    AmbientLight, Camera, Channel, ChannelMap, DrawItem, DrawList, Material, MeshSource, NormalMap,
+    Shape, Sun, TextureMaps, TextureSource,
 };
 pub use renderer::{Renderer, TextureRenderer};
 

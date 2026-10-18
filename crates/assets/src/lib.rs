@@ -23,8 +23,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 pub use import::{ImportError, MODELS_FOLDER, import_model, import_picks, list_model_objects};
 pub use model::{
-    AlphaMode, Image, Model, ModelError, ModelFormat, ModelMaterial, ModelObject, Pick, Primitive,
-    list_objects, load_model, load_models,
+    AlphaMode, Channel, ChannelTexture, Image, Model, ModelError, ModelFormat, ModelMaterial,
+    ModelObject, Pick, Primitive, list_objects, load_model, load_models,
 };
 
 /// The project's loaded assets. Cloning gives another handle to the same

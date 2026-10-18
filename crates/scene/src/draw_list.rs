@@ -6,11 +6,12 @@
 
 use std::sync::Arc;
 
-use axcenity_assets::{AlphaMode, Assets, Image, Model, ModelMaterial};
+use axcenity_assets::{AlphaMode, Assets, ChannelTexture, Image, Model, ModelMaterial};
 use axcenity_core::{ClassName, Instance, PartType, Value, World};
 use axcenity_render::glam::{Mat4, Vec3};
 use axcenity_render::{
-    AmbientLight, Camera, DrawItem, DrawList, Material, MeshSource, Shape, Sun, TextureSource,
+    AmbientLight, Camera, Channel, ChannelMap, DrawItem, DrawList, Material, MeshSource, NormalMap,
+    Shape, Sun, TextureMaps, TextureSource,
 };
 
 use crate::orientation::rotation_from_orientation;
@@ -153,15 +154,44 @@ fn model_material(material: &ModelMaterial) -> Material {
     Material {
         // glTF colors are linear light; draw lists take sRGB.
         base_color: srgb([r, g, b]),
-        base_color_texture: material
-            .base_color_texture
-            .clone()
-            .map(|image| Arc::new(ImageTexture(image)) as Arc<dyn TextureSource>),
+        base_color_texture: material.base_color_texture.as_ref().map(texture),
         metalness: material.metalness,
         roughness: material.roughness,
         emissive: srgb(material.emissive),
         opacity,
         alpha_cutoff,
+        maps: TextureMaps {
+            normal: material.normal_texture.as_ref().map(|image| NormalMap {
+                texture: texture(image),
+                scale: material.normal_scale,
+                flip_green: false,
+            }),
+            metalness: material.metalness_texture.as_ref().map(channel_map),
+            roughness: material.roughness_texture.as_ref().map(channel_map),
+            occlusion: material.occlusion_texture.as_ref().map(channel_map),
+            occlusion_strength: material.occlusion_strength,
+            emissive: material.emissive_texture.as_ref().map(texture),
+            opacity: material.opacity_texture.as_ref().map(channel_map),
+            specular: material.specular_texture.as_ref().map(texture),
+        },
+    }
+}
+
+/// A model's image, handed to the renderer without copying it.
+fn texture(image: &Arc<Image>) -> Arc<dyn TextureSource> {
+    Arc::new(ImageTexture(image.clone()))
+}
+
+fn channel_map(map: &ChannelTexture) -> ChannelMap {
+    ChannelMap {
+        texture: texture(&map.image),
+        channel: match map.channel {
+            axcenity_assets::Channel::Red => Channel::Red,
+            axcenity_assets::Channel::Green => Channel::Green,
+            axcenity_assets::Channel::Blue => Channel::Blue,
+            axcenity_assets::Channel::Alpha => Channel::Alpha,
+        },
+        invert: map.invert,
     }
 }
 
@@ -194,6 +224,9 @@ impl MeshSource for ModelMesh {
     }
     fn uvs(&self) -> &[[f32; 2]] {
         &self.model.primitives[self.index].uvs
+    }
+    fn tangents(&self) -> &[[f32; 4]] {
+        &self.model.primitives[self.index].tangents
     }
     fn indices(&self) -> &[u32] {
         &self.model.primitives[self.index].indices

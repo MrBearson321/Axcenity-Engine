@@ -4,6 +4,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::ops::Range;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use bytemuck::{Pod, Zeroable};
@@ -11,7 +12,7 @@ use glam::camera::rh;
 use glam::{Mat3, Vec3};
 use wgpu::util::DeviceExt;
 
-use crate::draw_list::{DrawItem, DrawList, MeshSource, Shape, TextureSource};
+use crate::draw_list::{ChannelMap, DrawItem, DrawList, MeshSource, Shape, TextureSource};
 use crate::mesh::{self, MeshData, Vertex};
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -19,8 +20,10 @@ const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const TARGET_SHOW_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 /// A [`TextureRenderer`]'s texture, as drawn into.
 const TARGET_DRAW_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
-/// Textures are drawn through an sRGB view, so sampling gives linear light.
-const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+/// Textures are stored as plain bytes. Color textures are read through an
+/// sRGB view of them ([`TEXTURE_SRGB_FORMAT`]), so sampling gives linear light.
+const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+const TEXTURE_SRGB_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const NEAR_PLANE: f32 = 0.1;
 const FAR_PLANE: f32 = 5000.0;
 /// A caller's mesh or texture not drawn for this many frames is taken off
@@ -63,11 +66,53 @@ struct GpuMesh {
     index_format: wgpu::IndexFormat,
 }
 
-/// A texture uploaded to the GPU, ready to bind to the shader.
+/// How a material's texture maps are read. Must match `Maps` in
+/// shader.wgsl. Each field is 16 bytes, as uniform buffers need.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+struct MapsUniform {
+    /// Which channel holds each map's value: 1 in that one, 0 in the others.
+    metalness: [f32; 4],
+    roughness: [f32; 4],
+    occlusion: [f32; 4],
+    opacity: [f32; 4],
+    /// 1 to invert metalness, roughness, occlusion and opacity.
+    invert: [f32; 4],
+    /// Normal map scale (0: none), green's sign, occlusion strength (0:
+    /// none), and 1 if opacity has its own map.
+    settings: [f32; 4],
+    /// 1 if there's a specular map, then unused.
+    specular: [f32; 4],
+}
+
+/// A texture uploaded to the GPU, with a view for each way it's read.
 struct GpuTexture {
-    /// Kept so it lives as long as the bind group that uses it.
+    /// Kept so it lives as long as the bind groups that use it.
     _texture: wgpu::Texture,
+    /// Converts sRGB to linear light, for colors.
+    srgb: wgpu::TextureView,
+    /// Gives the bytes as they are (128 is 0.5), for values.
+    linear: wgpu::TextureView,
+}
+
+/// A material's textures and [`MapsUniform`], bound together for the shader.
+struct GpuMaterial {
     bind_group: wgpu::BindGroup,
+    /// Kept so it lives as long as the bind group.
+    _maps: wgpu::Buffer,
+}
+
+/// The number of textures a material can have: base color, normal,
+/// metalness, roughness, occlusion, emissive, opacity and specular.
+const MATERIAL_TEXTURES: usize = 8;
+
+/// Which material binding an item uses: its textures' keys and its
+/// [`MapsUniform`] (as bits, so it can be compared and sorted). Items with
+/// the same key share one binding.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct MaterialKey {
+    textures: [Option<u64>; MATERIAL_TEXTURES],
+    maps: [u32; 28],
 }
 
 /// Something of a caller's on the GPU, and the frame it was last drawn in.
@@ -120,13 +165,13 @@ impl Meshes {
     }
 }
 
-/// Consecutive instances with the same mesh, the same texture and the same
-/// kind of drawing (solid or see-through), drawn with one draw call.
+/// Consecutive instances with the same mesh, the same material textures
+/// and the same kind of drawing (solid or see-through), drawn with one
+/// draw call.
 #[derive(Clone, Debug, PartialEq)]
 struct Batch {
     mesh: MeshKey,
-    /// The key of the base color texture, if there is one.
-    texture: Option<u64>,
+    material: MaterialKey,
     transparent: bool,
     instances: Range<u32>,
 }
@@ -167,13 +212,16 @@ struct ScenePipeline {
     instance_buffer: wgpu::Buffer,
     /// How many instances fit in `instance_buffer` before it must grow.
     instance_capacity: usize,
-    texture_layout: wgpu::BindGroupLayout,
+    material_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
-    /// One white pixel, for items without a texture: it changes nothing.
+    /// One white pixel, for maps an item doesn't have: it changes nothing.
     white_texture: GpuTexture,
-    /// Callers' meshes and textures, by key.
+    /// For items with no textures, such as every built-in shape.
+    plain_material: GpuMaterial,
+    /// Callers' meshes and textures, by key, and the materials using them.
     custom_meshes: HashMap<u64, Cached<GpuMesh>>,
     textures: HashMap<u64, Cached<GpuTexture>>,
+    materials: HashMap<MaterialKey, Cached<GpuMaterial>>,
     /// How many frames have been drawn, to tell what wasn't drawn lately.
     frame: u64,
 }
@@ -414,31 +462,45 @@ impl ScenePipeline {
             }],
         });
 
-        let texture_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("base color texture"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
+        // Bindings 0 and 3–9 are the textures (see `material_bindings`).
+        let texture_entry = |binding| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        };
+        let mut entries = vec![
+            texture_entry(0),
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
                 },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
+                count: None,
+            },
+        ];
+        entries.extend((3..=9).map(texture_entry));
+        let material_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("material"),
+            entries: &entries,
         });
         // glTF's default: smooth, blending between mipmap levels, and
         // repeating past the edges.
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("base color texture"),
+            label: Some("material textures"),
             address_mode_u: wgpu::AddressMode::Repeat,
             address_mode_v: wgpu::AddressMode::Repeat,
             address_mode_w: wgpu::AddressMode::Repeat,
@@ -447,13 +509,24 @@ impl ScenePipeline {
             mipmap_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
-        let white_texture =
-            create_texture(&device, &queue, &texture_layout, &sampler, 1, 1, &[255; 4]);
+        let white_texture = create_texture(&device, &queue, 1, 1, &[255; 4]);
+        let plain_material = create_material(
+            &device,
+            &material_layout,
+            &sampler,
+            [&white_texture; MATERIAL_TEXTURES],
+            maps_uniform_of(&MaterialKey::default()),
+        );
 
-        let opaque_pipeline =
-            create_pipeline(&device, &frame_layout, &texture_layout, color_format, false);
+        let opaque_pipeline = create_pipeline(
+            &device,
+            &frame_layout,
+            &material_layout,
+            color_format,
+            false,
+        );
         let transparent_pipeline =
-            create_pipeline(&device, &frame_layout, &texture_layout, color_format, true);
+            create_pipeline(&device, &frame_layout, &material_layout, color_format, true);
         let meshes = Meshes {
             block: upload_mesh(&device, "block", &mesh::block()),
             sphere: upload_mesh(&device, "sphere", &mesh::sphere()),
@@ -474,11 +547,13 @@ impl ScenePipeline {
             meshes,
             instance_buffer,
             instance_capacity,
-            texture_layout,
+            material_layout,
             sampler,
             white_texture,
+            plain_material,
             custom_meshes: HashMap::new(),
             textures: HashMap::new(),
+            materials: HashMap::new(),
             frame: 0,
         }
     }
@@ -551,12 +626,13 @@ impl ScenePipeline {
                 let Some(mesh) = mesh else {
                     continue;
                 };
-                let texture = batch
-                    .texture
-                    .and_then(|key| self.textures.get(&key)?.gpu.as_ref())
-                    .unwrap_or(&self.white_texture);
+                let material = self
+                    .materials
+                    .get(&batch.material)
+                    .and_then(|cached| cached.gpu.as_ref())
+                    .unwrap_or(&self.plain_material);
                 pass.set_pipeline(pipeline);
-                pass.set_bind_group(1, &texture.bind_group, &[]);
+                pass.set_bind_group(1, &material.bind_group, &[]);
                 pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                 pass.set_index_buffer(mesh.indices.slice(..), mesh.index_format);
                 pass.draw_indexed(0..mesh.index_count, 0, batch.instances);
@@ -583,33 +659,55 @@ impl ScenePipeline {
                     }
                 }
             }
-            if let Some(source) = &item.material.base_color_texture {
+            let sources = material_textures(item);
+            for source in sources.iter().flatten() {
                 match self.textures.entry(source.key()) {
                     Entry::Occupied(mut cached) => cached.get_mut().last_drawn = frame,
                     Entry::Vacant(slot) => {
                         slot.insert(Cached {
-                            gpu: upload_texture(
-                                &self.device,
-                                &self.queue,
-                                &self.texture_layout,
-                                &self.sampler,
-                                source.as_ref(),
-                            ),
+                            gpu: upload_texture(&self.device, &self.queue, source.as_ref()),
                             last_drawn: frame,
                         });
                     }
                 }
             }
+            let key = material_key(item);
+            if key == MaterialKey::default() {
+                continue;
+            }
+            match self.materials.entry(key) {
+                Entry::Occupied(mut cached) => cached.get_mut().last_drawn = frame,
+                Entry::Vacant(slot) => {
+                    // A texture with broken data is drawn as white instead.
+                    let textures = sources.map(|source| {
+                        source
+                            .and_then(|source| self.textures.get(&source.key())?.gpu.as_ref())
+                            .unwrap_or(&self.white_texture)
+                    });
+                    slot.insert(Cached {
+                        gpu: Some(create_material(
+                            &self.device,
+                            &self.material_layout,
+                            &self.sampler,
+                            textures,
+                            maps_uniform_of(&key),
+                        )),
+                        last_drawn: frame,
+                    });
+                }
+            }
         }
     }
 
-    /// Frees the callers' meshes and textures that haven't been drawn lately.
+    /// Frees the callers' meshes, textures and materials that haven't been
+    /// drawn lately.
     fn forget_undrawn(&mut self) {
         let frame = self.frame;
         let recent = |last_drawn: u64| frame - last_drawn < KEEP_UNDRAWN_FRAMES;
         self.custom_meshes
             .retain(|_, cached| recent(cached.last_drawn));
         self.textures.retain(|_, cached| recent(cached.last_drawn));
+        self.materials.retain(|_, cached| recent(cached.last_drawn));
     }
 
     /// Replaces the instance buffer with a bigger one if `count` won't fit.
@@ -658,7 +756,7 @@ fn plan_draws(list: &DrawList) -> (Vec<InstanceRaw>, Vec<Batch>) {
         .filter(|item| item.material.opacity > 0.0)
         .partition(|item| item.material.opacity < 1.0);
 
-    opaque.sort_by_key(|item| (MeshKey::of(&item.shape), texture_key(item)));
+    opaque.sort_by_key(|item| (MeshKey::of(&item.shape), material_key(item)));
     let distance = |item: &DrawItem| {
         item.transform
             .w_axis
@@ -680,18 +778,18 @@ fn plan_draws(list: &DrawList) -> (Vec<InstanceRaw>, Vec<Batch>) {
         };
         let index = instances.len() as u32;
         instances.push(raw);
-        let (mesh, texture) = (MeshKey::of(&item.shape), texture_key(item));
+        let (mesh, material) = (MeshKey::of(&item.shape), material_key(item));
         match batches.last_mut() {
             Some(last)
                 if last.mesh == mesh
-                    && last.texture == texture
+                    && last.material == material
                     && last.transparent == transparent =>
             {
                 last.instances.end = index + 1;
             }
             _ => batches.push(Batch {
                 mesh,
-                texture,
+                material,
                 transparent,
                 instances: index..index + 1,
             }),
@@ -700,13 +798,90 @@ fn plan_draws(list: &DrawList) -> (Vec<InstanceRaw>, Vec<Batch>) {
     (instances, batches)
 }
 
-/// The key of the texture an item is drawn with. Only callers' meshes have
-/// texture coordinates, so the built-in shapes never use one.
-fn texture_key(item: &DrawItem) -> Option<u64> {
-    match item.shape {
-        Shape::Mesh(_) => item.material.base_color_texture.as_ref().map(|t| t.key()),
-        _ => None,
+/// The textures an item is drawn with, in binding order (see
+/// [`MATERIAL_TEXTURES`]). Only callers' meshes have texture coordinates,
+/// so the built-in shapes never use any.
+fn material_textures(item: &DrawItem) -> [Option<&Arc<dyn TextureSource>>; MATERIAL_TEXTURES] {
+    if !matches!(item.shape, Shape::Mesh(_)) {
+        return [None; MATERIAL_TEXTURES];
     }
+    let material = &item.material;
+    let maps = &material.maps;
+    [
+        material.base_color_texture.as_ref(),
+        maps.normal.as_ref().map(|map| &map.texture),
+        maps.metalness.as_ref().map(|map| &map.texture),
+        maps.roughness.as_ref().map(|map| &map.texture),
+        maps.occlusion.as_ref().map(|map| &map.texture),
+        maps.emissive.as_ref(),
+        maps.opacity.as_ref().map(|map| &map.texture),
+        maps.specular.as_ref(),
+    ]
+}
+
+/// The material binding an item is drawn with (see [`MaterialKey`]).
+fn material_key(item: &DrawItem) -> MaterialKey {
+    let textures = material_textures(item).map(|source| source.map(|source| source.key()));
+    if textures.iter().all(Option::is_none) {
+        return MaterialKey::default();
+    }
+    let maps = &item.material.maps;
+    let mask = |map: &Option<ChannelMap>| {
+        let mut mask = [0.0; 4];
+        mask[map.as_ref().map_or(0, |map| map.channel as usize)] = 1.0;
+        mask
+    };
+    let inverted = |map: &Option<ChannelMap>| f32::from(map.as_ref().is_some_and(|map| map.invert));
+    let used = |used: bool| f32::from(used);
+    let uniform = MapsUniform {
+        metalness: mask(&maps.metalness),
+        roughness: mask(&maps.roughness),
+        occlusion: mask(&maps.occlusion),
+        opacity: mask(&maps.opacity),
+        invert: [
+            inverted(&maps.metalness),
+            inverted(&maps.roughness),
+            inverted(&maps.occlusion),
+            inverted(&maps.opacity),
+        ],
+        settings: [
+            maps.normal.as_ref().map_or(0.0, |map| map.scale),
+            if maps.normal.as_ref().is_some_and(|map| map.flip_green) {
+                -1.0
+            } else {
+                1.0
+            },
+            if maps.occlusion.is_some() {
+                maps.occlusion_strength.clamp(0.0, 1.0)
+            } else {
+                0.0
+            },
+            used(maps.opacity.is_some()),
+        ],
+        specular: [used(maps.specular.is_some()), 0.0, 0.0, 0.0],
+    };
+    MaterialKey {
+        textures,
+        maps: bytemuck::cast(uniform),
+    }
+}
+
+/// The [`MapsUniform`] a key was made from. The default key's is the plain
+/// material's: no maps.
+fn maps_uniform_of(key: &MaterialKey) -> MapsUniform {
+    if *key == MaterialKey::default() {
+        let red = [1.0, 0.0, 0.0, 0.0];
+        return MapsUniform {
+            metalness: red,
+            roughness: red,
+            occlusion: red,
+            opacity: red,
+            invert: [0.0; 4],
+            settings: [0.0, 1.0, 0.0, 0.0],
+            specular: [0.0; 4],
+        };
+    }
+    bytemuck::cast(key.maps)
 }
 
 /// The GPU data for one item, or `None` if it can't be seen.
@@ -759,21 +934,23 @@ fn sky_clear_color(srgb: [f32; 3]) -> wgpu::Color {
 fn create_pipeline(
     device: &wgpu::Device,
     frame_layout: &wgpu::BindGroupLayout,
-    texture_layout: &wgpu::BindGroupLayout,
+    material_layout: &wgpu::BindGroupLayout,
     color_format: wgpu::TextureFormat,
     transparent: bool,
 ) -> wgpu::RenderPipeline {
     let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("scene"),
-        bind_group_layouts: &[frame_layout, texture_layout],
+        bind_group_layouts: &[frame_layout, material_layout],
         push_constant_ranges: &[],
     });
 
     let vertex_layout = wgpu::VertexBufferLayout {
         array_stride: size_of::<Vertex>() as u64,
         step_mode: wgpu::VertexStepMode::Vertex,
-        attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 12 => Float32x2],
+        attributes: &wgpu::vertex_attr_array![
+            0 => Float32x3, 1 => Float32x3, 12 => Float32x2, 13 => Float32x4
+        ],
     };
     // Advances once per drawn shape instead of once per corner.
     let instance_layout = wgpu::VertexBufferLayout {
@@ -931,11 +1108,13 @@ fn upload_custom_mesh(device: &wgpu::Device, source: &dyn MeshSource) -> Option<
     let positions = source.positions();
     let normals = source.normals();
     let uvs = source.uvs();
+    let tangents = source.tangents();
     let indices = source.indices();
     let count = positions.len();
     let fits = count > 0
         && normals.len() == count
         && (uvs.is_empty() || uvs.len() == count)
+        && (tangents.is_empty() || tangents.len() == count)
         && !indices.is_empty()
         && indices.len().is_multiple_of(3)
         && indices.iter().all(|&index| (index as usize) < count);
@@ -948,6 +1127,7 @@ fn upload_custom_mesh(device: &wgpu::Device, source: &dyn MeshSource) -> Option<
             position: positions[i],
             normal: normals[i],
             uv: uvs.get(i).copied().unwrap_or_default(),
+            tangent: tangents.get(i).copied().unwrap_or(mesh::NO_TANGENT),
         })
         .collect();
     Some(upload_buffers(
@@ -991,8 +1171,6 @@ fn upload_buffers(
 fn upload_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-    layout: &wgpu::BindGroupLayout,
-    sampler: &wgpu::Sampler,
     source: &dyn TextureSource,
 ) -> Option<GpuTexture> {
     let (width, height) = source.size();
@@ -1004,18 +1182,71 @@ fn upload_texture(
         );
         return None;
     }
-    Some(create_texture(
-        device, queue, layout, sampler, width, height, rgba,
-    ))
+    Some(create_texture(device, queue, width, height, rgba))
+}
+
+/// Binds a material's `textures` (in [`MATERIAL_TEXTURES`] order) and
+/// `maps` for the shader. Colors are read through sRGB views, the rest as
+/// plain values.
+fn create_material(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    sampler: &wgpu::Sampler,
+    textures: [&GpuTexture; MATERIAL_TEXTURES],
+    maps: MapsUniform,
+) -> GpuMaterial {
+    let maps = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("material maps"),
+        contents: bytemuck::bytes_of(&maps),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+    let [
+        base,
+        normal,
+        metalness,
+        roughness,
+        occlusion,
+        emissive,
+        opacity,
+        specular,
+    ] = textures;
+    let view = |binding, view| wgpu::BindGroupEntry {
+        binding,
+        resource: wgpu::BindingResource::TextureView(view),
+    };
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("material"),
+        layout,
+        entries: &[
+            view(0, &base.srgb),
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: maps.as_entire_binding(),
+            },
+            view(3, &normal.linear),
+            view(4, &metalness.linear),
+            view(5, &roughness.linear),
+            view(6, &occlusion.linear),
+            view(7, &emissive.srgb),
+            view(8, &opacity.linear),
+            view(9, &specular.linear),
+        ],
+    });
+    GpuMaterial {
+        bind_group,
+        _maps: maps,
+    }
 }
 
 /// Uploads RGBA pixels with a full set of mipmaps (smaller copies, so far
-/// away surfaces don't shimmer), ready to bind.
+/// away surfaces don't shimmer), with an sRGB and a plain view.
 fn create_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-    layout: &wgpu::BindGroupLayout,
-    sampler: &wgpu::Sampler,
     width: u32,
     height: u32,
     rgba: &[u8],
@@ -1027,7 +1258,7 @@ fn create_texture(
     levels.retain(|(width, height, _)| *width <= max && *height <= max);
     let (width, height) = (levels[0].0, levels[0].1);
     let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("base color texture"),
+        label: Some("material texture"),
         size: wgpu::Extent3d {
             width,
             height,
@@ -1038,7 +1269,7 @@ fn create_texture(
         dimension: wgpu::TextureDimension::D2,
         format: TEXTURE_FORMAT,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
+        view_formats: &[TEXTURE_SRGB_FORMAT],
     });
     for (level, (width, height, pixels)) in levels.iter().enumerate() {
         queue.write_texture(
@@ -1061,24 +1292,15 @@ fn create_texture(
             },
         );
     }
-    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("base color texture"),
-        layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(&view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::Sampler(sampler),
-            },
-        ],
+    let linear = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let srgb = texture.create_view(&wgpu::TextureViewDescriptor {
+        format: Some(TEXTURE_SRGB_FORMAT),
+        ..Default::default()
     });
     GpuTexture {
         _texture: texture,
-        bind_group,
+        srgb,
+        linear,
     }
 }
 
@@ -1128,10 +1350,8 @@ fn drawable_size(width: u32, height: u32) -> Option<(u32, u32)> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::*;
-    use crate::draw_list::{AmbientLight, Camera, DrawItem, Material, Sun};
+    use crate::draw_list::{AmbientLight, Camera, Channel, DrawItem, Material, NormalMap, Sun};
     use glam::Mat4;
 
     #[test]
@@ -1191,7 +1411,7 @@ mod tests {
     fn batch(mesh: MeshKey, transparent: bool, instances: Range<u32>) -> Batch {
         Batch {
             mesh,
-            texture: None,
+            material: MaterialKey::default(),
             transparent,
             instances,
         }
@@ -1252,19 +1472,56 @@ mod tests {
             textured(Shape::Block, Some(1)),
         ]);
         let (_, batches) = plan_draws(&list);
-        let with_texture = |mesh, texture, instances| Batch {
-            texture,
-            ..batch(mesh, false, instances)
-        };
+        let textures: Vec<(MeshKey, Option<u64>, Range<u32>)> = batches
+            .into_iter()
+            .map(|batch| (batch.mesh, batch.material.textures[0], batch.instances))
+            .collect();
         assert_eq!(
-            batches,
+            textures,
             vec![
-                with_texture(MeshKey::Block, None, 0..1),
-                with_texture(MeshKey::Custom(5), None, 1..2),
-                with_texture(MeshKey::Custom(7), Some(1), 2..3),
-                with_texture(MeshKey::Custom(7), Some(2), 3..5),
+                (MeshKey::Block, None, 0..1),
+                (MeshKey::Custom(5), None, 1..2),
+                (MeshKey::Custom(7), Some(1), 2..3),
+                (MeshKey::Custom(7), Some(2), 3..5),
             ]
         );
+    }
+
+    #[test]
+    fn maps_and_their_settings_pick_the_material_binding() {
+        let mesh = Shape::Mesh(Arc::new(TestMesh(1)));
+        let texture = |key| Arc::new(TestTexture(key)) as Arc<dyn TextureSource>;
+        let mut packed = textured(mesh.clone(), None);
+        // One ORM texture: occlusion in red, roughness in green, metalness in blue.
+        let channel = |channel| {
+            Some(ChannelMap {
+                texture: texture(9),
+                channel,
+                invert: false,
+            })
+        };
+        packed.material.maps.occlusion = channel(Channel::Red);
+        packed.material.maps.roughness = channel(Channel::Green);
+        packed.material.maps.metalness = channel(Channel::Blue);
+        let key = material_key(&packed);
+        assert_eq!(
+            key.textures,
+            [None, None, Some(9), Some(9), Some(9), None, None, None]
+        );
+        let maps = maps_uniform_of(&key);
+        assert_eq!(maps.metalness, [0.0, 0.0, 1.0, 0.0]);
+        assert_eq!(maps.roughness, [0.0, 1.0, 0.0, 0.0]);
+        assert_eq!(maps.settings, [0.0, 1.0, 1.0, 0.0]);
+
+        // The same textures read another way need another binding.
+        let mut glossy = packed.clone();
+        glossy.material.maps.roughness.as_mut().unwrap().invert = true;
+        assert_ne!(material_key(&glossy), key);
+        assert_eq!(maps_uniform_of(&material_key(&glossy)).invert[1], 1.0);
+        // Built-in shapes have no texture coordinates, so no maps.
+        let mut block = packed.clone();
+        block.shape = Shape::Block;
+        assert_eq!(material_key(&block), MaterialKey::default());
     }
 
     #[test]
@@ -1390,6 +1647,93 @@ mod tests {
             [161, 204, 242, 255],
             "the middle shows the block"
         );
+    }
+
+    /// A square facing +Z, filling the unit cube's front, with texture
+    /// coordinates and tangents.
+    struct Square;
+
+    impl MeshSource for Square {
+        fn key(&self) -> u64 {
+            1
+        }
+        fn positions(&self) -> &[[f32; 3]] {
+            &[
+                [-0.5, -0.5, 0.0],
+                [0.5, -0.5, 0.0],
+                [0.5, 0.5, 0.0],
+                [-0.5, 0.5, 0.0],
+            ]
+        }
+        fn normals(&self) -> &[[f32; 3]] {
+            &[[0.0, 0.0, 1.0]; 4]
+        }
+        fn uvs(&self) -> &[[f32; 2]] {
+            &[[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]]
+        }
+        fn tangents(&self) -> &[[f32; 4]] {
+            &[[1.0, 0.0, 0.0, 1.0]; 4]
+        }
+        fn indices(&self) -> &[u32] {
+            &[0, 1, 2, 0, 2, 3]
+        }
+    }
+
+    /// One pixel of `rgba`.
+    struct Pixel(u64, [u8; 4]);
+
+    impl TextureSource for Pixel {
+        fn key(&self) -> u64 {
+            self.0
+        }
+        fn size(&self) -> (u32, u32) {
+            (1, 1)
+        }
+        fn rgba(&self) -> &[u8] {
+            &self.1
+        }
+    }
+
+    #[test]
+    fn texture_renderer_draws_a_mesh_with_texture_maps() {
+        let Some((device, queue)) = test_device() else {
+            eprintln!("skipped: no graphics adapter on this machine");
+            return;
+        };
+        let mut list = list_of(vec![]);
+        list.sun.intensity = 0.0;
+        let pixel = |key, rgba| Arc::new(Pixel(key, rgba)) as Arc<dyn TextureSource>;
+        let mut material = Material {
+            base_color: [0.0; 3],
+            emissive: [1.0; 3],
+            ..Material::default()
+        };
+        // Glows only in the emissive map's green; the other maps are bound
+        // but change nothing without light.
+        material.maps.emissive = Some(pixel(2, [0, 255, 0, 255]));
+        material.maps.normal = Some(NormalMap {
+            texture: pixel(3, [128, 128, 255, 255]),
+            scale: 1.0,
+            flip_green: true,
+        });
+        material.maps.roughness = Some(ChannelMap {
+            texture: pixel(4, [0, 0, 0, 255]),
+            channel: Channel::Alpha,
+            invert: true,
+        });
+        list.items.push(DrawItem {
+            shape: Shape::Mesh(Arc::new(Square)),
+            transform: Mat4::from_scale_rotation_translation(
+                Vec3::splat(4.0),
+                glam::Quat::IDENTITY,
+                Vec3::new(0.0, 0.0, -3.0),
+            ),
+            material,
+        });
+        let mut renderer = TextureRenderer::new(&device, &queue, 32, 32);
+        renderer.render(&list);
+        let pixels = renderer.read_pixels();
+        assert_eq!(pixels[(16 * 32 + 16) * 4..][..4], [0, 255, 0, 255]);
     }
 
     #[test]

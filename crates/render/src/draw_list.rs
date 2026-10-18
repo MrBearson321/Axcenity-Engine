@@ -96,19 +96,26 @@ pub trait MeshSource: Send + Sync {
     /// Texture coordinates, one per position, or empty for none. (0, 0) is
     /// the top left of the texture.
     fn uvs(&self) -> &[[f32; 2]];
+    /// Tangents for normal maps, one per position, or empty for none: the
+    /// direction texture coordinate U grows along the surface (one unit
+    /// long), and in `w` 1 or -1, the side of the normal the texture's "up"
+    /// is on (`cross(normal, tangent) * w` points up the texture).
+    fn tangents(&self) -> &[[f32; 4]] {
+        &[]
+    }
     /// Three per triangle, counter-clockwise seen from outside.
     fn indices(&self) -> &[u32];
 }
 
-/// An image the caller owns, to color a surface with
-/// ([`Material::base_color_texture`]).
+/// An image the caller owns, to put on a surface ([`Material`]'s textures).
 pub trait TextureSource: Send + Sync {
     /// The same for the same image, and different for every other image.
     fn key(&self) -> u64;
     /// Width and height in pixels.
     fn size(&self) -> (u32, u32);
-    /// 4 bytes per pixel (red, green, blue, alpha), sRGB-encoded like the
-    /// colors, rows from the top.
+    /// 4 bytes per pixel (red, green, blue, alpha), rows from the top.
+    /// Color textures (base color, emission) are sRGB-encoded like the
+    /// colors; the others hold plain values (128 is 0.5).
     fn rgba(&self) -> &[u8];
 }
 
@@ -147,6 +154,9 @@ pub struct Material {
     /// Pixels whose opacity (with the texture's) is below this aren't drawn
     /// at all, for cut-out leaves and fences. 0 cuts nothing.
     pub alpha_cutoff: f32,
+    /// More textures, placed like `base_color_texture`. Built-in shapes
+    /// ignore them too.
+    pub maps: TextureMaps,
 }
 
 impl Default for Material {
@@ -159,6 +169,79 @@ impl Default for Material {
             emissive: [0.0, 0.0, 0.0],
             opacity: 1.0,
             alpha_cutoff: 0.0,
+            maps: TextureMaps::default(),
         }
     }
+}
+
+/// The textures of a material besides its base color. Each is optional;
+/// without one, the material's own value is used everywhere.
+#[derive(Clone, Debug)]
+pub struct TextureMaps {
+    /// Bumps and grooves, as surface directions.
+    pub normal: Option<NormalMap>,
+    /// Multiplies [`Material::metalness`].
+    pub metalness: Option<ChannelMap>,
+    /// Multiplies [`Material::roughness`].
+    pub roughness: Option<ChannelMap>,
+    /// How much ambient light reaches each point: 1 everywhere, 0 deep in
+    /// cracks. Sunlight isn't affected.
+    pub occlusion: Option<ChannelMap>,
+    /// How strongly `occlusion` darkens, from 0 (not at all) to 1.
+    pub occlusion_strength: f32,
+    /// sRGB colors that multiply [`Material::emissive`].
+    pub emissive: Option<Arc<dyn TextureSource>>,
+    /// Replaces the base color texture's alpha as the opacity (which still
+    /// multiplies [`Material::opacity`]).
+    pub opacity: Option<ChannelMap>,
+    /// How strongly non-metal parts reflect, per color, as plain values:
+    /// 0.5 is the usual 4% of light, 0 none, 1 twice that. For older
+    /// materials' specular maps.
+    pub specular: Option<Arc<dyn TextureSource>>,
+}
+
+impl Default for TextureMaps {
+    fn default() -> Self {
+        Self {
+            normal: None,
+            metalness: None,
+            roughness: None,
+            occlusion: None,
+            occlusion_strength: 1.0,
+            emissive: None,
+            opacity: None,
+            specular: None,
+        }
+    }
+}
+
+/// A tangent-space normal map: red is the U direction, green the texture's
+/// "up", blue straight out of the surface, each from 0 (-1) to 255 (+1).
+#[derive(Clone, Debug)]
+pub struct NormalMap {
+    pub texture: Arc<dyn TextureSource>,
+    /// Scales how far the normals tip (1 as authored, 0 flat).
+    pub scale: f32,
+    /// True for maps whose green points down the texture (DirectX's
+    /// convention) rather than up (OpenGL's and glTF's).
+    pub flip_green: bool,
+}
+
+/// One channel of a texture, used as a number from 0 to 1.
+#[derive(Clone, Debug)]
+pub struct ChannelMap {
+    pub texture: Arc<dyn TextureSource>,
+    pub channel: Channel,
+    /// Use 1 minus the value: a glossiness or smoothness map as roughness.
+    pub invert: bool,
+}
+
+/// A color channel of a texture.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Channel {
+    #[default]
+    Red,
+    Green,
+    Blue,
+    Alpha,
 }

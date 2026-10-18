@@ -16,12 +16,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use glam::{DMat3, DMat4, DVec3, Vec3};
-use ufbx::{CoordinateAxes, CoordinateAxis};
+use ufbx::{CoordinateAxes, CoordinateAxis, ShaderType};
 
 use super::objects::{self, Listed, Siblings};
 use super::{
-    AlphaMode, Image, MAX_NODE_DEPTH, Model, ModelError, ModelMaterial, ModelObject, Pick,
-    Primitive, fit, missing, new_key, smooth_normals, want,
+    AlphaMode, Channel, ChannelTexture, Image, MAX_NODE_DEPTH, Model, ModelError, ModelMaterial,
+    ModelObject, Pick, Primitive, fit, missing, new_key, smooth_normals, want,
 };
 
 /// Reads an FBX file's `bytes`, making one model for each of `picks`.
@@ -217,9 +217,9 @@ impl Reader<'_> {
                 .or_else(|| mesh.materials.get(part.index as usize));
             let mut material = match material {
                 Some(material) => self.material(material),
-                None => plain_material(),
+                None => ModelMaterial::default(),
             };
-            let want_uvs = material.base_color_texture.is_some() && mesh.vertex_uv.exists;
+            let want_uvs = material.has_textures() && mesh.vertex_uv.exists;
 
             let mut positions = Vec::new();
             let mut normals = Vec::new();
@@ -284,13 +284,14 @@ impl Reader<'_> {
             }
             // A texture needs coordinates to be placed by.
             if uvs.is_empty() {
-                material.base_color_texture = None;
+                material.remove_textures();
             }
             self.primitives.push(Primitive {
                 key: new_key(),
                 positions,
                 normals,
                 uvs,
+                tangents: Vec::new(),
                 indices,
                 material,
             });
@@ -299,34 +300,139 @@ impl Reader<'_> {
 
     /// An FBX material as metallic-roughness. `ufbx` works out PBR values
     /// for every kind of FBX material, including the old Lambert and Phong.
+    /// A value with a map is the map's alone: FBX programs use a map
+    /// instead of the value, not multiplied by it.
     fn material(&mut self, material: &ufbx::Material) -> ModelMaterial {
         let pbr = &material.pbr;
+        let fbx = &material.fbx;
+        // Lambert and Phong, the FBX format's own materials, rather than a
+        // PBR one from a renderer's plug-in.
+        let classic = matches!(
+            material.shader_type,
+            ShaderType::Unknown
+                | ShaderType::FbxLambert
+                | ShaderType::FbxPhong
+                | ShaderType::BlenderPhong
+        );
         let base = color(&pbr.base_color, Vec3::ONE) * number(&pbr.base_factor, 1.0);
-        let emissive = color(&pbr.emission_color, Vec3::ZERO) * number(&pbr.emission_factor, 1.0);
-        let opacity = number(&pbr.opacity, 1.0);
-        let texture = pbr
-            .base_color
-            .texture
+        let base_color_texture = self.map_image(&pbr.base_color);
+
+        let normal_texture = match self
+            .map_image(&pbr.normal_map)
+            .or_else(|| self.map_image(&fbx.normal_map))
+        {
+            Some(image) => Some(image),
+            // Many exporters put normal maps in the bump slot; a real bump
+            // (height) map is grey, and can't be used.
+            None => self
+                .map_image(&fbx.bump)
+                .filter(|image| looks_like_normal_map(image)),
+        };
+
+        let metalness_texture = self
+            .map_image(&pbr.metalness)
+            .map(|image| ChannelTexture::new(image, Channel::Red));
+        // Phong's shininess map, and maps the program says are
+        // glossiness, are smooth where they're white.
+        let roughness_texture = match self.map_image(&pbr.glossiness) {
+            Some(image) => Some((image, true)),
+            None => self.map_image(&pbr.roughness).map(|image| (image, classic)),
+        }
+        .map(|(image, invert)| ChannelTexture {
+            invert,
+            ..ChannelTexture::new(image, Channel::Red)
+        });
+        let occlusion_texture = self
+            .map_image(&pbr.ambient_occlusion)
+            .map(|image| ChannelTexture::new(image, Channel::Red));
+
+        let emissive_texture = self.map_image(&pbr.emission_color);
+        let mut emissive =
+            color(&pbr.emission_color, Vec3::ZERO) * number(&pbr.emission_factor, 1.0);
+        // An emission map with no emission color set glows in its own colors.
+        if emissive_texture.is_some() && emissive.max_element() <= 0.0 {
+            emissive = Vec3::ONE;
+        }
+
+        // Opacity is the base texture's alpha, or a map of its own (white
+        // is solid). Classic materials keep it in "transparent color".
+        let opacity_image = self
+            .map_image(&pbr.opacity)
+            .or_else(|| self.map_image(&fbx.transparency_color))
+            .or_else(|| self.map_image(&fbx.transparency_factor));
+        let same_as_base = |image: &Arc<Image>| {
+            base_color_texture
+                .as_ref()
+                .is_some_and(|base| Arc::ptr_eq(base, image))
+        };
+        let opacity_texture = opacity_image
             .as_ref()
-            .filter(|_| pbr.base_color.texture_enabled)
-            .and_then(|texture| self.image(texture));
+            .filter(|image| !same_as_base(image))
+            .map(|image| {
+                let channel = if image
+                    .rgba
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .any(|pixel| pixel[3] < 255)
+                {
+                    Channel::Alpha
+                } else {
+                    Channel::Red
+                };
+                ChannelTexture::new(image.clone(), channel)
+            });
+        let opacity = number(&pbr.opacity, 1.0);
         // FBX has no alpha mode. A see-through material blends; an opacity
-        // map cuts out (leaves, fences) by the base texture's alpha.
+        // map cuts out (leaves, fences).
         let alpha_mode = if opacity < 1.0 {
             AlphaMode::Blend
-        } else if pbr.opacity.texture.is_some() && texture.is_some() {
+        } else if opacity_image.is_some() {
             AlphaMode::Mask { cutoff: 0.5 }
         } else {
             AlphaMode::Opaque
         };
+
+        // A classic material's specular map says how strongly it shines.
+        let specular_texture = if classic {
+            self.map_image(&pbr.specular_color)
+                .or_else(|| self.map_image(&fbx.specular_color))
+        } else {
+            None
+        };
+
         ModelMaterial {
+            name: material.element.name.to_string(),
             base_color: [base.x, base.y, base.z, opacity].map(unit),
-            metalness: unit(number(&pbr.metalness, 0.0)),
-            roughness: unit(number(&pbr.roughness, 1.0)),
+            metalness: match metalness_texture {
+                Some(_) => 1.0,
+                None => unit(number(&pbr.metalness, 0.0)),
+            },
+            roughness: match roughness_texture {
+                Some(_) => 1.0,
+                None => unit(number(&pbr.roughness, 1.0)),
+            },
             emissive: emissive.to_array().map(unit),
             alpha_mode,
-            base_color_texture: texture,
+            base_color_texture,
+            normal_texture,
+            normal_scale: 1.0,
+            metalness_texture,
+            roughness_texture,
+            occlusion_texture,
+            occlusion_strength: 1.0,
+            emissive_texture,
+            opacity_texture,
+            specular_texture,
         }
+    }
+
+    /// The image of a material value's map, if it has one that can be used.
+    fn map_image(&mut self, map: &ufbx::MaterialMap) -> Option<Arc<Image>> {
+        map.texture
+            .as_ref()
+            .filter(|_| map.texture_enabled)
+            .and_then(|texture| self.image(texture))
     }
 
     /// The texture decoded, from the FBX file if it's embedded or from its
@@ -432,16 +538,26 @@ fn decode(bytes: &[u8], name: &str) -> Result<Image, String> {
     })
 }
 
-/// The material of a mesh that has none: plain white plastic.
-fn plain_material() -> ModelMaterial {
-    ModelMaterial {
-        base_color: [1.0; 4],
-        metalness: 0.0,
-        roughness: 1.0,
-        emissive: [0.0; 3],
-        alpha_mode: AlphaMode::Opaque,
-        base_color_texture: None,
+/// True if `image` looks like a tangent-space normal map rather than a
+/// bump (height) map: mostly blue (surfaces facing out), with red and
+/// green around the middle. A bump map is grey.
+fn looks_like_normal_map(image: &Image) -> bool {
+    let pixels = image.rgba.len() / 4;
+    // Every pixel of a small image, or about 4,096 spread over a big one.
+    let step = (pixels / 4096).max(1);
+    let mut sums = [0u64; 3];
+    let mut count = 0u64;
+    for pixel in image.rgba.as_chunks::<4>().0.iter().step_by(step) {
+        for (sum, &value) in sums.iter_mut().zip(pixel) {
+            *sum += u64::from(value);
+        }
+        count += 1;
     }
+    if count == 0 {
+        return false;
+    }
+    let [red, green, blue] = sums.map(|sum| sum as f32 / count as f32);
+    blue > 180.0 && (red - 128.0).abs() < 40.0 && (green - 128.0).abs() < 40.0
 }
 
 /// A material value that's one number, or `default` if the file has none.
@@ -496,6 +612,17 @@ pub(crate) mod tests {
     /// 3ds Max does), otherwise in meters with Y up. With a `texture` path,
     /// the material's diffuse color uses it.
     pub(crate) fn pyramid_fbx(z_up: bool, texture: Option<&str>) -> String {
+        let maps: Vec<(&str, &str)> = texture
+            .map(|path| ("DiffuseColor", path))
+            .into_iter()
+            .collect();
+        pyramid_fbx_with_maps(z_up, &maps)
+    }
+
+    /// Like [`pyramid_fbx`], with each `(property, path)` of `maps` a
+    /// texture linked to that property of the material ("DiffuseColor",
+    /// "NormalMap", "SpecularColor"…).
+    pub(crate) fn pyramid_fbx_with_maps(z_up: bool, maps: &[(&str, &str)]) -> String {
         let (up_axis, front_axis, front_sign, unit, vertices) = if z_up {
             (
                 2,
@@ -507,21 +634,21 @@ pub(crate) mod tests {
         } else {
             (1, 2, 1, 100, "-2,0,-2, 2,0,-2, 2,0,2, -2,0,2, 0,3,0")
         };
-        let (texture_object, texture_connection) = match texture {
-            Some(path) => (
-                format!(
-                    "\tTexture: 4000, \"Texture::Checker\", \"\" {{\n\
-                     \t\tType: \"TextureVideoClip\"\n\
-                     \t\tVersion: 202\n\
-                     \t\tTextureName: \"Texture::Checker\"\n\
-                     \t\tFileName: \"C:/Users/artist/Desktop/{path}\"\n\
-                     \t\tRelativeFilename: \"{path}\"\n\
-                     \t}}\n"
-                ),
-                "\tC: \"OP\",4000,3000, \"DiffuseColor\"\n",
-            ),
-            None => (String::new(), ""),
-        };
+        let mut texture_object = String::new();
+        let mut texture_connection = String::new();
+        for (i, (property, path)) in maps.iter().enumerate() {
+            let id = 4000 + i;
+            texture_object.push_str(&format!(
+                "\tTexture: {id}, \"Texture::Map{i}\", \"\" {{\n\
+                 \t\tType: \"TextureVideoClip\"\n\
+                 \t\tVersion: 202\n\
+                 \t\tTextureName: \"Texture::Map{i}\"\n\
+                 \t\tFileName: \"C:/Users/artist/Desktop/{path}\"\n\
+                 \t\tRelativeFilename: \"{path}\"\n\
+                 \t}}\n"
+            ));
+            texture_connection.push_str(&format!("\tC: \"OP\",{id},3000, \"{property}\"\n"));
+        }
         format!(
             r#"; FBX 7.4.0 project file
 FBXHeaderExtension:  {{
@@ -743,6 +870,87 @@ Connections:  {
             // V is flipped: FBX's (0, 0) is the bottom left.
             assert!(primitive.uvs.contains(&[0.0, 1.0]), "{:?}", primitive.uvs);
         }
+    }
+
+    /// A 2×2 PNG all of one color.
+    fn solid_png(rgba: [u8; 4]) -> Vec<u8> {
+        let image = image::RgbaImage::from_pixel(2, 2, image::Rgba(rgba));
+        let mut png = std::io::Cursor::new(Vec::new());
+        image.write_to(&mut png, image::ImageFormat::Png).unwrap();
+        png.into_inner()
+    }
+
+    #[test]
+    fn a_phong_materials_maps_become_pbr_maps() {
+        let folder = temp_folder("phong-maps");
+        let files = [
+            ("color.png", [200, 100, 50, 255]),
+            ("normal.png", [128, 128, 255, 255]),
+            ("gloss.png", [255, 255, 255, 255]),
+            ("spec.png", [64, 64, 64, 255]),
+            ("glow.png", [255, 0, 0, 255]),
+            ("cutout.png", [255, 255, 255, 0]),
+        ];
+        for (name, rgba) in files {
+            std::fs::write(folder.join(name), solid_png(rgba)).unwrap();
+        }
+        let fbx = pyramid_fbx_with_maps(
+            false,
+            &[
+                ("DiffuseColor", "color.png"),
+                ("NormalMap", "normal.png"),
+                ("ShininessExponent", "gloss.png"),
+                ("SpecularColor", "spec.png"),
+                ("EmissiveColor", "glow.png"),
+                ("TransparentColor", "cutout.png"),
+            ],
+        );
+        let model = load_fbx(&fbx, &folder).unwrap();
+        assert!(model.warnings.is_empty(), "{:?}", model.warnings);
+        let primitive = &model.primitives[0];
+        let material = &primitive.material;
+        assert_eq!(material.name, "Red");
+        assert!(material.base_color_texture.is_some());
+        assert!(material.normal_texture.is_some());
+        // Every corner gets a tangent for the normal map.
+        assert_eq!(primitive.tangents.len(), primitive.positions.len());
+        // Shininess is glossiness: inverted, and the map alone sets it.
+        let roughness = material.roughness_texture.as_ref().unwrap();
+        assert!(roughness.invert);
+        assert_eq!(material.roughness, 1.0);
+        assert!(material.specular_texture.is_some());
+        // An emission map with no emission color glows in its own colors.
+        assert!(material.emissive_texture.is_some());
+        assert_eq!(material.emissive, [1.0; 3]);
+        // The cut-out map has alpha, so that's the channel used.
+        let opacity = material.opacity_texture.as_ref().unwrap();
+        assert_eq!(opacity.channel, Channel::Alpha);
+        assert_eq!(material.alpha_mode, AlphaMode::Mask { cutoff: 0.5 });
+    }
+
+    #[test]
+    fn a_bump_map_is_used_only_if_it_is_really_a_normal_map() {
+        let folder = temp_folder("bump");
+        std::fs::write(folder.join("normal.png"), solid_png([120, 135, 250, 255])).unwrap();
+        std::fs::write(folder.join("height.png"), solid_png([90, 90, 90, 255])).unwrap();
+        let normal = load_fbx(
+            &pyramid_fbx_with_maps(false, &[("Bump", "normal.png")]),
+            &folder,
+        );
+        assert!(
+            normal.unwrap().primitives[0]
+                .material
+                .normal_texture
+                .is_some()
+        );
+        let height = load_fbx(
+            &pyramid_fbx_with_maps(false, &[("Bump", "height.png")]),
+            &folder,
+        );
+        let height = height.unwrap();
+        assert!(height.primitives[0].material.normal_texture.is_none());
+        // With no texture left, it needs no texture coordinates.
+        assert!(height.primitives[0].uvs.is_empty());
     }
 
     #[test]

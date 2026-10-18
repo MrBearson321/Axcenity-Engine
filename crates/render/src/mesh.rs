@@ -11,6 +11,10 @@ use glam::Vec3;
 /// How many slices round shapes are cut into. More looks smoother but costs more triangles.
 const ROUND_SEGMENTS: u16 = 32;
 
+/// The tangent of corners without one. Any direction does; it's only used
+/// with a normal map.
+pub const NO_TANGENT: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
+
 /// One corner of a triangle, as the GPU reads it.
 ///
 /// `#[repr(C)]` fixes the field order and layout, and `Pod`/`Zeroable` let
@@ -23,6 +27,9 @@ pub struct Vertex {
     /// Where on the texture this corner is. The built-in shapes have no
     /// texture, so theirs are all (0, 0).
     pub uv: [f32; 2],
+    /// For normal maps (see `MeshSource::tangents`). Unused by the
+    /// built-in shapes, which have none.
+    pub tangent: [f32; 4],
 }
 
 #[derive(Default)]
@@ -39,6 +46,7 @@ impl MeshData {
             position: position.to_array(),
             normal: normal.to_array(),
             uv: [0.0, 0.0],
+            tangent: NO_TANGENT,
         });
         index
     }
