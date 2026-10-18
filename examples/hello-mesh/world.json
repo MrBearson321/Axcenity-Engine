@@ -11,63 +11,1291 @@
           "Material": "Plastic",
           "Metalness": 0,
           "Orientation": [0, 0, 0],
-          "Position": [0, -0.5, 0],
+          "Position": [0, -10.5, 0],
           "Roughness": 0.5,
           "Shape": "Block",
           "Size": [60, 1, 60]
         }
       },
       {
-        "class": "MeshPart",
-        "name": "Pyramid",
-        "properties": {
-          "Anchored": true,
-          "MeshId": "assets/models/pyramid.gltf",
-          "Orientation": [0, 0, 0],
-          "Position": [0, 3, 0],
-          "Size": [8, 6, 8]
-        }
-      },
-      {
-        "class": "MeshPart",
-        "name": "FallingPyramid",
-        "properties": {
-          "Anchored": false,
-          "MeshId": "assets/models/pyramid.gltf",
-          "Orientation": [25, 30, 10],
-          "Position": [12, 8, 0],
-          "Size": [4, 3, 4]
-        }
-      },
-      {
-        "class": "Part",
-        "name": "Ball",
-        "properties": {
-          "Anchored": false,
-          "Color": [0.9, 0.2, 0.2],
-          "Material": "Plastic",
-          "Metalness": 0,
-          "Orientation": [0, 0, 0],
-          "Position": [0.3, 12, 0.2],
-          "Roughness": 0.5,
-          "Shape": "Ball",
-          "Size": [2, 2, 2]
-        }
-      },
-      {
-        "class": "Part",
-        "name": "Crate",
-        "properties": {
-          "Anchored": false,
-          "Color": [0.2, 0.5, 0.9],
-          "Material": "Plastic",
-          "Metalness": 0,
-          "Orientation": [0, 45, 0],
-          "Position": [-2, 10, 2],
-          "Roughness": 0.5,
-          "Shape": "Block",
-          "Size": [2, 2, 2]
-        }
+        "class": "Model",
+        "name": "CityPropsCollection",
+        "children": [
+          {
+            "class": "MeshPart",
+            "name": "ATM",
+            "properties": {
+              "Anchored": false,
+              "MeshId": "assets/models/CityPropsCollection2.fbx#ATM",
+              "Orientation": [-90, 0, 0],
+              "Position": [-8.754552, -5.4116173, -17.803623],
+              "Size": [0.75878525, 0.91689265, 0.11045408]
+            },
+            "children": [
+              {
+                "class": "SurfaceAppearance",
+                "name": "ATM_shader",
+                "properties": {
+                  "AmbientOcclusionChannel": "Red",
+                  "AmbientOcclusionMap": "",
+                  "AmbientOcclusionStrength": 1,
+                  "Color": [1, 1, 1],
+                  "ColorMap": "assets/textures/ATM_ATM_shader_Diffuse.png",
+                  "EmissiveMap": "assets/textures/ATM_ATM_shader_Emissive.png",
+                  "EmissiveStrength": 1,
+                  "InvertOpacity": false,
+                  "InvertRoughness": false,
+                  "MaterialName": "ATM_shader",
+                  "MetalnessChannel": "Red",
+                  "MetalnessMap": "",
+                  "NormalMap": "assets/textures/ATM_ATM_shader_Diffuse2.png",
+                  "NormalMapDirectX": false,
+                  "NormalStrength": 1,
+                  "OpacityChannel": "Alpha",
+                  "OpacityMap": "",
+                  "RoughnessChannel": "Red",
+                  "RoughnessMap": "",
+                  "SpecularMap": ""
+                }
+              }
+            ]
+          },
+          {
+            "class": "MeshPart",
+            "name": "Manhole",
+            "properties": {
+              "Anchored": false,
+              "MeshId": "assets/models/CityPropsCollection2.fbx#Manhole",
+              "Orientation": [0, 0, 0],
+              "Position": [-6.8098335, -7.0245004, -9.909206],
+              "Size": [0.996684, 0.023212202, 0.99668455]
+            },
+            "children": [
+              {
+                "class": "SurfaceAppearance",
+                "name": "Manhole_shader",
+                "properties": {
+                  "AmbientOcclusionChannel": "Red",
+                  "AmbientOcclusionMap": "",
+                  "AmbientOcclusionStrength": 1,
+                  "Color": [1, 1, 1],
+                  "ColorMap": "",
+                  "EmissiveMap": "",
+                  "EmissiveStrength": 1,
+                  "InvertOpacity": false,
+                  "InvertRoughness": false,
+                  "MaterialName": "Manhole_shader",
+                  "MetalnessChannel": "Red",
+                  "MetalnessMap": "",
+                  "NormalMap": "",
+                  "NormalMapDirectX": false,
+                  "NormalStrength": 1,
+                  "OpacityChannel": "Alpha",
+                  "OpacityMap": "",
+                  "RoughnessChannel": "Red",
+                  "RoughnessMap": "",
+                  "SpecularMap": ""
+                }
+              }
+            ]
+          },
+          {
+            "class": "MeshPart",
+            "name": "TrashCanCap",
+            "properties": {
+              "Anchored": false,
+              "MeshId": "assets/models/CityPropsCollection2.fbx#TrashCanCap",
+              "Orientation": [0, 0, 0],
+              "Position": [-0.8772938, -6.396702, -11.664956],
+              "Size": [0.92658615, 1.2643847, 0.9265864]
+            },
+            "children": [
+              {
+                "class": "SurfaceAppearance",
+                "name": "TrashCanCap_shader",
+                "properties": {
+                  "AmbientOcclusionChannel": "Red",
+                  "AmbientOcclusionMap": "",
+                  "AmbientOcclusionStrength": 1,
+                  "Color": [1, 1, 1],
+                  "ColorMap": "",
+                  "EmissiveMap": "",
+                  "EmissiveStrength": 1,
+                  "InvertOpacity": false,
+                  "InvertRoughness": false,
+                  "MaterialName": "TrashCanCap_shader",
+                  "MetalnessChannel": "Red",
+                  "MetalnessMap": "",
+                  "NormalMap": "",
+                  "NormalMapDirectX": false,
+                  "NormalStrength": 1,
+                  "OpacityChannel": "Alpha",
+                  "OpacityMap": "",
+                  "RoughnessChannel": "Red",
+                  "RoughnessMap": "",
+                  "SpecularMap": ""
+                }
+              }
+            ]
+          },
+          {
+            "class": "MeshPart",
+            "name": "TrashCanLarge",
+            "properties": {
+              "Anchored": false,
+              "MeshId": "assets/models/CityPropsCollection2.fbx#TrashCanLarge",
+              "Orientation": [0, 0, 0],
+              "Position": [-10.558114, -6.54561, -12.828734],
+              "Size": [0.89250755, 0.9664133, 0.8925075]
+            },
+            "children": [
+              {
+                "class": "SurfaceAppearance",
+                "name": "TrashCanLarge_shader",
+                "properties": {
+                  "AmbientOcclusionChannel": "Red",
+                  "AmbientOcclusionMap": "",
+                  "AmbientOcclusionStrength": 1,
+                  "Color": [1, 1, 1],
+                  "ColorMap": "",
+                  "EmissiveMap": "",
+                  "EmissiveStrength": 1,
+                  "InvertOpacity": false,
+                  "InvertRoughness": false,
+                  "MaterialName": "TrashCanLarge_shader",
+                  "MetalnessChannel": "Red",
+                  "MetalnessMap": "",
+                  "NormalMap": "",
+                  "NormalMapDirectX": false,
+                  "NormalStrength": 1,
+                  "OpacityChannel": "Alpha",
+                  "OpacityMap": "",
+                  "RoughnessChannel": "Red",
+                  "RoughnessMap": "",
+                  "SpecularMap": ""
+                }
+              }
+            ]
+          },
+          {
+            "class": "MeshPart",
+            "name": "TrashCanSmall",
+            "properties": {
+              "Anchored": false,
+              "MeshId": "assets/models/CityPropsCollection2.fbx#TrashCanSmall",
+              "Orientation": [0, 0, 0],
+              "Position": [-9.250651, -6.5944266, -13.35844],
+              "Size": [0.630445, 0.86882776, 0.6304451]
+            },
+            "children": [
+              {
+                "class": "SurfaceAppearance",
+                "name": "TrashCanSmall_shader",
+                "properties": {
+                  "AmbientOcclusionChannel": "Red",
+                  "AmbientOcclusionMap": "",
+                  "AmbientOcclusionStrength": 1,
+                  "Color": [1, 1, 1],
+                  "ColorMap": "",
+                  "EmissiveMap": "",
+                  "EmissiveStrength": 1,
+                  "InvertOpacity": false,
+                  "InvertRoughness": false,
+                  "MaterialName": "TrashCanSmall_shader",
+                  "MetalnessChannel": "Red",
+                  "MetalnessMap": "",
+                  "NormalMap": "",
+                  "NormalMapDirectX": false,
+                  "NormalStrength": 1,
+                  "OpacityChannel": "Alpha",
+                  "OpacityMap": "",
+                  "RoughnessChannel": "Red",
+                  "RoughnessMap": "",
+                  "SpecularMap": ""
+                }
+              }
+            ]
+          },
+          {
+            "class": "MeshPart",
+            "name": "Drain",
+            "properties": {
+              "Anchored": false,
+              "MeshId": "assets/models/CityPropsCollection2.fbx#Drain",
+              "Orientation": [0, 0, 0],
+              "Position": [-9.088857, -7.032112, -9.942457],
+              "Size": [1.2961714, 0.030242573, 1.1105273]
+            },
+            "children": [
+              {
+                "class": "SurfaceAppearance",
+                "name": "Drain_shader",
+                "properties": {
+                  "AmbientOcclusionChannel": "Red",
+                  "AmbientOcclusionMap": "",
+                  "AmbientOcclusionStrength": 1,
+                  "Color": [1, 1, 1],
+                  "ColorMap": "",
+                  "EmissiveMap": "",
+                  "EmissiveStrength": 1,
+                  "InvertOpacity": false,
+                  "InvertRoughness": false,
+                  "MaterialName": "Drain_shader",
+                  "MetalnessChannel": "Red",
+                  "MetalnessMap": "",
+                  "NormalMap": "",
+                  "NormalMapDirectX": false,
+                  "NormalStrength": 1,
+                  "OpacityChannel": "Alpha",
+                  "OpacityMap": "",
+                  "RoughnessChannel": "Red",
+                  "RoughnessMap": "",
+                  "SpecularMap": ""
+                }
+              }
+            ]
+          },
+          {
+            "class": "MeshPart",
+            "name": "ParkBenchLong",
+            "properties": {
+              "Anchored": false,
+              "MeshId": "assets/models/CityPropsCollection2.fbx#ParkBenchLong",
+              "Orientation": [0, 0, 0],
+              "Position": [-1.5231974, -6.496155, -8.380835],
+              "Size": [1.0440464, 1.0812063, 3.2248914]
+            },
+            "children": [
+              {
+                "class": "SurfaceAppearance",
+                "name": "ParkBenchLong_shader",
+                "properties": {
+                  "AmbientOcclusionChannel": "Red",
+                  "AmbientOcclusionMap": "",
+                  "AmbientOcclusionStrength": 1,
+                  "Color": [1, 1, 1],
+                  "ColorMap": "",
+                  "EmissiveMap": "",
+                  "EmissiveStrength": 1,
+                  "InvertOpacity": false,
+                  "InvertRoughness": false,
+                  "MaterialName": "ParkBenchLong_shader",
+                  "MetalnessChannel": "Red",
+                  "MetalnessMap": "",
+                  "NormalMap": "",
+                  "NormalMapDirectX": false,
+                  "NormalStrength": 1,
+                  "OpacityChannel": "Alpha",
+                  "OpacityMap": "",
+                  "RoughnessChannel": "Red",
+                  "RoughnessMap": "",
+                  "SpecularMap": ""
+                }
+              }
+            ]
+          },
+          {
+            "class": "MeshPart",
+            "name": "PostBarrier",
+            "properties": {
+              "Anchored": false,
+              "MeshId": "assets/models/CityPropsCollection2.fbx#PostBarrier",
+              "Orientation": [0, 0, 0],
+              "Position": [-8.486826, -6.518555, -16.651688],
+              "Size": [3.5737739, 1.022769, 1.2951574]
+            },
+            "children": [
+              {
+                "class": "SurfaceAppearance",
+                "name": "PostBarrier_shader",
+                "properties": {
+                  "AmbientOcclusionChannel": "Red",
+                  "AmbientOcclusionMap": "",
+                  "AmbientOcclusionStrength": 1,
+                  "Color": [1, 1, 1],
+                  "ColorMap": "",
+                  "EmissiveMap": "",
+                  "EmissiveStrength": 1,
+                  "InvertOpacity": false,
+                  "InvertRoughness": false,
+                  "MaterialName": "PostBarrier_shader",
+                  "MetalnessChannel": "Red",
+                  "MetalnessMap": "",
+                  "NormalMap": "",
+                  "NormalMapDirectX": false,
+                  "NormalStrength": 1,
+                  "OpacityChannel": "Alpha",
+                  "OpacityMap": "",
+                  "RoughnessChannel": "Red",
+                  "RoughnessMap": "",
+                  "SpecularMap": ""
+                }
+              }
+            ]
+          },
+          {
+            "class": "MeshPart",
+            "name": "PostBarrier2",
+            "properties": {
+              "Anchored": false,
+              "MeshId": "assets/models/CityPropsCollection2.fbx#PostBarrier2",
+              "Orientation": [0, 0, 0],
+              "Position": [2.0682108, -6.536147, -10.876108],
+              "Size": [1.8723154, 1.0540161, 3.3694415]
+            },
+            "children": [
+              {
+                "class": "SurfaceAppearance",
+                "name": "PostBarrier_shader",
+                "properties": {
+                  "AmbientOcclusionChannel": "Red",
+                  "AmbientOcclusionMap": "",
+                  "AmbientOcclusionStrength": 1,
+                  "Color": [1, 1, 1],
+                  "ColorMap": "",
+                  "EmissiveMap": "",
+                  "EmissiveStrength": 1,
+                  "InvertOpacity": false,
+                  "InvertRoughness": false,
+                  "MaterialName": "PostBarrier_shader",
+                  "MetalnessChannel": "Red",
+                  "MetalnessMap": "",
+                  "NormalMap": "",
+                  "NormalMapDirectX": false,
+                  "NormalStrength": 1,
+                  "OpacityChannel": "Alpha",
+                  "OpacityMap": "",
+                  "RoughnessChannel": "Red",
+                  "RoughnessMap": "",
+                  "SpecularMap": ""
+                }
+              }
+            ]
+          },
+          {
+            "class": "MeshPart",
+            "name": "Crossing",
+            "properties": {
+              "Anchored": false,
+              "MeshId": "assets/models/CityPropsCollection2.fbx#Crossing",
+              "Orientation": [0, 0, 0],
+              "Position": [-10.243014, -6.4755387, -15.142166],
+              "Size": [0.52713823, 1.095613, 0.49817932]
+            },
+            "children": [
+              {
+                "class": "SurfaceAppearance",
+                "name": "Crossing_shader",
+                "properties": {
+                  "AmbientOcclusionChannel": "Red",
+                  "AmbientOcclusionMap": "",
+                  "AmbientOcclusionStrength": 1,
+                  "Color": [1, 1, 1],
+                  "ColorMap": "",
+                  "EmissiveMap": "",
+                  "EmissiveStrength": 1,
+                  "InvertOpacity": false,
+                  "InvertRoughness": false,
+                  "MaterialName": "Crossing_shader",
+                  "MetalnessChannel": "Red",
+                  "MetalnessMap": "",
+                  "NormalMap": "",
+                  "NormalMapDirectX": false,
+                  "NormalStrength": 1,
+                  "OpacityChannel": "Alpha",
+                  "OpacityMap": "",
+                  "RoughnessChannel": "Red",
+                  "RoughnessMap": "",
+                  "SpecularMap": ""
+                }
+              }
+            ]
+          },
+          {
+            "class": "MeshPart",
+            "name": "ParkBenchShort",
+            "properties": {
+              "Anchored": false,
+              "MeshId": "assets/models/CityPropsCollection2.fbx#ParkBenchShort",
+              "Orientation": [0, 0, 0],
+              "Position": [-3.7607427, -7.493385, -9.212514],
+              "Size": [1.098384, 1.0703387, 1.9187043]
+            },
+            "children": [
+              {
+                "class": "SurfaceAppearance",
+                "name": "ParkBenchShort_shader",
+                "properties": {
+                  "AmbientOcclusionChannel": "Red",
+                  "AmbientOcclusionMap": "",
+                  "AmbientOcclusionStrength": 1,
+                  "Color": [1, 1, 1],
+                  "ColorMap": "",
+                  "EmissiveMap": "",
+                  "EmissiveStrength": 1,
+                  "InvertOpacity": false,
+                  "InvertRoughness": false,
+                  "MaterialName": "ParkBenchShort_shader",
+                  "MetalnessChannel": "Red",
+                  "MetalnessMap": "",
+                  "NormalMap": "",
+                  "NormalMapDirectX": false,
+                  "NormalStrength": 1,
+                  "OpacityChannel": "Alpha",
+                  "OpacityMap": "",
+                  "RoughnessChannel": "Red",
+                  "RoughnessMap": "",
+                  "SpecularMap": ""
+                }
+              }
+            ]
+          },
+          {
+            "class": "MeshPart",
+            "name": "StormDrain",
+            "properties": {
+              "Anchored": false,
+              "MeshId": "assets/models/CityPropsCollection2.fbx#StormDrain",
+              "Orientation": [0, 0, 0],
+              "Position": [-8.0895195, -6.8836117, -8.407444],
+              "Size": [1.1715566, 0.040917695, 1.3318834]
+            },
+            "children": [
+              {
+                "class": "SurfaceAppearance",
+                "name": "StornDrain_shader",
+                "properties": {
+                  "AmbientOcclusionChannel": "Red",
+                  "AmbientOcclusionMap": "",
+                  "AmbientOcclusionStrength": 1,
+                  "Color": [1, 1, 1],
+                  "ColorMap": "",
+                  "EmissiveMap": "",
+                  "EmissiveStrength": 1,
+                  "InvertOpacity": false,
+                  "InvertRoughness": false,
+                  "MaterialName": "StornDrain_shader",
+                  "MetalnessChannel": "Red",
+                  "MetalnessMap": "",
+                  "NormalMap": "",
+                  "NormalMapDirectX": false,
+                  "NormalStrength": 1,
+                  "OpacityChannel": "Alpha",
+                  "OpacityMap": "",
+                  "RoughnessChannel": "Red",
+                  "RoughnessMap": "",
+                  "SpecularMap": ""
+                }
+              }
+            ]
+          },
+          {
+            "class": "MeshPart",
+            "name": "Dumpster",
+            "properties": {
+              "Anchored": false,
+              "MeshId": "assets/models/CityPropsCollection2.fbx#Dumpster",
+              "Orientation": [0, 0, 0],
+              "Position": [1.8272922, -6.3099704, -8.405685],
+              "Size": [1.4424891, 1.4672658, 2.130465]
+            },
+            "children": [
+              {
+                "class": "SurfaceAppearance",
+                "name": "Dumpster_shader",
+                "properties": {
+                  "AmbientOcclusionChannel": "Red",
+                  "AmbientOcclusionMap": "",
+                  "AmbientOcclusionStrength": 1,
+                  "Color": [1, 1, 1],
+                  "ColorMap": "",
+                  "EmissiveMap": "",
+                  "EmissiveStrength": 1,
+                  "InvertOpacity": false,
+                  "InvertRoughness": false,
+                  "MaterialName": "Dumpster_shader",
+                  "MetalnessChannel": "Red",
+                  "MetalnessMap": "",
+                  "NormalMap": "",
+                  "NormalMapDirectX": false,
+                  "NormalStrength": 1,
+                  "OpacityChannel": "Alpha",
+                  "OpacityMap": "",
+                  "RoughnessChannel": "Red",
+                  "RoughnessMap": "",
+                  "SpecularMap": ""
+                }
+              }
+            ]
+          },
+          {
+            "class": "MeshPart",
+            "name": "LidRight",
+            "properties": {
+              "Anchored": false,
+              "MeshId": "assets/models/CityPropsCollection2.fbx#Dumpster/LidRight",
+              "Orientation": [0, 0, 0],
+              "Position": [1.7568033, -5.71529, -7.931985],
+              "Size": [1.3236737, 0.3020873, 1.080833]
+            },
+            "children": [
+              {
+                "class": "SurfaceAppearance",
+                "name": "DumpsterLid_shader",
+                "properties": {
+                  "AmbientOcclusionChannel": "Red",
+                  "AmbientOcclusionMap": "",
+                  "AmbientOcclusionStrength": 1,
+                  "Color": [1, 1, 1],
+                  "ColorMap": "",
+                  "EmissiveMap": "",
+                  "EmissiveStrength": 1,
+                  "InvertOpacity": false,
+                  "InvertRoughness": false,
+                  "MaterialName": "DumpsterLid_shader",
+                  "MetalnessChannel": "Red",
+                  "MetalnessMap": "",
+                  "NormalMap": "",
+                  "NormalMapDirectX": false,
+                  "NormalStrength": 1,
+                  "OpacityChannel": "Alpha",
+                  "OpacityMap": "",
+                  "RoughnessChannel": "Red",
+                  "RoughnessMap": "",
+                  "SpecularMap": ""
+                }
+              }
+            ]
+          },
+          {
+            "class": "MeshPart",
+            "name": "LidLeft",
+            "properties": {
+              "Anchored": false,
+              "MeshId": "assets/models/CityPropsCollection2.fbx#Dumpster/LidLeft",
+              "Orientation": [0, 0, 0],
+              "Position": [1.8845112, -5.715109, -8.850054],
+              "Size": [1.3236742, 0.3020872, 1.080833]
+            },
+            "children": [
+              {
+                "class": "SurfaceAppearance",
+                "name": "DumpsterLid_shader",
+                "properties": {
+                  "AmbientOcclusionChannel": "Red",
+                  "AmbientOcclusionMap": "",
+                  "AmbientOcclusionStrength": 1,
+                  "Color": [1, 1, 1],
+                  "ColorMap": "",
+                  "EmissiveMap": "",
+                  "EmissiveStrength": 1,
+                  "InvertOpacity": false,
+                  "InvertRoughness": false,
+                  "MaterialName": "DumpsterLid_shader",
+                  "MetalnessChannel": "Red",
+                  "MetalnessMap": "",
+                  "NormalMap": "",
+                  "NormalMapDirectX": false,
+                  "NormalStrength": 1,
+                  "OpacityChannel": "Alpha",
+                  "OpacityMap": "",
+                  "RoughnessChannel": "Red",
+                  "RoughnessMap": "",
+                  "SpecularMap": ""
+                }
+              }
+            ]
+          },
+          {
+            "class": "MeshPart",
+            "name": "Light",
+            "properties": {
+              "Anchored": false,
+              "MeshId": "assets/models/CityPropsCollection2.fbx#Light",
+              "Orientation": [0, 0, 0],
+              "Position": [0.10559869, -4.9578505, -11.166499],
+              "Size": [0.46694374, 4.146211, 0.45679593]
+            },
+            "children": [
+              {
+                "class": "SurfaceAppearance",
+                "name": "Light_shader",
+                "properties": {
+                  "AmbientOcclusionChannel": "Red",
+                  "AmbientOcclusionMap": "",
+                  "AmbientOcclusionStrength": 1,
+                  "Color": [1, 1, 1],
+                  "ColorMap": "",
+                  "EmissiveMap": "",
+                  "EmissiveStrength": 1,
+                  "InvertOpacity": false,
+                  "InvertRoughness": false,
+                  "MaterialName": "Light_shader",
+                  "MetalnessChannel": "Red",
+                  "MetalnessMap": "",
+                  "NormalMap": "",
+                  "NormalMapDirectX": false,
+                  "NormalStrength": 1,
+                  "OpacityChannel": "Alpha",
+                  "OpacityMap": "",
+                  "RoughnessChannel": "Red",
+                  "RoughnessMap": "",
+                  "SpecularMap": ""
+                }
+              }
+            ]
+          },
+          {
+            "class": "MeshPart",
+            "name": "FireHydrant",
+            "properties": {
+              "Anchored": false,
+              "MeshId": "assets/models/CityPropsCollection2.fbx#FireHydrant",
+              "Orientation": [0, 0, 0],
+              "Position": [-9.041486, -6.5522566, -15.69986],
+              "Size": [0.49351454, 1.125997, 0.47866035]
+            },
+            "children": [
+              {
+                "class": "SurfaceAppearance",
+                "name": "FireHydrant_shader",
+                "properties": {
+                  "AmbientOcclusionChannel": "Red",
+                  "AmbientOcclusionMap": "",
+                  "AmbientOcclusionStrength": 1,
+                  "Color": [1, 1, 1],
+                  "ColorMap": "",
+                  "EmissiveMap": "",
+                  "EmissiveStrength": 1,
+                  "InvertOpacity": false,
+                  "InvertRoughness": false,
+                  "MaterialName": "FireHydrant_shader",
+                  "MetalnessChannel": "Red",
+                  "MetalnessMap": "",
+                  "NormalMap": "",
+                  "NormalMapDirectX": false,
+                  "NormalStrength": 1,
+                  "OpacityChannel": "Alpha",
+                  "OpacityMap": "",
+                  "RoughnessChannel": "Red",
+                  "RoughnessMap": "",
+                  "SpecularMap": ""
+                }
+              }
+            ]
+          },
+          {
+            "class": "MeshPart",
+            "name": "ParkingMeter",
+            "properties": {
+              "Anchored": false,
+              "MeshId": "assets/models/CityPropsCollection2.fbx#ParkingMeter",
+              "Orientation": [0, 0, 0],
+              "Position": [-8.129169, -6.3767195, -15.19539],
+              "Size": [0.20680499, 1.3909941, 0.11090219]
+            },
+            "children": [
+              {
+                "class": "SurfaceAppearance",
+                "name": "ParkingMeter_shader",
+                "properties": {
+                  "AmbientOcclusionChannel": "Red",
+                  "AmbientOcclusionMap": "",
+                  "AmbientOcclusionStrength": 1,
+                  "Color": [1, 1, 1],
+                  "ColorMap": "",
+                  "EmissiveMap": "",
+                  "EmissiveStrength": 1,
+                  "InvertOpacity": false,
+                  "InvertRoughness": false,
+                  "MaterialName": "ParkingMeter_shader",
+                  "MetalnessChannel": "Red",
+                  "MetalnessMap": "",
+                  "NormalMap": "",
+                  "NormalMapDirectX": false,
+                  "NormalStrength": 1,
+                  "OpacityChannel": "Alpha",
+                  "OpacityMap": "",
+                  "RoughnessChannel": "Red",
+                  "RoughnessMap": "",
+                  "SpecularMap": ""
+                }
+              }
+            ]
+          },
+          {
+            "class": "MeshPart",
+            "name": "TrashCommercial",
+            "properties": {
+              "Anchored": false,
+              "MeshId": "assets/models/CityPropsCollection2.fbx#TrashCommercial",
+              "Orientation": [0, 0, 0],
+              "Position": [-7.8627787, -6.4825764, -13.59843],
+              "Size": [0.5976496, 1.0246716, 0.5976497]
+            },
+            "children": [
+              {
+                "class": "SurfaceAppearance",
+                "name": "TrashCommercial_shader",
+                "properties": {
+                  "AmbientOcclusionChannel": "Red",
+                  "AmbientOcclusionMap": "",
+                  "AmbientOcclusionStrength": 1,
+                  "Color": [1, 1, 1],
+                  "ColorMap": "",
+                  "EmissiveMap": "",
+                  "EmissiveStrength": 1,
+                  "InvertOpacity": false,
+                  "InvertRoughness": false,
+                  "MaterialName": "TrashCommercial_shader",
+                  "MetalnessChannel": "Red",
+                  "MetalnessMap": "",
+                  "NormalMap": "",
+                  "NormalMapDirectX": false,
+                  "NormalStrength": 1,
+                  "OpacityChannel": "Alpha",
+                  "OpacityMap": "",
+                  "RoughnessChannel": "Red",
+                  "RoughnessMap": "",
+                  "SpecularMap": ""
+                }
+              }
+            ]
+          },
+          {
+            "class": "MeshPart",
+            "name": "ConcreteBench",
+            "properties": {
+              "Anchored": false,
+              "MeshId": "assets/models/CityPropsCollection2.fbx#ConcreteBench",
+              "Orientation": [0, 0, 0],
+              "Position": [-4.0483513, -6.4857445, -6.509864],
+              "Size": [1.1489497, 1.0771056, 2.0716324]
+            },
+            "children": [
+              {
+                "class": "SurfaceAppearance",
+                "name": "ConcreteBench_shader",
+                "properties": {
+                  "AmbientOcclusionChannel": "Red",
+                  "AmbientOcclusionMap": "",
+                  "AmbientOcclusionStrength": 1,
+                  "Color": [1, 1, 1],
+                  "ColorMap": "",
+                  "EmissiveMap": "",
+                  "EmissiveStrength": 1,
+                  "InvertOpacity": false,
+                  "InvertRoughness": false,
+                  "MaterialName": "ConcreteBench_shader",
+                  "MetalnessChannel": "Red",
+                  "MetalnessMap": "",
+                  "NormalMap": "",
+                  "NormalMapDirectX": false,
+                  "NormalStrength": 1,
+                  "OpacityChannel": "Alpha",
+                  "OpacityMap": "",
+                  "RoughnessChannel": "Red",
+                  "RoughnessMap": "",
+                  "SpecularMap": ""
+                }
+              }
+            ]
+          },
+          {
+            "class": "MeshPart",
+            "name": "Bench",
+            "properties": {
+              "Anchored": false,
+              "MeshId": "assets/models/CityPropsCollection2.fbx#Bench",
+              "Orientation": [0, 0, 0],
+              "Position": [-8.6623955, -6.748829, -11.51736],
+              "Size": [2.0252748, 0.5346771, 1.4296128]
+            },
+            "children": [
+              {
+                "class": "SurfaceAppearance",
+                "name": "BenchA_shader",
+                "properties": {
+                  "AmbientOcclusionChannel": "Red",
+                  "AmbientOcclusionMap": "",
+                  "AmbientOcclusionStrength": 1,
+                  "Color": [1, 1, 1],
+                  "ColorMap": "",
+                  "EmissiveMap": "",
+                  "EmissiveStrength": 1,
+                  "InvertOpacity": false,
+                  "InvertRoughness": false,
+                  "MaterialName": "BenchA_shader",
+                  "MetalnessChannel": "Red",
+                  "MetalnessMap": "",
+                  "NormalMap": "",
+                  "NormalMapDirectX": false,
+                  "NormalStrength": 1,
+                  "OpacityChannel": "Alpha",
+                  "OpacityMap": "",
+                  "RoughnessChannel": "Red",
+                  "RoughnessMap": "",
+                  "SpecularMap": ""
+                }
+              }
+            ]
+          },
+          {
+            "class": "MeshPart",
+            "name": "Grate",
+            "properties": {
+              "Anchored": false,
+              "MeshId": "assets/models/CityPropsCollection2.fbx#Grate",
+              "Orientation": [0, 0, 0],
+              "Position": [-5.860998, -7.0321393, -7.506342],
+              "Size": [2.0246, 0.026556496, 2.7261243]
+            },
+            "children": [
+              {
+                "class": "SurfaceAppearance",
+                "name": "Grate_shader",
+                "properties": {
+                  "AmbientOcclusionChannel": "Red",
+                  "AmbientOcclusionMap": "",
+                  "AmbientOcclusionStrength": 1,
+                  "Color": [1, 1, 1],
+                  "ColorMap": "",
+                  "EmissiveMap": "",
+                  "EmissiveStrength": 1,
+                  "InvertOpacity": false,
+                  "InvertRoughness": false,
+                  "MaterialName": "Grate_shader",
+                  "MetalnessChannel": "Red",
+                  "MetalnessMap": "",
+                  "NormalMap": "",
+                  "NormalMapDirectX": false,
+                  "NormalStrength": 1,
+                  "OpacityChannel": "Alpha",
+                  "OpacityMap": "",
+                  "RoughnessChannel": "Red",
+                  "RoughnessMap": "",
+                  "SpecularMap": ""
+                }
+              }
+            ]
+          },
+          {
+            "class": "MeshPart",
+            "name": "pallet1",
+            "properties": {
+              "Anchored": false,
+              "MeshId": "assets/models/CityPropsCollection2.fbx#pallet1",
+              "Orientation": [0, 0, 0],
+              "Position": [-5.9733696, -6.982873, -11.95554],
+              "Size": [1.8994474, 0.13593794, 1.7893074]
+            },
+            "children": [
+              {
+                "class": "SurfaceAppearance",
+                "name": "Pallet_shader",
+                "properties": {
+                  "AmbientOcclusionChannel": "Red",
+                  "AmbientOcclusionMap": "",
+                  "AmbientOcclusionStrength": 1,
+                  "Color": [1, 1, 1],
+                  "ColorMap": "",
+                  "EmissiveMap": "",
+                  "EmissiveStrength": 1,
+                  "InvertOpacity": false,
+                  "InvertRoughness": false,
+                  "MaterialName": "Pallet_shader",
+                  "MetalnessChannel": "Red",
+                  "MetalnessMap": "",
+                  "NormalMap": "",
+                  "NormalMapDirectX": false,
+                  "NormalStrength": 1,
+                  "OpacityChannel": "Alpha",
+                  "OpacityMap": "",
+                  "RoughnessChannel": "Red",
+                  "RoughnessMap": "",
+                  "SpecularMap": ""
+                }
+              }
+            ]
+          },
+          {
+            "class": "MeshPart",
+            "name": "pallet2",
+            "properties": {
+              "Anchored": false,
+              "MeshId": "assets/models/CityPropsCollection2.fbx#pallet2",
+              "Orientation": [0, 0, 0],
+              "Position": [-4.190853, -6.970555, -11.370592],
+              "Size": [1.7669861, 0.13593796, 1.89048]
+            },
+            "children": [
+              {
+                "class": "SurfaceAppearance",
+                "name": "Pallet_shader2",
+                "properties": {
+                  "AmbientOcclusionChannel": "Red",
+                  "AmbientOcclusionMap": "",
+                  "AmbientOcclusionStrength": 1,
+                  "Color": [1, 1, 1],
+                  "ColorMap": "",
+                  "EmissiveMap": "",
+                  "EmissiveStrength": 1,
+                  "InvertOpacity": false,
+                  "InvertRoughness": false,
+                  "MaterialName": "Pallet_shader2",
+                  "MetalnessChannel": "Red",
+                  "MetalnessMap": "",
+                  "NormalMap": "",
+                  "NormalMapDirectX": false,
+                  "NormalStrength": 1,
+                  "OpacityChannel": "Alpha",
+                  "OpacityMap": "",
+                  "RoughnessChannel": "Red",
+                  "RoughnessMap": "",
+                  "SpecularMap": ""
+                }
+              }
+            ]
+          },
+          {
+            "class": "MeshPart",
+            "name": "BusStop",
+            "properties": {
+              "Anchored": false,
+              "MeshId": "assets/models/CityPropsCollection2.fbx#BusStop",
+              "Orientation": [0, 0, 0],
+              "Position": [-4.0991907, -5.4095173, -13.383871],
+              "Size": [6.261084, 3.255657, 3.9542725]
+            },
+            "children": [
+              {
+                "class": "SurfaceAppearance",
+                "name": "Structure_shader",
+                "properties": {
+                  "AmbientOcclusionChannel": "Red",
+                  "AmbientOcclusionMap": "",
+                  "AmbientOcclusionStrength": 1,
+                  "Color": [1, 1, 1],
+                  "ColorMap": "",
+                  "EmissiveMap": "",
+                  "EmissiveStrength": 1,
+                  "InvertOpacity": false,
+                  "InvertRoughness": false,
+                  "MaterialName": "Structure_shader",
+                  "MetalnessChannel": "Red",
+                  "MetalnessMap": "",
+                  "NormalMap": "",
+                  "NormalMapDirectX": false,
+                  "NormalStrength": 1,
+                  "OpacityChannel": "Alpha",
+                  "OpacityMap": "",
+                  "RoughnessChannel": "Red",
+                  "RoughnessMap": "",
+                  "SpecularMap": ""
+                }
+              },
+              {
+                "class": "SurfaceAppearance",
+                "name": "Sign_shader",
+                "properties": {
+                  "AmbientOcclusionChannel": "Red",
+                  "AmbientOcclusionMap": "",
+                  "AmbientOcclusionStrength": 1,
+                  "Color": [1, 1, 1],
+                  "ColorMap": "",
+                  "EmissiveMap": "",
+                  "EmissiveStrength": 1,
+                  "InvertOpacity": false,
+                  "InvertRoughness": false,
+                  "MaterialName": "Sign_shader",
+                  "MetalnessChannel": "Red",
+                  "MetalnessMap": "",
+                  "NormalMap": "",
+                  "NormalMapDirectX": false,
+                  "NormalStrength": 1,
+                  "OpacityChannel": "Alpha",
+                  "OpacityMap": "",
+                  "RoughnessChannel": "Red",
+                  "RoughnessMap": "",
+                  "SpecularMap": ""
+                }
+              }
+            ]
+          },
+          {
+            "class": "MeshPart",
+            "name": "PostBox",
+            "properties": {
+              "Anchored": false,
+              "MeshId": "assets/models/CityPropsCollection2.fbx#PostBox",
+              "Orientation": [0, 0, 0],
+              "Position": [0.70799327, -6.4232645, -6.265682],
+              "Size": [0.73384523, 1.1915914, 0.7338457]
+            },
+            "children": [
+              {
+                "class": "SurfaceAppearance",
+                "name": "PostBox_shader",
+                "properties": {
+                  "AmbientOcclusionChannel": "Red",
+                  "AmbientOcclusionMap": "",
+                  "AmbientOcclusionStrength": 1,
+                  "Color": [1, 1, 1],
+                  "ColorMap": "",
+                  "EmissiveMap": "",
+                  "EmissiveStrength": 1,
+                  "InvertOpacity": false,
+                  "InvertRoughness": false,
+                  "MaterialName": "PostBox_shader",
+                  "MetalnessChannel": "Red",
+                  "MetalnessMap": "",
+                  "NormalMap": "",
+                  "NormalMapDirectX": false,
+                  "NormalStrength": 1,
+                  "OpacityChannel": "Alpha",
+                  "OpacityMap": "",
+                  "RoughnessChannel": "Red",
+                  "RoughnessMap": "",
+                  "SpecularMap": ""
+                }
+              }
+            ]
+          },
+          {
+            "class": "MeshPart",
+            "name": "Tarp",
+            "properties": {
+              "Anchored": false,
+              "MeshId": "assets/models/CityPropsCollection2.fbx#Tarp",
+              "Orientation": [0, 0, 0],
+              "Position": [-1.7233489, -6.5225396, -4.8574047],
+              "Size": [2.7559612, 1.0248946, 2.6901836]
+            },
+            "children": [
+              {
+                "class": "SurfaceAppearance",
+                "name": "Tarp_shader",
+                "properties": {
+                  "AmbientOcclusionChannel": "Red",
+                  "AmbientOcclusionMap": "",
+                  "AmbientOcclusionStrength": 1,
+                  "Color": [1, 1, 1],
+                  "ColorMap": "",
+                  "EmissiveMap": "",
+                  "EmissiveStrength": 1,
+                  "InvertOpacity": false,
+                  "InvertRoughness": false,
+                  "MaterialName": "Tarp_shader",
+                  "MetalnessChannel": "Red",
+                  "MetalnessMap": "",
+                  "NormalMap": "",
+                  "NormalMapDirectX": false,
+                  "NormalStrength": 1,
+                  "OpacityChannel": "Alpha",
+                  "OpacityMap": "",
+                  "RoughnessChannel": "Red",
+                  "RoughnessMap": "",
+                  "SpecularMap": ""
+                }
+              }
+            ]
+          },
+          {
+            "class": "MeshPart",
+            "name": "TarpCrate4",
+            "properties": {
+              "Anchored": false,
+              "MeshId": "assets/models/CityPropsCollection2.fbx#Tarp/TarpCrate4",
+              "Orientation": [0, 0, 0],
+              "Position": [-2.2129743, -6.690553, -4.966876],
+              "Size": [1.034827, 0.76533616, 1.0520754]
+            },
+            "children": [
+              {
+                "class": "SurfaceAppearance",
+                "name": "Crate4_shader",
+                "properties": {
+                  "AmbientOcclusionChannel": "Red",
+                  "AmbientOcclusionMap": "",
+                  "AmbientOcclusionStrength": 1,
+                  "Color": [1, 1, 1],
+                  "ColorMap": "",
+                  "EmissiveMap": "",
+                  "EmissiveStrength": 1,
+                  "InvertOpacity": false,
+                  "InvertRoughness": false,
+                  "MaterialName": "Crate4_shader",
+                  "MetalnessChannel": "Red",
+                  "MetalnessMap": "",
+                  "NormalMap": "",
+                  "NormalMapDirectX": false,
+                  "NormalStrength": 1,
+                  "OpacityChannel": "Alpha",
+                  "OpacityMap": "",
+                  "RoughnessChannel": "Red",
+                  "RoughnessMap": "",
+                  "SpecularMap": ""
+                }
+              }
+            ]
+          },
+          {
+            "class": "MeshPart",
+            "name": "TarpCrate2",
+            "properties": {
+              "Anchored": false,
+              "MeshId": "assets/models/CityPropsCollection2.fbx#Tarp/TarpCrate2",
+              "Orientation": [0, 0, 0],
+              "Position": [-1.1379664, -6.672571, -4.719963],
+              "Size": [0.98757696, 0.7780133, 0.97491837]
+            },
+            "children": [
+              {
+                "class": "SurfaceAppearance",
+                "name": "Crate2_shader",
+                "properties": {
+                  "AmbientOcclusionChannel": "Red",
+                  "AmbientOcclusionMap": "",
+                  "AmbientOcclusionStrength": 1,
+                  "Color": [1, 1, 1],
+                  "ColorMap": "",
+                  "EmissiveMap": "",
+                  "EmissiveStrength": 1,
+                  "InvertOpacity": false,
+                  "InvertRoughness": false,
+                  "MaterialName": "Crate2_shader",
+                  "MetalnessChannel": "Red",
+                  "MetalnessMap": "",
+                  "NormalMap": "",
+                  "NormalMapDirectX": false,
+                  "NormalStrength": 1,
+                  "OpacityChannel": "Alpha",
+                  "OpacityMap": "",
+                  "RoughnessChannel": "Red",
+                  "RoughnessMap": "",
+                  "SpecularMap": ""
+                }
+              }
+            ]
+          },
+          {
+            "class": "MeshPart",
+            "name": "TarpCrate3",
+            "properties": {
+              "Anchored": false,
+              "MeshId": "assets/models/CityPropsCollection2.fbx#Tarp/TarpCrate3",
+              "Orientation": [0, 0, 0],
+              "Position": [-1.5711119, -6.7502337, -5.373826],
+              "Size": [1.0102277, 0.624578, 1.0365663]
+            },
+            "children": [
+              {
+                "class": "SurfaceAppearance",
+                "name": "Crate3_shader",
+                "properties": {
+                  "AmbientOcclusionChannel": "Red",
+                  "AmbientOcclusionMap": "",
+                  "AmbientOcclusionStrength": 1,
+                  "Color": [1, 1, 1],
+                  "ColorMap": "",
+                  "EmissiveMap": "",
+                  "EmissiveStrength": 1,
+                  "InvertOpacity": false,
+                  "InvertRoughness": false,
+                  "MaterialName": "Crate3_shader",
+                  "MetalnessChannel": "Red",
+                  "MetalnessMap": "",
+                  "NormalMap": "",
+                  "NormalMapDirectX": false,
+                  "NormalStrength": 1,
+                  "OpacityChannel": "Alpha",
+                  "OpacityMap": "",
+                  "RoughnessChannel": "Red",
+                  "RoughnessMap": "",
+                  "SpecularMap": ""
+                }
+              }
+            ]
+          },
+          {
+            "class": "MeshPart",
+            "name": "TarpCrate1",
+            "properties": {
+              "Anchored": false,
+              "MeshId": "assets/models/CityPropsCollection2.fbx#Tarp/TarpCrate1",
+              "Orientation": [0, 0, 0],
+              "Position": [-1.7886984, -6.6052775, -4.321458],
+              "Size": [0.9875772, 0.92321926, 0.97491837]
+            },
+            "children": [
+              {
+                "class": "SurfaceAppearance",
+                "name": "Crate1_shader",
+                "properties": {
+                  "AmbientOcclusionChannel": "Red",
+                  "AmbientOcclusionMap": "",
+                  "AmbientOcclusionStrength": 1,
+                  "Color": [1, 1, 1],
+                  "ColorMap": "",
+                  "EmissiveMap": "",
+                  "EmissiveStrength": 1,
+                  "InvertOpacity": false,
+                  "InvertRoughness": false,
+                  "MaterialName": "Crate1_shader",
+                  "MetalnessChannel": "Red",
+                  "MetalnessMap": "",
+                  "NormalMap": "",
+                  "NormalMapDirectX": false,
+                  "NormalStrength": 1,
+                  "OpacityChannel": "Alpha",
+                  "OpacityMap": "",
+                  "RoughnessChannel": "Red",
+                  "RoughnessMap": "",
+                  "SpecularMap": ""
+                }
+              }
+            ]
+          },
+          {
+            "class": "MeshPart",
+            "name": "Utility",
+            "properties": {
+              "Anchored": false,
+              "MeshId": "assets/models/CityPropsCollection2.fbx#Utility",
+              "Orientation": [0, 0, 0],
+              "Position": [-6.4679985, -5.976737, -17.83471],
+              "Size": [2.2997613, 2.1189113, 1.3059571]
+            },
+            "children": [
+              {
+                "class": "SurfaceAppearance",
+                "name": "Utility_shader",
+                "properties": {
+                  "AmbientOcclusionChannel": "Red",
+                  "AmbientOcclusionMap": "",
+                  "AmbientOcclusionStrength": 1,
+                  "Color": [1, 1, 1],
+                  "ColorMap": "",
+                  "EmissiveMap": "",
+                  "EmissiveStrength": 1,
+                  "InvertOpacity": false,
+                  "InvertRoughness": false,
+                  "MaterialName": "Utility_shader",
+                  "MetalnessChannel": "Red",
+                  "MetalnessMap": "",
+                  "NormalMap": "",
+                  "NormalMapDirectX": false,
+                  "NormalStrength": 1,
+                  "OpacityChannel": "Alpha",
+                  "OpacityMap": "",
+                  "RoughnessChannel": "Red",
+                  "RoughnessMap": "",
+                  "SpecularMap": ""
+                }
+              }
+            ]
+          }
+        ]
       }
     ]
   }
