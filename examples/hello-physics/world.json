@@ -1,0 +1,109 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Anchored": true,
+          "Position": [0, -0.5, 0],
+          "Size": [40, 1, 40],
+          "Color": [0.35, 0.37, 0.4]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Tower1",
+        "properties": {
+          "Position": [-5, 1, 0],
+          "Size": [2, 2, 2],
+          "Color": [0.95, 0.6, 0.2]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Tower2",
+        "properties": {
+          "Position": [-5, 3.05, 0],
+          "Size": [2, 2, 2],
+          "Color": [0.95, 0.7, 0.3]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Tower3",
+        "properties": {
+          "Position": [-5, 5.1, 0],
+          "Size": [2, 2, 2],
+          "Color": [0.95, 0.8, 0.4]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Dropper",
+        "properties": {
+          "Anchored": true,
+          "Position": [-4.4, 14, 0.4],
+          "Size": [2, 2, 2],
+          "Color": [0.85, 0.2, 0.2]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Ramp",
+        "properties": {
+          "Anchored": true,
+          "Shape": "Wedge",
+          "Position": [5, 2, 0],
+          "Size": [4, 4, 8],
+          "Color": [0.3, 0.55, 0.9]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Wall",
+        "properties": {
+          "Anchored": true,
+          "Position": [5, 1, -6.6],
+          "Size": [8, 2, 1],
+          "Color": [0.3, 0.55, 0.9]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "RampBall",
+        "properties": {
+          "Shape": "Ball",
+          "Material": "Metal",
+          "Position": [5, 10, 1],
+          "Size": [2, 2, 2],
+          "Color": [0.9, 0.9, 0.95]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "BouncyBall",
+        "properties": {
+          "Shape": "Ball",
+          "Material": "Neon",
+          "Position": [0, 12, 6],
+          "Size": [2, 2, 2],
+          "Color": [0.2, 0.9, 0.5]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "GlassCylinder",
+        "properties": {
+          "Shape": "Cylinder",
+          "Material": "Glass",
+          "Position": [-1, 5, -5],
+          "Orientation": [0, 0, 90],
+          "Size": [3, 2, 2],
+          "Color": [0.6, 0.85, 1]
+        }
+      }
+    ]
+  }
+}

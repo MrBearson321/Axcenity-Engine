@@ -13,6 +13,7 @@ authors = ["Paul Janota and contributors"]
 [workspace.dependencies]
 # Engine crates. In code they're named with underscores, for example `axcenity_core`.
 axcenity-core = { path = "crates/core" }
+axcenity-physics = { path = "crates/physics" }
 axcenity-project = { path = "crates/project" }
 axcenity-render = { path = "crates/render" }
 axcenity-script = { path = "crates/script" }
@@ -26,6 +27,8 @@ log = "0.4"
 # Lua 5.4, compiled from source (`vendored`) so no system Lua is needed on any OS.
 mlua = { version = "0.12", features = ["lua54", "vendored"] }
 pollster = "0.4"
+# Physics. Its math types come from `glamx` (glam-based), re-exported as `rapier3d::math`.
+rapier3d = "0.36"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

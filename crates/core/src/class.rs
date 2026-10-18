@@ -65,6 +65,8 @@ impl ClassName {
                 let material = Material::Plastic;
                 let preset = material.preset();
                 vec![
+                    // Anchored parts stay put; unanchored ones fall and collide.
+                    ("Anchored", Value::Bool(false)),
                     ("Shape", Value::PartType(PartType::Block)),
                     ("Position", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
                     // Rotation in degrees around X, Y and Z, applied Z first, then X, then Y.

@@ -14,7 +14,7 @@ Read before working in the `script` or `blocks` crates, or adding anything to th
 - Clean up Roblox quirks when it helps beginners. Don't chase full compatibility.
 - Never use Roblox's name, logos or assets.
 
-## API so far (Phase 5)
+## API so far (Phase 6)
 
 - Globals: `game`, `workspace`, `script` (the running Script), `print`, `Instance.new(className)`, `Vector3.new(x, y, z)`, `Color3.new(r, g, b)`, `Color3.fromRGB(r, g, b)`, `Enum` and `task` (see Execution model).
 - Instances: `Name`, `ClassName` (read-only), `Parent` (an Instance or `nil`), every property in `core`'s class table, and `:FindFirstChild(name, recursive?)`.
@@ -23,6 +23,7 @@ Read before working in the `script` or `blocks` crates, or adding anything to th
 - `Vector3`: `.X .Y .Z .Magnitude .Unit`, `+ -`, `*` and `/` by a number or another Vector3, unary `-`, `==`. Prints as `1, 2, 3`.
 - `Color3`: `.R .G .B`, `==`. `Color3.new` rejects channels outside 0 to 1 with a hint to use `fromRGB`, matching the world file's check (Roblox allows them silently).
 - Numbers are Lua 5.4 numbers, so `print(part.Position.Y)` shows `5.0`.
+- `Part.Anchored` (default `false`): unanchored parts fall under physics. Setting `Position` or `Orientation` on one teleports it and stops it; physics writes both back as the part moves. See Physics in `docs/architecture.md`.
 
 ## Errors
 

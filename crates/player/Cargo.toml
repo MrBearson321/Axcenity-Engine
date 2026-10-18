@@ -8,6 +8,7 @@ authors.workspace = true
 
 [dependencies]
 axcenity-core.workspace = true
+axcenity-physics.workspace = true
 axcenity-project.workspace = true
 axcenity-render.workspace = true
 axcenity-script.workspace = true

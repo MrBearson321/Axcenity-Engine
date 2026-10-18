@@ -562,6 +562,7 @@ mod tests {
                 format!("{indent}  \"class\": \"Part\","),
                 format!("{indent}  \"name\": {name},"),
                 format!("{indent}  \"properties\": {{"),
+                format!("{indent}    \"Anchored\": false,"),
                 format!("{indent}    \"Color\": [0.64, 0.64, 0.64],"),
                 format!("{indent}    \"Material\": \"{material}\","),
                 format!("{indent}    \"Metalness\": 0,"),

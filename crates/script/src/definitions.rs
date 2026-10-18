@@ -246,13 +246,18 @@ const ENUM_GLOBAL_DOC: &str = "Every enum, such as `Enum.Material` and `Enum.Par
 const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     (
         ClassName::Part,
+        "Anchored",
+        "If true, the part stays where it is. If false, it falls and collides with other parts.",
+    ),
+    (
+        ClassName::Part,
         "Shape",
         "Block, Ball, Cylinder (along X) or Wedge.",
     ),
     (
         ClassName::Part,
         "Position",
-        "Where the part's center is, in studs.",
+        "Where the part's center is, in studs. Setting it on an unanchored part teleports it and stops it moving.",
     ),
     (
         ClassName::Part,

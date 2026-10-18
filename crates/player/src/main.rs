@@ -1,8 +1,8 @@
 //! Axcenity Player: the runtime that ships with every exported game.
 //!
-//! Phase 5: loads a project folder, starts its server scripts, and runs the
-//! frame loop: resume scripts whose `task.wait` is over, then draw the
-//! Workspace, with a fly camera for looking around.
+//! Phase 6: loads a project folder, starts its server scripts, and runs the
+//! frame loop: resume scripts whose `task.wait` is over, step physics, then
+//! draw the Workspace, with a fly camera for looking around.
 
 mod camera;
 mod scene;
@@ -13,6 +13,7 @@ use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
 use axcenity_core::World;
+use axcenity_physics::Physics;
 use axcenity_project::ScriptFile;
 use axcenity_render::Renderer;
 use axcenity_render::glam::Vec3;
@@ -62,6 +63,7 @@ fn main() -> Result<()> {
         title: format!("{} - Axcenity Player", project.manifest.name),
         world,
         scripts,
+        physics: Physics::new(),
         window: None,
         renderer: None,
         error: None,
@@ -107,6 +109,8 @@ struct App {
     world: World,
     /// Runs the scripts, and keeps the ones paused by `task.wait`.
     scripts: ScriptRuntime,
+    /// Simulates the unanchored parts.
+    physics: Physics,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     error: Option<anyhow::Error>,
@@ -223,7 +227,11 @@ impl ApplicationHandler for App {
                 self.scripts.step(&mut self.world, f64::from(seconds));
                 print_output(&mut self.scripts);
 
-                // 3 to 5 (physics, Touched events, UI layout) come in later phases.
+                // 3. Step physics at a fixed 60 Hz (0 to N steps this frame),
+                //    after scripts so it sees what they changed this frame.
+                self.physics.step(&mut self.world, f64::from(seconds));
+
+                // 4 and 5 (Touched events, UI layout) come in later phases.
 
                 // 6. Build the draw list and render.
                 let draw_list = scene::build_draw_list(&self.world, self.camera.to_render_camera());
@@ -287,6 +295,125 @@ mod tests {
         let camera = FlyCamera::looking_at(START_CAMERA_POSITION, Vec3::ZERO).to_render_camera();
         let draw_list = scene::build_draw_list(&world, camera);
         assert_eq!(draw_list.items.len(), parts_before + 5);
+    }
+
+    /// The example project in `examples/<name>`, with its scripts started.
+    fn start_example(name: &str) -> (World, ScriptRuntime) {
+        let folder = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples")
+            .join(name);
+        let project = axcenity_project::load(&folder).unwrap();
+        let mut world = project.world;
+        let mut scripts = ScriptRuntime::new();
+        start_scripts(&mut scripts, &mut world, &project.scripts);
+        (world, scripts)
+    }
+
+    /// Runs frames at 60 fps until the game clock reaches `until` seconds,
+    /// with scripts and then physics each frame, as the frame loop does.
+    fn run_until(
+        world: &mut World,
+        scripts: &mut ScriptRuntime,
+        physics: &mut Physics,
+        clock: &mut u32,
+        until: f64,
+    ) {
+        while f64::from(*clock) / 60.0 < until {
+            scripts.step(world, 1.0 / 60.0);
+            physics.step(world, 1.0 / 60.0);
+            *clock += 1;
+        }
+    }
+
+    fn position_of(world: &World, name: &str) -> Vector3 {
+        let id = world.find_first_child(world.workspace(), name).unwrap();
+        world
+            .get(id)
+            .unwrap()
+            .property("Position")
+            .and_then(Value::as_vector3)
+            .unwrap()
+    }
+
+    #[test]
+    fn hello_physics_parts_fall_collide_and_come_to_rest_on_the_floor() {
+        let (mut world, mut scripts) = start_example("hello-physics");
+        let mut physics = Physics::new();
+        let mut clock = 0;
+        let moving = [
+            "Tower1",
+            "Tower2",
+            "Tower3",
+            "Dropper",
+            "RampBall",
+            "GlassCylinder",
+        ];
+        let start: Vec<Vector3> = moving.iter().map(|n| position_of(&world, n)).collect();
+
+        run_until(&mut world, &mut scripts, &mut physics, &mut clock, 9.0);
+        let settled: Vec<Vector3> = moving.iter().map(|n| position_of(&world, n)).collect();
+        run_until(&mut world, &mut scripts, &mut physics, &mut clock, 9.9);
+
+        for (i, name) in moving.iter().enumerate() {
+            let now = position_of(&world, name);
+            // On the floor or on another part, not fallen through it.
+            assert!(now.y > 0.4 && now.y < 8.0, "{name} is at {now:?}");
+            let still = (now.x - settled[i].x).abs() < 0.01
+                && (now.y - settled[i].y).abs() < 0.01
+                && (now.z - settled[i].z).abs() < 0.01;
+            assert!(still, "{name} still moving: {:?} -> {now:?}", settled[i]);
+        }
+        // Everything except the bottom of the tower (already on the floor) fell,
+        // if only by the small gaps between the tower blocks.
+        for (i, name) in moving.iter().enumerate().skip(1) {
+            assert!(settled[i].y < start[i].y - 0.02, "{name} didn't fall");
+        }
+        // The ball rolled down the ramp, away from where it landed.
+        assert!(
+            position_of(&world, "RampBall").z < -4.0,
+            "{:?}",
+            position_of(&world, "RampBall")
+        );
+        assert_eq!(position_of(&world, "Floor"), Vector3::new(0.0, -0.5, 0.0));
+    }
+
+    #[test]
+    fn hello_physics_script_freezes_and_releases_the_dropper() {
+        let (mut world, mut scripts) = start_example("hello-physics");
+        let mut physics = Physics::new();
+        let mut clock = 0;
+        let mut at = |until| {
+            run_until(&mut world, &mut scripts, &mut physics, &mut clock, until);
+            position_of(&world, "Dropper").y
+        };
+
+        assert_eq!(at(1.9), 14.0, "anchored at the start");
+        let frozen = at(2.5);
+        assert!(
+            frozen < 13.0 && frozen > 8.0,
+            "released, then frozen: {frozen}"
+        );
+        assert_eq!(at(3.5), frozen, "frozen in mid-air");
+        assert!(at(5.0) < 8.0, "released again, it fell onto the tower");
+    }
+
+    #[test]
+    fn hello_physics_script_teleports_the_bouncy_ball_back_to_its_start() {
+        let (mut world, mut scripts) = start_example("hello-physics");
+        let mut physics = Physics::new();
+        let mut clock = 0;
+        run_until(&mut world, &mut scripts, &mut physics, &mut clock, 4.9);
+        assert!(position_of(&world, "BouncyBall").y < 2.0, "it fell");
+        // The script runs at 5 s; one physics step of falling from rest follows.
+        run_until(
+            &mut world,
+            &mut scripts,
+            &mut physics,
+            &mut clock,
+            5.0 + 1.5 / 60.0,
+        );
+        let y = position_of(&world, "BouncyBall").y;
+        assert!(y > 11.5 && y < 12.0, "{y}");
     }
 
     #[test]

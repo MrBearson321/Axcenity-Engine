@@ -135,10 +135,10 @@ Create the `physics` crate. Parts have an `Anchored` property: anchored parts ar
 
 ### Acceptance criteria
 
-- [ ] In the example scene, unanchored parts fall, collide and come to rest on an anchored floor.
-- [ ] Physics behaves the same at 30 fps and 144 fps (the fixed step is verified by a test).
-- [ ] Toggling `Anchored` from a script freezes or releases a part.
-- [ ] A part deleted from the tree is removed from the physics world.
+- [x] In the example scene, unanchored parts fall, collide and come to rest on an anchored floor.
+- [x] Physics behaves the same at 30 fps and 144 fps (the fixed step is verified by a test).
+- [x] Toggling `Anchored` from a script freezes or releases a part.
+- [x] A part deleted from the tree is removed from the physics world.
 
 ---
 

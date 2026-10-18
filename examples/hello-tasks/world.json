@@ -6,6 +6,7 @@
         "class": "Part",
         "name": "Floor",
         "properties": {
+          "Anchored": true,
           "Position": [0, -0.5, 0],
           "Size": [40, 1, 40],
           "Color": [0.35, 0.37, 0.4]
@@ -15,6 +16,7 @@
         "class": "Part",
         "name": "Lamp",
         "properties": {
+          "Anchored": true,
           "Shape": "Ball",
           "Material": "Neon",
           "Position": [-5, 2, 0],
@@ -26,6 +28,7 @@
         "class": "Part",
         "name": "Spinner",
         "properties": {
+          "Anchored": true,
           "Position": [3, 1.5, 0],
           "Size": [6, 1, 1],
           "Color": [0.95, 0.75, 0.2]

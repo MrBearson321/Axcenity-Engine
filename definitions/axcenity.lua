@@ -84,8 +84,9 @@ function InstanceClass:FindFirstChild(name, recursive) end
 
 ---A solid shape in the world.
 ---@class Part: Instance
+---@field Anchored boolean If true, the part stays where it is. If false, it falls and collides with other parts.
 ---@field Shape EnumItem.PartType|"Block"|"Ball"|"Cylinder"|"Wedge" Block, Ball, Cylinder (along X) or Wedge.
----@field Position Vector3 Where the part's center is, in studs.
+---@field Position Vector3 Where the part's center is, in studs. Setting it on an unanchored part teleports it and stops it moving.
 ---@field Orientation Vector3 Rotation in degrees around X, Y and Z, applied Z first, then X, then Y.
 ---@field Size Vector3 The part's size in studs along X, Y and Z.
 ---@field Color Color3 The part's color.

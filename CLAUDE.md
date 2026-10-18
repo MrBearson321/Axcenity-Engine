@@ -2,7 +2,7 @@
 
 A Roblox Studio-inspired 3D game engine and editor in Rust, scripted with Lua 5.4 and Scratch-style blocks. Targets Windows, macOS and Linux. Licensed Apache-2.0.
 
-**Status:** Phase 5 (task scheduler). Crates so far: `core`, `project`, `render`, `script`, `player`.
+**Status:** Phase 6 (physics). Crates so far: `core`, `project`, `render`, `physics`, `script`, `player`.
 
 ## Read only what the task needs
 
@@ -11,6 +11,7 @@ A Roblox Studio-inspired 3D game engine and editor in Rust, scripted with Lua 5.
 | crate layout, dependencies, frame loop, Instance tree, Play mode | `docs/architecture.md` |
 | `script` or `blocks` crates, Lua API, sandbox, scheduler | `docs/scripting.md` |
 | `render` crate, materials, lights | `docs/rendering.md` |
+| `physics` crate, Anchored, gravity, fixed step | `docs/architecture.md` (Physics) |
 | `ui` crate, CSS, layout | `docs/ui.md` |
 | `project` or `player` crates, export, CI, licenses | `docs/project-and-export.md` |
 | product scope, user stories, milestones, out of scope | `prd/axcenity-engine-v1.md` (large; grep for the section you need) |
