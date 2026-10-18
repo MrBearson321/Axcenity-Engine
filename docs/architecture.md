@@ -2,7 +2,7 @@
 
 Read before creating a crate, adding a dependency between crates, or touching the frame loop.
 
-## Crate map (Cargo workspace)
+## Implemented crates
 
 | Crate | Owns | May depend on |
 |---|---|---|
@@ -11,15 +11,14 @@ Read before creating a crate, adding a dependency between crates, or touching th
 | `scene` | Instance tree → draw list (`build_draw_list`), the shared `FlyCamera`, viewport picking (`pick`) | `core`, `render` |
 | `physics` | `rapier3d` integration | `core` |
 | `script` | Lua 5.4 (`mlua`), sandbox, scheduler, engine API | `core` |
-| `blocks` | block-script model and translation to Lua | `core` (not `script`) |
-| `ui` | game UI: CSS subset, `taffy` layout, UI draw data | `core` |
-| `audio` | `kira` integration | `core` |
-| `project` | project folder load and save, export packing | `core` |
-| `player` | the runtime shipped with games (binary) | `core`, `render`, `scene`, `physics`, `script`, `ui`, `audio`, `project` |
-| `editor` | `egui` editor app (binary) | everything |
+| `project` | project folder load and save | `core` |
+| `player` | runtime shipped with games (binary) | `core`, `render`, `scene`, `physics`, `script`, `project` |
+| `editor` | `egui` editor app (binary) | `core`, `physics`, `project`, `render`, `scene`, `script` |
+
+`blocks`, `ui` and `audio` are planned crates, not current workspace members. The planned export flow translates blocks to Lua, then packages projects for the player.
 
 Rules:
-- `player` must **never** depend on `editor`, `egui` or `blocks`. The editor runs the export pipeline: `blocks` translates block scripts to Lua, then `project` packs the result.
+- `player` must **never** depend on `editor`, `egui` or `blocks`.
 - `render` never sees Instances, scripts or the editor. Something outside it turns the world into a draw list (meshes, materials, transforms, lights, camera).
 - Don't let crates depend on each other in a cycle. If two crates need each other, move the shared type into `core`.
 - Pin dependency versions in the workspace's root `Cargo.toml` (`[workspace.dependencies]`).

@@ -30,17 +30,17 @@ Transparency: opaque items are drawn first. Then see-through items are drawn, fa
 
 ## Geometry
 
-Built-in primitives (block, sphere, cylinder, wedge) plus imported **glTF** meshes. Part shape rules match Roblox: a Ball's diameter is the smallest of its `Size` axes, a Cylinder lies along X (`Size.X` is its length, its diameter is the smaller of Y and Z), and a Wedge's slope rises from the bottom front (-Z) edge to the top back (+Z) edge. `Orientation` is degrees, applied around Z, then X, then Y.
+Built-in primitives are block, sphere, cylinder and wedge. glTF/GLB mesh import is planned for Phase 17; it is not implemented yet. Part shape rules match Roblox: a Ball's diameter is the smallest of its `Size` axes, a Cylinder lies along X (`Size.X` is its length, its diameter is the smaller of Y and Z), and a Wedge's slope rises from the bottom front (-Z) edge to the top back (+Z) edge. `Orientation` is degrees, applied around Z, then X, then Y.
 
-## Stages (build in order; editor and scripting work starts after stage 1)
+## Stages
 
-1. PBR shading with a sun and ambient light ← current target
-2. Sun shadows (shadow maps)
+1. PBR shading with a sun and ambient light (implemented)
+2. Sun shadows (shadow maps; next)
 3. Many point and spot lights
 4. Sky and environment lighting (image-based lighting)
 5. Post-processing: HDR, tone mapping, bloom
 
-Each stage must leave existing scenes rendering correctly. Update "current target" above when a stage is done.
+Each stage must leave existing scenes rendering correctly.
 
 ## Platform
 

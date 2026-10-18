@@ -1,11 +1,5 @@
-# scene
+# `scene`
 
-The bridge between Instances and the renderer, shared by `player` and `editor`. Depends only on `core` and `render`; no winit or egui here.
-
-- `draw_list.rs`: `build_draw_list(world, camera)` turns Workspace Parts into a `render::DrawList`. This is the only code that sees both Instances and render types. It applies the Part shape rules (balls and cylinders stay round) and the material looks (glass opacity, neon glow). Lighting is fixed constants until the Lighting service exists.
-- `camera.rs`: `FlyCamera` (yaw/pitch plus a focus point `focus_distance` ahead) and `MoveKeys` (plain booleans). `view`/`set_view` give the position and an Orientation in degrees (X pitch, Y yaw) for `workspace.CurrentCamera`. `look`, `update` (fly at `speed`, scaled by frame time), `change_speed`/`set_speed` (×1.2 per step, 1–500 studs/s), and the editor's `orbit`, `pan` and `zoom`. Each app maps its own input events onto these: the player from winit `KeyCode`s, the editor from egui keys.
-- `pick.rs`: `CameraView` (screen point ↔ world ray, `project_line` clips at the camera), `pick(world, ray)` (nearest Part, exact per-shape hit tests in mesh space), `part_box_edges`. Drawing and picking share `draw_list::part_placement`, so clicks hit what's drawn. The view matrix is `glam::camera::rh::view::look_at_mat4`, the same as `render` (glam 0.34 has no `Mat4::look_at_rh`).
-- `CameraView::project_point` and `studs_per_half_screen` let the editor draw handles that stay the same size on screen.
-- `pick_hit(world, ray, skip)` returns a `Hit` with distance and world surface normal (each `Span` carries the normal of the side it enters through; normals go to the world by the inverse-transpose). `part_half_extent` is how far a part's drawn box reaches along a direction. The editor's drag-to-place uses both.
-- `orientation.rs`: `rotation_from_orientation` / `orientation_from_rotation` (degrees, `EulerRot::YXZ` with (y, x, z) argument order, the same as `physics`). The way back rounds to 3 decimals and turns -0 into 0, so the rotate tool stores tidy numbers.
-- Zoom never goes closer than `MIN_FOCUS_DISTANCE` to the focus point, so it can't flip past it.
+- Shared bridge from `core::World` to `render::DrawList`, plus camera and picking; see `docs/architecture.md` and `docs/rendering.md`.
+- Keep picking consistent with rendered placement, and preserve the shared orientation convention (degrees, YXZ).
+- Depend only on `core` and `render`; input/window handling belongs to `player` or `editor`.

@@ -1,48 +1,35 @@
 # Axcenity Engine
 
-A Roblox Studio-inspired 3D game engine and editor in Rust, scripted with Lua 5.4 and Scratch-style blocks. Targets Windows, macOS and Linux. Licensed Apache-2.0.
+Rust 3D game engine and editor; Lua 5.4 scripting. See [README.md](README.md) for the current project status and getting started.
 
-**Status:** Phase 16 (More events and autocomplete). Crates so far: `core`, `project`, `render`, `scene`, `physics`, `script`, `player`, `editor`.
+## Load only relevant context
 
-## Read only what the task needs
+- Workspace members and dependency pins: [Cargo.toml](Cargo.toml).
+- Crate boundaries, Instance model, frame loop, editor and Play mode: [docs/architecture.md](docs/architecture.md).
+- Lua API, sandbox and scheduler: [docs/scripting.md](docs/scripting.md).
+- Renderer and materials: [docs/rendering.md](docs/rendering.md).
+- Project files, export plans and licensing: [docs/project-and-export.md](docs/project-and-export.md).
+- In-game UI design: [docs/ui.md](docs/ui.md).
+- Product scope and stories: [prd/axcenity-engine-v1.md](prd/axcenity-engine-v1.md).
+- Roadmap and acceptance criteria: [plans/axcenity-engine-v1.md](plans/axcenity-engine-v1.md). Read only the relevant phase.
 
-| Working on… | Read |
-|---|---|
-| crate layout, dependencies, frame loop, Instance tree, Play mode | `docs/architecture.md` |
-| `script` or `blocks` crates, Lua API, sandbox, scheduler | `docs/scripting.md` |
-| `render` crate, materials, lights | `docs/rendering.md` |
-| `physics` crate, Anchored, gravity, fixed step | `docs/architecture.md` (Physics) |
-| `editor` or `scene` crates, panels, viewport camera | `docs/architecture.md` (Editor) |
-| `ui` crate, CSS, layout | `docs/ui.md` |
-| `project` or `player` crates, export, CI, licenses | `docs/project-and-export.md` |
-| product scope, user stories, milestones, out of scope | `prd/axcenity-engine-v1.md` (large; grep for the section you need) |
-| what to build next, acceptance criteria for a phase | `plans/axcenity-engine-v1.md` (grep `## Phase N`; read only the current phase) |
+Open only the source, tests and doc sections needed for the task. For large docs, search headings first; don't load the whole PRD or plan, or copy their details into these instructions. Treat source and tests as authoritative when docs disagree, then update the relevant docs.
 
-When a crate is created, give it its own `crates/<name>/CLAUDE.md` (under 20 lines: purpose, key types, gotchas). Those load automatically only when working in that crate, so keep crate-specific detail there, not here.
+## Invariants
 
-## Hard rules
-
-- `player` never depends on `editor`, `egui` or `blocks`.
-- `render` never sees Instances or scripts. It only receives a draw list.
-- Instances live in an arena with generational IDs. No `Rc<RefCell>` trees.
-- Blocks always translate to Lua. There is one scripting runtime.
-- Lua API: Roblox-familiar names, never Roblox branding.
-- New dependencies: pinned in `[workspace.dependencies]`, Apache-2.0-compatible license.
-- Nothing may assume a single OS.
+- `player` must not depend on `editor`, `egui` or `blocks`.
+- `render` only consumes draw data; it must not depend on Instances or scripts.
+- Instances live in a generational-ID arena; don't make an `Rc<RefCell>` tree.
+- Blocks translate to Lua; there is one scripting runtime. Use Axcenity's Roblox-familiar API names, never Roblox branding.
+- Keep the engine cross-platform. Pin new dependencies in the workspace and check Apache-2.0-compatible licensing.
 
 ## Commands
 
-- Run the player: `cargo run -p axcenity-player -- examples/hello-part`
-- Run the editor: `cargo run -p axcenity-editor -- examples/hello-touched`
+- Player: `cargo run -p axcenity-player -- examples/hello-part`
+- Editor: `cargo run -p axcenity-editor -- examples/hello-touched`
 - Build: `cargo build --workspace`
 - Test: `cargo test --workspace`
 - Lint: `cargo clippy --workspace --all-targets -- -D warnings`
 - Format: `cargo fmt --all`
 
-## Working with the developer
-
-The developer is new to Rust. Prefer simple, idiomatic code over clever code. Briefly explain non-obvious Rust (lifetimes, traits, borrow errors) when introducing it. For design choices, give options with trade-offs and one recommendation.
-
-## Keeping docs lean
-
-Update the relevant `docs/*.md` when a decision changes, and keep this file a short index. Don't copy doc content into it.
+Prefer simple, idiomatic Rust. Briefly explain non-obvious Rust concepts when introducing them. When behavior or a design decision changes, update its canonical doc. Keep crate `CLAUDE.md` files under 10 lines: purpose, doc pointers and only non-obvious local constraints.
