@@ -52,9 +52,16 @@ pub struct DrawItem {
     pub material: Material,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// The built-in meshes. Each one fits the 1×1×1 cube centered on the origin.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Shape {
     Block,
+    Sphere,
+    /// Lies along the X axis, with flat ends at x = ±0.5.
+    Cylinder,
+    /// A ramp: full bottom and back (+Z) faces, and a slope rising from the
+    /// bottom front edge to the top back edge.
+    Wedge,
 }
 
 /// Physically based material fields. Presets such as plastic or metal are
@@ -68,7 +75,8 @@ pub struct Material {
     pub roughness: f32,
     /// Light the surface gives off by itself.
     pub emissive: [f32; 3],
-    /// 1 is solid. Transparency isn't drawn yet; see `docs/rendering.md`.
+    /// 1 is solid, 0 is invisible. Anything below 1 is blended over what's
+    /// behind it.
     pub opacity: f32,
 }
 

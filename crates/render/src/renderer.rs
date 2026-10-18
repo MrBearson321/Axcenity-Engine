@@ -1,12 +1,14 @@
 //! The wgpu side: GPU setup, the window surface, buffers and drawing.
 
+use std::ops::Range;
+
 use anyhow::{Context, Result};
 use bytemuck::{Pod, Zeroable};
 use glam::camera::rh;
 use glam::{Mat3, Vec3};
 use wgpu::util::DeviceExt;
 
-use crate::draw_list::{DrawList, Shape};
+use crate::draw_list::{DrawItem, DrawList, Shape};
 use crate::mesh::{self, MeshData, Vertex};
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -45,6 +47,34 @@ struct GpuMesh {
     index_count: u32,
 }
 
+/// One uploaded mesh per [`Shape`].
+struct Meshes {
+    block: GpuMesh,
+    sphere: GpuMesh,
+    cylinder: GpuMesh,
+    wedge: GpuMesh,
+}
+
+impl Meshes {
+    fn get(&self, shape: Shape) -> &GpuMesh {
+        match shape {
+            Shape::Block => &self.block,
+            Shape::Sphere => &self.sphere,
+            Shape::Cylinder => &self.cylinder,
+            Shape::Wedge => &self.wedge,
+        }
+    }
+}
+
+/// Consecutive instances with the same shape and the same kind of drawing
+/// (solid or see-through), drawn with one draw call.
+#[derive(Clone, Debug, PartialEq)]
+struct Batch {
+    shape: Shape,
+    transparent: bool,
+    instances: Range<u32>,
+}
+
 pub struct Renderer {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -53,10 +83,11 @@ pub struct Renderer {
     /// True while the window is minimized (zero-sized), when there's nothing to draw.
     minimized: bool,
     depth_view: wgpu::TextureView,
-    pipeline: wgpu::RenderPipeline,
+    opaque_pipeline: wgpu::RenderPipeline,
+    transparent_pipeline: wgpu::RenderPipeline,
     frame_buffer: wgpu::Buffer,
     frame_bind_group: wgpu::BindGroup,
-    block: GpuMesh,
+    meshes: Meshes,
     instance_buffer: wgpu::Buffer,
     /// How many instances fit in `instance_buffer` before it must grow.
     instance_capacity: usize,
@@ -138,8 +169,14 @@ impl Renderer {
             }],
         });
 
-        let pipeline = create_pipeline(&device, &frame_layout, config.format);
-        let block = upload_mesh(&device, "block", &mesh::block());
+        let opaque_pipeline = create_pipeline(&device, &frame_layout, config.format, false);
+        let transparent_pipeline = create_pipeline(&device, &frame_layout, config.format, true);
+        let meshes = Meshes {
+            block: upload_mesh(&device, "block", &mesh::block()),
+            sphere: upload_mesh(&device, "sphere", &mesh::sphere()),
+            cylinder: upload_mesh(&device, "cylinder", &mesh::cylinder()),
+            wedge: upload_mesh(&device, "wedge", &mesh::wedge()),
+        };
         let instance_capacity = 64;
         let instance_buffer = create_instance_buffer(&device, instance_capacity);
 
@@ -150,10 +187,11 @@ impl Renderer {
             config,
             minimized: false,
             depth_view,
-            pipeline,
+            opaque_pipeline,
+            transparent_pipeline,
             frame_buffer,
             frame_bind_group,
-            block,
+            meshes,
             instance_buffer,
             instance_capacity,
         })
@@ -198,10 +236,10 @@ impl Renderer {
         self.queue
             .write_buffer(&self.frame_buffer, 0, bytemuck::bytes_of(&frame_uniform));
 
-        let blocks = instances_for(list, Shape::Block);
-        self.ensure_instance_capacity(blocks.len());
+        let (instances, batches) = plan_draws(list);
+        self.ensure_instance_capacity(instances.len());
         self.queue
-            .write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&blocks));
+            .write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&instances));
 
         let view = frame
             .texture
@@ -236,13 +274,19 @@ impl Renderer {
                 ..Default::default()
             });
 
-            if !blocks.is_empty() {
-                pass.set_pipeline(&self.pipeline);
-                pass.set_bind_group(0, &self.frame_bind_group, &[]);
-                pass.set_vertex_buffer(0, self.block.vertices.slice(..));
-                pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-                pass.set_index_buffer(self.block.indices.slice(..), wgpu::IndexFormat::Uint16);
-                pass.draw_indexed(0..self.block.index_count, 0, 0..blocks.len() as u32);
+            pass.set_bind_group(0, &self.frame_bind_group, &[]);
+            pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+            for batch in batches {
+                let pipeline = if batch.transparent {
+                    &self.transparent_pipeline
+                } else {
+                    &self.opaque_pipeline
+                };
+                let mesh = self.meshes.get(batch.shape);
+                pass.set_pipeline(pipeline);
+                pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint16);
+                pass.draw_indexed(0..mesh.index_count, 0, batch.instances);
             }
         }
 
@@ -285,29 +329,71 @@ fn frame_uniform(list: &DrawList, aspect: f32) -> FrameUniform {
     }
 }
 
-/// GPU data for every item in `list` with this shape.
-fn instances_for(list: &DrawList, shape: Shape) -> Vec<InstanceRaw> {
-    list.items
+/// Puts the visible items in drawing order and groups them into batches.
+///
+/// Solid items come first, grouped by shape. See-through items come last,
+/// farthest from the camera first, so each one blends over what's behind it.
+/// They're sorted by their centers, so two that overlap can still blend in the
+/// wrong order; that's the usual trade-off for this simple approach.
+fn plan_draws(list: &DrawList) -> (Vec<InstanceRaw>, Vec<Batch>) {
+    let (mut transparent, mut opaque): (Vec<&DrawItem>, Vec<&DrawItem>) = list
+        .items
         .iter()
-        .filter(|item| item.shape == shape)
-        .filter_map(|item| {
-            let model3 = Mat3::from_mat4(item.transform);
-            // A shape squashed flat (size 0 on some axis) has no inverse,
-            // and can't be seen anyway.
-            if model3.determinant().abs() < 1e-12 {
-                return None;
+        .filter(|item| item.material.opacity > 0.0)
+        .partition(|item| item.material.opacity < 1.0);
+
+    opaque.sort_by_key(|item| item.shape);
+    let distance = |item: &DrawItem| {
+        item.transform
+            .w_axis
+            .truncate()
+            .distance_squared(list.camera.position)
+    };
+    // `total_cmp` orders floats even when one is NaN, so sorting can't panic.
+    transparent.sort_by(|a, b| distance(b).total_cmp(&distance(a)));
+
+    let mut instances = Vec::new();
+    let mut batches: Vec<Batch> = Vec::new();
+    let ordered = opaque
+        .into_iter()
+        .map(|item| (item, false))
+        .chain(transparent.into_iter().map(|item| (item, true)));
+    for (item, transparent) in ordered {
+        let Some(raw) = instance_raw(item) else {
+            continue;
+        };
+        let index = instances.len() as u32;
+        instances.push(raw);
+        match batches.last_mut() {
+            Some(last) if last.shape == item.shape && last.transparent == transparent => {
+                last.instances.end = index + 1;
             }
-            let material = &item.material;
-            let base_color = linear_color(material.base_color);
-            Some(InstanceRaw {
-                model: item.transform.to_cols_array_2d(),
-                normal_matrix: model3.inverse().transpose().to_cols_array_2d(),
-                base_color_opacity: base_color.extend(material.opacity).to_array(),
-                emissive: linear_color(material.emissive).to_array(),
-                metalness_roughness: [material.metalness, material.roughness],
-            })
-        })
-        .collect()
+            _ => batches.push(Batch {
+                shape: item.shape,
+                transparent,
+                instances: index..index + 1,
+            }),
+        }
+    }
+    (instances, batches)
+}
+
+/// The GPU data for one item, or `None` if it can't be seen.
+fn instance_raw(item: &DrawItem) -> Option<InstanceRaw> {
+    let model3 = Mat3::from_mat4(item.transform);
+    // A shape squashed flat (size 0 on some axis) has no inverse, and can't be seen anyway.
+    if model3.determinant().abs() < 1e-12 {
+        return None;
+    }
+    let material = &item.material;
+    let base_color = linear_color(material.base_color);
+    Some(InstanceRaw {
+        model: item.transform.to_cols_array_2d(),
+        normal_matrix: model3.inverse().transpose().to_cols_array_2d(),
+        base_color_opacity: base_color.extend(material.opacity).to_array(),
+        emissive: linear_color(material.emissive).to_array(),
+        metalness_roughness: [material.metalness, material.roughness],
+    })
 }
 
 /// Converts an sRGB color (as people pick it) to linear light (what shading
@@ -333,10 +419,13 @@ fn sky_clear_color(srgb: [f32; 3]) -> wgpu::Color {
     }
 }
 
+/// The pipeline for solid items, or for see-through ones when `transparent`
+/// is true. Both use the same shader.
 fn create_pipeline(
     device: &wgpu::Device,
     frame_layout: &wgpu::BindGroupLayout,
     color_format: wgpu::TextureFormat,
+    transparent: bool,
 ) -> wgpu::RenderPipeline {
     let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -363,8 +452,28 @@ fn create_pipeline(
         ],
     };
 
+    let blend = if transparent {
+        wgpu::BlendState {
+            // Mix the surface's color over what's already drawn, by its opacity.
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::SrcAlpha,
+                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                operation: wgpu::BlendOperation::Add,
+            },
+            // Keep the window's own alpha at 1. Some desktops would otherwise
+            // show what's behind the window through see-through parts.
+            alpha: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::Zero,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            },
+        }
+    } else {
+        wgpu::BlendState::REPLACE
+    };
+
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("scene"),
+        label: Some(if transparent { "transparent" } else { "opaque" }),
         layout: Some(&layout),
         vertex: wgpu::VertexState {
             module: &shader,
@@ -380,7 +489,9 @@ fn create_pipeline(
         },
         depth_stencil: Some(wgpu::DepthStencilState {
             format: DEPTH_FORMAT,
-            depth_write_enabled: true,
+            // See-through items are hidden behind solid ones, but don't hide
+            // other see-through items behind them.
+            depth_write_enabled: !transparent,
             depth_compare: wgpu::CompareFunction::Less,
             stencil: Default::default(),
             bias: Default::default(),
@@ -392,7 +503,7 @@ fn create_pipeline(
             compilation_options: Default::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format: color_format,
-                blend: Some(wgpu::BlendState::REPLACE),
+                blend: Some(blend),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),
@@ -479,18 +590,13 @@ mod tests {
         assert!((linear_color([0.0, 1.0, 0.5]).z - 0.214).abs() < 0.001);
     }
 
-    #[test]
-    fn flat_shapes_are_skipped() {
-        let item = |scale: Vec3| DrawItem {
-            shape: Shape::Block,
-            transform: Mat4::from_scale(scale),
-            material: Material::default(),
-        };
-        let list = DrawList {
+    /// A list seen from the origin.
+    fn list_of(items: Vec<DrawItem>) -> DrawList {
+        DrawList {
             sky_color: [0.0; 3],
             camera: Camera {
-                position: Vec3::Z,
-                look_at: Vec3::ZERO,
+                position: Vec3::ZERO,
+                look_at: Vec3::NEG_Z,
                 fov_y_degrees: 70.0,
             },
             sun: Sun {
@@ -502,8 +608,81 @@ mod tests {
                 color: [1.0; 3],
                 intensity: 0.0,
             },
-            items: vec![item(Vec3::ONE), item(Vec3::new(1.0, 0.0, 1.0))],
-        };
-        assert_eq!(instances_for(&list, Shape::Block).len(), 1);
+            items,
+        }
+    }
+
+    /// A unit-sized item at `position`.
+    fn item(shape: Shape, position: Vec3, opacity: f32) -> DrawItem {
+        DrawItem {
+            shape,
+            transform: Mat4::from_translation(position),
+            material: Material {
+                opacity,
+                ..Material::default()
+            },
+        }
+    }
+
+    fn batch(shape: Shape, transparent: bool, instances: Range<u32>) -> Batch {
+        Batch {
+            shape,
+            transparent,
+            instances,
+        }
+    }
+
+    #[test]
+    fn flat_and_invisible_shapes_are_skipped() {
+        let mut flat = item(Shape::Block, Vec3::ZERO, 1.0);
+        flat.transform = Mat4::from_scale(Vec3::new(1.0, 0.0, 1.0));
+        let list = list_of(vec![
+            item(Shape::Block, Vec3::ZERO, 1.0),
+            flat,
+            item(Shape::Block, Vec3::ZERO, 0.0),
+        ]);
+        let (instances, batches) = plan_draws(&list);
+        assert_eq!(instances.len(), 1);
+        assert_eq!(batches, vec![batch(Shape::Block, false, 0..1)]);
+    }
+
+    #[test]
+    fn solid_items_are_grouped_by_shape() {
+        let list = list_of(vec![
+            item(Shape::Wedge, Vec3::ZERO, 1.0),
+            item(Shape::Block, Vec3::ZERO, 1.0),
+            item(Shape::Wedge, Vec3::ZERO, 1.0),
+            item(Shape::Block, Vec3::ZERO, 1.0),
+        ]);
+        let (_, batches) = plan_draws(&list);
+        assert_eq!(
+            batches,
+            vec![
+                batch(Shape::Block, false, 0..2),
+                batch(Shape::Wedge, false, 2..4)
+            ]
+        );
+    }
+
+    #[test]
+    fn see_through_items_come_last_and_farthest_first() {
+        let near_glass = item(Shape::Sphere, Vec3::new(0.0, 0.0, -2.0), 0.5);
+        let far_glass = item(Shape::Sphere, Vec3::new(0.0, 0.0, -9.0), 0.5);
+        let middle_glass = item(Shape::Block, Vec3::new(0.0, 0.0, -5.0), 0.5);
+        let solid = item(Shape::Sphere, Vec3::new(0.0, 0.0, -1.0), 1.0);
+        let list = list_of(vec![near_glass, far_glass, solid, middle_glass]);
+
+        let (instances, batches) = plan_draws(&list);
+        assert_eq!(
+            batches,
+            vec![
+                batch(Shape::Sphere, false, 0..1),
+                batch(Shape::Sphere, true, 1..2),
+                batch(Shape::Block, true, 2..3),
+                batch(Shape::Sphere, true, 3..4),
+            ]
+        );
+        let z = |i: usize| instances[i].model[3][2];
+        assert_eq!([z(1), z(2), z(3)], [-9.0, -5.0, -2.0]);
     }
 }

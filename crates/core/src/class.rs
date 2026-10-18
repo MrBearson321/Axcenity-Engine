@@ -2,6 +2,7 @@
 
 use std::fmt;
 
+use crate::enums::{Material, PartType};
 use crate::value::{Color3, Value, Vector3};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -44,13 +45,21 @@ impl ClassName {
     pub fn default_properties(self) -> Vec<(&'static str, Value)> {
         match self {
             ClassName::DataModel | ClassName::Workspace => Vec::new(),
-            ClassName::Part => vec![
-                ("Position", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
-                ("Size", Value::Vector3(Vector3::new(4.0, 1.0, 2.0))),
-                ("Color", Value::Color3(Color3::new(0.64, 0.64, 0.64))),
-                ("Metalness", Value::Number(0.0)),
-                ("Roughness", Value::Number(0.5)),
-            ],
+            ClassName::Part => {
+                let material = Material::Plastic;
+                let preset = material.preset();
+                vec![
+                    ("Shape", Value::PartType(PartType::Block)),
+                    ("Position", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
+                    // Rotation in degrees around X, Y and Z, applied Z first, then X, then Y.
+                    ("Orientation", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
+                    ("Size", Value::Vector3(Vector3::new(4.0, 1.0, 2.0))),
+                    ("Color", Value::Color3(Color3::new(0.64, 0.64, 0.64))),
+                    ("Material", Value::Material(material)),
+                    ("Metalness", Value::Number(preset.metalness)),
+                    ("Roughness", Value::Number(preset.roughness)),
+                ]
+            }
         }
     }
 }

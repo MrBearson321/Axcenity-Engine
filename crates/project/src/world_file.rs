@@ -17,10 +17,14 @@
 //! ```
 //!
 //! Property values are plain JSON. Their meaning comes from the class: the
-//! same `[0, 1, 0]` is a `Vector3` for `Position` and a `Color3` for `Color`.
-//! Properties that are left out keep their default values.
+//! same `[0, 1, 0]` is a `Vector3` for `Position` and a `Color3` for `Color`,
+//! and enum items are strings such as `"Neon"`. Properties that are left out
+//! keep their default values.
+//!
+//! [`write_world`] saves every property, sorted by name, so saving the same
+//! world always produces the same text.
 
-use axcenity_core::{ClassName, InstanceId, Value, ValueKind, World};
+use axcenity_core::{ClassName, InstanceId, Material, PartType, Value, ValueKind, World};
 use serde::Deserialize;
 use serde_json::{Map, Value as Json};
 
@@ -135,7 +139,13 @@ fn apply_properties(
     id: InstanceId,
     properties: &Map<String, Json>,
 ) -> Result<(), WorldError> {
-    for (property, json) in properties {
+    // `Material` goes first: setting it resets `Metalness` and `Roughness` to
+    // its preset, and any values the file gives for those must win.
+    let (material, others): (Vec<_>, Vec<_>) = properties
+        .iter()
+        .partition(|(property, _)| property.as_str() == "Material");
+
+    for (property, json) in material.into_iter().chain(others) {
         let instance = world.get(id).expect("caller passes a live Instance");
         let path = world.full_name(id).expect("caller passes a live Instance");
         let Some(current) = instance.property(property) else {
@@ -189,6 +199,24 @@ fn json_to_value(json: &Json, kind: ValueKind) -> Result<Value, String> {
             }
             Ok(Value::Color3(axcenity_core::Color3::new(r, g, b)))
         }
+        ValueKind::PartType => {
+            let names = PartType::ALL.map(PartType::as_str);
+            let name = enum_name(json, &names)?;
+            Ok(Value::PartType(PartType::from_name(name).expect("checked")))
+        }
+        ValueKind::Material => {
+            let names = Material::ALL.map(Material::as_str);
+            let name = enum_name(json, &names)?;
+            Ok(Value::Material(Material::from_name(name).expect("checked")))
+        }
+    }
+}
+
+/// Reads `json` as one of `names`, or explains which names are allowed.
+fn enum_name<'a>(json: &'a Json, names: &[&str]) -> Result<&'a str, String> {
+    match json.as_str() {
+        Some(name) if names.contains(&name) => Ok(name),
+        _ => Err(format!("expected one of: \"{}\"", names.join("\", \""))),
     }
 }
 
@@ -197,6 +225,113 @@ fn three_numbers(json: &Json) -> Option<[f32; 3]> {
         [a, b, c] => Some([a.as_f64()? as f32, b.as_f64()? as f32, c.as_f64()? as f32]),
         _ => None,
     }
+}
+
+/// The text of a world file for `world`, in the same layout people write by
+/// hand: two-space indents, and `[x, y, z]` values on one line.
+pub fn write_world(world: &World) -> String {
+    let mut out = format!("{{\n  \"format_version\": {FORMAT_VERSION},\n  \"workspace\": ");
+    write_instance(world, world.workspace(), 1, &mut out);
+    out.push_str("\n}\n");
+    out
+}
+
+/// Appends `id` as a JSON object whose closing brace is indented `depth` levels.
+fn write_instance(world: &World, id: InstanceId, depth: usize, out: &mut String) {
+    let instance = world.get(id).expect("only live Instances are in the tree");
+    let indent = "  ".repeat(depth + 1);
+    let inner_indent = "  ".repeat(depth + 2);
+    let mut fields = Vec::new();
+
+    // A service's class and name are fixed, so the file doesn't repeat them.
+    if !instance.class().is_service() {
+        fields.push(format!(
+            "{indent}\"class\": {}",
+            json_string(instance.class().as_str())
+        ));
+        fields.push(format!(
+            "{indent}\"name\": {}",
+            json_string(instance.name())
+        ));
+    }
+
+    let properties: Vec<String> = instance
+        .properties()
+        .map(|(name, value)| format!("{inner_indent}{}: {}", json_string(name), json_value(value)))
+        .collect();
+    if !properties.is_empty() {
+        fields.push(format!(
+            "{indent}\"properties\": {{\n{}\n{indent}}}",
+            properties.join(",\n")
+        ));
+    }
+
+    let children = instance.children();
+    if !children.is_empty() {
+        let mut text = format!("{indent}\"children\": [\n");
+        for (i, &child) in children.iter().enumerate() {
+            text.push_str(&inner_indent);
+            write_instance(world, child, depth + 2, &mut text);
+            if i + 1 < children.len() {
+                text.push(',');
+            }
+            text.push('\n');
+        }
+        text.push_str(&format!("{indent}]"));
+        fields.push(text);
+    }
+
+    if fields.is_empty() {
+        out.push_str("{}");
+    } else {
+        out.push_str(&format!(
+            "{{\n{}\n{}}}",
+            fields.join(",\n"),
+            "  ".repeat(depth)
+        ));
+    }
+}
+
+fn json_value(value: &Value) -> String {
+    match value {
+        Value::Bool(b) => b.to_string(),
+        Value::Number(n) => json_number(*n),
+        Value::String(s) => json_string(s),
+        Value::Vector3(v) => json_triple([v.x, v.y, v.z]),
+        Value::Color3(c) => json_triple([c.r, c.g, c.b]),
+        Value::PartType(t) => json_string(t.as_str()),
+        Value::Material(m) => json_string(m.as_str()),
+    }
+}
+
+/// Rust prints floats in the shortest form that reads back as the same
+/// number, without a trailing `.0` for whole numbers, which is valid JSON.
+/// JSON has no NaN or infinity, so those are written as `null`; loading the
+/// file then reports the bad value instead of silently changing it.
+fn json_number(n: f64) -> String {
+    if n.is_finite() {
+        n.to_string()
+    } else {
+        "null".to_owned()
+    }
+}
+
+/// Like [`json_number`], for each of three `f32`s. They're printed as `f32`
+/// on purpose: widening `0.45_f32` to `f64` first would print 0.44999998807907715.
+fn json_triple(numbers: [f32; 3]) -> String {
+    let [a, b, c] = numbers.map(|n| {
+        if n.is_finite() {
+            n.to_string()
+        } else {
+            "null".to_owned()
+        }
+    });
+    format!("[{a}, {b}, {c}]")
+}
+
+/// A JSON string literal, with quotes and any needed escapes.
+fn json_string(s: &str) -> String {
+    serde_json::to_string(s).expect("a string always converts to JSON")
 }
 
 #[cfg(test)]
@@ -332,5 +467,125 @@ mod tests {
                 { "class": "Part", "properties": { "Color": [255, 0, 0] } } ] } }"#,
         );
         assert!(message.contains("divide each by 255"), "{message}");
+    }
+
+    #[test]
+    fn enum_values_are_read_by_name() {
+        let world = parse_world(
+            r#"{ "format_version": 1, "workspace": { "children": [
+                { "class": "Part", "properties": { "Shape": "Ball", "Material": "Neon" } } ] } }"#,
+        )
+        .unwrap();
+        let part = world.get(world.descendants(world.workspace())[0]).unwrap();
+        assert_eq!(
+            part.property("Shape"),
+            Some(&Value::PartType(PartType::Ball))
+        );
+        assert_eq!(
+            part.property("Material"),
+            Some(&Value::Material(Material::Neon))
+        );
+    }
+
+    #[test]
+    fn unknown_enum_item_lists_the_choices() {
+        let message = parse_err(
+            r#"{ "format_version": 1, "workspace": { "children": [
+                { "class": "Part", "properties": { "Material": "Wood" } } ] } }"#,
+        );
+        assert_eq!(
+            message,
+            r#"Workspace.Part.Material: expected one of: "Plastic", "Metal", "Glass", "Neon""#
+        );
+    }
+
+    #[test]
+    fn roughness_in_the_file_overrides_the_material_preset() {
+        // "Roughness" is listed before "Material" on purpose: the order in the file doesn't matter.
+        let world = parse_world(
+            r#"{ "format_version": 1, "workspace": { "children": [
+                { "class": "Part", "properties": { "Roughness": 0.8, "Material": "Metal" } } ] } }"#,
+        )
+        .unwrap();
+        let part = world.get(world.descendants(world.workspace())[0]).unwrap();
+        assert_eq!(part.property("Metalness"), Some(&Value::Number(1.0)));
+        assert_eq!(part.property("Roughness"), Some(&Value::Number(0.8)));
+    }
+
+    #[test]
+    fn written_world_has_the_hand_written_layout() {
+        let world = parse_world(
+            r#"{ "format_version": 1, "workspace": { "children": [
+                { "class": "Part", "name": "Say \"hi\"",
+                  "properties": { "Position": [1, 0.45, -2.5], "Material": "Glass" },
+                  "children": [ { "class": "Part" } ] } ] } }"#,
+        )
+        .unwrap();
+        let part = |indent: &str, name: &str, position: &str, material: &str, roughness: &str| {
+            [
+                format!("{indent}  \"class\": \"Part\","),
+                format!("{indent}  \"name\": {name},"),
+                format!("{indent}  \"properties\": {{"),
+                format!("{indent}    \"Color\": [0.64, 0.64, 0.64],"),
+                format!("{indent}    \"Material\": \"{material}\","),
+                format!("{indent}    \"Metalness\": 0,"),
+                format!("{indent}    \"Orientation\": [0, 0, 0],"),
+                format!("{indent}    \"Position\": {position},"),
+                format!("{indent}    \"Roughness\": {roughness},"),
+                format!("{indent}    \"Shape\": \"Block\","),
+                format!("{indent}    \"Size\": [4, 1, 2]"),
+                format!("{indent}  }}"),
+            ]
+            .join("\n")
+        };
+        let expected = [
+            "{".to_owned(),
+            "  \"format_version\": 1,".to_owned(),
+            "  \"workspace\": {".to_owned(),
+            "    \"children\": [".to_owned(),
+            "      {".to_owned(),
+            part(
+                "      ",
+                r#""Say \"hi\"""#,
+                "[1, 0.45, -2.5]",
+                "Glass",
+                "0.05",
+            ) + ",",
+            "        \"children\": [".to_owned(),
+            "          {".to_owned(),
+            part("          ", "\"Part\"", "[0, 0, 0]", "Plastic", "0.5"),
+            "          }".to_owned(),
+            "        ]".to_owned(),
+            "      }".to_owned(),
+            "    ]".to_owned(),
+            "  }".to_owned(),
+            "}".to_owned(),
+            String::new(),
+        ]
+        .join("\n");
+        assert_eq!(write_world(&world), expected);
+    }
+
+    #[test]
+    fn empty_world_writes_an_empty_workspace() {
+        let world = World::new();
+        assert_eq!(
+            write_world(&world),
+            "{\n  \"format_version\": 1,\n  \"workspace\": {}\n}\n"
+        );
+    }
+
+    #[test]
+    fn values_that_json_cannot_hold_fail_to_load_again() {
+        let mut world = World::new();
+        let part = world.create(ClassName::Part).unwrap();
+        world.set_parent(part, Some(world.workspace())).unwrap();
+        world
+            .set_property(part, "Metalness", Value::Number(f64::NAN))
+            .unwrap();
+        assert!(matches!(
+            parse_world(&write_world(&world)),
+            Err(WorldError::InvalidProperty { .. })
+        ));
     }
 }

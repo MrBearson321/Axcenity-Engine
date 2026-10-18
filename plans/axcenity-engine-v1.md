@@ -66,11 +66,11 @@ Create the `core`, `project` and `render` crates. The player takes a project fol
 
 ### Acceptance criteria
 
-- [ ] An example project folder in the repository loads, and a single lit block appears.
-- [ ] Changing the part's color, metalness or roughness in the world file changes how it looks on the next run.
-- [ ] A missing or malformed world file produces a clear error message, not a panic.
-- [ ] Unit tests cover the arena: create, parent, reparent, delete, and detecting stale IDs.
-- [ ] `render` has no dependency on `core`'s Instance types; it only receives the draw list.
+- [x] An example project folder in the repository loads, and a single lit block appears.
+- [x] Changing the part's color, metalness or roughness in the world file changes how it looks on the next run.
+- [x] A missing or malformed world file produces a clear error message, not a panic.
+- [x] Unit tests cover the arena: create, parent, reparent, delete, and detecting stale IDs.
+- [x] `render` has no dependency on `core`'s Instance types; it only receives the draw list.
 
 ---
 

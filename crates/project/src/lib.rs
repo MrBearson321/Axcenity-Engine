@@ -1,5 +1,5 @@
-//! Axcenity project folders: reading the manifest and world file and
-//! building the Instance tree from them.
+//! Axcenity project folders: reading the manifest and world file, building
+//! the Instance tree from them, and saving the tree back.
 //!
 //! A project folder looks like this:
 //!
@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use axcenity_core::World;
 use serde::Deserialize;
 
-pub use world_file::{WorldError, parse_world};
+pub use world_file::{WorldError, parse_world, write_world};
 
 pub const MANIFEST_FILE: &str = "axcenity.json";
 pub const WORLD_FILE: &str = "world.json";
@@ -92,6 +92,31 @@ pub fn load(folder: &Path) -> Result<Project, LoadError> {
     })
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("could not write `{}`", path.display())]
+pub struct SaveError {
+    pub path: PathBuf,
+    #[source]
+    pub source: std::io::Error,
+}
+
+/// Writes `world` to the world file in `folder`.
+///
+/// The text goes to a temporary file first, which then replaces the old
+/// world file in one step. If saving fails partway, the old file is untouched.
+pub fn save_world(folder: &Path, world: &World) -> Result<(), SaveError> {
+    let path = folder.join(WORLD_FILE);
+    let temporary = folder.join(format!("{WORLD_FILE}.saving"));
+    let error = |source| SaveError {
+        path: path.clone(),
+        source,
+    };
+
+    fs::write(&temporary, write_world(world)).map_err(error)?;
+    // `rename` replaces an existing file on Windows, macOS and Linux alike.
+    fs::rename(&temporary, &path).map_err(error)
+}
+
 fn read(path: &Path) -> Result<String, LoadError> {
     fs::read_to_string(path).map_err(|source| LoadError::Read {
         path: path.to_owned(),
@@ -102,7 +127,7 @@ fn read(path: &Path) -> Result<String, LoadError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axcenity_core::ClassName;
+    use axcenity_core::{ClassName, Material, PartType, Value};
 
     fn examples_folder() -> PathBuf {
         // CARGO_MANIFEST_DIR is this crate's folder: crates/project.
@@ -130,5 +155,76 @@ mod tests {
             .unwrap();
         assert!(matches!(err, LoadError::Read { .. }));
         assert!(err.to_string().contains(MANIFEST_FILE));
+    }
+
+    /// Every folder in `examples/` must load.
+    fn every_example() -> Vec<PathBuf> {
+        let mut folders: Vec<PathBuf> = fs::read_dir(examples_folder())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.is_dir())
+            .collect();
+        folders.sort();
+        assert!(!folders.is_empty());
+        folders
+    }
+
+    #[test]
+    fn every_example_round_trips_through_saving() {
+        for folder in every_example() {
+            let first = write_world(&load(&folder).unwrap().world);
+            let second = write_world(&parse_world(&first).unwrap());
+            assert_eq!(first, second, "{} changed when saved", folder.display());
+        }
+    }
+
+    /// The primitives example doubles as a reference for the saved layout.
+    #[test]
+    fn primitives_example_is_already_in_saved_form() {
+        let folder = examples_folder().join("primitives");
+        // Git may check text files out with Windows line endings.
+        let text = fs::read_to_string(folder.join(WORLD_FILE))
+            .unwrap()
+            .replace("\r\n", "\n");
+        assert_eq!(
+            write_world(&load(&folder).unwrap().world),
+            text,
+            "re-save examples/primitives/world.json with `project::save_world`"
+        );
+    }
+
+    #[test]
+    fn primitives_example_has_every_shape_and_material() {
+        let world = load(&examples_folder().join("primitives")).unwrap().world;
+        let parts: Vec<_> = world
+            .descendants(world.workspace())
+            .into_iter()
+            .map(|id| world.get(id).unwrap())
+            .collect();
+        for shape in PartType::ALL {
+            let value = Value::PartType(shape);
+            assert!(parts.iter().any(|p| p.property("Shape") == Some(&value)));
+        }
+        for material in Material::ALL {
+            let value = Value::Material(material);
+            assert!(parts.iter().any(|p| p.property("Material") == Some(&value)));
+        }
+    }
+
+    #[test]
+    fn save_then_load_gives_the_same_world_file() {
+        let folder =
+            std::env::temp_dir().join(format!("axcenity-save-test-{}", std::process::id()));
+        fs::create_dir_all(&folder).unwrap();
+        let world = load(&examples_folder().join("primitives")).unwrap().world;
+
+        save_world(&folder, &world).unwrap();
+        let saved = fs::read_to_string(folder.join(WORLD_FILE)).unwrap();
+        let leftover = folder.join(format!("{WORLD_FILE}.saving")).exists();
+        fs::remove_dir_all(&folder).unwrap();
+
+        assert_eq!(saved, write_world(&world));
+        assert_eq!(write_world(&parse_world(&saved).unwrap()), saved);
+        assert!(!leftover, "the temporary file was left behind");
     }
 }

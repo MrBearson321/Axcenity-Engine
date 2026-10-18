@@ -1,0 +1,105 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Color": [0.42, 0.45, 0.48],
+          "Material": "Plastic",
+          "Metalness": 0,
+          "Orientation": [0, 0, 0],
+          "Position": [0, -0.5, 0],
+          "Roughness": 0.8,
+          "Shape": "Block",
+          "Size": [28, 1, 14]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "RedBlock",
+        "properties": {
+          "Color": [0.85, 0.25, 0.2],
+          "Material": "Plastic",
+          "Metalness": 0,
+          "Orientation": [0, 30, 0],
+          "Position": [-9, 1.5, 0],
+          "Roughness": 0.5,
+          "Shape": "Block",
+          "Size": [3, 3, 3]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "GoldBall",
+        "properties": {
+          "Color": [1, 0.78, 0.35],
+          "Material": "Metal",
+          "Metalness": 1,
+          "Orientation": [0, 0, 0],
+          "Position": [-3, 1.75, 0],
+          "Roughness": 0.3,
+          "Shape": "Ball",
+          "Size": [3.5, 3.5, 3.5]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "GlassCylinder",
+        "properties": {
+          "Color": [0.75, 0.9, 1],
+          "Material": "Glass",
+          "Metalness": 0,
+          "Orientation": [0, 0, 90],
+          "Position": [3, 2, 0],
+          "Roughness": 0.05,
+          "Shape": "Cylinder",
+          "Size": [4, 3, 3]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Marble",
+        "properties": {
+          "Color": [1, 0.6, 0.1],
+          "Material": "Plastic",
+          "Metalness": 0,
+          "Orientation": [0, 0, 0],
+          "Position": [3, 0.75, 0],
+          "Roughness": 0.5,
+          "Shape": "Ball",
+          "Size": [1.5, 1.5, 1.5]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "NeonWedge",
+        "properties": {
+          "Color": [0.2, 0.9, 1],
+          "Material": "Neon",
+          "Metalness": 0,
+          "Orientation": [0, -30, 0],
+          "Position": [9, 1.5, 0],
+          "Roughness": 1,
+          "Shape": "Wedge",
+          "Size": [3, 3, 4]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "BrushedSteel",
+        "properties": {
+          "Color": [0.75, 0.76, 0.78],
+          "Material": "Metal",
+          "Metalness": 1,
+          "Orientation": [0, 0, 0],
+          "Position": [0, 0.5, 4.5],
+          "Roughness": 0.65,
+          "Shape": "Block",
+          "Size": [8, 1, 2]
+        }
+      }
+    ]
+  }
+}

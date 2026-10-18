@@ -1,22 +1,33 @@
 //! Axcenity Player: the runtime that ships with every exported game.
 //!
-//! Phase 2: loads a project folder and draws its Workspace from a fixed camera.
+//! Phase 3: loads a project folder and draws its Workspace, with a fly camera
+//! for looking around.
 
+mod camera;
 mod scene;
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
 use axcenity_core::World;
 use axcenity_render::Renderer;
+use axcenity_render::glam::Vec3;
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
-use winit::event::WindowEvent;
+use winit::event::{DeviceEvent, DeviceId, ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::window::{Window, WindowId};
+use winit::keyboard::PhysicalKey;
+use winit::window::{CursorGrabMode, Window, WindowId};
+
+use crate::camera::{FlyCamera, MoveKeys};
 
 const DEFAULT_WINDOW_SIZE: LogicalSize<f64> = LogicalSize::new(1280.0, 720.0);
+const START_CAMERA_POSITION: Vec3 = Vec3::new(12.0, 8.0, 16.0);
+/// After a long pause (such as dragging the window), don't jump the camera
+/// by the whole pause; treat the frame as at most this long.
+const MAX_FRAME_SECONDS: f32 = 0.1;
 const USAGE: &str = "usage: axcenity-player <project-folder>\n\
                      example: cargo run -p axcenity-player -- examples/hello-part";
 
@@ -47,6 +58,10 @@ fn main() -> Result<()> {
         window: None,
         renderer: None,
         error: None,
+        camera: FlyCamera::looking_at(START_CAMERA_POSITION, Vec3::ZERO),
+        keys: MoveKeys::default(),
+        looking: false,
+        last_frame: None,
     };
     event_loop.run_app(&mut app)?;
 
@@ -65,6 +80,12 @@ struct App {
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     error: Option<anyhow::Error>,
+    camera: FlyCamera,
+    keys: MoveKeys,
+    /// True while the right mouse button is held, when moving the mouse turns the camera.
+    looking: bool,
+    /// When the previous frame was drawn, to measure how much time passed.
+    last_frame: Option<Instant>,
 }
 
 impl App {
@@ -73,6 +94,35 @@ impl App {
         self.error = Some(err);
         event_loop.exit();
     }
+}
+
+/// Seconds since `last_frame` (0 for the first frame), and records now as the latest frame.
+///
+/// This takes only the `last_frame` field rather than all of `App`, so it can
+/// be called while other fields of `App` are borrowed.
+fn frame_seconds(last_frame: &mut Option<Instant>) -> f32 {
+    let now = Instant::now();
+    let seconds = last_frame.map_or(0.0, |last| (now - last).as_secs_f32());
+    *last_frame = Some(now);
+    seconds.min(MAX_FRAME_SECONDS)
+}
+
+/// While looking around, hides the cursor and keeps it from leaving the window.
+fn capture_mouse(window: &Window, captured: bool) {
+    let result = if captured {
+        // `Locked` keeps the cursor still (macOS, Wayland). Windows and X11
+        // only offer `Confined`, which keeps it inside the window.
+        window
+            .set_cursor_grab(CursorGrabMode::Locked)
+            .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))
+    } else {
+        window.set_cursor_grab(CursorGrabMode::None)
+    };
+    // Looking around still works without the grab, so this isn't an error.
+    if let Err(err) = result {
+        log::debug!("could not grab the mouse cursor: {err}");
+    }
+    window.set_cursor_visible(!captured);
 }
 
 impl ApplicationHandler for App {
@@ -109,14 +159,46 @@ impl ApplicationHandler for App {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => renderer.resize(size.width, size.height),
+            WindowEvent::KeyboardInput { event, .. } => {
+                if let PhysicalKey::Code(key) = event.physical_key {
+                    self.keys.set(key, event.state == ElementState::Pressed);
+                }
+            }
+            WindowEvent::MouseInput {
+                state,
+                button: MouseButton::Right,
+                ..
+            } => {
+                self.looking = state == ElementState::Pressed;
+                capture_mouse(window, self.looking);
+            }
+            // Key releases aren't reported while another window has focus,
+            // so let go of everything to avoid the camera drifting on its own.
+            WindowEvent::Focused(false) => {
+                self.keys = MoveKeys::default();
+                self.looking = false;
+                capture_mouse(window, false);
+            }
             WindowEvent::RedrawRequested => {
-                let draw_list = scene::build_draw_list(&self.world);
+                let seconds = frame_seconds(&mut self.last_frame);
+                self.camera.update(&self.keys, seconds);
+
+                let draw_list = scene::build_draw_list(&self.world, self.camera.to_render_camera());
                 // `|| ...` is a closure: a small function the renderer calls at the right moment.
                 if let Err(err) = renderer.render(&draw_list, || window.pre_present_notify()) {
                     self.fail(event_loop, err);
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Raw mouse movement, reported even when the cursor is held still.
+    fn device_event(&mut self, _event_loop: &ActiveEventLoop, _id: DeviceId, event: DeviceEvent) {
+        if let DeviceEvent::MouseMotion { delta: (dx, dy) } = event
+            && self.looking
+        {
+            self.camera.look(dx as f32, dy as f32);
         }
     }
 

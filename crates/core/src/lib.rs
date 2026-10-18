@@ -6,10 +6,12 @@
 
 mod arena;
 mod class;
+mod enums;
 mod value;
 mod world;
 
 pub use arena::{Arena, Id};
 pub use class::ClassName;
+pub use enums::{Material, MaterialPreset, PartType};
 pub use value::{Color3, Value, ValueKind, Vector3};
 pub use world::{Instance, InstanceId, PropertyError, TreeError, World};

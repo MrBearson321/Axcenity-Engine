@@ -12,11 +12,18 @@ Draw list conventions: Y up, right-handed, and colors as sRGB from 0 to 1 (the r
 
 Every material carries: base color, metalness, roughness, emissive, opacity. Presets like plastic, metal, glass and neon are just preset values for these fields. Don't add stage-specific material fields that a later stage would have to undo.
 
-As of Phase 2, `Part` exposes `Color`, `Metalness` and `Roughness` directly. Emissive and opacity are in the draw list and shader but have no Part property yet, and opacity isn't blended. Phase 3 decides how `Material` presets combine with these properties.
+How Part properties map onto these (decided in Phase 3):
+
+- `Color`, `Metalness` and `Roughness` are Part properties and feed the draw list directly.
+- `Material` (Plastic, Metal, Glass, Neon) is a preset. Choosing it sets `Metalness` and `Roughness` to the preset's values, which you can then adjust (for example, a rougher Metal). See `Material::preset()` in `core`.
+- Opacity and glow aren't properties; they come from the material. Glass is drawn see-through, and Neon gives off its `Color` as emissive light instead of being shaded. If per-part transparency is needed later, add a `Transparency` property that multiplies the preset's opacity.
+- Without environment lighting (stage 4), metals reflect only the sun and ambient light, so they look darker than they will later.
+
+Transparency: opaque items are drawn first. Then see-through items are drawn, farthest to nearest by their centers, with blending on and depth writes off. Overlapping see-through items can still blend in the wrong order; that's accepted for now.
 
 ## Geometry
 
-Built-in primitives (block, sphere, cylinder, wedge) plus imported **glTF** meshes.
+Built-in primitives (block, sphere, cylinder, wedge) plus imported **glTF** meshes. Part shape rules match Roblox: a Ball's diameter is the smallest of its `Size` axes, a Cylinder lies along X (`Size.X` is its length, its diameter is the smaller of Y and Z), and a Wedge's slope rises from the bottom front (-Z) edge to the top back (+Z) edge. `Orientation` is degrees, applied around Z, then X, then Y.
 
 ## Stages (build in order; editor and scripting work starts after stage 1)
 

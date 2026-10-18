@@ -211,6 +211,9 @@ impl World {
     }
 
     /// Sets an existing property. The new value must have the same type as the old one.
+    ///
+    /// Setting `Material` also resets `Metalness` and `Roughness` to the
+    /// material's preset, so set those afterwards to adjust them.
     pub fn set_property(
         &mut self,
         id: InstanceId,
@@ -239,7 +242,21 @@ impl World {
                 actual: value.kind(),
             });
         }
+        // Read before `value` moves into the slot below.
+        let material = value.as_material();
         *slot = value;
+
+        if let Some(material) = material {
+            let preset = material.preset();
+            for (name, number) in [
+                ("Metalness", preset.metalness),
+                ("Roughness", preset.roughness),
+            ] {
+                if let Some(slot) = instance.properties.get_mut(name) {
+                    *slot = Value::Number(number);
+                }
+            }
+        }
         Ok(())
     }
 
@@ -309,6 +326,7 @@ impl Default for World {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::enums::Material;
     use crate::value::Vector3;
 
     fn part_in(world: &mut World, parent: InstanceId, name: &str) -> InstanceId {
@@ -459,5 +477,47 @@ mod tests {
             world.set_property(part, "Metalness", Value::Bool(true)),
             Err(PropertyError::WrongType { .. })
         ));
+    }
+
+    #[test]
+    fn setting_material_applies_its_preset_which_can_then_be_adjusted() {
+        let mut world = World::new();
+        let part = world.create(ClassName::Part).unwrap();
+        let number = |world: &World, name| world.get(part).unwrap().property(name).cloned();
+
+        world
+            .set_property(part, "Material", Value::Material(Material::Metal))
+            .unwrap();
+        assert_eq!(number(&world, "Metalness"), Some(Value::Number(1.0)));
+        assert_eq!(number(&world, "Roughness"), Some(Value::Number(0.3)));
+
+        world
+            .set_property(part, "Roughness", Value::Number(0.8))
+            .unwrap();
+        assert_eq!(number(&world, "Roughness"), Some(Value::Number(0.8)));
+        assert_eq!(
+            number(&world, "Material"),
+            Some(Value::Material(Material::Metal))
+        );
+    }
+
+    #[test]
+    fn default_part_matches_the_plastic_preset() {
+        let mut world = World::new();
+        let part = world.create(ClassName::Part).unwrap();
+        let instance = world.get(part).unwrap();
+        let preset = Material::Plastic.preset();
+        assert_eq!(
+            instance.property("Material"),
+            Some(&Value::Material(Material::Plastic))
+        );
+        assert_eq!(
+            instance.property("Metalness"),
+            Some(&Value::Number(preset.metalness))
+        );
+        assert_eq!(
+            instance.property("Roughness"),
+            Some(&Value::Number(preset.roughness))
+        );
     }
 }

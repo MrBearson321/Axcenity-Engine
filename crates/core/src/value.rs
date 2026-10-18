@@ -3,6 +3,8 @@
 
 use std::fmt;
 
+use crate::enums::{Material, PartType};
+
 /// A position, size or direction in studs. Y is up.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Vector3 {
@@ -38,6 +40,8 @@ pub enum Value {
     String(String),
     Vector3(Vector3),
     Color3(Color3),
+    PartType(PartType),
+    Material(Material),
 }
 
 /// The type of a [`Value`], without the data. Used to check assignments.
@@ -48,6 +52,8 @@ pub enum ValueKind {
     String,
     Vector3,
     Color3,
+    PartType,
+    Material,
 }
 
 impl Value {
@@ -58,6 +64,8 @@ impl Value {
             Value::String(_) => ValueKind::String,
             Value::Vector3(_) => ValueKind::Vector3,
             Value::Color3(_) => ValueKind::Color3,
+            Value::PartType(_) => ValueKind::PartType,
+            Value::Material(_) => ValueKind::Material,
         }
     }
 
@@ -81,6 +89,20 @@ impl Value {
             _ => None,
         }
     }
+
+    pub fn as_part_type(&self) -> Option<PartType> {
+        match self {
+            Value::PartType(t) => Some(*t),
+            _ => None,
+        }
+    }
+
+    pub fn as_material(&self) -> Option<Material> {
+        match self {
+            Value::Material(m) => Some(*m),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for ValueKind {
@@ -91,6 +113,8 @@ impl fmt::Display for ValueKind {
             ValueKind::String => "string",
             ValueKind::Vector3 => "Vector3",
             ValueKind::Color3 => "Color3",
+            ValueKind::PartType => "PartType",
+            ValueKind::Material => "Material",
         };
         f.write_str(name)
     }
