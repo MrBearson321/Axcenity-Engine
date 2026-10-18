@@ -84,10 +84,10 @@ Support block, sphere, cylinder and wedge shapes. Parts have `Position`, `Size`,
 
 ### Acceptance criteria
 
-- [ ] An example scene with all four shapes in different materials renders correctly.
-- [ ] Glass is see-through and neon glows (emissive), within stage 1 lighting.
-- [ ] The fly camera moves smoothly and independently of frame rate.
-- [ ] Property values round-trip: load → save → load gives an identical world file.
+- [x] An example scene with all four shapes in different materials renders correctly.
+- [x] Glass is see-through and neon glows (emissive), within stage 1 lighting.
+- [x] The fly camera moves smoothly and independently of frame rate.
+- [x] Property values round-trip: load → save → load gives an identical world file.
 
 ---
 
@@ -101,10 +101,10 @@ Create the `script` crate. When the project loads, each `*.server.lua` file beco
 
 ### Acceptance criteria
 
-- [ ] An example script creates a new part and moves an existing one, and the changes appear on screen.
-- [ ] `io`, `os.execute`, `debug`, `load`, `dofile` and `loadfile` are unavailable inside scripts (covered by tests).
-- [ ] A script with a runtime error reports its path and line, and other scripts keep running.
-- [ ] Scripts can't access each other's global variables.
+- [x] An example script creates a new part and moves an existing one, and the changes appear on screen.
+- [x] `io`, `os.execute`, `debug`, `load`, `dofile` and `loadfile` are unavailable inside scripts (covered by tests).
+- [x] A script with a runtime error reports its path and line, and other scripts keep running.
+- [x] Scripts can't access each other's global variables.
 
 ---
 

@@ -44,6 +44,10 @@ pub enum WorldError {
     UnknownClass { path: String, class: String },
     #[error("{path}: {class} is a service and can't be listed as a child")]
     Service { path: String, class: ClassName },
+    #[error(
+        "{path}: Scripts can't be listed in the world file; save them as `.server.lua` files in the `scripts` folder instead"
+    )]
+    Script { path: String },
     #[error("{path}: {class} has no property named `{property}`")]
     UnknownProperty {
         path: String,
@@ -121,6 +125,9 @@ fn add_instance(
         path: path.clone(),
         class: node.class.clone(),
     })?;
+    if class == ClassName::Script {
+        return Err(WorldError::Script { path });
+    }
     let id = world
         .create(class)
         .map_err(|_| WorldError::Service { path, class })?;
@@ -266,7 +273,17 @@ fn write_instance(world: &World, id: InstanceId, depth: usize, out: &mut String)
         ));
     }
 
-    let children = instance.children();
+    // Scripts are saved as their own `.lua` files, not in the world file.
+    let children: Vec<InstanceId> = instance
+        .children()
+        .iter()
+        .copied()
+        .filter(|&child| {
+            world
+                .get(child)
+                .is_some_and(|c| c.class() != ClassName::Script)
+        })
+        .collect();
     if !children.is_empty() {
         let mut text = format!("{indent}\"children\": [\n");
         for (i, &child) in children.iter().enumerate() {
@@ -437,6 +454,25 @@ mod tests {
             ),
             Err(WorldError::Service { .. })
         ));
+    }
+
+    #[test]
+    fn script_in_the_world_file_is_an_error() {
+        let err = parse_err(
+            r#"{ "format_version": 1, "workspace": { "children": [
+                { "class": "Script", "name": "Spin" } ] } }"#,
+        );
+        assert!(err.contains("Workspace.Spin"), "{err}");
+        assert!(err.contains("scripts"), "{err}");
+    }
+
+    #[test]
+    fn scripts_are_left_out_when_saving() {
+        let mut world = World::new();
+        let workspace = world.workspace();
+        let script = world.create(ClassName::Script).unwrap();
+        world.set_parent(script, Some(workspace)).unwrap();
+        assert_eq!(write_world(&world), write_world(&World::new()));
     }
 
     #[test]

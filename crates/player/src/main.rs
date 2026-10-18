@@ -1,7 +1,7 @@
 //! Axcenity Player: the runtime that ships with every exported game.
 //!
-//! Phase 3: loads a project folder and draws its Workspace, with a fly camera
-//! for looking around.
+//! Phase 4: loads a project folder, runs its server scripts once, and draws
+//! the Workspace, with a fly camera for looking around.
 
 mod camera;
 mod scene;
@@ -12,8 +12,10 @@ use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
 use axcenity_core::World;
+use axcenity_project::ScriptFile;
 use axcenity_render::Renderer;
 use axcenity_render::glam::Vec3;
+use axcenity_script::{OutputKind, ScriptRuntime};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{DeviceEvent, DeviceId, ElementState, MouseButton, WindowEvent};
@@ -47,6 +49,8 @@ fn main() -> Result<()> {
     let project = axcenity_project::load(&folder)
         .with_context(|| format!("could not open the project in `{}`", folder.display()))?;
     log::info!("loaded project \"{}\"", project.manifest.name);
+    let mut world = project.world;
+    run_scripts(&mut world, &project.scripts);
 
     let event_loop = EventLoop::new()?;
     // Games redraw continuously instead of waiting for input.
@@ -54,7 +58,7 @@ fn main() -> Result<()> {
 
     let mut app = App {
         title: format!("{} - Axcenity Player", project.manifest.name),
-        world: project.world,
+        world,
         window: None,
         renderer: None,
         error: None,
@@ -69,6 +73,22 @@ fn main() -> Result<()> {
     match app.error {
         Some(err) => Err(err),
         None => Ok(()),
+    }
+}
+
+/// Runs every server script once, in path order, and prints its output.
+/// An error stops only the script it happens in.
+fn run_scripts(world: &mut World, scripts: &[ScriptFile]) {
+    let mut runtime = ScriptRuntime::new();
+    for script in scripts {
+        log::info!("running {}", script.path);
+        runtime.run_script(world, script.instance, &script.path, &script.source);
+        for line in runtime.take_output() {
+            match line.kind {
+                OutputKind::Print => println!("{}", line.text),
+                OutputKind::Error => eprintln!("error: {}", line.text),
+            }
+        }
     }
 }
 
@@ -207,5 +227,42 @@ impl ApplicationHandler for App {
         if let Some(window) = &self.window {
             window.request_redraw();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use axcenity_core::{Value, Vector3};
+
+    use super::*;
+
+    #[test]
+    fn hello_script_example_creates_a_part_and_moves_an_existing_one() {
+        let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-script");
+        let project = axcenity_project::load(&folder).unwrap();
+        let mut world = project.world;
+        let parts_before = world.descendants(world.workspace()).len();
+
+        run_scripts(&mut world, &project.scripts);
+
+        let workspace = world.workspace();
+        let block = world.find_first_child(workspace, "Block").unwrap();
+        assert_eq!(
+            world.get(block).unwrap().property("Position"),
+            Some(&Value::Vector3(Vector3::new(-8.0, 3.0, 0.0)))
+        );
+        for i in 1..=5 {
+            assert!(
+                world
+                    .find_first_child(workspace, &format!("Ball{i}"))
+                    .is_some()
+            );
+        }
+        // The new parts are drawn along with the ones from the world file.
+        let camera = FlyCamera::looking_at(START_CAMERA_POSITION, Vec3::ZERO).to_render_camera();
+        let draw_list = scene::build_draw_list(&world, camera);
+        assert_eq!(draw_list.items.len(), parts_before + 5);
     }
 }

@@ -92,29 +92,39 @@ pub struct World {
     instances: Arena<Instance>,
     root: InstanceId,
     workspace: InstanceId,
+    server_script_service: InstanceId,
 }
 
 impl World {
-    /// Creates a world with `game` and its `Workspace` service.
+    /// Creates a world with `game` and its services (`Workspace` and
+    /// `ServerScriptService`).
     pub fn new() -> Self {
         let mut instances = Arena::new();
         let mut game = Instance::new(ClassName::DataModel);
         game.name = "Game".to_owned();
         let root = InstanceId(instances.insert(game));
 
-        let mut workspace = Instance::new(ClassName::Workspace);
-        workspace.parent = Some(root);
-        let workspace = InstanceId(instances.insert(workspace));
-        instances
-            .get_mut(root.0)
-            .expect("root was just inserted")
-            .children
-            .push(workspace);
+        // A closure that adds one service under `game`. It borrows `instances`
+        // mutably, so `instances` can't be used directly until its last call.
+        let mut add_service = |class| {
+            let mut service = Instance::new(class);
+            service.parent = Some(root);
+            let id = InstanceId(instances.insert(service));
+            instances
+                .get_mut(root.0)
+                .expect("root was just inserted")
+                .children
+                .push(id);
+            id
+        };
+        let workspace = add_service(ClassName::Workspace);
+        let server_script_service = add_service(ClassName::ServerScriptService);
 
         Self {
             instances,
             root,
             workspace,
+            server_script_service,
         }
     }
 
@@ -125,6 +135,10 @@ impl World {
 
     pub fn workspace(&self) -> InstanceId {
         self.workspace
+    }
+
+    pub fn server_script_service(&self) -> InstanceId {
+        self.server_script_service
     }
 
     pub fn get(&self, id: InstanceId) -> Option<&Instance> {
@@ -270,6 +284,13 @@ impl World {
             .find(|&child| self.get(child).is_some_and(|c| c.name == name))
     }
 
+    /// The first descendant of `ancestor` with this name, in [`descendants`](Self::descendants) order.
+    pub fn find_first_descendant(&self, ancestor: InstanceId, name: &str) -> Option<InstanceId> {
+        self.descendants(ancestor)
+            .into_iter()
+            .find(|&id| self.get(id).is_some_and(|instance| instance.name == name))
+    }
+
     /// Every Instance below `id`, parents before their children.
     /// Empty if `id` is stale.
     pub fn descendants(&self, id: InstanceId) -> Vec<InstanceId> {
@@ -341,9 +362,14 @@ mod tests {
         let world = World::new();
         let game = world.get(world.root()).unwrap();
         assert_eq!(game.class(), ClassName::DataModel);
-        assert_eq!(game.children(), &[world.workspace()]);
+        assert_eq!(
+            game.children(),
+            &[world.workspace(), world.server_script_service()]
+        );
         let workspace = world.get(world.workspace()).unwrap();
         assert_eq!(workspace.parent(), Some(world.root()));
+        let scripts = world.get(world.server_script_service()).unwrap();
+        assert_eq!(scripts.class(), ClassName::ServerScriptService);
     }
 
     #[test]
@@ -370,6 +396,17 @@ mod tests {
         assert!(world.set_parent(workspace, None).is_err());
         assert!(world.destroy(workspace).is_err());
         assert!(world.destroy(world.root()).is_err());
+        assert!(world.destroy(world.server_script_service()).is_err());
+    }
+
+    #[test]
+    fn find_first_descendant_searches_the_whole_subtree() {
+        let mut world = World::new();
+        let workspace = world.workspace();
+        let a = part_in(&mut world, workspace, "A");
+        let deep = part_in(&mut world, a, "Target");
+        assert_eq!(world.find_first_child(workspace, "Target"), None);
+        assert_eq!(world.find_first_descendant(workspace, "Target"), Some(deep));
     }
 
     #[test]

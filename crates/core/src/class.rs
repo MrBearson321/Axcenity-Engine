@@ -11,40 +11,56 @@ pub enum ClassName {
     DataModel,
     /// The service that holds the 3D world.
     Workspace,
+    /// The service that holds server scripts.
+    ServerScriptService,
     /// A solid shape in the world.
     Part,
+    /// Lua code that runs on the server. Its source lives in a
+    /// `*.server.lua` file, not in a property.
+    Script,
 }
 
 impl ClassName {
+    pub const ALL: [ClassName; 5] = [
+        ClassName::DataModel,
+        ClassName::Workspace,
+        ClassName::ServerScriptService,
+        ClassName::Part,
+        ClassName::Script,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
             ClassName::DataModel => "DataModel",
             ClassName::Workspace => "Workspace",
+            ClassName::ServerScriptService => "ServerScriptService",
             ClassName::Part => "Part",
+            ClassName::Script => "Script",
         }
     }
 
     /// Looks up a class by the name used in world files and scripts.
     pub fn from_name(name: &str) -> Option<Self> {
-        match name {
-            "DataModel" => Some(ClassName::DataModel),
-            "Workspace" => Some(ClassName::Workspace),
-            "Part" => Some(ClassName::Part),
-            _ => None,
-        }
+        Self::ALL.into_iter().find(|class| class.as_str() == name)
     }
 
     /// Services exist exactly once and are created with the [`World`](crate::World),
     /// so they can't be created again.
     pub fn is_service(self) -> bool {
-        matches!(self, ClassName::DataModel | ClassName::Workspace)
+        matches!(
+            self,
+            ClassName::DataModel | ClassName::Workspace | ClassName::ServerScriptService
+        )
     }
 
     /// Every property this class has, with its default value. A new Instance
     /// starts with all of these, which also fixes each property's type.
     pub fn default_properties(self) -> Vec<(&'static str, Value)> {
         match self {
-            ClassName::DataModel | ClassName::Workspace => Vec::new(),
+            ClassName::DataModel
+            | ClassName::Workspace
+            | ClassName::ServerScriptService
+            | ClassName::Script => Vec::new(),
             ClassName::Part => {
                 let material = Material::Plastic;
                 let preset = material.preset();
@@ -76,7 +92,7 @@ mod tests {
 
     #[test]
     fn names_round_trip() {
-        for class in [ClassName::DataModel, ClassName::Workspace, ClassName::Part] {
+        for class in ClassName::ALL {
             assert_eq!(ClassName::from_name(class.as_str()), Some(class));
         }
         assert_eq!(ClassName::from_name("part"), None);

@@ -4,6 +4,8 @@ Loads project folders (`axcenity.json` manifest plus `world.json`) into a `core:
 
 - `lib.rs`: `load(folder)` and `LoadError`. Each error names the file; `#[source]` carries the cause, so don't repeat the cause in the message.
 - `world_file.rs`: `parse_world(&str)` and `write_world(&World)`. Property JSON is converted using the type of the property's *default* value, so the file stays plain (`[1, 2, 3]`, not `{"Vector3": …}`). The writer is hand-written (serde's pretty printer puts every array item on its own line) and writes every property, sorted, so output is deterministic.
+- `lib.rs` also finds `scripts/**/*.server.lua` (sorted by path), and makes a Script for each one in `ServerScriptService`, named after the file. `ScriptFile.path` uses `/` on every OS. `*.client.lua` is ignored until Phase 14.
+- The world file rejects `Script` entries, and `write_world` skips Script Instances, since scripts are saved as files.
 - `save_world` writes `world.json.saving`, then renames it over `world.json`.
 - `examples/primitives/world.json` must stay exactly as `write_world` produces it (a test checks this).
 - Every serde struct uses `deny_unknown_fields`, so typos become errors with a line number.

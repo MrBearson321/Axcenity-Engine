@@ -16,6 +16,7 @@ Chosen over RON because every editor (including VS Code) highlights and validate
 my-game/
   axcenity.json   { "name": "My Game", "format_version": 1 }
   world.json      the Workspace and its descendants
+  scripts/        server scripts: build.server.lua, doors/open.server.lua, ...
 ```
 
 `world.json`:
@@ -37,6 +38,7 @@ my-game/
 - Left-out properties keep their defaults. `name` defaults to the class name. Unknown fields, classes or properties are errors, not silently ignored.
 - `Material` is applied before the other properties wherever it appears in the file, because choosing a material resets `Metalness` and `Roughness` to its preset.
 - Saving (`project::save_world`) writes every property, sorted by name, with numbers in their shortest exact form. Loading and saving again always gives the same text. Writing every property, rather than only the changed ones, means a saved world keeps its look even if a default changes later. `examples/primitives` shows the saved layout.
+- **Scripts** (decided in Phase 4): every `scripts/**/*.server.lua` becomes a `Script` in `ServerScriptService`, named after the file without `.server.lua`, and scripts start in path order. Subfolders only organize files for now; all Scripts sit directly in `ServerScriptService` until a Folder class exists. Scripts never appear in `world.json` (loading one there is an error, and saving leaves them out). Putting a script inside a part can be added later as a world-file reference without breaking this layout.
 - `format_version` appears in both files. The engine refuses newer versions with a "please update" message.
 - Errors name the file and, for JSON syntax problems, the line and column. For bad property values they name the Instance path (for example `Workspace.Block.Color`).
 

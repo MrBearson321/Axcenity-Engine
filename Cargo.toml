@@ -15,6 +15,7 @@ authors = ["Paul Janota and contributors"]
 axcenity-core = { path = "crates/core" }
 axcenity-project = { path = "crates/project" }
 axcenity-render = { path = "crates/render" }
+axcenity-script = { path = "crates/script" }
 
 # Third-party crates.
 anyhow = "1"
@@ -22,6 +23,8 @@ bytemuck = { version = "1", features = ["derive"] }
 env_logger = "0.11"
 glam = "0.34"
 log = "0.4"
+# Lua 5.4, compiled from source (`vendored`) so no system Lua is needed on any OS.
+mlua = { version = "0.12", features = ["lua54", "vendored"] }
 pollster = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
