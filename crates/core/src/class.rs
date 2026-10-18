@@ -80,6 +80,19 @@ impl ClassName {
             }
         }
     }
+
+    /// The names of this class's events, such as `Touched` on a Part. Scripts
+    /// reach them as `part.Touched` and connect handlers with `:Connect`.
+    pub fn events(self) -> &'static [&'static str] {
+        match self {
+            ClassName::DataModel
+            | ClassName::Workspace
+            | ClassName::ServerScriptService
+            | ClassName::Script => &[],
+            // Fires on both parts when two parts start touching.
+            ClassName::Part => &["Touched"],
+        }
+    }
 }
 
 impl fmt::Display for ClassName {
@@ -98,5 +111,18 @@ mod tests {
             assert_eq!(ClassName::from_name(class.as_str()), Some(class));
         }
         assert_eq!(ClassName::from_name("part"), None);
+    }
+
+    #[test]
+    fn event_names_never_clash_with_property_names() {
+        for class in ClassName::ALL {
+            for event in class.events() {
+                let clashes = class
+                    .default_properties()
+                    .iter()
+                    .any(|(name, _)| name == event);
+                assert!(!clashes, "{class}.{event} is both an event and a property");
+            }
+        }
     }
 }

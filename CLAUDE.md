@@ -2,7 +2,7 @@
 
 A Roblox Studio-inspired 3D game engine and editor in Rust, scripted with Lua 5.4 and Scratch-style blocks. Targets Windows, macOS and Linux. Licensed Apache-2.0.
 
-**Status:** Phase 6 (physics). Crates so far: `core`, `project`, `render`, `physics`, `script`, `player`.
+**Status:** Phase 7 (Touched events). Crates so far: `core`, `project`, `render`, `physics`, `script`, `player`.
 
 ## Read only what the task needs
 

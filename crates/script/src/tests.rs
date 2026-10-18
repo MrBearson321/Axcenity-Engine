@@ -660,3 +660,230 @@ fn task_functions_explain_bad_arguments() {
         );
     }
 }
+
+/// A world with two Parts in the Workspace, named `Pad` and `Ball`.
+fn world_with_pad_and_ball() -> (World, InstanceId, InstanceId) {
+    let (mut world, pad) = world_with_block();
+    world.set_name(pad, "Pad").unwrap();
+    let ball = world.create(ClassName::Part).unwrap();
+    world.set_name(ball, "Ball").unwrap();
+    world.set_parent(ball, Some(world.workspace())).unwrap();
+    (world, pad, ball)
+}
+
+#[test]
+fn touched_fires_on_both_parts_with_the_other_part() {
+    let (mut world, pad, ball) = world_with_pad_and_ball();
+    let mut runtime = ScriptRuntime::new();
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/touch.server.lua",
+        r#"
+        workspace.Pad.Touched:Connect(function(other)
+            print("Pad touched by " .. other.Name)
+            workspace.Pad.Color = Color3.new(0, 1, 0)
+        end)
+        workspace.Ball.Touched:Connect(function(other)
+            print("Ball touched by " .. other.Name)
+        end)
+        "#,
+    );
+    assert_eq!(lines(&mut runtime), Vec::<String>::new());
+
+    runtime.fire_touched(&mut world, &[(pad, ball)]);
+    assert_eq!(
+        lines(&mut runtime),
+        ["Pad touched by Ball", "Ball touched by Pad"]
+    );
+    assert_eq!(
+        property(&world, pad, "Color"),
+        Value::Color3(Color3::new(0.0, 1.0, 0.0))
+    );
+}
+
+#[test]
+fn touched_fires_once_per_reported_touch() {
+    let (mut world, pad, ball) = world_with_pad_and_ball();
+    let mut runtime = ScriptRuntime::new();
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/touch.server.lua",
+        r#"
+        local count = 0
+        workspace.Pad.Touched:Connect(function()
+            count = count + 1
+            print(count)
+        end)
+        "#,
+    );
+    // Frames with no new touch fire nothing.
+    for _ in 0..5 {
+        runtime.step(&mut world, 1.0 / 60.0);
+        runtime.fire_touched(&mut world, &[]);
+    }
+    assert_eq!(lines(&mut runtime), Vec::<String>::new());
+    runtime.fire_touched(&mut world, &[(pad, ball)]);
+    runtime.fire_touched(&mut world, &[(ball, pad)]);
+    assert_eq!(lines(&mut runtime), ["1", "2"]);
+}
+
+#[test]
+fn disconnect_stops_further_calls_to_the_handler() {
+    let (mut world, pad, ball) = world_with_pad_and_ball();
+    let mut runtime = ScriptRuntime::new();
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/touch.server.lua",
+        r#"
+        local connection
+        connection = workspace.Pad.Touched:Connect(function(other)
+            print("touched, connected: " .. tostring(connection.Connected))
+            connection:Disconnect()
+            connection:Disconnect() -- twice is harmless
+            print("now connected: " .. tostring(connection.Connected))
+        end)
+        "#,
+    );
+    runtime.fire_touched(&mut world, &[(pad, ball)]);
+    assert_eq!(
+        lines(&mut runtime),
+        ["touched, connected: true", "now connected: false"]
+    );
+    runtime.fire_touched(&mut world, &[(pad, ball)]);
+    assert_eq!(lines(&mut runtime), Vec::<String>::new());
+}
+
+#[test]
+fn a_handler_can_disconnect_others_that_have_not_run_yet() {
+    let (mut world, pad, ball) = world_with_pad_and_ball();
+    let mut runtime = ScriptRuntime::new();
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/touch.server.lua",
+        r#"
+        local second
+        workspace.Pad.Touched:Connect(function()
+            print("first")
+            second:Disconnect()
+        end)
+        second = workspace.Pad.Touched:Connect(function() print("second") end)
+        workspace.Pad.Touched:Connect(function() print("third") end)
+        "#,
+    );
+    runtime.fire_touched(&mut world, &[(pad, ball)]);
+    assert_eq!(lines(&mut runtime), ["first", "third"]);
+}
+
+#[test]
+fn a_handler_that_waits_does_not_block_other_handlers_or_the_frame() {
+    let (mut world, pad, ball) = world_with_pad_and_ball();
+    let mut runtime = ScriptRuntime::new();
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/touch.server.lua",
+        r#"
+        workspace.Pad.Touched:Connect(function(other)
+            print("slow handler starts")
+            task.wait(1)
+            print("slow handler done, touched by " .. other.Name)
+        end)
+        workspace.Pad.Touched:Connect(function()
+            print("fast handler")
+        end)
+        "#,
+    );
+    // `fire_touched` returning at all shows the frame isn't held up.
+    runtime.fire_touched(&mut world, &[(pad, ball)]);
+    assert_eq!(lines(&mut runtime), ["slow handler starts", "fast handler"]);
+    // A second touch while the first call still waits runs it again, separately.
+    runtime.fire_touched(&mut world, &[(pad, ball)]);
+    assert_eq!(lines(&mut runtime), ["slow handler starts", "fast handler"]);
+
+    runtime.step(&mut world, 0.5);
+    assert_eq!(lines(&mut runtime), Vec::<String>::new());
+    runtime.step(&mut world, 0.5);
+    assert_eq!(
+        lines(&mut runtime),
+        [
+            "slow handler done, touched by Ball",
+            "slow handler done, touched by Ball"
+        ]
+    );
+}
+
+#[test]
+fn an_error_in_a_handler_is_reported_and_other_handlers_still_run() {
+    let (mut world, pad, ball) = world_with_pad_and_ball();
+    let mut runtime = ScriptRuntime::new();
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/touch.server.lua",
+        r#"workspace.Pad.Touched:Connect(function()
+    error("oops")
+end)
+workspace.Pad.Touched:Connect(function() print("still runs") end)"#,
+    );
+    let expected = ["error: scripts/touch.server.lua:2: oops", "still runs"];
+    runtime.fire_touched(&mut world, &[(pad, ball)]);
+    assert_eq!(lines(&mut runtime), expected);
+    // The handler stays connected, as in Roblox.
+    runtime.fire_touched(&mut world, &[(pad, ball)]);
+    assert_eq!(lines(&mut runtime), expected);
+}
+
+#[test]
+fn touches_with_a_destroyed_part_are_skipped_and_its_handlers_dropped() {
+    let (mut world, pad, ball) = world_with_pad_and_ball();
+    let mut runtime = ScriptRuntime::new();
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/touch.server.lua",
+        r#"
+        local connection = workspace.Ball.Touched:Connect(function() print("ball touched") end)
+        workspace.Pad.Touched:Connect(function() print("pad touched") end)
+        task.delay(0.1, function() print(connection.Connected) end)
+        "#,
+    );
+    world.destroy(ball).unwrap();
+    runtime.fire_touched(&mut world, &[(pad, ball)]);
+    runtime.step(&mut world, 0.1);
+    assert_eq!(lines(&mut runtime), ["false"]);
+}
+
+#[test]
+fn events_explain_mistakes() {
+    let (mut world, _) = world_with_block();
+    let output = output_of(
+        &mut world,
+        r#"
+        print(workspace.Block.Touched)
+        print(workspace.Block.Touched == workspace.Block.Touched)
+        print(workspace.Block.Touched:Connect(print))
+        print(pcall(function() workspace.Block.Touched = 5 end))
+        print(pcall(function() workspace.Block.Touched:Connect("print") end))
+        print(pcall(function() return workspace.Touched end))
+        "#,
+    );
+    let expected = [
+        "Signal Touched",
+        "true",
+        "Connection",
+        "Part.Touched is an event and can't be set; use Touched:Connect(function) to react to it",
+        "Connect takes a function, not a string",
+        "Touched is not a valid member of Workspace \"Workspace\"",
+    ];
+    assert_eq!(output.len(), expected.len(), "{output:?}");
+    for (line, expected) in output.iter().zip(expected) {
+        assert!(
+            line.ends_with(expected),
+            "{line:?} should end with {expected:?}"
+        );
+    }
+}

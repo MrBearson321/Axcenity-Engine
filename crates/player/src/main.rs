@@ -1,8 +1,9 @@
 //! Axcenity Player: the runtime that ships with every exported game.
 //!
-//! Phase 6: loads a project folder, starts its server scripts, and runs the
-//! frame loop: resume scripts whose `task.wait` is over, step physics, then
-//! draw the Workspace, with a fly camera for looking around.
+//! Phase 7: loads a project folder, starts its server scripts, and runs the
+//! frame loop: resume scripts whose `task.wait` is over, step physics, fire
+//! `Touched` for parts that started touching, then draw the Workspace, with a
+//! fly camera for looking around.
 
 mod camera;
 mod scene;
@@ -231,7 +232,13 @@ impl ApplicationHandler for App {
                 //    after scripts so it sees what they changed this frame.
                 self.physics.step(&mut self.world, f64::from(seconds));
 
-                // 4 and 5 (Touched events, UI layout) come in later phases.
+                // 4. Fire `Touched` for parts that started touching during
+                //    those steps. Handlers that wait carry on in step 2.
+                let touches = self.physics.take_touches();
+                self.scripts.fire_touched(&mut self.world, &touches);
+                print_output(&mut self.scripts);
+
+                // 5 (UI layout) comes in a later phase.
 
                 // 6. Build the draw list and render.
                 let draw_list = scene::build_draw_list(&self.world, self.camera.to_render_camera());
@@ -310,7 +317,8 @@ mod tests {
     }
 
     /// Runs frames at 60 fps until the game clock reaches `until` seconds,
-    /// with scripts and then physics each frame, as the frame loop does.
+    /// with scripts, physics and then `Touched` each frame, as the frame loop
+    /// does.
     fn run_until(
         world: &mut World,
         scripts: &mut ScriptRuntime,
@@ -321,6 +329,8 @@ mod tests {
         while f64::from(*clock) / 60.0 < until {
             scripts.step(world, 1.0 / 60.0);
             physics.step(world, 1.0 / 60.0);
+            let touches = physics.take_touches();
+            scripts.fire_touched(world, &touches);
             *clock += 1;
         }
     }
@@ -458,5 +468,81 @@ mod tests {
             panic!("the spinner has no Orientation");
         };
         assert!((orientation.y - 315.0).abs() < 0.5, "{orientation:?}");
+    }
+
+    /// Like `run_until`, but also collects what scripts printed.
+    fn run_and_collect(
+        world: &mut World,
+        scripts: &mut ScriptRuntime,
+        physics: &mut Physics,
+        clock: &mut u32,
+        until: f64,
+    ) -> Vec<String> {
+        let mut printed = Vec::new();
+        while f64::from(*clock) / 60.0 < until {
+            run_until(world, scripts, physics, clock, f64::from(*clock + 1) / 60.0);
+            printed.extend(
+                scripts
+                    .take_output()
+                    .into_iter()
+                    .map(|line| match line.kind {
+                        OutputKind::Print => line.text,
+                        OutputKind::Error => format!("error: {}", line.text),
+                    }),
+            );
+        }
+        printed
+    }
+
+    #[test]
+    fn hello_touched_demo_recolors_the_pad_and_prints_what_landed() {
+        let (mut world, mut scripts) = start_example("hello-touched");
+        let mut physics = Physics::new();
+        let mut clock = 0;
+        let pad = world.find_first_child(world.workspace(), "Pad").unwrap();
+        let color = |world: &World| world.get(pad).unwrap().property("Color").cloned();
+        let start_color = color(&world);
+
+        // The red ball falls about 9 studs and lands within the first second.
+        let first = run_and_collect(&mut world, &mut scripts, &mut physics, &mut clock, 2.9);
+        assert!(!first.is_empty(), "the ball should have landed");
+        assert!(
+            first.iter().all(|line| line == "Ball touched the pad"),
+            "{first:?}"
+        );
+        assert_ne!(color(&world), start_color, "the pad changed color");
+
+        // At 3 s a blue ball drops; at 6 s the script disconnects.
+        let second = run_and_collect(&mut world, &mut scripts, &mut physics, &mut clock, 6.0);
+        let (last, landings) = second.split_last().unwrap();
+        assert_eq!(last, "stopped listening for touches");
+        assert!(!landings.is_empty(), "the blue ball should have landed");
+        assert!(
+            landings
+                .iter()
+                .all(|line| line == "BlueBall touched the pad"),
+            "{second:?}"
+        );
+
+        // The last ball lands after the disconnect, so nothing more happens.
+        let after = run_and_collect(&mut world, &mut scripts, &mut physics, &mut clock, 9.0);
+        assert_eq!(after, Vec::<String>::new());
+        let ignored = position_of(&world, "IgnoredBall");
+        assert!(ignored.y < 2.0, "the last ball landed: {ignored:?}");
+    }
+
+    #[test]
+    fn settled_hello_physics_parts_stop_reporting_touches() {
+        let (mut world, mut scripts) = start_example("hello-physics");
+        let mut physics = Physics::new();
+        let mut clock = 0;
+        run_until(&mut world, &mut scripts, &mut physics, &mut clock, 9.0);
+        // Everything is at rest now, so 3 more seconds report no new touches.
+        let mut touches = Vec::new();
+        for _ in 0..180 {
+            physics.step(&mut world, 1.0 / 60.0);
+            touches.extend(physics.take_touches());
+        }
+        assert_eq!(touches, []);
     }
 }

@@ -253,3 +253,107 @@ fn orientation_survives_the_trip_through_a_rotation() {
         assert!(close, "{degrees:?} came back as {back:?}");
     }
 }
+
+/// Runs `seconds` at 60 fps and returns every touch reported, frame by frame.
+fn touches_during(
+    physics: &mut Physics,
+    world: &mut World,
+    seconds: f64,
+) -> Vec<(InstanceId, InstanceId)> {
+    let frames = (seconds * 60.0).round() as u32;
+    let mut touches = Vec::new();
+    for _ in 0..frames {
+        physics.step(world, 1.0 / 60.0);
+        touches.extend(physics.take_touches());
+    }
+    touches
+}
+
+/// The pair as physics reports it: smaller ID first.
+fn pair(a: InstanceId, b: InstanceId) -> (InstanceId, InstanceId) {
+    if a < b { (a, b) } else { (b, a) }
+}
+
+#[test]
+fn a_landing_is_reported_once_not_every_step_while_resting() {
+    let (mut world, floor) = world_with_floor();
+    let block = part(&mut world, Vector3::new(0.0, 3.0, 0.0), false);
+    let mut physics = Physics::new();
+
+    let landing = touches_during(&mut physics, &mut world, 2.0);
+    assert!(!landing.is_empty(), "the landing should be reported");
+    assert!(
+        landing.iter().all(|&t| t == pair(block, floor)),
+        "{landing:?}"
+    );
+
+    // Resting on the floor for 5 more seconds reports nothing new.
+    assert_eq!(touches_during(&mut physics, &mut world, 5.0), []);
+}
+
+#[test]
+fn a_heavy_block_dropped_a_short_way_is_reported_exactly_once() {
+    let (mut world, floor) = world_with_floor();
+    let block = part(&mut world, Vector3::new(0.0, 1.0, 0.0), false);
+    let mut physics = Physics::new();
+    assert_eq!(
+        touches_during(&mut physics, &mut world, 3.0),
+        [pair(block, floor)]
+    );
+}
+
+#[test]
+fn parts_already_touching_at_the_start_are_not_reported() {
+    let (mut world, _) = world_with_floor();
+    // Resting exactly on the floor's top.
+    part(&mut world, Vector3::new(0.0, 0.5, 0.0), false);
+    let mut physics = Physics::new();
+    assert_eq!(touches_during(&mut physics, &mut world, 2.0), []);
+}
+
+#[test]
+fn touching_again_after_a_teleport_is_a_new_touch() {
+    let (mut world, floor) = world_with_floor();
+    let block = part(&mut world, Vector3::new(0.0, 1.0, 0.0), false);
+    let mut physics = Physics::new();
+    assert_eq!(touches_during(&mut physics, &mut world, 2.0).len(), 1);
+
+    set(&mut world, block, "Position", vector(0.0, 1.0, 0.0));
+    assert_eq!(
+        touches_during(&mut physics, &mut world, 2.0),
+        [pair(block, floor)]
+    );
+}
+
+#[test]
+fn two_falling_parts_landing_report_each_pair() {
+    let (mut world, floor) = world_with_floor();
+    let left = part(&mut world, Vector3::new(-5.0, 1.0, 0.0), false);
+    let right = part(&mut world, Vector3::new(5.0, 2.0, 0.0), false);
+    let mut physics = Physics::new();
+    let touches = touches_during(&mut physics, &mut world, 3.0);
+    assert_eq!(touches, [pair(left, floor), pair(right, floor)]);
+}
+
+#[test]
+fn anchored_parts_never_touch_each_other() {
+    let (mut world, _) = world_with_floor();
+    // Overlapping the floor, but anchored, so physics doesn't move or test it.
+    part(&mut world, Vector3::new(0.0, 0.0, 0.0), true);
+    let mut physics = Physics::new();
+    assert_eq!(touches_during(&mut physics, &mut world, 1.0), []);
+}
+
+#[test]
+fn a_bouncing_ball_is_reported_for_each_real_landing() {
+    let (mut world, floor) = world_with_floor();
+    let ball = part(&mut world, Vector3::new(0.0, 20.0, 0.0), false);
+    set(&mut world, ball, "Shape", Value::PartType(PartType::Ball));
+    set(&mut world, ball, "Size", vector(2.0, 2.0, 2.0));
+    let mut physics = Physics::new();
+    let touches = touches_during(&mut physics, &mut world, 5.0);
+    eprintln!("bounce touches: {}", touches.len());
+    assert!(!touches.is_empty());
+    assert!(touches.iter().all(|&t| t == pair(ball, floor)));
+    assert_eq!(touches_during(&mut physics, &mut world, 3.0), []);
+}

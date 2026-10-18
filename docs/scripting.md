@@ -14,7 +14,7 @@ Read before working in the `script` or `blocks` crates, or adding anything to th
 - Clean up Roblox quirks when it helps beginners. Don't chase full compatibility.
 - Never use Roblox's name, logos or assets.
 
-## API so far (Phase 6)
+## API so far (Phase 7)
 
 - Globals: `game`, `workspace`, `script` (the running Script), `print`, `Instance.new(className)`, `Vector3.new(x, y, z)`, `Color3.new(r, g, b)`, `Color3.fromRGB(r, g, b)`, `Enum` and `task` (see Execution model).
 - Instances: `Name`, `ClassName` (read-only), `Parent` (an Instance or `nil`), every property in `core`'s class table, and `:FindFirstChild(name, recursive?)`.
@@ -23,6 +23,7 @@ Read before working in the `script` or `blocks` crates, or adding anything to th
 - `Vector3`: `.X .Y .Z .Magnitude .Unit`, `+ -`, `*` and `/` by a number or another Vector3, unary `-`, `==`. Prints as `1, 2, 3`.
 - `Color3`: `.R .G .B`, `==`. `Color3.new` rejects channels outside 0 to 1 with a hint to use `fromRGB`, matching the world file's check (Roblox allows them silently).
 - Numbers are Lua 5.4 numbers, so `print(part.Position.Y)` shows `5.0`.
+- **Events** (decided in Phase 7): `part.Touched` is a Signal. `signal:Connect(fn)` returns a Connection with `:Disconnect()` (calling it twice is harmless) and `.Connected`. `Touched` handlers get the other part. Event names come from `ClassName::events()` in `core`; `instance.Key` checks them after properties and before children, and assigning to one explains how to connect instead. Connections to a destroyed Instance are dropped at the next step. `:Once` and `:Wait` aren't built yet (Phase 16 at the earliest).
 - `Part.Anchored` (default `false`): unanchored parts fall under physics. Setting `Position` or `Orientation` on one teleports it and stops it; physics writes both back as the part moves. See Physics in `docs/architecture.md`.
 
 ## Errors
@@ -51,7 +52,7 @@ Each script gets its own restricted environment. Remove or replace `io`, `os` (k
 - **Resume order**: earliest due first; ties in the order they were scheduled. A task within 1 µs of due counts as due, so float rounding in summed frame times never costs a whole frame. A `task.wait(1)` loop still drifts by up to a frame per wait when frames are uneven (as in Roblox); use the returned time for exact timing.
 - `task.wait` inside a script's own coroutine (`coroutine.wrap`) pauses just that coroutine and returns control to whoever resumed it; the scheduler resumes it later. It also works inside `pcall`.
 - No legacy `wait`, `spawn` or `delay` globals (decided in Phase 5): only `task.*`.
-- Event handlers fired in the same frame run in a deterministic order.
+- Event handlers fired in the same frame run in a deterministic order: touches in the order physics found them (sorted pairs per step), then for each pair the first part's handlers and then the other's, each in the order they were connected. Handlers run **immediately** when the event fires (step 4), each as a new coroutine, so a handler that calls `task.wait` pauses only itself and the scheduler resumes it later. A handler disconnected by an earlier handler in the same firing doesn't run. An error in a handler is reported and the handler stays connected, as in Roblox.
 - **Watchdog**: an instruction-count hook aborts a coroutine that runs too long without yielding, and reports an error with the script name and line.
 - Errors in one script never stop other scripts. Report them to Output with the script path and line. An error in a `task.spawn` or `task.delay` function is reported the same way and doesn't stop the script that started it.
 

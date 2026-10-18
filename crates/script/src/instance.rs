@@ -7,6 +7,7 @@ use mlua::{
     AppDataRef, AppDataRefMut, FromLua, IntoLua, Lua, MetaMethod, UserData, UserDataMethods,
 };
 
+use crate::events::LuaSignal;
 use crate::types::{type_name, value_from_lua, value_to_lua};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,7 +64,8 @@ impl UserData for LuaInstance {
             },
         );
 
-        // `instance.Key`: a field, then a property, then a child with that name.
+        // `instance.Key`: a field, then a property, then an event, then a
+        // child with that name.
         methods.add_meta_method(MetaMethod::Index, |lua, this, key: String| {
             get(lua, this.0, &key)
         });
@@ -97,6 +99,18 @@ fn get(lua: &Lua, id: InstanceId, key: &str) -> mlua::Result<mlua::Value> {
     }
     if let Some(value) = instance.property(key) {
         return value_to_lua(lua, value);
+    }
+    if let Some(&event) = instance
+        .class()
+        .events()
+        .iter()
+        .find(|&&event| event == key)
+    {
+        return LuaSignal {
+            instance: id,
+            event,
+        }
+        .into_lua(lua);
     }
     if let Some(child) = world.find_first_child(id, key) {
         return LuaInstance(child).into_lua(lua);
@@ -140,8 +154,14 @@ fn set(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> mlua::Result
             let (class, kind) = {
                 let world = world(lua)?;
                 let instance = world.get(id).ok_or_else(destroyed)?;
+                let class = instance.class();
                 match instance.property(key) {
-                    Some(current) => (instance.class(), current.kind()),
+                    Some(current) => (class, current.kind()),
+                    None if class.events().contains(&key) => {
+                        return Err(mlua::Error::runtime(format!(
+                            "{class}.{key} is an event and can't be set; use {key}:Connect(function) to react to it"
+                        )));
+                    }
                     None => return Err(not_a_member(&world, id, key)),
                 }
             };

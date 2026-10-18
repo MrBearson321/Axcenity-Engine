@@ -6,7 +6,9 @@
 //! - Every script gets its own global variables, and only safe parts of the
 //!   standard library (see `sandbox`).
 //! - The engine API (`game`, `workspace`, `Instance`, `Vector3`, ...) lives in
-//!   `api`, `instance` and `types`.
+//!   `api`, `instance` and `types`. Events (`part.Touched:Connect`) live in
+//!   `events`, and the host fires them with methods such as
+//!   [`ScriptRuntime::fire_touched`].
 //! - [`lua_definitions`] describes that API for editors (see `definitions`).
 //! - `print` output and errors are collected as [`OutputLine`]s for the host to
 //!   show: the player's console now, the editor's Output panel later.
@@ -14,6 +16,7 @@
 mod api;
 mod definitions;
 mod errors;
+mod events;
 mod instance;
 mod sandbox;
 mod scheduler;
@@ -67,6 +70,7 @@ impl ScriptRuntime {
             .expect("loading Lua's standard libraries only fails when out of memory");
         lua.set_app_data(Output::default());
         lua.set_app_data(scheduler::Scheduler::default());
+        lua.set_app_data(events::Connections::default());
         let shared = sandbox::Shared::new(&lua)
             .expect("creating the shared script functions only fails when out of memory");
         Self { lua, shared }
@@ -122,7 +126,28 @@ impl ScriptRuntime {
     /// resumes every paused script whose wait is over, and every
     /// `task.delay` whose time has come.
     pub fn step(&mut self, world: &mut World, seconds: f64) {
+        if let Some(mut connections) = self.lua.app_data_mut::<events::Connections>() {
+            connections.forget(|id| world.contains(id));
+        }
         with_world(&self.lua, world, || scheduler::step(&self.lua, seconds));
+    }
+
+    /// Frame-order step 4: fires `Touched` on both parts of each pair that
+    /// started touching, in the order given. Each handler gets the other part
+    /// and runs as its own coroutine, so one that waits doesn't hold up the
+    /// rest. Pairs with a part that a handler destroyed are skipped.
+    pub fn fire_touched(&mut self, world: &mut World, touches: &[(InstanceId, InstanceId)]) {
+        with_world(&self.lua, world, || {
+            for &(a, b) in touches {
+                for (part, other) in [(a, b), (b, a)] {
+                    let both_exist = instance::world(&self.lua)
+                        .is_ok_and(|world| world.contains(part) && world.contains(other));
+                    if both_exist {
+                        events::fire(&self.lua, part, "Touched", instance::LuaInstance(other));
+                    }
+                }
+            }
+        });
     }
 
     /// Removes and returns the output produced since the last call.

@@ -2,8 +2,9 @@
 //! `---@field` annotations describing the whole script API, so editors such
 //! as VS Code can autocomplete it and point out mistakes.
 //!
-//! - Classes, properties and enums come straight from `core`, so they can't
-//!   fall out of date. A new property only needs a line in `PROPERTY_DOCS`.
+//! - Classes, properties, events and enums come straight from `core`, so they
+//!   can't fall out of date. A new property only needs a line in
+//!   `PROPERTY_DOCS`, and a new event one in `EVENT_DOCS`.
 //! - Functions, globals and value types are described by hand below.
 //! - Tests check the descriptions against what scripts really get, and that
 //!   the checked-in file matches this generator.
@@ -152,6 +153,32 @@ const INSTANCE_METHODS: &[Function] = &[Function {
     returns: "Instance?",
 }];
 
+/// What `part.Touched` and other events are.
+const SIGNAL_DOC: &str =
+    "An event, such as `part.Touched`. Connect a function to run it every time the event fires.";
+
+const SIGNAL_METHODS: &[Function] = &[Function {
+    name: "Connect",
+    doc: "Runs `callback` every time the event fires, each time as its own task (so it may `task.wait`). Returns a Connection for stopping it.",
+    params: &[("callback", "function")],
+    returns: "Connection",
+}];
+
+const CONNECTION_DOC: &str = "A function connected to an event, returned by `Connect`.";
+
+const CONNECTION_FIELDS: &[Field] = &[Field {
+    name: "Connected",
+    ty: "boolean",
+    doc: "True until `Disconnect` is called (or the Instance is destroyed).",
+}];
+
+const CONNECTION_METHODS: &[Function] = &[Function {
+    name: "Disconnect",
+    doc: "Stops the function from running when the event fires again. Calling it twice is harmless.",
+    params: &[],
+    returns: "nil",
+}];
+
 /// Globals that are Instances.
 const INSTANCE_GLOBALS: &[(&str, ClassName, &str)] = &[
     (
@@ -286,6 +313,14 @@ const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "From 0 (mirror-smooth) to 1 (matte).",
     ),
 ];
+
+/// What each event means, including what its handler receives. A test
+/// checks every event in `core` is here.
+const EVENT_DOCS: &[(ClassName, &str, &str)] = &[(
+    ClassName::Part,
+    "Touched",
+    "Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.",
+)];
 
 /// What each class is. A `match` with no `_` case, so adding a class won't
 /// compile until it has a description here.
@@ -436,6 +471,24 @@ pub fn lua_definitions() -> String {
         w.function("InstanceClass", ':', method, &[]);
     }
 
+    w.doc(SIGNAL_DOC);
+    w.line("---@class Signal");
+    w.line("local SignalClass = {}");
+    w.line("");
+    for method in SIGNAL_METHODS {
+        w.function("SignalClass", ':', method, &[]);
+    }
+    w.doc(CONNECTION_DOC);
+    w.line("---@class Connection");
+    for field in CONNECTION_FIELDS {
+        w.field(field);
+    }
+    w.line("local ConnectionClass = {}");
+    w.line("");
+    for method in CONNECTION_METHODS {
+        w.function("ConnectionClass", ':', method, &[]);
+    }
+
     // The services, as `game` holds them, so `game.Workspace` autocompletes.
     let world = World::new();
     let services: Vec<ClassName> = world
@@ -465,6 +518,10 @@ pub fn lua_definitions() -> String {
                 "---@field {name} {} {doc}",
                 lua_type(default.kind())
             ));
+        }
+        for &event in class.events() {
+            let doc = event_doc(class, event).unwrap_or("");
+            w.line(&format!("---@field {event} Signal {doc}"));
         }
         w.line("");
     }
@@ -509,6 +566,13 @@ fn overloads(library: &Library, function: &Function) -> Vec<String> {
         .filter(|class| !class.is_service())
         .map(|class| format!("fun(className: \"{class}\"): {class}"))
         .collect()
+}
+
+fn event_doc(class: ClassName, event: &str) -> Option<&'static str> {
+    EVENT_DOCS
+        .iter()
+        .find(|(c, e, _)| *c == class && *e == event)
+        .map(|(_, _, doc)| *doc)
 }
 
 fn property_doc(class: ClassName, property: &str) -> Option<&'static str> {
@@ -565,6 +629,22 @@ mod tests {
         assert_eq!(
             in_core, described,
             "PROPERTY_DOCS doesn't match the properties in core"
+        );
+    }
+
+    #[test]
+    fn every_event_has_a_description() {
+        let in_core: BTreeSet<_> = ClassName::ALL
+            .into_iter()
+            .flat_map(|class| class.events().iter().map(move |e| (class.as_str(), *e)))
+            .collect();
+        let described: BTreeSet<_> = EVENT_DOCS
+            .iter()
+            .map(|(c, e, _)| (c.as_str(), *e))
+            .collect();
+        assert_eq!(
+            in_core, described,
+            "EVENT_DOCS doesn't match the events in core"
         );
     }
 
@@ -639,6 +719,25 @@ mod tests {
         for method in INSTANCE_METHODS {
             checks.push(format!(
                 "assert(type(part.{0}) == 'function', 'Instance:{0}')",
+                method.name
+            ));
+        }
+        checks.push("local connection = part.Touched:Connect(function() end)".to_owned());
+        for method in SIGNAL_METHODS {
+            checks.push(format!(
+                "assert(type(part.Touched.{0}) == 'function', 'Signal:{0}')",
+                method.name
+            ));
+        }
+        for field in CONNECTION_FIELDS {
+            checks.push(format!(
+                "assert(connection.{0} ~= nil, 'Connection.{0}')",
+                field.name
+            ));
+        }
+        for method in CONNECTION_METHODS {
+            checks.push(format!(
+                "assert(type(connection.{0}) == 'function', 'Connection:{0}')",
                 method.name
             ));
         }

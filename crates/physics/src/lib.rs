@@ -8,10 +8,13 @@
 //! Physics never gets told about changes. Instead, before stepping it compares
 //! every Part with what it last saw (or wrote), so a script that moves,
 //! anchors, resizes or deletes a part is noticed on the next frame.
+//!
+//! After each step it also notes which parts started touching, for the
+//! `Touched` event. The host collects them with [`Physics::take_touches`].
 
 mod shapes;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use axcenity_core::{Instance, InstanceId, PartType, Value, Vector3, World};
 use rapier3d::glamx::{EulerRot, Quat, Vec3};
@@ -38,6 +41,12 @@ const STEP_TOLERANCE: f64 = 1e-6;
 /// resistance, so without this a ball on flat ground would roll forever.
 const ANGULAR_DAMPING: f32 = 0.5;
 
+/// How many steps in a row two parts must be apart before touching again
+/// counts as a new touch. Parts resting on each other can lose and regain
+/// contact for a single step; this stops that from firing `Touched` again,
+/// while a real bounce (apart for many steps) still does.
+const SEPARATE_STEPS: u32 = 3;
+
 /// Owns the rapier simulation and remembers which body belongs to which Part.
 pub struct Physics {
     rapier: PhysicsWorld,
@@ -47,6 +56,17 @@ pub struct Physics {
     /// Time passed that hasn't been simulated yet, always less than one step
     /// after [`step`](Self::step).
     unsimulated_seconds: f64,
+    /// Which part each collider belongs to, to name the parts in a contact.
+    owners: HashMap<ColliderHandle, InstanceId>,
+    /// Pairs of parts that count as touching (smaller ID first), with how
+    /// many steps in a row they've been apart (see [`SEPARATE_STEPS`]).
+    touching: BTreeMap<(InstanceId, InstanceId), u32>,
+    /// False until the first step has run. Contacts found in that step were
+    /// there when the game started, so they aren't reported (decided in Phase 7).
+    started: bool,
+    /// Pairs that started touching since the last
+    /// [`take_touches`](Self::take_touches).
+    touches: Vec<(InstanceId, InstanceId)>,
 }
 
 /// One Part's rapier body, plus the part's properties as physics last saw or
@@ -115,6 +135,10 @@ impl Physics {
             rapier,
             parts: BTreeMap::new(),
             unsimulated_seconds: 0.0,
+            owners: HashMap::new(),
+            touching: BTreeMap::new(),
+            started: false,
+            touches: Vec::new(),
         }
     }
 
@@ -134,6 +158,7 @@ impl Physics {
             }
             self.rapier.step();
             self.write_to_world(world);
+            self.find_touches();
             self.unsimulated_seconds = (self.unsimulated_seconds - STEP_SECONDS).max(0.0);
             steps += 1;
         }
@@ -143,6 +168,13 @@ impl Physics {
     /// True if `id` currently has a body in the simulation.
     pub fn has_body(&self, id: InstanceId) -> bool {
         self.parts.contains_key(&id)
+    }
+
+    /// Removes and returns the pairs of parts that started touching since the
+    /// last call, in a fixed order. Each pair is listed once; frame step 4
+    /// fires `Touched` on both parts.
+    pub fn take_touches(&mut self) -> Vec<(InstanceId, InstanceId)> {
+        std::mem::take(&mut self.touches)
     }
 
     /// How many parts are being simulated (anchored ones included).
@@ -170,19 +202,26 @@ impl Physics {
             if let Some(part) = self.parts.remove(&id) {
                 // `true` also removes the body's collider.
                 self.rapier.remove_body_with_colliders(part.body, true);
+                self.owners.remove(&part.collider);
                 anything_changed = true;
             }
         }
+        // A part that comes back (moved into the Workspace again) touches anew.
+        self.touching
+            .retain(|(a, b), _| current.contains_key(a) && current.contains_key(b));
 
         for (id, state) in current {
             match self.parts.get(&id) {
                 None => {
                     let part = self.add_body(state);
+                    self.owners.insert(part.collider, id);
                     self.parts.insert(id, part);
                 }
                 Some(part) if part.seen != state => {
                     let mut part = self.parts.remove(&id).expect("just found");
+                    self.owners.remove(&part.collider);
                     self.apply_change(&mut part, state);
+                    self.owners.insert(part.collider, id);
                     self.parts.insert(id, part);
                     anything_changed = true;
                 }
@@ -254,6 +293,40 @@ impl Physics {
             body.set_linvel(Vec3::ZERO, true);
             body.set_angvel(Vec3::ZERO, true);
         }
+    }
+
+    /// Compares the parts touching after this step with those touching
+    /// before, and records the pairs that are new.
+    fn find_touches(&mut self) {
+        // Only contacts the solver acts on count, not pairs whose bounding
+        // boxes merely overlap. A set, so the order is the same every run.
+        let now: BTreeSet<(InstanceId, InstanceId)> = self
+            .rapier
+            .contact_pairs()
+            .filter(|pair| pair.has_any_active_contact())
+            .filter_map(|pair| {
+                let a = *self.owners.get(&pair.collider1)?;
+                let b = *self.owners.get(&pair.collider2)?;
+                Some(if a < b { (a, b) } else { (b, a) })
+            })
+            .collect();
+
+        for &(a, b) in &now {
+            // `insert` returns the old value: `None` means the pair is new.
+            let was_touching = self.touching.insert((a, b), 0).is_some();
+            if !was_touching && self.started {
+                self.touches.push((a, b));
+            }
+        }
+        // Pairs that are apart this step stop counting once they've been
+        // apart for long enough.
+        self.touching.retain(|pair, steps_apart| {
+            if !now.contains(pair) {
+                *steps_apart += 1;
+            }
+            *steps_apart < SEPARATE_STEPS
+        });
+        self.started = true;
     }
 
     /// Copies where each moving part is now into its `Position` and

@@ -153,9 +153,9 @@ Add a general event/signal system with `:Connect` that returns a connection you 
 ### Acceptance criteria
 
 - [ ] The Milestone 1 demo project runs end-to-end on all three OSes.
-- [ ] `Touched` fires once per new contact, not every frame while touching.
-- [ ] `:Disconnect` stops further calls to the handler.
-- [ ] A handler that calls `task.wait` doesn't block other handlers or the frame.
+- [x] `Touched` fires once per new contact, not every frame while touching.
+- [x] `:Disconnect` stops further calls to the handler.
+- [x] A handler that calls `task.wait` doesn't block other handlers or the frame.
 
 ---
 

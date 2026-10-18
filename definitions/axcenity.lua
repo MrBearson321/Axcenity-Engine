@@ -71,6 +71,24 @@ local InstanceClass = {}
 ---@return Instance?
 function InstanceClass:FindFirstChild(name, recursive) end
 
+---An event, such as `part.Touched`. Connect a function to run it every time the event fires.
+---@class Signal
+local SignalClass = {}
+
+---Runs `callback` every time the event fires, each time as its own task (so it may `task.wait`). Returns a Connection for stopping it.
+---@param callback function
+---@return Connection
+function SignalClass:Connect(callback) end
+
+---A function connected to an event, returned by `Connect`.
+---@class Connection
+---@field Connected boolean True until `Disconnect` is called (or the Instance is destroyed).
+local ConnectionClass = {}
+
+---Stops the function from running when the event fires again. Calling it twice is harmless.
+---@return nil
+function ConnectionClass:Disconnect() end
+
 ---The root of the game, called `game` in scripts.
 ---@class DataModel: Instance
 ---@field Workspace Workspace The service that holds the 3D world. Parts inside it are drawn.
@@ -93,6 +111,7 @@ function InstanceClass:FindFirstChild(name, recursive) end
 ---@field Material EnumItem.Material|"Plastic"|"Metal"|"Glass"|"Neon" Plastic, Metal, Glass (see-through) or Neon (glows). Setting it resets Metalness and Roughness.
 ---@field Metalness number From 0 (not metal) to 1 (metal).
 ---@field Roughness number From 0 (mirror-smooth) to 1 (matte).
+---@field Touched Signal Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.
 
 ---Lua code that runs on the server, from a `.server.lua` file.
 ---@class Script: Instance
