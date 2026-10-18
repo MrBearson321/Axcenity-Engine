@@ -383,6 +383,24 @@ const CLASS_METHODS: &[(ClassName, Function)] = &[
             returns: "nil",
         },
     ),
+    (
+        ClassName::Sound,
+        Function {
+            name: "Play",
+            doc: "Starts this sound using its SoundId, Volume and Looped properties. Playing it again restarts it; stopping the game session stops all sounds.",
+            params: &[],
+            returns: "nil",
+        },
+    ),
+    (
+        ClassName::Sound,
+        Function {
+            name: "Stop",
+            doc: "Stops this sound if it is playing.",
+            params: &[],
+            returns: "nil",
+        },
+    ),
 ];
 
 /// Fields only some classes have, besides their properties and events.
@@ -526,8 +544,28 @@ const ENUM_GLOBAL_DOC: &str =
 const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     (
         ClassName::ScreenGui,
+        "Class",
+        "Space-separated CSS class names used to style this UI Instance.",
+    ),
+    (
+        ClassName::ScreenGui,
+        "Id",
+        "The CSS identifier used to style this UI Instance.",
+    ),
+    (
+        ClassName::ScreenGui,
         "Enabled",
         "If true, the UI in this ScreenGui is drawn.",
+    ),
+    (
+        ClassName::Frame,
+        "Class",
+        "Space-separated CSS class names used to style this UI Instance.",
+    ),
+    (
+        ClassName::Frame,
+        "Id",
+        "The CSS identifier used to style this UI Instance.",
     ),
     (
         ClassName::Frame,
@@ -556,6 +594,16 @@ const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     ),
     (
         ClassName::TextLabel,
+        "Class",
+        "Space-separated CSS class names used to style this UI Instance.",
+    ),
+    (
+        ClassName::TextLabel,
+        "Id",
+        "The CSS identifier used to style this UI Instance.",
+    ),
+    (
+        ClassName::TextLabel,
         "Position",
         "The top-left position relative to the parent, in scale and pixel offsets.",
     ),
@@ -581,6 +629,21 @@ const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::TextLabel,
         "Visible",
         "If false, this label is hidden.",
+    ),
+    (
+        ClassName::Sound,
+        "SoundId",
+        "The audio file inside the project folder, such as \"assets/audio/chime.wav\".",
+    ),
+    (
+        ClassName::Sound,
+        "Volume",
+        "Playback volume as a non-negative amplitude; 1 is the original level and 0 is silent.",
+    ),
+    (
+        ClassName::Sound,
+        "Looped",
+        "If true, playback repeats until Stop is called or the game session stops.",
     ),
     (
         ClassName::Part,
@@ -817,6 +880,7 @@ fn class_doc(class: ClassName) -> &'static str {
         ClassName::ScreenGui => "The on-screen UI root, usually inside Workspace.",
         ClassName::Frame => "A rectangular UI element that can contain other UI elements.",
         ClassName::TextLabel => "A UI element that displays text.",
+        ClassName::Sound => "A sound effect or music track that scripts can play.",
     }
 }
 
@@ -1364,6 +1428,7 @@ mod tests {
             (ClassName::Workspace, "workspace"),
             (ClassName::Players, "game.Players"),
             (ClassName::RemoteEvent, "Instance.new('RemoteEvent')"),
+            (ClassName::Sound, "Instance.new('Sound')"),
         ];
         let instance = |class: ClassName| {
             instances
@@ -1401,6 +1466,8 @@ mod tests {
         let samples = [
             ("Vector3", "Vector3.new(1, 2, 3)"),
             ("Color3", "Color3.new(1, 0, 0)"),
+            ("UDim", "UDim2.new(0, 1, 0, 1).X"),
+            ("UDim2", "UDim2.new(0, 1, 0, 1)"),
             ("EnumItem", "Enum.Material.Neon"),
             ("UserInputService", "game:GetService('UserInputService')"),
             ("RunService", "game:GetService('RunService')"),

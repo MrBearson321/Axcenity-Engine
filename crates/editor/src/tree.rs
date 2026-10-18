@@ -20,6 +20,7 @@ pub enum Insertable {
     ScreenGui,
     Frame,
     TextLabel,
+    Sound,
 }
 
 impl Insertable {
@@ -38,6 +39,7 @@ impl Insertable {
         Insertable::Frame,
         Insertable::TextLabel,
     ];
+    pub const AUDIO: [Insertable; 1] = [Insertable::Sound];
 
     /// What the buttons and menus call it. A Ball is a "Sphere", as in Studio.
     pub fn label(self) -> &'static str {
@@ -53,6 +55,7 @@ impl Insertable {
             Insertable::ScreenGui => "ScreenGui",
             Insertable::Frame => "Frame",
             Insertable::TextLabel => "TextLabel",
+            Insertable::Sound => "Sound",
         }
     }
 
@@ -66,6 +69,7 @@ impl Insertable {
             Insertable::ScreenGui => ClassName::ScreenGui,
             Insertable::Frame => ClassName::Frame,
             Insertable::TextLabel => ClassName::TextLabel,
+            Insertable::Sound => ClassName::Sound,
         }
     }
 }
@@ -121,11 +125,16 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
             world.get(id).map(|instance| instance.class()),
             Some(ClassName::ScreenGui | ClassName::Frame)
         );
+        let is_sound_container = matches!(
+            world.get(id).map(|instance| instance.class()),
+            Some(ClassName::Part | ClassName::MeshPart)
+        );
         id == world.replicated_storage()
             || (is_group && is_saved(world, id))
             || (is_ui_container
                 && matches!(what, Insertable::Frame | Insertable::TextLabel)
                 && is_saved(world, id))
+            || (is_sound_container && matches!(what, Insertable::Sound) && is_saved(world, id))
     })
     .unwrap_or(default)
 }

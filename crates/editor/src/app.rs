@@ -18,12 +18,14 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use axcenity_assets::Assets;
+use axcenity_blocks::{BlockScript, translate};
 use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
 use axcenity_project::ScriptFile;
 use axcenity_script::{CameraState, KeyEvent};
 use eframe::egui;
 
 use crate::autocomplete;
+use crate::block_editor;
 use crate::explorer::{self, Action, Explorer, ExplorerOutput};
 use crate::gizmo::{Snap, Tool};
 use crate::history::{self, Field, History, Move, Place};
@@ -37,7 +39,8 @@ use crate::side_warnings::{self, WarningCache};
 use crate::start::{self, Brand, ProjectLink, StartAction};
 use crate::theme::{self, filled_icons, icons};
 use crate::tree::{self, Insertable};
-use crate::viewport::{DragEdit, DragKind, Viewport};
+use crate::ui_handles::{CssEdit, UiDragEdit, apply_css_edits};
+use crate::viewport::{DragEdit, DragKind, Viewport, ViewportScene};
 use crate::watcher::Watcher;
 
 /// The hover text of Import Model, in the File menu and the toolbar.
@@ -103,6 +106,9 @@ pub struct EditorApp {
     explorer: Explorer,
     output: Output,
     viewport: Viewport,
+    /// Original stylesheet contents for the current viewport drag; CSS edit
+    /// spans remain relative to this text while the pointer moves.
+    ui_drag_baselines: HashMap<String, String>,
     /// The window title last sent to the window, to send it again only when it changes.
     shown_title: String,
     /// The game, while Play is on. `world` stays as it was before Play.
@@ -129,6 +135,14 @@ pub struct EditorApp {
     examples: Vec<ProjectLink>,
     /// True while Help > About is open.
     about_open: bool,
+}
+
+struct BlockDocument {
+    instance: InstanceId,
+    path: String,
+    script: BlockScript,
+    saved: BlockScript,
+    highlighted: Option<u64>,
 }
 
 /// The keys the editor's settings are saved under (see [`EditorApp::load_settings`]).
@@ -168,9 +182,11 @@ struct Keys {
 struct OpenProject {
     name: String,
     folder: PathBuf,
+    stylesheets: Vec<axcenity_ui::Stylesheet>,
     /// Its server scripts, sorted by path, with each file's text as last
     /// read or written. Play reads their files again, for the newest code.
     scripts: Vec<ScriptFile>,
+    block_scripts: Vec<BlockDocument>,
     /// Notices files changed by other programs.
     watcher: Watcher,
     /// The world file's text as last read or written, to tell the editor's
@@ -199,6 +215,7 @@ impl EditorApp {
             closing: false,
             output: Output::default(),
             viewport: Viewport::new(),
+            ui_drag_baselines: HashMap::new(),
             shown_title: String::new(),
             play: None,
             last_frame: None,
@@ -262,6 +279,15 @@ impl EditorApp {
             if scripts == 1 { "script" } else { "scripts" },
         ));
         files::report_problems(&mut self.output, &project);
+        let mut stylesheets = Vec::new();
+        for file in &project.stylesheets {
+            let (stylesheet, warnings) = axcenity_ui::parse_stylesheet(&file.path, &file.source);
+            stylesheets.push(stylesheet);
+            for warning in warnings {
+                self.output
+                    .warning(format!("{}: {}", warning.path, warning.message));
+            }
+        }
         // A project set up for autocomplete by an older engine gets this
         // engine's API.
         match autocomplete::refresh(&project.folder) {
@@ -291,11 +317,24 @@ impl EditorApp {
                 folder,
             },
         );
+        let block_scripts = project
+            .block_scripts
+            .into_iter()
+            .map(|file| BlockDocument {
+                instance: file.instance,
+                path: file.path,
+                script: file.script.clone(),
+                saved: file.script,
+                highlighted: None,
+            })
+            .collect();
         self.project = Some(OpenProject {
             name: project.manifest.name,
             watcher: Watcher::start(project.folder.clone()),
             folder: project.folder,
+            stylesheets,
             scripts: project.scripts,
+            block_scripts,
             world_text,
             keep_world_file: !project.world_loaded,
         });
@@ -391,7 +430,14 @@ impl EditorApp {
     /// True when the world or a script tab has changes that aren't saved.
     /// Undoing back to where it was saved counts as no changes.
     fn unsaved(&self) -> bool {
-        !self.history.is_saved() || self.tabs.any_unsaved()
+        !self.history.is_saved()
+            || self.tabs.any_unsaved()
+            || self.project.as_ref().is_some_and(|project| {
+                project
+                    .block_scripts
+                    .iter()
+                    .any(|document| document.script != document.saved)
+            })
     }
 
     /// Applies a change from the Properties panel, as an undo step such as
@@ -436,6 +482,78 @@ impl EditorApp {
             .map(|(name, value)| Edit::Property(name, value))
             .collect();
         self.change(edit.part, Field::Property(property), label, edits);
+    }
+
+    fn apply_ui_drag(&mut self, edit: UiDragEdit) {
+        if self.playing() || self.world.get(edit.id).is_none() {
+            return;
+        }
+        for (property, value) in edit.values {
+            self.apply(edit.id, Edit::Property(property, value));
+        }
+
+        let mut edits_by_path: HashMap<String, Vec<CssEdit>> = HashMap::new();
+        for css_edit in edit.css {
+            edits_by_path
+                .entry(css_edit.path.clone())
+                .or_default()
+                .push(css_edit);
+        }
+        for (path, edits) in edits_by_path {
+            if !self.ui_drag_baselines.contains_key(&path) {
+                let source = self
+                    .tabs
+                    .get(&path)
+                    .map(|tab| tab.text.clone())
+                    .or_else(|| {
+                        self.project.as_ref().and_then(|project| {
+                            std::fs::read_to_string(project.folder.join(&path)).ok()
+                        })
+                    });
+                let Some(source) = source else {
+                    self.output.error(format!(
+                        "Could not edit stylesheet `{path}`: its source file could not be read."
+                    ));
+                    continue;
+                };
+                self.ui_drag_baselines.insert(path.clone(), source.clone());
+                self.tabs.open_in_background(&path, &source);
+            }
+            let Some(source) = self.ui_drag_baselines.get(&path) else {
+                continue;
+            };
+            let updated = apply_css_edits(source, edits.iter());
+            if let Some(tab) = self.tabs.get_mut(&path) {
+                tab.text = updated.clone();
+            }
+            self.refresh_stylesheet(&path, &updated);
+        }
+    }
+
+    fn refresh_stylesheet(&mut self, path: &str, source: &str) {
+        let (stylesheet, warnings) = axcenity_ui::parse_stylesheet(path, source);
+        let Some(project) = &mut self.project else {
+            return;
+        };
+        match project
+            .stylesheets
+            .iter_mut()
+            .find(|existing| existing.path() == path)
+        {
+            Some(existing) => *existing = stylesheet,
+            None => {
+                let index = project
+                    .stylesheets
+                    .partition_point(|existing| existing.path() < path);
+                project.stylesheets.insert(index, stylesheet);
+            }
+        }
+        for warning in warnings {
+            self.output.warning(format!(
+                "Stylesheet `{}`: {}",
+                warning.path, warning.message
+            ));
+        }
     }
 
     /// Makes `edits` to `id` and records them in the history. `key` is the
@@ -559,6 +677,29 @@ impl EditorApp {
                 .set_camera_view(moved.position, moved.orientation),
             Ok(None) => {}
             Err(crash) => self.crashed(crash),
+        }
+    }
+
+    fn update_block_lua(&mut self, path: &str) {
+        let Some(source) = self.project.as_ref().and_then(|project| {
+            let document = project
+                .block_scripts
+                .iter()
+                .find(|document| document.path == path)?;
+            Some(translate(&document.script).ok()?.source)
+        }) else {
+            return;
+        };
+        if let Some(project) = &mut self.project
+            && let Some(script) = project
+                .scripts
+                .iter_mut()
+                .find(|script| script.path == path)
+        {
+            script.source = source.clone();
+        }
+        if let Some(tab) = self.tabs.get_mut(path) {
+            tab.text = source;
         }
     }
 
@@ -767,7 +908,14 @@ impl EditorApp {
     /// or `None` after putting up "Save changes?" because there are unsaved changes.
     fn request(&mut self, discard: Discard) -> Option<Discard> {
         let unsaved = match &discard {
-            Discard::CloseTab(path) => self.tabs.get(path).is_some_and(|tab| tab.unsaved()),
+            Discard::CloseTab(path) => {
+                self.tabs.get(path).is_some_and(|tab| tab.unsaved())
+                    || self.project.as_ref().is_some_and(|project| {
+                        project.block_scripts.iter().any(|document| {
+                            document.path == *path && document.script != document.saved
+                        })
+                    })
+            }
             Discard::Quit | Discard::OpenAnother => self.unsaved(),
         };
         if unsaved {
@@ -788,7 +936,40 @@ impl EditorApp {
                 Discard::CloseTab(path) => self.save_tab(path).then_some(discard),
                 Discard::Quit | Discard::OpenAnother => self.save().then_some(discard),
             },
-            Answer::DontSave => Some(discard),
+            Answer::DontSave => {
+                if let Discard::CloseTab(path) = &discard {
+                    let source = self
+                        .project
+                        .as_mut()
+                        .and_then(|project| {
+                            project
+                                .block_scripts
+                                .iter_mut()
+                                .find(|document| document.path == *path)
+                        })
+                        .map(|document| {
+                            document.script = document.saved.clone();
+                            translate(&document.script)
+                        });
+                    match source {
+                        Some(Ok(translation)) => {
+                            if let Some(script) = self.project.as_mut().and_then(|project| {
+                                project
+                                    .scripts
+                                    .iter_mut()
+                                    .find(|script| script.path == *path)
+                            }) {
+                                script.source = translation.source;
+                            }
+                        }
+                        Some(Err(err)) => self.output.error(format!(
+                            "Could not restore the saved blocks in `{path}`: {err}"
+                        )),
+                        None => {}
+                    }
+                }
+                Some(discard)
+            }
             Answer::Cancel => None,
         }
     }
@@ -900,6 +1081,24 @@ impl EditorApp {
                     .clicked()
                 {
                     self.request_and_go_ahead(ui.ctx(), Discard::OpenAnother);
+                }
+                if ui
+                    .add_enabled(
+                        self.project.is_some() && !self.playing(),
+                        egui::Button::new("Open Stylesheet…"),
+                    )
+                    .clicked()
+                {
+                    self.open_stylesheet_with_dialog();
+                }
+                if ui
+                    .add_enabled(
+                        self.project.is_some() && !self.playing(),
+                        egui::Button::new("New Stylesheet"),
+                    )
+                    .clicked()
+                {
+                    self.new_stylesheet();
                 }
                 let save = egui::Button::new(theme::with_icon(icons::FLOPPY_DISK, "Save"))
                     .shortcut_text(ui.ctx().format_shortcut(&SAVE_SHORTCUT));
@@ -1079,6 +1278,7 @@ impl EditorApp {
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         let mut insert = None;
         let mut insert_script = None;
+        let mut insert_block_script = None;
         let mut import = false;
         let (mut play, mut stop) = (false, false);
         let playing = self.playing();
@@ -1187,6 +1387,20 @@ impl EditorApp {
                             insert = Some(what);
                         }
                     }
+                    for what in Insertable::AUDIO {
+                        let button = RibbonButton::new(theme::insert_icon(what), what.label())
+                            .color(theme::class_color(what.class(), ui.visuals()));
+                        if ui
+                            .add_enabled(!playing, button)
+                            .on_hover_text(
+                                "Insert a Sound into the selected part or the Workspace.",
+                            )
+                            .on_disabled_hover_text("Press Stop to edit.")
+                            .clicked()
+                        {
+                            insert = Some(what);
+                        }
+                    }
                     let color = theme::class_color(ClassName::MeshPart, ui.visuals());
                     let button = RibbonButton::new(icons::FILE_ARROW_DOWN, "Import").color(color);
                     import = ui
@@ -1216,6 +1430,36 @@ impl EditorApp {
                         }
                     }
                 });
+                ui.separator();
+                ribbon::group(ui, "Blocks", |ui| {
+                    for class in [ClassName::Script, ClassName::LocalScript] {
+                        let (title, hover) = if class == ClassName::Script {
+                            (
+                                "Server Blocks",
+                                "Create and open a new server block script.",
+                            )
+                        } else {
+                            (
+                                "Client Blocks",
+                                "Create and open a new client block script.",
+                            )
+                        };
+                        let button = RibbonButton::new(theme::class_icon(class), title)
+                            .color(theme::class_color(class, ui.visuals()));
+                        if ui
+                            .add_enabled(!playing && can_play, button)
+                            .on_hover_text(hover)
+                            .on_disabled_hover_text(if playing {
+                                "Press Stop to edit."
+                            } else {
+                                "Open a project first."
+                            })
+                            .clicked()
+                        {
+                            insert_block_script = Some(class);
+                        }
+                    }
+                });
             });
         });
         if let Some(what) = insert {
@@ -1224,6 +1468,9 @@ impl EditorApp {
         }
         if let Some(class) = insert_script {
             self.act(Action::InsertScript(class));
+        }
+        if let Some(class) = insert_block_script {
+            self.insert_block_script(class);
         }
         if import {
             self.import_model_with_dialog();
@@ -1504,8 +1751,17 @@ impl eframe::App for EditorApp {
 
         // Again, as the edits above may have changed which world to show.
         let world = shown(&self.world, &self.play);
+        let stylesheets = self
+            .project
+            .as_ref()
+            .map_or(&[][..], |project| project.stylesheets.as_slice());
         // No tool during Play, so nothing can be dragged.
         let tool = (!self.playing()).then_some(self.tool);
+        let active_block_path = self
+            .tabs
+            .active_path()
+            .filter(|path| axcenity_project::is_block_script(path))
+            .map(str::to_owned);
         let output = if !has_project {
             self.start_screen(ctx);
             Default::default()
@@ -1516,11 +1772,14 @@ impl eframe::App for EditorApp {
                     Some(render_state) => self.viewport.show(
                         ui,
                         render_state,
-                        world,
-                        &self.assets,
-                        self.selected,
-                        tool,
-                        self.snap,
+                        ViewportScene {
+                            world,
+                            assets: &self.assets,
+                            selected: self.selected,
+                            tool,
+                            snap: self.snap,
+                            stylesheets,
+                        },
                     ),
                     // Can't happen: main.rs always picks the wgpu renderer.
                     None => {
@@ -1529,8 +1788,52 @@ impl eframe::App for EditorApp {
                     }
                 })
                 .inner
+        } else if let Some(path) = &active_block_path {
+            let mut changed = false;
+            egui::CentralPanel::default().show(ctx, |ui| {
+                if let Some(document) = self.project.as_mut().and_then(|project| {
+                    project
+                        .block_scripts
+                        .iter_mut()
+                        .find(|document| document.path == *path)
+                }) {
+                    changed = block_editor::show(
+                        ui,
+                        &mut document.script,
+                        axcenity_project::script_class(path) == ClassName::LocalScript,
+                        document.highlighted,
+                    );
+                    if changed {
+                        document.highlighted = None;
+                    }
+                }
+            });
+            if changed {
+                self.update_block_lua(path);
+            }
+            Default::default()
         } else {
+            let stylesheet_path = self
+                .tabs
+                .active_path()
+                .filter(|path| axcenity_project::is_stylesheet(path))
+                .map(str::to_owned);
+            let previous_source = stylesheet_path
+                .as_deref()
+                .and_then(|path| self.tabs.get(path))
+                .map(|tab| tab.text.clone());
             egui::CentralPanel::default().show(ctx, |ui| self.tabs.show_active(ui));
+            if let (Some(path), Some(previous_source)) = (stylesheet_path, previous_source) {
+                let current_source = self
+                    .tabs
+                    .get(&path)
+                    .map(|tab| tab.text.clone())
+                    .unwrap_or_default();
+                if current_source != previous_source {
+                    self.refresh_stylesheet(&path, &current_source);
+                    ctx.request_repaint();
+                }
+            }
             Default::default()
         };
         if let Some(clicked) = output.clicked {
@@ -1544,12 +1847,17 @@ impl eframe::App for EditorApp {
             // The viewport was drawn before this change, so draw it again.
             ctx.request_repaint();
         }
+        if let Some(edit) = output.ui_drag {
+            self.apply_ui_drag(edit);
+            ctx.request_repaint();
+        }
 
         // A drag or a typed value is one undo step: it ends when the mouse
         // is let go and no text box is being typed in.
         let busy = ctx.is_using_pointer() || ctx.wants_keyboard_input();
         if output.drag_released || (!busy && !self.viewport.is_dragging()) {
             self.history.seal();
+            self.ui_drag_baselines.clear();
         }
 
         // Models that couldn't be loaded, found while drawing or playing.
@@ -1643,6 +1951,74 @@ mod tests {
             "{}",
             line.text
         );
+    }
+
+    #[test]
+    fn unsupported_css_properties_are_reported_as_output_warnings() {
+        let folder = temp_project(
+            "unsupported-css",
+            &[
+                ("axcenity.json", r#"{"name":"CSS","format_version":1}"#),
+                ("world.json", r#"{"format_version":1}"#),
+                ("ui.css", ".hud { animation: fade 1s; opacity: .5 }"),
+            ],
+        );
+        let app = EditorApp::new(Some(&folder));
+        let warning = app
+            .output
+            .lines()
+            .iter()
+            .find(|line| line.kind == OutputKind::Warning)
+            .expect("unknown CSS properties should be reported");
+
+        assert!(warning.text.contains("ui.css"));
+        assert!(
+            warning
+                .text
+                .contains("unsupported CSS property `animation`")
+        );
+        drop(app);
+        std::fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn stylesheet_edits_restyle_the_viewport_immediately_and_save() {
+        let folder = copy_of_example("hello-css", "stylesheet-live-edit");
+        let mut app = EditorApp::new(Some(&folder));
+        let path = "ui.css";
+        let original = std::fs::read_to_string(folder.join(path)).unwrap();
+        let updated = original.replace("width: 280px", "width: 320px");
+        assert_ne!(original, updated);
+        app.tabs.open(path, &original, None);
+
+        let hud = app
+            .world
+            .find_first_child(app.world.workspace(), "Hud")
+            .unwrap();
+        let panel = app.world.find_first_child(hud, "HudPanel").unwrap();
+        let layout = |app: &EditorApp| {
+            axcenity_ui::layout_ui(
+                &app.world,
+                800,
+                600,
+                &app.project.as_ref().unwrap().stylesheets,
+            )
+            .element(panel)
+            .unwrap()
+            .rect
+            .width
+        };
+        assert_eq!(layout(&app), 280.0);
+
+        app.tabs.get_mut(path).unwrap().text = updated.clone();
+        app.refresh_stylesheet(path, &updated);
+        assert_eq!(layout(&app), 320.0);
+        assert!(app.unsaved());
+        assert!(app.save());
+        assert_eq!(std::fs::read_to_string(folder.join(path)).unwrap(), updated);
+        assert!(!app.unsaved());
+        drop(app);
+        std::fs::remove_dir_all(folder).unwrap();
     }
 
     #[test]
@@ -1807,7 +2183,7 @@ mod tests {
         let center = drawn_pad.transform.transform_point3(Vec3::ZERO);
         assert!(center.abs_diff_eq(Vec3::new(1.25, 0.3, -7.1), 1e-6));
         let corner = drawn_pad.transform.transform_point3(Vec3::splat(0.5));
-        assert!((corner - center).abs_diff_eq(Vec3::new(1.65, 0.0005, 6.0), 1e-6));
+        assert!((corner - center).abs_diff_eq(Vec3::new(-6.0, 0.0005, 1.65), 1e-6));
     }
 
     #[test]
@@ -1978,7 +2354,12 @@ mod tests {
             Handle::Rotate(Axis::Z),
             &rays_along_z(&around),
         );
-        assert_eq!(property(&app, pad, "Orientation"), vector(0.0, 0.0, 90.0));
+        let orientation = property(&app, pad, "Orientation").as_vector3().unwrap();
+        let actual_rotation = axcenity_scene::rotation_from_orientation(orientation);
+        let initial_orientation = start.2.as_vector3().unwrap();
+        let expected_rotation = axcenity_render::glam::Quat::from_rotation_z(90.0_f32.to_radians())
+            * axcenity_scene::rotation_from_orientation(initial_orientation);
+        assert!(actual_rotation.dot(expected_rotation).abs() > 1.0 - 1e-6);
         assert_eq!(app.history.undo_label(), Some("Rotate Pad"));
 
         // Three drags, three undos, back to the start.

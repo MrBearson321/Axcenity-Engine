@@ -69,6 +69,10 @@ struct InstanceRaw {
 struct UiVertex {
     position: [f32; 2],
     color: [f32; 4],
+    uv: [f32; 2],
+    size: [f32; 2],
+    border_color: [f32; 4],
+    border: [f32; 2],
 }
 
 /// A mesh uploaded to the GPU.
@@ -773,7 +777,7 @@ impl ScenePipeline {
             buffer.set_text(
                 &mut self.font_system,
                 &text.text,
-                &Attrs::new().family(Family::Name("Montserrat")),
+                &Attrs::new().family(Family::Name(&text.font_family)),
                 Shaping::Advanced,
             );
             buffer.shape_until_scroll(&mut self.font_system, false);
@@ -1124,16 +1128,34 @@ fn ui_vertices(items: &[UiDrawItem], (width, height): (u32, u32)) -> Vec<UiVerte
             position: [x, y],
             size: [w, h],
             color: [r, g, b, alpha],
+            border_color: [br, bg, bb, ba],
+            border_width,
+            border_radius,
         }) = item
         else {
             continue;
         };
-        if ![x, y, w, h, r, g, b, alpha]
-            .into_iter()
-            .all(|component| component.is_finite())
+        if ![
+            x,
+            y,
+            w,
+            h,
+            r,
+            g,
+            b,
+            alpha,
+            br,
+            bg,
+            bb,
+            ba,
+            border_width,
+            border_radius,
+        ]
+        .into_iter()
+        .all(|component| component.is_finite())
             || *w <= 0.0
             || *h <= 0.0
-            || *alpha <= 0.0
+            || (*alpha <= 0.0 && (*ba <= 0.0 || *border_width <= 0.0))
         {
             continue;
         }
@@ -1144,27 +1166,44 @@ fn ui_vertices(items: &[UiDrawItem], (width, height): (u32, u32)) -> Vec<UiVerte
         let bottom_right = point(*x + *w, *y + *h);
         let color = linear_color([*r, *g, *b]);
         let color = [color.x, color.y, color.z, alpha.clamp(0.0, 1.0)];
-        for position in [
-            top_left,
-            bottom_left,
-            top_right,
-            top_right,
-            bottom_left,
-            bottom_right,
+        let border_color = linear_color([*br, *bg, *bb]);
+        let border_color = [
+            border_color.x,
+            border_color.y,
+            border_color.z,
+            ba.clamp(0.0, 1.0),
+        ];
+        for (position, uv) in [
+            (top_left, [0.0, 0.0]),
+            (bottom_left, [0.0, 1.0]),
+            (top_right, [1.0, 0.0]),
+            (top_right, [1.0, 0.0]),
+            (bottom_left, [0.0, 1.0]),
+            (bottom_right, [1.0, 1.0]),
         ] {
-            vertices.push(UiVertex { position, color });
+            vertices.push(UiVertex {
+                position,
+                color,
+                uv,
+                size: [*w, *h],
+                border_color,
+                border: [
+                    border_radius.clamp(0.0, w.min(*h) * 0.5),
+                    border_width.clamp(0.0, w.min(*h) * 0.5),
+                ],
+            });
         }
     }
     vertices
 }
 
-fn glyph_color([r, g, b]: [f32; 3]) -> GlyphColor {
+fn glyph_color([r, g, b, a]: [f32; 4]) -> GlyphColor {
     let byte = |channel: f32| {
         (if channel.is_finite() { channel } else { 1.0 })
             .clamp(0.0, 1.0)
             .mul_add(255.0, 0.5) as u8
     };
-    GlyphColor::rgb(byte(r), byte(g), byte(b))
+    GlyphColor::rgba(byte(r), byte(g), byte(b), byte(a))
 }
 
 fn create_ui_pipeline(
@@ -1180,7 +1219,10 @@ fn create_ui_pipeline(
     let vertex_layout = wgpu::VertexBufferLayout {
         array_stride: size_of::<UiVertex>() as u64,
         step_mode: wgpu::VertexStepMode::Vertex,
-        attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x4],
+        attributes: &wgpu::vertex_attr_array![
+            0 => Float32x2, 1 => Float32x4, 2 => Float32x2,
+            3 => Float32x2, 4 => Float32x4, 5 => Float32x2
+        ],
     };
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("UI overlay"),
@@ -1652,6 +1694,24 @@ mod tests {
         assert_eq!(linear_color([0.0, 1.0, 0.5]).x, 0.0);
         assert!((linear_color([0.0, 1.0, 0.5]).y - 1.0).abs() < 1e-6);
         assert!((linear_color([0.0, 1.0, 0.5]).z - 0.214).abs() < 0.001);
+    }
+
+    #[test]
+    fn ui_rectangles_keep_rounded_border_data_and_allow_border_only_shapes() {
+        let item = UiDrawItem::Rectangle(UiRectangle {
+            position: [10.0, 20.0],
+            size: [100.0, 50.0],
+            color: [0.0, 0.0, 0.0, 0.0],
+            border_color: [1.0, 0.0, 0.0, 1.0],
+            border_width: 3.0,
+            border_radius: 80.0,
+        });
+
+        let vertices = ui_vertices(&[item], (200, 100));
+        assert_eq!(vertices.len(), 6);
+        assert_eq!(vertices[0].size, [100.0, 50.0]);
+        assert_eq!(vertices[0].border, [25.0, 3.0]);
+        assert_eq!(vertices[0].border_color[3], 1.0);
     }
 
     /// A list seen from the origin.

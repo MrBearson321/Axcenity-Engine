@@ -1,0 +1,39 @@
+ScreenGui {
+    --panel: #142238;
+    --text: #f4f7fb;
+    --health: #49d17d;
+}
+
+.hud {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px;
+    width: 280px;
+    height: 90px;
+    background-color: var(--panel);
+    border: 1px solid #3b82f6;
+    border-radius: 8px;
+}
+
+.health-track {
+    width: 260px;
+    height: 24px;
+    background-color: #334155;
+    border-radius: 12px;
+}
+
+#health-fill {
+    width: 72%;
+    height: 100%;
+    background-color: var(--health, green);
+    border-radius: 12px;
+}
+
+#score {
+    width: 260px;
+    height: 30px;
+    color: var(--text);
+    font-family: Montserrat;
+    font-size: 20px;
+}

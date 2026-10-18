@@ -14,11 +14,12 @@ use std::io::ErrorKind;
 use std::path::Path;
 
 use axcenity_assets::Pick;
+use axcenity_blocks::{Block, BlockKind, BlockScript, translate};
 use axcenity_core::{ClassName, InstanceId, Value, Vector3};
 use axcenity_project::{self as project, LoadError, Project, ScriptFile};
 use eframe::egui;
 
-use super::EditorApp;
+use super::{BlockDocument, EditorApp};
 use crate::history::{self, Move, Place};
 use crate::import_dialog::{Answer, ImportDialog, Placement};
 use crate::output::Output;
@@ -93,6 +94,102 @@ fn non_script_children(world: &axcenity_core::World, parent: InstanceId) -> usiz
 }
 
 impl EditorApp {
+    pub(super) fn new_stylesheet(&mut self) {
+        let Some(project) = &self.project else {
+            return;
+        };
+        if self.playing() {
+            return;
+        }
+        let folder = project.folder.clone();
+        for suffix in 1.. {
+            let name = if suffix == 1 {
+                "Stylesheet".to_owned()
+            } else {
+                format!("Stylesheet{suffix}")
+            };
+            match project::create_stylesheet(&folder, &name, project::NEW_STYLESHEET_SOURCE) {
+                Ok(path) => {
+                    let (stylesheet, warnings) =
+                        axcenity_ui::parse_stylesheet(&path, project::NEW_STYLESHEET_SOURCE);
+                    if let Some(project) = &mut self.project {
+                        let index = project
+                            .stylesheets
+                            .partition_point(|existing| existing.path() < path.as_str());
+                        project.stylesheets.insert(index, stylesheet);
+                    }
+                    self.tabs.open(&path, project::NEW_STYLESHEET_SOURCE, None);
+                    for warning in warnings {
+                        self.output.warning(format!(
+                            "Stylesheet `{}`: {}",
+                            warning.path, warning.message
+                        ));
+                    }
+                    self.output
+                        .info(format!("Made a new stylesheet, `{path}`."));
+                    return;
+                }
+                Err(err) if err.already_exists() => continue,
+                Err(err) => {
+                    self.output
+                        .error(format!("Could not make a stylesheet: {}", chain(&err)));
+                    return;
+                }
+            }
+        }
+    }
+
+    pub(super) fn open_stylesheet_with_dialog(&mut self) {
+        let Some(project) = &self.project else {
+            return;
+        };
+        if self.playing() {
+            return;
+        }
+        let folder = project.folder.clone();
+        let Some(file) = rfd::FileDialog::new()
+            .set_title("Open a stylesheet")
+            .add_filter("CSS stylesheet", &["css"])
+            .set_directory(&folder)
+            .pick_file()
+        else {
+            return;
+        };
+        let path = match (folder.canonicalize(), file.canonicalize()) {
+            (Ok(folder), Ok(canonical_file)) => match canonical_file.strip_prefix(&folder) {
+                Ok(relative) => relative
+                    .components()
+                    .map(|component| component.as_os_str().to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/"),
+                Err(_) => {
+                    self.output.error(
+                        "Could not open stylesheet: choose a CSS file inside the project folder.",
+                    );
+                    return;
+                }
+            },
+            (Err(err), _) | (_, Err(err)) => {
+                self.output
+                    .error(format!("Could not open `{}`: {err}", file.display()));
+                return;
+            }
+        };
+        if !project::is_stylesheet(&path) {
+            self.output.error(format!(
+                "Could not open `{}`: it isn't a CSS stylesheet.",
+                file.display()
+            ));
+            return;
+        }
+        match std::fs::read_to_string(&file) {
+            Ok(source) => self.tabs.open(&path, &source, None),
+            Err(err) => self
+                .output
+                .error(format!("Could not read stylesheet `{path}`: {err}")),
+        }
+    }
+
     /// Writes the world file and every script tab with unsaved changes.
     /// Returns false (with the reason in Output) if nothing is open or a
     /// file couldn't be written.
@@ -101,7 +198,14 @@ impl EditorApp {
             return false;
         };
         let name = project.name.clone();
-        let scripts = self.tabs.unsaved_paths();
+        let mut scripts = self.tabs.unsaved_paths();
+        if let Some(project) = &self.project {
+            for document in &project.block_scripts {
+                if document.script != document.saved && !scripts.contains(&document.path) {
+                    scripts.push(document.path.clone());
+                }
+            }
+        }
         // Save with nothing changed still writes the world file, as it
         // always has, but never over a world file the editor didn't load.
         let world_unsaved = !self.history.is_saved();
@@ -180,6 +284,26 @@ impl EditorApp {
     /// Writes the script tab for `path` to its file. If the file had been
     /// deleted elsewhere, this brings it back, and its Script with it.
     fn write_tab(&mut self, path: &str) -> bool {
+        if project::is_block_script(path) {
+            return self.write_block_tab(path);
+        }
+        if project::is_stylesheet(path) {
+            let (Some(project), Some(tab)) = (&self.project, self.tabs.get(path)) else {
+                return false;
+            };
+            let folder = project.folder.clone();
+            let source = tab.text.clone();
+            if let Err(err) = project::write_stylesheet(&folder, path, &source) {
+                self.output
+                    .error(format!("Could not save: {}", chain(&err)));
+                return false;
+            }
+            if let Some(tab) = self.tabs.get_mut(path) {
+                tab.mark_saved();
+            }
+            self.refresh_stylesheet(path, &source);
+            return true;
+        }
         let (Some(project), Some(tab)) = (&mut self.project, self.tabs.get_mut(path)) else {
             return false;
         };
@@ -199,6 +323,70 @@ impl EditorApp {
             None => {
                 self.add_script(path, source);
             }
+        }
+        true
+    }
+
+    fn write_block_tab(&mut self, path: &str) -> bool {
+        let Some((folder, script)) = self.project.as_ref().and_then(|project| {
+            let document = project
+                .block_scripts
+                .iter()
+                .find(|document| document.path == path)?;
+            Some((project.folder.clone(), document.script.clone()))
+        }) else {
+            return false;
+        };
+        let translation = match translate(&script) {
+            Ok(translation) => translation,
+            Err(err) => {
+                self.output.error(format!("Could not save `{path}`: {err}"));
+                return false;
+            }
+        };
+        if let Err(err) = project::write_block_script(&folder, path, &script) {
+            self.output
+                .error(format!("Could not save `{path}`: {}", chain(&err)));
+            return false;
+        }
+        let missing_instance = self
+            .project
+            .as_ref()
+            .is_some_and(|project| project.scripts.iter().all(|file| file.path != path));
+        let instance =
+            missing_instance.then(|| project::add_script_instance(&mut self.world, path));
+        if let Some(project) = &mut self.project {
+            if let Some(instance) = instance {
+                if let Some(document) = project
+                    .block_scripts
+                    .iter_mut()
+                    .find(|document| document.path == path)
+                {
+                    document.instance = instance;
+                }
+                project.scripts.push(ScriptFile {
+                    instance,
+                    path: path.to_owned(),
+                    source: translation.source.clone(),
+                });
+            }
+            if let Some(document) = project
+                .block_scripts
+                .iter_mut()
+                .find(|document| document.path == path)
+            {
+                document.saved = script;
+            }
+            if let Some(file) = project.scripts.iter_mut().find(|file| file.path == path) {
+                file.source = translation.source.clone();
+            }
+        }
+        if missing_instance {
+            self.sort_scripts();
+        }
+        if let Some(tab) = self.tabs.get_mut(path) {
+            tab.text = translation.source;
+            tab.mark_saved();
         }
         true
     }
@@ -231,6 +419,15 @@ impl EditorApp {
     /// Takes the script at `path` out of the project, and its Script out of
     /// the world. Its tab stays (the caller decides).
     fn remove_script(&mut self, path: &str) {
+        self.remove_script_instance(path);
+        if let Some(project) = &mut self.project {
+            project
+                .block_scripts
+                .retain(|document| document.path != path);
+        }
+    }
+
+    fn remove_script_instance(&mut self, path: &str) {
         let Some(project) = &mut self.project else {
             return;
         };
@@ -289,6 +486,24 @@ impl EditorApp {
             .as_ref()
             .and_then(|project| project.scripts.iter().find(|script| script.path == path))
             .map(|script| script.source.clone());
+        if project::is_block_script(path)
+            && let Some(document) = self.project.as_mut().and_then(|project| {
+                project
+                    .block_scripts
+                    .iter_mut()
+                    .find(|document| document.path == path)
+            })
+        {
+            document.highlighted = line.and_then(|line| {
+                translate(&document.script)
+                    .ok()?
+                    .block_lines
+                    .into_iter()
+                    .filter(|(tag_line, _)| *tag_line < line)
+                    .max_by_key(|(tag_line, _)| *tag_line)
+                    .map(|(_, id)| id)
+            });
+        }
         match known {
             Some(source) => self.tabs.open(path, &source, line),
             // Its file was deleted, but its tab is still open.
@@ -331,6 +546,59 @@ impl EditorApp {
                     let err = chain(&err);
                     self.output
                         .error(format!("Could not make a new script: {err}"));
+                    return;
+                }
+            }
+        }
+    }
+
+    pub(super) fn insert_block_script(&mut self, class: ClassName) {
+        if self.project.is_none() || self.playing() || self.viewport.is_dragging() {
+            return;
+        }
+        let Some(project) = &self.project else {
+            return;
+        };
+        let folder = project.folder.clone();
+        let service = project::script_service(&self.world, class);
+        for name in tree::numbered_names(format!("{class}Blocks").as_str()) {
+            if self.world.find_first_child(service, &name).is_some() {
+                continue;
+            }
+            let script = BlockScript {
+                blocks: vec![Block::new(BlockKind::WhenStarted { body: Vec::new() })],
+            };
+            match project::create_block_script(&folder, &name, class, &script) {
+                Ok(path) => {
+                    let source = match translate(&script) {
+                        Ok(translation) => translation.source,
+                        Err(err) => {
+                            self.output.error(format!(
+                                "Could not create `{path}`: block script can't translate: {err}"
+                            ));
+                            return;
+                        }
+                    };
+                    let id = self.add_script(&path, source.clone());
+                    if let Some(project) = &mut self.project {
+                        project.block_scripts.push(BlockDocument {
+                            instance: id,
+                            path: path.clone(),
+                            script: script.clone(),
+                            saved: script,
+                            highlighted: None,
+                        });
+                    }
+                    self.select_from_viewport(Some(id));
+                    self.tabs.open(&path, &source, None);
+                    self.output
+                        .info(format!("Made a new block script, `{path}`."));
+                    return;
+                }
+                Err(err) if err.already_exists() => continue,
+                Err(err) => {
+                    self.output
+                        .error(format!("Could not make a block script: {}", chain(&err)));
                     return;
                 }
             }
@@ -732,13 +1000,25 @@ impl EditorApp {
                 .error(format!("Can't rename {old_name} to \"{name}\": {reason}."));
             return;
         }
-        match project::rename_script(&project.folder, &old, name) {
+        let rename = if project::is_block_script(&old) {
+            project::rename_block_script(&project.folder, &old, name)
+        } else {
+            project::rename_script(&project.folder, &old, name)
+        };
+        match rename {
             Ok(new) => {
                 self.world.set_name(id, name).expect("it's a Script");
                 if let Some(project) = &mut self.project
                     && let Some(script) = project.scripts.iter_mut().find(|s| s.instance == id)
                 {
                     script.path = new.clone();
+                }
+                if let Some(document) = self
+                    .project
+                    .as_mut()
+                    .and_then(|project| project.block_scripts.iter_mut().find(|d| d.instance == id))
+                {
+                    document.path = new.clone();
                 }
                 self.tabs.rename(&old, &new);
                 self.sort_scripts();
@@ -873,6 +1153,15 @@ impl EditorApp {
                 for script in &mut project.scripts {
                     script.instance = project::add_script_instance(&mut world, &script.path);
                 }
+                for document in &mut project.block_scripts {
+                    if let Some(script) = project
+                        .scripts
+                        .iter()
+                        .find(|script| script.path == document.path)
+                    {
+                        document.instance = script.instance;
+                    }
+                }
                 project.keep_world_file = false;
                 self.replace_world(world);
                 self.output.info(format!(
@@ -893,6 +1182,10 @@ impl EditorApp {
 
     /// The script file at `path` was made, changed or deleted.
     fn script_file_changed(&mut self, path: &str) {
+        if project::is_block_script(path) {
+            self.block_script_file_changed(path);
+            return;
+        }
         let Some(project) = &self.project else {
             return;
         };
@@ -933,6 +1226,113 @@ impl EditorApp {
             None => {
                 self.add_script(path, source.clone());
                 self.output.info(format!("Found a new script, `{path}`."));
+            }
+        }
+        self.sync_tab(path, Some(&source));
+    }
+
+    fn block_script_file_changed(&mut self, path: &str) {
+        let Some((folder, old_script)) = self.project.as_ref().map(|project| {
+            (
+                project.folder.clone(),
+                project
+                    .block_scripts
+                    .iter()
+                    .find(|document| document.path == path)
+                    .map(|document| (document.script.clone(), document.saved.clone())),
+            )
+        }) else {
+            return;
+        };
+        if !folder.join(path).exists() {
+            if let Some((script, saved)) = old_script {
+                if script != saved {
+                    self.remove_script_instance(path);
+                } else {
+                    self.remove_script(path);
+                }
+                self.output
+                    .info(format!("`{path}` was deleted outside the editor."));
+                self.sync_tab(path, None);
+            }
+            return;
+        }
+
+        let script = match project::read_block_script(&folder, path) {
+            Ok(script) => script,
+            Err(err) => {
+                self.output
+                    .error(format!("Skipped a damaged file: {}", chain(&err)));
+                return;
+            }
+        };
+        let translation = match translate(&script) {
+            Ok(translation) => translation,
+            Err(err) => {
+                self.output
+                    .error(format!("Skipped a damaged block script `{path}`: {err}"));
+                return;
+            }
+        };
+        if old_script
+            .as_ref()
+            .is_some_and(|(_, saved)| *saved == script)
+        {
+            return;
+        }
+
+        let source = translation.source;
+        let was_dirty = old_script
+            .as_ref()
+            .is_some_and(|(current, saved)| current != saved);
+        match old_script {
+            Some(_) if was_dirty => {
+                if let Some(project) = &mut self.project {
+                    if let Some(document) = project
+                        .block_scripts
+                        .iter_mut()
+                        .find(|document| document.path == path)
+                    {
+                        document.saved = script;
+                    }
+                    if let Some(file) = project.scripts.iter_mut().find(|file| file.path == path) {
+                        file.source = source.clone();
+                    }
+                }
+                self.output.info(format!(
+                    "`{path}` changed outside the editor; your unsaved blocks are kept."
+                ));
+            }
+            Some(_) => {
+                if let Some(project) = &mut self.project {
+                    if let Some(document) = project
+                        .block_scripts
+                        .iter_mut()
+                        .find(|document| document.path == path)
+                    {
+                        document.script = script.clone();
+                        document.saved = script;
+                    }
+                    if let Some(file) = project.scripts.iter_mut().find(|file| file.path == path) {
+                        file.source = source.clone();
+                    }
+                }
+                self.output
+                    .info(format!("`{path}` was changed outside the editor."));
+            }
+            None => {
+                let id = self.add_script(path, source.clone());
+                if let Some(project) = &mut self.project {
+                    project.block_scripts.push(BlockDocument {
+                        instance: id,
+                        path: path.to_owned(),
+                        script: script.clone(),
+                        saved: script,
+                        highlighted: None,
+                    });
+                }
+                self.output
+                    .info(format!("Found a new block script, `{path}`."));
             }
         }
         self.sync_tab(path, Some(&source));
@@ -1000,6 +1400,76 @@ mod tests {
 
     fn example_model() -> std::path::PathBuf {
         super::super::tests::example("hello-mesh").join("assets/models/pyramid.gltf")
+    }
+
+    #[test]
+    fn block_scripts_can_be_created_edited_saved_and_reloaded() {
+        let folder = copy_of_example("hello-part", "block-script-editor");
+        let mut app = EditorApp::new(Some(&folder));
+        app.insert_block_script(ClassName::Script);
+        let path = app
+            .project
+            .as_ref()
+            .unwrap()
+            .block_scripts
+            .last()
+            .unwrap()
+            .path
+            .clone();
+        let document = app
+            .project
+            .as_mut()
+            .unwrap()
+            .block_scripts
+            .iter_mut()
+            .find(|document| document.path == path)
+            .unwrap();
+        let BlockKind::WhenStarted { body } = &mut document.script.blocks[0].kind else {
+            panic!("new block scripts start with a WhenStarted event");
+        };
+        let play_sound = Block::new(BlockKind::PlaySound {
+            target: "Chime".to_owned(),
+        });
+        let play_sound_id = play_sound.id;
+        body.push(play_sound);
+        app.update_block_lua(&path);
+
+        assert!(app.unsaved());
+        assert!(app.save());
+        assert!(!app.unsaved());
+        let saved = project::read_block_script(&folder, &path).unwrap();
+        assert_eq!(saved, app.project.as_ref().unwrap().block_scripts[0].script);
+        let source = &app
+            .project
+            .as_ref()
+            .unwrap()
+            .scripts
+            .iter()
+            .find(|script| script.path == path)
+            .unwrap()
+            .source;
+        assert!(source.contains("workspace[\"Chime\"]:Play()"));
+        let play_line = source
+            .lines()
+            .position(|line| line.contains(":Play()"))
+            .unwrap()
+            + 1;
+        app.open_script(&path, Some(play_line));
+        assert_eq!(
+            app.project
+                .as_ref()
+                .unwrap()
+                .block_scripts
+                .iter()
+                .find(|document| document.path == path)
+                .unwrap()
+                .highlighted,
+            Some(play_sound_id)
+        );
+
+        let reopened = EditorApp::new(Some(&folder));
+        assert_eq!(reopened.project.unwrap().block_scripts.len(), 1);
+        fs::remove_dir_all(folder).unwrap();
     }
 
     #[test]
@@ -1189,7 +1659,12 @@ mod tests {
         let dialog = app.importing.as_ref().expect("the dialog is open");
         let names: Vec<&str> = dialog.objects.iter().map(|o| o.name.as_str()).collect();
         assert_eq!(names, ["Pyramid", "Street", "Big", "Small"]);
-        assert!(!folder.join(axcenity_assets::MODELS_FOLDER).exists());
+        assert!(
+            !folder
+                .join(axcenity_assets::MODELS_FOLDER)
+                .join("props")
+                .exists()
+        );
         let _ = fs::remove_dir_all(&folder);
     }
 
@@ -1284,7 +1759,12 @@ mod tests {
 
         app.import_model(&broken);
         assert_eq!(app.world.descendants(app.world.workspace()).len(), before);
-        assert!(!folder.join(axcenity_assets::MODELS_FOLDER).exists());
+        assert!(
+            !folder
+                .join(axcenity_assets::MODELS_FOLDER)
+                .join("broken.glb")
+                .exists()
+        );
         let line = last_line(&app);
         assert_eq!(line.kind, OutputKind::Error);
         assert!(
@@ -1299,7 +1779,7 @@ mod tests {
     #[test]
     fn a_mesh_part_whose_file_is_missing_is_reported_in_output() {
         let folder = copy_of_example("hello-mesh", "missing-model");
-        fs::remove_file(folder.join("assets/models/pyramid.gltf")).unwrap();
+        fs::remove_file(folder.join("assets/models/CityPropsCollection2.fbx")).unwrap();
         let app = EditorApp::new(Some(&folder));
         // Drawing asks for the model, which reports it once.
         let camera = axcenity_render::Camera {
@@ -1310,7 +1790,7 @@ mod tests {
         axcenity_scene::build_draw_list(&app.world, &app.assets, camera);
         let errors = app.assets.take_errors();
         assert_eq!(errors.len(), 1, "{errors:?}");
-        assert!(errors[0].contains("pyramid.gltf") && errors[0].contains("isn't there"));
+        assert!(errors[0].contains("CityPropsCollection2.fbx"), "{errors:?}");
         let _ = fs::remove_dir_all(&folder);
     }
 

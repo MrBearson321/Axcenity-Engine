@@ -1,7 +1,7 @@
 //! Script tabs: a strip of tabs above the center of the window, with the
-//! 3D view ("World") first and one tab per open script, like Roblox Studio.
-//! A script tab shows a code editor with Lua syntax highlighting and line
-//! numbers in place of the viewport.
+//! 3D view ("World") first and one tab per open script or stylesheet, like
+//! Roblox Studio. A tab shows a code editor with Lua (or CSS) syntax
+//! highlighting and line numbers in place of the viewport.
 //!
 //! Tabs are found by their script's file path, not its Instance, because
 //! the file is what's being edited: it outlives its Script Instance when the
@@ -11,12 +11,12 @@
 use std::collections::HashMap;
 
 use axcenity_core::ClassName;
-use axcenity_project::script_name;
+use axcenity_project::{is_stylesheet, script_name};
 use eframe::egui;
 
-use crate::lua_syntax;
 use crate::side_warnings::SideWarning;
 use crate::theme::{self, icons};
+use crate::{css_syntax, lua_syntax};
 
 /// What a new script starts with, as in Roblox Studio.
 pub const NEW_SCRIPT_SOURCE: &str = "print(\"Hello world!\")\n";
@@ -63,9 +63,17 @@ pub struct ScriptTab {
 }
 
 impl ScriptTab {
-    /// The Script's name, from its file name.
+    /// The Script's name, from its file name, or a stylesheet's file name.
     pub fn name(&self) -> &str {
-        script_name(&self.path)
+        if self.is_stylesheet() {
+            self.path.rsplit('/').next().unwrap_or(&self.path)
+        } else {
+            script_name(&self.path)
+        }
+    }
+
+    pub fn is_stylesheet(&self) -> bool {
+        is_stylesheet(&self.path)
     }
 
     pub fn unsaved(&self) -> bool {
@@ -120,6 +128,27 @@ impl ScriptTabs {
         self.active = Some(index);
     }
 
+    /// Opens a tab for `path` with `source` without showing it, if it isn't
+    /// open yet, and returns it. Dragging a UI handle edits a stylesheet
+    /// this way, so its unsaved changes show in the strip.
+    pub fn open_in_background(&mut self, path: &str, source: &str) -> &mut ScriptTab {
+        let index = match self.tabs.iter().position(|tab| tab.path == path) {
+            Some(index) => index,
+            None => {
+                self.tabs.push(ScriptTab {
+                    path: path.to_string(),
+                    text: source.to_string(),
+                    saved: source.to_string(),
+                    disk: Disk::Same,
+                    go_to_line: None,
+                    highlighted: None,
+                });
+                self.tabs.len() - 1
+            }
+        };
+        &mut self.tabs[index]
+    }
+
     /// Shows the World tab: the viewport.
     pub fn show_world(&mut self) {
         self.active = None;
@@ -133,6 +162,10 @@ impl ScriptTabs {
     #[cfg(test)]
     pub fn active(&self) -> Option<&ScriptTab> {
         self.tabs.get(self.active?)
+    }
+
+    pub fn active_path(&self) -> Option<&str> {
+        Some(&self.tabs.get(self.active?)?.path)
     }
 
     pub fn get(&self, path: &str) -> Option<&ScriptTab> {
@@ -210,9 +243,14 @@ impl ScriptTabs {
                     } else {
                         tab.name().to_string()
                     };
-                    let class = axcenity_project::script_class(&tab.path);
-                    let icon = egui::RichText::new(theme::class_icon(class))
-                        .color(theme::class_color(class, ui.visuals()));
+                    let icon = if tab.is_stylesheet() {
+                        egui::RichText::new(icons::PAINT_BRUSH)
+                            .color(theme::class_color(ClassName::ScreenGui, ui.visuals()))
+                    } else {
+                        let class = axcenity_project::script_class(&tab.path);
+                        egui::RichText::new(theme::class_icon(class))
+                            .color(theme::class_color(class, ui.visuals()))
+                    };
                     let mut title = egui::Atoms::new((icon, name));
                     if self.warnings.contains_key(&tab.path) {
                         let warning = ui.visuals().warn_fg_color;
@@ -315,8 +353,13 @@ fn code_editor(ui: &mut egui::Ui, tab: &mut ScriptTab) {
     // egui calls this to lay out the text whenever it needs to. It ignores
     // the wrap width: long lines scroll sideways, so they stay one row each
     // and line up with the numbers.
+    let stylesheet = tab.is_stylesheet();
     let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, _wrap_width: f32| {
-        let job = lua_syntax::layout_job(text.as_str(), font.clone(), ui.visuals());
+        let job = if stylesheet {
+            css_syntax::layout_job(text.as_str(), font.clone(), ui.visuals())
+        } else {
+            lua_syntax::layout_job(text.as_str(), font.clone(), ui.visuals())
+        };
         ui.fonts(|fonts| fonts.layout_job(job))
     };
 
@@ -430,6 +473,16 @@ mod tests {
         assert_eq!(tabs.active().unwrap().name(), "b");
         tabs.close("scripts/b.server.lua");
         assert!(tabs.world_shown());
+    }
+
+    #[test]
+    fn stylesheet_tabs_are_named_by_file_and_can_open_without_showing() {
+        let mut tabs = ScriptTabs::default();
+        tabs.open_in_background("styles/hud.css", ".hud {}").text = ".hud { width: 1px }".into();
+        assert!(tabs.world_shown());
+        let tab = tabs.get("styles/hud.css").unwrap();
+        assert_eq!(tab.name(), "hud.css");
+        assert!(tab.is_stylesheet() && tab.unsaved());
     }
 
     /// Draws the shown tab's editor for one frame, with no window or GPU.

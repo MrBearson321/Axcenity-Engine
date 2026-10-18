@@ -40,6 +40,7 @@ impl Context {
         // Which side this is, for `sides::check`.
         lua.set_app_data(side);
         lua.set_app_data(Output::default());
+        lua.set_app_data(crate::SoundActions::default());
         lua.set_app_data(Outbox::default());
         lua.set_app_data(scheduler::Scheduler::default());
         lua.set_app_data(events::Connections::default());
@@ -54,6 +55,10 @@ impl Context {
             .expect("changing the string metatable only fails when out of memory");
         let mut methods = remote::methods(&lua)
             .expect("creating the RemoteEvent methods only fails when out of memory");
+        methods.extend(
+            instance::sound_methods(&lua)
+                .expect("creating Sound methods only fails when out of memory"),
+        );
         methods.push((
             axcenity_core::ClassName::DataModel,
             "GetService",
@@ -194,6 +199,13 @@ impl Context {
     pub fn take_outbox(&self) -> Vec<Message> {
         match self.lua.app_data_mut::<Outbox>() {
             Some(mut outbox) => std::mem::take(&mut outbox.0),
+            None => Vec::new(),
+        }
+    }
+
+    pub fn take_sound_actions(&self) -> Vec<axcenity_audio::SoundAction> {
+        match self.lua.app_data_mut::<crate::SoundActions>() {
+            Some(mut actions) => std::mem::take(&mut actions.0),
             None => Vec::new(),
         }
     }

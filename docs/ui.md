@@ -10,16 +10,16 @@ Read before working in the `ui` crate. This covers in-game UI; the editor's own 
 
 ## Styling: a CSS subset (plain CSS, not SCSS)
 
-- Parse with `cssparser` or `lightningcss`. `.css` files live in the project folder.
-- Selectors: type (`TextButton`), `.class`, `#id`, descendant, `:hover`, `:active`.
-- Properties: flexbox (`display:flex`, `flex-direction`, `justify-content`, `align-items`, `gap`, `flex-grow`, and so on), `width`/`height` (px and %), `padding`, `margin`, `background-color`, `color`, `border`, `border-radius`, `font-family`, `font-size`, `opacity`, CSS variables (`--name` / `var()`).
-- Later: `transition`. Unsupported properties produce a warning in Output, never a crash.
+- Plain `.css` files anywhere in the project folder are loaded in path order.
+- Selectors: type (`TextLabel`), `.class`, `#id`, comma lists, and descendant selectors. Specificity and later-source order follow CSS cascade rules.
+- Properties: flex layout (`display`, `flex-direction`, `justify-content`, `align-items`, `gap`, `flex-grow`), `width`/`height` (px and %), `padding`, `margin`, `background-color`, `color`, `border`, `border-radius`, `font-family`, `font-size`, `opacity`, CSS variables (`--name` / `var()` with fallbacks).
+- `Visible = false` removes an element from flex layout and hit testing. `:hover`, `:active`, and `transition` need interactive UI and are not implemented yet. Unsupported properties produce a warning in Output, never a crash.
 - Specificity and cascade follow normal CSS rules for the supported subset.
 
 ## Layout and drawing
 
 - Layout is computed by **`taffy`** (frame order step 5). Text is shaped with `cosmic-text` or `glyphon`.
-- `ui` produces UI draw data, and `render` draws it as an overlay. The editor viewport previews UI while editing as well as during Play; edit-mode scripts do not run.
+- `ui` resolves styles and produces UI draw data, and `render` draws it as an overlay. The editor viewport previews UI while editing as well as during Play; edit-mode scripts do not run.
 
 ## Future (don't build yet, don't block)
 

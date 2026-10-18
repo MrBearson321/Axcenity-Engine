@@ -328,9 +328,9 @@ Add an import action that copies a `.gltf`/`.glb` file into the project's assets
 
 ### Acceptance criteria
 
-- [ ] A Blender-exported glTF model imports, renders, and can be moved, saved and reloaded.
-- [ ] An imported mesh collides with physics parts.
-- [ ] A malformed glTF file produces a clear error and doesn't crash.
+- [x] A Blender-exported glTF model imports, renders, and can be moved, saved and reloaded.
+- [x] An imported mesh collides with physics parts.
+- [x] A malformed glTF file produces a clear error and doesn't crash.
 
 ---
 
@@ -344,10 +344,10 @@ Importing a glTF or FBX file with more than one mesh object opens a dialog. It s
 
 ### Acceptance criteria
 
-- [ ] Importing a multi-object FBX (such as a city props pack) lists its objects, and importing a few of them creates only those.
-- [ ] Each placement choice produces the expected Instances, and the Model layout matches the file.
-- [ ] A part naming one object saves, reloads and collides with its own shape, not the whole file's.
-- [ ] Cancelling the dialog imports nothing and copies no files.
+- [x] Importing a multi-object FBX (such as a city props pack) lists its objects, and importing a few of them creates only those.
+- [x] Each placement choice produces the expected Instances, and the Model layout matches the file.
+- [x] A part naming one object saves, reloads and collides with its own shape, not the whole file's.
+- [x] Cancelling the dialog imports nothing and copies no files.
 
 ---
 
@@ -364,7 +364,7 @@ The draw list's material gains normal, metalness, roughness, ambient occlusion, 
 - [ ] A glTF sample with all its maps (such as DamagedHelmet) renders with visible normal detail, shiny metal and glowing parts.
 - [ ] An FBX with linked base color, normal, roughness, metalness, emission, opacity and AO maps renders with each one applied.
 - [ ] A glossiness map renders as the inverse roughness; a specular map changes how strongly non-metal parts shine.
-- [ ] Built-in parts look the same as before.
+- [x] Built-in parts look the same as before.
 
 ---
 
@@ -378,9 +378,9 @@ Textures embedded in an FBX are used and copied out as image files on import. Ea
 
 ### Acceptance criteria
 
-- [ ] An FBX with embedded textures imports with them applied, and they appear as files in the model's folder.
-- [ ] An ORM-packed texture and a Unity metallic-smoothness texture each drive the right channels.
-- [ ] A texture with an unknown role is reported in Output and left out, and the model still loads.
+- [x] An FBX with embedded textures imports with them applied, and they appear as files in the model's folder.
+- [x] An ORM-packed texture and a Unity metallic-smoothness texture each drive the right channels.
+- [x] A texture with an unknown role is reported in Output and left out, and the model still loads.
 
 ---
 
@@ -394,10 +394,10 @@ Each `MeshPart` gets one `SurfaceAppearance` child per material in its file, hol
 
 ### Acceptance criteria
 
-- [ ] Importing creates a SurfaceAppearance per material with the detected maps filled in.
-- [ ] Changing a map or setting in Properties updates the viewport straight away, and it saves and reloads.
-- [ ] Changing a material's maps in the import dialog is what gets imported.
-- [ ] Deleting a SurfaceAppearance draws that material with the file's own textures again.
+- [x] Importing creates a SurfaceAppearance per material with the detected maps filled in.
+- [x] Changing a map or setting in Properties updates the viewport straight away, and it saves and reloads.
+- [x] Changing a material's maps in the import dialog is what gets imported.
+- [x] Deleting a SurfaceAppearance draws that material with the file's own textures again.
 
 ---
 
@@ -430,9 +430,9 @@ Load `.css` files from the project. Support the subset in `docs/ui.md`: type, `.
 ### Acceptance criteria
 
 - [ ] An example HUD (a health bar and score) styled only with CSS matches a reference screenshot.
-- [ ] Specificity and cascade tests pass for the supported selectors.
-- [ ] CSS variables resolve, including fallbacks.
-- [ ] An unknown property logs a warning, and the rest of the stylesheet still applies.
+- [x] Specificity and cascade tests pass for the supported selectors.
+- [x] CSS variables resolve, including fallbacks.
+- [x] An unknown property logs a warning, and the rest of the stylesheet still applies.
 
 ---
 
@@ -534,9 +534,9 @@ Create the `audio` crate around `kira`. Add a `Sound` Instance (asset reference,
 
 ### Acceptance criteria
 
-- [ ] A script plays a sound effect when a part is touched, and background music loops.
-- [ ] Stopping Play silences all game audio.
-- [ ] Sound blocks exist and translate to the same API.
+- [x] A script plays a sound effect when a part is touched, and background music loops.
+- [x] Stopping Play silences all game audio.
+- [x] Sound blocks exist and translate to the same API.
 
 ---
 

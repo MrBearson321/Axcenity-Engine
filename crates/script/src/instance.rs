@@ -2,6 +2,7 @@
 //! every read and write looks the Instance up in the World, which is lent to
 //! Lua while scripts run (see `with_world` in `lib.rs`).
 
+use axcenity_audio::SoundAction;
 use axcenity_core::{ClassName, INSTANCE_EVENTS, InstanceId, World};
 use mlua::{
     AppDataRef, AppDataRefMut, FromLua, Function, IntoLua, Lua, MetaMethod, UserData,
@@ -236,6 +237,60 @@ fn class_member(lua: &Lua, class: ClassName, key: &str) -> mlua::Result<Option<m
     Ok(Some(value))
 }
 
+/// The methods exposed by Sound Instances, which queue host audio actions.
+pub fn sound_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Function)>> {
+    let play = lua.create_function(|lua, this: LuaInstance| {
+        let (sound_id, volume, looped) = {
+            let world = world(lua)?;
+            let sound = world.get(this.0).ok_or_else(destroyed)?;
+            let sound_id = sound
+                .property("SoundId")
+                .and_then(|value| value.as_str())
+                .ok_or_else(|| mlua::Error::runtime("Sound.SoundId must be a file path"))?;
+            let volume = sound
+                .property("Volume")
+                .and_then(|value| value.as_number())
+                .ok_or_else(|| mlua::Error::runtime("Sound.Volume must be a number"))?;
+            let looped = sound
+                .property("Looped")
+                .and_then(|value| value.as_bool())
+                .ok_or_else(|| mlua::Error::runtime("Sound.Looped must be a boolean"))?;
+            (sound_id.to_owned(), volume, looped)
+        };
+        if sound_id.is_empty() {
+            return Err(mlua::Error::runtime(
+                "Sound.SoundId must name an audio file inside the project folder",
+            ));
+        }
+        if !volume.is_finite() || volume < 0.0 {
+            return Err(mlua::Error::runtime(
+                "Sound.Volume must be a finite number greater than or equal to 0",
+            ));
+        }
+        let mut actions = lua
+            .app_data_mut::<crate::SoundActions>()
+            .ok_or_else(|| mlua::Error::runtime("sound actions aren't ready"))?;
+        actions.0.push(SoundAction::Play {
+            instance: this.0,
+            sound_id,
+            volume,
+            looped,
+        });
+        Ok(())
+    })?;
+    let stop = lua.create_function(|lua, this: LuaInstance| {
+        let mut actions = lua
+            .app_data_mut::<crate::SoundActions>()
+            .ok_or_else(|| mlua::Error::runtime("sound actions aren't ready"))?;
+        actions.0.push(SoundAction::Stop(this.0));
+        Ok(())
+    })?;
+    Ok(vec![
+        (ClassName::Sound, "Play", play),
+        (ClassName::Sound, "Stop", stop),
+    ])
+}
+
 /// `game:GetService(name)`: a service by its class name, such as
 /// `"Players"`, or `"UserInputService"` (LocalScripts only) or
 /// `"RunService"`, which aren't Instances.
@@ -250,7 +305,6 @@ pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
             _ => {}
         }
         let world = world(lua)?;
-        // The services directly in `game`, in Explorer order.
         let services: Vec<InstanceId> = world
             .get(world.root())
             .map(|game| game.children().to_vec())

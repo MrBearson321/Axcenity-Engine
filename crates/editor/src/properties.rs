@@ -32,7 +32,7 @@ pub struct Section {
 
 /// The groups, in panel order, and which properties go in each. Name and
 /// ClassName come first, under "Data", and aren't in the property map.
-const GROUPS: [(&str, &[&str]); 6] = [
+const GROUPS: [(&str, &[&str]); 7] = [
     (
         "Appearance",
         &["Color", "Material", "Metalness", "Roughness"],
@@ -74,6 +74,8 @@ const GROUPS: [(&str, &[&str]); 6] = [
     (
         "UI",
         &[
+            "Class",
+            "Id",
             "Enabled",
             "Visible",
             "Position",
@@ -85,6 +87,7 @@ const GROUPS: [(&str, &[&str]); 6] = [
             "TextSize",
         ],
     ),
+    ("Audio", &["SoundId", "Volume", "Looped"]),
 ];
 
 /// True for a property that names a texture file, such as `ColorMap`.
@@ -113,6 +116,7 @@ pub fn sections(instance: &Instance) -> Vec<Section> {
                 instance.class(),
                 ClassName::ScreenGui | ClassName::Frame | ClassName::TextLabel
             ),
+            "Audio" => instance.class() == ClassName::Sound,
             _ => true,
         })
         .map(|&(title, names)| Section {
@@ -296,7 +300,8 @@ fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
                 "Metalness"
                 | "Roughness"
                 | "AmbientOcclusionStrength"
-                | "BackgroundTransparency" => drag.speed(0.01).range(0.0..=1.0),
+                | "BackgroundTransparency"
+                | "Volume" => drag.speed(0.01).range(0.0..=1.0),
                 "NormalStrength" | "EmissiveStrength" | "TextSize" => {
                     drag.speed(0.01).range(0.0..=f64::INFINITY)
                 }

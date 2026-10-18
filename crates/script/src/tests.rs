@@ -83,6 +83,146 @@ fn a_script_creates_a_new_part_and_moves_an_existing_one() {
 }
 
 #[test]
+fn sound_play_and_stop_queue_host_actions() {
+    let mut world = World::new();
+    let sound = world.create(ClassName::Sound).unwrap();
+    world.set_name(sound, "Chime").unwrap();
+    world
+        .set_property(
+            sound,
+            "SoundId",
+            Value::String("assets/audio/chime.wav".to_owned()),
+        )
+        .unwrap();
+    world
+        .set_property(sound, "Volume", Value::Number(0.5))
+        .unwrap();
+    world
+        .set_property(sound, "Looped", Value::Bool(true))
+        .unwrap();
+    world.set_parent(sound, Some(world.workspace())).unwrap();
+
+    let mut runtime = ScriptRuntime::new();
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/audio.server.lua",
+        "workspace.Chime:Play(); workspace.Chime:Stop()",
+    );
+    assert!(lines(&mut runtime).is_empty());
+    assert_eq!(
+        runtime.take_sound_actions(),
+        [
+            axcenity_audio::SoundAction::Play {
+                instance: sound,
+                sound_id: "assets/audio/chime.wav".to_owned(),
+                volume: 0.5,
+                looped: true,
+            },
+            axcenity_audio::SoundAction::Stop(sound),
+        ]
+    );
+}
+
+#[test]
+fn sound_play_rejects_invalid_volume_without_queueing_audio() {
+    let mut world = World::new();
+    let sound = world.create(ClassName::Sound).unwrap();
+    world.set_name(sound, "Chime").unwrap();
+    world
+        .set_property(
+            sound,
+            "SoundId",
+            Value::String("assets/audio/chime.wav".to_owned()),
+        )
+        .unwrap();
+    world
+        .set_property(sound, "Volume", Value::Number(-1.0))
+        .unwrap();
+    world.set_parent(sound, Some(world.workspace())).unwrap();
+
+    let mut runtime = ScriptRuntime::new();
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/audio.server.lua",
+        "workspace.Chime:Play()",
+    );
+    assert_eq!(
+        lines(&mut runtime),
+        [
+            "error: scripts/audio.server.lua:1: Sound.Volume must be a finite number greater than or equal to 0"
+        ]
+    );
+    assert!(runtime.take_sound_actions().is_empty());
+}
+
+#[test]
+fn touched_events_play_effects_while_startup_music_loops() {
+    let (mut world, pad, ball) = world_with_pad_and_ball();
+    let chime = world.create(ClassName::Sound).unwrap();
+    world.set_name(chime, "Chime").unwrap();
+    world
+        .set_property(
+            chime,
+            "SoundId",
+            Value::String("assets/audio/chime.wav".to_owned()),
+        )
+        .unwrap();
+    world
+        .set_property(chime, "Looped", Value::Bool(false))
+        .unwrap();
+    world.set_parent(chime, Some(world.workspace())).unwrap();
+
+    let music = world.create(ClassName::Sound).unwrap();
+    world.set_name(music, "Music").unwrap();
+    world
+        .set_property(
+            music,
+            "SoundId",
+            Value::String("assets/audio/ambient-loop.wav".to_owned()),
+        )
+        .unwrap();
+    world
+        .set_property(music, "Looped", Value::Bool(true))
+        .unwrap();
+    world.set_parent(music, Some(world.workspace())).unwrap();
+
+    let mut runtime = ScriptRuntime::new();
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/audio.server.lua",
+        r#"
+        workspace.Music:Play()
+        workspace.Pad.Touched:Connect(function()
+            workspace.Chime:Play()
+        end)
+        "#,
+    );
+    assert_eq!(
+        runtime.take_sound_actions(),
+        [axcenity_audio::SoundAction::Play {
+            instance: music,
+            sound_id: "assets/audio/ambient-loop.wav".to_owned(),
+            volume: 1.0,
+            looped: true,
+        }]
+    );
+
+    runtime.fire_touched(&mut world, &[(pad, ball)]);
+    assert_eq!(
+        runtime.take_sound_actions(),
+        [axcenity_audio::SoundAction::Play {
+            instance: chime,
+            sound_id: "assets/audio/chime.wav".to_owned(),
+            volume: 1.0,
+            looped: false,
+        }]
+    );
+}
+
+#[test]
 fn a_script_creates_and_updates_ui_instances_with_udim2() {
     let mut world = World::new();
     let output = output_of(

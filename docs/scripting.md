@@ -16,7 +16,7 @@ Read before working in the `script` or `blocks` crates, or adding anything to th
 - Clean up Roblox quirks when it helps beginners. Don't chase full compatibility.
 - Never use Roblox's name, logos or assets.
 
-## API so far (Phase 16)
+## API so far (Phase 29)
 
 - Globals: `game`, `workspace`, `script` (the running Script, LocalScript or ModuleScript), `print`, `require(module)` (see Modules), `Instance.new(className)`, `Vector3.new(x, y, z)`, `Color3.new(r, g, b)`, `Color3.fromRGB(r, g, b)`, `UDim2.new(xScale, xOffset, yScale, yOffset)`, `UDim2.fromScale(x, y)`, `UDim2.fromOffset(x, y)`, `Enum` and `task` (see Execution model).
 - `game:GetService(name)` returns a service by class name (`Workspace`, `Players`, `ReplicatedStorage`, `ServerScriptService`, `StarterPlayer`), or `UserInputService`; a wrong name lists the choices. `Instance.new("Player")` is an error: Players are made when someone joins.
@@ -32,6 +32,7 @@ Read before working in the `script` or `blocks` crates, or adding anything to th
 - **`RunService`** (Phase 16, chosen by the developer): `game:GetService("RunService")` (or `game.RunService`) has `Heartbeat`, which fires once a frame after physics and `Touched`, on both sides, with the frame's length in seconds. Not an Instance (like `UserInputService`), so it isn't in the Explorer. No `RenderStepped` or `Stepped` yet.
 - **MeshPart** (Phase 17): `Instance.new("MeshPart")` works, with `Anchored`, `Position`, `Orientation`, `Size` and `MeshId` (a model's path in the project, such as `"assets/models/pyramid.gltf"`; `.gltf`, `.glb` and `.fbx` files work, and `#` after the file picks objects in it: `"assets/models/props.fbx#Bench"`), and fires `Touched` like a Part. Setting `MeshId` loads that model the first time it's drawn; a path outside the project is refused, and a model that can't be loaded is reported once and drawn as a grey box. It has no `Color` or `Material`: it uses the file's materials.
 - **SurfaceAppearance** (Phase 21): `Instance.new("SurfaceAppearance")` inside a MeshPart replaces the texture maps of the model's material named by its `MaterialName`, with the properties in `docs/rendering.md` (maps are texture paths in the project, such as `"assets/textures/wood.png"`). `Enum.TextureChannel` (`Red`, `Green`, `Blue`, `Alpha`) is for its `…Channel` properties, which also take item names (`look.RoughnessChannel = "Green"`).
+- **Sound** (Phase 29): put a `Sound` Instance in the Workspace, set `SoundId` to a project-relative audio file (such as `"assets/audio/chime.wav"`), then call `sound:Play()` or `sound:Stop()`. `Volume` is a non-negative linear amplitude multiplier (1 is original level, 0 is silent), and `Looped` repeats the entire file. A new `Play()` on the same Sound restarts it. Supported files are WAV, FLAC, Ogg Vorbis and MP3. Playback runs in the host, not Lua; stopping editor Play drops its audio engine and stops all playback.
 - `Part.Anchored` (default `false`): unanchored parts fall under physics. Setting `Position` or `Orientation` on one teleports it and stops it; physics writes both back as the part moves. See Physics in `docs/architecture.md`.
 
 ## Errors
@@ -102,7 +103,8 @@ Each script gets its own restricted environment. Remove or replace `io`, `os` (k
 
 ## Blocks to Lua
 
-- Blocks are Scratch-style (vertical snapping, shape-typed slots). There is no separate runtime: **blocks always translate to Lua**.
-- Generated Lua must be **readable** (it's shown by "View as Lua") and carry **source-block tags**, so errors and highlighting map back to block IDs.
+- Block scripts are JSON files ending in `.server.blocks.json` or `.client.blocks.json`. The editor presents event blocks with nested statement sequences and editable value/condition fields; available statements include setting properties, waiting, moving, conditionals, repeats, variables, and playing or stopping a Sound.
+- There is no separate runtime: **blocks always translate to Lua**, using the same `ScriptRuntime` and API as handwritten scripts. Sound blocks generate `sound:Play()` and `sound:Stop()`.
+- Generated Lua is shown as a read-only preview and carries source-block tags, so Lua error lines can highlight the block that generated them.
 - One-way only. Don't build Lua-to-blocks conversion.
 - Every block must correspond to a real Lua API. Don't add block-only features.

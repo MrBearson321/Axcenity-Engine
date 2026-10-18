@@ -168,7 +168,7 @@ function UserInputServiceClass:IsKeyDown(key) end
 ---@field Changed Signal Fires when a property (or `Name` or `Parent`) gets a different value, whether a script, physics or the editor changed it. The handler gets the property's name: `function(property) ... end`.
 ---@field ChildAdded Signal Fires when an Instance is put inside this one. The handler gets the child.
 ---@field ChildRemoved Signal Fires when an Instance is taken out of this one. The handler gets the child.
----@field [string] Workspace|Players|ReplicatedStorage|ServerScriptService|StarterPlayer|StarterPlayerScripts|Part|MeshPart|Script|LocalScript|ModuleScript|RemoteEvent|Player|Model|Folder|SurfaceAppearance|ScreenGui|Frame|TextLabel A child, found by its name.
+---@field [string] Workspace|Players|ReplicatedStorage|ServerScriptService|StarterPlayer|StarterPlayerScripts|Part|MeshPart|Script|LocalScript|ModuleScript|RemoteEvent|Player|Model|Folder|SurfaceAppearance|ScreenGui|Frame|TextLabel|Sound A child, found by its name.
 local InstanceClass = {}
 
 ---The first child with this name, or nil. With `recursive`, searches every descendant.
@@ -325,10 +325,14 @@ function RemoteEventClass:FireAllClients(...) end
 
 ---The on-screen UI root, usually inside Workspace.
 ---@class ScreenGui: Instance
+---@field Class string Space-separated CSS class names used to style this UI Instance.
+---@field Id string The CSS identifier used to style this UI Instance.
 ---@field Enabled boolean If true, the UI in this ScreenGui is drawn.
 
 ---A rectangular UI element that can contain other UI elements.
 ---@class Frame: Instance
+---@field Class string Space-separated CSS class names used to style this UI Instance.
+---@field Id string The CSS identifier used to style this UI Instance.
 ---@field Position UDim2 The top-left position relative to the parent, in scale and pixel offsets.
 ---@field Size UDim2 The size relative to the parent, in scale and pixel offsets.
 ---@field BackgroundColor3 Color3 The frame's background color.
@@ -337,6 +341,8 @@ function RemoteEventClass:FireAllClients(...) end
 
 ---A UI element that displays text.
 ---@class TextLabel: Instance
+---@field Class string Space-separated CSS class names used to style this UI Instance.
+---@field Id string The CSS identifier used to style this UI Instance.
 ---@field Position UDim2 The top-left position relative to the parent, in scale and pixel offsets.
 ---@field Size UDim2 The size relative to the parent, in scale and pixel offsets.
 ---@field BackgroundColor3 Color3 The label's background color.
@@ -345,6 +351,22 @@ function RemoteEventClass:FireAllClients(...) end
 ---@field TextColor3 Color3 The text color.
 ---@field TextSize number The text size in pixels.
 ---@field Visible boolean If false, this label is hidden.
+
+---A sound effect or music track that scripts can play.
+---@class Sound: Instance
+---@field SoundId string The audio file inside the project folder, such as "assets/audio/chime.wav".
+---@field Volume number Playback volume as a non-negative amplitude; 1 is the original level and 0 is silent.
+---@field Looped boolean If true, playback repeats until Stop is called or the game session stops.
+local SoundClass = {}
+
+---Starts this sound using its SoundId, Volume and Looped properties. Playing it again restarts it; stopping the game session stops all sounds.
+---@return nil
+function SoundClass:Play() end
+
+---Stops this sound if it is playing.
+---@return nil
+function SoundClass:Stop() end
+
 
 -- Globals -------------------------------------------------------------------
 
@@ -388,6 +410,7 @@ Instance = {}
 ---@overload fun(className: "ScreenGui"): ScreenGui
 ---@overload fun(className: "Frame"): Frame
 ---@overload fun(className: "TextLabel"): TextLabel
+---@overload fun(className: "Sound"): Sound
 function Instance.new(className) end
 
 ---Creates Vector3 values.

@@ -9,6 +9,7 @@
 //!   world.json      the Instances in the world
 //!   scripts/        `*.server.lua`, `*.client.lua` and `*.module.lua`
 //!                   files, in subfolders if you like
+//!   *.css           project stylesheets, also found in subfolders
 //! ```
 //!
 //! One damaged file never stops the rest from loading: [`load`] leaves it
@@ -16,6 +17,9 @@
 
 mod world_file;
 
+#[cfg(test)]
+use axcenity_blocks::{Block, BlockKind};
+use axcenity_blocks::{BlockScript, reserve_block_ids, translate};
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -40,6 +44,8 @@ pub const CLIENT_SCRIPT_SUFFIX: &str = ".client.lua";
 /// Files ending in this are modules, which become ModuleScripts that other
 /// scripts load with `require`.
 pub const MODULE_SCRIPT_SUFFIX: &str = ".module.lua";
+pub const SERVER_BLOCK_SCRIPT_SUFFIX: &str = ".server.blocks.json";
+pub const CLIENT_BLOCK_SCRIPT_SUFFIX: &str = ".client.blocks.json";
 
 /// The newest project format this version of the engine understands.
 pub const FORMAT_VERSION: u32 = 1;
@@ -59,6 +65,10 @@ pub struct Project {
     /// first (so they can be required), then server scripts, then client
     /// scripts, each sorted by path (see [`script_order`]).
     pub scripts: Vec<ScriptFile>,
+    /// Parsed block documents corresponding to generated entries in `scripts`.
+    pub block_scripts: Vec<BlockScriptFile>,
+    /// CSS files, in stable path order, ready for the UI crate to parse.
+    pub stylesheets: Vec<StylesheetFile>,
     /// The files that couldn't be loaded. Each was left out, and the rest
     /// of the project loaded without it.
     pub problems: Vec<LoadError>,
@@ -79,6 +89,19 @@ pub struct ScriptFile {
     /// Error messages show this path.
     pub path: String,
     /// The Lua code.
+    pub source: String,
+}
+
+pub struct BlockScriptFile {
+    pub instance: InstanceId,
+    pub path: String,
+    pub script: BlockScript,
+}
+
+/// A CSS file from the project folder.
+pub struct StylesheetFile {
+    /// Relative path with `/` separators on every OS.
+    pub path: String,
     pub source: String,
 }
 
@@ -104,6 +127,25 @@ pub enum LoadError {
         #[source]
         source: WorldError,
     },
+    #[error("`{}` is not a valid block script: {message}", path.display())]
+    BlockScript { path: PathBuf, message: String },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum BlockSaveError {
+    #[error("could not encode block script: {0}")]
+    Serialize(#[source] serde_json::Error),
+    #[error(transparent)]
+    Write(#[from] SaveError),
+}
+
+impl BlockSaveError {
+    pub fn already_exists(&self) -> bool {
+        match self {
+            Self::Write(error) => error.already_exists(),
+            Self::Serialize(_) => false,
+        }
+    }
 }
 
 /// Loads the project in `folder`.
@@ -144,16 +186,136 @@ pub fn load(folder: &Path) -> Result<Project, LoadError> {
             (World::new(), false)
         }
     };
-    let scripts = load_scripts(folder, &mut world, &mut problems);
+    let (scripts, block_scripts) = load_scripts(folder, &mut world, &mut problems);
+    let stylesheets = load_stylesheets(folder, &mut problems);
 
     Ok(Project {
         folder: folder.to_owned(),
         manifest,
         world,
         scripts,
+        block_scripts,
+        stylesheets,
         problems,
         world_loaded,
     })
+}
+
+fn load_stylesheets(folder: &Path, problems: &mut Vec<LoadError>) -> Vec<StylesheetFile> {
+    find_stylesheets(folder, problems)
+        .into_iter()
+        .filter_map(|path| match read(&folder.join(&path)) {
+            Ok(source) => Some(StylesheetFile { path, source }),
+            Err(problem) => {
+                problems.push(problem);
+                None
+            }
+        })
+        .collect()
+}
+
+/// The paths of the `.css` files in `folder` and its subfolders, sorted,
+/// which is the order they cascade in. Folders that can't be read are added
+/// to `problems`.
+pub fn find_stylesheets(folder: &Path, problems: &mut Vec<LoadError>) -> Vec<String> {
+    let mut paths = Vec::new();
+    find_stylesheet_files(folder, "", &mut paths, problems);
+    paths.sort();
+    paths
+}
+
+/// True for a stylesheet's path (one ending in `.css`, in any capitals).
+pub fn is_stylesheet(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("css"))
+}
+
+/// What a new stylesheet starts with: a rule for every ScreenGui, to show
+/// how one looks.
+pub const NEW_STYLESHEET_SOURCE: &str = "ScreenGui {
+    --text: #ffffff;
+}
+";
+
+/// Makes a new stylesheet, `name.css`, at the top of the project folder with
+/// `source` in it, and returns its path. Fails (see
+/// [`SaveError::already_exists`]) rather than replace a file.
+pub fn create_stylesheet(folder: &Path, name: &str, source: &str) -> Result<String, SaveError> {
+    let path = format!("{name}.css");
+    let disk_path = folder.join(&path);
+    use std::io::Write;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&disk_path)
+        .map_err(SaveError::new(&disk_path))?;
+    file.write_all(source.as_bytes())
+        .map_err(SaveError::new(&disk_path))?;
+    Ok(path)
+}
+
+/// Writes `source` to the stylesheet at `path`, the same way as [`write_script`].
+pub fn write_stylesheet(folder: &Path, path: &str, source: &str) -> Result<(), SaveError> {
+    write_script(folder, path, source)
+}
+
+fn find_stylesheet_files(
+    directory: &Path,
+    prefix: &str,
+    found: &mut Vec<String>,
+    problems: &mut Vec<LoadError>,
+) {
+    let mut problem = |source| {
+        problems.push(LoadError::Read {
+            path: directory.to_owned(),
+            source,
+        })
+    };
+    let entries = match fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == ErrorKind::NotFound && prefix.is_empty() => return,
+        Err(err) => return problem(err),
+    };
+
+    let mut folders = Vec::new();
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(err) => {
+                problem(err);
+                continue;
+            }
+        };
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let shown = if prefix.is_empty() {
+            name.clone()
+        } else {
+            format!("{prefix}/{name}")
+        };
+        let file_type = match entry.file_type() {
+            Ok(file_type) => file_type,
+            Err(err) => {
+                problem(err);
+                continue;
+            }
+        };
+        if file_type.is_dir() {
+            if !name.starts_with('.') && name != "target" && name != "node_modules" {
+                folders.push((path, shown));
+            }
+        } else if file_type.is_file()
+            && path
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("css"))
+        {
+            found.push(shown);
+        }
+    }
+    for (path, shown) in folders {
+        find_stylesheet_files(&path, &shown, found, problems);
+    }
 }
 
 /// The name of the project in `folder`, from its manifest, without loading
@@ -189,19 +351,42 @@ fn load_scripts(
     folder: &Path,
     world: &mut World,
     problems: &mut Vec<LoadError>,
-) -> Vec<ScriptFile> {
+) -> (Vec<ScriptFile>, Vec<BlockScriptFile>) {
     let mut scripts = Vec::new();
+    let mut block_scripts = Vec::new();
     for path in find_scripts(folder, problems) {
-        match read_script(folder, &path) {
-            Ok(source) => scripts.push(ScriptFile {
-                instance: add_script_instance(world, &path),
-                path,
-                source,
-            }),
+        let loaded = if is_block_script(&path) {
+            read_block_script(folder, &path).and_then(|script| {
+                translate(&script)
+                    .map(|translation| (translation.source, Some(script)))
+                    .map_err(|err| LoadError::BlockScript {
+                        path: folder.join(&path),
+                        message: err.to_string(),
+                    })
+            })
+        } else {
+            read_script(folder, &path).map(|source| (source, None))
+        };
+        match loaded {
+            Ok((source, block_script)) => {
+                let instance = add_script_instance(world, &path);
+                scripts.push(ScriptFile {
+                    instance,
+                    path: path.clone(),
+                    source,
+                });
+                if let Some(script) = block_script {
+                    block_scripts.push(BlockScriptFile {
+                        instance,
+                        path,
+                        script,
+                    });
+                }
+            }
             Err(err) => problems.push(err),
         }
     }
-    scripts
+    (scripts, block_scripts)
 }
 
 /// The path of every `*.server.lua`, `*.client.lua` and `*.module.lua` file in the project
@@ -275,6 +460,8 @@ fn find_script_files(
             SERVER_SCRIPT_SUFFIX,
             CLIENT_SCRIPT_SUFFIX,
             MODULE_SCRIPT_SUFFIX,
+            SERVER_BLOCK_SCRIPT_SUFFIX,
+            CLIENT_BLOCK_SCRIPT_SUFFIX,
         ]
         .iter()
         .any(|suffix| file_name.ends_with(suffix))
@@ -290,7 +477,7 @@ fn find_script_files(
 /// The class of the script in the file at `path`: LocalScript for a
 /// `.client.lua` file, ModuleScript for a `.module.lua` file, otherwise Script.
 pub fn script_class(path: &str) -> ClassName {
-    if path.ends_with(CLIENT_SCRIPT_SUFFIX) {
+    if path.ends_with(CLIENT_SCRIPT_SUFFIX) || path.ends_with(CLIENT_BLOCK_SCRIPT_SUFFIX) {
         ClassName::LocalScript
     } else if path.ends_with(MODULE_SCRIPT_SUFFIX) {
         ClassName::ModuleScript
@@ -315,10 +502,16 @@ pub fn script_suffix(class: ClassName) -> &'static str {
 pub fn script_name(path: &str) -> &str {
     let file_name = path.rsplit('/').next().unwrap_or(path);
     file_name
-        .strip_suffix(SERVER_SCRIPT_SUFFIX)
+        .strip_suffix(SERVER_BLOCK_SCRIPT_SUFFIX)
+        .or_else(|| file_name.strip_suffix(CLIENT_BLOCK_SCRIPT_SUFFIX))
+        .or_else(|| file_name.strip_suffix(SERVER_SCRIPT_SUFFIX))
         .or_else(|| file_name.strip_suffix(CLIENT_SCRIPT_SUFFIX))
         .or_else(|| file_name.strip_suffix(MODULE_SCRIPT_SUFFIX))
         .unwrap_or(file_name)
+}
+
+pub fn is_block_script(path: &str) -> bool {
+    path.ends_with(SERVER_BLOCK_SCRIPT_SUFFIX) || path.ends_with(CLIENT_BLOCK_SCRIPT_SUFFIX)
 }
 
 /// The path of a new script of `class` (Script, LocalScript or ModuleScript) called
@@ -358,7 +551,80 @@ pub fn add_script_instance(world: &mut World, path: &str) -> InstanceId {
 /// Reads the script file at `path` (a [`ScriptFile::path`]) in the project in
 /// `folder` again, for the newest version of it.
 pub fn read_script(folder: &Path, path: &str) -> Result<String, LoadError> {
+    if is_block_script(path) {
+        let script = read_block_script(folder, path)?;
+        return translate(&script)
+            .map(|translation| translation.source)
+            .map_err(|err| LoadError::BlockScript {
+                path: folder.join(path),
+                message: err.to_string(),
+            });
+    }
     read(&folder.join(path))
+}
+
+pub fn read_block_script(folder: &Path, path: &str) -> Result<BlockScript, LoadError> {
+    let full_path = folder.join(path);
+    let text = read(&full_path)?;
+    let script = serde_json::from_str(&text).map_err(|err| LoadError::BlockScript {
+        path: full_path,
+        message: err.to_string(),
+    })?;
+    reserve_block_ids(&script);
+    Ok(script)
+}
+
+pub fn write_block_script(
+    folder: &Path,
+    path: &str,
+    script: &BlockScript,
+) -> Result<(), BlockSaveError> {
+    let source = serde_json::to_string_pretty(script).map_err(BlockSaveError::Serialize)?;
+    write_script(folder, path, &source).map_err(BlockSaveError::Write)
+}
+
+pub fn block_script_path(name: &str, class: ClassName) -> String {
+    let suffix = if class == ClassName::LocalScript {
+        CLIENT_BLOCK_SCRIPT_SUFFIX
+    } else {
+        SERVER_BLOCK_SCRIPT_SUFFIX
+    };
+    format!("{SCRIPTS_FOLDER}/{name}{suffix}")
+}
+
+pub fn create_block_script(
+    folder: &Path,
+    name: &str,
+    class: ClassName,
+    script: &BlockScript,
+) -> Result<String, BlockSaveError> {
+    let path = block_script_path(name, class);
+    let source = serde_json::to_string_pretty(script).map_err(BlockSaveError::Serialize)?;
+    let disk_path = folder.join(&path);
+    fs::create_dir_all(folder.join(SCRIPTS_FOLDER)).map_err(|source| {
+        BlockSaveError::Write(SaveError {
+            path: disk_path.clone(),
+            source,
+        })
+    })?;
+    use std::io::Write;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&disk_path)
+        .map_err(|source| {
+            BlockSaveError::Write(SaveError {
+                path: disk_path.clone(),
+                source,
+            })
+        })?;
+    file.write_all(source.as_bytes()).map_err(|source| {
+        BlockSaveError::Write(SaveError {
+            path: disk_path,
+            source,
+        })
+    })?;
+    Ok(path)
 }
 
 /// Whether `name` can be a script's name, or why not, in words for the
@@ -464,7 +730,25 @@ pub fn write_script(folder: &Path, path: &str, source: &str) -> Result<(), SaveE
 /// (`.server.lua` or `.client.lua`), and returns its new path. Fails rather
 /// than replace another file.
 pub fn rename_script(folder: &Path, path: &str, new_name: &str) -> Result<String, SaveError> {
-    let new_file_name = format!("{new_name}{}", script_suffix(script_class(path)));
+    rename_script_file(folder, path, new_name, script_suffix(script_class(path)))
+}
+
+pub fn rename_block_script(folder: &Path, path: &str, new_name: &str) -> Result<String, SaveError> {
+    let suffix = if path.ends_with(CLIENT_BLOCK_SCRIPT_SUFFIX) {
+        CLIENT_BLOCK_SCRIPT_SUFFIX
+    } else {
+        SERVER_BLOCK_SCRIPT_SUFFIX
+    };
+    rename_script_file(folder, path, new_name, suffix)
+}
+
+fn rename_script_file(
+    folder: &Path,
+    path: &str,
+    new_name: &str,
+    suffix: &str,
+) -> Result<String, SaveError> {
+    let new_file_name = format!("{new_name}{suffix}");
     let new_path = match path.rsplit_once('/') {
         Some((dir, _)) => format!("{dir}/{new_file_name}"),
         None => new_file_name.clone(),
@@ -579,8 +863,49 @@ mod tests {
 
     #[test]
     fn project_without_a_scripts_folder_has_no_scripts() {
-        let project = load(&examples_folder().join("hello-part")).unwrap();
+        let folder = project_with_scripts("no-scripts", &[]);
+        let project = load(&folder).unwrap();
+        fs::remove_dir_all(folder).unwrap();
         assert!(project.scripts.is_empty());
+    }
+
+    #[test]
+    fn new_stylesheets_never_replace_a_file() {
+        let folder = project_with_scripts("new-stylesheet", &[]);
+        let path = create_stylesheet(&folder, "Stylesheet", NEW_STYLESHEET_SOURCE).unwrap();
+        assert_eq!(path, "Stylesheet.css");
+        assert!(is_stylesheet(&path));
+        assert!(
+            create_stylesheet(&folder, "Stylesheet", "")
+                .unwrap_err()
+                .already_exists()
+        );
+        write_stylesheet(&folder, &path, ".hud { width: 10px }").unwrap();
+        assert_eq!(
+            load(&folder).unwrap().stylesheets[0].source,
+            ".hud { width: 10px }"
+        );
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn project_loads_nested_css_files_in_stable_order() {
+        let folder = project_with_scripts("stylesheets", &[]);
+        fs::write(folder.join("base.css"), ".root { opacity: 1 }").unwrap();
+        fs::create_dir_all(folder.join("styles")).unwrap();
+        fs::write(folder.join("styles/hud.CSS"), ".hud { display: flex }").unwrap();
+
+        let project = load(&folder).unwrap();
+        assert_eq!(
+            project
+                .stylesheets
+                .iter()
+                .map(|sheet| sheet.path.as_str())
+                .collect::<Vec<_>>(),
+            ["base.css", "styles/hud.CSS"]
+        );
+        assert_eq!(project.stylesheets[1].source, ".hud { display: flex }");
+        fs::remove_dir_all(folder).unwrap();
     }
 
     /// A project with a manifest, an empty world and these script files.
@@ -853,6 +1178,44 @@ mod tests {
         assert_eq!(found, ["scripts/DOOR.server.lua"]);
         assert_eq!(text.unwrap(), "print('edited')");
         assert!(problems.is_empty() && !leftover);
+    }
+
+    #[test]
+    fn block_scripts_load_as_lua_scripts_and_keep_their_class_when_renamed() {
+        let folder = project_with_scripts("block-script-files", &[]);
+        let script = BlockScript {
+            blocks: vec![Block::new(BlockKind::WhenStarted {
+                body: vec![Block::new(BlockKind::PlaySound {
+                    target: "Music".to_owned(),
+                })],
+            })],
+        };
+        let path = create_block_script(&folder, "Music", ClassName::LocalScript, &script).unwrap();
+        assert_eq!(path, "scripts/Music.client.blocks.json");
+
+        let loaded = load(&folder).unwrap();
+        assert_eq!(loaded.block_scripts.len(), 1);
+        assert_eq!(loaded.scripts.len(), 1);
+        assert_eq!(
+            loaded
+                .world
+                .get(loaded.scripts[0].instance)
+                .unwrap()
+                .class(),
+            ClassName::LocalScript
+        );
+        assert!(
+            loaded.scripts[0]
+                .source
+                .contains("workspace[\"Music\"]:Play()")
+        );
+
+        let renamed = rename_block_script(&folder, &path, "Background").unwrap();
+        assert_eq!(renamed, "scripts/Background.client.blocks.json");
+        assert!(!folder.join(&path).exists());
+        assert_eq!(read_block_script(&folder, &renamed).unwrap(), script);
+        delete_script(&folder, &renamed).unwrap();
+        fs::remove_dir_all(folder).unwrap();
     }
 
     #[test]

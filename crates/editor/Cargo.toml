@@ -8,12 +8,15 @@ authors.workspace = true
 
 [dependencies]
 axcenity-assets.workspace = true
+axcenity-audio.workspace = true
+axcenity-blocks.workspace = true
 axcenity-core.workspace = true
 axcenity-physics.workspace = true
 axcenity-project.workspace = true
 axcenity-render.workspace = true
 axcenity-scene.workspace = true
 axcenity-script.workspace = true
+axcenity-ui.workspace = true
 anyhow.workspace = true
 eframe.workspace = true
 egui-phosphor.workspace = true

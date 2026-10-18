@@ -14,6 +14,7 @@ use std::panic::{self, AssertUnwindSafe};
 use std::path::Path;
 
 use axcenity_assets::Assets;
+use axcenity_audio::{AudioEngine, SoundAction};
 use axcenity_core::{KeyCode, World};
 use axcenity_physics::Physics;
 use axcenity_project::ScriptFile;
@@ -32,6 +33,9 @@ pub struct Session {
     world: World,
     scripts: ScriptRuntime,
     physics: Physics,
+    assets: Assets,
+    audio: Option<AudioEngine>,
+    audio_failed: bool,
     /// Set by Debug > Panic during Play, to check that a crash is caught.
     panic_next_frame: bool,
 }
@@ -50,7 +54,10 @@ impl Session {
         let mut session = Session {
             world: edit_world.clone(),
             scripts: ScriptRuntime::new(),
-            physics: Physics::with_assets(assets),
+            physics: Physics::with_assets(assets.clone()),
+            assets,
+            audio: None,
+            audio_failed: false,
             panic_next_frame: false,
         };
         guard(|| {
@@ -63,6 +70,7 @@ impl Session {
                 );
                 session.forward_output(output);
             }
+            session.apply_audio(output);
         })?;
         Ok(session)
     }
@@ -116,6 +124,7 @@ impl Session {
             self.scripts.heartbeat(&mut self.world, seconds);
             self.forward_output(output);
             moved = self.scripts.take_camera_move();
+            self.apply_audio(output);
         })?;
         Ok(moved)
     }
@@ -127,6 +136,36 @@ impl Session {
                 OutputKind::Print => output.info(line.text),
                 OutputKind::Error => output.error(line.text),
             }
+        }
+    }
+
+    fn apply_audio(&mut self, output: &mut Output) {
+        for action in self.scripts.take_sound_actions() {
+            if matches!(action, SoundAction::Stop(_)) {
+                if let Some(audio) = &mut self.audio
+                    && let Err(err) = audio.apply(action, &self.assets)
+                {
+                    output.error(format!("Audio: {err}"));
+                }
+                continue;
+            }
+            if self.audio.is_none() && !self.audio_failed {
+                match AudioEngine::new() {
+                    Ok(audio) => self.audio = Some(audio),
+                    Err(err) => {
+                        self.audio_failed = true;
+                        output.error(format!("Audio is unavailable: {err}"));
+                    }
+                }
+            }
+            if let Some(audio) = &mut self.audio
+                && let Err(err) = audio.apply(action, &self.assets)
+            {
+                output.error(format!("Audio: {err}"));
+            }
+        }
+        if let Some(audio) = &mut self.audio {
+            audio.collect_finished();
         }
     }
 }

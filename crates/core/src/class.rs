@@ -59,10 +59,12 @@ pub enum ClassName {
     Frame,
     /// A UI element that displays text.
     TextLabel,
+    /// Plays an audio file from the project.
+    Sound,
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 20] = [
+    pub const ALL: [ClassName; 21] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -83,6 +85,7 @@ impl ClassName {
         ClassName::ScreenGui,
         ClassName::Frame,
         ClassName::TextLabel,
+        ClassName::Sound,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -107,6 +110,7 @@ impl ClassName {
             ClassName::ScreenGui => "ScreenGui",
             ClassName::Frame => "Frame",
             ClassName::TextLabel => "TextLabel",
+            ClassName::Sound => "Sound",
         }
     }
 
@@ -157,8 +161,14 @@ impl ClassName {
             | ClassName::Player
             | ClassName::Model
             | ClassName::Folder => Vec::new(),
-            ClassName::ScreenGui => vec![("Enabled", Value::Bool(true))],
+            ClassName::ScreenGui => vec![
+                ("Class", Value::String(String::new())),
+                ("Id", Value::String(String::new())),
+                ("Enabled", Value::Bool(true)),
+            ],
             ClassName::Frame => vec![
+                ("Class", Value::String(String::new())),
+                ("Id", Value::String(String::new())),
                 ("Position", Value::UDim2(UDim2::default())),
                 ("Size", Value::UDim2(UDim2::new(0.0, 200.0, 0.0, 100.0))),
                 (
@@ -169,6 +179,8 @@ impl ClassName {
                 ("Visible", Value::Bool(true)),
             ],
             ClassName::TextLabel => vec![
+                ("Class", Value::String(String::new())),
+                ("Id", Value::String(String::new())),
                 ("Position", Value::UDim2(UDim2::default())),
                 ("Size", Value::UDim2(UDim2::new(1.0, 0.0, 1.0, 0.0))),
                 (
@@ -180,6 +192,11 @@ impl ClassName {
                 ("TextColor3", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
                 ("TextSize", Value::Number(16.0)),
                 ("Visible", Value::Bool(true)),
+            ],
+            ClassName::Sound => vec![
+                ("SoundId", Value::String(String::new())),
+                ("Volume", Value::Number(1.0)),
+                ("Looped", Value::Bool(false)),
             ],
             ClassName::Part => {
                 let material = Material::Plastic;
@@ -263,7 +280,8 @@ impl ClassName {
             | ClassName::SurfaceAppearance
             | ClassName::ScreenGui
             | ClassName::Frame
-            | ClassName::TextLabel => &[],
+            | ClassName::TextLabel
+            | ClassName::Sound => &[],
             // Fires on both parts when two parts start touching.
             ClassName::Part | ClassName::MeshPart => &["Touched"],
             // `OnServerEvent` fires in Scripts for each `FireServer`, and

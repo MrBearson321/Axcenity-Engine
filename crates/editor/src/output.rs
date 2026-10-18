@@ -12,6 +12,7 @@ use crate::theme::{self, icons};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutputKind {
     Info,
+    Warning,
     Error,
 }
 
@@ -47,18 +48,23 @@ impl Output {
         self.push(OutputKind::Error, text.into());
     }
 
+    pub fn warning(&mut self, text: impl Into<String>) {
+        self.push(OutputKind::Warning, text.into());
+    }
+
     fn push(&mut self, kind: OutputKind, text: String) {
         // Also log it, so messages show up in the terminal when the editor
         // was started from one (handy when the window won't open).
         match kind {
             OutputKind::Info => log::info!("{text}"),
+            OutputKind::Warning => log::warn!("{text}"),
             OutputKind::Error => log::error!("{text}"),
         }
         // Only errors link to scripts: a `print` that happens to look like
         // `x.lua:3:` shouldn't.
         let location = match kind {
             OutputKind::Error => script_location(&text),
-            OutputKind::Info => None,
+            OutputKind::Info | OutputKind::Warning => None,
         };
         self.lines.push(OutputLine {
             kind,
@@ -100,6 +106,9 @@ impl Output {
                     let (icon, icon_color, color) = match line.kind {
                         OutputKind::Info => {
                             (icons::INFO, visuals.weak_text_color(), visuals.text_color())
+                        }
+                        OutputKind::Warning => {
+                            (icons::INFO, visuals.warn_fg_color, visuals.warn_fg_color)
                         }
                         OutputKind::Error => (
                             icons::X_CIRCLE,
@@ -195,6 +204,15 @@ mod tests {
         ] {
             assert_eq!(script_location(text), None, "{text}");
         }
+    }
+
+    #[test]
+    fn warnings_are_visible_but_are_not_script_links() {
+        let mut output = Output::default();
+        output.warning("ui.css: unsupported CSS property `animation`");
+
+        assert_eq!(output.lines()[0].kind, OutputKind::Warning);
+        assert_eq!(output.lines()[0].location, None);
     }
 
     #[test]

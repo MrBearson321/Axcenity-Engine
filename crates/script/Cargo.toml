@@ -7,6 +7,7 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+axcenity-audio.workspace = true
 axcenity-core.workspace = true
 mlua.workspace = true
 

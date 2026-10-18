@@ -1,0 +1,16 @@
+[package]
+name = "axcenity-audio"
+description = "Plays project sounds through Kira."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+axcenity-assets.workspace = true
+axcenity-core.workspace = true
+kira.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

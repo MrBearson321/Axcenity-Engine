@@ -15,6 +15,7 @@ use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
 use axcenity_assets::Assets;
+use axcenity_audio::{AudioEngine, SoundAction};
 use axcenity_core::World;
 use axcenity_physics::Physics;
 use axcenity_project::ScriptFile;
@@ -57,13 +58,23 @@ fn main() -> Result<()> {
     for problem in project.problems {
         eprintln!("error: {:#}", anyhow::Error::new(problem));
     }
+    let mut stylesheets = Vec::new();
+    for file in &project.stylesheets {
+        let (stylesheet, warnings) = axcenity_ui::parse_stylesheet(&file.path, &file.source);
+        stylesheets.push(stylesheet);
+        for warning in warnings {
+            log::warn!("{}: {}", warning.path, warning.message);
+        }
+    }
     let mut world = project.world;
+    let assets = Assets::new(&project.folder);
     let mut scripts = ScriptRuntime::new();
     start_scripts(&mut scripts, &mut world, &project.scripts);
+    let mut audio = None;
+    let mut audio_failed = false;
+    apply_audio(&mut scripts, &assets, &mut audio, &mut audio_failed);
     // Models load the first time a MeshPart needs one; physics and drawing
     // share them.
-    let assets = Assets::new(&project.folder);
-
     let event_loop = EventLoop::new()?;
     // Games redraw continuously instead of waiting for input.
     event_loop.set_control_flow(ControlFlow::Poll);
@@ -71,7 +82,10 @@ fn main() -> Result<()> {
     let mut app = App {
         title: format!("{} - Axcenity Player", project.manifest.name),
         world,
+        stylesheets,
         scripts,
+        audio,
+        audio_failed,
         physics: Physics::with_assets(assets.clone()),
         assets,
         window: None,
@@ -115,13 +129,52 @@ fn print_output(runtime: &mut ScriptRuntime) {
     }
 }
 
+fn apply_audio(
+    scripts: &mut ScriptRuntime,
+    assets: &Assets,
+    audio: &mut Option<AudioEngine>,
+    failed: &mut bool,
+) {
+    for action in scripts.take_sound_actions() {
+        if matches!(action, SoundAction::Stop(_)) {
+            if let Some(engine) = audio
+                && let Err(err) = engine.apply(action, assets)
+            {
+                log::error!("audio: {err}");
+            }
+            continue;
+        }
+        if audio.is_none() && !*failed {
+            match AudioEngine::new() {
+                Ok(engine) => *audio = Some(engine),
+                Err(err) => {
+                    *failed = true;
+                    log::error!("audio is unavailable: {err}");
+                }
+            }
+        }
+        if let Some(engine) = audio
+            && let Err(err) = engine.apply(action, assets)
+        {
+            log::error!("audio: {err}");
+        }
+    }
+    if let Some(engine) = audio {
+        engine.collect_finished();
+    }
+}
+
 /// Everything the player owns while running. `window` and `renderer` start as
 /// `None` because winit only allows creating windows once the event loop has started.
 struct App {
     title: String,
     world: World,
+    stylesheets: Vec<axcenity_ui::Stylesheet>,
     /// Runs the scripts, and keeps the ones paused by `task.wait`.
     scripts: ScriptRuntime,
+    /// Audio output and handles, created only when a script first plays a sound.
+    audio: Option<AudioEngine>,
+    audio_failed: bool,
     /// Simulates the unanchored parts.
     physics: Physics,
     /// The project's models, for MeshParts.
@@ -371,6 +424,12 @@ impl ApplicationHandler for App {
                 self.scripts.fire_touched(&mut self.world, &touches);
                 self.scripts.heartbeat(&mut self.world, f64::from(seconds));
                 print_output(&mut self.scripts);
+                apply_audio(
+                    &mut self.scripts,
+                    &self.assets,
+                    &mut self.audio,
+                    &mut self.audio_failed,
+                );
 
                 // 5. Lay out ScreenGuis at this window's current pixel size.
                 let size = window.inner_size();
@@ -381,11 +440,13 @@ impl ApplicationHandler for App {
                 if let Some(view) = self.scripts.take_camera_move() {
                     self.camera.set_view(view.position, view.orientation);
                 }
+
                 let draw_list = axcenity_scene::build_draw_list_with_ui(
                     &self.world,
                     &self.assets,
                     self.camera.to_render_camera(),
                     ui_size,
+                    &self.stylesheets,
                 );
                 // Models that couldn't be loaded, by physics or for drawing.
                 for error in self.assets.take_errors() {
@@ -628,8 +689,67 @@ mod tests {
 
     #[test]
     fn hello_mesh_drops_parts_onto_an_imported_model_which_reports_touches() {
-        let (mut world, mut scripts) = start_example("hello-mesh");
         let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-mesh");
+        let project = axcenity_project::load(&folder).unwrap();
+        let mut world = project.world;
+        let workspace = world.workspace();
+        for child in world.get(workspace).unwrap().children().to_vec() {
+            world.destroy(child).unwrap();
+        }
+        let floor = world.create(axcenity_core::ClassName::Part).unwrap();
+        world.set_name(floor, "Floor").unwrap();
+        world
+            .set_property(
+                floor,
+                "Position",
+                Value::Vector3(Vector3::new(0.0, -0.5, 0.0)),
+            )
+            .unwrap();
+        world
+            .set_property(floor, "Size", Value::Vector3(Vector3::new(40.0, 1.0, 40.0)))
+            .unwrap();
+        world
+            .set_property(floor, "Anchored", Value::Bool(true))
+            .unwrap();
+        world.set_parent(floor, Some(workspace)).unwrap();
+
+        let mut make_mesh = |name: &str, position: Vector3, anchored: bool| {
+            let id = world.create(axcenity_core::ClassName::MeshPart).unwrap();
+            world.set_name(id, name).unwrap();
+            world
+                .set_property(
+                    id,
+                    "MeshId",
+                    Value::String("assets/models/pyramid.gltf".to_owned()),
+                )
+                .unwrap();
+            world
+                .set_property(id, "Position", Value::Vector3(position))
+                .unwrap();
+            world
+                .set_property(id, "Size", Value::Vector3(Vector3::new(4.0, 4.0, 4.0)))
+                .unwrap();
+            world
+                .set_property(id, "Anchored", Value::Bool(anchored))
+                .unwrap();
+            world.set_parent(id, Some(workspace)).unwrap();
+            id
+        };
+        make_mesh("Pyramid", Vector3::new(0.0, 1.5, 0.0), true);
+        make_mesh("FallingPyramid", Vector3::new(10.0, 8.0, 0.0), false);
+        let ball = world.create(axcenity_core::ClassName::Part).unwrap();
+        world.set_name(ball, "Ball").unwrap();
+        world
+            .set_property(
+                ball,
+                "Position",
+                Value::Vector3(Vector3::new(0.0, 8.0, 0.0)),
+            )
+            .unwrap();
+        world.set_parent(ball, Some(workspace)).unwrap();
+
+        let mut scripts = ScriptRuntime::new();
+        start_scripts(&mut scripts, &mut world, &project.scripts);
         let assets = Assets::new(folder);
         let mut physics = Physics::with_assets(assets.clone());
         let mut clock = 0;
@@ -652,9 +772,13 @@ mod tests {
             !output.iter().any(|line| line.starts_with("error")),
             "{output:?}"
         );
-        // The ball rolled off the pyramid's slope instead of resting on its box.
-        assert!(position_of(&world, "Ball").y < 1.5);
-        // The unanchored pyramid fell and lies on the floor.
+        // The ball rests on the imported pyramid instead of falling through it.
+        assert!(
+            (3.5..4.5).contains(&position_of(&world, "Ball").y),
+            "{:?}",
+            position_of(&world, "Ball")
+        );
+        // An unanchored imported pyramid falls and lands on the floor.
         assert!(position_of(&world, "FallingPyramid").y < 3.0);
         assert!(assets.take_errors().is_empty());
 

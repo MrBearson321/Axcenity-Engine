@@ -15,6 +15,10 @@
 //!
 //! Saving doesn't touch the history. It only remembers which step was on top
 //! when it saved, so undoing back to that point counts as saved again.
+//!
+//! Dragging a UI handle can also rewrite a stylesheet (see `ui_handles.rs`).
+//! Its step holds that file's text before and after as a [`TextChange`], and
+//! undo and redo hand those back for the app to put in the file's tab.
 
 use axcenity_core::{InstanceId, TreeError, Value, World};
 
@@ -77,6 +81,14 @@ pub struct Move {
     pub after: Option<Place>,
 }
 
+/// A stylesheet's text before and after a change, by its path.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TextChange {
+    pub path: String,
+    pub before: String,
+    pub after: String,
+}
+
 /// One field's value before and after a step.
 #[derive(Clone, Debug, PartialEq)]
 struct Change {
@@ -106,6 +118,8 @@ enum StepKind {
         /// Every field that changed, including side effects (setting
         /// `Material` also sets `Metalness` and `Roughness`).
         changes: Vec<Change>,
+        /// Stylesheets the same gesture rewrote.
+        texts: Vec<TextChange>,
     },
     /// Instances added to, taken out of, or moved around the tree, in the
     /// order they were made.
@@ -144,8 +158,27 @@ impl History {
         before: Snapshot,
         after: Snapshot,
     ) {
+        self.record_with_texts(world, id, key, label, before, after, Vec::new());
+    }
+
+    /// [`History::record`], for a change that also rewrote stylesheets.
+    #[allow(clippy::too_many_arguments)] // `record`'s, and the texts.
+    pub fn record_with_texts(
+        &mut self,
+        world: &mut World,
+        id: InstanceId,
+        key: Field,
+        label: String,
+        before: Snapshot,
+        after: Snapshot,
+        texts: Vec<TextChange>,
+    ) {
         let changes = differences(before, after);
-        if changes.is_empty() {
+        let texts: Vec<_> = texts
+            .into_iter()
+            .filter(|text| text.before != text.after)
+            .collect();
+        if changes.is_empty() && texts.is_empty() {
             return;
         }
         let open = self.open;
@@ -155,7 +188,16 @@ impl History {
                 if open == Some(top.number) && *top_id == id && *top_key == key)
         });
         if !merging {
-            let number = self.push(world, label, StepKind::Fields { id, key, changes });
+            let number = self.push(
+                world,
+                label,
+                StepKind::Fields {
+                    id,
+                    key,
+                    changes,
+                    texts,
+                },
+            );
             self.open = Some(number);
             return;
         }
@@ -164,6 +206,7 @@ impl History {
         let top = self.undo.last_mut().expect("checked by `merging`");
         let StepKind::Fields {
             changes: top_changes,
+            texts: top_texts,
             ..
         } = &mut top.kind
         else {
@@ -176,8 +219,15 @@ impl History {
                 None => top_changes.push(change),
             }
         }
+        for text in texts {
+            match top_texts.iter_mut().find(|old| old.path == text.path) {
+                Some(old) => old.after = text.after,
+                None => top_texts.push(text),
+            }
+        }
         top_changes.retain(|change| change.before != change.after);
-        if top_changes.is_empty() {
+        top_texts.retain(|text| text.before != text.after);
+        if top_changes.is_empty() && top_texts.is_empty() {
             // Dragged back to where it started: there's nothing left to undo.
             self.undo.pop();
             self.open = None;
@@ -239,16 +289,26 @@ impl History {
         self.redo.last().map(|step| step.label.as_str())
     }
 
-    /// Puts the last step's "before" values back. Returns false if there
-    /// was nothing to undo.
-    pub fn undo(&mut self, world: &mut World) -> bool {
+    /// Puts the last step's "before" values back. Returns `None` if there
+    /// was nothing to undo, or the stylesheets to change back, each from its
+    /// `before` text to its `after`.
+    pub fn undo(&mut self, world: &mut World) -> Option<Vec<TextChange>> {
         self.seal();
-        let Some(step) = self.undo.pop() else {
-            return false;
-        };
+        let step = self.undo.pop()?;
+        let mut undone = Vec::new();
         match &step.kind {
-            StepKind::Fields { id, changes, .. } => {
+            StepKind::Fields {
+                id, changes, texts, ..
+            } => {
                 restore(world, *id, changes.iter().map(|c| (c.field, &c.before)));
+                undone = texts
+                    .iter()
+                    .map(|text| TextChange {
+                        path: text.path.clone(),
+                        before: text.after.clone(),
+                        after: text.before.clone(),
+                    })
+                    .collect();
             }
             // Backwards, so each Instance goes back to where it was at the time.
             StepKind::Tree(moves) => {
@@ -258,19 +318,21 @@ impl History {
             }
         }
         self.redo.push(step);
-        true
+        Some(undone)
     }
 
-    /// Puts the last undone step's "after" values back. Returns false if
-    /// there was nothing to redo.
-    pub fn redo(&mut self, world: &mut World) -> bool {
+    /// Puts the last undone step's "after" values back. Returns `None` if
+    /// there was nothing to redo, or the stylesheets to change, as [`History::undo`].
+    pub fn redo(&mut self, world: &mut World) -> Option<Vec<TextChange>> {
         self.seal();
-        let Some(step) = self.redo.pop() else {
-            return false;
-        };
+        let step = self.redo.pop()?;
+        let mut redone = Vec::new();
         match &step.kind {
-            StepKind::Fields { id, changes, .. } => {
+            StepKind::Fields {
+                id, changes, texts, ..
+            } => {
                 restore(world, *id, changes.iter().map(|c| (c.field, &c.after)));
+                redone = texts.clone();
             }
             StepKind::Tree(moves) => {
                 for step in moves {
@@ -279,7 +341,7 @@ impl History {
             }
         }
         self.undo.push(step);
-        true
+        Some(redone)
     }
 
     /// Remembers that the world as it is now is what's saved. The history
@@ -390,6 +452,37 @@ mod tests {
     }
 
     #[test]
+    fn a_drag_that_rewrites_a_stylesheet_is_one_step_that_hands_the_text_back() {
+        let (mut world, part) = world_with_part();
+        let mut history = History::new();
+        let field = Field::Property("Size");
+        let text = |before: &str, after: &str| {
+            vec![TextChange {
+                path: "ui.css".into(),
+                before: before.into(),
+                after: after.into(),
+            }]
+        };
+        for (before, after) in [("10px", "11px"), ("11px", "12px")] {
+            let fields = snapshot(&world, part);
+            history.record_with_texts(
+                &mut world,
+                part,
+                field,
+                "Resize".into(),
+                fields.clone(),
+                fields,
+                text(before, after),
+            );
+        }
+        history.seal();
+
+        assert_eq!(history.undo(&mut world), Some(text("12px", "10px")));
+        assert_eq!(history.undo(&mut world), None, "both frames are one step");
+        assert_eq!(history.redo(&mut world), Some(text("10px", "12px")));
+    }
+
+    #[test]
     fn undo_and_redo_put_values_back_and_forth() {
         let (mut world, part) = world_with_part();
         let mut history = History::new();
@@ -398,15 +491,15 @@ mod tests {
         history.seal();
         assert_eq!(history.undo_label(), Some("Change Position"));
 
-        assert!(history.undo(&mut world));
+        assert!(history.undo(&mut world).is_some());
         assert_eq!(position(&world, part), start);
         assert_eq!(history.undo_label(), None);
         assert_eq!(history.redo_label(), Some("Change Position"));
-        assert!(!history.undo(&mut world), "nothing more to undo");
+        assert!(history.undo(&mut world).is_none(), "nothing more to undo");
 
-        assert!(history.redo(&mut world));
+        assert!(history.redo(&mut world).is_some());
         assert_eq!(position(&world, part), at(5.0));
-        assert!(!history.redo(&mut world), "nothing more to redo");
+        assert!(history.redo(&mut world).is_none(), "nothing more to redo");
     }
 
     #[test]
@@ -426,7 +519,10 @@ mod tests {
         assert_eq!(position(&world, part), at(10.0));
         history.undo(&mut world);
         assert_eq!(position(&world, part), start);
-        assert!(!history.undo(&mut world), "two drags are two steps");
+        assert!(
+            history.undo(&mut world).is_none(),
+            "two drags are two steps"
+        );
     }
 
     #[test]
@@ -468,7 +564,7 @@ mod tests {
         history.undo(&mut world);
         set(&mut history, &mut world, part, "Position", at(2.0));
         assert_eq!(history.redo_label(), None);
-        assert!(!history.redo(&mut world));
+        assert!(history.redo(&mut world).is_none());
     }
 
     #[test]
@@ -595,7 +691,7 @@ mod tests {
         // A new change drops the redo step, and with it the folder.
         set(&mut history, &mut world, part, "Position", at(1.0));
         assert!(!world.contains(new));
-        assert!(!history.redo(&mut world));
+        assert!(history.redo(&mut world).is_none());
     }
 
     #[test]
@@ -612,10 +708,13 @@ mod tests {
         set(&mut history, &mut world, part, "Position", at(3.0));
         assert!(!history.is_saved());
 
-        assert!(history.undo(&mut world));
+        assert!(history.undo(&mut world).is_some());
         assert_eq!(position(&world, part), at(2.0));
         assert!(history.is_saved());
-        assert!(history.undo(&mut world), "saving didn't clear the history");
+        assert!(
+            history.undo(&mut world).is_some(),
+            "saving didn't clear the history"
+        );
         assert!(!history.is_saved());
         history.redo(&mut world);
         assert!(history.is_saved());

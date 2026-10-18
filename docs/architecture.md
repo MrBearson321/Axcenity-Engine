@@ -7,17 +7,19 @@ Read before creating a crate, adding a dependency between crates, or touching th
 | Crate | Owns | May depend on |
 |---|---|---|
 | `core` | Instance tree, arena, properties, events, services | nothing engine-internal |
-| `assets` | the asset system: loading glTF and FBX models (`Assets`, `load_model`) and importing them (`import_model`) | nothing engine-internal; plain data out |
+| `assets` | the asset system: loading glTF/FBX models, reading project files (`Assets`) and importing models | nothing engine-internal; plain data out |
+| `audio` | Kira playback for project sounds; session-owned handles and queued `SoundAction`s | `assets`, `core` |
+| `blocks` | persisted block-script data and its one-way Lua translation | nothing engine-internal |
 | `render` | `wgpu` renderer | nothing engine-internal; takes a draw list |
 | `scene` | Instance tree → draw list (`build_draw_list`), the shared `FlyCamera`, viewport picking (`pick`) | `core`, `assets`, `render` |
 | `physics` | `rapier3d` integration | `core`, `assets` |
-| `script` | Lua 5.4 (`mlua`), sandbox, scheduler, engine API | `core` |
-| `ui` | UI Instance layout (`taffy`) and screen-space draw data | `core`, `render` |
-| `project` | project folder load and save | `core` |
-| `player` | runtime shipped with games (binary) | `core`, `assets`, `render`, `scene`, `physics`, `script`, `project` |
-| `editor` | `egui` editor app (binary) | `core`, `assets`, `physics`, `project`, `render`, `scene`, `script` |
+| `script` | Lua 5.4 (`mlua`), sandbox, scheduler, engine API | `audio`, `core` |
+| `ui` | UI Instance layout, CSS cascade (`taffy`) and screen-space draw data | `core`, `render` |
+| `project` | project folder load and save, including CSS and block-script sources | `blocks`, `core` |
+| `player` | runtime shipped with games (binary) | `audio`, `core`, `assets`, `render`, `scene`, `physics`, `script`, `project`, `ui` |
+| `editor` | `egui` editor app (binary) | `audio`, `blocks`, `core`, `assets`, `physics`, `project`, `render`, `scene`, `script`, `ui` |
 
-`blocks` and `audio` are planned crates, not current workspace members. The planned export flow translates blocks to Lua, then packages projects for the player.
+Block scripts are translated to Lua at project load and run through the same `ScriptRuntime` as handwritten scripts. Hosts drain queued sound actions after script steps; the player owns playback for its lifetime, while editor Play owns a separate engine that is dropped on Stop.
 
 Rules:
 - `player` must **never** depend on `editor`, `egui` or `blocks`.
@@ -168,6 +170,7 @@ Play runs in-process on a **deep copy** of the edit world, and Stop drops the co
 - **Read-only during Play** (chosen by the developer): the Explorer, Properties and viewport show the live game world. You can select and inspect (values update every frame), open and close Explorer branches, and move the camera. The transform tools, dragging, inserting, the right-click menu, Explorer rename, undo and redo are all off. File > Save still saves the edit world. Opening another project stops the game.
 - **Except Properties** (changed in Phase 16, chosen by the developer, like Studio): during Play the Properties panel edits the game's world (`Session::world_mut`), so the game's scripts see the change (`Changed` fires at the next frame). These edits make no undo step, don't count as unsaved, and are gone at Stop. The panel says so above the values.
 - **Frame**: each editor frame during Play runs frame steps 2-4 with the real time since the last one (capped at 0.1 s, like the player), then draws; the editor repaints continuously while playing. The editor camera keeps working (there are no characters yet).
+- **Audio** (Phase 29): script contexts queue `SoundAction`s; the host applies them after script steps using project bytes from `Assets`. Each game session owns its Kira engine and playback handles. Dropping editor Play drops the engine and silences its sounds; the player retains its engine until the game exits.
 - **Output**: `print` lines are Info, script errors (`path:line: message`) are Error.
 - **Panics** (`catch_unwind` around `Session::start` and `Session::frame`): the session is thrown away, Output shows "The engine crashed during Play: <message>...", and the editor is back in edit mode. The panic's location goes to the terminal (Rust's default panic message). Panics while *drawing* the Play world aren't caught yet. In debug builds, **Debug > Panic during Play** makes the next frame panic, to test this (chosen by the developer); release builds have no Debug menu.
 

@@ -1,0 +1,53 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Anchored": true,
+          "Position": [0, -0.5, 0],
+          "Size": [40, 1, 40]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Pad",
+        "properties": {
+          "Anchored": true,
+          "Color": [0.25, 0.7, 0.95],
+          "Position": [0, 0.5, 0],
+          "Size": [8, 1, 8]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Ball",
+        "properties": {
+          "Position": [0, 8, 0],
+          "Shape": "Ball",
+          "Size": [2, 2, 2]
+        }
+      },
+      {
+        "class": "Sound",
+        "name": "Chime",
+        "properties": {
+          "Looped": false,
+          "SoundId": "assets/audio/chime.wav",
+          "Volume": 0.65
+        }
+      },
+      {
+        "class": "Sound",
+        "name": "Music",
+        "properties": {
+          "Looped": true,
+          "SoundId": "assets/audio/ambient-loop.wav",
+          "Volume": 0.12
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "ScreenGui",
+        "name": "Hud",
+        "properties": {
+          "Enabled": true
+        },
+        "children": [
+          {
+            "class": "Frame",
+            "name": "HudPanel",
+            "properties": {
+              "Class": "hud",
+              "Position": [0, 24, 0, 24],
+              "Size": [0, 280, 0, 90],
+              "BackgroundTransparency": 1,
+              "Visible": true
+            },
+            "children": [
+              {
+                "class": "Frame",
+                "name": "HealthTrack",
+                "properties": {
+                  "Class": "health-track",
+                  "Size": [0, 260, 0, 24],
+                  "BackgroundTransparency": 1,
+                  "Visible": true
+                },
+                "children": [
+                  {
+                    "class": "Frame",
+                    "name": "HealthFill",
+                    "properties": {
+                      "Id": "health-fill",
+                      "BackgroundTransparency": 1,
+                      "Visible": true
+                    },
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "class": "TextLabel",
+                "name": "Score",
+                "properties": {
+                  "Id": "score",
+                  "Size": [0, 260, 0, 30],
+                  "Text": "SCORE  001250",
+                  "Visible": true
+                },
+                "children": []
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

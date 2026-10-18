@@ -41,6 +41,7 @@ mod watchdog;
 
 use std::time::Duration;
 
+use axcenity_audio::SoundAction;
 use axcenity_core::{ClassName, InstanceId, World};
 use mlua::Lua;
 
@@ -77,6 +78,9 @@ const MAX_CHANGE_ROUNDS: usize = 10;
 #[derive(Default)]
 struct Output(Vec<OutputLine>);
 
+#[derive(Default)]
+struct SoundActions(Vec<SoundAction>);
+
 /// Runs every script of one game: Scripts on the server side, LocalScripts
 /// on the client side (one player, on this device), and the RemoteEvent
 /// messages between them.
@@ -87,6 +91,8 @@ pub struct ScriptRuntime {
     transport: Box<dyn Transport>,
     /// Output from both sides, in the order it happened.
     output: Vec<OutputLine>,
+    /// Sound commands waiting for the game host to apply.
+    sound_actions: Vec<SoundAction>,
     /// Whether the error for change events that never stop has been shown,
     /// so it's shown once rather than every frame.
     reported_change_loop: bool,
@@ -108,6 +114,7 @@ impl ScriptRuntime {
             client: Context::new(Side::Client),
             transport,
             output: Vec::new(),
+            sound_actions: Vec::new(),
             reported_change_loop: false,
         }
     }
@@ -297,6 +304,12 @@ impl ScriptRuntime {
         std::mem::take(&mut self.output)
     }
 
+    /// Removes sound requests produced since the last call. Hosts apply
+    /// these after each script step using their session-owned audio engine.
+    pub fn take_sound_actions(&mut self) -> Vec<SoundAction> {
+        std::mem::take(&mut self.sound_actions)
+    }
+
     /// Collects what `side` printed, and hands the messages it sent to the
     /// transport.
     fn collect(&mut self, side: Side) {
@@ -305,6 +318,7 @@ impl ScriptRuntime {
             Side::Client => &self.client,
         };
         self.output.extend(context.take_output());
+        self.sound_actions.extend(context.take_sound_actions());
         for message in context.take_outbox() {
             self.transport.send(message);
         }

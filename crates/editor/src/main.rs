@@ -9,6 +9,8 @@
 
 mod app;
 mod autocomplete;
+mod block_editor;
+mod css_syntax;
 mod explorer;
 mod gizmo;
 mod history;
@@ -26,6 +28,7 @@ mod start;
 mod surface;
 mod theme;
 mod tree;
+mod ui_handles;
 mod viewport;
 mod watcher;
 

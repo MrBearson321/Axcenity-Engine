@@ -13,6 +13,10 @@
 //! it onto the surface under the mouse (see `placing.rs`).
 //!
 //! UI is visible as an in-place preview both while editing and during Play.
+//! It's drawn over the 3D view, so a click selects the UI element under the
+//! mouse before any part. A selected UI element gets an outline and handles
+//! to move and resize it (see `ui_handles.rs`).
+//!
 //! During Play there's no tool: the camera and selecting still work, but
 //! nothing can be dragged.
 
@@ -22,12 +26,14 @@ use axcenity_render::TextureRenderer;
 use axcenity_render::glam::Vec3;
 use axcenity_render::wgpu;
 use axcenity_scene::{FlyCamera, MoveKeys};
+use axcenity_ui::{Stylesheet, UiLayout};
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 
 use crate::gizmo::{self, Drag, Handle, Pose, Snap, Tool};
 use crate::placing::PlaceDrag;
 use crate::screen::Screen;
+use crate::ui_handles::{Grip, Handles, UiDrag, UiDragEdit};
 
 /// Where the camera starts, looking at the origin (the same as the player).
 const START_CAMERA_POSITION: Vec3 = Vec3::new(12.0, 8.0, 16.0);
@@ -49,9 +55,9 @@ const POPUP_FADE_SECONDS: f64 = 0.4;
 const SELECTION_COLOR: egui::Color32 = egui::Color32::from_rgb(25, 160, 255);
 const SELECTION_WIDTH: f32 = 2.0;
 
-/// A left click in the viewport, with the part under the mouse (`None` for
-/// empty space, which clears the selection). Starting to drag a part by its
-/// body counts as clicking it, so it gets selected.
+/// A left click in the viewport, with the UI element or part under the
+/// mouse (`None` for empty space, which clears the selection). Starting to
+/// drag something by its body counts as clicking it, so it gets selected.
 pub struct Clicked {
     pub part: Option<InstanceId>,
 }
@@ -87,17 +93,48 @@ pub struct DragEdit {
 pub struct ViewportOutput {
     pub clicked: Option<Clicked>,
     pub drag: Option<DragEdit>,
+    /// A UI element being moved or resized.
+    pub ui_drag: Option<UiDragEdit>,
     /// True on the frame a drag is let go, which ends that drag's undo step.
     pub drag_released: bool,
 }
 
+pub struct ViewportScene<'a> {
+    pub world: &'a World,
+    pub assets: &'a Assets,
+    pub selected: Option<InstanceId>,
+    pub tool: Option<Tool>,
+    pub snap: Snap,
+    pub stylesheets: &'a [Stylesheet],
+}
+
 /// What the left button holds, from going down on it until it's let go.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 enum Dragging {
     /// A handle of the selected part.
     Handle(Drag),
     /// A part, by its body.
     Body(PlaceDrag),
+    /// A UI element, by its body or a handle.
+    Ui(Box<UiDrag>),
+}
+
+/// The UI as laid out this frame, and the selected element's handles.
+struct UiScene<'a> {
+    layout: &'a UiLayout,
+    handles: Option<&'a Handles>,
+    /// Where the viewport's top left is, in points, and the points-to-pixels
+    /// scale, to turn the mouse position into the layout's pixels.
+    origin: egui::Pos2,
+    pixels_per_point: f32,
+}
+
+impl UiScene<'_> {
+    /// The topmost UI element at `pointer` (in points).
+    fn hit(&self, pointer: egui::Pos2) -> Option<InstanceId> {
+        let pixels = (pointer - self.origin) * self.pixels_per_point;
+        self.layout.hit(pixels.x, pixels.y)
+    }
 }
 
 /// What dragging did this frame, before anything is drawn.
@@ -106,12 +143,15 @@ struct DragInput {
     /// The handles to draw, and which one to highlight.
     shapes: Vec<gizmo::Shape>,
     highlighted: Option<Handle>,
+    /// The selected UI element's handle under the mouse or being dragged.
+    ui_highlighted: Option<Grip>,
     /// True if the left button is (or just was) dragging something, so the
     /// click that ends it doesn't also select something.
     in_use: bool,
     /// A part grabbed by its body this frame, to select.
     grabbed: Option<InstanceId>,
     edit: Option<DragEdit>,
+    ui_edit: Option<UiDragEdit>,
     released: bool,
 }
 
@@ -196,27 +236,53 @@ impl Viewport {
         &mut self,
         ui: &mut egui::Ui,
         render_state: &RenderState,
-        world: &World,
-        assets: &Assets,
-        selected: Option<InstanceId>,
-        tool: Option<Tool>,
-        snap: Snap,
+        scene: ViewportScene<'_>,
     ) -> ViewportOutput {
+        let ViewportScene {
+            world,
+            assets,
+            selected,
+            tool,
+            snap,
+            stylesheets,
+        } = scene;
         let size = ui.available_size();
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
         self.handle_input(ui, &response, rect.height());
         let screen = self.screen(rect);
-        let drag = self.drag_input(ui, &response, &screen, world, selected, tool, snap);
-        let clicked = match drag.grabbed {
-            Some(part) => Some(Clicked { part: Some(part) }),
-            None if drag.in_use => None,
-            None => self.clicked_part(ui, &response, &screen, world),
-        };
 
         // The texture is sized in physical pixels, so it stays sharp on
         // high-DPI screens where one point is several pixels.
-        let pixels = size * ui.ctx().pixels_per_point();
+        let pixels_per_point = ui.ctx().pixels_per_point();
+        let pixels = size * pixels_per_point;
         let (width, height) = (pixels.x.round() as u32, pixels.y.round() as u32);
+        let ui_layout = axcenity_ui::layout_ui(world, width, height, stylesheets);
+        let handles = selected
+            .and_then(|id| ui_layout.element(id))
+            .map(|&element| Handles::new(element, world, stylesheets, rect.min, pixels_per_point));
+        let ui_scene = UiScene {
+            layout: &ui_layout,
+            handles: handles.as_ref(),
+            origin: rect.min,
+            pixels_per_point,
+        };
+
+        let drag = self.drag_input(
+            ui,
+            &response,
+            &screen,
+            world,
+            selected,
+            tool,
+            snap,
+            &ui_scene,
+            stylesheets,
+        );
+        let clicked = match drag.grabbed {
+            Some(part) => Some(Clicked { part: Some(part) }),
+            None if drag.in_use => None,
+            None => self.clicked_part(ui, &response, &screen, world, &ui_scene),
+        };
         let target = self.target.get_or_insert_with(|| {
             let renderer =
                 TextureRenderer::new(&render_state.device, &render_state.queue, width, height);
@@ -244,12 +310,9 @@ impl Viewport {
                 );
         }
 
-        let draw_list = axcenity_scene::build_draw_list_with_ui(
-            world,
-            assets,
-            self.camera.to_render_camera(),
-            (width, height),
-        );
+        let mut draw_list =
+            axcenity_scene::build_draw_list(world, assets, self.camera.to_render_camera());
+        draw_list.ui = ui_layout.draw_items;
         if let Err(error) = target.renderer.render(&draw_list) {
             log::error!("could not render the viewport: {error:#}");
         }
@@ -260,10 +323,27 @@ impl Viewport {
             paint_selection_box(ui, rect, &screen, world, selected);
         }
         gizmo::paint(&ui.painter_at(rect), &drag.shapes, drag.highlighted);
+        // Handles only show with a tool, so not during Play, but the
+        // outline always does.
+        if let Some(handles) = &handles {
+            let painter = ui.painter_at(rect);
+            match tool {
+                Some(_) => handles.paint(&painter, SELECTION_COLOR, drag.ui_highlighted),
+                None => {
+                    painter.rect_stroke(
+                        handles.rect,
+                        0.0,
+                        egui::Stroke::new(SELECTION_WIDTH, SELECTION_COLOR),
+                        egui::StrokeKind::Middle,
+                    );
+                }
+            }
+        }
         self.paint_speed_popup(ui, rect);
         ViewportOutput {
             clicked,
             drag: drag.edit,
+            ui_drag: drag.ui_edit,
             drag_released: drag.released,
         }
     }
@@ -274,8 +354,8 @@ impl Viewport {
         Screen::new(self.camera.to_render_camera(), rect)
     }
 
-    /// Starts, continues or ends dragging a handle of the selected part, or
-    /// any part by its body.
+    /// Starts, continues or ends dragging a handle of the selected part or
+    /// UI element, or any part or UI element by its body.
     #[allow(clippy::too_many_arguments)] // Each is a different thing dragging needs.
     fn drag_input(
         &mut self,
@@ -286,6 +366,8 @@ impl Viewport {
         selected: Option<InstanceId>,
         tool: Option<Tool>,
         snap: Snap,
+        ui_scene: &UiScene,
+        stylesheets: &[Stylesheet],
     ) -> DragInput {
         let Some(tool) = tool else {
             // Nothing to drag. A drag can't be under way either: Play
@@ -307,28 +389,58 @@ impl Viewport {
                 input.modifiers.alt,
             )
         });
-        let hovered = match (&self.drag, pointer) {
-            (None, Some(pointer)) if response.contains_pointer() => {
-                gizmo::hovered(&shapes, pointer)
-            }
+        let over = response.contains_pointer() && self.drag.is_none();
+        let hovered = match pointer {
+            Some(pointer) if over => gizmo::hovered(&shapes, pointer),
             _ => None,
         };
+        // The UI element's handle under the mouse (not its body: that's
+        // only grabbed by dragging, so a click can select what's inside it).
+        let ui_hovered = match (pointer, ui_scene.handles) {
+            (Some(pointer), Some(handles)) if over => handles.grip_at(pointer),
+            _ => None,
+        };
+        let ui_handle = ui_hovered.filter(|&grip| grip != Grip::BODY);
         let mut input = DragInput::default();
 
         // Alt+left-drag orbits the camera, so it never grabs anything.
         // A handle is grabbed as soon as the button goes down on it.
         if pressed
             && !alt
+            && let (Some(grip), Some(pointer), Some(handles)) =
+                (ui_handle, pointer, ui_scene.handles)
+        {
+            self.drag = UiDrag::start(handles, grip, pointer, world)
+                .map(|drag| Dragging::Ui(Box::new(drag)));
+        } else if pressed
+            && !alt
             && let (Some(handle), Some(pointer), Some((part, pose))) = (hovered, pointer, selected)
         {
             self.drag = Drag::start(handle, part, pose, screen.ray(pointer)).map(Dragging::Handle);
         }
-        // A part's body only once the mouse has moved far enough to be a
-        // drag, so a plain click still just selects. It's grabbed where the
-        // button went down.
-        if self.drag.is_none()
-            && !alt
-            && response.drag_started_by(egui::PointerButton::Primary)
+        // A UI element or part's body only once the mouse has moved far
+        // enough to be a drag, so a plain click still just selects. It's
+        // grabbed where the button went down. UI is on top, so it goes first.
+        let body_drag =
+            self.drag.is_none() && !alt && response.drag_started_by(egui::PointerButton::Primary);
+        if body_drag
+            && let Some(origin) = press_origin
+            && let Some(id) = ui_scene.hit(origin)
+        {
+            // Selected even when it can't move (in a flex container).
+            input.grabbed = Some(id);
+            if let Some(&element) = ui_scene.layout.element(id) {
+                let handles = Handles::new(
+                    element,
+                    world,
+                    stylesheets,
+                    ui_scene.origin,
+                    ui_scene.pixels_per_point,
+                );
+                self.drag = UiDrag::start(&handles, Grip::BODY, origin, world)
+                    .map(|drag| Dragging::Ui(Box::new(drag)));
+            }
+        } else if body_drag
             && let Some(origin) = press_origin
             && let Some(hit) = axcenity_scene::pick_hit(world, screen.ray(origin), None)
             && let Some(place) =
@@ -338,15 +450,26 @@ impl Viewport {
             input.grabbed = Some(hit.part);
         }
 
-        input.highlighted = match self.drag {
+        input.highlighted = match &self.drag {
             Some(Dragging::Handle(drag)) => Some(drag.handle),
             _ => hovered,
         };
+        input.ui_highlighted = match &self.drag {
+            Some(Dragging::Ui(drag)) => Some(drag.grip),
+            _ => ui_handle,
+        };
         input.in_use = self.drag.is_some();
-        if self.drag.is_some() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-        } else if hovered.is_some() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+        match (&self.drag, ui_scene.handles) {
+            (Some(Dragging::Ui(drag)), Some(handles)) => {
+                ui.ctx().set_cursor_icon(handles.cursor(drag.grip));
+            }
+            (Some(_), _) => ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing),
+            (None, Some(handles)) if ui_hovered.is_some() => {
+                ui.ctx()
+                    .set_cursor_icon(handles.cursor(ui_hovered.expect("checked")));
+            }
+            (None, _) if hovered.is_some() => ui.ctx().set_cursor_icon(egui::CursorIcon::Grab),
+            (None, _) => {}
         }
         if let Some(dragging) = &mut self.drag {
             if !down {
@@ -367,6 +490,10 @@ impl Viewport {
                             values: vec![("Position", position)],
                         })
                     }
+                    Dragging::Ui(drag) => {
+                        input.ui_edit = Some(drag.update(pointer, ui_scene.pixels_per_point));
+                        None
+                    }
                 };
             }
         }
@@ -375,20 +502,23 @@ impl Viewport {
     }
 
     /// If this frame has a plain left click (not the end of a drag, and not
-    /// Alt for orbiting), the part under the mouse.
+    /// Alt for orbiting), the UI element or part under the mouse.
     fn clicked_part(
         &self,
         ui: &egui::Ui,
         response: &egui::Response,
         screen: &Screen,
         world: &World,
+        ui_scene: &UiScene,
     ) -> Option<Clicked> {
         if !response.clicked() || ui.input(|input| input.modifiers.alt) {
             return None;
         }
         let pointer = response.interact_pointer_pos()?;
         Some(Clicked {
-            part: axcenity_scene::pick(world, screen.ray(pointer)),
+            part: ui_scene
+                .hit(pointer)
+                .or_else(|| axcenity_scene::pick(world, screen.ray(pointer))),
         })
     }
 

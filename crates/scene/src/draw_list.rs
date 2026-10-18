@@ -13,7 +13,7 @@ use axcenity_render::{
     AmbientLight, Camera, Channel, ChannelMap, DrawItem, DrawList, Material, MeshSource, NormalMap,
     Shape, Sun, TextureMaps, TextureSource,
 };
-use axcenity_ui::build_ui_draw_data;
+use axcenity_ui::{Stylesheet, build_ui_draw_data};
 
 use crate::orientation::rotation_from_orientation;
 
@@ -60,9 +60,10 @@ pub fn build_draw_list_with_ui(
     assets: &Assets,
     camera: Camera,
     viewport_size: (u32, u32),
+    stylesheets: &[Stylesheet],
 ) -> DrawList {
     let mut list = build_draw_list(world, assets, camera);
-    list.ui = build_ui_draw_data(world, viewport_size.0, viewport_size.1);
+    list.ui = build_ui_draw_data(world, viewport_size.0, viewport_size.1, stylesheets);
     list
 }
 

@@ -87,9 +87,13 @@ impl Assets {
                 Some(Arc::new(model))
             }
             Err(message) => {
-                shared
-                    .errors
-                    .push(format!("Could not load the model `{mesh_id}`: {message}"));
+                let source_id = mesh_id.split('#').next().unwrap_or(mesh_id);
+                let prefix = format!("Could not load the model `{source_id}`:");
+                if !shared.errors.iter().any(|error| error.starts_with(&prefix)) {
+                    shared
+                        .errors
+                        .push(format!("Could not load the model `{source_id}`: {message}"));
+                }
                 None
             }
         };
@@ -121,6 +125,22 @@ impl Assets {
         };
         shared.textures.insert(path.to_owned(), texture.clone());
         texture
+    }
+
+    /// Reads a project asset by a relative path such as
+    /// `assets/audio/chime.wav`. Paths that leave the project are refused.
+    pub fn read_file(&self, path: &str) -> Result<Vec<u8>, String> {
+        let relative = safe_path(path)
+            .ok_or_else(|| "asset paths must name a file inside the project folder".to_owned())?;
+        let folder = self
+            .lock()
+            .folder
+            .clone()
+            .ok_or_else(|| "there is no project folder".to_owned())?;
+        std::fs::read(folder.join(relative)).map_err(|err| match err.kind() {
+            std::io::ErrorKind::NotFound => format!("the file `{path}` isn't there"),
+            _ => err.to_string(),
+        })
     }
 
     /// Adds `model` as the one at `mesh_id`, for a model just imported, so
@@ -254,6 +274,28 @@ mod tests {
         let assets = Assets::new(std::env::temp_dir());
         assert!(assets.model("../secret.glb").is_none());
         assert!(assets.take_errors()[0].contains("inside the project folder"));
+    }
+
+    #[test]
+    fn project_files_can_be_read_without_leaving_the_asset_folder() {
+        let folder =
+            std::env::temp_dir().join(format!("axcenity-audio-asset-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(folder.join("assets/audio")).unwrap();
+        std::fs::write(folder.join("assets/audio/tone.wav"), b"audio data").unwrap();
+
+        let assets = Assets::new(&folder);
+        assert_eq!(
+            assets.read_file("assets/audio/tone.wav").unwrap(),
+            b"audio data"
+        );
+        assert!(
+            assets
+                .read_file("../outside.wav")
+                .unwrap_err()
+                .contains("inside the project folder")
+        );
+        std::fs::remove_dir_all(folder).unwrap();
     }
 
     #[test]

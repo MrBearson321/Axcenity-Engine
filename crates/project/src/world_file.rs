@@ -601,6 +601,12 @@ mod tests {
         world.set_parent(gui, Some(world.workspace())).unwrap();
         let frame = world.create(ClassName::Frame).unwrap();
         world.set_parent(frame, Some(gui)).unwrap();
+        world
+            .set_property(frame, "Class", Value::String("hud".to_owned()))
+            .unwrap();
+        world
+            .set_property(frame, "Id", Value::String("main".to_owned()))
+            .unwrap();
         let position = axcenity_core::UDim2::new(0.5, 12.0, 0.25, -4.0);
         world
             .set_property(frame, "Position", Value::UDim2(position))
@@ -620,6 +626,14 @@ mod tests {
         assert_eq!(
             loaded.get(frame).unwrap().property("Position"),
             Some(&Value::UDim2(position))
+        );
+        assert_eq!(
+            loaded.get(frame).unwrap().property("Class"),
+            Some(&Value::String("hud".to_owned()))
+        );
+        assert_eq!(
+            loaded.get(frame).unwrap().property("Id"),
+            Some(&Value::String("main".to_owned()))
         );
         let label = loaded
             .find_first_descendant(loaded.workspace(), "TextLabel")

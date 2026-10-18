@@ -1,0 +1,11 @@
+{
+  "blocks": [
+    {
+      "id": 2,
+      "kind": {
+        "type": "when_started",
+        "body": []
+      }
+    }
+  ]
+}

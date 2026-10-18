@@ -33,6 +33,9 @@ pub struct UiRectangle {
     pub position: [f32; 2],
     pub size: [f32; 2],
     pub color: [f32; 4],
+    pub border_color: [f32; 4],
+    pub border_width: f32,
+    pub border_radius: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -41,7 +44,8 @@ pub struct UiText {
     pub size: [f32; 2],
     pub text: String,
     pub font_size: f32,
-    pub color: [f32; 3],
+    pub font_family: String,
+    pub color: [f32; 4],
 }
 
 #[derive(Clone, Copy, Debug)]

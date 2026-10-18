@@ -198,7 +198,7 @@ fn number_end(bytes: &[u8], i: usize) -> usize {
 }
 
 /// The color of each kind of piece, in the dark or light theme.
-fn color(kind: TokenKind, dark: bool, plain: Color32) -> Color32 {
+pub fn color(kind: TokenKind, dark: bool, plain: Color32) -> Color32 {
     let rgb = Color32::from_rgb;
     match (kind, dark) {
         (TokenKind::Plain, _) => plain,

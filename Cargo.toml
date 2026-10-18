@@ -13,6 +13,8 @@ authors = ["Paul Janota and contributors"]
 [workspace.dependencies]
 # Engine crates. In code they're named with underscores, for example `axcenity_core`.
 axcenity-assets = { path = "crates/assets" }
+axcenity-audio = { path = "crates/audio" }
+axcenity-blocks = { path = "crates/blocks" }
 axcenity-core = { path = "crates/core" }
 axcenity-physics = { path = "crates/physics" }
 axcenity-project = { path = "crates/project" }
@@ -42,6 +44,7 @@ gltf = "1.4"
 # Decodes FBX models' textures. The same release `gltf` uses; the decoders are
 # pure Rust (MIT OR Apache-2.0). FBX files often use TGA or BMP textures.
 image = { version = "0.25", default-features = false, features = ["bmp", "jpeg", "png", "tga"] }
+kira = "0.12"
 log = "0.4"
 # Decodes the logo PNG for the player's window icon. (The editor gets PNG
 # decoding through eframe.)
