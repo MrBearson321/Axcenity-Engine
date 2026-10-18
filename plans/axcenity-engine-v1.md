@@ -49,10 +49,10 @@ The workspace skeleton with the `player` crate. Running the player opens a resiz
 
 ### Acceptance criteria
 
-- [ ] `cargo run` for the player opens a sky-colored window on Windows, macOS and Linux.
-- [ ] Resizing and closing the window work without errors or panics.
-- [ ] CI runs build, clippy (warnings are errors), fmt check and tests on all three OSes, and passes.
-- [ ] Apache-2.0 license, `NOTICE` and README are present.
+- [x] `cargo run` for the player opens a sky-colored window on Windows, macOS and Linux.
+- [x] Resizing and closing the window work without errors or panics.
+- [x] CI runs build, clippy (warnings are errors), fmt check and tests on all three OSes, and passes.
+- [x] Apache-2.0 license, `NOTICE` and README are present.
 
 ---
 

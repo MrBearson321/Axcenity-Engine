@@ -5,9 +5,38 @@ Read before working in the `project` or `player` crates, the export pipeline, CI
 ## Project folder
 
 - Readable text files only (except user assets): a manifest, world and Instance data, `.lua` scripts (`*.server.lua` / `*.client.lua`), block script files, `.css` stylesheets, and assets (glTF, textures, sounds).
-- The world data format (RON or JSON) is still open. Decide it in the `project` crate and record it here.
 - One damaged file must not prevent loading the rest of the project. Report it and continue.
 - The editor watches the folder and reloads files changed externally.
+
+### World data format: JSON (decided in Phase 2)
+
+Chosen over RON because every editor (including VS Code) highlights and validates JSON with no extensions, a JSON Schema can later give autocomplete in world files, and non-Rust tools can read and write projects. The cost: JSON has no comments and is a little more verbose.
+
+```text
+my-game/
+  axcenity.json   { "name": "My Game", "format_version": 1 }
+  world.json      the Workspace and its descendants
+```
+
+`world.json`:
+
+```json
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      { "class": "Part", "name": "Block",
+        "properties": { "Position": [0, 1, 0], "Color": [0.8, 0.2, 0.2] },
+        "children": [] }
+    ]
+  }
+}
+```
+
+- Property values are plain JSON, and the property's type decides how they're read: `Vector3` and `Color3` are `[a, b, c]`, numbers are numbers. `Color3` is sRGB from 0 to 1.
+- Left-out properties keep their defaults. `name` defaults to the class name. Unknown fields, classes or properties are errors, not silently ignored.
+- `format_version` appears in both files. The engine refuses newer versions with a "please update" message.
+- Errors name the file and, for JSON syntax problems, the line and column. For bad property values they name the Instance path (for example `Workspace.Block.Color`).
 
 ## Export
 

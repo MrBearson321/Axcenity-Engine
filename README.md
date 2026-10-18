@@ -4,18 +4,18 @@
 
 A free, open-source 3D game engine and editor inspired by Roblox Studio. Build worlds from parts, script them in **Lua 5.4** or with **Scratch-style blocks**, press Play to test, and export standalone games for **Windows, macOS and Linux**. Written in Rust.
 
-> **Status:** early development (Phase 1 of the [v1 plan](plans/axcenity-engine-v1.md)). Right now the player opens a window and clears it to a sky color.
+> **Status:** early development (Phase 2 of the [v1 plan](plans/axcenity-engine-v1.md)). Right now the player loads a project folder and draws its part, lit by a sun.
 
 ## Getting started
 
 1. Install Rust with [rustup](https://rustup.rs). On Windows, rustup also asks you to install the Microsoft C++ Build Tools; accept that.
-2. From this folder, run the player:
+2. From this folder, run the player with the example project:
 
    ```bash
-   cargo run -p axcenity-player
+   cargo run -p axcenity-player -- examples/hello-part
    ```
 
-   For more log output, set `RUST_LOG=info` first.
+   Try editing `examples/hello-part/world.json` (for example the block's `Color`, `Metalness` or `Roughness`) and running it again. For more log output, set `RUST_LOG=info` first.
 
 Useful commands:
 
@@ -31,6 +31,7 @@ On Linux you may need your distribution's Vulkan driver package (for example `me
 ## Project layout
 
 - `crates/`: the engine, split into focused crates (see [docs/architecture.md](docs/architecture.md))
+- `examples/`: example project folders
 - `docs/`: design notes per subsystem
 - `prd/`: the product requirements for v1
 - `plans/`: the phase-by-phase implementation plan

@@ -1,0 +1,16 @@
+[package]
+name = "axcenity-project"
+description = "Loads Axcenity project folders into an Instance tree."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+axcenity-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

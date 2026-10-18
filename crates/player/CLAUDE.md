@@ -2,7 +2,6 @@
 
 Binary that ships with exported games. Must never depend on `editor`, `egui` or `blocks`.
 
-- `main.rs`: winit 0.30 `ApplicationHandler`. The window is created in `resumed`, not before the loop starts. Errors in the loop go through `App::fail` and are returned from `main`.
-- `gpu.rs`: temporary wgpu setup plus clear-to-sky. Moves into the `render` crate in Phase 2.
-- wgpu is pinned to 25.x. Its API changes between majors (for example, `request_adapter`/`request_device` signatures and render pass attachment fields), so check the changelog when upgrading.
-- Minimized windows are 0×0. Never configure a surface with zero size.
+- `main.rs`: takes a project folder path as its first argument. winit 0.30 `ApplicationHandler`; the window is created in `resumed`, not before the loop starts. Errors in the loop go through `App::fail` and are returned from `main`.
+- `scene.rs`: turns the `World` into a `render::DrawList`. This is the only code that sees both Instances and render types. Lighting and the camera are fixed constants here until the Lighting service and camera controls exist. The editor will need the same step in Phase 8; move it into a shared crate then rather than copying it.
+- wgpu is pinned to 25.x (used through `render`). Its API changes between majors, so check the changelog when upgrading.

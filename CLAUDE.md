@@ -2,7 +2,7 @@
 
 A Roblox Studio-inspired 3D game engine and editor in Rust, scripted with Lua 5.4 and Scratch-style blocks. Targets Windows, macOS and Linux. Licensed Apache-2.0.
 
-**Status:** Phase 1 (workspace and window). Only the `player` crate exists so far.
+**Status:** Phase 2 (one lit part from a project folder). Crates so far: `core`, `project`, `render`, `player`.
 
 ## Read only what the task needs
 
@@ -30,7 +30,7 @@ When a crate is created, give it its own `crates/<name>/CLAUDE.md` (under 20 lin
 
 ## Commands
 
-- Run the player: `cargo run -p axcenity-player`
+- Run the player: `cargo run -p axcenity-player -- examples/hello-part`
 - Build: `cargo build --workspace`
 - Test: `cargo test --workspace`
 - Lint: `cargo clippy --workspace --all-targets -- -D warnings`

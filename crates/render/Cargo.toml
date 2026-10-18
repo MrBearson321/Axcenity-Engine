@@ -1,0 +1,18 @@
+[package]
+name = "axcenity-render"
+description = "The Axcenity renderer: draws a draw list with wgpu."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+# No engine crates here, on purpose: `render` only knows about draw lists.
+[dependencies]
+anyhow.workspace = true
+bytemuck.workspace = true
+glam.workspace = true
+log.workspace = true
+wgpu.workspace = true
+
+[lints]
+workspace = true
