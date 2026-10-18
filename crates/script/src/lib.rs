@@ -11,7 +11,7 @@
 //!   [`ScriptRuntime::fire_touched`].
 //! - [`lua_definitions`] describes that API for editors (see `definitions`).
 //! - `print` output and errors are collected as [`OutputLine`]s for the host to
-//!   show: the player's console now, the editor's Output panel later.
+//!   show: the player's console, or the editor's Output panel during Play.
 
 mod api;
 mod definitions;

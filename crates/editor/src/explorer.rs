@@ -176,21 +176,26 @@ impl Explorer {
     }
 
     /// Draws the tree with the `selected` row highlighted. Returns the row
-    /// that was clicked, and anything to do to the tree.
+    /// that was clicked, and anything to do to the tree. When not `editable`
+    /// (during Play), rows can still be clicked and opened, but there's no
+    /// right-click menu, renaming or dragging.
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
         world: &World,
         selected: Option<InstanceId>,
+        editable: bool,
     ) -> ExplorerOutput {
         ui.strong("Explorer");
         ui.separator();
 
-        // A rename of something that has left the tree (undone, say) can't finish.
+        // A rename of something that has left the tree (undone, say) can't
+        // finish, and nothing is renamed during Play.
         if self
             .renaming
             .as_ref()
             .is_some_and(|renaming| !world.is_descendant_of(renaming.id, world.root()))
+            || !editable
         {
             self.renaming = None;
         }
@@ -255,6 +260,9 @@ impl Explorer {
                         toggled = Some(row.id);
                     }
 
+                    if !editable {
+                        return;
+                    }
                     if tree::check_editable(world, row.id).is_ok() {
                         label.dnd_set_drag_payload(DraggedRow(row.id));
                     }
@@ -541,6 +549,17 @@ mod tests {
         world: &World,
         events: Vec<egui::Event>,
     ) -> ExplorerOutput {
+        frame_while(ctx, explorer, world, events, true)
+    }
+
+    /// `frame`, with the Explorer `editable` or not (during Play).
+    fn frame_while(
+        ctx: &egui::Context,
+        explorer: &mut Explorer,
+        world: &World,
+        events: Vec<egui::Event>,
+        editable: bool,
+    ) -> ExplorerOutput {
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -552,7 +571,7 @@ mod tests {
         let mut output = ExplorerOutput::default();
         let _ = ctx.run(input, |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                output = explorer.show(ui, world, None);
+                output = explorer.show(ui, world, None, editable);
             });
         });
         output
@@ -571,8 +590,19 @@ mod tests {
         from: InstanceId,
         to: InstanceId,
     ) -> Vec<Action> {
+        drag_row_while(explorer, world, from, to, true)
+    }
+
+    /// `drag_row`, with the Explorer `editable` or not (during Play).
+    fn drag_row_while(
+        explorer: &mut Explorer,
+        world: &World,
+        from: InstanceId,
+        to: InstanceId,
+        editable: bool,
+    ) -> Vec<Action> {
         let ctx = egui::Context::default();
-        frame(&ctx, explorer, world, Vec::new());
+        frame_while(&ctx, explorer, world, Vec::new(), editable);
         let (start, end) = (center_of(explorer, from), center_of(explorer, to));
         let button = |pos, pressed| egui::Event::PointerButton {
             pos,
@@ -593,7 +623,7 @@ mod tests {
         frames.push(Vec::new());
         frames
             .into_iter()
-            .filter_map(|events| frame(&ctx, explorer, world, events).action)
+            .filter_map(|events| frame_while(&ctx, explorer, world, events, editable).action)
             .collect()
     }
 
@@ -637,6 +667,42 @@ mod tests {
         assert_eq!(drag_row(&mut explorer, &world, car, scripts), []);
         // Services can't be dragged at all.
         assert_eq!(drag_row(&mut explorer, &world, world.workspace(), car), []);
+    }
+
+    #[test]
+    fn while_playing_rows_can_be_clicked_but_not_dragged_or_renamed() {
+        let (world, car, wheel, props) = car_world();
+        let mut explorer = Explorer::new(&world);
+        explorer.toggle(car);
+        assert_eq!(
+            drag_row_while(&mut explorer, &world, wheel, props, false),
+            []
+        );
+
+        // A rename under way when Play starts is dropped.
+        let ctx = egui::Context::default();
+        explorer.start_rename(&world, props);
+        frame_while(&ctx, &mut explorer, &world, Vec::new(), false);
+        assert_eq!(explorer.renaming(), None);
+
+        // Clicking still selects, to inspect the running game.
+        let at = center_of(&explorer, wheel);
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame_while(
+            &ctx,
+            &mut explorer,
+            &world,
+            vec![egui::Event::PointerMoved(at)],
+            false,
+        );
+        frame_while(&ctx, &mut explorer, &world, vec![button(true)], false);
+        let clicked = frame_while(&ctx, &mut explorer, &world, vec![button(false)], false);
+        assert_eq!(clicked.clicked, Some(wheel));
     }
 
     fn key(key: egui::Key) -> egui::Event {

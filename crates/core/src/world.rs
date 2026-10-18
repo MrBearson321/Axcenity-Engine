@@ -88,6 +88,10 @@ pub enum PropertyError {
     },
 }
 
+/// `clone()` makes a deep copy: a whole separate tree, with every Instance at
+/// the same `InstanceId` as in the original. Play mode runs on such a copy, so
+/// IDs (the selection, open Explorer branches) mean the same thing in both.
+#[derive(Clone)]
 pub struct World {
     instances: Arena<Instance>,
     root: InstanceId,
@@ -418,6 +422,31 @@ mod tests {
         world.set_name(part, name).unwrap();
         world.set_parent(part, Some(parent)).unwrap();
         part
+    }
+
+    #[test]
+    fn a_cloned_world_has_the_same_ids_and_changes_to_it_stay_in_it() {
+        let mut world = World::new();
+        let workspace = world.workspace();
+        let pad = part_in(&mut world, workspace, "Pad");
+        let removed = part_in(&mut world, workspace, "Gone");
+        world.destroy(removed).unwrap();
+
+        let mut copy = world.clone();
+        assert_eq!(copy.find_first_child(workspace, "Pad"), Some(pad));
+        assert!(
+            !copy.contains(removed),
+            "a destroyed ID stays dead in the copy"
+        );
+        copy.set_name(pad, "Changed").unwrap();
+        copy.destroy(pad).unwrap();
+        part_in(&mut copy, workspace, "New");
+
+        assert_eq!(world.get(pad).unwrap().name(), "Pad");
+        assert_eq!(world.get(workspace).unwrap().children(), &[pad]);
+        // Something made only in the copy isn't in the original.
+        let new = copy.find_first_child(workspace, "New").unwrap();
+        assert!(!world.contains(new));
     }
 
     #[test]

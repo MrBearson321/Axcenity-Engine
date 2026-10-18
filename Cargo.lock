@@ -494,9 +494,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axcenity-core",
+ "axcenity-physics",
  "axcenity-project",
  "axcenity-render",
  "axcenity-scene",
+ "axcenity-script",
  "eframe",
  "env_logger",
  "log",

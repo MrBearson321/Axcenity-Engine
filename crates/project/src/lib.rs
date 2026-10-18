@@ -179,6 +179,13 @@ fn find_server_scripts(
     Ok(())
 }
 
+/// Reads the script file at `path` (a [`ScriptFile::path`]) in the project in
+/// `folder` again, for running the newest version of it. The editor does
+/// this at Play, because scripts are edited in other programs.
+pub fn read_script(folder: &Path, path: &str) -> Result<String, LoadError> {
+    read(&folder.join(path))
+}
+
 #[derive(Debug, thiserror::Error)]
 #[error("could not write `{}`", path.display())]
 pub struct SaveError {
@@ -266,6 +273,9 @@ mod tests {
         .unwrap();
 
         let project = load(&folder);
+        // Edited after loading: `read_script` gets the new text by its path.
+        fs::write(scripts.join("main.server.lua"), "print('edited')").unwrap();
+        let reread = read_script(&folder, "scripts/main.server.lua");
         fs::remove_dir_all(&folder).unwrap();
         let project = project.unwrap();
 
@@ -275,6 +285,7 @@ mod tests {
             ["scripts/doors/open.server.lua", "scripts/main.server.lua"]
         );
         assert_eq!(project.scripts[1].source, "print('main')");
+        assert_eq!(reread.unwrap(), "print('edited')");
 
         let world = &project.world;
         let service = world.server_script_service();

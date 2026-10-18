@@ -14,11 +14,15 @@ pub struct Id {
     generation: u32,
 }
 
+#[derive(Clone)]
 struct Slot<T> {
     generation: u32,
     value: Option<T>,
 }
 
+/// `Clone` copies every value and keeps every slot's generation, so each
+/// `Id` points at the same value in the copy as in the original.
+#[derive(Clone)]
 pub struct Arena<T> {
     slots: Vec<Slot<T>>,
     /// Indexes of empty slots, reused before the `Vec` grows.

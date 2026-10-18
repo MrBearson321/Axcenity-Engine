@@ -240,10 +240,10 @@ Add Play and Stop buttons. Play autosaves, deep-copies the edit world, and runs 
 
 ### Acceptance criteria
 
-- [ ] Play runs the Milestone 1 demo inside the editor.
-- [ ] After Stop, every Instance and property matches the state before Play (verified by a test).
-- [ ] The project is saved to disk before Play starts.
-- [ ] A deliberately triggered engine panic during Play shows an error and returns to edit mode without closing the editor.
+- [x] Play runs the Milestone 1 demo inside the editor.
+- [x] After Stop, every Instance and property matches the state before Play (verified by a test).
+- [x] The project is saved to disk before Play starts.
+- [x] A deliberately triggered engine panic during Play shows an error and returns to edit mode without closing the editor.
 
 ---
 

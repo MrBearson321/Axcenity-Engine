@@ -39,7 +39,7 @@ Rules:
 5. Update UI layout (`taffy`)
 6. Build the draw list and render
 
-The player runs these in `WindowEvent::RedrawRequested` (`crates/player/src/main.rs`), with a comment per step. Step 5 arrives with its phase. The editor only runs step 6 until Play exists.
+The player runs these in `WindowEvent::RedrawRequested` (`crates/player/src/main.rs`), with a comment per step. Step 5 arrives with its phase. The editor runs step 6 every frame it draws, and steps 2-4 only during Play (`Session::frame` in `crates/editor/src/play.rs`), before any panel is drawn.
 
 ## Physics (decided in Phase 6)
 
@@ -58,9 +58,9 @@ The player runs these in `WindowEvent::RedrawRequested` (`crates/player/src/main
 - **Camera** (Studio-style): right-drag looks (cursor hidden; `Locked` on macOS, `Confined` elsewhere), WASD/E/Q fly while the mouse is over the viewport, Shift slows, wheel zooms toward the focus point, middle-drag pans, Alt+left-drag orbits the focus point. Keys are read by physical position, like the player.
 - **Fly speed** (added to Phase 8 on request): Shift+wheel, or the wheel while right-dragging (like Unity and Godot), changes the WASD speed by 20% per notch, from 1 to 500 studs/s (default 20). A pop-up in the middle of the viewport shows the new speed for a second, then fades. The speed survives opening another project but isn't saved between sessions. The player keeps a fixed 20 studs/s.
 - **Explorer**: shows the real root (`Game`, class `DataModel`; `game` in scripts) and every Instance under it. `game` and `Workspace` start open, everything else closed. The class is shown next to names that differ from it.
-- **Output**: editor messages (project opened, with object and script counts) and load errors, one line each with the full cause chain (file and line for bad JSON). A failed open keeps the current project. Script output joins it with Play.
+- **Output**: editor messages (project opened, with object and script counts) and load errors, one line each with the full cause chain (file and line for bad JSON). A failed open keeps the current project. During Play, script output and errors join it.
 - **Opening projects**: `axcenity-editor <folder>` or File > Open Project… (`rfd` native folder dialog; the desktop portal on Linux). With no folder, the editor starts empty with a hint in Output.
-- Scripts and physics don't run in the editor until Play (Phase 12).
+- Scripts and physics only run during Play (see Play mode).
 
 ### Selecting and editing (decided in Phase 9)
 
@@ -98,7 +98,18 @@ The player runs these in `WindowEvent::RedrawRequested` (`crates/player/src/main
 
 ## Play mode
 
-Play runs in-process on a **deep copy** of the edit world, and Stop drops the copy. Before Play: autosave. During Play: the Lua watchdog is active, and Rust panics are caught at the Play boundary and reported to the Output panel.
+Play runs in-process on a **deep copy** of the edit world, and Stop drops the copy. Before Play: autosave. During Play: the Lua watchdog is active (Phase 15), and Rust panics are caught at the Play boundary and reported to the Output panel.
+
+### Decided in Phase 12
+
+- **Controls**: **▶ Play** and **■ Stop** at the left of the toolbar, only one enabled at a time, and **F5** / **Shift+F5** as in Studio (chosen by the developer). A green "Playing" label shows at the end of the toolbar.
+- **The copy**: `World` derives `Clone`. The arena has no pointers, so a clone is a full deep copy where every Instance keeps its `InstanceId`. The selection and open Explorer branches carry over to the Play world and back. A fresh `ScriptRuntime` and `Physics` are made for each Play, so nothing (connections, waiting threads, bodies) survives into the next one. After Stop, a selection that only existed in the game is cleared.
+- **Autosave** (chosen by the developer): Play saves `world.json` first **only if there are unsaved changes**; otherwise the file already matches, and Play doesn't rewrite it. If saving fails, Play doesn't start and Output says why. The undo history is kept across Play.
+- **Scripts** are read again from their files at Play (`project::read_script`), since they're edited in other programs until Phase 13. A file that can't be read is reported and left out; the rest still run. New script files need the project reopened (their Script Instances are made at load).
+- **Read-only during Play** (chosen by the developer): the Explorer, Properties and viewport show the live game world. You can select and inspect (Properties values are greyed out but update every frame), open and close Explorer branches, and move the camera. Editing, the transform tools, dragging, inserting, the right-click menu, rename, undo and redo are all off. File > Save still saves the edit world. Opening another project stops the game.
+- **Frame**: each editor frame during Play runs frame steps 2-4 with the real time since the last one (capped at 0.1 s, like the player), then draws; the editor repaints continuously while playing. The editor camera keeps working (there are no characters yet).
+- **Output**: `print` lines are Info, script errors (`path:line: message`) are Error.
+- **Panics** (`catch_unwind` around `Session::start` and `Session::frame`): the session is thrown away, Output shows "The engine crashed during Play: <message>...", and the editor is back in edit mode. The panic's location goes to the terminal (Rust's default panic message). Panics while *drawing* the Play world aren't caught yet. In debug builds, **Debug > Panic during Play** makes the next frame panic, to test this (chosen by the developer); release builds have no Debug menu.
 
 ## Portability
 

@@ -1,8 +1,9 @@
 //! Axcenity Editor: open a project folder, look around it in a 3D viewport,
 //! and see its Instance tree in the Explorer.
 //!
-//! Phase 11: insert, select, move, edit, rename, delete, duplicate and
-//! regroup parts, with undo, and save. Play comes in a later phase.
+//! Phase 12: insert, select, move, edit, rename, delete, duplicate and
+//! regroup parts, with undo, and save. Play runs the game in the viewport,
+//! and Stop puts the world back as it was.
 //! Built on eframe (egui's app framework), which owns the window and the GPU
 //! device; the viewport draws with the same renderer as the player.
 
@@ -12,6 +13,7 @@ mod gizmo;
 mod history;
 mod output;
 mod placing;
+mod play;
 mod properties;
 mod screen;
 mod tree;

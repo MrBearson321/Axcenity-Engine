@@ -1,20 +1,37 @@
 //! The editor window: a menu bar, the Explorer and Properties on the right,
 //! the Output panel along the bottom, and the 3D viewport filling the rest,
 //! like Roblox Studio.
+//!
+//! Play runs the game on a copy of the world (see `play.rs`). While it
+//! plays, every panel shows that copy and editing is off; Stop drops it.
 
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use axcenity_core::{InstanceId, Vector3, World};
+use axcenity_project::ScriptFile;
 use eframe::egui;
 
 use crate::explorer::{Action, Explorer, ExplorerOutput};
 use crate::gizmo::{Snap, Tool};
 use crate::history::{self, Field, History, Move, Place};
 use crate::output::Output;
+use crate::play::{self, Crash, Session};
 use crate::properties::{self, Edit};
 use crate::tree::{self, Insertable};
 use crate::viewport::{DragEdit, DragKind, Viewport};
 
+/// F5 plays and Shift+F5 stops, as in Roblox Studio.
+const PLAY_SHORTCUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::F5);
+const STOP_SHORTCUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::F5);
+/// During Play, after a long pause (such as dragging the window), don't jump
+/// the game ahead by the whole pause; treat the frame as at most this long.
+/// The same cap as the player's.
+const MAX_FRAME_SECONDS: f64 = 0.1;
+/// The "Playing" label in the toolbar.
+const PLAYING_COLOR: egui::Color32 = egui::Color32::from_rgb(90, 200, 120);
 /// Ctrl+S, or Cmd+S on macOS (`COMMAND` picks the right one).
 const SAVE_SHORTCUT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::S);
@@ -63,6 +80,10 @@ pub struct EditorApp {
     viewport: Viewport,
     /// The window title last sent to the window, to send it again only when it changes.
     shown_title: String,
+    /// The game, while Play is on. `world` stays as it was before Play.
+    play: Option<Session>,
+    /// When the last Play frame ran, to measure how much game time passed.
+    last_frame: Option<Instant>,
 }
 
 /// Something that throws the open world away, so it has to ask first if
@@ -96,6 +117,8 @@ struct Keys {
 struct OpenProject {
     name: String,
     folder: PathBuf,
+    /// Its server scripts. Play reads their files again, for the newest code.
+    scripts: Vec<ScriptFile>,
 }
 
 impl EditorApp {
@@ -115,6 +138,8 @@ impl EditorApp {
             output: Output::default(),
             viewport: Viewport::new(),
             shown_title: String::new(),
+            play: None,
+            last_frame: None,
         };
         match folder {
             Some(folder) => app.open(folder),
@@ -146,14 +171,16 @@ impl EditorApp {
 
         let scripts = project.scripts.len();
         self.output.info(format!(
-            "Opened \"{}\" from `{}`: {} objects, {scripts} {}. Scripts run when \
-             you press Play, which comes in a later version.",
+            "Opened \"{}\" from `{}`: {} objects, {scripts} {}. Press Play (F5) \
+             to run it.",
             project.manifest.name,
             folder.display(),
             // `game` and its services are always there, so don't count them.
             project.world.descendants(project.world.root()).len() - 2,
             if scripts == 1 { "script" } else { "scripts" },
         ));
+        // The game being played belongs to the old project.
+        self.play = None;
         self.world = project.world;
         self.selected = None;
         // Undo steps belong to the world they were made in.
@@ -163,6 +190,7 @@ impl EditorApp {
         self.project = Some(OpenProject {
             name: project.manifest.name,
             folder: project.folder,
+            scripts: project.scripts,
         });
     }
 
@@ -208,8 +236,12 @@ impl EditorApp {
     fn select_from_viewport(&mut self, id: Option<InstanceId>) {
         self.selected = id;
         if let Some(id) = id {
-            self.explorer.reveal(&self.world, id);
+            self.explorer.reveal(shown(&self.world, &self.play), id);
         }
+    }
+
+    fn playing(&self) -> bool {
+        self.play.is_some()
     }
 
     /// True when the world has changes that aren't saved. Undoing back to
@@ -257,7 +289,11 @@ impl EditorApp {
     /// Makes `edits` to `id` and records them in the history. `key` is the
     /// field being edited, so a drag or typing keeps adding to one undo step.
     /// Only real changes are recorded: typing the same value again isn't one.
+    /// Nothing changes during Play, when the panels show the game's world.
     fn change(&mut self, id: InstanceId, key: Field, label: String, edits: Vec<Edit>) {
+        if self.playing() {
+            return;
+        }
         let before = history::snapshot(&self.world, id);
         for edit in edits {
             if let Err(err) = self.set(id, edit) {
@@ -292,16 +328,17 @@ impl EditorApp {
         Ok(())
     }
 
-    /// Undoes the last step, unless a handle is being dragged.
+    /// Undoes the last step, unless a handle is being dragged or the game
+    /// is playing (undo would change a world that isn't on screen).
     fn undo(&mut self) {
-        if !self.viewport.is_dragging() {
+        if !self.viewport.is_dragging() && !self.playing() {
             self.history.undo(&mut self.world);
             self.forget_selection_outside_tree();
         }
     }
 
     fn redo(&mut self) {
-        if !self.viewport.is_dragging() {
+        if !self.viewport.is_dragging() && !self.playing() {
             self.history.redo(&mut self.world);
             self.forget_selection_outside_tree();
         }
@@ -309,18 +346,87 @@ impl EditorApp {
 
     /// Clears the selection if it was taken out of the tree (deleted, or an
     /// insert undone), so nothing edits an Instance that isn't in the world.
+    /// After Stop, that includes anything the game made.
     fn forget_selection_outside_tree(&mut self) {
+        let world = shown(&self.world, &self.play);
         if let Some(id) = self.selected
-            && !self.world.is_descendant_of(id, self.world.root())
+            && !world.is_descendant_of(id, world.root())
         {
             self.selected = None;
         }
     }
 
+    /// Starts the game: saves the project if it has unsaved changes, then
+    /// runs its scripts and physics on a copy of the world. If saving fails,
+    /// Play doesn't start, so a crash during Play can't lose the changes.
+    fn play(&mut self) {
+        if self.playing() || self.viewport.is_dragging() || self.project.is_none() {
+            return;
+        }
+        // A half-typed value is part of the world being saved, so end its step.
+        self.history.seal();
+        if self.unsaved() && !self.save() {
+            self.output
+                .error("Play didn't start, because the project couldn't be saved first.");
+            return;
+        }
+        let Some(project) = &self.project else {
+            return;
+        };
+        self.output.info(format!(
+            "Playing \"{}\". Press Stop (Shift+F5) to go back to editing; the world \
+             will be as it was before Play.",
+            project.name
+        ));
+        // `project` borrows `self.project` and `output` borrows `self.output`:
+        // different fields, so Rust allows both borrows at once.
+        let scripts = play::read_scripts(&project.folder, &project.scripts, &mut self.output);
+        match Session::start(&self.world, &scripts, &mut self.output) {
+            Ok(session) => {
+                self.play = Some(session);
+                self.last_frame = None;
+            }
+            Err(crash) => self.crashed(crash),
+        }
+    }
+
+    /// Stops the game and throws its world away. The world being edited was
+    /// never touched, so it's back exactly as before Play.
+    fn stop(&mut self) {
+        if self.play.take().is_some() {
+            self.output
+                .info("Stopped. The world is back as it was before Play.");
+            self.forget_selection_outside_tree();
+        }
+    }
+
+    /// Runs one frame of the game, `seconds` long. A crash stops it.
+    fn play_frame(&mut self, seconds: f64) {
+        let Some(session) = &mut self.play else {
+            return;
+        };
+        if let Err(crash) = session.frame(seconds, &mut self.output) {
+            self.crashed(crash);
+        }
+    }
+
+    /// The engine panicked during Play: say so, and go back to editing.
+    fn crashed(&mut self, crash: Crash) {
+        self.play = None;
+        self.output.error(format!(
+            "The engine crashed during Play: {}. Play stopped, and the world is back \
+             as it was before Play. This is a bug in Axcenity; if you started the \
+             editor from a terminal, it shows where it happened.",
+            crash.0
+        ));
+        self.forget_selection_outside_tree();
+    }
+
     /// Does something to the tree from the Explorer, the toolbar or a
-    /// shortcut. Ignored while a part is being dragged in the viewport.
+    /// shortcut. Ignored while a part is being dragged in the viewport, and
+    /// during Play.
     fn act(&mut self, action: Action) {
-        if self.viewport.is_dragging() {
+        if self.viewport.is_dragging() || self.playing() {
             return;
         }
         match action {
@@ -561,7 +667,8 @@ impl EditorApp {
                 }
             });
             ui.menu_button("Edit", |ui| {
-                let dragging = self.viewport.is_dragging();
+                // Nothing can be edited mid-drag, or while the game plays.
+                let busy = self.viewport.is_dragging() || self.playing();
                 // "Undo Move Pad", so it's clear what will be undone.
                 let undo_label = self.history.undo_label().map(str::to_string);
                 let undo = egui::Button::new(match &undo_label {
@@ -570,7 +677,7 @@ impl EditorApp {
                 })
                 .shortcut_text(ui.ctx().format_shortcut(&UNDO_SHORTCUT));
                 if ui
-                    .add_enabled(undo_label.is_some() && !dragging, undo)
+                    .add_enabled(undo_label.is_some() && !busy, undo)
                     .clicked()
                 {
                     self.undo();
@@ -582,7 +689,7 @@ impl EditorApp {
                 })
                 .shortcut_text(ui.ctx().format_shortcut(&REDO_SHORTCUT));
                 if ui
-                    .add_enabled(redo_label.is_some() && !dragging, redo)
+                    .add_enabled(redo_label.is_some() && !busy, redo)
                     .clicked()
                 {
                     self.redo();
@@ -593,10 +700,11 @@ impl EditorApp {
                 let selected = self.selected;
                 let renamable = selected
                     .and_then(|id| self.world.get(id))
-                    .is_some_and(properties::can_rename);
+                    .is_some_and(properties::can_rename)
+                    && !self.playing();
                 let editable = selected
                     .is_some_and(|id| tree::check_editable(&self.world, id).is_ok())
-                    && !dragging;
+                    && !busy;
                 let rename = egui::Button::new("Rename").shortcut_text(RENAME_KEY.name());
                 if ui.add_enabled(renamable, rename).clicked()
                     && let Some(id) = selected
@@ -617,6 +725,24 @@ impl EditorApp {
                     self.act(Action::Delete(id));
                 }
             });
+            // Only in debug builds (`cargo run`), never in a release.
+            if cfg!(debug_assertions) {
+                ui.menu_button("Debug", |ui| {
+                    let panic = egui::Button::new("Panic during Play");
+                    if ui
+                        .add_enabled(self.playing(), panic)
+                        .on_hover_text(
+                            "Makes the engine panic on the next frame, to check that \
+                             Play stops and reports it instead of closing the editor.",
+                        )
+                        .on_disabled_hover_text("Press Play first.")
+                        .clicked()
+                        && let Some(session) = &mut self.play
+                    {
+                        session.panic_next_frame();
+                    }
+                });
+            }
             if self.unsaved() {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.weak("Unsaved changes");
@@ -625,11 +751,36 @@ impl EditorApp {
         });
     }
 
-    /// The row under the menu bar: the tools, the snapping settings, then
-    /// buttons that insert each primitive.
+    /// The row under the menu bar: Play and Stop, the tools, the snapping
+    /// settings, then buttons that insert each primitive.
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         let mut insert = None;
+        let (mut play, mut stop) = (false, false);
+        let playing = self.playing();
+        let can_play = self.project.is_some();
         ui.horizontal(|ui| {
+            let play_button = egui::Button::new("▶ Play");
+            play = ui
+                .add_enabled(!playing && can_play, play_button)
+                .on_hover_text(format!(
+                    "Save, then run the game here ({})",
+                    ui.ctx().format_shortcut(&PLAY_SHORTCUT)
+                ))
+                .on_disabled_hover_text(if playing {
+                    "The game is playing."
+                } else {
+                    "Open a project first."
+                })
+                .clicked();
+            stop = ui
+                .add_enabled(playing, egui::Button::new("■ Stop"))
+                .on_hover_text(format!(
+                    "Stop the game and go back to editing ({})",
+                    ui.ctx().format_shortcut(&STOP_SHORTCUT)
+                ))
+                .clicked();
+            ui.separator();
+
             for tool in Tool::ALL {
                 let shortcut = ui.ctx().format_shortcut(&tool.shortcut());
                 if ui
@@ -673,20 +824,47 @@ impl EditorApp {
                      Model or Folder if there is one.",
                     what.label().to_lowercase()
                 );
-                if ui.button(what.label()).on_hover_text(hover).clicked() {
+                if ui
+                    .add_enabled(!playing, egui::Button::new(what.label()))
+                    .on_hover_text(hover)
+                    .on_disabled_hover_text("Press Stop to edit.")
+                    .clicked()
+                {
                     insert = Some(what);
                 }
+            }
+            if playing {
+                ui.separator();
+                ui.colored_label(PLAYING_COLOR, "Playing")
+                    .on_hover_text("Editing is off until you press Stop.");
             }
         });
         if let Some(what) = insert {
             let near = self.selected;
             self.act(Action::Insert { what, near });
         }
+        if play {
+            self.play();
+        }
+        if stop {
+            self.stop();
+        }
     }
 
     /// The keyboard shortcuts for undo, redo, the tools, and renaming,
     /// duplicating and deleting the selection.
     fn shortcuts(&mut self, ctx: &egui::Context) {
+        // Stop first: egui counts Shift+F5 as F5 too.
+        let (stop, play) = ctx.input_mut(|input| {
+            let stop = input.consume_shortcut(&STOP_SHORTCUT);
+            (stop, input.consume_shortcut(&PLAY_SHORTCUT))
+        });
+        if stop {
+            self.stop();
+        } else if play {
+            self.play();
+        }
+
         // A text box being typed in has its own undo, and uses Delete and
         // Backspace itself, so leave those keys to it then.
         let typing = ctx.wants_keyboard_input();
@@ -727,8 +905,10 @@ impl EditorApp {
         if let Some(tool) = keys.tool {
             self.tool = tool;
         }
+        // Undo, duplicate and delete check for Play themselves; renaming
+        // only opens a text box, so it's checked here.
         if let Some(id) = self.selected {
-            if keys.rename {
+            if keys.rename && !self.playing() {
                 self.explorer.start_rename(&self.world, id);
             }
             if keys.duplicate {
@@ -739,6 +919,17 @@ impl EditorApp {
             }
         }
     }
+}
+
+/// The world the panels and viewport show: the game's during Play, otherwise
+/// the one being edited.
+///
+/// This takes the two fields instead of `&self`, so the result only borrows
+/// those two, and other fields (the Explorer, the viewport) can still be
+/// changed while it's in use. `'a` says the returned world lives as long as
+/// the borrowed fields.
+fn shown<'a>(world: &'a World, play: &'a Option<Session>) -> &'a World {
+    play.as_ref().map_or(world, Session::world)
 }
 
 impl eframe::App for EditorApp {
@@ -759,6 +950,20 @@ impl eframe::App for EditorApp {
         }
         self.shortcuts(ctx);
 
+        // During Play, run a game frame before anything is drawn, so every
+        // panel shows the world as it is now. Then ask for the next frame
+        // straight away: games keep moving without input.
+        if self.playing() {
+            let now = Instant::now();
+            let seconds = self
+                .last_frame
+                .map_or(0.0, |last| (now - last).as_secs_f64())
+                .min(MAX_FRAME_SECONDS);
+            self.last_frame = Some(now);
+            self.play_frame(seconds);
+            ctx.request_repaint();
+        }
+
         let title = self.title();
         if title != self.shown_title {
             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
@@ -772,6 +977,9 @@ impl eframe::App for EditorApp {
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| self.toolbar(ui));
         let mut edit = None;
         let mut explorer = ExplorerOutput::default();
+        let editing = !self.playing();
+        // The game's world during Play, otherwise the one being edited.
+        let world = shown(&self.world, &self.play);
         egui::SidePanel::right("explorer")
             .default_width(300.0)
             .show(ctx, |ui| {
@@ -779,9 +987,9 @@ impl eframe::App for EditorApp {
                     .resizable(true)
                     .default_height(340.0)
                     .show_inside(ui, |ui| {
-                        edit = properties::show(ui, &self.world, self.selected);
+                        edit = properties::show(ui, world, self.selected, editing);
                     });
-                explorer = self.explorer.show(ui, &self.world, self.selected);
+                explorer = self.explorer.show(ui, world, self.selected, editing);
             });
         // Applied before the viewport draws, so it shows the change this frame.
         if let (Some(id), Some(edit)) = (self.selected, edit) {
@@ -799,17 +1007,17 @@ impl eframe::App for EditorApp {
             .resizable(true)
             .default_height(160.0)
             .show(ctx, |ui| self.output.show(ui));
+        // Again, as the edits above may have changed which world to show.
+        let world = shown(&self.world, &self.play);
+        // No tool during Play, so nothing can be dragged.
+        let tool = (!self.playing()).then_some(self.tool);
         let output = egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| match frame.wgpu_render_state() {
-                Some(render_state) => self.viewport.show(
-                    ui,
-                    render_state,
-                    &self.world,
-                    self.selected,
-                    self.tool,
-                    self.snap,
-                ),
+                Some(render_state) => {
+                    self.viewport
+                        .show(ui, render_state, world, self.selected, tool, self.snap)
+                }
                 // Can't happen: main.rs always picks the wgpu renderer.
                 None => {
                     ui.label("The viewport needs the wgpu renderer.");
@@ -1686,5 +1894,270 @@ mod tests {
         press(&mut app, command, egui::Key::Z);
         press(&mut app, command | egui::Modifiers::SHIFT, egui::Key::Z);
         assert_eq!(property(&app, pad, "Anchored"), Value::Bool(false));
+    }
+
+    /// Runs the game for `seconds` at 60 frames per second.
+    fn play_for(app: &mut EditorApp, seconds: f64) {
+        for _ in 0..(seconds * 60.0).round() as u32 {
+            app.play_frame(1.0 / 60.0);
+        }
+    }
+
+    fn printed(app: &EditorApp) -> Vec<&str> {
+        app.output.lines().iter().map(|l| l.text.as_str()).collect()
+    }
+
+    /// The whole tree, every Instance out of the tree that undo still holds,
+    /// and the undo history: everything Stop has to put back.
+    fn everything(app: &EditorApp) -> (Vec<String>, String, usize, Option<String>, bool) {
+        (
+            describe(&app.world, app.world.root()),
+            axcenity_project::write_world(&app.world),
+            app.world.len(),
+            app.history.undo_label().map(str::to_string),
+            app.unsaved(),
+        )
+    }
+
+    #[test]
+    fn play_runs_the_milestone_1_demo_in_the_editor() {
+        let folder = example("hello-touched");
+        let file_before = std::fs::read_to_string(folder.join("world.json")).unwrap();
+        let mut app = EditorApp::new(Some(&folder));
+        let pad = part(&app, "Pad");
+        let gray = property(&app, pad, "Color");
+        app.play();
+        assert!(app.playing());
+        assert!(
+            last_line(&app)
+                .text
+                .starts_with("Playing \"Hello Touched\"")
+        );
+
+        // The red ball lands on the pad within 3 seconds, and the pad changes color.
+        play_for(&mut app, 2.9);
+        assert!(printed(&app).contains(&"Ball touched the pad"));
+        let shown_pad = |app: &EditorApp| {
+            shown(&app.world, &app.play)
+                .get(pad)
+                .unwrap()
+                .property("Color")
+                .cloned()
+        };
+        assert_ne!(
+            shown_pad(&app),
+            Some(gray.clone()),
+            "the panels show the game"
+        );
+        assert_eq!(
+            property(&app, pad, "Color"),
+            gray,
+            "the edit world is untouched"
+        );
+        // At 3 s the script drops a blue ball; at 6 s it stops listening.
+        play_for(&mut app, 3.2);
+        assert!(printed(&app).contains(&"BlueBall touched the pad"));
+        assert_eq!(last_line(&app).text, "stopped listening for touches");
+        let game = shown(&app.world, &app.play);
+        assert!(
+            game.find_first_child(game.workspace(), "BlueBall")
+                .is_some()
+        );
+
+        // Nothing was unsaved, so Play didn't write the world file.
+        let file_after = std::fs::read_to_string(folder.join("world.json")).unwrap();
+        assert_eq!(file_after, file_before);
+    }
+
+    #[test]
+    fn stop_puts_every_instance_and_property_back_as_before_play() {
+        let folder = copy_of_example("hello-touched", "play-stop");
+        let mut app = EditorApp::new(Some(&folder));
+        // Some edits first: a moved pad, a new Model with a part in it, and a
+        // deleted Folder that undo still holds outside the tree.
+        let pad = part(&app, "Pad");
+        app.apply(pad, Edit::Property("Position", vector(1.5, 0.25, -0.5)));
+        let model = inserted(&mut app, Insertable::Model, None);
+        inserted(&mut app, Insertable::Part(PartType::Wedge), Some(model));
+        let folder_id = inserted(&mut app, Insertable::Folder, None);
+        app.act(Action::Delete(folder_id));
+        app.selected = Some(pad);
+        app.play();
+        let before = everything(&app);
+        let game_ball = part(&app, "Ball");
+
+        // Scripts recolor the pad and add balls, physics moves them all.
+        play_for(&mut app, 9.0);
+        let game = shown(&app.world, &app.play);
+        assert!(
+            game.find_first_child(game.workspace(), "IgnoredBall")
+                .is_some()
+        );
+        assert_ne!(
+            game.get(game_ball).unwrap().property("Position"),
+            app.world.get(game_ball).unwrap().property("Position"),
+            "the ball fell in the game"
+        );
+
+        app.stop();
+        assert!(!app.playing());
+        assert_eq!(
+            last_line(&app).text,
+            "Stopped. The world is back as it was before Play."
+        );
+        assert_eq!(everything(&app), before);
+        assert_eq!(app.selected, Some(pad), "the selection stays");
+        // The history still works on the same Instances: undo the delete.
+        app.undo();
+        assert!(app.world.is_descendant_of(folder_id, app.world.workspace()));
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn something_the_game_made_is_unselected_at_stop() {
+        let mut app = EditorApp::new(Some(&example("hello-touched")));
+        app.play();
+        play_for(&mut app, 3.1);
+        let game = shown(&app.world, &app.play);
+        let blue = game.find_first_child(game.workspace(), "BlueBall").unwrap();
+        app.select_from_viewport(Some(blue));
+        app.stop();
+        assert_eq!(app.selected, None);
+    }
+
+    #[test]
+    fn play_saves_unsaved_changes_first_and_does_not_start_if_saving_fails() {
+        let folder = copy_of_example("hello-touched", "play-save");
+        let mut app = EditorApp::new(Some(&folder));
+        let pad = part(&app, "Pad");
+        app.apply(pad, Edit::Name("Launch Pad".to_string()));
+        app.play();
+        assert!(app.playing());
+        assert!(!app.unsaved());
+        assert!(part_exists_on_disk(&folder, "Launch Pad"));
+        assert!(printed(&app).iter().any(|line| line.starts_with("Saved")));
+        app.stop();
+
+        // With the folder gone, saving fails, so the game doesn't start.
+        std::fs::remove_dir_all(&folder).unwrap();
+        app.apply(pad, Edit::Name("Pad".to_string()));
+        app.play();
+        assert!(!app.playing());
+        assert!(app.unsaved());
+        assert_eq!(last_line(&app).kind, OutputKind::Error);
+        assert!(last_line(&app).text.starts_with("Play didn't start"));
+    }
+
+    #[test]
+    fn play_runs_the_script_file_as_it_is_now() {
+        let folder = copy_of_example("hello-touched", "play-reread");
+        let mut app = EditorApp::new(Some(&folder));
+        std::fs::write(
+            folder.join("scripts/pad.server.lua"),
+            "print('edited in another program')",
+        )
+        .unwrap();
+        app.play();
+        assert_eq!(last_line(&app).text, "edited in another program");
+        app.stop();
+
+        // A script file that's gone is reported, and the rest of the game runs.
+        std::fs::remove_file(folder.join("scripts/pad.server.lua")).unwrap();
+        app.play();
+        assert!(app.playing());
+        let line = last_line(&app);
+        assert_eq!(line.kind, OutputKind::Error);
+        assert!(
+            line.text.starts_with("scripts/pad.server.lua won't run"),
+            "{}",
+            line.text
+        );
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn an_engine_panic_during_play_is_reported_and_goes_back_to_editing() {
+        let mut app = EditorApp::new(Some(&example("hello-touched")));
+        let before = everything(&app);
+        app.play();
+        play_for(&mut app, 1.0);
+        app.play.as_mut().unwrap().panic_next_frame();
+        app.play_frame(1.0 / 60.0);
+
+        assert!(!app.playing(), "back in edit mode");
+        let line = last_line(&app);
+        assert_eq!(line.kind, OutputKind::Error);
+        assert!(
+            line.text
+                .starts_with("The engine crashed during Play: a deliberate engine panic"),
+            "{}",
+            line.text
+        );
+        assert_eq!(everything(&app), before);
+        // The editor carries on: editing works, and so does playing again.
+        let pad = part(&app, "Pad");
+        app.apply(pad, Edit::Property("Anchored", Value::Bool(false)));
+        assert_eq!(property(&app, pad, "Anchored"), Value::Bool(false));
+        app.undo();
+        app.play();
+        play_for(&mut app, 1.0);
+        assert!(app.playing());
+    }
+
+    #[test]
+    fn nothing_can_be_edited_while_playing() {
+        // A copy, because Play saves the unsaved edit below.
+        let folder = copy_of_example("hello-touched", "play-read-only");
+        let mut app = EditorApp::new(Some(&folder));
+        let pad = part(&app, "Pad");
+        app.apply(pad, Edit::Property("Anchored", Value::Bool(false)));
+        app.play();
+        let before = everything(&app);
+
+        app.apply(pad, Edit::Name("Door".to_string()));
+        app.act(Action::Delete(pad));
+        app.act(Action::Duplicate(pad));
+        app.act(Action::Insert {
+            what: Insertable::Folder,
+            near: None,
+        });
+        app.undo();
+        app.selected = Some(pad);
+        press(&mut app, egui::Modifiers::NONE, egui::Key::F2);
+        assert_eq!(app.explorer.renaming(), None);
+        let game = shown(&app.world, &app.play);
+        assert_eq!(game.get(pad).unwrap().name(), "Pad");
+        assert!(game.find_first_child(game.workspace(), "Folder").is_none());
+
+        app.stop();
+        assert_eq!(everything(&app), before);
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn f5_plays_and_shift_f5_stops() {
+        let mut app = EditorApp::new(Some(&example("hello-touched")));
+        press(&mut app, egui::Modifiers::SHIFT, egui::Key::F5);
+        assert!(!app.playing());
+        press(&mut app, egui::Modifiers::NONE, egui::Key::F5);
+        assert!(app.playing());
+        // F5 again does nothing; Shift+F5 isn't taken for F5.
+        press(&mut app, egui::Modifiers::NONE, egui::Key::F5);
+        assert!(app.playing());
+        press(&mut app, egui::Modifiers::SHIFT, egui::Key::F5);
+        assert!(!app.playing());
+
+        // Nothing to play without a project.
+        let mut empty = EditorApp::new(None);
+        press(&mut empty, egui::Modifiers::NONE, egui::Key::F5);
+        assert!(!empty.playing());
+    }
+
+    #[test]
+    fn opening_another_project_stops_the_game() {
+        let mut app = EditorApp::new(Some(&example("hello-touched")));
+        app.play();
+        app.open(&example("hello-part"));
+        assert!(!app.playing());
     }
 }

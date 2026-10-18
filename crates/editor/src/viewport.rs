@@ -11,6 +11,9 @@
 //! With the Move, Scale or Rotate tool, it also gets handles to drag
 //! (see `gizmo.rs`). With any tool, left-dragging a part by its body moves
 //! it onto the surface under the mouse (see `placing.rs`).
+//!
+//! During Play there's no tool: the camera and selecting still work, but
+//! nothing can be dragged.
 
 use axcenity_core::{InstanceId, Value, World};
 use axcenity_render::TextureRenderer;
@@ -170,14 +173,15 @@ impl Viewport {
     /// Fills `ui` with the viewport: moves the camera from this frame's
     /// input, then draws `world` from there with a box around `selected`,
     /// and `tool`'s handles on it. Returns what a click picked and what a
-    /// drag changed; the app applies those to the world.
+    /// drag changed; the app applies those to the world. With no `tool`
+    /// (during Play), nothing can be dragged.
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
         render_state: &RenderState,
         world: &World,
         selected: Option<InstanceId>,
-        tool: Tool,
+        tool: Option<Tool>,
         snap: Snap,
     ) -> ViewportOutput {
         let size = ui.available_size();
@@ -255,9 +259,15 @@ impl Viewport {
         screen: &Screen,
         world: &World,
         selected: Option<InstanceId>,
-        tool: Tool,
+        tool: Option<Tool>,
         snap: Snap,
     ) -> DragInput {
+        let Some(tool) = tool else {
+            // Nothing to drag. A drag can't be under way either: Play
+            // doesn't start during one.
+            self.drag = None;
+            return DragInput::default();
+        };
         let selected = selected.and_then(|id| Some((id, Pose::of(world.get(id)?)?)));
         let shapes = match selected {
             Some((_, pose)) => gizmo::shapes(tool, pose, screen),

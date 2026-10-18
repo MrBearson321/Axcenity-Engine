@@ -1,6 +1,6 @@
 //! The Output panel: messages from the editor, such as which project opened
-//! and why one couldn't load. Script `print`s and errors join them once Play
-//! arrives.
+//! and why one couldn't load, and during Play what scripts `print`, their
+//! errors, and engine crashes.
 
 use eframe::egui;
 
