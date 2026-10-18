@@ -8,6 +8,8 @@
 use axcenity_core::{Color3, Instance, InstanceId, Material, PartType, Value, World};
 use eframe::egui;
 
+use crate::theme::{self, icons};
+
 /// A change made in the Properties panel.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Edit {
@@ -91,9 +93,12 @@ pub fn show(
     selected: Option<InstanceId>,
     playing: bool,
 ) -> Option<Edit> {
-    ui.strong("Properties");
+    theme::panel_title(ui, icons::SLIDERS_HORIZONTAL, "Properties");
     if playing {
-        ui.weak("Changes made during Play are undone at Stop.");
+        ui.weak(theme::with_icon(
+            icons::INFO,
+            "Changes made during Play are undone at Stop.",
+        ));
     }
     ui.separator();
     let mut edit = None;
@@ -150,7 +155,16 @@ pub fn show(
 
 /// A collapsible group with a two-column grid of names and controls.
 fn section(ui: &mut egui::Ui, title: &str, rows: impl FnOnce(&mut egui::Ui)) {
-    egui::CollapsingHeader::new(title)
+    let icon = match title {
+        "Data" => icons::IDENTIFICATION_CARD,
+        "Appearance" => icons::PALETTE,
+        "Behavior" => icons::GEAR,
+        "Part" => icons::CUBE,
+        _ => icons::DOTS_THREE_OUTLINE,
+    };
+    let header = egui::RichText::new(theme::with_icon(icon, title)).family(theme::heading_family());
+    egui::CollapsingHeader::new(header)
+        .id_salt(title)
         .default_open(true)
         .show(ui, |ui| {
             egui::Grid::new(title)

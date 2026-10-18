@@ -17,9 +17,12 @@ mod output;
 mod placing;
 mod play;
 mod properties;
+mod ribbon;
 mod screen;
 mod scripts;
 mod side_warnings;
+mod start;
+mod theme;
 mod tree;
 mod viewport;
 mod watcher;
@@ -69,7 +72,13 @@ fn main() -> eframe::Result {
         options,
         // `move` hands `folder` over to the closure, which eframe calls once
         // the window exists to create the app.
-        Box::new(move |_creation_context| Ok(Box::new(EditorApp::new(folder.as_deref())))),
+        Box::new(move |creation_context| {
+            let ctx = &creation_context.egui_ctx;
+            theme::install(ctx);
+            let mut app = EditorApp::new(folder.as_deref());
+            app.load_settings(ctx, creation_context.storage);
+            Ok(Box::new(app))
+        }),
     )
 }
 

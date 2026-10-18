@@ -156,6 +156,15 @@ pub fn load(folder: &Path) -> Result<Project, LoadError> {
     })
 }
 
+/// The name of the project in `folder`, from its manifest, without loading
+/// anything else (for lists of projects). `None` if `folder` has no
+/// readable manifest.
+pub fn project_name(folder: &Path) -> Option<String> {
+    let text = fs::read_to_string(folder.join(MANIFEST_FILE)).ok()?;
+    let manifest = serde_json::from_str::<Manifest>(&text).ok()?;
+    Some(manifest.name)
+}
+
 /// The last part of `folder`'s path, such as `my-game`.
 fn folder_name(folder: &Path) -> String {
     // `canonicalize` turns `.` and `..` into real names first.
@@ -699,6 +708,16 @@ mod tests {
             .unwrap();
         assert!(matches!(err, LoadError::Read { .. }));
         assert!(err.to_string().contains(MANIFEST_FILE));
+    }
+
+    #[test]
+    fn project_names_come_from_the_manifest() {
+        let examples = examples_folder();
+        assert_eq!(
+            project_name(&examples.join("hello-touched")).as_deref(),
+            Some("Hello Touched")
+        );
+        assert_eq!(project_name(&examples.join("does-not-exist")), None);
     }
 
     #[test]

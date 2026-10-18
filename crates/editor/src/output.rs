@@ -7,6 +7,8 @@
 
 use eframe::egui;
 
+use crate::theme::{self, icons};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutputKind {
     Info,
@@ -74,10 +76,16 @@ impl Output {
     /// clicked, to open the script there.
     pub fn show(&mut self, ui: &mut egui::Ui) -> Option<Location> {
         ui.horizontal(|ui| {
-            ui.strong("Output");
-            if ui.small_button("Clear").clicked() {
-                self.lines.clear();
-            }
+            theme::panel_title(ui, icons::TERMINAL_WINDOW, "Output");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .small_button(theme::with_icon(icons::BROOM, "Clear"))
+                    .on_hover_text("Remove every line")
+                    .clicked()
+                {
+                    self.lines.clear();
+                }
+            });
         });
         ui.separator();
 
@@ -89,36 +97,63 @@ impl Output {
             .show(ui, |ui| {
                 for line in &self.lines {
                     let visuals = ui.visuals();
-                    let color = match line.kind {
-                        OutputKind::Info => visuals.text_color(),
-                        OutputKind::Error => visuals.error_fg_color,
+                    let (icon, icon_color, color) = match line.kind {
+                        OutputKind::Info => {
+                            (icons::INFO, visuals.weak_text_color(), visuals.text_color())
+                        }
+                        OutputKind::Error => (
+                            icons::X_CIRCLE,
+                            visuals.error_fg_color,
+                            visuals.error_fg_color,
+                        ),
                     };
                     let font = egui::TextStyle::Monospace.resolve(ui.style());
-                    let Some(location) = &line.location else {
-                        let text = egui::RichText::new(&line.text).font(font).color(color);
-                        ui.add(egui::Label::new(text).wrap());
-                        continue;
-                    };
-                    // `path:line` underlined like a link, then the message.
-                    let prefix = format!("{}:{}", location.path, location.line);
-                    let rest = line.text.strip_prefix(&prefix).unwrap_or(&line.text);
-                    let mut job = egui::text::LayoutJob::default();
-                    let mut format = egui::TextFormat::simple(font, color);
-                    format.underline = egui::Stroke::new(1.0_f32, color);
-                    job.append(&prefix, 0.0, format.clone());
-                    format.underline = egui::Stroke::NONE;
-                    job.append(rest, 0.0, format);
-                    let label = ui
-                        .add(egui::Label::new(job).wrap().sense(egui::Sense::click()))
-                        .on_hover_cursor(egui::CursorIcon::PointingHand)
-                        .on_hover_text(format!("Open {} at line {}", location.path, location.line));
-                    if label.clicked() {
-                        clicked = Some(location.clone());
-                    }
+                    // The icon sits left of the text, which wraps beside it.
+                    ui.horizontal_top(|ui| {
+                        ui.label(
+                            egui::RichText::new(icon)
+                                .font(font.clone())
+                                .color(icon_color),
+                        );
+                        match &line.location {
+                            Some(location) => {
+                                if location_link(ui, &line.text, location, font, color) {
+                                    clicked = Some(location.clone());
+                                }
+                            }
+                            None => {
+                                let text = egui::RichText::new(&line.text).font(font).color(color);
+                                ui.add(egui::Label::new(text).wrap());
+                            }
+                        }
+                    });
                 }
             });
         clicked
     }
+}
+
+/// A script error's text, with the `path:line` it starts with underlined
+/// like a link, then the message. Returns true when it's clicked.
+fn location_link(
+    ui: &mut egui::Ui,
+    text: &str,
+    location: &Location,
+    font: egui::FontId,
+    color: egui::Color32,
+) -> bool {
+    let prefix = format!("{}:{}", location.path, location.line);
+    let rest = text.strip_prefix(&prefix).unwrap_or(text);
+    let mut job = egui::text::LayoutJob::default();
+    let mut format = egui::TextFormat::simple(font, color);
+    format.underline = egui::Stroke::new(1.0_f32, color);
+    job.append(&prefix, 0.0, format.clone());
+    format.underline = egui::Stroke::NONE;
+    job.append(rest, 0.0, format);
+    ui.add(egui::Label::new(job).wrap().sense(egui::Sense::click()))
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text(format!("Open {} at line {}", location.path, location.line))
+        .clicked()
 }
 
 /// The script and line at the start of `text`, if it starts with

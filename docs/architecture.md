@@ -66,6 +66,16 @@ Since Phase 14, step 1 also hands LocalScripts the camera (`set_camera`) and the
 - **Opening projects**: `axcenity-editor <folder>` or File > Open Project… (`rfd` native folder dialog; the desktop portal on Linux). With no folder, the editor starts empty with a hint in Output.
 - Scripts and physics only run during Play (see Play mode).
 
+### Look and feel (UI refresh, after Phase 16)
+
+- **Themes**: a branded dark theme (blue-grey panels, brand blue selection) by default, and a light one. View > Theme picks Dark, Light or Match System. `theme.rs` sets both themes' styles at startup, so switching is instant.
+- **Fonts**: Montserrat for UI text (SemiBold for headings and panel titles, the `heading` font family), JetBrains Mono for code and Output, egui's own fonts as fallback. Text is 13 pt and widgets are 22 pt tall, a little larger than egui's defaults, so things are easier to read and hit.
+- **Icons**: Phosphor, as an icon font (`egui-phosphor` 0.10, matching egui 0.32), so an icon is a letter inside any text. Every Instance class has an icon and a colour (`theme::class_icon`, `class_color`): parts and models blue, folders yellow, Scripts orange, LocalScripts teal, ModuleScripts purple, RemoteEvents pink, services grey. Parts show their shape's icon. Menus, panel titles, tabs and Output lines have icons too.
+- **Toolbar**: a ribbon like Studio's (`ribbon.rs`), with big icons above their names, in captioned groups: Game (Play, Stop), Tools, Snapping, Insert, Scripts. The "Playing" badge and "Unsaved changes" sit at the right of the menu bar.
+- **Start screen**: with no project open, the window shows the wordmark, an Open Project button, recent projects (up to 8) and the examples found in `examples/` under the current folder. The toolbar, Explorer, Properties and tabs are hidden until a project opens; Output stays, so open errors are visible.
+- **Saved between runs** (eframe's `persistence` feature, in the OS's app data folder): the theme, the recent projects, the window's size and position, and egui's panel sizes. Tests never touch it (only `eframe::run_native` loads and saves it).
+- **Logo**: the hexagon mark at the left of the menu bar (tinted per theme), the wordmark on the start screen and in Help > About.
+
 ### Selecting and editing (decided in Phase 9)
 
 - **One selected Instance** (`EditorApp::selected`), shared by the Explorer, Properties and viewport. Multi-select can come later.

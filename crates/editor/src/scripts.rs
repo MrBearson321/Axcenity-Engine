@@ -16,6 +16,7 @@ use eframe::egui;
 
 use crate::lua_syntax;
 use crate::side_warnings::SideWarning;
+use crate::theme::{self, icons};
 
 /// What a new script starts with, as in Roblox Studio.
 pub const NEW_SCRIPT_SOURCE: &str = "print(\"Hello world!\")\n";
@@ -91,7 +92,7 @@ pub struct ScriptTabs {
     /// The tab shown, or `None` for the World tab (the viewport).
     active: Option<usize>,
     /// Each script's uses of APIs that only work on the other side, by
-    /// path. The app fills it in each frame; a tab with any shows ⚠.
+    /// path. The app fills it in each frame; a tab with any shows a warning sign.
     pub warnings: HashMap<String, Vec<SideWarning>>,
 }
 
@@ -193,8 +194,9 @@ impl ScriptTabs {
         let mut close = None;
         egui::ScrollArea::horizontal().show(ui, |ui| {
             ui.horizontal(|ui| {
+                let world = theme::with_icon(icons::GLOBE_HEMISPHERE_WEST, "World");
                 if ui
-                    .selectable_label(self.active.is_none(), "World")
+                    .selectable_label(self.active.is_none(), world)
                     .on_hover_text("The 3D view of the world")
                     .clicked()
                 {
@@ -203,21 +205,26 @@ impl ScriptTabs {
                 for (index, tab) in self.tabs.iter().enumerate() {
                     ui.separator();
                     // A dot after the name means unsaved changes, as in VS Code.
-                    let mut title = if tab.unsaved() {
+                    let name = if tab.unsaved() {
                         format!("{} ●", tab.name())
                     } else {
                         tab.name().to_string()
                     };
+                    let class = axcenity_project::script_class(&tab.path);
+                    let icon = egui::RichText::new(theme::class_icon(class))
+                        .color(theme::class_color(class, ui.visuals()));
+                    let mut title = egui::Atoms::new((icon, name));
                     if self.warnings.contains_key(&tab.path) {
-                        title.push_str(" ⚠");
+                        let warning = ui.visuals().warn_fg_color;
+                        title.push_right(egui::RichText::new(icons::WARNING).color(warning));
                     }
                     let label = ui
-                        .selectable_label(self.active == Some(index), title)
+                        .add(egui::Button::selectable(self.active == Some(index), title))
                         .on_hover_text(&tab.path);
                     if label.clicked() {
                         show = Some(Some(index));
                     }
-                    let cross = ui.small_button("×").on_hover_text("Close");
+                    let cross = ui.small_button(icons::X).on_hover_text("Close");
                     if label.middle_clicked() || cross.clicked() {
                         close = Some(tab.path.clone());
                     }
@@ -242,10 +249,19 @@ impl ScriptTabs {
                 ui.horizontal(|ui| {
                     ui.colored_label(
                         warning,
-                        "This file was changed outside the editor. Saving replaces it with \
-                         your version.",
+                        theme::with_icon(
+                            icons::WARNING,
+                            "This file was changed outside the editor. Saving replaces it \
+                             with your version.",
+                        ),
                     );
-                    if ui.button("Reload from disk").clicked() {
+                    if ui
+                        .button(theme::with_icon(
+                            icons::ARROWS_CLOCKWISE,
+                            "Reload from disk",
+                        ))
+                        .clicked()
+                    {
                         tab.text = tab.saved.clone();
                         tab.disk = Disk::Same;
                     }
@@ -254,14 +270,22 @@ impl ScriptTabs {
             Disk::Deleted => {
                 ui.colored_label(
                     warning,
-                    "This file was deleted outside the editor. Save to write it back, or \
-                     close the tab.",
+                    theme::with_icon(
+                        icons::WARNING,
+                        "This file was deleted outside the editor. Save to write it back, \
+                         or close the tab.",
+                    ),
                 );
             }
         }
         // Clicking a warning puts the cursor on its line.
         for side_warning in self.warnings.get(&tab.path).into_iter().flatten() {
-            let text = format!("⚠ Line {}: {}", side_warning.line, side_warning.message);
+            let text = format!(
+                "{}  Line {}: {}",
+                icons::WARNING,
+                side_warning.line,
+                side_warning.message
+            );
             let label = egui::Label::new(egui::RichText::new(text).color(warning))
                 .sense(egui::Sense::click());
             if ui.add(label).on_hover_text("Go to this line").clicked() {
@@ -430,7 +454,7 @@ mod tests {
             .collect::<String>();
         let mut tabs = ScriptTabs::default();
         tabs.open(path, &code, Some(150));
-        let ctx = egui::Context::default();
+        let ctx = theme::test_context();
         frame(&ctx, &mut tabs);
         frame(&ctx, &mut tabs);
 

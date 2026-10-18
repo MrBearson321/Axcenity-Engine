@@ -3,7 +3,7 @@
 //!
 //! Right-clicking a row opens a menu to insert, rename, duplicate or delete,
 //! and dragging a row onto another moves it inside that one. Double-clicking
-//! a Script or LocalScript opens it in a script tab, and a ⚠ after one says
+//! a Script or LocalScript opens it in a script tab, and a warning sign after one says
 //! it uses something that only works on the other side. The Explorer
 //! never changes the world itself: [`Explorer::show`] returns an [`Action`]
 //! and the app carries it out, so it's recorded for undo.
@@ -13,11 +13,12 @@
 
 use std::collections::{HashMap, HashSet};
 
-use axcenity_core::{ClassName, InstanceId, World};
+use axcenity_core::{ClassName, InstanceId, Value, World};
 use eframe::egui;
 
 use crate::app::{DELETE_KEY_TEXT, DUPLICATE_SHORTCUT, RENAME_KEY};
 use crate::properties;
+use crate::theme::{self, icons};
 use crate::tree::{self, Insertable};
 
 /// How far each level of the tree is indented, in points.
@@ -67,7 +68,7 @@ pub struct Explorer {
     scroll_to: Option<InstanceId>,
     /// The row being renamed, which shows a text box instead of its name.
     renaming: Option<Renaming>,
-    /// The hover text of the ⚠ badge after each script that uses an API
+    /// The hover text of the warning badge after each script that uses an API
     /// from the other side. The app fills it in each frame.
     pub warnings: HashMap<InstanceId, String>,
     /// Where each row's name was drawn last frame, so tests can point at rows.
@@ -228,7 +229,7 @@ impl Explorer {
         selected: Option<InstanceId>,
         editable: bool,
     ) -> ExplorerOutput {
-        ui.strong("Explorer");
+        theme::panel_title(ui, icons::TREE_STRUCTURE, "Explorer");
         ui.separator();
 
         // A rename of something that has left the tree (undone, say) can't
@@ -263,8 +264,24 @@ impl Explorer {
                     let (_, arrow) =
                         ui.allocate_exact_size(egui::Vec2::splat(ARROW_SIZE), arrow_sense);
                     if row.has_children {
-                        let openness = if row.expanded { 1.0 } else { 0.0 };
-                        egui::collapsing_header::paint_default_icon(ui, openness, &arrow);
+                        let caret = if row.expanded {
+                            icons::CARET_DOWN
+                        } else {
+                            icons::CARET_RIGHT
+                        };
+                        let visuals = ui.visuals();
+                        let color = if arrow.hovered() {
+                            visuals.strong_text_color()
+                        } else {
+                            visuals.weak_text_color()
+                        };
+                        ui.painter().text(
+                            arrow.rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            caret,
+                            egui::FontId::proportional(12.0),
+                            color,
+                        );
                     }
                     if arrow.clicked() {
                         toggled = Some(row.id);
@@ -279,10 +296,15 @@ impl Explorer {
                     }
 
                     // Clicks select; dragging moves the row onto another.
+                    let icon = egui::RichText::new(row_icon(world, &row))
+                        .color(theme::class_color(row.class, ui.visuals()));
                     let label = ui
                         .add(
-                            egui::Button::selectable(selected == Some(row.id), &row.name)
-                                .sense(egui::Sense::click_and_drag()),
+                            egui::Button::selectable(
+                                selected == Some(row.id),
+                                (icon, row.name.as_str()),
+                            )
+                            .sense(egui::Sense::click_and_drag()),
                         )
                         .on_hover_text(row.class.as_str());
                     #[cfg(test)]
@@ -302,7 +324,7 @@ impl Explorer {
                         toggled = Some(row.id);
                     }
                     if let Some(text) = warning_badge(&self.warnings, world, &row) {
-                        ui.colored_label(ui.visuals().warn_fg_color, "⚠")
+                        ui.colored_label(ui.visuals().warn_fg_color, icons::WARNING)
                             .on_hover_text(text);
                     }
                     if row.class.is_script() && label.double_clicked() {
@@ -347,7 +369,20 @@ impl Explorer {
     }
 }
 
-/// The hover text of `row`'s ⚠ badge, if it has one: its own warnings, or,
+/// The icon in front of `row`'s name: its class's, or for a part its shape's,
+/// and an open folder for an open Folder.
+fn row_icon(world: &World, row: &Row) -> &'static str {
+    match row.class {
+        ClassName::Part => match world.get(row.id).and_then(|part| part.property("Shape")) {
+            Some(&Value::PartType(shape)) => theme::part_icon(shape),
+            _ => theme::class_icon(row.class),
+        },
+        ClassName::Folder if row.expanded => icons::FOLDER_OPEN,
+        class => theme::class_icon(class),
+    }
+}
+
+/// The hover text of `row`'s warning badge, if it has one: its own warnings, or,
 /// on a closed branch, a pointer to the scripts inside with warnings, so
 /// they aren't hidden.
 fn warning_badge(
@@ -489,25 +524,31 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
     let is_script = world
         .get(id)
         .is_some_and(|instance| instance.class().is_script());
-    if is_script && ui.button("Open").clicked() {
+    if is_script
+        && ui
+            .button(theme::with_icon(icons::ARROW_SQUARE_OUT, "Open"))
+            .clicked()
+    {
         chosen = Some(RowCommand::Open);
     }
-    ui.menu_button("Insert", |ui| {
+    ui.menu_button(theme::with_icon(icons::PLUS, "Insert"), |ui| {
         for what in Insertable::PARTS {
-            if ui.button(what.label()).clicked() {
+            if ui.button(insert_item(ui, what)).clicked() {
                 chosen = Some(RowCommand::Insert(what));
             }
         }
         ui.separator();
         for what in Insertable::GROUPS {
-            if ui.button(what.label()).clicked() {
+            if ui.button(insert_item(ui, what)).clicked() {
                 chosen = Some(RowCommand::Insert(what));
             }
         }
         ui.separator();
         for class in SCRIPT_CLASSES {
+            let icon = egui::RichText::new(theme::class_icon(class))
+                .color(theme::class_color(class, ui.visuals()));
             if ui
-                .button(class.as_str())
+                .button((icon, class.as_str()))
                 .on_hover_text(script_hover(class))
                 .clicked()
             {
@@ -516,7 +557,7 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
         }
         let remote = Insertable::RemoteEvent;
         if ui
-            .button(remote.label())
+            .button(insert_item(ui, remote))
             .on_hover_text(REMOTE_EVENT_HOVER)
             .clicked()
         {
@@ -526,7 +567,8 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
     ui.separator();
 
     let renamable = world.get(id).is_some_and(properties::can_rename);
-    let rename = egui::Button::new("Rename").shortcut_text(RENAME_KEY.name());
+    let rename = egui::Button::new(theme::with_icon(icons::PENCIL_SIMPLE, "Rename"))
+        .shortcut_text(RENAME_KEY.name());
     if ui
         .add_enabled(renamable, rename)
         .on_disabled_hover_text("Services keep their names.")
@@ -536,8 +578,8 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
     }
     let editable = tree::check_editable(world, id);
     let reason = editable.err().unwrap_or_default();
-    let duplicate =
-        egui::Button::new("Duplicate").shortcut_text(ui.ctx().format_shortcut(&DUPLICATE_SHORTCUT));
+    let duplicate = egui::Button::new(theme::with_icon(icons::COPY, "Duplicate"))
+        .shortcut_text(ui.ctx().format_shortcut(&DUPLICATE_SHORTCUT));
     if ui
         .add_enabled(editable.is_ok(), duplicate)
         .on_disabled_hover_text(reason)
@@ -546,7 +588,8 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
         chosen = Some(RowCommand::Duplicate);
     }
     let deletable = tree::check_delete(world, id);
-    let delete = egui::Button::new("Delete").shortcut_text(DELETE_KEY_TEXT);
+    let delete =
+        egui::Button::new(theme::with_icon(icons::TRASH, "Delete")).shortcut_text(DELETE_KEY_TEXT);
     if ui
         .add_enabled(deletable.is_ok(), delete)
         .on_disabled_hover_text(deletable.err().unwrap_or_default())
@@ -555,6 +598,13 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
         chosen = Some(RowCommand::Delete);
     }
     chosen
+}
+
+/// An Insert menu item: the icon, in its class's colour, then the name.
+fn insert_item(ui: &egui::Ui, what: Insertable) -> (egui::RichText, &'static str) {
+    let icon = egui::RichText::new(theme::insert_icon(what))
+        .color(theme::class_color(what.class(), ui.visuals()));
+    (icon, what.label())
 }
 
 #[cfg(test)]
@@ -751,7 +801,7 @@ mod tests {
         to: InstanceId,
         editable: bool,
     ) -> Vec<Action> {
-        let ctx = egui::Context::default();
+        let ctx = theme::test_context();
         frame_while(&ctx, explorer, world, Vec::new(), editable);
         let (start, end) = (center_of(explorer, from), center_of(explorer, to));
         let button = |pos, pressed| egui::Event::PointerButton {
@@ -830,7 +880,7 @@ mod tests {
         );
 
         // A rename under way when Play starts is dropped.
-        let ctx = egui::Context::default();
+        let ctx = theme::test_context();
         explorer.start_rename(&world, props);
         frame_while(&ctx, &mut explorer, &world, Vec::new(), false);
         assert_eq!(explorer.renaming(), None);
@@ -869,7 +919,7 @@ mod tests {
     fn renaming_in_the_explorer_ends_with_enter_and_escape_cancels() {
         let (world, _, _, props) = car_world();
         let mut explorer = Explorer::new(&world);
-        let ctx = egui::Context::default();
+        let ctx = theme::test_context();
 
         explorer.start_rename(&world, props);
         frame(&ctx, &mut explorer, &world, Vec::new());
