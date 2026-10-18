@@ -132,11 +132,21 @@ function UserInputServiceClass:IsKeyDown(key) end
 ---@field LeftAlt EnumItem.KeyCode
 ---@field RightAlt EnumItem.KeyCode
 
+---@class EnumItem.TextureChannel: EnumItem
+
+---The choices of `Enum.TextureChannel`.
+---@class Enum.TextureChannel
+---@field Red EnumItem.TextureChannel
+---@field Green EnumItem.TextureChannel
+---@field Blue EnumItem.TextureChannel
+---@field Alpha EnumItem.TextureChannel
+
 ---Every enum, such as `Enum.Material`, `Enum.PartType` and `Enum.KeyCode`.
 ---@class EnumLibrary
 ---@field Material Enum.Material
 ---@field PartType Enum.PartType
 ---@field KeyCode Enum.KeyCode
+---@field TextureChannel Enum.TextureChannel
 
 -- Instances -----------------------------------------------------------------
 
@@ -148,7 +158,7 @@ function UserInputServiceClass:IsKeyDown(key) end
 ---@field Changed Signal Fires when a property (or `Name` or `Parent`) gets a different value, whether a script, physics or the editor changed it. The handler gets the property's name: `function(property) ... end`.
 ---@field ChildAdded Signal Fires when an Instance is put inside this one. The handler gets the child.
 ---@field ChildRemoved Signal Fires when an Instance is taken out of this one. The handler gets the child.
----@field [string] Workspace|Players|ReplicatedStorage|ServerScriptService|StarterPlayer|StarterPlayerScripts|Part|MeshPart|Script|LocalScript|ModuleScript|RemoteEvent|Player|Model|Folder A child, found by its name.
+---@field [string] Workspace|Players|ReplicatedStorage|ServerScriptService|StarterPlayer|StarterPlayerScripts|Part|MeshPart|Script|LocalScript|ModuleScript|RemoteEvent|Player|Model|Folder|SurfaceAppearance A child, found by its name.
 local InstanceClass = {}
 
 ---The first child with this name, or nil. With `recursive`, searches every descendant.
@@ -230,10 +240,10 @@ function DataModelClass:GetService(className) end
 ---@field Roughness number From 0 (mirror-smooth) to 1 (matte).
 ---@field Touched Signal Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.
 
----A solid 3D model imported from a glTF file, drawn with the file's own materials. It collides as the model's convex hull.
+---A solid 3D model imported from a glTF or FBX file, drawn with the file's own materials (or its SurfaceAppearances'). It collides as the model's convex hull.
 ---@class MeshPart: Instance
 ---@field Anchored boolean If true, the part stays where it is. If false, it falls and collides with other parts.
----@field MeshId string The model's glTF file, inside the project folder, such as "assets/models/chair.glb". The editor's Import Model sets it.
+---@field MeshId string The model's glTF or FBX file, inside the project folder, such as "assets/models/chair.glb"; `#` after it picks objects in the file ("assets/models/props.fbx#Bench"). The editor's Import Model sets it.
 ---@field Position Vector3 Where the center of the model's box is, in studs. Setting it on an unanchored part teleports it and stops it moving.
 ---@field Orientation Vector3 Rotation in degrees around X, Y and Z, applied Z first, then X, then Y.
 ---@field Size Vector3 The size of the model's box in studs along X, Y and Z. The model stretches to fill it.
@@ -280,6 +290,29 @@ function RemoteEventClass:FireAllClients(...) end
 ---Groups Instances to keep the tree tidy. Has no effect on the game.
 ---@class Folder: Instance
 
+---Inside a MeshPart: the texture maps of one of its model's materials (MaterialName), drawn in place of the file's own. Delete it to go back to the file's.
+---@class SurfaceAppearance: Instance
+---@field MaterialName string The name of the material of the parent MeshPart's model whose maps this replaces. Import Model sets it.
+---@field Color Color3 Multiplies the material's color (and its ColorMap).
+---@field ColorMap string The base color texture, a file inside the project folder such as "assets/textures/wood.png". Empty for none.
+---@field NormalMap string The normal map's file, for bumps and grooves. Empty for none.
+---@field MetalnessMap string The metalness map's file (read from MetalnessChannel). Empty for the model's own metalness.
+---@field RoughnessMap string The roughness map's file (read from RoughnessChannel). Empty for the model's own roughness.
+---@field EmissiveMap string The file of colors the surface glows in. Empty for the model's own glow.
+---@field AmbientOcclusionMap string The ambient occlusion map's file: dark where ambient light can't reach. Empty for none.
+---@field OpacityMap string The opacity map's file (read from OpacityChannel): the surface is cut out where it's below half. Empty for the color map's alpha.
+---@field SpecularMap string How strongly non-metal parts shine, for older materials: mid grey is the usual. Empty for none.
+---@field NormalStrength number How far the normal map tips the surface: 1 as made, 0 flat.
+---@field NormalMapDirectX boolean True for normal maps made for DirectX, whose green points the other way.
+---@field MetalnessChannel EnumItem.TextureChannel|"Red"|"Green"|"Blue"|"Alpha" Which channel of MetalnessMap holds metalness, for packed textures.
+---@field RoughnessChannel EnumItem.TextureChannel|"Red"|"Green"|"Blue"|"Alpha" Which channel of RoughnessMap holds roughness, for packed textures.
+---@field InvertRoughness boolean True if RoughnessMap is a glossiness or smoothness map: white is smooth.
+---@field AmbientOcclusionChannel EnumItem.TextureChannel|"Red"|"Green"|"Blue"|"Alpha" Which channel of AmbientOcclusionMap holds it, for packed textures.
+---@field AmbientOcclusionStrength number How much AmbientOcclusionMap darkens, from 0 to 1.
+---@field OpacityChannel EnumItem.TextureChannel|"Red"|"Green"|"Blue"|"Alpha" Which channel of OpacityMap holds opacity.
+---@field InvertOpacity boolean True if OpacityMap is white where the surface is see-through.
+---@field EmissiveStrength number Multiplies the glow.
+
 -- Globals -------------------------------------------------------------------
 
 ---The root of the game. Every service is inside it.
@@ -318,6 +351,7 @@ Instance = {}
 ---@overload fun(className: "RemoteEvent"): RemoteEvent
 ---@overload fun(className: "Model"): Model
 ---@overload fun(className: "Folder"): Folder
+---@overload fun(className: "SurfaceAppearance"): SurfaceAppearance
 function Instance.new(className) end
 
 ---Creates Vector3 values.

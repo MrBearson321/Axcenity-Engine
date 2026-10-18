@@ -5,7 +5,9 @@
 //! the user made, and the app applies it, which keeps the panel easy to test
 //! and gives one place to notice unsaved changes.
 
-use axcenity_core::{Color3, Instance, InstanceId, Material, PartType, Value, World};
+use axcenity_core::{
+    Color3, Instance, InstanceId, Material, PartType, TextureChannel, Value, World,
+};
 use eframe::egui;
 
 use crate::theme::{self, icons};
@@ -15,6 +17,10 @@ use crate::theme::{self, icons};
 pub enum Edit {
     Name(String),
     Property(&'static str, Value),
+    /// Asks for a texture file for this map property (such as a
+    /// SurfaceAppearance's `ColorMap`) with the file picker. The app does
+    /// that, and sets the property.
+    PickTexture(&'static str),
 }
 
 /// One group of properties in the panel, such as "Appearance".
@@ -26,7 +32,7 @@ pub struct Section {
 
 /// The groups, in panel order, and which properties go in each. Name and
 /// ClassName come first, under "Data", and aren't in the property map.
-const GROUPS: [(&str, &[&str]); 3] = [
+const GROUPS: [(&str, &[&str]); 5] = [
     (
         "Appearance",
         &["Color", "Material", "Metalness", "Roughness"],
@@ -36,7 +42,41 @@ const GROUPS: [(&str, &[&str]); 3] = [
         "Part",
         &["Shape", "MeshId", "Position", "Orientation", "Size"],
     ),
+    (
+        "Surface",
+        &[
+            "MaterialName",
+            "ColorMap",
+            "NormalMap",
+            "MetalnessMap",
+            "RoughnessMap",
+            "EmissiveMap",
+            "AmbientOcclusionMap",
+            "OpacityMap",
+            "SpecularMap",
+        ],
+    ),
+    (
+        "Map Settings",
+        &[
+            "NormalStrength",
+            "NormalMapDirectX",
+            "MetalnessChannel",
+            "RoughnessChannel",
+            "InvertRoughness",
+            "AmbientOcclusionChannel",
+            "AmbientOcclusionStrength",
+            "OpacityChannel",
+            "InvertOpacity",
+            "EmissiveStrength",
+        ],
+    ),
 ];
+
+/// True for a property that names a texture file, such as `ColorMap`.
+pub fn is_map(name: &str) -> bool {
+    name.ends_with("Map") && name != "NormalMapDirectX"
+}
 /// Where properties that no group lists go, so a new property always shows.
 const OTHER: &str = "Other";
 
@@ -144,8 +184,8 @@ pub fn show(
                     section(ui, group.title, |ui| {
                         for (name, value) in group.properties {
                             ui.label(name);
-                            if let Some(value) = value_control(ui, name, value) {
-                                edit = Some(Edit::Property(name, value));
+                            if let Some(made) = value_control(ui, name, value) {
+                                edit = Some(made);
                             }
                             ui.end_row();
                         }
@@ -163,6 +203,8 @@ fn section(ui: &mut egui::Ui, title: &str, rows: impl FnOnce(&mut egui::Ui)) {
         "Appearance" => icons::PALETTE,
         "Behavior" => icons::GEAR,
         "Part" => icons::CUBE,
+        "Surface" => icons::IMAGE,
+        "Map Settings" => icons::SLIDERS,
         _ => icons::DOTS_THREE_OUTLINE,
     };
     let header = egui::RichText::new(theme::with_icon(icon, title)).family(theme::heading_family());
@@ -178,9 +220,47 @@ fn section(ui: &mut egui::Ui, title: &str, rows: impl FnOnce(&mut egui::Ui)) {
         });
 }
 
-/// Draws the control for one property and returns its new value if the
-/// user changed it this frame.
-fn value_control(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
+/// Draws the control for one property and returns the edit if the user
+/// changed it this frame.
+fn value_control(ui: &mut egui::Ui, name: &'static str, value: Value) -> Option<Edit> {
+    match value {
+        Value::String(path) if is_map(name) => map_control(ui, name, &path),
+        value => value_edit(ui, name, value).map(|value| Edit::Property(name, value)),
+    }
+}
+
+/// A texture map's file, with buttons to pick another and to clear it.
+/// Typing isn't offered: each half-typed path would be loaded, and fail.
+fn map_control(ui: &mut egui::Ui, name: &'static str, path: &str) -> Option<Edit> {
+    let mut edit = None;
+    ui.horizontal(|ui| {
+        if ui
+            .small_button(icons::FOLDER_OPEN)
+            .on_hover_text("Choose a texture file (PNG, JPEG, TGA or BMP)")
+            .clicked()
+        {
+            edit = Some(Edit::PickTexture(name));
+        }
+        if path.is_empty() {
+            ui.weak("None");
+            return;
+        }
+        if ui
+            .small_button(icons::X)
+            .on_hover_text("Use no map")
+            .clicked()
+        {
+            edit = Some(Edit::Property(name, Value::String(String::new())));
+        }
+        let file = path.rsplit('/').next().unwrap_or(path);
+        ui.label(file).on_hover_text(path);
+    });
+    edit
+}
+
+/// Draws the control for a property's value and returns its new value if
+/// the user changed it this frame.
+fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
     match value {
         Value::Bool(mut on) => ui
             .checkbox(&mut on, "")
@@ -190,7 +270,12 @@ fn value_control(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
             let mut drag = egui::DragValue::new(&mut number).max_decimals(MAX_DECIMALS);
             drag = match name {
                 // These only make sense from 0 to 1.
-                "Metalness" | "Roughness" => drag.speed(0.01).range(0.0..=1.0),
+                "Metalness" | "Roughness" | "AmbientOcclusionStrength" => {
+                    drag.speed(0.01).range(0.0..=1.0)
+                }
+                "NormalStrength" | "EmissiveStrength" => {
+                    drag.speed(0.01).range(0.0..=f64::INFINITY)
+                }
                 _ => drag.speed(0.1),
             };
             // `clamp_existing_to_range(false)`: only clamp what the user
@@ -245,6 +330,10 @@ fn value_control(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
         }
         Value::Material(material) => {
             choice_control(ui, name, material, &Material::ALL, |m| m.as_str()).map(Value::Material)
+        }
+        Value::TextureChannel(channel) => {
+            choice_control(ui, name, channel, &TextureChannel::ALL, |c| c.as_str())
+                .map(Value::TextureChannel)
         }
     }
 }
@@ -334,6 +423,22 @@ mod tests {
                 assert_eq!(instance.property(name), Some(value));
             }
         }
+    }
+
+    #[test]
+    fn surface_appearances_show_their_maps_then_how_they_are_read() {
+        let mut world = World::new();
+        let look = world.create(ClassName::SurfaceAppearance).unwrap();
+        let sections = sections(world.get(look).unwrap());
+        assert_eq!(titles(&sections), ["Appearance", "Surface", "Map Settings"]);
+        let maps: Vec<&str> = sections[1]
+            .properties
+            .iter()
+            .map(|(name, _)| *name)
+            .filter(|name| is_map(name))
+            .collect();
+        assert_eq!(maps.len(), 8);
+        assert!(!is_map("NormalMapDirectX") && !is_map("MaterialName"));
     }
 
     #[test]

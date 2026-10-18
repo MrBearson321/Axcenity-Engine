@@ -12,6 +12,6 @@ mod world;
 
 pub use arena::{Arena, Id};
 pub use class::{ClassName, INSTANCE_EVENTS};
-pub use enums::{KeyCode, Material, MaterialPreset, PartType};
+pub use enums::{KeyCode, Material, MaterialPreset, PartType, TextureChannel};
 pub use value::{Color3, Value, ValueKind, Vector3};
 pub use world::{Change, Instance, InstanceId, PropertyError, RecordedChange, TreeError, World};

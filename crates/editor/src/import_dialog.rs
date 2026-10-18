@@ -7,8 +7,11 @@
 use std::ops::Range;
 use std::path::PathBuf;
 
-use axcenity_assets::ModelObject;
+use axcenity_assets::{Channel, ModelObject};
 use eframe::egui;
+
+use crate::surface::{MapFile, MaterialMaps, Slot};
+use crate::theme::icons;
 
 /// How the ticked objects arrive in the world.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -40,18 +43,41 @@ pub struct ImportDialog {
     pub placement: Placement,
     /// Only objects whose names contain this are shown (ignoring case).
     filter: String,
+    /// False for a file with one object: then there's nothing to choose,
+    /// and the dialog only shows the materials.
+    pub pick_objects: bool,
+    /// The maps of each of the file's materials, as found, then as changed.
+    pub materials: Vec<MaterialMaps>,
 }
 
 impl ImportDialog {
-    /// The dialog for `file`'s `objects`, with all of them ticked.
-    pub fn new(file: PathBuf, objects: Vec<ModelObject>) -> Self {
+    /// The dialog for `file`'s `objects`, with all of them ticked, and
+    /// its `materials`. With one object, it comes in as one MeshPart.
+    pub fn new(file: PathBuf, objects: Vec<ModelObject>, materials: Vec<MaterialMaps>) -> Self {
+        let meshes = objects.iter().filter(|object| object.has_mesh()).count();
         Self {
             file,
             ticked: vec![true; objects.len()],
             objects,
-            placement: Placement::default(),
+            placement: if meshes > 1 {
+                Placement::default()
+            } else {
+                Placement::Merged
+            },
             filter: String::new(),
+            pick_objects: meshes > 1,
+            materials,
         }
+    }
+
+    /// True if there's anything to ask: objects to choose from, or texture
+    /// maps to look over.
+    pub fn worth_asking(&self) -> bool {
+        self.pick_objects
+            || self
+                .materials
+                .iter()
+                .any(|maps| maps.files.iter().any(Option::is_some))
     }
 
     /// The objects inside object `index`, and it: the ones after it that
@@ -123,103 +149,21 @@ impl ImportDialog {
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default();
         let modal = egui::Modal::new(egui::Id::new("import model")).show(ctx, |ui| {
-            ui.set_width(520.0);
+            ui.set_width(560.0);
             ui.heading(format!("Import {file_name}"));
-            ui.label("Choose the objects to import.");
-            ui.add_space(4.0);
-
-            ui.horizontal(|ui| {
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.filter)
-                        .hint_text("Search objects")
-                        .desired_width(220.0),
-                );
-                let shown = self.shown();
-                // With a search, these tick only what's shown.
-                if ui.button("Select all").clicked() {
-                    for &i in &shown {
-                        self.ticked[i] = true;
-                    }
-                }
-                if ui.button("Select none").clicked() {
-                    for &i in &shown {
-                        self.ticked[i] = false;
-                    }
-                }
-            });
-            ui.add_space(4.0);
-
-            egui::ScrollArea::vertical()
-                .max_height(320.0)
-                .auto_shrink([false, true])
-                .show(ui, |ui| {
-                    let searching = !self.filter.trim().is_empty();
-                    for i in self.shown() {
-                        let object = &self.objects[i];
-                        let (mut checked, partly) = self.state(i);
-                        let details = if object.has_mesh() {
-                            format!(
-                                "{} triangles · {}",
-                                thousands(object.triangles),
-                                object.materials.join(", ")
-                            )
-                        } else {
-                            "group".to_owned()
-                        };
-                        let name = object.name.clone();
-                        // A search shows matches without their place in the tree.
-                        let indent = if searching { 0 } else { object.depth };
-                        let changed = ui
-                            .horizontal(|ui| {
-                                ui.add_space(indent as f32 * 18.0);
-                                let changed = ui
-                                    .add(
-                                        egui::Checkbox::new(&mut checked, name)
-                                            .indeterminate(partly),
-                                    )
-                                    .changed();
-                                ui.weak(details);
-                                changed
-                            })
-                            .inner;
-                        if changed {
-                            self.set(i, checked);
-                        }
-                    }
-                });
-
-            let chosen = self.chosen();
-            let triangles: usize = chosen.iter().map(|&i| self.objects[i].triangles).sum();
-            let meshes = self.objects.iter().filter(|o| o.has_mesh()).count();
-            ui.add_space(4.0);
-            ui.weak(format!(
-                "{} of {meshes} objects, {} triangles",
-                chosen.len(),
-                thousands(triangles)
-            ));
-
-            ui.separator();
-            ui.label("Bring them in as:");
-            ui.radio_value(
-                &mut self.placement,
-                Placement::Grouped,
-                "A Model, laid out as in the file",
-            );
-            ui.radio_value(
-                &mut self.placement,
-                Placement::Separate,
-                "Separate MeshParts, each at the insert point",
-            );
-            ui.radio_value(
-                &mut self.placement,
-                Placement::Merged,
-                "One MeshPart with all of them",
-            );
+            if self.pick_objects {
+                self.objects_section(ui);
+            }
+            if !self.materials.is_empty() {
+                ui.separator();
+                self.materials_section(ui);
+            }
 
             ui.add_space(8.0);
+            let can_import = !self.pick_objects || !self.chosen().is_empty();
             ui.horizontal(|ui| {
                 if ui
-                    .add_enabled(!chosen.is_empty(), egui::Button::new("Import"))
+                    .add_enabled(can_import, egui::Button::new("Import"))
                     .clicked()
                 {
                     answer = Some(Answer::Import);
@@ -234,6 +178,198 @@ impl ImportDialog {
             answer = Some(Answer::Cancel);
         }
         answer
+    }
+
+    /// The object tree, with its search box, and how the objects arrive.
+    fn objects_section(&mut self, ui: &mut egui::Ui) {
+        ui.label("Choose the objects to import.");
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut self.filter)
+                    .hint_text("Search objects")
+                    .desired_width(220.0),
+            );
+            let shown = self.shown();
+            // With a search, these tick only what's shown.
+            if ui.button("Select all").clicked() {
+                for &i in &shown {
+                    self.ticked[i] = true;
+                }
+            }
+            if ui.button("Select none").clicked() {
+                for &i in &shown {
+                    self.ticked[i] = false;
+                }
+            }
+        });
+        ui.add_space(4.0);
+
+        egui::ScrollArea::vertical()
+            .id_salt("objects")
+            .max_height(260.0)
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                let searching = !self.filter.trim().is_empty();
+                for i in self.shown() {
+                    let object = &self.objects[i];
+                    let (mut checked, partly) = self.state(i);
+                    let details = if object.has_mesh() {
+                        format!(
+                            "{} triangles · {}",
+                            thousands(object.triangles),
+                            object.materials.join(", ")
+                        )
+                    } else {
+                        "group".to_owned()
+                    };
+                    let name = object.name.clone();
+                    // A search shows matches without their place in the tree.
+                    let indent = if searching { 0 } else { object.depth };
+                    let changed = ui
+                        .horizontal(|ui| {
+                            ui.add_space(indent as f32 * 18.0);
+                            let changed = ui
+                                .add(egui::Checkbox::new(&mut checked, name).indeterminate(partly))
+                                .changed();
+                            ui.weak(details);
+                            changed
+                        })
+                        .inner;
+                    if changed {
+                        self.set(i, checked);
+                    }
+                }
+            });
+
+        let chosen = self.chosen();
+        let triangles: usize = chosen.iter().map(|&i| self.objects[i].triangles).sum();
+        let meshes = self.objects.iter().filter(|o| o.has_mesh()).count();
+        ui.add_space(4.0);
+        ui.weak(format!(
+            "{} of {meshes} objects, {} triangles",
+            chosen.len(),
+            thousands(triangles)
+        ));
+
+        ui.separator();
+        ui.label("Bring them in as:");
+        ui.radio_value(
+            &mut self.placement,
+            Placement::Grouped,
+            "A Model, laid out as in the file",
+        );
+        ui.radio_value(
+            &mut self.placement,
+            Placement::Separate,
+            "Separate MeshParts, each at the insert point",
+        );
+        ui.radio_value(
+            &mut self.placement,
+            Placement::Merged,
+            "One MeshPart with all of them",
+        );
+    }
+
+    /// Each material's maps, as found in the file, to change before importing.
+    fn materials_section(&mut self, ui: &mut egui::Ui) {
+        ui.label("The texture maps found for each material. Change any before importing:");
+        ui.weak("Each material gets a SurfaceAppearance in its MeshParts, to change later in Properties.");
+        ui.add_space(4.0);
+        egui::ScrollArea::vertical()
+            .id_salt("materials")
+            .max_height(260.0)
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                let open = self.materials.len() <= 3;
+                for (index, maps) in self.materials.iter_mut().enumerate() {
+                    let found = maps.files.iter().flatten().count();
+                    let title = match maps.material.as_str() {
+                        "" => "(unnamed material)".to_owned(),
+                        name => name.to_owned(),
+                    };
+                    egui::CollapsingHeader::new(format!("{title}  ·  {found} maps"))
+                        .id_salt(("material", index))
+                        .default_open(open)
+                        .show(ui, |ui| material_maps(ui, index, maps));
+                }
+            });
+    }
+}
+
+/// The rows for one material's maps: each map's file with Browse and
+/// Clear, its channel for grey maps, and the settings for how they're read.
+fn material_maps(ui: &mut egui::Ui, index: usize, maps: &mut MaterialMaps) {
+    egui::Grid::new(("maps", index))
+        .num_columns(3)
+        .spacing([10.0, 4.0])
+        .show(ui, |ui| {
+            for slot in Slot::ALL {
+                ui.label(slot.label());
+                ui.horizontal(|ui| {
+                    if ui
+                        .small_button(icons::FOLDER_OPEN)
+                        .on_hover_text("Choose a texture file")
+                        .clicked()
+                        && let Some(file) = rfd::FileDialog::new()
+                            .set_title(format!("Choose a {} map", slot.label().to_lowercase()))
+                            .add_filter("Texture", &axcenity_assets::TEXTURE_EXTENSIONS)
+                            .pick_file()
+                    {
+                        maps.set_file(slot, Some(MapFile::Picked(file)));
+                    }
+                    match maps.file(slot) {
+                        Some(file) => {
+                            let name = file.file_name();
+                            if ui
+                                .small_button(icons::X)
+                                .on_hover_text("Use no map")
+                                .clicked()
+                            {
+                                maps.set_file(slot, None);
+                            }
+                            ui.label(name);
+                        }
+                        None => {
+                            ui.weak("None");
+                        }
+                    }
+                });
+                match maps.channel_mut(slot) {
+                    Some(channel) => {
+                        egui::ComboBox::from_id_salt(("channel", index, slot as usize))
+                            .width(70.0)
+                            .selected_text(channel_name(*channel))
+                            .show_ui(ui, |ui| {
+                                for item in
+                                    [Channel::Red, Channel::Green, Channel::Blue, Channel::Alpha]
+                                {
+                                    ui.selectable_value(channel, item, channel_name(item));
+                                }
+                            })
+                            .response
+                            .on_hover_text("The channel of the texture this map is in");
+                    }
+                    None => {
+                        ui.label("");
+                    }
+                }
+                ui.end_row();
+            }
+        });
+    ui.horizontal_wrapped(|ui| {
+        ui.checkbox(&mut maps.normal_directx, "Normal map is DirectX-style");
+        ui.checkbox(&mut maps.invert_roughness, "Roughness map is glossiness");
+        ui.checkbox(&mut maps.invert_opacity, "Opacity map is inverted");
+    });
+}
+
+fn channel_name(channel: Channel) -> &'static str {
+    match channel {
+        Channel::Red => "Red",
+        Channel::Green => "Green",
+        Channel::Blue => "Blue",
+        Channel::Alpha => "Alpha",
     }
 }
 
@@ -273,6 +409,7 @@ mod tests {
                 object("Dumpster", 0, 30),
                 object("Lid", 1, 5),
             ],
+            Vec::new(),
         )
     }
 

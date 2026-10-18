@@ -406,6 +406,14 @@ impl EditorApp {
                 Field::Property(name),
                 format!("Change {name} of {}", instance.name()),
             ),
+            &Edit::PickTexture(name) => {
+                if let Some(path) = self.pick_texture() {
+                    self.apply(id, Edit::Property(name, Value::String(path)));
+                    // Picking is one whole step, not more typing.
+                    self.history.seal();
+                }
+                return;
+            }
         };
         self.change(id, key, label, vec![edit]);
     }
@@ -1353,6 +1361,8 @@ fn set(world: &mut World, id: InstanceId, edit: Edit) -> anyhow::Result<()> {
                 world.set_property(id, name, value)?;
             }
         }
+        // Turned into a property edit by `apply`.
+        Edit::PickTexture(_) => {}
     }
     Ok(())
 }

@@ -887,3 +887,26 @@ fn events_explain_mistakes() {
         );
     }
 }
+
+#[test]
+fn a_script_can_retexture_a_mesh_part_with_a_surface_appearance() {
+    let mut world = World::new();
+    let output = output_of(
+        &mut world,
+        r#"
+        local part = Instance.new("MeshPart")
+        part.Parent = workspace
+        local look = Instance.new("SurfaceAppearance")
+        look.MaterialName = "Wood"
+        look.RoughnessMap = "assets/textures/wood_orm.png"
+        look.RoughnessChannel = Enum.TextureChannel.Green
+        look.MetalnessChannel = "Blue"
+        look.Parent = part
+        print(look.RoughnessChannel, look.MetalnessChannel, look.InvertRoughness)
+        "#,
+    );
+    assert_eq!(
+        output,
+        ["Enum.TextureChannel.Green\tEnum.TextureChannel.Blue\tfalse"]
+    );
+}

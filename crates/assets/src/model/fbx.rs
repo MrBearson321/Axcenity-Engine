@@ -22,7 +22,7 @@ use super::maps::{self, Role};
 use super::objects::{self, Listed, Siblings};
 use super::{
     AlphaMode, Channel, ChannelTexture, Image, MAX_NODE_DEPTH, Model, ModelError, ModelMaterial,
-    ModelObject, Pick, Primitive, fit, missing, new_key, smooth_normals, want,
+    ModelObject, Pick, Primitive, decode_image, fit, missing, new_key, smooth_normals, want,
 };
 
 /// Reads an FBX file's `bytes`, making one model for each of `picks`.
@@ -35,6 +35,10 @@ pub(super) fn load(bytes: &[u8], folder: &Path, picks: &[Pick]) -> Result<Vec<Mo
         images: HashMap::new(),
         materials: HashMap::new(),
         loose: loose_textures(&scene),
+        embedded: embedded_files(&scene)
+            .into_iter()
+            .flat_map(|(name, _, ids)| ids.into_iter().map(move |id| (id, name.clone())))
+            .collect(),
         primitives: Vec::new(),
         warnings: Vec::new(),
     };
@@ -115,14 +119,27 @@ fn unlinked_textures(scene: &ufbx::Scene) -> Vec<&ufbx::Texture> {
 /// unique) and their bytes as they are, for copying out on import.
 pub(super) fn embedded_textures(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, ModelError> {
     let scene = parse(bytes)?;
-    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
+    Ok(embedded_files(&scene)
+        .into_iter()
+        .map(|(name, content, _)| (name, content.to_vec()))
+        .collect())
+}
+
+/// The scene's embedded images: each one's file name (made safe, and
+/// unique), its bytes, and the element IDs of the textures that use it.
+/// Loading and importing both name them this way, so an image's
+/// [`Image::file`] is where importing copies it.
+fn embedded_files(scene: &ufbx::Scene) -> Vec<(String, &[u8], Vec<u32>)> {
+    let mut files: Vec<(String, &[u8], Vec<u32>)> = Vec::new();
     for texture in &scene.textures {
         if texture.content.is_empty() {
             continue;
         }
         let content: &[u8] = &texture.content;
+        let id = texture.element.element_id;
         // The same image used by several textures is one file.
-        if files.iter().any(|(_, bytes)| bytes.as_slice() == content) {
+        if let Some((_, _, ids)) = files.iter_mut().find(|(_, bytes, _)| *bytes == content) {
+            ids.push(id);
             continue;
         }
         let name = match crate::import::safe_file_name(file_name(texture)) {
@@ -136,11 +153,11 @@ pub(super) fn embedded_textures(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, 
             }
         };
         let name = crate::import::unique_file_name(&name, |taken| {
-            files.iter().any(|(n, _)| n.eq_ignore_ascii_case(taken))
+            files.iter().any(|(n, _, _)| n.eq_ignore_ascii_case(taken))
         });
-        files.push((name, content.to_vec()));
+        files.push((name, content, vec![id]));
     }
-    Ok(files)
+    files
 }
 
 /// The objects in an FBX file: its visible nodes with meshes, and the
@@ -260,6 +277,9 @@ struct Reader<'a> {
     /// Materials made so far for this model, by element ID, so each is
     /// worked out (and its problems noted) once.
     materials: HashMap<u32, ModelMaterial>,
+    /// The file names of embedded textures, by element ID (see
+    /// [`embedded_files`]).
+    embedded: HashMap<u32, String>,
     /// Textures no material links, and the materials they're for (see
     /// [`loose_textures`]).
     loose: Vec<(&'a ufbx::Texture, Option<u32>)>,
@@ -646,13 +666,22 @@ impl Reader<'_> {
         let image = if texture.content.is_empty() {
             match texture_path(texture, self.folder) {
                 Some(path) => match std::fs::read(self.folder.join(&path)) {
-                    Ok(bytes) => decode(&bytes, &name),
+                    Ok(bytes) => decode_image(&bytes, &name).map(|image| Image {
+                        file: Some(slash_path(&path)),
+                        ..image
+                    }),
                     Err(err) => Err(err.to_string()),
                 },
                 None => Err("it isn't there; put it next to the model".to_owned()),
             }
         } else {
-            decode(&texture.content, &name)
+            decode_image(&texture.content, &name).map(|image| Image {
+                file: self
+                    .embedded
+                    .get(&id)
+                    .map(|file| format!("{}/{file}", crate::import::TEXTURES_FOLDER)),
+                ..image
+            })
         };
         let image = match image {
             Ok(image) => Some(Arc::new(image)),
@@ -685,6 +714,15 @@ fn texture_path(texture: &ufbx::Texture, folder: &Path) -> Option<PathBuf> {
         .find(|path| folder.join(path).is_file())
 }
 
+/// `path` with `/` between folders, whatever the OS.
+fn slash_path(path: &Path) -> String {
+    let parts: Vec<String> = path
+        .components()
+        .map(|part| part.as_os_str().to_string_lossy().into_owned())
+        .collect();
+    parts.join("/")
+}
+
 /// The last part of the texture's path, with `/` or `\` between folders.
 fn file_name(texture: &ufbx::Texture) -> &str {
     [
@@ -705,31 +743,6 @@ fn texture_name(texture: &ufbx::Texture) -> String {
         "" => texture.element.name.to_string(),
         name => name.to_owned(),
     }
-}
-
-/// Decodes a PNG, JPEG, TGA or BMP texture. TGA files have no signature to
-/// recognize, so the name's extension decides when the content can't.
-fn decode(bytes: &[u8], name: &str) -> Result<Image, String> {
-    let format = image::guess_format(bytes)
-        .or_else(|_| image::ImageFormat::from_path(name))
-        .map_err(|_| "only PNG, JPEG, TGA and BMP textures can be used".to_owned())?;
-    let rgba = image::load_from_memory_with_format(bytes, format)
-        .map_err(|err| match err {
-            image::ImageError::Unsupported(_) => {
-                "only PNG, JPEG, TGA and BMP textures can be used".to_owned()
-            }
-            err => err.to_string(),
-        })?
-        .into_rgba8();
-    if rgba.width() == 0 || rgba.height() == 0 {
-        return Err("it has no pixels".to_owned());
-    }
-    Ok(Image {
-        key: new_key(),
-        width: rgba.width(),
-        height: rgba.height(),
-        rgba: rgba.into_raw(),
-    })
 }
 
 /// True if `image` looks like a tangent-space normal map rather than a

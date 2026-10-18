@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use crate::enums::{Material, PartType};
+use crate::enums::{Material, PartType, TextureChannel};
 use crate::value::{Color3, Value, Vector3};
 
 /// Events every Instance has, whatever its class. `Changed` fires with the
@@ -50,10 +50,13 @@ pub enum ClassName {
     Model,
     /// Groups Instances to keep the tree tidy. Has no effect on the game.
     Folder,
+    /// Inside a MeshPart: the texture maps of one of its model's materials,
+    /// which it names in `MaterialName`, in place of the file's own.
+    SurfaceAppearance,
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 16] = [
+    pub const ALL: [ClassName; 17] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -70,6 +73,7 @@ impl ClassName {
         ClassName::Player,
         ClassName::Model,
         ClassName::Folder,
+        ClassName::SurfaceAppearance,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -90,6 +94,7 @@ impl ClassName {
             ClassName::Player => "Player",
             ClassName::Model => "Model",
             ClassName::Folder => "Folder",
+            ClassName::SurfaceAppearance => "SurfaceAppearance",
         }
     }
 
@@ -167,6 +172,37 @@ impl ClassName {
                 // The model is stretched so its bounding box is this size.
                 ("Size", Value::Vector3(Vector3::new(2.0, 2.0, 2.0))),
             ],
+            ClassName::SurfaceAppearance => {
+                let map = |name| (name, Value::String(String::new()));
+                let channel = |name, channel| (name, Value::TextureChannel(channel));
+                vec![
+                    // The material of the parent MeshPart's model it's for.
+                    ("MaterialName", Value::String(String::new())),
+                    // Multiplies the material's color.
+                    ("Color", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
+                    // Texture files, relative to the project folder, such as
+                    // "assets/textures/wood.png". Empty means none.
+                    map("ColorMap"),
+                    map("NormalMap"),
+                    map("MetalnessMap"),
+                    map("RoughnessMap"),
+                    map("EmissiveMap"),
+                    map("AmbientOcclusionMap"),
+                    map("OpacityMap"),
+                    map("SpecularMap"),
+                    // How the maps are read.
+                    ("NormalStrength", Value::Number(1.0)),
+                    ("NormalMapDirectX", Value::Bool(false)),
+                    channel("MetalnessChannel", TextureChannel::Red),
+                    channel("RoughnessChannel", TextureChannel::Red),
+                    ("InvertRoughness", Value::Bool(false)),
+                    channel("AmbientOcclusionChannel", TextureChannel::Red),
+                    ("AmbientOcclusionStrength", Value::Number(1.0)),
+                    channel("OpacityChannel", TextureChannel::Alpha),
+                    ("InvertOpacity", Value::Bool(false)),
+                    ("EmissiveStrength", Value::Number(1.0)),
+                ]
+            }
         }
     }
 
@@ -187,7 +223,8 @@ impl ClassName {
             | ClassName::ModuleScript
             | ClassName::Player
             | ClassName::Model
-            | ClassName::Folder => &[],
+            | ClassName::Folder
+            | ClassName::SurfaceAppearance => &[],
             // Fires on both parts when two parts start touching.
             ClassName::Part | ClassName::MeshPart => &["Touched"],
             // `OnServerEvent` fires in Scripts for each `FireServer`, and

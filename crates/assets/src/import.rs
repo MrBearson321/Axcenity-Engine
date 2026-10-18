@@ -17,6 +17,8 @@ pub const TEXTURES_FOLDER: &str = "textures";
 pub enum ImportError {
     #[error("only glTF and FBX models (.gltf, .glb or .fbx files) can be imported")]
     NotAModel,
+    #[error("only PNG, JPEG, TGA and BMP textures can be used")]
+    NotATexture,
     #[error("could not read it")]
     Read(#[source] io::Error),
     #[error(transparent)]
@@ -93,6 +95,53 @@ pub fn import_picks(
         .map(|pick| pick.mesh_id(&mesh_id))
         .zip(models)
         .collect())
+}
+
+/// Where texture files picked from outside the project are copied to.
+pub const PROJECT_TEXTURES_FOLDER: &str = "assets/textures";
+
+/// The extensions of the texture files the engine reads.
+pub const TEXTURE_EXTENSIONS: [&str; 5] = ["png", "jpg", "jpeg", "tga", "bmp"];
+
+/// The path in `project` (with `/` between folders) of the texture `file`,
+/// for a SurfaceAppearance's maps: its own if it's inside the project,
+/// otherwise a copy's, made in `into` (a folder in the project, such as
+/// [`PROJECT_TEXTURES_FOLDER`]) under a name not yet taken there.
+pub fn import_texture(project: &Path, file: &Path, into: &str) -> Result<String, ImportError> {
+    let extension = file
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+    if !TEXTURE_EXTENSIONS.contains(&extension.as_str()) {
+        return Err(ImportError::NotATexture);
+    }
+    if let (Ok(project), Ok(file)) = (project.canonicalize(), file.canonicalize())
+        && let Ok(inside) = file.strip_prefix(&project)
+    {
+        let parts: Vec<String> = inside
+            .components()
+            .map(|part| part.as_os_str().to_string_lossy().into_owned())
+            .collect();
+        return Ok(parts.join("/"));
+    }
+    let name = file
+        .file_name()
+        .and_then(|name| safe_file_name(&name.to_string_lossy()))
+        .unwrap_or_else(|| format!("texture.{extension}"));
+    let folder = project.join(into);
+    let name = unique_file_name(&name, |taken| folder.join(taken).exists());
+    copy(file, &folder.join(&name))?;
+    Ok(format!("{}/{name}", into.trim_end_matches('/')))
+}
+
+/// The model at `file` (outside the project), loaded from where it is,
+/// for looking at before importing it.
+pub fn load_model_file(file: &Path) -> Result<Model, ImportError> {
+    let format = ModelFormat::of(file).ok_or(ImportError::NotAModel)?;
+    let bytes = fs::read(file).map_err(ImportError::Read)?;
+    let folder = file.parent().unwrap_or(Path::new("."));
+    Ok(model::load_model(&bytes, folder, format)?)
 }
 
 /// The objects in the model at `file`, for choosing which to import.
@@ -268,7 +317,7 @@ mod tests {
     }
 
     #[test]
-    fn a_glb_is_copied_as_one_file() {
+    fn a_glb_is_copied_with_its_embedded_textures_copied_out() {
         // A .glb is a header and the JSON, padded to 4 bytes (this model
         // embeds its buffer, so it needs no binary chunk).
         let mut json = fs::read(example_model()).unwrap();
@@ -287,7 +336,10 @@ mod tests {
 
         let project = temp_folder("import-glb");
         let (mesh_id, _) = import_model(&project, &source.join("Pyramid.GLB")).unwrap();
-        assert_eq!(mesh_id, "assets/models/Pyramid.glb");
+        // Its texture is embedded, so it gets a folder to copy that out to.
+        assert_eq!(mesh_id, "assets/models/Pyramid/Pyramid.glb");
+        let textures = project.join("assets/models/Pyramid/textures");
+        assert_eq!(fs::read_dir(textures).unwrap().count(), 1);
         assert!(Assets::new(&project).model(&mesh_id).is_some());
     }
 

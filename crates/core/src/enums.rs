@@ -113,6 +113,39 @@ impl Material {
     }
 }
 
+/// Which channel of a texture holds a grey map, such as a
+/// SurfaceAppearance's `RoughnessChannel`. Packed textures keep several
+/// maps in one image, one per channel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TextureChannel {
+    Red,
+    Green,
+    Blue,
+    Alpha,
+}
+
+impl TextureChannel {
+    pub const ALL: [TextureChannel; 4] = [
+        TextureChannel::Red,
+        TextureChannel::Green,
+        TextureChannel::Blue,
+        TextureChannel::Alpha,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TextureChannel::Red => "Red",
+            TextureChannel::Green => "Green",
+            TextureChannel::Blue => "Blue",
+            TextureChannel::Alpha => "Alpha",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|item| item.as_str() == name)
+    }
+}
+
 /// A key on the keyboard, for `UserInputService` in LocalScripts. Keys are
 /// named by their place on a US keyboard, so `W` is the key above `S` on
 /// every layout. Names follow Roblox's (`Return`, `LeftShift`, `Zero`).

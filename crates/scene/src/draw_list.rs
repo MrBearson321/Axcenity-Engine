@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use axcenity_assets::{AlphaMode, Assets, ChannelTexture, Image, Model, ModelMaterial};
-use axcenity_core::{ClassName, Instance, PartType, Value, World};
+use axcenity_core::{ClassName, Instance, PartType, TextureChannel, Value, World};
 use axcenity_render::glam::{Mat4, Vec3};
 use axcenity_render::{
     AmbientLight, Camera, Channel, ChannelMap, DrawItem, DrawList, Material, MeshSource, NormalMap,
@@ -38,7 +38,7 @@ pub fn build_draw_list(world: &World, assets: &Assets, camera: Camera) -> DrawLi
         .filter_map(|id| world.get(id))
     {
         match instance.class() {
-            ClassName::MeshPart => mesh_part_draw_items(instance, assets, &mut items),
+            ClassName::MeshPart => mesh_part_draw_items(world, instance, assets, &mut items),
             _ => items.extend(part_draw_item(instance)),
         }
     }
@@ -110,10 +110,16 @@ fn part_draw_item(instance: &Instance) -> Option<DrawItem> {
 }
 
 /// A MeshPart's draw items, one per part of its model, each with the
-/// model's own material. Until it has a model (no `MeshId` yet, or one that
-/// can't be loaded), it's drawn as a plain grey box, so it can still be seen
-/// and picked.
-fn mesh_part_draw_items(instance: &Instance, assets: &Assets, items: &mut Vec<DrawItem>) {
+/// model's own material, or with the maps of the SurfaceAppearance inside
+/// it for that material. Until it has a model (no `MeshId` yet, or one
+/// that can't be loaded), it's drawn as a plain grey box, so it can still
+/// be seen and picked.
+fn mesh_part_draw_items(
+    world: &World,
+    instance: &Instance,
+    assets: &Assets,
+    items: &mut Vec<DrawItem>,
+) {
     let Some((_, transform)) = part_placement(instance) else {
         return;
     };
@@ -129,16 +135,103 @@ fn mesh_part_draw_items(instance: &Instance, assets: &Assets, items: &mut Vec<Dr
         });
         return;
     };
+    let appearances: Vec<&Instance> = instance
+        .children()
+        .iter()
+        .filter_map(|&id| world.get(id))
+        .filter(|child| child.class() == ClassName::SurfaceAppearance)
+        .collect();
     for (index, primitive) in model.primitives.iter().enumerate() {
+        let appearance = appearances.iter().find(|appearance| {
+            appearance.property("MaterialName").and_then(Value::as_str)
+                == Some(primitive.material.name.as_str())
+        });
+        let material = match appearance {
+            Some(appearance) => surface_material(&primitive.material, appearance, assets),
+            None => model_material(&primitive.material),
+        };
         items.push(DrawItem {
             shape: Shape::Mesh(Arc::new(ModelMesh {
                 model: model.clone(),
                 index,
             })),
             transform,
-            material: model_material(&primitive.material),
+            material,
         });
     }
+}
+
+/// A model's material with a SurfaceAppearance's maps in place of its own.
+/// A map the SurfaceAppearance leaves empty is no map (metalness and
+/// roughness then take the material's own values); one it sets gives the
+/// value alone. Its textures come from `assets`.
+fn surface_material(file: &ModelMaterial, appearance: &Instance, assets: &Assets) -> Material {
+    let texture_of = |name| {
+        let path = appearance.property(name).and_then(Value::as_str)?;
+        assets.texture(path).map(|image| texture(&image))
+    };
+    let number = |name, default: f32| {
+        appearance
+            .property(name)
+            .and_then(Value::as_number)
+            .map_or(default, |n| n as f32)
+    };
+    let flag = |name| appearance.property(name).and_then(Value::as_bool) == Some(true);
+    let channel = |name| match appearance
+        .property(name)
+        .and_then(Value::as_texture_channel)
+    {
+        Some(TextureChannel::Green) => Channel::Green,
+        Some(TextureChannel::Blue) => Channel::Blue,
+        Some(TextureChannel::Alpha) => Channel::Alpha,
+        Some(TextureChannel::Red) | None => Channel::Red,
+    };
+    let channel_map = |map, channel_property, invert| {
+        texture_of(map).map(|texture| ChannelMap {
+            texture,
+            channel: channel(channel_property),
+            invert,
+        })
+    };
+
+    let mut material = model_material(file);
+    if let Some(tint) = appearance.property("Color").and_then(Value::as_color3) {
+        let [r, g, b] = material.base_color;
+        material.base_color = [r * tint.r, g * tint.g, b * tint.b];
+    }
+    material.base_color_texture = texture_of("ColorMap");
+    let maps = &mut material.maps;
+    maps.normal = texture_of("NormalMap").map(|texture| NormalMap {
+        texture,
+        scale: number("NormalStrength", 1.0),
+        flip_green: flag("NormalMapDirectX"),
+    });
+    maps.metalness = channel_map("MetalnessMap", "MetalnessChannel", false);
+    if maps.metalness.is_some() {
+        material.metalness = 1.0;
+    }
+    maps.roughness = channel_map("RoughnessMap", "RoughnessChannel", flag("InvertRoughness"));
+    if maps.roughness.is_some() {
+        material.roughness = 1.0;
+    }
+    maps.occlusion = channel_map("AmbientOcclusionMap", "AmbientOcclusionChannel", false);
+    maps.occlusion_strength = number("AmbientOcclusionStrength", 1.0);
+    maps.emissive = texture_of("EmissiveMap");
+    // A glow map on a material that doesn't glow glows in the map's colors.
+    let glow = if maps.emissive.is_some() && file.emissive.iter().all(|&c| c <= 0.0) {
+        [1.0; 3]
+    } else {
+        file.emissive
+    };
+    let strength = number("EmissiveStrength", 1.0).max(0.0);
+    material.emissive = srgb(glow.map(|c| c * strength));
+    maps.opacity = channel_map("OpacityMap", "OpacityChannel", flag("InvertOpacity"));
+    // An opacity map on a solid material cuts it out.
+    if maps.opacity.is_some() && material.opacity >= 1.0 && material.alpha_cutoff == 0.0 {
+        material.alpha_cutoff = 0.5;
+    }
+    maps.specular = texture_of("SpecularMap");
+    material
 }
 
 /// glTF's material values, as the renderer takes them.
@@ -445,6 +538,64 @@ mod tests {
         assert_eq!(item.material.roughness, 0.8);
         assert_eq!(item.material.opacity, 1.0);
         assert!(assets.take_errors().is_empty());
+    }
+
+    #[test]
+    fn a_surface_appearance_replaces_its_materials_maps() {
+        // A project with the pyramid imported, so its texture is a file in it.
+        let project = std::env::temp_dir().join("axcenity-scene-surface");
+        let _ = std::fs::remove_dir_all(&project);
+        std::fs::create_dir_all(&project).unwrap();
+        let pyramid = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/hello-mesh/assets/models/pyramid.gltf");
+        let (mesh_id, model) = axcenity_assets::import_model(&project, &pyramid).unwrap();
+        let base = model.primitives[0]
+            .material
+            .base_color_texture
+            .clone()
+            .unwrap();
+        let texture = format!("assets/models/pyramid/{}", base.file.as_ref().unwrap());
+        let assets = Assets::new(&project);
+
+        let mut world = World::new();
+        let part = mesh_part(&mut world, &mesh_id);
+        let appearance = world.create(ClassName::SurfaceAppearance).unwrap();
+        world.set_parent(appearance, Some(part)).unwrap();
+        let set = |world: &mut World, name, value| {
+            world.set_property(appearance, name, value).unwrap();
+        };
+        // For another material: the file's own maps are drawn.
+        set(&mut world, "MaterialName", Value::String("Other".into()));
+        assert!(
+            only_item_with(&world, &assets)
+                .material
+                .base_color_texture
+                .is_some()
+        );
+
+        set(
+            &mut world,
+            "MaterialName",
+            Value::String("Sandstone".into()),
+        );
+        set(&mut world, "RoughnessMap", Value::String(texture));
+        set(
+            &mut world,
+            "RoughnessChannel",
+            Value::TextureChannel(TextureChannel::Green),
+        );
+        set(&mut world, "InvertRoughness", Value::Bool(true));
+        let material = only_item_with(&world, &assets).material;
+        // Its ColorMap is empty: no color texture.
+        assert!(material.base_color_texture.is_none());
+        let roughness = material.maps.roughness.unwrap();
+        assert_eq!(
+            (roughness.channel, roughness.invert),
+            (Channel::Green, true)
+        );
+        assert_eq!(material.roughness, 1.0);
+        assert!(assets.take_errors().is_empty());
+        let _ = std::fs::remove_dir_all(&project);
     }
 
     #[test]

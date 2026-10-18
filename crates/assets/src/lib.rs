@@ -21,7 +21,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
-pub use import::{ImportError, MODELS_FOLDER, import_model, import_picks, list_model_objects};
+pub use import::{
+    ImportError, MODELS_FOLDER, PROJECT_TEXTURES_FOLDER, TEXTURE_EXTENSIONS, TEXTURES_FOLDER,
+    import_model, import_picks, import_texture, list_model_objects, load_model_file,
+};
 pub use model::{
     AlphaMode, Channel, ChannelTexture, Image, Model, ModelError, ModelFormat, ModelMaterial,
     ModelObject, Pick, Primitive, list_objects, load_model, load_models,
@@ -46,6 +49,8 @@ struct Shared {
     /// Every model asked for so far, by its `MeshId`. `None` means it
     /// couldn't be loaded, so it isn't tried again.
     models: HashMap<String, Option<Arc<Model>>>,
+    /// Every texture file asked for so far, by its path, the same way.
+    textures: HashMap<String, Option<Arc<Image>>>,
     /// Loading errors not yet collected by [`Assets::take_errors`].
     errors: Vec<String>,
 }
@@ -92,6 +97,32 @@ impl Assets {
         model
     }
 
+    /// The texture file at `path` (a SurfaceAppearance's map, such as
+    /// `assets/textures/wood.png`), decoded the first time. `None` if
+    /// `path` is empty or it can't be read; the reason goes to
+    /// [`take_errors`](Self::take_errors), once.
+    pub fn texture(&self, path: &str) -> Option<Arc<Image>> {
+        if path.is_empty() {
+            return None;
+        }
+        let mut shared = self.lock();
+        if let Some(texture) = shared.textures.get(path) {
+            return texture.clone();
+        }
+        let folder = shared.folder.clone()?;
+        let texture = match read_texture(&folder, path) {
+            Ok(image) => Some(Arc::new(image)),
+            Err(message) => {
+                shared
+                    .errors
+                    .push(format!("Could not load the texture `{path}`: {message}"));
+                None
+            }
+        };
+        shared.textures.insert(path.to_owned(), texture.clone());
+        texture
+    }
+
     /// Adds `model` as the one at `mesh_id`, for a model just imported, so
     /// it isn't read again.
     pub fn insert(&self, mesh_id: &str, model: Model) -> Arc<Model> {
@@ -132,6 +163,20 @@ fn read_model(folder: &Path, mesh_id: &str) -> Result<Model, String> {
     load_models(&bytes, base, format, &[pick])
         .map(|mut models| models.remove(0))
         .map_err(|err| with_causes(&err))
+}
+
+/// Reads the texture at `path` inside `folder`, or explains why it can't.
+fn read_texture(folder: &Path, path: &str) -> Result<Image, String> {
+    let relative = safe_path(path).ok_or(
+        "a texture must be a file inside the project folder, such as \"assets/textures/wood.png\"",
+    )?;
+    let bytes = std::fs::read(folder.join(&relative)).map_err(|err| match err.kind() {
+        std::io::ErrorKind::NotFound => "the file isn't there".to_owned(),
+        _ => err.to_string(),
+    })?;
+    let mut image = model::decode_image(&bytes, path)?;
+    image.file = Some(path.to_owned());
+    Ok(image)
 }
 
 /// An error and its causes on one line: "it isn't a valid glTF file:
@@ -216,6 +261,30 @@ mod tests {
         let assets = Assets::new(std::env::temp_dir());
         assert!(assets.model("assets/notes.txt").is_none());
         assert!(assets.take_errors()[0].contains(".gltf, .glb or .fbx"));
+    }
+
+    #[test]
+    fn textures_load_once_and_failures_are_reported_once() {
+        let folder = std::env::temp_dir().join("axcenity-assets-textures");
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(folder.join("assets/textures")).unwrap();
+        std::fs::write(
+            folder.join("assets/textures/checker.png"),
+            model::checker_png(),
+        )
+        .unwrap();
+        let assets = Assets::new(&folder);
+        let first = assets.texture("assets/textures/checker.png").unwrap();
+        let again = assets.texture("assets/textures/checker.png").unwrap();
+        assert!(Arc::ptr_eq(&first, &again));
+        assert!(assets.texture("").is_none());
+        assert!(assets.texture("assets/textures/gone.png").is_none());
+        assert!(assets.texture("assets/textures/gone.png").is_none());
+        assert!(assets.texture("../outside.png").is_none());
+        let errors = assets.take_errors();
+        assert_eq!(errors.len(), 2, "{errors:?}");
+        assert!(errors[0].contains("`assets/textures/gone.png`: the file isn't there"));
+        assert!(errors[1].contains("inside the project folder"));
     }
 
     #[test]

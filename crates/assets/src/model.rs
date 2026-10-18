@@ -277,6 +277,10 @@ pub struct Image {
     /// 4 bytes per pixel (red, green, blue, alpha), rows from the top:
     /// sRGB-encoded for colors, plain values for the other maps.
     pub rgba: Vec<u8>,
+    /// Its file, relative to the model's folder (with `/` between
+    /// folders). For an image embedded in the model, where importing
+    /// copies it out to (`textures/…`). `None` if it has no file.
+    pub file: Option<String>,
 }
 
 impl Image {
@@ -383,16 +387,107 @@ pub(crate) fn files_used(
 }
 
 /// The image files embedded in a model, as file names and bytes, for
-/// copying out on import. Only FBX's for now; a glTF's stay inside it.
+/// copying out to its `textures` folder on import (see [`Image::file`]).
+/// Their bytes are copied as they are.
 pub(crate) fn embedded_files(
     bytes: &[u8],
     format: ModelFormat,
 ) -> Result<Vec<(String, Vec<u8>)>, ModelError> {
     panic::catch_unwind(AssertUnwindSafe(|| match format {
-        ModelFormat::Gltf => Ok(Vec::new()),
+        ModelFormat::Gltf => gltf_embedded_files(bytes),
         ModelFormat::Fbx => fbx::embedded_textures(bytes),
     }))
     .unwrap_or(Err(ModelError::Damaged))
+}
+
+fn gltf_embedded_files(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, ModelError> {
+    let gltf::Gltf { document, blob } = gltf::Gltf::from_slice(bytes)?;
+    let names = embedded_image_names(&document);
+    if names.is_empty() {
+        return Ok(Vec::new());
+    }
+    // Only the file's own buffers: the images in them, and data URIs, are
+    // what's embedded. Buffers in other files aren't needed.
+    let buffers: Vec<gltf::buffer::Data> = document
+        .buffers()
+        .map(|buffer| match buffer.source() {
+            gltf::buffer::Source::Bin => blob.clone().unwrap_or_default(),
+            gltf::buffer::Source::Uri(uri) => data_uri(uri).unwrap_or_default(),
+        })
+        .map(gltf::buffer::Data)
+        .collect();
+    let mut files = Vec::new();
+    for image in document.images() {
+        let Some(name) = names.get(&image.index()) else {
+            continue;
+        };
+        let content = match image.source() {
+            gltf::image::Source::View { view, .. } => buffers
+                .get(view.buffer().index())
+                .and_then(|data| data.0.get(view.offset()..view.offset() + view.length()))
+                .map(<[u8]>::to_vec),
+            gltf::image::Source::Uri { uri, .. } => data_uri(uri),
+        };
+        if let Some(content) = content {
+            files.push((name.clone(), content));
+        }
+    }
+    Ok(files)
+}
+
+/// The bytes of a base64 `data:` URI, or `None` for any other URI.
+fn data_uri(uri: &str) -> Option<Vec<u8>> {
+    let (_, data) = uri.strip_prefix("data:")?.split_once(";base64,")?;
+    let digit = |c: u8| match c {
+        b'A'..=b'Z' => Some(c - b'A'),
+        b'a'..=b'z' => Some(c - b'a' + 26),
+        b'0'..=b'9' => Some(c - b'0' + 52),
+        b'+' | b'-' => Some(62),
+        b'/' | b'_' => Some(63),
+        _ => None,
+    };
+    let mut bytes = Vec::with_capacity(data.len() / 4 * 3);
+    let (mut bits, mut count) = (0u32, 0);
+    for c in data.bytes().filter(|&c| c != b'=') {
+        bits = bits << 6 | u32::from(digit(c)?);
+        count += 6;
+        if count >= 8 {
+            count -= 8;
+            bytes.push((bits >> count) as u8);
+        }
+    }
+    Some(bytes)
+}
+
+/// The file names (made safe, and unique) that importing gives a glTF's
+/// embedded images, by image index: their names, or `image<N>`, with the
+/// extension their type has.
+fn embedded_image_names(document: &gltf::Document) -> HashMap<usize, String> {
+    let mut names: HashMap<usize, String> = HashMap::new();
+    for image in document.images() {
+        let extension = match image.source() {
+            gltf::image::Source::View { mime_type, .. } => match mime_type {
+                "image/jpeg" => "jpg",
+                _ => "png",
+            },
+            gltf::image::Source::Uri { uri, .. } if uri.starts_with("data:image/jpeg") => "jpg",
+            gltf::image::Source::Uri { uri, .. } if uri.starts_with("data:") => "png",
+            gltf::image::Source::Uri { .. } => continue,
+        };
+        let stem = image
+            .name()
+            .and_then(crate::import::safe_file_name)
+            .map(|name| match name.rsplit_once('.') {
+                Some((stem, _)) => stem.to_owned(),
+                None => name,
+            })
+            .unwrap_or_else(|| format!("image{}", image.index()));
+        let name = crate::import::unique_file_name(&format!("{stem}.{extension}"), |taken| {
+            names.values().any(|name| name.eq_ignore_ascii_case(taken))
+        });
+        names.insert(image.index(), name);
+    }
+    names
 }
 
 fn read(bytes: &[u8], folder: &Path, picks: &[Pick]) -> Result<Vec<Model>, ModelError> {
@@ -412,6 +507,7 @@ fn read(bytes: &[u8], folder: &Path, picks: &[Pick]) -> Result<Vec<Model>, Model
         images: HashMap::new(),
         primitives: Vec::new(),
         visits: 0,
+        embedded: embedded_image_names(&document),
         wanted: None,
         found: HashSet::new(),
     };
@@ -620,6 +716,9 @@ struct Reader<'a> {
     images: HashMap<usize, Arc<Image>>,
     primitives: Vec<Primitive>,
     visits: usize,
+    /// The file names importing gives embedded images (see
+    /// [`embedded_image_names`]).
+    embedded: HashMap<usize, String>,
     /// The paths of the objects to draw, or `None` for all of them.
     wanted: Option<HashSet<String>>,
     /// The wanted paths seen so far.
@@ -833,11 +932,21 @@ impl Reader<'_> {
             _ => format!("image {}", image.index()),
         };
         let rgba = to_rgba8(&data).ok_or(ModelError::BadTexture(name))?;
+        let file = match image.source() {
+            gltf::image::Source::Uri { uri, .. } if !uri.starts_with("data:") => {
+                percent_decode(uri)
+            }
+            _ => self
+                .embedded
+                .get(&image.index())
+                .map(|name| format!("{}/{name}", crate::import::TEXTURES_FOLDER)),
+        };
         let decoded = Arc::new(Image {
             key: new_key(),
             width: data.width,
             height: data.height,
             rgba,
+            file,
         });
         self.images.insert(image.index(), decoded.clone());
         Ok(decoded)
@@ -895,6 +1004,32 @@ fn to_rgba8(data: &gltf::image::Data) -> Option<Vec<u8>> {
         rgba.extend_from_slice(&rgba_pixel);
     }
     Some(rgba)
+}
+
+/// Decodes a PNG, JPEG, TGA or BMP texture. TGA files have no signature to
+/// recognize, so the name's extension decides when the content can't.
+pub(crate) fn decode_image(bytes: &[u8], name: &str) -> Result<Image, String> {
+    let format = image::guess_format(bytes)
+        .or_else(|_| image::ImageFormat::from_path(name))
+        .map_err(|_| "only PNG, JPEG, TGA and BMP textures can be used".to_owned())?;
+    let rgba = image::load_from_memory_with_format(bytes, format)
+        .map_err(|err| match err {
+            image::ImageError::Unsupported(_) => {
+                "only PNG, JPEG, TGA and BMP textures can be used".to_owned()
+            }
+            err => err.to_string(),
+        })?
+        .into_rgba8();
+    if rgba.width() == 0 || rgba.height() == 0 {
+        return Err("it has no pixels".to_owned());
+    }
+    Ok(Image {
+        key: new_key(),
+        width: rgba.width(),
+        height: rgba.height(),
+        rgba: rgba.into_raw(),
+        file: None,
+    })
 }
 
 /// Normals for a mesh that has none: each corner gets the average of the
@@ -1214,6 +1349,27 @@ mod tests {
             assert!((Vec3::new(tangent[0], tangent[1], tangent[2]) - Vec3::X).length() < 1e-5);
             assert_eq!(tangent[3], 1.0);
         }
+    }
+
+    #[test]
+    fn data_uris_are_decoded() {
+        assert_eq!(
+            data_uri("data:application/octet-stream;base64,SGk="),
+            Some(b"Hi".to_vec())
+        );
+        assert_eq!(data_uri("buffer.bin"), None);
+    }
+
+    #[test]
+    fn embedded_images_are_named_for_copying_out() {
+        // The example pyramid's texture is in its data: URI buffer.
+        let files = embedded_files(&example_bytes(), ModelFormat::Gltf).unwrap();
+        assert_eq!(files.len(), 1);
+        let (name, png) = &files[0];
+        assert!(image::guess_format(png).is_ok(), "{name}");
+        let model = load_model(&example_bytes(), &example_folder(), ModelFormat::Gltf).unwrap();
+        let texture = model.primitives[0].material.base_color_texture.as_ref();
+        assert_eq!(texture.unwrap().file, Some(format!("textures/{name}")));
     }
 
     #[test]

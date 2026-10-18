@@ -265,6 +265,7 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::Player => icons::USER,
         ClassName::Model => icons::PACKAGE,
         ClassName::Folder => icons::FOLDER,
+        ClassName::SurfaceAppearance => icons::IMAGE,
     }
 }
 
@@ -309,6 +310,7 @@ pub fn class_color(class: ClassName, visuals: &egui::Visuals) -> Color32 {
             pick((110, 160, 245), (0, 74, 173))
         }
         ClassName::Folder => pick((249, 191, 59), (190, 130, 0)),
+        ClassName::SurfaceAppearance => pick((236, 120, 220), (160, 40, 150)),
         ClassName::Script => pick((241, 137, 45), (200, 95, 0)),
         ClassName::LocalScript => pick((64, 200, 180), (0, 128, 118)),
         ClassName::ModuleScript => pick((180, 145, 255), (110, 70, 200)),

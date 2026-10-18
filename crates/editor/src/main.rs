@@ -23,6 +23,7 @@ mod screen;
 mod scripts;
 mod side_warnings;
 mod start;
+mod surface;
 mod theme;
 mod tree;
 mod viewport;

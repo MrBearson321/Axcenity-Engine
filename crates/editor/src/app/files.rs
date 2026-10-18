@@ -24,6 +24,7 @@ use crate::import_dialog::{Answer, ImportDialog, Placement};
 use crate::output::Output;
 use crate::properties::MIN_SIZE;
 use crate::scripts::{Disk, new_script_source};
+use crate::surface::{self, MapFile};
 use crate::tree::{self, Insertable};
 
 /// An error and its causes on one line, the way `{:#}` shows an `anyhow::Error`.
@@ -353,16 +354,47 @@ impl EditorApp {
         }
     }
 
-    /// Imports the model at `file`. A file with more than one object asks
-    /// which of them to import first ([`ImportDialog`]); a file with one
-    /// goes straight in as a MeshPart. A file that can't be read is
-    /// reported in Output.
+    /// Asks for a texture file with the system's file picker, for a map
+    /// in Properties, and returns its path in the project: a file outside
+    /// the project is copied into `assets/textures` first. `None` if
+    /// cancelled or it can't be used (said in Output).
+    pub(super) fn pick_texture(&mut self) -> Option<String> {
+        let project = self.project.as_ref()?;
+        let file = rfd::FileDialog::new()
+            .set_title("Choose a texture")
+            .add_filter("Texture", &axcenity_assets::TEXTURE_EXTENSIONS)
+            .set_directory(&project.folder)
+            .pick_file()?;
+        match axcenity_assets::import_texture(
+            &project.folder,
+            &file,
+            axcenity_assets::PROJECT_TEXTURES_FOLDER,
+        ) {
+            Ok(path) => Some(path),
+            Err(err) => {
+                let err = chain(&err);
+                self.output
+                    .error(format!("Could not use `{}`: {err}", file.display()));
+                None
+            }
+        }
+    }
+
+    /// Imports the model at `file`. A file with more than one object, or
+    /// with texture maps, asks first which objects to import and shows its
+    /// materials' maps for changing ([`ImportDialog`]); any other goes
+    /// straight in as a MeshPart. A file that can't be read is reported in
+    /// Output.
     pub(super) fn import_model(&mut self, file: &Path) {
         if self.project.is_none() || self.playing() || self.viewport.is_dragging() {
             return;
         }
-        let objects = match axcenity_assets::list_model_objects(file) {
-            Ok(objects) => objects,
+        let read = axcenity_assets::list_model_objects(file).and_then(|objects| {
+            let model = axcenity_assets::load_model_file(file)?;
+            Ok((objects, model))
+        });
+        let (objects, model) = match read {
+            Ok(read) => read,
             Err(err) => {
                 let err = chain(&err);
                 self.output
@@ -370,11 +402,11 @@ impl EditorApp {
                 return;
             }
         };
-        let mut dialog = ImportDialog::new(file.to_owned(), objects);
-        if dialog.chosen().len() > 1 {
+        let materials = surface::materials_maps(model.primitives.iter().map(|p| &p.material));
+        let dialog = ImportDialog::new(file.to_owned(), objects, materials);
+        if dialog.worth_asking() {
             self.importing = Some(dialog);
         } else {
-            dialog.placement = Placement::Merged;
             self.import_chosen(&dialog);
         }
     }
@@ -435,6 +467,12 @@ impl EditorApp {
             "Imported `{}` into the project as `{copy}`.",
             file.display()
         ));
+        // The copy's folder in the project, which its maps' paths start from.
+        let folder = copy
+            .rsplit_once('/')
+            .map_or("", |(folder, _)| folder)
+            .to_owned();
+        let mut copied = HashMap::new();
         let mut parts = Vec::new();
         for (mesh_id, model) in imported {
             let model = self.assets.insert(&mesh_id, model);
@@ -454,13 +492,12 @@ impl EditorApp {
         let position = self.insert_position();
         match dialog.placement {
             Placement::Merged => {
+                let parent = tree::insert_parent(&self.world, near, Insertable::MeshPart);
                 let (mesh_id, model) = parts.remove(0);
-                self.insert_named(
-                    Insertable::MeshPart,
-                    near,
-                    &file_name,
-                    mesh_part_properties(mesh_id, &model),
-                );
+                let id = self.new_mesh_part(mesh_id, &model, position);
+                self.world.set_name(id, &file_name).expect("just made");
+                self.add_surfaces(id, &model, dialog, &folder, &mut copied);
+                self.place_new(parent, vec![id], format!("Import {file_name}"));
             }
             Placement::Separate => {
                 let parent = tree::insert_parent(&self.world, near, Insertable::MeshPart);
@@ -472,6 +509,7 @@ impl EditorApp {
                         self.world
                             .set_name(id, object_name(&dialog.objects[i].name))
                             .expect("just made");
+                        self.add_surfaces(id, &model, dialog, &folder, &mut copied);
                         id
                     })
                     .collect();
@@ -500,6 +538,7 @@ impl EditorApp {
                         position.z + model.center[2] - middle[2],
                     );
                     let id = self.new_mesh_part(mesh_id, &model, at);
+                    self.add_surfaces(id, &model, dialog, &folder, &mut copied);
                     let container = self.group_of(dialog, i, root, &mut groups);
                     let name = tree::unique_name(
                         &self.world,
@@ -513,6 +552,79 @@ impl EditorApp {
                 }
                 self.place_new(parent, vec![root], format!("Import {file_name}"));
             }
+        }
+    }
+
+    /// Puts a SurfaceAppearance in the new MeshPart `part` for each
+    /// material its `model` uses, with the maps `dialog` has for it (as
+    /// found, or as changed there). `folder` is the model's copy's folder
+    /// in the project. Files picked in the dialog are copied into its
+    /// `textures` folder, each once (`copied` remembers where to).
+    fn add_surfaces(
+        &mut self,
+        part: InstanceId,
+        model: &axcenity_assets::Model,
+        dialog: &ImportDialog,
+        folder: &str,
+        copied: &mut HashMap<std::path::PathBuf, Option<String>>,
+    ) {
+        let Some(project) = &self.project else {
+            return;
+        };
+        let project = project.folder.clone();
+        let textures = format!("{folder}/{}", axcenity_assets::TEXTURES_FOLDER);
+        let in_project = |path: &str| match folder {
+            "" => path.to_owned(),
+            folder => format!("{folder}/{path}"),
+        };
+        for maps in surface::materials_maps(model.primitives.iter().map(|p| &p.material)) {
+            let maps = dialog
+                .materials
+                .iter()
+                .find(|changed| changed.material == maps.material)
+                .cloned()
+                .unwrap_or(maps);
+            let mut errors = Vec::new();
+            let properties = maps.properties(|file| match file {
+                MapFile::Model(path) => Some(in_project(path)),
+                MapFile::Picked(path) => copied
+                    .entry(path.clone())
+                    .or_insert_with(|| {
+                        match axcenity_assets::import_texture(&project, path, &textures) {
+                            Ok(copy) => Some(copy),
+                            Err(err) => {
+                                errors.push(format!(
+                                    "Could not use `{}`: {}",
+                                    path.display(),
+                                    chain(&err)
+                                ));
+                                None
+                            }
+                        }
+                    })
+                    .clone(),
+            });
+            for error in errors {
+                self.output.error(error);
+            }
+            let id = self
+                .world
+                .create(ClassName::SurfaceAppearance)
+                .expect("not a service");
+            for (property, value) in properties {
+                self.world
+                    .set_property(id, property, value)
+                    .expect("every SurfaceAppearance has these");
+            }
+            let wanted = match maps.material.as_str() {
+                "" => ClassName::SurfaceAppearance.as_str(),
+                name => name,
+            };
+            let name = tree::unique_name(&self.world, part, wanted);
+            self.world.set_name(id, name).expect("just made");
+            self.world
+                .set_parent(id, Some(part))
+                .expect("a SurfaceAppearance can go in a new MeshPart");
         }
     }
 
@@ -866,6 +978,8 @@ mod tests {
     use crate::output::OutputKind;
     use crate::properties::Edit;
     use crate::scripts::NEW_SCRIPT_SOURCE;
+    use crate::surface::Slot;
+    use axcenity_assets::Channel;
 
     fn script_names(app: &EditorApp) -> Vec<String> {
         let world = &app.world;
@@ -893,6 +1007,10 @@ mod tests {
         let folder = copy_of_example("hello-part", "import-model");
         let mut app = EditorApp::new(Some(&folder));
         app.import_model(&example_model());
+        // It has a texture, so its maps are shown first.
+        let dialog = app.importing.take().expect("the dialog is open");
+        assert!(!dialog.pick_objects);
+        app.import_chosen(&dialog);
 
         let id = app.selected.expect("the new MeshPart is selected");
         let mesh_part = app.world.get(id).unwrap();
@@ -985,6 +1103,81 @@ mod tests {
             Some(Value::String(mesh_id)) => mesh_id.clone(),
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn each_material_gets_a_surface_appearance_with_its_maps_as_changed_in_the_dialog() {
+        let folder = copy_of_example("hello-part", "import-surface");
+        let mut app = EditorApp::new(Some(&folder));
+        app.import_model(&example_model());
+        let mut dialog = app.importing.take().expect("the dialog is open");
+        let maps = &mut dialog.materials[0];
+        assert_eq!(maps.material, "Sandstone");
+        // A roughness map picked from outside the project, read from green.
+        let picked = folder.join("..").join("import-surface-rough.png");
+        fs::write(&picked, b"not checked until drawn").unwrap();
+        maps.set_file(Slot::Roughness, Some(MapFile::Picked(picked.clone())));
+        *maps.channel_mut(Slot::Roughness).unwrap() = Channel::Green;
+        app.import_chosen(&dialog);
+
+        let part = app.selected.unwrap();
+        let surface = app.world.find_first_child(part, "Sandstone").unwrap();
+        let surface = app.world.get(surface).unwrap();
+        assert_eq!(surface.class(), ClassName::SurfaceAppearance);
+        let path = |name| {
+            surface
+                .property(name)
+                .and_then(Value::as_str)
+                .unwrap()
+                .to_owned()
+        };
+        assert_eq!(path("MaterialName"), "Sandstone");
+        // The model's own texture, copied out of the file into its folder.
+        let color = path("ColorMap");
+        assert!(
+            color.starts_with("assets/models/pyramid/textures/"),
+            "{color}"
+        );
+        assert!(folder.join(&color).is_file());
+        // The picked one, copied in beside it.
+        assert_eq!(
+            path("RoughnessMap"),
+            "assets/models/pyramid/textures/import-surface-rough.png"
+        );
+        assert!(folder.join(path("RoughnessMap")).is_file());
+        assert_eq!(
+            surface.property("RoughnessChannel"),
+            Some(&Value::TextureChannel(axcenity_core::TextureChannel::Green))
+        );
+        assert_eq!(path("NormalMap"), "");
+
+        // Saved and opened again, it's still there; undo takes it out with the part.
+        assert!(app.save());
+        let reopened = EditorApp::new(Some(&folder));
+        let again = part_named(&reopened, "pyramid");
+        assert!(
+            reopened
+                .world
+                .find_first_child(again, "Sandstone")
+                .is_some()
+        );
+        app.undo();
+        assert!(
+            app.world
+                .get(app.world.workspace())
+                .unwrap()
+                .children()
+                .iter()
+                .all(|&id| { app.world.get(id).unwrap().name() != "pyramid" })
+        );
+        let _ = fs::remove_file(&picked);
+        let _ = fs::remove_dir_all(&folder);
+    }
+
+    fn part_named(app: &EditorApp, name: &str) -> InstanceId {
+        app.world
+            .find_first_child(app.world.workspace(), name)
+            .unwrap()
     }
 
     #[test]

@@ -499,6 +499,7 @@ mod tests {
             width: 1,
             height: 1,
             rgba: rgba.to_vec(),
+            file: None,
         })
     }
 

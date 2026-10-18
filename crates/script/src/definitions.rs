@@ -508,7 +508,7 @@ const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     (
         ClassName::MeshPart,
         "MeshId",
-        "The model's glTF file, inside the project folder, such as \"assets/models/chair.glb\". The editor's Import Model sets it.",
+        "The model's glTF or FBX file, inside the project folder, such as \"assets/models/chair.glb\"; `#` after it picks objects in the file (\"assets/models/props.fbx#Bench\"). The editor's Import Model sets it.",
     ),
     (
         ClassName::MeshPart,
@@ -524,6 +524,106 @@ const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::MeshPart,
         "Size",
         "The size of the model's box in studs along X, Y and Z. The model stretches to fill it.",
+    ),
+    (
+        ClassName::SurfaceAppearance,
+        "MaterialName",
+        "The name of the material of the parent MeshPart's model whose maps this replaces. Import Model sets it.",
+    ),
+    (
+        ClassName::SurfaceAppearance,
+        "Color",
+        "Multiplies the material's color (and its ColorMap).",
+    ),
+    (
+        ClassName::SurfaceAppearance,
+        "ColorMap",
+        "The base color texture, a file inside the project folder such as \"assets/textures/wood.png\". Empty for none.",
+    ),
+    (
+        ClassName::SurfaceAppearance,
+        "NormalMap",
+        "The normal map's file, for bumps and grooves. Empty for none.",
+    ),
+    (
+        ClassName::SurfaceAppearance,
+        "MetalnessMap",
+        "The metalness map's file (read from MetalnessChannel). Empty for the model's own metalness.",
+    ),
+    (
+        ClassName::SurfaceAppearance,
+        "RoughnessMap",
+        "The roughness map's file (read from RoughnessChannel). Empty for the model's own roughness.",
+    ),
+    (
+        ClassName::SurfaceAppearance,
+        "EmissiveMap",
+        "The file of colors the surface glows in. Empty for the model's own glow.",
+    ),
+    (
+        ClassName::SurfaceAppearance,
+        "AmbientOcclusionMap",
+        "The ambient occlusion map's file: dark where ambient light can't reach. Empty for none.",
+    ),
+    (
+        ClassName::SurfaceAppearance,
+        "OpacityMap",
+        "The opacity map's file (read from OpacityChannel): the surface is cut out where it's below half. Empty for the color map's alpha.",
+    ),
+    (
+        ClassName::SurfaceAppearance,
+        "SpecularMap",
+        "How strongly non-metal parts shine, for older materials: mid grey is the usual. Empty for none.",
+    ),
+    (
+        ClassName::SurfaceAppearance,
+        "NormalStrength",
+        "How far the normal map tips the surface: 1 as made, 0 flat.",
+    ),
+    (
+        ClassName::SurfaceAppearance,
+        "NormalMapDirectX",
+        "True for normal maps made for DirectX, whose green points the other way.",
+    ),
+    (
+        ClassName::SurfaceAppearance,
+        "MetalnessChannel",
+        "Which channel of MetalnessMap holds metalness, for packed textures.",
+    ),
+    (
+        ClassName::SurfaceAppearance,
+        "RoughnessChannel",
+        "Which channel of RoughnessMap holds roughness, for packed textures.",
+    ),
+    (
+        ClassName::SurfaceAppearance,
+        "InvertRoughness",
+        "True if RoughnessMap is a glossiness or smoothness map: white is smooth.",
+    ),
+    (
+        ClassName::SurfaceAppearance,
+        "AmbientOcclusionChannel",
+        "Which channel of AmbientOcclusionMap holds it, for packed textures.",
+    ),
+    (
+        ClassName::SurfaceAppearance,
+        "AmbientOcclusionStrength",
+        "How much AmbientOcclusionMap darkens, from 0 to 1.",
+    ),
+    (
+        ClassName::SurfaceAppearance,
+        "OpacityChannel",
+        "Which channel of OpacityMap holds opacity.",
+    ),
+    (
+        ClassName::SurfaceAppearance,
+        "InvertOpacity",
+        "True if OpacityMap is white where the surface is see-through.",
+    ),
+    (
+        ClassName::SurfaceAppearance,
+        "EmissiveStrength",
+        "Multiplies the glow.",
     ),
 ];
 
@@ -573,7 +673,7 @@ fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::Part => "A solid shape in the world.",
         ClassName::MeshPart => {
-            "A solid 3D model imported from a glTF file, drawn with the file's own materials. It collides as the model's convex hull."
+            "A solid 3D model imported from a glTF or FBX file, drawn with the file's own materials (or its SurfaceAppearances'). It collides as the model's convex hull."
         }
         ClassName::Script => "Lua code that runs on the server, from a `.server.lua` file.",
         ClassName::LocalScript => {
@@ -588,6 +688,9 @@ fn class_doc(class: ClassName) -> &'static str {
         ClassName::Player => "Someone playing the game, in Players. Made when they join.",
         ClassName::Model => "Groups the parts of one thing, such as a car or a house.",
         ClassName::Folder => "Groups Instances to keep the tree tidy. Has no effect on the game.",
+        ClassName::SurfaceAppearance => {
+            "Inside a MeshPart: the texture maps of one of its model's materials (MaterialName), drawn in place of the file's own. Delete it to go back to the file's."
+        }
     }
 }
 
@@ -600,7 +703,7 @@ fn lua_type(kind: ValueKind) -> String {
         ValueKind::Vector3 => "Vector3".to_owned(),
         ValueKind::Color3 => "Color3".to_owned(),
         // Enum properties read as items and also accept item names.
-        ValueKind::Material | ValueKind::PartType => {
+        ValueKind::Material | ValueKind::PartType | ValueKind::TextureChannel => {
             let enum_type = EnumType::of_kind(kind).expect("an enum kind");
             let mut options = vec![format!("EnumItem.{}", enum_type.name())];
             options.extend(
