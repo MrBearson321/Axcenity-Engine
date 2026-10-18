@@ -1,10 +1,12 @@
 //! Axcenity Player: the runtime that ships with every exported game.
 //!
-//! Phase 7: loads a project folder, starts its server scripts, and runs the
-//! frame loop: resume scripts whose `task.wait` is over, step physics, fire
-//! `Touched` for parts that started touching, then draw the Workspace, with a
-//! fly camera for looking around.
+//! Loads a project folder, starts its Scripts and then its LocalScripts, and
+//! runs the frame loop: pass key presses to LocalScripts, resume scripts
+//! whose `task.wait` is over (and deliver RemoteEvent messages), step
+//! physics, fire `Touched` for parts that started touching, then draw the
+//! Workspace, with a fly camera for looking around.
 
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -16,7 +18,7 @@ use axcenity_project::ScriptFile;
 use axcenity_render::Renderer;
 use axcenity_render::glam::Vec3;
 use axcenity_scene::{FlyCamera, MoveKeys};
-use axcenity_script::{OutputKind, ScriptRuntime};
+use axcenity_script::{CameraState, KeyEvent, OutputKind, ScriptRuntime};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{DeviceEvent, DeviceId, ElementState, MouseButton, WindowEvent};
@@ -70,6 +72,8 @@ fn main() -> Result<()> {
         error: None,
         camera: FlyCamera::looking_at(START_CAMERA_POSITION, Vec3::ZERO),
         keys: MoveKeys::default(),
+        key_events: Vec::new(),
+        held_keys: BTreeSet::new(),
         looking: false,
         last_frame: None,
     };
@@ -82,9 +86,10 @@ fn main() -> Result<()> {
     }
 }
 
-/// Starts every server script, in path order, and prints its output. Each
-/// runs until it finishes or first waits; the frame loop resumes it after
-/// that. An error stops only the script it happens in.
+/// Starts every script in the order the project lists them (Scripts, then
+/// LocalScripts, each by path), and prints their output. Each runs until it
+/// finishes or first waits; the frame loop resumes it after that. An error
+/// stops only the script it happens in.
 fn start_scripts(runtime: &mut ScriptRuntime, world: &mut World, scripts: &[ScriptFile]) {
     for script in scripts {
         log::info!("starting {}", script.path);
@@ -117,6 +122,10 @@ struct App {
     error: Option<anyhow::Error>,
     camera: FlyCamera,
     keys: MoveKeys,
+    /// Key presses and releases since the last frame, for LocalScripts.
+    key_events: Vec<KeyEvent>,
+    /// The keys held down, so they can all be let go when the window loses focus.
+    held_keys: BTreeSet<axcenity_core::KeyCode>,
     /// True while the right mouse button is held, when moving the mouse turns the camera.
     looking: bool,
     /// When the previous frame was drawn, to measure how much time passed.
@@ -156,6 +165,82 @@ fn set_move_key(keys: &mut MoveKeys, key: KeyCode, pressed: bool) {
         _ => return,
     };
     *held = pressed;
+}
+
+/// Each winit key, and the key scripts know it as (`Enum.KeyCode.<name>`).
+/// Keys are physical positions, like the movement keys.
+const SCRIPT_KEYS: [(KeyCode, axcenity_core::KeyCode); 51] = {
+    use axcenity_core::KeyCode as K;
+    [
+        (KeyCode::KeyA, K::A),
+        (KeyCode::KeyB, K::B),
+        (KeyCode::KeyC, K::C),
+        (KeyCode::KeyD, K::D),
+        (KeyCode::KeyE, K::E),
+        (KeyCode::KeyF, K::F),
+        (KeyCode::KeyG, K::G),
+        (KeyCode::KeyH, K::H),
+        (KeyCode::KeyI, K::I),
+        (KeyCode::KeyJ, K::J),
+        (KeyCode::KeyK, K::K),
+        (KeyCode::KeyL, K::L),
+        (KeyCode::KeyM, K::M),
+        (KeyCode::KeyN, K::N),
+        (KeyCode::KeyO, K::O),
+        (KeyCode::KeyP, K::P),
+        (KeyCode::KeyQ, K::Q),
+        (KeyCode::KeyR, K::R),
+        (KeyCode::KeyS, K::S),
+        (KeyCode::KeyT, K::T),
+        (KeyCode::KeyU, K::U),
+        (KeyCode::KeyV, K::V),
+        (KeyCode::KeyW, K::W),
+        (KeyCode::KeyX, K::X),
+        (KeyCode::KeyY, K::Y),
+        (KeyCode::KeyZ, K::Z),
+        (KeyCode::Digit0, K::Zero),
+        (KeyCode::Digit1, K::One),
+        (KeyCode::Digit2, K::Two),
+        (KeyCode::Digit3, K::Three),
+        (KeyCode::Digit4, K::Four),
+        (KeyCode::Digit5, K::Five),
+        (KeyCode::Digit6, K::Six),
+        (KeyCode::Digit7, K::Seven),
+        (KeyCode::Digit8, K::Eight),
+        (KeyCode::Digit9, K::Nine),
+        (KeyCode::Space, K::Space),
+        (KeyCode::Enter, K::Return),
+        (KeyCode::Escape, K::Escape),
+        (KeyCode::Tab, K::Tab),
+        (KeyCode::Backspace, K::Backspace),
+        (KeyCode::ArrowUp, K::Up),
+        (KeyCode::ArrowDown, K::Down),
+        (KeyCode::ArrowLeft, K::Left),
+        (KeyCode::ArrowRight, K::Right),
+        (KeyCode::ShiftLeft, K::LeftShift),
+        (KeyCode::ShiftRight, K::RightShift),
+        (KeyCode::ControlLeft, K::LeftControl),
+        (KeyCode::ControlRight, K::RightControl),
+        (KeyCode::AltLeft, K::LeftAlt),
+        (KeyCode::AltRight, K::RightAlt),
+    ]
+};
+
+/// The key scripts know for a winit key, if it's one they can see.
+fn script_key(key: KeyCode) -> Option<axcenity_core::KeyCode> {
+    SCRIPT_KEYS
+        .into_iter()
+        .find(|(winit, _)| *winit == key)
+        .map(|(_, script)| script)
+}
+
+/// The camera as `workspace.CurrentCamera` shows it to LocalScripts.
+fn camera_state(camera: &FlyCamera) -> CameraState {
+    let (position, orientation) = camera.view();
+    CameraState {
+        position,
+        orientation,
+    }
 }
 
 /// While looking around, hides the cursor and keeps it from leaving the window.
@@ -212,7 +297,16 @@ impl ApplicationHandler for App {
             WindowEvent::Resized(size) => renderer.resize(size.width, size.height),
             WindowEvent::KeyboardInput { event, .. } => {
                 if let PhysicalKey::Code(key) = event.physical_key {
-                    set_move_key(&mut self.keys, key, event.state == ElementState::Pressed);
+                    let pressed = event.state == ElementState::Pressed;
+                    set_move_key(&mut self.keys, key, pressed);
+                    if let Some(key) = script_key(key) {
+                        self.key_events.push(KeyEvent { key, pressed });
+                        if pressed {
+                            self.held_keys.insert(key);
+                        } else {
+                            self.held_keys.remove(&key);
+                        }
+                    }
                 }
             }
             WindowEvent::MouseInput {
@@ -227,6 +321,12 @@ impl ApplicationHandler for App {
             // so let go of everything to avoid the camera drifting on its own.
             WindowEvent::Focused(false) => {
                 self.keys = MoveKeys::default();
+                for key in std::mem::take(&mut self.held_keys) {
+                    self.key_events.push(KeyEvent {
+                        key,
+                        pressed: false,
+                    });
+                }
                 self.looking = false;
                 capture_mouse(window, false);
             }
@@ -235,8 +335,13 @@ impl ApplicationHandler for App {
                 let seconds = frame_seconds(&mut self.last_frame);
 
                 // 1. Input: the events above have already updated the keys
-                //    and mouse look, so move the camera.
+                //    and mouse look, so move the camera. Then LocalScripts
+                //    see where it is, and the keys pressed since last frame.
                 self.camera.update(&self.keys, seconds);
+                self.scripts.set_camera(camera_state(&self.camera));
+                let keys = std::mem::take(&mut self.key_events);
+                self.scripts.input(&mut self.world, &keys);
+                print_output(&mut self.scripts);
 
                 // 2. Resume scripts whose wait is over (and due `task.delay`s).
                 //    Game time is the sum of the (capped) frame times, so a
@@ -256,7 +361,11 @@ impl ApplicationHandler for App {
 
                 // 5 (UI layout) comes in a later phase.
 
-                // 6. Build the draw list and render.
+                // 6. Build the draw list and render, from wherever a
+                //    LocalScript put the camera (if one moved it).
+                if let Some(view) = self.scripts.take_camera_move() {
+                    self.camera.set_view(view.position, view.orientation);
+                }
                 let draw_list =
                     axcenity_scene::build_draw_list(&self.world, self.camera.to_render_camera());
                 // `|| ...` is a closure: a small function the renderer calls at the right moment.
@@ -292,6 +401,77 @@ mod tests {
     use axcenity_core::{Value, Vector3};
 
     use super::*;
+
+    #[test]
+    fn arrow_and_letter_keys_reach_scripts_by_their_roblox_names() {
+        use axcenity_core::KeyCode as K;
+        assert_eq!(script_key(KeyCode::ArrowUp), Some(K::Up));
+        assert_eq!(script_key(KeyCode::KeyW), Some(K::W));
+        assert_eq!(script_key(KeyCode::Digit0), Some(K::Zero));
+        assert_eq!(script_key(KeyCode::Enter), Some(K::Return));
+        assert_eq!(script_key(KeyCode::F13), None);
+        // Every key scripts know can be pressed in the player.
+        for key in K::ALL {
+            assert!(
+                SCRIPT_KEYS.iter().any(|(_, script)| *script == key),
+                "{key:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn hello_remote_example_moves_the_block_while_an_arrow_key_is_held() {
+        let (mut world, mut scripts) = start_example("hello-remote");
+        let mover = world.find_first_child(world.workspace(), "Mover").unwrap();
+        let start = position_of(&world, "Mover");
+        let mut physics = Physics::new();
+        let mut frame = |world: &mut World, keys: &[KeyEvent]| {
+            scripts.input(world, keys);
+            scripts.step(world, 1.0 / 60.0);
+            physics.step(world, 1.0 / 60.0);
+            let touches = physics.take_touches();
+            scripts.fire_touched(world, &touches);
+        };
+        // Hold Right for one second: the LocalScript sends the direction
+        // every frame, and the Script moves the block 12 studs a second.
+        let right = axcenity_core::KeyCode::Right;
+        frame(
+            &mut world,
+            &[KeyEvent {
+                key: right,
+                pressed: true,
+            }],
+        );
+        for _ in 0..59 {
+            frame(&mut world, &[]);
+        }
+        frame(
+            &mut world,
+            &[KeyEvent {
+                key: right,
+                pressed: false,
+            }],
+        );
+        let moved = position_of(&world, "Mover");
+        assert!(
+            (moved.x - start.x - 12.0).abs() < 0.5,
+            "{start:?} -> {moved:?}"
+        );
+        assert_eq!((moved.y, moved.z), (start.y, start.z));
+        // Let go: it stays put.
+        for _ in 0..30 {
+            frame(&mut world, &[]);
+        }
+        assert_eq!(position_of(&world, "Mover"), moved);
+        assert!(world.contains(mover));
+        let errors: Vec<String> = scripts
+            .take_output()
+            .into_iter()
+            .filter(|line| line.kind == OutputKind::Error)
+            .map(|line| line.text)
+            .collect();
+        assert!(errors.is_empty(), "{errors:?}");
+    }
 
     #[test]
     fn keys_are_recorded_and_released() {

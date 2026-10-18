@@ -46,6 +46,11 @@ fn instance_library(lua: &Lua) -> mlua::Result<Table> {
             let class = ClassName::from_name(&class_name).ok_or_else(|| {
                 mlua::Error::runtime(format!("there is no class named \"{class_name}\""))
             })?;
+            if class == ClassName::Player {
+                return Err(mlua::Error::runtime(
+                    "a Player is made by the engine when someone joins, not with Instance.new",
+                ));
+            }
             let id = world_mut(lua)?
                 .create(class)
                 .map_err(mlua::Error::runtime)?;

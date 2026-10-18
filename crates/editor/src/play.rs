@@ -9,13 +9,15 @@
 //! go back to editing instead of closing.
 
 use std::any::Any;
+use std::collections::BTreeSet;
 use std::panic::{self, AssertUnwindSafe};
 use std::path::Path;
 
-use axcenity_core::World;
+use axcenity_core::{KeyCode, World};
 use axcenity_physics::Physics;
 use axcenity_project::ScriptFile;
-use axcenity_script::{OutputKind, ScriptRuntime};
+use axcenity_script::{CameraState, KeyEvent, OutputKind, ScriptRuntime};
+use eframe::egui;
 
 use crate::output::Output;
 
@@ -34,8 +36,9 @@ pub struct Session {
 }
 
 impl Session {
-    /// Copies `edit_world` and starts every script in it, in path order, the
-    /// same way the player does. Script output and errors go to `output`.
+    /// Copies `edit_world` and starts every script in it, in the order given
+    /// (Scripts, then LocalScripts, as the project lists them), the same way
+    /// the player does. Script output and errors go to `output`.
     pub fn start(
         edit_world: &World,
         scripts: &[ScriptFile],
@@ -71,15 +74,29 @@ impl Session {
         self.panic_next_frame = true;
     }
 
-    /// Runs one frame of the game, `seconds` long: steps 2 to 4 of the fixed
-    /// frame order in `docs/architecture.md`. The editor's viewport draws the
-    /// result (step 6) afterward.
-    pub fn frame(&mut self, seconds: f64, output: &mut Output) -> Result<(), Crash> {
+    /// Runs one frame of the game, `seconds` long: steps 1 to 4 of the fixed
+    /// frame order in `docs/architecture.md`, with the keys pressed and
+    /// released since the last frame and the viewport's camera. The
+    /// editor's viewport draws the result (step 6) afterward. Returns where
+    /// a LocalScript moved the camera, if one did.
+    pub fn frame(
+        &mut self,
+        seconds: f64,
+        keys: &[KeyEvent],
+        camera: CameraState,
+        output: &mut Output,
+    ) -> Result<Option<CameraState>, Crash> {
+        let mut moved = None;
         guard(|| {
             if self.panic_next_frame {
                 panic!("a deliberate engine panic, from Debug > Panic during Play");
             }
-            // 2. Resume scripts whose wait is over (and due `task.delay`s).
+            // 1. Input, for LocalScripts: the camera and the keys.
+            self.scripts.set_camera(camera);
+            self.scripts.input(&mut self.world, keys);
+            self.forward_output(output);
+            // 2. Resume scripts whose wait is over (and due `task.delay`s),
+            //    after delivering RemoteEvent messages.
             self.scripts.step(&mut self.world, seconds);
             self.forward_output(output);
             // 3. Step physics at a fixed 60 Hz (0 to N steps this frame).
@@ -88,7 +105,9 @@ impl Session {
             let touches = self.physics.take_touches();
             self.scripts.fire_touched(&mut self.world, &touches);
             self.forward_output(output);
-        })
+            moved = self.scripts.take_camera_move();
+        })?;
+        Ok(moved)
     }
 
     /// Moves what scripts printed, and their errors, into the Output panel.
@@ -100,6 +119,131 @@ impl Session {
             }
         }
     }
+}
+
+/// Turns the editor's keyboard events into key presses for LocalScripts
+/// during Play.
+#[derive(Default)]
+pub struct GameKeys {
+    held: BTreeSet<KeyCode>,
+    /// Shift, Ctrl and Alt as last seen. egui reports them as modifiers, not
+    /// keys, so a change in them is a press or release of the left one.
+    modifiers: egui::Modifiers,
+}
+
+impl GameKeys {
+    /// The presses and releases in this frame's `events`. While `typing`
+    /// (a text box has the keyboard), or when the window lost focus, every
+    /// held key is let go and new presses are ignored.
+    pub fn read(
+        &mut self,
+        events: &[egui::Event],
+        modifiers: egui::Modifiers,
+        focused: bool,
+        typing: bool,
+    ) -> Vec<KeyEvent> {
+        let mut keys = Vec::new();
+        if typing || !focused {
+            for key in std::mem::take(&mut self.held) {
+                keys.push(KeyEvent {
+                    key,
+                    pressed: false,
+                });
+            }
+            self.modifiers = egui::Modifiers::NONE;
+            return keys;
+        }
+        let mut change = |key: KeyCode, pressed: bool| {
+            let changed = if pressed {
+                self.held.insert(key)
+            } else {
+                self.held.remove(&key)
+            };
+            if changed {
+                keys.push(KeyEvent { key, pressed });
+            }
+        };
+        let was = self.modifiers;
+        for (key, before, now) in [
+            (KeyCode::LeftShift, was.shift, modifiers.shift),
+            (KeyCode::LeftControl, was.ctrl, modifiers.ctrl),
+            (KeyCode::LeftAlt, was.alt, modifiers.alt),
+        ] {
+            if before != now {
+                change(key, now);
+            }
+        }
+        self.modifiers = modifiers;
+        for event in events {
+            if let egui::Event::Key {
+                key,
+                physical_key,
+                pressed,
+                ..
+            } = event
+                // The key's place on the keyboard, like the player, when known.
+                && let Some(key) = script_key(physical_key.unwrap_or(*key))
+            {
+                change(key, *pressed);
+            }
+        }
+        keys
+    }
+}
+
+/// The key scripts know as `Enum.KeyCode.<name>` for an egui key, if it's
+/// one they can see. Shift, Ctrl and Alt come from the modifiers instead.
+fn script_key(key: egui::Key) -> Option<KeyCode> {
+    use egui::Key as E;
+    let key = match key {
+        E::A => KeyCode::A,
+        E::B => KeyCode::B,
+        E::C => KeyCode::C,
+        E::D => KeyCode::D,
+        E::E => KeyCode::E,
+        E::F => KeyCode::F,
+        E::G => KeyCode::G,
+        E::H => KeyCode::H,
+        E::I => KeyCode::I,
+        E::J => KeyCode::J,
+        E::K => KeyCode::K,
+        E::L => KeyCode::L,
+        E::M => KeyCode::M,
+        E::N => KeyCode::N,
+        E::O => KeyCode::O,
+        E::P => KeyCode::P,
+        E::Q => KeyCode::Q,
+        E::R => KeyCode::R,
+        E::S => KeyCode::S,
+        E::T => KeyCode::T,
+        E::U => KeyCode::U,
+        E::V => KeyCode::V,
+        E::W => KeyCode::W,
+        E::X => KeyCode::X,
+        E::Y => KeyCode::Y,
+        E::Z => KeyCode::Z,
+        E::Num0 => KeyCode::Zero,
+        E::Num1 => KeyCode::One,
+        E::Num2 => KeyCode::Two,
+        E::Num3 => KeyCode::Three,
+        E::Num4 => KeyCode::Four,
+        E::Num5 => KeyCode::Five,
+        E::Num6 => KeyCode::Six,
+        E::Num7 => KeyCode::Seven,
+        E::Num8 => KeyCode::Eight,
+        E::Num9 => KeyCode::Nine,
+        E::Space => KeyCode::Space,
+        E::Enter => KeyCode::Return,
+        E::Escape => KeyCode::Escape,
+        E::Tab => KeyCode::Tab,
+        E::Backspace => KeyCode::Backspace,
+        E::ArrowUp => KeyCode::Up,
+        E::ArrowDown => KeyCode::Down,
+        E::ArrowLeft => KeyCode::Left,
+        E::ArrowRight => KeyCode::Right,
+        _ => return None,
+    };
+    Some(key)
 }
 
 /// Runs `f`, catching a panic inside it and returning its message instead.
@@ -186,7 +330,9 @@ mod tests {
         let mut output = Output::default();
         let mut session = Session::start(&world, &scripts, &mut output).unwrap();
         for _ in 0..90 {
-            session.frame(1.0 / 60.0, &mut output).unwrap();
+            session
+                .frame(1.0 / 60.0, &[], CameraState::default(), &mut output)
+                .unwrap();
         }
         let line = output.lines().last().unwrap();
         assert_eq!(line.kind, crate::output::OutputKind::Error);
@@ -197,12 +343,91 @@ mod tests {
     fn a_panic_in_a_frame_is_caught_with_its_message() {
         let mut output = Output::default();
         let mut session = Session::start(&World::new(), &[], &mut output).unwrap();
-        session.frame(1.0 / 60.0, &mut output).unwrap();
+        let camera = CameraState::default();
+        session.frame(1.0 / 60.0, &[], camera, &mut output).unwrap();
         session.panic_next_frame();
-        let crash = session.frame(1.0 / 60.0, &mut output).unwrap_err();
+        let crash = session
+            .frame(1.0 / 60.0, &[], camera, &mut output)
+            .unwrap_err();
         assert!(crash.0.contains("deliberate engine panic"), "{crash:?}");
         // Formatted messages carry a `String`, which is read too.
         let crash = guard(|| panic!("{} went wrong", "this")).unwrap_err();
         assert_eq!(crash.0, "this went wrong");
+    }
+
+    fn key(key: egui::Key, pressed: bool) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn game_keys_report_presses_releases_and_modifiers_once() {
+        let mut keys = GameKeys::default();
+        let none = egui::Modifiers::NONE;
+        let pressed = keys.read(
+            &[
+                key(egui::Key::ArrowRight, true),
+                // Held keys repeat; that isn't a new press.
+                key(egui::Key::ArrowRight, true),
+                key(egui::Key::F1, true),
+            ],
+            egui::Modifiers::SHIFT,
+            true,
+            false,
+        );
+        let event = |key, pressed| KeyEvent { key, pressed };
+        assert_eq!(
+            pressed,
+            [event(KeyCode::LeftShift, true), event(KeyCode::Right, true)]
+        );
+        // Typing in a script tab lets go of everything.
+        let typing = keys.read(&[key(egui::Key::A, true)], none, true, true);
+        assert_eq!(
+            typing,
+            [
+                event(KeyCode::Right, false),
+                event(KeyCode::LeftShift, false)
+            ]
+        );
+        assert_eq!(keys.read(&[], none, true, false), []);
+    }
+
+    #[test]
+    fn a_local_script_in_play_reads_keys_and_moves_the_camera() {
+        let mut world = World::new();
+        let instance = world.create(ClassName::LocalScript).unwrap();
+        world
+            .set_parent(instance, Some(world.starter_player_scripts()))
+            .unwrap();
+        let scripts = [ScriptFile {
+            instance,
+            path: "scripts/keys.client.lua".to_string(),
+            source: r#"
+                game:GetService("UserInputService").InputBegan:Connect(function(input)
+                    print(input.KeyCode.Name)
+                    workspace.CurrentCamera.Position = Vector3.new(0, 50, 0)
+                end)
+            "#
+            .to_string(),
+        }];
+        let mut output = Output::default();
+        let mut session = Session::start(&world, &scripts, &mut output).unwrap();
+        let space = KeyEvent {
+            key: KeyCode::Space,
+            pressed: true,
+        };
+        let moved = session
+            .frame(1.0 / 60.0, &[space], CameraState::default(), &mut output)
+            .unwrap();
+        assert_eq!(output.lines().last().unwrap().text, "Space");
+        assert_eq!(
+            moved.map(|camera| camera.position),
+            Some(axcenity_core::Vector3::new(0.0, 50.0, 0.0))
+        );
     }
 }

@@ -159,6 +159,21 @@ impl Viewport {
         self.camera.focus()
     }
 
+    /// Where the camera is and which way it looks (degrees, like a Part's
+    /// Orientation), for `workspace.CurrentCamera` during Play.
+    pub fn camera_view(&self) -> (axcenity_core::Vector3, axcenity_core::Vector3) {
+        self.camera.view()
+    }
+
+    /// Moves the camera where a LocalScript put it during Play.
+    pub fn set_camera_view(
+        &mut self,
+        position: axcenity_core::Vector3,
+        orientation: axcenity_core::Vector3,
+    ) {
+        self.camera.set_view(position, orientation);
+    }
+
     /// Points the camera at `target` from `position`.
     #[cfg(test)]
     pub fn look_at(&mut self, position: Vec3, target: Vec3) {

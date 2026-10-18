@@ -30,6 +30,28 @@
 ---@class EnumItem
 ---@field Name string The item's name, such as `"Neon"`.
 
+---The player's keyboard, from `game:GetService("UserInputService")`. LocalScripts only.
+---@class UserInputService
+---@field InputBegan Signal Fires when a key goes down. The handler gets an InputObject and `gameProcessedEvent` (always false for now): `function(input, gameProcessedEvent) ... end`.
+---@field InputEnded Signal Fires when a key comes back up, with the same arguments as InputBegan.
+local UserInputServiceClass = {}
+
+---True while `key` is held down, such as `Enum.KeyCode.W`.
+---@param key EnumItem.KeyCode
+---@return boolean
+function UserInputServiceClass:IsKeyDown(key) end
+
+
+---One key going down or up, as `InputBegan` and `InputEnded` handlers get it.
+---@class InputObject
+---@field KeyCode EnumItem.KeyCode Which key, such as `Enum.KeyCode.W`.
+
+---What the player sees through, `workspace.CurrentCamera`. LocalScripts only. Setting Position or Orientation moves the view; the player can still fly on from there.
+---@class Camera
+---@field Position Vector3 Where the camera is, in studs.
+---@field Orientation Vector3 Which way it looks, in degrees like a Part's: X looks up (positive) and down, Y turns left (positive) and right. Z is ignored.
+---@field LookVector Vector3 The direction the camera looks in, one stud long. Read-only.
+
 -- Enums ---------------------------------------------------------------------
 
 ---@class EnumItem.Material: EnumItem
@@ -50,10 +72,67 @@
 ---@field Cylinder EnumItem.PartType
 ---@field Wedge EnumItem.PartType
 
----Every enum, such as `Enum.Material` and `Enum.PartType`.
+---@class EnumItem.KeyCode: EnumItem
+
+---The choices of `Enum.KeyCode`.
+---@class Enum.KeyCode
+---@field A EnumItem.KeyCode
+---@field B EnumItem.KeyCode
+---@field C EnumItem.KeyCode
+---@field D EnumItem.KeyCode
+---@field E EnumItem.KeyCode
+---@field F EnumItem.KeyCode
+---@field G EnumItem.KeyCode
+---@field H EnumItem.KeyCode
+---@field I EnumItem.KeyCode
+---@field J EnumItem.KeyCode
+---@field K EnumItem.KeyCode
+---@field L EnumItem.KeyCode
+---@field M EnumItem.KeyCode
+---@field N EnumItem.KeyCode
+---@field O EnumItem.KeyCode
+---@field P EnumItem.KeyCode
+---@field Q EnumItem.KeyCode
+---@field R EnumItem.KeyCode
+---@field S EnumItem.KeyCode
+---@field T EnumItem.KeyCode
+---@field U EnumItem.KeyCode
+---@field V EnumItem.KeyCode
+---@field W EnumItem.KeyCode
+---@field X EnumItem.KeyCode
+---@field Y EnumItem.KeyCode
+---@field Z EnumItem.KeyCode
+---@field Zero EnumItem.KeyCode
+---@field One EnumItem.KeyCode
+---@field Two EnumItem.KeyCode
+---@field Three EnumItem.KeyCode
+---@field Four EnumItem.KeyCode
+---@field Five EnumItem.KeyCode
+---@field Six EnumItem.KeyCode
+---@field Seven EnumItem.KeyCode
+---@field Eight EnumItem.KeyCode
+---@field Nine EnumItem.KeyCode
+---@field Space EnumItem.KeyCode
+---@field Return EnumItem.KeyCode
+---@field Escape EnumItem.KeyCode
+---@field Tab EnumItem.KeyCode
+---@field Backspace EnumItem.KeyCode
+---@field Up EnumItem.KeyCode
+---@field Down EnumItem.KeyCode
+---@field Left EnumItem.KeyCode
+---@field Right EnumItem.KeyCode
+---@field LeftShift EnumItem.KeyCode
+---@field RightShift EnumItem.KeyCode
+---@field LeftControl EnumItem.KeyCode
+---@field RightControl EnumItem.KeyCode
+---@field LeftAlt EnumItem.KeyCode
+---@field RightAlt EnumItem.KeyCode
+
+---Every enum, such as `Enum.Material`, `Enum.PartType` and `Enum.KeyCode`.
 ---@class EnumLibrary
 ---@field Material Enum.Material
 ---@field PartType Enum.PartType
+---@field KeyCode Enum.KeyCode
 
 -- Instances -----------------------------------------------------------------
 
@@ -92,13 +171,38 @@ function ConnectionClass:Disconnect() end
 ---The root of the game, called `game` in scripts.
 ---@class DataModel: Instance
 ---@field Workspace Workspace The service that holds the 3D world. Parts inside it are drawn.
+---@field Players Players The service with a Player for everyone in the game.
+---@field ReplicatedStorage ReplicatedStorage The service for things Scripts and LocalScripts share, such as RemoteEvents.
 ---@field ServerScriptService ServerScriptService The service that holds server scripts (`scripts/*.server.lua`).
+---@field StarterPlayer StarterPlayer The service with what each player starts with, such as StarterPlayerScripts.
+---@field UserInputService UserInputService The player's keyboard (same as `game:GetService("UserInputService")`). LocalScripts only.
+local DataModelClass = {}
+
+---The service with this class name, such as `"Players"` or `"UserInputService"`.
+---@param className string
+---@return Instance
+function DataModelClass:GetService(className) end
+
 
 ---The service that holds the 3D world. Parts inside it are drawn.
 ---@class Workspace: Instance
+---@field CurrentCamera Camera The camera the player sees through. LocalScripts only.
+
+---The service with a Player for everyone in the game.
+---@class Players: Instance
+---@field LocalPlayer Player The player on this device. LocalScripts only.
+
+---The service for things Scripts and LocalScripts share, such as RemoteEvents.
+---@class ReplicatedStorage: Instance
 
 ---The service that holds server scripts (`scripts/*.server.lua`).
 ---@class ServerScriptService: Instance
+
+---The service with what each player starts with, such as StarterPlayerScripts.
+---@class StarterPlayer: Instance
+
+---Holds the LocalScripts (`scripts/*.client.lua`), which run on the player's side.
+---@class StarterPlayerScripts: Instance
 
 ---A solid shape in the world.
 ---@class Part: Instance
@@ -116,6 +220,35 @@ function ConnectionClass:Disconnect() end
 ---Lua code that runs on the server, from a `.server.lua` file.
 ---@class Script: Instance
 
+---Lua code that runs on the player's side (input, camera), from a `.client.lua` file.
+---@class LocalScript: Instance
+
+---Carries messages between Scripts and LocalScripts. Keep it in ReplicatedStorage.
+---@class RemoteEvent: Instance
+---@field OnServerEvent Signal Fires when a LocalScript calls `FireServer`. The handler gets the Player who sent it, then the arguments: `function(player, ...) ... end`. Scripts only.
+---@field OnClientEvent Signal Fires when a Script calls `FireClient` or `FireAllClients`. The handler gets the arguments. LocalScripts only.
+local RemoteEventClass = {}
+
+---Sends the arguments to the server, where `OnServerEvent` fires with this player first. LocalScripts only.
+---@param ... any
+---@return nil
+function RemoteEventClass:FireServer(...) end
+
+---Sends the arguments to one player, where `OnClientEvent` fires. Scripts only.
+---@param player Player
+---@param ... any
+---@return nil
+function RemoteEventClass:FireClient(player, ...) end
+
+---Sends the arguments to every player, where `OnClientEvent` fires. Scripts only.
+---@param ... any
+---@return nil
+function RemoteEventClass:FireAllClients(...) end
+
+
+---Someone playing the game, in Players. Made when they join.
+---@class Player: Instance
+
 ---Groups the parts of one thing, such as a car or a house.
 ---@class Model: Instance
 
@@ -132,11 +265,11 @@ game = nil
 ---@type Workspace
 workspace = nil
 
----The Script that is running this code.
----@type Script
+---The Script or LocalScript that is running this code.
+---@type Script|LocalScript
 script = nil
 
----Every enum, such as `Enum.Material` and `Enum.PartType`.
+---Every enum, such as `Enum.Material`, `Enum.PartType` and `Enum.KeyCode`.
 ---@type EnumLibrary
 Enum = nil
 
@@ -149,6 +282,8 @@ Instance = {}
 ---@return Instance
 ---@overload fun(className: "Part"): Part
 ---@overload fun(className: "Script"): Script
+---@overload fun(className: "LocalScript"): LocalScript
+---@overload fun(className: "RemoteEvent"): RemoteEvent
 ---@overload fun(className: "Model"): Model
 ---@overload fun(className: "Folder"): Folder
 function Instance.new(className) end

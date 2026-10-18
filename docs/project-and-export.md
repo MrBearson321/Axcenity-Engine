@@ -17,6 +17,7 @@ my-game/
   axcenity.json   { "name": "My Game", "format_version": 1 }
   world.json      the Workspace and its descendants
   scripts/        server scripts: build.server.lua, doors/open.server.lua, ...
+                  client scripts: keys.client.lua, ...
 ```
 
 `world.json`:
@@ -30,9 +31,14 @@ my-game/
         "properties": { "Position": [0, 1, 0], "Color": [0.8, 0.2, 0.2] },
         "children": [] }
     ]
+  },
+  "replicated_storage": {
+    "children": [ { "class": "RemoteEvent", "name": "MoveRequest" } ]
   }
 }
 ```
+
+- **ReplicatedStorage** (decided in Phase 14, chosen by the developer): the optional `replicated_storage` section is written like `workspace`, and only when it has something in it, so older files and their saved text stay the same. `format_version` stays 1: older engines would reject the new field, but no older engine is in use. These two services are the only saved ones; Players (made at Play) and scripts are never in the file. A `LocalScript` or `Player` listed in the file is an error.
 
 - Property values are plain JSON, and the property's type decides how they're read: `Vector3` and `Color3` are `[a, b, c]`, numbers are numbers, and enum items are strings (`"Shape": "Ball"`, `"Material": "Neon"`). `Color3` is sRGB from 0 to 1.
 - Left-out properties keep their defaults. Note `Anchored` defaults to `false`, so a floor or wall left without `"Anchored": true` falls. `name` defaults to the class name. Unknown fields, classes or properties are errors, not silently ignored.
@@ -40,6 +46,7 @@ my-game/
 - `Material` is applied before the other properties wherever it appears in the file, because choosing a material resets `Metalness` and `Roughness` to its preset.
 - Saving (`project::save_world`) writes every property, sorted by name, with numbers in their shortest exact form. Loading and saving again always gives the same text. Writing every property, rather than only the changed ones, means a saved world keeps its look even if a default changes later. `examples/primitives` shows the saved layout.
 - **Scripts** (decided in Phase 4): every `scripts/**/*.server.lua` becomes a `Script` in `ServerScriptService`, named after the file without `.server.lua`, and scripts start in path order. Subfolders only organize files for now; all Scripts sit directly in `ServerScriptService`. (The Folder class exists since Phase 11, but script subfolders don't turn into Folders yet.) Scripts never appear in `world.json` (loading one there is an error, and saving leaves them out). Putting a script inside a part can be added later as a world-file reference without breaking this layout.
+- **Client scripts** (Phase 14): every `scripts/**/*.client.lua` becomes a `LocalScript` in `StarterPlayer.StarterPlayerScripts`, named the same way. `project.scripts` lists Scripts first, then LocalScripts, each by path (`script_order`), which is the order they start in. `script_class(path)`, `script_suffix(class)`, `script_service(world, class)` and `script_path(name, class)` pick the right ending and service.
 - **Script files** (Phase 13): `project::create_script` (never replaces a file, not even one differing only in capitals on Windows and macOS), `write_script` (through a `.saving` temporary file, like `save_world`), `rename_script` (same folder, refuses to replace another file) and `delete_script`. `check_script_name` applies Windows file name rules on every OS, so projects open everywhere.
 - `format_version` appears in both files. The engine refuses newer versions with a "please update" message.
 - Errors name the file and, for JSON syntax problems, the line and column. For bad property values they name the Instance path (for example `Workspace.Block.Color`).

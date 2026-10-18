@@ -13,6 +13,7 @@ pub enum Insertable {
     Part(PartType),
     Model,
     Folder,
+    RemoteEvent,
 }
 
 impl Insertable {
@@ -35,6 +36,7 @@ impl Insertable {
             Insertable::Part(PartType::Wedge) => "Wedge",
             Insertable::Model => "Model",
             Insertable::Folder => "Folder",
+            Insertable::RemoteEvent => "RemoteEvent",
         }
     }
 
@@ -43,6 +45,7 @@ impl Insertable {
             Insertable::Part(_) => ClassName::Part,
             Insertable::Model => ClassName::Model,
             Insertable::Folder => ClassName::Folder,
+            Insertable::RemoteEvent => ClassName::RemoteEvent,
         }
     }
 }
@@ -79,17 +82,29 @@ pub fn create(world: &mut World, what: Insertable, position: Vector3) -> Instanc
     id
 }
 
-/// Where a new Instance goes: into `near` if it's a Model or Folder in the
-/// Workspace, otherwise into the Workspace itself.
-pub fn insert_parent(world: &World, near: Option<InstanceId>) -> InstanceId {
-    let workspace = world.workspace();
+/// Where a new `what` goes: into `near` if it's ReplicatedStorage, or a
+/// Model or Folder in a place that's saved (see [`is_saved`]). Otherwise a
+/// RemoteEvent goes into ReplicatedStorage (where both sides find it, as in
+/// Roblox), and anything else into the Workspace.
+pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) -> InstanceId {
+    let default = match what {
+        Insertable::RemoteEvent => world.replicated_storage(),
+        _ => world.workspace(),
+    };
     near.filter(|&id| {
         let is_group = world.get(id).is_some_and(|instance| {
             matches!(instance.class(), ClassName::Model | ClassName::Folder)
         });
-        is_group && world.is_descendant_of(id, workspace)
+        id == world.replicated_storage() || (is_group && is_saved(world, id))
     })
-    .unwrap_or(workspace)
+    .unwrap_or(default)
+}
+
+/// True if `id` is in the Workspace or ReplicatedStorage: the only places
+/// the world file saves.
+pub fn is_saved(world: &World, id: InstanceId) -> bool {
+    world.is_descendant_of(id, world.workspace())
+        || world.is_descendant_of(id, world.replicated_storage())
 }
 
 /// A name that none of `parent`'s children has: `wanted` itself if it's
@@ -118,13 +133,18 @@ pub fn check_editable(world: &World, id: InstanceId) -> Result<(), &'static str>
     if instance.class().is_service() {
         return Err("Services are always there, so they can't be deleted, copied or moved.");
     }
-    if instance.class() == ClassName::Script {
-        // A Script is its `.server.lua` file, which always sits in
-        // ServerScriptService; copying it would mean copying the file.
-        return Err("Scripts can't be copied or moved yet. Insert a new Script instead.");
+    if instance.class().is_script() {
+        // A script is its `.lua` file, and its Instance always sits in its
+        // service; copying it would mean copying the file.
+        return Err("Scripts can't be copied or moved yet. Insert a new one instead.");
     }
-    if !world.is_descendant_of(id, world.workspace()) {
-        return Err("Only things in the Workspace are saved, so only those can be changed.");
+    if instance.class() == ClassName::Player {
+        return Err("Players only exist while the game runs.");
+    }
+    if !is_saved(world, id) {
+        return Err(
+            "Only things in the Workspace and ReplicatedStorage are saved, so only those can be changed.",
+        );
     }
     Ok(())
 }
@@ -133,7 +153,7 @@ pub fn check_editable(world: &World, id: InstanceId) -> Result<(), &'static str>
 /// [`check_editable`]: deleting one deletes its file.
 pub fn check_delete(world: &World, id: InstanceId) -> Result<(), &'static str> {
     match world.get(id) {
-        Some(instance) if instance.class() == ClassName::Script => Ok(()),
+        Some(instance) if instance.class().is_script() => Ok(()),
         _ => check_editable(world, id),
     }
 }
@@ -144,10 +164,12 @@ pub fn check_move(world: &World, id: InstanceId, parent: InstanceId) -> Result<(
     if parent == id || world.is_descendant_of(parent, id) {
         return Err("Something can't go inside itself.");
     }
-    let workspace = world.workspace();
-    if parent != workspace && !world.is_descendant_of(parent, workspace) {
-        // The world file only holds the Workspace, so it would be lost on saving.
-        return Err("Only things in the Workspace are saved, so it has to stay in there.");
+    let saved_service = parent == world.workspace() || parent == world.replicated_storage();
+    if !saved_service && !is_saved(world, parent) {
+        // The world file only holds those two, so it would be lost on saving.
+        return Err(
+            "Only things in the Workspace and ReplicatedStorage are saved, so it has to stay in one of them.",
+        );
     }
     Ok(())
 }
@@ -210,14 +232,34 @@ mod tests {
         let folder = child(&mut world, workspace, ClassName::Folder, "Folder");
         let model = child(&mut world, folder, ClassName::Model, "Model");
         let part = child(&mut world, model, ClassName::Part, "Part");
-        assert_eq!(insert_parent(&world, Some(folder)), folder);
-        assert_eq!(insert_parent(&world, Some(model)), model);
-        assert_eq!(insert_parent(&world, Some(part)), workspace);
-        assert_eq!(insert_parent(&world, None), workspace);
-        assert_eq!(insert_parent(&world, Some(world.root())), workspace);
-        // A Folder outside the Workspace wouldn't be saved.
+        let block = Insertable::Part(PartType::Block);
+        assert_eq!(insert_parent(&world, Some(folder), block), folder);
+        assert_eq!(insert_parent(&world, Some(model), block), model);
+        assert_eq!(insert_parent(&world, Some(part), block), workspace);
+        assert_eq!(insert_parent(&world, None, block), workspace);
+        assert_eq!(insert_parent(&world, Some(world.root()), block), workspace);
+        // A Folder outside the saved places wouldn't be saved.
         let loose = world.create(ClassName::Folder).unwrap();
-        assert_eq!(insert_parent(&world, Some(loose)), workspace);
+        assert_eq!(insert_parent(&world, Some(loose), block), workspace);
+    }
+
+    #[test]
+    fn remote_events_go_into_replicated_storage_unless_a_group_is_selected() {
+        let mut world = World::new();
+        let storage = world.replicated_storage();
+        let remote = Insertable::RemoteEvent;
+        assert_eq!(insert_parent(&world, None, remote), storage);
+        assert_eq!(
+            insert_parent(&world, Some(world.workspace()), remote),
+            storage
+        );
+        let remotes = child(&mut world, storage, ClassName::Folder, "Remotes");
+        assert_eq!(insert_parent(&world, Some(remotes), remote), remotes);
+        // Right-clicking ReplicatedStorage inserts anything there.
+        let folder = Insertable::Folder;
+        assert_eq!(insert_parent(&world, Some(storage), folder), storage);
+        let id = create(&mut world, remote, Vector3::new(0.0, 0.0, 0.0));
+        assert_eq!(world.get(id).unwrap().class(), ClassName::RemoteEvent);
     }
 
     #[test]
@@ -237,6 +279,12 @@ mod tests {
         assert!(check_move(&world, model, world.server_script_service()).is_err());
         assert!(check_move(&world, model, world.root()).is_err());
         assert!(check_move(&world, workspace, other).is_err());
+        // ReplicatedStorage is saved too.
+        let storage = world.replicated_storage();
+        assert_eq!(check_move(&world, model, storage), Ok(()));
+        let remotes = child(&mut world, storage, ClassName::Folder, "Remotes");
+        assert_eq!(check_move(&world, wheel, remotes), Ok(()));
+        assert_eq!(check_editable(&world, remotes), Ok(()));
     }
 
     #[test]
@@ -244,13 +292,24 @@ mod tests {
         let mut world = World::new();
         let script_service = world.server_script_service();
         let script = child(&mut world, script_service, ClassName::Script, "door");
-        for id in [world.root(), world.workspace(), script_service, script] {
+        let client = world.starter_player_scripts();
+        let local_script = child(&mut world, client, ClassName::LocalScript, "keys");
+        let services = [
+            world.root(),
+            world.workspace(),
+            world.players(),
+            world.replicated_storage(),
+            script_service,
+            client,
+        ];
+        for id in services.into_iter().chain([script, local_script]) {
             assert!(check_editable(&world, id).is_err());
         }
-        for id in [world.root(), world.workspace(), script_service] {
+        for id in services {
             assert!(check_delete(&world, id).is_err());
         }
         assert_eq!(check_delete(&world, script), Ok(()));
+        assert_eq!(check_delete(&world, local_script), Ok(()));
         let workspace = world.workspace();
         let part = child(&mut world, workspace, ClassName::Part, "Part");
         assert_eq!(check_editable(&world, part), Ok(()));

@@ -1,0 +1,32 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Anchored": true,
+          "Position": [0, -0.5, 0],
+          "Size": [40, 1, 40],
+          "Color": [0.35, 0.37, 0.4]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Mover",
+        "properties": {
+          "Anchored": true,
+          "Position": [0, 1, 0],
+          "Size": [2, 2, 2],
+          "Color": [0.2, 0.45, 0.95]
+        }
+      }
+    ]
+  },
+  "replicated_storage": {
+    "children": [
+      { "class": "RemoteEvent", "name": "MoveRequest" }
+    ]
+  }
+}

@@ -9,6 +9,7 @@
 //! No windowing code lives here: the player (winit) and the editor (egui)
 //! each turn their own key and mouse events into calls on [`FlyCamera`].
 
+use axcenity_core::Vector3;
 use axcenity_render::Camera;
 use axcenity_render::glam::Vec3;
 
@@ -160,6 +161,28 @@ impl FlyCamera {
         self.position += direction * speed * seconds;
     }
 
+    /// Where the camera is and which way it looks, in a Part's terms, for
+    /// `workspace.CurrentCamera`: the position, and the orientation in
+    /// degrees (X looks up and down, Y turns; there's no roll). Y stays
+    /// between -180 and 180, however many times the camera has turned.
+    pub fn view(&self) -> (Vector3, Vector3) {
+        let yaw = (self.yaw.to_degrees() + 180.0).rem_euclid(360.0) - 180.0;
+        let p = self.position;
+        (
+            Vector3::new(p.x, p.y, p.z),
+            Vector3::new(self.pitch.to_degrees(), yaw, 0.0),
+        )
+    }
+
+    /// Moves the camera to `position`, looking the way `orientation` says
+    /// (in the same terms as [`Self::view`]; Z is ignored). The pitch stops
+    /// just short of straight up or down, like mouse look.
+    pub fn set_view(&mut self, position: Vector3, orientation: Vector3) {
+        self.position = Vec3::new(position.x, position.y, position.z);
+        self.pitch = orientation.x.to_radians().clamp(-MAX_PITCH, MAX_PITCH);
+        self.yaw = orientation.y.to_radians();
+    }
+
     /// The camera as the renderer needs it.
     pub fn to_render_camera(self) -> Camera {
         Camera {
@@ -183,6 +206,28 @@ mod tests {
         let camera = FlyCamera::looking_at(Vec3::new(7.0, 5.0, 9.0), Vec3::ZERO);
         assert_near(camera.forward(), Vec3::new(-7.0, -5.0, -9.0).normalize());
         assert_near(camera.focus(), Vec3::ZERO);
+    }
+
+    #[test]
+    fn view_gives_degrees_like_a_part_and_set_view_puts_them_back() {
+        // Looking along -X is a quarter turn left: Y = 90.
+        let mut camera = FlyCamera::looking_at(Vec3::new(1.0, 2.0, 3.0), Vec3::new(-9.0, 2.0, 3.0));
+        let (position, orientation) = camera.view();
+        assert_eq!(position, Vector3::new(1.0, 2.0, 3.0));
+        assert!((orientation.y - 90.0).abs() < 1e-3, "{orientation:?}");
+        assert!(orientation.x.abs() < 1e-3, "{orientation:?}");
+
+        camera.set_view(Vector3::new(0.0, 10.0, 0.0), Vector3::new(-30.0, 0.0, 0.0));
+        let down = Vec3::new(
+            0.0,
+            -(30f32.to_radians().sin()),
+            -(30f32.to_radians().cos()),
+        );
+        assert_near(camera.forward(), down);
+        assert_near(camera.position, Vec3::new(0.0, 10.0, 0.0));
+        // Many turns still read between -180 and 180.
+        camera.set_view(Vector3::new(0.0, 0.0, 0.0), Vector3::new(0.0, 450.0, 0.0));
+        assert!((camera.view().1.y - 90.0).abs() < 1e-3);
     }
 
     #[test]

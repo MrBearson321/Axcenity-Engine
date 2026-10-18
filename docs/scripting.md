@@ -14,12 +14,13 @@ Read before working in the `script` or `blocks` crates, or adding anything to th
 - Clean up Roblox quirks when it helps beginners. Don't chase full compatibility.
 - Never use Roblox's name, logos or assets.
 
-## API so far (Phase 7)
+## API so far (Phase 14)
 
-- Globals: `game`, `workspace`, `script` (the running Script), `print`, `Instance.new(className)`, `Vector3.new(x, y, z)`, `Color3.new(r, g, b)`, `Color3.fromRGB(r, g, b)`, `Enum` and `task` (see Execution model).
+- Globals: `game`, `workspace`, `script` (the running Script or LocalScript), `print`, `Instance.new(className)`, `Vector3.new(x, y, z)`, `Color3.new(r, g, b)`, `Color3.fromRGB(r, g, b)`, `Enum` and `task` (see Execution model).
+- `game:GetService(name)` returns a service by class name (`Workspace`, `Players`, `ReplicatedStorage`, `ServerScriptService`, `StarterPlayer`), or `UserInputService`; a wrong name lists the choices. `Instance.new("Player")` is an error: Players are made when someone joins.
 - Instances: `Name`, `ClassName` (read-only), `Parent` (an Instance or `nil`), every property in `core`'s class table, and `:FindFirstChild(name, recursive?)`.
 - **Children by name** (decided in Phase 4): `workspace.Block` returns the first child named `Block`. Methods and properties win over children with the same name. A name that's none of these errors with `X is not a valid member of Workspace "Workspace"`.
-- **Enums** (decided in Phase 4): `Enum.Material.Neon` and `Enum.PartType.Ball`. Enum properties also accept the item's name as a string (`part.Material = "Neon"`); a wrong name errors and lists the choices. Reading always gives an enum item, which prints as `Enum.Material.Neon` and has `.Name`.
+- **Enums** (decided in Phase 4): `Enum.Material.Neon`, `Enum.PartType.Ball` and (Phase 14) `Enum.KeyCode.W`. Enum items are `LuaEnumItem { enum_type, name }` in `types.rs`; `KeyCode` isn't a property type, so it isn't a `Value`. Enum properties also accept the item's name as a string (`part.Material = "Neon"`); a wrong name errors and lists the choices. Reading always gives an enum item, which prints as `Enum.Material.Neon` and has `.Name`.
 - `Vector3`: `.X .Y .Z .Magnitude .Unit`, `+ -`, `*` and `/` by a number or another Vector3, unary `-`, `==`. Prints as `1, 2, 3`.
 - `Color3`: `.R .G .B`, `==`. `Color3.new` rejects channels outside 0 to 1 with a hint to use `fromRGB`, matching the world file's check (Roblox allows them silently).
 - Numbers are Lua 5.4 numbers, so `print(part.Position.Y)` shows `5.0`.
@@ -62,6 +63,18 @@ Each script gets its own restricted environment. Remove or replace `io`, `os` (k
 - `RemoteEvent` sends messages server ↔ client. v1 uses an **in-memory loopback transport**, so keep the transport behind a trait so a real network can replace it.
 - Client-only APIs (input, camera, local UI) error in a `Script` with a helpful message, and vice versa.
 - File naming: `*.server.lua` and `*.client.lua`.
+
+### Decided in Phase 14
+
+- **Two interpreters**: `ScriptRuntime` owns a server `Context` and a client `Context` (`crates/script/src/context.rs`), each its own `mlua::Lua`. So the sides can't share globals, library tables or even the string metatable. Both use the one `World` (lent to whichever side runs). One client: the player on this device.
+- **Where things live** (chosen by the developer, Roblox's layout): LocalScripts in `StarterPlayer.StarterPlayerScripts` (they run from there; no copying into a `PlayerScripts`), RemoteEvents usually in `ReplicatedStorage`, and a `Players` service. `StarterPlayerScripts` counts as a service (can't be moved or deleted).
+- **Start order**: Scripts first, then LocalScripts, each by path. The player **joins** (a `Player` named `Player` goes into `Players` and becomes `LocalPlayer`) just before the first LocalScript starts, or at the first frame if there are none.
+- **RemoteEvent API** (chosen by the developer, Roblox's shapes): `remote:FireServer(...)` (client), `remote:FireClient(player, ...)` and `remote:FireAllClients(...)` (server); `remote.OnServerEvent` handlers get `(player, ...)`, `remote.OnClientEvent` handlers get `(...)`. Calling with `.` instead of `:` explains to use a colon.
+- **What can be sent**: nil, booleans, numbers (whole numbers stay whole), strings, tables (nested, any keys), Vector3, Color3, enum items and Instances. A function, coroutine or other engine object is an error (Roblox silently sends nil; an error teaches more), and so is a table that contains itself. Arguments become `RemoteValue`s (plain data), so the receiver gets copies. An Instance arrives as the same Instance (one World), or nil if it was destroyed meanwhile.
+- **Delivery**: messages go into the sender's outbox, then the `Transport` (`remote.rs`: `send`, `receive(side)`; `Loopback` is two queues). In frame step 2 the server takes its messages and fires `OnServerEvent`, runs its due tasks, then the client does the same. So a key press in step 1 reaches the server in the same frame, and a server reply reaches the client in that frame too; messages sent later arrive next frame. A message with no handler connected is dropped (Roblox queues it).
+- **Input** (`client.rs`): `game:GetService("UserInputService")` (also `game.UserInputService`) with `InputBegan` / `InputEnded` (handler gets an `InputObject` with `.KeyCode`, and `gameProcessedEvent`, always false until UI exists) and `:IsKeyDown(Enum.KeyCode.X)`. Keyboard only. Keys are named by their place on a US keyboard, with Roblox's names (`Up`, `Return`, `LeftShift`, `Zero`); the host sends `KeyEvent`s with `ScriptRuntime::input` in frame step 1. A repeat of a held key isn't a new press.
+- **Camera** (chosen by the developer): `workspace.CurrentCamera` with `Position` and `Orientation` (read and set; degrees like a Part, X pitch, Y yaw, Z ignored) and `LookVector` (read). Setting moves the view, and the player can still fly on from there; no `CameraType` yet. The host passes the camera in with `set_camera` each frame and applies `take_camera_move` before drawing.
+- **Wrong side**: `sides.rs` lists every side-only API (`SIDE_ONLY_APIS`: UserInputService, CurrentCamera, LocalPlayer, FireServer, OnClientEvent on the client; FireClient, FireAllClients, OnServerEvent on the server) with a message such as "UserInputService only works in a LocalScript, because input comes from the player's keyboard. This is a Script, which runs on the server: read the input in a LocalScript, and send it to the server with a RemoteEvent's FireServer." Reading one on the wrong side raises it as `path:line:` error. The editor uses the same list for its warning badges.
 
 ## Blocks to Lua
 

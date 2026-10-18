@@ -18,6 +18,7 @@ mod play;
 mod properties;
 mod screen;
 mod scripts;
+mod side_warnings;
 mod tree;
 mod viewport;
 mod watcher;

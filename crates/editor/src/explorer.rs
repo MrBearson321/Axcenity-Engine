@@ -3,14 +3,15 @@
 //!
 //! Right-clicking a row opens a menu to insert, rename, duplicate or delete,
 //! and dragging a row onto another moves it inside that one. Double-clicking
-//! a Script opens it in a script tab. The Explorer
+//! a Script or LocalScript opens it in a script tab, and a ⚠ after one says
+//! it uses something that only works on the other side. The Explorer
 //! never changes the world itself: [`Explorer::show`] returns an [`Action`]
 //! and the app carries it out, so it's recorded for undo.
 //!
 //! [`Explorer::rows`] works out which rows are visible without any UI code,
 //! so tests can check the tree; [`Explorer::show`] only draws those rows.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use axcenity_core::{ClassName, InstanceId, World};
 use eframe::egui;
@@ -23,8 +24,24 @@ use crate::tree::{self, Insertable};
 const INDENT: f32 = 14.0;
 /// The size of the open/close arrow's clickable square, in points.
 const ARROW_SIZE: f32 = 16.0;
-/// The hover text of every "Insert Script" button and menu item.
-pub const SCRIPT_HOVER: &str = "Make a new server script in ServerScriptService, with its .server.lua file in the      project's scripts folder, and open it.";
+/// The hover text of every button and menu item that inserts a script of `class`.
+pub fn script_hover(class: ClassName) -> &'static str {
+    match class {
+        ClassName::LocalScript => {
+            "Make a new LocalScript, which runs on the player's side (keyboard, camera), in \
+             StarterPlayerScripts, with its .client.lua file in the project's scripts folder, \
+             and open it."
+        }
+        _ => {
+            "Make a new Script, which runs on the server, in ServerScriptService, with its \
+             .server.lua file in the project's scripts folder, and open it."
+        }
+    }
+}
+/// The hover text of Insert ▸ RemoteEvent.
+const REMOTE_EVENT_HOVER: &str = "Make a RemoteEvent, for sending messages between Scripts and \
+     LocalScripts. It goes in ReplicatedStorage, where both can find it, unless a Model or \
+     Folder is selected.";
 /// The outline around the row something would be dropped into: the same
 /// blue as the viewport's selection box.
 const DROP_COLOR: egui::Color32 = egui::Color32::from_rgb(25, 160, 255);
@@ -38,6 +55,9 @@ pub struct Explorer {
     scroll_to: Option<InstanceId>,
     /// The row being renamed, which shows a text box instead of its name.
     renaming: Option<Renaming>,
+    /// The hover text of the ⚠ badge after each script that uses an API
+    /// from the other side. The app fills it in each frame.
+    pub warnings: HashMap<InstanceId, String>,
     /// Where each row's name was drawn last frame, so tests can point at rows.
     #[cfg(test)]
     drawn: Vec<(InstanceId, egui::Rect)>,
@@ -60,8 +80,9 @@ pub enum Action {
         what: Insertable,
         near: Option<InstanceId>,
     },
-    /// Make a new script file and its Script in ServerScriptService.
-    InsertScript,
+    /// Make a new script file and its Script (in ServerScriptService) or
+    /// LocalScript (in StarterPlayerScripts).
+    InsertScript(ClassName),
     Rename(InstanceId, String),
     Duplicate(InstanceId),
     Delete(InstanceId),
@@ -106,6 +127,7 @@ impl Explorer {
             expanded: HashSet::from([world.root(), world.workspace()]),
             scroll_to: None,
             renaming: None,
+            warnings: HashMap::new(),
             #[cfg(test)]
             drawn: Vec::new(),
         }
@@ -267,7 +289,11 @@ impl Explorer {
                     if row.has_children && label.double_clicked() {
                         toggled = Some(row.id);
                     }
-                    if row.class == ClassName::Script && label.double_clicked() {
+                    if let Some(text) = warning_badge(&self.warnings, world, &row) {
+                        ui.colored_label(ui.visuals().warn_fg_color, "⚠")
+                            .on_hover_text(text);
+                    }
+                    if row.class.is_script() && label.double_clicked() {
                         output.open = Some(row.id);
                     }
 
@@ -307,6 +333,35 @@ impl Explorer {
         }
         output
     }
+}
+
+/// The hover text of `row`'s ⚠ badge, if it has one: its own warnings, or,
+/// on a closed branch, a pointer to the scripts inside with warnings, so
+/// they aren't hidden.
+fn warning_badge(
+    warnings: &HashMap<InstanceId, String>,
+    world: &World,
+    row: &Row,
+) -> Option<String> {
+    if let Some(text) = warnings.get(&row.id) {
+        return Some(text.clone());
+    }
+    if row.expanded {
+        return None;
+    }
+    let mut inside: Vec<&str> = warnings
+        .keys()
+        .filter(|&&id| world.is_descendant_of(id, row.id))
+        .filter_map(|&id| world.get(id).map(|script| script.name()))
+        .collect();
+    inside.sort_unstable();
+    (!inside.is_empty()).then(|| {
+        format!(
+            "Open this to see the warnings of {}: they use something that only works on the \
+             other side.",
+            inside.join(", ")
+        )
+    })
 }
 
 /// The text box a row turns into while it's renamed. Returns `None` while
@@ -388,8 +443,8 @@ fn paint_dragged_name(ui: &egui::Ui, world: &World, id: InstanceId) {
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum RowCommand {
     Insert(Insertable),
-    InsertScript,
-    /// Open a Script in a tab.
+    InsertScript(ClassName),
+    /// Open a script in a tab.
     Open,
     Rename,
     Duplicate,
@@ -406,7 +461,7 @@ impl RowCommand {
                 what,
                 near: Some(id),
             }),
-            RowCommand::InsertScript => Some(Action::InsertScript),
+            RowCommand::InsertScript(class) => Some(Action::InsertScript(class)),
             RowCommand::Open | RowCommand::Rename => None,
             RowCommand::Duplicate => Some(Action::Duplicate(id)),
             RowCommand::Delete => Some(Action::Delete(id)),
@@ -414,14 +469,14 @@ impl RowCommand {
     }
 }
 
-/// The right-click menu of `id`'s row: Open (for Scripts), Insert ▸, then
+/// The right-click menu of `id`'s row: Open (for scripts), Insert ▸, then
 /// Rename, Duplicate and Delete, greyed out (with the reason on hover) where
 /// they can't be done.
 fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowCommand> {
     let mut chosen = None;
     let is_script = world
         .get(id)
-        .is_some_and(|instance| instance.class() == ClassName::Script);
+        .is_some_and(|instance| instance.class().is_script());
     if is_script && ui.button("Open").clicked() {
         chosen = Some(RowCommand::Open);
     }
@@ -438,8 +493,22 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
             }
         }
         ui.separator();
-        if ui.button("Script").on_hover_text(SCRIPT_HOVER).clicked() {
-            chosen = Some(RowCommand::InsertScript);
+        for class in [ClassName::Script, ClassName::LocalScript] {
+            if ui
+                .button(class.as_str())
+                .on_hover_text(script_hover(class))
+                .clicked()
+            {
+                chosen = Some(RowCommand::InsertScript(class));
+            }
+        }
+        let remote = Insertable::RemoteEvent;
+        if ui
+            .button(remote.label())
+            .on_hover_text(REMOTE_EVENT_HOVER)
+            .clicked()
+        {
+            chosen = Some(RowCommand::Insert(remote));
         }
     });
     ui.separator();
@@ -514,10 +583,47 @@ mod tests {
             assert_eq!(rows[2 + i].id, child);
             assert_eq!(rows[2 + i].depth, 2);
         }
-        // ServerScriptService is closed, so its Script isn't shown.
-        let last = rows.last().unwrap();
-        assert_eq!(last.name, "ServerScriptService");
-        assert!(last.has_children && !last.expanded);
+        // The other services follow, closed, so the Script inside
+        // ServerScriptService isn't shown.
+        let services: Vec<&str> = rows[2 + workspace.children().len()..]
+            .iter()
+            .map(|row| row.name.as_str())
+            .collect();
+        assert_eq!(
+            services,
+            [
+                "Players",
+                "ReplicatedStorage",
+                "ServerScriptService",
+                "StarterPlayer"
+            ]
+        );
+        let scripts = &rows[rows.len() - 2];
+        assert!(scripts.has_children && !scripts.expanded);
+    }
+
+    #[test]
+    fn a_closed_branch_shows_the_warning_badge_of_a_script_inside() {
+        let world = demo_world();
+        let scripts = world.server_script_service();
+        let pad = world.find_first_child(scripts, "pad").unwrap();
+        let mut explorer = Explorer::new(&world);
+        explorer
+            .warnings
+            .insert(pad, "Line 1: a warning".to_string());
+        let badge = |explorer: &Explorer, id| {
+            let rows = explorer.rows(&world);
+            let row = rows.iter().find(|row| row.id == id)?;
+            warning_badge(&explorer.warnings, &world, row)
+        };
+
+        let closed = badge(&explorer, scripts).unwrap();
+        assert!(closed.contains("warnings of pad"), "{closed}");
+        assert_eq!(badge(&explorer, world.workspace()), None);
+        // Opened, the script shows its own badge, and the branch none.
+        explorer.toggle(scripts);
+        assert_eq!(badge(&explorer, scripts), None);
+        assert_eq!(badge(&explorer, pad).unwrap(), "Line 1: a warning");
     }
 
     #[test]
@@ -529,7 +635,7 @@ mod tests {
         explorer.toggle(world.server_script_service());
         let opened = outline(&explorer, &world);
         assert_eq!(opened.len(), before.len() + 1);
-        assert_eq!(opened.last().unwrap(), "    pad");
+        assert_eq!(opened[opened.len() - 2], "    pad");
 
         explorer.toggle(world.workspace());
         let parts = world.get(world.workspace()).unwrap().children().len();
@@ -558,7 +664,10 @@ mod tests {
             "  Workspace",
             "    Car",
             "      Wheel",
+            "  Players",
+            "  ReplicatedStorage",
             "  ServerScriptService",
+            "  StarterPlayer",
         ];
         assert_eq!(outline(&explorer, &world), open);
 

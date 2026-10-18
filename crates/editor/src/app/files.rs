@@ -1,9 +1,9 @@
 //! The editor and the project folder: saving, script files (insert, open,
 //! rename, delete), and reacting to files changed by other programs.
 //!
-//! Each script is its `.server.lua` file. Making, renaming or deleting a
-//! Script changes its file straight away and isn't an undo step; only the
-//! code typed in a tab waits for Save.
+//! Each script is its `.server.lua` (Script) or `.client.lua` (LocalScript)
+//! file. Making, renaming or deleting a script changes its file straight
+//! away and isn't an undo step; only the code typed in a tab waits for Save.
 //!
 //! These are more methods of [`EditorApp`]: a child module like this one can
 //! use its private fields.
@@ -11,7 +11,7 @@
 use std::io::ErrorKind;
 use std::path::Path;
 
-use axcenity_core::InstanceId;
+use axcenity_core::{ClassName, InstanceId};
 use axcenity_project::{self as project, LoadError, Project, ScriptFile};
 use eframe::egui;
 
@@ -174,7 +174,7 @@ impl EditorApp {
     }
 
     /// Adds the script at `path` (whose file has `source` in it) to the
-    /// project, with a Script for it, and returns the Script.
+    /// project, with a Script or LocalScript for it, and returns that.
     fn add_script(&mut self, path: &str, source: String) -> InstanceId {
         let instance = project::add_script_instance(&mut self.world, path);
         if let Some(project) = &mut self.project {
@@ -209,17 +209,24 @@ impl EditorApp {
         }
     }
 
-    /// Keeps the scripts, and their Scripts in ServerScriptService, in path
-    /// order: the order they start in, and the order they load in next time.
+    /// Keeps the scripts in the order they start in (and load in next
+    /// time): Scripts, then LocalScripts, each by path. Their Instances in
+    /// ServerScriptService and StarterPlayerScripts follow the same order.
     fn sort_scripts(&mut self) {
         let Some(project) = &mut self.project else {
             return;
         };
-        project.scripts.sort_by(|a, b| a.path.cmp(&b.path));
-        let service = self.world.server_script_service();
-        for (index, script) in project.scripts.iter().enumerate() {
-            // Only Scripts are in ServerScriptService in the edit world.
-            let _ = self.world.set_parent_at(script.instance, service, index);
+        project
+            .scripts
+            .sort_by(|a, b| project::script_order(&a.path).cmp(&project::script_order(&b.path)));
+        // Only scripts are in those two services in the edit world, so each
+        // script's index among its service's scripts is its child index.
+        let mut counts = std::collections::HashMap::new();
+        for script in &project.scripts {
+            let service = project::script_service(&self.world, project::script_class(&script.path));
+            let index = counts.entry(service).or_insert(0);
+            let _ = self.world.set_parent_at(script.instance, service, *index);
+            *index += 1;
         }
     }
 
@@ -249,19 +256,21 @@ impl EditorApp {
         }
     }
 
-    /// Makes a new script file, `scripts/Script.server.lua` (or `Script2`
-    /// and so on), with a Script for it, selects it and opens it.
-    pub(super) fn insert_script(&mut self) {
+    /// Makes a new script file for a script of `class`:
+    /// `scripts/Script.server.lua` for a Script, or
+    /// `scripts/LocalScript.client.lua` for a LocalScript (or `Script2` and
+    /// so on), with its Instance, then selects it and opens it.
+    pub(super) fn insert_script(&mut self, class: ClassName) {
         let Some(project) = &self.project else {
             return;
         };
         let folder = project.folder.clone();
-        let service = self.world.server_script_service();
-        for name in tree::numbered_names("Script") {
+        let service = project::script_service(&self.world, class);
+        for name in tree::numbered_names(class.as_str()) {
             if self.world.find_first_child(service, &name).is_some() {
                 continue;
             }
-            match project::create_script(&folder, &name, NEW_SCRIPT_SOURCE) {
+            match project::create_script(&folder, &name, class, NEW_SCRIPT_SOURCE) {
                 Ok(path) => {
                     let id = self.add_script(&path, NEW_SCRIPT_SOURCE.to_string());
                     // Selects it and shows it in the Explorer.
@@ -565,8 +574,8 @@ mod tests {
     fn insert_script_makes_the_file_and_the_script_together_and_opens_it() {
         let folder = copy_of_example("hello-touched", "insert-script");
         let mut app = EditorApp::new(Some(&folder));
-        app.act(Action::InsertScript);
-        app.act(Action::InsertScript);
+        app.act(Action::InsertScript(ClassName::Script));
+        app.act(Action::InsertScript(ClassName::Script));
 
         assert_eq!(script_names(&app), ["Script", "Script2", "pad"]);
         let path = "scripts/Script2.server.lua";
@@ -585,7 +594,7 @@ mod tests {
     fn editing_and_saving_a_script_writes_its_file() {
         let folder = copy_of_example("hello-touched", "edit-script");
         let mut app = EditorApp::new(Some(&folder));
-        app.act(Action::InsertScript);
+        app.act(Action::InsertScript(ClassName::Script));
         let path = "scripts/Script.server.lua";
         app.tabs.get_mut(path).unwrap().text = "print('edited here')\n".to_string();
         assert!(app.unsaved());
@@ -904,5 +913,139 @@ mod tests {
         drop(app);
         let _ = fs::remove_dir_all(&folder);
         assert_eq!(names, ["door", "pad"]);
+    }
+
+    /// The names of the Instances in `service`, in order.
+    fn names_in(app: &EditorApp, service: InstanceId) -> Vec<String> {
+        let world = &app.world;
+        world
+            .get(service)
+            .unwrap()
+            .children()
+            .iter()
+            .map(|&id| world.get(id).unwrap().name().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn insert_local_script_makes_a_client_file_in_starter_player_scripts() {
+        let folder = copy_of_example("hello-touched", "insert-local-script");
+        let mut app = EditorApp::new(Some(&folder));
+        app.act(Action::InsertScript(ClassName::LocalScript));
+
+        let path = "scripts/LocalScript.client.lua";
+        assert_eq!(
+            fs::read_to_string(folder.join(path)).unwrap(),
+            NEW_SCRIPT_SOURCE
+        );
+        let service = app.world.starter_player_scripts();
+        assert_eq!(names_in(&app, service), ["LocalScript"]);
+        let id = app.world.find_first_child(service, "LocalScript").unwrap();
+        assert_eq!(app.world.get(id).unwrap().class(), ClassName::LocalScript);
+        assert_eq!(app.tabs.active().unwrap().path, path);
+        // Server scripts still start first.
+        let paths: Vec<&str> = app
+            .project
+            .as_ref()
+            .unwrap()
+            .scripts
+            .iter()
+            .map(|s| s.path.as_str())
+            .collect();
+        assert_eq!(paths, ["scripts/pad.server.lua", path]);
+
+        // Renaming keeps it a LocalScript.
+        app.act(Action::Rename(id, "Keys".to_string()));
+        assert!(folder.join("scripts/Keys.client.lua").exists());
+        // A client file made elsewhere becomes a LocalScript too.
+        fs::write(folder.join("scripts/Camera.client.lua"), "print(1)").unwrap();
+        app.disk_changed(&["scripts/Camera.client.lua".to_string()]);
+        assert_eq!(names_in(&app, service), ["Camera", "Keys"]);
+        let _ = fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn remote_events_are_inserted_into_replicated_storage_and_saved() {
+        let folder = copy_of_example("hello-touched", "insert-remote");
+        let mut app = EditorApp::new(Some(&folder));
+        let what = crate::tree::Insertable::RemoteEvent;
+        app.act(Action::Insert { what, near: None });
+        let storage = app.world.replicated_storage();
+        assert_eq!(names_in(&app, storage), ["RemoteEvent"]);
+        assert!(app.save());
+        let saved = axcenity_project::load(&folder).unwrap();
+        let world = &saved.world;
+        let remote = world
+            .find_first_child(world.replicated_storage(), "RemoteEvent")
+            .unwrap();
+        assert_eq!(world.get(remote).unwrap().class(), ClassName::RemoteEvent);
+        // It's an ordinary undo step.
+        app.undo();
+        assert_eq!(names_in(&app, storage), Vec::<String>::new());
+        let _ = fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn a_script_using_input_gets_a_warning_badge_until_it_is_fixed() {
+        let folder = copy_of_example("hello-touched", "side-warning");
+        let mut app = EditorApp::new(Some(&folder));
+        let pad = script(&app, "pad");
+        app.update_warnings();
+        assert!(app.explorer.warnings.is_empty());
+
+        // Typed in the tab, before saving: the badge shows straight away.
+        app.open_script_instance(pad);
+        let path = "scripts/pad.server.lua";
+        app.tabs.get_mut(path).unwrap().text =
+            "print('hi')\nlocal uis = game:GetService('UserInputService')\n".to_string();
+        app.update_warnings();
+        let badge = &app.explorer.warnings[&pad];
+        assert!(
+            badge.starts_with("Line 2: UserInputService only works in a LocalScript"),
+            "{badge}"
+        );
+        assert_eq!(app.tabs.warnings[path][0].line, 2);
+
+        app.tabs.get_mut(path).unwrap().text = "print('hi')\n".to_string();
+        app.update_warnings();
+        assert!(app.explorer.warnings.is_empty() && app.tabs.warnings.is_empty());
+        let _ = fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn play_runs_hello_remote_and_held_arrow_keys_move_the_block() {
+        let folder = copy_of_example("hello-remote", "play-remote");
+        let mut app = EditorApp::new(Some(&folder));
+        let mover = part(&app, "Mover");
+        let start = app.world.get(mover).unwrap().property("Position").cloned();
+        app.play();
+        let right = axcenity_core::KeyCode::Right;
+        let key = |pressed| axcenity_script::KeyEvent {
+            key: right,
+            pressed,
+        };
+        app.play_frame(1.0 / 60.0, &[key(true)]);
+        play_for(&mut app, 0.5);
+        app.play_frame(1.0 / 60.0, &[key(false)]);
+
+        let world = app.play.as_ref().unwrap().world();
+        let Some(axcenity_core::Value::Vector3(moved)) =
+            world.get(mover).unwrap().property("Position").cloned()
+        else {
+            panic!("the block has no Position");
+        };
+        assert!(moved.x > 5.0, "{moved:?}");
+        assert!(
+            printed(&app).contains(&"Hold the arrow keys to move the blue block (Space for help)."),
+            "{:?}",
+            printed(&app)
+        );
+        app.stop();
+        assert_eq!(
+            app.world.get(mover).unwrap().property("Position").cloned(),
+            start,
+            "Stop puts it back"
+        );
+        let _ = fs::remove_dir_all(&folder);
     }
 }

@@ -11,20 +11,23 @@
 
 mod files;
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use axcenity_core::{ClassName, InstanceId, Vector3, World};
 use axcenity_project::ScriptFile;
+use axcenity_script::{CameraState, KeyEvent};
 use eframe::egui;
 
 use crate::explorer::{self, Action, Explorer, ExplorerOutput};
 use crate::gizmo::{Snap, Tool};
 use crate::history::{self, Field, History, Move, Place};
 use crate::output::Output;
-use crate::play::{self, Crash, Session};
+use crate::play::{self, Crash, GameKeys, Session};
 use crate::properties::{self, Edit};
 use crate::scripts::ScriptTabs;
+use crate::side_warnings::{self, WarningCache};
 use crate::tree::{self, Insertable};
 use crate::viewport::{DragEdit, DragKind, Viewport};
 use crate::watcher::Watcher;
@@ -92,6 +95,10 @@ pub struct EditorApp {
     play: Option<Session>,
     /// When the last Play frame ran, to measure how much game time passed.
     last_frame: Option<Instant>,
+    /// Turns keyboard events into key presses for LocalScripts during Play.
+    game_keys: GameKeys,
+    /// Each script's uses of APIs from the other side, for the warning badges.
+    warnings: WarningCache,
     /// The open script tabs, and whether the viewport or a script is shown.
     tabs: ScriptTabs,
     /// A Script waiting for an answer to "Delete script?".
@@ -166,6 +173,8 @@ impl EditorApp {
             last_frame: None,
             tabs: ScriptTabs::default(),
             confirm_delete: None,
+            game_keys: GameKeys::default(),
+            warnings: WarningCache::default(),
         };
         match folder {
             Some(folder) => app.open(folder),
@@ -202,7 +211,15 @@ impl EditorApp {
             project.manifest.name,
             folder.display(),
             // `game` and its services are always there, so don't count them.
-            project.world.descendants(project.world.root()).len() - 2,
+            project
+                .world
+                .descendants(project.world.root())
+                .into_iter()
+                .filter(|&id| project
+                    .world
+                    .get(id)
+                    .is_some_and(|instance| !instance.class().is_service()))
+                .count(),
             if scripts == 1 { "script" } else { "scripts" },
         ));
         files::report_problems(&mut self.output, &project);
@@ -399,6 +416,7 @@ impl EditorApp {
             Ok(session) => {
                 self.play = Some(session);
                 self.last_frame = None;
+                self.game_keys = GameKeys::default();
             }
             Err(crash) => self.crashed(crash),
         }
@@ -414,14 +432,48 @@ impl EditorApp {
         }
     }
 
-    /// Runs one frame of the game, `seconds` long. A crash stops it.
-    fn play_frame(&mut self, seconds: f64) {
+    /// Runs one frame of the game, `seconds` long, with the keys pressed and
+    /// released since the last one. LocalScripts see the viewport's camera
+    /// as `workspace.CurrentCamera`, and can move it. A crash stops the game.
+    fn play_frame(&mut self, seconds: f64, keys: &[KeyEvent]) {
         let Some(session) = &mut self.play else {
             return;
         };
-        if let Err(crash) = session.frame(seconds, &mut self.output) {
-            self.crashed(crash);
+        let (position, orientation) = self.viewport.camera_view();
+        let camera = CameraState {
+            position,
+            orientation,
+        };
+        match session.frame(seconds, keys, camera, &mut self.output) {
+            Ok(Some(moved)) => self
+                .viewport
+                .set_camera_view(moved.position, moved.orientation),
+            Ok(None) => {}
+            Err(crash) => self.crashed(crash),
         }
+    }
+
+    /// Works out which scripts use an API that only works on the other side
+    /// (from the code in their tab, if open), for the warning badges in the
+    /// Explorer and on the tabs.
+    fn update_warnings(&mut self) {
+        let mut badges = HashMap::new();
+        let mut by_path = HashMap::new();
+        if let Some(project) = &self.project {
+            for script in &project.scripts {
+                let source = self
+                    .tabs
+                    .get(&script.path)
+                    .map_or(script.source.as_str(), |tab| tab.text.as_str());
+                let warnings = self.warnings.get(&script.path, source);
+                if !warnings.is_empty() {
+                    badges.insert(script.instance, side_warnings::badge_text(warnings));
+                    by_path.insert(script.path.clone(), warnings.to_vec());
+                }
+            }
+        }
+        self.explorer.warnings = badges;
+        self.tabs.warnings = by_path;
     }
 
     /// The engine panicked during Play: say so, and go back to editing.
@@ -446,12 +498,12 @@ impl EditorApp {
         let is_script = |id| {
             self.world
                 .get(id)
-                .is_some_and(|instance| instance.class() == ClassName::Script)
+                .is_some_and(|instance| instance.class().is_script())
         };
         match action {
             Action::Insert { what, near } => self.insert(what, near),
-            Action::InsertScript => self.insert_script(),
-            // A Script's name is its file's name, so the file is renamed.
+            Action::InsertScript(class) => self.insert_script(class),
+            // A script's name is its file's name, so the file is renamed.
             Action::Rename(id, name) if is_script(id) => self.rename_script(id, &name),
             Action::Rename(id, name) => {
                 self.apply(id, Edit::Name(name));
@@ -477,11 +529,10 @@ impl EditorApp {
         Vector3::new(tidy(focus.x), tidy(focus.y), tidy(focus.z))
     }
 
-    /// Inserts `what` into `near` if that's a Model or Folder, otherwise
-    /// into the Workspace, with a name no sibling has, and selects it. A
-    /// part goes at the camera's focus point.
+    /// Inserts `what` where [`tree::insert_parent`] says, with a name no
+    /// sibling has, and selects it. A part goes at the camera's focus point.
     fn insert(&mut self, what: Insertable, near: Option<InstanceId>) {
-        let parent = tree::insert_parent(&self.world, near);
+        let parent = tree::insert_parent(&self.world, near, what);
         // Worked out first: `create` borrows the world mutably, and
         // `insert_position` needs to borrow `self` while that lasts.
         let position = self.insert_position();
@@ -791,7 +842,7 @@ impl EditorApp {
     /// settings, then buttons that insert each primitive.
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         let mut insert = None;
-        let mut insert_script = false;
+        let mut insert_script = None;
         let (mut play, mut stop) = (false, false);
         let playing = self.playing();
         let can_play = self.project.is_some();
@@ -871,15 +922,20 @@ impl EditorApp {
                 }
             }
             ui.separator();
-            insert_script = ui
-                .add_enabled(!playing && can_play, egui::Button::new("Script"))
-                .on_hover_text(explorer::SCRIPT_HOVER)
-                .on_disabled_hover_text(if playing {
-                    "Press Stop to edit."
-                } else {
-                    "Open a project first."
-                })
-                .clicked();
+            for class in [ClassName::Script, ClassName::LocalScript] {
+                if ui
+                    .add_enabled(!playing && can_play, egui::Button::new(class.as_str()))
+                    .on_hover_text(explorer::script_hover(class))
+                    .on_disabled_hover_text(if playing {
+                        "Press Stop to edit."
+                    } else {
+                        "Open a project first."
+                    })
+                    .clicked()
+                {
+                    insert_script = Some(class);
+                }
+            }
             if playing {
                 ui.separator();
                 ui.colored_label(PLAYING_COLOR, "Playing")
@@ -890,8 +946,8 @@ impl EditorApp {
             let near = self.selected;
             self.act(Action::Insert { what, near });
         }
-        if insert_script {
-            self.act(Action::InsertScript);
+        if let Some(class) = insert_script {
+            self.act(Action::InsertScript(class));
         }
         if play {
             self.play();
@@ -1016,7 +1072,14 @@ impl eframe::App for EditorApp {
                 .map_or(0.0, |last| (now - last).as_secs_f64())
                 .min(MAX_FRAME_SECONDS);
             self.last_frame = Some(now);
-            self.play_frame(seconds);
+            // Keys go to LocalScripts, unless a text box is being typed in.
+            // (Read inside `input`, then used outside it: see the deadlock
+            // trap in the crate's CLAUDE.md.)
+            let typing = ctx.wants_keyboard_input();
+            let (events, modifiers, focused) =
+                ctx.input(|input| (input.events.clone(), input.modifiers, input.focused));
+            let keys = self.game_keys.read(&events, modifiers, focused, typing);
+            self.play_frame(seconds, &keys);
             ctx.request_repaint();
         }
 
@@ -1029,6 +1092,7 @@ impl eframe::App for EditorApp {
         // Panels take their space in the order they're added: the menu bar
         // spans the whole top, then the Explorer (with Properties under it)
         // runs down the whole right side, then the Output fits under the viewport.
+        self.update_warnings();
         egui::TopBottomPanel::top("menu bar").show(ctx, |ui| self.menu_bar(ui));
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| self.toolbar(ui));
         let mut edit = None;
@@ -1185,7 +1249,14 @@ mod tests {
         let app = EditorApp::new(None);
         assert_eq!(app.title(), "Axcenity Editor");
         assert!(last_line(&app).text.contains("File > Open Project"));
-        assert_eq!(app.world.descendants(app.world.root()).len(), 2);
+        // Only `game`'s services.
+        let world = &app.world;
+        let descendants = world.descendants(world.root());
+        assert!(
+            descendants
+                .iter()
+                .all(|&id| world.get(id).unwrap().class().is_service())
+        );
     }
 
     #[test]
@@ -1984,7 +2055,7 @@ mod tests {
     /// Runs the game for `seconds` at 60 frames per second.
     pub(super) fn play_for(app: &mut EditorApp, seconds: f64) {
         for _ in 0..(seconds * 60.0).round() as u32 {
-            app.play_frame(1.0 / 60.0);
+            app.play_frame(1.0 / 60.0, &[]);
         }
     }
 
@@ -2167,7 +2238,7 @@ mod tests {
         app.play();
         play_for(&mut app, 1.0);
         app.play.as_mut().unwrap().panic_next_frame();
-        app.play_frame(1.0 / 60.0);
+        app.play_frame(1.0 / 60.0, &[]);
 
         assert!(!app.playing(), "back in edit mode");
         let line = last_line(&app);

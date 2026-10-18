@@ -12,9 +12,15 @@
 //!         "children": []
 //!       }
 //!     ]
+//!   },
+//!   "replicated_storage": {
+//!     "children": [ { "class": "RemoteEvent", "name": "Jump" } ]
 //!   }
 //! }
 //! ```
+//!
+//! Only the Workspace and ReplicatedStorage are saved. `replicated_storage`
+//! can be left out, and is only written when it has something in it.
 //!
 //! Property values are plain JSON. Their meaning comes from the class: the
 //! same `[0, 1, 0]` is a `Vector3` for `Position` and a `Color3` for `Color`,
@@ -45,9 +51,11 @@ pub enum WorldError {
     #[error("{path}: {class} is a service and can't be listed as a child")]
     Service { path: String, class: ClassName },
     #[error(
-        "{path}: Scripts can't be listed in the world file; save them as `.server.lua` files in the `scripts` folder instead"
+        "{path}: scripts can't be listed in the world file; save them as files in the `scripts` folder instead (`.server.lua` for a Script, `.client.lua` for a LocalScript)"
     )]
     Script { path: String },
+    #[error("{path}: Players are made when someone joins the game, so they can't be saved")]
+    Player { path: String },
     #[error("{path}: {class} has no property named `{property}`")]
     UnknownProperty {
         path: String,
@@ -70,6 +78,8 @@ struct WorldFile {
     format_version: u32,
     #[serde(default)]
     workspace: ServiceNode,
+    #[serde(default)]
+    replicated_storage: ServiceNode,
 }
 
 #[derive(Default, Deserialize)]
@@ -103,10 +113,15 @@ pub fn parse_world(text: &str) -> Result<World, WorldError> {
     }
 
     let mut world = World::new();
-    let workspace = world.workspace();
-    apply_properties(&mut world, workspace, &file.workspace.properties)?;
-    for child in &file.workspace.children {
-        add_instance(&mut world, workspace, child)?;
+    let services = [
+        (world.workspace(), &file.workspace),
+        (world.replicated_storage(), &file.replicated_storage),
+    ];
+    for (service, node) in services {
+        apply_properties(&mut world, service, &node.properties)?;
+        for child in &node.children {
+            add_instance(&mut world, service, child)?;
+        }
     }
     Ok(world)
 }
@@ -125,8 +140,11 @@ fn add_instance(
         path: path.clone(),
         class: node.class.clone(),
     })?;
-    if class == ClassName::Script {
+    if class.is_script() {
         return Err(WorldError::Script { path });
+    }
+    if class == ClassName::Player {
+        return Err(WorldError::Player { path });
     }
     let id = world
         .create(class)
@@ -239,8 +257,31 @@ fn three_numbers(json: &Json) -> Option<[f32; 3]> {
 pub fn write_world(world: &World) -> String {
     let mut out = format!("{{\n  \"format_version\": {FORMAT_VERSION},\n  \"workspace\": ");
     write_instance(world, world.workspace(), 1, &mut out);
+    // Left out when empty, so worlds without one look as they always have.
+    let replicated = world.replicated_storage();
+    if !saved_children(world, replicated).is_empty() {
+        out.push_str(",\n  \"replicated_storage\": ");
+        write_instance(world, replicated, 1, &mut out);
+    }
     out.push_str("\n}\n");
     out
+}
+
+/// The children of `id` that go in the world file. Scripts are saved as
+/// their own `.lua` files, and Players only exist while the game runs.
+fn saved_children(world: &World, id: InstanceId) -> Vec<InstanceId> {
+    world.get(id).map_or_else(Vec::new, |instance| {
+        instance
+            .children()
+            .iter()
+            .copied()
+            .filter(|&child| {
+                world
+                    .get(child)
+                    .is_some_and(|c| !c.class().is_script() && c.class() != ClassName::Player)
+            })
+            .collect()
+    })
 }
 
 /// Appends `id` as a JSON object whose closing brace is indented `depth` levels.
@@ -273,17 +314,7 @@ fn write_instance(world: &World, id: InstanceId, depth: usize, out: &mut String)
         ));
     }
 
-    // Scripts are saved as their own `.lua` files, not in the world file.
-    let children: Vec<InstanceId> = instance
-        .children()
-        .iter()
-        .copied()
-        .filter(|&child| {
-            world
-                .get(child)
-                .is_some_and(|c| c.class() != ClassName::Script)
-        })
-        .collect();
+    let children = saved_children(world, id);
     if !children.is_empty() {
         let mut text = format!("{indent}\"children\": [\n");
         for (i, &child) in children.iter().enumerate() {
@@ -467,12 +498,57 @@ mod tests {
     }
 
     #[test]
-    fn scripts_are_left_out_when_saving() {
+    fn local_scripts_and_players_in_the_world_file_are_errors() {
+        let err = parse_err(
+            r#"{ "format_version": 1, "replicated_storage": { "children": [
+                { "class": "LocalScript", "name": "Keys" } ] } }"#,
+        );
+        assert!(err.contains("ReplicatedStorage.Keys"), "{err}");
+        assert!(err.contains(".client.lua"), "{err}");
+        let err = parse_err(
+            r#"{ "format_version": 1, "workspace": { "children": [
+                { "class": "Player" } ] } }"#,
+        );
+        assert!(err.contains("Players are made when someone joins"), "{err}");
+    }
+
+    #[test]
+    fn scripts_and_players_are_left_out_when_saving() {
         let mut world = World::new();
-        let workspace = world.workspace();
-        let script = world.create(ClassName::Script).unwrap();
-        world.set_parent(script, Some(workspace)).unwrap();
+        for (class, parent) in [
+            (ClassName::Script, world.workspace()),
+            (ClassName::LocalScript, world.replicated_storage()),
+            (ClassName::Player, world.replicated_storage()),
+        ] {
+            let id = world.create(class).unwrap();
+            world.set_parent(id, Some(parent)).unwrap();
+        }
         assert_eq!(write_world(&world), write_world(&World::new()));
+    }
+
+    #[test]
+    fn remote_events_in_replicated_storage_save_and_load() {
+        let mut world = World::new();
+        let folder = world.create(ClassName::Folder).unwrap();
+        world.set_name(folder, "Remotes").unwrap();
+        world
+            .set_parent(folder, Some(world.replicated_storage()))
+            .unwrap();
+        let remote = world.create(ClassName::RemoteEvent).unwrap();
+        world.set_name(remote, "Jump").unwrap();
+        world.set_parent(remote, Some(folder)).unwrap();
+
+        let written = write_world(&world);
+        assert_eq!(
+            written,
+            "{\n  \"format_version\": 1,\n  \"workspace\": {},\n  \"replicated_storage\": {\n    \"children\": [\n      {\n        \"class\": \"Folder\",\n        \"name\": \"Remotes\",\n        \"children\": [\n          {\n            \"class\": \"RemoteEvent\",\n            \"name\": \"Jump\"\n          }\n        ]\n      }\n    ]\n  }\n}\n"
+        );
+        let loaded = parse_world(&written).unwrap();
+        let jump = loaded
+            .find_first_descendant(loaded.replicated_storage(), "Jump")
+            .unwrap();
+        assert_eq!(loaded.get(jump).unwrap().class(), ClassName::RemoteEvent);
+        assert_eq!(write_world(&loaded), written);
     }
 
     #[test]

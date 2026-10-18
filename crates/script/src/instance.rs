@@ -2,12 +2,15 @@
 //! every read and write looks the Instance up in the World, which is lent to
 //! Lua while scripts run (see `with_world` in `lib.rs`).
 
-use axcenity_core::{InstanceId, World};
+use axcenity_core::{ClassName, InstanceId, World};
 use mlua::{
-    AppDataRef, AppDataRefMut, FromLua, IntoLua, Lua, MetaMethod, UserData, UserDataMethods,
+    AppDataRef, AppDataRefMut, FromLua, Function, IntoLua, Lua, MetaMethod, UserData,
+    UserDataMethods,
 };
 
-use crate::events::LuaSignal;
+use crate::client::{LocalPlayer, LuaCamera, LuaUserInputService};
+use crate::events::{LuaSignal, Owner};
+use crate::sides;
 use crate::types::{type_name, value_from_lua, value_to_lua};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -64,8 +67,8 @@ impl UserData for LuaInstance {
             },
         );
 
-        // `instance.Key`: a field, then a property, then an event, then a
-        // child with that name.
+        // `instance.Key`: a field, then a property, then a member only
+        // some classes have, then an event, then a child with that name.
         methods.add_meta_method(MetaMethod::Index, |lua, this, key: String| {
             get(lua, this.0, &key)
         });
@@ -100,14 +103,16 @@ fn get(lua: &Lua, id: InstanceId, key: &str) -> mlua::Result<mlua::Value> {
     if let Some(value) = instance.property(key) {
         return value_to_lua(lua, value);
     }
-    if let Some(&event) = instance
-        .class()
-        .events()
-        .iter()
-        .find(|&&event| event == key)
-    {
+    let class = instance.class();
+    if let Some(member) = class_member(lua, class, key)? {
+        return Ok(member);
+    }
+    if let Some(&event) = class.events().iter().find(|&&event| event == key) {
+        // `OnServerEvent` only works on the server, and `OnClientEvent` only
+        // on the client.
+        sides::check(lua, key)?;
         return LuaSignal {
-            instance: id,
+            owner: Owner::Instance(id),
             event,
         }
         .into_lua(lua);
@@ -172,6 +177,78 @@ fn set(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> mlua::Result
                 .map_err(mlua::Error::runtime)
         }
     }
+}
+
+/// Methods only some classes have, such as `remote:FireServer` and
+/// `game:GetService`. Made once per interpreter (see `context.rs`) and kept
+/// in its app data.
+pub struct ClassMethods(pub Vec<(ClassName, &'static str, Function)>);
+
+/// A member of `class` that isn't a property or an event: a method such as
+/// `remote:FireServer`, or a field such as `workspace.CurrentCamera`.
+/// Side-only members check the side first.
+fn class_member(lua: &Lua, class: ClassName, key: &str) -> mlua::Result<Option<mlua::Value>> {
+    let value = match (class, key) {
+        // Roblox code uses `game:GetService("UserInputService")`, but
+        // `game.UserInputService` works there too.
+        (ClassName::DataModel, "UserInputService") => LuaUserInputService.into_lua(lua)?,
+        (ClassName::Workspace, "CurrentCamera") => LuaCamera.into_lua(lua)?,
+        (ClassName::Players, "LocalPlayer") => lua
+            .app_data_ref::<LocalPlayer>()
+            .map(|player| LuaInstance(player.0))
+            .into_lua(lua)?,
+        _ => {
+            let method = lua.app_data_ref::<ClassMethods>().and_then(|methods| {
+                methods
+                    .0
+                    .iter()
+                    .find(|(c, name, _)| *c == class && *name == key)
+                    .map(|(_, _, function)| function.clone())
+            });
+            match method {
+                Some(function) => mlua::Value::Function(function),
+                None => return Ok(None),
+            }
+        }
+    };
+    sides::check(lua, key)?;
+    Ok(Some(value))
+}
+
+/// `game:GetService(name)`: a service by its class name, such as
+/// `"Players"`, or `"UserInputService"` (LocalScripts only).
+pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
+    lua.create_function(|lua, (_game, name): (mlua::Value, String)| {
+        if name == "UserInputService" {
+            sides::check(lua, &name)?;
+            return LuaUserInputService.into_lua(lua);
+        }
+        let world = world(lua)?;
+        // The services directly in `game`, in Explorer order.
+        let services: Vec<InstanceId> = world
+            .get(world.root())
+            .map(|game| game.children().to_vec())
+            .unwrap_or_default();
+        let found = services.iter().copied().find(|&id| {
+            world
+                .get(id)
+                .is_some_and(|service| service.class().as_str() == name)
+        });
+        match found {
+            Some(id) => LuaInstance(id).into_lua(lua),
+            None => {
+                let mut names: Vec<&str> = services
+                    .iter()
+                    .filter_map(|&id| world.get(id).map(|s| s.class().as_str()))
+                    .collect();
+                names.push("UserInputService");
+                Err(mlua::Error::runtime(format!(
+                    "there is no service named \"{name}\"; choose from {}",
+                    names.join(", ")
+                )))
+            }
+        }
+    })
 }
 
 /// The error for `instance.Key` when `Key` is neither a property nor a child,

@@ -11,13 +11,30 @@ pub enum ClassName {
     DataModel,
     /// The service that holds the 3D world.
     Workspace,
+    /// The service that holds a Player for everyone in the game.
+    Players,
+    /// The service for things both sides use, such as RemoteEvents.
+    ReplicatedStorage,
     /// The service that holds server scripts.
     ServerScriptService,
+    /// The service with what each player starts with. Holds
+    /// StarterPlayerScripts.
+    StarterPlayer,
+    /// Holds the LocalScripts, which run on the player's side. Inside
+    /// StarterPlayer, and can't be moved, like a service.
+    StarterPlayerScripts,
     /// A solid shape in the world.
     Part,
     /// Lua code that runs on the server. Its source lives in a
     /// `*.server.lua` file, not in a property.
     Script,
+    /// Lua code that runs on the player's side (input, camera). Its source
+    /// lives in a `*.client.lua` file.
+    LocalScript,
+    /// Carries messages between Scripts and LocalScripts.
+    RemoteEvent,
+    /// Someone playing the game. Made by the engine when they join, in Players.
+    Player,
     /// Groups the parts of one thing, such as a car or a house.
     Model,
     /// Groups Instances to keep the tree tidy. Has no effect on the game.
@@ -25,12 +42,19 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 7] = [
+    pub const ALL: [ClassName; 14] = [
         ClassName::DataModel,
         ClassName::Workspace,
+        ClassName::Players,
+        ClassName::ReplicatedStorage,
         ClassName::ServerScriptService,
+        ClassName::StarterPlayer,
+        ClassName::StarterPlayerScripts,
         ClassName::Part,
         ClassName::Script,
+        ClassName::LocalScript,
+        ClassName::RemoteEvent,
+        ClassName::Player,
         ClassName::Model,
         ClassName::Folder,
     ];
@@ -39,9 +63,16 @@ impl ClassName {
         match self {
             ClassName::DataModel => "DataModel",
             ClassName::Workspace => "Workspace",
+            ClassName::Players => "Players",
+            ClassName::ReplicatedStorage => "ReplicatedStorage",
             ClassName::ServerScriptService => "ServerScriptService",
+            ClassName::StarterPlayer => "StarterPlayer",
+            ClassName::StarterPlayerScripts => "StarterPlayerScripts",
             ClassName::Part => "Part",
             ClassName::Script => "Script",
+            ClassName::LocalScript => "LocalScript",
+            ClassName::RemoteEvent => "RemoteEvent",
+            ClassName::Player => "Player",
             ClassName::Model => "Model",
             ClassName::Folder => "Folder",
         }
@@ -53,12 +84,24 @@ impl ClassName {
     }
 
     /// Services exist exactly once and are created with the [`World`](crate::World),
-    /// so they can't be created again.
+    /// so they can't be created again. StarterPlayerScripts counts as one:
+    /// it's always inside StarterPlayer.
     pub fn is_service(self) -> bool {
         matches!(
             self,
-            ClassName::DataModel | ClassName::Workspace | ClassName::ServerScriptService
+            ClassName::DataModel
+                | ClassName::Workspace
+                | ClassName::Players
+                | ClassName::ReplicatedStorage
+                | ClassName::ServerScriptService
+                | ClassName::StarterPlayer
+                | ClassName::StarterPlayerScripts
         )
+    }
+
+    /// Script or LocalScript: Lua code kept in a file of its own.
+    pub fn is_script(self) -> bool {
+        matches!(self, ClassName::Script | ClassName::LocalScript)
     }
 
     /// Every property this class has, with its default value. A new Instance
@@ -67,8 +110,15 @@ impl ClassName {
         match self {
             ClassName::DataModel
             | ClassName::Workspace
+            | ClassName::Players
+            | ClassName::ReplicatedStorage
             | ClassName::ServerScriptService
+            | ClassName::StarterPlayer
+            | ClassName::StarterPlayerScripts
             | ClassName::Script
+            | ClassName::LocalScript
+            | ClassName::RemoteEvent
+            | ClassName::Player
             | ClassName::Model
             | ClassName::Folder => Vec::new(),
             ClassName::Part => {
@@ -97,12 +147,21 @@ impl ClassName {
         match self {
             ClassName::DataModel
             | ClassName::Workspace
+            | ClassName::Players
+            | ClassName::ReplicatedStorage
             | ClassName::ServerScriptService
+            | ClassName::StarterPlayer
+            | ClassName::StarterPlayerScripts
             | ClassName::Script
+            | ClassName::LocalScript
+            | ClassName::Player
             | ClassName::Model
             | ClassName::Folder => &[],
             // Fires on both parts when two parts start touching.
             ClassName::Part => &["Touched"],
+            // `OnServerEvent` fires in Scripts for each `FireServer`, and
+            // `OnClientEvent` in LocalScripts for each `FireClient`.
+            ClassName::RemoteEvent => &["OnServerEvent", "OnClientEvent"],
         }
     }
 }

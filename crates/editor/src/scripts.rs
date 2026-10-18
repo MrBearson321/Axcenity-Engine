@@ -8,10 +8,13 @@
 //! world is reloaded, and a tab can stay open after its file was deleted.
 //! [`ScriptTabs`] never touches files; the app reads and writes them.
 
+use std::collections::HashMap;
+
 use axcenity_project::script_name;
 use eframe::egui;
 
 use crate::lua_syntax;
+use crate::side_warnings::SideWarning;
 
 /// What a new script starts with, as in Roblox Studio.
 pub const NEW_SCRIPT_SOURCE: &str = "print(\"Hello world!\")\n";
@@ -75,6 +78,9 @@ pub struct ScriptTabs {
     tabs: Vec<ScriptTab>,
     /// The tab shown, or `None` for the World tab (the viewport).
     active: Option<usize>,
+    /// Each script's uses of APIs that only work on the other side, by
+    /// path. The app fills it in each frame; a tab with any shows ⚠.
+    pub warnings: HashMap<String, Vec<SideWarning>>,
 }
 
 impl ScriptTabs {
@@ -185,11 +191,14 @@ impl ScriptTabs {
                 for (index, tab) in self.tabs.iter().enumerate() {
                     ui.separator();
                     // A dot after the name means unsaved changes, as in VS Code.
-                    let title = if tab.unsaved() {
+                    let mut title = if tab.unsaved() {
                         format!("{} ●", tab.name())
                     } else {
                         tab.name().to_string()
                     };
+                    if self.warnings.contains_key(&tab.path) {
+                        title.push_str(" ⚠");
+                    }
                     let label = ui
                         .selectable_label(self.active == Some(index), title)
                         .on_hover_text(&tab.path);
@@ -236,6 +245,15 @@ impl ScriptTabs {
                     "This file was deleted outside the editor. Save to write it back, or \
                      close the tab.",
                 );
+            }
+        }
+        // Clicking a warning puts the cursor on its line.
+        for side_warning in self.warnings.get(&tab.path).into_iter().flatten() {
+            let text = format!("⚠ Line {}: {}", side_warning.line, side_warning.message);
+            let label = egui::Label::new(egui::RichText::new(text).color(warning))
+                .sense(egui::Sense::click());
+            if ui.add(label).on_hover_text("Go to this line").clicked() {
+                tab.go_to_line = Some(side_warning.line);
             }
         }
         code_editor(ui, tab);

@@ -5,6 +5,8 @@
 //! - Classes, properties, events and enums come straight from `core`, so they
 //!   can't fall out of date. A new property only needs a line in
 //!   `PROPERTY_DOCS`, and a new event one in `EVENT_DOCS`.
+//! - APIs that only work on one side (see `sides`) say so in their
+//!   description, added from `SIDE_ONLY_APIS`.
 //! - Functions, globals and value types are described by hand below.
 //! - Tests check the descriptions against what scripts really get, and that
 //!   the checked-in file matches this generator.
@@ -13,7 +15,8 @@
 
 use axcenity_core::{ClassName, ValueKind, World};
 
-use crate::types::{ENUM_KINDS, enum_item_names};
+use crate::sides::{Side, side_only};
+use crate::types::EnumType;
 
 /// Where the generated file is kept, relative to the repository root.
 pub const DEFINITIONS_PATH: &str = "definitions/axcenity.lua";
@@ -36,13 +39,15 @@ struct Field {
     doc: &'static str,
 }
 
-/// A type of value that isn't an Instance, such as `Vector3`.
+/// A type of value that isn't an Instance, such as `Vector3`, or an engine
+/// object that isn't one, such as `UserInputService`.
 struct ValueType {
     class: &'static str,
     doc: &'static str,
     fields: &'static [Field],
     /// Lua Language Server `---@operator` lines, such as `add(Vector3): Vector3`.
     operators: &'static [&'static str],
+    methods: &'static [Function],
 }
 
 /// A global table of functions, such as `Vector3` with `Vector3.new`.
@@ -92,6 +97,7 @@ const VALUE_TYPES: &[ValueType] = &[
             "div(number): Vector3",
             "unm: Vector3",
         ],
+        methods: &[],
     },
     ValueType {
         class: "Color3",
@@ -114,6 +120,7 @@ const VALUE_TYPES: &[ValueType] = &[
             },
         ],
         operators: &[],
+        methods: &[],
     },
     ValueType {
         class: "EnumItem",
@@ -124,6 +131,64 @@ const VALUE_TYPES: &[ValueType] = &[
             doc: "The item's name, such as `\"Neon\"`.",
         }],
         operators: &[],
+        methods: &[],
+    },
+    ValueType {
+        class: "UserInputService",
+        doc: "The player's keyboard, from `game:GetService(\"UserInputService\")`. LocalScripts only.",
+        fields: &[
+            Field {
+                name: "InputBegan",
+                ty: "Signal",
+                doc: "Fires when a key goes down. The handler gets an InputObject and `gameProcessedEvent` (always false for now): `function(input, gameProcessedEvent) ... end`.",
+            },
+            Field {
+                name: "InputEnded",
+                ty: "Signal",
+                doc: "Fires when a key comes back up, with the same arguments as InputBegan.",
+            },
+        ],
+        operators: &[],
+        methods: &[Function {
+            name: "IsKeyDown",
+            doc: "True while `key` is held down, such as `Enum.KeyCode.W`.",
+            params: &[("key", "EnumItem.KeyCode")],
+            returns: "boolean",
+        }],
+    },
+    ValueType {
+        class: "InputObject",
+        doc: "One key going down or up, as `InputBegan` and `InputEnded` handlers get it.",
+        fields: &[Field {
+            name: "KeyCode",
+            ty: "EnumItem.KeyCode",
+            doc: "Which key, such as `Enum.KeyCode.W`.",
+        }],
+        operators: &[],
+        methods: &[],
+    },
+    ValueType {
+        class: "Camera",
+        doc: "What the player sees through, `workspace.CurrentCamera`. LocalScripts only. Setting Position or Orientation moves the view; the player can still fly on from there.",
+        fields: &[
+            Field {
+                name: "Position",
+                ty: "Vector3",
+                doc: "Where the camera is, in studs.",
+            },
+            Field {
+                name: "Orientation",
+                ty: "Vector3",
+                doc: "Which way it looks, in degrees like a Part's: X looks up (positive) and down, Y turns left (positive) and right. Z is ignored.",
+            },
+            Field {
+                name: "LookVector",
+                ty: "Vector3",
+                doc: "The direction the camera looks in, one stud long. Read-only.",
+            },
+        ],
+        operators: &[],
+        methods: &[],
     },
 ];
 
@@ -179,22 +244,90 @@ const CONNECTION_METHODS: &[Function] = &[Function {
     returns: "nil",
 }];
 
-/// Globals that are Instances.
-const INSTANCE_GLOBALS: &[(&str, ClassName, &str)] = &[
+/// Globals that are Instances: name, Lua Language Server type, description.
+const INSTANCE_GLOBALS: &[(&str, &str, &str)] = &[
     (
         "game",
-        ClassName::DataModel,
+        "DataModel",
         "The root of the game. Every service is inside it.",
     ),
     (
         "workspace",
-        ClassName::Workspace,
+        "Workspace",
         "The service that holds the 3D world (same as `game.Workspace`).",
     ),
     (
         "script",
-        ClassName::Script,
-        "The Script that is running this code.",
+        "Script|LocalScript",
+        "The Script or LocalScript that is running this code.",
+    ),
+];
+
+/// Methods only some classes have.
+const CLASS_METHODS: &[(ClassName, Function)] = &[
+    (
+        ClassName::DataModel,
+        Function {
+            name: "GetService",
+            doc: "The service with this class name, such as `\"Players\"` or `\"UserInputService\"`.",
+            params: &[("className", "string")],
+            returns: "Instance",
+        },
+    ),
+    (
+        ClassName::RemoteEvent,
+        Function {
+            name: "FireServer",
+            doc: "Sends the arguments to the server, where `OnServerEvent` fires with this player first.",
+            params: &[("...", "any")],
+            returns: "nil",
+        },
+    ),
+    (
+        ClassName::RemoteEvent,
+        Function {
+            name: "FireClient",
+            doc: "Sends the arguments to one player, where `OnClientEvent` fires.",
+            params: &[("player", "Player"), ("...", "any")],
+            returns: "nil",
+        },
+    ),
+    (
+        ClassName::RemoteEvent,
+        Function {
+            name: "FireAllClients",
+            doc: "Sends the arguments to every player, where `OnClientEvent` fires.",
+            params: &[("...", "any")],
+            returns: "nil",
+        },
+    ),
+];
+
+/// Fields only some classes have, besides their properties and events.
+const CLASS_FIELDS: &[(ClassName, Field)] = &[
+    (
+        ClassName::DataModel,
+        Field {
+            name: "UserInputService",
+            ty: "UserInputService",
+            doc: "The player's keyboard (same as `game:GetService(\"UserInputService\")`).",
+        },
+    ),
+    (
+        ClassName::Workspace,
+        Field {
+            name: "CurrentCamera",
+            ty: "Camera",
+            doc: "The camera the player sees through.",
+        },
+    ),
+    (
+        ClassName::Players,
+        Field {
+            name: "LocalPlayer",
+            ty: "Player",
+            doc: "The player on this device.",
+        },
     ),
 ];
 
@@ -267,7 +400,8 @@ const LIBRARIES: &[Library] = &[
     },
 ];
 
-const ENUM_GLOBAL_DOC: &str = "Every enum, such as `Enum.Material` and `Enum.PartType`.";
+const ENUM_GLOBAL_DOC: &str =
+    "Every enum, such as `Enum.Material`, `Enum.PartType` and `Enum.KeyCode`.";
 
 /// What each property means. A test checks every property in `core` is here.
 const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
@@ -316,11 +450,23 @@ const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
 
 /// What each event means, including what its handler receives. A test
 /// checks every event in `core` is here.
-const EVENT_DOCS: &[(ClassName, &str, &str)] = &[(
-    ClassName::Part,
-    "Touched",
-    "Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.",
-)];
+const EVENT_DOCS: &[(ClassName, &str, &str)] = &[
+    (
+        ClassName::Part,
+        "Touched",
+        "Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.",
+    ),
+    (
+        ClassName::RemoteEvent,
+        "OnServerEvent",
+        "Fires when a LocalScript calls `FireServer`. The handler gets the Player who sent it, then the arguments: `function(player, ...) ... end`.",
+    ),
+    (
+        ClassName::RemoteEvent,
+        "OnClientEvent",
+        "Fires when a Script calls `FireClient` or `FireAllClients`. The handler gets the arguments.",
+    ),
+];
 
 /// What each class is. A `match` with no `_` case, so adding a class won't
 /// compile until it has a description here.
@@ -328,11 +474,28 @@ fn class_doc(class: ClassName) -> &'static str {
     match class {
         ClassName::DataModel => "The root of the game, called `game` in scripts.",
         ClassName::Workspace => "The service that holds the 3D world. Parts inside it are drawn.",
+        ClassName::Players => "The service with a Player for everyone in the game.",
+        ClassName::ReplicatedStorage => {
+            "The service for things Scripts and LocalScripts share, such as RemoteEvents."
+        }
         ClassName::ServerScriptService => {
             "The service that holds server scripts (`scripts/*.server.lua`)."
         }
+        ClassName::StarterPlayer => {
+            "The service with what each player starts with, such as StarterPlayerScripts."
+        }
+        ClassName::StarterPlayerScripts => {
+            "Holds the LocalScripts (`scripts/*.client.lua`), which run on the player's side."
+        }
         ClassName::Part => "A solid shape in the world.",
         ClassName::Script => "Lua code that runs on the server, from a `.server.lua` file.",
+        ClassName::LocalScript => {
+            "Lua code that runs on the player's side (input, camera), from a `.client.lua` file."
+        }
+        ClassName::RemoteEvent => {
+            "Carries messages between Scripts and LocalScripts. Keep it in ReplicatedStorage."
+        }
+        ClassName::Player => "Someone playing the game, in Players. Made when they join.",
         ClassName::Model => "Groups the parts of one thing, such as a car or a house.",
         ClassName::Folder => "Groups Instances to keep the tree tidy. Has no effect on the game.",
     }
@@ -348,9 +511,11 @@ fn lua_type(kind: ValueKind) -> String {
         ValueKind::Color3 => "Color3".to_owned(),
         // Enum properties read as items and also accept item names.
         ValueKind::Material | ValueKind::PartType => {
-            let mut options = vec![format!("EnumItem.{kind}")];
+            let enum_type = EnumType::of_kind(kind).expect("an enum kind");
+            let mut options = vec![format!("EnumItem.{}", enum_type.name())];
             options.extend(
-                enum_item_names(kind)
+                enum_type
+                    .item_names()
                     .iter()
                     .map(|name| format!("\"{name}\"")),
             );
@@ -375,7 +540,9 @@ impl Writer {
     fn field(&mut self, field: &Field) {
         self.line(&format!(
             "---@field {} {} {}",
-            field.name, field.ty, field.doc
+            field.name,
+            field.ty,
+            with_side(field.name, field.doc)
         ));
     }
 
@@ -396,7 +563,7 @@ impl Writer {
         function: &Function,
         overloads: &[String],
     ) {
-        self.doc(function.doc);
+        self.doc(&with_side(function.name, function.doc));
         for (name, ty) in function.params {
             self.line(&format!("---@param {name} {ty}"));
         }
@@ -438,24 +605,34 @@ pub fn lua_definitions() -> String {
         for operator in value_type.operators {
             w.line(&format!("---@operator {operator}"));
         }
+        if !value_type.methods.is_empty() {
+            let owner = format!("{}Class", value_type.class);
+            w.line(&format!("local {owner} = {{}}"));
+            w.line("");
+            for method in value_type.methods {
+                w.function(&owner, ':', method, &[]);
+            }
+        }
         w.line("");
     }
 
     w.heading("Enums");
-    for kind in ENUM_KINDS {
-        w.line(&format!("---@class EnumItem.{kind}: EnumItem"));
+    for enum_type in EnumType::ALL {
+        let name = enum_type.name();
+        w.line(&format!("---@class EnumItem.{name}: EnumItem"));
         w.line("");
-        w.doc(&format!("The choices of `Enum.{kind}`."));
-        w.line(&format!("---@class Enum.{kind}"));
-        for name in enum_item_names(kind) {
-            w.line(&format!("---@field {name} EnumItem.{kind}"));
+        w.doc(&format!("The choices of `Enum.{name}`."));
+        w.line(&format!("---@class Enum.{name}"));
+        for item in enum_type.item_names() {
+            w.line(&format!("---@field {item} EnumItem.{name}"));
         }
         w.line("");
     }
     w.doc(ENUM_GLOBAL_DOC);
     w.line("---@class EnumLibrary");
-    for kind in ENUM_KINDS {
-        w.line(&format!("---@field {kind} Enum.{kind}"));
+    for enum_type in EnumType::ALL {
+        let name = enum_type.name();
+        w.line(&format!("---@field {name} Enum.{name}"));
     }
     w.line("");
 
@@ -521,17 +698,36 @@ pub fn lua_definitions() -> String {
                 lua_type(default.kind())
             ));
         }
+        for (_, field) in CLASS_FIELDS.iter().filter(|(c, _)| *c == class) {
+            w.field(field);
+        }
         for &event in class.events() {
             let doc = event_doc(class, event).unwrap_or("");
-            w.line(&format!("---@field {event} Signal {doc}"));
+            w.line(&format!(
+                "---@field {event} Signal {}",
+                with_side(event, doc)
+            ));
+        }
+        let methods: Vec<&Function> = CLASS_METHODS
+            .iter()
+            .filter(|(c, _)| *c == class)
+            .map(|(_, method)| method)
+            .collect();
+        if !methods.is_empty() {
+            let owner = format!("{class}Class");
+            w.line(&format!("local {owner} = {{}}"));
+            w.line("");
+            for method in methods {
+                w.function(&owner, ':', method, &[]);
+            }
         }
         w.line("");
     }
 
     w.heading("Globals");
-    for &(name, class, doc) in INSTANCE_GLOBALS {
+    for &(name, ty, doc) in INSTANCE_GLOBALS {
         w.doc(doc);
-        w.line(&format!("---@type {class}"));
+        w.line(&format!("---@type {ty}"));
         w.line(&format!("{name} = nil"));
         w.line("");
     }
@@ -565,9 +761,19 @@ fn overloads(library: &Library, function: &Function) -> Vec<String> {
     }
     ClassName::ALL
         .into_iter()
-        .filter(|class| !class.is_service())
+        // Services always exist, and Players are made when someone joins.
+        .filter(|class| !class.is_service() && *class != ClassName::Player)
         .map(|class| format!("fun(className: \"{class}\"): {class}"))
         .collect()
+}
+
+/// `doc`, saying where it works if `name` is a side-only API.
+fn with_side(name: &str, doc: &str) -> String {
+    match side_only(name).map(|api| api.side) {
+        Some(Side::Client) => format!("{doc} LocalScripts only."),
+        Some(Side::Server) => format!("{doc} Scripts only."),
+        None => doc.to_owned(),
+    }
 }
 
 fn event_doc(class: ClassName, event: &str) -> Option<&'static str> {
@@ -593,6 +799,8 @@ mod tests {
     use mlua::{Table, Value};
 
     use super::*;
+    use crate::client::KeyEvent;
+    use crate::context::Context;
     use crate::sandbox::{self, SAFE_FUNCTIONS, SAFE_LIBRARIES, ScriptIds};
     use crate::{OutputKind, ScriptRuntime};
 
@@ -651,14 +859,14 @@ mod tests {
     }
 
     /// One script environment, as a script would see it.
-    fn environment(runtime: &ScriptRuntime) -> Table {
+    fn environment(context: &Context) -> Table {
         let world = World::new();
         let ids = ScriptIds {
             game: world.root(),
             workspace: world.workspace(),
             script: world.workspace(),
         };
-        sandbox::environment(&runtime.lua, &runtime.shared, ids).unwrap()
+        sandbox::environment(&context.lua, &context.shared, ids).unwrap()
     }
 
     fn keys(table: &Table) -> BTreeSet<String> {
@@ -670,7 +878,7 @@ mod tests {
 
     #[test]
     fn every_engine_global_is_described() {
-        let runtime = ScriptRuntime::new();
+        let runtime = Context::new(Side::Server);
         let standard: BTreeSet<String> = SAFE_FUNCTIONS
             .iter()
             .chain(SAFE_LIBRARIES)
@@ -694,7 +902,7 @@ mod tests {
 
     #[test]
     fn every_library_function_is_described() {
-        let runtime = ScriptRuntime::new();
+        let runtime = Context::new(Side::Server);
         let env = environment(&runtime);
         for library in LIBRARIES {
             let table: Table = env.get(library.global).unwrap();
@@ -708,74 +916,165 @@ mod tests {
     }
 
     /// The opposite direction for things mlua can't list: every described
-    /// field and method exists in a real script.
+    /// field and method exists in a real script, on the side it works on.
     #[test]
     fn described_fields_and_methods_exist() {
-        let mut checks = Vec::new();
+        // Checks for the server (a Script) and the client (a LocalScript).
+        let mut server = Vec::new();
+        let mut client = Vec::new();
+        let mut check = |name: &str, line: String| match side_only(name).map(|api| api.side) {
+            Some(Side::Client) => client.push(line),
+            _ => server.push(line),
+        };
         for field in INSTANCE_FIELDS {
-            checks.push(format!(
-                "assert(part.{0} ~= nil, 'Instance.{0}')",
-                field.name
-            ));
+            check(
+                field.name,
+                format!("assert(part.{0} ~= nil, 'Instance.{0}')", field.name),
+            );
         }
         for method in INSTANCE_METHODS {
-            checks.push(format!(
-                "assert(type(part.{0}) == 'function', 'Instance:{0}')",
-                method.name
-            ));
+            check(
+                method.name,
+                format!(
+                    "assert(type(part.{0}) == 'function', 'Instance:{0}')",
+                    method.name
+                ),
+            );
         }
-        checks.push("local connection = part.Touched:Connect(function() end)".to_owned());
+        check(
+            "",
+            "local connection = part.Touched:Connect(function() end)".to_owned(),
+        );
         for method in SIGNAL_METHODS {
-            checks.push(format!(
-                "assert(type(part.Touched.{0}) == 'function', 'Signal:{0}')",
-                method.name
-            ));
+            check(
+                method.name,
+                format!(
+                    "assert(type(part.Touched.{0}) == 'function', 'Signal:{0}')",
+                    method.name
+                ),
+            );
         }
         for field in CONNECTION_FIELDS {
-            checks.push(format!(
-                "assert(connection.{0} ~= nil, 'Connection.{0}')",
-                field.name
-            ));
+            check(
+                field.name,
+                format!(
+                    "assert(connection.{0} ~= nil, 'Connection.{0}')",
+                    field.name
+                ),
+            );
         }
         for method in CONNECTION_METHODS {
-            checks.push(format!(
-                "assert(type(connection.{0}) == 'function', 'Connection:{0}')",
-                method.name
-            ));
+            check(
+                method.name,
+                format!(
+                    "assert(type(connection.{0}) == 'function', 'Connection:{0}')",
+                    method.name
+                ),
+            );
         }
+        // An Instance of each class with its own methods or fields.
+        let instances = [
+            (ClassName::DataModel, "game"),
+            (ClassName::Workspace, "workspace"),
+            (ClassName::Players, "game.Players"),
+            (ClassName::RemoteEvent, "Instance.new('RemoteEvent')"),
+        ];
+        let instance = |class: ClassName| {
+            instances
+                .iter()
+                .find(|(c, _)| *c == class)
+                .map(|(_, sample)| *sample)
+                .expect("add a sample Instance for the new class")
+        };
+        for (class, method) in CLASS_METHODS {
+            check(
+                method.name,
+                format!(
+                    "assert(type(({0}).{1}) == 'function', '{2}:{1}')",
+                    instance(*class),
+                    method.name,
+                    class
+                ),
+            );
+        }
+        for (class, field) in CLASS_FIELDS {
+            // `LocalPlayer` is nil only before the player joins.
+            check(
+                field.name,
+                format!(
+                    "assert(({0}).{1} ~= nil, '{2}.{1}')",
+                    instance(*class),
+                    field.name,
+                    class
+                ),
+            );
+        }
+        // InputObjects only exist inside input handlers: those checks run
+        // when the test presses a key.
+        let mut on_input = Vec::new();
         let samples = [
             ("Vector3", "Vector3.new(1, 2, 3)"),
             ("Color3", "Color3.new(1, 0, 0)"),
             ("EnumItem", "Enum.Material.Neon"),
+            ("UserInputService", "game:GetService('UserInputService')"),
+            ("InputObject", "input"),
+            ("Camera", "workspace.CurrentCamera"),
         ];
         for value_type in VALUE_TYPES {
             let (_, sample) = samples
                 .iter()
                 .find(|(class, _)| *class == value_type.class)
                 .expect("add a sample value for the new value type");
+            let mut lines = Vec::new();
             for field in value_type.fields {
-                checks.push(format!(
+                lines.push(format!(
                     "assert({sample}.{0} ~= nil, '{1}.{0}')",
                     field.name, value_type.class
                 ));
             }
+            for method in value_type.methods {
+                lines.push(format!(
+                    "assert(type({sample}.{0}) == 'function', '{1}:{0}')",
+                    method.name, value_type.class
+                ));
+            }
+            for line in lines {
+                match value_type.class {
+                    "InputObject" => on_input.push(line),
+                    // Reached through `workspace.CurrentCamera`, so client only.
+                    "Camera" => check("CurrentCamera", line),
+                    other => check(other, line),
+                }
+            }
         }
-        // Parented, so that every Instance field (including `Parent`) has a value.
-        let source = format!(
-            "local part = Instance.new('Part')\npart.Parent = workspace\n{}",
-            checks.join("\n")
-        );
+        client.push(format!(
+            "game:GetService('UserInputService').InputBegan:Connect(function(input)\n{}\nprint('checked input')\nend)",
+            on_input.join("\n")
+        ));
 
+        // Parented, so that every Instance field (including `Parent`) has a value.
+        let start = "local part = Instance.new('Part')\npart.Parent = workspace\n";
         let mut world = World::new();
         let mut runtime = ScriptRuntime::new();
-        let script = world.workspace();
-        runtime.start_script(&mut world, script, "check.lua", &source);
-        let errors: Vec<String> = runtime
-            .take_output()
-            .into_iter()
+        let script = world.create(ClassName::Script).unwrap();
+        let local_script = world.create(ClassName::LocalScript).unwrap();
+        let source = format!("{start}{}", server.join("\n"));
+        runtime.start_script(&mut world, script, "check.server.lua", &source);
+        let source = format!("{start}{}", client.join("\n"));
+        runtime.start_script(&mut world, local_script, "check.client.lua", &source);
+        let key = KeyEvent {
+            key: axcenity_core::KeyCode::W,
+            pressed: true,
+        };
+        runtime.input(&mut world, &[key]);
+
+        let output = runtime.take_output();
+        let errors: Vec<&str> = output
+            .iter()
             .filter(|line| line.kind == OutputKind::Error)
-            .map(|line| line.text)
+            .map(|line| line.text.as_str())
             .collect();
         assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(output.last().unwrap().text, "checked input");
     }
 }

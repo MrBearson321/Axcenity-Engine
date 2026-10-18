@@ -39,7 +39,9 @@ Rules:
 5. Update UI layout (`taffy`)
 6. Build the draw list and render
 
-The player runs these in `WindowEvent::RedrawRequested` (`crates/player/src/main.rs`), with a comment per step. Step 5 arrives with its phase. The editor runs step 6 every frame it draws, and steps 2-4 only during Play (`Session::frame` in `crates/editor/src/play.rs`), before any panel is drawn.
+The player runs these in `WindowEvent::RedrawRequested` (`crates/player/src/main.rs`), with a comment per step. Step 5 arrives with its phase. The editor runs step 6 every frame it draws, and steps 1-4 only during Play (`Session::frame` in `crates/editor/src/play.rs`), before any panel is drawn.
+
+Since Phase 14, step 1 also hands LocalScripts the camera (`set_camera`) and the key presses since the last frame (`ScriptRuntime::input`), and step 2 first delivers RemoteEvent messages to each side (server, then client) before resuming its tasks. Where a LocalScript moved the camera (`take_camera_move`) is applied just before step 6. See `docs/scripting.md` (Server and client).
 
 ## Physics (decided in Phase 6)
 
@@ -107,6 +109,15 @@ The player runs these in `WindowEvent::RedrawRequested` (`crates/player/src/main
 - **Watching the folder** (chosen by the developer: polling, not the `notify` crate): `watcher.rs` runs a background thread that checks `world.json` and every `scripts/**/*.server.lua` every 0.5 s by modification time and size, sends the changed paths, and wakes egui only when something changed, so an idle editor stays idle. The editor reads each changed file and compares its text with what it last read or wrote, so its own saves are ignored. A changed script updates its tab; if the tab has unsaved changes, it keeps them and shows a bar with **Reload from disk** (saving replaces the file). A new file adds a Script; a deleted one removes it (its tab closes, or stays with "deleted; Save to write it back" if it had changes). A changed `world.json` is reloaded (new undo history, selection cleared) unless the world has unsaved changes; then the editor keeps its world, and the other file is kept as `world.backup.json` on the next save. During Play, changes wait until Stop.
 - **Damaged files**: opening reports each file that can't be loaded in Output ("Skipped a damaged file: …", with the line for bad JSON) and loads the rest. A damaged `world.json` gives an empty Workspace with a hint; fixing the file elsewhere loads it. Saving over a world file the editor never loaded first renames it to `world.backup.json` (`world.backup2.json`… if taken), so nothing is lost.
 - **Error links**: Output lines of kind Error that start with `<path>.lua:<line>:` underline that part, and clicking opens the script at that line (cursor placed, scrolled into view, the line highlighted until the code is edited).
+
+### Server and client (decided in Phase 14)
+
+- **Explorer**: `game` has Workspace, Players, ReplicatedStorage, ServerScriptService and StarterPlayer (with StarterPlayerScripts), in that order, all locked like services. During Play, Players holds the Player.
+- **LocalScripts**: a toolbar **LocalScript** button next to **Script**, and Insert ▸ LocalScript, make `scripts/LocalScript.client.lua` and its LocalScript in StarterPlayerScripts. Opening, renaming (keeps `.client.lua`), deleting, watching and Play's autosave work as for Scripts. Scripts and LocalScripts each stay in path order in their service.
+- **RemoteEvents**: Insert ▸ RemoteEvent (Explorer menu only, not the toolbar). It goes into the selected Model or Folder, or ReplicatedStorage itself if that's selected, otherwise into ReplicatedStorage. **ReplicatedStorage is saved** like the Workspace, so anything can be inserted, moved (dragging rows) or edited there; `tree::is_saved` says where.
+- **Warning badges**: `side_warnings.rs` scans each script's code (its tab's text if open, so it updates while typing) for side-only API names and strings from the script crate's `SIDE_ONLY_APIS`, skipping comments. A script with a hit gets a ⚠ after its Explorer row (hover lists `Line N: message`); a closed branch holding one shows ⚠ too, so it's never hidden. Its tab title gets ⚠, and the tab lists the warnings above the code; clicking one goes to the line. It's a text check: a variable that happens to be called `LocalPlayer` in a Script is warned about too. Warnings are cached by path and only worked out again when the text changes.
+- **Play input**: during Play, keyboard events go to LocalScripts (`play::GameKeys`) unless a text box has the keyboard; then, or when the window loses focus, held keys are let go. Keys use their physical place when egui knows it. Shift, Ctrl and Alt come from egui's modifiers, so they always arrive as the left one. WASD still flies the editor camera too, as in the player.
+- **Play camera**: LocalScripts see the viewport camera as `workspace.CurrentCamera`, and setting it moves the viewport camera (`Viewport::camera_view` / `set_camera_view`).
 
 ## Play mode
 

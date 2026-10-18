@@ -5,7 +5,7 @@
 //! (here mlua's `UserData`) for a type from *this* crate. So each core type
 //! is wrapped in a small struct, such as `LuaVector3(Vector3)`.
 
-use axcenity_core::{Color3, Material, PartType, Value, ValueKind, Vector3};
+use axcenity_core::{Color3, KeyCode, Material, PartType, Value, ValueKind, Vector3};
 use mlua::{FromLua, IntoLua, Lua, MetaMethod, UserData, UserDataFields, UserDataMethods};
 
 use crate::instance::LuaInstance;
@@ -142,61 +142,116 @@ impl UserData for LuaColor3 {
     }
 }
 
-/// The `Enum` global. `Enum.Material` and `Enum.PartType` are its members.
+/// The `Enum` global. `Enum.Material`, `Enum.PartType` and `Enum.KeyCode`
+/// are its members.
 #[derive(Clone, Copy, Debug)]
 pub struct LuaEnum;
 
-/// One enum type, such as `Enum.Material`. Holds the property kind it's for.
-#[derive(Clone, Copy, Debug)]
-pub struct LuaEnumType(ValueKind);
+/// One enum scripts can use through `Enum`, such as `Enum.Material`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EnumType {
+    Material,
+    PartType,
+    KeyCode,
+}
 
-/// One enum item, such as `Enum.Material.Neon`. Always holds a
-/// `Value::Material` or `Value::PartType`.
-#[derive(Clone, Debug)]
-pub struct LuaEnumItem(Value);
+impl EnumType {
+    pub const ALL: [EnumType; 3] = [EnumType::Material, EnumType::PartType, EnumType::KeyCode];
 
-/// The enum property kinds scripts can use through `Enum`.
-pub const ENUM_KINDS: [ValueKind; 2] = [ValueKind::Material, ValueKind::PartType];
+    pub fn name(self) -> &'static str {
+        match self {
+            EnumType::Material => "Material",
+            EnumType::PartType => "PartType",
+            EnumType::KeyCode => "KeyCode",
+        }
+    }
 
-/// Every item name of an enum kind, in order.
-pub fn enum_item_names(kind: ValueKind) -> Vec<&'static str> {
-    match kind {
-        ValueKind::Material => Material::ALL.iter().map(|m| m.as_str()).collect(),
-        ValueKind::PartType => PartType::ALL.iter().map(|t| t.as_str()).collect(),
-        _ => Vec::new(),
+    /// Every item name, in order.
+    pub fn item_names(self) -> Vec<&'static str> {
+        match self {
+            EnumType::Material => Material::ALL.iter().map(|m| m.as_str()).collect(),
+            EnumType::PartType => PartType::ALL.iter().map(|t| t.as_str()).collect(),
+            EnumType::KeyCode => KeyCode::ALL.iter().map(|k| k.as_str()).collect(),
+        }
+    }
+
+    /// The enum that a property of `kind` holds, if it holds one.
+    pub fn of_kind(kind: ValueKind) -> Option<EnumType> {
+        match kind {
+            ValueKind::Material => Some(EnumType::Material),
+            ValueKind::PartType => Some(EnumType::PartType),
+            _ => None,
+        }
     }
 }
 
-fn enum_item(kind: ValueKind, name: &str) -> Option<Value> {
-    match kind {
-        ValueKind::Material => Material::from_name(name).map(Value::Material),
-        ValueKind::PartType => PartType::from_name(name).map(Value::PartType),
-        _ => None,
+/// One enum item, such as `Enum.Material.Neon`. `name` is always one of
+/// `enum_type`'s item names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LuaEnumItem {
+    pub enum_type: EnumType,
+    pub name: &'static str,
+}
+
+impl LuaEnumItem {
+    /// The item of `enum_type` called `name`, if there is one.
+    pub fn find(enum_type: EnumType, name: &str) -> Option<Self> {
+        enum_type
+            .item_names()
+            .into_iter()
+            .find(|item| *item == name)
+            .map(|name| Self { enum_type, name })
+    }
+
+    pub fn key(key: KeyCode) -> Self {
+        Self {
+            enum_type: EnumType::KeyCode,
+            name: key.as_str(),
+        }
+    }
+
+    pub fn as_key(self) -> Option<KeyCode> {
+        match self.enum_type {
+            EnumType::KeyCode => KeyCode::from_name(self.name),
+            _ => None,
+        }
+    }
+
+    /// The item an enum property value is, such as `Enum.Material.Neon`.
+    fn from_value(value: &Value) -> Option<Self> {
+        let (enum_type, name) = match value {
+            Value::Material(m) => (EnumType::Material, m.as_str()),
+            Value::PartType(t) => (EnumType::PartType, t.as_str()),
+            _ => return None,
+        };
+        Some(Self { enum_type, name })
+    }
+
+    /// This item as a property value, if it's an item of a property enum.
+    fn to_value(self) -> Option<Value> {
+        match self.enum_type {
+            EnumType::Material => Material::from_name(self.name).map(Value::Material),
+            EnumType::PartType => PartType::from_name(self.name).map(Value::PartType),
+            EnumType::KeyCode => None,
+        }
     }
 }
 
-fn enum_item_name(value: &Value) -> &'static str {
-    match value {
-        Value::Material(m) => m.as_str(),
-        Value::PartType(t) => t.as_str(),
-        _ => "?",
-    }
-}
-
-/// The message for a name that isn't an item of `kind`, listing the items.
-fn not_an_item(kind: ValueKind, name: &str) -> String {
+/// The message for a name that isn't an item of `enum_type`, listing the items.
+fn not_an_item(enum_type: EnumType, name: &str) -> String {
     format!(
-        "{name} is not a valid member of Enum.{kind}; choose from {}",
-        enum_item_names(kind).join(", ")
+        "{name} is not a valid member of Enum.{}; choose from {}",
+        enum_type.name(),
+        enum_type.item_names().join(", ")
     )
 }
 
 impl UserData for LuaEnum {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_meta_method(MetaMethod::Index, |_, _, name: String| {
-            ENUM_KINDS
+            EnumType::ALL
                 .into_iter()
-                .find(|kind| kind.to_string() == name)
+                .find(|enum_type| enum_type.name() == name)
                 .map(LuaEnumType)
                 .ok_or_else(|| {
                     mlua::Error::runtime(format!("{name} is not a valid member of Enum"))
@@ -206,34 +261,33 @@ impl UserData for LuaEnum {
     }
 }
 
+/// One enum, as scripts see it: `Enum.Material`.
+#[derive(Clone, Copy, Debug)]
+pub struct LuaEnumType(EnumType);
+
 impl UserData for LuaEnumType {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_meta_method(MetaMethod::Index, |_, this, name: String| {
-            enum_item(this.0, &name)
-                .map(LuaEnumItem)
+            LuaEnumItem::find(this.0, &name)
                 .ok_or_else(|| mlua::Error::runtime(not_an_item(this.0, &name)))
         });
         methods.add_meta_method(MetaMethod::ToString, |_, this, ()| {
-            Ok(format!("Enum.{}", this.0))
+            Ok(format!("Enum.{}", this.0.name()))
         });
     }
 }
 
 impl UserData for LuaEnumItem {
     fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("Name", |_, item| Ok(enum_item_name(&item.0)));
+        fields.add_field_method_get("Name", |_, item| Ok(item.name));
     }
 
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_meta_method(MetaMethod::Eq, |lua, item, other: mlua::Value| {
-            Ok(LuaEnumItem::from_lua(other, lua).is_ok_and(|other| other.0 == item.0))
+            Ok(LuaEnumItem::from_lua(other, lua).is_ok_and(|other| other == *item))
         });
         methods.add_meta_method(MetaMethod::ToString, |_, item, ()| {
-            Ok(format!(
-                "Enum.{}.{}",
-                item.0.kind(),
-                enum_item_name(&item.0)
-            ))
+            Ok(format!("Enum.{}.{}", item.enum_type.name(), item.name))
         });
     }
 }
@@ -274,7 +328,9 @@ pub fn value_to_lua(lua: &Lua, value: &Value) -> mlua::Result<mlua::Value> {
         Value::String(s) => s.as_str().into_lua(lua),
         Value::Vector3(v) => LuaVector3(*v).into_lua(lua),
         Value::Color3(c) => LuaColor3(*c).into_lua(lua),
-        Value::PartType(_) | Value::Material(_) => LuaEnumItem(value.clone()).into_lua(lua),
+        Value::PartType(_) | Value::Material(_) => LuaEnumItem::from_value(value)
+            .expect("enum property values are enum items")
+            .into_lua(lua),
     }
 }
 
@@ -295,13 +351,15 @@ pub fn value_from_lua(lua: &Lua, value: mlua::Value, kind: ValueKind) -> Result<
             .ok()
             .map(|c| Value::Color3(c.0)),
         (ValueKind::Material | ValueKind::PartType, mlua::Value::String(s)) => {
+            let enum_type = EnumType::of_kind(kind).expect("an enum kind");
             let name = s.to_string_lossy();
-            return enum_item(kind, &name)
-                .ok_or_else(|| format!("can't be \"{name}\": {}", not_an_item(kind, &name)));
+            return LuaEnumItem::find(enum_type, &name)
+                .and_then(LuaEnumItem::to_value)
+                .ok_or_else(|| format!("can't be \"{name}\": {}", not_an_item(enum_type, &name)));
         }
         (ValueKind::Material | ValueKind::PartType, _) => LuaEnumItem::from_lua(value.clone(), lua)
             .ok()
-            .map(|item| item.0)
+            .and_then(LuaEnumItem::to_value)
             .filter(|item| item.kind() == kind),
         _ => None,
     };
@@ -319,7 +377,21 @@ pub fn type_name(lua: &Lua, value: &mlua::Value) -> String {
             return "Color3".to_owned();
         }
         if let Ok(item) = data.borrow::<LuaEnumItem>() {
-            return item.0.kind().to_string();
+            return item.enum_type.name().to_owned();
+        }
+        // Engine objects that aren't Instances, by the names scripts know them by.
+        let others = [
+            (data.is::<crate::client::LuaCamera>(), "Camera"),
+            (data.is::<crate::client::LuaInputObject>(), "InputObject"),
+            (
+                data.is::<crate::client::LuaUserInputService>(),
+                "UserInputService",
+            ),
+            (data.is::<crate::events::LuaSignal>(), "Signal"),
+            (data.is::<crate::events::LuaConnection>(), "Connection"),
+        ];
+        if let Some((_, name)) = others.into_iter().find(|(is, _)| *is) {
+            return name.to_owned();
         }
         if let Ok(instance) = data.borrow::<LuaInstance>()
             && let Ok(world) = crate::instance::world(lua)

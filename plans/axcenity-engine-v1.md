@@ -276,10 +276,10 @@ Add a script editor tab with Lua syntax highlighting, and an "Insert Script" act
 
 ### Acceptance criteria
 
-- [ ] An example game reads keyboard input in a `LocalScript`, sends it through a `RemoteEvent`, and a `Script` moves a part in response.
-- [ ] Calling an input API from a `Script` gives an error that explains to use a `LocalScript` instead.
-- [ ] The loopback transport can be swapped out (proven by a test double).
-- [ ] Server and client contexts don't share Lua globals.
+- [x] An example game reads keyboard input in a `LocalScript`, sends it through a `RemoteEvent`, and a `Script` moves a part in response.
+- [x] Calling an input API from a `Script` gives an error that explains to use a `LocalScript` instead.
+- [x] The loopback transport can be swapped out (proven by a test double).
+- [x] Server and client contexts don't share Lua globals.
 
 ---
 

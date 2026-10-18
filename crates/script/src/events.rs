@@ -1,6 +1,7 @@
 //! Events (signals) such as `part.Touched`, and the handlers connected to them.
 //!
-//! `part.Touched` gives a [`LuaSignal`]: just the Instance and the event name.
+//! `part.Touched` gives a [`LuaSignal`]: just its [`Owner`] (here the part)
+//! and the event name.
 //! `signal:Connect(handler)` stores the handler in [`Connections`] (in Lua's
 //! app data) and returns a [`LuaConnection`], which `:Disconnect()` removes.
 //! When the engine fires an event, every handler runs as its own coroutine,
@@ -18,8 +19,16 @@ use crate::errors::error_message;
 use crate::types::type_name;
 use crate::{OutputKind, push_output, scheduler};
 
-/// One event on one Instance, such as `Touched` on a Part.
-type EventKey = (InstanceId, &'static str);
+/// What an event belongs to: an Instance (`part.Touched`), or an engine
+/// object that isn't one (`UserInputService.InputBegan`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Owner {
+    Instance(InstanceId),
+    UserInputService,
+}
+
+/// One event of one owner, such as `Touched` on a Part.
+type EventKey = (Owner, &'static str);
 
 /// Every connected handler. Lives in Lua's app data, so that `:Connect` and
 /// `:Disconnect` can reach it.
@@ -66,7 +75,10 @@ impl Connections {
     /// Drops the handlers of Instances that no longer exist, so their
     /// functions (and whatever those functions use) can be freed.
     pub fn forget(&mut self, exists: impl Fn(InstanceId) -> bool) {
-        self.handlers.retain(|(instance, _), _| exists(*instance));
+        self.handlers.retain(|(owner, _), _| match owner {
+            Owner::Instance(instance) => exists(*instance),
+            Owner::UserInputService => true,
+        });
     }
 }
 
@@ -75,11 +87,11 @@ fn connections_mut(lua: &Lua) -> mlua::Result<AppDataRefMut<'_, Connections>> {
         .ok_or_else(|| mlua::Error::runtime("events aren't available"))
 }
 
-/// Runs every handler connected to `event` on `instance`, each in a new
+/// Runs every handler connected to `event` of `owner`, each in a new
 /// coroutine, in the order they were connected. A handler that waits pauses
 /// only itself, and an error in one is reported without stopping the others.
-pub fn fire(lua: &Lua, instance: InstanceId, event: &'static str, args: impl IntoLuaMulti) {
-    let key = (instance, event);
+pub fn fire(lua: &Lua, owner: Owner, event: &'static str, args: impl IntoLuaMulti) {
+    let key = (owner, event);
     // Take a list first and let go of `Connections`, because a handler may
     // connect or disconnect handlers while it runs.
     let handlers: Vec<(u64, Function)> = match lua.app_data_ref::<Connections>() {
@@ -110,10 +122,10 @@ pub fn fire(lua: &Lua, instance: InstanceId, event: &'static str, args: impl Int
     }
 }
 
-/// An event of one Instance, as scripts see it: `part.Touched`.
+/// An event, as scripts see it: `part.Touched`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LuaSignal {
-    pub instance: InstanceId,
+    pub owner: Owner,
     pub event: &'static str,
 }
 
@@ -126,7 +138,7 @@ impl UserData for LuaSignal {
                     type_name(lua, &callback)
                 )));
             };
-            let key = (this.instance, this.event);
+            let key = (this.owner, this.event);
             let id = connections_mut(lua)?.connect(key, callback);
             Ok(LuaConnection { key, id })
         });

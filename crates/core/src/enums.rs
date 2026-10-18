@@ -1,5 +1,5 @@
-//! Enum property types, such as a part's shape or material. World files (and,
-//! later, scripts) refer to their items by name, for example `"Neon"`.
+//! Enum types, such as a part's shape or material. World files and scripts
+//! refer to their items by name, for example `"Neon"` or `Enum.KeyCode.W`.
 
 /// The shape of a Part.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -113,6 +113,180 @@ impl Material {
     }
 }
 
+/// A key on the keyboard, for `UserInputService` in LocalScripts. Keys are
+/// named by their place on a US keyboard, so `W` is the key above `S` on
+/// every layout. Names follow Roblox's (`Return`, `LeftShift`, `Zero`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum KeyCode {
+    A,
+    B,
+    C,
+    D,
+    E,
+    F,
+    G,
+    H,
+    I,
+    J,
+    K,
+    L,
+    M,
+    N,
+    O,
+    P,
+    Q,
+    R,
+    S,
+    T,
+    U,
+    V,
+    W,
+    X,
+    Y,
+    Z,
+    Zero,
+    One,
+    Two,
+    Three,
+    Four,
+    Five,
+    Six,
+    Seven,
+    Eight,
+    Nine,
+    Space,
+    Return,
+    Escape,
+    Tab,
+    Backspace,
+    Up,
+    Down,
+    Left,
+    Right,
+    LeftShift,
+    RightShift,
+    LeftControl,
+    RightControl,
+    LeftAlt,
+    RightAlt,
+}
+
+impl KeyCode {
+    pub const ALL: [KeyCode; 51] = [
+        KeyCode::A,
+        KeyCode::B,
+        KeyCode::C,
+        KeyCode::D,
+        KeyCode::E,
+        KeyCode::F,
+        KeyCode::G,
+        KeyCode::H,
+        KeyCode::I,
+        KeyCode::J,
+        KeyCode::K,
+        KeyCode::L,
+        KeyCode::M,
+        KeyCode::N,
+        KeyCode::O,
+        KeyCode::P,
+        KeyCode::Q,
+        KeyCode::R,
+        KeyCode::S,
+        KeyCode::T,
+        KeyCode::U,
+        KeyCode::V,
+        KeyCode::W,
+        KeyCode::X,
+        KeyCode::Y,
+        KeyCode::Z,
+        KeyCode::Zero,
+        KeyCode::One,
+        KeyCode::Two,
+        KeyCode::Three,
+        KeyCode::Four,
+        KeyCode::Five,
+        KeyCode::Six,
+        KeyCode::Seven,
+        KeyCode::Eight,
+        KeyCode::Nine,
+        KeyCode::Space,
+        KeyCode::Return,
+        KeyCode::Escape,
+        KeyCode::Tab,
+        KeyCode::Backspace,
+        KeyCode::Up,
+        KeyCode::Down,
+        KeyCode::Left,
+        KeyCode::Right,
+        KeyCode::LeftShift,
+        KeyCode::RightShift,
+        KeyCode::LeftControl,
+        KeyCode::RightControl,
+        KeyCode::LeftAlt,
+        KeyCode::RightAlt,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            KeyCode::A => "A",
+            KeyCode::B => "B",
+            KeyCode::C => "C",
+            KeyCode::D => "D",
+            KeyCode::E => "E",
+            KeyCode::F => "F",
+            KeyCode::G => "G",
+            KeyCode::H => "H",
+            KeyCode::I => "I",
+            KeyCode::J => "J",
+            KeyCode::K => "K",
+            KeyCode::L => "L",
+            KeyCode::M => "M",
+            KeyCode::N => "N",
+            KeyCode::O => "O",
+            KeyCode::P => "P",
+            KeyCode::Q => "Q",
+            KeyCode::R => "R",
+            KeyCode::S => "S",
+            KeyCode::T => "T",
+            KeyCode::U => "U",
+            KeyCode::V => "V",
+            KeyCode::W => "W",
+            KeyCode::X => "X",
+            KeyCode::Y => "Y",
+            KeyCode::Z => "Z",
+            KeyCode::Zero => "Zero",
+            KeyCode::One => "One",
+            KeyCode::Two => "Two",
+            KeyCode::Three => "Three",
+            KeyCode::Four => "Four",
+            KeyCode::Five => "Five",
+            KeyCode::Six => "Six",
+            KeyCode::Seven => "Seven",
+            KeyCode::Eight => "Eight",
+            KeyCode::Nine => "Nine",
+            KeyCode::Space => "Space",
+            KeyCode::Return => "Return",
+            KeyCode::Escape => "Escape",
+            KeyCode::Tab => "Tab",
+            KeyCode::Backspace => "Backspace",
+            KeyCode::Up => "Up",
+            KeyCode::Down => "Down",
+            KeyCode::Left => "Left",
+            KeyCode::Right => "Right",
+            KeyCode::LeftShift => "LeftShift",
+            KeyCode::RightShift => "RightShift",
+            KeyCode::LeftControl => "LeftControl",
+            KeyCode::RightControl => "RightControl",
+            KeyCode::LeftAlt => "LeftAlt",
+            KeyCode::RightAlt => "RightAlt",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|item| item.as_str() == name)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -126,6 +300,9 @@ mod tests {
             assert_eq!(Material::from_name(item.as_str()), Some(item));
         }
         assert_eq!(Material::from_name("neon"), None);
+        for item in KeyCode::ALL {
+            assert_eq!(KeyCode::from_name(item.as_str()), Some(item));
+        }
     }
 
     #[test]

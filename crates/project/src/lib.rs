@@ -7,7 +7,8 @@
 //! my-game/
 //!   axcenity.json   the manifest: project name and format version
 //!   world.json      the Instances in the world
-//!   scripts/        `*.server.lua` files, in subfolders if you like
+//!   scripts/        `*.server.lua` and `*.client.lua` files, in subfolders
+//!                   if you like
 //! ```
 //!
 //! One damaged file never stops the rest from loading: [`load`] leaves it
@@ -34,6 +35,8 @@ pub const KEPT_WORLD_FILE: &str = "world.backup.json";
 pub const SCRIPTS_FOLDER: &str = "scripts";
 /// Files ending in this are server scripts. The part before it is the Script's name.
 pub const SERVER_SCRIPT_SUFFIX: &str = ".server.lua";
+/// Files ending in this are client scripts, which become LocalScripts.
+pub const CLIENT_SCRIPT_SUFFIX: &str = ".client.lua";
 
 /// The newest project format this version of the engine understands.
 pub const FORMAT_VERSION: u32 = 1;
@@ -49,7 +52,9 @@ pub struct Project {
     pub folder: PathBuf,
     pub manifest: Manifest,
     pub world: World,
-    /// Every server script that could be read, sorted by path.
+    /// Every script that could be read, in the order they start: server
+    /// scripts first, then client scripts, each sorted by path (see
+    /// [`script_order`]).
     pub scripts: Vec<ScriptFile>,
     /// The files that couldn't be loaded. Each was left out, and the rest
     /// of the project loaded without it.
@@ -62,7 +67,8 @@ pub struct Project {
 
 /// A script file from the project's `scripts` folder.
 pub struct ScriptFile {
-    /// The Script Instance made for this file, in `ServerScriptService`.
+    /// The Script made for this file, in `ServerScriptService`, or the
+    /// LocalScript, in `StarterPlayer.StarterPlayerScripts`.
     pub instance: InstanceId,
     /// Where the file is, relative to the project folder and with `/` between
     /// folders on every OS, for example `scripts/doors/open.server.lua`.
@@ -162,8 +168,8 @@ fn load_world(folder: &Path) -> Result<World, LoadError> {
     parse_world(&text).map_err(|source| LoadError::World { path, source })
 }
 
-/// Reads every server script and gives each one a Script Instance in
-/// `ServerScriptService`. A file that can't be read is left out, with the
+/// Reads every script and gives each one its Script or LocalScript (see
+/// [`add_script_instance`]). A file that can't be read is left out, with the
 /// reason added to `problems`.
 fn load_scripts(
     folder: &Path,
@@ -184,12 +190,12 @@ fn load_scripts(
     scripts
 }
 
-/// The path of every `*.server.lua` file in the project in `folder`, as
-/// [`ScriptFile::path`]s, sorted. Folders that can't be read are skipped and
-/// added to `problems`.
+/// The path of every `*.server.lua` and `*.client.lua` file in the project
+/// in `folder`, as [`ScriptFile::path`]s, in [`script_order`]. Folders that
+/// can't be read are skipped and added to `problems`.
 pub fn find_scripts(folder: &Path, problems: &mut Vec<LoadError>) -> Vec<String> {
     let mut found = Vec::new();
-    find_server_scripts(
+    find_script_files(
         &folder.join(SCRIPTS_FOLDER),
         SCRIPTS_FOLDER,
         &mut found,
@@ -197,13 +203,20 @@ pub fn find_scripts(folder: &Path, problems: &mut Vec<LoadError>) -> Vec<String>
     );
     // Folder listings come back in a different order on each OS; sorting makes
     // scripts start in the same order everywhere.
-    found.sort();
+    found.sort_by(|a, b| script_order(a).cmp(&script_order(b)));
     found
 }
 
-/// Adds the path of every `*.server.lua` file in `dir` and its subfolders to
+/// What scripts are sorted by: server scripts before client scripts (a
+/// server is running before any player joins), then by path. Sort with
+/// `scripts.sort_by(|a, b| script_order(a).cmp(&script_order(b)))`.
+pub fn script_order(path: &str) -> (bool, &str) {
+    (script_class(path) == ClassName::LocalScript, path)
+}
+
+/// Adds the path of every script file in `dir` and its subfolders to
 /// `found`. `shown` is how `dir` itself is shown.
-fn find_server_scripts(
+fn find_script_files(
     dir: &Path,
     shown: &str,
     found: &mut Vec<String>,
@@ -237,41 +250,73 @@ fn find_server_scripts(
         if disk_path.is_dir() {
             // Visited after the loop, which still borrows `problems` through `problem`.
             folders.push((disk_path, shown));
-        } else if file_name.ends_with(SERVER_SCRIPT_SUFFIX) {
+        } else if file_name.ends_with(SERVER_SCRIPT_SUFFIX)
+            || file_name.ends_with(CLIENT_SCRIPT_SUFFIX)
+        {
             found.push(shown);
         }
     }
     for (disk_path, shown) in folders {
-        find_server_scripts(&disk_path, &shown, found, problems);
+        find_script_files(&disk_path, &shown, found, problems);
     }
 }
 
-/// The name of the Script for the file at `path`: its file name without
-/// `.server.lua`, so `scripts/doors/open.server.lua` is `open`.
+/// The class of the script in the file at `path`: LocalScript for a
+/// `.client.lua` file, otherwise Script.
+pub fn script_class(path: &str) -> ClassName {
+    if path.ends_with(CLIENT_SCRIPT_SUFFIX) {
+        ClassName::LocalScript
+    } else {
+        ClassName::Script
+    }
+}
+
+/// The file ending for scripts of `class`: `.client.lua` for a LocalScript,
+/// otherwise `.server.lua`.
+pub fn script_suffix(class: ClassName) -> &'static str {
+    match class {
+        ClassName::LocalScript => CLIENT_SCRIPT_SUFFIX,
+        _ => SERVER_SCRIPT_SUFFIX,
+    }
+}
+
+/// The name of the script for the file at `path`: its file name without
+/// `.server.lua` or `.client.lua`, so `scripts/doors/open.server.lua` is `open`.
 pub fn script_name(path: &str) -> &str {
     let file_name = path.rsplit('/').next().unwrap_or(path);
     file_name
         .strip_suffix(SERVER_SCRIPT_SUFFIX)
+        .or_else(|| file_name.strip_suffix(CLIENT_SCRIPT_SUFFIX))
         .unwrap_or(file_name)
 }
 
-/// The path of a new script called `name`, directly in the `scripts` folder.
-pub fn script_path(name: &str) -> String {
-    format!("{SCRIPTS_FOLDER}/{name}{SERVER_SCRIPT_SUFFIX}")
+/// The path of a new script of `class` (Script or LocalScript) called
+/// `name`, directly in the `scripts` folder.
+pub fn script_path(name: &str, class: ClassName) -> String {
+    format!("{SCRIPTS_FOLDER}/{name}{}", script_suffix(class))
 }
 
-/// Makes the Script Instance for the file at `path`, named after it, in
-/// `ServerScriptService`. Subfolders only organize the files: every Script
-/// goes directly into `ServerScriptService`.
+/// The service the scripts of `class` go in: `ServerScriptService` for
+/// Scripts, `StarterPlayer.StarterPlayerScripts` for LocalScripts.
+pub fn script_service(world: &World, class: ClassName) -> InstanceId {
+    match class {
+        ClassName::LocalScript => world.starter_player_scripts(),
+        _ => world.server_script_service(),
+    }
+}
+
+/// Makes the Script (or, for a `.client.lua` file, the LocalScript) for the
+/// file at `path`, named after it, in its service (see [`script_service`]).
+/// Subfolders only organize the files: every script goes directly into its
+/// service.
 pub fn add_script_instance(world: &mut World, path: &str) -> InstanceId {
-    let instance = world
-        .create(ClassName::Script)
-        .expect("Script is not a service");
+    let class = script_class(path);
+    let instance = world.create(class).expect("scripts are not services");
     world
         .set_name(instance, script_name(path))
         .expect("just created");
     world
-        .set_parent(instance, Some(world.server_script_service()))
+        .set_parent(instance, Some(script_service(world, class)))
         .expect("both exist");
     instance
 }
@@ -341,13 +386,19 @@ impl SaveError {
     }
 }
 
-/// Makes a new script file called `name` (see [`check_script_name`]) with
-/// `source` in it, directly in the `scripts` folder, and returns its path.
-/// Fails (see [`SaveError::already_exists`]) if a file with that name is
-/// already there, never replacing it. On Windows and macOS that includes a
-/// name that only differs in capitals.
-pub fn create_script(folder: &Path, name: &str, source: &str) -> Result<String, SaveError> {
-    let path = script_path(name);
+/// Makes a new script file called `name` (see [`check_script_name`]) for a
+/// script of `class` (Script or LocalScript) with `source` in it, directly
+/// in the `scripts` folder, and returns its path. Fails (see
+/// [`SaveError::already_exists`]) if a file with that name is already there,
+/// never replacing it. On Windows and macOS that includes a name that only
+/// differs in capitals.
+pub fn create_script(
+    folder: &Path,
+    name: &str,
+    class: ClassName,
+    source: &str,
+) -> Result<String, SaveError> {
+    let path = script_path(name, class);
     let disk_path = folder.join(&path);
     let error = SaveError::new(&disk_path);
     fs::create_dir_all(folder.join(SCRIPTS_FOLDER)).map_err(SaveError::new(&disk_path))?;
@@ -375,10 +426,11 @@ pub fn write_script(folder: &Path, path: &str, source: &str) -> Result<(), SaveE
 }
 
 /// Renames the script file at `path` to `new_name` (see
-/// [`check_script_name`]), in the same folder, and returns its new path.
-/// Fails rather than replace another file.
+/// [`check_script_name`]), in the same folder and with the same ending
+/// (`.server.lua` or `.client.lua`), and returns its new path. Fails rather
+/// than replace another file.
 pub fn rename_script(folder: &Path, path: &str, new_name: &str) -> Result<String, SaveError> {
-    let new_file_name = format!("{new_name}{SERVER_SCRIPT_SUFFIX}");
+    let new_file_name = format!("{new_name}{}", script_suffix(script_class(path)));
     let new_path = match path.rsplit_once('/') {
         Some((dir, _)) => format!("{dir}/{new_file_name}"),
         None => new_file_name.clone(),
@@ -515,14 +567,15 @@ mod tests {
     }
 
     #[test]
-    fn server_scripts_become_script_instances_sorted_by_path() {
+    fn server_scripts_become_scripts_and_client_scripts_local_scripts() {
         let folder = project_with_scripts(
             "scripts",
             &[
                 ("scripts/main.server.lua", b"print('main')"),
                 ("scripts/doors/open.server.lua", b"print('door')"),
                 ("scripts/notes.txt", b"not a script"),
-                ("scripts/camera.client.lua", b"-- client scripts come later"),
+                ("scripts/camera.client.lua", b"print('camera')"),
+                ("scripts/a/keys.client.lua", b"print('keys')"),
             ],
         );
         let scripts = folder.join(SCRIPTS_FOLDER);
@@ -534,28 +587,37 @@ mod tests {
         fs::remove_dir_all(&folder).unwrap();
         let project = project.unwrap();
 
+        // Server scripts start first, then client scripts, each by path.
         let paths: Vec<&str> = project.scripts.iter().map(|s| s.path.as_str()).collect();
         assert_eq!(
             paths,
-            ["scripts/doors/open.server.lua", "scripts/main.server.lua"]
+            [
+                "scripts/doors/open.server.lua",
+                "scripts/main.server.lua",
+                "scripts/a/keys.client.lua",
+                "scripts/camera.client.lua",
+            ]
         );
         assert_eq!(project.scripts[1].source, "print('main')");
         assert_eq!(reread.unwrap(), "print('edited')");
 
         let world = &project.world;
-        let service = world.server_script_service();
-        let names: Vec<&str> = world
-            .get(service)
-            .unwrap()
-            .children()
-            .iter()
-            .map(|&id| world.get(id).unwrap().name())
-            .collect();
-        assert_eq!(names, ["open", "main"]);
+        let names = |service| -> Vec<&str> {
+            world
+                .get(service)
+                .unwrap()
+                .children()
+                .iter()
+                .map(|&id| world.get(id).unwrap().name())
+                .collect()
+        };
+        assert_eq!(names(world.server_script_service()), ["open", "main"]);
+        assert_eq!(names(world.starter_player_scripts()), ["keys", "camera"]);
         for script in &project.scripts {
             let instance = world.get(script.instance).unwrap();
-            assert_eq!(instance.class(), ClassName::Script);
-            assert_eq!(instance.parent(), Some(service));
+            let class = script_class(&script.path);
+            assert_eq!(instance.class(), class);
+            assert_eq!(instance.parent(), Some(script_service(world, class)));
         }
     }
 
@@ -672,16 +734,24 @@ mod tests {
     #[test]
     fn scripts_are_created_renamed_and_deleted_as_files() {
         let folder = project_with_scripts("script-files", &[]);
-        let path = create_script(&folder, "Script", "print('hi')").unwrap();
+        let server = ClassName::Script;
+        let path = create_script(&folder, "Script", server, "print('hi')").unwrap();
         assert_eq!(path, "scripts/Script.server.lua");
         // Never replaces a file that's already there.
-        let again = create_script(&folder, "Script", "print('other')").unwrap_err();
+        let again = create_script(&folder, "Script", server, "print('other')").unwrap_err();
         assert!(again.already_exists());
 
         write_script(&folder, &path, "print('edited')").unwrap();
         assert_eq!(read_script(&folder, &path).unwrap(), "print('edited')");
 
-        let other = create_script(&folder, "Other", "").unwrap();
+        // A LocalScript's file keeps its `.client.lua` when renamed.
+        let client = create_script(&folder, "Keys", ClassName::LocalScript, "").unwrap();
+        assert_eq!(client, "scripts/Keys.client.lua");
+        let client = rename_script(&folder, &client, "Input").unwrap();
+        assert_eq!(client, "scripts/Input.client.lua");
+        delete_script(&folder, &client).unwrap();
+
+        let other = create_script(&folder, "Other", server, "").unwrap();
         assert!(
             rename_script(&folder, &path, "Other")
                 .unwrap_err()
@@ -728,7 +798,15 @@ mod tests {
             assert!(check_script_name(bad).is_err(), "{bad:?}");
         }
         assert_eq!(script_name("scripts/doors/open.server.lua"), "open");
-        assert_eq!(script_path("open"), "scripts/open.server.lua");
+        assert_eq!(script_name("scripts/keys.client.lua"), "keys");
+        assert_eq!(
+            script_path("open", ClassName::Script),
+            "scripts/open.server.lua"
+        );
+        assert_eq!(
+            script_path("keys", ClassName::LocalScript),
+            "scripts/keys.client.lua"
+        );
     }
 
     #[test]

@@ -96,39 +96,52 @@ pub struct World {
     instances: Arena<Instance>,
     root: InstanceId,
     workspace: InstanceId,
+    players: InstanceId,
+    replicated_storage: InstanceId,
     server_script_service: InstanceId,
+    starter_player_scripts: InstanceId,
 }
 
 impl World {
-    /// Creates a world with `game` and its services (`Workspace` and
-    /// `ServerScriptService`).
+    /// Creates a world with `game` and its services, in the order the
+    /// Explorer shows them: `Workspace`, `Players`, `ReplicatedStorage`,
+    /// `ServerScriptService` and `StarterPlayer` (with
+    /// `StarterPlayerScripts` inside).
     pub fn new() -> Self {
         let mut instances = Arena::new();
         let mut game = Instance::new(ClassName::DataModel);
         game.name = "Game".to_owned();
         let root = InstanceId(instances.insert(game));
 
-        // A closure that adds one service under `game`. It borrows `instances`
-        // mutably, so `instances` can't be used directly until its last call.
-        let mut add_service = |class| {
+        // A closure that adds one service under `parent`. It borrows
+        // `instances` mutably, so `instances` can't be used directly until
+        // its last call.
+        let mut add_service = |class, parent: InstanceId| {
             let mut service = Instance::new(class);
-            service.parent = Some(root);
+            service.parent = Some(parent);
             let id = InstanceId(instances.insert(service));
             instances
-                .get_mut(root.0)
-                .expect("root was just inserted")
+                .get_mut(parent.0)
+                .expect("parent was inserted first")
                 .children
                 .push(id);
             id
         };
-        let workspace = add_service(ClassName::Workspace);
-        let server_script_service = add_service(ClassName::ServerScriptService);
+        let workspace = add_service(ClassName::Workspace, root);
+        let players = add_service(ClassName::Players, root);
+        let replicated_storage = add_service(ClassName::ReplicatedStorage, root);
+        let server_script_service = add_service(ClassName::ServerScriptService, root);
+        let starter_player = add_service(ClassName::StarterPlayer, root);
+        let starter_player_scripts = add_service(ClassName::StarterPlayerScripts, starter_player);
 
         Self {
             instances,
             root,
             workspace,
+            players,
+            replicated_storage,
             server_script_service,
+            starter_player_scripts,
         }
     }
 
@@ -141,8 +154,38 @@ impl World {
         self.workspace
     }
 
+    /// Holds a Player for everyone in the game (only during play).
+    pub fn players(&self) -> InstanceId {
+        self.players
+    }
+
+    /// Holds what Scripts and LocalScripts share, such as RemoteEvents.
+    pub fn replicated_storage(&self) -> InstanceId {
+        self.replicated_storage
+    }
+
     pub fn server_script_service(&self) -> InstanceId {
         self.server_script_service
+    }
+
+    /// `StarterPlayer.StarterPlayerScripts`, which holds the LocalScripts.
+    pub fn starter_player_scripts(&self) -> InstanceId {
+        self.starter_player_scripts
+    }
+
+    /// The service (or `game` itself) of class `class`, if `class` is one.
+    pub fn service(&self, class: ClassName) -> Option<InstanceId> {
+        let id = match class {
+            ClassName::DataModel => self.root,
+            ClassName::Workspace => self.workspace,
+            ClassName::Players => self.players,
+            ClassName::ReplicatedStorage => self.replicated_storage,
+            ClassName::ServerScriptService => self.server_script_service,
+            ClassName::StarterPlayer => self.get(self.starter_player_scripts)?.parent?,
+            ClassName::StarterPlayerScripts => self.starter_player_scripts,
+            _ => return None,
+        };
+        Some(id)
     }
 
     pub fn get(&self, id: InstanceId) -> Option<&Instance> {
@@ -450,14 +493,32 @@ mod tests {
     }
 
     #[test]
-    fn new_world_has_game_and_workspace() {
+    fn new_world_has_game_and_its_services() {
         let world = World::new();
         let game = world.get(world.root()).unwrap();
         assert_eq!(game.class(), ClassName::DataModel);
+        let starter_player = world.service(ClassName::StarterPlayer).unwrap();
         assert_eq!(
             game.children(),
-            &[world.workspace(), world.server_script_service()]
+            &[
+                world.workspace(),
+                world.players(),
+                world.replicated_storage(),
+                world.server_script_service(),
+                starter_player,
+            ]
         );
+        assert_eq!(
+            world.get(starter_player).unwrap().children(),
+            &[world.starter_player_scripts()]
+        );
+        for class in ClassName::ALL {
+            let service = world.service(class);
+            assert_eq!(service.is_some(), class.is_service(), "{class}");
+            if let Some(id) = service {
+                assert_eq!(world.get(id).unwrap().class(), class);
+            }
+        }
         let workspace = world.get(world.workspace()).unwrap();
         assert_eq!(workspace.parent(), Some(world.root()));
         let scripts = world.get(world.server_script_service()).unwrap();

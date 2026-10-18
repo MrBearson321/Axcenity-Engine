@@ -5,7 +5,7 @@
 //! the user made, and the app applies it, which keeps the panel easy to test
 //! and gives one place to notice unsaved changes.
 
-use axcenity_core::{ClassName, Color3, Instance, InstanceId, Material, PartType, Value, World};
+use axcenity_core::{Color3, Instance, InstanceId, Material, PartType, Value, World};
 use eframe::egui;
 
 /// A change made in the Properties panel.
@@ -76,10 +76,10 @@ pub fn can_rename(instance: &Instance) -> bool {
 }
 
 /// Whether the Name box in this panel can rename `instance`. Renaming a
-/// Script renames its file, which shouldn't happen at every key typed, so
+/// script renames its file, which shouldn't happen at every key typed, so
 /// Scripts are renamed in the Explorer instead, all at once.
 pub fn can_rename_here(instance: &Instance) -> bool {
-    can_rename(instance) && instance.class() != ClassName::Script
+    can_rename(instance) && !instance.class().is_script()
 }
 
 /// Shown when hovering a greyed-out value during Play.
@@ -120,8 +120,8 @@ pub fn show(
                             edit = Some(Edit::Name(name));
                         }
                     } else {
-                        let hint = if instance.class() == ClassName::Script {
-                            "Rename a Script in the Explorer (F2). That renames its file too."
+                        let hint = if instance.class().is_script() {
+                            "Rename a script in the Explorer (F2). That renames its file too."
                         } else {
                             "Services can't be renamed."
                         };
@@ -275,6 +275,7 @@ fn choice_control<T: Copy + PartialEq>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axcenity_core::ClassName;
 
     fn titles(sections: &[Section]) -> Vec<&'static str> {
         sections.iter().map(|section| section.title).collect()
