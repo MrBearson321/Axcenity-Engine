@@ -210,6 +210,34 @@ const LIBRARIES: &[Library] = &[
             },
         ],
     },
+    Library {
+        global: "task",
+        doc: "Pauses scripts and runs functions later, without stopping the game.",
+        functions: &[
+            Function {
+                name: "wait",
+                doc: "Pauses this code for `seconds` (left out: until the next frame), while the game and other scripts keep running. Returns the seconds that really passed.",
+                params: &[("seconds?", "number")],
+                returns: "number",
+            },
+            Function {
+                name: "spawn",
+                doc: "Runs `callback` right away with the given arguments, until it finishes or waits, then carries on here. An error inside it is reported without stopping this code.",
+                params: &[("callback", "function"), ("...", "any")],
+                returns: "thread",
+            },
+            Function {
+                name: "delay",
+                doc: "Runs `callback` with the given arguments after `seconds`, without pausing this code.",
+                params: &[
+                    ("seconds", "number"),
+                    ("callback", "function"),
+                    ("...", "any"),
+                ],
+                returns: "thread",
+            },
+        ],
+    },
 ];
 
 const ENUM_GLOBAL_DOC: &str = "Every enum, such as `Enum.Material` and `Enum.PartType`.";
@@ -635,7 +663,7 @@ mod tests {
         let mut world = World::new();
         let mut runtime = ScriptRuntime::new();
         let script = world.workspace();
-        runtime.run_script(&mut world, script, "check.lua", &source);
+        runtime.start_script(&mut world, script, "check.lua", &source);
         let errors: Vec<String> = runtime
             .take_output()
             .into_iter()

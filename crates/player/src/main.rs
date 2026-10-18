@@ -1,7 +1,8 @@
 //! Axcenity Player: the runtime that ships with every exported game.
 //!
-//! Phase 4: loads a project folder, runs its server scripts once, and draws
-//! the Workspace, with a fly camera for looking around.
+//! Phase 5: loads a project folder, starts its server scripts, and runs the
+//! frame loop: resume scripts whose `task.wait` is over, then draw the
+//! Workspace, with a fly camera for looking around.
 
 mod camera;
 mod scene;
@@ -50,7 +51,8 @@ fn main() -> Result<()> {
         .with_context(|| format!("could not open the project in `{}`", folder.display()))?;
     log::info!("loaded project \"{}\"", project.manifest.name);
     let mut world = project.world;
-    run_scripts(&mut world, &project.scripts);
+    let mut scripts = ScriptRuntime::new();
+    start_scripts(&mut scripts, &mut world, &project.scripts);
 
     let event_loop = EventLoop::new()?;
     // Games redraw continuously instead of waiting for input.
@@ -59,6 +61,7 @@ fn main() -> Result<()> {
     let mut app = App {
         title: format!("{} - Axcenity Player", project.manifest.name),
         world,
+        scripts,
         window: None,
         renderer: None,
         error: None,
@@ -76,18 +79,23 @@ fn main() -> Result<()> {
     }
 }
 
-/// Runs every server script once, in path order, and prints its output.
-/// An error stops only the script it happens in.
-fn run_scripts(world: &mut World, scripts: &[ScriptFile]) {
-    let mut runtime = ScriptRuntime::new();
+/// Starts every server script, in path order, and prints its output. Each
+/// runs until it finishes or first waits; the frame loop resumes it after
+/// that. An error stops only the script it happens in.
+fn start_scripts(runtime: &mut ScriptRuntime, world: &mut World, scripts: &[ScriptFile]) {
     for script in scripts {
-        log::info!("running {}", script.path);
-        runtime.run_script(world, script.instance, &script.path, &script.source);
-        for line in runtime.take_output() {
-            match line.kind {
-                OutputKind::Print => println!("{}", line.text),
-                OutputKind::Error => eprintln!("error: {}", line.text),
-            }
+        log::info!("starting {}", script.path);
+        runtime.start_script(world, script.instance, &script.path, &script.source);
+        print_output(runtime);
+    }
+}
+
+/// Prints what scripts printed to stdout, and their errors to stderr.
+fn print_output(runtime: &mut ScriptRuntime) {
+    for line in runtime.take_output() {
+        match line.kind {
+            OutputKind::Print => println!("{}", line.text),
+            OutputKind::Error => eprintln!("error: {}", line.text),
         }
     }
 }
@@ -97,6 +105,8 @@ fn run_scripts(world: &mut World, scripts: &[ScriptFile]) {
 struct App {
     title: String,
     world: World,
+    /// Runs the scripts, and keeps the ones paused by `task.wait`.
+    scripts: ScriptRuntime,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     error: Option<anyhow::Error>,
@@ -199,10 +209,23 @@ impl ApplicationHandler for App {
                 self.looking = false;
                 capture_mouse(window, false);
             }
+            // One frame, in the fixed order from docs/architecture.md.
             WindowEvent::RedrawRequested => {
                 let seconds = frame_seconds(&mut self.last_frame);
+
+                // 1. Input: the events above have already updated the keys
+                //    and mouse look, so move the camera.
                 self.camera.update(&self.keys, seconds);
 
+                // 2. Resume scripts whose wait is over (and due `task.delay`s).
+                //    Game time is the sum of the (capped) frame times, so a
+                //    long pause doesn't make every waiting script fire at once.
+                self.scripts.step(&mut self.world, f64::from(seconds));
+                print_output(&mut self.scripts);
+
+                // 3 to 5 (physics, Touched events, UI layout) come in later phases.
+
+                // 6. Build the draw list and render.
                 let draw_list = scene::build_draw_list(&self.world, self.camera.to_render_camera());
                 // `|| ...` is a closure: a small function the renderer calls at the right moment.
                 if let Err(err) = renderer.render(&draw_list, || window.pre_present_notify()) {
@@ -245,7 +268,7 @@ mod tests {
         let mut world = project.world;
         let parts_before = world.descendants(world.workspace()).len();
 
-        run_scripts(&mut world, &project.scripts);
+        start_scripts(&mut ScriptRuntime::new(), &mut world, &project.scripts);
 
         let workspace = world.workspace();
         let block = world.find_first_child(workspace, "Block").unwrap();
@@ -264,5 +287,49 @@ mod tests {
         let camera = FlyCamera::looking_at(START_CAMERA_POSITION, Vec3::ZERO).to_render_camera();
         let draw_list = scene::build_draw_list(&world, camera);
         assert_eq!(draw_list.items.len(), parts_before + 5);
+    }
+
+    #[test]
+    fn hello_tasks_example_blinks_spins_and_adds_a_ball_over_time() {
+        let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-tasks");
+        let project = axcenity_project::load(&folder).unwrap();
+        let mut world = project.world;
+        let mut scripts = ScriptRuntime::new();
+        start_scripts(&mut scripts, &mut world, &project.scripts);
+
+        let workspace = world.workspace();
+        let lamp = world.find_first_child(workspace, "Lamp").unwrap();
+        let spinner = world.find_first_child(workspace, "Spinner").unwrap();
+        let property = |world: &World, id, name| world.get(id).unwrap().property(name).cloned();
+
+        // 3.5 seconds at 60 frames per second, the way the frame loop steps it.
+        let mut color = property(&world, lamp, "Color");
+        let mut color_changes = 0;
+        let mut printed = Vec::new();
+        for _ in 0..210 {
+            scripts.step(&mut world, 1.0 / 60.0);
+            printed.extend(scripts.take_output().into_iter().map(|line| line.text));
+            if property(&world, lamp, "Color") != color {
+                color = property(&world, lamp, "Color");
+                color_changes += 1;
+            }
+        }
+
+        assert_eq!(color_changes, 3);
+        assert_eq!(
+            printed,
+            [
+                "blink 1",
+                "blink 2",
+                "blink 3",
+                "a ball appeared after 3 seconds"
+            ]
+        );
+        assert!(world.find_first_child(workspace, "Ball").is_some());
+        // 90 degrees a second for 3.5 seconds is 315 degrees.
+        let Some(Value::Vector3(orientation)) = property(&world, spinner, "Orientation") else {
+            panic!("the spinner has no Orientation");
+        };
+        assert!((orientation.y - 315.0).abs() < 0.5, "{orientation:?}");
     }
 }

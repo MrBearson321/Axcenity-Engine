@@ -153,3 +153,25 @@ function Color3.new(r, g, b) end
 ---@param b? number
 ---@return Color3
 function Color3.fromRGB(r, g, b) end
+
+---Pauses scripts and runs functions later, without stopping the game.
+---@class taskLibrary
+task = {}
+
+---Pauses this code for `seconds` (left out: until the next frame), while the game and other scripts keep running. Returns the seconds that really passed.
+---@param seconds? number
+---@return number
+function task.wait(seconds) end
+
+---Runs `callback` right away with the given arguments, until it finishes or waits, then carries on here. An error inside it is reported without stopping this code.
+---@param callback function
+---@param ... any
+---@return thread
+function task.spawn(callback, ...) end
+
+---Runs `callback` with the given arguments after `seconds`, without pausing this code.
+---@param seconds number
+---@param callback function
+---@param ... any
+---@return thread
+function task.delay(seconds, callback, ...) end

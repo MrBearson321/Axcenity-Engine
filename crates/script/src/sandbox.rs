@@ -9,7 +9,7 @@
 use axcenity_core::InstanceId;
 use mlua::{Function, Lua, Table, Value};
 
-use crate::{api, errors};
+use crate::{api, errors, task};
 
 /// Standard functions scripts may use as they are.
 pub const SAFE_FUNCTIONS: &[&str] = &[
@@ -48,12 +48,18 @@ const SAFE_OS_FUNCTIONS: &[&str] = &["clock", "date", "difftime", "time"];
 pub struct Shared {
     pcall: Function,
     xpcall: Function,
+    task: task::TaskFunctions,
 }
 
 impl Shared {
     pub fn new(lua: &Lua) -> mlua::Result<Self> {
         let (pcall, xpcall) = errors::protected_calls(lua)?;
-        Ok(Self { pcall, xpcall })
+        let task = task::TaskFunctions::new(lua)?;
+        Ok(Self {
+            pcall,
+            xpcall,
+            task,
+        })
     }
 }
 
@@ -104,5 +110,6 @@ pub fn environment(lua: &Lua, shared: &Shared, ids: ScriptIds) -> mlua::Result<T
     env.raw_set("_G", &env)?;
 
     api::install(lua, &env, ids)?;
+    env.raw_set("task", shared.task.library(lua)?)?;
     Ok(env)
 }

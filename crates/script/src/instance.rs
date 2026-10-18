@@ -1,6 +1,6 @@
 //! Instances as Lua values. A Lua Instance only holds an [`InstanceId`];
 //! every read and write looks the Instance up in the World, which is lent to
-//! Lua while scripts run (see `ScriptRuntime::run_script`).
+//! Lua while scripts run (see `with_world` in `lib.rs`).
 
 use axcenity_core::{InstanceId, World};
 use mlua::{

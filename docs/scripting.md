@@ -14,9 +14,9 @@ Read before working in the `script` or `blocks` crates, or adding anything to th
 - Clean up Roblox quirks when it helps beginners. Don't chase full compatibility.
 - Never use Roblox's name, logos or assets.
 
-## API so far (Phase 4)
+## API so far (Phase 5)
 
-- Globals: `game`, `workspace`, `script` (the running Script), `print`, `Instance.new(className)`, `Vector3.new(x, y, z)`, `Color3.new(r, g, b)`, `Color3.fromRGB(r, g, b)` and `Enum`.
+- Globals: `game`, `workspace`, `script` (the running Script), `print`, `Instance.new(className)`, `Vector3.new(x, y, z)`, `Color3.new(r, g, b)`, `Color3.fromRGB(r, g, b)`, `Enum` and `task` (see Execution model).
 - Instances: `Name`, `ClassName` (read-only), `Parent` (an Instance or `nil`), every property in `core`'s class table, and `:FindFirstChild(name, recursive?)`.
 - **Children by name** (decided in Phase 4): `workspace.Block` returns the first child named `Block`. Methods and properties win over children with the same name. A name that's none of these errors with `X is not a valid member of Workspace "Workspace"`.
 - **Enums** (decided in Phase 4): `Enum.Material.Neon` and `Enum.PartType.Ball`. Enum properties also accept the item's name as a string (`part.Material = "Neon"`); a wrong name errors and lists the choices. Reading always gives an enum item, which prints as `Enum.Material.Neon` and has `.Name`.
@@ -40,10 +40,19 @@ Each script gets its own restricted environment. Remove or replace `io`, `os` (k
 ## Execution model
 
 - Every script body and every event handler runs as a **coroutine**.
-- The **scheduler** owns all paused coroutines. `task.wait(t)` yields, and the scheduler resumes it once `t` has passed (frame order step 2).
+- The **scheduler** (`crates/script/src/scheduler.rs`) owns all paused coroutines. `task.wait(t)` yields, and the scheduler resumes it once `t` has passed (frame order step 2, `ScriptRuntime::step`).
+- **The clock is game time**, the sum of the frame times the host passes to `step`, not the computer's clock. The player caps a frame at 0.1 s, so after a stall waiting scripts don't all fire at once. Tests drive the clock exactly.
+- `task` (decided in Phase 5, matching Roblox):
+  - `task.wait(seconds?)` returns the seconds that really passed. Left out, 0, negative or NaN means "until the next step", so `while true do task.wait() end` runs once a frame. A task is never resumed in the step that scheduled it.
+  - `task.spawn(fn, ...)` runs `fn` **right away** until it finishes or waits, then the caller continues. Returns the coroutine.
+  - `task.delay(seconds, fn, ...)` starts `fn` once `seconds` have passed (at the next step at the earliest). Returns the coroutine.
+  - Both take functions only, not coroutines. `task.cancel` and `task.defer` don't exist yet.
+- **Resume order**: earliest due first; ties in the order they were scheduled. A task within 1 µs of due counts as due, so float rounding in summed frame times never costs a whole frame. A `task.wait(1)` loop still drifts by up to a frame per wait when frames are uneven (as in Roblox); use the returned time for exact timing.
+- `task.wait` inside a script's own coroutine (`coroutine.wrap`) pauses just that coroutine and returns control to whoever resumed it; the scheduler resumes it later. It also works inside `pcall`.
+- No legacy `wait`, `spawn` or `delay` globals (decided in Phase 5): only `task.*`.
 - Event handlers fired in the same frame run in a deterministic order.
 - **Watchdog**: an instruction-count hook aborts a coroutine that runs too long without yielding, and reports an error with the script name and line.
-- Errors in one script never stop other scripts. Report them to Output with the script path and line.
+- Errors in one script never stop other scripts. Report them to Output with the script path and line. An error in a `task.spawn` or `task.delay` function is reported the same way and doesn't stop the script that started it.
 
 ## Server and client
 

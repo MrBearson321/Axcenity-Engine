@@ -118,10 +118,10 @@ Run every script body as a coroutine owned by a scheduler. Implement `task.wait`
 
 ### Acceptance criteria
 
-- [ ] A script that loops forever with `task.wait(1)` and toggles a part's color does so once per second without freezing the window.
-- [ ] `task.wait` returns roughly the requested time, and a test checks it against a simulated clock.
-- [ ] `task.spawn` and `task.delay` run in a predictable order, verified by a test.
-- [ ] An error inside a spawned task is reported and doesn't kill its parent script.
+- [x] A script that loops forever with `task.wait(1)` and toggles a part's color does so once per second without freezing the window.
+- [x] `task.wait` returns roughly the requested time, and a test checks it against a simulated clock.
+- [x] `task.spawn` and `task.delay` run in a predictable order, verified by a test.
+- [x] An error inside a spawned task is reported and doesn't kill its parent script.
 
 ---
 

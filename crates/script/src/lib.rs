@@ -1,6 +1,8 @@
 //! Axcenity scripting: runs Lua 5.4 scripts against the Instance tree.
 //!
-//! - [`ScriptRuntime`] owns the Lua interpreter and runs scripts.
+//! - [`ScriptRuntime`] owns the Lua interpreter and runs scripts. Each script
+//!   runs as a coroutine, and the `scheduler` resumes paused ones each frame
+//!   (`task.wait`, `task.spawn` and `task.delay` live in `task`).
 //! - Every script gets its own global variables, and only safe parts of the
 //!   standard library (see `sandbox`).
 //! - The engine API (`game`, `workspace`, `Instance`, `Vector3`, ...) lives in
@@ -14,11 +16,13 @@ mod definitions;
 mod errors;
 mod instance;
 mod sandbox;
+mod scheduler;
+mod task;
 mod types;
 
 use axcenity_core::{InstanceId, World};
 use mlua::chunk::ChunkMode;
-use mlua::{Lua, LuaOptions, StdLib};
+use mlua::{Lua, LuaOptions, StdLib, Thread};
 
 use crate::errors::error_message;
 
@@ -62,49 +66,63 @@ impl ScriptRuntime {
         let lua = Lua::new_with(libraries, LuaOptions::default())
             .expect("loading Lua's standard libraries only fails when out of memory");
         lua.set_app_data(Output::default());
+        lua.set_app_data(scheduler::Scheduler::default());
         let shared = sandbox::Shared::new(&lua)
             .expect("creating the shared script functions only fails when out of memory");
         Self { lua, shared }
     }
 
-    /// Runs one script's code from start to finish.
+    /// Starts one script: runs its code as a new coroutine until it finishes,
+    /// fails or pauses (`task.wait`). Paused scripts carry on in [`Self::step`].
     ///
     /// `script` is its Script Instance (the `script` global), and `path` is
     /// the file path shown in error messages. Errors don't stop anything else:
     /// they're added to the output, and the next script can run as normal.
-    pub fn run_script(&mut self, world: &mut World, script: InstanceId, path: &str, source: &str) {
+    pub fn start_script(
+        &mut self,
+        world: &mut World,
+        script: InstanceId,
+        path: &str,
+        source: &str,
+    ) {
         let ids = sandbox::ScriptIds {
             game: world.root(),
             workspace: world.workspace(),
             script,
         };
-
-        // Lua callbacks can't borrow `world`, because Lua may keep those
-        // callbacks around for longer than this call. So the World itself is
-        // moved into Lua's "app data" while the script runs (leaving an empty
-        // World behind), and moved back afterwards.
-        self.lua.set_app_data(std::mem::take(world));
-        let result = self.run_chunk(ids, path, source);
-        *world = self
-            .lua
-            .remove_app_data::<World>()
-            .expect("the World was lent to Lua above");
-
-        if let Err(err) = result {
-            push_output(&self.lua, OutputKind::Error, error_message(&err));
-        }
+        with_world(&self.lua, world, || {
+            match self.load_script(ids, path, source) {
+                Ok(thread) => scheduler::resume(&self.lua, &thread, ()),
+                Err(err) => push_output(&self.lua, OutputKind::Error, error_message(&err)),
+            }
+        });
     }
 
-    fn run_chunk(&self, ids: sandbox::ScriptIds, path: &str, source: &str) -> mlua::Result<()> {
+    /// Compiles a script into a coroutine that hasn't started yet.
+    fn load_script(
+        &self,
+        ids: sandbox::ScriptIds,
+        path: &str,
+        source: &str,
+    ) -> mlua::Result<Thread> {
         let env = sandbox::environment(&self.lua, &self.shared, ids)?;
-        self.lua
+        let function = self
+            .lua
             .load(source)
             // The `@` tells Lua this is a file path, so messages read `path:line:`.
             .set_name(format!("@{path}"))
             // Precompiled bytecode can crash the interpreter, so only accept source text.
             .set_mode(ChunkMode::Text)
             .set_environment(env)
-            .exec()
+            .into_function()?;
+        self.lua.create_thread(function)
+    }
+
+    /// Frame-order step 2: moves the game clock forward by `seconds` and
+    /// resumes every paused script whose wait is over, and every
+    /// `task.delay` whose time has come.
+    pub fn step(&mut self, world: &mut World, seconds: f64) {
+        with_world(&self.lua, world, || scheduler::step(&self.lua, seconds));
     }
 
     /// Removes and returns the output produced since the last call.
@@ -120,6 +138,23 @@ impl Default for ScriptRuntime {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Lends `world` to Lua while `f` runs.
+///
+/// Lua callbacks can't borrow `world`, because Lua may keep those callbacks
+/// around for longer than this call. So the World itself is moved into Lua's
+/// "app data" (leaving an empty World behind), and moved back afterwards.
+///
+/// `impl FnOnce() -> R` means "any closure that can be called once and
+/// returns an R", so callers can pass `|| ...` with whatever result they need.
+fn with_world<R>(lua: &Lua, world: &mut World, f: impl FnOnce() -> R) -> R {
+    lua.set_app_data(std::mem::take(world));
+    let result = f();
+    *world = lua
+        .remove_app_data::<World>()
+        .expect("the World was lent to Lua above");
+    result
 }
 
 fn push_output(lua: &Lua, kind: OutputKind, text: String) {

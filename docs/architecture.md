@@ -38,6 +38,8 @@ Rules:
 5. Update UI layout (`taffy`)
 6. Build the draw list and render
 
+The player runs these in `WindowEvent::RedrawRequested` (`crates/player/src/main.rs`), with a comment per step. Steps 3 to 5 arrive with their phases.
+
 ## Play mode
 
 Play runs in-process on a **deep copy** of the edit world, and Stop drops the copy. Before Play: autosave. During Play: the Lua watchdog is active, and Rust panics are caught at the Play boundary and reported to the Output panel.

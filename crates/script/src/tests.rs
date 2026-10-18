@@ -23,7 +23,7 @@ fn run(runtime: &mut ScriptRuntime, world: &mut World, path: &str, source: &str)
     world
         .set_parent(script, Some(world.server_script_service()))
         .unwrap();
-    runtime.run_script(world, script, path, source);
+    runtime.start_script(world, script, path, source);
 }
 
 /// Runs one script in a fresh runtime and returns everything it printed or
@@ -388,4 +388,275 @@ fn the_world_is_returned_even_after_an_error() {
     let (mut world, block) = world_with_block();
     output_of(&mut world, "error('stop')");
     assert!(world.get(block).is_some());
+}
+
+/// Steps the scheduler `count` times by `seconds`, like a game running at a
+/// steady frame rate.
+fn step_frames(runtime: &mut ScriptRuntime, world: &mut World, seconds: f64, count: usize) {
+    for _ in 0..count {
+        runtime.step(world, seconds);
+    }
+}
+
+#[test]
+fn a_forever_loop_with_task_wait_toggles_a_color_once_per_second() {
+    let (mut world, block) = world_with_block();
+    let mut runtime = ScriptRuntime::new();
+    // `start_script` returning at all shows the loop doesn't block the caller.
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/blink.server.lua",
+        r#"
+        local block = workspace.Block
+        local red, blue = Color3.new(1, 0, 0), Color3.new(0, 0, 1)
+        block.Color = red
+        while true do
+            task.wait(1)
+            if block.Color == red then
+                block.Color = blue
+            else
+                block.Color = red
+            end
+        end
+        "#,
+    );
+
+    // 3.5 seconds at 60 frames per second, noting when the color changes.
+    let frame = 1.0 / 60.0;
+    let mut color = property(&world, block, "Color");
+    let mut changes = Vec::new();
+    for i in 1..=210 {
+        runtime.step(&mut world, frame);
+        let now = property(&world, block, "Color");
+        if now != color {
+            changes.push(f64::from(i) * frame);
+            color = now;
+        }
+    }
+    assert_eq!(lines(&mut runtime), Vec::<String>::new());
+    assert_eq!(changes.len(), 3, "{changes:?}");
+    for (second, time) in [1.0, 2.0, 3.0].iter().zip(&changes) {
+        // Each change happens on the first frame at or after the whole second.
+        assert!(
+            *time >= second - 1e-9 && *time < second + frame + 1e-9,
+            "{changes:?}"
+        );
+    }
+    assert_eq!(color, Value::Color3(Color3::new(0.0, 0.0, 1.0)));
+}
+
+#[test]
+fn task_wait_returns_the_time_that_passed_on_a_simulated_clock() {
+    let mut world = World::new();
+    let mut runtime = ScriptRuntime::new();
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/test.server.lua",
+        "print(task.wait(1))\nprint(task.wait(0.5))\nprint(task.wait())",
+    );
+
+    // Quarter seconds add up exactly in floating point.
+    step_frames(&mut runtime, &mut world, 0.25, 3);
+    assert_eq!(lines(&mut runtime), Vec::<String>::new());
+    runtime.step(&mut world, 0.25);
+    assert_eq!(lines(&mut runtime), ["1.0"]);
+    step_frames(&mut runtime, &mut world, 0.25, 2);
+    assert_eq!(lines(&mut runtime), ["0.5"]);
+    // `task.wait()` with no time waits for the next step.
+    runtime.step(&mut world, 0.25);
+    assert_eq!(lines(&mut runtime), ["0.25"]);
+}
+
+#[test]
+fn task_wait_is_accurate_to_a_frame_at_60_fps() {
+    let mut world = World::new();
+    let mut runtime = ScriptRuntime::new();
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/test.server.lua",
+        "for _ = 1, 10 do print(task.wait(0.1)) end",
+    );
+    let frame = 1.0 / 60.0;
+    step_frames(&mut runtime, &mut world, frame, 120);
+    let waited: Vec<f64> = lines(&mut runtime)
+        .iter()
+        .map(|line| line.parse().unwrap())
+        .collect();
+    assert_eq!(waited.len(), 10);
+    for seconds in waited {
+        assert!(
+            (0.1 - 1e-9..0.1 + frame + 1e-9).contains(&seconds),
+            "{seconds}"
+        );
+    }
+}
+
+#[test]
+fn task_wait_with_no_time_resumes_once_per_step() {
+    let mut world = World::new();
+    let mut runtime = ScriptRuntime::new();
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/test.server.lua",
+        "local frames = 0\nwhile true do task.wait() frames = frames + 1 print(frames) end",
+    );
+    step_frames(&mut runtime, &mut world, 1.0 / 60.0, 3);
+    assert_eq!(lines(&mut runtime), ["1", "2", "3"]);
+}
+
+#[test]
+fn task_spawn_and_task_delay_run_in_a_predictable_order() {
+    let mut world = World::new();
+    let mut runtime = ScriptRuntime::new();
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/test.server.lua",
+        r#"
+        print("start")
+        task.delay(0.5, print, "delay 0.5, scheduled first")
+        task.delay(0, print, "delay 0")
+        task.spawn(function(how)
+            print("spawn " .. how)
+            task.wait()
+            print("spawn after task.wait()")
+        end, "runs right away")
+        task.delay(0.5, print, "delay 0.5, scheduled second")
+        print("end of script")
+        "#,
+    );
+    // `task.spawn` runs straight away; delays wait for a step, however short.
+    assert_eq!(
+        lines(&mut runtime),
+        ["start", "spawn runs right away", "end of script"]
+    );
+    runtime.step(&mut world, 0.25);
+    // Due at the same time, so they resume in the order they were scheduled.
+    assert_eq!(lines(&mut runtime), ["delay 0", "spawn after task.wait()"]);
+    runtime.step(&mut world, 0.25);
+    assert_eq!(
+        lines(&mut runtime),
+        ["delay 0.5, scheduled first", "delay 0.5, scheduled second"]
+    );
+}
+
+#[test]
+fn an_error_in_a_spawned_task_is_reported_and_the_parent_keeps_running() {
+    let (mut world, _) = world_with_block();
+    let mut runtime = ScriptRuntime::new();
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/test.server.lua",
+        r#"task.spawn(function()
+    error("spawned problem")
+end)
+task.spawn(function() workspace.Block.Size = 5 end)
+print("parent continues")
+task.delay(0.1, function()
+    local missing = nil
+    missing.Position = 1
+end)
+task.wait(0.2)
+print("parent still running")"#,
+    );
+    assert_eq!(
+        lines(&mut runtime),
+        [
+            "error: scripts/test.server.lua:2: spawned problem",
+            "error: scripts/test.server.lua:4: Part.Size must be a Vector3, not a number",
+            "parent continues",
+        ]
+    );
+    runtime.step(&mut world, 0.1);
+    let output = lines(&mut runtime);
+    assert_eq!(output.len(), 1, "{output:?}");
+    assert!(
+        output[0].starts_with("error: scripts/test.server.lua:8: attempt to index a nil value"),
+        "{output:?}"
+    );
+    runtime.step(&mut world, 0.1);
+    assert_eq!(lines(&mut runtime), ["parent still running"]);
+}
+
+#[test]
+fn one_waiting_script_does_not_hold_up_the_others() {
+    let mut world = World::new();
+    let mut runtime = ScriptRuntime::new();
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/slow.server.lua",
+        "task.wait(1)\nprint('slow done')",
+    );
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/fast.server.lua",
+        "print('fast done')",
+    );
+    assert_eq!(lines(&mut runtime), ["fast done"]);
+    runtime.step(&mut world, 1.0);
+    assert_eq!(lines(&mut runtime), ["slow done"]);
+}
+
+#[test]
+fn task_wait_works_inside_pcall_and_coroutines() {
+    let mut world = World::new();
+    let mut runtime = ScriptRuntime::new();
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/test.server.lua",
+        r#"local wrapped = coroutine.wrap(function()
+    task.wait(0.1)
+    print("coroutine resumed")
+end)
+wrapped()
+print("after the coroutine paused")
+print(pcall(function()
+    task.wait(0.1)
+    error("after waiting")
+end))"#,
+    );
+    assert_eq!(lines(&mut runtime), ["after the coroutine paused"]);
+    runtime.step(&mut world, 0.1);
+    assert_eq!(
+        lines(&mut runtime),
+        [
+            "coroutine resumed",
+            "false\tscripts/test.server.lua:9: after waiting"
+        ]
+    );
+}
+
+#[test]
+fn task_functions_explain_bad_arguments() {
+    let mut world = World::new();
+    let output = output_of(
+        &mut world,
+        r#"
+        print(pcall(task.wait, "soon"))
+        print(pcall(task.spawn, 5))
+        print(pcall(task.delay, 1))
+        print(pcall(task.delay, "1", print))
+        "#,
+    );
+    let expected = [
+        "task.wait takes a number of seconds, not a string",
+        "task.spawn takes a function, not a number",
+        "task.delay takes a function, not a nil",
+        "task.delay takes a number of seconds, not a string",
+    ];
+    assert_eq!(output.len(), expected.len(), "{output:?}");
+    for (line, expected) in output.iter().zip(expected) {
+        assert!(
+            line.starts_with("false\t") && line.ends_with(expected),
+            "{line:?} should end with {expected:?}"
+        );
+    }
 }
