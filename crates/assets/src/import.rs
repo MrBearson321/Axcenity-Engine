@@ -5,7 +5,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::model::{self, Model, ModelError, ModelFormat};
+use crate::model::{self, Model, ModelError, ModelFormat, ModelObject, Pick};
 
 /// Where imported models go, inside the project folder.
 pub const MODELS_FOLDER: &str = "assets/models";
@@ -38,6 +38,18 @@ pub enum ImportError {
 /// engine can't load is never copied. An FBX texture that isn't there is
 /// left out (see [`Model::warnings`]).
 pub fn import_model(project: &Path, file: &Path) -> Result<(String, Model), ImportError> {
+    let mut models = import_picks(project, file, &[Pick::Whole])?;
+    Ok(models.remove(0))
+}
+
+/// Like [`import_model`], but copies the file once and returns a `MeshId`
+/// and a loaded model for each of `picks` (some of the objects in it, see
+/// [`list_model_objects`]).
+pub fn import_picks(
+    project: &Path,
+    file: &Path,
+    picks: &[Pick],
+) -> Result<Vec<(String, Model)>, ImportError> {
     let format = ModelFormat::of(file).ok_or(ImportError::NotAModel)?;
     let extension = match file.extension().and_then(|extension| extension.to_str()) {
         Some(extension) => extension.to_ascii_lowercase(),
@@ -45,26 +57,38 @@ pub fn import_model(project: &Path, file: &Path) -> Result<(String, Model), Impo
     };
     let bytes = fs::read(file).map_err(ImportError::Read)?;
     let folder = file.parent().unwrap_or(Path::new("."));
-    let model = model::load_model(&bytes, folder, format)?;
+    let models = model::load_models(&bytes, folder, format, picks)?;
     let used = model::files_used(&bytes, folder, format)?;
 
     let name = file_name(file);
-    let models = project.join(MODELS_FOLDER);
-    if used.is_empty() && extension != "gltf" {
-        let name = free_name(&models, &name, &format!(".{extension}"));
+    let models_folder = project.join(MODELS_FOLDER);
+    let mesh_id = if used.is_empty() && extension != "gltf" {
+        let name = free_name(&models_folder, &name, &format!(".{extension}"));
         let mesh_id = format!("{MODELS_FOLDER}/{name}.{extension}");
         copy(file, &project.join(&mesh_id))?;
-        return Ok((mesh_id, model));
-    }
+        mesh_id
+    } else {
+        let name = free_name(&models_folder, &name, "");
+        let copy_folder = models_folder.join(&name);
+        for path in used {
+            copy(&folder.join(&path), &copy_folder.join(&path))?;
+        }
+        // Renamed to match its folder. Nothing in a model refers to its own file.
+        copy(file, &copy_folder.join(format!("{name}.{extension}")))?;
+        format!("{MODELS_FOLDER}/{name}/{name}.{extension}")
+    };
+    Ok(picks
+        .iter()
+        .map(|pick| pick.mesh_id(&mesh_id))
+        .zip(models)
+        .collect())
+}
 
-    let name = free_name(&models, &name, "");
-    let copy_folder = models.join(&name);
-    for path in used {
-        copy(&folder.join(&path), &copy_folder.join(&path))?;
-    }
-    // Renamed to match its folder. Nothing in a model refers to its own file.
-    copy(file, &copy_folder.join(format!("{name}.{extension}")))?;
-    Ok((format!("{MODELS_FOLDER}/{name}/{name}.{extension}"), model))
+/// The objects in the model at `file`, for choosing which to import.
+pub fn list_model_objects(file: &Path) -> Result<Vec<ModelObject>, ImportError> {
+    let format = ModelFormat::of(file).ok_or(ImportError::NotAModel)?;
+    let bytes = fs::read(file).map_err(ImportError::Read)?;
+    Ok(model::list_objects(&bytes, format)?)
 }
 
 /// The model's file name without its extension, keeping only letters,

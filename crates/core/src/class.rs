@@ -30,8 +30,8 @@ pub enum ClassName {
     StarterPlayerScripts,
     /// A solid shape in the world.
     Part,
-    /// A solid 3D model imported from a glTF file, which it names in
-    /// `MeshId`. Drawn with the file's own materials.
+    /// A solid 3D model imported from a glTF or FBX file (or some objects
+    /// in one), which it names in `MeshId`. Drawn with the file's own materials.
     MeshPart,
     /// Lua code that runs on the server. Its source lives in a
     /// `*.server.lua` file, not in a property.

@@ -11,21 +11,23 @@
 //! texture is left out and noted in [`Model::warnings`]; the model still
 //! loads, drawn with its materials' colors.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use glam::{DMat3, DMat4, DVec3, Vec3};
 use ufbx::{CoordinateAxes, CoordinateAxis};
 
+use super::objects::{self, Listed, Siblings};
 use super::{
-    AlphaMode, Image, MAX_NODE_DEPTH, Model, ModelError, ModelMaterial, Primitive, fit, new_key,
-    smooth_normals,
+    AlphaMode, Image, MAX_NODE_DEPTH, Model, ModelError, ModelMaterial, ModelObject, Pick,
+    Primitive, fit, missing, new_key, smooth_normals, want,
 };
 
-/// Reads an FBX file's `bytes`. Textures that aren't embedded in it are
-/// read from `folder`, the folder the model is in.
-pub(super) fn load(bytes: &[u8], folder: &Path) -> Result<Model, ModelError> {
+/// Reads an FBX file's `bytes`, making one model for each of `picks`.
+/// Textures that aren't embedded in it are read from `folder`, the folder
+/// the model is in.
+pub(super) fn load(bytes: &[u8], folder: &Path, picks: &[Pick]) -> Result<Vec<Model>, ModelError> {
     let scene = parse(bytes)?;
     let mut reader = Reader {
         folder,
@@ -33,17 +35,83 @@ pub(super) fn load(bytes: &[u8], folder: &Path) -> Result<Model, ModelError> {
         primitives: Vec::new(),
         warnings: Vec::new(),
     };
-    for node in &scene.nodes {
-        // Hidden in the program it was made in, so hidden here too.
-        if let Some(mesh) = &node.mesh
-            && node.visible
-        {
-            reader.mesh(node, mesh);
+    let mut models = Vec::new();
+    for pick in picks {
+        let wanted = pick.paths();
+        let mut found = HashSet::new();
+        reader.children(&scene.root_node, "", &wanted, &mut found);
+        if let Some(path) = missing(&wanted, &found) {
+            return Err(ModelError::NoObject(path));
+        }
+        let mut model = fit(std::mem::take(&mut reader.primitives))?;
+        // A texture that can't be used is noted by the first model that has it.
+        model.warnings = std::mem::take(&mut reader.warnings);
+        models.push(model);
+    }
+    Ok(models)
+}
+
+/// The objects in an FBX file: its visible nodes with meshes, and the
+/// nodes they're in.
+pub(super) fn list(bytes: &[u8]) -> Result<Vec<ModelObject>, ModelError> {
+    let scene = parse(bytes)?;
+    fn children(node: &ufbx::Node, path: &str, depth: usize) -> Vec<Listed> {
+        let mut siblings = Siblings::default();
+        node.children
+            .iter()
+            .map(|child| {
+                let name = node_name(child);
+                let path = siblings.path(path, &name);
+                let (triangles, materials) = match &child.mesh {
+                    Some(mesh) if child.visible => {
+                        (mesh.num_triangles, material_names(child, mesh))
+                    }
+                    _ => (0, Vec::new()),
+                };
+                let children = children(child, &path, depth + 1);
+                Listed {
+                    object: ModelObject {
+                        path,
+                        name,
+                        depth,
+                        triangles,
+                        materials,
+                    },
+                    children,
+                }
+            })
+            .collect()
+    }
+    Ok(objects::flatten(children(&scene.root_node, "", 0)))
+}
+
+/// A node's name, or "Object" if it has none.
+fn node_name(node: &ufbx::Node) -> String {
+    match node.element.name.trim() {
+        "" => "Object".to_owned(),
+        name => name.to_owned(),
+    }
+}
+
+/// The names of the materials `mesh` uses, as placed by `node`.
+fn material_names(node: &ufbx::Node, mesh: &ufbx::Mesh) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    for part in mesh
+        .material_parts
+        .iter()
+        .filter(|part| part.num_triangles > 0)
+    {
+        let name = node
+            .materials
+            .get(part.index as usize)
+            .or_else(|| mesh.materials.get(part.index as usize))
+            .map_or("Default", |material| material.element.name.as_ref())
+            .to_owned();
+        if !names.contains(&name) {
+            names.push(name);
         }
     }
-    let mut model = fit(reader.primitives)?;
-    model.warnings = reader.warnings;
-    Ok(model)
+    names
 }
 
 /// The texture files an FBX file in `folder` uses that are there, as paths
@@ -102,6 +170,29 @@ struct Reader<'a> {
 }
 
 impl Reader<'_> {
+    /// Collects the wanted meshes inside `node` (whose path is `path`),
+    /// adding their paths to `found`. Every one if `wanted` is `None`.
+    fn children(
+        &mut self,
+        node: &ufbx::Node,
+        path: &str,
+        wanted: &Option<HashSet<String>>,
+        found: &mut HashSet<String>,
+    ) {
+        let mut siblings = Siblings::default();
+        for child in &node.children {
+            let child_path = siblings.path(path, &node_name(child));
+            // Hidden in the program it was made in, so hidden here too.
+            if let Some(mesh) = &child.mesh
+                && child.visible
+                && want(wanted, found, &child_path)
+            {
+                self.mesh(child, mesh);
+            }
+            self.children(child, &child_path, wanted, found);
+        }
+    }
+
     /// One primitive per material the mesh uses, placed by `node`.
     fn mesh(&mut self, node: &ufbx::Node, mesh: &ufbx::Mesh) {
         let transform = mat4(&node.geometry_to_world);
@@ -398,7 +489,7 @@ fn mat4(m: &ufbx::Matrix) -> DMat4 {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::model::{ModelFormat, load_model};
+    use crate::model::{ModelFormat, Pick, load_model};
 
     /// An ASCII FBX file of a square pyramid 4 wide and 3 tall, with one
     /// red Phong material. `z_up` saves it in centimeters with Z up (as
@@ -513,6 +604,71 @@ Connections:  {{
         )
     }
 
+    /// An ASCII FBX file, in meters with Y up, of two copies of a 2×2×2
+    /// cube: `Street/Bench` (inside an empty `Street` node, 10 m along X)
+    /// and `Lamp` (at the origin, with a second, empty `Lamp` after it).
+    pub(crate) fn two_cubes_fbx() -> String {
+        r#"; FBX 7.4.0 project file
+FBXHeaderExtension:  {
+	FBXHeaderVersion: 1003
+	FBXVersion: 7400
+}
+GlobalSettings:  {
+	Version: 1000
+	Properties70:  {
+		P: "UpAxis", "int", "Integer", "",1
+		P: "UpAxisSign", "int", "Integer", "",1
+		P: "FrontAxis", "int", "Integer", "",2
+		P: "FrontAxisSign", "int", "Integer", "",1
+		P: "CoordAxis", "int", "Integer", "",0
+		P: "CoordAxisSign", "int", "Integer", "",1
+		P: "UnitScaleFactor", "double", "Number", "",100
+	}
+}
+Objects:  {
+	Geometry: 1000, "Geometry::Cube", "Mesh" {
+		Vertices: *24 {
+			a: -1,-1,-1, 1,-1,-1, 1,1,-1, -1,1,-1, -1,-1,1, 1,-1,1, 1,1,1, -1,1,1
+		}
+		PolygonVertexIndex: *24 {
+			a: 0,3,2,-2,4,5,6,-8,0,1,5,-5,2,3,7,-7,1,2,6,-6,0,4,7,-4
+		}
+		GeometryVersion: 124
+	}
+	Model: 2000, "Model::Street", "Null" {
+		Version: 232
+	}
+	Model: 2001, "Model::Bench", "Mesh" {
+		Version: 232
+		Properties70:  {
+			P: "Lcl Translation", "Lcl Translation", "", "A",10,0,0
+		}
+	}
+	Model: 2002, "Model::Lamp", "Mesh" {
+		Version: 232
+	}
+	Model: 2003, "Model::Lamp", "Null" {
+		Version: 232
+	}
+	Material: 3000, "Material::Stone", "" {
+		Version: 102
+		ShadingModel: "phong"
+	}
+}
+Connections:  {
+	C: "OO",2000,0
+	C: "OO",2001,2000
+	C: "OO",2002,0
+	C: "OO",2003,0
+	C: "OO",1000,2001
+	C: "OO",1000,2002
+	C: "OO",3000,2001
+	C: "OO",3000,2002
+}
+"#
+        .to_owned()
+    }
+
     /// A 2×2 checkered PNG.
     pub(crate) fn checker_png() -> Vec<u8> {
         let image = image::RgbaImage::from_fn(2, 2, |x, y| match (x + y) % 2 {
@@ -606,6 +762,63 @@ Connections:  {{
             unreadable.warnings[0].contains("only PNG, JPEG, TGA and BMP"),
             "{:?}",
             unreadable.warnings
+        );
+    }
+
+    #[test]
+    fn the_objects_in_an_fbx_are_listed_as_a_tree() {
+        let objects =
+            crate::model::list_objects(two_cubes_fbx().as_bytes(), ModelFormat::Fbx).unwrap();
+        let rows: Vec<(&str, usize, usize)> = objects
+            .iter()
+            .map(|object| (object.path.as_str(), object.depth, object.triangles))
+            .collect();
+        // The empty second Lamp has nothing to import, so it isn't listed.
+        assert_eq!(
+            rows,
+            [("Street", 0, 0), ("Street/Bench", 1, 12), ("Lamp", 0, 12)]
+        );
+        assert_eq!(objects[1].materials, ["Stone"]);
+    }
+
+    #[test]
+    fn picked_fbx_objects_load_on_their_own_and_keep_their_places() {
+        let folder = temp_folder("picks");
+        let picks = [
+            Pick::Objects(vec!["Street/Bench".into()]),
+            Pick::Objects(vec!["Lamp".into()]),
+            Pick::Whole,
+        ];
+        let models = crate::model::load_models(
+            two_cubes_fbx().as_bytes(),
+            &folder,
+            ModelFormat::Fbx,
+            &picks,
+        )
+        .unwrap();
+        let [bench, lamp, whole] = &models[..] else {
+            panic!("one model per pick");
+        };
+        assert_size(bench, [2.0, 2.0, 2.0]);
+        assert!((bench.center[0] - 10.0).abs() < 1e-4, "{:?}", bench.center);
+        assert!(
+            lamp.center.iter().all(|c| c.abs() < 1e-4),
+            "{:?}",
+            lamp.center
+        );
+        assert_size(whole, [12.0, 2.0, 2.0]);
+        assert_eq!(whole.primitives.len(), 2);
+
+        let missing = crate::model::load_models(
+            two_cubes_fbx().as_bytes(),
+            &folder,
+            ModelFormat::Fbx,
+            &[Pick::Objects(vec!["Street".into()])],
+        );
+        // A group has no mesh of its own.
+        assert_eq!(
+            missing.unwrap_err().to_string(),
+            "it has no object `Street`"
         );
     }
 

@@ -8,6 +8,9 @@
 //! `Size` an imported MeshPart starts with.
 
 mod fbx;
+mod objects;
+
+pub use objects::{ModelObject, Pick};
 
 #[cfg(test)]
 pub(crate) use fbx::tests::{checker_png, pyramid_fbx};
@@ -22,6 +25,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use glam::{Mat3, Mat4, Vec3};
 use gltf::image::Format;
 use gltf::mesh::Mode;
+use objects::{Listed, Siblings};
 
 /// Nodes inside nodes deeper than this, or more node visits than
 /// [`MAX_NODE_VISITS`], mean a broken file (nodes in a loop). Real models
@@ -69,6 +73,9 @@ pub struct Model {
     /// The model's size in its file, in studs (1 glTF unit = 1 stud). Zero
     /// on an axis where it's flat.
     pub size: [f32; 3],
+    /// The middle of its box in the file, in studs. Objects imported from
+    /// one file keep their places by where their centers are.
+    pub center: [f32; 3],
     /// One per glTF primitive (and per time its node is used), each with
     /// one material.
     pub primitives: Vec<Primitive>,
@@ -191,6 +198,8 @@ pub enum ModelError {
     MissingFile(String),
     #[error("it has no triangles to draw")]
     NoTriangles,
+    #[error("it has no object `{0}`")]
+    NoObject(String),
     #[error("a mesh in it has no vertex positions")]
     NoPositions,
     #[error("a mesh in it lists a corner that isn't there")]
@@ -207,13 +216,36 @@ pub enum ModelError {
 /// buffers, textures) are read from `folder`, the folder the model is in,
 /// and must be inside it.
 pub fn load_model(bytes: &[u8], folder: &Path, format: ModelFormat) -> Result<Model, ModelError> {
+    let mut models = load_models(bytes, folder, format, &[Pick::Whole])?;
+    Ok(models.remove(0))
+}
+
+/// Like [`load_model`], but makes one model for each of `picks`, reading
+/// the file once. Textures they share are decoded once. A pick naming an
+/// object the file doesn't have is an error ([`ModelError::NoObject`]).
+pub fn load_models(
+    bytes: &[u8],
+    folder: &Path,
+    format: ModelFormat,
+    picks: &[Pick],
+) -> Result<Vec<Model>, ModelError> {
     // The `gltf` crate trusts some indices after checking the file, and
     // panics (`unwrap`) on a few broken files; `ufbx` turns its own internal
     // errors into panics too. `catch_unwind` turns such a panic into an
     // error, so a bad file can never crash the engine.
     panic::catch_unwind(AssertUnwindSafe(|| match format {
-        ModelFormat::Gltf => read(bytes, folder),
-        ModelFormat::Fbx => fbx::load(bytes, folder),
+        ModelFormat::Gltf => read(bytes, folder, picks),
+        ModelFormat::Fbx => fbx::load(bytes, folder, picks),
+    }))
+    .unwrap_or(Err(ModelError::Damaged))
+}
+
+/// The objects in a model file, parents first (see [`ModelObject`]), for
+/// choosing which to import. Reads only the file itself, not its textures.
+pub fn list_objects(bytes: &[u8], format: ModelFormat) -> Result<Vec<ModelObject>, ModelError> {
+    panic::catch_unwind(AssertUnwindSafe(|| match format {
+        ModelFormat::Gltf => list(bytes),
+        ModelFormat::Fbx => fbx::list(bytes),
     }))
     .unwrap_or(Err(ModelError::Damaged))
 }
@@ -239,7 +271,7 @@ pub(crate) fn files_used(
     .unwrap_or(Err(ModelError::Damaged))
 }
 
-fn read(bytes: &[u8], folder: &Path) -> Result<Model, ModelError> {
+fn read(bytes: &[u8], folder: &Path, picks: &[Pick]) -> Result<Vec<Model>, ModelError> {
     let gltf::Gltf { document, blob } = gltf::Gltf::from_slice(bytes)?;
     // Checked here, not left to `gltf`, so nothing outside `folder` is read
     // and a missing file is named.
@@ -256,24 +288,157 @@ fn read(bytes: &[u8], folder: &Path) -> Result<Model, ModelError> {
         images: HashMap::new(),
         primitives: Vec::new(),
         visits: 0,
+        wanted: None,
+        found: HashSet::new(),
     };
-    match document
-        .default_scene()
-        .or_else(|| document.scenes().next())
-    {
-        Some(scene) => {
-            for node in scene.nodes() {
-                reader.node(&node, Mat4::IDENTITY, 0)?;
-            }
+    let mut models = Vec::new();
+    for pick in picks {
+        reader.visits = 0;
+        reader.wanted = pick.paths();
+        reader.found.clear();
+        reader.walk(&document)?;
+        if let Some(path) = missing(&reader.wanted, &reader.found) {
+            return Err(ModelError::NoObject(path));
         }
-        // A file with no scenes: draw every mesh where it is.
-        None => {
-            for mesh in document.meshes() {
-                reader.mesh(&mesh, Mat4::IDENTITY)?;
-            }
+        models.push(fit(std::mem::take(&mut reader.primitives))?);
+    }
+    Ok(models)
+}
+
+/// The objects in a glTF file: the default scene's nodes, or every mesh
+/// if it has no scenes.
+fn list(bytes: &[u8]) -> Result<Vec<ModelObject>, ModelError> {
+    let document = gltf::Gltf::from_slice(bytes)?.document;
+    let mut visits = 0;
+    let mut siblings = Siblings::default();
+    let tree = match default_scene(&document) {
+        Some(scene) => scene
+            .nodes()
+            .map(|node| {
+                let path = siblings.path("", &node_name(&node));
+                list_node(&node, path, 0, &mut visits)
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        None => document
+            .meshes()
+            .map(|mesh| {
+                let name = mesh_name(&mesh);
+                let (triangles, materials) = mesh_summary(&mesh);
+                Listed {
+                    object: ModelObject {
+                        path: siblings.path("", &name),
+                        name,
+                        depth: 0,
+                        triangles,
+                        materials,
+                    },
+                    children: Vec::new(),
+                }
+            })
+            .collect(),
+    };
+    Ok(objects::flatten(tree))
+}
+
+fn list_node(
+    node: &gltf::Node,
+    path: String,
+    depth: usize,
+    visits: &mut usize,
+) -> Result<Listed, ModelError> {
+    *visits += 1;
+    if depth > MAX_NODE_DEPTH || *visits > MAX_NODE_VISITS {
+        return Err(ModelError::TooDeep);
+    }
+    let (triangles, materials) = node
+        .mesh()
+        .map(|mesh| mesh_summary(&mesh))
+        .unwrap_or_default();
+    let mut siblings = Siblings::default();
+    let children = node
+        .children()
+        .map(|child| {
+            let child_path = siblings.path(&path, &node_name(&child));
+            list_node(&child, child_path, depth + 1, visits)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Listed {
+        object: ModelObject {
+            path,
+            name: node_name(node),
+            depth,
+            triangles,
+            materials,
+        },
+        children,
+    })
+}
+
+/// How many triangles a mesh has, and its materials' names.
+fn mesh_summary(mesh: &gltf::Mesh) -> (usize, Vec<String>) {
+    let mut triangles = 0;
+    let mut materials: Vec<String> = Vec::new();
+    for primitive in mesh.primitives() {
+        if primitive.mode() != Mode::Triangles {
+            continue;
+        }
+        let corners = primitive
+            .indices()
+            .or_else(|| primitive.get(&gltf::Semantic::Positions))
+            .map_or(0, |accessor| accessor.count());
+        triangles += corners / 3;
+        let material = primitive.material();
+        let name = match (material.name(), material.index()) {
+            (Some(name), _) => name.to_owned(),
+            (None, Some(index)) => format!("Material {index}"),
+            (None, None) => "Default".to_owned(),
+        };
+        if !materials.contains(&name) {
+            materials.push(name);
         }
     }
-    fit(reader.primitives)
+    (triangles, materials)
+}
+
+fn default_scene(document: &gltf::Document) -> Option<gltf::Scene<'_>> {
+    document
+        .default_scene()
+        .or_else(|| document.scenes().next())
+}
+
+/// A node's name, or its mesh's, or its number.
+fn node_name(node: &gltf::Node) -> String {
+    node.name()
+        .or_else(|| node.mesh().and_then(|mesh| mesh.name()))
+        .map_or_else(|| format!("Node {}", node.index()), str::to_owned)
+}
+
+fn mesh_name(mesh: &gltf::Mesh) -> String {
+    mesh.name()
+        .map_or_else(|| format!("Mesh {}", mesh.index()), str::to_owned)
+}
+
+/// True if the object at `path` is in `wanted` (or everything is wanted),
+/// adding it to `found` if so.
+fn want(wanted: &Option<HashSet<String>>, found: &mut HashSet<String>, path: &str) -> bool {
+    match wanted {
+        None => true,
+        Some(wanted) if wanted.contains(path) => {
+            found.insert(path.to_owned());
+            true
+        }
+        Some(_) => false,
+    }
+}
+
+/// The first wanted path, alphabetically, that wasn't found.
+fn missing(wanted: &Option<HashSet<String>>, found: &HashSet<String>) -> Option<String> {
+    wanted
+        .iter()
+        .flatten()
+        .filter(|path| !found.contains(*path))
+        .min()
+        .cloned()
 }
 
 /// The URIs of the files a model uses (buffers and textures), leaving out
@@ -331,20 +496,58 @@ struct Reader<'a> {
     images: HashMap<usize, Arc<Image>>,
     primitives: Vec<Primitive>,
     visits: usize,
+    /// The paths of the objects to draw, or `None` for all of them.
+    wanted: Option<HashSet<String>>,
+    /// The wanted paths seen so far.
+    found: HashSet<String>,
 }
 
 impl Reader<'_> {
-    fn node(&mut self, node: &gltf::Node, parent: Mat4, depth: usize) -> Result<(), ModelError> {
+    /// Collects the wanted meshes in the default scene, or every mesh if
+    /// the file has no scenes.
+    fn walk(&mut self, document: &gltf::Document) -> Result<(), ModelError> {
+        let mut siblings = Siblings::default();
+        match default_scene(document) {
+            Some(scene) => {
+                for node in scene.nodes() {
+                    let path = siblings.path("", &node_name(&node));
+                    self.node(&node, Mat4::IDENTITY, 0, &path)?;
+                }
+            }
+            // A file with no scenes: draw every mesh where it is.
+            None => {
+                for mesh in document.meshes() {
+                    let path = siblings.path("", &mesh_name(&mesh));
+                    if want(&self.wanted, &mut self.found, &path) {
+                        self.mesh(&mesh, Mat4::IDENTITY)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn node(
+        &mut self,
+        node: &gltf::Node,
+        parent: Mat4,
+        depth: usize,
+        path: &str,
+    ) -> Result<(), ModelError> {
         self.visits += 1;
         if depth > MAX_NODE_DEPTH || self.visits > MAX_NODE_VISITS {
             return Err(ModelError::TooDeep);
         }
         let transform = parent * Mat4::from_cols_array_2d(&node.transform().matrix());
-        if let Some(mesh) = node.mesh() {
+        if let Some(mesh) = node.mesh()
+            && want(&self.wanted, &mut self.found, path)
+        {
             self.mesh(&mesh, transform)?;
         }
+        let mut siblings = Siblings::default();
         for child in node.children() {
-            self.node(&child, transform, depth + 1)?;
+            let child_path = siblings.path(path, &node_name(&child));
+            self.node(&child, transform, depth + 1, &child_path)?;
         }
         Ok(())
     }
@@ -591,6 +794,7 @@ fn fit(mut primitives: Vec<Primitive>) -> Result<Model, ModelError> {
     Ok(Model {
         key: new_key(),
         size: Vec3::select(thick, size, Vec3::ZERO).to_array(),
+        center: center.to_array(),
         primitives,
         hull_points,
         warnings: Vec::new(),

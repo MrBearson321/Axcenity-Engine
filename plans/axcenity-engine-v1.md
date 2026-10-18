@@ -334,9 +334,76 @@ Add an import action that copies a `.gltf`/`.glb` file into the project's assets
 
 ---
 
+## Phase 18: Choose objects on import
+
+**User stories**: 61
+
+### What to build
+
+Importing a glTF or FBX file with more than one mesh object opens a dialog. It shows the file's node tree with a checkbox, triangle count and material names for each mesh node, and ticking a group ticks its children. Choose how the ticked objects land: one `Model` holding a `MeshPart` per object, laid out as in the file; separate `MeshPart`s at the insert point; or one merged `MeshPart`, as before. A `MeshId` can name one object inside a model file (`…/props.fbx#Street/Bench`), so every part shares one copied file. Files with a single object skip the dialog.
+
+### Acceptance criteria
+
+- [ ] Importing a multi-object FBX (such as a city props pack) lists its objects, and importing a few of them creates only those.
+- [ ] Each placement choice produces the expected Instances, and the Model layout matches the file.
+- [ ] A part naming one object saves, reloads and collides with its own shape, not the whole file's.
+- [ ] Cancelling the dialog imports nothing and copies no files.
+
+---
+
+## Phase 19: PBR texture maps
+
+**User stories**: 62
+
+### What to build
+
+The draw list's material gains normal, metalness, roughness, ambient occlusion, emission and opacity maps, and the renderer uses them (normal maps with tangents, AO darkening ambient light). glTF models use their own normal, metallic-roughness, occlusion and emissive textures. FBX models use every map their materials link, including Phong/Lambert ones (diffuse, specular, glossiness, bump-as-normal, transparency), converted to metallic-roughness.
+
+### Acceptance criteria
+
+- [ ] A glTF sample with all its maps (such as DamagedHelmet) renders with visible normal detail, shiny metal and glowing parts.
+- [ ] An FBX with linked base color, normal, roughness, metalness, emission, opacity and AO maps renders with each one applied.
+- [ ] A glossiness map renders as the inverse roughness; a specular map gives a sensible metalness.
+- [ ] Built-in parts look the same as before.
+
+---
+
+## Phase 20: Embedded and channel-packed textures
+
+**User stories**: 63
+
+### What to build
+
+Textures embedded in an FBX are used and copied out as image files on import. Each texture's role is taken from the material link, or else guessed from its name (`albedo`, `basecolor`, `diffuse`, `normal`, `nrm`, `rough`, `gloss`, `smoothness`, `metal`, `spec`, `emissive`, `opacity`, `ao`, `occlusion`, and common suffixes such as `_N`, `_AO`). Channel-packed maps are split by known layouts: ORM/ARM, RMA, Unity's metallic + smoothness in alpha, HDRP's mask map, and opacity in base color alpha.
+
+### Acceptance criteria
+
+- [ ] An FBX with embedded textures imports with them applied, and they appear as files in the model's folder.
+- [ ] An ORM-packed texture and a Unity metallic-smoothness texture each drive the right channels.
+- [ ] A texture with an unknown role is reported in Output and left out, and the model still loads.
+
+---
+
+## Phase 21: SurfaceAppearance and texture overrides
+
+**User stories**: 64
+
+### What to build
+
+Each `MeshPart` gets one `SurfaceAppearance` child per material in its file, holding that material's maps (`ColorMap`, `NormalMap`, `MetalnessMap`, `RoughnessMap`, `EmissiveMap`, `AmbientOcclusionMap`, `OpacityMap`) as project texture paths, plus per-map settings (source channel, invert for glossiness, DirectX or OpenGL normals, emissive strength). Properties edits them, with a texture file picker. The import dialog lists each material's detected maps, so they can be changed before importing. Scripts can read and set the same properties.
+
+### Acceptance criteria
+
+- [ ] Importing creates a SurfaceAppearance per material with the detected maps filled in.
+- [ ] Changing a map or setting in Properties updates the viewport straight away, and it saves and reloads.
+- [ ] Changing a material's maps in the import dialog is what gets imported.
+- [ ] Deleting a SurfaceAppearance draws that material with the file's own textures again.
+
+---
+
 # Milestone 4: Game UI
 
-## Phase 18: UI Instances on screen
+## Phase 22: UI Instances on screen
 
 **User stories**: 42
 
@@ -352,7 +419,7 @@ Create the `ui` crate. Add `ScreenGui`, `Frame` and `TextLabel` Instances. `taff
 
 ---
 
-## Phase 19: CSS stylesheets
+## Phase 23: CSS stylesheets
 
 **User stories**: 43, 44, 45
 
@@ -369,7 +436,7 @@ Load `.css` files from the project. Support the subset in `docs/ui.md`: type, `.
 
 ---
 
-## Phase 20: Interactive UI
+## Phase 24: Interactive UI
 
 **User stories**: 46, 47
 
@@ -387,7 +454,7 @@ Add `TextButton` and `ImageLabel`. Support `:hover` and `:active` states, button
 
 # Milestone 5: Blocks
 
-## Phase 21: First blocks
+## Phase 25: First blocks
 
 **User stories**: 24, 25, 26, 29
 
@@ -404,7 +471,7 @@ Create the `blocks` crate and a block editor panel. Start with a small palette: 
 
 ---
 
-## Phase 22: Blocks as a learning path
+## Phase 26: Blocks as a learning path
 
 **User stories**: 27, 28, 30
 
@@ -422,7 +489,7 @@ Add a "View as Lua" panel showing readable generated code. Generated Lua carries
 
 # Milestone 6: Export
 
-## Phase 23: Export for your own OS
+## Phase 27: Export for your own OS
 
 **User stories**: 54
 
@@ -438,7 +505,7 @@ Add an editor export action: translate blocks to Lua via `blocks`, then `project
 
 ---
 
-## Phase 24: Export for every OS
+## Phase 28: Export for every OS
 
 **User stories**: 53, 55, 56, 57, 59
 
@@ -457,7 +524,7 @@ CI builds release players for Windows, macOS and Linux, and the editor bundles t
 
 # Ongoing
 
-## Phase 25: Audio
+## Phase 29: Audio
 
 **User stories**: 48
 
@@ -473,7 +540,7 @@ Create the `audio` crate around `kira`. Add a `Sound` Instance (asset reference,
 
 ---
 
-## Phase 26: Render stage 2, shadows
+## Phase 30: Render stage 2, shadows
 
 **User stories**: 40, 41
 
@@ -489,7 +556,7 @@ Add sun shadow maps (cascaded if needed for large scenes), configurable from the
 
 ---
 
-## Phase 27: Render stage 3, point and spot lights
+## Phase 31: Render stage 3, point and spot lights
 
 **User stories**: 11, 40, 41
 
@@ -505,7 +572,7 @@ Add `PointLight` and `SpotLight` Instances (parented to parts) with color, brigh
 
 ---
 
-## Phase 28: Render stage 4, sky and environment lighting
+## Phase 32: Render stage 4, sky and environment lighting
 
 **User stories**: 40, 41
 
@@ -521,7 +588,7 @@ Add a configurable sky (a procedural sky and/or HDR skybox) and image-based envi
 
 ---
 
-## Phase 29: Render stage 5, post-processing
+## Phase 33: Render stage 5, post-processing
 
 **User stories**: 40, 41
 

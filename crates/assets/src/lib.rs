@@ -7,7 +7,9 @@
 //!   triangles, materials and textures, fitted into the 1×1×1 cube that every
 //!   part's mesh fills.
 //! - [`import_model`] copies a model file (and the files it uses) into a
-//!   project's `assets/models` folder.
+//!   project's `assets/models` folder; [`list_model_objects`] and
+//!   [`import_picks`] import some of the objects in it, each a MeshPart
+//!   whose `MeshId` names them ([`Pick`]).
 //!
 //! Every file is read from inside the project folder ([`safe_path`]), so a
 //! world file or script can't make the engine read anything else.
@@ -19,9 +21,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
-pub use import::{ImportError, MODELS_FOLDER, import_model};
+pub use import::{ImportError, MODELS_FOLDER, import_model, import_picks, list_model_objects};
 pub use model::{
-    AlphaMode, Image, Model, ModelError, ModelFormat, ModelMaterial, Primitive, load_model,
+    AlphaMode, Image, Model, ModelError, ModelFormat, ModelMaterial, ModelObject, Pick, Primitive,
+    list_objects, load_model, load_models,
 };
 
 /// The project's loaded assets. Cloning gives another handle to the same
@@ -114,7 +117,8 @@ impl Assets {
 
 /// Reads the model at `mesh_id` inside `folder`, or explains why it can't.
 fn read_model(folder: &Path, mesh_id: &str) -> Result<Model, String> {
-    let relative = safe_path(mesh_id).ok_or(
+    let (file, pick) = Pick::of_mesh_id(mesh_id);
+    let relative = safe_path(file).ok_or(
         "MeshId must be a path inside the project folder, such as \"assets/models/chair.glb\"",
     )?;
     let format = ModelFormat::of(&relative)
@@ -125,7 +129,9 @@ fn read_model(folder: &Path, mesh_id: &str) -> Result<Model, String> {
         _ => err.to_string(),
     })?;
     let base = path.parent().unwrap_or(folder);
-    load_model(&bytes, base, format).map_err(|err| with_causes(&err))
+    load_models(&bytes, base, format, &[pick])
+        .map(|mut models| models.remove(0))
+        .map_err(|err| with_causes(&err))
 }
 
 /// An error and its causes on one line: "it isn't a valid glTF file:

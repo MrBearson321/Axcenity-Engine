@@ -9,14 +9,18 @@
 //! These are more methods of [`EditorApp`]: a child module like this one can
 //! use its private fields.
 
+use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::path::Path;
 
+use axcenity_assets::Pick;
 use axcenity_core::{ClassName, InstanceId, Value, Vector3};
 use axcenity_project::{self as project, LoadError, Project, ScriptFile};
 use eframe::egui;
 
 use super::EditorApp;
+use crate::history::{self, Move, Place};
+use crate::import_dialog::{Answer, ImportDialog, Placement};
 use crate::output::Output;
 use crate::properties::MIN_SIZE;
 use crate::scripts::{Disk, new_script_source};
@@ -31,6 +35,28 @@ fn chain(err: &dyn std::error::Error) -> String {
         source = cause.source();
     }
     text
+}
+
+/// The properties of a MeshPart showing `model` from `mesh_id`: it starts
+/// at the model's size in the file. A flat model (a plane) still gets some
+/// thickness, to be seen and picked.
+fn mesh_part_properties(
+    mesh_id: String,
+    model: &axcenity_assets::Model,
+) -> Vec<(&'static str, Value)> {
+    let [x, y, z] = model.size.map(|size| size.max(MIN_SIZE));
+    vec![
+        ("MeshId", Value::String(mesh_id)),
+        ("Size", Value::Vector3(Vector3::new(x, y, z))),
+    ]
+}
+
+/// An object's name from a model file as an Instance name.
+fn object_name(name: &str) -> String {
+    match name.trim() {
+        "" => ClassName::MeshPart.as_str().to_owned(),
+        name => name.to_owned(),
+    }
 }
 
 /// Says in Output which files of `project` couldn't be loaded.
@@ -327,20 +353,75 @@ impl EditorApp {
         }
     }
 
-    /// Copies the model at `file` into the project's `assets/models` folder
-    /// and inserts a MeshPart showing it, at its size in the file, inside
-    /// the selected Model or Folder if there is one. The insert is an undo
-    /// step; the copied file stays. A model that can't be loaded is reported
-    /// in Output and not copied; problems that didn't stop it loading (an
-    /// FBX texture that isn't there) are reported after it's imported.
+    /// Imports the model at `file`. A file with more than one object asks
+    /// which of them to import first ([`ImportDialog`]); a file with one
+    /// goes straight in as a MeshPart. A file that can't be read is
+    /// reported in Output.
     pub(super) fn import_model(&mut self, file: &Path) {
+        if self.project.is_none() || self.playing() || self.viewport.is_dragging() {
+            return;
+        }
+        let objects = match axcenity_assets::list_model_objects(file) {
+            Ok(objects) => objects,
+            Err(err) => {
+                let err = chain(&err);
+                self.output
+                    .error(format!("Could not import `{}`: {err}", file.display()));
+                return;
+            }
+        };
+        let mut dialog = ImportDialog::new(file.to_owned(), objects);
+        if dialog.chosen().len() > 1 {
+            self.importing = Some(dialog);
+        } else {
+            dialog.placement = Placement::Merged;
+            self.import_chosen(&dialog);
+        }
+    }
+
+    /// Shows the Import Model dialog while a file is waiting for it, and
+    /// imports what it says.
+    pub(super) fn import_prompt(&mut self, ctx: &egui::Context) {
+        let Some(dialog) = &mut self.importing else {
+            return;
+        };
+        match dialog.show(ctx) {
+            Some(Answer::Import) => {
+                let dialog = self.importing.take().expect("checked above");
+                self.import_chosen(&dialog);
+            }
+            Some(Answer::Cancel) => self.importing = None,
+            None => {}
+        }
+    }
+
+    /// Copies the dialog's model file into the project's `assets/models`
+    /// folder and inserts the objects ticked in it, as its placement says,
+    /// inside the selected Model or Folder if there is one. Each MeshPart
+    /// starts at its object's size in the file. The insert is one undo
+    /// step; the copied file stays. A model that can't be loaded is
+    /// reported in Output and not copied; problems that didn't stop it
+    /// loading (an FBX texture that isn't there) are reported after it's
+    /// imported.
+    pub(super) fn import_chosen(&mut self, dialog: &ImportDialog) {
         let Some(project) = &self.project else {
             return;
         };
         if self.playing() || self.viewport.is_dragging() {
             return;
         }
-        let (mesh_id, model) = match axcenity_assets::import_model(&project.folder, file) {
+        let file = &dialog.file;
+        let chosen = dialog.chosen();
+        let path = |i: usize| dialog.objects[i].path.clone();
+        let picks: Vec<Pick> = match dialog.placement {
+            Placement::Merged if dialog.all_chosen() => vec![Pick::Whole],
+            Placement::Merged => vec![Pick::Objects(chosen.iter().map(|&i| path(i)).collect())],
+            Placement::Grouped | Placement::Separate => chosen
+                .iter()
+                .map(|&i| Pick::Objects(vec![path(i)]))
+                .collect(),
+        };
+        let imported = match axcenity_assets::import_picks(&project.folder, file, &picks) {
             Ok(imported) => imported,
             Err(err) => {
                 let err = chain(&err);
@@ -349,32 +430,179 @@ impl EditorApp {
                 return;
             }
         };
-        let model = self.assets.insert(&mesh_id, model);
-        // A flat model (a plane) still needs some thickness to be seen and picked.
-        let [x, y, z] = model.size.map(|size| size.max(MIN_SIZE));
-        let name = file
+        let (copy, _) = Pick::of_mesh_id(&imported[0].0);
+        self.output.info(format!(
+            "Imported `{}` into the project as `{copy}`.",
+            file.display()
+        ));
+        let mut parts = Vec::new();
+        for (mesh_id, model) in imported {
+            let model = self.assets.insert(&mesh_id, model);
+            for warning in &model.warnings {
+                self.output
+                    .error(format!("The model `{mesh_id}` {warning}."));
+            }
+            parts.push((mesh_id, model));
+        }
+
+        let file_name = file
             .file_stem()
             .map(|stem| stem.to_string_lossy().trim().to_owned())
             .filter(|stem| !stem.is_empty())
             .unwrap_or_else(|| ClassName::MeshPart.as_str().to_owned());
-        self.output.info(format!(
-            "Imported `{}` into the project as `{mesh_id}`.",
-            file.display()
-        ));
-        for warning in &model.warnings {
-            self.output
-                .error(format!("The model `{mesh_id}` {warning}."));
-        }
         let near = self.selected;
-        self.insert_named(
-            Insertable::MeshPart,
-            near,
-            &name,
-            vec![
-                ("MeshId", Value::String(mesh_id)),
-                ("Size", Value::Vector3(Vector3::new(x, y, z))),
-            ],
+        let position = self.insert_position();
+        match dialog.placement {
+            Placement::Merged => {
+                let (mesh_id, model) = parts.remove(0);
+                self.insert_named(
+                    Insertable::MeshPart,
+                    near,
+                    &file_name,
+                    mesh_part_properties(mesh_id, &model),
+                );
+            }
+            Placement::Separate => {
+                let parent = tree::insert_parent(&self.world, near, Insertable::MeshPart);
+                let ids: Vec<InstanceId> = chosen
+                    .iter()
+                    .zip(parts)
+                    .map(|(&i, (mesh_id, model))| {
+                        let id = self.new_mesh_part(mesh_id, &model, position);
+                        self.world
+                            .set_name(id, object_name(&dialog.objects[i].name))
+                            .expect("just made");
+                        id
+                    })
+                    .collect();
+                self.place_new(parent, ids, format!("Import {file_name}"));
+            }
+            Placement::Grouped => {
+                let parent = tree::insert_parent(&self.world, near, Insertable::Model);
+                let root = tree::create(&mut self.world, Insertable::Model, position);
+                self.world.set_name(root, &file_name).expect("just made");
+                // The parts keep their places around the middle of them all.
+                let mut min = [f32::INFINITY; 3];
+                let mut max = [f32::NEG_INFINITY; 3];
+                for (_, model) in &parts {
+                    for axis in 0..3 {
+                        let half = model.size[axis] / 2.0;
+                        min[axis] = min[axis].min(model.center[axis] - half);
+                        max[axis] = max[axis].max(model.center[axis] + half);
+                    }
+                }
+                let middle = [0, 1, 2].map(|axis| (min[axis] + max[axis]) / 2.0);
+                let mut groups = HashMap::new();
+                for (&i, (mesh_id, model)) in chosen.iter().zip(parts) {
+                    let at = Vector3::new(
+                        position.x + model.center[0] - middle[0],
+                        position.y + model.center[1] - middle[1],
+                        position.z + model.center[2] - middle[2],
+                    );
+                    let id = self.new_mesh_part(mesh_id, &model, at);
+                    let container = self.group_of(dialog, i, root, &mut groups);
+                    let name = tree::unique_name(
+                        &self.world,
+                        container,
+                        &object_name(&dialog.objects[i].name),
+                    );
+                    self.world.set_name(id, name).expect("just made");
+                    self.world
+                        .set_parent(id, Some(container))
+                        .expect("a new part can go in a new Model");
+                }
+                self.place_new(parent, vec![root], format!("Import {file_name}"));
+            }
+        }
+    }
+
+    /// A new MeshPart showing `model` (loaded from `mesh_id`), centered on
+    /// `position`, with no parent yet.
+    fn new_mesh_part(
+        &mut self,
+        mesh_id: String,
+        model: &axcenity_assets::Model,
+        position: Vector3,
+    ) -> InstanceId {
+        let id = tree::create(&mut self.world, Insertable::MeshPart, position);
+        for (property, value) in mesh_part_properties(mesh_id, model) {
+            self.world
+                .set_property(id, property, value)
+                .expect("every MeshPart has these");
+        }
+        id
+    }
+
+    /// The Model that object `i` of `dialog` goes in when importing it as
+    /// a Model: one made for the group (an object without a mesh) it's
+    /// inside, or `root` if it isn't inside one. Groups' Models are made
+    /// the first time, and remembered in `groups` by object.
+    fn group_of(
+        &mut self,
+        dialog: &ImportDialog,
+        i: usize,
+        root: InstanceId,
+        groups: &mut HashMap<usize, InstanceId>,
+    ) -> InstanceId {
+        // An object inside one with a mesh goes next to it: parts don't
+        // hold other parts.
+        let mut parent = dialog.parent(i);
+        while let Some(p) = parent
+            && dialog.objects[p].has_mesh()
+        {
+            parent = dialog.parent(p);
+        }
+        let Some(group) = parent else {
+            return root;
+        };
+        if let Some(&model) = groups.get(&group) {
+            return model;
+        }
+        let container = self.group_of(dialog, group, root, groups);
+        let model = tree::create(
+            &mut self.world,
+            Insertable::Model,
+            Vector3::new(0.0, 0.0, 0.0),
         );
+        let name = tree::unique_name(
+            &self.world,
+            container,
+            &object_name(&dialog.objects[group].name),
+        );
+        self.world.set_name(model, name).expect("just made");
+        self.world
+            .set_parent(model, Some(container))
+            .expect("a new Model can go in a new Model");
+        groups.insert(group, model);
+        model
+    }
+
+    /// Puts the new Instances `ids` at the end of `parent`, each with a
+    /// name none of its siblings has, as one undo step named `label`, and
+    /// selects the last of them.
+    fn place_new(&mut self, parent: InstanceId, ids: Vec<InstanceId>, label: String) {
+        let mut moves = Vec::new();
+        for &id in &ids {
+            let wanted = self.world.get(id).map(|i| i.name().to_string());
+            let name = tree::unique_name(&self.world, parent, &wanted.unwrap_or_default());
+            self.world.set_name(id, name).expect("just made");
+            let end = self.world.get(parent).map_or(0, |p| p.children().len());
+            let place = Place { parent, index: end };
+            if let Err(err) = history::put(&mut self.world, id, Some(place)) {
+                self.output.error(format!("Could not do that: {err}"));
+                break;
+            }
+            moves.push(Move {
+                id,
+                before: None,
+                after: Some(place),
+            });
+        }
+        let last = moves.last().map(|step| step.id);
+        self.history.record_tree(&mut self.world, label, moves);
+        if last.is_some() {
+            self.select_from_viewport(last);
+        }
     }
 
     /// Renames the Script `id` and its file to `name`. Not an undo step.
@@ -709,6 +937,147 @@ mod tests {
         let workspace = app.world.workspace();
         assert!(app.world.find_first_child(workspace, "pyramid").is_none());
         assert!(folder.join(mesh_id).is_file());
+        let _ = fs::remove_dir_all(&folder);
+    }
+
+    /// A glTF file in `folder` holding three copies of the example pyramid
+    /// (4 wide): `Pyramid` at the origin, `Street/Big` 10 along X inside
+    /// an empty `Street` node, and `Small` 10 along -Z.
+    fn write_props(folder: &Path) -> std::path::PathBuf {
+        let text = fs::read_to_string(example_model()).unwrap();
+        let mut gltf: serde_json::Value = serde_json::from_str(&text).unwrap();
+        gltf["scenes"][0]["nodes"] = serde_json::json!([0, 1, 3]);
+        gltf["nodes"] = serde_json::json!([
+            { "name": "Pyramid", "mesh": 0 },
+            { "name": "Street", "children": [2] },
+            { "name": "Big", "mesh": 0, "translation": [10, 0, 0] },
+            { "name": "Small", "mesh": 0, "translation": [0, 0, -10] },
+        ]);
+        let file = folder.join("props.gltf");
+        fs::write(&file, gltf.to_string()).unwrap();
+        file
+    }
+
+    /// Opens the Import Model dialog for `file`, unticks `Small`, and
+    /// imports the rest as `placement` says.
+    fn import_without_small(app: &mut EditorApp, file: &Path, placement: Placement) {
+        app.import_model(file);
+        let mut dialog = app.importing.take().expect("several objects ask first");
+        let small = dialog
+            .objects
+            .iter()
+            .position(|object| object.name == "Small")
+            .unwrap();
+        dialog.set(small, false);
+        dialog.placement = placement;
+        app.import_chosen(&dialog);
+    }
+
+    fn position(app: &EditorApp, id: InstanceId) -> Vector3 {
+        match app.world.get(id).unwrap().property("Position") {
+            Some(Value::Vector3(position)) => *position,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    fn mesh_id(app: &EditorApp, id: InstanceId) -> String {
+        match app.world.get(id).unwrap().property("MeshId") {
+            Some(Value::String(mesh_id)) => mesh_id.clone(),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_file_with_several_objects_asks_first_and_copies_nothing_yet() {
+        let folder = copy_of_example("hello-part", "import-ask");
+        let file = write_props(&folder);
+        let mut app = EditorApp::new(Some(&folder));
+        app.import_model(&file);
+        let dialog = app.importing.as_ref().expect("the dialog is open");
+        let names: Vec<&str> = dialog.objects.iter().map(|o| o.name.as_str()).collect();
+        assert_eq!(names, ["Pyramid", "Street", "Big", "Small"]);
+        assert!(!folder.join(axcenity_assets::MODELS_FOLDER).exists());
+        let _ = fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn chosen_objects_import_as_a_model_laid_out_as_in_the_file() {
+        let folder = copy_of_example("hello-part", "import-grouped");
+        let file = write_props(&folder);
+        let mut app = EditorApp::new(Some(&folder));
+        import_without_small(&mut app, &file, Placement::Grouped);
+
+        let workspace = app.world.workspace();
+        let model = app.world.find_first_child(workspace, "props").unwrap();
+        assert_eq!(app.selected, Some(model));
+        assert_eq!(app.world.get(model).unwrap().class(), ClassName::Model);
+        let pyramid = app.world.find_first_child(model, "Pyramid").unwrap();
+        let street = app.world.find_first_child(model, "Street").unwrap();
+        assert_eq!(app.world.get(street).unwrap().class(), ClassName::Model);
+        let big = app.world.find_first_child(street, "Big").unwrap();
+        assert!(app.world.find_first_child(model, "Small").is_none());
+        assert_eq!(
+            mesh_id(&app, big),
+            "assets/models/props/props.gltf#Street/Big"
+        );
+        assert_eq!(
+            mesh_id(&app, pyramid),
+            "assets/models/props/props.gltf#Pyramid"
+        );
+        let (a, b) = (position(&app, pyramid), position(&app, big));
+        assert!((b.x - a.x - 10.0).abs() < 1e-4 && (b.z - a.z).abs() < 1e-4);
+        assert_eq!(
+            app.world.get(big).unwrap().property("Size"),
+            Some(&Value::Vector3(Vector3::new(4.0, 3.0, 4.0)))
+        );
+
+        // Saved and opened again, each part loads its own object.
+        assert!(app.save());
+        let reopened = EditorApp::new(Some(&folder));
+        let model = reopened.world.find_first_child(workspace, "props").unwrap();
+        let street = reopened.world.find_first_child(model, "Street").unwrap();
+        let big = reopened.world.find_first_child(street, "Big").unwrap();
+        let loaded = reopened.assets.model(&mesh_id(&reopened, big)).unwrap();
+        assert!((loaded.center[0] - 10.0).abs() < 1e-4);
+        assert!(reopened.assets.take_errors().is_empty());
+
+        // One undo takes it all out.
+        app.undo();
+        assert!(app.world.find_first_child(workspace, "props").is_none());
+        let _ = fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn chosen_objects_can_import_as_separate_parts_or_one_merged_part() {
+        let folder = copy_of_example("hello-part", "import-separate");
+        let file = write_props(&folder);
+        let mut app = EditorApp::new(Some(&folder));
+        let workspace = app.world.workspace();
+        let before = app.world.get(workspace).unwrap().children().len();
+
+        import_without_small(&mut app, &file, Placement::Separate);
+        let pyramid = app.world.find_first_child(workspace, "Pyramid").unwrap();
+        let big = app.world.find_first_child(workspace, "Big").unwrap();
+        assert_eq!(position(&app, pyramid), position(&app, big));
+        assert_eq!(
+            app.world.get(workspace).unwrap().children().len(),
+            before + 2
+        );
+        app.undo();
+        assert_eq!(app.world.get(workspace).unwrap().children().len(), before);
+
+        import_without_small(&mut app, &file, Placement::Merged);
+        let merged = app.world.find_first_child(workspace, "props").unwrap();
+        // The second import's copy: the first is still in the project.
+        assert_eq!(
+            mesh_id(&app, merged),
+            "assets/models/props2/props2.gltf#Pyramid,Street/Big"
+        );
+        // From the Pyramid's left edge (-2) to the Big one's right (12).
+        assert_eq!(
+            app.world.get(merged).unwrap().property("Size"),
+            Some(&Value::Vector3(Vector3::new(14.0, 3.0, 4.0)))
+        );
         let _ = fs::remove_dir_all(&folder);
     }
 

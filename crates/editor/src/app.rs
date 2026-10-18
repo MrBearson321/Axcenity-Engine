@@ -27,6 +27,7 @@ use crate::autocomplete;
 use crate::explorer::{self, Action, Explorer, ExplorerOutput};
 use crate::gizmo::{Snap, Tool};
 use crate::history::{self, Field, History, Move, Place};
+use crate::import_dialog::ImportDialog;
 use crate::output::Output;
 use crate::play::{self, Crash, GameKeys, Session};
 use crate::properties::{self, Edit};
@@ -116,6 +117,8 @@ pub struct EditorApp {
     tabs: ScriptTabs,
     /// A Script waiting for an answer to "Delete script?".
     confirm_delete: Option<InstanceId>,
+    /// A model file waiting for its objects to be chosen.
+    importing: Option<ImportDialog>,
     /// Dark, light or the system's, picked in View > Theme. Saved between runs.
     theme: egui::ThemePreference,
     /// The logo images, loaded on the first frame (they need the egui context).
@@ -201,6 +204,7 @@ impl EditorApp {
             last_frame: None,
             tabs: ScriptTabs::default(),
             confirm_delete: None,
+            importing: None,
             game_keys: GameKeys::default(),
             warnings: WarningCache::default(),
             theme: egui::ThemePreference::Dark,
@@ -1550,6 +1554,7 @@ impl eframe::App for EditorApp {
 
         self.unsaved_changes_prompt(ctx);
         self.delete_script_prompt(ctx);
+        self.import_prompt(ctx);
         if self.about_open
             && let Some(brand) = &self.brand
         {

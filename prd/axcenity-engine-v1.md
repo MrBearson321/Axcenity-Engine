@@ -44,6 +44,10 @@ Graphics aim for a modern, realistic look (physically based materials, shadows, 
 11. As a creator, I want to add lights (sun, point lights, spot lights) and adjust them, so that I can set the mood of my scenes.
 12. As a creator, I want to mark parts as anchored or unanchored, so that I control which parts fall and collide under physics.
 13. As a creator, I want undo and redo in the editor, so that mistakes are cheap.
+61. As a creator, I want to choose which objects to import from a model file that holds many, and whether they arrive grouped as laid out or as separate parts, so that I can use one prop from a large pack.
+62. As a creator, I want imported models to use all their standard texture maps (base color, normal, roughness or glossiness, metalness or specular, emission, opacity, ambient occlusion), so that they look as their artist made them.
+63. As a creator, I want FBX files with embedded or channel-packed textures to import with the right maps worked out for me, so that assets from stores and other engines just work.
+64. As a creator, I want to see and change each imported material's texture maps, both while importing and afterwards, so that I can fix a wrong guess or retexture a model.
 
 ### Scripting with Lua
 
@@ -171,7 +175,7 @@ Graphics aim for a modern, realistic look (physically based materials, shadows, 
   3. Many point and spot lights
   4. Sky and environment lighting
   5. Post-processing (bloom, tone mapping)
-- Supported geometry: built-in primitives (block, sphere, cylinder, wedge) and imported glTF models.
+- Supported geometry: built-in primitives (block, sphere, cylinder, wedge) and imported glTF and FBX models, with their standard PBR texture maps.
 
 ### Scripting
 - The language is **Lua 5.4** through `mlua`.

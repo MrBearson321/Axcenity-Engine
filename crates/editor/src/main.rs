@@ -12,6 +12,7 @@ mod autocomplete;
 mod explorer;
 mod gizmo;
 mod history;
+mod import_dialog;
 mod lua_syntax;
 mod output;
 mod placing;
