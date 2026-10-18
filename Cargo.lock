@@ -503,6 +503,7 @@ dependencies = [
  "env_logger",
  "log",
  "rfd",
+ "serde_json",
 ]
 
 [[package]]
@@ -526,6 +527,7 @@ dependencies = [
  "axcenity-script",
  "env_logger",
  "log",
+ "png",
  "pollster",
  "winit",
 ]

@@ -35,11 +35,13 @@ Rules:
 1. Read input
 2. Resume coroutines whose wait has expired, and fire queued events
 3. Step physics at a fixed 60 Hz (accumulator; may run 0–N steps per frame)
-4. Fire `Touched` and collision events
+4. Fire `Touched` and collision events, then `RunService.Heartbeat`
 5. Update UI layout (`taffy`)
 6. Build the draw list and render
 
 The player runs these in `WindowEvent::RedrawRequested` (`crates/player/src/main.rs`), with a comment per step. Step 5 arrives with its phase. The editor runs step 6 every frame it draws, and steps 1-4 only during Play (`Session::frame` in `crates/editor/src/play.rs`), before any panel is drawn.
+
+Since Phase 16, change events (`Changed`, `ChildAdded`, ...) for whatever changed fire at every step that runs scripts, before and after it, so physics' changes fire at the start of step 4 (see `docs/scripting.md`, Execution model).
 
 Since Phase 14, step 1 also hands LocalScripts the camera (`set_camera`) and the key presses since the last frame (`ScriptRuntime::input`), and step 2 first delivers RemoteEvent messages to each side (server, then client) before resuming its tasks. Where a LocalScript moved the camera (`take_camera_move`) is applied just before step 6. See `docs/scripting.md` (Server and client).
 
@@ -134,7 +136,8 @@ Play runs in-process on a **deep copy** of the edit world, and Stop drops the co
 - **The copy**: `World` derives `Clone`. The arena has no pointers, so a clone is a full deep copy where every Instance keeps its `InstanceId`. The selection and open Explorer branches carry over to the Play world and back. A fresh `ScriptRuntime` and `Physics` are made for each Play, so nothing (connections, waiting threads, bodies) survives into the next one. After Stop, a selection that only existed in the game is cleared.
 - **Autosave** (chosen by the developer): Play saves `world.json` first **only if there are unsaved changes**; otherwise the file already matches, and Play doesn't rewrite it. If saving fails, Play doesn't start and Output says why. The undo history is kept across Play.
 - **Scripts** are read again from their files at Play (`project::read_script`), so Play runs exactly what's on disk (Play's autosave writes unsaved script tabs first). A file that can't be read is reported and left out; the rest still run.
-- **Read-only during Play** (chosen by the developer): the Explorer, Properties and viewport show the live game world. You can select and inspect (Properties values are greyed out but update every frame), open and close Explorer branches, and move the camera. Editing, the transform tools, dragging, inserting, the right-click menu, rename, undo and redo are all off. File > Save still saves the edit world. Opening another project stops the game.
+- **Read-only during Play** (chosen by the developer): the Explorer, Properties and viewport show the live game world. You can select and inspect (values update every frame), open and close Explorer branches, and move the camera. The transform tools, dragging, inserting, the right-click menu, Explorer rename, undo and redo are all off. File > Save still saves the edit world. Opening another project stops the game.
+- **Except Properties** (changed in Phase 16, chosen by the developer, like Studio): during Play the Properties panel edits the game's world (`Session::world_mut`), so the game's scripts see the change (`Changed` fires at the next frame). These edits make no undo step, don't count as unsaved, and are gone at Stop. The panel says so above the values.
 - **Frame**: each editor frame during Play runs frame steps 2-4 with the real time since the last one (capped at 0.1 s, like the player), then draws; the editor repaints continuously while playing. The editor camera keeps working (there are no characters yet).
 - **Output**: `print` lines are Info, script errors (`path:line: message`) are Error.
 - **Panics** (`catch_unwind` around `Session::start` and `Session::frame`): the session is thrown away, Output shows "The engine crashed during Play: <message>...", and the editor is back in edit mode. The panic's location goes to the terminal (Rust's default panic message). Panics while *drawing* the Play world aren't caught yet. In debug builds, **Debug > Panic during Play** makes the next frame panic, to test this (chosen by the developer); release builds have no Debug menu.

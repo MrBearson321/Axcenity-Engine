@@ -312,9 +312,9 @@ Add `Changed` and property-change signals, `ChildAdded`/`ChildRemoved`, and a he
 
 ### Acceptance criteria
 
-- [ ] `Changed` fires when a property changes, from scripts, physics or the editor during Play.
+- [x] `Changed` fires when a property changes, from scripts, physics or the editor during Play.
 - [ ] Opening the project in VS Code with Lua Language Server gives autocomplete for `Instance.new`, part properties and `task.*`.
-- [ ] CI fails if the generated definitions are out of date with the API.
+- [x] CI fails if the generated definitions are out of date with the API.
 
 ---
 

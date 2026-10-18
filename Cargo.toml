@@ -29,6 +29,9 @@ eframe = { version = "0.32", default-features = false, features = ["accesskit", 
 env_logger = "0.11"
 glam = "0.34"
 log = "0.4"
+# Decodes the logo PNG for the player's window icon. (The editor gets PNG
+# decoding through eframe.)
+png = "0.18"
 # Lua 5.4, compiled from source (`vendored`) so no system Lua is needed on any OS.
 mlua = { version = "0.12", features = ["lua54", "vendored"] }
 pollster = "0.4"

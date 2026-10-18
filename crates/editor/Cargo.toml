@@ -19,5 +19,8 @@ env_logger.workspace = true
 log.workspace = true
 rfd.workspace = true
 
+[dev-dependencies]
+serde_json.workspace = true
+
 [lints]
 workspace = true

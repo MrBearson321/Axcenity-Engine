@@ -89,10 +89,7 @@ impl UserData for LuaUserInputService {
     fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
         for event in ["InputBegan", "InputEnded"] {
             fields.add_field_method_get(event, move |_, _| {
-                Ok(LuaSignal {
-                    owner: Owner::UserInputService,
-                    event,
-                })
+                Ok(LuaSignal::named(Owner::UserInputService, event))
             });
         }
     }

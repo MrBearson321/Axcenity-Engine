@@ -82,18 +82,19 @@ pub fn can_rename_here(instance: &Instance) -> bool {
     can_rename(instance) && !instance.class().is_script()
 }
 
-/// Shown when hovering a greyed-out value during Play.
-const PLAYING_HINT: &str = "Values show the running game. Press Stop to edit.";
-
 /// Draws the panel for `selected` and returns the edit made this frame, if any.
-/// When not `editable` (during Play), the values are shown but greyed out.
+/// While `playing`, `world` is the game's, and the panel says that changes
+/// last only until Stop.
 pub fn show(
     ui: &mut egui::Ui,
     world: &World,
     selected: Option<InstanceId>,
-    editable: bool,
+    playing: bool,
 ) -> Option<Edit> {
     ui.strong("Properties");
+    if playing {
+        ui.weak("Changes made during Play are undone at Stop.");
+    }
     ui.separator();
     let mut edit = None;
     // The scroll area fills the panel even when nothing is selected. Without
@@ -112,10 +113,7 @@ pub fn show(
                 section(ui, "Data", |ui| {
                     ui.label("Name");
                     let mut name = instance.name().to_string();
-                    if !editable {
-                        ui.add_enabled(false, egui::TextEdit::singleline(&mut name))
-                            .on_disabled_hover_text(PLAYING_HINT);
-                    } else if can_rename_here(instance) {
+                    if can_rename_here(instance) {
                         if ui.text_edit_singleline(&mut name).changed() {
                             edit = Some(Edit::Name(name));
                         }
@@ -138,12 +136,7 @@ pub fn show(
                     section(ui, group.title, |ui| {
                         for (name, value) in group.properties {
                             ui.label(name);
-                            // `add_enabled_ui` greys out (and ignores) whatever is
-                            // drawn inside it; `.inner` is what the closure returned.
-                            let changed = ui
-                                .add_enabled_ui(editable, |ui| value_control(ui, name, value))
-                                .inner;
-                            if let Some(value) = changed {
+                            if let Some(value) = value_control(ui, name, value) {
                                 edit = Some(Edit::Property(name, value));
                             }
                             ui.end_row();

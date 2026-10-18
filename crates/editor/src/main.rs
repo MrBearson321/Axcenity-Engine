@@ -8,6 +8,7 @@
 //! device; the viewport draws with the same renderer as the player.
 
 mod app;
+mod autocomplete;
 mod explorer;
 mod gizmo;
 mod history;
@@ -29,6 +30,19 @@ use eframe::egui;
 
 use crate::app::EditorApp;
 
+/// The logo at 256×256, from `assets/branding` (see its README), built into
+/// the program. Windows and X11 show it; macOS and Wayland ignore window icons.
+const ICON_PNG: &[u8] = include_bytes!("../../../assets/branding/icon-256.png");
+
+/// The logo as a window icon. If it can't be decoded, eframe's default icon
+/// is used and the reason goes to the log.
+fn window_icon() -> egui::IconData {
+    eframe::icon_data::from_png_bytes(ICON_PNG).unwrap_or_else(|err| {
+        log::warn!("no window icon: {err}");
+        egui::IconData::default()
+    })
+}
+
 fn main() -> eframe::Result {
     // Same logging defaults as the player: warnings and errors, minus
     // harmless graphics driver chatter. Set RUST_LOG to override.
@@ -46,7 +60,8 @@ fn main() -> eframe::Result {
         renderer: eframe::Renderer::Wgpu,
         viewport: egui::ViewportBuilder::default()
             .with_title("Axcenity Editor")
-            .with_inner_size([1280.0, 800.0]),
+            .with_inner_size([1280.0, 800.0])
+            .with_icon(window_icon()),
         ..Default::default()
     };
     eframe::run_native(
@@ -56,4 +71,14 @@ fn main() -> eframe::Result {
         // the window exists to create the app.
         Box::new(move |_creation_context| Ok(Box::new(EditorApp::new(folder.as_deref())))),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_logo_decodes_into_a_window_icon() {
+        let icon = super::window_icon();
+        assert_eq!((icon.width, icon.height), (256, 256));
+        assert_eq!(icon.rgba.len(), 256 * 256 * 4);
+    }
 }

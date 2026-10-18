@@ -157,6 +157,17 @@ const VALUE_TYPES: &[ValueType] = &[
         }],
     },
     ValueType {
+        class: "RunService",
+        doc: "The game's frame loop, from `game:GetService(\"RunService\")`.",
+        fields: &[Field {
+            name: "Heartbeat",
+            ty: "Signal",
+            doc: "Fires once every frame, after physics. The handler gets the frame's length in seconds: `function(deltaTime) ... end`.",
+        }],
+        operators: &[],
+        methods: &[],
+    },
+    ValueType {
         class: "InputObject",
         doc: "One key going down or up, as `InputBegan` and `InputEnded` handlers get it.",
         fields: &[Field {
@@ -211,12 +222,37 @@ const INSTANCE_FIELDS: &[Field] = &[
     },
 ];
 
-const INSTANCE_METHODS: &[Function] = &[Function {
-    name: "FindFirstChild",
-    doc: "The first child with this name, or nil. With `recursive`, searches every descendant.",
-    params: &[("name", "string"), ("recursive?", "boolean")],
-    returns: "Instance?",
-}];
+const INSTANCE_METHODS: &[Function] = &[
+    Function {
+        name: "FindFirstChild",
+        doc: "The first child with this name, or nil. With `recursive`, searches every descendant.",
+        params: &[("name", "string"), ("recursive?", "boolean")],
+        returns: "Instance?",
+    },
+    Function {
+        name: "GetPropertyChangedSignal",
+        doc: "An event that fires when this one property (or `Name` or `Parent`) gets a different value. The handler gets nothing: read the property to see its new value.",
+        params: &[("property", "string")],
+        returns: "Signal",
+    },
+];
+
+/// What each event every Instance has means (`core`'s `INSTANCE_EVENTS`).
+/// A test checks they match.
+const INSTANCE_EVENT_DOCS: &[(&str, &str)] = &[
+    (
+        "Changed",
+        "Fires when a property (or `Name` or `Parent`) gets a different value, whether a script, physics or the editor changed it. The handler gets the property's name: `function(property) ... end`.",
+    ),
+    (
+        "ChildAdded",
+        "Fires when an Instance is put inside this one. The handler gets the child.",
+    ),
+    (
+        "ChildRemoved",
+        "Fires when an Instance is taken out of this one. The handler gets the child.",
+    ),
+];
 
 /// What `part.Touched` and other events are.
 const SIGNAL_DOC: &str =
@@ -267,7 +303,9 @@ const INSTANCE_GLOBALS: &[(&str, &str, &str)] = &[
 const GLOBAL_FUNCTIONS: &[Function] = &[Function {
     name: "require",
     doc: "Runs a ModuleScript (a `.module.lua` file, such as `require(game.ReplicatedStorage.Utils)`) the first time, and returns what it returned. Later calls on the same side return the same value.",
-    params: &[("module", "ModuleScript")],
+    // `Instance`, not `ModuleScript`: a child found by name could be any
+    // class (see the Instance indexer), and `require` checks it when it runs.
+    params: &[("module", "Instance")],
     returns: "any",
 }];
 
@@ -277,7 +315,7 @@ const CLASS_METHODS: &[(ClassName, Function)] = &[
         ClassName::DataModel,
         Function {
             name: "GetService",
-            doc: "The service with this class name, such as `\"Players\"` or `\"UserInputService\"`.",
+            doc: "The service with this class name, such as `\"Players\"`, `\"RunService\"` or `\"UserInputService\"`.",
             params: &[("className", "string")],
             returns: "Instance",
         },
@@ -319,6 +357,14 @@ const CLASS_FIELDS: &[(ClassName, Field)] = &[
             name: "UserInputService",
             ty: "UserInputService",
             doc: "The player's keyboard (same as `game:GetService(\"UserInputService\")`).",
+        },
+    ),
+    (
+        ClassName::DataModel,
+        Field {
+            name: "RunService",
+            ty: "RunService",
+            doc: "The game's frame loop, with `Heartbeat` (same as `game:GetService(\"RunService\")`).",
         },
     ),
     (
@@ -658,7 +704,21 @@ pub fn lua_definitions() -> String {
     for field in INSTANCE_FIELDS {
         w.field(field);
     }
-    w.line("---@field [string] Instance A child, found by its name.");
+    for (event, doc) in INSTANCE_EVENT_DOCS {
+        w.line(&format!("---@field {event} Signal {doc}"));
+    }
+    // A child could be of any class. Typed as all of them, not as plain
+    // `Instance`, so `workspace.Pad.Color = ...` isn't flagged as setting a
+    // field Instance doesn't have, and `Pad`'s Part properties autocomplete.
+    let children: Vec<&str> = ClassName::ALL
+        .into_iter()
+        .filter(|class| *class != ClassName::DataModel)
+        .map(ClassName::as_str)
+        .collect();
+    w.line(&format!(
+        "---@field [string] {} A child, found by its name.",
+        children.join("|")
+    ));
     // A different name from the global `Instance` library, which this would hide.
     w.line("local InstanceClass = {}");
     w.line("");
@@ -875,6 +935,35 @@ mod tests {
             in_core, described,
             "EVENT_DOCS doesn't match the events in core"
         );
+        let described: Vec<&str> = INSTANCE_EVENT_DOCS.iter().map(|(e, _)| *e).collect();
+        assert_eq!(
+            described,
+            axcenity_core::INSTANCE_EVENTS,
+            "INSTANCE_EVENT_DOCS doesn't match core's INSTANCE_EVENTS"
+        );
+    }
+
+    /// What Phase 16 promises VS Code users: `Instance.new` gives the
+    /// class it was asked for, Parts have their properties, and `task.*` is
+    /// there.
+    #[test]
+    fn definitions_cover_instance_new_part_properties_and_task() {
+        let text = lua_definitions();
+        for line in [
+            "---@overload fun(className: \"Part\"): Part",
+            "function Instance.new(className) end",
+            "---@class Part: Instance",
+            "---@field Position Vector3 ",
+            "---@field Material EnumItem.Material|\"Plastic\"",
+            "function task.wait(seconds) end",
+            "function task.spawn(callback, ...) end",
+            "function task.delay(seconds, callback, ...) end",
+            "---@field Changed Signal ",
+            "function InstanceClass:GetPropertyChangedSignal(property) end",
+            "---@field Heartbeat Signal ",
+        ] {
+            assert!(text.contains(line), "the definitions have no `{line}`");
+        }
     }
 
     /// One script environment, as a script would see it.
@@ -969,6 +1058,12 @@ mod tests {
                 ),
             );
         }
+        for (event, _) in INSTANCE_EVENT_DOCS {
+            check(
+                event,
+                format!("assert(part.{event}.Connect ~= nil, 'Instance.{event}')"),
+            );
+        }
         check(
             "",
             "local connection = part.Touched:Connect(function() end)".to_owned(),
@@ -1045,6 +1140,7 @@ mod tests {
             ("Color3", "Color3.new(1, 0, 0)"),
             ("EnumItem", "Enum.Material.Neon"),
             ("UserInputService", "game:GetService('UserInputService')"),
+            ("RunService", "game:GetService('RunService')"),
             ("InputObject", "input"),
             ("Camera", "workspace.CurrentCamera"),
         ];

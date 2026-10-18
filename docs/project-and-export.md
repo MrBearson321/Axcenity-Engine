@@ -19,6 +19,9 @@ my-game/
   scripts/        server scripts: build.server.lua, doors/open.server.lua, ...
                   client scripts: keys.client.lua, ...
                   modules: shared/utils.module.lua, ...
+  .luarc.json, .axcenity/, .vscode/extensions.json
+                  optional: written by the editor's File > Set Up VS Code
+                  Autocomplete (see docs/scripting.md); the engine ignores them
 ```
 
 `world.json`:
@@ -66,3 +69,9 @@ my-game/
 - The engine is **Apache-2.0**. The `NOTICE` reads: "Built with Axcenity Engine, © 2026 Paul Janota and contributors."
 - Every new dependency must be license-compatible with Apache-2.0 (MIT, Apache-2.0, BSD, Zlib and similar are fine; no GPL). Add its notice to the generated credits.
 - Games made with the engine belong to their creators, with no royalties.
+
+## Branding (added in Phase 16)
+
+- `assets/branding/` holds the engine's logo, supplied by the developer. See its `README.md` for which file is for what.
+- The editor and the player use `icon-256.png` as their window icon, built in with `include_bytes!` (the player decodes it with the `png` crate, the editor with eframe). Windows and X11 show window icons; macOS and Wayland ignore them, so the app bundle and desktop file icons come with export (`icon.ico` and `icon.png` are ready for it).
+- A wordmark logo for splash and loading screens is still to come: the first version spelled the name "Axenity" and had dark text that disappears on dark backgrounds.

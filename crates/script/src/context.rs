@@ -5,7 +5,7 @@
 //! between them is a RemoteEvent. [`ScriptRuntime`](crate::ScriptRuntime)
 //! owns both and passes messages between them.
 
-use axcenity_core::{InstanceId, World};
+use axcenity_core::{InstanceId, RecordedChange, World};
 use mlua::chunk::ChunkMode;
 use mlua::{Lua, LuaOptions, StdLib, Thread};
 
@@ -15,8 +15,8 @@ use crate::instance::{self, ClassMethods};
 use crate::remote::{self, Message, Outbox};
 use crate::sides::Side;
 use crate::{
-    Output, OutputKind, OutputLine, events, modules, push_output, sandbox, scheduler, watchdog,
-    with_world,
+    Output, OutputKind, OutputLine, changes, events, modules, push_output, sandbox, scheduler,
+    watchdog, with_world,
 };
 
 pub struct Context {
@@ -140,6 +140,19 @@ impl Context {
                     }
                 }
             }
+        });
+    }
+
+    /// Fires `Changed`, property signals, `ChildAdded` and `ChildRemoved`
+    /// for `changes`.
+    pub fn fire_changes(&self, world: &mut World, changes: &[RecordedChange]) {
+        with_world(&self.lua, world, || changes::fire(&self.lua, changes));
+    }
+
+    /// Fires `RunService.Heartbeat` with the frame's length in seconds.
+    pub fn fire_heartbeat(&self, world: &mut World, seconds: f64) {
+        with_world(&self.lua, world, || {
+            events::fire(&self.lua, events::Owner::RunService, "Heartbeat", seconds);
         });
     }
 

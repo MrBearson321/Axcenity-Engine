@@ -5,6 +5,11 @@ use std::fmt;
 use crate::enums::{Material, PartType};
 use crate::value::{Color3, Value, Vector3};
 
+/// Events every Instance has, whatever its class. `Changed` fires with the
+/// name of a property that got a new value, `ChildAdded` and `ChildRemoved`
+/// with the child. Scripts reach them like class events: `part.Changed`.
+pub const INSTANCE_EVENTS: [&str; 3] = ["Changed", "ChildAdded", "ChildRemoved"];
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ClassName {
     /// The root of the tree, called `game` in scripts.
@@ -150,8 +155,9 @@ impl ClassName {
         }
     }
 
-    /// The names of this class's events, such as `Touched` on a Part. Scripts
-    /// reach them as `part.Touched` and connect handlers with `:Connect`.
+    /// The names of this class's own events, such as `Touched` on a Part.
+    /// Scripts reach them as `part.Touched` and connect handlers with
+    /// `:Connect`. Every class also has the [`INSTANCE_EVENTS`].
     pub fn events(self) -> &'static [&'static str] {
         match self {
             ClassName::DataModel
@@ -184,7 +190,7 @@ impl fmt::Display for ClassName {
 
 #[cfg(test)]
 mod tests {
-    use super::ClassName;
+    use super::{ClassName, INSTANCE_EVENTS};
 
     #[test]
     fn names_round_trip() {
@@ -197,12 +203,16 @@ mod tests {
     #[test]
     fn event_names_never_clash_with_property_names() {
         for class in ClassName::ALL {
-            for event in class.events() {
+            for event in class.events().iter().chain(&INSTANCE_EVENTS) {
                 let clashes = class
                     .default_properties()
                     .iter()
                     .any(|(name, _)| name == event);
                 assert!(!clashes, "{class}.{event} is both an event and a property");
+                assert!(
+                    !INSTANCE_EVENTS.contains(event) || !class.events().contains(event),
+                    "{class} lists {event}, which every Instance already has"
+                );
             }
         }
     }

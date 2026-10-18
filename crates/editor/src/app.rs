@@ -3,7 +3,9 @@
 //! like Roblox Studio.
 //!
 //! Play runs the game on a copy of the world (see `play.rs`). While it
-//! plays, every panel shows that copy and editing is off; Stop drops it.
+//! plays, every panel shows that copy. Only the Properties panel can change
+//! it (the game's scripts see those changes); everything else is read-only.
+//! Stop drops the copy.
 //!
 //! Above the viewport, tabs switch between the viewport ("World") and the
 //! open scripts. Everything that reads or writes project files (saving,
@@ -20,6 +22,7 @@ use axcenity_project::ScriptFile;
 use axcenity_script::{CameraState, KeyEvent};
 use eframe::egui;
 
+use crate::autocomplete;
 use crate::explorer::{self, Action, Explorer, ExplorerOutput};
 use crate::gizmo::{Snap, Tool};
 use crate::history::{self, Field, History, Move, Place};
@@ -223,6 +226,19 @@ impl EditorApp {
             if scripts == 1 { "script" } else { "scripts" },
         ));
         files::report_problems(&mut self.output, &project);
+        // A project set up for autocomplete by an older engine gets this
+        // engine's API.
+        match autocomplete::refresh(&project.folder) {
+            Ok(true) => self.output.info(format!(
+                "Updated `{}` to this version of the engine's script API.",
+                autocomplete::DEFINITIONS_FILE
+            )),
+            Ok(false) => {}
+            Err(err) => self.output.error(format!(
+                "Could not update `{}`: {err}",
+                autocomplete::DEFINITIONS_FILE
+            )),
+        }
         // The game being played belongs to the old project.
         self.play = None;
         self.tabs.close_all();
@@ -246,6 +262,34 @@ impl EditorApp {
         self.selected = None;
         self.history = History::new();
         self.explorer = Explorer::new(&self.world);
+    }
+
+    /// File > Set Up VS Code Autocomplete: writes the files Lua Language
+    /// Server needs into the project, and says what to do next.
+    fn set_up_autocomplete(&mut self) {
+        let Some(project) = &self.project else {
+            return;
+        };
+        match autocomplete::set_up(&project.folder) {
+            Ok(result) => {
+                let mut message = format!(
+                    "Set up autocomplete: wrote {}.",
+                    quoted_list(&result.written)
+                );
+                if !result.kept.is_empty() {
+                    message.push_str(&format!(" Kept your own {}.", quoted_list(&result.kept)));
+                }
+                message.push_str(
+                    " Open the project folder in VS Code and install the Lua extension \
+                     (sumneko.lua) when it asks; scripts then autocomplete the engine's API.",
+                );
+                self.output.info(message);
+            }
+            Err(err) => self.output.error(format!(
+                "Could not set up autocomplete in `{}`: {err}",
+                project.folder.display()
+            )),
+        }
     }
 
     /// Asks for a project folder with the system's folder picker, then opens it.
@@ -280,9 +324,9 @@ impl EditorApp {
     }
 
     /// Applies a change from the Properties panel, as an undo step such as
-    /// "Change Color of Pad".
+    /// "Change Color of Pad". During Play it changes the game instead.
     fn apply(&mut self, id: InstanceId, edit: Edit) {
-        let Some(instance) = self.world.get(id) else {
+        let Some(instance) = shown(&self.world, &self.play).get(id) else {
             return;
         };
         let (key, label) = match &edit {
@@ -318,14 +362,22 @@ impl EditorApp {
     /// Makes `edits` to `id` and records them in the history. `key` is the
     /// field being edited, so a drag or typing keeps adding to one undo step.
     /// Only real changes are recorded: typing the same value again isn't one.
-    /// Nothing changes during Play, when the panels show the game's world.
+    ///
+    /// During Play the panels show the game's world, so the edits go there
+    /// instead: the game's scripts see them (`Changed` fires), there's no
+    /// undo step, and Stop throws them away with the rest of the game.
     fn change(&mut self, id: InstanceId, key: Field, label: String, edits: Vec<Edit>) {
-        if self.playing() {
+        if let Some(session) = &mut self.play {
+            for edit in edits {
+                if let Err(err) = set(session.world_mut(), id, edit) {
+                    self.output.error(format!("Could not change that: {err:#}"));
+                }
+            }
             return;
         }
         let before = history::snapshot(&self.world, id);
         for edit in edits {
-            if let Err(err) = self.set(id, edit) {
+            if let Err(err) = set(&mut self.world, id, edit) {
                 // Can't happen from the panel or the gizmos, which only make valid values.
                 self.output.error(format!("Could not change that: {err:#}"));
             }
@@ -333,28 +385,6 @@ impl EditorApp {
         let after = history::snapshot(&self.world, id);
         self.history
             .record(&mut self.world, id, key, label, before, after);
-    }
-
-    /// Makes one edit to the world, without recording it.
-    fn set(&mut self, id: InstanceId, edit: Edit) -> anyhow::Result<()> {
-        let Some(instance) = self.world.get(id) else {
-            return Ok(());
-        };
-        match edit {
-            Edit::Name(name) => {
-                if properties::can_rename_here(instance) {
-                    self.world.set_name(id, name)?;
-                }
-            }
-            Edit::Property(name, value) => {
-                // Setting a Material resets Metalness and Roughness, so
-                // picking the material it already has must do nothing.
-                if instance.property(name) != Some(&value) {
-                    self.world.set_property(id, name, value)?;
-                }
-            }
-        }
-        Ok(())
     }
 
     /// Undoes the last step, unless a handle is being dragged or the game
@@ -747,6 +777,21 @@ impl EditorApp {
                     self.save();
                 }
                 ui.separator();
+                if ui
+                    .add_enabled(
+                        self.project.is_some(),
+                        egui::Button::new("Set Up VS Code Autocomplete"),
+                    )
+                    .on_hover_text(
+                        "Add the engine's API to this project for Lua Language Server, \
+                         so VS Code autocompletes it in scripts.",
+                    )
+                    .on_disabled_hover_text("Open a project first.")
+                    .clicked()
+                {
+                    self.set_up_autocomplete();
+                }
+                ui.separator();
                 if ui.button("Quit").clicked() {
                     self.request_and_go_ahead(ui.ctx(), Discard::Quit);
                 }
@@ -938,8 +983,10 @@ impl EditorApp {
             }
             if playing {
                 ui.separator();
-                ui.colored_label(PLAYING_COLOR, "Playing")
-                    .on_hover_text("Editing is off until you press Stop.");
+                ui.colored_label(PLAYING_COLOR, "Playing").on_hover_text(
+                    "Only the Properties panel can change the game, until you press \
+                     Stop. Those changes are undone at Stop.",
+                );
             }
         });
         if let Some(what) = insert {
@@ -1027,6 +1074,38 @@ impl EditorApp {
     }
 }
 
+/// `a`, `b` and `c`, each in backticks.
+fn quoted_list(items: &[&str]) -> String {
+    let quoted: Vec<String> = items.iter().map(|item| format!("`{item}`")).collect();
+    match quoted.as_slice() {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
+/// Makes one edit to `world`, without recording it.
+fn set(world: &mut World, id: InstanceId, edit: Edit) -> anyhow::Result<()> {
+    let Some(instance) = world.get(id) else {
+        return Ok(());
+    };
+    match edit {
+        Edit::Name(name) => {
+            if properties::can_rename_here(instance) {
+                world.set_name(id, name)?;
+            }
+        }
+        Edit::Property(name, value) => {
+            // Setting a Material resets Metalness and Roughness, so
+            // picking the material it already has must do nothing.
+            if instance.property(name) != Some(&value) {
+                world.set_property(id, name, value)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The world the panels and viewport show: the game's during Play, otherwise
 /// the one being edited.
 ///
@@ -1107,7 +1186,7 @@ impl eframe::App for EditorApp {
                     .resizable(true)
                     .default_height(340.0)
                     .show_inside(ui, |ui| {
-                        edit = properties::show(ui, world, self.selected, editing);
+                        edit = properties::show(ui, world, self.selected, !editing);
                     });
                 explorer = self.explorer.show(ui, world, self.selected, editing);
             });
@@ -2303,7 +2382,7 @@ mod tests {
     }
 
     #[test]
-    fn nothing_can_be_edited_while_playing() {
+    fn only_properties_can_be_edited_while_playing_and_stop_undoes_them() {
         // A copy, because Play saves the unsaved edit below.
         let folder = copy_of_example("hello-touched", "play-read-only");
         let mut app = EditorApp::new(Some(&folder));
@@ -2312,7 +2391,9 @@ mod tests {
         app.play();
         let before = everything(&app);
 
+        // The Properties panel changes the game's world...
         app.apply(pad, Edit::Name("Door".to_string()));
+        // ...and nothing else changes anything.
         app.act(Action::Delete(pad));
         app.act(Action::Duplicate(pad));
         app.act(Action::Insert {
@@ -2324,12 +2405,37 @@ mod tests {
         press(&mut app, egui::Modifiers::NONE, egui::Key::F2);
         assert_eq!(app.explorer.renaming(), None);
         let game = shown(&app.world, &app.play);
-        assert_eq!(game.get(pad).unwrap().name(), "Pad");
+        assert_eq!(game.get(pad).unwrap().name(), "Door");
+        assert!(game.is_descendant_of(pad, game.workspace()));
         assert!(game.find_first_child(game.workspace(), "Folder").is_none());
+        assert_eq!(everything(&app), before, "no undo step, nothing unsaved");
 
         app.stop();
         assert_eq!(everything(&app), before);
+        assert_eq!(app.world.get(pad).unwrap().name(), "Pad");
         let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn editing_a_property_during_play_fires_changed_in_the_game() {
+        let mut app = EditorApp::new(Some(&example("hello-events")));
+        let lamp = part(&app, "Lamp");
+        app.play();
+        play_for(&mut app, 0.5);
+        let changed = "Lamp's Color changed";
+        assert!(!printed(&app).contains(&changed));
+
+        let green = Value::Color3(Color3::new(0.1, 0.8, 0.2));
+        app.apply(lamp, Edit::Property("Color", green.clone()));
+        play_for(&mut app, 1.0 / 60.0);
+        assert_eq!(last_line(&app).text, changed);
+        let game = shown(&app.world, &app.play);
+        assert_eq!(game.get(lamp).unwrap().property("Color"), Some(&green));
+
+        // The edit world never changed, so there's nothing to save or undo.
+        assert_ne!(property(&app, lamp, "Color"), green);
+        assert!(!app.unsaved());
+        assert_eq!(app.history.undo_label(), None);
     }
 
     #[test]
@@ -2349,6 +2455,47 @@ mod tests {
         let mut empty = EditorApp::new(None);
         press(&mut empty, egui::Modifiers::NONE, egui::Key::F5);
         assert!(!empty.playing());
+    }
+
+    #[test]
+    fn set_up_autocomplete_writes_the_files_and_opening_refreshes_old_definitions() {
+        let folder = copy_of_example("hello-events", "autocomplete");
+        let mut app = EditorApp::new(Some(&folder));
+        app.set_up_autocomplete();
+        assert_eq!(
+            last_line(&app).text,
+            "Set up autocomplete: wrote `.axcenity/axcenity.lua`, `.luarc.json` and \
+             `.vscode/extensions.json`. Open the project folder in VS Code and install the \
+             Lua extension (sumneko.lua) when it asks; scripts then autocomplete the \
+             engine's API."
+        );
+        let definitions = folder.join(autocomplete::DEFINITIONS_FILE);
+        assert_eq!(
+            std::fs::read_to_string(&definitions).unwrap(),
+            axcenity_script::lua_definitions()
+        );
+        // The project still opens as before: the new files aren't scripts.
+        assert_eq!(app.project.as_ref().unwrap().scripts.len(), 1);
+
+        // Definitions from an older engine are updated when the project opens.
+        std::fs::write(&definitions, "---@meta\n").unwrap();
+        app.open(&folder);
+        assert!(printed(&app).contains(
+            &"Updated `.axcenity/axcenity.lua` to this version of the engine's script API."
+        ),);
+        assert_eq!(
+            std::fs::read_to_string(&definitions).unwrap(),
+            axcenity_script::lua_definitions()
+        );
+        assert_eq!(app.project.as_ref().unwrap().scripts.len(), 1);
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn quoted_lists_read_like_a_sentence() {
+        assert_eq!(quoted_list(&["a"]), "`a`");
+        assert_eq!(quoted_list(&["a", "b"]), "`a` and `b`");
+        assert_eq!(quoted_list(&["a", "b", "c"]), "`a`, `b` and `c`");
     }
 
     #[test]

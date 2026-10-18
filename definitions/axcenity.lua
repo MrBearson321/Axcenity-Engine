@@ -42,6 +42,10 @@ local UserInputServiceClass = {}
 function UserInputServiceClass:IsKeyDown(key) end
 
 
+---The game's frame loop, from `game:GetService("RunService")`.
+---@class RunService
+---@field Heartbeat Signal Fires once every frame, after physics. The handler gets the frame's length in seconds: `function(deltaTime) ... end`.
+
 ---One key going down or up, as `InputBegan` and `InputEnded` handlers get it.
 ---@class InputObject
 ---@field KeyCode EnumItem.KeyCode Which key, such as `Enum.KeyCode.W`.
@@ -141,7 +145,10 @@ function UserInputServiceClass:IsKeyDown(key) end
 ---@field Name string The Instance's name. Children can be found by name: `workspace.Block`.
 ---@field ClassName string The Instance's class, such as `"Part"`. Read-only.
 ---@field Parent Instance? The Instance this one is inside, or nil. Setting it moves the Instance.
----@field [string] Instance A child, found by its name.
+---@field Changed Signal Fires when a property (or `Name` or `Parent`) gets a different value, whether a script, physics or the editor changed it. The handler gets the property's name: `function(property) ... end`.
+---@field ChildAdded Signal Fires when an Instance is put inside this one. The handler gets the child.
+---@field ChildRemoved Signal Fires when an Instance is taken out of this one. The handler gets the child.
+---@field [string] Workspace|Players|ReplicatedStorage|ServerScriptService|StarterPlayer|StarterPlayerScripts|Part|Script|LocalScript|ModuleScript|RemoteEvent|Player|Model|Folder A child, found by its name.
 local InstanceClass = {}
 
 ---The first child with this name, or nil. With `recursive`, searches every descendant.
@@ -149,6 +156,11 @@ local InstanceClass = {}
 ---@param recursive? boolean
 ---@return Instance?
 function InstanceClass:FindFirstChild(name, recursive) end
+
+---An event that fires when this one property (or `Name` or `Parent`) gets a different value. The handler gets nothing: read the property to see its new value.
+---@param property string
+---@return Signal
+function InstanceClass:GetPropertyChangedSignal(property) end
 
 ---An event, such as `part.Touched`. Connect a function to run it every time the event fires.
 ---@class Signal
@@ -176,9 +188,10 @@ function ConnectionClass:Disconnect() end
 ---@field ServerScriptService ServerScriptService The service that holds server scripts (`scripts/*.server.lua`).
 ---@field StarterPlayer StarterPlayer The service with what each player starts with, such as StarterPlayerScripts.
 ---@field UserInputService UserInputService The player's keyboard (same as `game:GetService("UserInputService")`). LocalScripts only.
+---@field RunService RunService The game's frame loop, with `Heartbeat` (same as `game:GetService("RunService")`).
 local DataModelClass = {}
 
----The service with this class name, such as `"Players"` or `"UserInputService"`.
+---The service with this class name, such as `"Players"`, `"RunService"` or `"UserInputService"`.
 ---@param className string
 ---@return Instance
 function DataModelClass:GetService(className) end
@@ -277,7 +290,7 @@ script = nil
 Enum = nil
 
 ---Runs a ModuleScript (a `.module.lua` file, such as `require(game.ReplicatedStorage.Utils)`) the first time, and returns what it returned. Later calls on the same side return the same value.
----@param module ModuleScript
+---@param module Instance
 ---@return any
 function require(module) end
 

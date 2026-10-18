@@ -69,6 +69,12 @@ impl Session {
         &self.world
     }
 
+    /// The game's world, for the Properties panel's edits during Play. The
+    /// game's scripts see those changes at the next frame.
+    pub fn world_mut(&mut self) -> &mut World {
+        &mut self.world
+    }
+
     /// Makes the next frame panic, as an engine bug would.
     pub fn panic_next_frame(&mut self) {
         self.panic_next_frame = true;
@@ -101,9 +107,11 @@ impl Session {
             self.forward_output(output);
             // 3. Step physics at a fixed 60 Hz (0 to N steps this frame).
             self.physics.step(&mut self.world, seconds);
-            // 4. Fire `Touched` for parts that started touching.
+            // 4. Fire `Touched` for parts that started touching (and
+            //    `Changed` for parts that moved), then `RunService.Heartbeat`.
             let touches = self.physics.take_touches();
             self.scripts.fire_touched(&mut self.world, &touches);
+            self.scripts.heartbeat(&mut self.world, seconds);
             self.forward_output(output);
             moved = self.scripts.take_camera_move();
         })?;

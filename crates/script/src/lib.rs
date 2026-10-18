@@ -13,13 +13,16 @@
 //! - The engine API (`game`, `workspace`, `Instance`, `Vector3`, ...) lives in
 //!   `api`, `instance` and `types`. Events (`part.Touched:Connect`) live in
 //!   `events`, and the host fires them with methods such as
-//!   [`ScriptRuntime::fire_touched`]. Client-only APIs (keyboard, camera)
-//!   live in `client`, and `sides` says which APIs work on which side.
+//!   [`ScriptRuntime::fire_touched`] and [`ScriptRuntime::heartbeat`]
+//!   (`run_service`). Change events (`part.Changed`) come from the World's
+//!   change log (`changes`). Client-only APIs (keyboard, camera) live in
+//!   `client`, and `sides` says which APIs work on which side.
 //! - [`lua_definitions`] describes that API for editors (see `definitions`).
 //! - `print` output and errors are collected as [`OutputLine`]s for the host to
 //!   show: the player's console, or the editor's Output panel during Play.
 
 mod api;
+mod changes;
 mod client;
 mod context;
 mod definitions;
@@ -28,6 +31,7 @@ mod events;
 mod instance;
 mod modules;
 mod remote;
+mod run_service;
 mod sandbox;
 mod scheduler;
 mod sides;
@@ -62,6 +66,12 @@ pub struct OutputLine {
     pub text: String,
 }
 
+/// How many rounds of change events [`ScriptRuntime::fire_changes`] runs in
+/// one call. Handlers that change things fire more change events (the next
+/// round); a handler that keeps changing what it listens to would never
+/// stop, so after this many rounds the rest wait for the next call.
+const MAX_CHANGE_ROUNDS: usize = 10;
+
 /// The output lines waiting for the host. A named type, so that this is the
 /// only `Vec<OutputLine>` stored in Lua's app data.
 #[derive(Default)]
@@ -77,6 +87,9 @@ pub struct ScriptRuntime {
     transport: Box<dyn Transport>,
     /// Output from both sides, in the order it happened.
     output: Vec<OutputLine>,
+    /// Whether the error for change events that never stop has been shown,
+    /// so it's shown once rather than every frame.
+    reported_change_loop: bool,
 }
 
 impl ScriptRuntime {
@@ -95,6 +108,7 @@ impl ScriptRuntime {
             client: Context::new(Side::Client),
             transport,
             output: Vec::new(),
+            reported_change_loop: false,
         }
     }
 
@@ -134,11 +148,13 @@ impl ScriptRuntime {
             return;
         }
         let side = class.and_then(Side::of_class).unwrap_or(Side::Server);
+        self.fire_changes(world);
         if side == Side::Client {
             self.join(world);
         }
         self.context(side).start_script(world, script, path, source);
         self.collect(side);
+        self.fire_changes(world);
     }
 
     /// The player on this device joins the game, once: a Player Instance
@@ -165,12 +181,15 @@ impl ScriptRuntime {
     /// Frame-order step 1: the keys pressed and released since the last
     /// frame, in order. LocalScripts see them through `UserInputService`.
     pub fn input(&mut self, world: &mut World, keys: &[KeyEvent]) {
+        // Changes made since the last frame, such as by the editor.
+        self.fire_changes(world);
         if keys.is_empty() {
             return;
         }
         self.join(world);
         self.client.fire_input(world, keys);
         self.collect(Side::Client);
+        self.fire_changes(world);
     }
 
     /// Frame-order step 2, first on the server, then on the client: fires
@@ -181,12 +200,14 @@ impl ScriptRuntime {
     /// So a message sent before this step (during step 1, or by the server
     /// during this step) arrives in this step; anything later, next frame.
     pub fn step(&mut self, world: &mut World, seconds: f64) {
+        self.fire_changes(world);
         // A game with no LocalScripts still has its player.
         self.join(world);
         for side in [Side::Server, Side::Client] {
             let messages = self.transport.receive(side);
             self.context(side).step(world, messages, seconds);
             self.collect(side);
+            self.fire_changes(world);
         }
     }
 
@@ -195,10 +216,60 @@ impl ScriptRuntime {
     /// LocalScripts. Each handler gets the other part and runs as its own
     /// coroutine, so one that waits doesn't hold up the rest. Pairs with a
     /// part that a handler destroyed are skipped.
+    ///
+    /// Changes physics made (parts moving) fire their change events first.
     pub fn fire_touched(&mut self, world: &mut World, touches: &[(InstanceId, InstanceId)]) {
+        self.fire_changes(world);
         for side in [Side::Server, Side::Client] {
             self.context(side).fire_touched(world, touches);
             self.collect(side);
+            self.fire_changes(world);
+        }
+    }
+
+    /// The end of frame step 4, after `Touched`: fires `RunService.Heartbeat`
+    /// with the frame's length in seconds, in Scripts and then in LocalScripts.
+    pub fn heartbeat(&mut self, world: &mut World, seconds: f64) {
+        self.fire_changes(world);
+        for side in [Side::Server, Side::Client] {
+            self.context(side).fire_heartbeat(world, seconds);
+            self.collect(side);
+            self.fire_changes(world);
+        }
+    }
+
+    /// Fires `Changed`, `GetPropertyChangedSignal`, `ChildAdded` and
+    /// `ChildRemoved` for everything that changed in `world` since the last
+    /// call, in the order it happened, in Scripts and then in LocalScripts.
+    ///
+    /// Every other method here calls this before and after running scripts,
+    /// so the host never has to. Changes made while handlers run fire too,
+    /// up to [`MAX_CHANGE_ROUNDS`] rounds; the rest wait for the next call.
+    /// Only changes made after the first call are seen: it turns on the
+    /// World's change log.
+    pub fn fire_changes(&mut self, world: &mut World) {
+        world.record_changes();
+        for _ in 0..MAX_CHANGE_ROUNDS {
+            let changes = world.take_changes();
+            if changes.is_empty() {
+                return;
+            }
+            for side in [Side::Server, Side::Client] {
+                self.context(side).fire_changes(world, &changes);
+                self.collect(side);
+            }
+        }
+        if world.has_changes() && !self.reported_change_loop {
+            self.reported_change_loop = true;
+            self.output.push(OutputLine {
+                kind: OutputKind::Error,
+                text: format!(
+                    "Changed, ChildAdded or ChildRemoved handlers kept changing things \
+                     that fire more of them ({MAX_CHANGE_ROUNDS} rounds in a row), so the \
+                     rest will fire next frame. Look for a handler that changes the \
+                     property it listens to."
+                ),
+            });
         }
     }
 
@@ -274,6 +345,9 @@ mod tests;
 
 #[cfg(test)]
 mod client_server_tests;
+
+#[cfg(test)]
+mod events_tests;
 
 #[cfg(test)]
 mod sandbox_tests;

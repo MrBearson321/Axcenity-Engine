@@ -1,0 +1,47 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Anchored": true,
+          "Position": [0, -0.5, 0],
+          "Size": [40, 1, 40],
+          "Color": [0.35, 0.37, 0.4]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Spinner",
+        "properties": {
+          "Anchored": true,
+          "Position": [6, 2, 0],
+          "Size": [6, 0.5, 1],
+          "Color": [0.2, 0.6, 0.95]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Lamp",
+        "properties": {
+          "Anchored": true,
+          "Position": [0, 1, -6],
+          "Size": [2, 2, 2],
+          "Color": [0.8, 0.8, 0.82]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Ball",
+        "properties": {
+          "Shape": "Ball",
+          "Position": [0, 10, 0],
+          "Size": [2, 2, 2],
+          "Color": [0.9, 0.2, 0.2]
+        }
+      }
+    ]
+  }
+}

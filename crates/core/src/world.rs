@@ -88,6 +88,47 @@ pub enum PropertyError {
     },
 }
 
+/// Something that changed in the tree. Scripts hear about these through
+/// `Changed`, `GetPropertyChangedSignal`, `ChildAdded` and `ChildRemoved`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Change {
+    /// A property of `instance` got a different value. `Name` and `Parent`
+    /// count as properties here.
+    Property {
+        instance: InstanceId,
+        name: &'static str,
+    },
+    /// `child` was put inside `parent`.
+    ChildAdded {
+        parent: InstanceId,
+        child: InstanceId,
+    },
+    /// `child` was taken out of `parent`.
+    ChildRemoved {
+        parent: InstanceId,
+        child: InstanceId,
+    },
+}
+
+/// A [`Change`] with its number. Changes are numbered 0, 1, 2, ... in the
+/// order they happened, so a script that starts listening after change 5
+/// can skip changes 0 to 5.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RecordedChange {
+    pub number: u64,
+    pub change: Change,
+}
+
+/// The changes since the last [`World::take_changes`]. Off until
+/// [`World::record_changes`], so a world that no script runs in (the one
+/// the editor edits) doesn't collect changes nobody reads.
+#[derive(Clone, Default)]
+struct ChangeLog {
+    recording: bool,
+    next_number: u64,
+    changes: Vec<RecordedChange>,
+}
+
 /// `clone()` makes a deep copy: a whole separate tree, with every Instance at
 /// the same `InstanceId` as in the original. Play mode runs on such a copy, so
 /// IDs (the selection, open Explorer branches) mean the same thing in both.
@@ -100,6 +141,7 @@ pub struct World {
     replicated_storage: InstanceId,
     server_script_service: InstanceId,
     starter_player_scripts: InstanceId,
+    changes: ChangeLog,
 }
 
 impl World {
@@ -142,6 +184,41 @@ impl World {
             replicated_storage,
             server_script_service,
             starter_player_scripts,
+            changes: ChangeLog::default(),
+        }
+    }
+
+    /// Starts keeping a list of every [`Change`] from now on, for
+    /// [`take_changes`](Self::take_changes). Calling it again does nothing.
+    pub fn record_changes(&mut self) {
+        self.changes.recording = true;
+    }
+
+    /// The number the next change will get. Something that starts listening
+    /// now should only hear about changes numbered this or higher.
+    pub fn next_change_number(&self) -> u64 {
+        self.changes.next_number
+    }
+
+    /// True if changes were recorded since the last [`take_changes`](Self::take_changes).
+    pub fn has_changes(&self) -> bool {
+        !self.changes.changes.is_empty()
+    }
+
+    /// Removes and returns the changes recorded since the last call, oldest first.
+    pub fn take_changes(&mut self) -> Vec<RecordedChange> {
+        std::mem::take(&mut self.changes.changes)
+    }
+
+    /// Notes `change`, if changes are being recorded.
+    fn changed(&mut self, change: Change) {
+        let log = &mut self.changes;
+        if log.recording {
+            log.changes.push(RecordedChange {
+                number: log.next_number,
+                change,
+            });
+            log.next_number += 1;
         }
     }
 
@@ -271,8 +348,22 @@ impl World {
             let index = index.min(parent.children.len());
             parent.children.insert(index, id);
         }
-        self.instances.get_mut(id.0).expect("checked above").parent =
-            new_parent.map(|(parent, _)| parent);
+        let new_parent = new_parent.map(|(parent, _)| parent);
+        self.instances.get_mut(id.0).expect("checked above").parent = new_parent;
+
+        // Moving among the same parent's children isn't a change of Parent.
+        if old_parent != new_parent {
+            if let Some(parent) = old_parent {
+                self.changed(Change::ChildRemoved { parent, child: id });
+            }
+            if let Some(parent) = new_parent {
+                self.changed(Change::ChildAdded { parent, child: id });
+            }
+            self.changed(Change::Property {
+                instance: id,
+                name: "Parent",
+            });
+        }
         Ok(())
     }
 
@@ -324,11 +415,19 @@ impl World {
 
     pub fn set_name(&mut self, id: InstanceId, name: impl Into<String>) -> Result<(), TreeError> {
         let instance = self.instances.get_mut(id.0).ok_or(TreeError::Stale)?;
-        instance.name = name.into();
+        let name = name.into();
+        if instance.name != name {
+            instance.name = name;
+            self.changed(Change::Property {
+                instance: id,
+                name: "Name",
+            });
+        }
         Ok(())
     }
 
     /// Sets an existing property. The new value must have the same type as the old one.
+    /// Setting the value it already has isn't a [`Change`].
     ///
     /// Setting `Material` also resets `Metalness` and `Roughness` to the
     /// material's preset, so set those afterwards to adjust them.
@@ -360,6 +459,11 @@ impl World {
                 actual: value.kind(),
             });
         }
+        // The properties that really change, for the change log.
+        let mut changed = Vec::new();
+        if *slot != value {
+            changed.push(key);
+        }
         // Read before `value` moves into the slot below.
         let material = value.as_material();
         *slot = value;
@@ -370,10 +474,16 @@ impl World {
                 ("Metalness", preset.metalness),
                 ("Roughness", preset.roughness),
             ] {
-                if let Some(slot) = instance.properties.get_mut(name) {
+                if let Some(slot) = instance.properties.get_mut(name)
+                    && *slot != Value::Number(number)
+                {
                     *slot = Value::Number(number);
+                    changed.push(name);
                 }
             }
+        }
+        for name in changed {
+            self.changed(Change::Property { instance: id, name });
         }
         Ok(())
     }
@@ -780,6 +890,122 @@ mod tests {
         assert_eq!(
             instance.property("Roughness"),
             Some(&Value::Number(preset.roughness))
+        );
+    }
+
+    fn changes(world: &mut World) -> Vec<Change> {
+        world
+            .take_changes()
+            .into_iter()
+            .map(|recorded| recorded.change)
+            .collect()
+    }
+
+    #[test]
+    fn changes_are_only_recorded_once_asked() {
+        let mut world = World::new();
+        let workspace = world.workspace();
+        part_in(&mut world, workspace, "Before");
+        assert!(world.take_changes().is_empty());
+
+        world.record_changes();
+        let part = part_in(&mut world, workspace, "After");
+        let property = |name| Change::Property {
+            instance: part,
+            name,
+        };
+        assert_eq!(
+            changes(&mut world),
+            [
+                property("Name"),
+                Change::ChildAdded {
+                    parent: workspace,
+                    child: part
+                },
+                property("Parent"),
+            ]
+        );
+        // Taken, so the list starts again.
+        assert!(world.take_changes().is_empty());
+    }
+
+    #[test]
+    fn only_real_changes_are_recorded_and_numbered_in_order() {
+        let mut world = World::new();
+        let workspace = world.workspace();
+        let part = part_in(&mut world, workspace, "Pad");
+        world.record_changes();
+        let first = world.next_change_number();
+
+        // The values it already has: no change.
+        world.set_name(part, "Pad").unwrap();
+        world
+            .set_property(part, "Anchored", Value::Bool(false))
+            .unwrap();
+        world.set_parent(part, Some(workspace)).unwrap();
+        assert!(world.take_changes().is_empty());
+        assert_eq!(world.next_change_number(), first);
+
+        world
+            .set_property(part, "Anchored", Value::Bool(true))
+            .unwrap();
+        // Metal's preset differs in both, so all three change.
+        world
+            .set_property(part, "Material", Value::Material(Material::Metal))
+            .unwrap();
+        let recorded = world.take_changes();
+        let names: Vec<_> = recorded
+            .iter()
+            .map(|recorded| match recorded.change {
+                Change::Property { name, .. } => name,
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(names, ["Anchored", "Material", "Metalness", "Roughness"]);
+        let numbers: Vec<u64> = recorded.iter().map(|recorded| recorded.number).collect();
+        assert_eq!(numbers, [first, first + 1, first + 2, first + 3]);
+        assert_eq!(world.next_change_number(), first + 4);
+    }
+
+    #[test]
+    fn moving_records_removed_added_and_parent_but_reordering_does_not() {
+        let mut world = World::new();
+        let workspace = world.workspace();
+        let folder = world.create(ClassName::Folder).unwrap();
+        world.set_parent(folder, Some(workspace)).unwrap();
+        let part = part_in(&mut world, workspace, "Pad");
+        world.record_changes();
+
+        world.set_parent_at(part, workspace, 0).unwrap();
+        assert!(world.take_changes().is_empty());
+
+        world.set_parent(part, Some(folder)).unwrap();
+        world.destroy(part).unwrap();
+        assert_eq!(
+            changes(&mut world),
+            [
+                Change::ChildRemoved {
+                    parent: workspace,
+                    child: part
+                },
+                Change::ChildAdded {
+                    parent: folder,
+                    child: part
+                },
+                Change::Property {
+                    instance: part,
+                    name: "Parent"
+                },
+                // Destroying takes it out of its parent first.
+                Change::ChildRemoved {
+                    parent: folder,
+                    child: part
+                },
+                Change::Property {
+                    instance: part,
+                    name: "Parent"
+                },
+            ]
         );
     }
 }

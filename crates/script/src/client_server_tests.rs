@@ -485,7 +485,8 @@ fn get_service_finds_services_and_lists_them_for_a_wrong_name() {
     assert!(
         output[1].ends_with(
             "there is no service named \"Lighting\"; choose from Workspace, Players, \
-             ReplicatedStorage, ServerScriptService, StarterPlayer, UserInputService"
+             ReplicatedStorage, ServerScriptService, StarterPlayer, RunService, \
+             UserInputService"
         ),
         "{}",
         output[1]

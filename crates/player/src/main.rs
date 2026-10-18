@@ -6,6 +6,8 @@
 //! physics, fire `Touched` for parts that started touching, then draw the
 //! Workspace, with a fly camera for looking around.
 
+mod icon;
+
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -270,7 +272,8 @@ impl ApplicationHandler for App {
 
         let attributes = Window::default_attributes()
             .with_title(&self.title)
-            .with_inner_size(DEFAULT_WINDOW_SIZE);
+            .with_inner_size(DEFAULT_WINDOW_SIZE)
+            .with_window_icon(icon::window_icon());
         let window = match event_loop.create_window(attributes) {
             Ok(window) => Arc::new(window),
             Err(err) => return self.fail(event_loop, err.into()),
@@ -354,9 +357,12 @@ impl ApplicationHandler for App {
                 self.physics.step(&mut self.world, f64::from(seconds));
 
                 // 4. Fire `Touched` for parts that started touching during
-                //    those steps. Handlers that wait carry on in step 2.
+                //    those steps (and `Changed` for the parts that moved),
+                //    then `RunService.Heartbeat`. Handlers that wait carry
+                //    on in step 2.
                 let touches = self.physics.take_touches();
                 self.scripts.fire_touched(&mut self.world, &touches);
+                self.scripts.heartbeat(&mut self.world, f64::from(seconds));
                 print_output(&mut self.scripts);
 
                 // 5 (UI layout) comes in a later phase.
@@ -547,8 +553,8 @@ mod tests {
     }
 
     /// Runs frames at 60 fps until the game clock reaches `until` seconds,
-    /// with scripts, physics and then `Touched` each frame, as the frame loop
-    /// does.
+    /// with scripts, physics, then `Touched` and `Heartbeat` each frame, as
+    /// the frame loop does.
     fn run_until(
         world: &mut World,
         scripts: &mut ScriptRuntime,
@@ -561,8 +567,46 @@ mod tests {
             physics.step(world, 1.0 / 60.0);
             let touches = physics.take_touches();
             scripts.fire_touched(world, &touches);
+            scripts.heartbeat(world, 1.0 / 60.0);
             *clock += 1;
         }
+    }
+
+    #[test]
+    fn hello_events_reacts_to_physics_heartbeat_new_children_and_script_changes() {
+        let (mut world, mut scripts) = start_example("hello-events");
+        let mut physics = Physics::new();
+        let mut clock = 0;
+        run_until(&mut world, &mut scripts, &mut physics, &mut clock, 4.0);
+
+        let output: Vec<String> = scripts
+            .take_output()
+            .into_iter()
+            .map(|line| match line.kind {
+                OutputKind::Print => line.text,
+                OutputKind::Error => format!("error: {}", line.text),
+            })
+            .collect();
+        // Physics moved the ball, which fired its Position signal.
+        assert_eq!(
+            output,
+            [
+                "the ball reached the floor",
+                "Crate was added to the Workspace",
+                "Lamp's Color changed",
+            ]
+        );
+        // Heartbeat turned the spinner 90 degrees a second, every frame.
+        let spinner = world
+            .find_first_child(world.workspace(), "Spinner")
+            .unwrap();
+        let orientation = world
+            .get(spinner)
+            .unwrap()
+            .property("Orientation")
+            .and_then(Value::as_vector3)
+            .unwrap();
+        assert!((orientation.y - 360.0).abs() < 0.01, "{orientation:?}");
     }
 
     fn position_of(world: &World, name: &str) -> Vector3 {
