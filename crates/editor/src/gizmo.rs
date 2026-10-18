@@ -108,7 +108,8 @@ impl Snap {
     pub const MIN_MOVE_STEP: f32 = MIN_SIZE;
     pub const MIN_ROTATE_STEP: f32 = 0.1;
 
-    fn studs(&self, distance: f32) -> f32 {
+    /// `distance` rounded to the move step, if move snapping is on.
+    pub fn studs(&self, distance: f32) -> f32 {
         snap(distance, self.move_on, self.move_step)
     }
 

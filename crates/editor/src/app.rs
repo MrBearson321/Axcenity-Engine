@@ -4,14 +4,15 @@
 
 use std::path::{Path, PathBuf};
 
-use axcenity_core::{InstanceId, World};
+use axcenity_core::{InstanceId, Vector3, World};
 use eframe::egui;
 
-use crate::explorer::Explorer;
+use crate::explorer::{Action, Explorer, ExplorerOutput};
 use crate::gizmo::{Snap, Tool};
-use crate::history::{self, Field, History};
+use crate::history::{self, Field, History, Move, Place};
 use crate::output::Output;
 use crate::properties::{self, Edit};
+use crate::tree::{self, Insertable};
 use crate::viewport::{DragEdit, DragKind, Viewport};
 
 /// Ctrl+S, or Cmd+S on macOS (`COMMAND` picks the right one).
@@ -26,6 +27,18 @@ const REDO_SHIFT_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
     egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
     egui::Key::Z,
 );
+/// Ctrl+D (Cmd+D on macOS) duplicates the selection, as in Studio.
+pub const DUPLICATE_SHORTCUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::D);
+/// F2 renames the selection in the Explorer, as in Studio and most file managers.
+pub const RENAME_KEY: egui::Key = egui::Key::F2;
+/// The Delete key deletes the selection. On macOS, the key labelled
+/// "delete" is Backspace, so that works there too.
+pub const DELETE_KEY_TEXT: &str = if cfg!(target_os = "macos") {
+    "⌫"
+} else {
+    "Del"
+};
 
 pub struct EditorApp {
     /// The open project's Instances, or an empty world when none is open.
@@ -66,6 +79,17 @@ enum Answer {
     Save,
     DontSave,
     Cancel,
+}
+
+/// The shortcut keys pressed this frame.
+#[derive(Default)]
+struct Keys {
+    undo: bool,
+    redo: bool,
+    tool: Option<Tool>,
+    rename: bool,
+    duplicate: bool,
+    delete: bool,
 }
 
 /// What the editor remembers about the open project.
@@ -242,7 +266,8 @@ impl EditorApp {
             }
         }
         let after = history::snapshot(&self.world, id);
-        self.history.record(id, key, label, before, after);
+        self.history
+            .record(&mut self.world, id, key, label, before, after);
     }
 
     /// Makes one edit to the world, without recording it.
@@ -271,13 +296,164 @@ impl EditorApp {
     fn undo(&mut self) {
         if !self.viewport.is_dragging() {
             self.history.undo(&mut self.world);
+            self.forget_selection_outside_tree();
         }
     }
 
     fn redo(&mut self) {
         if !self.viewport.is_dragging() {
             self.history.redo(&mut self.world);
+            self.forget_selection_outside_tree();
         }
+    }
+
+    /// Clears the selection if it was taken out of the tree (deleted, or an
+    /// insert undone), so nothing edits an Instance that isn't in the world.
+    fn forget_selection_outside_tree(&mut self) {
+        if let Some(id) = self.selected
+            && !self.world.is_descendant_of(id, self.world.root())
+        {
+            self.selected = None;
+        }
+    }
+
+    /// Does something to the tree from the Explorer, the toolbar or a
+    /// shortcut. Ignored while a part is being dragged in the viewport.
+    fn act(&mut self, action: Action) {
+        if self.viewport.is_dragging() {
+            return;
+        }
+        match action {
+            Action::Insert { what, near } => self.insert(what, near),
+            Action::Rename(id, name) => {
+                self.apply(id, Edit::Name(name));
+                // Typing in the Explorer is done, so this is one whole step.
+                self.history.seal();
+            }
+            Action::Duplicate(id) => self.duplicate(id),
+            Action::Delete(id) => self.delete(id),
+            Action::MoveInto { id, parent } => {
+                self.move_into(id, parent);
+            }
+        }
+    }
+
+    /// Where a new part goes: the camera's focus point, on the move grid
+    /// when snapping is on, so new parts line up.
+    fn insert_position(&self) -> Vector3 {
+        let focus = self.viewport.focus();
+        // Rounded to 3 decimals so the numbers stay tidy; `+ 0.0` turns -0 into 0.
+        let tidy = |value: f32| (self.snap.studs(value) * 1000.0).round() / 1000.0 + 0.0;
+        Vector3::new(tidy(focus.x), tidy(focus.y), tidy(focus.z))
+    }
+
+    /// Inserts `what` into `near` if that's a Model or Folder, otherwise
+    /// into the Workspace, with a name no sibling has, and selects it. A
+    /// part goes at the camera's focus point.
+    fn insert(&mut self, what: Insertable, near: Option<InstanceId>) {
+        let parent = tree::insert_parent(&self.world, near);
+        // Worked out first: `create` borrows the world mutably, and
+        // `insert_position` needs to borrow `self` while that lasts.
+        let position = self.insert_position();
+        let id = tree::create(&mut self.world, what, position);
+        let name = tree::unique_name(&self.world, parent, what.class().as_str());
+        self.world.set_name(id, &name).expect("just created");
+        let end = self.world.get(parent).map_or(0, |p| p.children().len());
+        let place = Place { parent, index: end };
+        if self.place(id, Some(place), format!("Insert {name}")) {
+            self.select_from_viewport(Some(id));
+        }
+    }
+
+    /// Takes `id` and everything inside it out of the world, as one undo step.
+    fn delete(&mut self, id: InstanceId) {
+        let Some(name) = self.editable_name(id, "delete") else {
+            return;
+        };
+        if self.place(id, None, format!("Delete {name}")) {
+            self.forget_selection_outside_tree();
+        }
+    }
+
+    /// Copies `id` and everything inside it, puts the copy right after it
+    /// with a name no sibling has, and selects the copy.
+    fn duplicate(&mut self, id: InstanceId) {
+        let Some(name) = self.editable_name(id, "duplicate") else {
+            return;
+        };
+        let Some(original) = history::place_of(&self.world, id) else {
+            return;
+        };
+        let copy = self.world.duplicate(id).expect("checked it can be edited");
+        let copy_name = tree::unique_name(&self.world, original.parent, &name);
+        self.world.set_name(copy, copy_name).expect("just made");
+        let after = Place {
+            parent: original.parent,
+            index: original.index + 1,
+        };
+        if self.place(copy, Some(after), format!("Duplicate {name}")) {
+            self.select_from_viewport(Some(copy));
+        }
+    }
+
+    /// Moves `id` into `parent` as its last child, as one undo step. Moves
+    /// into itself, into something inside it, or out of the Workspace are
+    /// rejected with the reason in Output. Returns true if it moved.
+    fn move_into(&mut self, id: InstanceId, parent: InstanceId) -> bool {
+        let (Some(instance), Some(target)) = (self.world.get(id), self.world.get(parent)) else {
+            return false;
+        };
+        let (name, target_name) = (instance.name().to_string(), target.name().to_string());
+        if let Err(reason) = tree::check_move(&self.world, id, parent) {
+            self.output
+                .error(format!("Can't move {name} into {target_name}: {reason}"));
+            return false;
+        }
+        if instance.parent() == Some(parent) {
+            return false;
+        }
+        let place = Place {
+            parent,
+            index: target.children().len(),
+        };
+        let label = format!("Move {name} into {target_name}");
+        let moved = self.place(id, Some(place), label);
+        if moved {
+            // Opens the new parent, so the moved row stays in view.
+            self.explorer.reveal(&self.world, id);
+        }
+        moved
+    }
+
+    /// `id`'s name, if it can be deleted, duplicated or moved. Otherwise
+    /// says why not in Output (`doing` is "delete", say) and returns `None`.
+    fn editable_name(&mut self, id: InstanceId, doing: &str) -> Option<String> {
+        let name = self.world.get(id)?.name().to_string();
+        match tree::check_editable(&self.world, id) {
+            Ok(()) => Some(name),
+            Err(reason) => {
+                self.output.error(format!("Can't {doing} {name}: {reason}"));
+                None
+            }
+        }
+    }
+
+    /// Puts `id` at `place` in the tree (`None` takes it out), and records
+    /// that as an undo step named `label`. Returns false, with the reason in
+    /// Output, if the tree said no.
+    fn place(&mut self, id: InstanceId, place: Option<Place>, label: String) -> bool {
+        let before = history::place_of(&self.world, id);
+        if let Err(err) = history::put(&mut self.world, id, place) {
+            self.output.error(format!("Could not do that: {err}"));
+            return false;
+        }
+        let moves = vec![Move {
+            id,
+            before,
+            after: place,
+        }];
+        self.history.record_tree(&mut self.world, label, moves);
+        true
     }
 
     /// Asks to `discard` the open world. Returns it when it can go ahead now,
@@ -411,6 +587,35 @@ impl EditorApp {
                 {
                     self.redo();
                 }
+                ui.separator();
+
+                // These act on the selection, the same as its right-click menu in the Explorer.
+                let selected = self.selected;
+                let renamable = selected
+                    .and_then(|id| self.world.get(id))
+                    .is_some_and(properties::can_rename);
+                let editable = selected
+                    .is_some_and(|id| tree::check_editable(&self.world, id).is_ok())
+                    && !dragging;
+                let rename = egui::Button::new("Rename").shortcut_text(RENAME_KEY.name());
+                if ui.add_enabled(renamable, rename).clicked()
+                    && let Some(id) = selected
+                {
+                    self.explorer.start_rename(&self.world, id);
+                }
+                let duplicate = egui::Button::new("Duplicate")
+                    .shortcut_text(ui.ctx().format_shortcut(&DUPLICATE_SHORTCUT));
+                if ui.add_enabled(editable, duplicate).clicked()
+                    && let Some(id) = selected
+                {
+                    self.act(Action::Duplicate(id));
+                }
+                let delete = egui::Button::new("Delete").shortcut_text(DELETE_KEY_TEXT);
+                if ui.add_enabled(editable, delete).clicked()
+                    && let Some(id) = selected
+                {
+                    self.act(Action::Delete(id));
+                }
             });
             if self.unsaved() {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -420,8 +625,10 @@ impl EditorApp {
         });
     }
 
-    /// The row under the menu bar: the tools, then the snapping settings.
+    /// The row under the menu bar: the tools, the snapping settings, then
+    /// buttons that insert each primitive.
     fn toolbar(&mut self, ui: &mut egui::Ui) {
+        let mut insert = None;
         ui.horizontal(|ui| {
             for tool in Tool::ALL {
                 let shortcut = ui.ctx().format_shortcut(&tool.shortcut());
@@ -457,33 +664,79 @@ impl EditorApp {
                     .max_decimals(2)
                     .suffix("°"),
             );
+            ui.separator();
+
+            ui.label("Insert:");
+            for what in Insertable::PARTS {
+                let hover = format!(
+                    "Insert a {} part at the camera's focus point, inside the selected \
+                     Model or Folder if there is one.",
+                    what.label().to_lowercase()
+                );
+                if ui.button(what.label()).on_hover_text(hover).clicked() {
+                    insert = Some(what);
+                }
+            }
         });
+        if let Some(what) = insert {
+            let near = self.selected;
+            self.act(Action::Insert { what, near });
+        }
     }
 
-    /// The keyboard shortcuts for undo, redo and the tools.
+    /// The keyboard shortcuts for undo, redo, the tools, and renaming,
+    /// duplicating and deleting the selection.
     fn shortcuts(&mut self, ctx: &egui::Context) {
-        // A text box being typed in has its own undo for the text, so leave
-        // Ctrl+Z to it then.
+        // A text box being typed in has its own undo, and uses Delete and
+        // Backspace itself, so leave those keys to it then.
         let typing = ctx.wants_keyboard_input();
-        let (undo, redo, tool) = ctx.input_mut(|input| {
+        let keys = ctx.input_mut(|input| {
+            if typing {
+                let tool = Tool::ALL
+                    .into_iter()
+                    .find(|tool| input.consume_shortcut(&tool.shortcut()));
+                return Keys {
+                    tool,
+                    ..Keys::default()
+                };
+            }
             // Redo first: egui counts Ctrl+Shift+Z as Ctrl+Z too.
-            let redo = !typing
-                && (input.consume_shortcut(&REDO_SHIFT_SHORTCUT)
-                    || input.consume_shortcut(&REDO_SHORTCUT));
-            let undo = !typing && input.consume_shortcut(&UNDO_SHORTCUT);
-            let tool = Tool::ALL
-                .into_iter()
-                .find(|tool| input.consume_shortcut(&tool.shortcut()));
-            (undo, redo, tool)
+            let redo = input.consume_shortcut(&REDO_SHIFT_SHORTCUT)
+                || input.consume_shortcut(&REDO_SHORTCUT);
+            let none = egui::Modifiers::NONE;
+            Keys {
+                redo,
+                undo: input.consume_shortcut(&UNDO_SHORTCUT),
+                tool: Tool::ALL
+                    .into_iter()
+                    .find(|tool| input.consume_shortcut(&tool.shortcut())),
+                // Taken before the viewport sees them, so Ctrl+D doesn't
+                // also fly the camera right.
+                duplicate: input.consume_shortcut(&DUPLICATE_SHORTCUT),
+                rename: input.consume_key(none, RENAME_KEY),
+                delete: input.consume_key(none, egui::Key::Delete)
+                    || (cfg!(target_os = "macos") && input.consume_key(none, egui::Key::Backspace)),
+            }
         });
-        if redo {
+        if keys.redo {
             self.redo();
         }
-        if undo {
+        if keys.undo {
             self.undo();
         }
-        if let Some(tool) = tool {
+        if let Some(tool) = keys.tool {
             self.tool = tool;
+        }
+        if let Some(id) = self.selected {
+            if keys.rename {
+                self.explorer.start_rename(&self.world, id);
+            }
+            if keys.duplicate {
+                self.act(Action::Duplicate(id));
+            }
+            if keys.delete {
+                self.act(Action::Delete(id));
+            }
         }
     }
 }
@@ -518,6 +771,7 @@ impl eframe::App for EditorApp {
         egui::TopBottomPanel::top("menu bar").show(ctx, |ui| self.menu_bar(ui));
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| self.toolbar(ui));
         let mut edit = None;
+        let mut explorer = ExplorerOutput::default();
         egui::SidePanel::right("explorer")
             .default_width(300.0)
             .show(ctx, |ui| {
@@ -527,13 +781,19 @@ impl eframe::App for EditorApp {
                     .show_inside(ui, |ui| {
                         edit = properties::show(ui, &self.world, self.selected);
                     });
-                if let Some(id) = self.explorer.show(ui, &self.world, self.selected) {
-                    self.selected = Some(id);
-                }
+                explorer = self.explorer.show(ui, &self.world, self.selected);
             });
         // Applied before the viewport draws, so it shows the change this frame.
         if let (Some(id), Some(edit)) = (self.selected, edit) {
             self.apply(id, edit);
+        }
+        if let Some(id) = explorer.clicked {
+            self.selected = Some(id);
+        }
+        if let Some(action) = explorer.action {
+            self.act(action);
+            // The Explorer was drawn before this change, so draw it again.
+            ctx.request_repaint();
         }
         egui::TopBottomPanel::bottom("output")
             .resizable(true)
@@ -582,7 +842,7 @@ impl eframe::App for EditorApp {
 
 #[cfg(test)]
 mod tests {
-    use axcenity_core::{ClassName, Color3, Material, Value, Vector3};
+    use axcenity_core::{ClassName, Color3, Material, PartType, Value, Vector3};
     use axcenity_render::glam::Vec3;
     use axcenity_scene::Ray;
 
@@ -1083,6 +1343,305 @@ mod tests {
         assert_eq!(app.history.undo_label(), None);
         assert!(!app.unsaved());
         assert_eq!(app.tool, Tool::Rotate, "the tool is a preference");
+    }
+
+    fn name(app: &EditorApp, id: InstanceId) -> &str {
+        app.world.get(id).unwrap().name()
+    }
+
+    fn children(app: &EditorApp, id: InstanceId) -> Vec<InstanceId> {
+        app.world.get(id).unwrap().children().to_vec()
+    }
+
+    /// How many parts the viewport would draw.
+    fn drawn_parts(app: &EditorApp) -> usize {
+        let camera = axcenity_render::Camera {
+            position: Vec3::new(0.0, 50.0, 50.0),
+            look_at: Vec3::ZERO,
+            fov_y_degrees: 70.0,
+        };
+        axcenity_scene::build_draw_list(&app.world, camera)
+            .items
+            .len()
+    }
+
+    /// The Instance just inserted or duplicated, which is selected.
+    fn inserted(app: &mut EditorApp, what: Insertable, near: Option<InstanceId>) -> InstanceId {
+        app.act(Action::Insert { what, near });
+        app.selected.expect("inserting selects the new Instance")
+    }
+
+    #[test]
+    fn each_primitive_is_inserted_at_the_camera_focus_point() {
+        let mut app = EditorApp::new(Some(&example("hello-touched")));
+        let workspace = app.world.workspace();
+        app.viewport
+            .look_at(Vec3::new(30.0, 20.0, 10.0), Vec3::new(5.25, 3.0, -7.5));
+        app.snap.move_on = false;
+        let mut shapes = Vec::new();
+        for what in Insertable::PARTS {
+            let part = inserted(&mut app, what, None);
+            assert_eq!(app.world.get(part).unwrap().parent(), Some(workspace));
+            assert_eq!(property(&app, part, "Position"), vector(5.25, 3.0, -7.5));
+            shapes.push(property(&app, part, "Shape"));
+            let label = format!("Insert {}", name(&app, part));
+            assert_eq!(app.history.undo_label(), Some(label.as_str()));
+        }
+        let shape = |shape| Value::PartType(shape);
+        assert_eq!(
+            shapes,
+            [
+                shape(PartType::Block),
+                shape(PartType::Ball),
+                shape(PartType::Cylinder),
+                shape(PartType::Wedge)
+            ]
+        );
+        // They're in the world, so the viewport draws them.
+        assert_eq!(drawn_parts(&app), 3 + 4);
+
+        // With Snap move on, the point goes to the move grid.
+        app.snap.move_on = true;
+        let part = inserted(&mut app, Insertable::Part(PartType::Block), None);
+        assert_eq!(property(&app, part, "Position"), vector(5.0, 3.0, -8.0));
+
+        // Each insert is one undo step, and undoing it clears the selection.
+        app.undo();
+        assert!(!app.world.is_descendant_of(part, workspace));
+        assert_eq!(app.selected, None);
+        app.redo();
+        assert_eq!(children(&app, workspace).last(), Some(&part));
+    }
+
+    #[test]
+    fn inserting_gives_a_unique_default_name_among_siblings() {
+        let mut app = EditorApp::new(Some(&example("hello-touched")));
+        let block = Insertable::Part(PartType::Block);
+        let names: Vec<String> = [block, block, Insertable::Model, Insertable::Folder]
+            .into_iter()
+            .chain([Insertable::Model, Insertable::Folder, block])
+            .map(|what| {
+                let id = inserted(&mut app, what, None);
+                name(&app, id).to_string()
+            })
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "Part", "Part2", "Model", "Folder", "Model2", "Folder2", "Part3"
+            ]
+        );
+
+        // Inside a Model, only its own children count.
+        let model = part(&app, "Model");
+        let inside = inserted(&mut app, block, Some(model));
+        assert_eq!(app.world.get(inside).unwrap().parent(), Some(model));
+        assert_eq!(name(&app, inside), "Part");
+        let inside2 = inserted(&mut app, block, Some(model));
+        assert_eq!(name(&app, inside2), "Part2");
+
+        // Duplicates follow the same rule, and go right after the original.
+        let pad = part(&app, "Pad");
+        app.act(Action::Duplicate(pad));
+        let copy = app.selected.unwrap();
+        assert_eq!(name(&app, copy), "Pad2");
+        let workspace = children(&app, app.world.workspace());
+        let at = workspace.iter().position(|&id| id == pad).unwrap();
+        assert_eq!(workspace[at + 1], copy);
+        assert_eq!(
+            property(&app, copy, "Position"),
+            property(&app, pad, "Position")
+        );
+        app.act(Action::Duplicate(copy));
+        assert_eq!(name(&app, app.selected.unwrap()), "Pad3");
+        assert_eq!(app.history.undo_label(), Some("Duplicate Pad2"));
+    }
+
+    /// Everything about `id` and the Instances inside it: IDs, classes, names,
+    /// parents, child order and every property value.
+    fn describe(world: &World, id: InstanceId) -> Vec<String> {
+        std::iter::once(id)
+            .chain(world.descendants(id))
+            .map(|id| {
+                let instance = world.get(id).unwrap();
+                format!(
+                    "{id:?} {} {:?} in {:?} {:?} {:?}",
+                    instance.class(),
+                    instance.name(),
+                    instance.parent(),
+                    instance.children(),
+                    instance.properties().collect::<Vec<_>>()
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn deleting_a_model_deletes_its_children_and_undo_restores_them_all() {
+        let folder = copy_of_example("hello-touched", "delete-model");
+        let mut app = EditorApp::new(Some(&folder));
+        let workspace = app.world.workspace();
+        let model = inserted(&mut app, Insertable::Model, None);
+        // A part in the model, a part inside that part, and edited properties.
+        let wheel = inserted(&mut app, Insertable::Part(PartType::Cylinder), Some(model));
+        app.apply(
+            wheel,
+            Edit::Property("Color", Value::Color3(Color3::new(0.1, 0.2, 0.3))),
+        );
+        app.apply(
+            wheel,
+            Edit::Property("Material", Value::Material(Material::Metal)),
+        );
+        app.apply(wheel, Edit::Property("Roughness", Value::Number(0.75)));
+        let hub = inserted(&mut app, Insertable::Folder, Some(model));
+        assert!(app.move_into(wheel, hub));
+        app.move_into(part(&app, "Pad"), model);
+        // Something after the model, so its place among its siblings matters.
+        inserted(&mut app, Insertable::Folder, None);
+        app.history.seal();
+        let before = describe(&app.world, model);
+        let siblings = children(&app, workspace);
+        let world_file = axcenity_project::write_world(&app.world);
+        let drawn_before = drawn_parts(&app);
+
+        app.selected = Some(wheel);
+        app.act(Action::Delete(model));
+        assert!(!children(&app, workspace).contains(&model));
+        for id in [model, wheel, hub] {
+            assert!(!app.world.is_descendant_of(id, workspace));
+        }
+        assert_eq!(app.selected, None, "the selection was inside it");
+        assert_eq!(
+            drawn_parts(&app),
+            drawn_before - 2,
+            "the wheel and the pad are gone"
+        );
+        assert_eq!(app.history.undo_label(), Some("Delete Model"));
+        // Saving now leaves them out of the file.
+        assert!(app.save());
+        assert!(!part_exists_on_disk(&folder, "Pad"));
+
+        app.undo();
+        assert_eq!(describe(&app.world, model), before);
+        assert_eq!(children(&app, workspace), siblings);
+        assert_eq!(axcenity_project::write_world(&app.world), world_file);
+        // Redo deletes them again, and undo brings them back again.
+        app.redo();
+        assert!(!app.world.is_descendant_of(wheel, workspace));
+        app.undo();
+        assert_eq!(describe(&app.world, model), before);
+        // The steps before the delete still work on the same Instances:
+        // undo "Insert Folder", "Move Pad into Model", then "Move Part into Folder".
+        app.undo();
+        app.undo();
+        assert_eq!(app.world.get(wheel).unwrap().parent(), Some(hub));
+        app.undo();
+        assert_eq!(app.world.get(wheel).unwrap().parent(), Some(model));
+        assert_eq!(property(&app, wheel, "Roughness"), Value::Number(0.75));
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn moving_into_another_parent_is_one_step_and_moves_into_itself_are_rejected() {
+        let mut app = EditorApp::new(Some(&example("hello-touched")));
+        let workspace = app.world.workspace();
+        let model = inserted(&mut app, Insertable::Model, None);
+        let pad = part(&app, "Pad");
+        app.act(Action::MoveInto {
+            id: pad,
+            parent: model,
+        });
+        assert_eq!(children(&app, model), [pad]);
+        assert_eq!(app.history.undo_label(), Some("Move Pad into Model"));
+
+        // Into its own child, into itself, out of the Workspace, or moving a
+        // service or a Script: nothing changes, and Output says why.
+        let steps = app.history.undo_label().map(str::to_string);
+        let world_file = axcenity_project::write_world(&app.world);
+        let script = app
+            .world
+            .find_first_child(app.world.server_script_service(), "pad")
+            .unwrap();
+        for (id, parent) in [
+            (model, pad),
+            (model, model),
+            (model, app.world.server_script_service()),
+            (workspace, model),
+            (script, model),
+        ] {
+            assert!(!app.move_into(id, parent));
+            assert_eq!(last_line(&app).kind, OutputKind::Error);
+            assert!(
+                last_line(&app).text.starts_with("Can't move"),
+                "{}",
+                last_line(&app).text
+            );
+        }
+        assert_eq!(axcenity_project::write_world(&app.world), world_file);
+        assert_eq!(app.history.undo_label().map(str::to_string), steps);
+
+        app.undo();
+        assert_eq!(app.world.get(pad).unwrap().parent(), Some(workspace));
+        assert!(children(&app, model).is_empty());
+    }
+
+    #[test]
+    fn services_and_scripts_cannot_be_deleted_or_duplicated() {
+        let mut app = EditorApp::new(Some(&example("hello-touched")));
+        let script = app
+            .world
+            .find_first_child(app.world.server_script_service(), "pad")
+            .unwrap();
+        let count = app.world.len();
+        for id in [app.world.workspace(), app.world.root(), script] {
+            app.act(Action::Delete(id));
+            app.act(Action::Duplicate(id));
+        }
+        assert_eq!(app.world.len(), count);
+        assert!(app.world.is_descendant_of(script, app.world.root()));
+        assert!(!app.unsaved());
+        assert!(last_line(&app).text.starts_with("Can't duplicate pad"));
+    }
+
+    #[test]
+    fn models_and_folders_save_and_reopen() {
+        let folder = copy_of_example("hello-touched", "save-groups");
+        let mut app = EditorApp::new(Some(&folder));
+        let props = inserted(&mut app, Insertable::Folder, None);
+        let car = inserted(&mut app, Insertable::Model, Some(props));
+        inserted(&mut app, Insertable::Part(PartType::Wedge), Some(car));
+        app.act(Action::Rename(car, "Car".to_string()));
+        assert_eq!(app.history.undo_label(), Some("Rename Model"));
+        assert!(app.save());
+        let saved = axcenity_project::write_world(&app.world);
+
+        let reopened = EditorApp::new(Some(&folder));
+        assert_eq!(axcenity_project::write_world(&reopened.world), saved);
+        let wedge = reopened
+            .world
+            .find_first_descendant(reopened.world.workspace(), "Part")
+            .unwrap();
+        assert_eq!(
+            reopened.world.full_name(wedge).as_deref(),
+            Some("Workspace.Folder.Car.Part")
+        );
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn delete_ctrl_d_and_f2_act_on_the_selection() {
+        let mut app = EditorApp::new(Some(&example("hello-touched")));
+        let pad = part(&app, "Pad");
+        app.selected = Some(pad);
+        press(&mut app, egui::Modifiers::COMMAND, egui::Key::D);
+        let copy = app.selected.unwrap();
+        assert_eq!(name(&app, copy), "Pad2");
+        press(&mut app, egui::Modifiers::NONE, egui::Key::Delete);
+        assert!(!app.world.is_descendant_of(copy, app.world.root()));
+        assert_eq!(app.selected, None);
+        app.selected = Some(pad);
+        press(&mut app, egui::Modifiers::NONE, egui::Key::F2);
+        assert_eq!(app.explorer.renaming(), Some(pad));
     }
 
     /// Runs one egui frame in which `key` is pressed with `modifiers`, and

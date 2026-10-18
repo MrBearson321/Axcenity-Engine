@@ -18,15 +18,21 @@ pub enum ClassName {
     /// Lua code that runs on the server. Its source lives in a
     /// `*.server.lua` file, not in a property.
     Script,
+    /// Groups the parts of one thing, such as a car or a house.
+    Model,
+    /// Groups Instances to keep the tree tidy. Has no effect on the game.
+    Folder,
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 5] = [
+    pub const ALL: [ClassName; 7] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::ServerScriptService,
         ClassName::Part,
         ClassName::Script,
+        ClassName::Model,
+        ClassName::Folder,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -36,6 +42,8 @@ impl ClassName {
             ClassName::ServerScriptService => "ServerScriptService",
             ClassName::Part => "Part",
             ClassName::Script => "Script",
+            ClassName::Model => "Model",
+            ClassName::Folder => "Folder",
         }
     }
 
@@ -60,7 +68,9 @@ impl ClassName {
             ClassName::DataModel
             | ClassName::Workspace
             | ClassName::ServerScriptService
-            | ClassName::Script => Vec::new(),
+            | ClassName::Script
+            | ClassName::Model
+            | ClassName::Folder => Vec::new(),
             ClassName::Part => {
                 let material = Material::Plastic;
                 let preset = material.preset();
@@ -88,7 +98,9 @@ impl ClassName {
             ClassName::DataModel
             | ClassName::Workspace
             | ClassName::ServerScriptService
-            | ClassName::Script => &[],
+            | ClassName::Script
+            | ClassName::Model
+            | ClassName::Folder => &[],
             // Fires on both parts when two parts start touching.
             ClassName::Part => &["Touched"],
         }

@@ -1,6 +1,11 @@
 //! The Explorer panel: the Instance tree, from `game` down, with branches
 //! that open and close. Clicking a row selects that Instance.
 //!
+//! Right-clicking a row opens a menu to insert, rename, duplicate or delete,
+//! and dragging a row onto another moves it inside that one. The Explorer
+//! never changes the world itself: [`Explorer::show`] returns an [`Action`]
+//! and the app carries it out, so it's recorded for undo.
+//!
 //! [`Explorer::rows`] works out which rows are visible without any UI code,
 //! so tests can check the tree; [`Explorer::show`] only draws those rows.
 
@@ -9,19 +14,70 @@ use std::collections::HashSet;
 use axcenity_core::{ClassName, InstanceId, World};
 use eframe::egui;
 
+use crate::app::{DELETE_KEY_TEXT, DUPLICATE_SHORTCUT, RENAME_KEY};
+use crate::properties;
+use crate::tree::{self, Insertable};
+
 /// How far each level of the tree is indented, in points.
 const INDENT: f32 = 14.0;
 /// The size of the open/close arrow's clickable square, in points.
 const ARROW_SIZE: f32 = 16.0;
+/// The outline around the row something would be dropped into: the same
+/// blue as the viewport's selection box.
+const DROP_COLOR: egui::Color32 = egui::Color32::from_rgb(25, 160, 255);
 
-/// Which branches are open. IDs of Instances that no longer exist do no harm:
-/// they simply never match a row again.
+/// Which branches are open, and the rename in progress. IDs of Instances
+/// that no longer exist do no harm: they simply never match a row again.
 pub struct Explorer {
     expanded: HashSet<InstanceId>,
     /// A row to scroll into view on the next frame, after something was
     /// selected in the viewport.
     scroll_to: Option<InstanceId>,
+    /// The row being renamed, which shows a text box instead of its name.
+    renaming: Option<Renaming>,
+    /// Where each row's name was drawn last frame, so tests can point at rows.
+    #[cfg(test)]
+    drawn: Vec<(InstanceId, egui::Rect)>,
 }
+
+struct Renaming {
+    id: InstanceId,
+    /// The name as typed so far.
+    text: String,
+    /// True until the text box has been given the keyboard, on its first frame.
+    needs_focus: bool,
+}
+
+/// Something done in the Explorer, for the app to carry out.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Action {
+    /// Insert `what`, going by the rule in [`tree::insert_parent`] with
+    /// `near` as the selection.
+    Insert {
+        what: Insertable,
+        near: Option<InstanceId>,
+    },
+    Rename(InstanceId, String),
+    Duplicate(InstanceId),
+    Delete(InstanceId),
+    /// `id` was dropped onto `parent`'s row, so it becomes `parent`'s last child.
+    MoveInto {
+        id: InstanceId,
+        parent: InstanceId,
+    },
+}
+
+/// What happened in the Explorer this frame.
+#[derive(Debug, Default, PartialEq)]
+pub struct ExplorerOutput {
+    /// A row that was clicked (with either button), to select.
+    pub clicked: Option<InstanceId>,
+    pub action: Option<Action>,
+}
+
+/// What egui's drag and drop carries while a row is being dragged.
+#[derive(Clone, Copy, Debug)]
+struct DraggedRow(InstanceId);
 
 /// One visible line in the Explorer.
 #[derive(Clone, Debug, PartialEq)]
@@ -41,7 +97,33 @@ impl Explorer {
         Self {
             expanded: HashSet::from([world.root(), world.workspace()]),
             scroll_to: None,
+            renaming: None,
+            #[cfg(test)]
+            drawn: Vec::new(),
         }
+    }
+
+    /// Turns `id`'s row into a text box to type a new name in, if it can be
+    /// renamed. Enter or clicking elsewhere keeps the name; Escape cancels.
+    pub fn start_rename(&mut self, world: &World, id: InstanceId) {
+        let Some(instance) = world.get(id) else {
+            return;
+        };
+        if !properties::can_rename(instance) {
+            return;
+        }
+        self.reveal(world, id);
+        self.renaming = Some(Renaming {
+            id,
+            text: instance.name().to_string(),
+            needs_focus: true,
+        });
+    }
+
+    /// The Instance being renamed, if any.
+    #[cfg(test)]
+    pub fn renaming(&self) -> Option<InstanceId> {
+        self.renaming.as_ref().map(|renaming| renaming.id)
     }
 
     /// Opens every branch above `id`, so its row is visible, and scrolls to
@@ -93,22 +175,35 @@ impl Explorer {
         }
     }
 
-    /// Draws the tree with the `selected` row highlighted, and returns the
-    /// Instance whose row was clicked, if any.
+    /// Draws the tree with the `selected` row highlighted. Returns the row
+    /// that was clicked, and anything to do to the tree.
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
         world: &World,
         selected: Option<InstanceId>,
-    ) -> Option<InstanceId> {
+    ) -> ExplorerOutput {
         ui.strong("Explorer");
         ui.separator();
 
-        // Toggling while looping over the rows would change what's being
-        // looped over, so remember the clicks and apply them afterward.
+        // A rename of something that has left the tree (undone, say) can't finish.
+        if self
+            .renaming
+            .as_ref()
+            .is_some_and(|renaming| !world.is_descendant_of(renaming.id, world.root()))
+        {
+            self.renaming = None;
+        }
+        // Changing which rows there are while looping over them would change
+        // what's being looped over, so remember what happened and do it afterward.
         let mut toggled = None;
-        let mut clicked = None;
+        let mut start_rename = None;
+        let mut rename_done = None;
+        let mut output = ExplorerOutput::default();
         let scroll_to = self.scroll_to.take();
+        let dragged = egui::DragAndDrop::payload::<DraggedRow>(ui.ctx()).map(|row| row.0);
+        #[cfg(test)]
+        self.drawn.clear();
         egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
             for row in self.rows(world) {
                 ui.horizontal(|ui| {
@@ -124,15 +219,30 @@ impl Explorer {
                         let openness = if row.expanded { 1.0 } else { 0.0 };
                         egui::collapsing_header::paint_default_icon(ui, openness, &arrow);
                     }
+                    if arrow.clicked() {
+                        toggled = Some(row.id);
+                    }
 
+                    // `filter` keeps the rename only if it's for this row.
+                    if let Some(renaming) = self.renaming.as_mut().filter(|r| r.id == row.id) {
+                        if let Some(done) = rename_box(ui, renaming) {
+                            rename_done = Some(done);
+                        }
+                        return;
+                    }
+
+                    // Clicks select; dragging moves the row onto another.
                     let label = ui
-                        .add(egui::Button::selectable(
-                            selected == Some(row.id),
-                            &row.name,
-                        ))
+                        .add(
+                            egui::Button::selectable(selected == Some(row.id), &row.name)
+                                .sense(egui::Sense::click_and_drag()),
+                        )
                         .on_hover_text(row.class.as_str());
-                    if label.clicked() {
-                        clicked = Some(row.id);
+                    #[cfg(test)]
+                    self.drawn.push((row.id, label.rect));
+                    // A right-click selects too, so the menu acts on what's selected.
+                    if label.clicked() || label.secondary_clicked() {
+                        output.clicked = Some(row.id);
                     }
                     if scroll_to == Some(row.id) {
                         label.scroll_to_me(Some(egui::Align::Center));
@@ -141,17 +251,192 @@ impl Explorer {
                     if row.name != row.class.as_str() {
                         ui.weak(row.class.as_str());
                     }
-                    if row.has_children && (arrow.clicked() || label.double_clicked()) {
+                    if row.has_children && label.double_clicked() {
                         toggled = Some(row.id);
                     }
+
+                    if tree::check_editable(world, row.id).is_ok() {
+                        label.dnd_set_drag_payload(DraggedRow(row.id));
+                    }
+                    if let Some(action) = drop_onto(ui, &label, world, dragged, row.id) {
+                        output.action = Some(action);
+                    }
+                    label.context_menu(|ui| match row_menu(ui, world, row.id) {
+                        Some(RowCommand::Rename) => start_rename = Some(row.id),
+                        Some(command) => output.action = command.action(row.id),
+                        None => {}
+                    });
                 });
             }
         });
+
         if let Some(id) = toggled {
             self.toggle(id);
         }
-        clicked
+        if let Some(id) = start_rename {
+            self.start_rename(world, id);
+        }
+        if let Some(done) = rename_done
+            && let Some(renaming) = self.renaming.take()
+            && let Some(name) = done
+        {
+            output.action = Some(Action::Rename(renaming.id, name));
+        }
+        if let Some(id) = dragged {
+            paint_dragged_name(ui, world, id);
+        }
+        output
     }
+}
+
+/// The text box a row turns into while it's renamed. Returns `None` while
+/// typing, then `Some(Some(name))` to rename or `Some(None)` to cancel.
+fn rename_box(ui: &mut egui::Ui, renaming: &mut Renaming) -> Option<Option<String>> {
+    let text_box = ui.add(egui::TextEdit::singleline(&mut renaming.text).desired_width(160.0));
+    if renaming.needs_focus {
+        text_box.request_focus();
+        renaming.needs_focus = false;
+        return None;
+    }
+    if !text_box.lost_focus() {
+        return None;
+    }
+    // Escape takes the keyboard away from the text box too, so check which it was.
+    let cancelled = ui.input(|input| input.key_pressed(egui::Key::Escape));
+    let name = renaming.text.trim();
+    if cancelled || name.is_empty() {
+        Some(None)
+    } else {
+        Some(Some(name.to_string()))
+    }
+}
+
+/// While a row is dragged over `target`'s row: outlines it if the row can be
+/// dropped there, or shows a "not allowed" cursor and the reason. Returns the
+/// move if the row was let go over it.
+fn drop_onto(
+    ui: &egui::Ui,
+    label: &egui::Response,
+    world: &World,
+    dragged: Option<InstanceId>,
+    target: InstanceId,
+) -> Option<Action> {
+    let dragged = dragged?;
+    // Over its own row is where every drag starts, so say nothing there.
+    if dragged == target || label.dnd_hover_payload::<DraggedRow>().is_none() {
+        return None;
+    }
+    let allowed = tree::check_move(world, dragged, target);
+    match allowed {
+        Ok(()) => {
+            let stroke = egui::Stroke::new(1.5_f32, DROP_COLOR);
+            ui.painter()
+                .rect_stroke(label.rect, 2.0, stroke, egui::StrokeKind::Outside);
+        }
+        Err(reason) => {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::NotAllowed);
+            label.show_tooltip_text(reason);
+        }
+    }
+    let dropped = label.dnd_release_payload::<DraggedRow>().is_some();
+    (dropped && allowed.is_ok()).then_some(Action::MoveInto {
+        id: dragged,
+        parent: target,
+    })
+}
+
+/// Shows the name of the row being dragged next to the mouse.
+fn paint_dragged_name(ui: &egui::Ui, world: &World, id: InstanceId) {
+    let (Some(instance), Some(pointer)) = (world.get(id), ui.ctx().pointer_latest_pos()) else {
+        return;
+    };
+    // The tooltip layer is drawn over every panel.
+    let layer = egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("dragged explorer row"));
+    let painter = ui.ctx().layer_painter(layer);
+    let galley = painter.layout_no_wrap(
+        instance.name().to_string(),
+        egui::TextStyle::Body.resolve(ui.style()),
+        ui.visuals().strong_text_color(),
+    );
+    let at = pointer + egui::vec2(14.0, -galley.size().y / 2.0);
+    let background = egui::Rect::from_min_size(at, galley.size()).expand(4.0);
+    painter.rect_filled(background, 3.0, ui.visuals().window_fill);
+    painter.galley(at, galley, egui::Color32::WHITE);
+}
+
+/// A choice in a row's right-click menu.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum RowCommand {
+    Insert(Insertable),
+    Rename,
+    Duplicate,
+    Delete,
+}
+
+impl RowCommand {
+    /// The tree action for this command on `id`'s row. Renaming isn't one
+    /// yet: it starts a text box, and the rename comes when it's done.
+    fn action(self, id: InstanceId) -> Option<Action> {
+        match self {
+            RowCommand::Insert(what) => Some(Action::Insert {
+                what,
+                near: Some(id),
+            }),
+            RowCommand::Rename => None,
+            RowCommand::Duplicate => Some(Action::Duplicate(id)),
+            RowCommand::Delete => Some(Action::Delete(id)),
+        }
+    }
+}
+
+/// The right-click menu of `id`'s row: Insert ▸, then Rename, Duplicate and
+/// Delete, greyed out (with the reason on hover) where they can't be done.
+fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowCommand> {
+    let mut chosen = None;
+    ui.menu_button("Insert", |ui| {
+        for what in Insertable::PARTS {
+            if ui.button(what.label()).clicked() {
+                chosen = Some(RowCommand::Insert(what));
+            }
+        }
+        ui.separator();
+        for what in Insertable::GROUPS {
+            if ui.button(what.label()).clicked() {
+                chosen = Some(RowCommand::Insert(what));
+            }
+        }
+    });
+    ui.separator();
+
+    let renamable = world.get(id).is_some_and(properties::can_rename);
+    let rename = egui::Button::new("Rename").shortcut_text(RENAME_KEY.name());
+    if ui
+        .add_enabled(renamable, rename)
+        .on_disabled_hover_text("Services and Scripts keep their names.")
+        .clicked()
+    {
+        chosen = Some(RowCommand::Rename);
+    }
+    let editable = tree::check_editable(world, id);
+    let reason = editable.err().unwrap_or_default();
+    let duplicate =
+        egui::Button::new("Duplicate").shortcut_text(ui.ctx().format_shortcut(&DUPLICATE_SHORTCUT));
+    if ui
+        .add_enabled(editable.is_ok(), duplicate)
+        .on_disabled_hover_text(reason)
+        .clicked()
+    {
+        chosen = Some(RowCommand::Duplicate);
+    }
+    let delete = egui::Button::new("Delete").shortcut_text(DELETE_KEY_TEXT);
+    if ui
+        .add_enabled(editable.is_ok(), delete)
+        .on_disabled_hover_text(reason)
+        .clicked()
+    {
+        chosen = Some(RowCommand::Delete);
+    }
+    chosen
 }
 
 #[cfg(test)]
@@ -246,6 +531,155 @@ mod tests {
         // The Model inside stays open, so it all comes back as it was.
         explorer.toggle(world.root());
         assert_eq!(outline(&explorer, &world), open);
+    }
+
+    /// Runs the Explorer for one egui frame in an 800×600 window, with these
+    /// input events. No window or GPU needed.
+    fn frame(
+        ctx: &egui::Context,
+        explorer: &mut Explorer,
+        world: &World,
+        events: Vec<egui::Event>,
+    ) -> ExplorerOutput {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 600.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        let mut output = ExplorerOutput::default();
+        let _ = ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                output = explorer.show(ui, world, None);
+            });
+        });
+        output
+    }
+
+    fn center_of(explorer: &Explorer, id: InstanceId) -> egui::Pos2 {
+        let (_, rect) = explorer.drawn.iter().find(|(row, _)| *row == id).unwrap();
+        rect.center()
+    }
+
+    /// Drags the name of `from`'s row with the mouse and lets go over `to`'s
+    /// row. Returns every action the Explorer asked for along the way.
+    fn drag_row(
+        explorer: &mut Explorer,
+        world: &World,
+        from: InstanceId,
+        to: InstanceId,
+    ) -> Vec<Action> {
+        let ctx = egui::Context::default();
+        frame(&ctx, explorer, world, Vec::new());
+        let (start, end) = (center_of(explorer, from), center_of(explorer, to));
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let mut frames = vec![
+            vec![egui::Event::PointerMoved(start)],
+            vec![button(start, true)],
+        ];
+        for step in 1..=5 {
+            frames.push(vec![egui::Event::PointerMoved(
+                start.lerp(end, step as f32 / 5.0),
+            )]);
+        }
+        frames.push(vec![button(end, false)]);
+        frames.push(Vec::new());
+        frames
+            .into_iter()
+            .filter_map(|events| frame(&ctx, explorer, world, events).action)
+            .collect()
+    }
+
+    /// game → Workspace → Car (a Model, open) → Wheel, and a Folder.
+    fn car_world() -> (World, InstanceId, InstanceId, InstanceId) {
+        let mut world = World::new();
+        let workspace = world.workspace();
+        let mut add = |class, name, parent| {
+            let id = world.create(class).unwrap();
+            world.set_name(id, name).unwrap();
+            world.set_parent(id, Some(parent)).unwrap();
+            id
+        };
+        let car = add(ClassName::Model, "Car", workspace);
+        let wheel = add(ClassName::Part, "Wheel", car);
+        let props = add(ClassName::Folder, "Props", workspace);
+        (world, car, wheel, props)
+    }
+
+    #[test]
+    fn dragging_a_row_onto_another_asks_to_move_it_inside() {
+        let (world, car, wheel, props) = car_world();
+        let mut explorer = Explorer::new(&world);
+        explorer.toggle(car);
+        assert_eq!(
+            drag_row(&mut explorer, &world, wheel, props),
+            [Action::MoveInto {
+                id: wheel,
+                parent: props
+            }]
+        );
+    }
+
+    #[test]
+    fn dragging_a_row_onto_its_own_child_or_a_service_outside_the_workspace_does_nothing() {
+        let (world, car, wheel, _) = car_world();
+        let mut explorer = Explorer::new(&world);
+        explorer.toggle(car);
+        assert_eq!(drag_row(&mut explorer, &world, car, wheel), []);
+        let scripts = world.server_script_service();
+        assert_eq!(drag_row(&mut explorer, &world, car, scripts), []);
+        // Services can't be dragged at all.
+        assert_eq!(drag_row(&mut explorer, &world, world.workspace(), car), []);
+    }
+
+    fn key(key: egui::Key) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn renaming_in_the_explorer_ends_with_enter_and_escape_cancels() {
+        let (world, _, _, props) = car_world();
+        let mut explorer = Explorer::new(&world);
+        let ctx = egui::Context::default();
+
+        explorer.start_rename(&world, props);
+        frame(&ctx, &mut explorer, &world, Vec::new());
+        assert_eq!(explorer.renaming(), Some(props));
+        let typed = vec![egui::Event::Text("2".to_string())];
+        assert_eq!(frame(&ctx, &mut explorer, &world, typed).action, None);
+        let entered = frame(&ctx, &mut explorer, &world, vec![key(egui::Key::Enter)]);
+        // Where the cursor starts is up to egui, so the 2 is at one end or the other.
+        let Some(Action::Rename(id, name)) = entered.action else {
+            panic!("expected a rename, got {:?}", entered.action);
+        };
+        assert_eq!(id, props);
+        assert!(name == "Props2" || name == "2Props", "{name}");
+        assert_eq!(explorer.renaming(), None);
+
+        explorer.start_rename(&world, props);
+        frame(&ctx, &mut explorer, &world, Vec::new());
+        let typed = vec![egui::Event::Text("x".to_string())];
+        frame(&ctx, &mut explorer, &world, typed);
+        let escaped = frame(&ctx, &mut explorer, &world, vec![key(egui::Key::Escape)]);
+        assert_eq!(escaped.action, None);
+        assert_eq!(explorer.renaming(), None);
+
+        // Services keep their names.
+        explorer.start_rename(&world, world.workspace());
+        assert_eq!(explorer.renaming(), None);
     }
 
     #[test]

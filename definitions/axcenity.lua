@@ -116,6 +116,12 @@ function ConnectionClass:Disconnect() end
 ---Lua code that runs on the server, from a `.server.lua` file.
 ---@class Script: Instance
 
+---Groups the parts of one thing, such as a car or a house.
+---@class Model: Instance
+
+---Groups Instances to keep the tree tidy. Has no effect on the game.
+---@class Folder: Instance
+
 -- Globals -------------------------------------------------------------------
 
 ---The root of the game. Every service is inside it.
@@ -143,6 +149,8 @@ Instance = {}
 ---@return Instance
 ---@overload fun(className: "Part"): Part
 ---@overload fun(className: "Script"): Script
+---@overload fun(className: "Model"): Model
+---@overload fun(className: "Folder"): Folder
 function Instance.new(className) end
 
 ---Creates Vector3 values.

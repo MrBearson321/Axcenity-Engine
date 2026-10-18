@@ -333,6 +333,8 @@ fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::Part => "A solid shape in the world.",
         ClassName::Script => "Lua code that runs on the server, from a `.server.lua` file.",
+        ClassName::Model => "Groups the parts of one thing, such as a car or a house.",
+        ClassName::Folder => "Groups Instances to keep the tree tidy. Has no effect on the game.",
     }
 }
 

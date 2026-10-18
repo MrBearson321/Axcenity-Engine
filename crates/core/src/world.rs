@@ -5,7 +5,7 @@
 //! [`InstanceId`]s of its parent and children, and all access goes through
 //! [`World`], which owns every Instance in an [`Arena`].
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::arena::{Arena, Id};
 use crate::class::ClassName;
@@ -167,11 +167,35 @@ impl World {
         Ok(InstanceId(self.instances.insert(Instance::new(class))))
     }
 
-    /// Moves `id` under `new_parent`, or detaches it when `new_parent` is `None`.
+    /// Moves `id` under `new_parent` as its last child, or detaches it when
+    /// `new_parent` is `None`.
     pub fn set_parent(
         &mut self,
         id: InstanceId,
         new_parent: Option<InstanceId>,
+    ) -> Result<(), TreeError> {
+        self.reparent(id, new_parent.map(|parent| (parent, usize::MAX)))
+    }
+
+    /// Moves `id` under `new_parent` so that it ends up as child number
+    /// `index` (0 is the first), with the children from there on moving down
+    /// one. An `index` past the end makes it the last child. Undo uses this
+    /// to put an Instance back exactly where it was.
+    pub fn set_parent_at(
+        &mut self,
+        id: InstanceId,
+        new_parent: InstanceId,
+        index: usize,
+    ) -> Result<(), TreeError> {
+        self.reparent(id, Some((new_parent, index)))
+    }
+
+    /// `set_parent` and `set_parent_at`: `new_parent` is the parent and the
+    /// index among its children, or `None` to detach.
+    fn reparent(
+        &mut self,
+        id: InstanceId,
+        new_parent: Option<(InstanceId, usize)>,
     ) -> Result<(), TreeError> {
         let instance = self.get(id).ok_or(TreeError::Stale)?;
         if instance.class.is_service() {
@@ -179,7 +203,7 @@ impl World {
         }
         let old_parent = instance.parent;
 
-        if let Some(new_parent) = new_parent {
+        if let Some((new_parent, _)) = new_parent {
             if !self.contains(new_parent) {
                 return Err(TreeError::Stale);
             }
@@ -195,12 +219,45 @@ impl World {
         {
             old.children.retain(|&child| child != id);
         }
-        if let Some(new_parent) = new_parent {
+        if let Some((new_parent, index)) = new_parent {
             let parent = self.instances.get_mut(new_parent.0).expect("checked above");
-            parent.children.push(id);
+            let index = index.min(parent.children.len());
+            parent.children.insert(index, id);
         }
-        self.instances.get_mut(id.0).expect("checked above").parent = new_parent;
+        self.instances.get_mut(id.0).expect("checked above").parent =
+            new_parent.map(|(parent, _)| parent);
         Ok(())
+    }
+
+    /// Makes a copy of `id` and everything inside it, with the same classes,
+    /// names and properties, and returns the copy. The copy has no parent yet.
+    pub fn duplicate(&mut self, id: InstanceId) -> Result<InstanceId, TreeError> {
+        let original = self.get(id).ok_or(TreeError::Stale)?;
+        if original.class.is_service() {
+            return Err(TreeError::Service(original.class));
+        }
+        let mut copy = original.clone();
+        copy.parent = None;
+        copy.children.clear();
+        let root = InstanceId(self.instances.insert(copy));
+
+        // `descendants` lists parents before their children, so each
+        // descendant's parent has already been copied when it's reached.
+        let mut copies = HashMap::from([(id, root)]);
+        for old in self.descendants(id) {
+            let mut copy = self.get(old).expect("descendants are alive").clone();
+            let parent = copies[&copy.parent.expect("a descendant has a parent")];
+            copy.parent = Some(parent);
+            copy.children.clear();
+            let new = InstanceId(self.instances.insert(copy));
+            self.instances
+                .get_mut(parent.0)
+                .expect("copied above")
+                .children
+                .push(new);
+            copies.insert(old, new);
+        }
+        Ok(root)
     }
 
     /// Destroys `id` and all of its descendants. Their IDs become stale.
@@ -325,6 +382,12 @@ impl World {
         Some(names.join("."))
     }
 
+    /// True if `id` is somewhere inside `ancestor` (not `ancestor` itself).
+    /// Detached Instances are inside nothing.
+    pub fn is_descendant_of(&self, id: InstanceId, ancestor: InstanceId) -> bool {
+        id != ancestor && self.is_ancestor_or_self(ancestor, id)
+    }
+
     /// True if `ancestor` is `id` itself or any Instance above it.
     fn is_ancestor_or_self(&self, ancestor: InstanceId, id: InstanceId) -> bool {
         let mut current = Some(id);
@@ -447,6 +510,78 @@ mod tests {
         assert_eq!(world.set_parent(a, Some(a)), Err(TreeError::Cycle));
         // Nothing changed.
         assert_eq!(world.get(a).unwrap().parent(), Some(workspace));
+    }
+
+    #[test]
+    fn set_parent_at_puts_it_at_that_index() {
+        let mut world = World::new();
+        let workspace = world.workspace();
+        let a = part_in(&mut world, workspace, "A");
+        let b = part_in(&mut world, workspace, "B");
+        let c = part_in(&mut world, workspace, "C");
+
+        // Within the same parent: C moves to the front.
+        world.set_parent_at(c, workspace, 0).unwrap();
+        assert_eq!(world.get(workspace).unwrap().children(), &[c, a, b]);
+        // Into another parent, past the end: it goes last.
+        world.set_parent_at(b, a, 99).unwrap();
+        assert_eq!(world.get(a).unwrap().children(), &[b]);
+        // Detached, then back in the middle.
+        world.set_parent(c, None).unwrap();
+        world.set_parent_at(c, workspace, 1).unwrap();
+        assert_eq!(world.get(workspace).unwrap().children(), &[a, c]);
+        assert_eq!(world.set_parent_at(a, b, 0), Err(TreeError::Cycle));
+    }
+
+    #[test]
+    fn duplicate_copies_the_whole_subtree_without_a_parent() {
+        let mut world = World::new();
+        let workspace = world.workspace();
+        let model = world.create(ClassName::Model).unwrap();
+        world.set_name(model, "Car").unwrap();
+        world.set_parent(model, Some(workspace)).unwrap();
+        let wheel = part_in(&mut world, model, "Wheel");
+        let hub = part_in(&mut world, wheel, "Hub");
+        world
+            .set_property(wheel, "Metalness", Value::Number(0.7))
+            .unwrap();
+
+        let copy = world.duplicate(model).unwrap();
+        let instance = world.get(copy).unwrap();
+        assert_eq!(
+            (instance.class(), instance.name()),
+            (ClassName::Model, "Car")
+        );
+        assert_eq!(instance.parent(), None);
+        let copied_wheel = instance.children()[0];
+        assert_ne!(copied_wheel, wheel);
+        let copied_wheel = world.get(copied_wheel).unwrap();
+        assert_eq!(copied_wheel.name(), "Wheel");
+        assert_eq!(copied_wheel.parent(), Some(copy));
+        assert_eq!(
+            copied_wheel.property("Metalness"),
+            Some(&Value::Number(0.7))
+        );
+        let copied_hub = world.get(copied_wheel.children()[0]).unwrap();
+        assert_eq!(copied_hub.name(), "Hub");
+        // The original is untouched.
+        assert_eq!(world.get(wheel).unwrap().children(), &[hub]);
+        assert_eq!(world.get(workspace).unwrap().children(), &[model]);
+        assert!(world.duplicate(workspace).is_err());
+    }
+
+    #[test]
+    fn is_descendant_of_follows_parents_up() {
+        let mut world = World::new();
+        let workspace = world.workspace();
+        let a = part_in(&mut world, workspace, "A");
+        let b = part_in(&mut world, a, "B");
+        assert!(world.is_descendant_of(b, world.root()));
+        assert!(world.is_descendant_of(b, a));
+        assert!(!world.is_descendant_of(a, b));
+        assert!(!world.is_descendant_of(a, a));
+        world.set_parent(a, None).unwrap();
+        assert!(!world.is_descendant_of(b, world.root()));
     }
 
     #[test]

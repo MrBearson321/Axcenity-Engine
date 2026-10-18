@@ -223,10 +223,10 @@ Insert parts and other Instances from a menu, and rename, delete and duplicate t
 
 ### Acceptance criteria
 
-- [ ] Each primitive can be inserted at the camera's focus point.
-- [ ] Dragging in the Explorer reparents, and invalid moves (into your own descendant) are rejected.
-- [ ] Deleting a Model deletes its children, and undo restores all of them with the same properties.
-- [ ] Inserting a new Instance gives it a unique default name among its siblings.
+- [x] Each primitive can be inserted at the camera's focus point.
+- [x] Dragging in the Explorer reparents, and invalid moves (into your own descendant) are rejected.
+- [x] Deleting a Model deletes its children, and undo restores all of them with the same properties.
+- [x] Inserting a new Instance gives it a unique default name among its siblings.
 
 ---
 

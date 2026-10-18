@@ -604,6 +604,34 @@ mod tests {
     }
 
     #[test]
+    fn models_and_folders_save_and_load_with_their_children() {
+        let text = r#"{ "format_version": 1, "workspace": { "children": [
+            { "class": "Folder", "name": "Props", "children": [
+                { "class": "Model", "name": "Car", "children": [
+                    { "class": "Part", "name": "Body" } ] } ] } ] } }"#;
+        let world = parse_world(text).unwrap();
+        let body = world
+            .find_first_descendant(world.workspace(), "Body")
+            .unwrap();
+        assert_eq!(
+            world.full_name(body).as_deref(),
+            Some("Workspace.Props.Car.Body")
+        );
+        let car = world.get(body).unwrap().parent().unwrap();
+        assert_eq!(world.get(car).unwrap().class(), ClassName::Model);
+
+        // They have no properties, so the file lists only their class, name and children.
+        let written = write_world(&world);
+        assert!(
+            written.contains(
+                "\"class\": \"Folder\",\n        \"name\": \"Props\",\n        \"children\": ["
+            ),
+            "{written}"
+        );
+        assert_eq!(write_world(&parse_world(&written).unwrap()), written);
+    }
+
+    #[test]
     fn empty_world_writes_an_empty_workspace() {
         let world = World::new();
         assert_eq!(

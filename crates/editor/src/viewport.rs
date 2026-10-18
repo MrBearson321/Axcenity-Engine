@@ -151,6 +151,17 @@ impl Viewport {
         self.drag = None;
     }
 
+    /// The camera's focus point, where new parts are inserted.
+    pub fn focus(&self) -> Vec3 {
+        self.camera.focus()
+    }
+
+    /// Points the camera at `target` from `position`.
+    #[cfg(test)]
+    pub fn look_at(&mut self, position: Vec3, target: Vec3) {
+        self.camera = FlyCamera::looking_at(position, target);
+    }
+
     /// True while a part or a handle is being dragged.
     pub fn is_dragging(&self) -> bool {
         self.drag.is_some()
