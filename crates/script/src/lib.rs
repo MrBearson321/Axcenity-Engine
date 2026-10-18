@@ -5,10 +5,12 @@
 //!   standard library (see `sandbox`).
 //! - The engine API (`game`, `workspace`, `Instance`, `Vector3`, ...) lives in
 //!   `api`, `instance` and `types`.
+//! - [`lua_definitions`] describes that API for editors (see `definitions`).
 //! - `print` output and errors are collected as [`OutputLine`]s for the host to
 //!   show: the player's console now, the editor's Output panel later.
 
 mod api;
+mod definitions;
 mod errors;
 mod instance;
 mod sandbox;
@@ -19,6 +21,8 @@ use mlua::chunk::ChunkMode;
 use mlua::{Lua, LuaOptions, StdLib};
 
 use crate::errors::error_message;
+
+pub use definitions::{DEFINITIONS_PATH, lua_definitions};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutputKind {

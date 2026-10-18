@@ -12,7 +12,7 @@ use mlua::{Function, Lua, Table, Value};
 use crate::{api, errors};
 
 /// Standard functions scripts may use as they are.
-const SAFE_FUNCTIONS: &[&str] = &[
+pub const SAFE_FUNCTIONS: &[&str] = &[
     "assert",
     "error",
     "getmetatable",
@@ -33,7 +33,7 @@ const SAFE_FUNCTIONS: &[&str] = &[
 
 /// Standard library tables. Each script gets its own copy, so one script
 /// adding to `math` doesn't change `math` for the others.
-const SAFE_LIBRARIES: &[&str] = &["coroutine", "math", "string", "table", "utf8"];
+pub const SAFE_LIBRARIES: &[&str] = &["coroutine", "math", "string", "table", "utf8"];
 
 /// Library functions left out of those copies. `string.dump` turns functions
 /// into bytecode, which is only useful together with the missing `load`.

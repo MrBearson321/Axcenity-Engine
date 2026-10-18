@@ -8,5 +8,6 @@ Runs Lua 5.4 (mlua 0.12, vendored) against the `core` World. Depends only on `co
 - `instance.rs`: `LuaInstance(InstanceId)`. `__index` order: mlua checks methods first, then `Name`/`ClassName`/`Parent`, properties, children by name.
 - `types.rs`: newtypes (orphan rule) for `Vector3`, `Color3`, enum items; `value_from_lua` converts by the property's existing kind. Use `f32_to_lua` so `0.1f32` reads as `0.1`.
 - `errors.rs`: messages start `path:line:`. Rust callback errors take the location from mlua's traceback, skipping `[C]`, `[engine]` and `__mlua*` frames. `pcall`/`xpcall` are Lua wrappers (so yields still work) that turn mlua error objects into plain strings.
+- `definitions.rs`: generates `definitions/axcenity.lua` for Lua Language Server. **Any API change** needs its description there (new properties: `PROPERTY_DOCS`), then `cargo run -p axcenity-script --bin lua-definitions`. Tests catch anything missed.
 - Gotchas: mlua's `Value::type_name` says `integer` for whole numbers; show `number`. Lua's `tostring(1.0)` is `1.0`, and `print` uses the real `tostring` to match.
-- Not yet: coroutines and `task.*` (Phase 5), events, the watchdog and the shared string metatable (Phase 15), the Lua definitions-file generator.
+- Not yet: coroutines and `task.*` (Phase 5), events, the watchdog and the shared string metatable (Phase 15).

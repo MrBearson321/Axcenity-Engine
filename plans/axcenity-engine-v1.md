@@ -307,6 +307,8 @@ Add an instruction-count hook that stops a coroutine that runs too long without 
 
 Add `Changed` and property-change signals, `ChildAdded`/`ChildRemoved`, and a heartbeat-style per-frame event. Build a generator that writes a Lua Language Server definitions file from the engine's API descriptions, and an editor action that drops it into the project so VS Code gets autocomplete.
 
+> The generator (`crates/script/src/definitions.rs`) and its up-to-date test were built early, right after Phase 4. This phase extends it with the new events and `task.*`, and adds the editor action.
+
 ### Acceptance criteria
 
 - [ ] `Changed` fires when a property changes, from scripts, physics or the editor during Play.

@@ -5,7 +5,7 @@ Read before working in the `script` or `blocks` crates, or adding anything to th
 ## Language
 
 - **Lua 5.4** via `mlua` (vendored). Not Luau, not LuaJIT.
-- Types for tooling come from a generated **Lua Language Server definitions file** (`---@class`, `---@param` annotations). Every public API addition must update the generator.
+- Types for tooling come from a generated **Lua Language Server definitions file** (`---@class`, `---@param` annotations), checked in at `definitions/axcenity.lua`. The generator is `crates/script/src/definitions.rs`: classes, properties and enums come from `core`, while functions, globals and value types are described there by hand. Every public API addition must update it, then run `cargo run -p axcenity-script --bin lua-definitions`. Tests fail (so CI fails) if a property has no description, if a global or library function is missing from the descriptions, or if the checked-in file is out of date.
 
 ## API style: Roblox-familiar, not Roblox-compatible
 

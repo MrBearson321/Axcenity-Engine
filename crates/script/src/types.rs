@@ -156,10 +156,10 @@ pub struct LuaEnumType(ValueKind);
 pub struct LuaEnumItem(Value);
 
 /// The enum property kinds scripts can use through `Enum`.
-const ENUM_KINDS: [ValueKind; 2] = [ValueKind::Material, ValueKind::PartType];
+pub const ENUM_KINDS: [ValueKind; 2] = [ValueKind::Material, ValueKind::PartType];
 
 /// Every item name of an enum kind, in order.
-fn enum_item_names(kind: ValueKind) -> Vec<&'static str> {
+pub fn enum_item_names(kind: ValueKind) -> Vec<&'static str> {
     match kind {
         ValueKind::Material => Material::ALL.iter().map(|m| m.as_str()).collect(),
         ValueKind::PartType => PartType::ALL.iter().map(|t| t.as_str()).collect(),
