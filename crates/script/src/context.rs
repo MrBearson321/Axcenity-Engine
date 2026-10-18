@@ -14,11 +14,13 @@ use crate::errors::error_message;
 use crate::instance::{self, ClassMethods};
 use crate::remote::{self, Message, Outbox};
 use crate::sides::Side;
-use crate::{Output, OutputKind, OutputLine, events, push_output, sandbox, scheduler, with_world};
+use crate::{
+    Output, OutputKind, OutputLine, events, modules, push_output, sandbox, scheduler, watchdog,
+    with_world,
+};
 
 pub struct Context {
     pub lua: Lua,
-    pub shared: sandbox::Shared,
 }
 
 impl Context {
@@ -33,18 +35,23 @@ impl Context {
             | StdLib::UTF8;
         let lua = Lua::new_with(libraries, LuaOptions::default())
             .expect("loading Lua's standard libraries only fails when out of memory");
+        // First, so that every coroutine made from here on is watched.
+        watchdog::install(&lua).expect("setting a hook only fails when out of memory");
         // Which side this is, for `sides::check`.
         lua.set_app_data(side);
         lua.set_app_data(Output::default());
         lua.set_app_data(Outbox::default());
         lua.set_app_data(scheduler::Scheduler::default());
         lua.set_app_data(events::Connections::default());
+        lua.set_app_data(modules::Modules::default());
         if side == Side::Client {
             lua.set_app_data(HeldKeys::default());
             lua.set_app_data(Camera::default());
         }
-        let shared = sandbox::Shared::new(&lua)
+        sandbox::Shared::install(&lua)
             .expect("creating the shared script functions only fails when out of memory");
+        sandbox::lock_string_metatable(&lua)
+            .expect("changing the string metatable only fails when out of memory");
         let mut methods = remote::methods(&lua)
             .expect("creating the RemoteEvent methods only fails when out of memory");
         methods.push((
@@ -53,7 +60,19 @@ impl Context {
             instance::get_service(&lua).expect("only fails when out of memory"),
         ));
         lua.set_app_data(ClassMethods(methods));
-        Self { lua, shared }
+        Self { lua }
+    }
+
+    /// Makes the ModuleScript `module` loadable with `require` on this side.
+    /// Its code only runs when a script first requires it.
+    pub fn add_module(&self, module: InstanceId, path: &str, source: &str) {
+        modules::add(&self.lua, module, path, source);
+    }
+
+    /// How long a coroutine may run without pausing before the watchdog
+    /// stops it.
+    pub fn set_watchdog_limit(&self, limit: std::time::Duration) {
+        watchdog::set_limit(&self.lua, limit);
     }
 
     /// Runs a script's code as a new coroutine until it finishes, fails or
@@ -79,7 +98,7 @@ impl Context {
         path: &str,
         source: &str,
     ) -> mlua::Result<Thread> {
-        let env = sandbox::environment(&self.lua, &self.shared, ids)?;
+        let env = sandbox::environment(&self.lua, ids)?;
         let function = self
             .lua
             .load(source)

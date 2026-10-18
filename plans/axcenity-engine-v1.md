@@ -293,10 +293,10 @@ Add an instruction-count hook that stops a coroutine that runs too long without 
 
 ### Acceptance criteria
 
-- [ ] `while true do end` during Play is stopped with an error, and the editor stays responsive.
-- [ ] Normal heavy scripts (for example, loops of a few million iterations that yield) aren't falsely stopped.
-- [ ] A suite of sandbox-escape attempts all fail.
-- [ ] `require` loads project modules and nothing outside the project.
+- [x] `while true do end` during Play is stopped with an error, and the editor stays responsive.
+- [x] Normal heavy scripts (for example, loops of a few million iterations that yield) aren't falsely stopped.
+- [x] A suite of sandbox-escape attempts all fail.
+- [x] `require` loads project modules and nothing outside the project.
 
 ---
 

@@ -4,7 +4,7 @@ Read before working in the `project` or `player` crates, the export pipeline, CI
 
 ## Project folder
 
-- Readable text files only (except user assets): a manifest, world and Instance data, `.lua` scripts (`*.server.lua` / `*.client.lua`), block script files, `.css` stylesheets, and assets (glTF, textures, sounds).
+- Readable text files only (except user assets): a manifest, world and Instance data, `.lua` scripts (`*.server.lua` / `*.client.lua` / `*.module.lua`), block script files, `.css` stylesheets, and assets (glTF, textures, sounds).
 - One damaged file must not prevent loading the rest of the project. Report it and continue. Since Phase 13, `project::load` only fails for a missing or unreadable manifest (not a project folder) or a newer `format_version`. Anything else goes in `Project::problems` and is left out: a broken manifest gives the project its folder's name, a broken `world.json` an empty Workspace (`world_loaded = false`), and an unreadable script (not UTF-8, say) no Script. The player prints problems as `error:` lines and runs the rest.
 - The editor watches the folder and reloads files changed externally (see `docs/architecture.md`, Script editing). Before saving over a world file it never loaded, it renames that file to `world.backup.json` (`project::keep_world_file`).
 
@@ -18,6 +18,7 @@ my-game/
   world.json      the Workspace and its descendants
   scripts/        server scripts: build.server.lua, doors/open.server.lua, ...
                   client scripts: keys.client.lua, ...
+                  modules: shared/utils.module.lua, ...
 ```
 
 `world.json`:
@@ -47,6 +48,7 @@ my-game/
 - Saving (`project::save_world`) writes every property, sorted by name, with numbers in their shortest exact form. Loading and saving again always gives the same text. Writing every property, rather than only the changed ones, means a saved world keeps its look even if a default changes later. `examples/primitives` shows the saved layout.
 - **Scripts** (decided in Phase 4): every `scripts/**/*.server.lua` becomes a `Script` in `ServerScriptService`, named after the file without `.server.lua`, and scripts start in path order. Subfolders only organize files for now; all Scripts sit directly in `ServerScriptService`. (The Folder class exists since Phase 11, but script subfolders don't turn into Folders yet.) Scripts never appear in `world.json` (loading one there is an error, and saving leaves them out). Putting a script inside a part can be added later as a world-file reference without breaking this layout.
 - **Client scripts** (Phase 14): every `scripts/**/*.client.lua` becomes a `LocalScript` in `StarterPlayer.StarterPlayerScripts`, named the same way. `project.scripts` lists Scripts first, then LocalScripts, each by path (`script_order`), which is the order they start in. `script_class(path)`, `script_suffix(class)`, `script_service(world, class)` and `script_path(name, class)` pick the right ending and service.
+- **Modules** (Phase 15): every `scripts/**/*.module.lua` becomes a `ModuleScript` in `ReplicatedStorage`, named the same way, after the world file's children there. `script_order` puts modules first (they must be registered before any script requires them), then Scripts, then LocalScripts. Like other scripts, they're never written to `world.json`, and listing one there is an error.
 - **Script files** (Phase 13): `project::create_script` (never replaces a file, not even one differing only in capitals on Windows and macOS), `write_script` (through a `.saving` temporary file, like `save_world`), `rename_script` (same folder, refuses to replace another file) and `delete_script`. `check_script_name` applies Windows file name rules on every OS, so projects open everywhere.
 - `format_version` appears in both files. The engine refuses newer versions with a "please update" message.
 - Errors name the file and, for JSON syntax problems, the line and column. For bad property values they name the Instance path (for example `Workspace.Block.Color`).

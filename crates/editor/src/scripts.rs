@@ -10,6 +10,7 @@
 
 use std::collections::HashMap;
 
+use axcenity_core::ClassName;
 use axcenity_project::script_name;
 use eframe::egui;
 
@@ -18,6 +19,17 @@ use crate::side_warnings::SideWarning;
 
 /// What a new script starts with, as in Roblox Studio.
 pub const NEW_SCRIPT_SOURCE: &str = "print(\"Hello world!\")\n";
+/// What a new ModuleScript starts with: a table to put functions in, which
+/// `require` returns.
+pub const NEW_MODULE_SOURCE: &str = "local module = {}\n\nreturn module\n";
+
+/// What a new script of `class` starts with.
+pub fn new_script_source(class: ClassName) -> &'static str {
+    match class {
+        ClassName::ModuleScript => NEW_MODULE_SOURCE,
+        _ => NEW_SCRIPT_SOURCE,
+    }
+}
 /// The background of the line jumped to from an error in Output.
 const JUMP_LINE_COLOR: egui::Color32 = egui::Color32::from_rgba_premultiplied(60, 50, 10, 60);
 

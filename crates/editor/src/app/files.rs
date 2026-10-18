@@ -1,8 +1,8 @@
 //! The editor and the project folder: saving, script files (insert, open,
 //! rename, delete), and reacting to files changed by other programs.
 //!
-//! Each script is its `.server.lua` (Script) or `.client.lua` (LocalScript)
-//! file. Making, renaming or deleting a script changes its file straight
+//! Each script is its `.server.lua` (Script), `.client.lua` (LocalScript)
+//! or `.module.lua` (ModuleScript) file. Making, renaming or deleting a script changes its file straight
 //! away and isn't an undo step; only the code typed in a tab waits for Save.
 //!
 //! These are more methods of [`EditorApp`]: a child module like this one can
@@ -17,7 +17,7 @@ use eframe::egui;
 
 use super::EditorApp;
 use crate::output::Output;
-use crate::scripts::{Disk, NEW_SCRIPT_SOURCE};
+use crate::scripts::{Disk, new_script_source};
 use crate::tree;
 
 /// An error and its causes on one line, the way `{:#}` shows an `anyhow::Error`.
@@ -50,6 +50,17 @@ pub(super) fn report_problems(output: &mut Output, project: &Project) {
 /// The world file's text, or `None` if it can't be read.
 pub(super) fn read_world_text(folder: &Path) -> Option<String> {
     std::fs::read_to_string(folder.join(project::WORLD_FILE)).ok()
+}
+
+/// How many of `parent`'s children aren't scripts.
+fn non_script_children(world: &axcenity_core::World, parent: InstanceId) -> usize {
+    world.get(parent).map_or(0, |parent| {
+        parent
+            .children()
+            .iter()
+            .filter(|&&child| world.get(child).is_some_and(|c| !c.class().is_script()))
+            .count()
+    })
 }
 
 impl EditorApp {
@@ -210,8 +221,9 @@ impl EditorApp {
     }
 
     /// Keeps the scripts in the order they start in (and load in next
-    /// time): Scripts, then LocalScripts, each by path. Their Instances in
-    /// ServerScriptService and StarterPlayerScripts follow the same order.
+    /// time): ModuleScripts, Scripts, then LocalScripts, each by path. Their
+    /// Instances in ReplicatedStorage, ServerScriptService and
+    /// StarterPlayerScripts follow the same order.
     fn sort_scripts(&mut self) {
         let Some(project) = &mut self.project else {
             return;
@@ -219,12 +231,15 @@ impl EditorApp {
         project
             .scripts
             .sort_by(|a, b| project::script_order(&a.path).cmp(&project::script_order(&b.path)));
-        // Only scripts are in those two services in the edit world, so each
-        // script's index among its service's scripts is its child index.
-        let mut counts = std::collections::HashMap::new();
+        // Each service's scripts go after its other children (only
+        // ReplicatedStorage has any: RemoteEvents, Folders and so on), as
+        // they are after loading, where the world file comes first.
+        let mut next_index = std::collections::HashMap::new();
         for script in &project.scripts {
             let service = project::script_service(&self.world, project::script_class(&script.path));
-            let index = counts.entry(service).or_insert(0);
+            let index = next_index
+                .entry(service)
+                .or_insert_with(|| non_script_children(&self.world, service));
             let _ = self.world.set_parent_at(script.instance, service, *index);
             *index += 1;
         }
@@ -270,12 +285,13 @@ impl EditorApp {
             if self.world.find_first_child(service, &name).is_some() {
                 continue;
             }
-            match project::create_script(&folder, &name, class, NEW_SCRIPT_SOURCE) {
+            let source = new_script_source(class);
+            match project::create_script(&folder, &name, class, source) {
                 Ok(path) => {
-                    let id = self.add_script(&path, NEW_SCRIPT_SOURCE.to_string());
+                    let id = self.add_script(&path, source.to_string());
                     // Selects it and shows it in the Explorer.
                     self.select_from_viewport(Some(id));
-                    self.tabs.open(&path, NEW_SCRIPT_SOURCE, None);
+                    self.tabs.open(&path, source, None);
                     self.output.info(format!("Made a new script, `{path}`."));
                     return;
                 }
@@ -552,6 +568,7 @@ mod tests {
     use crate::explorer::Action;
     use crate::output::OutputKind;
     use crate::properties::Edit;
+    use crate::scripts::NEW_SCRIPT_SOURCE;
 
     fn script_names(app: &EditorApp) -> Vec<String> {
         let world = &app.world;
@@ -961,6 +978,49 @@ mod tests {
         fs::write(folder.join("scripts/Camera.client.lua"), "print(1)").unwrap();
         app.disk_changed(&["scripts/Camera.client.lua".to_string()]);
         assert_eq!(names_in(&app, service), ["Camera", "Keys"]);
+        let _ = fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn insert_module_script_makes_a_module_file_in_replicated_storage() {
+        let folder = copy_of_example("hello-touched", "insert-module-script");
+        let mut app = EditorApp::new(Some(&folder));
+        let what = crate::tree::Insertable::RemoteEvent;
+        app.act(Action::Insert { what, near: None });
+        app.act(Action::InsertScript(ClassName::ModuleScript));
+
+        let path = "scripts/ModuleScript.module.lua";
+        assert_eq!(
+            fs::read_to_string(folder.join(path)).unwrap(),
+            "local module = {}\n\nreturn module\n"
+        );
+        let service = app.world.replicated_storage();
+        // After the saved things, as it would be after loading.
+        assert_eq!(names_in(&app, service), ["RemoteEvent", "ModuleScript"]);
+        let id = app.world.find_first_child(service, "ModuleScript").unwrap();
+        assert_eq!(app.world.get(id).unwrap().class(), ClassName::ModuleScript);
+        // Modules are ready before any script starts.
+        let paths: Vec<&str> = app
+            .project
+            .as_ref()
+            .unwrap()
+            .scripts
+            .iter()
+            .map(|s| s.path.as_str())
+            .collect();
+        assert_eq!(paths, [path, "scripts/pad.server.lua"]);
+
+        // Nothing can be put inside it: it couldn't be saved there.
+        let part = app.world.create(ClassName::Part).unwrap();
+        app.world
+            .set_parent(part, Some(app.world.workspace()))
+            .unwrap();
+        assert!(tree::check_move(&app.world, part, id).is_err());
+
+        // It's a file, not part of the world file.
+        assert!(app.save());
+        let world_file = fs::read_to_string(folder.join(project::WORLD_FILE)).unwrap();
+        assert!(world_file.contains("RemoteEvent") && !world_file.contains("ModuleScript"));
         let _ = fs::remove_dir_all(&folder);
     }
 

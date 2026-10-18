@@ -7,8 +7,8 @@
 //! my-game/
 //!   axcenity.json   the manifest: project name and format version
 //!   world.json      the Instances in the world
-//!   scripts/        `*.server.lua` and `*.client.lua` files, in subfolders
-//!                   if you like
+//!   scripts/        `*.server.lua`, `*.client.lua` and `*.module.lua`
+//!                   files, in subfolders if you like
 //! ```
 //!
 //! One damaged file never stops the rest from loading: [`load`] leaves it
@@ -37,6 +37,9 @@ pub const SCRIPTS_FOLDER: &str = "scripts";
 pub const SERVER_SCRIPT_SUFFIX: &str = ".server.lua";
 /// Files ending in this are client scripts, which become LocalScripts.
 pub const CLIENT_SCRIPT_SUFFIX: &str = ".client.lua";
+/// Files ending in this are modules, which become ModuleScripts that other
+/// scripts load with `require`.
+pub const MODULE_SCRIPT_SUFFIX: &str = ".module.lua";
 
 /// The newest project format this version of the engine understands.
 pub const FORMAT_VERSION: u32 = 1;
@@ -52,9 +55,9 @@ pub struct Project {
     pub folder: PathBuf,
     pub manifest: Manifest,
     pub world: World,
-    /// Every script that could be read, in the order they start: server
-    /// scripts first, then client scripts, each sorted by path (see
-    /// [`script_order`]).
+    /// Every script that could be read, in the order they start: modules
+    /// first (so they can be required), then server scripts, then client
+    /// scripts, each sorted by path (see [`script_order`]).
     pub scripts: Vec<ScriptFile>,
     /// The files that couldn't be loaded. Each was left out, and the rest
     /// of the project loaded without it.
@@ -67,8 +70,9 @@ pub struct Project {
 
 /// A script file from the project's `scripts` folder.
 pub struct ScriptFile {
-    /// The Script made for this file, in `ServerScriptService`, or the
-    /// LocalScript, in `StarterPlayer.StarterPlayerScripts`.
+    /// The Script made for this file, in `ServerScriptService`, the
+    /// LocalScript, in `StarterPlayer.StarterPlayerScripts`, or the
+    /// ModuleScript, in `ReplicatedStorage`.
     pub instance: InstanceId,
     /// Where the file is, relative to the project folder and with `/` between
     /// folders on every OS, for example `scripts/doors/open.server.lua`.
@@ -168,7 +172,8 @@ fn load_world(folder: &Path) -> Result<World, LoadError> {
     parse_world(&text).map_err(|source| LoadError::World { path, source })
 }
 
-/// Reads every script and gives each one its Script or LocalScript (see
+/// Reads every script and gives each one its Script, LocalScript or
+/// ModuleScript (see
 /// [`add_script_instance`]). A file that can't be read is left out, with the
 /// reason added to `problems`.
 fn load_scripts(
@@ -190,7 +195,7 @@ fn load_scripts(
     scripts
 }
 
-/// The path of every `*.server.lua` and `*.client.lua` file in the project
+/// The path of every `*.server.lua`, `*.client.lua` and `*.module.lua` file in the project
 /// in `folder`, as [`ScriptFile::path`]s, in [`script_order`]. Folders that
 /// can't be read are skipped and added to `problems`.
 pub fn find_scripts(folder: &Path, problems: &mut Vec<LoadError>) -> Vec<String> {
@@ -207,11 +212,18 @@ pub fn find_scripts(folder: &Path, problems: &mut Vec<LoadError>) -> Vec<String>
     found
 }
 
-/// What scripts are sorted by: server scripts before client scripts (a
-/// server is running before any player joins), then by path. Sort with
+/// What scripts are sorted by: modules first (they only get ready to be
+/// required, so they must be there before any script runs), then server
+/// scripts before client scripts (a server is running before any player
+/// joins), then by path. Sort with
 /// `scripts.sort_by(|a, b| script_order(a).cmp(&script_order(b)))`.
-pub fn script_order(path: &str) -> (bool, &str) {
-    (script_class(path) == ClassName::LocalScript, path)
+pub fn script_order(path: &str) -> (u8, &str) {
+    let rank = match script_class(path) {
+        ClassName::ModuleScript => 0,
+        ClassName::Script => 1,
+        _ => 2,
+    };
+    (rank, path)
 }
 
 /// Adds the path of every script file in `dir` and its subfolders to
@@ -250,8 +262,13 @@ fn find_script_files(
         if disk_path.is_dir() {
             // Visited after the loop, which still borrows `problems` through `problem`.
             folders.push((disk_path, shown));
-        } else if file_name.ends_with(SERVER_SCRIPT_SUFFIX)
-            || file_name.ends_with(CLIENT_SCRIPT_SUFFIX)
+        } else if [
+            SERVER_SCRIPT_SUFFIX,
+            CLIENT_SCRIPT_SUFFIX,
+            MODULE_SCRIPT_SUFFIX,
+        ]
+        .iter()
+        .any(|suffix| file_name.ends_with(suffix))
         {
             found.push(shown);
         }
@@ -262,50 +279,58 @@ fn find_script_files(
 }
 
 /// The class of the script in the file at `path`: LocalScript for a
-/// `.client.lua` file, otherwise Script.
+/// `.client.lua` file, ModuleScript for a `.module.lua` file, otherwise Script.
 pub fn script_class(path: &str) -> ClassName {
     if path.ends_with(CLIENT_SCRIPT_SUFFIX) {
         ClassName::LocalScript
+    } else if path.ends_with(MODULE_SCRIPT_SUFFIX) {
+        ClassName::ModuleScript
     } else {
         ClassName::Script
     }
 }
 
 /// The file ending for scripts of `class`: `.client.lua` for a LocalScript,
-/// otherwise `.server.lua`.
+/// `.module.lua` for a ModuleScript, otherwise `.server.lua`.
 pub fn script_suffix(class: ClassName) -> &'static str {
     match class {
         ClassName::LocalScript => CLIENT_SCRIPT_SUFFIX,
+        ClassName::ModuleScript => MODULE_SCRIPT_SUFFIX,
         _ => SERVER_SCRIPT_SUFFIX,
     }
 }
 
 /// The name of the script for the file at `path`: its file name without
-/// `.server.lua` or `.client.lua`, so `scripts/doors/open.server.lua` is `open`.
+/// `.server.lua`, `.client.lua` or `.module.lua`, so
+/// `scripts/doors/open.server.lua` is `open`.
 pub fn script_name(path: &str) -> &str {
     let file_name = path.rsplit('/').next().unwrap_or(path);
     file_name
         .strip_suffix(SERVER_SCRIPT_SUFFIX)
         .or_else(|| file_name.strip_suffix(CLIENT_SCRIPT_SUFFIX))
+        .or_else(|| file_name.strip_suffix(MODULE_SCRIPT_SUFFIX))
         .unwrap_or(file_name)
 }
 
-/// The path of a new script of `class` (Script or LocalScript) called
+/// The path of a new script of `class` (Script, LocalScript or ModuleScript) called
 /// `name`, directly in the `scripts` folder.
 pub fn script_path(name: &str, class: ClassName) -> String {
     format!("{SCRIPTS_FOLDER}/{name}{}", script_suffix(class))
 }
 
 /// The service the scripts of `class` go in: `ServerScriptService` for
-/// Scripts, `StarterPlayer.StarterPlayerScripts` for LocalScripts.
+/// Scripts, `StarterPlayer.StarterPlayerScripts` for LocalScripts, and
+/// `ReplicatedStorage` for ModuleScripts, where both sides can require them.
 pub fn script_service(world: &World, class: ClassName) -> InstanceId {
     match class {
         ClassName::LocalScript => world.starter_player_scripts(),
+        ClassName::ModuleScript => world.replicated_storage(),
         _ => world.server_script_service(),
     }
 }
 
-/// Makes the Script (or, for a `.client.lua` file, the LocalScript) for the
+/// Makes the Script (or, for a `.client.lua` file, the LocalScript, and for
+/// a `.module.lua` file, the ModuleScript) for the
 /// file at `path`, named after it, in its service (see [`script_service`]).
 /// Subfolders only organize the files: every script goes directly into its
 /// service.
@@ -619,6 +644,42 @@ mod tests {
             assert_eq!(instance.class(), class);
             assert_eq!(instance.parent(), Some(script_service(world, class)));
         }
+    }
+
+    #[test]
+    fn module_files_become_module_scripts_in_replicated_storage_and_load_first() {
+        let folder = project_with_scripts(
+            "modules",
+            &[
+                ("scripts/main.server.lua", b"print('main')"),
+                ("scripts/shared/utils.module.lua", b"return {}"),
+                ("scripts/keys.client.lua", b"print('keys')"),
+            ],
+        );
+        let project = load(&folder);
+        fs::remove_dir_all(&folder).unwrap();
+        let project = project.unwrap();
+
+        let paths: Vec<&str> = project.scripts.iter().map(|s| s.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            [
+                "scripts/shared/utils.module.lua",
+                "scripts/main.server.lua",
+                "scripts/keys.client.lua",
+            ]
+        );
+        let world = &project.world;
+        let utils = world.get(project.scripts[0].instance).unwrap();
+        assert_eq!(utils.class(), ClassName::ModuleScript);
+        assert_eq!(utils.name(), "utils");
+        assert_eq!(utils.parent(), Some(world.replicated_storage()));
+        // ModuleScripts are files, so the world file doesn't save them.
+        assert!(!write_world(world).contains("utils"));
+        assert_eq!(
+            script_path("utils", ClassName::ModuleScript),
+            "scripts/utils.module.lua"
+        );
     }
 
     /// An empty folder in the system's temporary folder, unique to this test run.

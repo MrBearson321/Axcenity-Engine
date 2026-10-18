@@ -31,6 +31,9 @@ pub enum ClassName {
     /// Lua code that runs on the player's side (input, camera). Its source
     /// lives in a `*.client.lua` file.
     LocalScript,
+    /// Lua code that other scripts load with `require`, from a `*.module.lua`
+    /// file. It runs once per side, the first time it's required.
+    ModuleScript,
     /// Carries messages between Scripts and LocalScripts.
     RemoteEvent,
     /// Someone playing the game. Made by the engine when they join, in Players.
@@ -42,7 +45,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 14] = [
+    pub const ALL: [ClassName; 15] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -53,6 +56,7 @@ impl ClassName {
         ClassName::Part,
         ClassName::Script,
         ClassName::LocalScript,
+        ClassName::ModuleScript,
         ClassName::RemoteEvent,
         ClassName::Player,
         ClassName::Model,
@@ -71,6 +75,7 @@ impl ClassName {
             ClassName::Part => "Part",
             ClassName::Script => "Script",
             ClassName::LocalScript => "LocalScript",
+            ClassName::ModuleScript => "ModuleScript",
             ClassName::RemoteEvent => "RemoteEvent",
             ClassName::Player => "Player",
             ClassName::Model => "Model",
@@ -99,9 +104,12 @@ impl ClassName {
         )
     }
 
-    /// Script or LocalScript: Lua code kept in a file of its own.
+    /// Script, LocalScript or ModuleScript: Lua code kept in a file of its own.
     pub fn is_script(self) -> bool {
-        matches!(self, ClassName::Script | ClassName::LocalScript)
+        matches!(
+            self,
+            ClassName::Script | ClassName::LocalScript | ClassName::ModuleScript
+        )
     }
 
     /// Every property this class has, with its default value. A new Instance
@@ -117,6 +125,7 @@ impl ClassName {
             | ClassName::StarterPlayerScripts
             | ClassName::Script
             | ClassName::LocalScript
+            | ClassName::ModuleScript
             | ClassName::RemoteEvent
             | ClassName::Player
             | ClassName::Model
@@ -154,6 +163,7 @@ impl ClassName {
             | ClassName::StarterPlayerScripts
             | ClassName::Script
             | ClassName::LocalScript
+            | ClassName::ModuleScript
             | ClassName::Player
             | ClassName::Model
             | ClassName::Folder => &[],

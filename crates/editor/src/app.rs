@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use axcenity_core::{ClassName, InstanceId, Vector3, World};
+use axcenity_core::{InstanceId, Vector3, World};
 use axcenity_project::ScriptFile;
 use axcenity_script::{CameraState, KeyEvent};
 use eframe::egui;
@@ -922,7 +922,7 @@ impl EditorApp {
                 }
             }
             ui.separator();
-            for class in [ClassName::Script, ClassName::LocalScript] {
+            for class in explorer::SCRIPT_CLASSES {
                 if ui
                     .add_enabled(!playing && can_play, egui::Button::new(class.as_str()))
                     .on_hover_text(explorer::script_hover(class))
@@ -2123,6 +2123,48 @@ mod tests {
         // Nothing was unsaved, so Play didn't write the world file.
         let file_after = std::fs::read_to_string(folder.join("world.json")).unwrap();
         assert_eq!(file_after, file_before);
+    }
+
+    #[test]
+    fn an_endless_loop_during_play_is_stopped_and_the_editor_carries_on() {
+        let folder = copy_of_example("hello-touched", "endless-loop");
+        std::fs::write(
+            folder.join("scripts/stuck.server.lua"),
+            "print('looping')\nwhile true do\nend\n",
+        )
+        .unwrap();
+        let mut app = EditorApp::new(Some(&folder));
+        let started = std::time::Instant::now();
+        app.play();
+        let took = started.elapsed();
+
+        // The real limit, three seconds, then the editor gets control back.
+        assert!(app.playing(), "the game keeps running");
+        let limit = axcenity_script::WATCHDOG_LIMIT;
+        assert!(took >= limit && took < limit * 2, "{took:?}");
+        let stopped = app
+            .output
+            .lines()
+            .iter()
+            .find(|line| line.text.contains("without pausing"))
+            .unwrap();
+        assert_eq!(stopped.kind, OutputKind::Error);
+        assert!(
+            stopped.text.starts_with(
+                "scripts/stuck.server.lua:2: this script ran for 3 seconds without pausing"
+            ),
+            "{}",
+            stopped.text
+        );
+        // It links to the script, like any error.
+        assert!(stopped.location.is_some());
+
+        // The other script and the frames carry on, and Stop works.
+        play_for(&mut app, 2.9);
+        assert!(printed(&app).contains(&"Ball touched the pad"));
+        app.stop();
+        assert!(!app.playing());
+        let _ = std::fs::remove_dir_all(&folder);
     }
 
     #[test]

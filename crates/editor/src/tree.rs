@@ -164,6 +164,13 @@ pub fn check_move(world: &World, id: InstanceId, parent: InstanceId) -> Result<(
     if parent == id || world.is_descendant_of(parent, id) {
         return Err("Something can't go inside itself.");
     }
+    if world
+        .get(parent)
+        .is_some_and(|parent| parent.class().is_script())
+    {
+        // A script is a file; what's inside it couldn't be saved.
+        return Err("Scripts can't hold other things. Use a Folder or a Model.");
+    }
     let saved_service = parent == world.workspace() || parent == world.replicated_storage();
     if !saved_service && !is_saved(world, parent) {
         // The world file only holds those two, so it would be lost on saving.

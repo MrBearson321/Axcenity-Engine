@@ -211,7 +211,7 @@ fn server_and_client_contexts_do_not_share_lua_globals() {
     let mut world = World::new();
     let mut runtime = ScriptRuntime::new();
     // Inside one side, scripts already have their own globals and library
-    // tables, but the string metatable is shared: so set that too.
+    // tables (and the string metatable is locked, see `sandbox_tests`).
     start(
         &mut runtime,
         &mut world,
@@ -220,8 +220,6 @@ fn server_and_client_contexts_do_not_share_lua_globals() {
         score = 10
         _G.level = 2
         string.shout = string.upper
-        getmetatable("").__index.whisper = string.lower
-        print(("x"):whisper())
         "#,
     );
     start(
@@ -229,10 +227,10 @@ fn server_and_client_contexts_do_not_share_lua_globals() {
         &mut world,
         "scripts/get.client.lua",
         r#"
-        print(score, _G.level, string.shout, getmetatable("").__index.whisper)
+        print(score, _G.level, string.shout)
         "#,
     );
-    assert_eq!(lines(&mut runtime), ["x", "nil\tnil\tnil\tnil"]);
+    assert_eq!(lines(&mut runtime), ["nil\tnil\tnil"]);
 }
 
 /// A stand-in transport: records every message it carries, and only

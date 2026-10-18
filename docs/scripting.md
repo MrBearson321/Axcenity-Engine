@@ -14,9 +14,9 @@ Read before working in the `script` or `blocks` crates, or adding anything to th
 - Clean up Roblox quirks when it helps beginners. Don't chase full compatibility.
 - Never use Roblox's name, logos or assets.
 
-## API so far (Phase 14)
+## API so far (Phase 15)
 
-- Globals: `game`, `workspace`, `script` (the running Script or LocalScript), `print`, `Instance.new(className)`, `Vector3.new(x, y, z)`, `Color3.new(r, g, b)`, `Color3.fromRGB(r, g, b)`, `Enum` and `task` (see Execution model).
+- Globals: `game`, `workspace`, `script` (the running Script, LocalScript or ModuleScript), `print`, `require(module)` (see Modules), `Instance.new(className)`, `Vector3.new(x, y, z)`, `Color3.new(r, g, b)`, `Color3.fromRGB(r, g, b)`, `Enum` and `task` (see Execution model).
 - `game:GetService(name)` returns a service by class name (`Workspace`, `Players`, `ReplicatedStorage`, `ServerScriptService`, `StarterPlayer`), or `UserInputService`; a wrong name lists the choices. `Instance.new("Player")` is an error: Players are made when someone joins.
 - Instances: `Name`, `ClassName` (read-only), `Parent` (an Instance or `nil`), every property in `core`'s class table, and `:FindFirstChild(name, recursive?)`.
 - **Children by name** (decided in Phase 4): `workspace.Block` returns the first child named `Block`. Methods and properties win over children with the same name. A name that's none of these errors with `X is not a valid member of Workspace "Workspace"`.
@@ -38,7 +38,23 @@ Read before working in the `script` or `blocks` crates, or adding anything to th
 Each script gets its own restricted environment. Remove or replace `io`, `os` (keep only safe time functions), `debug`, `load`, `loadfile`, `dofile`, `require` (replaced by an engine module loader), and `collectgarbage` beyond safe options. Treat all script code as untrusted.
 
 - Since Phase 4 the environment is built from an **allowlist** (`crates/script/src/sandbox.rs`): the safe base functions, per-script copies of `coroutine`, `math`, `string` (without `dump`), `table` and `utf8`, and `os.clock/date/difftime/time`. `_G` is the script's own environment, and only source text loads, never bytecode.
-- Still open for Phase 15: the string metatable is shared (`getmetatable("").__index`), the module `require`, and a limited `collectgarbage`.
+
+### Hardened in Phase 15
+
+- **String metatable**: every string shares one metatable, whose `__index` was the real `string` table. It's now a hidden copy without `dump`, and `getmetatable("")` returns `"The metatable is locked"` (as in Roblox). A script's `string.upper = ...` only changes its own copy.
+- **`collectgarbage`** only takes `"count"` (memory in use, in KB). Anything else errors: the engine runs the collector for everyone.
+- **`setmetatable`** refuses a metatable with `__gc`: Lua runs finalizers with hooks off (so the watchdog couldn't stop one) and at unpredictable moments.
+- **`coroutine.resume/wrap/status/close`** are engine versions (`watchdog.rs`): errors come back as plain `path:line:` strings like `pcall`'s, `wrap` doesn't add a second location, and a coroutine the watchdog stopped looks dead and can't be resumed or closed.
+- Engine objects' metatables (Instances, Vector3, ...) are locked by mlua: `getmetatable(workspace)` is `false`; `sandbox_tests.rs` checks this and every other escape attempt (missing `io`/`debug`/`load`/`package`/..., bytecode, `os` beyond the clock, cross-script and cross-side globals, `require` of paths and libraries).
+- **Not covered** (out of scope for v1, noted for later): memory limits (a script can allocate until the process runs out), and C functions that run long by themselves (a huge `string.rep`, a pathological pattern in `string.find`): the watchdog only sees Lua instructions.
+
+## Modules (decided in Phase 15, chosen by the developer)
+
+- Roblox's way: a `scripts/**/*.module.lua` file becomes a **ModuleScript** in **ReplicatedStorage** (named after the file), and `require(game.ReplicatedStorage.Utils)` runs it. Only ModuleScripts can be required: a string (`require("utils")`), a path, a library name or another Instance is an error that explains what to pass. So nothing outside the project can be loaded.
+- A module runs **once per side**, the first time a script there requires it, in its own environment (`script` is the ModuleScript); every later `require` on that side gets the same value. The server and the client each run their own copy.
+- It must return exactly one value (usually a table), or `require` errors. An error while loading reaches the requiring script (with the module's path and line), and the module is tried again at the next `require`. A syntax error names both files: `scripts/main.server.lua:1: scripts/m.module.lua:3: ...`.
+- The module's code runs in the requiring coroutine, so it may `task.wait`; a second script requiring it meanwhile waits until it's loaded. Modules that require each other (in the same coroutine) error instead of hanging.
+- The host passes ModuleScripts to `ScriptRuntime::start_script` like any script; they only register their code (`modules.rs`), so pass them first (`project::script_order` sorts them first). A ModuleScript made with `Instance.new` has no code and can't be required.
 
 ## Execution model
 
@@ -54,7 +70,7 @@ Each script gets its own restricted environment. Remove or replace `io`, `os` (k
 - `task.wait` inside a script's own coroutine (`coroutine.wrap`) pauses just that coroutine and returns control to whoever resumed it; the scheduler resumes it later. It also works inside `pcall`.
 - No legacy `wait`, `spawn` or `delay` globals (decided in Phase 5): only `task.*`.
 - Event handlers fired in the same frame run in a deterministic order: touches in the order physics found them (sorted pairs per step), then for each pair the first part's handlers and then the other's, each in the order they were connected. Handlers run **immediately** when the event fires (step 4), each as a new coroutine, so a handler that calls `task.wait` pauses only itself and the scheduler resumes it later. A handler disconnected by an earlier handler in the same firing doesn't run. An error in a handler is reported and the handler stays connected, as in Roblox.
-- **Watchdog**: an instruction-count hook aborts a coroutine that runs too long without yielding, and reports an error with the script name and line.
+- **Watchdog** (built in Phase 15, `watchdog.rs`): Lua calls a hook every 1000 instructions in every coroutine. A coroutine may run **3 seconds** without pausing (`WATCHDOG_LIMIT`, chosen by the developer; `ScriptRuntime::set_watchdog_limit` changes it, for tests). The budget starts when the scheduler resumes it (or the host starts a script), so code that pauses now and then is never stopped. When it's used up, the hook **yields** the coroutine and nothing ever resumes it; the scheduler reports `path:line: this script ran for 3 seconds without pausing, so it was stopped. ...`. A yield can't be caught by `pcall` and runs no handlers or `__close`, so a script can't keep itself alive. Code that can't yield (Lua inside a C function, such as a `table.sort` comparator) gets an error instead, which the engine's `pcall`/`xpcall` pass on rather than catch (yielding is preferred because Lua leaves hooks off in a coroutine that an error from a hook ended). A coroutine that resumed the stopped one with `coroutine.resume` shares the used-up budget, so it's stopped too if it keeps running; one that `task.spawn`ed it gets a fresh budget. Other scripts carry on as normal. The game and the editor freeze for up to 3 seconds, then carry on.
 - Errors in one script never stop other scripts. Report them to Output with the script path and line. An error in a `task.spawn` or `task.delay` function is reported the same way and doesn't stop the script that started it.
 
 ## Server and client
@@ -62,7 +78,7 @@ Each script gets its own restricted environment. Remove or replace `io`, `os` (k
 - `Script` runs on the server side. `LocalScript` runs on the client side (input, camera, UI).
 - `RemoteEvent` sends messages server ↔ client. v1 uses an **in-memory loopback transport**, so keep the transport behind a trait so a real network can replace it.
 - Client-only APIs (input, camera, local UI) error in a `Script` with a helpful message, and vice versa.
-- File naming: `*.server.lua` and `*.client.lua`.
+- File naming: `*.server.lua`, `*.client.lua` and (Phase 15) `*.module.lua`, which both sides can require.
 
 ### Decided in Phase 14
 

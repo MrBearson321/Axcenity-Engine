@@ -2,6 +2,8 @@
 
 use mlua::{Function, IntoLua, Lua};
 
+use crate::watchdog;
+
 /// The message to show for a script error, starting with `path:line:`.
 pub fn error_message(err: &mlua::Error) -> String {
     match err {
@@ -52,14 +54,35 @@ fn script_location(traceback: &str) -> Option<&str> {
 ///
 /// They're written in Lua so they still call the real `pcall`; a Rust version
 /// would stop scripts from pausing (`task.wait`) inside a `pcall`.
+///
+/// `pcall` and `xpcall` don't catch the watchdog's error (`stopped` returns
+/// it once the watchdog has stopped this coroutine): it's raised again, so a
+/// script can't keep running forever by catching it. `xpcall` doesn't call
+/// the script's handler for it either, because Lua runs a handler for an
+/// error from the watchdog's hook with hooks off, where it can't be stopped.
 const PROTECTED_CALLS: &str = r#"
-local pcall, xpcall, clean = ...
+local pcall, xpcall, clean, stopped = ...
+
+local function raise_if_stopped()
+    local message = stopped()
+    if message then
+        error(message, 0)
+    end
+end
 
 local function finish(ok, ...)
     if ok then
         return true, ...
     end
+    raise_if_stopped()
     return false, clean((...))
+end
+
+local function finish_xpcall(ok, ...)
+    if not ok then
+        raise_if_stopped()
+    end
+    return ok, ...
 end
 
 local function safe_pcall(f, ...)
@@ -67,26 +90,44 @@ local function safe_pcall(f, ...)
 end
 
 local function safe_xpcall(f, handler, ...)
-    return xpcall(f, function(err)
+    return finish_xpcall(xpcall(f, function(err)
+        if stopped() then
+            return err
+        end
         return handler(clean(err))
-    end, ...)
+    end, ...))
 end
 
 return safe_pcall, safe_xpcall
 "#;
 
-/// Creates the `pcall` and `xpcall` every script gets. They hold no state, so
-/// one pair is shared by all scripts.
-pub fn protected_calls(lua: &Lua) -> mlua::Result<(Function, Function)> {
+/// The engine's `pcall` and `xpcall`, and `clean`, which turns an mlua
+/// error object into a plain string (and passes any other value on).
+pub struct ProtectedCalls {
+    pub pcall: Function,
+    pub xpcall: Function,
+    pub clean: Function,
+}
+
+/// Creates the `pcall` and `xpcall` every script gets. They hold no state,
+/// so one pair is shared by all scripts.
+pub fn protected_calls(lua: &Lua) -> mlua::Result<ProtectedCalls> {
     let globals = lua.globals();
     let clean = lua.create_function(|lua, value: mlua::Value| match value {
         // An error object made by mlua; other error values (strings, tables) pass through.
         mlua::Value::Error(err) => error_message(&err).into_lua(lua),
         other => Ok(other),
     })?;
-    lua.load(PROTECTED_CALLS).set_name("=[engine]").call((
+    let stopped = lua.create_function(|lua, ()| Ok(watchdog::stopped(lua)))?;
+    let (pcall, xpcall) = lua.load(PROTECTED_CALLS).set_name("=[engine]").call((
         globals.raw_get::<Function>("pcall")?,
         globals.raw_get::<Function>("xpcall")?,
+        &clean,
+        stopped,
+    ))?;
+    Ok(ProtectedCalls {
+        pcall,
+        xpcall,
         clean,
-    ))
+    })
 }

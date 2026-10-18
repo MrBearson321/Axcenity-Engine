@@ -66,6 +66,11 @@ impl TaskFunctions {
         Ok(Self { wait, spawn, delay })
     }
 
+    /// `task.wait`, for other engine Lua that needs to wait.
+    pub fn wait(&self) -> &Function {
+        &self.wait
+    }
+
     /// A new `task` table for one script, so a script that replaces
     /// `task.wait` only breaks itself.
     pub fn library(&self, lua: &Lua) -> mlua::Result<Table> {

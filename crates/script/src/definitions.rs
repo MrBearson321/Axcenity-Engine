@@ -258,10 +258,18 @@ const INSTANCE_GLOBALS: &[(&str, &str, &str)] = &[
     ),
     (
         "script",
-        "Script|LocalScript",
-        "The Script or LocalScript that is running this code.",
+        "Script|LocalScript|ModuleScript",
+        "The Script, LocalScript or ModuleScript that is running this code.",
     ),
 ];
+
+/// Global functions the engine adds or replaces.
+const GLOBAL_FUNCTIONS: &[Function] = &[Function {
+    name: "require",
+    doc: "Runs a ModuleScript (a `.module.lua` file, such as `require(game.ReplicatedStorage.Utils)`) the first time, and returns what it returned. Later calls on the same side return the same value.",
+    params: &[("module", "ModuleScript")],
+    returns: "any",
+}];
 
 /// Methods only some classes have.
 const CLASS_METHODS: &[(ClassName, Function)] = &[
@@ -476,7 +484,7 @@ fn class_doc(class: ClassName) -> &'static str {
         ClassName::Workspace => "The service that holds the 3D world. Parts inside it are drawn.",
         ClassName::Players => "The service with a Player for everyone in the game.",
         ClassName::ReplicatedStorage => {
-            "The service for things Scripts and LocalScripts share, such as RemoteEvents."
+            "The service for things Scripts and LocalScripts share, such as RemoteEvents and ModuleScripts."
         }
         ClassName::ServerScriptService => {
             "The service that holds server scripts (`scripts/*.server.lua`)."
@@ -491,6 +499,9 @@ fn class_doc(class: ClassName) -> &'static str {
         ClassName::Script => "Lua code that runs on the server, from a `.server.lua` file.",
         ClassName::LocalScript => {
             "Lua code that runs on the player's side (input, camera), from a `.client.lua` file."
+        }
+        ClassName::ModuleScript => {
+            "Lua code that scripts load with `require`, from a `.module.lua` file. It runs once per side and returns one value."
         }
         ClassName::RemoteEvent => {
             "Carries messages between Scripts and LocalScripts. Keep it in ReplicatedStorage."
@@ -563,6 +574,11 @@ impl Writer {
         function: &Function,
         overloads: &[String],
     ) {
+        self.function_named(&format!("{owner}{separator}"), function, overloads);
+    }
+
+    /// A function whose full name is `prefix` and then its name: `""` for a global.
+    fn function_named(&mut self, prefix: &str, function: &Function, overloads: &[String]) {
         self.doc(&with_side(function.name, function.doc));
         for (name, ty) in function.params {
             self.line(&format!("---@param {name} {ty}"));
@@ -577,7 +593,7 @@ impl Writer {
             .map(|(name, _)| name.trim_end_matches('?'))
             .collect();
         self.line(&format!(
-            "function {owner}{separator}{}({}) end",
+            "function {prefix}{}({}) end",
             function.name,
             names.join(", ")
         ));
@@ -735,6 +751,9 @@ pub fn lua_definitions() -> String {
     w.line("---@type EnumLibrary");
     w.line("Enum = nil");
     w.line("");
+    for function in GLOBAL_FUNCTIONS {
+        w.function_named("", function, &[]);
+    }
 
     for library in LIBRARIES {
         w.doc(library.doc);
@@ -866,7 +885,7 @@ mod tests {
             workspace: world.workspace(),
             script: world.workspace(),
         };
-        sandbox::environment(&context.lua, &context.shared, ids).unwrap()
+        sandbox::environment(&context.lua, ids).unwrap()
     }
 
     fn keys(table: &Table) -> BTreeSet<String> {
@@ -883,7 +902,15 @@ mod tests {
             .iter()
             .chain(SAFE_LIBRARIES)
             // Standard names that the sandbox replaces or trims.
-            .chain(&["os", "_G", "pcall", "xpcall", "print"])
+            .chain(&[
+                "os",
+                "_G",
+                "pcall",
+                "xpcall",
+                "print",
+                "setmetatable",
+                "collectgarbage",
+            ])
             .map(|name| name.to_string())
             .collect();
         let engine: BTreeSet<String> = keys(&environment(&runtime))
@@ -897,6 +924,7 @@ mod tests {
             .collect();
         described.extend(LIBRARIES.iter().map(|library| library.global.to_owned()));
         described.insert("Enum".to_owned());
+        described.extend(GLOBAL_FUNCTIONS.iter().map(|f| f.name.to_owned()));
         assert_eq!(engine, described);
     }
 

@@ -512,6 +512,28 @@ mod tests {
         assert_eq!(draw_list.items.len(), parts_before + 5);
     }
 
+    #[test]
+    fn hello_modules_example_builds_stairs_through_two_modules() {
+        let (world, _) = start_example("hello-modules");
+        let workspace = world.workspace();
+        let colors: Vec<Option<&Value>> = (1..=8)
+            .map(|n| {
+                let step = world
+                    .find_first_child(workspace, &format!("Step{n}"))
+                    .unwrap();
+                world.get(step).unwrap().property("Color")
+            })
+            .collect();
+        // The Palette module, required by the Builder module, goes round
+        // four colors.
+        assert_eq!(colors[0], colors[4]);
+        assert_ne!(colors[0], colors[1]);
+        // The modules are in ReplicatedStorage, where both sides find them.
+        let storage = world.replicated_storage();
+        assert!(world.find_first_child(storage, "Palette").is_some());
+        assert!(world.find_first_child(storage, "Builder").is_some());
+    }
+
     /// The example project in `examples/<name>`, with its scripts started.
     fn start_example(name: &str) -> (World, ScriptRuntime) {
         let folder = Path::new(env!("CARGO_MANIFEST_DIR"))

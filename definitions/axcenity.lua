@@ -172,7 +172,7 @@ function ConnectionClass:Disconnect() end
 ---@class DataModel: Instance
 ---@field Workspace Workspace The service that holds the 3D world. Parts inside it are drawn.
 ---@field Players Players The service with a Player for everyone in the game.
----@field ReplicatedStorage ReplicatedStorage The service for things Scripts and LocalScripts share, such as RemoteEvents.
+---@field ReplicatedStorage ReplicatedStorage The service for things Scripts and LocalScripts share, such as RemoteEvents and ModuleScripts.
 ---@field ServerScriptService ServerScriptService The service that holds server scripts (`scripts/*.server.lua`).
 ---@field StarterPlayer StarterPlayer The service with what each player starts with, such as StarterPlayerScripts.
 ---@field UserInputService UserInputService The player's keyboard (same as `game:GetService("UserInputService")`). LocalScripts only.
@@ -192,7 +192,7 @@ function DataModelClass:GetService(className) end
 ---@class Players: Instance
 ---@field LocalPlayer Player The player on this device. LocalScripts only.
 
----The service for things Scripts and LocalScripts share, such as RemoteEvents.
+---The service for things Scripts and LocalScripts share, such as RemoteEvents and ModuleScripts.
 ---@class ReplicatedStorage: Instance
 
 ---The service that holds server scripts (`scripts/*.server.lua`).
@@ -222,6 +222,9 @@ function DataModelClass:GetService(className) end
 
 ---Lua code that runs on the player's side (input, camera), from a `.client.lua` file.
 ---@class LocalScript: Instance
+
+---Lua code that scripts load with `require`, from a `.module.lua` file. It runs once per side and returns one value.
+---@class ModuleScript: Instance
 
 ---Carries messages between Scripts and LocalScripts. Keep it in ReplicatedStorage.
 ---@class RemoteEvent: Instance
@@ -265,13 +268,18 @@ game = nil
 ---@type Workspace
 workspace = nil
 
----The Script or LocalScript that is running this code.
----@type Script|LocalScript
+---The Script, LocalScript or ModuleScript that is running this code.
+---@type Script|LocalScript|ModuleScript
 script = nil
 
 ---Every enum, such as `Enum.Material`, `Enum.PartType` and `Enum.KeyCode`.
 ---@type EnumLibrary
 Enum = nil
+
+---Runs a ModuleScript (a `.module.lua` file, such as `require(game.ReplicatedStorage.Utils)`) the first time, and returns what it returned. Later calls on the same side return the same value.
+---@param module ModuleScript
+---@return any
+function require(module) end
 
 ---Creates Instances.
 ---@class InstanceLibrary
@@ -283,6 +291,7 @@ Instance = {}
 ---@overload fun(className: "Part"): Part
 ---@overload fun(className: "Script"): Script
 ---@overload fun(className: "LocalScript"): LocalScript
+---@overload fun(className: "ModuleScript"): ModuleScript
 ---@overload fun(className: "RemoteEvent"): RemoteEvent
 ---@overload fun(className: "Model"): Model
 ---@overload fun(className: "Folder"): Folder

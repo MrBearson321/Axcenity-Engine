@@ -119,9 +119,14 @@ Since Phase 14, step 1 also hands LocalScripts the camera (`set_camera`) and the
 - **Play input**: during Play, keyboard events go to LocalScripts (`play::GameKeys`) unless a text box has the keyboard; then, or when the window loses focus, held keys are let go. Keys use their physical place when egui knows it. Shift, Ctrl and Alt come from egui's modifiers, so they always arrive as the left one. WASD still flies the editor camera too, as in the player.
 - **Play camera**: LocalScripts see the viewport camera as `workspace.CurrentCamera`, and setting it moves the viewport camera (`Viewport::camera_view` / `set_camera_view`).
 
+### ModuleScripts (Phase 15)
+
+- The toolbar's **ModuleScript** button and Insert ▸ ModuleScript make `scripts/ModuleScript.module.lua` (starting with `local module = {}` / `return module`) and its ModuleScript in ReplicatedStorage. They open, rename (keeps `.module.lua`), delete and watch like other scripts, and never get wrong-side warnings (they run on whichever side requires them).
+- In ReplicatedStorage, scripts sort after the saved children, in path order (`sort_scripts`), as after loading. Nothing can be dropped into any script (`check_move`): it couldn't be saved there.
+
 ## Play mode
 
-Play runs in-process on a **deep copy** of the edit world, and Stop drops the copy. Before Play: autosave. During Play: the Lua watchdog is active (Phase 15), and Rust panics are caught at the Play boundary and reported to the Output panel.
+Play runs in-process on a **deep copy** of the edit world, and Stop drops the copy. Before Play: autosave. During Play: the Lua watchdog stops a script that runs 3 seconds without pausing (the editor freezes that long, then the error appears in Output and the game carries on; see `docs/scripting.md`), and Rust panics are caught at the Play boundary and reported to the Output panel.
 
 ### Decided in Phase 12
 

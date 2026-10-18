@@ -89,10 +89,10 @@ fn dangerous_functions_are_unavailable() {
         &mut world,
         r#"
         print(io, os.execute, os.exit, os.remove, os.getenv, debug, load, dofile,
-              loadfile, require, package, collectgarbage, string.dump)
+              loadfile, package, string.dump)
         "#,
     );
-    assert_eq!(output, [["nil"; 13].join("\t")]);
+    assert_eq!(output, [["nil"; 11].join("\t")]);
 }
 
 #[test]

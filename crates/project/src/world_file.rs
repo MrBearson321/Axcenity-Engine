@@ -51,7 +51,7 @@ pub enum WorldError {
     #[error("{path}: {class} is a service and can't be listed as a child")]
     Service { path: String, class: ClassName },
     #[error(
-        "{path}: scripts can't be listed in the world file; save them as files in the `scripts` folder instead (`.server.lua` for a Script, `.client.lua` for a LocalScript)"
+        "{path}: scripts can't be listed in the world file; save them as files in the `scripts` folder instead (`.server.lua` for a Script, `.client.lua` for a LocalScript, `.module.lua` for a ModuleScript)"
     )]
     Script { path: String },
     #[error("{path}: Players are made when someone joins the game, so they can't be saved")]

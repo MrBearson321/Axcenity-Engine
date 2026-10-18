@@ -4,12 +4,17 @@
 //! holding an allowlist of safe standard functions plus the engine API, so:
 //! - a global set by one script (`score = 10`) is invisible to the others, and
 //! - anything not on the list (`io`, `debug`, `load`, `dofile`, `loadfile`,
-//!   `require`, `collectgarbage`, most of `os`) doesn't exist inside scripts.
+//!   `package`, most of `os`) doesn't exist inside scripts.
+//!
+//! `require` is the engine's own (it only loads ModuleScripts, see
+//! `modules`), `collectgarbage` only answers `"count"`, and `setmetatable`
+//! refuses `__gc`. Strings share one metatable in Lua, so
+//! [`lock_string_metatable`] hides it from scripts.
 
 use axcenity_core::InstanceId;
 use mlua::{Function, Lua, Table, Value};
 
-use crate::{api, errors, task};
+use crate::{api, errors, modules, task, watchdog};
 
 /// Standard functions scripts may use as they are.
 pub const SAFE_FUNCTIONS: &[&str] = &[
@@ -24,7 +29,6 @@ pub const SAFE_FUNCTIONS: &[&str] = &[
     "rawlen",
     "rawset",
     "select",
-    "setmetatable",
     "tonumber",
     "tostring",
     "type",
@@ -43,24 +47,101 @@ const UNSAFE_LIBRARY_FUNCTIONS: &[(&str, &str)] = &[("string", "dump")];
 /// `exit`, `getenv`, ...) reaches outside the game.
 const SAFE_OS_FUNCTIONS: &[&str] = &["clock", "date", "difftime", "time"];
 
-/// Functions every script's environment shares. They hold no state, so one
-/// copy is enough, made once when the runtime starts.
+/// What `getmetatable` gives for a string, as in Roblox.
+const LOCKED: &str = "The metatable is locked";
+
+/// Lua runs `__gc` finalizers with hooks off, so the watchdog couldn't stop
+/// one that never ends, and they run at whatever moment memory is freed.
+/// So scripts can't make them. Lua only looks for `__gc` when the metatable
+/// is set, so checking here is enough.
+const SET_METATABLE: &str = r#"
+local setmetatable, rawget, type, error = ...
+
+return function(t, metatable)
+    if type(metatable) == "table" and rawget(metatable, "__gc") ~= nil then
+        error("__gc isn't supported in scripts: the engine frees memory by itself", 2)
+    end
+    return setmetatable(t, metatable)
+end
+"#;
+
+/// Functions every script's environment shares. They hold no state of their
+/// own, so one copy is enough, made once per side. Kept in Lua's app data,
+/// so `require` can make environments for modules too.
 pub struct Shared {
-    pcall: Function,
-    xpcall: Function,
+    protected: errors::ProtectedCalls,
+    /// `coroutine.resume`, `wrap`, `status` and `close`, see `watchdog`.
+    coroutine: Table,
+    setmetatable: Function,
     task: task::TaskFunctions,
+    require: Function,
+    collectgarbage: Function,
 }
 
 impl Shared {
-    pub fn new(lua: &Lua) -> mlua::Result<Self> {
-        let (pcall, xpcall) = errors::protected_calls(lua)?;
+    /// Creates the shared functions and puts them in `lua`'s app data.
+    pub fn install(lua: &Lua) -> mlua::Result<()> {
+        let protected = errors::protected_calls(lua)?;
+        let coroutine = watchdog::coroutine_functions(lua, &protected.clean)?;
+        let globals = lua.globals();
+        let setmetatable = lua.load(SET_METATABLE).set_name("=[engine]").call((
+            globals.raw_get::<Function>("setmetatable")?,
+            globals.raw_get::<Function>("rawget")?,
+            globals.raw_get::<Function>("type")?,
+            globals.raw_get::<Function>("error")?,
+        ))?;
         let task = task::TaskFunctions::new(lua)?;
-        Ok(Self {
-            pcall,
-            xpcall,
+        let require = modules::require_function(lua, task.wait())?;
+        let collectgarbage = lua.create_function(|lua, option: Value| match option {
+            Value::String(text) if text == "count" => Ok(lua.used_memory() as f64 / 1024.0),
+            // Other options start, stop or tune the garbage collector, which
+            // the engine runs by itself, for every script at once.
+            _ => Err(mlua::Error::runtime(
+                "collectgarbage only takes \"count\" in scripts: collectgarbage(\"count\") \
+                 is the memory in use, in kilobytes",
+            )),
+        })?;
+        lua.set_app_data(Self {
+            protected,
+            coroutine,
+            setmetatable,
             task,
-        })
+            require,
+            collectgarbage,
+        });
+        Ok(())
     }
+}
+
+/// Every string has the same metatable, whose `__index` is Lua's real
+/// `string` table (that's how `("hi"):upper()` works). A script that got
+/// hold of it could change `upper` for every script, or reach
+/// `string.dump`. So `__index` becomes a copy without `dump`, and
+/// `getmetatable("")` only returns [`LOCKED`].
+pub fn lock_string_metatable(lua: &Lua) -> mlua::Result<()> {
+    let metatable: Table = lua
+        .load("return getmetatable('')")
+        .set_name("=[engine]")
+        .eval()?;
+    let methods = safe_copy(lua, &lua.globals().raw_get("string")?, "string")?;
+    metatable.raw_set("__index", methods)?;
+    metatable.raw_set("__metatable", LOCKED)
+}
+
+/// A copy of the standard `library` table, without its unsafe functions.
+fn safe_copy(lua: &Lua, original: &Table, library: &str) -> mlua::Result<Table> {
+    let copy = lua.create_table()?;
+    // `pairs` visits every key, so the copy gets every function.
+    for pair in original.pairs::<Value, Value>() {
+        let (key, value) = pair?;
+        copy.raw_set(key, value)?;
+    }
+    for &(table, function) in UNSAFE_LIBRARY_FUNCTIONS {
+        if table == library {
+            copy.raw_set(function, Value::Nil)?;
+        }
+    }
+    Ok(copy)
 }
 
 /// The Instances a script's environment refers to.
@@ -72,28 +153,29 @@ pub struct ScriptIds {
     pub script: InstanceId,
 }
 
-/// Builds a new environment for one script.
-pub fn environment(lua: &Lua, shared: &Shared, ids: ScriptIds) -> mlua::Result<Table> {
+/// Builds a new environment for one script or module.
+pub fn environment(lua: &Lua, ids: ScriptIds) -> mlua::Result<Table> {
+    let shared = lua
+        .app_data_ref::<Shared>()
+        .ok_or_else(|| mlua::Error::runtime("the script functions aren't ready"))?;
     let globals = lua.globals();
     let env = lua.create_table()?;
 
     for &name in SAFE_FUNCTIONS {
         env.raw_set(name, globals.raw_get::<Value>(name)?)?;
     }
-    env.raw_set("pcall", &shared.pcall)?;
-    env.raw_set("xpcall", &shared.xpcall)?;
+    env.raw_set("pcall", &shared.protected.pcall)?;
+    env.raw_set("xpcall", &shared.protected.xpcall)?;
+    env.raw_set("setmetatable", &shared.setmetatable)?;
+    env.raw_set("require", &shared.require)?;
+    env.raw_set("collectgarbage", &shared.collectgarbage)?;
 
     for &library in SAFE_LIBRARIES {
-        let original: Table = globals.raw_get(library)?;
-        let copy = lua.create_table()?;
-        // `pairs` visits every key, so the copy gets every function.
-        for pair in original.pairs::<Value, Value>() {
-            let (key, value) = pair?;
-            copy.raw_set(key, value)?;
-        }
-        for &(table, function) in UNSAFE_LIBRARY_FUNCTIONS {
-            if table == library {
-                copy.raw_set(function, Value::Nil)?;
+        let copy = safe_copy(lua, &globals.raw_get(library)?, library)?;
+        if library == "coroutine" {
+            for pair in shared.coroutine.pairs::<Value, Value>() {
+                let (name, function) = pair?;
+                copy.raw_set(name, function)?;
             }
         }
         env.raw_set(library, copy)?;

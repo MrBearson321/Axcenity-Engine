@@ -24,9 +24,21 @@ use crate::tree::{self, Insertable};
 const INDENT: f32 = 14.0;
 /// The size of the open/close arrow's clickable square, in points.
 const ARROW_SIZE: f32 = 16.0;
+/// The kinds of script the Insert menus offer.
+pub const SCRIPT_CLASSES: [ClassName; 3] = [
+    ClassName::Script,
+    ClassName::LocalScript,
+    ClassName::ModuleScript,
+];
+
 /// The hover text of every button and menu item that inserts a script of `class`.
 pub fn script_hover(class: ClassName) -> &'static str {
     match class {
+        ClassName::ModuleScript => {
+            "Make a new ModuleScript, code that other scripts load with \
+             require(game.ReplicatedStorage.Name), in ReplicatedStorage, with its .module.lua \
+             file in the project's scripts folder, and open it."
+        }
         ClassName::LocalScript => {
             "Make a new LocalScript, which runs on the player's side (keyboard, camera), in \
              StarterPlayerScripts, with its .client.lua file in the project's scripts folder, \
@@ -493,7 +505,7 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
             }
         }
         ui.separator();
-        for class in [ClassName::Script, ClassName::LocalScript] {
+        for class in SCRIPT_CLASSES {
             if ui
                 .button(class.as_str())
                 .on_hover_text(script_hover(class))

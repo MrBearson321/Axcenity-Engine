@@ -7,7 +7,9 @@
 //! - Each script runs as a coroutine, and the `scheduler` resumes paused
 //!   ones each frame (`task.wait`, `task.spawn` and `task.delay` live in `task`).
 //! - Every script gets its own global variables, and only safe parts of the
-//!   standard library (see `sandbox`).
+//!   standard library (see `sandbox`). `require` loads ModuleScripts (see
+//!   `modules`), and the `watchdog` stops a script that runs too long
+//!   without pausing.
 //! - The engine API (`game`, `workspace`, `Instance`, `Vector3`, ...) lives in
 //!   `api`, `instance` and `types`. Events (`part.Touched:Connect`) live in
 //!   `events`, and the host fires them with methods such as
@@ -24,12 +26,16 @@ mod definitions;
 mod errors;
 mod events;
 mod instance;
+mod modules;
 mod remote;
 mod sandbox;
 mod scheduler;
 mod sides;
 mod task;
 mod types;
+mod watchdog;
+
+use std::time::Duration;
 
 use axcenity_core::{ClassName, InstanceId, World};
 use mlua::Lua;
@@ -40,6 +46,7 @@ pub use client::{CameraState, KeyEvent};
 pub use definitions::{DEFINITIONS_PATH, lua_definitions};
 pub use remote::{Loopback, Message, RemoteValue, Transport};
 pub use sides::{SIDE_ONLY_APIS, Side, SideOnlyApi, side_only};
+pub use watchdog::DEFAULT_LIMIT as WATCHDOG_LIMIT;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutputKind {
@@ -109,6 +116,10 @@ impl ScriptRuntime {
     /// Start the Scripts before the LocalScripts, as a real server is running
     /// before any player joins. The player joins (gets a Player in
     /// `Players`) just before the first LocalScript starts.
+    ///
+    /// A ModuleScript doesn't run here: its code is kept for `require`, on
+    /// both sides. So pass the ModuleScripts first, before any script that
+    /// might require them.
     pub fn start_script(
         &mut self,
         world: &mut World,
@@ -116,10 +127,13 @@ impl ScriptRuntime {
         path: &str,
         source: &str,
     ) {
-        let side = world
-            .get(script)
-            .and_then(|instance| Side::of_class(instance.class()))
-            .unwrap_or(Side::Server);
+        let class = world.get(script).map(|instance| instance.class());
+        if class == Some(ClassName::ModuleScript) {
+            self.server.add_module(script, path, source);
+            self.client.add_module(script, path, source);
+            return;
+        }
+        let side = class.and_then(Side::of_class).unwrap_or(Side::Server);
         if side == Side::Client {
             self.join(world);
         }
@@ -199,6 +213,14 @@ impl ScriptRuntime {
         self.client.take_camera_move()
     }
 
+    /// How long a script may run without pausing before the watchdog stops
+    /// it with an error. [`WATCHDOG_LIMIT`] (3 seconds) unless changed;
+    /// tests use a shorter one.
+    pub fn set_watchdog_limit(&mut self, limit: Duration) {
+        self.server.set_watchdog_limit(limit);
+        self.client.set_watchdog_limit(limit);
+    }
+
     /// Removes and returns the output produced since the last call.
     pub fn take_output(&mut self) -> Vec<OutputLine> {
         std::mem::take(&mut self.output)
@@ -252,3 +274,9 @@ mod tests;
 
 #[cfg(test)]
 mod client_server_tests;
+
+#[cfg(test)]
+mod sandbox_tests;
+
+#[cfg(test)]
+mod watchdog_tests;

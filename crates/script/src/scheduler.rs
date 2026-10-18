@@ -10,7 +10,7 @@
 use mlua::{IntoLuaMulti, Lua, MultiValue, Thread};
 
 use crate::errors::error_message;
-use crate::{OutputKind, push_output};
+use crate::{OutputKind, push_output, watchdog};
 
 /// Frame times are summed as floating-point numbers, which aren't exact:
 /// sixty steps of 1/60 add up to slightly less than 1. A task this close to
@@ -125,8 +125,22 @@ pub fn resume(lua: &Lua, thread: &Thread, args: impl IntoLuaMulti) {
     if !thread.is_resumable() {
         return;
     }
+    // The watchdog times the thread from here until it pauses or ends.
+    watchdog::enter(lua);
     // `()` because whatever the thread returns or yields isn't needed here.
-    if let Err(err) = thread.resume::<()>(args) {
-        push_output(lua, OutputKind::Error, error_message(&err));
+    match thread.resume::<()>(args) {
+        // Paused or finished. The watchdog may have paused it for good.
+        Ok(()) => {
+            if let Some(message) = watchdog::paused_by_watchdog(lua, thread) {
+                push_output(lua, OutputKind::Error, message);
+            }
+        }
+        Err(err) => {
+            let message = error_message(&err);
+            if watchdog::should_report(lua, &message) {
+                push_output(lua, OutputKind::Error, message);
+            }
+        }
     }
+    watchdog::leave(lua);
 }
