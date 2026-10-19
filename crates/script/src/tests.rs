@@ -1117,3 +1117,32 @@ fn a_script_can_retexture_a_mesh_part_with_a_surface_appearance() {
         ["Enum.TextureChannel.Green\tEnum.TextureChannel.Blue\tfalse"]
     );
 }
+
+#[test]
+fn emitters_emit_bursts_and_take_particle_types() {
+    let mut world = World::new();
+    let emitter = world.create(ClassName::ParticleEmitter).unwrap();
+    world.set_name(emitter, "Sparks").unwrap();
+    world.set_parent(emitter, Some(world.workspace())).unwrap();
+    let mut runtime = ScriptRuntime::new();
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/burst.server.lua",
+        "local sparks = workspace.Sparks
+         sparks:Emit(12)
+         sparks:Emit(5000)
+         sparks.ParticleType = Enum.ParticleType.Fire
+         print(sparks.ParticleType == Enum.ParticleType.Fire)
+         sparks.ParticleType = \"Smoke\"
+         print(pcall(sparks.Emit, sparks, -1))",
+    );
+    let output = lines(&mut runtime);
+    assert_eq!(output[0], "true");
+    assert!(output[1].starts_with("false"), "{}", output[1]);
+    assert_eq!(runtime.take_particle_emits(), [(emitter, 12), (emitter, 1000)]);
+    assert_eq!(
+        property(&world, emitter, "ParticleType"),
+        Value::ParticleType(axcenity_core::ParticleType::Smoke)
+    );
+}

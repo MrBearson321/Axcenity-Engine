@@ -15,7 +15,7 @@ use std::path::Path;
 
 use axcenity_assets::Assets;
 use axcenity_audio::GameAudio;
-use axcenity_core::{KeyCode, World};
+use axcenity_core::{InstanceId, KeyCode, World};
 use axcenity_physics::Physics;
 use axcenity_project::ScriptFile;
 use axcenity_script::{CameraState, KeyEvent, OutputKind, ScriptRuntime};
@@ -165,6 +165,11 @@ impl Session {
             self.apply_audio(output);
         })?;
         Ok(moved)
+    }
+
+    /// The `emitter:Emit(count)` calls scripts made since the last call.
+    pub fn take_particle_emits(&mut self) -> Vec<(InstanceId, u32)> {
+        self.scripts.take_particle_emits()
     }
 
     /// Moves what scripts printed, and their errors, into the Output panel.

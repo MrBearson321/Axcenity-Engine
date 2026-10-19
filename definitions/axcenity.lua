@@ -151,12 +151,24 @@ function UserInputServiceClass:IsKeyDown(key) end
 ---@field Blue EnumItem.TextureChannel
 ---@field Alpha EnumItem.TextureChannel
 
+---@class EnumItem.ParticleType: EnumItem
+
+---The choices of `Enum.ParticleType`.
+---@class Enum.ParticleType
+---@field Circle EnumItem.ParticleType
+---@field Spark EnumItem.ParticleType
+---@field Smoke EnumItem.ParticleType
+---@field Fire EnumItem.ParticleType
+---@field Star EnumItem.ParticleType
+---@field Magic EnumItem.ParticleType
+
 ---Every enum, such as `Enum.Material`, `Enum.PartType` and `Enum.KeyCode`.
 ---@class EnumLibrary
 ---@field Material Enum.Material
 ---@field PartType Enum.PartType
 ---@field KeyCode Enum.KeyCode
 ---@field TextureChannel Enum.TextureChannel
+---@field ParticleType Enum.ParticleType
 
 -- Instances -----------------------------------------------------------------
 
@@ -168,7 +180,7 @@ function UserInputServiceClass:IsKeyDown(key) end
 ---@field Changed Signal Fires when a property (or `Name` or `Parent`) gets a different value, whether a script, physics or the editor changed it. The handler gets the property's name: `function(property) ... end`.
 ---@field ChildAdded Signal Fires when an Instance is put inside this one. The handler gets the child.
 ---@field ChildRemoved Signal Fires when an Instance is taken out of this one. The handler gets the child.
----@field [string] Workspace|Players|Lighting|ReplicatedStorage|ServerScriptService|StarterPlayer|StarterPlayerScripts|Part|MeshPart|Script|LocalScript|ModuleScript|RemoteEvent|Player|Model|Folder|SurfaceAppearance|ScreenGui|Frame|TextLabel|TextButton|ImageLabel|TextBox|PageLayout|Table|BillboardGui|Sound|PointLight|SpotLight A child, found by its name.
+---@field [string] Workspace|Players|Lighting|ReplicatedStorage|ServerScriptService|StarterPlayer|StarterPlayerScripts|Part|MeshPart|Script|LocalScript|ModuleScript|RemoteEvent|Player|Model|Folder|SurfaceAppearance|ScreenGui|Frame|TextLabel|TextButton|ImageLabel|TextBox|PageLayout|Table|BillboardGui|Sound|PointLight|SpotLight|ParticleEmitter A child, found by its name.
 local InstanceClass = {}
 
 ---The first child with this name, or nil. With `recursive`, searches every descendant.
@@ -497,6 +509,36 @@ function SoundClass:Resume() end
 ---@field Angle number The full width of the cone, in degrees.
 ---@field Direction Vector3 The way the beam points, relative to the parent part.
 
+---Gives off particles (sparks, smoke, fire, stars...) from inside its parent part, shown in the editor and the game.
+---@class ParticleEmitter: Instance
+---@field Enabled boolean If false, it stops giving off particles; those already out live on.
+---@field ParticleType EnumItem.ParticleType|"Circle"|"Spark"|"Smoke"|"Fire"|"Star"|"Magic" The built-in picture each particle shows: Circle, Spark, Smoke, Fire, Star or Magic. Texture, if set, is used instead.
+---@field Texture string An image file inside the project folder each particle shows instead of ParticleType, such as "assets/particles/spark_01.png" (Kenney's free Particle Pack works well). Its alpha is the shape; it's tinted by Color.
+---@field Rate number How many particles a second it gives off while Enabled.
+---@field Lifetime number How many seconds each particle lives (each one a little more or less).
+---@field Speed number How fast particles leave, in studs a second, along Direction.
+---@field Direction Vector3 The way particles leave, relative to the parent part (up by default).
+---@field SpreadAngle number How wide the cone particles leave in is, in degrees: 0 is a straight line, 360 every way.
+---@field Acceleration Vector3 Added to every particle's speed each second, in world studs (gravity is Vector3.new(0, -196.2, 0)).
+---@field Drag number How quickly particles slow down: 0 never, higher sooner.
+---@field Size number How many studs across a particle is when it's born.
+---@field SizeEnd number How many studs across a particle is when it dies; it grows or shrinks smoothly.
+---@field Color Color3 A particle's color when it's born. It tints the picture.
+---@field ColorEnd Color3 A particle's color when it dies; it fades smoothly from Color.
+---@field Transparency number From 0 (solid) to 1 (invisible) when a particle is born.
+---@field TransparencyEnd number From 0 (solid) to 1 (invisible) when a particle dies.
+---@field Rotation number How far each particle is turned when it's born, in degrees.
+---@field RotSpeed number How fast particles spin, in degrees a second.
+---@field LightEmission number From 0 (particles paint over what's behind them, like smoke) to 1 (they add their light, like fire and sparks).
+---@field Brightness number How brightly particles glow: 1 is their color as it is; higher values bloom.
+local ParticleEmitterClass = {}
+
+---Gives off this many particles at once (up to 1000), even while Enabled is false, such as a burst of sparks when something breaks.
+---@param count number
+---@return nil
+function ParticleEmitterClass:Emit(count) end
+
+
 -- Globals -------------------------------------------------------------------
 
 ---The root of the game. Every service is inside it.
@@ -548,6 +590,7 @@ Instance = {}
 ---@overload fun(className: "Sound"): Sound
 ---@overload fun(className: "PointLight"): PointLight
 ---@overload fun(className: "SpotLight"): SpotLight
+---@overload fun(className: "ParticleEmitter"): ParticleEmitter
 function Instance.new(className) end
 
 ---Creates Vector3 values.

@@ -221,6 +221,7 @@ pub fn build_draw_list(world: &World, assets: &Assets, camera: Camera) -> DrawLi
         lights,
         post: settings.post,
         items,
+        sprites: Vec::new(),
         ui: Vec::new(),
     }
 }
@@ -597,6 +598,11 @@ fn model_material(material: &ModelMaterial) -> Material {
 /// A model's image, handed to the renderer without copying it.
 fn texture(image: &Arc<Image>) -> Arc<dyn TextureSource> {
     Arc::new(ImageTexture(image.clone()))
+}
+
+/// A project image as a texture the renderer can draw, for particles.
+pub(crate) fn image_texture(image: &Arc<Image>) -> Arc<dyn TextureSource> {
+    texture(image)
 }
 
 fn channel_map(map: &ChannelTexture) -> ChannelMap {

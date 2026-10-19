@@ -621,7 +621,7 @@ An Assets panel beside Output that lists the project's asset files by category (
 - [ ] The panel lists every model, prefab, image, texture and sound in the project's `assets` folder, and picks up new files without reopening the project.
 - [ ] Dragging each kind of tile into the viewport places it where it's dropped, as one undo step.
 - [ ] Saving a selection as a prefab and dropping it back in reproduces it exactly, and the prefab file is readable JSON.
-- [ ] The built-in props can be placed in any project, with no files needed.
+- [x] The built-in props can be placed in any project, with no files needed.
 
 ---
 
@@ -652,9 +652,9 @@ An **Angular** tool modelled on Archimedes: with a part selected, pick the direc
 
 ### Acceptance criteria
 
-- [ ] A 4-stud block bent 15° twenty-four times makes a closed ring, with each block touching the next along the inner edge.
-- [ ] Every extend direction and bend axis works on a turned part.
-- [ ] The preview matches what's placed, and one undo removes the whole batch.
+- [x] A 4-stud block bent 15° twenty-four times makes a closed ring, with each block touching the next along the inner edge.
+- [x] Every extend direction and bend axis works on a turned part.
+- [x] The preview matches what's placed, and one undo removes the whole batch.
 
 ---
 

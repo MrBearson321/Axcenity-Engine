@@ -411,6 +411,15 @@ const CLASS_METHODS: &[(ClassName, Function)] = &[
         },
     ),
     (
+        ClassName::ParticleEmitter,
+        Function {
+            name: "Emit",
+            doc: "Gives off this many particles at once (up to 1000), even while Enabled is false, such as a burst of sparks when something breaks.",
+            params: &[("count", "number")],
+            returns: "nil",
+        },
+    ),
+    (
         ClassName::Sound,
         Function {
             name: "Resume",
@@ -1050,6 +1059,106 @@ const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "The way the beam points, relative to the parent part.",
     ),
     (
+        ClassName::ParticleEmitter,
+        "Enabled",
+        "If false, it stops giving off particles; those already out live on.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "ParticleType",
+        "The built-in picture each particle shows: Circle, Spark, Smoke, Fire, Star or Magic. Texture, if set, is used instead.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "Texture",
+        "An image file inside the project folder each particle shows instead of ParticleType, such as \"assets/particles/spark_01.png\" (Kenney's free Particle Pack works well). Its alpha is the shape; it's tinted by Color.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "Rate",
+        "How many particles a second it gives off while Enabled.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "Lifetime",
+        "How many seconds each particle lives (each one a little more or less).",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "Speed",
+        "How fast particles leave, in studs a second, along Direction.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "Direction",
+        "The way particles leave, relative to the parent part (up by default).",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "SpreadAngle",
+        "How wide the cone particles leave in is, in degrees: 0 is a straight line, 360 every way.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "Acceleration",
+        "Added to every particle's speed each second, in world studs (gravity is Vector3.new(0, -196.2, 0)).",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "Drag",
+        "How quickly particles slow down: 0 never, higher sooner.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "Size",
+        "How many studs across a particle is when it's born.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "SizeEnd",
+        "How many studs across a particle is when it dies; it grows or shrinks smoothly.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "Color",
+        "A particle's color when it's born. It tints the picture.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "ColorEnd",
+        "A particle's color when it dies; it fades smoothly from Color.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "Transparency",
+        "From 0 (solid) to 1 (invisible) when a particle is born.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "TransparencyEnd",
+        "From 0 (solid) to 1 (invisible) when a particle dies.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "Rotation",
+        "How far each particle is turned when it's born, in degrees.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "RotSpeed",
+        "How fast particles spin, in degrees a second.",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "LightEmission",
+        "From 0 (particles paint over what's behind them, like smoke) to 1 (they add their light, like fire and sparks).",
+    ),
+    (
+        ClassName::ParticleEmitter,
+        "Brightness",
+        "How brightly particles glow: 1 is their color as it is; higher values bloom.",
+    ),
+    (
         ClassName::Part,
         "Anchored",
         "If true, the part stays where it is. If false, it falls and collides with other parts.",
@@ -1365,6 +1474,9 @@ fn class_doc(class: ClassName) -> &'static str {
         ClassName::SpotLight => {
             "A light that shines in a cone from just above its parent part. Inserting one with no part selected also inserts an anchored lamp."
         }
+        ClassName::ParticleEmitter => {
+            "Gives off particles (sparks, smoke, fire, stars...) from inside its parent part, shown in the editor and the game."
+        }
     }
 }
 
@@ -1378,7 +1490,10 @@ fn lua_type(kind: ValueKind) -> String {
         ValueKind::UDim2 => "UDim2".to_owned(),
         ValueKind::Color3 => "Color3".to_owned(),
         // Enum properties read as items and also accept item names.
-        ValueKind::Material | ValueKind::PartType | ValueKind::TextureChannel => {
+        ValueKind::Material
+        | ValueKind::PartType
+        | ValueKind::TextureChannel
+        | ValueKind::ParticleType => {
             let enum_type = EnumType::of_kind(kind).expect("an enum kind");
             let mut options = vec![format!("EnumItem.{}", enum_type.name())];
             options.extend(
@@ -1913,6 +2028,7 @@ mod tests {
             (ClassName::Players, "game.Players"),
             (ClassName::RemoteEvent, "Instance.new('RemoteEvent')"),
             (ClassName::Sound, "Instance.new('Sound')"),
+            (ClassName::ParticleEmitter, "Instance.new('ParticleEmitter')"),
         ];
         let instance = |class: ClassName| {
             instances

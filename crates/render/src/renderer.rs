@@ -23,6 +23,8 @@ use crate::draw_list::{
 };
 use crate::mesh::{self, MeshData, Vertex};
 
+mod sprites;
+
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// A [`TextureRenderer`]'s texture, as shown (see `create_target_texture`).
 const TARGET_SHOW_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
@@ -342,6 +344,8 @@ struct ScenePipeline {
     sky_pipeline: wgpu::RenderPipeline,
     opaque_pipeline: wgpu::RenderPipeline,
     transparent_pipeline: wgpu::RenderPipeline,
+    /// Camera-facing pictures, such as particles.
+    sprites: sprites::SpritePass,
     post: PostPasses,
     /// The scene's HDR texture and the bloom levels, remade at each resize.
     post_targets: PostTargets,
@@ -778,6 +782,7 @@ impl ScenePipeline {
         let transparent_pipeline =
             create_pipeline(&device, &frame_layout, &material_layout, HDR_FORMAT, true);
         let sky_pipeline = create_sky_pipeline(&device, &frame_layout);
+        let sprites = sprites::SpritePass::new(&device, &white_texture.srgb);
         let post = PostPasses::new(&device, color_format);
         let post_targets = PostTargets::new(&device, &post, width, height);
         let ui_pipeline = create_ui_pipeline(&device, color_format);
@@ -824,6 +829,7 @@ impl ScenePipeline {
             sky_pipeline,
             opaque_pipeline,
             transparent_pipeline,
+            sprites,
             post,
             post_targets,
             light_buffer,
@@ -928,6 +934,21 @@ impl ScenePipeline {
         }
 
         let text_buffers = self.prepare_ui_text(&list.ui, viewport_size)?;
+        let sprite_draws = {
+            let textures = &self.textures;
+            self.sprites.prepare(
+                &self.device,
+                &self.queue,
+                list,
+                view_projection(list, aspect),
+                |key| {
+                    textures
+                        .get(&key)
+                        .and_then(|cached| cached.gpu.as_ref())
+                        .map(|gpu| &gpu.srgb)
+                },
+            )
+        };
 
         // Shadow maps cost memory, so one exists only while shadows are on.
         let shadows_on = list.shadows.enabled;
@@ -1042,6 +1063,8 @@ impl ScenePipeline {
                 pass.set_index_buffer(mesh.indices.slice(..), mesh.index_format);
                 pass.draw_indexed(0..mesh.index_count, 0, batch.instances);
             }
+            // Last, over everything, but hidden behind solid items.
+            self.sprites.draw(&mut pass, &sprite_draws);
         }
 
         self.post.draw(
@@ -1238,6 +1261,11 @@ impl ScenePipeline {
                 self.note_texture(source.as_ref(), frame);
             }
         }
+        for sprite in &list.sprites {
+            if let Some(source) = &sprite.texture {
+                self.note_texture(source.as_ref(), frame);
+            }
+        }
     }
 
     /// Appends one quad per UI image and remembers which texture it uses.
@@ -1323,6 +1351,7 @@ impl ScenePipeline {
         self.textures.retain(|_, cached| recent(cached.last_drawn));
         self.ui_image_groups
             .retain(|key, _| self.textures.contains_key(key));
+        self.sprites.forget(|key| self.textures.contains_key(&key));
         self.materials.retain(|_, cached| recent(cached.last_drawn));
     }
 
@@ -3075,6 +3104,7 @@ mod tests {
                 intensity: 0.0,
             },
             items,
+            sprites: Vec::new(),
             shadows: Shadows::default(),
             lights: Vec::new(),
             post: PostProcessing {
@@ -3495,6 +3525,46 @@ mod tests {
             reflecting[2] > 60,
             "the block shows the sky: {reflecting:?}"
         );
+    }
+
+    fn red_sprite(z: f32, light_emission: f32) -> crate::Sprite {
+        crate::Sprite {
+            position: Vec3::new(0.0, 0.0, z),
+            size: 2.0,
+            rotation_degrees: 0.0,
+            color: [1.0, 0.0, 0.0],
+            opacity: 1.0,
+            brightness: 1.0,
+            light_emission,
+            texture: None,
+        }
+    }
+
+    #[test]
+    fn sprites_show_in_front_and_hide_behind_solid_items() {
+        let Some((device, queue)) = test_device() else {
+            eprintln!("skipped: no graphics adapter on this machine");
+            return;
+        };
+        let mut list = list_of(Vec::new());
+        list.sprites = vec![red_sprite(-3.0, 0.0)];
+        let shown = middle_pixel(&device, &queue, &list);
+        assert!(shown[0] > 200 && shown[1] < 40, "{shown:?}");
+
+        // Additive: black behind plus red light is still red.
+        list.sprites = vec![red_sprite(-3.0, 1.0)];
+        let added = middle_pixel(&device, &queue, &list);
+        assert!(added[0] > 200, "{added:?}");
+
+        // Behind a solid block, it's hidden.
+        list.items = vec![big_block()];
+        list.sprites = vec![red_sprite(-9.0, 0.0)];
+        let block_only = {
+            let mut plain = list_of(vec![big_block()]);
+            plain.sprites.clear();
+            middle_pixel(&device, &queue, &plain)
+        };
+        assert_eq!(middle_pixel(&device, &queue, &list), block_only);
     }
 
     #[test]

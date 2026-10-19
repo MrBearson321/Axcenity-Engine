@@ -279,6 +279,7 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::Sound => icons::MUSIC_NOTE,
         ClassName::PointLight => icons::LIGHTBULB,
         ClassName::SpotLight => icons::FLASHLIGHT,
+        ClassName::ParticleEmitter => icons::SPARKLE,
     }
 }
 
@@ -344,6 +345,7 @@ pub fn class_color(class: ClassName, visuals: &egui::Visuals) -> Color32 {
         }
         ClassName::Sound => pick((245, 166, 35), (175, 105, 0)),
         ClassName::PointLight | ClassName::SpotLight => pick((255, 220, 90), (170, 130, 0)),
+        ClassName::ParticleEmitter => pick((255, 150, 90), (190, 80, 20)),
         ClassName::Script => pick((241, 137, 45), (200, 95, 0)),
         ClassName::LocalScript => pick((64, 200, 180), (0, 128, 118)),
         ClassName::ModuleScript => pick((180, 145, 255), (110, 70, 200)),

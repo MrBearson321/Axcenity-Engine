@@ -319,6 +319,30 @@ pub fn sound_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Fu
     ])
 }
 
+/// The most particles one `Emit` call gives off, so a typo can't freeze the game.
+pub const MAX_EMIT: u32 = 1000;
+
+/// `emitter:Emit(count)`, which asks the host to give off particles now.
+pub fn particle_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Function)>> {
+    let emit = lua.create_function(|lua, (this, count): (LuaInstance, f64)| {
+        if world(lua)?.get(this.0).is_none() {
+            return Err(destroyed());
+        }
+        if !count.is_finite() || count < 0.0 {
+            return Err(mlua::Error::runtime(
+                "Emit needs a number of particles, 0 or more",
+            ));
+        }
+        let count = (count.round() as u32).min(MAX_EMIT);
+        let mut emits = lua
+            .app_data_mut::<crate::ParticleEmits>()
+            .ok_or_else(|| mlua::Error::runtime("particles aren't ready"))?;
+        emits.0.push((this.0, count));
+        Ok(())
+    })?;
+    Ok(vec![(ClassName::ParticleEmitter, "Emit", emit)])
+}
+
 /// Sets a Sound's `Playing`, which fires its change events like any property.
 fn set_playing(lua: &Lua, sound: InstanceId, playing: bool) -> mlua::Result<()> {
     world_mut(lua)?

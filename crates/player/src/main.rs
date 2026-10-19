@@ -115,6 +115,7 @@ fn main() -> Result<()> {
         scripts,
         audio,
         physics: Physics::with_assets(assets.clone()),
+        particles: axcenity_scene::Particles::new(),
         assets,
         window: None,
         renderer: None,
@@ -233,6 +234,8 @@ struct App {
     audio: GameAudio,
     /// Simulates the unanchored parts.
     physics: Physics,
+    /// What the ParticleEmitters have given off.
+    particles: axcenity_scene::Particles,
     /// The project's models, for MeshParts.
     assets: Assets,
     window: Option<Arc<Window>>,
@@ -286,9 +289,9 @@ impl App {
                 Some(&camera),
             );
             self.note_ui_warnings(&layout.warnings);
-            let in_window = self.pointer.filter(|&[x, y]| {
-                x >= 0.0 && y >= 0.0 && x < size.0 as f32 && y < size.1 as f32
-            });
+            let in_window = self
+                .pointer
+                .filter(|&[x, y]| x >= 0.0 && y >= 0.0 && x < size.0 as f32 && y < size.1 as f32);
             let hit = in_window.and_then(|[x, y]| layout.hit_button(x, y));
             let text_box = in_window.and_then(|[x, y]| layout.hit_text_box(x, y));
             if pressed {
@@ -325,7 +328,10 @@ impl App {
         self.text_focus = Some(id);
         self.keys = MoveKeys::default();
         for key in std::mem::take(&mut self.held_keys) {
-            self.key_events.push(KeyEvent { key, pressed: false });
+            self.key_events.push(KeyEvent {
+                key,
+                pressed: false,
+            });
         }
     }
 
@@ -360,7 +366,8 @@ impl App {
         let Some(command) = command else {
             return;
         };
-        if axcenity_ui::edit_text_box(&mut self.world, id, command) == axcenity_ui::TextOutcome::Finished
+        if axcenity_ui::edit_text_box(&mut self.world, id, command)
+            == axcenity_ui::TextOutcome::Finished
         {
             self.blur_text(id);
         }
@@ -629,6 +636,11 @@ impl ApplicationHandler for App {
                     &self.assets,
                     &mut self.audio,
                 );
+                // Particles move on, after scripts and physics moved their parts.
+                for (emitter, count) in self.scripts.take_particle_emits() {
+                    self.particles.emit(&self.world, emitter, count);
+                }
+                self.particles.update(&self.world, seconds);
 
                 // 5. Lay out ScreenGuis at this window's current pixel size.
                 let ui_size = (size.width, size.height);
@@ -651,6 +663,7 @@ impl ApplicationHandler for App {
                         self.text_focus,
                     );
                 self.note_ui_warnings(&ui_layout.warnings);
+                draw_list.sprites = self.particles.sprites(&self.world, &self.assets);
                 if self.show_splash && self.started_at.elapsed().as_secs_f32() < 2.5 {
                     draw_list
                         .ui
@@ -684,10 +697,11 @@ impl ApplicationHandler for App {
                     .as_ref()
                     .expect("checked at the start of the event")
                     .clone();
-                let rendered = self.renderer.as_mut().expect("checked").render(
-                    &draw_list,
-                    || window.pre_present_notify(),
-                );
+                let rendered = self
+                    .renderer
+                    .as_mut()
+                    .expect("checked")
+                    .render(&draw_list, || window.pre_present_notify());
                 if let Err(err) = rendered {
                     self.fail(event_loop, err);
                 }
@@ -957,7 +971,9 @@ mod tests {
             assert!(colors.len() > 8, "{name} renders almost one color");
             let center = ((height / 2 * width + width / 2) * 4) as usize;
             assert!(
-                pixels[center..center + 3].iter().any(|&channel| channel < 250),
+                pixels[center..center + 3]
+                    .iter()
+                    .any(|&channel| channel < 250),
                 "{name} is white in the middle"
             );
         }

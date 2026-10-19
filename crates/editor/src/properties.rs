@@ -6,7 +6,8 @@
 //! and gives one place to notice unsaved changes.
 
 use axcenity_core::{
-    ClassName, Color3, Instance, InstanceId, Material, PartType, TextureChannel, Value, World,
+    ClassName, Color3, Instance, InstanceId, Material, ParticleType, PartType, TextureChannel,
+    Value, World,
 };
 use eframe::egui;
 
@@ -37,7 +38,7 @@ pub struct Section {
 
 /// The groups, in panel order, and which properties go in each. Name and
 /// ClassName come first, under "Data", and aren't in the property map.
-const GROUPS: [(&str, &[&str]); 11] = [
+const GROUPS: [(&str, &[&str]); 13] = [
     (
         "Appearance",
         &[
@@ -143,11 +144,41 @@ const GROUPS: [(&str, &[&str]); 11] = [
         "Light",
         &["Enabled", "Brightness", "Range", "Angle", "Direction"],
     ),
+    (
+        "Emitter",
+        &[
+            "Enabled",
+            "ParticleType",
+            "Texture",
+            "Rate",
+            "Lifetime",
+            "Speed",
+            "Direction",
+            "SpreadAngle",
+            "Acceleration",
+            "Drag",
+        ],
+    ),
+    (
+        "Particles",
+        &[
+            "Size",
+            "SizeEnd",
+            "Color",
+            "ColorEnd",
+            "Transparency",
+            "TransparencyEnd",
+            "Rotation",
+            "RotSpeed",
+            "LightEmission",
+            "Brightness",
+        ],
+    ),
 ];
 
 /// True for a property that names a texture file, such as `ColorMap`.
 pub fn is_map(name: &str) -> bool {
-    name.ends_with("Map") && name != "NormalMapDirectX"
+    (name.ends_with("Map") && name != "NormalMapDirectX") || name == "Texture"
 }
 /// Where properties that no group lists go, so a new property always shows.
 const OTHER: &str = "Other";
@@ -174,6 +205,8 @@ pub fn sections(instance: &Instance) -> Vec<Section> {
                 instance.class(),
                 ClassName::PointLight | ClassName::SpotLight
             ),
+            "Emitter" | "Particles" => instance.class() == ClassName::ParticleEmitter,
+            "Appearance" | "Behavior" => instance.class() != ClassName::ParticleEmitter,
             _ => true,
         })
         .map(|&(title, names)| Section {
@@ -520,6 +553,10 @@ fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
         }
         Value::Material(material) => {
             choice_control(ui, name, material, &Material::ALL, |m| m.as_str()).map(Value::Material)
+        }
+        Value::ParticleType(kind) => {
+            choice_control(ui, name, kind, &ParticleType::ALL, |k| k.as_str())
+                .map(Value::ParticleType)
         }
         Value::TextureChannel(channel) => {
             choice_control(ui, name, channel, &TextureChannel::ALL, |c| c.as_str())

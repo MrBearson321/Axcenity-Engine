@@ -6,7 +6,8 @@
 //! is wrapped in a small struct, such as `LuaVector3(Vector3)`.
 
 use axcenity_core::{
-    Color3, KeyCode, Material, PartType, TextureChannel, UDim, UDim2, Value, ValueKind, Vector3,
+    Color3, KeyCode, Material, ParticleType, PartType, TextureChannel, UDim, UDim2, Value,
+    ValueKind, Vector3,
 };
 use mlua::{FromLua, IntoLua, Lua, MetaMethod, UserData, UserDataFields, UserDataMethods};
 
@@ -193,8 +194,8 @@ impl UserData for LuaUDim2 {
     }
 }
 
-/// The `Enum` global. `Enum.Material`, `Enum.PartType`, `Enum.KeyCode` and
-/// `Enum.TextureChannel` are its members.
+/// The `Enum` global. `Enum.Material`, `Enum.PartType`, `Enum.KeyCode`,
+/// `Enum.TextureChannel` and `Enum.ParticleType` are its members.
 #[derive(Clone, Copy, Debug)]
 pub struct LuaEnum;
 
@@ -205,14 +206,16 @@ pub enum EnumType {
     PartType,
     KeyCode,
     TextureChannel,
+    ParticleType,
 }
 
 impl EnumType {
-    pub const ALL: [EnumType; 4] = [
+    pub const ALL: [EnumType; 5] = [
         EnumType::Material,
         EnumType::PartType,
         EnumType::KeyCode,
         EnumType::TextureChannel,
+        EnumType::ParticleType,
     ];
 
     pub fn name(self) -> &'static str {
@@ -221,6 +224,7 @@ impl EnumType {
             EnumType::PartType => "PartType",
             EnumType::KeyCode => "KeyCode",
             EnumType::TextureChannel => "TextureChannel",
+            EnumType::ParticleType => "ParticleType",
         }
     }
 
@@ -231,6 +235,7 @@ impl EnumType {
             EnumType::PartType => PartType::ALL.iter().map(|t| t.as_str()).collect(),
             EnumType::KeyCode => KeyCode::ALL.iter().map(|k| k.as_str()).collect(),
             EnumType::TextureChannel => TextureChannel::ALL.iter().map(|c| c.as_str()).collect(),
+            EnumType::ParticleType => ParticleType::ALL.iter().map(|t| t.as_str()).collect(),
         }
     }
 
@@ -240,6 +245,7 @@ impl EnumType {
             ValueKind::Material => Some(EnumType::Material),
             ValueKind::PartType => Some(EnumType::PartType),
             ValueKind::TextureChannel => Some(EnumType::TextureChannel),
+            ValueKind::ParticleType => Some(EnumType::ParticleType),
             _ => None,
         }
     }
@@ -283,6 +289,7 @@ impl LuaEnumItem {
             Value::Material(m) => (EnumType::Material, m.as_str()),
             Value::PartType(t) => (EnumType::PartType, t.as_str()),
             Value::TextureChannel(c) => (EnumType::TextureChannel, c.as_str()),
+            Value::ParticleType(t) => (EnumType::ParticleType, t.as_str()),
             _ => return None,
         };
         Some(Self { enum_type, name })
@@ -296,6 +303,7 @@ impl LuaEnumItem {
             EnumType::TextureChannel => {
                 TextureChannel::from_name(self.name).map(Value::TextureChannel)
             }
+            EnumType::ParticleType => ParticleType::from_name(self.name).map(Value::ParticleType),
             EnumType::KeyCode => None,
         }
     }
@@ -395,7 +403,10 @@ pub fn value_to_lua(lua: &Lua, value: &Value) -> mlua::Result<mlua::Value> {
         Value::Vector3(v) => LuaVector3(*v).into_lua(lua),
         Value::UDim2(v) => LuaUDim2(*v).into_lua(lua),
         Value::Color3(c) => LuaColor3(*c).into_lua(lua),
-        Value::PartType(_) | Value::Material(_) | Value::TextureChannel(_) => {
+        Value::PartType(_)
+        | Value::Material(_)
+        | Value::TextureChannel(_)
+        | Value::ParticleType(_) => {
             LuaEnumItem::from_value(value)
                 .expect("enum property values are enum items")
                 .into_lua(lua)
@@ -423,7 +434,10 @@ pub fn value_from_lua(lua: &Lua, value: mlua::Value, kind: ValueKind) -> Result<
             .ok()
             .map(|c| Value::Color3(c.0)),
         (
-            ValueKind::Material | ValueKind::PartType | ValueKind::TextureChannel,
+            ValueKind::Material
+            | ValueKind::PartType
+            | ValueKind::TextureChannel
+            | ValueKind::ParticleType,
             mlua::Value::String(s),
         ) => {
             let enum_type = EnumType::of_kind(kind).expect("an enum kind");
@@ -432,7 +446,13 @@ pub fn value_from_lua(lua: &Lua, value: mlua::Value, kind: ValueKind) -> Result<
                 .and_then(LuaEnumItem::to_value)
                 .ok_or_else(|| format!("can't be \"{name}\": {}", not_an_item(enum_type, &name)));
         }
-        (ValueKind::Material | ValueKind::PartType | ValueKind::TextureChannel, _) => {
+        (
+            ValueKind::Material
+            | ValueKind::PartType
+            | ValueKind::TextureChannel
+            | ValueKind::ParticleType,
+            _,
+        ) => {
             LuaEnumItem::from_lua(value.clone(), lua)
                 .ok()
                 .and_then(LuaEnumItem::to_value)

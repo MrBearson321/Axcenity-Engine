@@ -81,6 +81,10 @@ struct Output(Vec<OutputLine>);
 #[derive(Default)]
 struct SoundActions(Vec<SoundAction>);
 
+/// `emitter:Emit(count)` calls waiting for the host's particles.
+#[derive(Default)]
+struct ParticleEmits(Vec<(InstanceId, u32)>);
+
 /// Runs every script of one game: Scripts on the server side, LocalScripts
 /// on the client side (one player, on this device), and the RemoteEvent
 /// messages between them.
@@ -93,6 +97,8 @@ pub struct ScriptRuntime {
     output: Vec<OutputLine>,
     /// Sound commands waiting for the game host to apply.
     sound_actions: Vec<SoundAction>,
+    /// Particle bursts waiting for the game host's particles.
+    particle_emits: Vec<(InstanceId, u32)>,
     /// Whether the error for change events that never stop has been shown,
     /// so it's shown once rather than every frame.
     reported_change_loop: bool,
@@ -115,6 +121,7 @@ impl ScriptRuntime {
             transport,
             output: Vec::new(),
             sound_actions: Vec::new(),
+            particle_emits: Vec::new(),
             reported_change_loop: false,
         }
     }
@@ -359,6 +366,12 @@ impl ScriptRuntime {
         std::mem::take(&mut self.sound_actions)
     }
 
+    /// Removes the `Emit` calls made since the last call: each emitter and
+    /// how many particles it gives off now.
+    pub fn take_particle_emits(&mut self) -> Vec<(InstanceId, u32)> {
+        std::mem::take(&mut self.particle_emits)
+    }
+
     /// Collects what `side` printed, and hands the messages it sent to the
     /// transport.
     fn collect(&mut self, side: Side) {
@@ -368,6 +381,7 @@ impl ScriptRuntime {
         };
         self.output.extend(context.take_output());
         self.sound_actions.extend(context.take_sound_actions());
+        self.particle_emits.extend(context.take_particle_emits());
         for message in context.take_outbox() {
             self.transport.send(message);
         }

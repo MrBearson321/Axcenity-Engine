@@ -30,7 +30,7 @@ use axcenity_core::{InstanceId, Value, World};
 use axcenity_render::TextureRenderer;
 use axcenity_render::glam::Vec3;
 use axcenity_render::wgpu;
-use axcenity_scene::{FlyCamera, LightMarker, MoveKeys};
+use axcenity_scene::{FlyCamera, LightMarker, MoveKeys, Particles};
 use axcenity_ui::{Stylesheet, UiLayout, UiRect};
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
@@ -154,6 +154,9 @@ pub struct ViewportScene<'a> {
     pub modes: Modes,
     /// Outlines of parts about to be placed (the Angular tool's copies).
     pub preview: &'a [Pose],
+    /// Particle bursts asked for this frame (`Emit` from scripts, or the
+    /// Emission tool's Burst): each emitter and how many.
+    pub emits: &'a [(InstanceId, u32)],
     pub stylesheets: &'a [Stylesheet],
     /// The TextBox being typed in during Play, so it gets a focus ring.
     pub focused_text: Option<InstanceId>,
@@ -258,6 +261,8 @@ pub struct Viewport {
     speed_changed_at: Option<f64>,
     /// What's being dragged, if anything.
     drag: Option<Dragging>,
+    /// The ParticleEmitters' particles, shown while editing and during Play.
+    particles: Particles,
 }
 
 /// The texture the scene is drawn into, and egui's name for it.
@@ -275,7 +280,13 @@ impl Viewport {
             target: None,
             speed_changed_at: None,
             drag: None,
+            particles: Particles::new(),
         }
+    }
+
+    /// Takes every particle away, for a new world (Play, Stop, another project).
+    pub fn clear_particles(&mut self) {
+        self.particles.clear();
     }
 
     /// Puts the camera back where it starts, for a newly opened project.
@@ -285,6 +296,7 @@ impl Viewport {
         self.camera = start_camera();
         self.camera.set_speed(speed);
         self.drag = None;
+        self.particles.clear();
     }
 
     /// The camera's focus point, where new parts are inserted.
@@ -338,6 +350,7 @@ impl Viewport {
             snap,
             modes,
             preview,
+            emits,
             stylesheets,
             focused_text,
         } = scene;
@@ -471,7 +484,17 @@ impl Viewport {
                 );
         }
 
+        for &(emitter, count) in emits {
+            self.particles.emit(world, emitter, count);
+        }
+        let seconds = ui.input(|input| input.unstable_dt).min(MAX_FRAME_SECONDS);
+        self.particles.update(world, seconds);
+        // Particles keep moving without input, so keep drawing frames.
+        if self.particles.is_active(world) {
+            ui.ctx().request_repaint();
+        }
         let mut draw_list = axcenity_scene::build_draw_list(world, assets, camera);
+        draw_list.sprites = self.particles.sprites(world, assets);
         draw_list.ui = ui_layout.draw_items.clone();
         axcenity_scene::attach_ui_textures(&mut draw_list.ui, assets);
         if let Err(error) = target.renderer.render(&draw_list) {

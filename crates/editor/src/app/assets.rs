@@ -211,9 +211,41 @@ impl EditorApp {
         self.history.seal();
     }
 
-    fn drop_particle_texture(&mut self, _entry: &AssetEntry, _spot: Spot) {
-        self.output
-            .info("Particle textures are used by ParticleEmitters, which aren't available yet.");
+    /// A particle texture dropped on a part: its emitters use it, or it
+    /// gets a new emitter with it if it has none.
+    fn drop_particle_texture(&mut self, entry: &AssetEntry, spot: Spot) {
+        let Some(part) = spot.part.filter(|&id| is_part(&self.world, id)) else {
+            self.output
+                .info("Drop a particle texture onto a part to give it a ParticleEmitter.");
+            return;
+        };
+        let texture = Value::String(entry.path.clone());
+        let emitters =
+            crate::build_tools::lights_in(&self.world, &[part], ClassName::ParticleEmitter);
+        if emitters.is_empty() {
+            let name = self
+                .world
+                .get(part)
+                .map(|i| i.name().to_owned())
+                .unwrap_or_default();
+            self.add_children(
+                &[part],
+                ClassName::ParticleEmitter,
+                &[("Texture", texture)],
+                format!("Add particles to {name}"),
+            );
+            return;
+        }
+        let edits = emitters
+            .into_iter()
+            .map(|id| (id, vec![Edit::Property("Texture", texture.clone())]))
+            .collect();
+        self.change_many(
+            Field::Property("Texture"),
+            format!("Change particles to {}", entry.name),
+            edits,
+        );
+        self.history.seal();
     }
 
     /// Moves `ids` (detached, and everything inside them) as a whole so

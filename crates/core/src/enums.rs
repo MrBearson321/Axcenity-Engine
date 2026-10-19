@@ -146,6 +146,50 @@ impl TextureChannel {
     }
 }
 
+/// The built-in picture a ParticleEmitter's particles show when it has no
+/// `Texture` of its own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ParticleType {
+    /// A soft round dot.
+    Circle,
+    /// A bright point with a glow, for sparks and embers.
+    Spark,
+    /// A soft, cloudy puff.
+    Smoke,
+    /// A flickering flame shape.
+    Fire,
+    /// A five-pointed star.
+    Star,
+    /// A four-pointed twinkle.
+    Magic,
+}
+
+impl ParticleType {
+    pub const ALL: [ParticleType; 6] = [
+        ParticleType::Circle,
+        ParticleType::Spark,
+        ParticleType::Smoke,
+        ParticleType::Fire,
+        ParticleType::Star,
+        ParticleType::Magic,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ParticleType::Circle => "Circle",
+            ParticleType::Spark => "Spark",
+            ParticleType::Smoke => "Smoke",
+            ParticleType::Fire => "Fire",
+            ParticleType::Star => "Star",
+            ParticleType::Magic => "Magic",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|item| item.as_str() == name)
+    }
+}
+
 /// A key on the keyboard, for `UserInputService` in LocalScripts. Keys are
 /// named by their place on a US keyboard, so `W` is the key above `S` on
 /// every layout. Names follow Roblox's (`Return`, `LeftShift`, `Zero`).

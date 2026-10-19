@@ -976,18 +976,14 @@ impl EditorApp {
     /// in Properties, and returns its path in the project: a file outside
     /// the project is copied into `assets/textures` first. `None` if
     /// cancelled or it can't be used (said in Output).
-    pub(super) fn pick_texture(&mut self) -> Option<String> {
+    pub(super) fn pick_texture(&mut self, into: &str) -> Option<String> {
         let project = self.project.as_ref()?;
         let file = rfd::FileDialog::new()
             .set_title("Choose a texture")
             .add_filter("Texture", &axcenity_assets::TEXTURE_EXTENSIONS)
             .set_directory(&project.folder)
             .pick_file()?;
-        match axcenity_assets::import_texture(
-            &project.folder,
-            &file,
-            axcenity_assets::PROJECT_TEXTURES_FOLDER,
-        ) {
+        match axcenity_assets::import_texture(&project.folder, &file, into) {
             Ok(path) => Some(path),
             Err(err) => {
                 let err = chain(&err);

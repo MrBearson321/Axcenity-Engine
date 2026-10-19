@@ -111,6 +111,9 @@ pub struct EditorApp {
     /// preferences, so they stay when another project is opened.
     tool: Tool,
     snap: Snap,
+    /// Particle bursts for the viewport's next frame: `Emit` calls from
+    /// scripts during Play, and the Emission tool's Burst.
+    pending_emits: Vec<(InstanceId, u32)>,
     /// The Move, Resize and Rotate tools' axes, directions and pivot, and
     /// the other building tools' settings. Preferences, like `snap`.
     modes: Modes,
@@ -281,6 +284,7 @@ impl EditorApp {
             snap: Snap::default(),
             modes: Modes::default(),
             build: BuildSettings::default(),
+            pending_emits: Vec::new(),
             asking: None,
             closing: false,
             output: Output::default(),
@@ -578,7 +582,12 @@ impl EditorApp {
                 format!("Change {name} of {}", instance.name()),
             ),
             &Edit::PickTexture(name) => {
-                if let Some(path) = self.pick_texture() {
+                let folder = if name == "Texture" {
+                    crate::asset_browser::PARTICLES_FOLDER
+                } else {
+                    axcenity_assets::PROJECT_TEXTURES_FOLDER
+                };
+                if let Some(path) = self.pick_texture(folder) {
                     self.apply(id, Edit::Property(name, Value::String(path)));
                     // Picking is one whole step, not more typing.
                     self.history.seal();
@@ -668,6 +677,21 @@ impl EditorApp {
                 self.forget_selection_outside_tree();
             }
             ToolAction::Extend => self.extend_angular(),
+            ToolAction::AddEmitter(kind) => {
+                let properties = build_tools::particle_preset(kind);
+                self.add_children(
+                    &parts,
+                    ClassName::ParticleEmitter,
+                    &properties,
+                    format!("{} particles", kind.as_str()),
+                );
+            }
+            ToolAction::Burst => {
+                let emitters =
+                    build_tools::lights_in(&self.world, &parts, ClassName::ParticleEmitter);
+                self.pending_emits
+                    .extend(emitters.into_iter().map(|id| (id, 20)));
+            }
             ToolAction::SetLight {
                 class,
                 property,
@@ -716,14 +740,42 @@ impl EditorApp {
 
     /// Puts a new `class` light in each of `parts` that hasn't one, as one step.
     fn add_lights(&mut self, parts: &[InstanceId], class: ClassName) {
+        let parts: Vec<InstanceId> = parts
+            .iter()
+            .copied()
+            .filter(|&part| build_tools::lights_in(&self.world, &[part], class).is_empty())
+            .collect();
+        let label = match parts.len() {
+            1 => format!("Add {class}"),
+            n => format!("Add {n} {class}s"),
+        };
+        self.add_children(&parts, class, &[], label);
+    }
+
+    /// Puts a new `class` with `properties` in each of `parts` (if it can
+    /// go there), named after the class, as one undo step named `label`.
+    fn add_children(
+        &mut self,
+        parts: &[InstanceId],
+        class: ClassName,
+        properties: &[(&'static str, Value)],
+        label: String,
+    ) {
         let mut moves = Vec::new();
         for &part in parts {
-            if !build_tools::lights_in(&self.world, &[part], class).is_empty() {
+            if !self
+                .world
+                .get(part)
+                .is_some_and(|i| matches!(i.class(), ClassName::Part | ClassName::MeshPart))
+            {
                 continue;
             }
             let Ok(id) = self.world.create(class) else {
                 continue;
             };
+            for (property, value) in properties {
+                let _ = self.world.set_property(id, property, value.clone());
+            }
             let name = tree::unique_name(&self.world, part, class.as_str());
             let _ = self.world.set_name(id, name);
             let index = self.world.get(part).map_or(0, |p| p.children().len());
@@ -739,10 +791,6 @@ impl EditorApp {
                 });
             }
         }
-        let label = match moves.len() {
-            1 => format!("Add {class}"),
-            n => format!("Add {n} {class}s"),
-        };
         self.history.record_tree(&mut self.world, label, moves);
     }
 
@@ -1183,6 +1231,8 @@ impl EditorApp {
         match Session::start(&self.world, &scripts, &mut self.output, self.assets.clone()) {
             Ok(session) => {
                 self.play = Some(session);
+                self.viewport.clear_particles();
+                self.pending_emits.clear();
                 self.pending_ui_activation = None;
                 self.focused_text = None;
                 self.pending_focus_lost = None;
@@ -1197,6 +1247,8 @@ impl EditorApp {
     /// never touched, so it's back exactly as before Play.
     fn stop(&mut self) {
         if self.play.take().is_some() {
+            self.viewport.clear_particles();
+            self.pending_emits.clear();
             self.output
                 .info("Stopped. The world is back as it was before Play.");
             self.focused_text = None;
@@ -1235,7 +1287,9 @@ impl EditorApp {
             position,
             orientation,
         };
-        match session.frame(seconds, keys, camera, &mut self.output) {
+        let frame = session.frame(seconds, keys, camera, &mut self.output);
+        self.pending_emits.extend(session.take_particle_emits());
+        match frame {
             Ok(Some(moved)) => self
                 .viewport
                 .set_camera_view(moved.position, moved.orientation),
@@ -1374,6 +1428,25 @@ impl EditorApp {
             );
             let lamp = self.selected;
             self.insert_named(what, lamp, what.class().as_str(), Vec::new());
+            return;
+        }
+        if what == Insertable::ParticleEmitter
+            && !tree::light_has_part_parent(&self.world, near.or(self.selected))
+        {
+            self.insert_named(
+                Insertable::Part(PartType::Block),
+                near.or(self.selected),
+                "Emitter",
+                vec![
+                    ("Anchored", Value::Bool(true)),
+                    ("Size", Value::Vector3(Vector3::new(1.0, 1.0, 1.0))),
+                    ("Transparency", Value::Number(1.0)),
+                    ("CanCollide", Value::Bool(false)),
+                    ("CastShadow", Value::Bool(false)),
+                ],
+            );
+            let holder = self.selected;
+            self.insert_named(what, holder, what.class().as_str(), Vec::new());
             return;
         }
         if what == Insertable::Page {
@@ -2240,6 +2313,21 @@ impl EditorApp {
                             insert = Some(what);
                         }
                     }
+                    for what in Insertable::EFFECTS {
+                        let button = RibbonButton::new(theme::insert_icon(what), what.label())
+                            .color(theme::class_color(what.class(), ui.visuals()));
+                        if ui
+                            .add_enabled(!playing, button)
+                            .on_hover_text(
+                                "Insert a ParticleEmitter into the selected part (an invisible \
+                                 holder part is made if none is selected).",
+                            )
+                            .on_disabled_hover_text("Press Stop to edit.")
+                            .clicked()
+                        {
+                            insert = Some(what);
+                        }
+                    }
                     for what in Insertable::LIGHTS {
                         let button = RibbonButton::new(theme::insert_icon(what), what.label())
                             .color(theme::class_color(what.class(), ui.visuals()));
@@ -2932,6 +3020,7 @@ impl eframe::App for EditorApp {
         // No tool during Play, so nothing can be dragged.
         let tool = (!self.playing()).then_some(self.tool);
         let preview = self.angular_preview();
+        let emits = std::mem::take(&mut self.pending_emits);
         let active_block_path = self
             .tabs
             .active_path()
@@ -2959,6 +3048,7 @@ impl eframe::App for EditorApp {
                                 snap: self.snap,
                                 modes: self.modes,
                                 preview: &preview,
+                                emits: &emits,
                                 stylesheets,
                                 focused_text: self.focused_text,
                             },

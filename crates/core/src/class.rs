@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use crate::enums::{Material, PartType, TextureChannel};
+use crate::enums::{Material, PartType, ParticleType, TextureChannel};
 use crate::value::{Color3, UDim2, Value, Vector3};
 
 /// Events every Instance has, whatever its class. `Changed` fires with the
@@ -79,10 +79,12 @@ pub enum ClassName {
     PointLight,
     /// Light that shines in a cone from just above its parent part.
     SpotLight,
+    /// Gives off particles (sparks, smoke, fire...) from inside its parent part.
+    ParticleEmitter,
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 30] = [
+    pub const ALL: [ClassName; 31] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -113,6 +115,7 @@ impl ClassName {
         ClassName::Sound,
         ClassName::PointLight,
         ClassName::SpotLight,
+        ClassName::ParticleEmitter,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -147,6 +150,7 @@ impl ClassName {
             ClassName::Sound => "Sound",
             ClassName::PointLight => "PointLight",
             ClassName::SpotLight => "SpotLight",
+            ClassName::ParticleEmitter => "ParticleEmitter",
         }
     }
 
@@ -241,6 +245,41 @@ impl ClassName {
                 ("Angle", Value::Number(60.0)),
                 // Where the cone points, relative to the parent part.
                 ("Direction", Value::Vector3(Vector3::new(0.0, -1.0, 0.0))),
+            ],
+            ClassName::ParticleEmitter => vec![
+                ("Enabled", Value::Bool(true)),
+                // The picture each particle shows, unless Texture names an
+                // image file in the project ("assets/particles/spark.png").
+                ("ParticleType", Value::ParticleType(ParticleType::Spark)),
+                ("Texture", Value::String(String::new())),
+                // Particles a second while Enabled.
+                ("Rate", Value::Number(20.0)),
+                // Seconds each particle lives (each a little more or less).
+                ("Lifetime", Value::Number(2.0)),
+                // Studs a second, out along Direction (relative to the
+                // part), spread in a cone SpreadAngle degrees wide.
+                ("Speed", Value::Number(5.0)),
+                ("Direction", Value::Vector3(Vector3::new(0.0, 1.0, 0.0))),
+                ("SpreadAngle", Value::Number(30.0)),
+                // Added to the speed each second, in world studs (gravity is
+                // (0, -196.2, 0)), and how quickly particles slow down.
+                ("Acceleration", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
+                ("Drag", Value::Number(0.0)),
+                // Studs across, color and transparency at birth, each
+                // blending to its End value by the end of the particle's life.
+                ("Size", Value::Number(1.0)),
+                ("SizeEnd", Value::Number(1.0)),
+                ("Color", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
+                ("ColorEnd", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
+                ("Transparency", Value::Number(0.0)),
+                ("TransparencyEnd", Value::Number(1.0)),
+                // Starting turn, in degrees, and degrees a second.
+                ("Rotation", Value::Number(0.0)),
+                ("RotSpeed", Value::Number(0.0)),
+                // 0 paints over what's behind; 1 adds light (fire, sparks).
+                ("LightEmission", Value::Number(0.0)),
+                // Above 1 glows (and blooms).
+                ("Brightness", Value::Number(1.0)),
             ],
             ClassName::ScreenGui => vec![
                 ("Class", Value::String(String::new())),
@@ -483,7 +522,8 @@ impl ClassName {
             | ClassName::Table
             | ClassName::BillboardGui
             | ClassName::PointLight
-            | ClassName::SpotLight => &[],
+            | ClassName::SpotLight
+            | ClassName::ParticleEmitter => &[],
             // Fires when a sound that isn't looped plays to its end.
             ClassName::Sound => &["Ended"],
             // Fires on both parts when two parts start touching.

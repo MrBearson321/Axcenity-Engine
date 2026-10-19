@@ -41,6 +41,7 @@ impl Context {
         lua.set_app_data(side);
         lua.set_app_data(Output::default());
         lua.set_app_data(crate::SoundActions::default());
+        lua.set_app_data(crate::ParticleEmits::default());
         lua.set_app_data(Outbox::default());
         lua.set_app_data(scheduler::Scheduler::default());
         lua.set_app_data(events::Connections::default());
@@ -58,6 +59,10 @@ impl Context {
         methods.extend(
             instance::sound_methods(&lua)
                 .expect("creating Sound methods only fails when out of memory"),
+        );
+        methods.extend(
+            instance::particle_methods(&lua)
+                .expect("creating ParticleEmitter methods only fails when out of memory"),
         );
         methods.push((
             axcenity_core::ClassName::DataModel,
@@ -213,6 +218,13 @@ impl Context {
     pub fn take_outbox(&self) -> Vec<Message> {
         match self.lua.app_data_mut::<Outbox>() {
             Some(mut outbox) => std::mem::take(&mut outbox.0),
+            None => Vec::new(),
+        }
+    }
+
+    pub fn take_particle_emits(&self) -> Vec<(axcenity_core::InstanceId, u32)> {
+        match self.lua.app_data_mut::<crate::ParticleEmits>() {
+            Some(mut emits) => std::mem::take(&mut emits.0),
             None => Vec::new(),
         }
     }

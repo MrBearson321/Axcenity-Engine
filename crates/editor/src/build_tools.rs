@@ -13,14 +13,16 @@
 //!   the selection (Enter toggles, as in F3X).
 //! - **Lighting**: add, change or remove a PointLight or SpotLight in each
 //!   selected part.
-//! - **Emission**: a glow of any color (`EmissiveColor` and `Emission`).
+//! - **Emission**: a glow of any color (`EmissiveColor` and `Emission`),
+//!   and particles: add a ParticleEmitter set up as one of the built-in
+//!   types, remove them, or see a burst.
 //! - **Angular**: copies of the last selected part at an angle, like
 //!   Archimedes (see `angular.rs`); Enter or Extend places them.
 //!
 //! The panel only reads the world and returns [`ToolAction`]s; the app
 //! applies each as one undo step. Values shown are the last selected part's.
 
-use axcenity_core::{ClassName, Color3, InstanceId, Material, Value, World};
+use axcenity_core::{ClassName, Color3, InstanceId, Material, ParticleType, Value, Vector3, World};
 use eframe::egui;
 
 use crate::angular::AngularSettings;
@@ -97,6 +99,10 @@ pub enum ToolAction {
     },
     /// Place the Angular tool's copies of the last selected part.
     Extend,
+    /// Put a ParticleEmitter set up as `kind` in each selected part.
+    AddEmitter(ParticleType),
+    /// Give off a burst from every emitter in the selected parts, to see it.
+    Burst,
 }
 
 /// What the panel shows: the world and the parts the tools act on.
@@ -655,6 +661,53 @@ fn emission(ui: &mut egui::Ui, scene: &PanelScene, actions: &mut Vec<ToolAction>
     if !needs_parts(ui, scene) {
         return;
     }
+    glow(ui, scene, actions);
+    ui.separator();
+    ui.label(theme::with_icon(
+        theme::class_icon(ClassName::ParticleEmitter),
+        "Particles",
+    ));
+    ui.horizontal_wrapped(|ui| {
+        for kind in ParticleType::ALL {
+            if ui
+                .button(kind.as_str())
+                .on_hover_text(format!(
+                    "Put a ParticleEmitter set up as {} in each selected part.",
+                    kind.as_str().to_lowercase()
+                ))
+                .clicked()
+            {
+                actions.push(ToolAction::AddEmitter(kind));
+            }
+        }
+    });
+    let emitters = lights_in(scene.world, scene.parts, ClassName::ParticleEmitter).len();
+    if emitters > 0 {
+        ui.horizontal(|ui| {
+            ui.weak(match emitters {
+                1 => "1 emitter".to_owned(),
+                n => format!("{n} emitters"),
+            });
+            if ui
+                .button("Burst")
+                .on_hover_text("Give off 20 particles from each, to see them.")
+                .clicked()
+            {
+                actions.push(ToolAction::Burst);
+            }
+            if ui
+                .button(theme::with_icon(icons::TRASH, "Remove"))
+                .clicked()
+            {
+                actions.push(ToolAction::RemoveLights(ClassName::ParticleEmitter));
+            }
+        });
+        ui.weak("Fine-tune them in Properties.");
+    }
+}
+
+/// The glow half of the Emission tool.
+fn glow(ui: &mut egui::Ui, scene: &PanelScene, actions: &mut Vec<ToolAction>) {
     let (Some(color), Some(mut strength)) =
         (scene.color("EmissiveColor"), scene.number("Emission"))
     else {
@@ -693,6 +746,93 @@ fn emission(ui: &mut egui::Ui, scene: &PanelScene, actions: &mut Vec<ToolAction>
             value: Value::Number(0.0),
         });
     }
+}
+
+/// A ParticleEmitter's properties for a built-in look: `kind`'s picture,
+/// with colors, sizes and motion to suit it.
+pub fn particle_preset(kind: ParticleType) -> Vec<(&'static str, Value)> {
+    let number = |value: f64| Value::Number(value);
+    let color = |r: f32, g: f32, b: f32| Value::Color3(Color3::new(r, g, b));
+    let vector = |x: f32, y: f32, z: f32| Value::Vector3(Vector3::new(x, y, z));
+    let mut properties = vec![("ParticleType", Value::ParticleType(kind))];
+    properties.extend(match kind {
+        ParticleType::Circle => vec![
+            ("Rate", number(15.0)),
+            ("Lifetime", number(2.0)),
+            ("Speed", number(3.0)),
+            ("SpreadAngle", number(40.0)),
+            ("Size", number(0.6)),
+            ("SizeEnd", number(0.2)),
+            ("Color", color(1.0, 1.0, 1.0)),
+            ("ColorEnd", color(0.6, 0.8, 1.0)),
+        ],
+        ParticleType::Spark => vec![
+            ("Rate", number(30.0)),
+            ("Lifetime", number(0.8)),
+            ("Speed", number(15.0)),
+            ("SpreadAngle", number(70.0)),
+            ("Acceleration", vector(0.0, -40.0, 0.0)),
+            ("Size", number(0.4)),
+            ("SizeEnd", number(0.1)),
+            ("Color", color(1.0, 0.85, 0.4)),
+            ("ColorEnd", color(1.0, 0.4, 0.1)),
+            ("LightEmission", number(1.0)),
+            ("Brightness", number(3.0)),
+        ],
+        ParticleType::Smoke => vec![
+            ("Rate", number(8.0)),
+            ("Lifetime", number(4.0)),
+            ("Speed", number(2.0)),
+            ("SpreadAngle", number(25.0)),
+            ("Drag", number(0.5)),
+            ("Size", number(1.5)),
+            ("SizeEnd", number(5.0)),
+            ("Color", color(0.55, 0.55, 0.55)),
+            ("ColorEnd", color(0.35, 0.35, 0.35)),
+            ("Transparency", number(0.4)),
+            ("RotSpeed", number(20.0)),
+        ],
+        ParticleType::Fire => vec![
+            ("Rate", number(40.0)),
+            ("Lifetime", number(1.0)),
+            ("Speed", number(3.0)),
+            ("SpreadAngle", number(20.0)),
+            ("Acceleration", vector(0.0, 6.0, 0.0)),
+            ("Size", number(2.0)),
+            ("SizeEnd", number(0.5)),
+            ("Color", color(1.0, 0.75, 0.25)),
+            ("ColorEnd", color(0.9, 0.15, 0.05)),
+            ("LightEmission", number(1.0)),
+            ("Brightness", number(2.0)),
+        ],
+        ParticleType::Star => vec![
+            ("Rate", number(6.0)),
+            ("Lifetime", number(3.0)),
+            ("Speed", number(2.0)),
+            ("SpreadAngle", number(90.0)),
+            ("Size", number(0.8)),
+            ("SizeEnd", number(0.8)),
+            ("Color", color(1.0, 1.0, 0.8)),
+            ("ColorEnd", color(1.0, 0.85, 0.3)),
+            ("RotSpeed", number(90.0)),
+            ("LightEmission", number(0.7)),
+            ("Brightness", number(1.5)),
+        ],
+        ParticleType::Magic => vec![
+            ("Rate", number(25.0)),
+            ("Lifetime", number(1.5)),
+            ("Speed", number(1.5)),
+            ("SpreadAngle", number(360.0)),
+            ("Size", number(0.7)),
+            ("SizeEnd", number(0.0)),
+            ("Color", color(0.75, 0.4, 1.0)),
+            ("ColorEnd", color(0.3, 0.9, 1.0)),
+            ("RotSpeed", number(45.0)),
+            ("LightEmission", number(1.0)),
+            ("Brightness", number(2.0)),
+        ],
+    });
+    properties
 }
 
 fn to_bytes(color: Color3) -> [u8; 3] {
@@ -786,6 +926,13 @@ mod tests {
             });
         });
         assert_eq!(lights_in(&world, &[part], ClassName::SpotLight), [light]);
+        // Every preset only sets properties an emitter has.
+        let emitter = world.create(ClassName::ParticleEmitter).unwrap();
+        for kind in ParticleType::ALL {
+            for (property, value) in particle_preset(kind) {
+                world.set_property(emitter, property, value).unwrap();
+            }
+        }
         assert!(lights_in(&world, &[part], ClassName::PointLight).is_empty());
     }
 }

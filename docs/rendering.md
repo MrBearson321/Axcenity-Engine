@@ -57,6 +57,7 @@ Built-in primitives are block, sphere, cylinder and wedge, plus imported glTF an
 3. Many point and spot lights (implemented in Phase 31)
 4. Sky and environment lighting (implemented in Phase 32)
 5. Post-processing: HDR, tone mapping, bloom (implemented in Phase 33)
+6. Sprites and particles (Phase 37)
 
 Each stage must leave existing scenes rendering correctly.
 
@@ -76,6 +77,11 @@ Each stage must leave existing scenes rendering correctly.
 - The scene draws into an `Rgba16Float` texture. A bloom chain (prefilter above `BloomThreshold`, downsample, additive upsample) feeds a composite pass that adds bloom, applies `Exposure` and tone mapping (colors under 0.6 are unchanged, brighter ones roll off toward white) into the real target, then the UI draws on top.
 - Lighting properties `PostProcessingEnabled`, `Exposure`, `BloomEnabled`, `BloomIntensity` and `BloomThreshold` configure it. Off means a plain clamp with no bloom.
 - `scene` draws Neon parts 2.5× brighter than their color when bloom is on, so they pass the threshold and glow.
+
+## Sprites and particles (Phase 37)
+
+- `DrawList::sprites` holds `Sprite { position, size, rotation_degrees, color, opacity, brightness, light_emission, texture }`: camera-facing pictures, unlit and unshadowed. `renderer/sprites.rs` and `sprite.wgsl` draw them last in the HDR scene pass, one instanced 6-corner quad each, turned to face the camera, depth-tested against solid items without writing depth, and sorted farthest first. The color is premultiplied by opacity and the alpha written is `opacity × (1 − light_emission)` with a `One, OneMinusSrcAlpha` blend, so light emission 0 paints over what's behind and 1 adds light. Runs of the same texture are one draw call; `None` (or a texture that couldn't be uploaded) is a plain square. Brightness above 1 blooms.
+- `scene::Particles` (owned by the player and by the editor's viewport, which shows emitters while editing too) turns ParticleEmitters into sprites: it gives off and moves particles each frame in world space (at most 4000 per emitter, 1000 births per frame), and `sprites` reads each emitter's look. The six built-in pictures (`ParticleType`) are drawn in code (64×64, white, shape in the alpha) and shared (`scene::built_in_particle`). A `Texture` is loaded through `Assets` like any texture; Kenney's CC0 Particle Pack images work as they are (white shapes on transparency).
 
 ## Shadows (stage 2)
 

@@ -34,7 +34,8 @@
 //! world always produces the same text.
 
 use axcenity_core::{
-    ClassName, InstanceId, Material, PartType, TextureChannel, Value, ValueKind, World,
+    ClassName, InstanceId, Material, ParticleType, PartType, TextureChannel, Value, ValueKind,
+    World,
 };
 use serde::Deserialize;
 use serde_json::{Map, Value as Json};
@@ -324,6 +325,13 @@ fn json_to_value(json: &Json, kind: ValueKind) -> Result<Value, String> {
             let name = enum_name(json, &names)?;
             Ok(Value::Material(Material::from_name(name).expect("checked")))
         }
+        ValueKind::ParticleType => {
+            let names = ParticleType::ALL.map(ParticleType::as_str);
+            let name = enum_name(json, &names)?;
+            Ok(Value::ParticleType(
+                ParticleType::from_name(name).expect("checked"),
+            ))
+        }
         ValueKind::TextureChannel => {
             let names = TextureChannel::ALL.map(TextureChannel::as_str);
             let name = enum_name(json, &names)?;
@@ -472,6 +480,7 @@ fn json_value(value: &Value) -> String {
         Value::PartType(t) => json_string(t.as_str()),
         Value::Material(m) => json_string(m.as_str()),
         Value::TextureChannel(c) => json_string(c.as_str()),
+        Value::ParticleType(t) => json_string(t.as_str()),
     }
 }
 

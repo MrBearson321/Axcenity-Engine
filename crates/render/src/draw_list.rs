@@ -23,8 +23,33 @@ pub struct DrawList {
     pub lights: Vec<Light>,
     pub post: PostProcessing,
     pub items: Vec<DrawItem>,
+    /// Pictures that always face the camera, such as particles, drawn
+    /// after every item. They aren't lit or shadowed.
+    pub sprites: Vec<Sprite>,
     /// Screen-space UI, drawn after the 3D scene.
     pub ui: Vec<UiDrawItem>,
+}
+
+/// A picture in the 3D scene that always faces the camera, such as one
+/// particle. It's hidden behind solid items, and never hides anything.
+#[derive(Clone, Debug)]
+pub struct Sprite {
+    pub position: Vec3,
+    /// How many studs across it is.
+    pub size: f32,
+    /// How far it's turned around the line of sight, in degrees.
+    pub rotation_degrees: f32,
+    /// An sRGB color that tints the texture.
+    pub color: [f32; 3],
+    /// 1 is solid, 0 invisible. Multiplies the texture's alpha.
+    pub opacity: f32,
+    /// Multiplies the color: 1 shows it as it is; above 1 glows and blooms.
+    pub brightness: f32,
+    /// 0 blends it over what's behind, like paint; 1 adds its light, like
+    /// fire. In between mixes the two.
+    pub light_emission: f32,
+    /// Its picture, whose alpha is its shape. `None` is a plain square.
+    pub texture: Option<Arc<dyn TextureSource>>,
 }
 
 #[derive(Clone, Debug)]

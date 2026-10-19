@@ -1,0 +1,156 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Anchored": true,
+          "Size": [40, 1, 24],
+          "Position": [0, -0.5, 0],
+          "Color": [0.3, 0.42, 0.28],
+          "Roughness": 0.9
+        }
+      },
+      {
+        "class": "Model",
+        "name": "Campfire",
+        "children": [
+          {
+            "class": "Part",
+            "name": "Log",
+            "properties": {
+              "Anchored": true,
+              "Shape": "Cylinder",
+              "Size": [4, 0.8, 0.8],
+              "Position": [-6, 0.4, 0],
+              "Orientation": [0, 35, 0],
+              "Color": [0.4, 0.26, 0.15]
+            }
+          },
+          {
+            "class": "Part",
+            "name": "Log",
+            "properties": {
+              "Anchored": true,
+              "Shape": "Cylinder",
+              "Size": [4, 0.8, 0.8],
+              "Position": [-6, 0.4, 0],
+              "Orientation": [0, -35, 0],
+              "Color": [0.4, 0.26, 0.15]
+            }
+          },
+          {
+            "class": "Part",
+            "name": "Flames",
+            "properties": {
+              "Anchored": true,
+              "CanCollide": false,
+              "CastShadow": false,
+              "Transparency": 1,
+              "Size": [1.6, 0.5, 1.6],
+              "Position": [-6, 0.9, 0]
+            },
+            "children": [
+              {
+                "class": "ParticleEmitter",
+                "name": "Fire",
+                "properties": {
+                  "ParticleType": "Fire",
+                  "Rate": 40,
+                  "Lifetime": 1,
+                  "Speed": 3,
+                  "SpreadAngle": 20,
+                  "Acceleration": [0, 6, 0],
+                  "Size": 2,
+                  "SizeEnd": 0.5,
+                  "Color": [1, 0.75, 0.25],
+                  "ColorEnd": [0.9, 0.15, 0.05],
+                  "LightEmission": 1,
+                  "Brightness": 2
+                }
+              },
+              {
+                "class": "ParticleEmitter",
+                "name": "Smoke",
+                "properties": {
+                  "ParticleType": "Smoke",
+                  "Rate": 6,
+                  "Lifetime": 4,
+                  "Speed": 3,
+                  "SpreadAngle": 20,
+                  "Drag": 0.4,
+                  "Size": 1.5,
+                  "SizeEnd": 5,
+                  "Color": [0.5, 0.5, 0.5],
+                  "ColorEnd": [0.3, 0.3, 0.3],
+                  "Transparency": 0.5,
+                  "RotSpeed": 20
+                }
+              },
+              {
+                "class": "PointLight",
+                "name": "Glow",
+                "properties": {
+                  "Color": [1, 0.6, 0.3],
+                  "Brightness": 2,
+                  "Range": 18
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "Pad",
+        "properties": {
+          "Anchored": true,
+          "Size": [6, 0.4, 6],
+          "Position": [6, 0.2, 0],
+          "Color": [0.25, 0.3, 0.45],
+          "Material": "Metal"
+        },
+        "children": [
+          {
+            "class": "ParticleEmitter",
+            "name": "Sparks",
+            "properties": {
+              "Enabled": false,
+              "ParticleType": "Spark",
+              "Lifetime": 0.8,
+              "Speed": 18,
+              "SpreadAngle": 80,
+              "Acceleration": [0, -40, 0],
+              "Size": 0.4,
+              "SizeEnd": 0.1,
+              "Color": [1, 0.85, 0.4],
+              "ColorEnd": [1, 0.4, 0.1],
+              "LightEmission": 1,
+              "Brightness": 3
+            }
+          },
+          {
+            "class": "ParticleEmitter",
+            "name": "Stars",
+            "properties": {
+              "ParticleType": "Star",
+              "Rate": 4,
+              "Lifetime": 3,
+              "Speed": 2,
+              "SpreadAngle": 60,
+              "Size": 0.7,
+              "SizeEnd": 0.7,
+              "Color": [0.7, 0.85, 1],
+              "ColorEnd": [1, 0.85, 0.3],
+              "RotSpeed": 90,
+              "LightEmission": 0.7,
+              "Brightness": 1.5
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
