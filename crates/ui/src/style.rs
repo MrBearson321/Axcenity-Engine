@@ -3,7 +3,8 @@ use std::ops::Range;
 
 use axcenity_core::{ClassName, InstanceId, Value, World};
 
-const SUPPORTED_PROPERTIES: &[&str] = &[
+/// The CSS properties UI elements understand. Others are warned about.
+pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "align-items",
     "background-color",
     "border",
@@ -52,6 +53,16 @@ impl Stylesheet {
     pub fn path(&self) -> &str {
         &self.path
     }
+
+    /// Where the last rule with exactly `selector` (such as `#score`) ends:
+    /// the byte offset of its closing `}`, to add a declaration before it.
+    pub fn rule_end(&self, selector: &str) -> Option<usize> {
+        self.rules
+            .iter()
+            .rev()
+            .find(|rule| rule.selector_text == selector)
+            .map(|rule| rule.block.end)
+    }
 }
 /// A declaration that applies to a UI element, and where it's written, so
 /// the editor can show it and rewrite it.
@@ -87,6 +98,8 @@ struct Rule {
     selector_text: String,
     selectors: Vec<Selector>,
     declarations: Vec<Declaration>,
+    /// Where the text between the braces is in the source, in bytes.
+    block: Range<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -168,6 +181,7 @@ pub fn parse_stylesheet(path: &str, source: &str) -> (Stylesheet, Vec<StyleWarni
                 .join(" "),
             selectors,
             declarations,
+            block: block_start..block_start + block.len(),
         });
     }
 
@@ -762,6 +776,19 @@ mod tests {
         assert_eq!(width.line, 3);
         assert_eq!(width.selector, ".hud");
         assert_eq!(width.path, "ui.css");
+    }
+
+    #[test]
+    fn a_rule_is_found_by_its_selector_to_add_to() {
+        let source = "#score { color: red; }\n.hud { gap: 4px; }\n";
+        let (stylesheet, _) = parse_stylesheet("ui.css", source);
+        let end = stylesheet.rule_end("#score").unwrap();
+        assert_eq!(&source[end..end + 1], "}");
+        assert_eq!(stylesheet.rule_end("#missing"), None);
+        assert_eq!(
+            &source[..stylesheet.rule_end(".hud").unwrap()],
+            "#score { color: red; }\n.hud { gap: 4px; "
+        );
     }
 
     #[test]

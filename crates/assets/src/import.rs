@@ -19,6 +19,8 @@ pub enum ImportError {
     NotAModel,
     #[error("only PNG, JPEG, TGA and BMP textures can be used")]
     NotATexture,
+    #[error("only WAV, OGG, MP3 and FLAC sounds can be used")]
+    NotAudio,
     #[error("could not read it")]
     Read(#[source] io::Error),
     #[error(transparent)]
@@ -108,13 +110,46 @@ pub const TEXTURE_EXTENSIONS: [&str; 5] = ["png", "jpg", "jpeg", "tga", "bmp"];
 /// otherwise a copy's, made in `into` (a folder in the project, such as
 /// [`PROJECT_TEXTURES_FOLDER`]) under a name not yet taken there.
 pub fn import_texture(project: &Path, file: &Path, into: &str) -> Result<String, ImportError> {
+    import_file(project, file, into, &TEXTURE_EXTENSIONS, "texture")
+        .ok_or(ImportError::NotATexture)?
+}
+
+/// Where sound files picked from outside the project are copied to.
+pub const PROJECT_AUDIO_FOLDER: &str = "assets/audio";
+
+/// The extensions of the sound files the engine plays.
+pub const AUDIO_EXTENSIONS: [&str; 4] = ["wav", "ogg", "mp3", "flac"];
+
+/// The path in `project` of the sound `file`, for a Sound's `SoundId`: its
+/// own if it's inside the project, otherwise a copy's in
+/// [`PROJECT_AUDIO_FOLDER`], as [`import_texture`] does for textures.
+pub fn import_audio(project: &Path, file: &Path) -> Result<String, ImportError> {
+    import_file(
+        project,
+        file,
+        PROJECT_AUDIO_FOLDER,
+        &AUDIO_EXTENSIONS,
+        "sound",
+    )
+    .ok_or(ImportError::NotAudio)?
+}
+
+/// `file`'s path in `project`, copying it into `into` first if it's
+/// outside. `None` if its extension isn't one of `extensions`.
+fn import_file(
+    project: &Path,
+    file: &Path,
+    into: &str,
+    extensions: &[&str],
+    fallback_name: &str,
+) -> Option<Result<String, ImportError>> {
     let extension = file
         .extension()
         .and_then(|extension| extension.to_str())
         .map(str::to_ascii_lowercase)
         .unwrap_or_default();
-    if !TEXTURE_EXTENSIONS.contains(&extension.as_str()) {
-        return Err(ImportError::NotATexture);
+    if !extensions.contains(&extension.as_str()) {
+        return None;
     }
     if let (Ok(project), Ok(file)) = (project.canonicalize(), file.canonicalize())
         && let Ok(inside) = file.strip_prefix(&project)
@@ -123,16 +158,15 @@ pub fn import_texture(project: &Path, file: &Path, into: &str) -> Result<String,
             .components()
             .map(|part| part.as_os_str().to_string_lossy().into_owned())
             .collect();
-        return Ok(parts.join("/"));
+        return Some(Ok(parts.join("/")));
     }
     let name = file
         .file_name()
         .and_then(|name| safe_file_name(&name.to_string_lossy()))
-        .unwrap_or_else(|| format!("texture.{extension}"));
+        .unwrap_or_else(|| format!("{fallback_name}.{extension}"));
     let folder = project.join(into);
     let name = unique_file_name(&name, |taken| folder.join(taken).exists());
-    copy(file, &folder.join(&name))?;
-    Ok(format!("{}/{name}", into.trim_end_matches('/')))
+    Some(copy(file, &folder.join(&name)).map(|()| format!("{}/{name}", into.trim_end_matches('/'))))
 }
 
 /// The model at `file` (outside the project), loaded from where it is,

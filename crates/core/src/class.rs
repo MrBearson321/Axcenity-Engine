@@ -185,6 +185,9 @@ impl ClassName {
             ClassName::Lighting => vec![
                 ("ShadowsEnabled", Value::Bool(true)),
                 ("ShadowDistance", Value::Number(150.0)),
+                // 0 is crisp; higher blurs edges more the further they are
+                // from what casts them.
+                ("ShadowSoftness", Value::Number(0.2)),
                 // The procedural sky, which also lights and is reflected by parts.
                 ("SkyTopColor", Value::Color3(Color3::new(0.25, 0.5, 0.9))),
                 (
@@ -282,6 +285,11 @@ impl ClassName {
                 ("SoundId", Value::String(String::new())),
                 ("Volume", Value::Number(1.0)),
                 ("Looped", Value::Bool(false)),
+                // 1 is the file's own speed; 2 plays twice as fast and higher.
+                ("PlaybackSpeed", Value::Number(1.0)),
+                // True while it plays. Saved true, it plays when the game
+                // starts; set false to pause and true to carry on.
+                ("Playing", Value::Bool(false)),
             ],
             ClassName::Part => {
                 let material = Material::Plastic;
@@ -298,6 +306,8 @@ impl ClassName {
                     ("Material", Value::Material(material)),
                     ("Metalness", Value::Number(preset.metalness)),
                     ("Roughness", Value::Number(preset.roughness)),
+                    // Off, the part casts no sun shadow (it's still shaded).
+                    ("CastShadow", Value::Bool(true)),
                 ]
             }
             ClassName::MeshPart => vec![
@@ -309,6 +319,7 @@ impl ClassName {
                 ("Orientation", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
                 // The model is stretched so its bounding box is this size.
                 ("Size", Value::Vector3(Vector3::new(2.0, 2.0, 2.0))),
+                ("CastShadow", Value::Bool(true)),
             ],
             ClassName::SurfaceAppearance => {
                 let map = |name| (name, Value::String(String::new()));
@@ -368,9 +379,10 @@ impl ClassName {
             | ClassName::Frame
             | ClassName::TextLabel
             | ClassName::ImageLabel
-            | ClassName::Sound
             | ClassName::PointLight
             | ClassName::SpotLight => &[],
+            // Fires when a sound that isn't looped plays to its end.
+            ClassName::Sound => &["Ended"],
             // Fires on both parts when two parts start touching.
             ClassName::Part | ClassName::MeshPart => &["Touched"],
             // `OnServerEvent` fires in Scripts for each `FireServer`, and

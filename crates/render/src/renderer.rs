@@ -48,10 +48,14 @@ struct FrameUniform {
     sun_direction: [f32; 4],
     sun_radiance: [f32; 4],
     ambient: [f32; 4],
-    /// Turns world space to the sun's view, for the shadow map.
-    light_view_proj: [[f32; 4]; 4],
-    /// 1 if shadows are on, the world size of a shadow texel, the depth
-    /// bias, and how far from the camera shadows reach.
+    /// Turns world space to the sun's view of each shadow cascade.
+    cascades: [[[f32; 4]; 4]; SHADOW_CASCADES],
+    /// The world size of a shadow texel in each cascade.
+    cascade_texels: [f32; 4],
+    /// How many studs each cascade's depth range covers.
+    cascade_depths: [f32; 4],
+    /// 1 if shadows are on, how wide the sun looks (for soft edges), how
+    /// many cascades there are, and how far from the camera shadows reach.
     shadow: [f32; 4],
     /// Turns clip space back to world space, to find the sky's direction.
     inv_view_proj: [[f32; 4]; 4],
@@ -104,15 +108,28 @@ struct PostUniform {
     flags: [f32; 4],
 }
 
-/// The size of the shadow map, in texels per side.
+/// The size of each shadow cascade, in texels per side.
 const SHADOW_MAP_SIZE: u32 = 2048;
+/// How many shadow maps cover the view, each further out and coarser than
+/// the one before. Must match the size of `cascades` in shader.wgsl.
+const SHADOW_CASCADES: usize = 3;
+/// How the cascades' far ends are spread between even steps (0) and steps
+/// that grow by the same factor each time (1). Mostly the second, so the
+/// nearest cascade is small and sharp.
+const CASCADE_SPLIT_BLEND: f32 = 0.75;
 /// How far behind the visible area (toward the sun) things still cast shadows into it.
 const SHADOW_CASTER_RANGE: f32 = 500.0;
+/// How wide the sun looks at `ShadowSoftness` 1: the width of a soft edge
+/// per stud between the caster and the surface it shades.
+const MAX_SUN_SIZE: f32 = 0.1;
+/// Uniform buffer offsets must be multiples of this (wgpu's default limit).
+const CASCADE_UNIFORM_STRIDE: u64 = 256;
 
-/// The depth texture the sun's view is drawn into, with the frame bindings
-/// that read it.
+/// The depth texture the sun's view is drawn into, one layer per cascade,
+/// with the frame bindings that read it.
 struct ShadowMap {
-    view: wgpu::TextureView,
+    /// One view per cascade, to draw into.
+    layers: Vec<wgpu::TextureView>,
     /// The frame bindings with this map in place of the empty one.
     frame_bind_group: wgpu::BindGroup,
 }
@@ -259,6 +276,7 @@ struct Batch {
     mesh: MeshKey,
     material: MaterialKey,
     transparent: bool,
+    casts_shadow: bool,
     instances: Range<u32>,
 }
 
@@ -342,7 +360,9 @@ struct ScenePipeline {
     frame_layout: wgpu::BindGroupLayout,
     shadow_sampler: wgpu::Sampler,
     shadow_pipeline: wgpu::RenderPipeline,
-    /// Gives the shadow pass the frame uniform only (it can't also bind the
+    /// Each cascade's view from the sun, [`CASCADE_UNIFORM_STRIDE`] apart.
+    cascade_buffer: wgpu::Buffer,
+    /// Gives the shadow pass one cascade's matrix (it can't also bind the
     /// shadow map it's drawing into).
     shadow_bind_group: wgpu::BindGroup,
     /// Made when shadows are first turned on, and freed when turned off.
@@ -612,7 +632,7 @@ impl ScenePipeline {
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Depth,
-                        view_dimension: wgpu::TextureViewDimension::D2,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
                         multisampled: false,
                     },
                     count: None,
@@ -646,7 +666,7 @@ impl ScenePipeline {
             compare: Some(wgpu::CompareFunction::LessEqual),
             ..Default::default()
         });
-        let empty_shadow_view = create_shadow_view(&device, 1);
+        let (empty_shadow_view, _) = create_shadow_views(&device, 1);
         // The bind group keeps the stand-in 1×1 map alive while shadows are off.
         let frame_bind_group = create_frame_bind_group(
             &device,
@@ -655,15 +675,24 @@ impl ScenePipeline {
             &empty_shadow_view,
             &shadow_sampler,
         );
+        let cascade_size = size_of::<[[f32; 4]; 4]>() as u64;
+        let cascade_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("shadow cascades"),
+            size: CASCADE_UNIFORM_STRIDE * SHADOW_CASCADES as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        // Binding 5 matches `shadow_cascade` in shader.wgsl. Each pass picks
+        // its cascade with an offset into the buffer (a "dynamic offset").
         let shadow_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("shadow pass"),
             entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
+                binding: 5,
                 visibility: wgpu::ShaderStages::VERTEX,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
+                    has_dynamic_offset: true,
+                    min_binding_size: wgpu::BufferSize::new(cascade_size),
                 },
                 count: None,
             }],
@@ -672,8 +701,12 @@ impl ScenePipeline {
             label: Some("shadow pass"),
             layout: &shadow_layout,
             entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: frame_buffer.as_entire_binding(),
+                binding: 5,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &cascade_buffer,
+                    offset: 0,
+                    size: wgpu::BufferSize::new(cascade_size),
+                }),
             }],
         });
         let shadow_pipeline = create_shadow_pipeline(&device, &shadow_layout);
@@ -797,6 +830,7 @@ impl ScenePipeline {
             frame_layout,
             shadow_sampler,
             shadow_pipeline,
+            cascade_buffer,
             shadow_bind_group,
             shadow_map: None,
             meshes,
@@ -838,6 +872,13 @@ impl ScenePipeline {
         ];
         self.queue
             .write_buffer(&self.frame_buffer, 0, bytemuck::bytes_of(&frame_uniform));
+        for (index, cascade) in frame_uniform.cascades.iter().enumerate() {
+            self.queue.write_buffer(
+                &self.cascade_buffer,
+                index as u64 * CASCADE_UNIFORM_STRIDE,
+                bytemuck::bytes_of(cascade),
+            );
+        }
         if !planned_lights.lights.is_empty() {
             self.queue.write_buffer(
                 &self.light_buffer,
@@ -874,7 +915,7 @@ impl ScenePipeline {
         // Shadow maps cost memory, so one exists only while shadows are on.
         let shadows_on = list.shadows.enabled;
         if shadows_on && self.shadow_map.is_none() {
-            let view = create_shadow_view(&self.device, SHADOW_MAP_SIZE);
+            let (view, layers) = create_shadow_views(&self.device, SHADOW_MAP_SIZE);
             let frame_bind_group = create_frame_bind_group(
                 &self.device,
                 &self.frame_layout,
@@ -883,7 +924,7 @@ impl ScenePipeline {
                 &self.shadow_sampler,
             );
             self.shadow_map = Some(ShadowMap {
-                view,
+                layers,
                 frame_bind_group,
             });
         } else if !shadows_on {
@@ -896,12 +937,14 @@ impl ScenePipeline {
                 label: Some("frame"),
             });
 
-        if let Some(shadow_map) = &self.shadow_map {
+        // One pass per cascade, each drawing into its own layer of the map.
+        let layers = self.shadow_map.iter().flat_map(|map| &map.layers);
+        for (index, layer) in layers.enumerate() {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("shadow map"),
+                label: Some("shadow cascade"),
                 color_attachments: &[],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &shadow_map.view,
+                    view: layer,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(1.0),
                         store: wgpu::StoreOp::Store,
@@ -911,10 +954,14 @@ impl ScenePipeline {
                 ..Default::default()
             });
             pass.set_pipeline(&self.shadow_pipeline);
-            pass.set_bind_group(0, &self.shadow_bind_group, &[]);
+            let offset = (index as u64 * CASCADE_UNIFORM_STRIDE) as u32;
+            pass.set_bind_group(0, &self.shadow_bind_group, &[offset]);
             pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            // See-through items cast no shadow.
-            for batch in batches.iter().filter(|batch| !batch.transparent) {
+            // See-through items, and parts with `CastShadow` off, cast no shadow.
+            for batch in batches
+                .iter()
+                .filter(|batch| !batch.transparent && batch.casts_shadow)
+            {
                 let Some(mesh) = self.gpu_mesh(batch.mesh) else {
                     continue;
                 };
@@ -1209,7 +1256,7 @@ fn frame_uniform(list: &DrawList, aspect: f32) -> FrameUniform {
     let sun_direction = list.sun.direction.normalize_or(Vec3::Y);
     let sun_radiance = linear_color(list.sun.color) * list.sun.intensity;
     let ambient = linear_color(list.ambient.color) * list.ambient.intensity;
-    let (light_view_proj, shadow) = shadow_setup(list, sun_direction, aspect);
+    let shadows = shadow_setup(list, sun_direction, aspect);
     let sky = &list.sky;
     let environment = if sky.environment_intensity.is_finite() {
         sky.environment_intensity.max(0.0)
@@ -1223,8 +1270,10 @@ fn frame_uniform(list: &DrawList, aspect: f32) -> FrameUniform {
         sun_direction: sun_direction.extend(0.0).to_array(),
         sun_radiance: sun_radiance.extend(0.0).to_array(),
         ambient: ambient.extend(0.0).to_array(),
-        light_view_proj: light_view_proj.to_cols_array_2d(),
-        shadow,
+        cascades: shadows.cascades.map(|cascade| cascade.to_cols_array_2d()),
+        cascade_texels: shadows.texels,
+        cascade_depths: shadows.depths,
+        shadow: shadows.settings,
         inv_view_proj: view_proj.inverse().to_cols_array_2d(),
         sky_top: linear_color(sky.top_color).extend(environment).to_array(),
         sky_horizon: linear_color(sky.horizon_color).extend(0.0).to_array(),
@@ -1404,32 +1453,50 @@ fn post_uniform(post: &PostProcessing) -> PostUniform {
     }
 }
 
-/// The sun's view matrix and the shadow values for the shader (see
-/// [`FrameUniform::shadow`]). One shadow map covers the part of the view
-/// out to the shadow distance, so shadows are sharpest where that's small.
-/// The area is a sphere around that part of the view, so turning the camera
-/// doesn't change the map's scale, and its position is snapped to whole
-/// texels so shadow edges don't shimmer as the camera moves.
-fn shadow_setup(list: &DrawList, sun_direction: Vec3, aspect: f32) -> (Mat4, [f32; 4]) {
+/// The shadow values for the shader (see [`FrameUniform`]).
+struct ShadowSetup {
+    cascades: [Mat4; SHADOW_CASCADES],
+    texels: [f32; 4],
+    depths: [f32; 4],
+    settings: [f32; 4],
+}
+
+/// Where each shadow cascade ends, in studs from the camera along the view.
+/// The ends are spread so each cascade reaches a few times further than
+/// the one before (see [`CASCADE_SPLIT_BLEND`]), and the last ends at `distance`.
+fn cascade_ends(distance: f32) -> [f32; SHADOW_CASCADES] {
+    // From 1 stud, not the near plane, or the first cascade would be tiny.
+    let near = 1.0_f32.min(distance * 0.5);
+    std::array::from_fn(|index| {
+        let fraction = (index + 1) as f32 / SHADOW_CASCADES as f32;
+        let even = near + (distance - near) * fraction;
+        let growing = near * (distance / near).powf(fraction);
+        even + (growing - even) * CASCADE_SPLIT_BLEND
+    })
+}
+
+/// The sun's views of the shadow cascades and the shadow values for the
+/// shader. Each cascade covers one slice of the view, so the nearest
+/// shadows get the most texels per stud and are the sharpest. The area of
+/// each is a sphere around its slice, so turning the camera doesn't change
+/// the map's scale, and its position is snapped to whole texels so shadow
+/// edges don't shimmer as the camera moves.
+fn shadow_setup(list: &DrawList, sun_direction: Vec3, aspect: f32) -> ShadowSetup {
     let settings = list.shadows;
+    let mut setup = ShadowSetup {
+        cascades: [Mat4::IDENTITY; SHADOW_CASCADES],
+        texels: [1.0; 4],
+        depths: [1.0; 4],
+        settings: [0.0; 4],
+    };
     if !settings.enabled || !settings.distance.is_finite() || settings.distance <= 0.0 {
-        return (Mat4::IDENTITY, [0.0; 4]);
+        return setup;
     }
     let camera = &list.camera;
     let forward = (camera.look_at - camera.position).normalize_or(Vec3::NEG_Z);
-    let far = settings.distance.clamp(NEAR_PLANE * 2.0, FAR_PLANE);
-
-    // The smallest sphere around the slice of the view between the near
-    // plane and `far`, centered on the view direction `center` away.
+    let distance = settings.distance.clamp(NEAR_PLANE * 4.0, FAR_PLANE);
     let tan_half = (camera.fov_y_degrees.to_radians() * 0.5).tan();
     let k2 = tan_half * tan_half * (1.0 + aspect * aspect);
-    let center = if k2 >= (far - NEAR_PLANE) / (far + NEAR_PLANE) {
-        far
-    } else {
-        0.5 * (far + NEAR_PLANE) * (1.0 + k2)
-    };
-    let radius = ((far - center).powi(2) + far * far * k2).sqrt().max(1.0);
-    let sphere_center = camera.position + forward * center;
 
     // Looking from the sun toward the scene.
     let toward_sun = sun_direction;
@@ -1440,24 +1507,44 @@ fn shadow_setup(list: &DrawList, sun_direction: Vec3, aspect: f32) -> (Mat4, [f3
     };
     let right = (-toward_sun).cross(up_hint).normalize();
     let up = right.cross(-toward_sun);
-    let texel = 2.0 * radius / SHADOW_MAP_SIZE as f32;
-    let snap = |distance: f32| (distance / texel).round() * texel;
-    let snapped_center = right * snap(sphere_center.dot(right))
-        + up * snap(sphere_center.dot(up))
-        + toward_sun * sphere_center.dot(toward_sun);
 
-    let back = radius + SHADOW_CASTER_RANGE;
-    let eye = snapped_center + toward_sun * back;
-    let view = rh::view::look_at_mat4(eye, snapped_center, up);
-    let (near, far_depth) = (0.1, back + radius);
-    let projection =
-        rh::proj::directx::orthographic(-radius, radius, -radius, radius, near, far_depth);
-    // Two texels of slack in world units, as depth from 0 to 1.
-    let depth_bias = 2.0 * texel / (far_depth - near);
-    (
-        projection * view,
-        [1.0, texel, depth_bias, settings.distance],
-    )
+    let mut slice_near = NEAR_PLANE;
+    for (index, far) in cascade_ends(distance).into_iter().enumerate() {
+        // The smallest sphere around the slice of the view between
+        // `slice_near` and `far`, centered on the view direction `center` away.
+        let center = (0.5 * (far + slice_near) * (1.0 + k2)).min(far);
+        let radius = ((far - center).powi(2) + far * far * k2).sqrt().max(1.0);
+        let sphere_center = camera.position + forward * center;
+        slice_near = far;
+
+        let texel = 2.0 * radius / SHADOW_MAP_SIZE as f32;
+        let snap = |distance: f32| (distance / texel).round() * texel;
+        let snapped_center = right * snap(sphere_center.dot(right))
+            + up * snap(sphere_center.dot(up))
+            + toward_sun * sphere_center.dot(toward_sun);
+
+        let back = radius + SHADOW_CASTER_RANGE;
+        let eye = snapped_center + toward_sun * back;
+        let view = rh::view::look_at_mat4(eye, snapped_center, up);
+        let (near, far_depth) = (0.1, back + radius);
+        let projection =
+            rh::proj::directx::orthographic(-radius, radius, -radius, radius, near, far_depth);
+        setup.cascades[index] = projection * view;
+        setup.texels[index] = texel;
+        setup.depths[index] = far_depth - near;
+    }
+    let softness = if settings.softness.is_finite() {
+        settings.softness.clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    setup.settings = [
+        1.0,
+        softness * MAX_SUN_SIZE,
+        SHADOW_CASCADES as f32,
+        settings.distance,
+    ];
+    setup
 }
 
 /// Puts the visible items in drawing order and groups them into batches.
@@ -1473,7 +1560,13 @@ fn plan_draws(list: &DrawList) -> (Vec<InstanceRaw>, Vec<Batch>) {
         .filter(|item| item.material.opacity > 0.0)
         .partition(|item| item.material.opacity < 1.0);
 
-    opaque.sort_by_key(|item| (MeshKey::of(&item.shape), material_key(item)));
+    opaque.sort_by_key(|item| {
+        (
+            MeshKey::of(&item.shape),
+            material_key(item),
+            !item.casts_shadow,
+        )
+    });
     let distance = |item: &DrawItem| {
         item.transform
             .w_axis
@@ -1496,11 +1589,13 @@ fn plan_draws(list: &DrawList) -> (Vec<InstanceRaw>, Vec<Batch>) {
         let index = instances.len() as u32;
         instances.push(raw);
         let (mesh, material) = (MeshKey::of(&item.shape), material_key(item));
+        let casts_shadow = item.casts_shadow;
         match batches.last_mut() {
             Some(last)
                 if last.mesh == mesh
                     && last.material == material
-                    && last.transparent == transparent =>
+                    && last.transparent == transparent
+                    && last.casts_shadow == casts_shadow =>
             {
                 last.instances.end = index + 1;
             }
@@ -1508,6 +1603,7 @@ fn plan_draws(list: &DrawList) -> (Vec<InstanceRaw>, Vec<Batch>) {
                 mesh,
                 material,
                 transparent,
+                casts_shadow,
                 instances: index..index + 1,
             }),
         }
@@ -2196,25 +2292,44 @@ fn create_pipeline(
     })
 }
 
-/// A square depth texture the sun's view is drawn into, which the scene
-/// pass then reads.
-fn create_shadow_view(device: &wgpu::Device, size: u32) -> wgpu::TextureView {
-    device
-        .create_texture(&wgpu::TextureDescriptor {
-            label: Some("shadow map"),
-            size: wgpu::Extent3d {
-                width: size,
-                height: size,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: DEPTH_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
+/// A square depth texture with one layer per shadow cascade, which the
+/// sun's views are drawn into and the scene pass then reads: a view of the
+/// whole array for reading, and one view per layer for drawing.
+fn create_shadow_views(
+    device: &wgpu::Device,
+    size: u32,
+) -> (wgpu::TextureView, Vec<wgpu::TextureView>) {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("shadow map"),
+        size: wgpu::Extent3d {
+            width: size,
+            height: size,
+            depth_or_array_layers: SHADOW_CASCADES as u32,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: DEPTH_FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    let array = texture.create_view(&wgpu::TextureViewDescriptor {
+        label: Some("shadow map"),
+        dimension: Some(wgpu::TextureViewDimension::D2Array),
+        ..Default::default()
+    });
+    let layers = (0..SHADOW_CASCADES as u32)
+        .map(|layer| {
+            texture.create_view(&wgpu::TextureViewDescriptor {
+                label: Some("shadow cascade"),
+                dimension: Some(wgpu::TextureViewDimension::D2),
+                base_array_layer: layer,
+                array_layer_count: Some(1),
+                ..Default::default()
+            })
         })
-        .create_view(&wgpu::TextureViewDescriptor::default())
+        .collect();
+    (array, layers)
 }
 
 fn create_frame_bind_group(
@@ -2296,7 +2411,13 @@ fn create_shadow_pipeline(
             depth_write_enabled: true,
             depth_compare: wgpu::CompareFunction::Less,
             stencil: Default::default(),
-            bias: Default::default(),
+            // Pushes steep surfaces' depth back a little, so they don't
+            // shadow themselves in stripes ("shadow acne").
+            bias: wgpu::DepthBiasState {
+                constant: 0,
+                slope_scale: 1.5,
+                clamp: 0.0,
+            },
         }),
         multisample: Default::default(),
         fragment: None,
@@ -2718,6 +2839,7 @@ mod tests {
                 opacity,
                 ..Material::default()
             },
+            casts_shadow: true,
         }
     }
 
@@ -2726,6 +2848,7 @@ mod tests {
             mesh,
             material: MaterialKey::default(),
             transparent,
+            casts_shadow: true,
             instances,
         }
     }
@@ -3004,7 +3127,48 @@ mod tests {
                 Vec3::new(0.0, 0.0, -5.0),
             ),
             material: Material::default(),
+            casts_shadow: true,
         }
+    }
+
+    #[test]
+    fn parts_shadow_others_unless_they_dont_cast_shadows() {
+        let Some((device, queue)) = test_device() else {
+            eprintln!("skipped: no graphics adapter on this machine");
+            return;
+        };
+        let block = |size: Vec3, position: Vec3| DrawItem {
+            transform: Mat4::from_scale_rotation_translation(size, glam::Quat::IDENTITY, position),
+            ..big_block()
+        };
+        // A wall facing the camera, lit from the front right. The small
+        // block's shadow falls on the middle of the wall, beside the block.
+        let wall = block(Vec3::new(30.0, 30.0, 1.0), Vec3::new(0.0, 0.0, -10.0));
+        let blocker = block(Vec3::splat(2.0), Vec3::new(4.0, 0.0, -6.0));
+        let mut list = list_of(vec![wall, blocker]);
+        list.sun.direction = Vec3::new(1.0, 0.0, 1.0);
+        list.shadows.softness = 0.0;
+
+        let shaded = middle_pixel(&device, &queue, &list);
+        list.items[1].casts_shadow = false;
+        let lit = middle_pixel(&device, &queue, &list);
+        assert!(
+            lit[0] > shaded[0] + 40,
+            "the block's shadow is gone: {shaded:?} vs {lit:?}"
+        );
+
+        list.items[1].casts_shadow = true;
+        list.shadows.enabled = false;
+        assert_eq!(middle_pixel(&device, &queue, &list), lit, "shadows off");
+    }
+
+    #[test]
+    fn cascades_end_further_out_each_time_and_the_last_at_the_distance() {
+        let ends = cascade_ends(150.0);
+        assert!(ends[0] > 1.0 && ends[0] < ends[1] && ends[1] < ends[2]);
+        assert!((ends[SHADOW_CASCADES - 1] - 150.0).abs() < 1e-3);
+        // The nearest cascade is small, so it's the sharpest.
+        assert!(ends[0] < 25.0, "{ends:?}");
     }
 
     #[test]
@@ -3158,6 +3322,7 @@ mod tests {
                 emissive: [0.63, 0.8, 0.95],
                 ..Material::default()
             },
+            casts_shadow: true,
         });
         renderer.resize(64, 64);
         assert_eq!(renderer.size(), (64, 64));
@@ -3254,6 +3419,7 @@ mod tests {
                 Vec3::new(0.0, 0.0, -3.0),
             ),
             material,
+            casts_shadow: true,
         });
         let mut renderer = TextureRenderer::new(&device, &queue, 32, 32);
         renderer.render(&list).unwrap();

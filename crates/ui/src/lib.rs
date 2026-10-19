@@ -7,8 +7,8 @@ use axcenity_render::{UiDrawItem, UiRectangle, UiText};
 use taffy::prelude::*;
 
 pub use style::{
-    CssDeclaration, StyleWarning, Stylesheet, applied_declaration, applied_declarations,
-    parse_stylesheet,
+    CssDeclaration, SUPPORTED_PROPERTIES, StyleWarning, Stylesheet, applied_declaration,
+    applied_declarations, parse_stylesheet,
 };
 use style::{PseudoClasses, ResolvedStyles, resolve_styles, resolve_variables};
 
@@ -639,6 +639,12 @@ fn apply_container_style(style: &mut Style, styles: &ResolvedStyles) {
 fn css_color(styles: &ResolvedStyles, name: &str) -> Option<(Color3, f32)> {
     let value = css_property(styles, name)?;
     parse_color(&value)
+}
+
+/// A CSS colour (`#rgb`, `#rrggbb`, `rgb()`, `rgba()` or a name), as its
+/// colour and opacity. The editor uses it to show colour swatches.
+pub fn parse_css_color(value: &str) -> Option<(Color3, f32)> {
+    parse_color(value)
 }
 
 fn parse_color(value: &str) -> Option<(Color3, f32)> {

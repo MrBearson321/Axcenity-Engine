@@ -24,7 +24,10 @@ mod ribbon;
 mod screen;
 mod scripts;
 mod side_warnings;
+#[cfg(test)]
+mod snapshot;
 mod start;
+mod style_panel;
 mod surface;
 mod theme;
 mod thumbnail;

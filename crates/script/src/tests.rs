@@ -125,6 +125,37 @@ fn sound_play_and_stop_queue_host_actions() {
 }
 
 #[test]
+fn sound_methods_keep_playing_in_step_and_ended_fires() {
+    let mut world = World::new();
+    let sound = world.create(ClassName::Sound).unwrap();
+    world.set_name(sound, "Music").unwrap();
+    world
+        .set_property(sound, "SoundId", Value::String("music.ogg".to_owned()))
+        .unwrap();
+    world.set_parent(sound, Some(world.workspace())).unwrap();
+
+    let mut runtime = ScriptRuntime::new();
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/audio.server.lua",
+        "local music = workspace.Music
+         music.Ended:Connect(function() print('ended', music.Playing) end)
+         music:Play()
+         print(music.Playing)
+         music:Pause()
+         print(music.Playing)
+         music:Resume()
+         print(music.Playing)",
+    );
+    assert_eq!(lines(&mut runtime), ["true", "false", "true"]);
+    assert_eq!(property(&world, sound, "Playing"), Value::Bool(true));
+
+    runtime.fire_sounds_ended(&mut world, &[sound]);
+    assert_eq!(lines(&mut runtime), ["ended\tfalse"]);
+}
+
+#[test]
 fn sound_play_rejects_invalid_volume_without_queueing_audio() {
     let mut world = World::new();
     let sound = world.create(ClassName::Sound).unwrap();

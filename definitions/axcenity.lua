@@ -230,6 +230,7 @@ function DataModelClass:GetService(className) end
 ---@class Lighting: Instance
 ---@field ShadowsEnabled boolean If false, the sun casts no shadows. Turn this off on low-end machines.
 ---@field ShadowDistance number How far from the camera sun shadows reach, in studs. Shorter distances give sharper shadows.
+---@field ShadowSoftness number How soft shadow edges are, from 0 (crisp) to 1 (very soft). Edges stay sharp where a part touches what it shades and soften further away, like real shadows.
 ---@field SkyTopColor Color3 The sky's color straight up.
 ---@field SkyHorizonColor Color3 The sky's color at the horizon.
 ---@field GroundColor Color3 The color of the ground below the horizon, as the sky and reflections see it.
@@ -263,6 +264,7 @@ function DataModelClass:GetService(className) end
 ---@field Material EnumItem.Material|"Plastic"|"Metal"|"Glass"|"Neon" Plastic, Metal, Glass (see-through) or Neon (glows). Setting it resets Metalness and Roughness.
 ---@field Metalness number From 0 (not metal) to 1 (metal).
 ---@field Roughness number From 0 (mirror-smooth) to 1 (matte).
+---@field CastShadow boolean If false, the part casts no sun shadow. It's still shaded by other parts' shadows.
 ---@field Touched Signal Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.
 
 ---A solid 3D model imported from a glTF or FBX file, drawn with the file's own materials (or its SurfaceAppearances'). It collides as the model's convex hull.
@@ -272,6 +274,7 @@ function DataModelClass:GetService(className) end
 ---@field Position Vector3 Where the center of the model's box is, in studs. Setting it on an unanchored part teleports it and stops it moving.
 ---@field Orientation Vector3 Rotation in degrees around X, Y and Z, applied Z first, then X, then Y.
 ---@field Size Vector3 The size of the model's box in studs along X, Y and Z. The model stretches to fill it.
+---@field CastShadow boolean If false, the part casts no sun shadow. It's still shaded by other parts' shadows.
 ---@field Touched Signal Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.
 
 ---Lua code that runs on the server, from a `.server.lua` file.
@@ -398,15 +401,26 @@ function RemoteEventClass:FireAllClients(...) end
 ---@field SoundId string The audio file inside the project folder, such as "assets/audio/chime.wav".
 ---@field Volume number Playback volume as a non-negative amplitude; 1 is the original level and 0 is silent.
 ---@field Looped boolean If true, playback repeats until Stop is called or the game session stops.
+---@field PlaybackSpeed number How fast the sound plays: 1 is normal, 2 twice as fast (and an octave higher), 0.5 half. Changes apply while it plays.
+---@field Playing boolean True while the sound plays. Set it to false to pause and true to carry on. Saved as true, the sound plays as soon as the game starts, with no script needed.
+---@field Ended Signal Fires when the sound plays to its end. Looped sounds, and sounds stopped with Stop, don't fire it.
 local SoundClass = {}
 
----Starts this sound using its SoundId, Volume and Looped properties. Playing it again restarts it; stopping the game session stops all sounds.
+---Plays this sound from the start, with its SoundId, Volume, PlaybackSpeed and Looped, and sets Playing to true. Playing it again restarts it; stopping the game session stops all sounds.
 ---@return nil
 function SoundClass:Play() end
 
----Stops this sound if it is playing.
+---Stops this sound and sets Playing to false. The next Play starts from the beginning.
 ---@return nil
 function SoundClass:Stop() end
+
+---Pauses this sound where it is (sets Playing to false). Resume carries on from there.
+---@return nil
+function SoundClass:Pause() end
+
+---Carries on playing a paused sound, or plays a stopped one from the start (sets Playing to true).
+---@return nil
+function SoundClass:Resume() end
 
 
 ---A light that shines in all directions from the center of its parent part.

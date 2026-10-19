@@ -11,10 +11,16 @@ struct Frame {
     sun_radiance: vec4<f32>,
     // Ambient color times intensity.
     ambient: vec4<f32>,
-    // Turns world space to the sun's view of the scene (the shadow map).
-    light_view_proj: mat4x4<f32>,
-    // x: 1 if shadows are on, y: the world size of one shadow map texel,
-    // z: depth bias, w: how far from the camera shadows reach.
+    // Turns world space to the sun's view of each shadow cascade (one layer
+    // of the shadow map each, nearest the camera first).
+    cascades: array<mat4x4<f32>, 3>,
+    // The world size of one shadow map texel in each cascade.
+    cascade_texels: vec4<f32>,
+    // How many studs a cascade's depth range (0 to 1) covers.
+    cascade_depths: vec4<f32>,
+    // x: 1 if shadows are on, y: how wide the sun looks (penumbra width per
+    // stud between caster and receiver), z: how many cascades, w: how far
+    // from the camera shadows reach.
     shadow: vec4<f32>,
     // Turns clip space back to world space, to find the sky's direction.
     inv_view_proj: mat4x4<f32>,
@@ -44,7 +50,7 @@ struct Light {
 const LIGHTS_PER_TILE: u32 = 64u;
 
 @group(0) @binding(0) var<uniform> frame: Frame;
-@group(0) @binding(1) var shadow_map: texture_depth_2d;
+@group(0) @binding(1) var shadow_map: texture_depth_2d_array;
 @group(0) @binding(2) var shadow_sampler: sampler_comparison;
 @group(0) @binding(3) var<storage, read> lights: array<Light>;
 // For each screen tile, `LIGHTS_PER_TILE + 1` numbers: how many lights
@@ -136,7 +142,11 @@ fn vs_main(vertex: VertexIn, instance: InstanceIn) -> VertexOut {
     return out;
 }
 
-// Draws solid items into the shadow map, from the sun's point of view.
+// The shadow pass's cascade: turns world space to that cascade's view from
+// the sun. Bound with a different offset for each cascade.
+@group(0) @binding(5) var<uniform> shadow_cascade: mat4x4<f32>;
+
+// Draws solid items into one cascade of the shadow map, from the sun's point of view.
 @vertex
 fn vs_shadow(
     @location(0) position: vec3<f32>,
@@ -146,35 +156,134 @@ fn vs_shadow(
     @location(5) model_3: vec4<f32>,
 ) -> @builtin(position) vec4<f32> {
     let model = mat4x4<f32>(model_0, model_1, model_2, model_3);
-    return frame.light_view_proj * model * vec4<f32>(position, 1.0);
+    return shadow_cascade * model * vec4<f32>(position, 1.0);
+}
+
+// Points spread evenly over a disc of radius 1 (a Poisson disc), for
+// sampling the shadow map around a point. `private` so it can be indexed
+// in a loop.
+var<private> POISSON: array<vec2<f32>, 16> = array<vec2<f32>, 16>(
+    vec2<f32>(-0.94201624, -0.39906216), vec2<f32>(0.94558609, -0.76890725),
+    vec2<f32>(-0.09418410, -0.92938870), vec2<f32>(0.34495938, 0.29387760),
+    vec2<f32>(-0.91588581, 0.45771432), vec2<f32>(-0.81544232, -0.87912464),
+    vec2<f32>(-0.38277543, 0.27676845), vec2<f32>(0.97484398, 0.75648379),
+    vec2<f32>(0.44323325, -0.97511554), vec2<f32>(0.53742981, -0.47373420),
+    vec2<f32>(-0.26496911, -0.41893023), vec2<f32>(0.79197514, 0.19090188),
+    vec2<f32>(-0.24188840, 0.99706507), vec2<f32>(-0.81409955, 0.91437590),
+    vec2<f32>(0.19984126, 0.78641367), vec2<f32>(0.14383161, -0.14100790),
+);
+// The widest a shadow's soft edge is blurred, in shadow map texels.
+const MAX_FILTER_TEXELS: f32 = 32.0;
+// How far from a receiver blockers are looked for, in studs.
+const BLOCKER_SEARCH_STUDS: f32 = 30.0;
+
+// A number from 0 to 1 that changes from pixel to pixel without a visible
+// pattern (interleaved gradient noise). It turns the sample pattern per
+// pixel, so blurred edges show fine grain instead of banding.
+fn pixel_noise(pixel: vec2<f32>) -> f32 {
+    return fract(52.9829189 * fract(dot(pixel, vec2<f32>(0.06711056, 0.00583715))));
+}
+
+// Sunlight reaching `world_position` as seen by cascade `index`: x is 1 in
+// the open and 0 in shadow, y how far toward the cascade's edge the point
+// is (0 inside, rising to 1 at the edge), or -1 if the cascade doesn't
+// cover the point.
+//
+// Soft shadows the way real ones are (percentage-closer soft shadows):
+// first the map is searched for what blocks the sun, and the further the
+// blocker is from the surface, the wider the blur. So a shadow is crisp
+// where a part touches the ground and softens further away.
+fn cascade_visibility(
+    index: u32,
+    world_position: vec3<f32>,
+    normal: vec3<f32>,
+    rotation: mat2x2<f32>,
+    slope: f32,
+) -> vec2<f32> {
+    let texel = frame.cascade_texels[index];
+    // Pushed off the surface so it doesn't shadow itself.
+    let shifted = world_position + normal * (texel * 1.5);
+    let light = frame.cascades[index] * vec4<f32>(shifted, 1.0);
+    let uv = vec2<f32>(light.x * 0.5 + 0.5, 0.5 - light.y * 0.5);
+    let receiver = light.z;
+    if any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0)) || receiver > 1.0 || receiver < 0.0 {
+        return vec2<f32>(1.0, -1.0);
+    }
+    let edge = smoothstep(0.8, 1.0, max(abs(light.x), abs(light.y)));
+    let size = f32(textureDimensions(shadow_map).x);
+    let depth_range = frame.cascade_depths[index];
+    let sun_size = frame.shadow.y;
+    let layer = i32(index);
+    // One texel of depth, as the map stores it.
+    let texel_depth = texel / depth_range;
+
+    // 1. Blockers: how far, on average, the things shading this point are.
+    let search = clamp(sun_size * BLOCKER_SEARCH_STUDS / texel, 1.0, MAX_FILTER_TEXELS);
+    let search_bias = texel_depth * (1.0 + slope);
+    let last = i32(size) - 1;
+    var blockers = 0.0;
+    var blocker_depth = 0.0;
+    for (var k = 0; k < 16; k++) {
+        let offset = rotation * POISSON[k] * search;
+        let coord = clamp(vec2<i32>(uv * size + offset), vec2<i32>(0), vec2<i32>(last));
+        let depth = textureLoad(shadow_map, coord, layer, 0);
+        if depth < receiver - search_bias {
+            blockers += 1.0;
+            blocker_depth += depth;
+        }
+    }
+    if blockers == 0.0 {
+        return vec2<f32>(1.0, edge);
+    }
+    blocker_depth /= blockers;
+
+    // 2. The soft edge's width, from how far light travels past the blocker.
+    let penumbra = (receiver - blocker_depth) * depth_range * sun_size;
+    let radius = clamp(penumbra / texel, 1.0, MAX_FILTER_TEXELS);
+
+    // 3. Averages comparisons over that width. Each comparison is itself
+    // filtered between four texels, so even radius 1 has smooth edges.
+    let bias = texel_depth * (1.0 + 0.5 * radius * slope);
+    var lit = 0.0;
+    for (var k = 0; k < 16; k++) {
+        let offset = rotation * POISSON[k] * (radius / size);
+        lit += textureSampleCompareLevel(shadow_map, shadow_sampler, uv + offset, layer, receiver - bias);
+    }
+    return vec2<f32>(lit / 16.0, edge);
 }
 
 // How much sunlight reaches `world_position`: 1 in the open, 0 in shadow.
 // `normal` is the surface's own (unmapped) normal, used to push the point
-// off the surface so it doesn't shadow itself.
-fn sun_visibility(world_position: vec3<f32>, normal: vec3<f32>) -> f32 {
+// off the surface so it doesn't shadow itself, and `pixel` where it is on
+// screen. The nearest cascade covering the point is used, blended into the
+// next one near its edge so the change in sharpness doesn't show.
+fn sun_visibility(world_position: vec3<f32>, normal: vec3<f32>, pixel: vec2<f32>) -> f32 {
     if frame.shadow.x == 0.0 {
         return 1.0;
     }
-    let texel = frame.shadow.y;
-    let shifted = world_position + normal * (texel * 1.5);
-    let light = frame.light_view_proj * vec4<f32>(shifted, 1.0);
-    let uv = vec2<f32>(light.x * 0.5 + 0.5, 0.5 - light.y * 0.5);
-    let depth = light.z - frame.shadow.z;
-    if any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0)) || depth > 1.0 {
-        return 1.0;
-    }
-    // Averages a 3x3 block of comparisons, for soft edges. The "level"
-    // variant can be used after the shader may have left early.
-    let size = vec2<f32>(textureDimensions(shadow_map));
-    var lit = 0.0;
-    for (var y = -1; y <= 1; y++) {
-        for (var x = -1; x <= 1; x++) {
-            let offset = vec2<f32>(f32(x), f32(y)) / size;
-            lit += textureSampleCompareLevel(shadow_map, shadow_sampler, uv + offset, depth);
+    let angle = pixel_noise(pixel) * 6.2831853;
+    let rotation = mat2x2<f32>(cos(angle), sin(angle), -sin(angle), cos(angle));
+    // How steeply the surface faces away from the sun (the tangent of the
+    // angle), for depth bias: tilted surfaces need more.
+    let n_dot_l = clamp(dot(normal, frame.sun_direction.xyz), 0.05, 1.0);
+    let slope = min(sqrt(1.0 - n_dot_l * n_dot_l) / n_dot_l, 3.0);
+
+    let count = u32(frame.shadow.z);
+    var lit = 1.0;
+    for (var i = 0u; i < count; i++) {
+        let here = cascade_visibility(i, world_position, normal, rotation, slope);
+        if here.y < 0.0 {
+            continue;
         }
+        lit = here.x;
+        if here.y > 0.0 && i + 1u < count {
+            let next = cascade_visibility(i + 1u, world_position, normal, rotation, slope);
+            if next.y >= 0.0 {
+                lit = mix(here.x, next.x, here.y);
+            }
+        }
+        break;
     }
-    lit /= 9.0;
     // Shadows fade out toward their distance limit instead of ending sharply.
     let reach = frame.shadow.w;
     let fade = 1.0 - smoothstep(reach * 0.8, reach, distance(frame.camera_position.xyz, world_position));
@@ -331,7 +440,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 
     let sun = shade(n, v, frame.sun_direction.xyz, base_color, metalness, roughness, f0)
         * frame.sun_radiance.rgb
-        * sun_visibility(in.world_position, normalize(in.normal));
+        * sun_visibility(in.world_position, normalize(in.normal), in.clip_position.xy);
 
     // Point and spot lights: only the ones listed for this pixel's tile.
     var lit = vec3<f32>(0.0);

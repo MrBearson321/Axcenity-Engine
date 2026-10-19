@@ -3,7 +3,7 @@
 //! Lua while scripts run (see `with_world` in `lib.rs`).
 
 use axcenity_audio::SoundAction;
-use axcenity_core::{ClassName, INSTANCE_EVENTS, InstanceId, World};
+use axcenity_core::{ClassName, INSTANCE_EVENTS, InstanceId, Value, World};
 use mlua::{
     AppDataRef, AppDataRefMut, FromLua, Function, IntoLua, Lua, MetaMethod, UserData,
     UserDataMethods,
@@ -267,6 +267,7 @@ pub fn sound_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Fu
                 "Sound.Volume must be a finite number greater than or equal to 0",
             ));
         }
+        set_playing(lua, this.0, true)?;
         let mut actions = lua
             .app_data_mut::<crate::SoundActions>()
             .ok_or_else(|| mlua::Error::runtime("sound actions aren't ready"))?;
@@ -279,16 +280,29 @@ pub fn sound_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Fu
         Ok(())
     })?;
     let stop = lua.create_function(|lua, this: LuaInstance| {
+        set_playing(lua, this.0, false)?;
         let mut actions = lua
             .app_data_mut::<crate::SoundActions>()
             .ok_or_else(|| mlua::Error::runtime("sound actions aren't ready"))?;
         actions.0.push(SoundAction::Stop(this.0));
         Ok(())
     })?;
+    // Pausing and resuming are `Playing` changes; the host's audio follows it.
+    let pause = lua.create_function(|lua, this: LuaInstance| set_playing(lua, this.0, false))?;
+    let resume = lua.create_function(|lua, this: LuaInstance| set_playing(lua, this.0, true))?;
     Ok(vec![
         (ClassName::Sound, "Play", play),
         (ClassName::Sound, "Stop", stop),
+        (ClassName::Sound, "Pause", pause),
+        (ClassName::Sound, "Resume", resume),
     ])
+}
+
+/// Sets a Sound's `Playing`, which fires its change events like any property.
+fn set_playing(lua: &Lua, sound: InstanceId, playing: bool) -> mlua::Result<()> {
+    world_mut(lua)?
+        .set_property(sound, "Playing", Value::Bool(playing))
+        .map_err(|_| destroyed())
 }
 
 /// `game:GetService(name)`: a service by its class name, such as

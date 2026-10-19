@@ -27,6 +27,8 @@ rfd.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
+# Draws editor UI offscreen in tests (see `snapshot.rs`).
+pollster.workspace = true
 
 [lints]
 workspace = true

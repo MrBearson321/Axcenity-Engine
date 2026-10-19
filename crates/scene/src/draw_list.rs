@@ -62,6 +62,7 @@ fn lighting_settings(world: &World) -> LightingSettings {
     let (shadows, sky, post) = (&mut settings.shadows, &mut settings.sky, &mut settings.post);
     shadows.enabled = bool_of("ShadowsEnabled", shadows.enabled);
     shadows.distance = number_of("ShadowDistance", shadows.distance);
+    shadows.softness = number_of("ShadowSoftness", shadows.softness);
     sky.top_color = color_of("SkyTopColor", sky.top_color);
     sky.horizon_color = color_of("SkyHorizonColor", sky.horizon_color);
     sky.ground_color = color_of("GroundColor", sky.ground_color);
@@ -212,6 +213,12 @@ pub(crate) fn part_placement(instance: &Instance) -> Option<(PartType, Mat4)> {
     Some((shape, transform))
 }
 
+/// Whether a Part or MeshPart casts a sun shadow: its `CastShadow`, on
+/// unless it's been turned off.
+fn casts_shadow(instance: &Instance) -> bool {
+    instance.property("CastShadow").and_then(Value::as_bool) != Some(false)
+}
+
 /// The draw item for a Part, or `None` for any other class. `glow` is how
 /// much brighter than its color a glowing part is drawn.
 fn part_draw_item(instance: &Instance, glow: f32) -> Option<DrawItem> {
@@ -246,6 +253,7 @@ fn part_draw_item(instance: &Instance, glow: f32) -> Option<DrawItem> {
             opacity: preset.opacity,
             ..Material::default()
         },
+        casts_shadow: casts_shadow(instance),
     })
 }
 
@@ -272,6 +280,7 @@ fn mesh_part_draw_items(
             shape: Shape::Block,
             transform,
             material: Material::default(),
+            casts_shadow: casts_shadow(instance),
         });
         return;
     };
@@ -297,6 +306,7 @@ fn mesh_part_draw_items(
             })),
             transform,
             material,
+            casts_shadow: casts_shadow(instance),
         });
     }
 }

@@ -11,5 +11,10 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 
+[dev-dependencies]
+# Runs translated block scripts, to check they work like typed ones.
+axcenity-core.workspace = true
+axcenity-script.workspace = true
+
 [lints]
 workspace = true

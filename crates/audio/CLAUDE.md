@@ -1,5 +1,5 @@
 # `audio`
 
 - Plays project audio through Kira; see `docs/architecture.md`.
-- `AudioEngine` owns output and sound handles; `SoundAction` is queued by Lua and applied by the host.
+- Hosts use `GameAudio`: it opens output lazily, applies the `SoundAction`s Lua queued, and syncs every Sound's properties each frame. `AudioEngine` wraps Kira.
 - Read sound paths through `Assets::read_file`; never access project files directly.

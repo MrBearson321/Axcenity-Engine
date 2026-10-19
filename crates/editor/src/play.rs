@@ -14,7 +14,7 @@ use std::panic::{self, AssertUnwindSafe};
 use std::path::Path;
 
 use axcenity_assets::Assets;
-use axcenity_audio::{AudioEngine, SoundAction};
+use axcenity_audio::GameAudio;
 use axcenity_core::{KeyCode, World};
 use axcenity_physics::Physics;
 use axcenity_project::ScriptFile;
@@ -34,8 +34,8 @@ pub struct Session {
     scripts: ScriptRuntime,
     physics: Physics,
     assets: Assets,
-    audio: Option<AudioEngine>,
-    audio_failed: bool,
+    /// Dropped at Stop, which silences every sound.
+    audio: GameAudio,
     /// Set by Debug > Panic during Play, to check that a crash is caught.
     panic_next_frame: bool,
 }
@@ -56,8 +56,7 @@ impl Session {
             scripts: ScriptRuntime::new(),
             physics: Physics::with_assets(assets.clone()),
             assets,
-            audio: None,
-            audio_failed: false,
+            audio: GameAudio::default(),
             panic_next_frame: false,
         };
         guard(|| {
@@ -152,32 +151,15 @@ impl Session {
     }
 
     fn apply_audio(&mut self, output: &mut Output) {
-        for action in self.scripts.take_sound_actions() {
-            if matches!(action, SoundAction::Stop(_)) {
-                if let Some(audio) = &mut self.audio
-                    && let Err(err) = audio.apply(action, &self.assets)
-                {
-                    output.error(format!("Audio: {err}"));
-                }
-                continue;
-            }
-            if self.audio.is_none() && !self.audio_failed {
-                match AudioEngine::new() {
-                    Ok(audio) => self.audio = Some(audio),
-                    Err(err) => {
-                        self.audio_failed = true;
-                        output.error(format!("Audio is unavailable: {err}"));
-                    }
-                }
-            }
-            if let Some(audio) = &mut self.audio
-                && let Err(err) = audio.apply(action, &self.assets)
-            {
-                output.error(format!("Audio: {err}"));
-            }
+        let actions = self.scripts.take_sound_actions();
+        let update = self.audio.update(actions, &self.world, &self.assets);
+        for err in update.errors {
+            output.error(format!("Audio: {err}"));
         }
-        if let Some(audio) = &mut self.audio {
-            audio.collect_finished();
+        if !update.ended.is_empty() {
+            self.scripts
+                .fire_sounds_ended(&mut self.world, &update.ended);
+            self.forward_output(output);
         }
     }
 }

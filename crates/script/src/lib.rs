@@ -42,7 +42,7 @@ mod watchdog;
 use std::time::Duration;
 
 use axcenity_audio::SoundAction;
-use axcenity_core::{ClassName, InstanceId, World};
+use axcenity_core::{ClassName, InstanceId, Value, World};
 use mlua::Lua;
 
 use crate::context::Context;
@@ -255,6 +255,28 @@ impl ScriptRuntime {
             self.client.fire_instance_event(world, button, "Activated");
             self.collect(Side::Client);
             self.fire_changes(world);
+        }
+    }
+
+    /// Sounds that played to their end (see `GameAudio::update`): sets each
+    /// one's `Playing` to false, then fires its `Ended` in Scripts and then
+    /// in LocalScripts. Sounds a handler destroyed are skipped.
+    pub fn fire_sounds_ended(&mut self, world: &mut World, sounds: &[InstanceId]) {
+        self.fire_changes(world);
+        for &sound in sounds {
+            if world
+                .set_property(sound, "Playing", Value::Bool(false))
+                .is_err()
+            {
+                continue;
+            }
+            self.fire_changes(world);
+            for side in [Side::Server, Side::Client] {
+                self.context(side)
+                    .fire_instance_event(world, sound, "Ended");
+                self.collect(side);
+                self.fire_changes(world);
+            }
         }
     }
 

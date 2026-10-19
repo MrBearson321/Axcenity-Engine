@@ -16,7 +16,7 @@ Read before working in the `script` or `blocks` crates, or adding anything to th
 - Clean up Roblox quirks when it helps beginners. Don't chase full compatibility.
 - Never use Roblox's name, logos or assets.
 
-## API so far (Phase 29)
+## API so far (Phase 33)
 
 - Globals: `game`, `workspace`, `script` (the running Script, LocalScript or ModuleScript), `print`, `require(module)` (see Modules), `Instance.new(className)`, `Vector3.new(x, y, z)`, `Color3.new(r, g, b)`, `Color3.fromRGB(r, g, b)`, `UDim2.new(xScale, xOffset, yScale, yOffset)`, `UDim2.fromScale(x, y)`, `UDim2.fromOffset(x, y)`, `Enum` and `task` (see Execution model).
 - `game:GetService(name)` returns a service by class name (`Workspace`, `Players`, `ReplicatedStorage`, `ServerScriptService`, `StarterPlayer`), or `UserInputService`; a wrong name lists the choices. `Instance.new("Player")` is an error: Players are made when someone joins.
@@ -32,7 +32,7 @@ Read before working in the `script` or `blocks` crates, or adding anything to th
 - **`RunService`** (Phase 16, chosen by the developer): `game:GetService("RunService")` (or `game.RunService`) has `Heartbeat`, which fires once a frame after physics and `Touched`, on both sides, with the frame's length in seconds. Not an Instance (like `UserInputService`), so it isn't in the Explorer. No `RenderStepped` or `Stepped` yet.
 - **MeshPart** (Phase 17): `Instance.new("MeshPart")` works, with `Anchored`, `Position`, `Orientation`, `Size` and `MeshId` (a model's path in the project, such as `"assets/models/pyramid.gltf"`; `.gltf`, `.glb` and `.fbx` files work, and `#` after the file picks objects in it: `"assets/models/props.fbx#Bench"`), and fires `Touched` like a Part. Setting `MeshId` loads that model the first time it's drawn; a path outside the project is refused, and a model that can't be loaded is reported once and drawn as a grey box. It has no `Color` or `Material`: it uses the file's materials.
 - **SurfaceAppearance** (Phase 21): `Instance.new("SurfaceAppearance")` inside a MeshPart replaces the texture maps of the model's material named by its `MaterialName`, with the properties in `docs/rendering.md` (maps are texture paths in the project, such as `"assets/textures/wood.png"`). `Enum.TextureChannel` (`Red`, `Green`, `Blue`, `Alpha`) is for its `…Channel` properties, which also take item names (`look.RoughnessChannel = "Green"`).
-- **Sound** (Phase 29): put a `Sound` Instance in the Workspace, set `SoundId` to a project-relative audio file (such as `"assets/audio/chime.wav"`), then call `sound:Play()` or `sound:Stop()`. `Volume` is a non-negative linear amplitude multiplier (1 is original level, 0 is silent), and `Looped` repeats the entire file. A new `Play()` on the same Sound restarts it. Supported files are WAV, FLAC, Ogg Vorbis and MP3. Playback runs in the host, not Lua; stopping editor Play drops its audio engine and stops all playback.
+- **Sound** (Phase 29, extended after it): put a `Sound` Instance in the Workspace (or a part), set `SoundId` to a project-relative audio file (such as `"assets/audio/chime.wav"`), then call `sound:Play()` (from the start) or `sound:Stop()`. `sound:Pause()` and `sound:Resume()` carry on from where it was. `Playing` is true while it plays: setting it to false pauses and true resumes, and a Sound saved with `Playing` true starts when the game starts, with no script. `Volume` is a non-negative linear amplitude multiplier (1 is original level, 0 is silent), `PlaybackSpeed` scales speed and pitch (1 is normal, from 0.01 to 20), and `Looped` repeats the entire file; changes to all three apply to a sound that's already playing. `Ended` fires (on both sides) when a sound that isn't looped plays to its end, after `Playing` goes false; `Stop` doesn't fire it. Supported files are WAV, FLAC, Ogg Vorbis and MP3. Playback runs in the host, not Lua (see `GameAudio` in `audio`); stopping editor Play drops its audio and stops all playback.
 - `Part.Anchored` (default `false`): unanchored parts fall under physics. Setting `Position` or `Orientation` on one teleports it and stops it; physics writes both back as the part moves. See Physics in `docs/architecture.md`.
 
 ## Errors
@@ -103,8 +103,28 @@ Each script gets its own restricted environment. Remove or replace `io`, `os` (k
 
 ## Blocks to Lua
 
-- Block scripts are JSON files ending in `.server.blocks.json` or `.client.blocks.json`. The editor presents event blocks with nested statement sequences and editable value/condition fields; available statements include setting properties, waiting, moving, conditionals, repeats, variables, and playing or stopping a Sound.
-- There is no separate runtime: **blocks always translate to Lua**, using the same `ScriptRuntime` and API as handwritten scripts. Sound blocks generate `sound:Play()` and `sound:Stop()`.
-- Generated Lua is shown as a read-only preview and carries source-block tags, so Lua error lines can highlight the block that generated them.
+- Block scripts are JSON files ending in `.server.blocks.json` or `.client.blocks.json` (format in `docs/project-and-export.md`). The editor shows them Scratch-style: a palette by category on the left, and a canvas of stacks, each under an event block ("hat"), or loose (an unattached stack, which doesn't run). Blocks snap together, C-shaped blocks hold stacks, and reporters (round for values, pointed for true or false) drop into slots; a pointed reporter fits any slot, a round one only round slots. Client-only blocks (keys, button clicks) are only offered in client block scripts, and the canvas shows a Server or Client badge.
+- There is no separate runtime: **blocks always translate to Lua**, using the same `ScriptRuntime` and API as handwritten scripts. Objects are named by their path under the Workspace (`Pad.Chime` is `workspace.Pad.Chime`, or `workspace["Red Ball"]` for names that aren't Lua names).
+- Variables belong to the whole block script, as in Scratch: each is declared once at the top as `local name = 0`. Loops that may run long (forever, repeat until, wait until) wait a frame each time round (`task.wait()`), so the game keeps running.
+- "View as Lua" shows the generated Lua beside the canvas, readable and with no markers in it. `Translation::block_lines` maps each block to the line its code starts on, so a runtime error's line highlights the block it came from (in red).
 - One-way only. Don't build Lua-to-blocks conversion.
-- Every block must correspond to a real Lua API. Don't add block-only features.
+- Every block must correspond to a real Lua API. Don't add block-only features. The blocks and what they become:
+
+| Category | Block | Lua |
+|---|---|---|
+| Events | when game starts | `task.spawn(function() … end)` |
+| | when *part* is touched | `part.Touched:Connect(function(otherPart) … end)` |
+| | when *key* key pressed (client) | `UserInputService.InputBegan:Connect(function(input) if input.KeyCode == Enum.KeyCode.Key then … end end)` |
+| | when *button* is clicked (client) | `button.Activated:Connect(function() … end)` |
+| | every frame | `RunService.Heartbeat:Connect(function(deltaTime) … end)` |
+| | when *sound* ends | `sound.Ended:Connect(function() … end)` |
+| Control | wait, wait until | `task.wait(n)`; `while not (c) do task.wait() end` |
+| | repeat *n* times, forever, repeat until | `for _ = 1, n do … end`; `while true do … task.wait() end`; `while not (c) do … task.wait() end` |
+| | if, if/else, stop this script | `if c then … else … end`; `do return end` |
+| Motion | move to, move by, turn to, turn by, set anchored | `Position =`, `Position = Position + v`, `Orientation =`, `Orientation = Orientation + v`, `Anchored =` |
+| Looks | set color, set text, show, hide, set *property* | `Color =`, `Text = tostring(v)`, `Visible = true/false`, `object.Property = v` |
+| Sound | play, stop, pause, resume, set volume | `:Play()`, `:Stop()`, `:Pause()`, `:Resume()`, `Volume =` |
+| Variables | set, change by, *variable* | `name = v`, `name = name + n`, `name` |
+| More | print, destroy | `print(v)`, `object:Destroy()` |
+| Operators | + − × ÷ mod ^, pick random, join, round/abs/floor/ceiling/sqrt, < = > ≤ ≥ ≠, and, or, not | Lua operators; `math.random(math.floor(a), math.floor(b))`; `tostring(a) .. tostring(b)`; `math.floor(x + 0.5)`, `math.abs` …; `not` |
+| Sensing | touching part, key pressed? (client), *property* of *object* | `otherPart` (inside "when touched" only), `UserInputService:IsKeyDown(Enum.KeyCode.Key)`, `object.Property` |

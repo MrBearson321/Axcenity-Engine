@@ -155,14 +155,18 @@ impl Default for PostProcessing {
     }
 }
 
-/// Shadows cast by the sun. They're drawn only near the camera, where one
-/// shadow map can keep them sharp.
+/// Shadows cast by the sun. They're drawn only near the camera, in
+/// cascades: the nearest part of the view gets the sharpest shadow map.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Shadows {
     /// Off for low-end machines: nothing is drawn into a shadow map.
     pub enabled: bool,
     /// How far from the camera shadows reach, in studs.
     pub distance: f32,
+    /// How soft shadow edges are, from 0 (crisp everywhere) to 1 (very
+    /// soft). Edges are always sharpest where a caster touches what it
+    /// shades, and soften with the distance between them, like real ones.
+    pub softness: f32,
 }
 
 impl Default for Shadows {
@@ -170,6 +174,7 @@ impl Default for Shadows {
         Self {
             enabled: true,
             distance: 150.0,
+            softness: 0.2,
         }
     }
 }
@@ -181,6 +186,9 @@ pub struct DrawItem {
     /// origin, so the transform's scale is the size.
     pub transform: Mat4,
     pub material: Material,
+    /// False draws the item without it casting a sun shadow. It is still
+    /// shaded by other items' shadows.
+    pub casts_shadow: bool,
 }
 
 /// What to draw: a built-in mesh, each fitting the 1×1×1 cube centered on

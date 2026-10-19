@@ -37,6 +37,7 @@ use crate::ribbon::{self, RibbonButton};
 use crate::scripts::ScriptTabs;
 use crate::side_warnings::{self, WarningCache};
 use crate::start::{self, Brand, ProjectLink, StartAction, StartScreen};
+use crate::style_panel::{self, StyleEdit};
 use crate::theme::{self, filled_icons, icons};
 use crate::thumbnail;
 use crate::tree::{self, Insertable};
@@ -145,6 +146,8 @@ pub struct EditorApp {
     viewport_rect: Option<egui::Rect>,
     /// True while Help > About is open.
     about_open: bool,
+    /// A Sound being listened to from the Properties panel, outside Play.
+    sound_preview: Option<axcenity_audio::AudioEngine>,
 }
 
 struct BlockDocument {
@@ -205,6 +208,9 @@ struct OpenProject {
     show_splash: bool,
     folder: PathBuf,
     stylesheets: Vec<axcenity_ui::Stylesheet>,
+    /// Each stylesheet's text as last read or written, by path, to tell the
+    /// editor's own saves from changes made elsewhere.
+    stylesheet_texts: HashMap<String, String>,
     /// Its server scripts, sorted by path, with each file's text as last
     /// read or written. Play reads their files again, for the newest code.
     scripts: Vec<ScriptFile>,
@@ -255,6 +261,7 @@ impl EditorApp {
             thumbnail_wanted: None,
             viewport_rect: None,
             about_open: false,
+            sound_preview: None,
         };
         if let Some(folder) = folder {
             app.open(folder);
@@ -301,6 +308,11 @@ impl EditorApp {
         ));
         files::report_problems(&mut self.output, &project);
         let mut stylesheets = Vec::new();
+        let stylesheet_texts = project
+            .stylesheets
+            .iter()
+            .map(|file| (file.path.clone(), file.source.clone()))
+            .collect();
         for file in &project.stylesheets {
             let (stylesheet, warnings) = axcenity_ui::parse_stylesheet(&file.path, &file.source);
             stylesheets.push(stylesheet);
@@ -359,6 +371,7 @@ impl EditorApp {
             watcher: Watcher::start(project.folder.clone()),
             folder: project.folder,
             stylesheets,
+            stylesheet_texts,
             scripts: project.scripts,
             block_scripts,
             world_text,
@@ -486,6 +499,17 @@ impl EditorApp {
                 }
                 return;
             }
+            Edit::PickAudio => {
+                if let Some(path) = self.pick_audio() {
+                    self.apply(id, Edit::Property("SoundId", Value::String(path)));
+                    self.history.seal();
+                }
+                return;
+            }
+            &Edit::PreviewSound(play) => {
+                self.preview_sound(id, play);
+                return;
+            }
         };
         self.change(id, key, label, vec![edit]);
     }
@@ -553,6 +577,127 @@ impl EditorApp {
                 tab.text = updated.clone();
             }
             self.refresh_stylesheet(&path, &updated);
+        }
+    }
+
+    /// The text of the stylesheet at `path`: its tab's, if it's open (it may
+    /// have unsaved changes), otherwise the file's.
+    fn stylesheet_text(&self, path: &str) -> Option<String> {
+        self.tabs.get(path).map(|tab| tab.text.clone()).or_else(|| {
+            let project = self.project.as_ref()?;
+            std::fs::read_to_string(project.folder.join(path)).ok()
+        })
+    }
+
+    /// Replaces the text of the stylesheet at `path` with `updated`. It goes
+    /// in the stylesheet's tab (opened in the background), unsaved like any
+    /// typed change, and the viewport is restyled with it at once.
+    fn set_stylesheet_text(&mut self, path: &str, updated: &str) {
+        if self.tabs.get(path).is_none() {
+            let saved = self.stylesheet_text(path).unwrap_or_default();
+            self.tabs.open_in_background(path, &saved);
+        }
+        if let Some(tab) = self.tabs.get_mut(path) {
+            tab.text = updated.to_owned();
+        }
+        self.refresh_stylesheet(path, updated);
+    }
+
+    /// Does what was done in the Style section for the UI element `id`.
+    fn apply_style(&mut self, id: InstanceId, edit: StyleEdit) {
+        if self.playing() {
+            return;
+        }
+        match edit {
+            StyleEdit::Set { path, span, value } => {
+                let Some(source) = self.stylesheet_text(&path) else {
+                    self.output.error(format!(
+                        "Could not edit stylesheet `{path}`: its file could not be read."
+                    ));
+                    return;
+                };
+                let edits = [CssEdit {
+                    path: path.clone(),
+                    span,
+                    value,
+                }];
+                let updated = apply_css_edits(&source, edits.iter());
+                self.set_stylesheet_text(&path, &updated);
+            }
+            StyleEdit::Open { path, line } => {
+                let source = self.stylesheet_text(&path).unwrap_or_default();
+                self.tabs.open(&path, &source, Some(line));
+            }
+            StyleEdit::Add { property, value } => self.add_style(id, &property, &value),
+        }
+    }
+
+    /// Adds `property: value` to the rule for `id`'s own `Id`, giving it an
+    /// `Id` (from its name) if it has none. The rule is the first one with
+    /// that selector, or a new one at the end of the first stylesheet; a
+    /// project with no stylesheet gets `ui.css`.
+    fn add_style(&mut self, id: InstanceId, property: &str, value: &str) {
+        let Some(instance) = self.world.get(id) else {
+            return;
+        };
+        let mut element_id = instance
+            .property("Id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        if element_id.is_empty() {
+            element_id = style_panel::id_from_name(instance.name());
+            self.apply(id, Edit::Property("Id", Value::String(element_id.clone())));
+            self.history.seal();
+        }
+        let selector = style_panel::own_selector(&element_id);
+        let Some(project) = &self.project else {
+            return;
+        };
+        let target = project
+            .stylesheets
+            .iter()
+            .find_map(|sheet| Some((sheet.path().to_owned(), sheet.rule_end(&selector)?)))
+            .map(|(path, end)| (path, Some(end)))
+            .or_else(|| {
+                project
+                    .stylesheets
+                    .first()
+                    .map(|sheet| (sheet.path().to_owned(), None))
+            });
+        match target {
+            Some((path, end)) => {
+                let Some(source) = self.stylesheet_text(&path) else {
+                    return;
+                };
+                let updated =
+                    style_panel::add_declaration(&source, end, &selector, property, value);
+                self.set_stylesheet_text(&path, &updated);
+                self.output.info(format!(
+                    "Added `{property}: {value}` to `{selector}` in `{path}`."
+                ));
+            }
+            None => {
+                let folder = project.folder.clone();
+                let source = style_panel::add_declaration("", None, &selector, property, value);
+                match axcenity_project::create_stylesheet(&folder, "ui", &source) {
+                    Ok(path) => {
+                        if let Some(project) = &mut self.project {
+                            project
+                                .stylesheet_texts
+                                .insert(path.clone(), source.clone());
+                        }
+                        self.refresh_stylesheet(&path, &source);
+                        self.tabs.open_in_background(&path, &source);
+                        self.output.info(format!(
+                            "Made `{path}` for this project's UI styles, with `{selector}` in it."
+                        ));
+                    }
+                    Err(err) => self
+                        .output
+                        .error(format!("Could not make a stylesheet: {err}")),
+                }
+            }
         }
     }
 
@@ -647,6 +792,8 @@ impl EditorApp {
         }
         // A half-typed value is part of the world being saved, so end its step.
         self.history.seal();
+        // The game has its own audio; a preview would play over it.
+        self.sound_preview = None;
         if self.unsaved() && !self.save() {
             self.output
                 .error("Play didn't start, because the project couldn't be saved first.");
@@ -814,7 +961,16 @@ impl EditorApp {
 
     /// Inserts `what` where [`tree::insert_parent`] says, with a name no
     /// sibling has, and selects it. A part goes at the camera's focus point.
+    ///
+    /// UI elements only show inside a ScreenGui, so inserting one where
+    /// there's none makes a ScreenGui for it first.
     fn insert(&mut self, what: Insertable, near: Option<InstanceId>) {
+        if tree::needs_screen_gui(&self.world, near, what) {
+            self.insert_named(Insertable::ScreenGui, None, "ScreenGui", Vec::new());
+            let gui = self.selected;
+            self.insert_named(what, gui, what.class().as_str(), Vec::new());
+            return;
+        }
         self.insert_named(what, near, what.class().as_str(), Vec::new());
     }
 
@@ -1590,6 +1746,39 @@ impl EditorApp {
                 });
                 ui.separator();
 
+                ribbon::group(ui, "UI", |ui| {
+                    for what in Insertable::UI {
+                        let label = match what {
+                            Insertable::ScreenGui => "Screen",
+                            Insertable::Frame => "Frame",
+                            Insertable::TextLabel => "Text",
+                            Insertable::TextButton => "Button",
+                            _ => "Image",
+                        };
+                        let hover = if what == Insertable::ScreenGui {
+                            "Insert a ScreenGui: a layer of UI over the game.".to_owned()
+                        } else {
+                            format!(
+                                "Insert a {} into the selected ScreenGui or Frame (or the first \
+                                 ScreenGui; one is made if there's none). Drag its handles in the \
+                                 viewport, and style it with CSS in the Style section of Properties.",
+                                what.label()
+                            )
+                        };
+                        let button = RibbonButton::new(theme::insert_icon(what), label)
+                            .color(theme::class_color(what.class(), ui.visuals()));
+                        if ui
+                            .add_enabled(!playing, button)
+                            .on_hover_text(hover)
+                            .on_disabled_hover_text("Press Stop to edit.")
+                            .clicked()
+                        {
+                            insert = Some(what);
+                        }
+                    }
+                });
+                ui.separator();
+
                 ribbon::group(ui, "Scripts", |ui| {
                     for class in explorer::SCRIPT_CLASSES {
                         let color = theme::class_color(class, ui.visuals());
@@ -1787,10 +1976,35 @@ fn set(world: &mut World, id: InstanceId, edit: Edit) -> anyhow::Result<()> {
                 world.set_property(id, name, value)?;
             }
         }
-        // Turned into a property edit by `apply`.
-        Edit::PickTexture(_) => {}
+        // Turned into a property edit, or done, by `apply`.
+        Edit::PickTexture(_) | Edit::PickAudio | Edit::PreviewSound(_) => {}
     }
     Ok(())
+}
+
+/// Every object in the Workspace, for the block editor's object menus: its
+/// path of names below the Workspace (`Pad.Chime`) and its class.
+fn block_objects(world: &World) -> Vec<block_editor::ObjectInfo> {
+    let workspace = world.workspace();
+    world
+        .descendants(workspace)
+        .into_iter()
+        .filter_map(|id| {
+            let instance = world.get(id)?;
+            let mut names = vec![instance.name().to_owned()];
+            let mut parent = instance.parent();
+            while let Some(above) = parent.filter(|&above| above != workspace) {
+                let above = world.get(above)?;
+                names.push(above.name().to_owned());
+                parent = above.parent();
+            }
+            names.reverse();
+            Some(block_editor::ObjectInfo {
+                path: names.join("."),
+                class: instance.class(),
+            })
+        })
+        .collect()
 }
 
 /// The world the panels and viewport show: the game's during Play, otherwise
@@ -1877,10 +2091,15 @@ impl eframe::App for EditorApp {
                 .show(ctx, |ui| self.toolbar(ui));
         }
         let mut edit = None;
+        let mut style_edit = None;
         let mut explorer = ExplorerOutput::default();
         let editing = !self.playing();
         // The game's world during Play, otherwise the one being edited.
         let world = shown(&self.world, &self.play);
+        let stylesheets = self
+            .project
+            .as_ref()
+            .map_or(&[][..], |project| project.stylesheets.as_slice());
         if has_project {
             egui::SidePanel::right("explorer")
                 .default_width(300.0)
@@ -1889,7 +2108,14 @@ impl eframe::App for EditorApp {
                         .resizable(true)
                         .default_height(340.0)
                         .show_inside(ui, |ui| {
-                            edit = properties::show(ui, world, self.selected, !editing);
+                            let selected = self.selected;
+                            edit = properties::show(ui, world, selected, !editing, |ui| {
+                                // Stylesheets are edited, not the game, so not during Play.
+                                if editing {
+                                    style_edit =
+                                        style_panel::show(ui, world, selected, stylesheets);
+                                }
+                            });
                         });
                     explorer = self.explorer.show(ui, world, self.selected, editing);
                 });
@@ -1897,6 +2123,9 @@ impl eframe::App for EditorApp {
         // Applied before the viewport draws, so it shows the change this frame.
         if let (Some(id), Some(edit)) = (self.selected, edit) {
             self.apply(id, edit);
+        }
+        if let (Some(id), Some(edit)) = (self.selected, style_edit) {
+            self.apply_style(id, edit);
         }
         if let Some(id) = explorer.clicked {
             self.selected = Some(id);
@@ -1978,24 +2207,32 @@ impl eframe::App for EditorApp {
                 .inner
         } else if let Some(path) = &active_block_path {
             let mut changed = false;
-            egui::CentralPanel::default().show(ctx, |ui| {
-                if let Some(document) = self.project.as_mut().and_then(|project| {
-                    project
-                        .block_scripts
-                        .iter_mut()
-                        .find(|document| document.path == *path)
-                }) {
-                    changed = block_editor::show(
-                        ui,
-                        &mut document.script,
-                        axcenity_project::script_class(path) == ClassName::LocalScript,
-                        document.highlighted,
-                    );
-                    if changed {
-                        document.highlighted = None;
+            let objects = block_objects(&self.world);
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ctx, |ui| {
+                    if let Some(document) = self.project.as_mut().and_then(|project| {
+                        project
+                            .block_scripts
+                            .iter_mut()
+                            .find(|document| document.path == *path)
+                    }) {
+                        changed = block_editor::show(
+                            ui,
+                            &mut document.script,
+                            block_editor::BlockContext {
+                                key: path,
+                                client: axcenity_project::script_class(path)
+                                    == ClassName::LocalScript,
+                                highlighted: document.highlighted,
+                                objects: &objects,
+                            },
+                        );
+                        if changed {
+                            document.highlighted = None;
+                        }
                     }
-                }
-            });
+                });
             if changed {
                 self.update_block_lua(path);
             }
@@ -2209,6 +2446,135 @@ mod tests {
         assert!(app.save());
         assert_eq!(std::fs::read_to_string(folder.join(path)).unwrap(), updated);
         assert!(!app.unsaved());
+        drop(app);
+        std::fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn the_style_section_rewrites_and_adds_css_for_the_selected_element() {
+        let folder = copy_of_example("hello-css", "style-section");
+        let mut app = EditorApp::new(Some(&folder));
+        let hud = app
+            .world
+            .find_first_child(app.world.workspace(), "Hud")
+            .unwrap();
+        let panel = app.world.find_first_child(hud, "HudPanel").unwrap();
+        let width = |app: &EditorApp| {
+            axcenity_ui::layout_ui(
+                &app.world,
+                800,
+                600,
+                &app.project.as_ref().unwrap().stylesheets,
+            )
+            .element(panel)
+            .unwrap()
+            .rect
+            .width
+        };
+        let declaration = |app: &EditorApp, property: &str| {
+            axcenity_ui::applied_declaration(
+                &app.world,
+                panel,
+                &app.project.as_ref().unwrap().stylesheets,
+                property,
+            )
+        };
+
+        // Changing a value rewrites the rule that set it, live.
+        let applied = declaration(&app, "width").unwrap();
+        app.apply_style(
+            panel,
+            StyleEdit::Set {
+                path: applied.path,
+                span: applied.span,
+                value: "300px".to_owned(),
+            },
+        );
+        assert_eq!(width(&app), 300.0);
+        assert!(
+            app.tabs
+                .get("ui.css")
+                .unwrap()
+                .text
+                .contains("width: 300px;")
+        );
+
+        // An element with no Id gets one from its name, and its own rule.
+        app.apply_style(
+            panel,
+            StyleEdit::Add {
+                property: "opacity".to_owned(),
+                value: "0.5".to_owned(),
+            },
+        );
+        let id = app.world.get(panel).unwrap().property("Id").cloned();
+        assert_eq!(id, Some(Value::String("HudPanel".to_owned())));
+        let added = declaration(&app, "opacity").unwrap();
+        assert_eq!(
+            (added.selector.as_str(), added.value.as_str()),
+            ("#HudPanel", "0.5")
+        );
+        // A second style joins the same rule.
+        app.apply_style(
+            panel,
+            StyleEdit::Add {
+                property: "border-radius".to_owned(),
+                value: "4px".to_owned(),
+            },
+        );
+        let text = &app.tabs.get("ui.css").unwrap().text;
+        assert_eq!(text.matches("#HudPanel {").count(), 1, "{text}");
+        assert!(app.unsaved());
+        drop(app);
+        std::fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn a_stylesheet_edited_in_another_program_restyles_the_viewport() {
+        let folder = copy_of_example("hello-css", "stylesheet-outside-edit");
+        let mut app = EditorApp::new(Some(&folder));
+        let hud = app
+            .world
+            .find_first_child(app.world.workspace(), "Hud")
+            .unwrap();
+        let panel = app.world.find_first_child(hud, "HudPanel").unwrap();
+        let width = |app: &EditorApp| {
+            axcenity_ui::layout_ui(
+                &app.world,
+                800,
+                600,
+                &app.project.as_ref().unwrap().stylesheets,
+            )
+            .element(panel)
+            .unwrap()
+            .rect
+            .width
+        };
+        assert_eq!(width(&app), 280.0);
+        let path = folder.join("ui.css");
+        let edited = std::fs::read_to_string(&path)
+            .unwrap()
+            .replace("width: 280px", "width: 340px");
+        std::fs::write(&path, &edited).unwrap();
+        app.disk_changed(&["ui.css".to_owned()]);
+        assert_eq!(width(&app), 340.0);
+        assert!(!app.unsaved(), "nothing to save: the file already has it");
+        drop(app);
+        std::fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn ui_elements_inserted_with_no_screen_gui_get_one() {
+        let folder = copy_of_example("hello-part", "ui-insert");
+        let mut app = EditorApp::new(Some(&folder));
+        app.insert(Insertable::TextButton, None);
+        let button = app.selected.unwrap();
+        let parent = app.world.get(button).unwrap().parent().unwrap();
+        assert_eq!(app.world.get(parent).unwrap().class(), ClassName::ScreenGui);
+        assert_eq!(
+            app.world.get(button).unwrap().class(),
+            ClassName::TextButton
+        );
         drop(app);
         std::fs::remove_dir_all(folder).unwrap();
     }

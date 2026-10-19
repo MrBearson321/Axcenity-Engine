@@ -30,14 +30,17 @@ type Stamp = (Option<SystemTime>, u64);
 /// `world.json` or `scripts/pad.server.lua`). Files that aren't there are left out.
 pub type Stamps = BTreeMap<String, Stamp>;
 
-/// The stamps of the world file and every script file in `folder` now.
+/// The stamps of the world file, every script file and every stylesheet in
+/// `folder` now.
 pub fn stamps(folder: &Path) -> Stamps {
     // Folders that can't be read just look empty; the editor reports
     // problems when it reads the files themselves.
     let mut ignored = Vec::new();
     let scripts = axcenity_project::find_scripts(folder, &mut ignored);
+    let stylesheets = axcenity_project::find_stylesheets(folder, &mut ignored);
     std::iter::once(axcenity_project::WORLD_FILE.to_string())
         .chain(scripts)
+        .chain(stylesheets)
         .filter_map(|path| {
             let metadata = std::fs::metadata(folder.join(&path)).ok()?;
             Some((path, (metadata.modified().ok(), metadata.len())))

@@ -21,6 +21,11 @@ pub enum Edit {
     /// SurfaceAppearance's `ColorMap`) with the file picker. The app does
     /// that, and sets the property.
     PickTexture(&'static str),
+    /// Asks for an audio file for the Sound's `SoundId`, like [`Edit::PickTexture`].
+    PickAudio,
+    /// Plays the selected Sound in the editor, to hear it without pressing
+    /// Play, or (false) stops that.
+    PreviewSound(bool),
 }
 
 /// One group of properties in the panel, such as "Appearance".
@@ -35,7 +40,7 @@ pub struct Section {
 const GROUPS: [(&str, &[&str]); 11] = [
     (
         "Appearance",
-        &["Color", "Material", "Metalness", "Roughness"],
+        &["Color", "Material", "Metalness", "Roughness", "CastShadow"],
     ),
     ("Behavior", &["Anchored"]),
     (
@@ -85,10 +90,18 @@ const GROUPS: [(&str, &[&str]); 11] = [
             "Text",
             "TextColor3",
             "TextSize",
+            "Image",
+            "ImageTransparency",
         ],
     ),
-    ("Audio", &["SoundId", "Volume", "Looped"]),
-    ("Shadows", &["ShadowsEnabled", "ShadowDistance"]),
+    (
+        "Audio",
+        &["SoundId", "Playing", "Volume", "PlaybackSpeed", "Looped"],
+    ),
+    (
+        "Shadows",
+        &["ShadowsEnabled", "ShadowDistance", "ShadowSoftness"],
+    ),
     (
         "Sky",
         &[
@@ -136,10 +149,7 @@ pub fn sections(instance: &Instance) -> Vec<Section> {
         .filter(|(title, _)| match *title {
             "Part" => matches!(instance.class(), ClassName::Part | ClassName::MeshPart),
             "Surface" | "Map Settings" => instance.class() == ClassName::SurfaceAppearance,
-            "UI" => matches!(
-                instance.class(),
-                ClassName::ScreenGui | ClassName::Frame | ClassName::TextLabel
-            ),
+            "UI" => crate::style_panel::is_styled(instance.class()),
             "Audio" => instance.class() == ClassName::Sound,
             "Shadows" | "Sky" | "Post-processing" => instance.class() == ClassName::Lighting,
             "Light" => matches!(
@@ -185,12 +195,14 @@ pub fn can_rename_here(instance: &Instance) -> bool {
 
 /// Draws the panel for `selected` and returns the edit made this frame, if any.
 /// While `playing`, `world` is the game's, and the panel says that changes
-/// last only until Stop.
+/// last only until Stop. `more` draws further sections (the Style section)
+/// at the end, in the same scrolling area.
 pub fn show(
     ui: &mut egui::Ui,
     world: &World,
     selected: Option<InstanceId>,
     playing: bool,
+    more: impl FnOnce(&mut egui::Ui),
 ) -> Option<Edit> {
     theme::panel_title(ui, icons::SLIDERS_HORIZONTAL, "Properties");
     if playing {
@@ -247,6 +259,7 @@ pub fn show(
                         }
                     });
                 }
+                more(ui);
             });
         });
     edit
@@ -261,6 +274,12 @@ fn section(ui: &mut egui::Ui, title: &str, rows: impl FnOnce(&mut egui::Ui)) {
         "Part" => icons::CUBE,
         "Surface" => icons::IMAGE,
         "Map Settings" => icons::SLIDERS,
+        "UI" => icons::LAYOUT,
+        "Audio" => icons::SPEAKER_HIGH,
+        "Shadows" => icons::SUN,
+        "Sky" => icons::CLOUD_SUN,
+        "Post-processing" => icons::SPARKLE,
+        "Light" => icons::LIGHTBULB,
         _ => icons::DOTS_THREE_OUTLINE,
     };
     let header = egui::RichText::new(theme::with_icon(icon, title)).family(theme::heading_family());
@@ -281,6 +300,7 @@ fn section(ui: &mut egui::Ui, title: &str, rows: impl FnOnce(&mut egui::Ui)) {
 fn value_control(ui: &mut egui::Ui, name: &'static str, value: Value) -> Option<Edit> {
     match value {
         Value::String(path) if is_map(name) => map_control(ui, name, &path),
+        Value::String(path) if name == "SoundId" => sound_control(ui, &path),
         value => value_edit(ui, name, value).map(|value| Edit::Property(name, value)),
     }
 }
@@ -314,6 +334,41 @@ fn map_control(ui: &mut egui::Ui, name: &'static str, path: &str) -> Option<Edit
     edit
 }
 
+/// A Sound's file, with buttons to pick another, and to hear it.
+fn sound_control(ui: &mut egui::Ui, path: &str) -> Option<Edit> {
+    let mut edit = None;
+    ui.horizontal(|ui| {
+        if ui
+            .small_button(icons::FOLDER_OPEN)
+            .on_hover_text("Choose a sound file (WAV, OGG, MP3 or FLAC)")
+            .clicked()
+        {
+            edit = Some(Edit::PickAudio);
+        }
+        if path.is_empty() {
+            ui.weak("None");
+            return;
+        }
+        if ui
+            .small_button(icons::PLAY)
+            .on_hover_text("Listen to it here, without pressing Play")
+            .clicked()
+        {
+            edit = Some(Edit::PreviewSound(true));
+        }
+        if ui
+            .small_button(icons::STOP)
+            .on_hover_text("Stop listening")
+            .clicked()
+        {
+            edit = Some(Edit::PreviewSound(false));
+        }
+        let file = path.rsplit('/').next().unwrap_or(path);
+        ui.label(file).on_hover_text(path);
+    });
+    edit
+}
+
 /// Draws the control for a property's value and returns its new value if
 /// the user changed it this frame.
 fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
@@ -322,6 +377,11 @@ fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
             .checkbox(&mut on, "")
             .changed()
             .then_some(Value::Bool(on)),
+        // A slider shows where between crisp and soft the shadows are.
+        Value::Number(mut number) if name == "ShadowSoftness" => ui
+            .add(egui::Slider::new(&mut number, 0.0..=1.0).clamping(egui::SliderClamping::Edits))
+            .changed()
+            .then_some(Value::Number(number)),
         Value::Number(mut number) => {
             let mut drag = egui::DragValue::new(&mut number).max_decimals(MAX_DECIMALS);
             drag = match name {
@@ -331,6 +391,7 @@ fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
                 | "AmbientOcclusionStrength"
                 | "BackgroundTransparency"
                 | "Volume" => drag.speed(0.01).range(0.0..=1.0),
+                "PlaybackSpeed" => drag.speed(0.01).range(0.01..=20.0),
                 "NormalStrength" | "EmissiveStrength" | "TextSize" => {
                     drag.speed(0.01).range(0.0..=f64::INFINITY)
                 }
@@ -492,6 +553,7 @@ mod tests {
                 "Material",
                 "Metalness",
                 "Roughness",
+                "CastShadow",
                 "Anchored",
                 "Shape",
                 "Position",

@@ -20,6 +20,8 @@ pub enum Insertable {
     ScreenGui,
     Frame,
     TextLabel,
+    TextButton,
+    ImageLabel,
     Sound,
     PointLight,
     SpotLight,
@@ -35,11 +37,13 @@ impl Insertable {
     ];
     /// The classes that group other Instances.
     pub const GROUPS: [Insertable; 2] = [Insertable::Model, Insertable::Folder];
-    /// UI objects available in Explorer's Insert menu.
-    pub const UI: [Insertable; 3] = [
+    /// UI objects, for the toolbar's UI group and the Explorer's Insert menu.
+    pub const UI: [Insertable; 5] = [
         Insertable::ScreenGui,
         Insertable::Frame,
         Insertable::TextLabel,
+        Insertable::TextButton,
+        Insertable::ImageLabel,
     ];
     pub const AUDIO: [Insertable; 1] = [Insertable::Sound];
     /// Lights shine from the part they are inside.
@@ -59,6 +63,8 @@ impl Insertable {
             Insertable::ScreenGui => "ScreenGui",
             Insertable::Frame => "Frame",
             Insertable::TextLabel => "TextLabel",
+            Insertable::TextButton => "TextButton",
+            Insertable::ImageLabel => "ImageLabel",
             Insertable::Sound => "Sound",
             Insertable::PointLight => "PointLight",
             Insertable::SpotLight => "SpotLight",
@@ -75,11 +81,53 @@ impl Insertable {
             Insertable::ScreenGui => ClassName::ScreenGui,
             Insertable::Frame => ClassName::Frame,
             Insertable::TextLabel => ClassName::TextLabel,
+            Insertable::TextButton => ClassName::TextButton,
+            Insertable::ImageLabel => ClassName::ImageLabel,
             Insertable::Sound => ClassName::Sound,
             Insertable::PointLight => ClassName::PointLight,
             Insertable::SpotLight => ClassName::SpotLight,
         }
     }
+
+    /// UI that shows only inside a ScreenGui: frames, text, buttons and images.
+    pub fn is_ui_element(self) -> bool {
+        matches!(
+            self,
+            Insertable::Frame
+                | Insertable::TextLabel
+                | Insertable::TextButton
+                | Insertable::ImageLabel
+        )
+    }
+}
+
+/// True for the classes UI elements can go inside.
+fn is_ui_container(world: &World, id: InstanceId) -> bool {
+    matches!(
+        world.get(id).map(|instance| instance.class()),
+        Some(ClassName::ScreenGui | ClassName::Frame)
+    )
+}
+
+/// The ScreenGui a new UI element goes in when nothing UI is selected: the
+/// one around `near`, or else the Workspace's first.
+fn screen_gui_for(world: &World, near: Option<InstanceId>) -> Option<InstanceId> {
+    let is_gui = |id: InstanceId| {
+        world
+            .get(id)
+            .is_some_and(|instance| instance.class() == ClassName::ScreenGui)
+    };
+    let mut current = near;
+    while let Some(id) = current {
+        if is_gui(id) && is_saved(world, id) {
+            return Some(id);
+        }
+        current = world.get(id).and_then(|instance| instance.parent());
+    }
+    world
+        .descendants(world.workspace())
+        .into_iter()
+        .find(|&id| is_gui(id))
 }
 
 /// The size a new part of each shape starts with, in studs. Blocks and
@@ -123,25 +171,21 @@ pub fn create(world: &mut World, what: Insertable, position: Vector3) -> Instanc
 pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) -> InstanceId {
     let default = match what {
         Insertable::RemoteEvent => world.replicated_storage(),
+        what if what.is_ui_element() => screen_gui_for(world, near).unwrap_or(world.workspace()),
         _ => world.workspace(),
     };
     near.filter(|&id| {
         let is_group = world.get(id).is_some_and(|instance| {
             matches!(instance.class(), ClassName::Model | ClassName::Folder)
         });
-        let is_ui_container = matches!(
-            world.get(id).map(|instance| instance.class()),
-            Some(ClassName::ScreenGui | ClassName::Frame)
-        );
+        let is_ui_container = is_ui_container(world, id);
         let is_sound_container = matches!(
             world.get(id).map(|instance| instance.class()),
             Some(ClassName::Part | ClassName::MeshPart)
         );
         id == world.replicated_storage()
             || (is_group && is_saved(world, id))
-            || (is_ui_container
-                && matches!(what, Insertable::Frame | Insertable::TextLabel)
-                && is_saved(world, id))
+            || (is_ui_container && what.is_ui_element() && is_saved(world, id))
             || (is_sound_container
                 && matches!(
                     what,
@@ -150,6 +194,12 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
                 && is_saved(world, id))
     })
     .unwrap_or(default)
+}
+
+/// True if a new `what` needs a ScreenGui made first: it's UI, and there's
+/// no ScreenGui or Frame for it to go in.
+pub fn needs_screen_gui(world: &World, near: Option<InstanceId>, what: Insertable) -> bool {
+    what.is_ui_element() && !is_ui_container(world, insert_parent(world, near, what))
 }
 
 /// True if `id` is in the Workspace or ReplicatedStorage: the only places
@@ -337,6 +387,20 @@ mod tests {
             insert_parent(&world, Some(frame), Insertable::ScreenGui),
             workspace
         );
+        // With a part selected, or nothing, UI still goes in the ScreenGui.
+        let part = child(&mut world, workspace, ClassName::Part, "Part");
+        assert_eq!(
+            insert_parent(&world, Some(part), Insertable::TextButton),
+            gui
+        );
+        assert_eq!(insert_parent(&world, None, Insertable::ImageLabel), gui);
+        assert!(!needs_screen_gui(&world, None, Insertable::Frame));
+        assert!(needs_screen_gui(&World::new(), None, Insertable::Frame));
+        assert!(!needs_screen_gui(
+            &World::new(),
+            None,
+            Insertable::ScreenGui
+        ));
     }
 
     #[test]

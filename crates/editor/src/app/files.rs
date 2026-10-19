@@ -159,6 +159,9 @@ impl EditorApp {
                     let (stylesheet, warnings) =
                         axcenity_ui::parse_stylesheet(&path, project::NEW_STYLESHEET_SOURCE);
                     if let Some(project) = &mut self.project {
+                        project
+                            .stylesheet_texts
+                            .insert(path.clone(), project::NEW_STYLESHEET_SOURCE.to_owned());
                         let index = project
                             .stylesheets
                             .partition_point(|existing| existing.path() < path.as_str());
@@ -558,6 +561,11 @@ impl EditorApp {
             if let Some(tab) = self.tabs.get_mut(path) {
                 tab.mark_saved();
             }
+            if let Some(project) = &mut self.project {
+                project
+                    .stylesheet_texts
+                    .insert(path.to_owned(), source.clone());
+            }
             self.refresh_stylesheet(path, &source);
             return true;
         }
@@ -751,15 +759,8 @@ impl EditorApp {
                     .find(|document| document.path == path)
             })
         {
-            document.highlighted = line.and_then(|line| {
-                translate(&document.script)
-                    .ok()?
-                    .block_lines
-                    .into_iter()
-                    .filter(|(tag_line, _)| *tag_line < line)
-                    .max_by_key(|(tag_line, _)| *tag_line)
-                    .map(|(_, id)| id)
-            });
+            document.highlighted =
+                line.and_then(|line| translate(&document.script).ok()?.block_at(line));
         }
         match known {
             Some(source) => self.tabs.open(path, &source, line),
@@ -902,6 +903,68 @@ impl EditorApp {
                     .error(format!("Could not use `{}`: {err}", file.display()));
                 None
             }
+        }
+    }
+
+    /// Asks for a sound file, and returns its `SoundId`: its path in the
+    /// project, copied into `assets/audio` first if it was outside.
+    pub(super) fn pick_audio(&mut self) -> Option<String> {
+        let project = self.project.as_ref()?;
+        let file = rfd::FileDialog::new()
+            .set_title("Choose a sound")
+            .add_filter("Sound", &axcenity_assets::AUDIO_EXTENSIONS)
+            .set_directory(&project.folder)
+            .pick_file()?;
+        match axcenity_assets::import_audio(&project.folder, &file) {
+            Ok(path) => Some(path),
+            Err(err) => {
+                let err = chain(&err);
+                self.output
+                    .error(format!("Could not use `{}`: {err}", file.display()));
+                None
+            }
+        }
+    }
+
+    /// Plays the Sound `id` in the editor (or stops it), with its own
+    /// settings. Starting Play stops it too.
+    pub(super) fn preview_sound(&mut self, id: InstanceId, play: bool) {
+        if !play {
+            self.sound_preview = None;
+            return;
+        }
+        let Some(sound) = self.world.get(id) else {
+            return;
+        };
+        let text = |name| {
+            sound
+                .property(name)
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned()
+        };
+        let action = axcenity_audio::SoundAction::Play {
+            instance: id,
+            sound_id: text("SoundId"),
+            volume: sound
+                .property("Volume")
+                .and_then(Value::as_number)
+                .unwrap_or(1.0),
+            looped: sound.property("Looped").and_then(Value::as_bool) == Some(true),
+        };
+        if self.sound_preview.is_none() {
+            match axcenity_audio::AudioEngine::new() {
+                Ok(engine) => self.sound_preview = Some(engine),
+                Err(err) => {
+                    self.output.error(format!("Audio is unavailable: {err}"));
+                    return;
+                }
+            }
+        }
+        if let Some(engine) = &mut self.sound_preview
+            && let Err(err) = engine.apply(action, &self.assets)
+        {
+            self.output.error(format!("Audio: {err}"));
         }
     }
 
@@ -1368,10 +1431,44 @@ impl EditorApp {
         for path in paths {
             if path == project::WORLD_FILE {
                 self.world_file_changed();
+            } else if project::is_stylesheet(path) {
+                self.stylesheet_file_changed(path);
             } else {
                 self.script_file_changed(path);
             }
         }
+    }
+
+    /// A stylesheet changed on disk, such as one edited in VS Code: restyle
+    /// the UI with it, unless its tab has unsaved changes (they're kept, and
+    /// saving replaces the other version). A deleted one stops applying.
+    fn stylesheet_file_changed(&mut self, path: &str) {
+        let Some(project) = &mut self.project else {
+            return;
+        };
+        let source = std::fs::read_to_string(project.folder.join(path)).ok();
+        if source.as_ref() == project.stylesheet_texts.get(path) {
+            // The editor's own save, or touched without a change.
+            return;
+        }
+        let Some(source) = source else {
+            project.stylesheet_texts.remove(path);
+            project.stylesheets.retain(|sheet| sheet.path() != path);
+            self.output
+                .info(format!("`{path}` was deleted outside the editor."));
+            self.sync_tab(path, None);
+            return;
+        };
+        project
+            .stylesheet_texts
+            .insert(path.to_owned(), source.clone());
+        let unsaved = self.tabs.get(path).is_some_and(|tab| tab.unsaved());
+        if !unsaved {
+            self.refresh_stylesheet(path, &source);
+            self.output
+                .info(format!("`{path}` was changed outside the editor."));
+        }
+        self.sync_tab(path, Some(&source));
     }
 
     /// The world file changed: load it, unless the world has unsaved changes.
@@ -1705,7 +1802,7 @@ mod tests {
             .find(|script| script.path == path)
             .unwrap()
             .source;
-        assert!(source.contains("workspace[\"Chime\"]:Play()"));
+        assert!(source.contains("workspace.Chime:Play()"));
         let play_line = source
             .lines()
             .position(|line| line.contains(":Play()"))

@@ -446,9 +446,9 @@ Add `TextButton` and `ImageLabel`. Support `:hover` and `:active` states, button
 
 ### Acceptance criteria
 
-- [ ] An example menu with buttons that change color on hover and press, and a script that reacts to clicks.
-- [ ] Editing a `.css` file updates the editor viewport without restarting.
-- [ ] Hidden (`Visible = false`) elements take no space in layout and receive no clicks.
+- [x] An example menu with buttons that change color on hover and press, and a script that reacts to clicks.
+- [x] Editing a `.css` file updates the editor viewport without restarting.
+- [x] Hidden (`Visible = false`) elements take no space in layout and receive no clicks.
 
 ---
 
@@ -465,9 +465,9 @@ Create the `blocks` crate and a block editor panel. Start with a small palette: 
 ### Acceptance criteria
 
 - [ ] A beginner can rebuild the Milestone 1 "touch pad changes color" demo using only blocks.
-- [ ] Incompatible blocks can't be dropped into a slot.
-- [ ] Translation tests cover every block type, and the output runs in the scheduler.
-- [ ] Every block maps to a documented Lua API; there are no block-only features.
+- [x] Incompatible blocks can't be dropped into a slot.
+- [x] Translation tests cover every block type, and the output runs in the scheduler.
+- [x] Every block maps to a documented Lua API; there are no block-only features.
 
 ---
 
@@ -481,9 +481,9 @@ Add a "View as Lua" panel showing readable generated code. Generated Lua carries
 
 ### Acceptance criteria
 
-- [ ] "View as Lua" output is readable: indented, with meaningful variable names and no internal noise.
-- [ ] A runtime error in a block script highlights the block that caused it.
-- [ ] The badge matches where the script runs, and client-only blocks are hidden in server block scripts.
+- [x] "View as Lua" output is readable: indented, with meaningful variable names and no internal noise.
+- [x] A runtime error in a block script highlights the block that caused it.
+- [x] The badge matches where the script runs, and client-only blocks are hidden in server block scripts.
 
 ---
 
@@ -500,7 +500,7 @@ Add an editor export action: translate blocks to Lua via `blocks`, then `project
 ### Acceptance criteria
 
 - [ ] An exported demo game runs on the same OS from a clean folder with no editor installed.
-- [ ] The exported game contains no editor code (verified by a dependency check in CI).
+- [x] The exported game contains no editor code (verified by a dependency check in CI).
 - [ ] Block scripts in the exported game behave the same as in Play.
 
 ---
@@ -516,9 +516,9 @@ CI builds release players for Windows, macOS and Linux, and the editor bundles t
 ### Acceptance criteria
 
 - [ ] From Windows, export a game that runs on macOS and Linux, and vice versa (tested manually on real machines or VMs).
-- [ ] Every export contains the credits file with the `NOTICE` text.
-- [ ] The splash shows by default, and the project setting turns it off.
-- [ ] The README covers game ownership, the fork rules and how to open unsigned macOS apps.
+- [x] Every export contains the credits file with the `NOTICE` text.
+- [x] The splash shows by default, and the project setting turns it off.
+- [x] The README covers game ownership, the fork rules and how to open unsigned macOS apps.
 
 ---
 
@@ -546,13 +546,13 @@ Create the `audio` crate around `kira`. Add a `Sound` Instance (asset reference,
 
 ### What to build
 
-Add sun shadow maps (cascaded if needed for large scenes), configurable from the lighting service.
+Add sun shadow maps (cascaded if needed for large scenes), configurable from the lighting service. (Since built: three cascades, contact-hardening soft shadows with `Lighting.ShadowSoftness`, and `CastShadow` on parts.)
 
 ### Acceptance criteria
 
-- [ ] Parts cast and receive sun shadows in the editor and the player.
+- [x] Parts cast and receive sun shadows in the editor and the player.
 - [ ] All earlier example projects still render correctly.
-- [ ] Shadows can be turned off for low-end machines.
+- [x] Shadows can be turned off for low-end machines.
 
 ---
 
@@ -582,8 +582,8 @@ Add a configurable sky (a procedural sky and/or HDR skybox) and image-based envi
 
 ### Acceptance criteria
 
-- [ ] Metal parts visibly reflect the sky.
-- [ ] Sky settings are editable in the lighting service and save with the project.
+- [x] Metal parts visibly reflect the sky.
+- [x] Sky settings are editable in the lighting service and save with the project.
 - [ ] Earlier example projects are unaffected.
 
 ---
@@ -599,5 +599,5 @@ Render in HDR, then apply tone mapping and bloom, configurable per project. Neon
 ### Acceptance criteria
 
 - [ ] Neon parts glow with bloom, and bright scenes don't clip harshly.
-- [ ] Post-processing can be adjusted or turned off per project.
+- [x] Post-processing can be adjusted or turned off per project.
 - [ ] All example projects render correctly with the final pipeline on all three OSes.

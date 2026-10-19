@@ -77,11 +77,12 @@ Each stage must leave existing scenes rendering correctly.
 
 ## Shadows (stage 2)
 
-- `DrawList::shadows` (`Shadows { enabled, distance }`) comes from the `Lighting` service's `ShadowsEnabled` and `ShadowDistance` properties (`scene` reads them). The defaults are on, 150 studs.
-- One 2048² depth map (no cascades yet) covers a sphere around the part of the view out to `distance`, drawn from the sun in a depth-only pass before the scene. The map's position snaps to whole texels so edges don't shimmer. Casters up to 500 studs toward the sun are included.
-- The shader compares with a 3×3 filter, offsets the point along the surface normal and biases depth by two texels, and fades shadows out over the last 20% of `distance`.
-- Only the sun casts shadows, only sun light is darkened (not ambient), and only solid items cast (see-through ones don't; cut-out textures cast as solid). Shadows off allocates no shadow map and skips the pass.
-- Cascades are the next step if big scenes need sharper shadows far away.
+- `DrawList::shadows` (`Shadows { enabled, distance, softness }`) comes from the `Lighting` service's `ShadowsEnabled`, `ShadowDistance` and `ShadowSoftness` properties (`scene` reads them). The defaults are on, 150 studs, softness 0.2.
+- **Cascades**: three 2048² depth maps (layers of one array texture) each cover a slice of the view out to `distance`, nearest first. The slices' ends are mostly geometric (`CASCADE_SPLIT_BLEND`), so the first covers only the closest dozen or so studs and is the sharpest. Each map covers a sphere around its slice (so turning the camera doesn't change its scale), snapped to whole texels so edges don't shimmer. Casters up to 500 studs toward the sun are included. The shader uses the nearest cascade that covers a point and blends into the next over the outer 20% of each, so the change in sharpness doesn't show.
+- **Soft shadows** (percentage-closer soft shadows): the shader first searches the map around the point for what blocks the sun and averages its depth, then blurs over a width proportional to the distance from that blocker to the surface times the sun's apparent size (`ShadowSoftness` × `MAX_SUN_SIZE`). So shadows are crisp where a part touches what it shades and soften further away, like real ones; softness 0 is crisp everywhere. Both steps take 16 samples on a Poisson disc, turned per pixel by interleaved gradient noise, and each comparison is itself filtered between four texels. The blur is at most 32 texels.
+- **Acne and peter-panning**: the point is offset along its surface normal by 1.5 texels, the depth bias grows with the blur width and the surface's slope to the sun, and the shadow pass adds a slope-scaled hardware bias.
+- `DrawItem::casts_shadow` (from a Part's or MeshPart's `CastShadow`, default true) leaves an item out of the shadow pass: it's still shaded by others. See-through items never cast (cut-out textures cast as solid). Batches are split by it.
+- Shadows fade out over the last 20% of `distance`. Only the sun casts shadows, and only sun light is darkened (not ambient). Shadows off allocates no shadow map and skips the passes.
 
 ## Platform
 

@@ -16,7 +16,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 use axcenity_assets::Assets;
-use axcenity_audio::{AudioEngine, SoundAction};
+use axcenity_audio::GameAudio;
 use axcenity_core::{InstanceId, World};
 use axcenity_physics::Physics;
 use axcenity_project::ScriptFile;
@@ -98,9 +98,8 @@ fn main() -> Result<()> {
     let assets = Assets::new(&project.folder);
     let mut scripts = ScriptRuntime::new();
     start_scripts(&mut scripts, &mut world, &project.scripts);
-    let mut audio = None;
-    let mut audio_failed = false;
-    apply_audio(&mut scripts, &assets, &mut audio, &mut audio_failed);
+    let mut audio = GameAudio::default();
+    apply_audio(&mut scripts, &mut world, &assets, &mut audio);
     // Models load the first time a MeshPart needs one; physics and drawing
     // share them.
     let event_loop = EventLoop::new()?;
@@ -115,7 +114,6 @@ fn main() -> Result<()> {
         stylesheets,
         scripts,
         audio,
-        audio_failed,
         physics: Physics::with_assets(assets.clone()),
         assets,
         window: None,
@@ -205,36 +203,17 @@ fn print_output(runtime: &mut ScriptRuntime) {
 
 fn apply_audio(
     scripts: &mut ScriptRuntime,
+    world: &mut World,
     assets: &Assets,
-    audio: &mut Option<AudioEngine>,
-    failed: &mut bool,
+    audio: &mut GameAudio,
 ) {
-    for action in scripts.take_sound_actions() {
-        if matches!(action, SoundAction::Stop(_)) {
-            if let Some(engine) = audio
-                && let Err(err) = engine.apply(action, assets)
-            {
-                log::error!("audio: {err}");
-            }
-            continue;
-        }
-        if audio.is_none() && !*failed {
-            match AudioEngine::new() {
-                Ok(engine) => *audio = Some(engine),
-                Err(err) => {
-                    *failed = true;
-                    log::error!("audio is unavailable: {err}");
-                }
-            }
-        }
-        if let Some(engine) = audio
-            && let Err(err) = engine.apply(action, assets)
-        {
-            log::error!("audio: {err}");
-        }
+    let update = audio.update(scripts.take_sound_actions(), world, assets);
+    for err in update.errors {
+        log::error!("audio: {err}");
     }
-    if let Some(engine) = audio {
-        engine.collect_finished();
+    if !update.ended.is_empty() {
+        scripts.fire_sounds_ended(world, &update.ended);
+        print_output(scripts);
     }
 }
 
@@ -249,8 +228,7 @@ struct App {
     /// Runs the scripts, and keeps the ones paused by `task.wait`.
     scripts: ScriptRuntime,
     /// Audio output and handles, created only when a script first plays a sound.
-    audio: Option<AudioEngine>,
-    audio_failed: bool,
+    audio: GameAudio,
     /// Simulates the unanchored parts.
     physics: Physics,
     /// The project's models, for MeshParts.
@@ -562,9 +540,9 @@ impl ApplicationHandler for App {
                 print_output(&mut self.scripts);
                 apply_audio(
                     &mut self.scripts,
+                    &mut self.world,
                     &self.assets,
                     &mut self.audio,
-                    &mut self.audio_failed,
                 );
 
                 // 5. Lay out ScreenGuis at this window's current pixel size.

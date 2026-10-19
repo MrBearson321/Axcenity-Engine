@@ -387,7 +387,7 @@ const CLASS_METHODS: &[(ClassName, Function)] = &[
         ClassName::Sound,
         Function {
             name: "Play",
-            doc: "Starts this sound using its SoundId, Volume and Looped properties. Playing it again restarts it; stopping the game session stops all sounds.",
+            doc: "Plays this sound from the start, with its SoundId, Volume, PlaybackSpeed and Looped, and sets Playing to true. Playing it again restarts it; stopping the game session stops all sounds.",
             params: &[],
             returns: "nil",
         },
@@ -396,7 +396,25 @@ const CLASS_METHODS: &[(ClassName, Function)] = &[
         ClassName::Sound,
         Function {
             name: "Stop",
-            doc: "Stops this sound if it is playing.",
+            doc: "Stops this sound and sets Playing to false. The next Play starts from the beginning.",
+            params: &[],
+            returns: "nil",
+        },
+    ),
+    (
+        ClassName::Sound,
+        Function {
+            name: "Pause",
+            doc: "Pauses this sound where it is (sets Playing to false). Resume carries on from there.",
+            params: &[],
+            returns: "nil",
+        },
+    ),
+    (
+        ClassName::Sound,
+        Function {
+            name: "Resume",
+            doc: "Carries on playing a paused sound, or plays a stopped one from the start (sets Playing to true).",
             params: &[],
             returns: "nil",
         },
@@ -733,6 +751,16 @@ const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "If true, playback repeats until Stop is called or the game session stops.",
     ),
     (
+        ClassName::Sound,
+        "PlaybackSpeed",
+        "How fast the sound plays: 1 is normal, 2 twice as fast (and an octave higher), 0.5 half. Changes apply while it plays.",
+    ),
+    (
+        ClassName::Sound,
+        "Playing",
+        "True while the sound plays. Set it to false to pause and true to carry on. Saved as true, the sound plays as soon as the game starts, with no script needed.",
+    ),
+    (
         ClassName::Lighting,
         "ShadowsEnabled",
         "If false, the sun casts no shadows. Turn this off on low-end machines.",
@@ -741,6 +769,11 @@ const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::Lighting,
         "ShadowDistance",
         "How far from the camera sun shadows reach, in studs. Shorter distances give sharper shadows.",
+    ),
+    (
+        ClassName::Lighting,
+        "ShadowSoftness",
+        "How soft shadow edges are, from 0 (crisp) to 1 (very soft). Edges stay sharp where a part touches what it shades and soften further away, like real shadows.",
     ),
     (
         ClassName::Lighting,
@@ -869,6 +902,16 @@ const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::Part,
         "Roughness",
         "From 0 (mirror-smooth) to 1 (matte).",
+    ),
+    (
+        ClassName::Part,
+        "CastShadow",
+        "If false, the part casts no sun shadow. It's still shaded by other parts' shadows.",
+    ),
+    (
+        ClassName::MeshPart,
+        "CastShadow",
+        "If false, the part casts no sun shadow. It's still shaded by other parts' shadows.",
     ),
     (
         ClassName::MeshPart,
@@ -1024,6 +1067,11 @@ const EVENT_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::TextButton,
         "Activated",
         "Fires when the player clicks or taps this button. The handler gets no arguments; LocalScripts only.",
+    ),
+    (
+        ClassName::Sound,
+        "Ended",
+        "Fires when the sound plays to its end. Looped sounds, and sounds stopped with Stop, don't fire it.",
     ),
 ];
 

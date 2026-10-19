@@ -22,8 +22,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
 pub use import::{
-    ImportError, MODELS_FOLDER, PROJECT_TEXTURES_FOLDER, TEXTURE_EXTENSIONS, TEXTURES_FOLDER,
-    import_model, import_picks, import_texture, list_model_objects, load_model_file,
+    AUDIO_EXTENSIONS, ImportError, MODELS_FOLDER, PROJECT_AUDIO_FOLDER, PROJECT_TEXTURES_FOLDER,
+    TEXTURE_EXTENSIONS, TEXTURES_FOLDER, import_audio, import_model, import_picks, import_texture,
+    list_model_objects, load_model_file,
 };
 pub use model::{
     AlphaMode, Channel, ChannelTexture, Image, Model, ModelError, ModelFormat, ModelMaterial,
