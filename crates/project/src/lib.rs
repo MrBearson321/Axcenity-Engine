@@ -29,7 +29,7 @@ use serde::Deserialize;
 
 pub use packed::{PackError, pack_game, unpack_game};
 pub use versions::{Version, list_versions, record_version, restore_version};
-pub use world_file::{WorldError, parse_world, write_world};
+pub use world_file::{WorldError, parse_prefab, parse_world, write_prefab, write_world};
 
 pub const MANIFEST_FILE: &str = "axcenity.json";
 pub const WORLD_FILE: &str = "world.json";

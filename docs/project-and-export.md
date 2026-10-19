@@ -24,6 +24,9 @@ my-game/
   assets/models/  imported glTF and FBX models: chair.glb, robot.fbx, or
                   tree/tree.gltf with the .bin and textures it uses (see Assets)
   assets/audio/   project audio files referenced by Sound.SoundId
+  assets/prefabs/ prefabs saved from the editor's Assets panel: lamp.prefab.json, ...
+  assets/images/, assets/textures/, assets/particles/
+                  UI images, SurfaceAppearance textures and particle textures
   .luarc.json, .axcenity/, .vscode/extensions.json
                   optional: written by the editor's File > Set Up VS Code
                   Autocomplete (see docs/scripting.md); the engine ignores them
@@ -65,6 +68,7 @@ my-game/
 - **SurfaceAppearances** (Phase 21) are saved inside their MeshPart like any child, with every property: `MaterialName`, `Color`, the maps (`ColorMap`, `NormalMap`, `MetalnessMap`, `RoughnessMap`, `EmissiveMap`, `AmbientOcclusionMap`, `OpacityMap`, `SpecularMap`: texture paths from the project folder, `""` for none), `NormalStrength`, `NormalMapDirectX`, the four `…Channel`s (`"Red"`, `"Green"`, `"Blue"` or `"Alpha"`), `InvertRoughness`, `InvertOpacity`, `AmbientOcclusionStrength` and `EmissiveStrength`. Texture paths follow the same rules as `MeshId` (inside the project only).
 - **UI Instances** (Phase 22) are saved in the Workspace like other Instances. `ScreenGui` holds `Frame` and `TextLabel` children; a UDim2 position/size is written as `[xScale, xOffset, yScale, yOffset]`.
 - **CSS stylesheets** (Phase 23) are plain `.css` files anywhere in the project folder. The loader reads them in stable path order; a file that cannot be read is reported without blocking the rest of the project.
+- **Prefabs** (Phase 34): `assets/prefabs/*.prefab.json` holds Instances saved to be placed again: `{ "format_version": 1, "instances": [ ... ] }`, each written exactly like a child in `world.json` (scripts are left out). `project::parse_prefab` checks the whole file before adding anything, so a bad prefab adds nothing; `project::write_prefab` writes it. Positions are absolute as saved; the editor moves the whole prefab where it's placed.
 - `format_version` appears in both files. The engine refuses newer versions with a "please update" message.
 - Errors name the file and, for JSON syntax problems, the line and column. For bad property values they name the Instance path (for example `Workspace.Block.Color`).
 

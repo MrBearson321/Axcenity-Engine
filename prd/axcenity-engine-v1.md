@@ -48,6 +48,11 @@ Graphics aim for a modern, realistic look (physically based materials, shadows, 
 62. As a creator, I want imported models to use all their standard texture maps (base color, normal, roughness or glossiness, metalness or specular, emission, opacity, ambient occlusion), so that they look as their artist made them.
 63. As a creator, I want FBX files with embedded or channel-packed textures to import with the right maps worked out for me, so that assets from stores and other engines just work.
 64. As a creator, I want to see and change each imported material's texture maps, both while importing and afterwards, so that I can fix a wrong guess or retexture a model.
+65. As a creator, I want an asset browser of my project's models, prefabs, images, textures, sounds and particle textures, plus a built-in set of common props, that I can drag straight into the world, so that I don't rebuild the same things over and over.
+66. As a creator, I want to save any part or Model as a prefab and place copies of it from the asset browser, so that repeated props stay quick to reuse.
+67. As a creator who learned with F3X Building Tools, I want familiar building tools (Move, Resize, Rotate, Paint, Material, Anchor, Collision, Lighting and Emission) that work on everything I've selected at once, so that I can build quickly the way I already know.
+68. As a creator, I want an angular tool like Archimedes that keeps placing copies of a part at a set angle, a set number of times, so that I can build arches, loops, curved roads and round towers.
+69. As a creator, I want particle emitters with built-in particle types (sparks, smoke, fire, stars, magic) and my own particle textures (such as Kenney's free Particle Pack), editable live in the editor and from scripts, so that my game has effects.
 
 ### Scripting with Lua
 

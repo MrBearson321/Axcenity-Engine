@@ -115,6 +115,25 @@ pub struct ViewportOutput {
     pub ui_drag: Option<UiDragEdit>,
     /// True on the frame a drag is let go, which ends that drag's undo step.
     pub drag_released: bool,
+    /// Where something dragged from another panel (an asset) would land,
+    /// while it's over the viewport.
+    pub drop: Option<DropTarget>,
+}
+
+/// What's under the mouse while an asset is dragged over the viewport.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DropTarget {
+    /// The point on the surface under the mouse: a part, or the ground
+    /// (the plane at Y = 0), or the camera's focus point if neither.
+    pub point: Vec3,
+    /// The way that surface faces, one stud long.
+    pub normal: Vec3,
+    /// The part under the mouse.
+    pub part: Option<InstanceId>,
+    /// The UI element under the mouse, which is in front of any part.
+    pub ui: Option<InstanceId>,
+    /// True on the frame the mouse button is let go: drop it there.
+    pub released: bool,
 }
 
 pub struct ViewportScene<'a> {
@@ -445,8 +464,7 @@ impl Viewport {
                         .map(|element| {
                             egui::Rect::from_min_size(
                                 rect.min
-                                    + egui::vec2(element.rect.x, element.rect.y)
-                                        / pixels_per_point,
+                                    + egui::vec2(element.rect.x, element.rect.y) / pixels_per_point,
                                 egui::vec2(element.rect.width, element.rect.height)
                                     / pixels_per_point,
                             )
@@ -472,6 +490,14 @@ impl Viewport {
             );
         }
         self.paint_speed_popup(ui, rect);
+        let drop = self.drop_target(ui, rect, &screen, world, &ui_scene);
+        if let Some(target) = &drop
+            && let Some(at) = screen.point(target.point)
+        {
+            let painter = ui.painter_at(rect);
+            painter.circle_stroke(at, 9.0, egui::Stroke::new(SELECTION_WIDTH, SELECTION_COLOR));
+            painter.circle_filled(at, 3.0, SELECTION_COLOR);
+        }
         ViewportOutput {
             clicked,
             activated,
@@ -481,7 +507,44 @@ impl Viewport {
             drag: drag.edit,
             ui_drag: drag.ui_edit,
             drag_released: drag.released,
+            drop,
         }
+    }
+
+    /// Where an asset dragged from another panel would land, if one is
+    /// being dragged and the mouse is over the viewport.
+    fn drop_target(
+        &self,
+        ui: &egui::Ui,
+        rect: egui::Rect,
+        screen: &Screen,
+        world: &World,
+        ui_scene: &UiScene,
+    ) -> Option<DropTarget> {
+        if !egui::DragAndDrop::has_any_payload(ui.ctx()) {
+            return None;
+        }
+        let (pointer, released) =
+            ui.input(|input| (input.pointer.latest_pos(), input.pointer.any_released()));
+        let pointer = pointer.filter(|pointer| rect.contains(*pointer))?;
+        let ray = screen.ray(pointer);
+        let hit = axcenity_scene::pick_hit(world, ray, None);
+        let (point, normal) = match &hit {
+            Some(hit) => (ray.at(hit.distance), hit.normal),
+            // The ground, if the mouse points down at it, near enough.
+            None if ray.direction.y < -0.01 => {
+                let distance = (-ray.origin.y / ray.direction.y).min(1000.0);
+                (ray.at(distance), Vec3::Y)
+            }
+            None => (self.camera.focus(), Vec3::Y),
+        };
+        Some(DropTarget {
+            point,
+            normal,
+            part: hit.map(|hit| hit.part),
+            ui: ui_scene.hit(pointer),
+            released,
+        })
     }
 
     /// The camera as it draws into `rect`, for turning between screen and

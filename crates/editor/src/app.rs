@@ -11,6 +11,7 @@
 //! open scripts. Everything that reads or writes project files (saving,
 //! scripts, outside changes) is in `app/files.rs`.
 
+mod assets;
 mod files;
 
 use std::collections::HashMap;
@@ -24,6 +25,7 @@ use axcenity_project::ScriptFile;
 use axcenity_script::{CameraState, KeyEvent};
 use eframe::egui;
 
+use crate::asset_browser::{AssetBrowser, AssetPayload, BrowserAction};
 use crate::autocomplete;
 use crate::block_editor;
 use crate::dialog;
@@ -160,6 +162,17 @@ pub struct EditorApp {
     about_open: bool,
     /// A Sound being listened to from the Properties panel, outside Play.
     sound_preview: Option<axcenity_audio::AudioEngine>,
+    /// The Assets panel, which shares the bottom of the window with Output.
+    asset_browser: AssetBrowser,
+    bottom_tab: BottomTab,
+}
+
+/// Which panel the bottom of the window shows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum BottomTab {
+    #[default]
+    Output,
+    Assets,
 }
 
 struct BlockDocument {
@@ -283,6 +296,8 @@ impl EditorApp {
             viewport_rect: None,
             about_open: false,
             sound_preview: None,
+            asset_browser: AssetBrowser::default(),
+            bottom_tab: BottomTab::default(),
         };
         if let Some(folder) = folder {
             app.open(folder);
@@ -363,6 +378,7 @@ impl EditorApp {
         self.focused_text = None;
         self.pending_focus_lost = None;
         self.assets = Assets::new(&project.folder);
+        self.asset_browser.open(Some(&project.folder));
         self.tabs.close_all();
         self.viewport.reset_camera();
         let world_text = files::read_world_text(&project.folder);
@@ -814,6 +830,34 @@ impl EditorApp {
             .record(&mut self.world, id, key, label, before, after);
     }
 
+    /// Like [`change`](Self::change), for edits to several Instances that
+    /// make one undo step, such as painting the whole selection.
+    fn change_many(&mut self, key: Field, label: String, edits: Vec<(InstanceId, Vec<Edit>)>) {
+        if let Some(session) = &mut self.play {
+            for (id, edits) in edits {
+                for edit in edits {
+                    if let Err(err) = set(session.world_mut(), id, edit) {
+                        self.output.error(format!("Could not change that: {err:#}"));
+                    }
+                }
+            }
+            return;
+        }
+        let mut changed = Vec::new();
+        for (id, edits) in edits {
+            let before = history::snapshot(&self.world, id);
+            for edit in edits {
+                if let Err(err) = set(&mut self.world, id, edit) {
+                    self.output.error(format!("Could not change that: {err:#}"));
+                }
+            }
+            let after = history::snapshot(&self.world, id);
+            changed.push(history::Changed { id, before, after });
+        }
+        self.history
+            .record_many(&mut self.world, key, label, changed);
+    }
+
     /// Undoes the last step, unless a handle is being dragged or the game
     /// is playing (undo would change a world that isn't on screen).
     fn undo(&mut self) {
@@ -838,7 +882,10 @@ impl EditorApp {
         let root = world.root();
         self.selection
             .retain(|id| *id == root || world.is_descendant_of(*id, root));
-        if self.selected.is_some_and(|id| !self.selection.contains(&id)) {
+        if self
+            .selected
+            .is_some_and(|id| !self.selection.contains(&id))
+        {
             self.selected = self.selection.last().copied();
         }
     }
@@ -1069,10 +1116,11 @@ impl EditorApp {
             return;
         }
         if what == Insertable::Page {
-            let layout = tree::page_layout_for(&self.world, near.or(self.selected)).unwrap_or_else(|| {
-                self.insert(Insertable::PageLayout, near);
-                self.selected.expect("inserting a PageLayout selects it")
-            });
+            let layout =
+                tree::page_layout_for(&self.world, near.or(self.selected)).unwrap_or_else(|| {
+                    self.insert(Insertable::PageLayout, near);
+                    self.selected.expect("inserting a PageLayout selects it")
+                });
             self.insert_named(Insertable::Frame, Some(layout), "Page", Vec::new());
             return;
         }
@@ -1365,6 +1413,7 @@ impl EditorApp {
         self.thumbnail = None;
         self.thumbnail_wanted = None;
         self.assets = Assets::default();
+        self.asset_browser.open(None);
         self.tabs.close_all();
         self.replace_world(World::new());
         self.start.reload_thumbnails();
@@ -2157,11 +2206,15 @@ impl EditorApp {
                 self.save();
             } else {
                 match axcenity_project::record_version(&folder, "Checkpoint") {
-                    Ok(true) => self.output.info("Kept a version of the world, scripts and styles."),
+                    Ok(true) => self
+                        .output
+                        .info("Kept a version of the world, scripts and styles."),
                     Ok(false) => self
                         .output
                         .info("The newest version already matches these files."),
-                    Err(err) => self.output.warning(format!("Could not keep a version: {err}")),
+                    Err(err) => self
+                        .output
+                        .warning(format!("Could not keep a version: {err}")),
                 }
             }
         }
@@ -2179,8 +2232,9 @@ impl EditorApp {
             return;
         }
         if let Err(err) = axcenity_project::record_version(&folder, "Before restore") {
-            self.output
-                .warning(format!("Could not keep the current files before restoring: {err}"));
+            self.output.warning(format!(
+                "Could not keep the current files before restoring: {err}"
+            ));
         }
         match axcenity_project::restore_version(&folder, id) {
             Ok(()) => {
@@ -2188,7 +2242,9 @@ impl EditorApp {
                 self.output.info("Restored that version. The files it replaced were kept as a version named \"Before restore\".");
                 self.versions_open = true;
             }
-            Err(err) => self.output.error(format!("Could not restore that version: {err}")),
+            Err(err) => self
+                .output
+                .error(format!("Could not restore that version: {err}")),
         }
     }
 }
@@ -2335,7 +2391,9 @@ impl eframe::App for EditorApp {
             {
                 for event in &events {
                     let command = match event {
-                        egui::Event::Text(text) => Some(axcenity_ui::TextCommand::Insert(text.clone())),
+                        egui::Event::Text(text) => {
+                            Some(axcenity_ui::TextCommand::Insert(text.clone()))
+                        }
                         egui::Event::Key {
                             key: egui::Key::Backspace,
                             pressed: true,
@@ -2430,17 +2488,29 @@ impl eframe::App for EditorApp {
                         .default_height(340.0)
                         .show_inside(ui, |ui| {
                             let selected = self.selected;
-                            edit = properties::show(ui, world, selected, !editing, self.selection.len(), |ui| {
-                                // Stylesheets are edited, not the game, so not during Play.
-                                if editing {
-                                    style_edit =
-                                        style_panel::show(ui, world, selected, stylesheets);
-                                }
-                            });
+                            edit = properties::show(
+                                ui,
+                                world,
+                                selected,
+                                !editing,
+                                self.selection.len(),
+                                |ui| {
+                                    // Stylesheets are edited, not the game, so not during Play.
+                                    if editing {
+                                        style_edit =
+                                            style_panel::show(ui, world, selected, stylesheets);
+                                    }
+                                },
+                            );
                         });
                     explorer = self.explorer.show(ui, world, &self.selection, editing);
                     if explorer.clicked.is_some() {
-                        explorer_rows = self.explorer.rows(world).into_iter().map(|row| row.id).collect();
+                        explorer_rows = self
+                            .explorer
+                            .rows(world)
+                            .into_iter()
+                            .map(|row| row.id)
+                            .collect();
                     }
                 });
         }
@@ -2468,15 +2538,53 @@ impl eframe::App for EditorApp {
         if let Some(id) = explorer.open {
             self.open_script_instance(id);
         }
+        let mut browser_action = None;
         let clicked_error = has_project
             .then(|| {
                 egui::TopBottomPanel::bottom("output")
                     .resizable(true)
                     .default_height(160.0)
-                    .show(ctx, |ui| self.output.show(ui))
+                    .show(ctx, |ui| {
+                        ui.horizontal(|ui| {
+                            for (tab, icon, label) in [
+                                (BottomTab::Output, icons::TERMINAL_WINDOW, "Output"),
+                                (BottomTab::Assets, icons::SHAPES, "Assets"),
+                            ] {
+                                if ui
+                                    .selectable_label(
+                                        self.bottom_tab == tab,
+                                        theme::with_icon(icon, label),
+                                    )
+                                    .clicked()
+                                {
+                                    self.bottom_tab = tab;
+                                }
+                            }
+                        });
+                        match self.bottom_tab {
+                            BottomTab::Output => self.output.show(ui),
+                            BottomTab::Assets => {
+                                let can_save =
+                                    assets::any_prefab(&self.world, &self.selection_roots());
+                                browser_action = self.asset_browser.show(
+                                    ui,
+                                    &self.assets,
+                                    !self.playing(),
+                                    can_save,
+                                );
+                                None
+                            }
+                        }
+                    })
                     .inner
             })
             .flatten();
+        match browser_action {
+            Some(BrowserAction::Place(entry)) => self.drop_asset(&entry, None),
+            Some(BrowserAction::Import { image_folder }) => self.import_assets(image_folder),
+            Some(BrowserAction::SavePrefab) => self.save_prefab(),
+            None => {}
+        }
         if let Some(location) = clicked_error {
             self.open_script(&location.path, Some(location.line));
         }
@@ -2641,6 +2749,13 @@ impl eframe::App for EditorApp {
         self.ui_warnings.clone_from(&output.ui_warnings);
         for warning in fresh {
             self.output.warning(warning);
+        }
+        // An asset let go over the viewport is placed where it was dropped.
+        if let Some(target) = output.drop.filter(|target| target.released)
+            && let Some(payload) = egui::DragAndDrop::take_payload::<AssetPayload>(ctx)
+        {
+            self.drop_asset(&payload.0, Some(target));
+            ctx.request_repaint();
         }
         if let Some(edit) = output.drag {
             self.apply_drag(edit);

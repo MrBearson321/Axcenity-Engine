@@ -124,6 +124,20 @@ enum StepKind {
     /// Instances added to, taken out of, or moved around the tree, in the
     /// order they were made.
     Tree(Vec<Move>),
+    /// Changes to several Instances at once, such as moving or painting the
+    /// whole selection. Merges like `Fields`, when the same field of the
+    /// same Instances is edited again.
+    Many {
+        key: Field,
+        parts: Vec<(InstanceId, Vec<Change>)>,
+    },
+}
+
+/// One Instance's snapshots either side of a change, for [`History::record_many`].
+pub struct Changed {
+    pub id: InstanceId,
+    pub before: Snapshot,
+    pub after: Snapshot,
 }
 
 #[derive(Debug, Default)]
@@ -239,6 +253,69 @@ impl History {
         }
     }
 
+    /// Records a change to several Instances as one step named `label`,
+    /// such as "Paint 3 parts". `key` is the field the gesture edits; the
+    /// next change merges into this step while the gesture is open and it
+    /// edits the same field of the same Instances. One Instance is recorded
+    /// as an ordinary [`record`](Self::record) step.
+    pub fn record_many(
+        &mut self,
+        world: &mut World,
+        key: Field,
+        label: String,
+        changed: Vec<Changed>,
+    ) {
+        if let [only] = changed.as_slice() {
+            let (id, before, after) = (only.id, only.before.clone(), only.after.clone());
+            self.record(world, id, key, label, before, after);
+            return;
+        }
+        let parts: Vec<(InstanceId, Vec<Change>)> = changed
+            .into_iter()
+            .map(|c| (c.id, differences(c.before, c.after)))
+            .collect();
+        if parts.iter().all(|(_, changes)| changes.is_empty()) {
+            return;
+        }
+        let open = self.open;
+        let same_ids = |top: &[(InstanceId, Vec<Change>)]| {
+            top.len() == parts.len() && top.iter().zip(&parts).all(|(a, b)| a.0 == b.0)
+        };
+        let merging = self.undo.last().is_some_and(|top| {
+            matches!(&top.kind, StepKind::Many { key: top_key, parts: top_parts }
+                if open == Some(top.number) && *top_key == key && same_ids(top_parts))
+        });
+        if !merging {
+            let number = self.push(world, label, StepKind::Many { key, parts });
+            self.open = Some(number);
+            return;
+        }
+        let number = self.next_number();
+        let top = self.undo.last_mut().expect("checked by `merging`");
+        let StepKind::Many {
+            parts: top_parts, ..
+        } = &mut top.kind
+        else {
+            unreachable!("checked by `merging`");
+        };
+        for ((_, top_changes), (_, changes)) in top_parts.iter_mut().zip(parts) {
+            for change in changes {
+                match top_changes.iter_mut().find(|old| old.field == change.field) {
+                    Some(old) => old.after = change.after,
+                    None => top_changes.push(change),
+                }
+            }
+            top_changes.retain(|change| change.before != change.after);
+        }
+        if top_parts.iter().all(|(_, changes)| changes.is_empty()) {
+            self.undo.pop();
+            self.open = None;
+        } else {
+            top.number = number;
+            self.open = Some(number);
+        }
+    }
+
     /// Records Instances that were inserted, deleted or moved in the tree
     /// (already done to `world`) as one step named `label`, such as
     /// "Delete Pad". A tree step never merges with the next change.
@@ -316,6 +393,11 @@ impl History {
                     put_back(world, step.id, step.before);
                 }
             }
+            StepKind::Many { parts, .. } => {
+                for (id, changes) in parts {
+                    restore(world, *id, changes.iter().map(|c| (c.field, &c.before)));
+                }
+            }
         }
         self.redo.push(step);
         Some(undone)
@@ -337,6 +419,11 @@ impl History {
             StepKind::Tree(moves) => {
                 for step in moves {
                     put_back(world, step.id, step.after);
+                }
+            }
+            StepKind::Many { parts, .. } => {
+                for (id, changes) in parts {
+                    restore(world, *id, changes.iter().map(|c| (c.field, &c.after)));
                 }
             }
         }

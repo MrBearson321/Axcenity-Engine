@@ -8,6 +8,7 @@
 //! device; the viewport draws with the same renderer as the player.
 
 mod app;
+mod asset_browser;
 mod autocomplete;
 mod block_editor;
 mod css_syntax;
@@ -21,6 +22,7 @@ mod output;
 mod placing;
 mod play;
 mod properties;
+mod props;
 mod ribbon;
 mod screen;
 mod scripts;

@@ -601,3 +601,74 @@ Render in HDR, then apply tone mapping and bloom, configurable per project. Neon
 - [ ] Neon parts glow with bloom, and bright scenes don't clip harshly.
 - [x] Post-processing can be adjusted or turned off per project.
 - [ ] All example projects render correctly with the final pipeline on all three OSes.
+
+---
+
+# Milestone 7: Building tools
+
+---
+
+## Phase 34: Asset browser
+
+**User stories**: 65, 66
+
+### What to build
+
+An Assets panel beside Output that lists the project's asset files by category (Models, Prefabs, Images, Textures, Audio, Particles) with thumbnails and a search box, plus a built-in Props shelf of common prefabs made from parts (floor, wall, stairs, lamp, table, tree). Dragging a tile into the viewport places it on the surface under the mouse: a model becomes a MeshPart, a prefab or prop its Instances, a sound a Sound in the part under the mouse, an image an ImageLabel (or the image of the ImageLabel under the mouse), and a texture the color map of the MeshPart under the mouse. Any selected part or Model can be saved as a prefab (`assets/prefabs/*.prefab.json`, the world file's Instance layout), and files can be imported into the right asset folder from the panel. Each placement is one undo step.
+
+### Acceptance criteria
+
+- [ ] The panel lists every model, prefab, image, texture and sound in the project's `assets` folder, and picks up new files without reopening the project.
+- [ ] Dragging each kind of tile into the viewport places it where it's dropped, as one undo step.
+- [ ] Saving a selection as a prefab and dropping it back in reproduces it exactly, and the prefab file is readable JSON.
+- [ ] The built-in props can be placed in any project, with no files needed.
+
+---
+
+## Phase 35: F3X-style building tools
+
+**User stories**: 67, 12, 10, 11
+
+### What to build
+
+Extend the toolbar's tools to an F3X-style set, each with an options panel floating in the viewport: **Move** (Global, Local or Last axes), **Resize** (Normal or Both directions), **Rotate** (Center, Local or Last pivot), **Paint** (a swatch palette and a color picker; clicking a part paints it), **Material** (material, transparency, metalness, roughness), **Anchor**, **Collision** (`CanCollide`), **Lighting** (add, edit or remove a PointLight or SpotLight on each selected part) and **Emission** (`EmissiveColor` and `Emission`, a glow of any color). Every tool acts on the whole selection, and each action is one undo step. Parts gain `Transparency`, `CanCollide`, `EmissiveColor` and `Emission`; physics lets parts with `CanCollide` off pass through others while still firing `Touched`.
+
+### Acceptance criteria
+
+- [ ] Moving, resizing and rotating several selected parts moves them together, with each axis and pivot mode behaving like F3X, and is one undo step.
+- [ ] Paint, Material, Anchor, Collision, Lighting and Emission change every selected part at once, as one undo step each.
+- [ ] A part with `CanCollide` off is passed through, still fires `Touched`, and saves and reloads.
+- [ ] Transparent and glowing parts look right in the editor and the player.
+
+---
+
+## Phase 36: Angular tool
+
+**User stories**: 68
+
+### What to build
+
+An **Angular** tool modelled on Archimedes: with a part selected, pick the direction to extend (±X, ±Y, ±Z of the part), the axis to bend around, the angle and how many copies to make. Each copy is placed against the end of the one before, hinged on the edge inside the bend and turned by the angle, so a series of copies forms an arc. A preview outline shows where the next copies go, the newest copy becomes the selection so pressing again carries on, a button picks the count that closes a full loop, and each press is one undo step.
+
+### Acceptance criteria
+
+- [ ] A 4-stud block bent 15° twenty-four times makes a closed ring, with each block touching the next along the inner edge.
+- [ ] Every extend direction and bend axis works on a turned part.
+- [ ] The preview matches what's placed, and one undo removes the whole batch.
+
+---
+
+## Phase 37: Particle emitters
+
+**User stories**: 69, 40
+
+### What to build
+
+A `ParticleEmitter` Instance, parented to a part, that emits camera-facing sprites from the part's surface: rate, lifetime, speed, spread, acceleration, drag, size, color, transparency (each from start to end of a particle's life), rotation, light emission and `ParticleType` (built-in Spark, Smoke, Fire, Star, Circle, Magic) or a `Texture` from the project, such as one of Kenney's CC0 Particle Pack images in `assets/particles`. Particles simulate and draw in the editor and the player; scripts call `emitter:Emit(count)` and set properties. The renderer gets a sprite pass (depth-tested, blended between alpha and additive by light emission). The Emission tool and the asset browser add emitters, and particle textures dropped on a part get an emitter.
+
+### Acceptance criteria
+
+- [ ] Each built-in particle type looks distinct, and a project PNG works as a custom texture.
+- [ ] Emitters show live in the editor while editing, and their settings change the effect immediately.
+- [ ] `Emit` and property changes from scripts work during Play, and emitters save and reload.
+- [ ] A scene with several thousand particles stays interactive.

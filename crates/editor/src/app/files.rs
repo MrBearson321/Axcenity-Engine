@@ -919,10 +919,8 @@ impl EditorApp {
                     (new_path, source, None)
                 }
                 Err(err) => {
-                    self.output.error(format!(
-                        "Could not switch {name} to Code: {}",
-                        chain(&err)
-                    ));
+                    self.output
+                        .error(format!("Could not switch {name} to Code: {}", chain(&err)));
                     return;
                 }
             }
@@ -1312,7 +1310,7 @@ impl EditorApp {
 
     /// A new MeshPart showing `model` (loaded from `mesh_id`), centered on
     /// `position`, with no parent yet.
-    fn new_mesh_part(
+    pub(super) fn new_mesh_part(
         &mut self,
         mesh_id: String,
         model: &axcenity_assets::Model,
@@ -1374,7 +1372,7 @@ impl EditorApp {
     /// Puts the new Instances `ids` at the end of `parent`, each with a
     /// name none of its siblings has, as one undo step named `label`, and
     /// selects the last of them.
-    fn place_new(&mut self, parent: InstanceId, ids: Vec<InstanceId>, label: String) {
+    pub(super) fn place_new(&mut self, parent: InstanceId, ids: Vec<InstanceId>, label: String) {
         let mut moves = Vec::new();
         for &id in &ids {
             let wanted = self.world.get(id).map(|i| i.name().to_string());
@@ -1457,8 +1455,7 @@ impl EditorApp {
             return;
         };
         let title = format!("Delete {}?", project::script_name(&path));
-        let message =
-            format!("This deletes `{path}` from the project folder. It can't be undone.");
+        let message = format!("This deletes `{path}` from the project folder. It can't be undone.");
         let outcome = dialog::ask(
             ctx,
             &dialog::Question {
@@ -1867,7 +1864,10 @@ mod tests {
         let code_path = app.tabs.active_path().unwrap().to_owned();
         let id = script(&app, "Script");
         app.switch_script_mode(&code_path);
-        assert!(!folder.join(&code_path).exists(), "the .lua file is replaced");
+        assert!(
+            !folder.join(&code_path).exists(),
+            "the .lua file is replaced"
+        );
         assert_eq!(script(&app, "Script"), id, "it's the same Script");
         let path = app
             .project
@@ -1943,11 +1943,12 @@ mod tests {
         assert!(!app.unsaved());
 
         // Typed code with no blocks for it still switches, as grey blocks.
-        app.tabs.get_mut(&code_path).unwrap().text =
-            format!("{code}local function twice(x)
+        app.tabs.get_mut(&code_path).unwrap().text = format!(
+            "{code}local function twice(x)
     return x * 2
 end
-");
+"
+        );
         app.switch_script_mode(&code_path);
         let document = &app.project.as_ref().unwrap().block_scripts[0];
         assert!(

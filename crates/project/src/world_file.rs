@@ -143,12 +143,78 @@ pub fn parse_world(text: &str) -> Result<World, WorldError> {
     Ok(world)
 }
 
+/// A prefab file (`assets/prefabs/*.prefab.json`): Instances saved to be
+/// placed again, written like the world file's children.
+///
+/// ```json
+/// { "format_version": 1, "instances": [ { "class": "Model", "name": "Lamp", "children": [] } ] }
+/// ```
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PrefabFile {
+    format_version: u32,
+    #[serde(default)]
+    instances: Vec<InstanceNode>,
+}
+
+/// Adds the Instances of a prefab file's text to `world`, inside `parent`,
+/// and returns the top-level ones in file order. Nothing is added if the
+/// text has any error.
+pub fn parse_prefab(
+    text: &str,
+    world: &mut World,
+    parent: InstanceId,
+) -> Result<Vec<InstanceId>, WorldError> {
+    let file: PrefabFile = serde_json::from_str(text).map_err(WorldError::Json)?;
+    if file.format_version > FORMAT_VERSION {
+        return Err(WorldError::TooNew {
+            found: file.format_version,
+        });
+    }
+    // Checked in a world of its own first, so a bad file leaves `world` alone.
+    let mut check = World::new();
+    let workspace = check.workspace();
+    for node in &file.instances {
+        add_instance(&mut check, workspace, node)?;
+    }
+    let mut added = Vec::new();
+    for node in &file.instances {
+        added.push(add_instance(world, parent, node)?);
+    }
+    Ok(added)
+}
+
+/// The text of a prefab file holding `ids` and everything inside them
+/// (scripts are left out, as in the world file).
+pub fn write_prefab(world: &World, ids: &[InstanceId]) -> String {
+    let mut out = format!("{{\n  \"format_version\": {FORMAT_VERSION},\n  \"instances\": [\n");
+    let ids: Vec<InstanceId> = ids
+        .iter()
+        .copied()
+        .filter(|&id| {
+            world
+                .get(id)
+                .is_some_and(|i| !i.class().is_script() && !i.class().is_service())
+        })
+        .collect();
+    for (i, &id) in ids.iter().enumerate() {
+        out.push_str("    ");
+        write_instance(world, id, 2, &mut out);
+        if i + 1 < ids.len() {
+            out.push(',');
+        }
+        out.push('\n');
+    }
+    out.push_str("  ]\n}\n");
+    out
+}
+
 /// Creates the Instance described by `node` under `parent`, then its children.
 fn add_instance(
     world: &mut World,
     parent: InstanceId,
     node: &InstanceNode,
-) -> Result<(), WorldError> {
+) -> Result<InstanceId, WorldError> {
     let parent_path = world.full_name(parent).expect("parent exists");
     let name = node.name.as_deref().unwrap_or(&node.class);
     let path = format!("{parent_path}.{name}");
@@ -173,7 +239,7 @@ fn add_instance(
     for child in &node.children {
         add_instance(world, id, child)?;
     }
-    Ok(())
+    Ok(id)
 }
 
 fn apply_properties(
@@ -460,6 +526,36 @@ mod tests {
             Ok(_) => panic!("expected an error"),
             Err(err) => err.to_string(),
         }
+    }
+
+    #[test]
+    fn prefabs_round_trip_and_a_bad_one_adds_nothing() {
+        let mut world = World::new();
+        let workspace = world.workspace();
+        let model = world.create(ClassName::Model).unwrap();
+        world.set_name(model, "Lamp").unwrap();
+        world.set_parent(model, Some(workspace)).unwrap();
+        let bulb = world.create(ClassName::Part).unwrap();
+        world.set_name(bulb, "Bulb").unwrap();
+        world
+            .set_property(bulb, "Material", Value::Material(Material::Neon))
+            .unwrap();
+        world.set_parent(bulb, Some(model)).unwrap();
+        let light = world.create(ClassName::PointLight).unwrap();
+        world.set_parent(light, Some(bulb)).unwrap();
+        let text = write_prefab(&world, &[model]);
+
+        let mut other = World::new();
+        let workspace = other.workspace();
+        let added = parse_prefab(&text, &mut other, workspace).unwrap();
+        assert_eq!(added.len(), 1);
+        assert_eq!(write_prefab(&other, &added), text);
+
+        let before = other.descendants(workspace).len();
+        let bad = r#"{ "format_version": 1, "instances": [
+            { "class": "Part" }, { "class": "Nope" } ] }"#;
+        assert!(parse_prefab(bad, &mut other, workspace).is_err());
+        assert_eq!(other.descendants(workspace).len(), before);
     }
 
     #[test]
