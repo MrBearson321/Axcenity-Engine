@@ -289,6 +289,12 @@ pub fn tool_icon(tool: Tool) -> &'static str {
         Tool::Move => icons::ARROWS_OUT_CARDINAL,
         Tool::Scale => icons::ARROWS_OUT,
         Tool::Rotate => icons::ARROWS_CLOCKWISE,
+        Tool::Paint => icons::PAINT_BUCKET,
+        Tool::Material => icons::DROP,
+        Tool::Anchor => icons::ANCHOR,
+        Tool::Collision => icons::INTERSECT,
+        Tool::Lighting => icons::LIGHTBULB,
+        Tool::Emission => icons::SUN_DIM,
     }
 }
 

@@ -20,5 +20,6 @@ pub use draw_list::{
 };
 pub use orientation::{orientation_from_rotation, rotation_from_orientation};
 pub use pick::{
-    CameraView, Hit, Ray, part_box_edges, part_half_extent, pick, pick_hit, visible_box_edges,
+    CameraView, Hit, Ray, part_box_edges, part_half_extent, pick, pick_hit, pick_hit_skipping,
+    visible_box_edges,
 };

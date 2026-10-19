@@ -88,6 +88,9 @@ struct Body {
 #[derive(Clone, PartialEq)]
 struct PartState {
     anchored: bool,
+    /// False makes the collider a sensor: nothing bounces off it, but
+    /// touches are still found.
+    can_collide: bool,
     shape: Form,
     size: Vector3,
     position: Vector3,
@@ -111,8 +114,10 @@ impl PartState {
             }
             _ => Form::Primitive(instance.property("Shape").and_then(Value::as_part_type)?),
         };
+        let can_collide = instance.property("CanCollide").and_then(Value::as_bool) != Some(false);
         let state = Self {
             anchored,
+            can_collide,
             shape,
             size: vector("Size")?,
             position: vector("Position")?,
@@ -268,9 +273,9 @@ impl Physics {
             .ccd_enabled(true)
             .angular_damping(ANGULAR_DAMPING)
             .build();
-        let (body, collider) = self
-            .rapier
-            .insert(body, shapes::collider(&state.shape, to_vec3(state.size)));
+        let mut collider = shapes::collider(&state.shape, to_vec3(state.size));
+        collider.set_sensor(!state.can_collide);
+        let (body, collider) = self.rapier.insert(body, collider);
         Body {
             body,
             collider,
@@ -292,11 +297,16 @@ impl Physics {
                 &mut rapier.soft_bodies,
                 true,
             );
-            part.collider = rapier.colliders.insert_with_parent(
-                shapes::collider(&state.shape, to_vec3(state.size)),
-                part.body,
-                &mut rapier.bodies,
-            );
+            let mut collider = shapes::collider(&state.shape, to_vec3(state.size));
+            collider.set_sensor(!state.can_collide);
+            part.collider =
+                rapier
+                    .colliders
+                    .insert_with_parent(collider, part.body, &mut rapier.bodies);
+        } else if old.can_collide != state.can_collide
+            && let Some(collider) = self.rapier.colliders.get_mut(part.collider)
+        {
+            collider.set_sensor(!state.can_collide);
         }
 
         let Some(body) = self.rapier.bodies.get_mut(part.body) else {
@@ -322,16 +332,23 @@ impl Physics {
     fn find_touches(&mut self) {
         // Only contacts the solver acts on count, not pairs whose bounding
         // boxes merely overlap. A set, so the order is the same every run.
-        let now: BTreeSet<(InstanceId, InstanceId)> = self
+        // Parts with CanCollide off are sensors: their overlaps count too.
+        let pair_of = |one: &ColliderHandle, two: &ColliderHandle| {
+            let a = *self.owners.get(one)?;
+            let b = *self.owners.get(two)?;
+            Some(if a < b { (a, b) } else { (b, a) })
+        };
+        let contacts = self
             .rapier
             .contact_pairs()
             .filter(|pair| pair.has_any_active_contact())
-            .filter_map(|pair| {
-                let a = *self.owners.get(&pair.collider1)?;
-                let b = *self.owners.get(&pair.collider2)?;
-                Some(if a < b { (a, b) } else { (b, a) })
-            })
-            .collect();
+            .filter_map(|pair| pair_of(&pair.collider1, &pair.collider2));
+        let overlaps = self
+            .rapier
+            .intersection_pairs()
+            .filter(|(_, _, _, _, intersecting)| *intersecting)
+            .filter_map(|(one, _, two, _, _)| pair_of(&one, &two));
+        let now: BTreeSet<(InstanceId, InstanceId)> = contacts.chain(overlaps).collect();
 
         for &(a, b) in &now {
             // `insert` returns the old value: `None` means the pair is new.

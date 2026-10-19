@@ -398,6 +398,14 @@ impl ClassName {
                     ("Roughness", Value::Number(preset.roughness)),
                     // Off, the part casts no sun shadow (it's still shaded).
                     ("CastShadow", Value::Bool(true)),
+                    // 0 is as solid as the material, 1 invisible.
+                    ("Transparency", Value::Number(0.0)),
+                    // Off, other parts pass through it (it still fires Touched).
+                    ("CanCollide", Value::Bool(true)),
+                    // The part glows in EmissiveColor, Emission times as
+                    // brightly as a plain white surface. 0 is no glow.
+                    ("EmissiveColor", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
+                    ("Emission", Value::Number(0.0)),
                 ]
             }
             ClassName::MeshPart => vec![
@@ -410,6 +418,8 @@ impl ClassName {
                 // The model is stretched so its bounding box is this size.
                 ("Size", Value::Vector3(Vector3::new(2.0, 2.0, 2.0))),
                 ("CastShadow", Value::Bool(true)),
+                ("Transparency", Value::Number(0.0)),
+                ("CanCollide", Value::Bool(true)),
             ],
             ClassName::SurfaceAppearance => {
                 let map = |name| (name, Value::String(String::new()));

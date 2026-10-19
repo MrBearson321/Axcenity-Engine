@@ -40,9 +40,18 @@ pub struct Section {
 const GROUPS: [(&str, &[&str]); 11] = [
     (
         "Appearance",
-        &["Color", "Material", "Metalness", "Roughness", "CastShadow"],
+        &[
+            "Color",
+            "Material",
+            "Metalness",
+            "Roughness",
+            "Transparency",
+            "EmissiveColor",
+            "Emission",
+            "CastShadow",
+        ],
     ),
-    ("Behavior", &["Anchored"]),
+    ("Behavior", &["Anchored", "CanCollide"]),
     (
         "Part",
         &["Shape", "MeshId", "Position", "Orientation", "Size"],
@@ -590,8 +599,12 @@ mod tests {
                 "Material",
                 "Metalness",
                 "Roughness",
+                "Transparency",
+                "EmissiveColor",
+                "Emission",
                 "CastShadow",
                 "Anchored",
+                "CanCollide",
                 "Shape",
                 "Position",
                 "Orientation",

@@ -22,20 +22,27 @@ use crate::gizmo::Snap;
 const AXIS_ALIGNED: f32 = 0.999;
 
 /// A part being dragged by its body.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct PlaceDrag {
     pub part: InstanceId,
+    /// Where the part was when the drag started.
+    pub start: Vec3,
     /// From the point where the part was grabbed to its center.
     grab_offset: Vec3,
+    /// Other parts being dragged along with it, which it can't rest on.
+    pub skip: Vec<InstanceId>,
 }
 
 impl PlaceDrag {
     /// Starts dragging `part`, grabbed at the world point `grabbed`.
     pub fn start(world: &World, part: InstanceId, grabbed: Vec3) -> Option<PlaceDrag> {
         let position = world.get(part)?.property("Position")?.as_vector3()?;
+        let start = Vec3::new(position.x, position.y, position.z);
         Some(PlaceDrag {
             part,
-            grab_offset: Vec3::new(position.x, position.y, position.z) - grabbed,
+            start,
+            grab_offset: start - grabbed,
+            skip: Vec::new(),
         })
     }
 
@@ -43,7 +50,9 @@ impl PlaceDrag {
     /// if there's no surface under the mouse (the part then stays put).
     pub fn update(&self, world: &World, ray: Ray, snap: &Snap) -> Option<Value> {
         // Skip the part itself, so it looks for what's behind it.
-        let hit = axcenity_scene::pick_hit(world, ray, Some(self.part))?;
+        let mut skip = self.skip.clone();
+        skip.push(self.part);
+        let hit = axcenity_scene::pick_hit_skipping(world, ray, &skip)?;
         let normal = hit.normal;
         // Only the sideways part of the grab offset: across the surface,
         // not off it.

@@ -1096,9 +1096,39 @@ const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "If false, the part casts no sun shadow. It's still shaded by other parts' shadows.",
     ),
     (
+        ClassName::Part,
+        "Transparency",
+        "From 0 (as solid as its material) to 1 (invisible).",
+    ),
+    (
+        ClassName::Part,
+        "CanCollide",
+        "If false, other parts pass through it. It still fires Touched. An unanchored part that can't collide falls through the floor.",
+    ),
+    (
+        ClassName::Part,
+        "EmissiveColor",
+        "The color the part glows in when Emission is above 0.",
+    ),
+    (
+        ClassName::Part,
+        "Emission",
+        "How brightly the part glows in EmissiveColor: 0 is no glow, 1 as bright as a white surface in full light, higher values bloom.",
+    ),
+    (
         ClassName::MeshPart,
         "CastShadow",
         "If false, the part casts no sun shadow. It's still shaded by other parts' shadows.",
+    ),
+    (
+        ClassName::MeshPart,
+        "Transparency",
+        "From 0 (as solid as its model) to 1 (invisible).",
+    ),
+    (
+        ClassName::MeshPart,
+        "CanCollide",
+        "If false, other parts pass through it. It still fires Touched.",
     ),
     (
         ClassName::MeshPart,

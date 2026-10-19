@@ -23,7 +23,9 @@ How Part properties map onto these (decided in Phase 3):
 
 - `Color`, `Metalness` and `Roughness` are Part properties and feed the draw list directly.
 - `Material` (Plastic, Metal, Glass, Neon) is a preset. Choosing it sets `Metalness` and `Roughness` to the preset's values, which you can then adjust (for example, a rougher Metal). See `Material::preset()` in `core`.
-- Opacity and glow aren't properties; they come from the material. Glass is drawn see-through, and Neon gives off its `Color` as emissive light instead of being shaded. If per-part transparency is needed later, add a `Transparency` property that multiplies the preset's opacity.
+- Glass is drawn see-through, and Neon gives off its `Color` as emissive light instead of being shaded.
+- `Transparency` (Phase 35, Parts and MeshParts, 0 to 1) multiplies the preset's (or the model's) opacity by `1 - Transparency`; a fully transparent part isn't drawn at all, but can still be picked in the editor.
+- `EmissiveColor` and `Emission` (Phase 35, Parts) add `EmissiveColor × Emission` to the emissive light on top of any Neon glow, so any material can glow in any color; above 1 it blooms.
 - Metals reflect the sky through environment lighting (stage 4).
 
 Transparency: opaque items are drawn first. Then see-through items are drawn, farthest to nearest by their centers, with blending on and depth writes off. Overlapping see-through items can still blend in the wrong order; that's accepted for now.

@@ -1,12 +1,16 @@
-//! The Move, Scale and Rotate tools: handles drawn over the selected part,
-//! and what dragging one does to it.
+//! The Move, Resize (`Scale`) and Rotate tools: handles drawn over the
+//! selection, and what dragging one does to every selected part.
 //!
-//! - **Move**: an arrow along each world axis. Dragging one slides the part
-//!   along that axis.
-//! - **Scale**: a ball on each face of the part, along the part's own axes.
-//!   Dragging one moves that face, and the opposite face stays where it is.
-//! - **Rotate**: a ring around each world axis. Dragging along one turns
-//!   the part around that axis, through its center.
+//! - **Move**: an arrow along each axis. Dragging one slides the parts
+//!   along it. With Global axes the arrows are the world's, from the middle
+//!   of the selection; with Local or Last they're the last selected part's
+//!   own (see [`MoveAxes`]).
+//! - **Resize**: a ball on each face of the last selected part, along its
+//!   own axes. Dragging one moves that face of every part (along each
+//!   part's own axis), and the opposite face stays where it is, or with
+//!   Both directions both faces move.
+//! - **Rotate**: a ring around each axis. Dragging along one turns the
+//!   parts around it, through the pivot (see [`RotatePivot`]).
 //!
 //! With snapping on, moves and size changes go in steps of `Snap::move_step`
 //! studs and turns in steps of `Snap::rotate_step` degrees, counted from
@@ -45,8 +49,10 @@ const HIGHLIGHT: egui::Color32 = egui::Color32::from_rgb(255, 215, 0);
 /// can't say where along it the mouse is.
 const PARALLEL: f32 = 1e-3;
 
-/// The tool picked in the toolbar. Select only selects; the others also
-/// show handles on the selected part.
+/// The tool picked in the toolbar. Select only selects; Move, Resize
+/// (`Scale`) and Rotate also show handles on the selection, and the others
+/// (modelled on F3X Building Tools) show an options panel in the viewport
+/// that acts on every selected part (see `build_tools.rs`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Tool {
     #[default]
@@ -54,29 +60,75 @@ pub enum Tool {
     Move,
     Scale,
     Rotate,
+    Paint,
+    Material,
+    Anchor,
+    Collision,
+    Lighting,
+    Emission,
 }
 
 impl Tool {
-    pub const ALL: [Tool; 4] = [Tool::Select, Tool::Move, Tool::Scale, Tool::Rotate];
+    pub const ALL: [Tool; 10] = [
+        Tool::Select,
+        Tool::Move,
+        Tool::Scale,
+        Tool::Rotate,
+        Tool::Paint,
+        Tool::Material,
+        Tool::Anchor,
+        Tool::Collision,
+        Tool::Lighting,
+        Tool::Emission,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
             Tool::Select => "Select",
             Tool::Move => "Move",
-            Tool::Scale => "Scale",
+            Tool::Scale => "Resize",
             Tool::Rotate => "Rotate",
+            Tool::Paint => "Paint",
+            Tool::Material => "Material",
+            Tool::Anchor => "Anchor",
+            Tool::Collision => "Collision",
+            Tool::Lighting => "Lighting",
+            Tool::Emission => "Emission",
         }
     }
 
-    /// Ctrl+1 to Ctrl+4 (Cmd on macOS), as in Studio.
-    pub fn shortcut(self) -> egui::KeyboardShortcut {
+    /// Ctrl+1 to Ctrl+4 (Cmd on macOS), as in Studio, for the first four.
+    pub fn shortcut(self) -> Option<egui::KeyboardShortcut> {
         let key = match self {
             Tool::Select => egui::Key::Num1,
             Tool::Move => egui::Key::Num2,
             Tool::Scale => egui::Key::Num3,
             Tool::Rotate => egui::Key::Num4,
+            _ => return None,
         };
-        egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, key)
+        Some(egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, key))
+    }
+
+    /// The single key that picks the tool in F3X, pressed on its own while
+    /// editing (not typing, not during Play).
+    pub fn key(self) -> Option<egui::Key> {
+        Some(match self {
+            Tool::Select => return None,
+            Tool::Move => egui::Key::Z,
+            Tool::Scale => egui::Key::X,
+            Tool::Rotate => egui::Key::C,
+            Tool::Paint => egui::Key::V,
+            Tool::Material => egui::Key::N,
+            Tool::Anchor => egui::Key::M,
+            Tool::Collision => egui::Key::K,
+            Tool::Lighting => egui::Key::U,
+            Tool::Emission => egui::Key::P,
+        })
+    }
+
+    /// True for the tools with handles to drag.
+    pub fn has_handles(self) -> bool {
+        matches!(self, Tool::Move | Tool::Scale | Tool::Rotate)
     }
 }
 
@@ -255,16 +307,91 @@ enum End {
     None,
 }
 
-/// The handles `tool` shows on a part at `pose`, as seen through `screen`.
+/// Which way the Move handles point, as in F3X: the world's axes (from the
+/// middle of the selection), or the last selected part's own axes, with
+/// each part moving along its own axes (Local) or all along the last
+/// part's (Last).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MoveAxes {
+    #[default]
+    Global,
+    Local,
+    Last,
+}
+
+/// Whether dragging a Resize handle moves one face (Normal) or both
+/// opposite faces, keeping the center (Both), as in F3X.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ResizeDirections {
+    #[default]
+    Normal,
+    Both,
+}
+
+/// What the Rotate tool turns parts around, as in F3X: the middle of the
+/// selection on the world's axes (Center), each part's own center and axes
+/// (Local), or the last selected part's center and axes (Last).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RotatePivot {
+    #[default]
+    Center,
+    Local,
+    Last,
+}
+
+/// The tool options that change what the handles do.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Modes {
+    pub axes: MoveAxes,
+    pub directions: ResizeDirections,
+    pub pivot: RotatePivot,
+}
+
+/// Where `tool`'s handles go for the selected parts `poses` (the last one
+/// is the last selected): a center and the axes they follow, with the last
+/// part's size for the Resize balls.
+pub fn handle_frame(tool: Tool, modes: Modes, poses: &[Pose]) -> Option<Pose> {
+    let last = *poses.last()?;
+    let middle = || Pose {
+        position: middle_of(poses),
+        rotation: Quat::IDENTITY,
+        size: last.size,
+    };
+    Some(match tool {
+        Tool::Move if modes.axes == MoveAxes::Global => middle(),
+        Tool::Rotate if modes.pivot == RotatePivot::Center => middle(),
+        _ => last,
+    })
+}
+
+/// The middle of the world-aligned box around the parts at `poses`.
+pub fn middle_of(poses: &[Pose]) -> Vec3 {
+    let mut min = Vec3::splat(f32::INFINITY);
+    let mut max = Vec3::splat(f32::NEG_INFINITY);
+    for pose in poses {
+        let half = pose.size / 2.0;
+        let reach = [Vec3::X, Vec3::Y, Vec3::Z]
+            .map(|axis| pose.rotation * axis)
+            .iter()
+            .zip([half.x, half.y, half.z])
+            .fold(Vec3::ZERO, |sum, (edge, half)| sum + edge.abs() * half);
+        min = min.min(pose.position - reach);
+        max = max.max(pose.position + reach);
+    }
+    (min + max) / 2.0
+}
+
+/// The handles `tool` shows around `pose` (from [`handle_frame`]), as seen
+/// through `screen`.
 pub fn shapes(tool: Tool, pose: Pose, screen: &Screen) -> Vec<Shape> {
     let length = screen.studs_per_point(pose.position) * HANDLE_POINTS;
     let center = pose.position;
     let mut shapes = Vec::new();
     match tool {
-        Tool::Select => {}
         Tool::Move => {
             for axis in Axis::ALL {
-                let Some(line) = screen.line(center, center + axis.vector() * length) else {
+                let direction = pose.rotation * axis.vector();
+                let Some(line) = screen.line(center, center + direction * length) else {
                     continue;
                 };
                 let along = line[1] - line[0];
@@ -304,6 +431,7 @@ pub fn shapes(tool: Tool, pose: Pose, screen: &Screen) -> Vec<Shape> {
         Tool::Rotate => {
             for axis in Axis::ALL {
                 let (across, up) = axis.ring_directions();
+                let (across, up) = (pose.rotation * across, pose.rotation * up);
                 let point = |i: usize| {
                     let angle = i as f32 / RING_PIECES as f32 * std::f32::consts::TAU;
                     center + (across * angle.cos() + up * angle.sin()) * length
@@ -318,6 +446,8 @@ pub fn shapes(tool: Tool, pose: Pose, screen: &Screen) -> Vec<Shape> {
                 });
             }
         }
+        // The other tools have no handles.
+        _ => {}
     }
     shapes
 }
@@ -390,13 +520,16 @@ pub fn paint(painter: &egui::Painter, shapes: &[Shape], highlighted: Option<Hand
 }
 
 /// A handle being dragged.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct Drag {
     pub handle: Handle,
-    pub part: InstanceId,
-    /// The part as it was when the drag started. Every frame works out the
-    /// new pose from this, so snapping and rounding errors never add up.
-    start: Pose,
+    /// Where the handles were when the drag started (see [`handle_frame`]).
+    frame: Pose,
+    /// Every part being changed, as it was when the drag started. Every
+    /// frame works out the new poses from these, so snapping and rounding
+    /// errors never add up.
+    parts: Vec<(InstanceId, Pose)>,
+    modes: Modes,
     /// Move and Scale: how far along the handle's line the mouse grabbed it.
     /// Rotate: the angle around the ring where the mouse grabbed it.
     grabbed: f32,
@@ -406,65 +539,149 @@ pub struct Drag {
     turned: f32,
 }
 
+/// New property values for each part a drag changes.
+pub type PartValues = Vec<(InstanceId, Vec<(&'static str, Value)>)>;
+
 impl Drag {
-    /// Starts dragging `handle` of `part` (at `start`) where `ray` points.
-    /// `None` if the ray runs alongside the handle and can't grab it.
+    /// Starts dragging `handle` of one `part` (at `start`) where `ray`
+    /// points, with world axes. `None` if the ray runs alongside the handle
+    /// and can't grab it.
+    #[cfg(test)]
     pub fn start(handle: Handle, part: InstanceId, start: Pose, ray: Ray) -> Option<Drag> {
+        // Resize handles follow the part's own axes; the others the world's.
+        let frame = match handle {
+            Handle::Scale(..) => start,
+            _ => Pose {
+                rotation: Quat::IDENTITY,
+                ..start
+            },
+        };
+        Self::start_many(handle, frame, vec![(part, start)], Modes::default(), ray)
+    }
+
+    /// Starts dragging `handle`, placed at `frame`, for every one of
+    /// `parts` (the last is the one the handles are on).
+    pub fn start_many(
+        handle: Handle,
+        frame: Pose,
+        parts: Vec<(InstanceId, Pose)>,
+        modes: Modes,
+        ray: Ray,
+    ) -> Option<Drag> {
+        parts.last()?;
         let grabbed = match handle {
             Handle::Move(_) | Handle::Scale(..) => {
-                let (origin, direction) = handle_line(handle, start);
+                let (origin, direction) = handle_line(handle, frame);
                 along_line(origin, direction, ray)?
             }
-            Handle::Rotate(axis) => ring_angle(start.position, axis, ray)?,
+            Handle::Rotate(axis) => ring_angle(frame, axis, ray)?,
         };
         Some(Drag {
             handle,
-            part,
-            start,
+            frame,
+            parts,
+            modes,
             grabbed,
             last_angle: grabbed,
             turned: 0.0,
         })
     }
 
-    /// The new property values for the mouse now pointing along `ray`, or
-    /// `None` if this ray can't tell (it runs alongside the handle).
+    /// The new property values of the part the handles are on, for the
+    /// mouse now pointing along `ray`, or `None` if this ray can't tell.
+    #[cfg(test)]
     pub fn update(&mut self, ray: Ray, snap: &Snap) -> Option<Vec<(&'static str, Value)>> {
-        let start = self.start;
+        let part = self.parts.last()?.0;
+        self.update_all(ray, snap)?
+            .into_iter()
+            .find(|(id, _)| *id == part)
+            .map(|(_, values)| values)
+    }
+
+    /// The new property values of every part, for the mouse now pointing
+    /// along `ray`, or `None` if this ray can't tell (it runs alongside the
+    /// handle).
+    pub fn update_all(&mut self, ray: Ray, snap: &Snap) -> Option<PartValues> {
+        let frame = self.frame;
+        let modes = self.modes;
         match self.handle {
-            Handle::Move(_) => {
-                let (origin, direction) = handle_line(self.handle, start);
+            Handle::Move(axis) => {
+                let (origin, direction) = handle_line(self.handle, frame);
                 let moved = snap.studs(along_line(origin, direction, ray)? - self.grabbed);
-                Some(vec![(
-                    "Position",
-                    to_value(start.position + direction * moved),
-                )])
+                Some(
+                    self.parts
+                        .iter()
+                        .map(|&(id, start)| {
+                            let direction = match modes.axes {
+                                MoveAxes::Local => start.rotation * axis.vector(),
+                                MoveAxes::Global | MoveAxes::Last => direction,
+                            };
+                            let position = start.position + direction * moved;
+                            (id, vec![("Position", to_value(position))])
+                        })
+                        .collect(),
+                )
             }
-            Handle::Scale(axis, _) => {
-                let (origin, direction) = handle_line(self.handle, start);
+            Handle::Scale(axis, side) => {
+                let (origin, direction) = handle_line(self.handle, frame);
                 let pulled = snap.studs(along_line(origin, direction, ray)? - self.grabbed);
                 let i = axis.index();
-                let mut size = start.size;
-                size[i] = (start.size[i] + pulled).max(MIN_SIZE);
-                // The center moves half as far as the face, so the opposite
-                // face stays put.
-                let grown = size[i] - start.size[i];
-                let position = start.position + direction * grown / 2.0;
-                Some(vec![
-                    ("Size", to_value(size)),
-                    ("Position", to_value(position)),
-                ])
+                Some(
+                    self.parts
+                        .iter()
+                        .map(|&(id, start)| {
+                            let outward = start.rotation * axis.vector() * side.sign();
+                            let mut size = start.size;
+                            let position = match modes.directions {
+                                ResizeDirections::Normal => {
+                                    size[i] = (start.size[i] + pulled).max(MIN_SIZE);
+                                    // The center moves half as far as the
+                                    // face, so the opposite face stays put.
+                                    start.position + outward * (size[i] - start.size[i]) / 2.0
+                                }
+                                ResizeDirections::Both => {
+                                    size[i] = (start.size[i] + pulled * 2.0).max(MIN_SIZE);
+                                    start.position
+                                }
+                            };
+                            let values =
+                                vec![("Size", to_value(size)), ("Position", to_value(position))];
+                            (id, values)
+                        })
+                        .collect(),
+                )
             }
             Handle::Rotate(axis) => {
-                let angle = ring_angle(start.position, axis, ray)?;
+                let angle = ring_angle(frame, axis, ray)?;
                 self.turned += shortest_turn(angle - self.last_angle);
                 self.last_angle = angle;
-                let degrees = snap.degrees(self.turned.to_degrees());
-                let turn = Quat::from_axis_angle(axis.vector(), degrees.to_radians());
-                // `turn * start.rotation` turns the already-turned part
-                // further around the world axis.
-                let orientation = orientation_from_rotation(turn * start.rotation);
-                Some(vec![("Orientation", Value::Vector3(orientation))])
+                let radians = snap.degrees(self.turned.to_degrees()).to_radians();
+                let world_axis = frame.rotation * axis.vector();
+                Some(
+                    self.parts
+                        .iter()
+                        .map(|&(id, start)| {
+                            let (turn, pivot) = match modes.pivot {
+                                RotatePivot::Local => (
+                                    Quat::from_axis_angle(start.rotation * axis.vector(), radians),
+                                    start.position,
+                                ),
+                                RotatePivot::Center | RotatePivot::Last => {
+                                    (Quat::from_axis_angle(world_axis, radians), frame.position)
+                                }
+                            };
+                            // `turn * start.rotation` turns the already-turned
+                            // part further around the axis.
+                            let orientation = orientation_from_rotation(turn * start.rotation);
+                            let position = pivot + turn * (start.position - pivot);
+                            let mut values = vec![("Orientation", Value::Vector3(orientation))];
+                            if !position.abs_diff_eq(start.position, 1e-5) {
+                                values.push(("Position", to_value(position)));
+                            }
+                            (id, values)
+                        })
+                        .collect(),
+                )
             }
         }
     }
@@ -474,7 +691,7 @@ impl Drag {
 /// pointing the way the handle points (one stud long).
 fn handle_line(handle: Handle, pose: Pose) -> (Vec3, Vec3) {
     let direction = match handle {
-        Handle::Move(axis) | Handle::Rotate(axis) => axis.vector(),
+        Handle::Move(axis) | Handle::Rotate(axis) => pose.rotation * axis.vector(),
         // Scale handles use the part's own (turned) axes, like `Size` does.
         Handle::Scale(axis, side) => pose.rotation * axis.vector() * side.sign(),
     };
@@ -500,8 +717,9 @@ fn along_line(origin: Vec3, direction: Vec3, ray: Ray) -> Option<f32> {
 /// The angle (in radians) around the ring for `axis` through `center` where
 /// `ray` meets the ring's flat side. `None` if it doesn't meet it in front
 /// of the camera.
-fn ring_angle(center: Vec3, axis: Axis, ray: Ray) -> Option<f32> {
-    let normal = axis.vector();
+fn ring_angle(frame: Pose, axis: Axis, ray: Ray) -> Option<f32> {
+    let center = frame.position;
+    let normal = frame.rotation * axis.vector();
     let facing = ray.direction.dot(normal);
     if facing.abs() < PARALLEL {
         return None;
@@ -512,6 +730,7 @@ fn ring_angle(center: Vec3, axis: Axis, ray: Ray) -> Option<f32> {
     }
     let offset = ray.at(distance) - center;
     let (across, up) = axis.ring_directions();
+    let (across, up) = (frame.rotation * across, frame.rotation * up);
     Some(offset.dot(up).atan2(offset.dot(across)))
 }
 
@@ -825,5 +1044,164 @@ mod tests {
         assert_eq!(pose.size, Vec3::new(4.0, 1.0, 2.0));
         assert_near(pose.rotation * Vec3::X, Vec3::NEG_Z);
         assert!(Pose::of(world.get(world.workspace()).unwrap()).is_none());
+    }
+
+    fn two_parts() -> Vec<(InstanceId, Pose)> {
+        let mut world = World::new();
+        let a = world.create(ClassName::Part).unwrap();
+        let b = world.create(ClassName::Part).unwrap();
+        vec![
+            (a, pose(Vec3::new(-2.0, 0.0, 0.0), Vec3::ONE)),
+            (b, pose(Vec3::new(2.0, 0.0, 0.0), Vec3::ONE)),
+        ]
+    }
+
+    fn value_of(values: &PartValues, id: InstanceId, name: &str) -> Vec3 {
+        let (_, values) = values.iter().find(|(part, _)| *part == id).unwrap();
+        vector(values, name)
+    }
+
+    #[test]
+    fn global_move_handles_sit_in_the_middle_and_move_every_part() {
+        let parts = two_parts();
+        let poses: Vec<Pose> = parts.iter().map(|(_, pose)| *pose).collect();
+        let frame = handle_frame(Tool::Move, Modes::default(), &poses).unwrap();
+        assert_near(frame.position, Vec3::ZERO);
+        let mut drag = Drag::start_many(
+            Handle::Move(Axis::Y),
+            frame,
+            parts.clone(),
+            Modes::default(),
+            ray_through(0.5, 0.0),
+        )
+        .unwrap();
+        let values = drag.update_all(ray_through(0.5, 3.0), &NO_SNAP).unwrap();
+        assert_near(
+            value_of(&values, parts[0].0, "Position"),
+            Vec3::new(-2.0, 3.0, 0.0),
+        );
+        assert_near(
+            value_of(&values, parts[1].0, "Position"),
+            Vec3::new(2.0, 3.0, 0.0),
+        );
+    }
+
+    #[test]
+    fn local_axes_move_each_part_along_its_own_axis() {
+        let mut parts = two_parts();
+        // The second part is turned 90° around Z: its X runs up the world's Y.
+        parts[1].1.rotation = Quat::from_rotation_z(90f32.to_radians());
+        let modes = Modes {
+            axes: MoveAxes::Local,
+            ..Modes::default()
+        };
+        let poses: Vec<Pose> = parts.iter().map(|(_, pose)| *pose).collect();
+        let frame = handle_frame(Tool::Move, modes, &poses).unwrap();
+        // The handles are the last part's: its X arrow points up.
+        let mut drag = Drag::start_many(
+            Handle::Move(Axis::X),
+            frame,
+            parts.clone(),
+            modes,
+            ray_through(2.0, 0.5),
+        )
+        .unwrap();
+        let values = drag.update_all(ray_through(2.0, 2.5), &NO_SNAP).unwrap();
+        assert_near(
+            value_of(&values, parts[0].0, "Position"),
+            Vec3::new(0.0, 0.0, 0.0),
+        );
+        assert_near(
+            value_of(&values, parts[1].0, "Position"),
+            Vec3::new(2.0, 2.0, 0.0),
+        );
+
+        // With Last, both go the last part's way.
+        let modes = Modes {
+            axes: MoveAxes::Last,
+            ..Modes::default()
+        };
+        let mut drag = Drag::start_many(
+            Handle::Move(Axis::X),
+            frame,
+            parts.clone(),
+            modes,
+            ray_through(2.0, 0.5),
+        )
+        .unwrap();
+        let values = drag.update_all(ray_through(2.0, 2.5), &NO_SNAP).unwrap();
+        assert_near(
+            value_of(&values, parts[0].0, "Position"),
+            Vec3::new(-2.0, 2.0, 0.0),
+        );
+    }
+
+    #[test]
+    fn resizing_both_directions_keeps_the_center() {
+        let parts = two_parts();
+        let modes = Modes {
+            directions: ResizeDirections::Both,
+            ..Modes::default()
+        };
+        let frame = parts[1].1;
+        let mut drag = Drag::start_many(
+            Handle::Scale(Axis::Y, Side::Plus),
+            frame,
+            parts.clone(),
+            modes,
+            ray_through(2.0, 1.0),
+        )
+        .unwrap();
+        let values = drag.update_all(ray_through(2.0, 2.0), &NO_SNAP).unwrap();
+        for (id, start) in &parts {
+            assert_near(value_of(&values, *id, "Size"), Vec3::new(1.0, 3.0, 1.0));
+            assert_near(value_of(&values, *id, "Position"), start.position);
+        }
+    }
+
+    #[test]
+    fn center_pivot_turns_the_selection_around_its_middle_and_local_turns_each_in_place() {
+        let parts = two_parts();
+        let poses: Vec<Pose> = parts.iter().map(|(_, pose)| *pose).collect();
+        let frame = handle_frame(Tool::Rotate, Modes::default(), &poses).unwrap();
+        let turn = |modes: Modes, frame: Pose| {
+            let mut drag = Drag::start_many(
+                Handle::Rotate(Axis::Z),
+                frame,
+                parts.clone(),
+                modes,
+                ray_through(frame.position.x + 3.0, 0.0),
+            )
+            .unwrap();
+            drag.update_all(ray_through(frame.position.x, 3.0), &NO_SNAP)
+                .unwrap()
+        };
+        // A quarter turn around the middle: the parts swing round to ±Y.
+        let values = turn(Modes::default(), frame);
+        assert_near(
+            value_of(&values, parts[0].0, "Position"),
+            Vec3::new(0.0, -2.0, 0.0),
+        );
+        assert_near(
+            value_of(&values, parts[1].0, "Position"),
+            Vec3::new(0.0, 2.0, 0.0),
+        );
+        assert_near(
+            value_of(&values, parts[0].0, "Orientation"),
+            Vec3::new(0.0, 0.0, 90.0),
+        );
+
+        // Local: each turns where it is.
+        let local = Modes {
+            pivot: RotatePivot::Local,
+            ..Modes::default()
+        };
+        let values = turn(local, parts[1].1);
+        let (_, first) = values.iter().find(|(id, _)| *id == parts[0].0).unwrap();
+        assert!(first.iter().all(|(name, _)| *name != "Position"));
+        assert_near(
+            value_of(&values, parts[0].0, "Orientation"),
+            Vec3::new(0.0, 0.0, 90.0),
+        );
     }
 }

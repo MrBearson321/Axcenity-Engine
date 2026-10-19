@@ -265,6 +265,10 @@ function DataModelClass:GetService(className) end
 ---@field Metalness number From 0 (not metal) to 1 (metal).
 ---@field Roughness number From 0 (mirror-smooth) to 1 (matte).
 ---@field CastShadow boolean If false, the part casts no sun shadow. It's still shaded by other parts' shadows.
+---@field Transparency number From 0 (as solid as its material) to 1 (invisible).
+---@field CanCollide boolean If false, other parts pass through it. It still fires Touched. An unanchored part that can't collide falls through the floor.
+---@field EmissiveColor Color3 The color the part glows in when Emission is above 0.
+---@field Emission number How brightly the part glows in EmissiveColor: 0 is no glow, 1 as bright as a white surface in full light, higher values bloom.
 ---@field Touched Signal Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.
 
 ---A solid 3D model imported from a glTF or FBX file, drawn with the file's own materials (or its SurfaceAppearances'). It collides as the model's convex hull.
@@ -275,6 +279,8 @@ function DataModelClass:GetService(className) end
 ---@field Orientation Vector3 Rotation in degrees around X, Y and Z, applied Z first, then X, then Y.
 ---@field Size Vector3 The size of the model's box in studs along X, Y and Z. The model stretches to fill it.
 ---@field CastShadow boolean If false, the part casts no sun shadow. It's still shaded by other parts' shadows.
+---@field Transparency number From 0 (as solid as its model) to 1 (invisible).
+---@field CanCollide boolean If false, other parts pass through it. It still fires Touched.
 ---@field Touched Signal Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.
 
 ---Lua code that runs on the server, from a `.server.lua` file.

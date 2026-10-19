@@ -433,3 +433,34 @@ fn a_mesh_part_without_a_model_collides_as_its_box() {
     let resting = position(&world, model);
     assert!((resting.y - 1.5).abs() < 0.05, "{resting:?}");
 }
+
+#[test]
+fn a_part_that_cannot_collide_is_passed_through_but_still_touched() {
+    let (mut world, _) = world_with_floor();
+    // A ghostly anchored slab in the way, and a block dropped through it.
+    let ghost = part(&mut world, Vector3::new(0.0, 4.0, 0.0), true);
+    set(&mut world, ghost, "Size", vector(10.0, 1.0, 10.0));
+    set(&mut world, ghost, "CanCollide", Value::Bool(false));
+    let block = part(&mut world, Vector3::new(0.0, 10.0, 0.0), false);
+    let mut physics = Physics::new();
+    let mut touches = Vec::new();
+    for _ in 0..240 {
+        physics.step(&mut world, 1.0 / 60.0);
+        touches.extend(physics.take_touches());
+    }
+    // It fell through the slab onto the floor...
+    assert!((position(&world, block).y - 0.5).abs() < 0.05);
+    // ...and touched the slab on the way.
+    let pair = if ghost < block {
+        (ghost, block)
+    } else {
+        (block, ghost)
+    };
+    assert!(touches.contains(&pair), "{touches:?}");
+
+    // Turned back on, it holds a dropped part up.
+    set(&mut world, ghost, "CanCollide", Value::Bool(true));
+    let second = part(&mut world, Vector3::new(3.0, 10.0, 0.0), false);
+    run(&mut physics, &mut world, 3.0, 60.0);
+    assert!((position(&world, second).y - 5.0).abs() < 0.05);
+}

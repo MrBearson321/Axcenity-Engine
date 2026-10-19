@@ -324,9 +324,9 @@ pub fn attach_ui_textures(items: &mut [axcenity_render::UiDrawItem], assets: &As
         if image.texture.is_some() || image.path.is_empty() {
             continue;
         }
-        image.texture = assets.texture(&image.path).map(|image| {
-            Arc::new(ImageTexture(image)) as Arc<dyn axcenity_render::TextureSource>
-        });
+        image.texture = assets
+            .texture(&image.path)
+            .map(|image| Arc::new(ImageTexture(image)) as Arc<dyn axcenity_render::TextureSource>);
     }
 }
 
@@ -373,6 +373,25 @@ fn part_draw_item(instance: &Instance, glow: f32) -> Option<DrawItem> {
         .preset();
 
     let color = [color.r, color.g, color.b];
+    let opacity = preset.opacity * visibility(instance);
+    if opacity <= 0.0 {
+        return None;
+    }
+    let mut emissive = if preset.glows {
+        color.map(|channel| channel * glow)
+    } else {
+        [0.0; 3]
+    };
+    let emission = number("Emission").unwrap_or(0.0).max(0.0) as f32;
+    if emission > 0.0
+        && let Some(tint) = instance
+            .property("EmissiveColor")
+            .and_then(Value::as_color3)
+    {
+        for (channel, added) in emissive.iter_mut().zip([tint.r, tint.g, tint.b]) {
+            *channel += added * emission;
+        }
+    }
     Some(DrawItem {
         shape: match shape {
             PartType::Block => Shape::Block,
@@ -385,14 +404,10 @@ fn part_draw_item(instance: &Instance, glow: f32) -> Option<DrawItem> {
             // A glowing part shows its color as light, the same on every side,
             // instead of being shaded by the sun.
             base_color: if preset.glows { [0.0; 3] } else { color },
-            emissive: if preset.glows {
-                color.map(|channel| channel * glow)
-            } else {
-                [0.0; 3]
-            },
+            emissive,
             metalness: number("Metalness")? as f32,
             roughness: number("Roughness")? as f32,
-            opacity: preset.opacity,
+            opacity,
             ..Material::default()
         },
         casts_shadow: casts_shadow(instance),
@@ -413,6 +428,11 @@ fn mesh_part_draw_items(
     let Some((_, transform)) = part_placement(instance) else {
         return;
     };
+    let visible = visibility(instance);
+    if visible <= 0.0 {
+        return;
+    }
+    let first = items.len();
     let mesh_id = instance
         .property("MeshId")
         .and_then(Value::as_str)
@@ -451,6 +471,18 @@ fn mesh_part_draw_items(
             casts_shadow: casts_shadow(instance),
         });
     }
+    for item in &mut items[first..] {
+        item.material.opacity *= visible;
+    }
+}
+
+/// How much of a part shows: 1 minus its `Transparency`, from 0 to 1.
+fn visibility(instance: &Instance) -> f32 {
+    let transparency = instance
+        .property("Transparency")
+        .and_then(Value::as_number)
+        .unwrap_or(0.0) as f32;
+    (1.0 - transparency).clamp(0.0, 1.0)
 }
 
 /// A model's material with a SurfaceAppearance's maps in place of its own.

@@ -11,6 +11,7 @@ mod app;
 mod asset_browser;
 mod autocomplete;
 mod block_editor;
+mod build_tools;
 mod css_syntax;
 mod dialog;
 mod explorer;

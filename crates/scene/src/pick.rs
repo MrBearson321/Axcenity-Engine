@@ -134,9 +134,15 @@ pub struct Hit {
 /// surface faces. `skip` is left out, so a part being dragged can look for
 /// what's behind it.
 pub fn pick_hit(world: &World, ray: Ray, skip: Option<InstanceId>) -> Option<Hit> {
+    pick_hit_skipping(world, ray, skip.as_slice())
+}
+
+/// Like [`pick_hit`], leaving out every part in `skip` (such as all the
+/// parts being dragged together).
+pub fn pick_hit_skipping(world: &World, ray: Ray, skip: &[InstanceId]) -> Option<Hit> {
     let mut nearest: Option<Hit> = None;
     for id in world.descendants(world.workspace()) {
-        if Some(id) == skip {
+        if skip.contains(&id) {
             continue;
         }
         let Some((shape, transform)) = world.get(id).and_then(part_placement) else {

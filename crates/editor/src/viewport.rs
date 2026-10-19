@@ -35,7 +35,7 @@ use axcenity_ui::{Stylesheet, UiLayout, UiRect};
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 
-use crate::gizmo::{self, Drag, Handle, Pose, Snap, Tool};
+use crate::gizmo::{self, Drag, Handle, Modes, PartValues, Pose, Snap, Tool};
 use crate::placing::PlaceDrag;
 use crate::screen::Screen;
 use crate::theme::{self, icons};
@@ -70,6 +70,9 @@ pub struct Clicked {
     pub part: Option<InstanceId>,
     /// Ctrl, Shift and the other modifier keys held for this click.
     pub modifiers: egui::Modifiers,
+    /// True when a selected part was grabbed to drag the whole selection,
+    /// which keeps the rest of the selection.
+    pub keep_group: bool,
 }
 
 /// What a drag in the viewport does to a part, which names its undo step.
@@ -90,12 +93,12 @@ impl DragKind {
     }
 }
 
-/// New property values for a part from dragging it or one of its handles.
+/// New property values for the parts being dragged (by a body or a handle).
 #[derive(Clone, Debug, PartialEq)]
 pub struct DragEdit {
-    pub part: InstanceId,
     pub kind: DragKind,
-    pub values: Vec<(&'static str, Value)>,
+    /// Each part changed, with its new values. The last selected part is last.
+    pub parts: PartValues,
 }
 
 /// What happened in the viewport this frame.
@@ -145,6 +148,8 @@ pub struct ViewportScene<'a> {
     pub selection: &'a [InstanceId],
     pub tool: Option<Tool>,
     pub snap: Snap,
+    /// The Move, Resize and Rotate tools' options.
+    pub modes: Modes,
     pub stylesheets: &'a [Stylesheet],
     /// The TextBox being typed in during Play, so it gets a focus ring.
     pub focused_text: Option<InstanceId>,
@@ -155,10 +160,47 @@ pub struct ViewportScene<'a> {
 enum Dragging {
     /// A handle of the selected part.
     Handle(Drag),
-    /// A part, by its body.
-    Body(PlaceDrag),
+    /// A part, by its body, and the other selected parts that move with
+    /// it, each with where it was at the start.
+    Body(PlaceDrag, Vec<(InstanceId, Vec3)>),
     /// A UI element, by its body or a handle.
     Ui(Box<UiDrag>),
+}
+
+/// What's selected, for dragging.
+#[derive(Clone, Copy)]
+struct DragSelection<'a> {
+    selected: Option<InstanceId>,
+    selection: &'a [InstanceId],
+    modes: Modes,
+}
+
+/// The parts the transform tools act on: each selected part, and the parts
+/// inside each selected Model or Folder, once each, with the last selected
+/// one (or the last part inside it) last.
+pub fn selected_parts(
+    world: &World,
+    selection: &[InstanceId],
+    selected: Option<InstanceId>,
+) -> Vec<(InstanceId, Pose)> {
+    let mut ids: Vec<InstanceId> = selection.to_vec();
+    if let Some(selected) = selected {
+        ids.retain(|id| *id != selected);
+        ids.push(selected);
+    }
+    let mut parts: Vec<(InstanceId, Pose)> = Vec::new();
+    for id in ids {
+        let inside = std::iter::once(id).chain(world.descendants(id));
+        for part in inside {
+            let Some(pose) = world.get(part).and_then(Pose::of) else {
+                continue;
+            };
+            // Seen again: it goes to the end, so the last selected stays last.
+            parts.retain(|(seen, _)| *seen != part);
+            parts.push((part, pose));
+        }
+    }
+    parts
 }
 
 /// The UI as laid out this frame, and the selected element's handles.
@@ -290,6 +332,7 @@ impl Viewport {
             selection,
             tool,
             snap,
+            modes,
             stylesheets,
             focused_text,
         } = scene;
@@ -365,7 +408,11 @@ impl Viewport {
             &response,
             &screen,
             world,
-            selected,
+            DragSelection {
+                selected,
+                selection,
+                modes,
+            },
             tool,
             snap,
             &ui_scene,
@@ -376,6 +423,7 @@ impl Viewport {
             Some(part) => Some(Clicked {
                 part: Some(part),
                 modifiers,
+                keep_group: selection.contains(&part),
             }),
             None if drag.in_use => None,
             None => self.clicked_part(ui, &response, &screen, world, &ui_scene, &lights),
@@ -562,7 +610,7 @@ impl Viewport {
         response: &egui::Response,
         screen: &Screen,
         world: &World,
-        selected: Option<InstanceId>,
+        chosen: DragSelection,
         tool: Option<Tool>,
         snap: Snap,
         ui_scene: &UiScene,
@@ -574,9 +622,22 @@ impl Viewport {
             self.drag = None;
             return DragInput::default();
         };
-        let selected = selected.and_then(|id| Some((id, Pose::of(world.get(id)?)?)));
-        let shapes = match selected {
-            Some((_, pose)) => gizmo::shapes(tool, pose, screen),
+        let DragSelection {
+            selected,
+            selection,
+            modes,
+        } = chosen;
+        // The handles act on every selected part (and the parts inside
+        // selected Models), with the last selected one last.
+        let parts = selected_parts(world, selection, selected);
+        let poses: Vec<Pose> = parts.iter().map(|(_, pose)| *pose).collect();
+        let frame = if tool.has_handles() {
+            gizmo::handle_frame(tool, modes, &poses)
+        } else {
+            None
+        };
+        let shapes = match frame {
+            Some(frame) => gizmo::shapes(tool, frame, screen),
             None => Vec::new(),
         };
         let (pressed, down, pointer, press_origin, alt) = ui.input(|input| {
@@ -613,9 +674,10 @@ impl Viewport {
                 .map(|drag| Dragging::Ui(Box::new(drag)));
         } else if pressed
             && !alt
-            && let (Some(handle), Some(pointer), Some((part, pose))) = (hovered, pointer, selected)
+            && let (Some(handle), Some(pointer), Some(frame)) = (hovered, pointer, frame)
         {
-            self.drag = Drag::start(handle, part, pose, screen.ray(pointer)).map(Dragging::Handle);
+            self.drag = Drag::start_many(handle, frame, parts.clone(), modes, screen.ray(pointer))
+                .map(Dragging::Handle);
         }
         // A UI element or part's body only once the mouse has moved far
         // enough to be a drag, so a plain click still just selects. It's
@@ -642,10 +704,21 @@ impl Viewport {
         } else if body_drag
             && let Some(origin) = press_origin
             && let Some(hit) = axcenity_scene::pick_hit(world, screen.ray(origin), None)
-            && let Some(place) =
+            && let Some(mut place) =
                 PlaceDrag::start(world, hit.part, screen.ray(origin).at(hit.distance))
         {
-            self.drag = Some(Dragging::Body(place));
+            // Grabbing a selected part drags the whole selection with it.
+            let others: Vec<(InstanceId, Vec3)> = if selection.contains(&hit.part) {
+                parts
+                    .iter()
+                    .filter(|(id, _)| *id != hit.part)
+                    .map(|(id, pose)| (*id, pose.position))
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            place.skip = others.iter().map(|(id, _)| *id).collect();
+            self.drag = Some(Dragging::Body(place, others));
             input.grabbed = Some(hit.part);
         }
 
@@ -677,16 +750,29 @@ impl Viewport {
             } else if let Some(pointer) = pointer {
                 let ray = screen.ray(pointer);
                 input.edit = match dragging {
-                    Dragging::Handle(drag) => drag.update(ray, &snap).map(|values| DragEdit {
-                        part: drag.part,
+                    Dragging::Handle(drag) => drag.update_all(ray, &snap).map(|parts| DragEdit {
                         kind: DragKind::of(drag.handle),
-                        values,
+                        parts,
                     }),
-                    Dragging::Body(place) => {
-                        place.update(world, ray, &snap).map(|position| DragEdit {
-                            part: place.part,
-                            kind: DragKind::Move,
-                            values: vec![("Position", position)],
+                    Dragging::Body(place, others) => {
+                        place.update(world, ray, &snap).map(|position| {
+                            let start = place.start;
+                            let moved = position
+                                .as_vector3()
+                                .map_or(Vec3::ZERO, |p| Vec3::new(p.x, p.y, p.z) - start);
+                            let mut parts: PartValues = others
+                                .iter()
+                                .map(|&(id, at)| {
+                                    let at = at + moved;
+                                    let value = axcenity_core::Vector3::new(at.x, at.y, at.z);
+                                    (id, vec![("Position", Value::Vector3(value))])
+                                })
+                                .collect();
+                            parts.push((place.part, vec![("Position", position)]));
+                            DragEdit {
+                                kind: DragKind::Move,
+                                parts,
+                            }
                         })
                     }
                     Dragging::Ui(drag) => {
@@ -727,6 +813,7 @@ impl Viewport {
                 .or_else(|| light_at(lights, pointer))
                 .or_else(|| axcenity_scene::pick(world, screen.ray(pointer))),
             modifiers: ui.input(|input| input.modifiers),
+            keep_group: false,
         })
     }
 

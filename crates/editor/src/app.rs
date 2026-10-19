@@ -28,9 +28,10 @@ use eframe::egui;
 use crate::asset_browser::{AssetBrowser, AssetPayload, BrowserAction};
 use crate::autocomplete;
 use crate::block_editor;
+use crate::build_tools::{self, BuildSettings, PanelScene, ToolAction};
 use crate::dialog;
 use crate::explorer::{self, Action, Explorer, ExplorerOutput};
-use crate::gizmo::{Snap, Tool};
+use crate::gizmo::{Modes, Snap, Tool};
 use crate::history::{self, Field, History, Move, Place};
 use crate::import_dialog::ImportDialog;
 use crate::output::{Output, OutputKind};
@@ -45,7 +46,7 @@ use crate::theme::{self, filled_icons, icons};
 use crate::thumbnail;
 use crate::tree::{self, Insertable};
 use crate::ui_handles::{CssEdit, UiDragEdit, apply_css_edits};
-use crate::viewport::{DragEdit, DragKind, Viewport, ViewportScene};
+use crate::viewport::{self, DragEdit, DragKind, Viewport, ViewportScene};
 use crate::watcher::Watcher;
 
 /// The hover text of Import Model, in the File menu and the toolbar.
@@ -108,6 +109,10 @@ pub struct EditorApp {
     /// preferences, so they stay when another project is opened.
     tool: Tool,
     snap: Snap,
+    /// The Move, Resize and Rotate tools' axes, directions and pivot, and
+    /// the other building tools' settings. Preferences, like `snap`.
+    modes: Modes,
+    build: BuildSettings,
     /// Something waiting for an answer to "Save changes?".
     asking: Option<Discard>,
     /// Set once closing has been allowed, so the window's close request
@@ -222,6 +227,8 @@ struct Keys {
     undo: bool,
     redo: bool,
     tool: Option<Tool>,
+    /// Enter, which switches Anchored or CanCollide with those tools.
+    toggle: bool,
     rename: bool,
     duplicate: bool,
     delete: bool,
@@ -270,6 +277,8 @@ impl EditorApp {
             history: History::new(),
             tool: Tool::default(),
             snap: Snap::default(),
+            modes: Modes::default(),
+            build: BuildSettings::default(),
             asking: None,
             closing: false,
             output: Output::default(),
@@ -592,7 +601,7 @@ impl EditorApp {
     /// Applies a drag from the viewport (a part or one of its handles), as
     /// an undo step such as "Move Pad".
     fn apply_drag(&mut self, edit: DragEdit) {
-        let Some(instance) = self.world.get(edit.part) else {
+        let Some(instance) = edit.parts.last().and_then(|(id, _)| self.world.get(*id)) else {
             return;
         };
         let (property, verb) = match edit.kind {
@@ -600,13 +609,181 @@ impl EditorApp {
             DragKind::Resize => ("Size", "Resize"),
             DragKind::Rotate => ("Orientation", "Rotate"),
         };
-        let label = format!("{verb} {}", instance.name());
+        let label = match edit.parts.len() {
+            1 => format!("{verb} {}", instance.name()),
+            n => format!("{verb} {n} parts"),
+        };
         let edits = edit
-            .values
+            .parts
             .into_iter()
-            .map(|(name, value)| Edit::Property(name, value))
+            .map(|(id, values)| {
+                let edits = values
+                    .into_iter()
+                    .map(|(name, value)| Edit::Property(name, value))
+                    .collect();
+                (id, edits)
+            })
             .collect();
-        self.change(edit.part, Field::Property(property), label, edits);
+        self.change_many(Field::Property(property), label, edits);
+    }
+
+    /// The parts the building tools act on: the selected parts and those
+    /// inside selected Models, the last selected last.
+    fn tool_parts(&self) -> Vec<InstanceId> {
+        let world = shown(&self.world, &self.play);
+        viewport::selected_parts(world, &self.selection, self.selected)
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect()
+    }
+
+    /// Does what a building tool's panel asked, to the parts it acts on,
+    /// as one undo step.
+    fn apply_tool_action(&mut self, action: ToolAction) {
+        if self.playing() || self.viewport.is_dragging() {
+            return;
+        }
+        let parts = self.tool_parts();
+        match action {
+            ToolAction::Set { property, value } => self.set_on_parts(&parts, property, value),
+            ToolAction::AddLight(class) => self.add_lights(&parts, class),
+            ToolAction::RemoveLights(class) => {
+                let lights = build_tools::lights_in(&self.world, &parts, class);
+                let moves: Vec<Move> = lights
+                    .iter()
+                    .filter_map(|&id| {
+                        let before = history::place_of(&self.world, id)?;
+                        history::put(&mut self.world, id, None).ok()?;
+                        Some(Move {
+                            id,
+                            before: Some(before),
+                            after: None,
+                        })
+                    })
+                    .collect();
+                let label = format!("Remove {} {class}s", moves.len());
+                self.history.record_tree(&mut self.world, label, moves);
+                self.forget_selection_outside_tree();
+            }
+            ToolAction::SetLight {
+                class,
+                property,
+                value,
+            } => {
+                let lights = build_tools::lights_in(&self.world, &parts, class);
+                let edits = lights
+                    .into_iter()
+                    .map(|id| (id, vec![Edit::Property(property, value.clone())]))
+                    .collect();
+                self.change_many(
+                    Field::Property(property),
+                    format!("Change {property} of {class}s"),
+                    edits,
+                );
+            }
+        }
+    }
+
+    /// Sets `property` to `value` on each of `parts` that has it, as one step.
+    fn set_on_parts(&mut self, parts: &[InstanceId], property: &'static str, value: Value) {
+        let world = shown(&self.world, &self.play);
+        let targets: Vec<InstanceId> = parts
+            .iter()
+            .copied()
+            .filter(|&id| {
+                world
+                    .get(id)
+                    .is_some_and(|i| i.property(property).is_some())
+            })
+            .collect();
+        let Some(name) = targets
+            .last()
+            .and_then(|&id| world.get(id))
+            .map(|i| i.name().to_owned())
+        else {
+            return;
+        };
+        let label = build_tools::step_label(property, &value, targets.len(), &name);
+        let edits = targets
+            .into_iter()
+            .map(|id| (id, vec![Edit::Property(property, value.clone())]))
+            .collect();
+        self.change_many(Field::Property(property), label, edits);
+    }
+
+    /// Puts a new `class` light in each of `parts` that hasn't one, as one step.
+    fn add_lights(&mut self, parts: &[InstanceId], class: ClassName) {
+        let mut moves = Vec::new();
+        for &part in parts {
+            if !build_tools::lights_in(&self.world, &[part], class).is_empty() {
+                continue;
+            }
+            let Ok(id) = self.world.create(class) else {
+                continue;
+            };
+            let name = tree::unique_name(&self.world, part, class.as_str());
+            let _ = self.world.set_name(id, name);
+            let index = self.world.get(part).map_or(0, |p| p.children().len());
+            let place = Place {
+                parent: part,
+                index,
+            };
+            if history::put(&mut self.world, id, Some(place)).is_ok() {
+                moves.push(Move {
+                    id,
+                    before: None,
+                    after: Some(place),
+                });
+            }
+        }
+        let label = match moves.len() {
+            1 => format!("Add {class}"),
+            n => format!("Add {n} {class}s"),
+        };
+        self.history.record_tree(&mut self.world, label, moves);
+    }
+
+    /// The Paint tool: a click on a part paints it, and the rest of the
+    /// selection too if it's selected.
+    fn paint_clicked(&mut self, part: InstanceId) {
+        let parts = if self.selection.contains(&part) {
+            self.tool_parts()
+        } else {
+            vec![part]
+        };
+        let color = Value::Color3(self.build.paint_color);
+        self.set_on_parts(&parts, "Color", color);
+        self.history.seal();
+    }
+
+    /// The selected building tool's options panel, at the top left of the viewport.
+    fn tool_panel(&mut self, ctx: &egui::Context, viewport: egui::Rect) {
+        if self.tool == Tool::Select || self.playing() {
+            return;
+        }
+        let parts = self.tool_parts();
+        let scene = PanelScene {
+            world: &self.world,
+            parts: &parts,
+        };
+        let (tool, settings, modes, snap) =
+            (self.tool, &mut self.build, &mut self.modes, &mut self.snap);
+        let actions = egui::Area::new(egui::Id::new("building tool panel"))
+            .fixed_pos(viewport.min + egui::vec2(10.0, 10.0))
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                egui::Frame::popup(ui.style())
+                    .show(ui, |ui| {
+                        ui.set_max_width(260.0);
+                        build_tools::panel(ui, tool, &scene, settings, modes, snap)
+                    })
+                    .inner
+            })
+            .inner;
+        for action in actions {
+            self.apply_tool_action(action);
+            ctx.request_repaint();
+        }
     }
 
     fn apply_ui_drag(&mut self, edit: UiDragEdit) {
@@ -1885,12 +2062,21 @@ impl EditorApp {
 
                 ribbon::group(ui, "Tools", |ui| {
                     for tool in Tool::ALL {
-                        let shortcut = ui.ctx().format_shortcut(&tool.shortcut());
+                        let keys: Vec<String> = tool
+                            .shortcut()
+                            .map(|shortcut| ui.ctx().format_shortcut(&shortcut))
+                            .into_iter()
+                            .chain(tool.key().map(|key| key.name().to_owned()))
+                            .collect();
+                        let hover = match keys.as_slice() {
+                            [] => format!("{} tool", tool.label()),
+                            keys => format!("{} tool ({})", tool.label(), keys.join(" or ")),
+                        };
                         let button = RibbonButton::new(theme::tool_icon(tool), tool.label())
                             .selected(self.tool == tool);
                         if ui
                             .add(button)
-                            .on_hover_text(format!("{} tool ({shortcut})", tool.label()))
+                            .on_hover_text(hover)
                             .clicked()
                         {
                             self.tool = tool;
@@ -2104,13 +2290,27 @@ impl EditorApp {
         // A text box being typed in has its own undo, and uses Delete and
         // Backspace itself, so leave those keys to it then.
         let typing = ctx.wants_keyboard_input();
+        let playing = self.playing();
+        let studio_tool = |input: &mut egui::InputState| {
+            Tool::ALL.into_iter().find(|tool| {
+                tool.shortcut()
+                    .is_some_and(|shortcut| input.consume_shortcut(&shortcut))
+            })
+        };
+        // F3X's single keys only while editing, so a game gets every key.
+        let f3x_tool = |input: &mut egui::InputState| {
+            if playing {
+                return None;
+            }
+            Tool::ALL.into_iter().find(|tool| {
+                tool.key()
+                    .is_some_and(|key| input.consume_key(egui::Modifiers::NONE, key))
+            })
+        };
         let keys = ctx.input_mut(|input| {
             if typing {
-                let tool = Tool::ALL
-                    .into_iter()
-                    .find(|tool| input.consume_shortcut(&tool.shortcut()));
                 return Keys {
-                    tool,
+                    tool: studio_tool(input),
                     ..Keys::default()
                 };
             }
@@ -2121,9 +2321,8 @@ impl EditorApp {
             Keys {
                 redo,
                 undo: input.consume_shortcut(&UNDO_SHORTCUT),
-                tool: Tool::ALL
-                    .into_iter()
-                    .find(|tool| input.consume_shortcut(&tool.shortcut())),
+                tool: studio_tool(input).or_else(|| f3x_tool(input)),
+                toggle: !playing && input.consume_key(none, egui::Key::Enter),
                 // Taken before the viewport sees them, so Ctrl+D doesn't
                 // also fly the camera right.
                 duplicate: input.consume_shortcut(&DUPLICATE_SHORTCUT),
@@ -2140,6 +2339,23 @@ impl EditorApp {
         }
         if let Some(tool) = keys.tool {
             self.tool = tool;
+        }
+        if keys.toggle && matches!(self.tool, Tool::Anchor | Tool::Collision) {
+            let property = if self.tool == Tool::Anchor {
+                "Anchored"
+            } else {
+                "CanCollide"
+            };
+            let parts = self.tool_parts();
+            let all_on = parts.iter().all(|&id| {
+                self.world
+                    .get(id)
+                    .and_then(|i| i.property(property))
+                    .and_then(Value::as_bool)
+                    != Some(false)
+            });
+            self.set_on_parts(&parts, property, Value::Bool(!all_on));
+            self.history.seal();
         }
         // Undo, duplicate and delete check for Play themselves; renaming
         // only opens a text box, so it's checked here.
@@ -2654,6 +2870,7 @@ impl eframe::App for EditorApp {
                                 selection: &self.selection,
                                 tool,
                                 snap: self.snap,
+                                modes: self.modes,
                                 stylesheets,
                                 focused_text: self.focused_text,
                             },
@@ -2723,7 +2940,16 @@ impl eframe::App for EditorApp {
             Default::default()
         };
         if let Some(clicked) = output.clicked {
-            self.select_clicked(clicked.part, clicked.modifiers, None, false);
+            if self.tool == Tool::Paint
+                && !self.playing()
+                && let Some(part) = clicked.part
+                && self.world.get(part).is_some_and(|i| {
+                    i.property("Color").is_some() && i.property("Position").is_some()
+                })
+            {
+                self.paint_clicked(part);
+            }
+            self.select_clicked(clicked.part, clicked.modifiers, None, clicked.keep_group);
             // The panels were already drawn this frame, so draw again to
             // show the new selection there.
             ctx.request_repaint();
@@ -2765,6 +2991,9 @@ impl eframe::App for EditorApp {
         if let Some(edit) = output.ui_drag {
             self.apply_ui_drag(edit);
             ctx.request_repaint();
+        }
+        if let Some(rect) = self.viewport_rect {
+            self.tool_panel(ctx, rect);
         }
 
         // A drag or a typed value is one undo step: it ends when the mouse
@@ -3370,9 +3599,8 @@ mod tests {
         for &ray in &rays[1..] {
             let values = drag.update(ray, &app.snap).unwrap();
             app.apply_drag(DragEdit {
-                part: id,
                 kind: DragKind::of(handle),
-                values,
+                parts: vec![(id, values)],
             });
         }
         app.history.seal();
@@ -3462,9 +3690,8 @@ mod tests {
         for (x, z) in [(12.0, 6.0), (8.0, 3.0), (2.0, 1.0)] {
             let position = place.update(&app.world, down(x, z), &app.snap).unwrap();
             app.apply_drag(DragEdit {
-                part: ball,
                 kind: DragKind::Move,
-                values: vec![("Position", position)],
+                parts: vec![(ball, vec![("Position", position)])],
             });
         }
         app.history.seal();
@@ -4275,5 +4502,64 @@ mod tests {
         app.play();
         app.open(&example("hello-part"));
         assert!(!app.playing());
+    }
+
+    #[test]
+    fn building_tools_change_the_whole_selection_in_one_undo_step() {
+        let mut app = EditorApp::new(Some(&example("hello-touched")));
+        let first = inserted(&mut app, Insertable::Part(PartType::Block), None);
+        let second = inserted(&mut app, Insertable::Part(PartType::Ball), None);
+        app.selection = vec![first, second];
+        app.selected = Some(second);
+
+        let red = Value::Color3(Color3::new(1.0, 0.0, 0.0));
+        app.apply_tool_action(ToolAction::Set {
+            property: "Color",
+            value: red.clone(),
+        });
+        app.history.seal();
+        assert_eq!(property(&app, first, "Color"), red);
+        assert_eq!(property(&app, second, "Color"), red);
+        assert_eq!(app.history.undo_label(), Some("Paint 2 parts"));
+
+        app.apply_tool_action(ToolAction::Set {
+            property: "CanCollide",
+            value: Value::Bool(false),
+        });
+        app.history.seal();
+        assert_eq!(property(&app, first, "CanCollide"), Value::Bool(false));
+
+        app.apply_tool_action(ToolAction::AddLight(ClassName::PointLight));
+        assert_eq!(children(&app, first).len(), 1);
+        assert_eq!(children(&app, second).len(), 1);
+        assert_eq!(app.history.undo_label(), Some("Add 2 PointLights"));
+        // Adding again leaves parts that already have one alone.
+        app.apply_tool_action(ToolAction::AddLight(ClassName::PointLight));
+        assert_eq!(children(&app, first).len(), 1);
+
+        app.undo();
+        assert!(children(&app, first).is_empty() && children(&app, second).is_empty());
+        app.undo();
+        assert_eq!(property(&app, first, "CanCollide"), Value::Bool(true));
+        app.undo();
+        assert_ne!(property(&app, first, "Color"), red);
+        assert_ne!(property(&app, second, "Color"), red);
+    }
+
+    #[test]
+    fn f3x_keys_pick_tools_while_editing() {
+        let mut app = EditorApp::new(Some(&example("hello-touched")));
+        for (key, tool) in [
+            (egui::Key::Z, Tool::Move),
+            (egui::Key::X, Tool::Scale),
+            (egui::Key::V, Tool::Paint),
+            (egui::Key::M, Tool::Anchor),
+            (egui::Key::K, Tool::Collision),
+            (egui::Key::U, Tool::Lighting),
+            (egui::Key::P, Tool::Emission),
+        ] {
+            press(&mut app, egui::Modifiers::NONE, key);
+            assert_eq!(app.tool, tool);
+        }
     }
 }
