@@ -3,7 +3,9 @@
 mod style;
 
 use axcenity_core::{ClassName, Color3, Instance, InstanceId, UDim2, Value, World};
-use axcenity_render::{UiDrawItem, UiRectangle, UiText};
+use axcenity_render::glam::camera::rh;
+use axcenity_render::glam::Vec3;
+use axcenity_render::{Camera, TextAlign, UiDrawItem, UiImage, UiRectangle, UiText};
 use taffy::prelude::*;
 
 pub use style::{
@@ -33,9 +35,15 @@ pub struct UiElement {
     pub id: InstanceId,
     pub rect: UiRect,
     pub button: bool,
+    /// True for a TextBox, which takes keyboard focus when clicked.
+    pub text_box: bool,
     /// True when its parent is a flex container: the flex layout places it,
     /// and its `Position` is ignored.
     pub in_flow: bool,
+    /// Screen pixels per authored pixel. `1` normally. A ScreenGui in Fit
+    /// mode lays out at its design size and scales the result, so a drag
+    /// divides screen pixels by this to get back to authored pixels.
+    pub pixels_per_unit: f32,
 }
 
 /// The UI's draw data, and each element drawn, in drawing order (so later
@@ -46,6 +54,10 @@ pub struct UiLayout {
     pub elements: Vec<UiElement>,
     pub hovered: Option<InstanceId>,
     pub active: Option<InstanceId>,
+    /// Problems found while laying out, such as a PageLayout page name that
+    /// matches no Frame. The same text can repeat every frame; callers
+    /// should show each distinct line once.
+    pub warnings: Vec<String>,
 }
 
 impl UiLayout {
@@ -70,6 +82,85 @@ impl UiLayout {
             .find(|element| element.rect.contains(x, y))
             .and_then(|element| element.button.then_some(element.id))
     }
+
+    /// The topmost visible text box at a point in physical pixels.
+    pub fn hit_text_box(&self, x: f32, y: f32) -> Option<InstanceId> {
+        self.elements
+            .iter()
+            .rev()
+            .find(|element| element.rect.contains(x, y))
+            .and_then(|element| element.text_box.then_some(element.id))
+    }
+}
+
+/// What a key did to a focused text box.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TextCommand {
+    /// Letters, digits and punctuation. Control characters are ignored.
+    Insert(String),
+    Backspace,
+    /// Enter. Finishes a one-line box, and starts a new line in a multi-line one.
+    Submit,
+}
+
+/// The result of [`edit_text_box`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextOutcome {
+    /// The text changed and the box is still focused.
+    Edited,
+    /// The player finished typing. The host should fire `FocusLost`.
+    Finished,
+    /// `id` is not a text box, or the command changed nothing.
+    Ignored,
+}
+
+/// Applies `command` to a TextBox's `Text`. A one-line box finishes on
+/// Enter. A multi-line box inserts a newline instead. Clicking away is the
+/// host's job: it drops focus and fires `FocusLost` itself.
+pub fn edit_text_box(world: &mut World, id: InstanceId, command: TextCommand) -> TextOutcome {
+    let Some(instance) = world.get(id) else {
+        return TextOutcome::Ignored;
+    };
+    if instance.class() != ClassName::TextBox {
+        return TextOutcome::Ignored;
+    }
+    let multiline = instance
+        .property("MultiLine")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let mut text = instance
+        .property("Text")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+    match command {
+        TextCommand::Submit if !multiline => return TextOutcome::Finished,
+        TextCommand::Submit => text.push('\n'),
+        TextCommand::Backspace => {
+            text.pop();
+        }
+        TextCommand::Insert(extra) => {
+            let extra: String = extra
+                .chars()
+                .filter(|c| *c == '\n' || !c.is_control())
+                .collect();
+            if extra.is_empty() {
+                return TextOutcome::Ignored;
+            }
+            if !multiline {
+                text.push_str(&extra.replace(['\n', '\r'], ""));
+            } else {
+                text.push_str(&extra);
+            }
+        }
+    }
+    if world
+        .set_property(id, "Text", Value::String(text))
+        .is_err()
+    {
+        return TextOutcome::Ignored;
+    }
+    TextOutcome::Edited
 }
 
 /// Lays out enabled ScreenGuis into pixel-space render data.
@@ -89,7 +180,31 @@ pub fn build_ui_draw_data(
 /// [`build_ui_draw_data`], also saying where each element went, for picking
 /// and handles in the editor.
 pub fn layout_ui(world: &World, width: u32, height: u32, stylesheets: &[Stylesheet]) -> UiLayout {
-    layout_ui_with_pseudo(world, width, height, stylesheets, PseudoClasses::default())
+    layout_ui_viewed(world, width, height, stylesheets, None, None)
+}
+
+/// [`layout_ui`], also placing BillboardGuis from `camera` and drawing a
+/// focus ring on `focused` (a TextBox).
+pub fn layout_ui_viewed(
+    world: &World,
+    width: u32,
+    height: u32,
+    stylesheets: &[Stylesheet],
+    focused: Option<InstanceId>,
+    camera: Option<&Camera>,
+) -> UiLayout {
+    layout_ui_with_pseudo(
+        world,
+        width,
+        height,
+        stylesheets,
+        PseudoClasses {
+            hovered: None,
+            active: None,
+            focused,
+        },
+        camera,
+    )
 }
 
 /// Lays out UI with CSS pointer states. The active element is the button held
@@ -101,8 +216,10 @@ pub fn layout_ui_interactive(
     stylesheets: &[Stylesheet],
     pointer: Option<[f32; 2]>,
     pressed_button: Option<InstanceId>,
+    focused: Option<InstanceId>,
+    camera: Option<&Camera>,
 ) -> UiLayout {
-    let base = layout_ui(world, width, height, stylesheets);
+    let base = layout_ui_viewed(world, width, height, stylesheets, focused, camera);
     let hovered = pointer.and_then(|[x, y]| base.hit(x, y));
     let active = pressed_button.filter(|button| hovered == Some(*button));
     let mut layout = layout_ui_with_pseudo(
@@ -110,7 +227,12 @@ pub fn layout_ui_interactive(
         width,
         height,
         stylesheets,
-        PseudoClasses { hovered, active },
+        PseudoClasses {
+            hovered,
+            active,
+            focused,
+        },
+        camera,
     );
     layout.hovered = hovered;
     layout.active = active;
@@ -123,6 +245,7 @@ fn layout_ui_with_pseudo(
     height: u32,
     stylesheets: &[Stylesheet],
     pseudo: PseudoClasses,
+    camera: Option<&Camera>,
 ) -> UiLayout {
     let mut layout = UiLayout::default();
     if width == 0 || height == 0 {
@@ -149,22 +272,132 @@ fn layout_ui_with_pseudo(
         let opacity = css_number(&styles, "opacity")
             .unwrap_or(1.0)
             .clamp(0.0, 1.0);
-        layout_children(
-            world,
-            id,
+        let fit = fit_transform(instance, width, height);
+        let bounds = fit.map_or(
             UiRect {
                 x: 0.0,
                 y: 0.0,
                 width: width as f32,
                 height: height as f32,
             },
+            |fit| UiRect {
+                x: 0.0,
+                y: 0.0,
+                width: fit.design_width,
+                height: fit.design_height,
+            },
+        );
+        let draws = layout.draw_items.len();
+        let elements = layout.elements.len();
+        layout_children(
+            world,
+            id,
+            bounds,
             &mut layout,
             stylesheets,
             opacity,
             pseudo,
         );
+        if let Some(fit) = fit {
+            apply_fit(&mut layout, draws, elements, fit);
+        }
+    }
+    if let Some(camera) = camera {
+        layout_billboards(
+            world,
+            camera,
+            width,
+            height,
+            &mut layout,
+            stylesheets,
+            pseudo,
+        );
     }
     layout
+}
+
+/// How a ScreenGui in Fit mode maps its design rectangle onto the viewport:
+/// uniform scale, centered, so the design stays proportional and inside the screen.
+#[derive(Clone, Copy)]
+struct Fit {
+    scale: f32,
+    origin_x: f32,
+    origin_y: f32,
+    design_width: f32,
+    design_height: f32,
+}
+
+/// `Some` when this ScreenGui's `ScaleMode` is `Fit`.
+fn fit_transform(instance: &Instance, width: u32, height: u32) -> Option<Fit> {
+    let mode = instance.property("ScaleMode").and_then(Value::as_str)?;
+    if !mode.eq_ignore_ascii_case("Fit") {
+        return None;
+    }
+    let design_width = instance
+        .property("DesignWidth")
+        .and_then(Value::as_number)
+        .unwrap_or(1920.0)
+        .max(1.0) as f32;
+    let design_height = instance
+        .property("DesignHeight")
+        .and_then(Value::as_number)
+        .unwrap_or(1080.0)
+        .max(1.0) as f32;
+    let scale = (width as f32 / design_width).min(height as f32 / design_height);
+    if !scale.is_finite() || scale <= 0.0 {
+        return None;
+    }
+    Some(Fit {
+        scale,
+        origin_x: (width as f32 - design_width * scale) * 0.5,
+        origin_y: (height as f32 - design_height * scale) * 0.5,
+        design_width,
+        design_height,
+    })
+}
+
+/// Scales everything `layout_children` just appended, from design pixels into the viewport.
+fn apply_fit(layout: &mut UiLayout, draws: usize, elements: usize, fit: Fit) {
+    for item in &mut layout.draw_items[draws..] {
+        scale_draw_item(item, fit);
+    }
+    for element in &mut layout.elements[elements..] {
+        element.rect = scale_rect(element.rect, fit);
+        element.pixels_per_unit = fit.scale;
+    }
+}
+
+fn scale_rect(rect: UiRect, fit: Fit) -> UiRect {
+    UiRect {
+        x: fit.origin_x + rect.x * fit.scale,
+        y: fit.origin_y + rect.y * fit.scale,
+        width: rect.width * fit.scale,
+        height: rect.height * fit.scale,
+    }
+}
+
+fn scale_draw_item(item: &mut UiDrawItem, fit: Fit) {
+    let place = |position: &mut [f32; 2], size: &mut [f32; 2]| {
+        position[0] = fit.origin_x + position[0] * fit.scale;
+        position[1] = fit.origin_y + position[1] * fit.scale;
+        size[0] *= fit.scale;
+        size[1] *= fit.scale;
+    };
+    match item {
+        UiDrawItem::Rectangle(rectangle) => {
+            place(&mut rectangle.position, &mut rectangle.size);
+            rectangle.border_width *= fit.scale;
+            rectangle.border_radius *= fit.scale;
+        }
+        UiDrawItem::Image(image) => {
+            place(&mut image.position, &mut image.size);
+            image.border_radius *= fit.scale;
+        }
+        UiDrawItem::Text(text) => {
+            place(&mut text.position, &mut text.size);
+            text.font_size *= fit.scale;
+        }
+    }
 }
 
 /// Lays out the UI children of `parent` inside `bounds` with Taffy.
@@ -189,19 +422,21 @@ fn layout_children(
         .children()
         .iter()
         .copied()
-        .filter(|&id| {
-            world.get(id).is_some_and(|child| {
-                matches!(
-                    child.class(),
-                    ClassName::Frame
-                        | ClassName::TextLabel
-                        | ClassName::TextButton
-                        | ClassName::ImageLabel
-                )
-            })
-        })
+        .filter(|&id| included_child(world, parent, id, out))
         .collect();
     if children.is_empty() {
+        return;
+    }
+    if parent_instance.class() == ClassName::Table {
+        layout_table(
+            world,
+            &children,
+            bounds,
+            out,
+            stylesheets,
+            inherited_opacity,
+            pseudo,
+        );
         return;
     }
 
@@ -318,9 +553,18 @@ fn layout_children(
             id,
             rect,
             button: instance.class() == ClassName::TextButton,
+            text_box: instance.class() == ClassName::TextBox,
             in_flow: flow_children,
+            pixels_per_unit: 1.0,
         });
-        paint_instance(instance, rect, &styles, opacity, &mut out.draw_items);
+        paint_instance(
+            instance,
+            rect,
+            &styles,
+            opacity,
+            pseudo.focused == Some(id),
+            &mut out.draw_items,
+        );
         layout_children(world, id, rect, out, stylesheets, opacity, pseudo);
     }
 }
@@ -330,6 +574,240 @@ fn visible(instance: &Instance) -> bool {
         .property("Visible")
         .and_then(Value::as_bool)
         .expect("every UI element has a Visible property")
+}
+
+fn is_widget(class: ClassName) -> bool {
+    matches!(
+        class,
+        ClassName::Frame
+            | ClassName::TextLabel
+            | ClassName::TextButton
+            | ClassName::ImageLabel
+            | ClassName::TextBox
+            | ClassName::PageLayout
+            | ClassName::Table
+    )
+}
+
+/// Whether `id` is drawn under `parent`. A PageLayout shows one Frame, the
+/// page named by `CurrentPage`, or the first Frame when that name is empty
+/// or missing.
+fn included_child(world: &World, parent: InstanceId, id: InstanceId, out: &mut UiLayout) -> bool {
+    let Some(child) = world.get(id) else {
+        return false;
+    };
+    if !is_widget(child.class()) {
+        return false;
+    }
+    let Some(parent_instance) = world.get(parent) else {
+        return false;
+    };
+    if parent_instance.class() != ClassName::PageLayout {
+        return true;
+    }
+    if child.class() != ClassName::Frame {
+        out.warnings.push(format!(
+            "PageLayout \"{}\" only switches Frames. \"{}\" stays visible on every page.",
+            parent_instance.name(),
+            child.name()
+        ));
+        return true;
+    }
+    current_page(world, parent, out) == Some(id)
+}
+
+fn current_page(world: &World, parent: InstanceId, out: &mut UiLayout) -> Option<InstanceId> {
+    let layout = world.get(parent)?;
+    let frames: Vec<InstanceId> = layout
+        .children()
+        .iter()
+        .copied()
+        .filter(|&id| {
+            world
+                .get(id)
+                .is_some_and(|child| child.class() == ClassName::Frame)
+        })
+        .collect();
+    let name = layout
+        .property("CurrentPage")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if !name.is_empty() {
+        if let Some(id) = frames.iter().copied().find(|&id| {
+            world
+                .get(id)
+                .is_some_and(|child| child.name() == name)
+        }) {
+            return Some(id);
+        }
+        out.warnings.push(format!(
+            "PageLayout \"{}\" has no page named \"{name}\", so it shows the first page.",
+            layout.name()
+        ));
+    }
+    frames
+        .into_iter()
+        .find(|&id| world.get(id).is_some_and(visible))
+}
+
+fn layout_table(
+    world: &World,
+    children: &[InstanceId],
+    bounds: UiRect,
+    out: &mut UiLayout,
+    stylesheets: &[Stylesheet],
+    inherited_opacity: f32,
+    pseudo: PseudoClasses,
+) {
+    let shown: Vec<InstanceId> = children
+        .iter()
+        .copied()
+        .filter(|&id| {
+            world.get(id).is_some_and(|child| {
+                let styles = resolve_styles(world, id, stylesheets, pseudo);
+                visible(child)
+                    && !css_property(&styles, "display").is_some_and(|display| display == "none")
+            })
+        })
+        .collect();
+    if shown.is_empty() || bounds.width <= 0.0 || bounds.height <= 0.0 {
+        return;
+    }
+    let columns = world
+        .get(children[0])
+        .and_then(|child| child.parent())
+        .and_then(|parent| world.get(parent))
+        .and_then(|table| table.property("Columns"))
+        .and_then(Value::as_number)
+        .map(|n| (n as isize).max(1) as usize)
+        .unwrap_or(2);
+    let gap = 8.0_f32;
+    let rows = shown.len().div_ceil(columns).max(1);
+    let cell_w = ((bounds.width - gap * (columns.saturating_sub(1) as f32)) / columns as f32).max(0.0);
+    let cell_h = ((bounds.height - gap * (rows.saturating_sub(1) as f32)) / rows as f32).max(0.0);
+    for (index, id) in shown.into_iter().enumerate() {
+        let Some(instance) = world.get(id) else {
+            continue;
+        };
+        let styles = resolve_styles(world, id, stylesheets, pseudo);
+        let opacity = inherited_opacity
+            * css_number(&styles, "opacity")
+                .unwrap_or(1.0)
+                .clamp(0.0, 1.0);
+        let column = index % columns;
+        let row = index / columns;
+        let rect = UiRect {
+            x: bounds.x + column as f32 * (cell_w + gap),
+            y: bounds.y + row as f32 * (cell_h + gap),
+            width: cell_w,
+            height: cell_h,
+        };
+        out.elements.push(UiElement {
+            id,
+            rect,
+            button: instance.class() == ClassName::TextButton,
+            text_box: instance.class() == ClassName::TextBox,
+            in_flow: true,
+            pixels_per_unit: 1.0,
+        });
+        paint_instance(
+            instance,
+            rect,
+            &styles,
+            opacity,
+            pseudo.focused == Some(id),
+            &mut out.draw_items,
+        );
+        layout_children(world, id, rect, out, stylesheets, opacity, pseudo);
+    }
+}
+
+fn layout_billboards(
+    world: &World,
+    camera: &Camera,
+    width: u32,
+    height: u32,
+    out: &mut UiLayout,
+    stylesheets: &[Stylesheet],
+    pseudo: PseudoClasses,
+) {
+    if width == 0 || height == 0 {
+        return;
+    }
+    let aspect = width as f32 / height as f32;
+    let view = rh::view::look_at_mat4(camera.position, camera.look_at, Vec3::Y);
+    let tan_half = (camera.fov_y_degrees.to_radians() * 0.5).tan();
+    for id in world.descendants(world.workspace()) {
+        let Some(instance) = world.get(id) else {
+            continue;
+        };
+        if instance.class() != ClassName::BillboardGui
+            || instance.property("Enabled").and_then(Value::as_bool) != Some(true)
+        {
+            continue;
+        }
+        let Some(position) = instance
+            .parent()
+            .and_then(|parent| world.get(parent))
+            .and_then(|parent| parent.property("Position"))
+            .and_then(Value::as_vector3)
+        else {
+            continue;
+        };
+        let offset = instance
+            .property("StudsOffset")
+            .and_then(Value::as_vector3)
+            .unwrap_or(axcenity_core::Vector3::new(0.0, 0.0, 0.0));
+        let anchor = Vec3::new(
+            position.x + offset.x,
+            position.y + offset.y,
+            position.z + offset.z,
+        );
+        let max_distance = instance
+            .property("MaxDistance")
+            .and_then(Value::as_number)
+            .unwrap_or(0.0) as f32;
+        if max_distance > 0.0 && camera.position.distance(anchor) > max_distance {
+            continue;
+        }
+        let camera_space = view.transform_point3(anchor);
+        if camera_space.z >= -0.05 {
+            continue;
+        }
+        let depth = -camera_space.z;
+        let ndc_x = camera_space.x / (depth * tan_half * aspect);
+        let ndc_y = camera_space.y / (depth * tan_half);
+        if !ndc_x.is_finite() || !ndc_y.is_finite() {
+            continue;
+        }
+        let size = instance
+            .property("Size")
+            .and_then(Value::as_udim2)
+            .unwrap_or_default();
+        let w = finite(size.x.scale) * width as f32 + finite(size.x.offset);
+        let h = finite(size.y.scale) * height as f32 + finite(size.y.offset);
+        let rect = UiRect {
+            x: (ndc_x + 1.0) * 0.5 * width as f32 - w * 0.5,
+            y: (1.0 - ndc_y) * 0.5 * height as f32 - h * 0.5,
+            width: w.max(0.0),
+            height: h.max(0.0),
+        };
+        layout_children(world, id, rect, out, stylesheets, 1.0, pseudo);
+    }
+}
+
+fn font_family_name(family: &str) -> String {
+    let name = family
+        .split(',')
+        .next()
+        .unwrap_or("Montserrat")
+        .trim()
+        .trim_matches(['\'', '"']);
+    match name.to_ascii_lowercase().as_str() {
+        "monospace" | "jetbrains mono" | "jetbrainsmono" => "JetBrains Mono".to_owned(),
+        "sans-serif" | "montserrat" | "" => "Montserrat".to_owned(),
+        _ => name.to_owned(),
+    }
 }
 
 /// A UDim's length in pixels: `scale` of `container` plus `offset`.
@@ -376,6 +854,7 @@ fn paint_instance(
     rect: UiRect,
     styles: &ResolvedStyles,
     opacity: f32,
+    focused: bool,
     out: &mut Vec<UiDrawItem>,
 ) {
     let css_background = css_color(styles, "background-color");
@@ -391,38 +870,123 @@ fn paint_instance(
             .map(|n| finite(n as f32).clamp(0.0, 1.0))
             .expect("every UI element has a BackgroundTransparency property")
     };
-    let (border_color, border_width, border_opacity) = css_border(styles);
-    if (transparency < 1.0 && opacity > 0.0) || border_width > 0.0 {
+    let (border_color, mut border_width, border_opacity) = css_border(styles);
+    let mut border_tint = border_color;
+    if focused && border_width <= 0.0 {
+        border_width = 2.0;
+        border_tint = color_property(instance, "TextColor3");
+    }
+    let gradient = css_gradient(styles);
+    let fill_alpha = (1.0 - transparency) * opacity * css_background.map_or(1.0, |(_, a)| a);
+    let (color_end, end_alpha) = gradient.map_or(
+        (
+            [color.r, color.g, color.b, fill_alpha],
+            fill_alpha,
+        ),
+        |(start, end)| {
+            // A gradient replaces the flat background. `color` below is
+            // overwritten by the start color when one was parsed.
+            let _ = start;
+            (
+                [end.0.r, end.0.g, end.0.b, opacity * end.1],
+                opacity * end.1,
+            )
+        },
+    );
+    let (fill, fill_alpha) = if let Some((start, _)) = gradient {
+        (
+            [start.0.r, start.0.g, start.0.b],
+            opacity * start.1,
+        )
+    } else {
+        ([color.r, color.g, color.b], fill_alpha)
+    };
+    if let Some((ox, oy, blur, shadow, shadow_alpha)) = css_box_shadow(styles) {
+        let spread = blur.max(0.0) * 0.5;
+        out.push(UiDrawItem::Rectangle(UiRectangle {
+            position: [rect.x + ox - spread, rect.y + oy - spread],
+            size: [rect.width + spread * 2.0, rect.height + spread * 2.0],
+            color: [shadow.r, shadow.g, shadow.b, opacity * shadow_alpha * 0.85],
+            color_end: [shadow.r, shadow.g, shadow.b, opacity * shadow_alpha * 0.85],
+            border_color: [0.0; 4],
+            border_width: 0.0,
+            border_radius: css_length_property(styles, "border-radius")
+                .unwrap_or(0.0)
+                .max(0.0)
+                + spread,
+        }));
+    }
+    let radius = css_length_property(styles, "border-radius")
+        .unwrap_or(0.0)
+        .max(0.0);
+    if (fill_alpha > 0.0 && opacity > 0.0) || end_alpha > 0.0 || border_width > 0.0 {
         out.push(UiDrawItem::Rectangle(UiRectangle {
             position: [rect.x, rect.y],
             size: [rect.width, rect.height],
-            color: [
-                color.r,
-                color.g,
-                color.b,
-                (1.0 - transparency) * opacity * css_background.map_or(1.0, |(_, a)| a),
-            ],
+            color: [fill[0], fill[1], fill[2], fill_alpha],
+            color_end,
             border_color: [
-                border_color.r,
-                border_color.g,
-                border_color.b,
-                opacity * border_opacity,
+                border_tint.r,
+                border_tint.g,
+                border_tint.b,
+                opacity * if focused && css_border(styles).1 <= 0.0 {
+                    1.0
+                } else {
+                    border_opacity
+                },
             ],
             border_width,
-            border_radius: css_length_property(styles, "border-radius")
-                .unwrap_or(0.0)
-                .max(0.0),
+            border_radius: radius,
         }));
+    }
+
+    let image_path = instance
+        .property("Image")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+    if !image_path.is_empty()
+        && matches!(
+            instance.class(),
+            ClassName::ImageLabel | ClassName::TextButton
+        )
+    {
+        let image_alpha = 1.0
+            - instance
+                .property("ImageTransparency")
+                .and_then(Value::as_number)
+                .map(|n| finite(n as f32).clamp(0.0, 1.0))
+                .unwrap_or(0.0);
+        if image_alpha > 0.0 && opacity > 0.0 {
+            out.push(UiDrawItem::Image(UiImage {
+                position: [rect.x, rect.y],
+                size: [rect.width, rect.height],
+                tint: [1.0, 1.0, 1.0, image_alpha * opacity],
+                border_radius: radius,
+                path: image_path,
+                texture: None,
+            }));
+        }
     }
 
     if matches!(
         instance.class(),
-        ClassName::TextLabel | ClassName::TextButton
+        ClassName::TextLabel | ClassName::TextButton | ClassName::TextBox
     ) {
-        let text = instance
+        let typed = instance
             .property("Text")
             .and_then(Value::as_str)
-            .expect("every TextLabel has a Text property");
+            .expect("every text element has a Text property");
+        let placeholder = typed.is_empty()
+            && instance.class() == ClassName::TextBox;
+        let text = if placeholder {
+            instance
+                .property("Placeholder")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+        } else {
+            typed
+        };
         let font_size = css_length_property(styles, "font-size")
             .or_else(|| {
                 instance
@@ -438,16 +1002,17 @@ fn paint_instance(
             .map(|(color, _)| color)
             .unwrap_or_else(|| color_property(instance, "TextColor3"));
         let font_family = css_property(styles, "font-family")
-            .map(|family| {
-                family
-                    .split(',')
-                    .next()
-                    .unwrap_or("Montserrat")
-                    .trim()
-                    .trim_matches(['\'', '"'])
-                    .to_owned()
-            })
+            .map(|family| font_family_name(&family))
             .unwrap_or_else(|| "Montserrat".to_owned());
+        // Buttons center their text, as in Roblox; labels start at the left.
+        let button = instance.class() == ClassName::TextButton;
+        let align = match css_property(styles, "text-align").as_deref().map(str::trim) {
+            Some("center") => TextAlign::Center,
+            Some("right" | "end") => TextAlign::Right,
+            Some(_) => TextAlign::Left,
+            None if button => TextAlign::Center,
+            None => TextAlign::Left,
+        };
         if !text.is_empty() && rect.width > 0.0 && rect.height > 0.0 {
             out.push(UiDrawItem::Text(UiText {
                 position: [rect.x + 4.0, rect.y + 4.0],
@@ -458,9 +1023,13 @@ fn paint_instance(
                     color.r,
                     color.g,
                     color.b,
-                    opacity * css_text_color.map_or(1.0, |(_, a)| a),
+                    opacity
+                        * css_text_color.map_or(1.0, |(_, a)| a)
+                        * if placeholder { 0.45 } else { 1.0 },
                 ],
                 font_family,
+                align,
+                center_vertically: button,
             }));
         }
     }
@@ -767,6 +1336,84 @@ fn css_border(styles: &ResolvedStyles) -> (Color3, f32, f32) {
     )
 }
 
+/// `linear-gradient(to bottom, #fff, #000)`, two colors, top to bottom.
+/// A leading `to …` direction is accepted and ignored: the blend is always
+/// top to bottom.
+fn css_gradient(styles: &ResolvedStyles) -> Option<((Color3, f32), (Color3, f32))> {
+    let value = css_property(styles, "background-image")?;
+    let inner = value
+        .trim()
+        .strip_prefix("linear-gradient(")?
+        .strip_suffix(')')?;
+    let mut colors = Vec::new();
+    for part in split_css_args(inner) {
+        let part = part.trim();
+        if part.starts_with("to ") {
+            continue;
+        }
+        if let Some(color) = parse_color(part) {
+            colors.push(color);
+        }
+    }
+    (colors.len() >= 2).then(|| (colors[0], colors[1]))
+}
+
+/// `box-shadow: <x> <y> <blur> <color>`, lengths in px. The blur is drawn
+/// as a larger, softer rectangle behind the element.
+fn css_box_shadow(styles: &ResolvedStyles) -> Option<(f32, f32, f32, Color3, f32)> {
+    let value = css_property(styles, "box-shadow")?;
+    let value = value.trim();
+    if value.is_empty() || value == "none" {
+        return None;
+    }
+    let (lengths, color) = split_shadow_color(value)?;
+    let nums: Vec<f32> = lengths
+        .split_whitespace()
+        .filter_map(|token| {
+            token
+                .strip_suffix("px")
+                .unwrap_or(token)
+                .parse::<f32>()
+                .ok()
+                .filter(|n| n.is_finite())
+        })
+        .collect();
+    let (x, y, blur) = match nums.as_slice() {
+        [x, y, blur, ..] => (*x, *y, *blur),
+        [x, y] => (*x, *y, 0.0),
+        _ => return None,
+    };
+    Some((x, y, blur.max(0.0), color.0, color.1))
+}
+
+fn split_shadow_color(value: &str) -> Option<(&str, (Color3, f32))> {
+    if let Some(start) = value.find("rgb") {
+        let color = parse_color(value[start..].trim())?;
+        return Some((value[..start].trim(), color));
+    }
+    let (lengths, color) = value.rsplit_once(char::is_whitespace)?;
+    Some((lengths.trim(), parse_color(color.trim())?))
+}
+
+fn split_css_args(value: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut depth = 0;
+    for (index, c) in value.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            ',' if depth == 0 => {
+                parts.push(&value[start..index]);
+                start = index + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&value[start..]);
+    parts
+}
+
 fn ui_property(instance: &Instance, name: &str) -> UDim2 {
     instance
         .property(name)
@@ -822,12 +1469,53 @@ mod tests {
         let large = build_ui_draw_data(&world, 1200, 800, &[]);
         let rectangle = |items: &[UiDrawItem]| match &items[0] {
             UiDrawItem::Rectangle(rect) => *rect,
-            UiDrawItem::Text(_) => panic!("frame layout starts with its rectangle"),
+            UiDrawItem::Text(_) | UiDrawItem::Image(_) => {
+                panic!("frame layout starts with its rectangle")
+            }
         };
         assert_eq!(rectangle(&small).position, [410.0, 155.0]);
         assert_eq!(rectangle(&small).size, [380.0, 290.0]);
         assert_eq!(rectangle(&large).position, [610.0, 205.0]);
         assert_eq!(rectangle(&large).size, [580.0, 390.0]);
+    }
+
+    #[test]
+    fn fit_mode_scales_uniformly_and_centers_on_a_different_aspect() {
+        let mut world = World::new();
+        let gui = world.create(ClassName::ScreenGui).unwrap();
+        world.set_parent(gui, Some(world.workspace())).unwrap();
+        world
+            .set_property(gui, "ScaleMode", Value::String("Fit".to_owned()))
+            .unwrap();
+        world
+            .set_property(gui, "DesignWidth", Value::Number(1920.0))
+            .unwrap();
+        world
+            .set_property(gui, "DesignHeight", Value::Number(1080.0))
+            .unwrap();
+        let frame = world.create(ClassName::Frame).unwrap();
+        world.set_parent(frame, Some(gui)).unwrap();
+        world
+            .set_property(
+                frame,
+                "Position",
+                Value::UDim2(UDim2::new(0.0, 100.0, 0.0, 40.0)),
+            )
+            .unwrap();
+        world
+            .set_property(
+                frame,
+                "Size",
+                Value::UDim2(UDim2::new(0.0, 200.0, 0.0, 80.0)),
+            )
+            .unwrap();
+
+        // Half the design width, same height: scale is limited by the width
+        // (0.5) and the spare height is split above and below.
+        let layout = layout_ui(&world, 960, 1080, &[]);
+        let rect = layout.element(frame).unwrap().rect;
+        assert_eq!(rect, UiRect { x: 50.0, y: 290.0, width: 100.0, height: 40.0 });
+        assert!((layout.element(frame).unwrap().pixels_per_unit - 0.5).abs() < 0.001);
     }
 
     #[test]
@@ -884,6 +1572,8 @@ mod tests {
             std::slice::from_ref(&sheet),
             Some([20.0, 20.0]),
             None,
+            None,
+            None,
         );
         assert_eq!(hovered.hovered, Some(button));
         assert_eq!(hovered.hit_button(20.0, 20.0), Some(button));
@@ -892,7 +1582,16 @@ mod tests {
             UiDrawItem::Text(text) if text.text == "Start"
         )));
         let active =
-            layout_ui_interactive(&world, 640, 480, &[sheet], Some([20.0, 20.0]), Some(button));
+            layout_ui_interactive(
+                &world,
+                640,
+                480,
+                &[sheet],
+                Some([20.0, 20.0]),
+                Some(button),
+                None,
+                None,
+            );
         assert_eq!(active.active, Some(button));
         let Some(UiDrawItem::Rectangle(rectangle)) = active.draw_items.first() else {
             panic!("the button background should be drawn first");
@@ -902,7 +1601,16 @@ mod tests {
         world
             .set_property(button, "Visible", Value::Bool(false))
             .unwrap();
-        let hidden = layout_ui_interactive(&world, 640, 480, &[], Some([20.0, 20.0]), Some(button));
+        let hidden = layout_ui_interactive(
+            &world,
+            640,
+            480,
+            &[],
+            Some([20.0, 20.0]),
+            Some(button),
+            None,
+            None,
+        );
         assert_eq!(hidden.hit_button(20.0, 20.0), None);
         assert_eq!(hidden.active, None);
     }
@@ -977,7 +1685,7 @@ mod tests {
             .iter()
             .filter_map(|item| match item {
                 UiDrawItem::Rectangle(rectangle) => Some(rectangle),
-                UiDrawItem::Text(_) => None,
+                UiDrawItem::Text(_) | UiDrawItem::Image(_) => None,
             })
             .collect();
         assert_eq!(rectangles.len(), 3);

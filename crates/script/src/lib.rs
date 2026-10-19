@@ -258,6 +258,20 @@ impl ScriptRuntime {
         }
     }
 
+    /// Delivers `FocusLost` only to LocalScripts, when the player finishes a TextBox.
+    pub fn release_text_box(&mut self, world: &mut World, text_box: InstanceId) {
+        self.fire_changes(world);
+        if world
+            .get(text_box)
+            .is_some_and(|instance| instance.class() == ClassName::TextBox)
+        {
+            self.client
+                .fire_instance_event(world, text_box, "FocusLost");
+            self.collect(Side::Client);
+            self.fire_changes(world);
+        }
+    }
+
     /// Sounds that played to their end (see `GameAudio::update`): sets each
     /// one's `Playing` to false, then fires its `Ended` in Scripts and then
     /// in LocalScripts. Sounds a handler destroyed are skipped.

@@ -11,6 +11,7 @@ mod app;
 mod autocomplete;
 mod block_editor;
 mod css_syntax;
+mod dialog;
 mod explorer;
 mod gizmo;
 mod history;

@@ -8,7 +8,8 @@
 //! or reporter blocks ([`Expression`]) that work a value out.
 //!
 //! Every block translates to the documented Lua API (see `docs/scripting.md`),
-//! so a block script runs exactly like a typed one.
+//! so a block script runs exactly like a typed one. [`from_lua`] goes the
+//! other way, for switching a script between Code and Blocks.
 
 use std::collections::{BTreeSet, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -188,6 +189,11 @@ pub enum BlockKind {
     Unattached {
         body: Vec<Block>,
     },
+    /// Lua at the top of the script that has no blocks, kept word for
+    /// word from a script switched from Code to Blocks. It runs where it is.
+    TopCode {
+        code: String,
+    },
 
     // Control.
     Wait {
@@ -260,6 +266,11 @@ pub enum BlockKind {
     Hide {
         target: String,
     },
+    /// Sets a PageLayout's current page to a Frame's name.
+    ShowPage {
+        layout: String,
+        page: Expression,
+    },
     SetProperty {
         target: String,
         property: String,
@@ -301,6 +312,12 @@ pub enum BlockKind {
     Destroy {
         target: String,
     },
+
+    /// Lua that has no blocks, kept word for word from a script switched
+    /// from Code to Blocks.
+    Code {
+        code: String,
+    },
 }
 
 impl BlockKind {
@@ -323,6 +340,7 @@ impl BlockKind {
                 | BlockKind::EveryFrame { .. }
                 | BlockKind::WhenSoundEnded { .. }
                 | BlockKind::Unattached { .. }
+                | BlockKind::TopCode { .. }
         )
     }
 
@@ -395,6 +413,7 @@ impl BlockKind {
             | BlockKind::SetAnchored { anchored: e, .. }
             | BlockKind::SetColor { color: e, .. }
             | BlockKind::SetText { text: e, .. }
+            | BlockKind::ShowPage { page: e, .. }
             | BlockKind::SetProperty { value: e, .. }
             | BlockKind::SetVolume { volume: e, .. }
             | BlockKind::SetVariable { value: e, .. }
@@ -426,6 +445,7 @@ impl BlockKind {
             | BlockKind::SetAnchored { anchored: e, .. }
             | BlockKind::SetColor { color: e, .. }
             | BlockKind::SetText { text: e, .. }
+            | BlockKind::ShowPage { page: e, .. }
             | BlockKind::SetProperty { value: e, .. }
             | BlockKind::SetVolume { volume: e, .. }
             | BlockKind::SetVariable { value: e, .. }
@@ -535,6 +555,11 @@ pub enum Expression {
     KeyDown {
         key: String,
     },
+    /// Lua that has no block, kept word for word from a script switched
+    /// from Code to Blocks. Pointed, so it fits any slot.
+    Code {
+        code: String,
+    },
 }
 
 impl Expression {
@@ -544,7 +569,8 @@ impl Expression {
             | Expression::Compare { .. }
             | Expression::Logic { .. }
             | Expression::Not { .. }
-            | Expression::KeyDown { .. } => BlockShape::Boolean,
+            | Expression::KeyDown { .. }
+            | Expression::Code { .. } => BlockShape::Boolean,
             _ => BlockShape::Value,
         }
     }
@@ -917,6 +943,10 @@ impl Writer {
             BlockKind::WhenSoundEnded { sound, body } => {
                 (format!("{}.Ended:Connect(function()", target(sound)?), body)
             }
+            BlockKind::TopCode { code } => {
+                self.code(code);
+                return Ok(());
+            }
             _ => return Err(TranslateError::InvalidEventPlacement),
         };
         self.line(opening);
@@ -926,6 +956,17 @@ impl Writer {
         self.line("end)");
         self.in_touched = false;
         Ok(())
+    }
+
+    /// Lua kept from a typed script, one line at a time at this indent.
+    fn code(&mut self, code: &str) {
+        for line in code.lines() {
+            if line.trim().is_empty() {
+                self.lines.push(String::new());
+            } else {
+                self.line(line);
+            }
+        }
     }
 
     fn nested(&mut self, body: &[Block], ids: &mut HashSet<u64>) -> Result<(), TranslateError> {
@@ -1063,6 +1104,13 @@ impl Writer {
             BlockKind::Hide { target: t } => {
                 self.line(format!("{}.Visible = false", target(t)?));
             }
+            BlockKind::ShowPage { layout, page } => {
+                let value = match page {
+                    Expression::Text { .. } => self.expression(page)?,
+                    other => format!("tostring({})", self.expression(other)?),
+                };
+                self.line(format!("{}.CurrentPage = {value}", target(layout)?));
+            }
             BlockKind::SetProperty {
                 target: t,
                 property,
@@ -1097,13 +1145,15 @@ impl Writer {
                 self.line(format!("print({value})"));
             }
             BlockKind::Destroy { target: t } => self.line(format!("{}:Destroy()", target(t)?)),
+            BlockKind::Code { code } => self.code(code),
             BlockKind::WhenStarted { .. }
             | BlockKind::WhenTouched { .. }
             | BlockKind::WhenKeyPressed { .. }
             | BlockKind::WhenClicked { .. }
             | BlockKind::EveryFrame { .. }
             | BlockKind::WhenSoundEnded { .. }
-            | BlockKind::Unattached { .. } => {
+            | BlockKind::Unattached { .. }
+            | BlockKind::TopCode { .. } => {
                 return Err(TranslateError::InvalidEventPlacement);
             }
         }
@@ -1189,6 +1239,8 @@ impl Writer {
             Expression::KeyDown { key: name } => {
                 format!("UserInputService:IsKeyDown({})", key(name)?)
             }
+            // Bracketed already where it needs to be (see `from_lua`).
+            Expression::Code { code } => code.clone(),
         })
     }
 }
@@ -1279,6 +1331,12 @@ pub fn valid_identifier(name: &str) -> bool {
                 | "while"
         )
 }
+
+mod from_lua;
+mod lua;
+
+pub use from_lua::{FromLuaError, from_lua};
+pub use lua::SyntaxError;
 
 #[cfg(test)]
 mod tests;

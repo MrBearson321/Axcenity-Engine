@@ -3,7 +3,9 @@
 //! other programs.
 //!
 //! Each script is its `.server.lua` (Script), `.client.lua` (LocalScript)
-//! or `.module.lua` (ModuleScript) file. Making, renaming or deleting a script changes its file straight
+//! or `.module.lua` (ModuleScript) file, or for a Script or LocalScript
+//! shown as blocks, its `.server.blocks.json` or `.client.blocks.json`
+//! file. Making, renaming or deleting a script changes its file straight
 //! away and isn't an undo step; only the code typed in a tab waits for Save.
 //!
 //! These are more methods of [`EditorApp`]: a child module like this one can
@@ -15,18 +17,20 @@ use std::io::ErrorKind;
 use std::path::Path;
 
 use axcenity_assets::Pick;
-use axcenity_blocks::{Block, BlockKind, BlockScript, translate};
+use axcenity_blocks::{from_lua, translate};
 use axcenity_core::{ClassName, InstanceId, Value, Vector3};
 use axcenity_project::{self as project, LoadError, Project, ScriptFile};
 use eframe::egui;
 
 use super::{BlockDocument, EditorApp};
+use crate::dialog;
 use crate::history::{self, Move, Place};
 use crate::import_dialog::{Answer, ImportDialog, Placement};
 use crate::output::Output;
 use crate::properties::MIN_SIZE;
 use crate::scripts::{Disk, new_script_source};
 use crate::surface::{self, MapFile};
+use crate::theme::{self, icons};
 use crate::tree::{self, Insertable};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -279,6 +283,14 @@ impl EditorApp {
         } else {
             self.output
                 .info(format!("Saved \"{name}\": {}.", saved.join(", ")));
+            if let Some(folder) = self.project.as_ref().map(|project| project.folder.clone()) {
+                match project::record_version(&folder, "Save") {
+                    Ok(_) => {}
+                    Err(err) => self
+                        .output
+                        .warning(format!("Saved, but could not keep a version: {err}")),
+                }
+            }
         }
         // The project list shows the picture taken at the last save.
         self.thumbnail_wanted.get_or_insert(false);
@@ -706,8 +718,9 @@ impl EditorApp {
         let script = project.scripts.remove(index);
         // Scripts are never in the undo history, so nothing refers to it there.
         let _ = self.world.destroy(script.instance);
+        self.selection.retain(|id| *id != script.instance);
         if self.selected == Some(script.instance) {
-            self.selected = None;
+            self.selected = self.selection.last().copied();
         }
     }
 
@@ -810,57 +823,138 @@ impl EditorApp {
         }
     }
 
-    pub(super) fn insert_block_script(&mut self, class: ClassName) {
-        if self.project.is_none() || self.playing() || self.viewport.is_dragging() {
+    /// Switches the Script or LocalScript at `path` between Code and Blocks,
+    /// keeping its Instance. Blocks become the Lua they translate to; Lua
+    /// becomes blocks, with code that has no blocks kept in grey Lua blocks.
+    /// The file is replaced by one with the other ending (`.server.lua` ↔
+    /// `.server.blocks.json`), so switching saves the script. Like a rename,
+    /// it isn't an undo step. Blocks switched to Code and back, with the code
+    /// unchanged, come back exactly as they were, loose blocks and all.
+    pub(super) fn switch_script_mode(&mut self, path: &str) {
+        if self.playing() {
             return;
         }
         let Some(project) = &self.project else {
             return;
         };
         let folder = project.folder.clone();
-        let service = project::script_service(&self.world, class);
-        for name in tree::numbered_names(format!("{class}Blocks").as_str()) {
-            if self.world.find_first_child(service, &name).is_some() {
-                continue;
-            }
-            let script = BlockScript {
-                blocks: vec![Block::new(BlockKind::WhenStarted { body: Vec::new() })],
-            };
-            match project::create_block_script(&folder, &name, class, &script) {
-                Ok(path) => {
-                    let source = match translate(&script) {
-                        Ok(translation) => translation.source,
-                        Err(err) => {
-                            self.output.error(format!(
-                                "Could not create `{path}`: block script can't translate: {err}"
-                            ));
-                            return;
-                        }
-                    };
-                    let id = self.add_script(&path, source.clone());
-                    if let Some(project) = &mut self.project {
-                        project.block_scripts.push(BlockDocument {
-                            instance: id,
-                            path: path.clone(),
-                            script: script.clone(),
-                            saved: script,
-                            highlighted: None,
-                        });
-                    }
-                    self.select_from_viewport(Some(id));
-                    self.tabs.open(&path, &source, None);
-                    self.output
-                        .info(format!("Made a new block script, `{path}`."));
+        let name = project::script_name(path).to_owned();
+        let Some(instance) = project
+            .scripts
+            .iter()
+            .find(|script| script.path == path)
+            .map(|script| script.instance)
+        else {
+            return;
+        };
+        let to_blocks = !project::is_block_script(path);
+        let (new_path, source, blocks) = if to_blocks {
+            let source = self.tabs.get(path).map_or_else(
+                || {
+                    project
+                        .scripts
+                        .iter()
+                        .find(|script| script.path == path)
+                        .map(|script| script.source.clone())
+                        .unwrap_or_default()
+                },
+                |tab| tab.text.clone(),
+            );
+            let remembered = project
+                .remembered_blocks
+                .get(path)
+                .filter(|(code, _)| *code == source)
+                .map(|(_, blocks)| blocks.clone());
+            let blocks = match remembered.map_or_else(|| from_lua(&source), Ok) {
+                Ok(blocks) => blocks,
+                Err(err) => {
+                    self.output.error(format!(
+                        "Can't show {name} as blocks: {err}. Fix the code first, then switch."
+                    ));
                     return;
                 }
-                Err(err) if err.already_exists() => continue,
+            };
+            let source = match translate(&blocks) {
+                Ok(translation) => translation.source,
                 Err(err) => {
                     self.output
-                        .error(format!("Could not make a block script: {}", chain(&err)));
+                        .error(format!("Can't show {name} as blocks: {err}."));
+                    return;
+                }
+            };
+            match project::switch_to_blocks(&folder, path, &blocks) {
+                Ok(new_path) => (new_path, source, Some(blocks)),
+                Err(err) => {
+                    self.output.error(format!(
+                        "Could not switch {name} to Blocks: {}",
+                        chain(&err)
+                    ));
                     return;
                 }
             }
+        } else {
+            let Some(document) = project
+                .block_scripts
+                .iter()
+                .find(|document| document.path == path)
+            else {
+                return;
+            };
+            let blocks = document.script.clone();
+            let source = match translate(&blocks) {
+                Ok(translation) => translation.source,
+                Err(err) => {
+                    self.output
+                        .error(format!("Can't switch {name} to Code: {err}."));
+                    return;
+                }
+            };
+            match project::switch_to_code(&folder, path, &source) {
+                Ok(new_path) => {
+                    if let Some(project) = &mut self.project {
+                        project
+                            .remembered_blocks
+                            .insert(new_path.clone(), (source.clone(), blocks));
+                    }
+                    (new_path, source, None)
+                }
+                Err(err) => {
+                    self.output.error(format!(
+                        "Could not switch {name} to Code: {}",
+                        chain(&err)
+                    ));
+                    return;
+                }
+            }
+        };
+
+        if let Some(project) = &mut self.project {
+            project
+                .block_scripts
+                .retain(|document| document.path != path);
+            if let Some(blocks) = blocks {
+                project.block_scripts.push(BlockDocument {
+                    instance,
+                    path: new_path.clone(),
+                    script: blocks.clone(),
+                    saved: blocks,
+                    highlighted: None,
+                });
+            }
+            if let Some(script) = project.scripts.iter_mut().find(|s| s.path == path) {
+                script.path = new_path.clone();
+                script.source = source.clone();
+            }
         }
+        self.tabs.rename(path, &new_path);
+        if let Some(tab) = self.tabs.get_mut(&new_path) {
+            tab.text = source;
+            tab.mark_saved();
+        }
+        self.sort_scripts();
+        let mode = if to_blocks { "Blocks" } else { "Code" };
+        self.output
+            .info(format!("Switched {name} to {mode} (`{new_path}`)."));
     }
 
     /// File > Import Model… and the toolbar's Import: asks for a glTF or
@@ -1362,26 +1456,34 @@ impl EditorApp {
             self.confirm_delete = None;
             return;
         };
-        let mut delete = None;
-        let modal = egui::Modal::new(egui::Id::new("delete script")).show(ctx, |ui| {
-            ui.heading(format!("Delete {}?", project::script_name(&path)));
-            ui.label(format!(
-                "This deletes `{path}` from the project folder. It can't be undone."
-            ));
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                if ui.button("Delete").clicked() {
-                    delete = Some(true);
-                }
-                if ui.button("Cancel").clicked() {
-                    delete = Some(false);
-                }
-            });
-        });
+        let title = format!("Delete {}?", project::script_name(&path));
+        let message =
+            format!("This deletes `{path}` from the project folder. It can't be undone.");
+        let outcome = dialog::ask(
+            ctx,
+            &dialog::Question {
+                id: "delete script",
+                icon: icons::TRASH,
+                accent: theme::STOP_RED,
+                title: &title,
+                message: &message,
+                items: Vec::new(),
+            },
+            &[
+                dialog::Button {
+                    icon: icons::X,
+                    label: "Cancel",
+                    kind: dialog::Kind::Plain,
+                },
+                dialog::Button {
+                    icon: icons::TRASH,
+                    label: "Delete",
+                    kind: dialog::Kind::Danger,
+                },
+            ],
+        );
         // Escape or a click outside the box means Cancel.
-        if delete.is_none() && modal.should_close() {
-            delete = Some(false);
-        }
+        let delete = outcome.map(|outcome| outcome == dialog::Outcome::Picked(1));
         if let Some(delete) = delete {
             self.confirm_delete = None;
             if delete {
@@ -1734,6 +1836,7 @@ mod tests {
     use crate::scripts::NEW_SCRIPT_SOURCE;
     use crate::surface::Slot;
     use axcenity_assets::Channel;
+    use axcenity_blocks::{Block, BlockKind};
 
     fn script_names(app: &EditorApp) -> Vec<String> {
         let world = &app.world;
@@ -1757,10 +1860,15 @@ mod tests {
     }
 
     #[test]
-    fn block_scripts_can_be_created_edited_saved_and_reloaded() {
+    fn scripts_switch_to_blocks_and_can_be_edited_saved_and_reloaded() {
         let folder = copy_of_example("hello-part", "block-script-editor");
         let mut app = EditorApp::new(Some(&folder));
-        app.insert_block_script(ClassName::Script);
+        app.insert_script(ClassName::Script);
+        let code_path = app.tabs.active_path().unwrap().to_owned();
+        let id = script(&app, "Script");
+        app.switch_script_mode(&code_path);
+        assert!(!folder.join(&code_path).exists(), "the .lua file is replaced");
+        assert_eq!(script(&app, "Script"), id, "it's the same Script");
         let path = app
             .project
             .as_ref()
@@ -1823,6 +1931,42 @@ mod tests {
 
         let reopened = EditorApp::new(Some(&folder));
         assert_eq!(reopened.project.unwrap().block_scripts.len(), 1);
+
+        // Back to Code: the Lua the blocks became, in a .lua file again.
+        assert_eq!(app.tabs.active_path(), Some(path.as_str()));
+        app.switch_script_mode(&path);
+        assert_eq!(app.tabs.active_path(), Some(code_path.as_str()));
+        let code = fs::read_to_string(folder.join(&code_path)).unwrap();
+        assert!(code.contains("workspace.Chime:Play()"), "{code}");
+        assert!(!folder.join(&path).exists());
+        assert!(app.project.as_ref().unwrap().block_scripts.is_empty());
+        assert!(!app.unsaved());
+
+        // Typed code with no blocks for it still switches, as grey blocks.
+        app.tabs.get_mut(&code_path).unwrap().text =
+            format!("{code}local function twice(x)
+    return x * 2
+end
+");
+        app.switch_script_mode(&code_path);
+        let document = &app.project.as_ref().unwrap().block_scripts[0];
+        assert!(
+            document
+                .script
+                .blocks
+                .iter()
+                .any(|block| matches!(block.kind, BlockKind::TopCode { .. })),
+            "{:#?}",
+            document.script
+        );
+        assert_eq!(script(&app, "Script"), id);
+
+        // Code with a mistake in it stays code.
+        app.switch_script_mode(&path);
+        app.tabs.get_mut(&code_path).unwrap().text = "if then".to_owned();
+        app.switch_script_mode(&code_path);
+        assert!(folder.join(&code_path).exists());
+        assert_eq!(app.tabs.active_path(), Some(code_path.as_str()));
         fs::remove_dir_all(folder).unwrap();
     }
 
@@ -2645,9 +2789,9 @@ mod tests {
             key: right,
             pressed,
         };
-        app.play_frame(1.0 / 60.0, &[key(true)], None);
+        app.play_frame(1.0 / 60.0, &[key(true)], None, None);
         play_for(&mut app, 0.5);
-        app.play_frame(1.0 / 60.0, &[key(false)], None);
+        app.play_frame(1.0 / 60.0, &[key(false)], None, None);
 
         let world = app.play.as_ref().unwrap().world();
         let Some(axcenity_core::Value::Vector3(moved)) =

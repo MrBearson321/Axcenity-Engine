@@ -34,8 +34,10 @@ pub struct Brand {
     /// The wordmark for light backgrounds, and for dark ones.
     wordmark: egui::TextureHandle,
     wordmark_dark: egui::TextureHandle,
-    /// The hexagon in white, to tint for the menu bar.
-    pub mark: egui::TextureHandle,
+    /// The same, made smaller for the sidebar: egui has no mipmaps, so an
+    /// image drawn at under half its size looks jagged.
+    wordmark_small: egui::TextureHandle,
+    wordmark_dark_small: egui::TextureHandle,
 }
 
 impl Brand {
@@ -51,20 +53,28 @@ impl Brand {
                 "wordmark dark",
                 include_bytes!("../../../assets/branding/wordmark-dark.png"),
             ),
-            mark: texture(
+            wordmark_small: texture(
                 ctx,
-                "mark",
-                include_bytes!("../../../assets/branding/mark-white-40.png"),
+                "wordmark small",
+                include_bytes!("../../../assets/branding/wordmark-small.png"),
+            ),
+            wordmark_dark_small: texture(
+                ctx,
+                "wordmark dark small",
+                include_bytes!("../../../assets/branding/wordmark-dark-small.png"),
             ),
         }
     }
 
-    /// The wordmark that reads well on the current theme's background.
-    pub fn wordmark(&self, visuals: &egui::Visuals) -> &egui::TextureHandle {
-        if visuals.dark_mode {
-            &self.wordmark_dark
-        } else {
-            &self.wordmark
+    /// The wordmark that reads well on the current theme's background, in
+    /// the size nearest twice `width` (in points), so it stays sharp.
+    pub fn wordmark(&self, visuals: &egui::Visuals, width: f32) -> &egui::TextureHandle {
+        let small = width * 2.0 <= self.wordmark_small.size_vec2().x * 1.25;
+        match (visuals.dark_mode, small) {
+            (true, true) => &self.wordmark_dark_small,
+            (true, false) => &self.wordmark_dark,
+            (false, true) => &self.wordmark_small,
+            (false, false) => &self.wordmark,
         }
     }
 }
@@ -165,6 +175,11 @@ enum Dialog {
         link: ProjectLink,
         error: Option<String>,
     },
+    History {
+        folder: PathBuf,
+        error: Option<String>,
+        notice: Option<String>,
+    },
 }
 
 /// What a project card's buttons asked for.
@@ -172,6 +187,7 @@ enum CardAction {
     Open,
     Settings,
     Reveal,
+    History,
     Forget,
     Delete,
 }
@@ -473,6 +489,13 @@ impl StartScreen {
             match picked {
                 CardAction::Open => action = Some(StartAction::Open(link.folder)),
                 CardAction::Settings => self.open_settings(link),
+                CardAction::History => {
+                    self.dialog = Some(Dialog::History {
+                        folder: link.folder,
+                        error: None,
+                        notice: None,
+                    });
+                }
                 CardAction::Reveal => {
                     if let Err(err) = reveal(&link.folder) {
                         self.notice = Some(format!(
@@ -510,6 +533,7 @@ impl StartScreen {
         let mut created = None;
         let mut deleted = None;
         let mut picked_parent = None;
+        let mut restored = None;
         let modal = egui::Modal::new(egui::Id::new("start dialog")).show(ctx, |ui| {
             ui.set_width(380.0);
             match dialog {
@@ -702,6 +726,62 @@ impl StartScreen {
                         }
                     });
                 }
+                Dialog::History {
+                    folder,
+                    error,
+                    notice,
+                } => {
+                    ui.set_width(440.0);
+                    ui.heading("Version History");
+                    ui.add_space(4.0);
+                    ui.weak(
+                        "Each save keeps the world, scripts and styles. Restoring puts that \
+                         version back. Assets and the project name stay as they are.",
+                    );
+                    ui.weak(folder.display().to_string());
+                    ui.add_space(6.0);
+                    let versions = axcenity_project::list_versions(folder);
+                    if versions.is_empty() {
+                        ui.weak("No versions yet. Open the project and save it to keep one.");
+                    }
+                    egui::ScrollArea::vertical()
+                        .max_height(280.0)
+                        .show(ui, |ui| {
+                            for version in &versions {
+                                ui.horizontal(|ui| {
+                                    ui.vertical(|ui| {
+                                        ui.label(version.label.as_str());
+                                        ui.weak(version.when());
+                                    });
+                                    if ui.button("Restore").clicked() {
+                                        match axcenity_project::restore_version(folder, &version.id)
+                                        {
+                                            Ok(()) => {
+                                                *notice = Some(format!(
+                                                    "Restored the version from {}.",
+                                                    version.when()
+                                                ));
+                                                *error = None;
+                                                restored = Some(folder.clone());
+                                            }
+                                            Err(err) => *error = Some(err.to_string()),
+                                        }
+                                    }
+                                });
+                                ui.separator();
+                            }
+                        });
+                    if let Some(notice) = notice {
+                        ui.colored_label(theme::PLAY_GREEN, notice.as_str());
+                    }
+                    if let Some(error) = error {
+                        ui.colored_label(theme::STOP_RED, error.as_str());
+                    }
+                    ui.add_space(8.0);
+                    if ui.button("Close").clicked() {
+                        close = true;
+                    }
+                }
             }
         });
         if let Some(parent) = picked_parent {
@@ -710,6 +790,9 @@ impl StartScreen {
         if let Some(folder) = deleted {
             self.thumbnails.remove(&folder);
             projects.retain(|link| link.folder != folder);
+        }
+        if let Some(folder) = restored {
+            self.edited.remove(&folder);
         }
         if close || modal.should_close() {
             self.dialog = None;
@@ -832,45 +915,62 @@ fn hero(ui: &mut egui::Ui, first_time: bool) -> Option<HeroAction> {
     action
 }
 
-/// Fills `rect` with a gradient from `left` to `right`, with rounded corners
-/// (drawn as a rounded mask over the gradient's corners).
-fn gradient(painter: &egui::Painter, rect: Rect, left: Color32, right: Color32, radius: u8) {
-    let mut mesh = egui::Mesh::default();
-    for (pos, color) in [
-        (rect.left_top(), left),
-        (rect.right_top(), right),
-        (rect.right_bottom(), right),
-        (rect.left_bottom(), left),
+/// Fills `rect` with a gradient from `left` to `right`, with rounded
+/// corners and smooth edges: a mesh in the rounded shape whose rim fades out
+/// over one pixel, so it looks right on any background.
+fn gradient(
+    painter: &egui::Painter,
+    rect: Rect,
+    left: Color32,
+    right: Color32,
+    radius: impl Into<CornerRadius>,
+) {
+    use std::f32::consts::{FRAC_PI_2, PI};
+    let radius: CornerRadius = radius.into();
+    let feather = 1.0 / painter.ctx().pixels_per_point();
+    let color_at = |x: f32| {
+        let t = ((x - rect.left()) / rect.width().max(1.0)).clamp(0.0, 1.0);
+        left.lerp_to_gamma(right, t)
+    };
+    // The outline, clockwise, with the way out from each point.
+    let mut outline: Vec<(Pos2, egui::Vec2)> = Vec::new();
+    let largest = rect.width().min(rect.height()) / 2.0;
+    for (corner, inward, r, start) in [
+        (rect.left_top(), vec2(1.0, 1.0), radius.nw, PI),
+        (rect.right_top(), vec2(-1.0, 1.0), radius.ne, PI + FRAC_PI_2),
+        (rect.right_bottom(), vec2(-1.0, -1.0), radius.se, 0.0),
+        (rect.left_bottom(), vec2(1.0, -1.0), radius.sw, FRAC_PI_2),
     ] {
-        mesh.colored_vertex(pos, color);
-    }
-    mesh.add_triangle(0, 1, 2);
-    mesh.add_triangle(0, 2, 3);
-    painter.add(mesh);
-    // The corners, cut away to the background.
-    let background = painter.ctx().style().visuals.panel_fill;
-    let r = f32::from(radius);
-    for (corner, inward) in [
-        (rect.left_top(), vec2(1.0, 1.0)),
-        (rect.right_top(), vec2(-1.0, 1.0)),
-        (rect.right_bottom(), vec2(-1.0, -1.0)),
-        (rect.left_bottom(), vec2(1.0, -1.0)),
-    ] {
+        let r = f32::from(r).min(largest);
+        if r <= 0.0 {
+            outline.push((corner, -inward.normalized()));
+            continue;
+        }
         let center = corner + inward * r;
-        let mut points = vec![corner];
-        for step in 0..=8 {
-            let t = step as f32 / 8.0 * std::f32::consts::FRAC_PI_2;
-            points.push(center - vec2(inward.x * t.cos(), inward.y * t.sin()) * r);
-        }
-        // Only the outer sliver: each fan triangle is convex.
-        for pair in points[1..].windows(2) {
-            painter.add(egui::Shape::convex_polygon(
-                vec![corner, pair[0], pair[1]],
-                background,
-                Stroke::NONE,
-            ));
+        let steps = (r * 0.75).ceil().clamp(4.0, 24.0) as usize;
+        for step in 0..=steps {
+            let angle = start + step as f32 / steps as f32 * FRAC_PI_2;
+            let out = vec2(angle.cos(), angle.sin());
+            outline.push((center + out * r, out));
         }
     }
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(rect.center(), color_at(rect.center().x));
+    for &(point, out) in &outline {
+        let inner = point - out * feather * 0.5;
+        mesh.colored_vertex(inner, color_at(inner.x));
+        mesh.colored_vertex(point + out * feather * 0.5, Color32::TRANSPARENT);
+    }
+    let count = outline.len() as u32;
+    for i in 0..count {
+        let j = (i + 1) % count;
+        let (inner_i, outer_i) = (1 + 2 * i, 2 + 2 * i);
+        let (inner_j, outer_j) = (1 + 2 * j, 2 + 2 * j);
+        mesh.add_triangle(0, inner_i, inner_j);
+        mesh.add_triangle(inner_i, outer_i, outer_j);
+        mesh.add_triangle(inner_i, outer_j, inner_j);
+    }
+    painter.add(mesh);
 }
 
 /// A heading for a part of the page, with `controls` at the right.
@@ -925,11 +1025,12 @@ fn nav_item(
     } else {
         visuals.text_color()
     };
+    // Drawn from its middle, so it grows and shrinks in place.
     ui.painter().text(
-        rect.left_center() + vec2(14.0, 0.0),
-        egui::Align2::LEFT_CENTER,
+        rect.left_center() + vec2(22.5, 0.0),
+        egui::Align2::CENTER_CENTER,
         icon,
-        FontId::proportional(17.0),
+        FontId::proportional(17.0 * theme::icon_scale(ui, &response)),
         color,
     );
     ui.painter().text(
@@ -987,7 +1088,7 @@ fn template_card(ui: &mut egui::Ui, template: Template) -> egui::Response {
         swatch.center(),
         egui::Align2::CENTER_CENTER,
         template_icon(template),
-        FontId::proportional(28.0),
+        FontId::proportional(28.0 * theme::icon_scale(ui, &response)),
         Color32::WHITE,
     );
     let text_left = swatch.right() + 14.0;
@@ -1084,7 +1185,7 @@ fn thumbnail_image(
             let right: Color32 =
                 egui::ecolor::Hsva::new((hue + 0.12) % 1.0, 0.65, 0.42, 1.0).into();
             let painter = ui.painter().with_clip_rect(rect);
-            gradient(&painter, rect, left, right, radius.nw);
+            gradient(&painter, rect, left, right, radius);
             let initials: String = name
                 .split_whitespace()
                 .filter_map(|word| word.chars().next())
@@ -1138,6 +1239,15 @@ fn card_menu(ui: &mut egui::Ui, rect: Rect, id: egui::Id) -> Option<CardAction> 
             .clicked()
         {
             action = Some(CardAction::Settings);
+        }
+        if ui
+            .button(theme::with_icon(
+                icons::CLOCK_COUNTER_CLOCKWISE,
+                "Version History…",
+            ))
+            .clicked()
+        {
+            action = Some(CardAction::History);
         }
         if ui
             .button(theme::with_icon(
@@ -1440,7 +1550,7 @@ fn learn_page(ui: &mut egui::Ui) {
 }
 
 fn wordmark(ui: &mut egui::Ui, brand: &Brand, width: f32) {
-    let texture = brand.wordmark(ui.visuals());
+    let texture = brand.wordmark(ui.visuals(), width);
     let size = texture.size_vec2();
     let height = width * size.y / size.x;
     ui.add(egui::Image::new(texture).fit_to_exact_size(egui::vec2(width, height)));
@@ -1514,6 +1624,21 @@ mod tests {
                 folder: PathBuf::from(format!("not-a-folder/{name}")),
             })
             .collect();
+        // One has a thumbnail: a bright picture, so its corners show.
+        let pictured = std::env::temp_dir().join(format!("axcenity-thumb-{}", std::process::id()));
+        std::fs::create_dir_all(&pictured).unwrap();
+        let mut rgb = Vec::new();
+        for y in 0..180u32 {
+            for x in 0..320u32 {
+                rgb.extend([(x * 255 / 320) as u8, (y * 255 / 180) as u8, 230]);
+            }
+        }
+        let mut png_bytes = Vec::new();
+        let mut encoder = png::Encoder::new(&mut png_bytes, 320, 180);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.write_header().unwrap().write_image_data(&rgb).unwrap();
+        std::fs::write(pictured.join(axcenity_project::THUMBNAIL_FILE), png_bytes).unwrap();
+        projects[0].folder = pictured.clone();
         let snapshots = std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from);
         for (name, page, dialog) in [
             ("start-projects", Page::Projects, false),
@@ -1552,6 +1677,7 @@ mod tests {
             }
         }
         assert_eq!(projects.len(), 3, "drawing alone changes nothing");
+        std::fs::remove_dir_all(pictured).unwrap();
     }
 
     #[test]

@@ -125,6 +125,8 @@ fn main() -> Result<()> {
         held_keys: BTreeSet::new(),
         looking: false,
         pointer: None,
+        text_focus: None,
+        ui_warnings: Vec::new(),
         ui_mouse_events: Vec::new(),
         ui_mouse_down: false,
         ui_pressed_button: None,
@@ -246,6 +248,11 @@ struct App {
     looking: bool,
     /// The mouse position in physical pixels, for on-screen UI.
     pointer: Option<[f32; 2]>,
+    /// A TextBox the player is typing in. Keys go to it instead of the game.
+    text_focus: Option<InstanceId>,
+    /// UI layout warnings already printed, so a PageLayout problem is not
+    /// repeated every frame.
+    ui_warnings: Vec<String>,
     /// Left-button transitions since the last frame.
     ui_mouse_events: Vec<bool>,
     ui_mouse_down: bool,
@@ -261,39 +268,111 @@ impl App {
         event_loop.exit();
     }
 
-    fn process_ui_mouse_events(
-        world: &mut World,
-        stylesheets: &[axcenity_ui::Stylesheet],
-        scripts: &mut ScriptRuntime,
-        (pointer, size): (Option<[f32; 2]>, (u32, u32)),
-        mouse_events: &mut Vec<bool>,
-        mouse_down: &mut bool,
-        pressed_button: &mut Option<InstanceId>,
-    ) {
-        let events = std::mem::take(mouse_events);
+    fn process_ui_mouse_events(&mut self, size: (u32, u32)) {
+        let camera = self.camera.to_render_camera();
+        let events = std::mem::take(&mut self.ui_mouse_events);
         for pressed in events {
-            if pressed == *mouse_down {
+            if pressed == self.ui_mouse_down {
                 continue;
             }
-            let hit = pointer.and_then(|[x, y]| {
-                if x < 0.0 || y < 0.0 || x >= size.0 as f32 || y >= size.1 as f32 {
-                    return None;
-                }
-                axcenity_ui::layout_ui(world, size.0, size.1, stylesheets).hit_button(x, y)
+            let layout = axcenity_ui::layout_ui_interactive(
+                &self.world,
+                size.0,
+                size.1,
+                &self.stylesheets,
+                self.pointer,
+                self.ui_pressed_button,
+                self.text_focus,
+                Some(&camera),
+            );
+            self.note_ui_warnings(&layout.warnings);
+            let in_window = self.pointer.filter(|&[x, y]| {
+                x >= 0.0 && y >= 0.0 && x < size.0 as f32 && y < size.1 as f32
             });
+            let hit = in_window.and_then(|[x, y]| layout.hit_button(x, y));
+            let text_box = in_window.and_then(|[x, y]| layout.hit_text_box(x, y));
             if pressed {
-                *pressed_button = hit;
-                *mouse_down = true;
-            } else {
-                if pressed_button.is_some() && *pressed_button == hit {
-                    let button = pressed_button.expect("checked above");
-                    scripts.activate_ui_button(world, button);
-                    print_output(scripts);
+                self.ui_pressed_button = hit;
+                self.ui_mouse_down = true;
+                match text_box {
+                    Some(id) => self.focus_text(id),
+                    None => {
+                        if let Some(id) = self.text_focus {
+                            self.blur_text(id);
+                        }
+                    }
                 }
-                *pressed_button = None;
-                *mouse_down = false;
+            } else {
+                if self.ui_pressed_button.is_some() && self.ui_pressed_button == hit {
+                    let button = self.ui_pressed_button.expect("checked above");
+                    self.scripts.activate_ui_button(&mut self.world, button);
+                    print_output(&mut self.scripts);
+                }
+                self.ui_pressed_button = None;
+                self.ui_mouse_down = false;
             }
         }
+    }
+
+    fn focus_text(&mut self, id: InstanceId) {
+        if self.text_focus == Some(id) {
+            return;
+        }
+        if let Some(previous) = self.text_focus.take() {
+            self.scripts.release_text_box(&mut self.world, previous);
+            print_output(&mut self.scripts);
+        }
+        self.text_focus = Some(id);
+        self.keys = MoveKeys::default();
+        for key in std::mem::take(&mut self.held_keys) {
+            self.key_events.push(KeyEvent { key, pressed: false });
+        }
+    }
+
+    fn blur_text(&mut self, id: InstanceId) {
+        self.text_focus = None;
+        self.scripts.release_text_box(&mut self.world, id);
+        print_output(&mut self.scripts);
+    }
+
+    fn type_text(&mut self, event: &winit::event::KeyEvent) {
+        if event.state != ElementState::Pressed {
+            return;
+        }
+        let Some(id) = self.text_focus else {
+            return;
+        };
+        let PhysicalKey::Code(code) = event.physical_key else {
+            return;
+        };
+        if code == KeyCode::Escape {
+            self.blur_text(id);
+            return;
+        }
+        let command = match code {
+            KeyCode::Enter | KeyCode::NumpadEnter => Some(axcenity_ui::TextCommand::Submit),
+            KeyCode::Backspace => Some(axcenity_ui::TextCommand::Backspace),
+            _ => event
+                .text
+                .as_ref()
+                .map(|text| axcenity_ui::TextCommand::Insert(text.to_string())),
+        };
+        let Some(command) = command else {
+            return;
+        };
+        if axcenity_ui::edit_text_box(&mut self.world, id, command) == axcenity_ui::TextOutcome::Finished
+        {
+            self.blur_text(id);
+        }
+    }
+
+    fn note_ui_warnings(&mut self, warnings: &[String]) {
+        for warning in warnings {
+            if !self.ui_warnings.iter().any(|seen| seen == warning) {
+                log::warn!("{warning}");
+            }
+        }
+        self.ui_warnings = warnings.to_vec();
     }
 }
 
@@ -446,18 +525,24 @@ impl ApplicationHandler for App {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
-        let (Some(window), Some(renderer)) = (&self.window, &mut self.renderer) else {
+        if self.window.is_none() || self.renderer.is_none() {
             return;
-        };
+        }
 
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
-            WindowEvent::Resized(size) => renderer.resize(size.width, size.height),
+            WindowEvent::Resized(size) => {
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.resize(size.width, size.height);
+                }
+            }
             WindowEvent::CursorMoved { position, .. } => {
                 self.pointer = Some([position.x as f32, position.y as f32]);
             }
             WindowEvent::KeyboardInput { event, .. } => {
-                if let PhysicalKey::Code(key) = event.physical_key {
+                if self.text_focus.is_some() {
+                    self.type_text(&event);
+                } else if let PhysicalKey::Code(key) = event.physical_key {
                     let pressed = event.state == ElementState::Pressed;
                     set_move_key(&mut self.keys, key, pressed);
                     if let Some(key) = script_key(key) {
@@ -481,7 +566,9 @@ impl ApplicationHandler for App {
                 ..
             } => {
                 self.looking = state == ElementState::Pressed;
-                capture_mouse(window, self.looking);
+                if let Some(window) = &self.window {
+                    capture_mouse(window, self.looking);
+                }
             }
             // Key releases aren't reported while another window has focus,
             // so let go of everything to avoid the camera drifting on its own.
@@ -494,22 +581,20 @@ impl ApplicationHandler for App {
                     });
                 }
                 self.looking = false;
-                capture_mouse(window, false);
+                if let Some(window) = &self.window {
+                    capture_mouse(window, false);
+                }
                 self.ui_mouse_events.push(false);
             }
             // One frame, in the fixed order from docs/architecture.md.
             WindowEvent::RedrawRequested => {
                 let seconds = frame_seconds(&mut self.last_frame);
-                let size = window.inner_size();
-                Self::process_ui_mouse_events(
-                    &mut self.world,
-                    &self.stylesheets,
-                    &mut self.scripts,
-                    (self.pointer, (size.width, size.height)),
-                    &mut self.ui_mouse_events,
-                    &mut self.ui_mouse_down,
-                    &mut self.ui_pressed_button,
-                );
+                let size = self
+                    .window
+                    .as_ref()
+                    .expect("checked at the start of the event")
+                    .inner_size();
+                self.process_ui_mouse_events((size.width, size.height));
 
                 // 1. Input: the events above have already updated the keys
                 //    and mouse look, so move the camera. Then LocalScripts
@@ -554,16 +639,18 @@ impl ApplicationHandler for App {
                     self.camera.set_view(view.position, view.orientation);
                 }
 
-                let mut draw_list = axcenity_scene::build_draw_list_with_ui_interaction(
-                    &self.world,
-                    &self.assets,
-                    self.camera.to_render_camera(),
-                    ui_size,
-                    &self.stylesheets,
-                    self.pointer,
-                    self.ui_pressed_button,
-                )
-                .0;
+                let (mut draw_list, ui_layout) =
+                    axcenity_scene::build_draw_list_with_ui_interaction(
+                        &self.world,
+                        &self.assets,
+                        self.camera.to_render_camera(),
+                        ui_size,
+                        &self.stylesheets,
+                        self.pointer,
+                        self.ui_pressed_button,
+                        self.text_focus,
+                    );
+                self.note_ui_warnings(&ui_layout.warnings);
                 if self.show_splash && self.started_at.elapsed().as_secs_f32() < 2.5 {
                     draw_list
                         .ui
@@ -571,6 +658,7 @@ impl ApplicationHandler for App {
                             position: [0.0, 0.0],
                             size: [size.width as f32, size.height as f32],
                             color: [0.025, 0.035, 0.055, 0.9],
+                            color_end: [0.025, 0.035, 0.055, 0.9],
                             border_color: [0.0; 4],
                             border_width: 0.0,
                             border_radius: 0.0,
@@ -582,6 +670,8 @@ impl ApplicationHandler for App {
                         font_size: 28.0,
                         font_family: "Montserrat".to_owned(),
                         color: [0.95, 0.97, 1.0, 1.0],
+                        align: axcenity_render::TextAlign::Center,
+                        center_vertically: true,
                     }));
                 }
                 // Models that couldn't be loaded, by physics or for drawing.
@@ -589,7 +679,16 @@ impl ApplicationHandler for App {
                     eprintln!("error: {error}");
                 }
                 // `|| ...` is a closure: a small function the renderer calls at the right moment.
-                if let Err(err) = renderer.render(&draw_list, || window.pre_present_notify()) {
+                let window = self
+                    .window
+                    .as_ref()
+                    .expect("checked at the start of the event")
+                    .clone();
+                let rendered = self.renderer.as_mut().expect("checked").render(
+                    &draw_list,
+                    || window.pre_present_notify(),
+                );
+                if let Err(err) = rendered {
                     self.fail(event_loop, err);
                 }
             }
@@ -752,6 +851,116 @@ mod tests {
         let storage = world.replicated_storage();
         assert!(world.find_first_child(storage, "Palette").is_some());
         assert!(world.find_first_child(storage, "Builder").is_some());
+    }
+
+    /// Every example renders (shadows, lights, sky and post-processing came
+    /// after most of them, and mustn't break them): a second after its
+    /// scripts start, the frame isn't one flat color, and the middle isn't
+    /// blown out to white. With `AXCENITY_SNAPSHOTS` naming a folder, each is
+    /// saved there as `example-<name>.png` to look at. Skipped on machines
+    /// without a GPU.
+    #[test]
+    fn every_example_renders() {
+        use axcenity_render::{TextureRenderer, wgpu};
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
+            return;
+        };
+        let Ok((device, queue)) = pollster::block_on(adapter.request_device(&Default::default()))
+        else {
+            return;
+        };
+        let snapshots = std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from);
+        let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+        let mut names: Vec<String> = fs::read_dir(&examples)
+            .unwrap()
+            .flatten()
+            .filter(|entry| entry.path().join("axcenity.json").exists())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert!(names.len() >= 10, "{names:?}");
+        let (width, height) = (480, 270);
+        for name in names {
+            let folder = examples.join(&name);
+            let project = axcenity_project::load(&folder).unwrap();
+            let stylesheets: Vec<_> = project
+                .stylesheets
+                .iter()
+                .map(|file| axcenity_ui::parse_stylesheet(&file.path, &file.source).0)
+                .collect();
+            let (mut world, mut scripts) = start_example(&name);
+            let (mut physics, mut clock) = (Physics::new(), 0);
+            run_until(&mut world, &mut scripts, &mut physics, &mut clock, 1.0);
+            let mut camera = FlyCamera::looking_at(START_CAMERA_POSITION, Vec3::ZERO);
+            if let Some(view) = scripts.take_camera_move() {
+                camera.set_view(view.position, view.orientation);
+            }
+            let assets = Assets::new(&folder);
+            // Models load the first time they're drawn, so draw twice.
+            let mut renderer = TextureRenderer::new(&device, &queue, width, height);
+            for _ in 0..2 {
+                let draw_list = axcenity_scene::build_draw_list_with_ui(
+                    &world,
+                    &assets,
+                    camera.to_render_camera(),
+                    (width, height),
+                    &stylesheets,
+                );
+                renderer.render(&draw_list).unwrap();
+            }
+            let errors = assets.take_errors();
+            assert!(errors.is_empty(), "{name}: {errors:?}");
+            let pixels = renderer.read_pixels();
+            if let Some(folder) = &snapshots {
+                let file = fs::File::create(folder.join(format!("example-{name}.png"))).unwrap();
+                let mut encoder = png::Encoder::new(file, width, height);
+                encoder.set_color(png::ColorType::Rgba);
+                encoder.set_depth(png::BitDepth::Eight);
+                encoder
+                    .write_header()
+                    .unwrap()
+                    .write_image_data(&pixels)
+                    .unwrap();
+            }
+            // An example can have a reference screenshot of its top-left
+            // corner (where hello-css's HUD is), which it must still match.
+            if let Ok(file) = fs::File::open(folder.join("reference.png")) {
+                let mut reader = png::Decoder::new(std::io::BufReader::new(file))
+                    .read_info()
+                    .unwrap();
+                let mut reference = vec![0; reader.output_buffer_size().unwrap()];
+                let info = reader.next_frame(&mut reference).unwrap();
+                let channels = info.color_type.samples();
+                let mut difference = 0u64;
+                for y in 0..info.height {
+                    for x in 0..info.width {
+                        let ours = ((y * width + x) * 4) as usize;
+                        let theirs = ((y * info.width + x) as usize) * channels;
+                        for channel in 0..3 {
+                            difference += u64::from(
+                                pixels[ours + channel].abs_diff(reference[theirs + channel]),
+                            );
+                        }
+                    }
+                }
+                let average = difference as f64 / f64::from(info.width * info.height * 3);
+                assert!(
+                    average < 6.0,
+                    "{name} differs from reference.png by {average:.1} per channel on average"
+                );
+            }
+            let colors: BTreeSet<[u8; 3]> = pixels
+                .chunks(4)
+                .map(|pixel| [pixel[0] / 16, pixel[1] / 16, pixel[2] / 16])
+                .collect();
+            assert!(colors.len() > 8, "{name} renders almost one color");
+            let center = ((height / 2 * width + width / 2) * 4) as usize;
+            assert!(
+                pixels[center..center + 3].iter().any(|&channel| channel < 250),
+                "{name} is white in the middle"
+            );
+        }
     }
 
     /// The example project in `examples/<name>`, with its scripts started.

@@ -89,6 +89,9 @@ enum Category {
     Variables,
     Sensing,
     More,
+    /// Grey blocks of Lua that have no blocks, from a script switched from
+    /// Code. Not in the palette.
+    Lua,
 }
 
 impl Category {
@@ -115,6 +118,7 @@ impl Category {
             Category::Variables => "Variables",
             Category::Sensing => "Sensing",
             Category::More => "More",
+            Category::Lua => "Lua",
         }
     }
 
@@ -130,6 +134,7 @@ impl Category {
             Category::Variables => Color32::from_rgb(255, 140, 26),
             Category::Sensing => Color32::from_rgb(92, 177, 214),
             Category::More => Color32::from_rgb(255, 102, 128),
+            Category::Lua => Color32::from_rgb(108, 117, 138),
         }
     }
 
@@ -145,6 +150,7 @@ impl Category {
             Category::Variables => Color32::from_rgb(219, 110, 0),
             Category::Sensing => Color32::from_rgb(46, 142, 184),
             Category::More => Color32::from_rgb(255, 51, 85),
+            Category::Lua => Color32::from_rgb(78, 86, 105),
         }
     }
 }
@@ -175,6 +181,7 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::SetText { .. }
         | BlockKind::Show { .. }
         | BlockKind::Hide { .. }
+        | BlockKind::ShowPage { .. }
         | BlockKind::SetProperty { .. } => Category::Looks,
         BlockKind::PlaySound { .. }
         | BlockKind::StopSound { .. }
@@ -183,6 +190,7 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::SetVolume { .. } => Category::Sound,
         BlockKind::SetVariable { .. } | BlockKind::ChangeVariable { .. } => Category::Variables,
         BlockKind::Print { .. } | BlockKind::Destroy { .. } => Category::More,
+        BlockKind::Code { .. } | BlockKind::TopCode { .. } => Category::Lua,
     }
 }
 
@@ -192,6 +200,7 @@ fn reporter_category(expression: &Expression) -> Category {
         Expression::Property { .. } | Expression::TouchingPart | Expression::KeyDown { .. } => {
             Category::Sensing
         }
+        Expression::Code { .. } => Category::Lua,
         _ => Category::Operators,
     }
 }
@@ -203,6 +212,7 @@ enum Filter {
     Sounds,
     Buttons,
     Texts,
+    PageLayouts,
     Gui,
     Any,
 }
@@ -213,7 +223,13 @@ impl Filter {
             Filter::Parts => matches!(class, ClassName::Part | ClassName::MeshPart),
             Filter::Sounds => class == ClassName::Sound,
             Filter::Buttons => class == ClassName::TextButton,
-            Filter::Texts => matches!(class, ClassName::TextLabel | ClassName::TextButton),
+            Filter::Texts => {
+                matches!(
+                    class,
+                    ClassName::TextLabel | ClassName::TextButton | ClassName::TextBox
+                )
+            }
+            Filter::PageLayouts => class == ClassName::PageLayout,
             Filter::Gui => matches!(
                 class,
                 ClassName::ScreenGui
@@ -221,6 +237,9 @@ impl Filter {
                     | ClassName::TextLabel
                     | ClassName::TextButton
                     | ClassName::ImageLabel
+                    | ClassName::TextBox
+                    | ClassName::PageLayout
+                    | ClassName::Table
             ),
             Filter::Any => true,
         }
@@ -233,6 +252,7 @@ impl Filter {
             Filter::Sounds => "Sound",
             Filter::Buttons => "TextButton",
             Filter::Texts => "TextLabel",
+            Filter::PageLayouts => "PageLayout",
             Filter::Gui => "Frame",
         }
     }
@@ -300,6 +320,8 @@ enum Part<'a> {
     Compare(&'a mut Comparison),
     Logic(&'a mut LogicOp),
     Function(&'a mut MathFunction),
+    /// Lua kept word for word, in a grey block. Switch to Code to change it.
+    Code(String),
 }
 
 /// A row of a block, or the mouth of a C-shaped block (if, repeat, ...)
@@ -307,6 +329,25 @@ enum Part<'a> {
 enum Section<'a> {
     Row(Vec<Part<'a>>),
     Mouth(&'a mut Vec<Block>),
+}
+
+/// The most lines of Lua a grey block shows.
+const CODE_LINES: usize = 14;
+
+/// The Lua a grey block shows: long code is cut short.
+fn shown_code(code: &str) -> String {
+    let lines: Vec<&str> = code.lines().collect();
+    if lines.len() <= CODE_LINES {
+        return code.to_owned();
+    }
+    let mut shown = lines[..CODE_LINES - 1].join("
+");
+    shown.push_str(&format!(
+        "
+-- … {} more lines (switch to Code to see them)",
+        lines.len() - (CODE_LINES - 1)
+    ));
+    shown
 }
 
 fn label(text: &str) -> Part<'static> {
@@ -446,6 +487,12 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
         ])],
         BlockKind::Show { target } => vec![Row(vec![label("show"), Object(target, Filter::Gui)])],
         BlockKind::Hide { target } => vec![Row(vec![label("hide"), Object(target, Filter::Gui)])],
+        BlockKind::ShowPage { layout, page } => vec![Row(vec![
+            label("show page"),
+            Slot(page, SlotKind::Text),
+            label("of"),
+            Object(layout, Filter::PageLayouts),
+        ])],
         BlockKind::SetProperty {
             target,
             property,
@@ -507,6 +554,9 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
         BlockKind::Destroy { target } => {
             vec![Row(vec![label("destroy"), Object(target, Filter::Any)])]
         }
+        BlockKind::Code { code } | BlockKind::TopCode { code } => {
+            vec![Row(vec![label("Lua"), Part::Code(shown_code(code))])]
+        }
     }
 }
 
@@ -558,6 +608,7 @@ fn reporter_parts<'a>(expression: &'a mut Expression, objects: &[ObjectInfo]) ->
         }
         Expression::TouchingPart => vec![label("touching part")],
         Expression::KeyDown { key } => vec![label("key"), Key(key), label("pressed?")],
+        Expression::Code { code } => vec![Part::Code(shown_code(code))],
         // Values typed in aren't reporters, and are drawn as inputs.
         Expression::Number { .. }
         | Expression::Text { .. }
@@ -743,6 +794,16 @@ impl<'a> BlockPainter<'a> {
         FontId::proportional(FONT_SIZE * self.z)
     }
 
+    fn code_galley(&self, ui: &egui::Ui, code: &str) -> std::sync::Arc<egui::Galley> {
+        ui.fonts(|fonts| {
+            fonts.layout_no_wrap(
+                code.to_owned(),
+                FontId::monospace(FONT_SIZE * self.z * 0.95),
+                Color32::WHITE,
+            )
+        })
+    }
+
     fn text_width(&self, ui: &egui::Ui, text: &str) -> f32 {
         ui.fonts(|fonts| {
             fonts
@@ -809,6 +870,7 @@ impl<'a> BlockPainter<'a> {
             Part::Compare(op) => self.dropdown_size(ui, op.symbol()),
             Part::Logic(op) => self.dropdown_size(ui, op.lua()),
             Part::Function(function) => self.dropdown_size(ui, function.name()),
+            Part::Code(code) => self.code_galley(ui, code).size() + vec2(self.s(12.0), self.s(8.0)),
         }
     }
 
@@ -889,7 +951,9 @@ impl<'a> BlockPainter<'a> {
         }
         let drawn = self.hat(ui, block, at);
         let body_top = pos2(at.x, at.y + drawn.height);
-        if self.interactive {
+        // Top-level Lua has nothing under it.
+        let has_body = !block.kind.bodies().is_empty();
+        if self.interactive && has_body {
             self.stack_spots.push((
                 body_top,
                 StackSpot::Mouth {
@@ -917,6 +981,7 @@ impl<'a> BlockPainter<'a> {
         let id = self.id.with(block.id);
         let block_id = block.id;
         let highlighted = self.highlighted == Some(block_id);
+        let has_body = !block.kind.bodies().is_empty();
         let mut sections = sections(&mut block.kind, self.objects);
         let Some(Section::Row(parts)) = sections.first_mut() else {
             return Drawn {
@@ -966,11 +1031,13 @@ impl<'a> BlockPainter<'a> {
         ));
         fill_shapes.push(Shape::closed_line(outline, self.outline(edge, highlighted)));
         self.painter.set(background, Shape::Vec(fill_shapes));
-        self.tabs.push(Tab {
-            at: pos2(at.x, row.bottom()),
-            fill,
-            edge,
-        });
+        if has_body {
+            self.tabs.push(Tab {
+                at: pos2(at.x, row.bottom()),
+                fill,
+                edge,
+            });
+        }
 
         let grabbed = self.grab(&response, at, block_id);
         Drawn {
@@ -1317,6 +1384,19 @@ impl<'a> BlockPainter<'a> {
                             }
                         });
                     }
+                }
+                Part::Code(code) => {
+                    let galley = self.code_galley(ui, code);
+                    self.painter.rect_filled(
+                        rect,
+                        self.s(4.0),
+                        Color32::from_rgba_unmultiplied(0, 0, 0, 60),
+                    );
+                    self.painter.galley(
+                        rect.min + vec2(self.s(6.0), self.s(4.0)),
+                        galley,
+                        Color32::WHITE,
+                    );
                 }
                 Part::Function(function) => {
                     if let Some(response) = self.dropdown(ui, rect, part_id, function.name()) {
@@ -2012,6 +2092,10 @@ fn palette(
             B(BlockKind::Hide {
                 target: first(Filter::Gui),
             }),
+            B(BlockKind::ShowPage {
+                layout: first(Filter::PageLayouts),
+                page: text("Home"),
+            }),
             B(BlockKind::SetProperty {
                 target: part.clone(),
                 property: "Size".to_owned(),
@@ -2121,6 +2205,8 @@ fn palette(
                 target: first(Filter::Parts),
             }),
         ],
+        // Grey blocks only come from code, so there are none to drag out.
+        Category::Lua => Vec::new(),
     };
     // Keyboard and button blocks only work on the player's side.
     if !client {
@@ -3087,6 +3173,32 @@ mod tests {
                 body: vec![Block::new(BlockKind::Wait {
                     seconds: Expression::Number { value: 2.5 },
                 })],
+            })
+        });
+        // Lua with no blocks, from a script switched from Code.
+        blocks.push(Block {
+            position: Some([800.0, 20.0]),
+            ..Block::new(BlockKind::TopCode {
+                code: "local function double(x)
+    return x * 2
+end".to_owned(),
+            })
+        });
+        blocks.push(Block {
+            position: Some([800.0, 180.0]),
+            ..Block::new(BlockKind::WhenStarted {
+                body: vec![
+                    Block::new(BlockKind::Code {
+                        code: "for i = 1, 3 do
+    print(i)
+end".to_owned(),
+                    }),
+                    Block::new(BlockKind::Print {
+                        value: Expression::Code {
+                            code: "double(4)".to_owned(),
+                        },
+                    }),
+                ],
             })
         });
         BlockScript { blocks }

@@ -196,6 +196,86 @@ pub fn part_box_edges(world: &World, id: InstanceId) -> Option<[(Vec3, Vec3); 12
     Some(edges)
 }
 
+/// How many points along each edge [`visible_box_edges`] checks.
+const EDGE_SAMPLES: usize = 16;
+
+/// The parts of the box around a Part that can be seen from `eye`, as
+/// lines in world space, for a Studio-like selection box: only the edges
+/// of the box's sides that face the camera, and only where no other part is
+/// in front of them. From inside the box, every edge counts as facing.
+/// `None` if `id` isn't a Part.
+pub fn visible_box_edges(world: &World, id: InstanceId, eye: Vec3) -> Option<Vec<(Vec3, Vec3)>> {
+    let (_, transform) = part_placement(world.get(id)?)?;
+    let center = transform.w_axis.truncate();
+    let axes = [
+        transform.x_axis.truncate(),
+        transform.y_axis.truncate(),
+        transform.z_axis.truncate(),
+    ];
+    // Whether the side of the box at `sign` (±1) along axis `axis` faces the eye.
+    let faces = |axis: usize, sign: f32| {
+        let side_center = center + axes[axis] * 0.5 * sign;
+        (eye - side_center).dot(axes[axis] * sign) > 0.0
+    };
+    let inside = (0..3).all(|axis| !faces(axis, 1.0) && !faces(axis, -1.0));
+    let corner = |i: usize| {
+        let side = |bit: usize| if i & (1 << bit) == 0 { -0.5 } else { 0.5 };
+        center + axes[0] * side(0) + axes[1] * side(1) + axes[2] * side(2)
+    };
+    let mut lines = Vec::new();
+    for i in 0..8 {
+        for along in 0..3 {
+            if i & (1 << along) != 0 {
+                continue;
+            }
+            // The two sides that meet at this edge.
+            let seen = inside
+                || (0..3).filter(|&axis| axis != along).any(|axis| {
+                    let sign = if i & (1 << axis) == 0 { -1.0 } else { 1.0 };
+                    faces(axis, sign)
+                });
+            if !seen {
+                continue;
+            }
+            let (a, b) = (corner(i), corner(i | (1 << along)));
+            // Split into the runs no other part hides.
+            let hidden = |t: f32| {
+                let point = a.lerp(b, t);
+                let offset = point - eye;
+                let distance = offset.length();
+                if distance < 1e-4 {
+                    return false;
+                }
+                let ray = Ray {
+                    origin: eye,
+                    direction: offset / distance,
+                };
+                pick_hit(world, ray, Some(id))
+                    .is_some_and(|hit| hit.distance < distance - (0.05_f32).max(distance * 0.002))
+            };
+            let mut run_start: Option<f32> = None;
+            for step in 0..=EDGE_SAMPLES {
+                let t = step as f32 / EDGE_SAMPLES as f32;
+                match (hidden(t), run_start) {
+                    (false, None) => run_start = Some(t),
+                    (true, Some(start)) => {
+                        let end = t - 0.5 / EDGE_SAMPLES as f32;
+                        if end > start {
+                            lines.push((a.lerp(b, start), a.lerp(b, end)));
+                        }
+                        run_start = None;
+                    }
+                    _ => {}
+                }
+            }
+            if let Some(start) = run_start {
+                lines.push((a.lerp(b, start), b));
+            }
+        }
+    }
+    Some(lines)
+}
+
 /// The stretch of a ray inside a solid: the distances where it goes in and
 /// comes out. Either can be negative (behind the ray's start) or infinite.
 #[derive(Clone, Copy, Debug)]
@@ -678,5 +758,27 @@ mod tests {
             }
         }
         assert_eq!(part_box_edges(&world, world.workspace()), None);
+    }
+
+    #[test]
+    fn only_the_box_edges_facing_the_camera_and_not_hidden_show() {
+        let mut world = World::new();
+        let id = part(&mut world, PartType::Block, Vec3::ZERO, Vec3::splat(2.0));
+        // From a corner: three sides face the camera, which share 9 edges.
+        let eye = Vec3::new(10.0, 10.0, 10.0);
+        let lines = visible_box_edges(&world, id, eye).unwrap();
+        assert_eq!(lines.len(), 9, "{lines:?}");
+        // Straight on, only the front side's 4 edges show.
+        let lines = visible_box_edges(&world, id, Vec3::new(0.0, 0.0, 10.0)).unwrap();
+        assert_eq!(lines.len(), 4, "{lines:?}");
+        // A wall between it and the camera hides it all.
+        part(
+            &mut world,
+            PartType::Block,
+            Vec3::new(0.0, 0.0, 5.0),
+            Vec3::new(20.0, 20.0, 1.0),
+        );
+        let lines = visible_box_edges(&world, id, Vec3::new(0.0, 0.0, 10.0)).unwrap();
+        assert!(lines.is_empty(), "{lines:?}");
     }
 }

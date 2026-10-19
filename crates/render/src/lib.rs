@@ -11,9 +11,9 @@ mod mesh;
 mod renderer;
 
 pub use draw_list::{
-    AmbientLight, Camera, Channel, ChannelMap, Cone, DrawItem, DrawList, Light, Material,
+    AmbientLight, Camera, Channel, ChannelMap, Cone, DrawItem, DrawList, Light, Material, UiImage,
     MeshSource, NormalMap, PostProcessing, Shadows, Shape, Sky, Sun, TextureMaps, TextureSource,
-    UiDrawItem, UiRectangle, UiText,
+    TextAlign, UiDrawItem, UiRectangle, UiText,
 };
 pub use renderer::{Renderer, TextureRenderer};
 

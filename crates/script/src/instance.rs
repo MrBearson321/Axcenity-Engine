@@ -193,6 +193,27 @@ fn set(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> mlua::Result
             };
             let new_value = value_from_lua(lua, value, kind)
                 .map_err(|message| mlua::Error::runtime(format!("{class}.{key} {message}")))?;
+            if key == "CurrentPage"
+                && class == ClassName::PageLayout
+                && let Value::String(name) = &new_value
+                && !name.is_empty()
+            {
+                let found = {
+                    let world = world(lua)?;
+                    world.get(id).is_some_and(|layout| {
+                        layout.children().iter().any(|&child| {
+                            world.get(child).is_some_and(|page| {
+                                page.class() == ClassName::Frame && page.name() == name
+                            })
+                        })
+                    })
+                };
+                if !found {
+                    return Err(mlua::Error::runtime(format!(
+                        "PageLayout has no page Frame named \"{name}\""
+                    )));
+                }
+            }
             world_mut(lua)?
                 .set_property(id, key, new_value)
                 .map_err(mlua::Error::runtime)

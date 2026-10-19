@@ -65,16 +65,24 @@ pub enum ClassName {
     TextButton,
     /// A UI element that displays an image from the project.
     ImageLabel,
+    /// A box the player can type in.
+    TextBox,
+    /// Shows one direct child Frame at a time. Those Frames are its pages.
+    PageLayout,
+    /// Lays its children out in a grid, left to right, then top to bottom.
+    Table,
+    /// UI that floats in the world, on the part it is parented to.
+    BillboardGui,
     /// Plays an audio file from the project.
     Sound,
-    /// Light that shines in every direction from the center of its parent part.
+    /// Light that shines in every direction from just above its parent part.
     PointLight,
-    /// Light that shines in a cone from the center of its parent part.
+    /// Light that shines in a cone from just above its parent part.
     SpotLight,
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 26] = [
+    pub const ALL: [ClassName; 30] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -98,6 +106,10 @@ impl ClassName {
         ClassName::TextLabel,
         ClassName::TextButton,
         ClassName::ImageLabel,
+        ClassName::TextBox,
+        ClassName::PageLayout,
+        ClassName::Table,
+        ClassName::BillboardGui,
         ClassName::Sound,
         ClassName::PointLight,
         ClassName::SpotLight,
@@ -128,6 +140,10 @@ impl ClassName {
             ClassName::TextLabel => "TextLabel",
             ClassName::TextButton => "TextButton",
             ClassName::ImageLabel => "ImageLabel",
+            ClassName::TextBox => "TextBox",
+            ClassName::PageLayout => "PageLayout",
+            ClassName::Table => "Table",
+            ClassName::BillboardGui => "BillboardGui",
             ClassName::Sound => "Sound",
             ClassName::PointLight => "PointLight",
             ClassName::SpotLight => "SpotLight",
@@ -136,6 +152,12 @@ impl ClassName {
 
     /// Looks up a class by the name used in world files and scripts.
     pub fn from_name(name: &str) -> Option<Self> {
+        // "Button" is the toolbar name of a TextButton: one object, with
+        // text, an image, or both. Saved projects keep the class name
+        // TextButton.
+        if name == "Button" {
+            return Some(ClassName::TextButton);
+        }
         Self::ALL.into_iter().find(|class| class.as_str() == name)
     }
 
@@ -224,6 +246,12 @@ impl ClassName {
                 ("Class", Value::String(String::new())),
                 ("Id", Value::String(String::new())),
                 ("Enabled", Value::Bool(true)),
+                // "Fixed" uses the viewport as it is. "Fit" lays the GUI out
+                // at DesignWidth by DesignHeight, then scales it uniformly
+                // so it stays proportional and inside any screen.
+                ("ScaleMode", Value::String("Fixed".to_owned())),
+                ("DesignWidth", Value::Number(1920.0)),
+                ("DesignHeight", Value::Number(1080.0)),
             ],
             ClassName::Frame => vec![
                 ("Class", Value::String(String::new())),
@@ -265,7 +293,69 @@ impl ClassName {
                 ("Text", Value::String("Button".to_owned())),
                 ("TextColor3", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
                 ("TextSize", Value::Number(16.0)),
+                // Empty shows no picture. A path is relative to the project.
+                ("Image", Value::String(String::new())),
+                ("ImageTransparency", Value::Number(0.0)),
                 ("Visible", Value::Bool(true)),
+            ],
+            ClassName::TextBox => vec![
+                ("Class", Value::String(String::new())),
+                ("Id", Value::String(String::new())),
+                ("Position", Value::UDim2(UDim2::default())),
+                ("Size", Value::UDim2(UDim2::new(0.0, 200.0, 0.0, 36.0))),
+                (
+                    "BackgroundColor3",
+                    Value::Color3(Color3::new(0.96, 0.96, 0.97)),
+                ),
+                ("BackgroundTransparency", Value::Number(0.0)),
+                ("Text", Value::String(String::new())),
+                ("Placeholder", Value::String("Type here".to_owned())),
+                ("TextColor3", Value::Color3(Color3::new(0.1, 0.1, 0.12))),
+                ("TextSize", Value::Number(16.0)),
+                // Off: one line, and Enter finishes typing. On: Enter starts
+                // a new line, and clicking away finishes typing.
+                ("MultiLine", Value::Bool(false)),
+                ("Visible", Value::Bool(true)),
+            ],
+            ClassName::PageLayout => vec![
+                ("Class", Value::String(String::new())),
+                ("Id", Value::String(String::new())),
+                ("Position", Value::UDim2(UDim2::default())),
+                ("Size", Value::UDim2(UDim2::new(1.0, 0.0, 1.0, 0.0))),
+                (
+                    "BackgroundColor3",
+                    Value::Color3(Color3::new(0.2, 0.2, 0.2)),
+                ),
+                ("BackgroundTransparency", Value::Number(1.0)),
+                ("Visible", Value::Bool(true)),
+                // Empty shows the first child Frame. Any other value is that
+                // Frame's name.
+                ("CurrentPage", Value::String(String::new())),
+            ],
+            ClassName::Table => vec![
+                ("Class", Value::String(String::new())),
+                ("Id", Value::String(String::new())),
+                ("Position", Value::UDim2(UDim2::default())),
+                ("Size", Value::UDim2(UDim2::new(0.0, 400.0, 0.0, 160.0))),
+                (
+                    "BackgroundColor3",
+                    Value::Color3(Color3::new(0.2, 0.2, 0.2)),
+                ),
+                ("BackgroundTransparency", Value::Number(0.0)),
+                ("Visible", Value::Bool(true)),
+                // How many cells sit in one row.
+                ("Columns", Value::Number(2.0)),
+            ],
+            ClassName::BillboardGui => vec![
+                ("Class", Value::String(String::new())),
+                ("Id", Value::String(String::new())),
+                ("Enabled", Value::Bool(true)),
+                ("Size", Value::UDim2(UDim2::new(0.0, 200.0, 0.0, 80.0))),
+                // Added to the parent part's position, in world studs.
+                ("StudsOffset", Value::Vector3(Vector3::new(0.0, 2.0, 0.0))),
+                // 0 shows it at any distance. Otherwise it hides past this
+                // many studs from the camera.
+                ("MaxDistance", Value::Number(0.0)),
             ],
             ClassName::ImageLabel => vec![
                 ("Class", Value::String(String::new())),
@@ -379,6 +469,9 @@ impl ClassName {
             | ClassName::Frame
             | ClassName::TextLabel
             | ClassName::ImageLabel
+            | ClassName::PageLayout
+            | ClassName::Table
+            | ClassName::BillboardGui
             | ClassName::PointLight
             | ClassName::SpotLight => &[],
             // Fires when a sound that isn't looped plays to its end.
@@ -389,6 +482,9 @@ impl ClassName {
             // `OnClientEvent` in LocalScripts for each `FireClient`.
             ClassName::RemoteEvent => &["OnServerEvent", "OnClientEvent"],
             ClassName::TextButton => &["Activated"],
+            // Fires in LocalScripts when the player finishes typing: Enter
+            // on one line, or a click away (and Enter, on one line only).
+            ClassName::TextBox => &["FocusLost"],
         }
     }
 }
@@ -409,6 +505,7 @@ mod tests {
             assert_eq!(ClassName::from_name(class.as_str()), Some(class));
         }
         assert_eq!(ClassName::from_name("part"), None);
+        assert_eq!(ClassName::from_name("Button"), Some(ClassName::TextButton));
     }
 
     #[test]

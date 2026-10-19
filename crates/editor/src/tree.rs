@@ -22,6 +22,12 @@ pub enum Insertable {
     TextLabel,
     TextButton,
     ImageLabel,
+    TextBox,
+    PageLayout,
+    /// A Frame parented under a PageLayout, named as a page.
+    Page,
+    Table,
+    BillboardGui,
     Sound,
     PointLight,
     SpotLight,
@@ -38,12 +44,17 @@ impl Insertable {
     /// The classes that group other Instances.
     pub const GROUPS: [Insertable; 2] = [Insertable::Model, Insertable::Folder];
     /// UI objects, for the toolbar's UI group and the Explorer's Insert menu.
-    pub const UI: [Insertable; 5] = [
+    pub const UI: [Insertable; 10] = [
         Insertable::ScreenGui,
         Insertable::Frame,
         Insertable::TextLabel,
         Insertable::TextButton,
         Insertable::ImageLabel,
+        Insertable::TextBox,
+        Insertable::PageLayout,
+        Insertable::Page,
+        Insertable::Table,
+        Insertable::BillboardGui,
     ];
     pub const AUDIO: [Insertable; 1] = [Insertable::Sound];
     /// Lights shine from the part they are inside.
@@ -63,8 +74,13 @@ impl Insertable {
             Insertable::ScreenGui => "ScreenGui",
             Insertable::Frame => "Frame",
             Insertable::TextLabel => "TextLabel",
-            Insertable::TextButton => "TextButton",
+            Insertable::TextButton => "Button",
             Insertable::ImageLabel => "ImageLabel",
+            Insertable::TextBox => "TextBox",
+            Insertable::PageLayout => "PageLayout",
+            Insertable::Page => "Page",
+            Insertable::Table => "Table",
+            Insertable::BillboardGui => "BillboardGui",
             Insertable::Sound => "Sound",
             Insertable::PointLight => "PointLight",
             Insertable::SpotLight => "SpotLight",
@@ -83,6 +99,11 @@ impl Insertable {
             Insertable::TextLabel => ClassName::TextLabel,
             Insertable::TextButton => ClassName::TextButton,
             Insertable::ImageLabel => ClassName::ImageLabel,
+            Insertable::TextBox => ClassName::TextBox,
+            Insertable::PageLayout => ClassName::PageLayout,
+            Insertable::Page => ClassName::Frame,
+            Insertable::Table => ClassName::Table,
+            Insertable::BillboardGui => ClassName::BillboardGui,
             Insertable::Sound => ClassName::Sound,
             Insertable::PointLight => ClassName::PointLight,
             Insertable::SpotLight => ClassName::SpotLight,
@@ -97,6 +118,10 @@ impl Insertable {
                 | Insertable::TextLabel
                 | Insertable::TextButton
                 | Insertable::ImageLabel
+                | Insertable::TextBox
+                | Insertable::PageLayout
+                | Insertable::Page
+                | Insertable::Table
         )
     }
 }
@@ -105,7 +130,13 @@ impl Insertable {
 fn is_ui_container(world: &World, id: InstanceId) -> bool {
     matches!(
         world.get(id).map(|instance| instance.class()),
-        Some(ClassName::ScreenGui | ClassName::Frame)
+        Some(
+            ClassName::ScreenGui
+                | ClassName::Frame
+                | ClassName::PageLayout
+                | ClassName::Table
+                | ClassName::BillboardGui
+        )
     )
 }
 
@@ -128,6 +159,35 @@ fn screen_gui_for(world: &World, near: Option<InstanceId>) -> Option<InstanceId>
         .descendants(world.workspace())
         .into_iter()
         .find(|&id| is_gui(id))
+}
+
+/// The PageLayout a new page Frame should join: `near` itself, the one
+/// that contains it, or else the Workspace's first.
+pub fn page_layout_for(world: &World, near: Option<InstanceId>) -> Option<InstanceId> {
+    let mut current = near;
+    while let Some(id) = current {
+        if world
+            .get(id)
+            .is_some_and(|instance| instance.class() == ClassName::PageLayout)
+            && is_saved(world, id)
+        {
+            return Some(id);
+        }
+        current = world.get(id).and_then(|instance| instance.parent());
+    }
+    world.descendants(world.workspace()).into_iter().find(|&id| {
+        world
+            .get(id)
+            .is_some_and(|instance| instance.class() == ClassName::PageLayout)
+    })
+}
+
+/// True when a new light would be parented to a part, which is the only
+/// place a light is drawn.
+pub fn light_has_part_parent(world: &World, near: Option<InstanceId>) -> bool {
+    world.get(insert_parent(world, near, Insertable::PointLight)).is_some_and(|instance| {
+        matches!(instance.class(), ClassName::Part | ClassName::MeshPart)
+    })
 }
 
 /// The size a new part of each shape starts with, in studs. Blocks and
@@ -189,7 +249,10 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
             || (is_sound_container
                 && matches!(
                     what,
-                    Insertable::Sound | Insertable::PointLight | Insertable::SpotLight
+                    Insertable::Sound
+                        | Insertable::PointLight
+                        | Insertable::SpotLight
+                        | Insertable::BillboardGui
                 )
                 && is_saved(world, id))
     })

@@ -39,7 +39,8 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         | BlockKind::WhenClicked { .. }
         | BlockKind::EveryFrame { .. }
         | BlockKind::WhenSoundEnded { .. }
-        | BlockKind::Unattached { .. } => return None,
+        | BlockKind::Unattached { .. }
+        | BlockKind::TopCode { .. } => return None,
         BlockKind::Wait { .. } => 0,
         BlockKind::WaitUntil { .. } => 1,
         BlockKind::Repeat { .. } => 2,
@@ -67,9 +68,11 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         BlockKind::ChangeVariable { .. } => 24,
         BlockKind::Print { .. } => 25,
         BlockKind::Destroy { .. } => 26,
+        BlockKind::ShowPage { .. } => 27,
+        BlockKind::Code { .. } => 28,
     })
 }
-const STATEMENT_COUNT: usize = 27;
+const STATEMENT_COUNT: usize = 29;
 
 /// One of each statement block, with the Lua it must produce.
 fn every_statement() -> Vec<(BlockKind, &'static str)> {
@@ -260,6 +263,21 @@ fn every_statement() -> Vec<(BlockKind, &'static str)> {
                 target: "Red Ball".to_owned(),
             },
             "workspace[\"Red Ball\"]:Destroy()",
+        ),
+        (
+            BlockKind::ShowPage {
+                layout: "Menu".to_owned(),
+                page: Expression::Text {
+                    value: "Home".to_owned(),
+                },
+            },
+            "workspace.Menu.CurrentPage = \"Home\"",
+        ),
+        (
+            BlockKind::Code {
+                code: "for i = 1, 2 do\n    print(i)\nend".to_owned(),
+            },
+            "    for i = 1, 2 do\n        print(i)\n    end",
         ),
     ]
 }
@@ -663,4 +681,273 @@ fn duplicates_get_new_ids_all_the_way_down() {
     };
     let (a, b) = (ids(&original), ids(&copy));
     assert!(a.iter().all(|id| !b.contains(id)), "{a:?} vs {b:?}");
+}
+
+/// Every block, as a script: one of each event, each holding every statement.
+fn every_block_script() -> BlockScript {
+    let mut id = 100;
+    let mut body = || {
+        every_statement()
+            .into_iter()
+            .filter(|(kind, _)| !matches!(kind, BlockKind::Code { .. }))
+            .map(|(kind, _)| {
+                id += 1;
+                block(id, kind)
+            })
+            .collect::<Vec<_>>()
+    };
+    let mut touched_body = body();
+    touched_body.push(block(
+        90,
+        BlockKind::Print {
+            value: Expression::TouchingPart,
+        },
+    ));
+    let stacks = vec![
+        block(1, BlockKind::WhenStarted { body: body() }),
+        block(
+            2,
+            BlockKind::WhenTouched {
+                part: "Pad".to_owned(),
+                body: touched_body,
+            },
+        ),
+        block(
+            3,
+            BlockKind::WhenKeyPressed {
+                key: "Space".to_owned(),
+                body: body(),
+            },
+        ),
+        block(
+            4,
+            BlockKind::WhenClicked {
+                button: "Menu.Start".to_owned(),
+                body: body(),
+            },
+        ),
+        block(5, BlockKind::EveryFrame { body: body() }),
+        block(
+            6,
+            BlockKind::WhenSoundEnded {
+                sound: "Music".to_owned(),
+                body: body(),
+            },
+        ),
+    ];
+    // New IDs all the way down, as the statements are copies.
+    script(stacks.iter().map(Block::duplicate).collect())
+}
+
+/// Whether any of `script` came back as grey Lua blocks.
+fn has_code(script: &BlockScript) -> bool {
+    let mut found = false;
+    script.for_each_block(&mut |block| {
+        found |= matches!(block.kind, BlockKind::Code { .. } | BlockKind::TopCode { .. })
+            || block
+                .kind
+                .expressions()
+                .iter()
+                .any(|e| matches!(e, Expression::Code { .. }));
+    });
+    found
+}
+
+#[test]
+fn blocks_switched_to_code_and_back_are_the_same_blocks() {
+    let original = every_block_script();
+    let lua = translate(&original).unwrap().source;
+    let back = from_lua(&lua).unwrap();
+    assert!(!has_code(&back), "every block should come back:\n{back:#?}");
+    assert_eq!(translate(&back).unwrap().source, lua);
+}
+
+#[test]
+fn reporters_switched_to_code_and_back_are_the_same_reporters() {
+    let every_reporter = vec![
+        Expression::Math {
+            op: MathOp::Power,
+            left: boxed(variable("a")),
+            right: boxed(number(-2.0)),
+        },
+        Expression::Function {
+            function: MathFunction::Round,
+            value: boxed(number(2.5)),
+        },
+        Expression::Function {
+            function: MathFunction::Sqrt,
+            value: boxed(number(9.0)),
+        },
+        Expression::Random {
+            min: boxed(number(1.0)),
+            max: boxed(number(6.0)),
+        },
+        Expression::Join {
+            left: boxed(Expression::Text {
+                value: "a \"quoted\"\n".to_owned(),
+            }),
+            right: boxed(variable("a")),
+        },
+        Expression::Logic {
+            op: LogicOp::Or,
+            left: boxed(Expression::Not {
+                value: boxed(Expression::Boolean { value: false }),
+            }),
+            right: boxed(Expression::Compare {
+                op: Comparison::GreaterOrEqual,
+                left: boxed(Expression::Property {
+                    target: "Pad".to_owned(),
+                    property: "Transparency".to_owned(),
+                }),
+                right: boxed(number(0.5)),
+            }),
+        },
+        Expression::KeyDown {
+            key: "W".to_owned(),
+        },
+        Expression::Color3 {
+            r: 0.0,
+            g: 0.5,
+            b: 1.0,
+        },
+    ];
+    let body = every_reporter
+        .into_iter()
+        .enumerate()
+        .map(|(index, value)| block(10 + index as u64, BlockKind::Print { value }))
+        .collect();
+    let original = script(vec![block(1, BlockKind::EveryFrame { body })]);
+    let lua = translate(&original).unwrap().source;
+    let back = from_lua(&lua).unwrap();
+    assert!(!has_code(&back), "every reporter should come back:\n{back:#?}");
+    assert_eq!(translate(&back).unwrap().source, lua);
+}
+
+#[test]
+fn typed_lua_becomes_blocks_and_keeps_what_has_none_as_lua() {
+    let typed = "\
+local count = 0
+-- Doubles a number.
+local function double(x)
+    return x * 2
+end
+
+workspace.Pad.Touched:Connect(function(hit)
+    count = count + 1
+    for i = 1, 2 do
+        print(i)
+    end
+    print(double(count))
+end)
+print(\"Hello world!\")
+";
+    let blocks = from_lua(typed).unwrap();
+    let kinds: Vec<_> = blocks.blocks.iter().map(|block| &block.kind).collect();
+    let [
+        BlockKind::TopCode { code },
+        BlockKind::WhenTouched { part, body },
+        BlockKind::WhenStarted { body: started },
+    ] = kinds.as_slice()
+    else {
+        panic!("unexpected blocks: {kinds:#?}");
+    };
+    assert_eq!(
+        code,
+        "-- Doubles a number.\nlocal function double(x)\n    return x * 2\nend"
+    );
+    assert_eq!(part, "Pad");
+    assert!(matches!(&body[0].kind, BlockKind::ChangeVariable { name, .. } if name == "count"));
+    assert_eq!(
+        body[1].kind,
+        BlockKind::Code {
+            code: "for i = 1, 2 do\n    print(i)\nend".to_owned()
+        }
+    );
+    assert_eq!(
+        body[2].kind,
+        BlockKind::Print {
+            value: Expression::Code {
+                code: "double(count)".to_owned()
+            }
+        }
+    );
+    assert!(matches!(&started[0].kind, BlockKind::Print { .. }));
+
+    // And it still runs.
+    let mut world = World::new();
+    let pad = world.create(ClassName::Part).unwrap();
+    world.set_name(pad, "Pad").unwrap();
+    world.set_parent(pad, Some(world.workspace())).unwrap();
+    let lua = world.create(ClassName::Script).unwrap();
+    world
+        .set_parent(lua, Some(world.server_script_service()))
+        .unwrap();
+    let source = translate(&blocks).unwrap().source;
+    let mut runtime = ScriptRuntime::new();
+    runtime.start_script(&mut world, lua, "scripts/Typed.server.lua", &source);
+    runtime.step(&mut world, 0.1);
+    let output: Vec<_> = runtime
+        .take_output()
+        .into_iter()
+        .map(|line| line.text)
+        .collect();
+    assert_eq!(output, ["Hello world!"], "{source}");
+}
+
+#[test]
+fn top_level_code_that_waits_stays_in_order() {
+    // Moving the wait into "when game starts" would connect the event
+    // before the wait is over.
+    let typed = "task.wait(2)\nworkspace.Pad.Touched:Connect(function()\nend)\n";
+    let blocks = from_lua(typed).unwrap();
+    assert!(matches!(
+        &blocks.blocks[0].kind,
+        BlockKind::TopCode { code } if code == "task.wait(2)"
+    ));
+    // A new script's code becomes a "when game starts" block.
+    let blocks = from_lua("print(\"Hello world!\")\n").unwrap();
+    assert!(matches!(
+        &blocks.blocks[..],
+        [Block {
+            kind: BlockKind::WhenStarted { .. },
+            ..
+        }]
+    ));
+}
+
+#[test]
+fn code_with_a_syntax_error_says_where() {
+    let err = from_lua("print(\"hi\")\nif x then\n").unwrap_err();
+    let FromLuaError::Syntax(err) = err else {
+        panic!("{err:?}");
+    };
+    assert_eq!(err.line, 3);
+    assert!(from_lua("x = = 1").is_err());
+}
+
+#[test]
+fn every_example_script_can_switch_to_blocks_and_back() {
+    let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    let mut checked = 0;
+    for project in std::fs::read_dir(examples).unwrap() {
+        let scripts = project.unwrap().path().join("scripts");
+        let Ok(files) = std::fs::read_dir(scripts) else {
+            continue;
+        };
+        for file in files {
+            let path = file.unwrap().path();
+            let name = path.to_string_lossy();
+            if !(name.ends_with(".server.lua") || name.ends_with(".client.lua")) {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).unwrap();
+            let blocks = from_lua(&source).unwrap_or_else(|err| panic!("{name}: {err}"));
+            // Switching again changes nothing more.
+            let lua = translate(&blocks).unwrap().source;
+            let again = translate(&from_lua(&lua).unwrap()).unwrap().source;
+            assert_eq!(lua, again, "{name}");
+            checked += 1;
+        }
+    }
+    assert!(checked > 5, "only {checked} example scripts found");
 }

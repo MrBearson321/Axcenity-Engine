@@ -17,7 +17,7 @@ src = np.asarray(Image.open(OUT + "wordmark-source.png").convert("RGB")).astype(
 PALETTE = {
     "blue": ((0, 74, 173), (77, 134, 232)),
     "dgrey": ((84, 84, 84), (238, 238, 242)),
-    "lgrey": ((170, 170, 170), (150, 152, 162)),
+    "lgrey": ((170, 170, 170), (226, 228, 236)),
     "orange": ((241, 137, 45), (241, 137, 45)),
     "yellow": ((249, 191, 59), (249, 191, 59)),
     "lyellow": ((255, 207, 75), (255, 207, 75)),
@@ -77,13 +77,34 @@ for dy, dx in itertools.product(range(-3, 4), repeat=2):
     nearmax = np.maximum(nearmax, np.roll(np.roll(al2, dy, 0), dx, 1))
 pale = (nearmax.reshape(-1) < 0.6) & (k == names.index("yellow")) & ~use_pair
 
+# The dark grey outlines of "Axc" (around light grey letters), told apart from
+# the dark grey letters "enity" by having light grey right beside them.
+lgrey_pure = (k == names.index("lgrey")).reshape(h, w) & (alpha.reshape(h, w) > 0.5)
+beside = np.zeros_like(lgrey_pure)
+# The outlines are a hollow copy of the letters, offset up and left from
+# the grey ones, so their far side is up to about 20 pixels away.
+for dy, dx in itertools.product(range(-20, 21, 2), repeat=2):
+    beside |= np.roll(np.roll(lgrey_pure, dy, 0), dx, 1)
+dg = names.index("dgrey")
+outline = beside.reshape(-1) & ((k == dg) | (use_pair & ((pair_i == dg) | (pair_j == dg))))
+# On dark backgrounds the "Axc" letters are light with a soft grey outline,
+# rather than grey inside a bright ring.
+DARK_OUTLINE = np.array((112, 117, 130), np.float32)
+DARK_PALE = np.array((255, 214, 120), np.float32)
 
-def render(colours, pale_boost=1.0):
-    rgb = colours[k].copy()
-    rgb[use_pair] = (pair_t[use_pair, None] * colours[pair_i[use_pair]]
-                     + (1 - pair_t[use_pair, None]) * colours[pair_j[use_pair]])
+
+def render(colours, pale_boost=1.0, dark=False):
+    # Per pixel: the palette, with the outline colour for "Axc" outlines.
+    per_pixel = np.repeat(colours[None], len(pix), 0)
+    if dark:
+        per_pixel[outline, dg] = DARK_OUTLINE
+    rgb = per_pixel[idx, k]
+    if dark:
+        rgb[pale] = DARK_PALE
+    rgb[use_pair] = (pair_t[use_pair, None] * per_pixel[use_pair, pair_i[use_pair]]
+                     + (1 - pair_t[use_pair, None]) * per_pixel[use_pair, pair_j[use_pair]])
     al = np.where(use_pair, 1.0, alpha)
-    al[pale] = np.minimum(al[pale] * pale_boost, 1)
+    al[pale] = np.minimum(al[pale] * pale_boost, 0.9 if dark else 1)
     al[white] = 0
     rgba = np.concatenate([rgb, al[:, None] * 255], 1).reshape(h, w, 4)
     return Image.fromarray(np.clip(rgba + 0.5, 0, 255).astype(np.uint8), "RGBA")
@@ -94,10 +115,14 @@ def trim(im, pad=12):
     return im.crop((x0 - pad, y0 - pad, x1 + pad, y1 + pad))
 
 
-for colours, name, boost in ((light, "wordmark.png", 1.0), (dark, "wordmark-dark.png", 1.7)):
-    im = trim(render(colours, boost))
-    im = im.resize((840, round(im.height * 840 / im.width)), Image.LANCZOS)
-    im.save(OUT + name, optimize=True)
+for colours, name, boost, is_dark in ((light, "wordmark", 1.0, False),
+                                      (dark, "wordmark-dark", 2.2, True)):
+    im = trim(render(colours, boost, is_dark))
+    # Twice the size it's drawn at, so it's sharp on high-DPI screens: egui
+    # has no mipmaps, so an image drawn at under half its size looks jagged.
+    for width, suffix in ((840, ""), (336, "-small")):
+        small = im.resize((width, round(im.height * width / im.width)), Image.LANCZOS)
+        small.save(OUT + name + suffix + ".png", optimize=True)
 
 # 3. The hexagon mark, redrawn as strokes (the letters cover parts of it).
 STROKE = 23
@@ -129,8 +154,6 @@ def mark(size, colour, scale=4, inset=0.0):
 
 
 mark(1024, (0, 74, 173)).save(OUT + "mark.png", optimize=True)
-# White, so the editor can tint it to suit the theme.
-mark(40, (255, 255, 255)).save(OUT + "mark-white-40.png", optimize=True)
 
 # The vector master.
 x0, y0, x1, _ = BOX

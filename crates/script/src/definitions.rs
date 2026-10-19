@@ -576,6 +576,21 @@ const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "If true, the UI in this ScreenGui is drawn.",
     ),
     (
+        ClassName::ScreenGui,
+        "ScaleMode",
+        "Fixed keeps positions and sizes as authored. Fit lays this ScreenGui out at DesignWidth by DesignHeight, then scales it uniformly so it stays proportional and inside the screen.",
+    ),
+    (
+        ClassName::ScreenGui,
+        "DesignWidth",
+        "The width, in pixels, Fit mode lays this ScreenGui out at. Ignored when ScaleMode is Fixed.",
+    ),
+    (
+        ClassName::ScreenGui,
+        "DesignHeight",
+        "The height, in pixels, Fit mode lays this ScreenGui out at. Ignored when ScaleMode is Fixed.",
+    ),
+    (
         ClassName::Frame,
         "Class",
         "Space-separated CSS class names used to style this UI Instance.",
@@ -687,8 +702,180 @@ const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     ),
     (
         ClassName::TextButton,
+        "Image",
+        "The project-relative path of an icon. Empty shows no picture. With Text, the icon sits beside the label.",
+    ),
+    (
+        ClassName::TextButton,
+        "ImageTransparency",
+        "The icon opacity: 0 is opaque and 1 is transparent.",
+    ),
+    (
+        ClassName::TextButton,
         "Visible",
         "If false, this button is hidden and cannot be activated.",
+    ),
+    (
+        ClassName::TextBox,
+        "Class",
+        "Space-separated CSS class names used to style this UI Instance.",
+    ),
+    (
+        ClassName::TextBox,
+        "Id",
+        "The CSS identifier used to style this UI Instance.",
+    ),
+    (
+        ClassName::TextBox,
+        "Position",
+        "The top-left position relative to the parent, in scale and pixel offsets.",
+    ),
+    (
+        ClassName::TextBox,
+        "Size",
+        "The size relative to the parent, in scale and pixel offsets.",
+    ),
+    (
+        ClassName::TextBox,
+        "BackgroundColor3",
+        "The box's background color.",
+    ),
+    (
+        ClassName::TextBox,
+        "BackgroundTransparency",
+        "The background opacity: 0 is opaque and 1 is transparent.",
+    ),
+    (ClassName::TextBox, "Text", "The text the player has typed."),
+    (
+        ClassName::TextBox,
+        "Placeholder",
+        "Grey text shown while Text is empty.",
+    ),
+    (ClassName::TextBox, "TextColor3", "The text color."),
+    (
+        ClassName::TextBox,
+        "TextSize",
+        "The text size in pixels.",
+    ),
+    (
+        ClassName::TextBox,
+        "MultiLine",
+        "If false, Enter finishes typing. If true, Enter starts a new line and clicking away finishes typing.",
+    ),
+    (
+        ClassName::TextBox,
+        "Visible",
+        "If false, this text box is hidden.",
+    ),
+    (
+        ClassName::PageLayout,
+        "Class",
+        "Space-separated CSS class names used to style this UI Instance.",
+    ),
+    (
+        ClassName::PageLayout,
+        "Id",
+        "The CSS identifier used to style this UI Instance.",
+    ),
+    (
+        ClassName::PageLayout,
+        "Position",
+        "The top-left position relative to the parent, in scale and pixel offsets.",
+    ),
+    (
+        ClassName::PageLayout,
+        "Size",
+        "The size relative to the parent, in scale and pixel offsets.",
+    ),
+    (
+        ClassName::PageLayout,
+        "BackgroundColor3",
+        "The layout's background color.",
+    ),
+    (
+        ClassName::PageLayout,
+        "BackgroundTransparency",
+        "The background opacity: 0 is opaque and 1 is transparent.",
+    ),
+    (
+        ClassName::PageLayout,
+        "Visible",
+        "If false, this layout and its pages are hidden.",
+    ),
+    (
+        ClassName::PageLayout,
+        "CurrentPage",
+        "The Name of the child Frame to show. Empty shows the first child Frame. A name that matches no Frame is rejected and the current page stays.",
+    ),
+    (
+        ClassName::Table,
+        "Class",
+        "Space-separated CSS class names used to style this UI Instance.",
+    ),
+    (
+        ClassName::Table,
+        "Id",
+        "The CSS identifier used to style this UI Instance.",
+    ),
+    (
+        ClassName::Table,
+        "Position",
+        "The top-left position relative to the parent, in scale and pixel offsets.",
+    ),
+    (
+        ClassName::Table,
+        "Size",
+        "The size relative to the parent, in scale and pixel offsets.",
+    ),
+    (
+        ClassName::Table,
+        "BackgroundColor3",
+        "The table's background color.",
+    ),
+    (
+        ClassName::Table,
+        "BackgroundTransparency",
+        "The background opacity: 0 is opaque and 1 is transparent.",
+    ),
+    (
+        ClassName::Table,
+        "Visible",
+        "If false, this table is hidden.",
+    ),
+    (
+        ClassName::Table,
+        "Columns",
+        "How many cells sit in one row. Cells are the table's children, left to right then top to bottom, each the same size.",
+    ),
+    (
+        ClassName::BillboardGui,
+        "Class",
+        "Space-separated CSS class names used to style descendants of this billboard.",
+    ),
+    (
+        ClassName::BillboardGui,
+        "Id",
+        "The CSS identifier used to style this billboard.",
+    ),
+    (
+        ClassName::BillboardGui,
+        "Enabled",
+        "If false, this billboard is not drawn.",
+    ),
+    (
+        ClassName::BillboardGui,
+        "Size",
+        "The on-screen size, in scale of the viewport plus a pixel offset.",
+    ),
+    (
+        ClassName::BillboardGui,
+        "StudsOffset",
+        "World studs added to the parent part's position. The offset is not rotated with the part.",
+    ),
+    (
+        ClassName::BillboardGui,
+        "MaxDistance",
+        "The billboard hides past this many studs from the camera. 0 shows it at any distance.",
     ),
     (
         ClassName::ImageLabel,
@@ -1069,6 +1256,11 @@ const EVENT_DOCS: &[(ClassName, &str, &str)] = &[
         "Fires when the player clicks or taps this button. The handler gets no arguments; LocalScripts only.",
     ),
     (
+        ClassName::TextBox,
+        "FocusLost",
+        "Fires when the player finishes typing: Enter on a one-line box, or clicking away (or Escape) on any box. The handler gets no arguments; LocalScripts only.",
+    ),
+    (
         ClassName::Sound,
         "Ended",
         "Fires when the sound plays to its end. Looped sounds, and sounds stopped with Stop, don't fire it.",
@@ -1121,14 +1313,28 @@ fn class_doc(class: ClassName) -> &'static str {
         ClassName::Frame => "A rectangular UI element that can contain other UI elements.",
         ClassName::TextLabel => "A UI element that displays text.",
         ClassName::TextButton => {
-            "A UI element that displays text and fires Activated when clicked."
+            "A clickable UI element. Text and Image can each be empty; both filled shows an icon and a label. Fires Activated when clicked. The old name TextButton still loads."
         }
-        ClassName::ImageLabel => "A UI element that displays an image from the project.",
+        ClassName::ImageLabel => "A UI element that displays an image from the project. It is not clickable.",
+        ClassName::TextBox => {
+            "A box the player can type in. MultiLine off (the default): Enter finishes. MultiLine on: Enter is a new line and clicking away finishes. Fires FocusLost."
+        }
+        ClassName::PageLayout => {
+            "Shows one child Frame at a time, chosen by CurrentPage (the Frame's Name). Other children, such as a title, stay visible."
+        }
+        ClassName::Table => {
+            "Lays its children out as equal cells, left to right then top to bottom. Columns is how many cells share a row."
+        }
+        ClassName::BillboardGui => {
+            "UI that floats in the world, parented to a Part or MeshPart and drawn on the screen UI overlay. Size is on-screen; StudsOffset moves it in world studs."
+        }
         ClassName::Sound => "A sound effect or music track that scripts can play.",
         ClassName::PointLight => {
-            "A light that shines in all directions from the center of its parent part."
+            "A light that shines in all directions from just above its parent part. Inserting one with no part selected also inserts an anchored lamp."
         }
-        ClassName::SpotLight => "A light that shines in a cone from the center of its parent part.",
+        ClassName::SpotLight => {
+            "A light that shines in a cone from just above its parent part. Inserting one with no part selected also inserts an anchored lamp."
+        }
     }
 }
 

@@ -7,7 +7,9 @@ use axcenity_core::{ClassName, InstanceId, Value, World};
 pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "align-items",
     "background-color",
+    "background-image",
     "border",
+    "box-shadow",
     "border-color",
     "border-radius",
     "border-width",
@@ -31,6 +33,7 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "padding-left",
     "padding-right",
     "padding-top",
+    "text-align",
     "width",
 ];
 
@@ -40,6 +43,7 @@ type Specificity = (u32, u32, u32);
 pub(crate) struct PseudoClasses {
     pub(crate) hovered: Option<InstanceId>,
     pub(crate) active: Option<InstanceId>,
+    pub(crate) focused: Option<InstanceId>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -718,6 +722,7 @@ mod tests {
                 PseudoClasses {
                     hovered: Some(button),
                     active: None,
+                    focused: None,
                 },
             )
             .values["opacity"],
@@ -731,6 +736,7 @@ mod tests {
                 PseudoClasses {
                     hovered: Some(button),
                     active: Some(button),
+                    focused: None,
                 },
             )
             .values["opacity"],

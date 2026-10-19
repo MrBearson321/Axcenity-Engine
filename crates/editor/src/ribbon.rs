@@ -86,11 +86,12 @@ impl egui::Widget for RibbonButton<'_> {
                 );
             }
             let text_color = visuals.text_color();
+            let scale = crate::theme::icon_scale(ui, &response);
             painter.text(
                 egui::pos2(rect.center().x, rect.top() + 19.0),
                 egui::Align2::CENTER_CENTER,
                 self.icon,
-                FontId::new(ICON_SIZE, self.family),
+                FontId::new(ICON_SIZE * scale, self.family),
                 self.color.unwrap_or(text_color),
             );
             let at = egui::pos2(

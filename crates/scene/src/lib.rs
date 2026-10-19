@@ -15,7 +15,10 @@ mod pick;
 
 pub use camera::{FlyCamera, MoveKeys};
 pub use draw_list::{
-    build_draw_list, build_draw_list_with_ui, build_draw_list_with_ui_interaction,
+    LightMarker, attach_ui_textures, build_draw_list, build_draw_list_with_ui,
+    build_draw_list_with_ui_interaction, light_markers,
 };
 pub use orientation::{orientation_from_rotation, rotation_from_orientation};
-pub use pick::{CameraView, Hit, Ray, part_box_edges, part_half_extent, pick, pick_hit};
+pub use pick::{
+    CameraView, Hit, Ray, part_box_edges, part_half_extent, pick, pick_hit, visible_box_edges,
+};

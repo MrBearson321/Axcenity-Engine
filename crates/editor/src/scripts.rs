@@ -336,6 +336,50 @@ impl ScriptTabs {
 
 /// The ID of the code editor's text box for the script at `path`. egui
 /// keeps the cursor and scroll position under it.
+/// The bar above a Script or LocalScript's tab that switches it between
+/// Code and Blocks. Returns true when the other one is picked.
+pub fn mode_bar(ui: &mut egui::Ui, blocks: bool, enabled: bool) -> bool {
+    let mut switch = false;
+    ui.horizontal(|ui| {
+        ui.add_enabled_ui(enabled, |ui| {
+            egui::Frame::new()
+                .fill(ui.visuals().extreme_bg_color)
+                .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
+                .corner_radius(8)
+                .inner_margin(egui::Margin::same(2))
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.x = 2.0;
+                    let modes = [
+                        (false, icons::CODE, "Code", "Type the script as Lua."),
+                        (
+                            true,
+                            icons::PUZZLE_PIECE,
+                            "Blocks",
+                            "Snap the script together from blocks. Lua that has no                              blocks shows as grey Lua blocks, so nothing is lost.",
+                        ),
+                    ];
+                    for (is_blocks, icon, label, tip) in modes {
+                        let selected = is_blocks == blocks;
+                        let button = egui::Button::new(theme::with_icon(icon, label))
+                            .selected(selected)
+                            .frame(selected)
+                            .corner_radius(6)
+                            .min_size(egui::vec2(84.0, 24.0));
+                        let response = ui
+                            .add(button)
+                            .on_hover_text(tip)
+                            .on_disabled_hover_text("Press Stop to switch.");
+                        if response.clicked() && !selected {
+                            switch = true;
+                        }
+                    }
+                });
+        });
+        ui.weak("Switch any time: the script runs the same either way.");
+    });
+    switch
+}
+
 pub fn editor_id(path: &str) -> egui::Id {
     egui::Id::new(("script editor", path))
 }

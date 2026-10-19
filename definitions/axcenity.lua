@@ -168,7 +168,7 @@ function UserInputServiceClass:IsKeyDown(key) end
 ---@field Changed Signal Fires when a property (or `Name` or `Parent`) gets a different value, whether a script, physics or the editor changed it. The handler gets the property's name: `function(property) ... end`.
 ---@field ChildAdded Signal Fires when an Instance is put inside this one. The handler gets the child.
 ---@field ChildRemoved Signal Fires when an Instance is taken out of this one. The handler gets the child.
----@field [string] Workspace|Players|Lighting|ReplicatedStorage|ServerScriptService|StarterPlayer|StarterPlayerScripts|Part|MeshPart|Script|LocalScript|ModuleScript|RemoteEvent|Player|Model|Folder|SurfaceAppearance|ScreenGui|Frame|TextLabel|TextButton|ImageLabel|Sound|PointLight|SpotLight A child, found by its name.
+---@field [string] Workspace|Players|Lighting|ReplicatedStorage|ServerScriptService|StarterPlayer|StarterPlayerScripts|Part|MeshPart|Script|LocalScript|ModuleScript|RemoteEvent|Player|Model|Folder|SurfaceAppearance|ScreenGui|Frame|TextLabel|TextButton|ImageLabel|TextBox|PageLayout|Table|BillboardGui|Sound|PointLight|SpotLight A child, found by its name.
 local InstanceClass = {}
 
 ---The first child with this name, or nil. With `recursive`, searches every descendant.
@@ -346,6 +346,9 @@ function RemoteEventClass:FireAllClients(...) end
 ---@field Class string Space-separated CSS class names used to style this UI Instance.
 ---@field Id string The CSS identifier used to style this UI Instance.
 ---@field Enabled boolean If true, the UI in this ScreenGui is drawn.
+---@field ScaleMode string Fixed keeps positions and sizes as authored. Fit lays this ScreenGui out at DesignWidth by DesignHeight, then scales it uniformly so it stays proportional and inside the screen.
+---@field DesignWidth number The width, in pixels, Fit mode lays this ScreenGui out at. Ignored when ScaleMode is Fixed.
+---@field DesignHeight number The height, in pixels, Fit mode lays this ScreenGui out at. Ignored when ScaleMode is Fixed.
 
 ---A rectangular UI element that can contain other UI elements.
 ---@class Frame: Instance
@@ -370,7 +373,7 @@ function RemoteEventClass:FireAllClients(...) end
 ---@field TextSize number The text size in pixels.
 ---@field Visible boolean If false, this label is hidden.
 
----A UI element that displays text and fires Activated when clicked.
+---A clickable UI element. Text and Image can each be empty; both filled shows an icon and a label. Fires Activated when clicked. The old name TextButton still loads.
 ---@class TextButton: Instance
 ---@field Class string Space-separated CSS class names used to style this UI Instance.
 ---@field Id string The CSS identifier used to style this UI Instance.
@@ -381,10 +384,12 @@ function RemoteEventClass:FireAllClients(...) end
 ---@field Text string The text to display.
 ---@field TextColor3 Color3 The text color.
 ---@field TextSize number The text size in pixels.
+---@field Image string The project-relative path of an icon. Empty shows no picture. With Text, the icon sits beside the label.
+---@field ImageTransparency number The icon opacity: 0 is opaque and 1 is transparent.
 ---@field Visible boolean If false, this button is hidden and cannot be activated.
 ---@field Activated Signal Fires when the player clicks or taps this button. The handler gets no arguments; LocalScripts only.
 
----A UI element that displays an image from the project.
+---A UI element that displays an image from the project. It is not clickable.
 ---@class ImageLabel: Instance
 ---@field Class string Space-separated CSS class names used to style this UI Instance.
 ---@field Id string The CSS identifier used to style this UI Instance.
@@ -395,6 +400,53 @@ function RemoteEventClass:FireAllClients(...) end
 ---@field Image string The project-relative path of the image to display.
 ---@field ImageTransparency number The image opacity: 0 is opaque and 1 is transparent.
 ---@field Visible boolean If false, this image is hidden.
+
+---A box the player can type in. MultiLine off (the default): Enter finishes. MultiLine on: Enter is a new line and clicking away finishes. Fires FocusLost.
+---@class TextBox: Instance
+---@field Class string Space-separated CSS class names used to style this UI Instance.
+---@field Id string The CSS identifier used to style this UI Instance.
+---@field Position UDim2 The top-left position relative to the parent, in scale and pixel offsets.
+---@field Size UDim2 The size relative to the parent, in scale and pixel offsets.
+---@field BackgroundColor3 Color3 The box's background color.
+---@field BackgroundTransparency number The background opacity: 0 is opaque and 1 is transparent.
+---@field Text string The text the player has typed.
+---@field Placeholder string Grey text shown while Text is empty.
+---@field TextColor3 Color3 The text color.
+---@field TextSize number The text size in pixels.
+---@field MultiLine boolean If false, Enter finishes typing. If true, Enter starts a new line and clicking away finishes typing.
+---@field Visible boolean If false, this text box is hidden.
+---@field FocusLost Signal Fires when the player finishes typing: Enter on a one-line box, or clicking away (or Escape) on any box. The handler gets no arguments; LocalScripts only.
+
+---Shows one child Frame at a time, chosen by CurrentPage (the Frame's Name). Other children, such as a title, stay visible.
+---@class PageLayout: Instance
+---@field Class string Space-separated CSS class names used to style this UI Instance.
+---@field Id string The CSS identifier used to style this UI Instance.
+---@field Position UDim2 The top-left position relative to the parent, in scale and pixel offsets.
+---@field Size UDim2 The size relative to the parent, in scale and pixel offsets.
+---@field BackgroundColor3 Color3 The layout's background color.
+---@field BackgroundTransparency number The background opacity: 0 is opaque and 1 is transparent.
+---@field Visible boolean If false, this layout and its pages are hidden.
+---@field CurrentPage string The Name of the child Frame to show. Empty shows the first child Frame. A name that matches no Frame is rejected and the current page stays.
+
+---Lays its children out as equal cells, left to right then top to bottom. Columns is how many cells share a row.
+---@class Table: Instance
+---@field Class string Space-separated CSS class names used to style this UI Instance.
+---@field Id string The CSS identifier used to style this UI Instance.
+---@field Position UDim2 The top-left position relative to the parent, in scale and pixel offsets.
+---@field Size UDim2 The size relative to the parent, in scale and pixel offsets.
+---@field BackgroundColor3 Color3 The table's background color.
+---@field BackgroundTransparency number The background opacity: 0 is opaque and 1 is transparent.
+---@field Visible boolean If false, this table is hidden.
+---@field Columns number How many cells sit in one row. Cells are the table's children, left to right then top to bottom, each the same size.
+
+---UI that floats in the world, parented to a Part or MeshPart and drawn on the screen UI overlay. Size is on-screen; StudsOffset moves it in world studs.
+---@class BillboardGui: Instance
+---@field Class string Space-separated CSS class names used to style descendants of this billboard.
+---@field Id string The CSS identifier used to style this billboard.
+---@field Enabled boolean If false, this billboard is not drawn.
+---@field Size UDim2 The on-screen size, in scale of the viewport plus a pixel offset.
+---@field StudsOffset Vector3 World studs added to the parent part's position. The offset is not rotated with the part.
+---@field MaxDistance number The billboard hides past this many studs from the camera. 0 shows it at any distance.
 
 ---A sound effect or music track that scripts can play.
 ---@class Sound: Instance
@@ -423,14 +475,14 @@ function SoundClass:Pause() end
 function SoundClass:Resume() end
 
 
----A light that shines in all directions from the center of its parent part.
+---A light that shines in all directions from just above its parent part. Inserting one with no part selected also inserts an anchored lamp.
 ---@class PointLight: Instance
 ---@field Enabled boolean If false, the light is off.
 ---@field Color Color3 The light's color.
 ---@field Brightness number How bright the light is.
 ---@field Range number How far the light reaches, in studs.
 
----A light that shines in a cone from the center of its parent part.
+---A light that shines in a cone from just above its parent part. Inserting one with no part selected also inserts an anchored lamp.
 ---@class SpotLight: Instance
 ---@field Enabled boolean If false, the light is off.
 ---@field Color Color3 The light's color.
@@ -483,6 +535,10 @@ Instance = {}
 ---@overload fun(className: "TextLabel"): TextLabel
 ---@overload fun(className: "TextButton"): TextButton
 ---@overload fun(className: "ImageLabel"): ImageLabel
+---@overload fun(className: "TextBox"): TextBox
+---@overload fun(className: "PageLayout"): PageLayout
+---@overload fun(className: "Table"): Table
+---@overload fun(className: "BillboardGui"): BillboardGui
 ---@overload fun(className: "Sound"): Sound
 ---@overload fun(className: "PointLight"): PointLight
 ---@overload fun(className: "SpotLight"): SpotLight

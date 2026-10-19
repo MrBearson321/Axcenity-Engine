@@ -88,10 +88,19 @@ const GROUPS: [(&str, &[&str]); 11] = [
             "BackgroundColor3",
             "BackgroundTransparency",
             "Text",
+            "Placeholder",
             "TextColor3",
             "TextSize",
+            "MultiLine",
             "Image",
             "ImageTransparency",
+            "CurrentPage",
+            "Columns",
+            "StudsOffset",
+            "MaxDistance",
+            "ScaleMode",
+            "DesignWidth",
+            "DesignHeight",
         ],
     ),
     (
@@ -202,6 +211,7 @@ pub fn show(
     world: &World,
     selected: Option<InstanceId>,
     playing: bool,
+    selection_count: usize,
     more: impl FnOnce(&mut egui::Ui),
 ) -> Option<Edit> {
     theme::panel_title(ui, icons::SLIDERS_HORIZONTAL, "Properties");
@@ -209,6 +219,11 @@ pub fn show(
         ui.weak(theme::with_icon(
             icons::INFO,
             "Changes made during Play are undone at Stop.",
+        ));
+    }
+    if selection_count > 1 {
+        ui.weak(format!(
+            "{selection_count} selected. Properties are for the last one clicked. Delete and Duplicate apply to all of them."
         ));
     }
     ui.separator();
@@ -258,6 +273,17 @@ pub fn show(
                             ui.end_row();
                         }
                     });
+                }
+                if instance.class() == ClassName::ScreenGui
+                    && instance
+                        .property("ScaleMode")
+                        .and_then(Value::as_str)
+                        .is_some_and(|mode| mode.eq_ignore_ascii_case("Fit"))
+                {
+                    ui.weak(
+                        "Fit lays this ScreenGui out at DesignWidth × DesignHeight, then scales \
+                         it uniformly so it stays proportional and inside the screen.",
+                    );
                 }
                 more(ui);
             });
@@ -395,6 +421,7 @@ fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
                 "NormalStrength" | "EmissiveStrength" | "TextSize" => {
                     drag.speed(0.01).range(0.0..=f64::INFINITY)
                 }
+                "DesignWidth" | "DesignHeight" => drag.speed(1.0).range(1.0..=10_000.0),
                 _ => drag.speed(0.1),
             };
             // `clamp_existing_to_range(false)`: only clamp what the user
@@ -405,6 +432,16 @@ fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
         }
         // Shown but not typed into: each half-typed path would be loaded
         // (and fail). Importing a model sets it.
+        Value::String(text) if name == "ScaleMode" => {
+            let current = if text.eq_ignore_ascii_case("Fit") {
+                "Fit"
+            } else {
+                "Fixed"
+            };
+            choice_control(ui, name, current, &["Fixed", "Fit"], |mode| mode).map(|mode| {
+                Value::String(mode.to_owned())
+            })
+        }
         Value::String(mut text) if name == "MeshId" => {
             ui.add_enabled(false, egui::TextEdit::singleline(&mut text))
                 .on_disabled_hover_text(

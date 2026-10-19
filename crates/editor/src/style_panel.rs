@@ -42,6 +42,10 @@ pub fn is_styled(class: ClassName) -> bool {
             | ClassName::TextLabel
             | ClassName::TextButton
             | ClassName::ImageLabel
+            | ClassName::TextBox
+            | ClassName::PageLayout
+            | ClassName::Table
+            | ClassName::BillboardGui
     )
 }
 
@@ -253,8 +257,26 @@ fn declaration_row(ui: &mut egui::Ui, declaration: &CssDeclaration) -> Option<St
                 .font(egui::TextStyle::Monospace)
                 .desired_width(f32::INFINITY),
         );
-        if response.changed() {
+        if let Some(picked) = accept_tab(ui, &response, value_choices(&declaration.property), &value)
+        {
+            made = Some(clean_value(&picked));
+        } else if response.changed() {
             made = Some(clean_value(&value));
+        }
+        let open = sticky_focus(
+            ui,
+            egui::Id::new((
+                "style value",
+                &declaration.path,
+                declaration.span.start,
+            )),
+            response.has_focus(),
+        );
+        if made.is_none()
+            && open
+            && let Some(picked) = choice_row(ui, value_choices(&declaration.property), &value, None)
+        {
+            made = Some(clean_value(&picked));
         }
     });
     made.map(|value| StyleEdit::Set {
@@ -272,7 +294,8 @@ struct Adding {
     value: String,
 }
 
-/// The row for adding a style to the element's own rule.
+/// The row for adding a style to the element's own rule. The property and
+/// value boxes offer the supported names and values while they are focused.
 fn add_row(ui: &mut egui::Ui, id: InstanceId, applied: &[CssDeclaration]) -> Option<StyleEdit> {
     let memory = egui::Id::new(("adding a style", id));
     let mut adding: Adding = ui
@@ -280,27 +303,20 @@ fn add_row(ui: &mut egui::Ui, id: InstanceId, applied: &[CssDeclaration]) -> Opt
         .unwrap_or_default();
     let mut made = None;
     ui.label(egui::RichText::new("Add a style").strong());
+    let mut property_focused = false;
+    let mut value_focused = false;
     ui.horizontal(|ui| {
-        let shown = if adding.property.is_empty() {
-            "property"
-        } else {
-            adding.property.as_str()
-        };
-        egui::ComboBox::from_id_salt(("style property", id))
-            .selected_text(egui::RichText::new(shown).monospace())
-            .width(150.0)
-            .height(320.0)
-            .show_ui(ui, |ui| {
-                for &property in axcenity_ui::SUPPORTED_PROPERTIES {
-                    let set = applied.iter().any(|d| d.property == property);
-                    let text = if set {
-                        format!("{property} ✓")
-                    } else {
-                        property.to_owned()
-                    };
-                    ui.selectable_value(&mut adding.property, property.to_owned(), text);
-                }
-            });
+        let property = ui.add(
+            egui::TextEdit::singleline(&mut adding.property)
+                .hint_text("property")
+                .font(egui::TextStyle::Monospace)
+                .desired_width(130.0),
+        );
+        property_focused = property.has_focus();
+        if let Some(picked) = accept_tab(ui, &property, axcenity_ui::SUPPORTED_PROPERTIES, &adding.property)
+        {
+            adding.property = picked;
+        }
         let hint = example_value(&adding.property);
         let typed = ui.add(
             egui::TextEdit::singleline(&mut adding.value)
@@ -308,6 +324,11 @@ fn add_row(ui: &mut egui::Ui, id: InstanceId, applied: &[CssDeclaration]) -> Opt
                 .font(egui::TextStyle::Monospace)
                 .desired_width(110.0),
         );
+        value_focused = typed.has_focus();
+        if let Some(picked) = accept_tab(ui, &typed, value_choices(&adding.property), &adding.value)
+        {
+            adding.value = picked;
+        }
         let entered = typed.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         let ready = !adding.property.is_empty() && !adding.value.trim().is_empty();
         if (ui
@@ -324,8 +345,130 @@ fn add_row(ui: &mut egui::Ui, id: InstanceId, applied: &[CssDeclaration]) -> Opt
             adding.value.clear();
         }
     });
+    if sticky_focus(ui, memory.with("property"), property_focused) {
+        let set: Vec<&str> = applied
+            .iter()
+            .map(|declaration| declaration.property.as_str())
+            .collect();
+        if let Some(picked) = choice_row(
+            ui,
+            axcenity_ui::SUPPORTED_PROPERTIES,
+            &adding.property,
+            Some(&set),
+        ) {
+            adding.property = picked;
+        }
+    } else if sticky_focus(ui, memory.with("value"), value_focused)
+        && let Some(picked) = choice_row(ui, value_choices(&adding.property), &adding.value, None)
+    {
+        adding.value = picked;
+    }
     ui.data_mut(|data| data.insert_temp(memory, adding));
     made
+}
+
+/// True while `focused`, and also while the mouse is still down after it
+/// was, so a click on a suggestion lands on a button that is still there.
+fn sticky_focus(ui: &mut egui::Ui, key: egui::Id, focused: bool) -> bool {
+    let held = ui.input(|input| input.pointer.primary_down());
+    let was = ui.data(|data| data.get_temp::<bool>(key).unwrap_or(false));
+    let open = focused || (was && held);
+    ui.data_mut(|data| {
+        if open {
+            data.insert_temp(key, true);
+        } else {
+            data.remove::<bool>(key);
+        }
+    });
+    open
+}
+
+/// Fills `typed` with the first match when Tab is pressed in `response`.
+fn accept_tab(ui: &egui::Ui, response: &egui::Response, options: &[&str], typed: &str) -> Option<String> {
+    let matches = matching(options, typed);
+    if response.has_focus()
+        && ui.input(|input| input.key_pressed(egui::Key::Tab))
+        && let Some(first) = matches.first()
+        && !first.eq_ignore_ascii_case(typed)
+    {
+        Some((*first).to_owned())
+    } else {
+        None
+    }
+}
+
+/// Buttons for the options that match `typed`. `used` options get a check,
+/// meaning a declaration already sets them. `None` when nothing is offered.
+fn choice_row(ui: &mut egui::Ui, options: &[&str], typed: &str, used: Option<&[&str]>) -> Option<String> {
+    let matches = matching(options, typed);
+    if matches.is_empty() || (matches.len() == 1 && matches[0].eq_ignore_ascii_case(typed.trim())) {
+        return None;
+    }
+    let mut picked = None;
+    ui.horizontal_wrapped(|ui| {
+        for option in matches {
+            let label = match used {
+                Some(used) if used.contains(&option) => format!("{option} ✓"),
+                _ => option.to_owned(),
+            };
+            if ui
+                .small_button(egui::RichText::new(label).monospace())
+                .clicked()
+            {
+                picked = Some(option.to_owned());
+            }
+        }
+    });
+    picked
+}
+
+/// Options that start with `typed`, or contain it when none start with it.
+fn matching<'a>(options: &'a [&'a str], typed: &str) -> Vec<&'a str> {
+    let typed = typed.trim().to_ascii_lowercase();
+    if typed.is_empty() {
+        return options.iter().copied().take(8).collect();
+    }
+    let mut found: Vec<&str> = options
+        .iter()
+        .copied()
+        .filter(|option| option.to_ascii_lowercase().starts_with(&typed))
+        .collect();
+    if found.is_empty() {
+        found = options
+            .iter()
+            .copied()
+            .filter(|option| option.to_ascii_lowercase().contains(&typed))
+            .collect();
+    }
+    found.truncate(8);
+    found
+}
+
+/// Values the engine understands for `property`, offered while typing.
+fn value_choices(property: &str) -> &'static [&'static str] {
+    match property {
+        "display" => &["flex", "none"],
+        "flex-direction" => &["row", "column", "row-reverse", "column-reverse"],
+        "justify-content" => &[
+            "flex-start",
+            "center",
+            "flex-end",
+            "space-between",
+            "space-around",
+            "space-evenly",
+        ],
+        "align-items" => &["flex-start", "center", "flex-end", "stretch"],
+        "text-align" => &["left", "center", "right"],
+        "font-family" => &["Montserrat", "sans-serif", "JetBrains Mono", "monospace"],
+        "background-color" | "color" | "border-color" => {
+            &["#ffffff", "#000000", "#3478f6", "transparent"]
+        }
+        "width" | "height" => &["100%", "50%", "100px", "auto"],
+        "opacity" => &["1", "0.8", "0.5", "0"],
+        "flex-grow" => &["0", "1"],
+        "background-image" => &["linear-gradient(#3478f6, #142238)"],
+        _ => &[],
+    }
 }
 
 /// What a value of `property` looks like, as the value box's hint.
@@ -394,7 +537,7 @@ mod tests {
             egui::SidePanel::right("properties")
                 .default_width(320.0)
                 .show(ctx, |ui| {
-                    crate::properties::show(ui, &world, Some(frame), false, |ui| {
+                    crate::properties::show(ui, &world, Some(frame), false, 1, |ui| {
                         edits.extend(show(ui, &world, Some(frame), &stylesheets));
                     });
                 });

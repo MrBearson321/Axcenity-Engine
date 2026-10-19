@@ -7,11 +7,11 @@ Colours: blue `#004AAD`, orange `#F1892D`, yellows `#F9BF3B` and `#FFCF4B`, grey
 | File | Size | Use |
 |---|---|---|
 | `wordmark-source.png` | 1536×1024 | The master, as supplied, on white. Every other file is made from it by `build.py`. |
-| `wordmark.png` | 840 wide | The wordmark for light backgrounds, transparent. The editor's start screen and About box (light theme). |
-| `wordmark-dark.png` | 840 wide | The wordmark for dark backgrounds, transparent. The same places, dark theme. |
+| `wordmark.png` | 840 wide | The wordmark for light backgrounds, transparent. The editor's About box (light theme). |
+| `wordmark-dark.png` | 840 wide | The wordmark for dark backgrounds, transparent: the "Axc" letters are light with a soft grey outline. The same place, dark theme. |
+| `wordmark-small.png`, `wordmark-dark-small.png` | 336 wide | The same, for the start screen's sidebar, where they're drawn 168 points wide. |
 | `mark.svg` | vector | The hexagon on its own, redrawn as strokes (in the source, the letters cover parts of it). |
 | `mark.png` | 1024×1024 | The hexagon in brand blue, transparent. |
-| `mark-white-40.png` | 40×40 | The hexagon in white, for the editor's menu bar, which tints it to suit the theme. |
 | `icon.png` | 1024×1024 | The app icon: the hexagon on a white rounded square, so it shows on light and dark taskbars. |
 | `icon-256.png` | 256×256 | The editor's and the player's window icon (built in with `include_bytes!`). |
 | `icon.ico` | 16 to 256 | The Windows app icon for exported games and installers, and a website favicon. |
@@ -21,4 +21,4 @@ To change the logo, replace `wordmark-source.png` (same layout, white background
 
 Windows and Linux (X11) show the window icon in the title bar and taskbar. macOS and Wayland ignore window icons: there, the app bundle or desktop file sets the icon, which comes with exporting.
 
-egui under wgpu has no mipmaps, so an image drawn at under half its size looks jagged. The editor's images are about twice the size they're drawn at, for high-DPI screens.
+egui under wgpu has no mipmaps, so an image drawn at under half its size looks jagged. The editor's images are about twice the size they're drawn at, for high-DPI screens; `build.py` makes a smaller copy for each place that draws them smaller.

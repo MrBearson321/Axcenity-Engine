@@ -16,6 +16,7 @@
 //! out and lists it in [`Project::problems`].
 
 mod packed;
+mod versions;
 mod world_file;
 
 use axcenity_blocks::{Block, BlockKind, BlockScript, reserve_block_ids, translate};
@@ -27,6 +28,7 @@ use axcenity_core::{ClassName, InstanceId, World};
 use serde::Deserialize;
 
 pub use packed::{PackError, pack_game, unpack_game};
+pub use versions::{Version, list_versions, record_version, restore_version};
 pub use world_file::{WorldError, parse_world, write_world};
 
 pub const MANIFEST_FILE: &str = "axcenity.json";
@@ -1077,6 +1079,74 @@ fn rename_script_file(
     }
     fs::rename(&from, &to).map_err(SaveError::new(&to))?;
     Ok(new_path)
+}
+
+/// The path a Script or LocalScript at `path` gets when it switches between
+/// Code and Blocks: `X.server.lua` ↔ `X.server.blocks.json`, and the same
+/// for `.client`. `None` for ModuleScripts, which are only code.
+pub fn switched_script_path(path: &str) -> Option<String> {
+    for (code, blocks) in [
+        (SERVER_SCRIPT_SUFFIX, SERVER_BLOCK_SCRIPT_SUFFIX),
+        (CLIENT_SCRIPT_SUFFIX, CLIENT_BLOCK_SCRIPT_SUFFIX),
+    ] {
+        if let Some(stem) = path.strip_suffix(blocks) {
+            return Some(format!("{stem}{code}"));
+        }
+        if let Some(stem) = path.strip_suffix(code) {
+            return Some(format!("{stem}{blocks}"));
+        }
+    }
+    None
+}
+
+/// Switches the block script at `path` to Code: writes `source` (the Lua
+/// its blocks translate to) next to it as a `.lua` file, then deletes the
+/// block file. Returns the new path. Fails rather than replace a file.
+pub fn switch_to_code(folder: &Path, path: &str, source: &str) -> Result<String, SaveError> {
+    switch_script_file(folder, path, source)
+}
+
+/// Switches the Lua script at `path` to Blocks: writes `script` next to it
+/// as a `.blocks.json` file, then deletes the `.lua` file. Returns the new
+/// path. Fails rather than replace a file.
+pub fn switch_to_blocks(
+    folder: &Path,
+    path: &str,
+    script: &BlockScript,
+) -> Result<String, BlockSaveError> {
+    let text = serde_json::to_string_pretty(script).map_err(BlockSaveError::Serialize)?;
+    switch_script_file(folder, path, &text).map_err(BlockSaveError::Write)
+}
+
+fn switch_script_file(folder: &Path, path: &str, text: &str) -> Result<String, SaveError> {
+    let new_path = switched_script_path(path).ok_or_else(|| SaveError {
+        path: folder.join(path),
+        source: std::io::Error::new(
+            ErrorKind::InvalidInput,
+            "only Scripts and LocalScripts can switch between Code and Blocks",
+        ),
+    })?;
+    let disk_path = folder.join(&new_path);
+    use std::io::Write;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&disk_path)
+        .map_err(SaveError::new(&disk_path))?;
+    file.write_all(text.as_bytes())
+        .map_err(SaveError::new(&disk_path))?;
+    drop(file);
+    match fs::remove_file(folder.join(path)) {
+        Err(err) if err.kind() != ErrorKind::NotFound => {
+            // Put things back as they were, so there aren't two scripts.
+            let _ = fs::remove_file(&disk_path);
+            Err(SaveError {
+                path: folder.join(path),
+                source: err,
+            })
+        }
+        _ => Ok(new_path),
+    }
 }
 
 /// Deletes the script file at `path` (a [`ScriptFile::path`]).

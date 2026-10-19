@@ -19,13 +19,14 @@ use std::time::Instant;
 
 use axcenity_assets::Assets;
 use axcenity_blocks::{BlockScript, translate};
-use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
+use axcenity_core::{ClassName, Color3, InstanceId, Material, PartType, Value, Vector3, World};
 use axcenity_project::ScriptFile;
 use axcenity_script::{CameraState, KeyEvent};
 use eframe::egui;
 
 use crate::autocomplete;
 use crate::block_editor;
+use crate::dialog;
 use crate::explorer::{self, Action, Explorer, ExplorerOutput};
 use crate::gizmo::{Snap, Tool};
 use crate::history::{self, Field, History, Move, Place};
@@ -34,7 +35,7 @@ use crate::output::{Output, OutputKind};
 use crate::play::{self, Crash, GameKeys, Session};
 use crate::properties::{self, Edit};
 use crate::ribbon::{self, RibbonButton};
-use crate::scripts::ScriptTabs;
+use crate::scripts::{self, ScriptTabs};
 use crate::side_warnings::{self, WarningCache};
 use crate::start::{self, Brand, ProjectLink, StartAction, StartScreen};
 use crate::style_panel::{self, StyleEdit};
@@ -91,8 +92,13 @@ pub struct EditorApp {
     /// The open project's models, loaded as MeshParts are drawn, and shared
     /// with Play's physics. Has none when no project is open.
     assets: Assets,
-    /// The Instance shown in Properties and highlighted in the Explorer and viewport.
+    /// The Instance shown in Properties and given handles. The last of [`selection`](Self::selection).
     selected: Option<InstanceId>,
+    /// Every selected Instance, in the order they were added. The viewport and
+    /// Explorer highlight all of them. Ctrl toggles; Shift extends.
+    selection: Vec<InstanceId>,
+    /// File > Version History, and the same window after a restore.
+    versions_open: bool,
     /// Every change made to `world` since it was opened, for undo and redo.
     /// It also knows whether the world is as saved.
     history: History,
@@ -117,6 +123,12 @@ pub struct EditorApp {
     play: Option<Session>,
     /// A button clicked in the viewport, delivered on the next Play frame.
     pending_ui_activation: Option<InstanceId>,
+    /// A TextBox the player is typing in during Play.
+    focused_text: Option<InstanceId>,
+    pending_focus_lost: Option<InstanceId>,
+    /// UI layout warnings already shown, so a PageLayout problem is not
+    /// repeated every frame.
+    ui_warnings: Vec<String>,
     /// When the last Play frame ran, to measure how much game time passed.
     last_frame: Option<Instant>,
     /// Turns keyboard events into key presses for LocalScripts during Play.
@@ -215,6 +227,10 @@ struct OpenProject {
     /// read or written. Play reads their files again, for the newest code.
     scripts: Vec<ScriptFile>,
     block_scripts: Vec<BlockDocument>,
+    /// Blocks switched to Code, by the code file's path, with the code they
+    /// became: switched back with that code unchanged, they come back as
+    /// they were (loose blocks and where each stack was).
+    remembered_blocks: HashMap<String, (String, BlockScript)>,
     /// Notices files changed by other programs.
     watcher: Watcher,
     /// The world file's text as last read or written, to tell the editor's
@@ -236,6 +252,8 @@ impl EditorApp {
             project: None,
             assets: Assets::default(),
             selected: None,
+            selection: Vec::new(),
+            versions_open: false,
             history: History::new(),
             tool: Tool::default(),
             snap: Snap::default(),
@@ -247,6 +265,9 @@ impl EditorApp {
             shown_title: String::new(),
             play: None,
             pending_ui_activation: None,
+            focused_text: None,
+            pending_focus_lost: None,
+            ui_warnings: Vec::new(),
             last_frame: None,
             tabs: ScriptTabs::default(),
             confirm_delete: None,
@@ -339,6 +360,8 @@ impl EditorApp {
         self.thumbnail = None;
         self.thumbnail_wanted = None;
         self.pending_ui_activation = None;
+        self.focused_text = None;
+        self.pending_focus_lost = None;
         self.assets = Assets::new(&project.folder);
         self.tabs.close_all();
         self.viewport.reset_camera();
@@ -374,6 +397,7 @@ impl EditorApp {
             stylesheet_texts,
             scripts: project.scripts,
             block_scripts,
+            remembered_blocks: HashMap::new(),
             world_text,
             keep_world_file: !project.world_loaded,
         });
@@ -409,6 +433,7 @@ impl EditorApp {
     fn replace_world(&mut self, world: World) {
         self.world = world;
         self.selected = None;
+        self.selection.clear();
         self.history = History::new();
         self.explorer = Explorer::new(&self.world);
     }
@@ -456,10 +481,44 @@ impl EditorApp {
     /// Selects `id` (or nothing), from a click in the viewport. The Explorer
     /// opens the branches above it and scrolls to it, so it's highlighted there too.
     fn select_from_viewport(&mut self, id: Option<InstanceId>) {
+        self.selection = id.into_iter().collect();
         self.selected = id;
         if let Some(id) = id {
             self.explorer.reveal(shown(&self.world, &self.play), id);
         }
+    }
+
+    /// A click in the Explorer or the viewport. `order` is the Explorer's
+    /// visible rows, so Shift can select the range; the viewport passes `None`.
+    fn select_clicked(
+        &mut self,
+        id: Option<InstanceId>,
+        modifiers: egui::Modifiers,
+        order: Option<&[InstanceId]>,
+        keep_group: bool,
+    ) {
+        explorer::update_selection(&mut self.selection, id, modifiers, order, keep_group);
+        self.selected = self.selection.last().copied();
+        if let Some(id) = self.selected {
+            self.explorer.reveal(shown(&self.world, &self.play), id);
+        }
+    }
+
+    /// The selected Instances that aren't inside another selected one, so
+    /// deleting or duplicating a parent doesn't also do it to its children.
+    fn selection_roots(&self) -> Vec<InstanceId> {
+        let ids = if self.selection.is_empty() {
+            self.selected.into_iter().collect::<Vec<_>>()
+        } else {
+            self.selection.clone()
+        };
+        ids.iter()
+            .copied()
+            .filter(|id| {
+                !ids.iter()
+                    .any(|other| self.world.is_descendant_of(*id, *other))
+            })
+            .collect()
     }
 
     fn playing(&self) -> bool {
@@ -776,10 +835,11 @@ impl EditorApp {
     /// After Stop, that includes anything the game made.
     fn forget_selection_outside_tree(&mut self) {
         let world = shown(&self.world, &self.play);
-        if let Some(id) = self.selected
-            && !world.is_descendant_of(id, world.root())
-        {
-            self.selected = None;
+        let root = world.root();
+        self.selection
+            .retain(|id| *id == root || world.is_descendant_of(*id, root));
+        if self.selected.is_some_and(|id| !self.selection.contains(&id)) {
+            self.selected = self.selection.last().copied();
         }
     }
 
@@ -816,6 +876,8 @@ impl EditorApp {
             Ok(session) => {
                 self.play = Some(session);
                 self.pending_ui_activation = None;
+                self.focused_text = None;
+                self.pending_focus_lost = None;
                 self.last_frame = None;
                 self.game_keys = GameKeys::default();
             }
@@ -829,6 +891,8 @@ impl EditorApp {
         if self.play.take().is_some() {
             self.output
                 .info("Stopped. The world is back as it was before Play.");
+            self.focused_text = None;
+            self.pending_focus_lost = None;
             self.forget_selection_outside_tree();
         }
     }
@@ -836,12 +900,24 @@ impl EditorApp {
     /// Runs one frame of the game, `seconds` long, with the keys pressed and
     /// released since the last one. LocalScripts see the viewport's camera
     /// as `workspace.CurrentCamera`, and can move it. A crash stops the game.
-    fn play_frame(&mut self, seconds: f64, keys: &[KeyEvent], activation: Option<InstanceId>) {
+    fn play_frame(
+        &mut self,
+        seconds: f64,
+        keys: &[KeyEvent],
+        activation: Option<InstanceId>,
+        focus_lost: Option<InstanceId>,
+    ) {
         let Some(session) = &mut self.play else {
             return;
         };
         if let Some(button) = activation
             && let Err(crash) = session.activate_ui_button(button, &mut self.output)
+        {
+            self.crashed(crash);
+            return;
+        }
+        if let Some(text_box) = focus_lost
+            && let Err(crash) = session.release_text_box(text_box, &mut self.output)
         {
             self.crashed(crash);
             return;
@@ -940,9 +1016,18 @@ impl EditorApp {
                 // Typing in the Explorer is done, so this is one whole step.
                 self.history.seal();
             }
-            Action::Duplicate(id) => self.duplicate(id),
+            Action::Duplicate(id) => {
+                if self.selection.contains(&id) && self.selection.len() > 1 {
+                    self.duplicate_selected();
+                } else {
+                    self.duplicate(id);
+                }
+            }
             // Deleting a script deletes its file, which can't be undone, so ask first.
             Action::Delete(id) if is_script(id) => self.confirm_delete = Some(id),
+            Action::Delete(id) if self.selection.contains(&id) && self.selection.len() > 1 => {
+                self.delete_selected();
+            }
             Action::Delete(id) => self.delete(id),
             Action::MoveInto { id, parent } => {
                 self.move_into(id, parent);
@@ -965,6 +1050,38 @@ impl EditorApp {
     /// UI elements only show inside a ScreenGui, so inserting one where
     /// there's none makes a ScreenGui for it first.
     fn insert(&mut self, what: Insertable, near: Option<InstanceId>) {
+        if matches!(what, Insertable::PointLight | Insertable::SpotLight)
+            && !tree::light_has_part_parent(&self.world, near.or(self.selected))
+        {
+            self.insert_named(
+                Insertable::Part(PartType::Ball),
+                near.or(self.selected),
+                "Lamp",
+                vec![
+                    ("Anchored", Value::Bool(true)),
+                    ("Material", Value::Material(Material::Neon)),
+                    ("Size", Value::Vector3(Vector3::new(1.2, 1.2, 1.2))),
+                    ("Color", Value::Color3(Color3::new(1.0, 0.86, 0.55))),
+                ],
+            );
+            let lamp = self.selected;
+            self.insert_named(what, lamp, what.class().as_str(), Vec::new());
+            return;
+        }
+        if what == Insertable::Page {
+            let layout = tree::page_layout_for(&self.world, near.or(self.selected)).unwrap_or_else(|| {
+                self.insert(Insertable::PageLayout, near);
+                self.selected.expect("inserting a PageLayout selects it")
+            });
+            self.insert_named(Insertable::Frame, Some(layout), "Page", Vec::new());
+            return;
+        }
+        if what == Insertable::BillboardGui
+            && !tree::light_has_part_parent(&self.world, near.or(self.selected))
+        {
+            self.output
+                .warning("BillboardGui shows when it is inside a part.");
+        }
         if tree::needs_screen_gui(&self.world, near, what) {
             self.insert_named(Insertable::ScreenGui, None, "ScreenGui", Vec::new());
             let gui = self.selected;
@@ -1014,12 +1131,12 @@ impl EditorApp {
 
     /// Copies `id` and everything inside it, puts the copy right after it
     /// with a name no sibling has, and selects the copy.
-    fn duplicate(&mut self, id: InstanceId) {
+    fn duplicate(&mut self, id: InstanceId) -> Option<InstanceId> {
         let Some(name) = self.editable_name(id, "duplicate") else {
-            return;
+            return None;
         };
         let Some(original) = history::place_of(&self.world, id) else {
-            return;
+            return None;
         };
         let copy = self.world.duplicate(id).expect("checked it can be edited");
         let copy_name = tree::unique_name(&self.world, original.parent, &name);
@@ -1030,6 +1147,61 @@ impl EditorApp {
         };
         if self.place(copy, Some(after), format!("Duplicate {name}")) {
             self.select_from_viewport(Some(copy));
+            return Some(copy);
+        }
+        None
+    }
+
+    /// Duplicates every selected Instance that isn't inside another one, and
+    /// selects the copies.
+    fn duplicate_selected(&mut self) {
+        let ids = self.selection_roots();
+        let mut copies = Vec::new();
+        for id in ids.into_iter().rev() {
+            if let Some(copy) = self.duplicate(id) {
+                copies.push(copy);
+            }
+        }
+        if copies.is_empty() {
+            return;
+        }
+        copies.reverse();
+        let primary = *copies.last().unwrap();
+        self.selection = copies;
+        self.selected = Some(primary);
+        self.explorer.reveal(&self.world, primary);
+    }
+
+    /// Deletes every selected Instance that isn't inside another one. One
+    /// script still goes through the "delete its file?" question. Several
+    /// scripts are left, and a note says to delete those one at a time.
+    fn delete_selected(&mut self) {
+        let ids = self.selection_roots();
+        if ids.len() == 1
+            && self
+                .world
+                .get(ids[0])
+                .is_some_and(|instance| instance.class().is_script())
+        {
+            self.confirm_delete = Some(ids[0]);
+            return;
+        }
+        let mut skipped_script = false;
+        for id in ids {
+            if self
+                .world
+                .get(id)
+                .is_some_and(|instance| instance.class().is_script())
+            {
+                skipped_script = true;
+                continue;
+            }
+            self.delete(id);
+        }
+        if skipped_script {
+            self.output.info(
+                "Scripts are deleted one at a time, from their row's menu, so the file can be removed too.",
+            );
         }
     }
 
@@ -1188,6 +1360,8 @@ impl EditorApp {
         self.project = None;
         self.play = None;
         self.pending_ui_activation = None;
+        self.focused_text = None;
+        self.pending_focus_lost = None;
         self.thumbnail = None;
         self.thumbnail_wanted = None;
         self.assets = Assets::default();
@@ -1261,29 +1435,58 @@ impl EditorApp {
             Discard::CloseProject => (project, "closing it"),
             Discard::CloseTab(path) => (axcenity_project::script_name(path), "closing it"),
         };
-        let mut answer = None;
-        let modal = egui::Modal::new(egui::Id::new("unsaved changes")).show(ctx, |ui| {
-            ui.heading("Save changes?");
-            ui.label(format!(
-                "\"{name}\" has unsaved changes. Save them before {doing}?"
-            ));
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                if ui.button("Save").clicked() {
-                    answer = Some(Answer::Save);
+        // What isn't saved: only the tab, when closing a tab.
+        let mut items = Vec::new();
+        if !matches!(discard, Discard::CloseTab(_)) {
+            if !self.history.is_saved() {
+                items.push((icons::GLOBE_HEMISPHERE_WEST, "The world".to_owned()));
+            }
+            for path in self.tabs.unsaved_paths() {
+                items.push((icons::FILE_CODE, path));
+            }
+            if let Some(project) = &self.project {
+                for document in &project.block_scripts {
+                    if document.script != document.saved {
+                        items.push((icons::PUZZLE_PIECE, document.path.clone()));
+                    }
                 }
-                if ui.button("Don't Save").clicked() {
-                    answer = Some(Answer::DontSave);
-                }
-                if ui.button("Cancel").clicked() {
-                    answer = Some(Answer::Cancel);
-                }
-            });
-        });
-        // Escape or a click outside the box means Cancel.
-        if answer.is_none() && modal.should_close() {
-            answer = Some(Answer::Cancel);
+            }
         }
+        let (icon, accent) = dialog::unsaved_style();
+        let message = format!("\"{name}\" has unsaved changes. Save them before {doing}?");
+        let outcome = dialog::ask(
+            ctx,
+            &dialog::Question {
+                id: "unsaved changes",
+                icon,
+                accent,
+                title: "Save changes?",
+                message: &message,
+                items,
+            },
+            &[
+                dialog::Button {
+                    icon: icons::X,
+                    label: "Cancel",
+                    kind: dialog::Kind::Plain,
+                },
+                dialog::Button {
+                    icon: icons::TRASH,
+                    label: "Don't Save",
+                    kind: dialog::Kind::Plain,
+                },
+                dialog::Button {
+                    icon: icons::FLOPPY_DISK,
+                    label: "Save",
+                    kind: dialog::Kind::Main,
+                },
+            ],
+        );
+        let answer = outcome.map(|outcome| match outcome {
+            dialog::Outcome::Picked(2) => Answer::Save,
+            dialog::Outcome::Picked(1) => Answer::DontSave,
+            _ => Answer::Cancel,
+        });
         if let Some(answer) = answer
             && let Some(discard) = self.answer(answer)
         {
@@ -1325,19 +1528,6 @@ impl EditorApp {
 
     fn menu_bar(&mut self, ui: &mut egui::Ui) {
         egui::MenuBar::new().ui(ui, |ui| {
-            if let Some(brand) = &self.brand {
-                let tint = if ui.visuals().dark_mode {
-                    theme::BRAND_BLUE_BRIGHT
-                } else {
-                    theme::BRAND_BLUE
-                };
-                ui.add(
-                    egui::Image::new(&brand.mark)
-                        .fit_to_exact_size(egui::vec2(20.0, 20.0))
-                        .tint(tint),
-                )
-                .on_hover_text("Axcenity Engine");
-            }
             ui.menu_button("File", |ui| {
                 if ui
                     .button(theme::with_icon(icons::FOLDER_OPEN, "Open Project…"))
@@ -1376,6 +1566,18 @@ impl EditorApp {
                     .shortcut_text(ui.ctx().format_shortcut(&SAVE_SHORTCUT));
                 if ui.add_enabled(self.project.is_some(), save).clicked() {
                     self.save();
+                }
+                if ui
+                    .add_enabled(
+                        self.project.is_some() && !self.playing(),
+                        egui::Button::new(theme::with_icon(
+                            icons::CLOCK_COUNTER_CLOCKWISE,
+                            "Version History…",
+                        )),
+                    )
+                    .clicked()
+                {
+                    self.versions_open = true;
                 }
                 let export_enabled = self.project.is_some() && !self.playing();
                 ui.menu_button(
@@ -1522,19 +1724,15 @@ impl EditorApp {
                 }
                 let duplicate = egui::Button::new(theme::with_icon(icons::COPY, "Duplicate"))
                     .shortcut_text(ui.ctx().format_shortcut(&DUPLICATE_SHORTCUT));
-                if ui.add_enabled(editable, duplicate).clicked()
-                    && let Some(id) = selected
-                {
-                    self.act(Action::Duplicate(id));
+                if ui.add_enabled(editable, duplicate).clicked() && selected.is_some() {
+                    self.duplicate_selected();
                 }
                 let deletable =
                     selected.is_some_and(|id| tree::check_delete(&self.world, id).is_ok()) && !busy;
                 let delete = egui::Button::new(theme::with_icon(icons::TRASH, "Delete"))
                     .shortcut_text(DELETE_KEY_TEXT);
-                if ui.add_enabled(deletable, delete).clicked()
-                    && let Some(id) = selected
-                {
-                    self.act(Action::Delete(id));
+                if ui.add_enabled(deletable, delete).clicked() && selected.is_some() {
+                    self.delete_selected();
                 }
             });
             ui.menu_button("View", |ui| {
@@ -1601,7 +1799,6 @@ impl EditorApp {
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         let mut insert = None;
         let mut insert_script = None;
-        let mut insert_block_script = None;
         let mut import = false;
         let (mut play, mut stop) = (false, false);
         let playing = self.playing();
@@ -1753,17 +1950,39 @@ impl EditorApp {
                             Insertable::Frame => "Frame",
                             Insertable::TextLabel => "Text",
                             Insertable::TextButton => "Button",
-                            _ => "Image",
+                            Insertable::ImageLabel => "Image",
+                            Insertable::TextBox => "TextBox",
+                            Insertable::PageLayout => "Pages",
+                            Insertable::Page => "Page",
+                            Insertable::Table => "Table",
+                            Insertable::BillboardGui => "Billboard",
+                            _ => what.label(),
                         };
-                        let hover = if what == Insertable::ScreenGui {
-                            "Insert a ScreenGui: a layer of UI over the game.".to_owned()
-                        } else {
-                            format!(
+                        let hover = match what {
+                            Insertable::ScreenGui => {
+                                "Insert a ScreenGui: a layer of UI over the game.".to_owned()
+                            }
+                            Insertable::PageLayout => {
+                                "Insert a PageLayout. Its child Frames are pages; a script or the \
+                                 show-page block sets CurrentPage."
+                                    .to_owned()
+                            }
+                            Insertable::Page => {
+                                "Insert a page Frame into the selected PageLayout (a PageLayout \
+                                 and a ScreenGui are made if there isn't one)."
+                                    .to_owned()
+                            }
+                            Insertable::BillboardGui => {
+                                "Insert a BillboardGui into the selected part. It floats in the \
+                                 world and is drawn with the screen UI."
+                                    .to_owned()
+                            }
+                            _ => format!(
                                 "Insert a {} into the selected ScreenGui or Frame (or the first \
                                  ScreenGui; one is made if there's none). Drag its handles in the \
                                  viewport, and style it with CSS in the Style section of Properties.",
                                 what.label()
-                            )
+                            ),
                         };
                         let button = RibbonButton::new(theme::insert_icon(what), label)
                             .color(theme::class_color(what.class(), ui.visuals()));
@@ -1798,36 +2017,7 @@ impl EditorApp {
                         }
                     }
                 });
-                ui.separator();
-                ribbon::group(ui, "Blocks", |ui| {
-                    for class in [ClassName::Script, ClassName::LocalScript] {
-                        let (title, hover) = if class == ClassName::Script {
-                            (
-                                "Server Blocks",
-                                "Create and open a new server block script.",
-                            )
-                        } else {
-                            (
-                                "Client Blocks",
-                                "Create and open a new client block script.",
-                            )
-                        };
-                        let button = RibbonButton::new(theme::class_icon(class), title)
-                            .color(theme::class_color(class, ui.visuals()));
-                        if ui
-                            .add_enabled(!playing && can_play, button)
-                            .on_hover_text(hover)
-                            .on_disabled_hover_text(if playing {
-                                "Press Stop to edit."
-                            } else {
-                                "Open a project first."
-                            })
-                            .clicked()
-                        {
-                            insert_block_script = Some(class);
-                        }
-                    }
-                });
+
             });
         });
         if let Some(what) = insert {
@@ -1836,9 +2026,6 @@ impl EditorApp {
         }
         if let Some(class) = insert_script {
             self.act(Action::InsertScript(class));
-        }
-        if let Some(class) = insert_block_script {
-            self.insert_block_script(class);
         }
         if import {
             self.import_model_with_dialog();
@@ -1912,11 +2099,96 @@ impl EditorApp {
                 self.explorer.start_rename(&self.world, id);
             }
             if keys.duplicate {
-                self.act(Action::Duplicate(id));
+                self.duplicate_selected();
             }
             if keys.delete {
-                self.act(Action::Delete(id));
+                self.delete_selected();
             }
+        }
+    }
+
+    /// File > Version History: the saves kept for this project, and restoring one.
+    fn version_window(&mut self, ctx: &egui::Context) {
+        let Some(folder) = self.project.as_ref().map(|project| project.folder.clone()) else {
+            self.versions_open = false;
+            return;
+        };
+        let mut open = self.versions_open;
+        let mut restore = None;
+        let mut checkpoint = false;
+        egui::Window::new("Version History")
+            .open(&mut open)
+            .resizable(true)
+            .default_width(420.0)
+            .show(ctx, |ui| {
+                ui.weak(
+                    "Each save keeps the world, scripts and styles. Restoring puts that \
+                     version back. Assets and the project name stay as they are.",
+                );
+                ui.add_space(6.0);
+                if ui.button("Save a version now").clicked() {
+                    checkpoint = true;
+                }
+                ui.add_space(6.0);
+                let versions = axcenity_project::list_versions(&folder);
+                if versions.is_empty() {
+                    ui.weak("No versions yet. Save the project to keep the first one.");
+                }
+                egui::ScrollArea::vertical()
+                    .max_height(320.0)
+                    .show(ui, |ui| {
+                        for version in &versions {
+                            ui.horizontal(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.label(version.label.as_str());
+                                    ui.weak(version.when());
+                                });
+                                if ui.button("Restore").clicked() {
+                                    restore = Some(version.id.clone());
+                                }
+                            });
+                            ui.separator();
+                        }
+                    });
+            });
+        self.versions_open = open;
+        if checkpoint {
+            if self.unsaved() {
+                self.save();
+            } else {
+                match axcenity_project::record_version(&folder, "Checkpoint") {
+                    Ok(true) => self.output.info("Kept a version of the world, scripts and styles."),
+                    Ok(false) => self
+                        .output
+                        .info("The newest version already matches these files."),
+                    Err(err) => self.output.warning(format!("Could not keep a version: {err}")),
+                }
+            }
+        }
+        if let Some(id) = restore {
+            self.restore_version(&id);
+        }
+    }
+
+    /// Puts version `id` back, keeping the current files as a version first.
+    fn restore_version(&mut self, id: &str) {
+        let Some(folder) = self.project.as_ref().map(|project| project.folder.clone()) else {
+            return;
+        };
+        if self.unsaved() && !self.save() {
+            return;
+        }
+        if let Err(err) = axcenity_project::record_version(&folder, "Before restore") {
+            self.output
+                .warning(format!("Could not keep the current files before restoring: {err}"));
+        }
+        match axcenity_project::restore_version(&folder, id) {
+            Ok(()) => {
+                self.open(&folder);
+                self.output.info("Restored that version. The files it replaced were kept as a version named \"Before restore\".");
+                self.versions_open = true;
+            }
+            Err(err) => self.output.error(format!("Could not restore that version: {err}")),
         }
     }
 }
@@ -2055,12 +2327,60 @@ impl eframe::App for EditorApp {
             // Keys go to LocalScripts, unless a text box is being typed in.
             // (Read inside `input`, then used outside it: see the deadlock
             // trap in the crate's CLAUDE.md.)
-            let typing = ctx.wants_keyboard_input();
+            let typing = self.focused_text.is_some() || ctx.wants_keyboard_input();
             let (events, modifiers, focused) =
                 ctx.input(|input| (input.events.clone(), input.modifiers, input.focused));
+            if let Some(id) = self.focused_text
+                && let Some(session) = &mut self.play
+            {
+                for event in &events {
+                    let command = match event {
+                        egui::Event::Text(text) => Some(axcenity_ui::TextCommand::Insert(text.clone())),
+                        egui::Event::Key {
+                            key: egui::Key::Backspace,
+                            pressed: true,
+                            ..
+                        } => Some(axcenity_ui::TextCommand::Backspace),
+                        egui::Event::Key {
+                            key: egui::Key::Enter,
+                            pressed: true,
+                            ..
+                        } => Some(axcenity_ui::TextCommand::Submit),
+                        _ => None,
+                    };
+                    if matches!(
+                        event,
+                        egui::Event::Key {
+                            key: egui::Key::Escape,
+                            pressed: true,
+                            ..
+                        }
+                    ) {
+                        self.focused_text = None;
+                        self.pending_focus_lost = Some(id);
+                        break;
+                    }
+                    let Some(command) = command else {
+                        continue;
+                    };
+                    match session.edit_text(id, command, &mut self.output) {
+                        Ok(axcenity_ui::TextOutcome::Finished) => {
+                            self.focused_text = None;
+                            self.pending_focus_lost = Some(id);
+                            break;
+                        }
+                        Ok(_) => {}
+                        Err(crash) => {
+                            self.crashed(crash);
+                            break;
+                        }
+                    }
+                }
+            }
             let keys = self.game_keys.read(&events, modifiers, focused, typing);
             let activation = self.pending_ui_activation.take();
-            self.play_frame(seconds, &keys, activation);
+            let focus_lost = self.pending_focus_lost.take();
+            self.play_frame(seconds, &keys, activation, focus_lost);
             ctx.request_repaint();
         }
 
@@ -2093,6 +2413,7 @@ impl eframe::App for EditorApp {
         let mut edit = None;
         let mut style_edit = None;
         let mut explorer = ExplorerOutput::default();
+        let mut explorer_rows = Vec::new();
         let editing = !self.playing();
         // The game's world during Play, otherwise the one being edited.
         let world = shown(&self.world, &self.play);
@@ -2109,7 +2430,7 @@ impl eframe::App for EditorApp {
                         .default_height(340.0)
                         .show_inside(ui, |ui| {
                             let selected = self.selected;
-                            edit = properties::show(ui, world, selected, !editing, |ui| {
+                            edit = properties::show(ui, world, selected, !editing, self.selection.len(), |ui| {
                                 // Stylesheets are edited, not the game, so not during Play.
                                 if editing {
                                     style_edit =
@@ -2117,7 +2438,10 @@ impl eframe::App for EditorApp {
                                 }
                             });
                         });
-                    explorer = self.explorer.show(ui, world, self.selected, editing);
+                    explorer = self.explorer.show(ui, world, &self.selection, editing);
+                    if explorer.clicked.is_some() {
+                        explorer_rows = self.explorer.rows(world).into_iter().map(|row| row.id).collect();
+                    }
                 });
         }
         // Applied before the viewport draws, so it shows the change this frame.
@@ -2127,8 +2451,14 @@ impl eframe::App for EditorApp {
         if let (Some(id), Some(edit)) = (self.selected, style_edit) {
             self.apply_style(id, edit);
         }
-        if let Some(id) = explorer.clicked {
-            self.selected = Some(id);
+        if explorer.clicked.is_some() || explorer.keep_group {
+            self.select_clicked(
+                explorer.clicked,
+                explorer.modifiers,
+                Some(&explorer_rows),
+                explorer.keep_group,
+            );
+            ctx.request_repaint();
         }
         if let Some(action) = explorer.action {
             self.act(action);
@@ -2161,6 +2491,27 @@ impl eframe::App for EditorApp {
         if let Some(path) = close_tab {
             self.request_and_go_ahead(ctx, Discard::CloseTab(path));
         }
+        // Scripts and LocalScripts switch between Code and Blocks here.
+        let switchable = self
+            .tabs
+            .active_path()
+            .filter(|path| axcenity_project::switched_script_path(path).is_some())
+            .map(str::to_owned);
+        if has_project && let Some(path) = switchable {
+            let blocks = axcenity_project::is_block_script(&path);
+            let playing = self.playing();
+            let switch = egui::TopBottomPanel::top("script mode")
+                .frame(
+                    egui::Frame::side_top_panel(&ctx.style())
+                        .inner_margin(egui::Margin::symmetric(10, 5)),
+                )
+                .show(ctx, |ui| scripts::mode_bar(ui, blocks, !playing))
+                .inner;
+            if switch {
+                self.switch_script_mode(&path);
+                ctx.request_repaint();
+            }
+        }
 
         // Again, as the edits above may have changed which world to show.
         let world = shown(&self.world, &self.play);
@@ -2192,9 +2543,11 @@ impl eframe::App for EditorApp {
                                 world,
                                 assets: &self.assets,
                                 selected: self.selected,
+                                selection: &self.selection,
                                 tool,
                                 snap: self.snap,
                                 stylesheets,
+                                focused_text: self.focused_text,
                             },
                         )
                     }
@@ -2262,13 +2615,32 @@ impl eframe::App for EditorApp {
             Default::default()
         };
         if let Some(clicked) = output.clicked {
-            self.select_from_viewport(clicked.part);
+            self.select_clicked(clicked.part, clicked.modifiers, None, false);
             // The panels were already drawn this frame, so draw again to
             // show the new selection there.
             ctx.request_repaint();
         }
         if output.activated.is_some() {
             self.pending_ui_activation = output.activated;
+        }
+        if self.playing() {
+            if output.text_box.is_some() {
+                self.focused_text = output.text_box;
+            } else if output.viewport_clicked {
+                if let Some(id) = self.focused_text.take() {
+                    self.pending_focus_lost = Some(id);
+                }
+            }
+        }
+        let fresh: Vec<String> = output
+            .ui_warnings
+            .iter()
+            .filter(|warning| !self.ui_warnings.contains(warning))
+            .cloned()
+            .collect();
+        self.ui_warnings.clone_from(&output.ui_warnings);
+        for warning in fresh {
+            self.output.warning(warning);
         }
         if let Some(edit) = output.drag {
             self.apply_drag(edit);
@@ -2298,6 +2670,9 @@ impl eframe::App for EditorApp {
             ctx.request_repaint();
         }
 
+        if self.versions_open {
+            self.version_window(ctx);
+        }
         self.unsaved_changes_prompt(ctx);
         self.delete_script_prompt(ctx);
         self.import_prompt(ctx);
@@ -3415,7 +3790,7 @@ mod tests {
     /// Runs the game for `seconds` at 60 frames per second.
     pub(super) fn play_for(app: &mut EditorApp, seconds: f64) {
         for _ in 0..(seconds * 60.0).round() as u32 {
-            app.play_frame(1.0 / 60.0, &[], None);
+            app.play_frame(1.0 / 60.0, &[], None, None);
         }
     }
 
@@ -3640,7 +4015,7 @@ mod tests {
         app.play();
         play_for(&mut app, 1.0);
         app.play.as_mut().unwrap().panic_next_frame();
-        app.play_frame(1.0 / 60.0, &[], None);
+        app.play_frame(1.0 / 60.0, &[], None, None);
 
         assert!(!app.playing(), "back in edit mode");
         let line = last_line(&app);

@@ -28,8 +28,6 @@ impl Screen {
     }
 
     /// Where a world point shows in the viewport, unless it's behind the camera.
-    /// Only tests need it so far; the viewport draws lines.
-    #[cfg(test)]
     pub fn point(&self, world: Vec3) -> Option<egui::Pos2> {
         let screen = self.view.project_point(world)?;
         Some(to_ui_point(self.rect, screen))

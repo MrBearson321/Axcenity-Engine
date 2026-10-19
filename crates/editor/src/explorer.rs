@@ -1,5 +1,7 @@
 //! The Explorer panel: the Instance tree, from `game` down, with branches
-//! that open and close. Clicking a row selects that Instance.
+//! that open and close. Clicking a row selects that Instance. Ctrl (Cmd on
+//! macOS) toggles it in the selection, and Shift selects every visible row
+//! from the last one to the clicked one.
 //!
 //! Right-clicking a row opens a menu to insert, rename, duplicate or delete,
 //! and dragging a row onto another moves it inside that one. Double-clicking
@@ -43,11 +45,12 @@ pub fn script_hover(class: ClassName) -> &'static str {
         ClassName::LocalScript => {
             "Make a new LocalScript, which runs on the player's side (keyboard, camera), in \
              StarterPlayerScripts, with its .client.lua file in the project's scripts folder, \
-             and open it."
+             and open it. Switch it between Code and Blocks at the top of its tab."
         }
         _ => {
             "Make a new Script, which runs on the server, in ServerScriptService, with its \
-             .server.lua file in the project's scripts folder, and open it."
+             .server.lua file in the project's scripts folder, and open it. Switch it between \
+             Code and Blocks at the top of its tab."
         }
     }
 }
@@ -106,11 +109,65 @@ pub enum Action {
     },
 }
 
+/// Changes `selection` for a click. The last id is the primary one (Properties
+/// and handles). Ctrl or Cmd toggles. Shift, with `order` (the visible rows),
+/// selects the range from the primary to the clicked row; without `order` it
+/// adds. A plain click replaces the selection. `None` clears it, unless Ctrl
+/// or Shift is held. `keep_group` is a right-click on a row already selected:
+/// the others stay, and that row becomes primary.
+pub fn update_selection(
+    selection: &mut Vec<InstanceId>,
+    clicked: Option<InstanceId>,
+    modifiers: egui::Modifiers,
+    order: Option<&[InstanceId]>,
+    keep_group: bool,
+) {
+    let toggle = modifiers.command || modifiers.ctrl || modifiers.mac_cmd;
+    match clicked {
+        None if toggle || modifiers.shift => {}
+        None => selection.clear(),
+        Some(id) if keep_group && selection.contains(&id) => {
+            selection.retain(|other| *other != id);
+            selection.push(id);
+        }
+        Some(id) if toggle => {
+            if let Some(index) = selection.iter().position(|other| *other == id) {
+                selection.remove(index);
+            } else {
+                selection.push(id);
+            }
+        }
+        Some(id) if modifiers.shift => {
+            if let Some(order) = order
+                && let Some(anchor) = selection.last().copied().or(Some(id))
+                && let (Some(from), Some(to)) = (
+                    order.iter().position(|row| *row == anchor),
+                    order.iter().position(|row| *row == id),
+                )
+            {
+                let (lo, hi) = (from.min(to), from.max(to));
+                *selection = order[lo..=hi].to_vec();
+            } else if !selection.contains(&id) {
+                selection.push(id);
+            }
+            if selection.last() != Some(&id) && selection.contains(&id) {
+                selection.retain(|other| *other != id);
+                selection.push(id);
+            }
+        }
+        Some(id) => *selection = vec![id],
+    }
+}
+
 /// What happened in the Explorer this frame.
 #[derive(Debug, Default, PartialEq)]
 pub struct ExplorerOutput {
     /// A row that was clicked (with either button), to select.
     pub clicked: Option<InstanceId>,
+    /// Ctrl, Shift and the other modifier keys held for [`clicked`](Self::clicked).
+    pub modifiers: egui::Modifiers,
+    /// A right-click on a row that is already selected should keep the others.
+    pub keep_group: bool,
     pub action: Option<Action>,
     /// A Script to open in a tab: its row was double-clicked, or Open was
     /// picked in its menu. Works during Play too.
@@ -218,15 +275,16 @@ impl Explorer {
         }
     }
 
-    /// Draws the tree with the `selected` row highlighted. Returns the row
+    /// Draws the tree with every id in `selected` highlighted. Returns the row
     /// that was clicked, and anything to do to the tree. When not `editable`
     /// (during Play), rows can still be clicked and opened, but there's no
-    /// right-click menu, renaming or dragging.
+    /// right-click menu, renaming or dragging. Ctrl (or Cmd) toggles a row
+    /// and Shift selects the range; see [`update_selection`].
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
         world: &World,
-        selected: Option<InstanceId>,
+        selected: &[InstanceId],
         editable: bool,
     ) -> ExplorerOutput {
         theme::panel_title(ui, icons::TREE_STRUCTURE, "Explorer");
@@ -301,7 +359,7 @@ impl Explorer {
                     let label = ui
                         .add(
                             egui::Button::selectable(
-                                selected == Some(row.id),
+                                selected.contains(&row.id),
                                 (icon, row.name.as_str()),
                             )
                             .sense(egui::Sense::click_and_drag()),
@@ -310,8 +368,12 @@ impl Explorer {
                     #[cfg(test)]
                     self.drawn.push((row.id, label.rect));
                     // A right-click selects too, so the menu acts on what's selected.
-                    if label.clicked() || label.secondary_clicked() {
+                    if label.secondary_clicked() {
                         output.clicked = Some(row.id);
+                        output.keep_group = true;
+                    } else if label.clicked() {
+                        output.clicked = Some(row.id);
+                        output.modifiers = ui.input(|input| input.modifiers);
                     }
                     if scroll_to == Some(row.id) {
                         label.scroll_to_me(Some(egui::Align::Center));
@@ -635,6 +697,40 @@ mod tests {
         axcenity_project::load(&folder).unwrap().world
     }
 
+    #[test]
+    fn ctrl_toggles_and_shift_selects_the_rows_between() {
+        let mut world = World::new();
+        let a = world.create(ClassName::Part).unwrap();
+        let b = world.create(ClassName::Part).unwrap();
+        let c = world.create(ClassName::Part).unwrap();
+        let order = [a, b, c];
+        let mut selection = vec![a];
+        update_selection(
+            &mut selection,
+            Some(c),
+            egui::Modifiers {
+                shift: true,
+                ..Default::default()
+            },
+            Some(&order),
+            false,
+        );
+        assert_eq!(selection, vec![a, b, c]);
+        update_selection(
+            &mut selection,
+            Some(b),
+            egui::Modifiers {
+                ctrl: true,
+                ..Default::default()
+            },
+            Some(&order),
+            false,
+        );
+        assert_eq!(selection, vec![a, c]);
+        update_selection(&mut selection, None, egui::Modifiers::default(), None, false);
+        assert!(selection.is_empty());
+    }
+
     /// Each visible row as indentation plus name, for easy comparing.
     fn outline(explorer: &Explorer, world: &World) -> Vec<String> {
         explorer
@@ -790,7 +886,7 @@ mod tests {
         let mut output = ExplorerOutput::default();
         let _ = ctx.run(input, |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                output = explorer.show(ui, world, None, editable);
+                output = explorer.show(ui, world, &[], editable);
             });
         });
         output

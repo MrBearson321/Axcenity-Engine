@@ -30,6 +30,7 @@ pub struct DrawList {
 #[derive(Clone, Debug)]
 pub enum UiDrawItem {
     Rectangle(UiRectangle),
+    Image(UiImage),
     Text(UiText),
 }
 
@@ -38,9 +39,24 @@ pub struct UiRectangle {
     pub position: [f32; 2],
     pub size: [f32; 2],
     pub color: [f32; 4],
+    /// The color at the bottom of a vertical gradient. The same as `color`
+    /// when the rectangle is a flat fill.
+    pub color_end: [f32; 4],
     pub border_color: [f32; 4],
     pub border_width: f32,
     pub border_radius: f32,
+}
+
+/// A picture in a UI rectangle. `texture` is filled in by `scene` from
+/// `path` before drawing; the UI crate only knows the project-relative path.
+#[derive(Clone, Debug)]
+pub struct UiImage {
+    pub position: [f32; 2],
+    pub size: [f32; 2],
+    pub tint: [f32; 4],
+    pub border_radius: f32,
+    pub path: String,
+    pub texture: Option<Arc<dyn TextureSource>>,
 }
 
 #[derive(Clone, Debug)]
@@ -51,6 +67,19 @@ pub struct UiText {
     pub font_size: f32,
     pub font_family: String,
     pub color: [f32; 4],
+    /// Where each line goes across the box.
+    pub align: TextAlign,
+    /// True to center the text up and down in its box; false puts it at the top.
+    pub center_vertically: bool,
+}
+
+/// Where lines of UI text go across their box (CSS `text-align`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TextAlign {
+    #[default]
+    Left,
+    Center,
+    Right,
 }
 
 #[derive(Clone, Copy, Debug)]

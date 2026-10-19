@@ -122,7 +122,7 @@ Each script gets its own restricted environment. Remove or replace `io`, `os` (k
 | | repeat *n* times, forever, repeat until | `for _ = 1, n do … end`; `while true do … task.wait() end`; `while not (c) do … task.wait() end` |
 | | if, if/else, stop this script | `if c then … else … end`; `do return end` |
 | Motion | move to, move by, turn to, turn by, set anchored | `Position =`, `Position = Position + v`, `Orientation =`, `Orientation = Orientation + v`, `Anchored =` |
-| Looks | set color, set text, show, hide, set *property* | `Color =`, `Text = tostring(v)`, `Visible = true/false`, `object.Property = v` |
+| Looks | set color, set text, show, hide, show page, set *property* | `Color =`, `Text = tostring(v)`, `Visible = true/false`, `layout.CurrentPage = page`, `object.Property = v` |
 | Sound | play, stop, pause, resume, set volume | `:Play()`, `:Stop()`, `:Pause()`, `:Resume()`, `Volume =` |
 | Variables | set, change by, *variable* | `name = v`, `name = name + n`, `name` |
 | More | print, destroy | `print(v)`, `object:Destroy()` |

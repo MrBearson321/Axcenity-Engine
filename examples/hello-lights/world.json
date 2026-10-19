@@ -1,0 +1,86 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Anchored": true,
+          "Color": [0.16, 0.17, 0.19],
+          "Material": "Plastic",
+          "Metalness": 0,
+          "Orientation": [0, 0, 0],
+          "Position": [0, -0.5, 0],
+          "Roughness": 0.35,
+          "Shape": "Block",
+          "Size": [80, 1, 80]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Lamp",
+        "properties": {
+          "Anchored": true,
+          "Color": [1, 0.85, 0.6],
+          "Material": "Neon",
+          "Metalness": 0,
+          "Orientation": [0, 0, 0],
+          "Position": [-10, 6, 8],
+          "Roughness": 0.5,
+          "Shape": "Ball",
+          "Size": [1.5, 1.5, 1.5]
+        },
+        "children": [
+          {
+            "class": "PointLight",
+            "name": "PointLight",
+            "properties": {
+              "Brightness": 6,
+              "Color": [1, 0.8, 0.55],
+              "Enabled": true,
+              "Range": 22
+            }
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "Spotlight",
+        "properties": {
+          "Anchored": true,
+          "Color": [0.2, 0.2, 0.22],
+          "Material": "Metal",
+          "Metalness": 1,
+          "Orientation": [0, 0, 0],
+          "Position": [10, 14, 8],
+          "Roughness": 0.3,
+          "Shape": "Cylinder",
+          "Size": [2, 1.5, 1.5]
+        },
+        "children": [
+          {
+            "class": "SpotLight",
+            "name": "SpotLight",
+            "properties": {
+              "Angle": 40,
+              "Brightness": 10,
+              "Color": [0.7, 0.85, 1],
+              "Direction": [0, -1, 0],
+              "Enabled": true,
+              "Range": 40
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "lighting": {
+    "properties": {
+      "EnvironmentIntensity": 0.25,
+      "GroundColor": [0.08, 0.08, 0.1],
+      "SkyHorizonColor": [0.2, 0.18, 0.3],
+      "SkyTopColor": [0.03, 0.04, 0.1]
+    }
+  }
+}

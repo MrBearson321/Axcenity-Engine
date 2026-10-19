@@ -102,6 +102,33 @@ impl Session {
         })
     }
 
+    /// Types into a TextBox inside the guarded Play session.
+    pub fn edit_text(
+        &mut self,
+        text_box: axcenity_core::InstanceId,
+        command: axcenity_ui::TextCommand,
+        output: &mut Output,
+    ) -> Result<axcenity_ui::TextOutcome, Crash> {
+        let mut outcome = axcenity_ui::TextOutcome::Ignored;
+        guard(|| {
+            outcome = axcenity_ui::edit_text_box(&mut self.world, text_box, command);
+            self.forward_output(output);
+        })?;
+        Ok(outcome)
+    }
+
+    /// Fires `FocusLost` for a TextBox the player finished typing in.
+    pub fn release_text_box(
+        &mut self,
+        text_box: axcenity_core::InstanceId,
+        output: &mut Output,
+    ) -> Result<(), Crash> {
+        guard(|| {
+            self.scripts.release_text_box(&mut self.world, text_box);
+            self.forward_output(output);
+        })
+    }
+
     /// Runs steps 1 to 4 of one frame, `seconds` long, with the keys pressed
     /// and released since the last frame and the viewport's camera. The
     /// viewport lays out UI at step 5 and draws the result at step 6.

@@ -83,7 +83,8 @@ fn light_of(world: &World, instance: &Instance) -> Option<Light> {
     }
     let parent = world.get(instance.parent()?)?;
     let (_, transform) = part_placement(parent)?;
-    let (_, rotation, position) = transform.to_scale_rotation_translation();
+    let position = light_origin(transform);
+    let (_, rotation, _) = transform.to_scale_rotation_translation();
     let color = instance.property("Color").and_then(Value::as_color3)?;
     let number = |name| instance.property(name).and_then(Value::as_number);
     let cone = match instance.class() {
@@ -104,6 +105,77 @@ fn light_of(world: &World, instance: &Instance) -> Option<Light> {
         range: number("Range")? as f32,
         cone,
     })
+}
+
+/// Where a PointLight or SpotLight in the Workspace is, for the editor to
+/// show it: a light has no shape of its own, so it's drawn as an icon.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LightMarker {
+    pub id: InstanceId,
+    pub spot: bool,
+    pub enabled: bool,
+    /// Just above the parent part, where the light shines from.
+    pub position: Vec3,
+    pub color: [f32; 3],
+    pub range: f32,
+    /// For a SpotLight: the way it points (one stud long), and its cone's
+    /// whole angle in degrees.
+    pub cone: Option<(Vec3, f32)>,
+}
+
+/// Every PointLight and SpotLight inside a part in the Workspace, switched
+/// on or not.
+pub fn light_markers(world: &World) -> Vec<LightMarker> {
+    let mut markers = Vec::new();
+    for id in world.descendants(world.workspace()) {
+        let Some(instance) = world.get(id) else {
+            continue;
+        };
+        let spot = match instance.class() {
+            ClassName::PointLight => false,
+            ClassName::SpotLight => true,
+            _ => continue,
+        };
+        let Some((_, transform)) = instance
+            .parent()
+            .and_then(|parent| world.get(parent))
+            .and_then(part_placement)
+        else {
+            continue;
+        };
+        let position = light_origin(transform);
+        let (_, rotation, _) = transform.to_scale_rotation_translation();
+        let number = |name| {
+            instance
+                .property(name)
+                .and_then(Value::as_number)
+                .unwrap_or(0.0) as f32
+        };
+        let cone = spot.then(|| {
+            let direction = instance
+                .property("Direction")
+                .and_then(Value::as_vector3)
+                .map_or(Vec3::NEG_Y, |d| Vec3::new(d.x, d.y, d.z));
+            (
+                (rotation * direction).normalize_or(Vec3::NEG_Y),
+                number("Angle"),
+            )
+        });
+        let color = instance
+            .property("Color")
+            .and_then(Value::as_color3)
+            .map_or([1.0; 3], |color| [color.r, color.g, color.b]);
+        markers.push(LightMarker {
+            id,
+            spot,
+            enabled: instance.property("Enabled").and_then(Value::as_bool) == Some(true),
+            position,
+            color,
+            range: number("Range"),
+            cone,
+        });
+    }
+    markers
 }
 
 /// The draw list for everything in the Workspace, seen from `camera`.
@@ -127,7 +199,16 @@ pub fn build_draw_list(world: &World, assets: &Assets, camera: Camera) -> DrawLi
             ClassName::PointLight | ClassName::SpotLight => {
                 lights.extend(light_of(world, instance))
             }
-            _ => items.extend(part_draw_item(instance, glow)),
+            _ => {
+                if let Some(mut item) = part_draw_item(instance, glow) {
+                    if let Some(extra) = fixture_glow(world, instance) {
+                        for (channel, added) in item.material.emissive.iter_mut().zip(extra) {
+                            *channel = (*channel + added).min(4.0);
+                        }
+                    }
+                    items.push(item);
+                }
+            }
         }
     }
 
@@ -160,6 +241,7 @@ pub fn build_draw_list_with_ui(
         stylesheets,
         None,
         None,
+        None,
     )
     .0
 }
@@ -174,6 +256,7 @@ pub fn build_draw_list_with_ui_interaction(
     stylesheets: &[Stylesheet],
     pointer: Option<[f32; 2]>,
     pressed_button: Option<InstanceId>,
+    focused: Option<InstanceId>,
 ) -> (DrawList, UiLayout) {
     let mut list = build_draw_list(world, assets, camera);
     let layout = layout_ui_interactive(
@@ -183,9 +266,68 @@ pub fn build_draw_list_with_ui_interaction(
         stylesheets,
         pointer,
         pressed_button,
+        focused,
+        Some(&camera),
     );
     list.ui = layout.draw_items.clone();
+    attach_ui_textures(&mut list.ui, assets);
     (list, layout)
+}
+
+/// Where a light shines from: just above the parent part, so the part's own
+/// top and the things around it are lit. A light at the part's center sits
+/// inside the mesh, and the outer faces point away from it.
+fn light_origin(transform: Mat4) -> Vec3 {
+    let (scale, rotation, position) = transform.to_scale_rotation_translation();
+    position + rotation * Vec3::Y * (scale.y.abs() * 0.5 + 0.05)
+}
+
+/// Color added to a part that contains a switched-on light, so the fixture
+/// itself is visible and not only the surfaces it happens to reach.
+fn fixture_glow(world: &World, instance: &Instance) -> Option<[f32; 3]> {
+    let mut glow = [0.0_f32; 3];
+    let mut any = false;
+    for child_id in instance.children() {
+        let Some(light) = world.get(*child_id) else {
+            continue;
+        };
+        if !matches!(light.class(), ClassName::PointLight | ClassName::SpotLight) {
+            continue;
+        }
+        if light.property("Enabled").and_then(Value::as_bool) != Some(true) {
+            continue;
+        }
+        let Some(color) = light.property("Color").and_then(Value::as_color3) else {
+            continue;
+        };
+        let brightness = light
+            .property("Brightness")
+            .and_then(Value::as_number)
+            .unwrap_or(1.0) as f32;
+        let scale = (brightness * 0.35).clamp(0.2, 1.5);
+        glow[0] += color.r * scale;
+        glow[1] += color.g * scale;
+        glow[2] += color.b * scale;
+        any = true;
+    }
+    any.then_some(glow)
+}
+
+/// Fills in UI image textures from project files. Paths that fail to load
+/// are reported by [`Assets`](axcenity_assets::Assets) and those images are
+/// not drawn.
+pub fn attach_ui_textures(items: &mut [axcenity_render::UiDrawItem], assets: &Assets) {
+    for item in items {
+        let axcenity_render::UiDrawItem::Image(image) = item else {
+            continue;
+        };
+        if image.texture.is_some() || image.path.is_empty() {
+            continue;
+        }
+        image.texture = assets.texture(&image.path).map(|image| {
+            Arc::new(ImageTexture(image)) as Arc<dyn axcenity_render::TextureSource>
+        });
+    }
 }
 
 /// A Part's shape and the transform that places its 1×1×1 mesh in the world,

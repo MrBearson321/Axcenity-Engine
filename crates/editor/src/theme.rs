@@ -103,9 +103,9 @@ fn fonts() -> egui::FontDefinitions {
     fonts
         .families
         .insert(heading_family(), family("Montserrat SemiBold"));
-    fonts
-        .families
-        .insert(filled(), vec!["Phosphor Fill".to_string()]);
+    // Every family needs a font with `◻` or `?` in it, which egui draws
+    // for characters no font has; without one it warns at startup.
+    fonts.families.insert(filled(), family("Phosphor Fill"));
     fonts
 }
 
@@ -272,6 +272,10 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::TextLabel => icons::FILE_CODE,
         ClassName::TextButton => icons::CURSOR,
         ClassName::ImageLabel => icons::IMAGE,
+        ClassName::TextBox => icons::TEXT_T,
+        ClassName::PageLayout => icons::STACK,
+        ClassName::Table => icons::TABLE,
+        ClassName::BillboardGui => icons::FLAG,
         ClassName::Sound => icons::MUSIC_NOTE,
         ClassName::PointLight => icons::LIGHTBULB,
         ClassName::SpotLight => icons::FLASHLIGHT,
@@ -320,7 +324,15 @@ pub fn class_color(class: ClassName, visuals: &egui::Visuals) -> Color32 {
         }
         ClassName::Folder => pick((249, 191, 59), (190, 130, 0)),
         ClassName::SurfaceAppearance => pick((236, 120, 220), (160, 40, 150)),
-        ClassName::ScreenGui | ClassName::Frame | ClassName::TextLabel => {
+        ClassName::ScreenGui
+        | ClassName::Frame
+        | ClassName::TextLabel
+        | ClassName::TextButton
+        | ClassName::ImageLabel
+        | ClassName::TextBox
+        | ClassName::PageLayout
+        | ClassName::Table
+        | ClassName::BillboardGui => {
             pick((120, 190, 255), (0, 105, 180))
         }
         ClassName::Sound => pick((245, 166, 35), (175, 105, 0)),
@@ -346,6 +358,41 @@ pub fn panel_title(ui: &mut egui::Ui, icon: &str, title: &str) {
 }
 
 /// The text of a menu item with an icon in front, such as "💾 Save".
+/// How big to draw a button's icon (1 is its normal size), animated: it
+/// grows a little under the mouse, dips while pressed, and pops back with a
+/// small bounce after a click.
+pub fn icon_scale(ui: &egui::Ui, response: &egui::Response) -> f32 {
+    const POP_SECONDS: f64 = 0.35;
+    let ctx = ui.ctx();
+    let hover = ctx.animate_bool_with_time(
+        response.id.with("icon hover"),
+        response.hovered() && ui.is_enabled(),
+        0.12,
+    );
+    let pressed = ctx.animate_bool_with_time(
+        response.id.with("icon press"),
+        response.is_pointer_button_down_on(),
+        0.06,
+    );
+    let clicked_at = response.id.with("icon clicked");
+    let now = ctx.input(|input| input.time);
+    if response.clicked() {
+        ctx.data_mut(|data| data.insert_temp(clicked_at, now));
+    }
+    let since = ctx
+        .data(|data| data.get_temp::<f64>(clicked_at))
+        .map(|at| now - at);
+    let pop = match since {
+        Some(since) if since < POP_SECONDS => {
+            ctx.request_repaint();
+            let t = (since / POP_SECONDS) as f32;
+            (t * std::f32::consts::PI).sin() * 0.25 * (1.0 - t)
+        }
+        _ => 0.0,
+    };
+    1.0 + 0.12 * hover - 0.12 * pressed + pop
+}
+
 pub fn with_icon(icon: &str, text: &str) -> String {
     format!("{icon}  {text}")
 }
@@ -373,6 +420,15 @@ mod tests {
                         fonts.has_glyph(&FontId::proportional(13.0), icon),
                         "{class:?}"
                     );
+                }
+                // Each family can draw the stand-in for missing characters.
+                for family in [
+                    FontFamily::Proportional,
+                    FontFamily::Monospace,
+                    heading_family(),
+                    filled(),
+                ] {
+                    assert!(fonts.has_glyph(&FontId::new(13.0, family.clone()), '?'), "{family:?}");
                 }
             });
             for theme in [egui::Theme::Dark, egui::Theme::Light] {

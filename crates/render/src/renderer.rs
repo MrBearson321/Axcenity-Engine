@@ -18,8 +18,8 @@ use glyphon::{
 use wgpu::util::DeviceExt;
 
 use crate::draw_list::{
-    ChannelMap, DrawItem, DrawList, Light, MeshSource, PostProcessing, Shape, TextureSource,
-    UiDrawItem, UiRectangle, UiText,
+    ChannelMap, DrawItem, DrawList, Light, MeshSource, PostProcessing, Shape, TextAlign,
+    TextureSource, UiDrawItem, UiImage, UiRectangle, UiText,
 };
 use crate::mesh::{self, MeshData, Vertex};
 
@@ -157,6 +157,7 @@ struct UiVertex {
     size: [f32; 2],
     border_color: [f32; 4],
     border: [f32; 2],
+    color_end: [f32; 4],
 }
 
 /// A mesh uploaded to the GPU.
@@ -347,6 +348,11 @@ struct ScenePipeline {
     light_buffer: wgpu::Buffer,
     tile_buffer: wgpu::Buffer,
     ui_pipeline: wgpu::RenderPipeline,
+    ui_image_pipeline: wgpu::RenderPipeline,
+    ui_image_layout: wgpu::BindGroupLayout,
+    ui_sampler: wgpu::Sampler,
+    /// One bind group per UI image texture. Dropped with the texture.
+    ui_image_groups: HashMap<u64, wgpu::BindGroup>,
     ui_buffer: wgpu::Buffer,
     ui_capacity: usize,
     font_system: FontSystem,
@@ -549,9 +555,9 @@ impl TextureRenderer {
         )
     }
 
-    /// Reads the texture back to the CPU as rows of RGBA bytes. Slow; for tests.
-    #[cfg(test)]
-    fn read_pixels(&self) -> Vec<u8> {
+    /// Reads the texture back to the CPU as rows of RGBA bytes. Slow: for
+    /// tests and screenshots.
+    pub fn read_pixels(&self) -> Vec<u8> {
         let (width, height) = self.size();
         let device = &self.scene.device;
         // Each copied row must be a multiple of 256 bytes long.
@@ -775,6 +781,8 @@ impl ScenePipeline {
         let post = PostPasses::new(&device, color_format);
         let post_targets = PostTargets::new(&device, &post, width, height);
         let ui_pipeline = create_ui_pipeline(&device, color_format);
+        let (ui_image_layout, ui_sampler, ui_image_pipeline) =
+            create_ui_image_pipeline(&device, color_format);
         let meshes = Meshes {
             block: upload_mesh(&device, "block", &mesh::block()),
             sphere: upload_mesh(&device, "sphere", &mesh::sphere()),
@@ -794,6 +802,9 @@ impl ScenePipeline {
         let mut font_system = FontSystem::new();
         font_system.db_mut().load_font_data(
             include_bytes!("../../../assets/fonts/Montserrat-Regular.ttf").to_vec(),
+        );
+        font_system.db_mut().load_font_data(
+            include_bytes!("../../../assets/fonts/JetBrainsMono-Regular.ttf").to_vec(),
         );
         let swash_cache = SwashCache::new();
         let glyph_cache = GlyphCache::new(&device);
@@ -818,6 +829,10 @@ impl ScenePipeline {
             light_buffer,
             tile_buffer,
             ui_pipeline,
+            ui_image_pipeline,
+            ui_image_layout,
+            ui_sampler,
+            ui_image_groups: HashMap::new(),
             ui_buffer,
             ui_capacity,
             font_system,
@@ -903,7 +918,9 @@ impl ScenePipeline {
         self.ensure_instance_capacity(instances.len());
         self.queue
             .write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&instances));
-        let ui_vertices = ui_vertices(&list.ui, viewport_size);
+        let mut ui_vertices = ui_vertices(&list.ui, viewport_size);
+        let rect_count = ui_vertices.len() as u32;
+        let image_draws = self.ui_image_draws(&list.ui, viewport_size, &mut ui_vertices);
         self.ensure_ui_capacity(ui_vertices.len());
         if !ui_vertices.is_empty() {
             self.queue
@@ -1048,10 +1065,21 @@ impl ScenePipeline {
                 depth_stencil_attachment: None,
                 ..Default::default()
             });
-            if !ui_vertices.is_empty() {
+            if rect_count > 0 {
                 pass.set_pipeline(&self.ui_pipeline);
                 pass.set_vertex_buffer(0, self.ui_buffer.slice(..));
-                pass.draw(0..ui_vertices.len() as u32, 0..1);
+                pass.draw(0..rect_count, 0..1);
+            }
+            if !image_draws.is_empty() {
+                pass.set_pipeline(&self.ui_image_pipeline);
+                pass.set_vertex_buffer(0, self.ui_buffer.slice(..));
+                for (key, start, count) in &image_draws {
+                    let Some(group) = self.ui_image_groups.get(key) else {
+                        continue;
+                    };
+                    pass.set_bind_group(0, group, &[]);
+                    pass.draw(*start..*start + *count, 0..1);
+                }
             }
             if !text_buffers.is_empty() {
                 self.text_renderer
@@ -1088,7 +1116,7 @@ impl ScenePipeline {
             .iter()
             .filter_map(|item| match item {
                 UiDrawItem::Text(text) => Some(text),
-                UiDrawItem::Rectangle(_) => None,
+                UiDrawItem::Rectangle(_) | UiDrawItem::Image(_) => None,
             })
             .collect();
         let mut buffers = Vec::with_capacity(text_items.len());
@@ -1109,6 +1137,14 @@ impl ScenePipeline {
                 &Attrs::new().family(Family::Name(&text.font_family)),
                 Shaping::Advanced,
             );
+            let align = match text.align {
+                TextAlign::Left => None,
+                TextAlign::Center => Some(glyphon::cosmic_text::Align::Center),
+                TextAlign::Right => Some(glyphon::cosmic_text::Align::Right),
+            };
+            for line in &mut buffer.lines {
+                line.set_align(align);
+            }
             buffer.shape_until_scroll(&mut self.font_system, false);
             buffers.push(buffer);
         }
@@ -1120,13 +1156,15 @@ impl ScenePipeline {
                 .map(|(text, buffer)| TextArea {
                     buffer,
                     left: text.position[0],
-                    top: text.position[1],
+                    top: text.position[1] + vertical_offset(text, buffer),
                     scale: 1.0,
+                    // Where the text may show, in screen pixels (not
+                    // relative to the text's position).
                     bounds: TextBounds {
-                        left: 0,
-                        top: 0,
-                        right: text.size[0].max(0.0) as i32,
-                        bottom: text.size[1].max(0.0) as i32,
+                        left: text.position[0].floor() as i32,
+                        top: text.position[1].floor() as i32,
+                        right: (text.position[0] + text.size[0].max(0.0)).ceil() as i32,
+                        bottom: (text.position[1] + text.size[1].max(0.0)).ceil() as i32,
                     },
                     default_color: glyph_color(text.color),
                     custom_glyphs: &[],
@@ -1165,15 +1203,7 @@ impl ScenePipeline {
             }
             let sources = material_textures(item);
             for source in sources.iter().flatten() {
-                match self.textures.entry(source.key()) {
-                    Entry::Occupied(mut cached) => cached.get_mut().last_drawn = frame,
-                    Entry::Vacant(slot) => {
-                        slot.insert(Cached {
-                            gpu: upload_texture(&self.device, &self.queue, source.as_ref()),
-                            last_drawn: frame,
-                        });
-                    }
-                }
+                self.note_texture(source.as_ref(), frame);
             }
             let key = material_key(item);
             if key == MaterialKey::default() {
@@ -1201,6 +1231,86 @@ impl ScenePipeline {
                 }
             }
         }
+        for item in &list.ui {
+            if let UiDrawItem::Image(image) = item
+                && let Some(source) = &image.texture
+            {
+                self.note_texture(source.as_ref(), frame);
+            }
+        }
+    }
+
+    /// Appends one quad per UI image and remembers which texture it uses.
+    fn ui_image_draws(
+        &mut self,
+        ui: &[UiDrawItem],
+        viewport: (u32, u32),
+        vertices: &mut Vec<UiVertex>,
+    ) -> Vec<(u64, u32, u32)> {
+        let mut draws = Vec::new();
+        for item in ui {
+            let UiDrawItem::Image(image) = item else {
+                continue;
+            };
+            let Some(source) = &image.texture else {
+                continue;
+            };
+            let key = source.key();
+            if self
+                .textures
+                .get(&key)
+                .and_then(|cached| cached.gpu.as_ref())
+                .is_none()
+            {
+                continue;
+            }
+            if !self.ui_image_groups.contains_key(&key) {
+                let group = {
+                    let gpu = self
+                        .textures
+                        .get(&key)
+                        .and_then(|cached| cached.gpu.as_ref())
+                        .expect("checked just above");
+                    self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("UI image"),
+                        layout: &self.ui_image_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(&gpu.srgb),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::Sampler(&self.ui_sampler),
+                            },
+                        ],
+                    })
+                };
+                self.ui_image_groups.insert(key, group);
+            }
+            let quad = image_quad(image, viewport);
+            if quad.is_empty() {
+                continue;
+            }
+            let start = vertices.len() as u32;
+            let count = quad.len() as u32;
+            vertices.extend(quad);
+            draws.push((key, start, count));
+        }
+        draws
+    }
+
+    /// Uploads `source` the first time, and marks it drawn this frame.
+    fn note_texture(&mut self, source: &dyn TextureSource, frame: u64) {
+        match self.textures.entry(source.key()) {
+            Entry::Occupied(mut cached) => cached.get_mut().last_drawn = frame,
+            Entry::Vacant(slot) => {
+                slot.insert(Cached {
+                    gpu: upload_texture(&self.device, &self.queue, source),
+                    last_drawn: frame,
+                });
+            }
+        }
     }
 
     /// Frees the callers' meshes, textures and materials that haven't been
@@ -1211,6 +1321,8 @@ impl ScenePipeline {
         self.custom_meshes
             .retain(|_, cached| recent(cached.last_drawn));
         self.textures.retain(|_, cached| recent(cached.last_drawn));
+        self.ui_image_groups
+            .retain(|key, _| self.textures.contains_key(key));
         self.materials.retain(|_, cached| recent(cached.last_drawn));
     }
 
@@ -1743,6 +1855,7 @@ fn ui_vertices(items: &[UiDrawItem], (width, height): (u32, u32)) -> Vec<UiVerte
             position: [x, y],
             size: [w, h],
             color: [r, g, b, alpha],
+            color_end: [er, eg, eb, ea],
             border_color: [br, bg, bb, ba],
             border_width,
             border_radius,
@@ -1765,12 +1878,16 @@ fn ui_vertices(items: &[UiDrawItem], (width, height): (u32, u32)) -> Vec<UiVerte
             ba,
             border_width,
             border_radius,
+            er,
+            eg,
+            eb,
+            ea,
         ]
         .into_iter()
         .all(|component| component.is_finite())
             || *w <= 0.0
             || *h <= 0.0
-            || (*alpha <= 0.0 && (*ba <= 0.0 || *border_width <= 0.0))
+            || (*alpha <= 0.0 && *ea <= 0.0 && (*ba <= 0.0 || *border_width <= 0.0))
         {
             continue;
         }
@@ -1788,6 +1905,8 @@ fn ui_vertices(items: &[UiDrawItem], (width, height): (u32, u32)) -> Vec<UiVerte
             border_color.z,
             ba.clamp(0.0, 1.0),
         ];
+        let end = linear_color([*er, *eg, *eb]);
+        let color_end = [end.x, end.y, end.z, ea.clamp(0.0, 1.0)];
         for (position, uv) in [
             (top_left, [0.0, 0.0]),
             (bottom_left, [0.0, 1.0]),
@@ -1806,10 +1925,53 @@ fn ui_vertices(items: &[UiDrawItem], (width, height): (u32, u32)) -> Vec<UiVerte
                     border_radius.clamp(0.0, w.min(*h) * 0.5),
                     border_width.clamp(0.0, w.min(*h) * 0.5),
                 ],
+                color_end,
             });
         }
     }
     vertices
+}
+
+fn image_quad(image: &UiImage, (width, height): (u32, u32)) -> Vec<UiVertex> {
+    if width == 0 || height == 0 {
+        return Vec::new();
+    }
+    let [x, y] = image.position;
+    let [w, h] = image.size;
+    let [r, g, b, alpha] = image.tint;
+    if ![x, y, w, h, r, g, b, alpha, image.border_radius]
+        .into_iter()
+        .all(f32::is_finite)
+        || w <= 0.0
+        || h <= 0.0
+        || alpha <= 0.0
+    {
+        return Vec::new();
+    }
+    let (width, height) = (width as f32, height as f32);
+    let point = |px: f32, py: f32| [px / width * 2.0 - 1.0, 1.0 - py / height * 2.0];
+    let color = linear_color([r, g, b]);
+    let color = [color.x, color.y, color.z, alpha.clamp(0.0, 1.0)];
+    let radius = image.border_radius.clamp(0.0, w.min(h) * 0.5);
+    [
+        (point(x, y), [0.0, 0.0]),
+        (point(x, y + h), [0.0, 1.0]),
+        (point(x + w, y), [1.0, 0.0]),
+        (point(x + w, y), [1.0, 0.0]),
+        (point(x, y + h), [0.0, 1.0]),
+        (point(x + w, y + h), [1.0, 1.0]),
+    ]
+    .into_iter()
+    .map(|(position, uv)| UiVertex {
+        position,
+        color,
+        uv,
+        size: [w, h],
+        border_color: [0.0; 4],
+        border: [radius, 0.0],
+        color_end: color,
+    })
+    .collect()
 }
 
 fn glyph_color([r, g, b, a]: [f32; 4]) -> GlyphColor {
@@ -1836,7 +1998,7 @@ fn create_ui_pipeline(
         step_mode: wgpu::VertexStepMode::Vertex,
         attributes: &wgpu::vertex_attr_array![
             0 => Float32x2, 1 => Float32x4, 2 => Float32x2,
-            3 => Float32x2, 4 => Float32x4, 5 => Float32x2
+            3 => Float32x2, 4 => Float32x4, 5 => Float32x2, 6 => Float32x4
         ],
     };
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -1864,6 +2026,88 @@ fn create_ui_pipeline(
         multiview: None,
         cache: None,
     })
+}
+
+/// A second UI pipeline that samples one texture. Rounded corners match
+/// [`create_ui_pipeline`]; the tint is the vertex color.
+fn create_ui_image_pipeline(
+    device: &wgpu::Device,
+    color_format: wgpu::TextureFormat,
+) -> (
+    wgpu::BindGroupLayout,
+    wgpu::Sampler,
+    wgpu::RenderPipeline,
+) {
+    let bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("UI image"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+        ],
+    });
+    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("UI image sampler"),
+        address_mode_u: wgpu::AddressMode::ClampToEdge,
+        address_mode_v: wgpu::AddressMode::ClampToEdge,
+        address_mode_w: wgpu::AddressMode::ClampToEdge,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        ..Default::default()
+    });
+    let shader = device.create_shader_module(wgpu::include_wgsl!("ui.wgsl"));
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("UI image"),
+        bind_group_layouts: &[&bind_layout],
+        push_constant_ranges: &[],
+    });
+    let vertex_layout = wgpu::VertexBufferLayout {
+        array_stride: size_of::<UiVertex>() as u64,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &wgpu::vertex_attr_array![
+            0 => Float32x2, 1 => Float32x4, 2 => Float32x2,
+            3 => Float32x2, 4 => Float32x4, 5 => Float32x2, 6 => Float32x4
+        ],
+    };
+    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("UI image"),
+        layout: Some(&layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            compilation_options: Default::default(),
+            buffers: &[vertex_layout],
+        },
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: None,
+        multisample: Default::default(),
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_image"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: color_format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview: None,
+        cache: None,
+    });
+    (bind_layout, sampler, pipeline)
 }
 
 /// Draws the sky as a full-screen triangle at the far plane, before any item.
@@ -2749,6 +2993,16 @@ fn drawable_size(width: u32, height: u32) -> Option<(u32, u32)> {
     (width > 0 && height > 0).then_some((width, height))
 }
 
+/// How far down to move text so it's centered up and down in its box, if
+/// it asks to be: half the room its lines leave.
+fn vertical_offset(text: &UiText, buffer: &Buffer) -> f32 {
+    if !text.center_vertically {
+        return 0.0;
+    }
+    let lines: f32 = buffer.layout_runs().map(|run| run.line_height).sum();
+    ((text.size[1] - lines) * 0.5).max(0.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2787,6 +3041,7 @@ mod tests {
             border_color: [1.0, 0.0, 0.0, 1.0],
             border_width: 3.0,
             border_radius: 80.0,
+            color_end: [0.0, 0.0, 0.0, 0.0],
         });
 
         let vertices = ui_vertices(&[item], (200, 100));

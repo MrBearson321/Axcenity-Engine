@@ -60,7 +60,7 @@ Each stage must leave existing scenes rendering correctly.
 
 ## Lights (stage 3)
 
-- `DrawList::lights` holds `Light { position, color, brightness, range, cone }`. `scene` builds them from PointLight and SpotLight Instances parented to a Part or MeshPart; the position is the part's center and a SpotLight's `Direction` turns with the part. A light with `Enabled` false, or not inside a part, is skipped.
+- `DrawList::lights` holds `Light { position, color, brightness, range, cone }`. `scene` builds them from PointLight and SpotLight Instances parented to a Part or MeshPart. The light sits just above the part (half the local Y size, plus 0.05 studs) so the part's outer faces are not back-facing an interior light. A SpotLight's `Direction` turns with the part. A light with `Enabled` false, or not inside a part, is skipped. A part that contains an enabled light also gets an emissive glow so the fixture itself is visible. Inserting a light with no part selected creates an anchored Neon Ball named Lamp and parents the light to it. Spot and point lights still cast no shadows of their own.
 - Tiled lighting: the CPU projects each light's bounding sphere onto the screen and lists it in the 32 px tiles it touches (up to 64 lights per tile, 1024 lights total; the nearest to the camera win). The shader loops over only its tile's lights. This is simpler than clustered (3D) lighting; switch to clusters if depth-heavy scenes need it.
 - Falloff is smooth to zero at `range`. Lights cast no shadows (only the sun does).
 

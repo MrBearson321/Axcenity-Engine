@@ -7,7 +7,11 @@
 //! Shift+wheel, or the wheel while right-dragging, changes the flying speed,
 //! and a pop-up in the middle of the viewport shows the new speed.
 //!
-//! Left-clicking a part selects it, and the selected part gets a blue box.
+//! Left-clicking a part selects it, and the selected part gets a blue box:
+//! the edges of its sides that face the camera, where nothing hides them.
+//! PointLights and SpotLights have no shape, so while editing each shows as
+//! an icon where it shines from, as in Unreal; click one to select it, and
+//! a selected light shows how far it reaches (a SpotLight, its cone).
 //! With the Move, Scale or Rotate tool, it also gets handles to drag
 //! (see `gizmo.rs`). With any tool, left-dragging a part by its body moves
 //! it onto the surface under the mouse (see `placing.rs`).
@@ -15,7 +19,8 @@
 //! UI is visible as an in-place preview both while editing and during Play.
 //! It's drawn over the 3D view, so a click selects the UI element under the
 //! mouse before any part. A selected UI element gets an outline and handles
-//! to move and resize it (see `ui_handles.rs`).
+//! to move and resize it, and a drag snaps to other UI edges and centers
+//! (see `ui_handles.rs`).
 //!
 //! During Play there's no tool: the camera and selecting still work, but
 //! nothing can be dragged.
@@ -25,15 +30,16 @@ use axcenity_core::{InstanceId, Value, World};
 use axcenity_render::TextureRenderer;
 use axcenity_render::glam::Vec3;
 use axcenity_render::wgpu;
-use axcenity_scene::{FlyCamera, MoveKeys};
-use axcenity_ui::{Stylesheet, UiLayout};
+use axcenity_scene::{FlyCamera, LightMarker, MoveKeys};
+use axcenity_ui::{Stylesheet, UiLayout, UiRect};
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 
 use crate::gizmo::{self, Drag, Handle, Pose, Snap, Tool};
 use crate::placing::PlaceDrag;
 use crate::screen::Screen;
-use crate::ui_handles::{Grip, Handles, UiDrag, UiDragEdit};
+use crate::theme::{self, icons};
+use crate::ui_handles::{self, Grip, Handles, UiDrag, UiDragEdit};
 
 /// Where the camera starts, looking at the origin (the same as the player).
 const START_CAMERA_POSITION: Vec3 = Vec3::new(12.0, 8.0, 16.0);
@@ -54,12 +60,16 @@ const POPUP_FADE_SECONDS: f64 = 0.4;
 /// the sky and most part colors.
 const SELECTION_COLOR: egui::Color32 = egui::Color32::from_rgb(25, 160, 255);
 const SELECTION_WIDTH: f32 = 2.0;
+/// A light's icon, in points, the same size however far away the light is.
+const LIGHT_ICON_RADIUS: f32 = 13.0;
 
 /// A left click in the viewport, with the UI element or part under the
 /// mouse (`None` for empty space, which clears the selection). Starting to
 /// drag something by its body counts as clicking it, so it gets selected.
 pub struct Clicked {
     pub part: Option<InstanceId>,
+    /// Ctrl, Shift and the other modifier keys held for this click.
+    pub modifiers: egui::Modifiers,
 }
 
 /// What a drag in the viewport does to a part, which names its undo step.
@@ -94,6 +104,12 @@ pub struct ViewportOutput {
     pub clicked: Option<Clicked>,
     /// A UI button clicked during Play, delivered to LocalScripts next frame.
     pub activated: Option<InstanceId>,
+    /// A TextBox clicked during Play. The app gives it keyboard focus.
+    pub text_box: Option<InstanceId>,
+    /// The viewport was clicked during Play, including a click on empty space.
+    pub viewport_clicked: bool,
+    /// Page and billboard problems from this frame's layout.
+    pub ui_warnings: Vec<String>,
     pub drag: Option<DragEdit>,
     /// A UI element being moved or resized.
     pub ui_drag: Option<UiDragEdit>,
@@ -105,9 +121,14 @@ pub struct ViewportScene<'a> {
     pub world: &'a World,
     pub assets: &'a Assets,
     pub selected: Option<InstanceId>,
+    /// Every selected Instance. `selected` is the last of these, and the one
+    /// that gets handles. The others are outlined too.
+    pub selection: &'a [InstanceId],
     pub tool: Option<Tool>,
     pub snap: Snap,
     pub stylesheets: &'a [Stylesheet],
+    /// The TextBox being typed in during Play, so it gets a focus ring.
+    pub focused_text: Option<InstanceId>,
 }
 
 /// What the left button holds, from going down on it until it's let go.
@@ -129,6 +150,9 @@ struct UiScene<'a> {
     /// scale, to turn the mouse position into the layout's pixels.
     origin: egui::Pos2,
     pixels_per_point: f32,
+    /// The screen the UI was laid out into, in physical pixels. Drags snap
+    /// to its edges and center.
+    viewport: UiRect,
 }
 
 impl UiScene<'_> {
@@ -244,9 +268,11 @@ impl Viewport {
             world,
             assets,
             selected,
+            selection,
             tool,
             snap,
             stylesheets,
+            focused_text,
         } = scene;
         let size = ui.available_size();
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
@@ -263,7 +289,15 @@ impl Viewport {
             .filter(|_| response.contains_pointer())
             .map(|pointer| (pointer - rect.min) * pixels_per_point)
             .map(|position| [position.x, position.y]);
-        let base_layout = axcenity_ui::layout_ui(world, width, height, stylesheets);
+        let camera = self.camera.to_render_camera();
+        let base_layout = axcenity_ui::layout_ui_viewed(
+            world,
+            width,
+            height,
+            stylesheets,
+            focused_text,
+            Some(&camera),
+        );
         let held_button = ui
             .input(|input| input.pointer.primary_down())
             .then(|| pointer_pixels.and_then(|[x, y]| base_layout.hit_button(x, y)))
@@ -275,6 +309,8 @@ impl Viewport {
             stylesheets,
             pointer_pixels,
             held_button,
+            focused_text,
+            Some(&camera),
         );
         let handles = selected
             .and_then(|id| ui_layout.element(id))
@@ -284,8 +320,27 @@ impl Viewport {
             handles: handles.as_ref(),
             origin: rect.min,
             pixels_per_point,
+            viewport: UiRect {
+                x: 0.0,
+                y: 0.0,
+                width: width as f32,
+                height: height as f32,
+            },
         };
 
+        // Lights only show as icons while editing (there's a tool), as in
+        // Unreal's editor; the game itself doesn't show them.
+        let lights: Vec<(LightMarker, egui::Pos2)> = if tool.is_some() {
+            axcenity_scene::light_markers(world)
+                .into_iter()
+                .filter_map(|marker| {
+                    let at = screen.point(marker.position)?;
+                    rect.contains(at).then_some((marker, at))
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         let drag = self.drag_input(
             ui,
             &response,
@@ -297,19 +352,26 @@ impl Viewport {
             &ui_scene,
             stylesheets,
         );
+        let modifiers = ui.input(|input| input.modifiers);
         let clicked = match drag.grabbed {
-            Some(part) => Some(Clicked { part: Some(part) }),
+            Some(part) => Some(Clicked {
+                part: Some(part),
+                modifiers,
+            }),
             None if drag.in_use => None,
-            None => self.clicked_part(ui, &response, &screen, world, &ui_scene),
+            None => self.clicked_part(ui, &response, &screen, world, &ui_scene, &lights),
         };
-        let activated = if tool.is_none() && response.clicked_by(egui::PointerButton::Primary) {
-            response.interact_pointer_pos().and_then(|pointer| {
-                let position = (pointer - rect.min) * pixels_per_point;
-                ui_layout.hit_button(position.x, position.y)
+        let playing = tool.is_none() && response.clicked_by(egui::PointerButton::Primary);
+        let clicked_ui = |hit: fn(&axcenity_ui::UiLayout, f32, f32) -> Option<InstanceId>| {
+            playing.then(|| {
+                response.interact_pointer_pos().and_then(|pointer| {
+                    let position = (pointer - rect.min) * pixels_per_point;
+                    hit(&ui_layout, position.x, position.y)
+                })
             })
-        } else {
-            None
         };
+        let activated = clicked_ui(axcenity_ui::UiLayout::hit_button).flatten();
+        let text_box = clicked_ui(axcenity_ui::UiLayout::hit_text_box).flatten();
         let target = self.target.get_or_insert_with(|| {
             let renderer =
                 TextureRenderer::new(&render_state.device, &render_state.queue, width, height);
@@ -337,25 +399,60 @@ impl Viewport {
                 );
         }
 
-        let mut draw_list =
-            axcenity_scene::build_draw_list(world, assets, self.camera.to_render_camera());
-        draw_list.ui = ui_layout.draw_items;
+        let mut draw_list = axcenity_scene::build_draw_list(world, assets, camera);
+        draw_list.ui = ui_layout.draw_items.clone();
+        axcenity_scene::attach_ui_textures(&mut draw_list.ui, assets);
         if let Err(error) = target.renderer.render(&draw_list) {
             log::error!("could not render the viewport: {error:#}");
         }
         let whole_texture = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
         ui.painter()
             .image(target.texture_id, rect, whole_texture, egui::Color32::WHITE);
-        if let Some(selected) = selected {
-            paint_selection_box(ui, rect, &screen, world, selected);
+        let eye = self.camera.to_render_camera().position;
+        for &id in selection {
+            if Some(id) != selected {
+                if let Some(element) = ui_layout.element(id) {
+                    let outline = egui::Rect::from_min_size(
+                        rect.min + egui::vec2(element.rect.x, element.rect.y) / pixels_per_point,
+                        egui::vec2(element.rect.width, element.rect.height) / pixels_per_point,
+                    );
+                    ui.painter_at(rect).rect_stroke(
+                        outline,
+                        0.0,
+                        egui::Stroke::new(SELECTION_WIDTH, SELECTION_COLOR),
+                        egui::StrokeKind::Middle,
+                    );
+                }
+                paint_selection_box(ui, rect, &screen, world, id, eye);
+            }
         }
+        if let Some(selected) = selected {
+            paint_selection_box(ui, rect, &screen, world, selected, eye);
+        }
+        paint_lights(ui, rect, &screen, &lights, selected, pointer);
         gizmo::paint(&ui.painter_at(rect), &drag.shapes, drag.highlighted);
         // Handles only show with a tool, so not during Play, but the
         // outline always does.
         if let Some(handles) = &handles {
             let painter = ui.painter_at(rect);
             match tool {
-                Some(_) => handles.paint(&painter, SELECTION_COLOR, drag.ui_highlighted),
+                Some(_) => {
+                    handles.paint(&painter, SELECTION_COLOR, drag.ui_highlighted);
+                    let parent = world
+                        .get(handles.element.id)
+                        .and_then(|instance| instance.parent())
+                        .and_then(|id| ui_layout.element(id))
+                        .map(|element| {
+                            egui::Rect::from_min_size(
+                                rect.min
+                                    + egui::vec2(element.rect.x, element.rect.y)
+                                        / pixels_per_point,
+                                egui::vec2(element.rect.width, element.rect.height)
+                                    / pixels_per_point,
+                            )
+                        });
+                    handles.paint_measures(&painter, rect, parent, pixels_per_point);
+                }
                 None => {
                     painter.rect_stroke(
                         handles.rect,
@@ -366,10 +463,21 @@ impl Viewport {
                 }
             }
         }
+        if let Some(edit) = &drag.ui_edit {
+            ui_handles::paint_guides(
+                &edit.guides,
+                &ui.painter_at(rect),
+                rect.min,
+                pixels_per_point,
+            );
+        }
         self.paint_speed_popup(ui, rect);
         ViewportOutput {
             clicked,
             activated,
+            text_box,
+            viewport_clicked: playing,
+            ui_warnings: ui_layout.warnings,
             drag: drag.edit,
             ui_drag: drag.ui_edit,
             drag_released: drag.released,
@@ -519,7 +627,13 @@ impl Viewport {
                         })
                     }
                     Dragging::Ui(drag) => {
-                        input.ui_edit = Some(drag.update(pointer, ui_scene.pixels_per_point));
+                        input.ui_edit = Some(drag.update(
+                            pointer,
+                            ui_scene.pixels_per_point,
+                            world,
+                            &ui_scene.layout.elements,
+                            ui_scene.viewport,
+                        ));
                         None
                     }
                 };
@@ -538,6 +652,7 @@ impl Viewport {
         screen: &Screen,
         world: &World,
         ui_scene: &UiScene,
+        lights: &[(LightMarker, egui::Pos2)],
     ) -> Option<Clicked> {
         if !response.clicked() || ui.input(|input| input.modifiers.alt) {
             return None;
@@ -546,7 +661,9 @@ impl Viewport {
         Some(Clicked {
             part: ui_scene
                 .hit(pointer)
+                .or_else(|| light_at(lights, pointer))
                 .or_else(|| axcenity_scene::pick(world, screen.ray(pointer))),
+            modifiers: ui.input(|input| input.modifiers),
         })
     }
 
@@ -662,23 +779,143 @@ impl Viewport {
     }
 }
 
-/// Draws the blue box around the selected part, on top of everything so it
-/// shows even behind other parts. Draws nothing if `selected` isn't a part.
+/// Draws the blue box around the selected part, Studio-style: the edges of
+/// the sides facing the camera, where no other part is in front of them.
+/// Draws nothing if `selected` isn't a part.
 fn paint_selection_box(
     ui: &egui::Ui,
     rect: egui::Rect,
     screen: &Screen,
     world: &World,
     selected: InstanceId,
+    eye: Vec3,
 ) {
-    let Some(edges) = axcenity_scene::part_box_edges(world, selected) else {
+    let Some(lines) = axcenity_scene::visible_box_edges(world, selected, eye) else {
         return;
     };
     let painter = ui.painter_at(rect);
+    // A soft glow under the line keeps it readable on any background.
+    let glow = egui::Stroke::new(SELECTION_WIDTH + 3.0, SELECTION_COLOR.gamma_multiply(0.25));
     let stroke = egui::Stroke::new(SELECTION_WIDTH, SELECTION_COLOR);
-    for (a, b) in edges {
-        if let Some(line) = screen.line(a, b) {
-            painter.line_segment(line, stroke);
+    let lines: Vec<_> = lines
+        .into_iter()
+        .filter_map(|(a, b)| screen.line(a, b))
+        .collect();
+    for line in &lines {
+        painter.line_segment(*line, glow);
+    }
+    for line in lines {
+        painter.line_segment(line, stroke);
+    }
+}
+
+/// The light whose icon is under `pointer`, the nearest if several are.
+fn light_at(lights: &[(LightMarker, egui::Pos2)], pointer: egui::Pos2) -> Option<InstanceId> {
+    lights
+        .iter()
+        .filter(|(_, at)| at.distance(pointer) <= LIGHT_ICON_RADIUS + 2.0)
+        .min_by(|(_, a), (_, b)| a.distance(pointer).total_cmp(&b.distance(pointer)))
+        .map(|(marker, _)| marker.id)
+}
+
+fn light_color(marker: &LightMarker) -> egui::Color32 {
+    let [r, g, b] = marker
+        .color
+        .map(|channel| (channel.clamp(0.0, 1.0) * 255.0) as u8);
+    egui::Color32::from_rgb(r, g, b)
+}
+
+/// Draws each light's icon (a bulb for a PointLight, a flashlight for a
+/// SpotLight) in the light's color, and how far the selected one reaches.
+fn paint_lights(
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    screen: &Screen,
+    lights: &[(LightMarker, egui::Pos2)],
+    selected: Option<InstanceId>,
+    pointer: Option<egui::Pos2>,
+) {
+    let painter = ui.painter_at(rect);
+    for (marker, _) in lights {
+        if Some(marker.id) == selected {
+            paint_light_reach(&painter, screen, marker);
+        }
+    }
+    let hovered = pointer.and_then(|pointer| light_at(lights, pointer));
+    for (marker, at) in lights {
+        // Grows a little under the mouse.
+        let grow = ui.ctx().animate_bool_with_time(
+            egui::Id::new(("light icon", marker.id)),
+            hovered == Some(marker.id),
+            0.12,
+        );
+        let radius = LIGHT_ICON_RADIUS * (1.0 + 0.15 * grow);
+        let (fill, tint) = if marker.enabled {
+            (egui::Color32::from_black_alpha(170), light_color(marker))
+        } else {
+            // Switched off: grey.
+            (
+                egui::Color32::from_black_alpha(120),
+                egui::Color32::from_gray(150),
+            )
+        };
+        painter.circle_filled(*at, radius, fill);
+        let ring = if Some(marker.id) == selected {
+            egui::Stroke::new(2.0_f32, SELECTION_COLOR)
+        } else {
+            egui::Stroke::new(1.0 + grow, tint.gamma_multiply(0.8))
+        };
+        painter.circle_stroke(*at, radius, ring);
+        let icon = if marker.spot {
+            icons::FLASHLIGHT
+        } else {
+            icons::LIGHTBULB
+        };
+        painter.text(
+            *at,
+            egui::Align2::CENTER_CENTER,
+            icon,
+            egui::FontId::new(radius * 1.15, theme::filled()),
+            tint,
+        );
+    }
+}
+
+/// A selected light's reach, faintly in its color: three rings for a
+/// PointLight's range, or the cone a SpotLight lights.
+fn paint_light_reach(painter: &egui::Painter, screen: &Screen, marker: &LightMarker) {
+    const SEGMENTS: usize = 48;
+    let stroke = egui::Stroke::new(1.5_f32, light_color(marker).gamma_multiply(0.85));
+    let range = marker.range.max(0.1);
+    let ring = |center: Vec3, a: Vec3, b: Vec3, radius: f32| {
+        let point = |i: usize| {
+            let turn = i as f32 / SEGMENTS as f32 * std::f32::consts::TAU;
+            center + (a * turn.cos() + b * turn.sin()) * radius
+        };
+        for i in 0..SEGMENTS {
+            if let Some(line) = screen.line(point(i), point(i + 1)) {
+                painter.line_segment(line, stroke);
+            }
+        }
+    };
+    match marker.cone {
+        None => {
+            ring(marker.position, Vec3::X, Vec3::Y, range);
+            ring(marker.position, Vec3::X, Vec3::Z, range);
+            ring(marker.position, Vec3::Y, Vec3::Z, range);
+        }
+        Some((direction, angle)) => {
+            let half = (angle.clamp(1.0, 179.0) * 0.5).to_radians();
+            let side = direction.any_orthonormal_vector();
+            let up = direction.cross(side);
+            let end = marker.position + direction * range * half.cos();
+            let radius = range * half.sin();
+            ring(end, side, up, radius);
+            for edge in [side, -side, up, -up] {
+                if let Some(line) = screen.line(marker.position, end + edge * radius) {
+                    painter.line_segment(line, stroke);
+                }
+            }
         }
     }
 }
