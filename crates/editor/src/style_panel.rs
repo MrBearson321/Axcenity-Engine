@@ -257,7 +257,8 @@ fn declaration_row(ui: &mut egui::Ui, declaration: &CssDeclaration) -> Option<St
                 .font(egui::TextStyle::Monospace)
                 .desired_width(f32::INFINITY),
         );
-        if let Some(picked) = accept_tab(ui, &response, value_choices(&declaration.property), &value)
+        if let Some(picked) =
+            accept_tab(ui, &response, value_choices(&declaration.property), &value)
         {
             made = Some(clean_value(&picked));
         } else if response.changed() {
@@ -265,11 +266,7 @@ fn declaration_row(ui: &mut egui::Ui, declaration: &CssDeclaration) -> Option<St
         }
         let open = sticky_focus(
             ui,
-            egui::Id::new((
-                "style value",
-                &declaration.path,
-                declaration.span.start,
-            )),
+            egui::Id::new(("style value", &declaration.path, declaration.span.start)),
             response.has_focus(),
         );
         if made.is_none()
@@ -313,8 +310,12 @@ fn add_row(ui: &mut egui::Ui, id: InstanceId, applied: &[CssDeclaration]) -> Opt
                 .desired_width(130.0),
         );
         property_focused = property.has_focus();
-        if let Some(picked) = accept_tab(ui, &property, axcenity_ui::SUPPORTED_PROPERTIES, &adding.property)
-        {
+        if let Some(picked) = accept_tab(
+            ui,
+            &property,
+            axcenity_ui::SUPPORTED_PROPERTIES,
+            &adding.property,
+        ) {
             adding.property = picked;
         }
         let hint = example_value(&adding.property);
@@ -384,7 +385,12 @@ fn sticky_focus(ui: &mut egui::Ui, key: egui::Id, focused: bool) -> bool {
 }
 
 /// Fills `typed` with the first match when Tab is pressed in `response`.
-fn accept_tab(ui: &egui::Ui, response: &egui::Response, options: &[&str], typed: &str) -> Option<String> {
+fn accept_tab(
+    ui: &egui::Ui,
+    response: &egui::Response,
+    options: &[&str],
+    typed: &str,
+) -> Option<String> {
     let matches = matching(options, typed);
     if response.has_focus()
         && ui.input(|input| input.key_pressed(egui::Key::Tab))
@@ -399,7 +405,12 @@ fn accept_tab(ui: &egui::Ui, response: &egui::Response, options: &[&str], typed:
 
 /// Buttons for the options that match `typed`. `used` options get a check,
 /// meaning a declaration already sets them. `None` when nothing is offered.
-fn choice_row(ui: &mut egui::Ui, options: &[&str], typed: &str, used: Option<&[&str]>) -> Option<String> {
+fn choice_row(
+    ui: &mut egui::Ui,
+    options: &[&str],
+    typed: &str,
+    used: Option<&[&str]>,
+) -> Option<String> {
     let matches = matching(options, typed);
     if matches.is_empty() || (matches.len() == 1 && matches[0].eq_ignore_ascii_case(typed.trim())) {
         return None;

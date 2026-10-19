@@ -180,19 +180,22 @@ pub fn page_layout_for(world: &World, near: Option<InstanceId>) -> Option<Instan
         }
         current = world.get(id).and_then(|instance| instance.parent());
     }
-    world.descendants(world.workspace()).into_iter().find(|&id| {
-        world
-            .get(id)
-            .is_some_and(|instance| instance.class() == ClassName::PageLayout)
-    })
+    world
+        .descendants(world.workspace())
+        .into_iter()
+        .find(|&id| {
+            world
+                .get(id)
+                .is_some_and(|instance| instance.class() == ClassName::PageLayout)
+        })
 }
 
 /// True when a new light would be parented to a part, which is the only
 /// place a light is drawn.
 pub fn light_has_part_parent(world: &World, near: Option<InstanceId>) -> bool {
-    world.get(insert_parent(world, near, Insertable::PointLight)).is_some_and(|instance| {
-        matches!(instance.class(), ClassName::Part | ClassName::MeshPart)
-    })
+    world
+        .get(insert_parent(world, near, Insertable::PointLight))
+        .is_some_and(|instance| matches!(instance.class(), ClassName::Part | ClassName::MeshPart))
 }
 
 /// The size a new part of each shape starts with, in studs. Blocks and

@@ -183,12 +183,9 @@ fn copy_in(from_root: &Path, to_root: &Path, relative: &str) -> io::Result<()> {
     if let Some(parent) = to.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::copy(&from, &to).map(|_| ()).map_err(|err| {
-        io::Error::new(
-            err.kind(),
-            format!("could not copy `{relative}`: {err}"),
-        )
-    })
+    fs::copy(&from, &to)
+        .map(|_| ())
+        .map_err(|err| io::Error::new(err.kind(), format!("could not copy `{relative}`: {err}")))
 }
 
 fn same_files(project: &Path, snapshot: &Path, files: &[String]) -> io::Result<bool> {
@@ -215,9 +212,7 @@ fn fresh_id(folder: &Path) -> io::Result<String> {
             return Ok(id);
         }
     }
-    Err(io::Error::other(
-        "could not pick a new version name",
-    ))
+    Err(io::Error::other("could not pick a new version name"))
 }
 
 fn prune(folder: &Path) -> io::Result<()> {
@@ -235,10 +230,7 @@ fn version_dir(folder: &Path, id: &str) -> Option<PathBuf> {
 }
 
 fn valid_id(id: &str) -> bool {
-    !id.is_empty()
-        && id
-            .chars()
-            .all(|c| c.is_ascii_digit() || c == '-')
+    !id.is_empty() && id.chars().all(|c| c.is_ascii_digit() || c == '-')
 }
 
 fn safe_relative(path: &str) -> bool {
@@ -282,10 +274,8 @@ mod tests {
     use super::*;
 
     fn temp_folder() -> PathBuf {
-        let folder = std::env::temp_dir().join(format!(
-            "axcenity-versions-test-{}",
-            std::process::id()
-        ));
+        let folder =
+            std::env::temp_dir().join(format!("axcenity-versions-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&folder);
         fs::create_dir_all(folder.join("scripts")).unwrap();
         fs::write(folder.join(WORLD_FILE), "{\"format_version\":1}").unwrap();
@@ -305,7 +295,11 @@ mod tests {
         assert_eq!(versions[0].label, "Save");
         assert!(versions[0].when().contains("UTC"));
 
-        fs::write(folder.join(WORLD_FILE), "{\"format_version\":1,\"changed\":true}").unwrap();
+        fs::write(
+            folder.join(WORLD_FILE),
+            "{\"format_version\":1,\"changed\":true}",
+        )
+        .unwrap();
         fs::write(folder.join("scripts/extra.client.lua"), "print(2)\n").unwrap();
         assert!(record_version(&folder, "Second").unwrap());
 

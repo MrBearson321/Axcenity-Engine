@@ -1,0 +1,292 @@
+//! Bloom and tone mapping (`post.wgsl`).
+//!
+//! The scene is drawn into an HDR target. Bloom blurs the bright parts, then
+//! the composite pass writes the window or the editor's viewport texture.
+
+use super::{HDR_FORMAT, MAX_BLOOM_LEVELS, PostPasses, PostTargets, PostUniform};
+
+impl PostPasses {
+    pub(super) fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
+        let texture_entry = |binding| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        };
+        let mut entries = vec![
+            texture_entry(0),
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+        ];
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("bloom"),
+            entries: &entries,
+        });
+        entries.push(texture_entry(3));
+        let composite_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("composite"),
+            entries: &entries,
+        });
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("post-processing"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let settings = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("post-processing settings"),
+            size: size_of::<PostUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let shader = device.create_shader_module(wgpu::include_wgsl!("../post.wgsl"));
+        let pipeline = |label, layout: &wgpu::BindGroupLayout, entry, format, blend| {
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some(label),
+                bind_group_layouts: &[layout],
+                push_constant_ranges: &[],
+            });
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: Default::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some(entry),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview: None,
+                cache: None,
+            })
+        };
+        let add = wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::One,
+            dst_factor: wgpu::BlendFactor::One,
+            operation: wgpu::BlendOperation::Add,
+        };
+        Self {
+            prefilter: pipeline("bloom prefilter", &layout, "fs_prefilter", HDR_FORMAT, None),
+            downsample: pipeline(
+                "bloom downsample",
+                &layout,
+                "fs_downsample",
+                HDR_FORMAT,
+                None,
+            ),
+            upsample: pipeline(
+                "bloom upsample",
+                &layout,
+                "fs_upsample",
+                HDR_FORMAT,
+                Some(wgpu::BlendState {
+                    color: add,
+                    alpha: add,
+                }),
+            ),
+            composite: pipeline(
+                "composite",
+                &composite_layout,
+                "fs_composite",
+                color_format,
+                None,
+            ),
+            sampler,
+            layout,
+            composite_layout,
+            settings,
+        }
+    }
+
+    /// Adds bloom (if `bloom`) to the scene and draws the result, tone
+    /// mapped, into `target`.
+    pub(super) fn draw(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        targets: &PostTargets,
+        target: &wgpu::TextureView,
+        bloom: bool,
+    ) {
+        let levels = &targets.levels;
+        if bloom {
+            fullscreen_pass(
+                encoder,
+                "bloom prefilter",
+                &levels[0],
+                wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                &self.prefilter,
+                &targets.prefilter_group,
+            );
+            for (level, target) in levels.iter().enumerate().skip(1) {
+                fullscreen_pass(
+                    encoder,
+                    "bloom downsample",
+                    target,
+                    wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    &self.downsample,
+                    &targets.downsample_groups[level],
+                );
+            }
+            for level in (1..levels.len()).rev() {
+                fullscreen_pass(
+                    encoder,
+                    "bloom upsample",
+                    &levels[level - 1],
+                    wgpu::LoadOp::Load,
+                    &self.upsample,
+                    &targets.upsample_groups[level],
+                );
+            }
+        }
+        fullscreen_pass(
+            encoder,
+            "composite",
+            target,
+            wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+            &self.composite,
+            &targets.composite_group,
+        );
+    }
+}
+
+/// Draws one full-screen triangle with `pipeline` into `target`.
+pub(super) fn fullscreen_pass(
+    encoder: &mut wgpu::CommandEncoder,
+    label: &str,
+    target: &wgpu::TextureView,
+    load: wgpu::LoadOp<wgpu::Color>,
+    pipeline: &wgpu::RenderPipeline,
+    bind_group: &wgpu::BindGroup,
+) {
+    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some(label),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view: target,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load,
+                store: wgpu::StoreOp::Store,
+            },
+        })],
+        depth_stencil_attachment: None,
+        ..Default::default()
+    });
+    pass.set_pipeline(pipeline);
+    pass.set_bind_group(0, bind_group, &[]);
+    pass.draw(0..3, 0..1);
+}
+
+impl PostTargets {
+    /// Makes the HDR texture for a `width` × `height` screen and the bloom
+    /// levels below it, with the bind groups that connect them.
+    pub(super) fn new(device: &wgpu::Device, post: &PostPasses, width: u32, height: u32) -> Self {
+        let make = |label, width: u32, height: u32| {
+            device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: Some(label),
+                    size: wgpu::Extent3d {
+                        width: width.max(1),
+                        height: height.max(1),
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: HDR_FORMAT,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                })
+                .create_view(&wgpu::TextureViewDescriptor::default())
+        };
+        let hdr_view = make("scene (HDR)", width, height);
+        let mut levels = Vec::new();
+        let (mut level_width, mut level_height) = ((width / 2).max(1), (height / 2).max(1));
+        loop {
+            levels.push(make("bloom level", level_width, level_height));
+            if levels.len() == MAX_BLOOM_LEVELS || level_width == 1 || level_height == 1 {
+                break;
+            }
+            level_width = (level_width / 2).max(1);
+            level_height = (level_height / 2).max(1);
+        }
+
+        let group = |layout: &wgpu::BindGroupLayout, source: &wgpu::TextureView, bloom| {
+            let mut entries = vec![
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(source),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&post.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: post.settings.as_entire_binding(),
+                },
+            ];
+            if let Some(bloom) = bloom {
+                entries.push(wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(bloom),
+                });
+            }
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("post-processing"),
+                layout,
+                entries: &entries,
+            })
+        };
+        let prefilter_group = group(&post.layout, &hdr_view, None);
+        // Index 0 is never used, but keeps the lists indexed by level.
+        let downsample_groups = (0..levels.len())
+            .map(|level| group(&post.layout, &levels[level.saturating_sub(1)], None))
+            .collect();
+        let upsample_groups = (0..levels.len())
+            .map(|level| group(&post.layout, &levels[level], None))
+            .collect();
+        let composite_group = group(&post.composite_layout, &hdr_view, Some(&levels[0]));
+        Self {
+            hdr_view,
+            levels,
+            prefilter_group,
+            downsample_groups,
+            upsample_groups,
+            composite_group,
+        }
+    }
+}

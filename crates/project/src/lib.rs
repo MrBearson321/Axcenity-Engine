@@ -14,6 +14,10 @@
 //!
 //! One damaged file never stops the rest from loading: [`load`] leaves it
 //! out and lists it in [`Project::problems`].
+//!
+//! `lib.rs` owns the manifest, templates, script paths and stylesheets.
+//! `world_file.rs` reads and writes `world.json`. `packed.rs` packs a game
+//! folder. `versions.rs` keeps the copies made on save.
 
 mod packed;
 mod versions;

@@ -13,6 +13,11 @@
 //! Blocks are painted here, piece by piece. egui only fills convex shapes,
 //! so a block is filled as convex pieces (rectangles, the hat's cap, the
 //! puzzle tab under it) and then outlined as one path.
+//!
+//! Where to change behavior:
+//! - `Category`, `sections` and `reporter_parts` — which pieces a block has
+//! - `BlockPainter` — convex fills and the outline path
+//! - `palette`, `show`, `show_canvas` and `finish_drag` — dragging, snapping and the toolbar
 
 use std::collections::BTreeSet;
 
@@ -340,8 +345,10 @@ fn shown_code(code: &str) -> String {
     if lines.len() <= CODE_LINES {
         return code.to_owned();
     }
-    let mut shown = lines[..CODE_LINES - 1].join("
-");
+    let mut shown = lines[..CODE_LINES - 1].join(
+        "
+",
+    );
     shown.push_str(&format!(
         "
 -- … {} more lines (switch to Code to see them)",
@@ -3181,7 +3188,8 @@ mod tests {
             ..Block::new(BlockKind::TopCode {
                 code: "local function double(x)
     return x * 2
-end".to_owned(),
+end"
+                .to_owned(),
             })
         });
         blocks.push(Block {
@@ -3191,7 +3199,8 @@ end".to_owned(),
                     Block::new(BlockKind::Code {
                         code: "for i = 1, 3 do
     print(i)
-end".to_owned(),
+end"
+                        .to_owned(),
                     }),
                     Block::new(BlockKind::Print {
                         value: Expression::Code {

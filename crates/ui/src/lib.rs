@@ -1,10 +1,15 @@
 //! Screen-space layout for UI Instances.
+//!
+//! `layout_ui` and `layout_children` place elements with taffy. `paint_instance`
+//! and the `css_*` helpers turn a placed element into draw items. Stylesheet
+//! parsing, specificity and variables live in `style.rs`. `render` stays free
+//! of Instances: this crate only returns draw-list types.
 
 mod style;
 
 use axcenity_core::{ClassName, Color3, Instance, InstanceId, UDim2, Value, World};
-use axcenity_render::glam::camera::rh;
 use axcenity_render::glam::Vec3;
+use axcenity_render::glam::camera::rh;
 use axcenity_render::{Camera, TextAlign, UiDrawItem, UiImage, UiRectangle, UiText};
 use taffy::prelude::*;
 
@@ -154,10 +159,7 @@ pub fn edit_text_box(world: &mut World, id: InstanceId, command: TextCommand) ->
             }
         }
     }
-    if world
-        .set_property(id, "Text", Value::String(text))
-        .is_err()
-    {
+    if world.set_property(id, "Text", Value::String(text)).is_err() {
         return TextOutcome::Ignored;
     }
     TextOutcome::Edited
@@ -289,15 +291,7 @@ fn layout_ui_with_pseudo(
         );
         let draws = layout.draw_items.len();
         let elements = layout.elements.len();
-        layout_children(
-            world,
-            id,
-            bounds,
-            &mut layout,
-            stylesheets,
-            opacity,
-            pseudo,
-        );
+        layout_children(world, id, bounds, &mut layout, stylesheets, opacity, pseudo);
         if let Some(fit) = fit {
             apply_fit(&mut layout, draws, elements, fit);
         }
@@ -633,11 +627,11 @@ fn current_page(world: &World, parent: InstanceId, out: &mut UiLayout) -> Option
         .and_then(Value::as_str)
         .unwrap_or("");
     if !name.is_empty() {
-        if let Some(id) = frames.iter().copied().find(|&id| {
-            world
-                .get(id)
-                .is_some_and(|child| child.name() == name)
-        }) {
+        if let Some(id) = frames
+            .iter()
+            .copied()
+            .find(|&id| world.get(id).is_some_and(|child| child.name() == name))
+        {
             return Some(id);
         }
         out.warnings.push(format!(
@@ -683,7 +677,8 @@ fn layout_table(
         .unwrap_or(2);
     let gap = 8.0_f32;
     let rows = shown.len().div_ceil(columns).max(1);
-    let cell_w = ((bounds.width - gap * (columns.saturating_sub(1) as f32)) / columns as f32).max(0.0);
+    let cell_w =
+        ((bounds.width - gap * (columns.saturating_sub(1) as f32)) / columns as f32).max(0.0);
     let cell_h = ((bounds.height - gap * (rows.saturating_sub(1) as f32)) / rows as f32).max(0.0);
     for (index, id) in shown.into_iter().enumerate() {
         let Some(instance) = world.get(id) else {
@@ -879,10 +874,7 @@ fn paint_instance(
     let gradient = css_gradient(styles);
     let fill_alpha = (1.0 - transparency) * opacity * css_background.map_or(1.0, |(_, a)| a);
     let (color_end, end_alpha) = gradient.map_or(
-        (
-            [color.r, color.g, color.b, fill_alpha],
-            fill_alpha,
-        ),
+        ([color.r, color.g, color.b, fill_alpha], fill_alpha),
         |(start, end)| {
             // A gradient replaces the flat background. `color` below is
             // overwritten by the start color when one was parsed.
@@ -894,10 +886,7 @@ fn paint_instance(
         },
     );
     let (fill, fill_alpha) = if let Some((start, _)) = gradient {
-        (
-            [start.0.r, start.0.g, start.0.b],
-            opacity * start.1,
-        )
+        ([start.0.r, start.0.g, start.0.b], opacity * start.1)
     } else {
         ([color.r, color.g, color.b], fill_alpha)
     };
@@ -929,11 +918,12 @@ fn paint_instance(
                 border_tint.r,
                 border_tint.g,
                 border_tint.b,
-                opacity * if focused && css_border(styles).1 <= 0.0 {
-                    1.0
-                } else {
-                    border_opacity
-                },
+                opacity
+                    * if focused && css_border(styles).1 <= 0.0 {
+                        1.0
+                    } else {
+                        border_opacity
+                    },
             ],
             border_width,
             border_radius: radius,
@@ -977,8 +967,7 @@ fn paint_instance(
             .property("Text")
             .and_then(Value::as_str)
             .expect("every text element has a Text property");
-        let placeholder = typed.is_empty()
-            && instance.class() == ClassName::TextBox;
+        let placeholder = typed.is_empty() && instance.class() == ClassName::TextBox;
         let text = if placeholder {
             instance
                 .property("Placeholder")
@@ -1514,7 +1503,15 @@ mod tests {
         // (0.5) and the spare height is split above and below.
         let layout = layout_ui(&world, 960, 1080, &[]);
         let rect = layout.element(frame).unwrap().rect;
-        assert_eq!(rect, UiRect { x: 50.0, y: 290.0, width: 100.0, height: 40.0 });
+        assert_eq!(
+            rect,
+            UiRect {
+                x: 50.0,
+                y: 290.0,
+                width: 100.0,
+                height: 40.0
+            }
+        );
         assert!((layout.element(frame).unwrap().pixels_per_unit - 0.5).abs() < 0.001);
     }
 
@@ -1581,17 +1578,16 @@ mod tests {
             item,
             UiDrawItem::Text(text) if text.text == "Start"
         )));
-        let active =
-            layout_ui_interactive(
-                &world,
-                640,
-                480,
-                &[sheet],
-                Some([20.0, 20.0]),
-                Some(button),
-                None,
-                None,
-            );
+        let active = layout_ui_interactive(
+            &world,
+            640,
+            480,
+            &[sheet],
+            Some([20.0, 20.0]),
+            Some(button),
+            None,
+            None,
+        );
         assert_eq!(active.active, Some(button));
         let Some(UiDrawItem::Rectangle(rectangle)) = active.draw_items.first() else {
             panic!("the button background should be drawn first");

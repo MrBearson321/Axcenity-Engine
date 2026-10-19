@@ -314,7 +314,10 @@ fn paint_badges(painter: &egui::Painter, rect: egui::Rect, viewport: egui::Rect,
     if origin.y + height > viewport.bottom() {
         origin.y = (rect.top() - height - 6.0).max(viewport.top());
     }
-    origin.x = origin.x.clamp(viewport.left(), (viewport.right() - width).max(viewport.left()));
+    origin.x = origin.x.clamp(
+        viewport.left(),
+        (viewport.right() - width).max(viewport.left()),
+    );
     let background = egui::Rect::from_min_size(origin, egui::vec2(width, height));
     painter.rect_filled(background, 3.0, egui::Color32::from_black_alpha(180));
     for (index, line) in lines.iter().enumerate() {
@@ -1112,7 +1115,10 @@ mod tests {
             .iter()
             .find(|element| world.get(element.id).unwrap().name() == "Child")
             .unwrap();
-        assert_eq!(child.rect.x, 100.0, "the child shares the parent's left edge");
+        assert_eq!(
+            child.rect.x, 100.0,
+            "the child shares the parent's left edge"
+        );
         // The child's left edge sits on the parent's. Snapping to it would
         // hold the parent still; five pixels of drag should stick.
         let edit = drag_named(&world, &layout, "Parent", Grip::BODY, egui::vec2(5.0, 0.0));

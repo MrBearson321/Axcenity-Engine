@@ -1,0 +1,1077 @@
+//! Menus, the ribbon, dock panels and keyboard shortcuts.
+//!
+//! Drawing a panel may change the selection. The frame in `app.rs` applies
+//! viewport results after the dock pass. These are methods of [`super::EditorApp`].
+
+use super::*;
+
+impl EditorApp {
+    /// The Explorer panel, then whatever was clicked or done in it.
+    pub(super) fn explorer_pane(&mut self, ui: &mut egui::Ui) {
+        let editing = !self.playing();
+        // The game's world during Play, otherwise the one being edited.
+        let world = shown(&self.world, &self.play);
+        let explorer = self.explorer.show(ui, world, &self.selection, editing);
+        let rows: Vec<InstanceId> = if explorer.clicked.is_some() {
+            self.explorer
+                .rows(world)
+                .into_iter()
+                .map(|row| row.id)
+                .collect()
+        } else {
+            Vec::new()
+        };
+        if explorer.clicked.is_some() || explorer.keep_group {
+            self.select_clicked(
+                explorer.clicked,
+                explorer.modifiers,
+                Some(&rows),
+                explorer.keep_group,
+            );
+            ui.ctx().request_repaint();
+        }
+        if let Some(action) = explorer.action {
+            self.act(action);
+            // The Explorer was drawn before this change, so draw it again.
+            ui.ctx().request_repaint();
+        }
+        if let Some(id) = explorer.open {
+            self.open_script_instance(id);
+        }
+    }
+    /// The Properties panel (with the Style section for UI elements), then
+    /// the edit made in it.
+    pub(super) fn properties_pane(&mut self, ui: &mut egui::Ui) {
+        let editing = !self.playing();
+        let world = shown(&self.world, &self.play);
+        let stylesheets = self
+            .project
+            .as_ref()
+            .map_or(&[][..], |project| project.stylesheets.as_slice());
+        let selected = self.selected;
+        let mut style_edit = None;
+        let edit = properties::show(ui, world, selected, !editing, self.selection.len(), |ui| {
+            // Stylesheets are edited, not the game, so not during Play.
+            if editing {
+                style_edit = style_panel::show(ui, world, selected, stylesheets);
+            }
+        });
+        // Other panels may already be drawn this frame, so draw again to
+        // show the change everywhere.
+        if let (Some(id), Some(edit)) = (selected, edit) {
+            self.apply(id, edit);
+            ui.ctx().request_repaint();
+        }
+        if let (Some(id), Some(edit)) = (selected, style_edit) {
+            self.apply_style(id, edit);
+            ui.ctx().request_repaint();
+        }
+    }
+    /// The Output panel. A clicked script error opens the script there.
+    pub(super) fn output_pane(&mut self, ui: &mut egui::Ui) {
+        if let Some(location) = self.output.show(ui) {
+            self.open_script(&location.path, Some(location.line));
+        }
+    }
+    /// The Assets panel, then what was asked for in it.
+    pub(super) fn assets_pane(&mut self, ui: &mut egui::Ui) {
+        let can_save = assets::any_prefab(&self.world, &self.selection_roots());
+        let action = self
+            .asset_browser
+            .show(ui, &self.assets, !self.playing(), can_save);
+        match action {
+            Some(BrowserAction::Place(entry)) => self.drop_asset(&entry, None),
+            Some(BrowserAction::Import { image_folder }) => self.import_assets(image_folder),
+            Some(BrowserAction::SavePrefab) => self.save_prefab(),
+            None => {}
+        }
+    }
+    /// The Scene panel: the tabs for the viewport ("World") and the open
+    /// scripts, Code/Blocks for a Script, and the viewport or the script.
+    pub(super) fn scene_pane(
+        &mut self,
+        ui: &mut egui::Ui,
+        render_state: Option<&RenderState>,
+    ) -> ViewportOutput {
+        let ctx = ui.ctx().clone();
+        let close_tab = egui::TopBottomPanel::top("tabs")
+            .show_inside(ui, |ui| self.tabs.tab_bar(ui))
+            .inner;
+        if let Some(path) = close_tab {
+            self.request_and_go_ahead(&ctx, Discard::CloseTab(path));
+        }
+        // Scripts and LocalScripts switch between Code and Blocks here.
+        let switchable = self
+            .tabs
+            .active_path()
+            .filter(|path| axcenity_project::switched_script_path(path).is_some())
+            .map(str::to_owned);
+        if let Some(path) = switchable {
+            let blocks = axcenity_project::is_block_script(&path);
+            let playing = self.playing();
+            let switch = egui::TopBottomPanel::top("script mode")
+                .frame(
+                    egui::Frame::side_top_panel(&ctx.style())
+                        .inner_margin(egui::Margin::symmetric(10, 5)),
+                )
+                .show_inside(ui, |ui| scripts::mode_bar(ui, blocks, !playing))
+                .inner;
+            if switch {
+                self.switch_script_mode(&path);
+                ctx.request_repaint();
+            }
+        }
+
+        let world = shown(&self.world, &self.play);
+        let stylesheets = self
+            .project
+            .as_ref()
+            .map_or(&[][..], |project| project.stylesheets.as_slice());
+        // No tool during Play, so nothing can be dragged.
+        let tool = (!self.playing()).then_some(self.tool);
+        let preview = self.angular_preview();
+        let active_block_path = self
+            .tabs
+            .active_path()
+            .filter(|path| axcenity_project::is_block_script(path))
+            .map(str::to_owned);
+        if self.tabs.world_shown() {
+            let emits = std::mem::take(&mut self.pending_emits);
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show_inside(ui, |ui| match render_state {
+                    Some(render_state) => {
+                        self.viewport_rect = Some(ui.available_rect_before_wrap());
+                        self.viewport.show(
+                            ui,
+                            render_state,
+                            ViewportScene {
+                                world,
+                                assets: &self.assets,
+                                selected: self.selected,
+                                selection: &self.selection,
+                                tool,
+                                snap: self.snap,
+                                modes: self.modes,
+                                preview: &preview,
+                                emits: &emits,
+                                stylesheets,
+                                focused_text: self.focused_text,
+                                light_cones: self.light_cones,
+                            },
+                        )
+                    }
+                    // Can't happen: main.rs always picks the wgpu renderer.
+                    None => {
+                        ui.label("The viewport needs the wgpu renderer.");
+                        Default::default()
+                    }
+                })
+                .inner
+        } else if let Some(path) = &active_block_path {
+            let mut changed = false;
+            let objects = block_objects(&self.world);
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show_inside(ui, |ui| {
+                    if let Some(document) = self.project.as_mut().and_then(|project| {
+                        project
+                            .block_scripts
+                            .iter_mut()
+                            .find(|document| document.path == *path)
+                    }) {
+                        changed = block_editor::show(
+                            ui,
+                            &mut document.script,
+                            block_editor::BlockContext {
+                                key: path,
+                                client: axcenity_project::script_class(path)
+                                    == ClassName::LocalScript,
+                                highlighted: document.highlighted,
+                                objects: &objects,
+                            },
+                        );
+                        if changed {
+                            document.highlighted = None;
+                        }
+                    }
+                });
+            if changed {
+                self.update_block_lua(path);
+            }
+            Default::default()
+        } else {
+            let stylesheet_path = self
+                .tabs
+                .active_path()
+                .filter(|path| axcenity_project::is_stylesheet(path))
+                .map(str::to_owned);
+            let previous_source = stylesheet_path
+                .as_deref()
+                .and_then(|path| self.tabs.get(path))
+                .map(|tab| tab.text.clone());
+            egui::CentralPanel::default().show_inside(ui, |ui| self.tabs.show_active(ui));
+            if let (Some(path), Some(previous_source)) = (stylesheet_path, previous_source) {
+                let current_source = self
+                    .tabs
+                    .get(&path)
+                    .map(|tab| tab.text.clone())
+                    .unwrap_or_default();
+                if current_source != previous_source {
+                    self.refresh_stylesheet(&path, &current_source);
+                    ctx.request_repaint();
+                }
+            }
+            Default::default()
+        }
+    }
+    pub(super) fn menu_bar(&mut self, ui: &mut egui::Ui) {
+        egui::MenuBar::new().ui(ui, |ui| {
+            ui.menu_button("File", |ui| {
+                if ui
+                    .button(theme::with_icon(icons::FOLDER_OPEN, "Open Project…"))
+                    .clicked()
+                {
+                    self.request_and_go_ahead(ui.ctx(), Discard::OpenAnother);
+                }
+                if ui
+                    .add_enabled(
+                        self.project.is_some() && !self.playing(),
+                        egui::Button::new(theme::with_icon(icons::HOUSE, "Close Project")),
+                    )
+                    .clicked()
+                {
+                    self.request_and_go_ahead(ui.ctx(), Discard::CloseProject);
+                }
+                if ui
+                    .add_enabled(
+                        self.project.is_some() && !self.playing(),
+                        egui::Button::new("Open Stylesheet…"),
+                    )
+                    .clicked()
+                {
+                    self.open_stylesheet_with_dialog();
+                }
+                if ui
+                    .add_enabled(
+                        self.project.is_some() && !self.playing(),
+                        egui::Button::new("New Stylesheet"),
+                    )
+                    .clicked()
+                {
+                    self.new_stylesheet();
+                }
+                let save = egui::Button::new(theme::with_icon(icons::FLOPPY_DISK, "Save"))
+                    .shortcut_text(ui.ctx().format_shortcut(&SAVE_SHORTCUT));
+                if ui.add_enabled(self.project.is_some(), save).clicked() {
+                    self.save();
+                }
+                if ui
+                    .add_enabled(
+                        self.project.is_some() && !self.playing(),
+                        egui::Button::new(theme::with_icon(
+                            icons::CLOCK_COUNTER_CLOCKWISE,
+                            "Version History…",
+                        )),
+                    )
+                    .clicked()
+                {
+                    self.versions_open = true;
+                }
+                let export_enabled = self.project.is_some() && !self.playing();
+                ui.menu_button(
+                    theme::with_icon(icons::FILE_ARROW_UP, "Export Game"),
+                    |ui| {
+                        if ui
+                            .add_enabled(export_enabled, egui::Button::new("For this OS"))
+                            .clicked()
+                        {
+                            self.export_game_with_dialog();
+                            ui.close();
+                        }
+                        ui.separator();
+                        for (target, label) in [
+                            (files::ExportTarget::Windows, "For Windows"),
+                            (files::ExportTarget::MacOS, "For macOS"),
+                            (files::ExportTarget::Linux, "For Linux"),
+                        ] {
+                            if ui
+                                .add_enabled(export_enabled, egui::Button::new(label))
+                                .clicked()
+                            {
+                                self.export_game_for_with_dialog(target);
+                                ui.close();
+                            }
+                        }
+                        if !export_enabled {
+                            ui.weak(if self.playing() {
+                                "Press Stop before exporting."
+                            } else {
+                                "Open a project first."
+                            });
+                        }
+                        ui.separator();
+                        let mut show_splash = self
+                            .project
+                            .as_ref()
+                            .is_some_and(|project| project.show_splash);
+                        if ui
+                            .add_enabled(
+                                self.project.is_some(),
+                                egui::Checkbox::new(
+                                    &mut show_splash,
+                                    "Show splash in exported games",
+                                ),
+                            )
+                            .changed()
+                        {
+                            self.set_show_splash(show_splash);
+                        }
+                    },
+                );
+                ui.separator();
+                let import =
+                    egui::Button::new(theme::with_icon(icons::FILE_ARROW_DOWN, "Import Model…"));
+                if ui
+                    .add_enabled(self.project.is_some() && !self.playing(), import)
+                    .on_hover_text(IMPORT_HOVER)
+                    .on_disabled_hover_text(if self.playing() {
+                        "Press Stop to edit."
+                    } else {
+                        "Open a project first."
+                    })
+                    .clicked()
+                {
+                    self.import_model_with_dialog();
+                }
+                if ui
+                    .add_enabled(
+                        self.project.is_some(),
+                        egui::Button::new(theme::with_icon(
+                            icons::SPARKLE,
+                            "Set Up VS Code Autocomplete",
+                        )),
+                    )
+                    .on_hover_text(
+                        "Add the engine's API to this project for Lua Language Server, \
+                         so VS Code autocompletes it in scripts.",
+                    )
+                    .on_disabled_hover_text("Open a project first.")
+                    .clicked()
+                {
+                    self.set_up_autocomplete();
+                }
+                ui.separator();
+                if ui
+                    .button(theme::with_icon(icons::SIGN_OUT, "Quit"))
+                    .clicked()
+                {
+                    self.request_and_go_ahead(ui.ctx(), Discard::Quit);
+                }
+            });
+            ui.menu_button("Edit", |ui| {
+                // Nothing can be edited mid-drag, or while the game plays.
+                let busy = self.viewport.is_dragging() || self.playing();
+                // "Undo Move Pad", so it's clear what will be undone.
+                let undo_label = self.history.undo_label().map(str::to_string);
+                let undo = egui::Button::new(theme::with_icon(
+                    icons::ARROW_COUNTER_CLOCKWISE,
+                    &match &undo_label {
+                        Some(label) => format!("Undo {label}"),
+                        None => "Undo".to_string(),
+                    },
+                ))
+                .shortcut_text(ui.ctx().format_shortcut(&UNDO_SHORTCUT));
+                if ui
+                    .add_enabled(undo_label.is_some() && !busy, undo)
+                    .clicked()
+                {
+                    self.undo();
+                }
+                let redo_label = self.history.redo_label().map(str::to_string);
+                let redo = egui::Button::new(theme::with_icon(
+                    icons::ARROW_CLOCKWISE,
+                    &match &redo_label {
+                        Some(label) => format!("Redo {label}"),
+                        None => "Redo".to_string(),
+                    },
+                ))
+                .shortcut_text(ui.ctx().format_shortcut(&REDO_SHORTCUT));
+                if ui
+                    .add_enabled(redo_label.is_some() && !busy, redo)
+                    .clicked()
+                {
+                    self.redo();
+                }
+                ui.separator();
+
+                // These act on the selection, the same as its right-click menu in the Explorer.
+                let selected = self.selected;
+                let renamable = selected
+                    .and_then(|id| self.world.get(id))
+                    .is_some_and(properties::can_rename)
+                    && !self.playing();
+                let editable = selected
+                    .is_some_and(|id| tree::check_editable(&self.world, id).is_ok())
+                    && !busy;
+                let rename = egui::Button::new(theme::with_icon(icons::PENCIL_SIMPLE, "Rename"))
+                    .shortcut_text(RENAME_KEY.name());
+                if ui.add_enabled(renamable, rename).clicked()
+                    && let Some(id) = selected
+                {
+                    self.explorer.start_rename(&self.world, id);
+                }
+                let duplicate = egui::Button::new(theme::with_icon(icons::COPY, "Duplicate"))
+                    .shortcut_text(ui.ctx().format_shortcut(&DUPLICATE_SHORTCUT));
+                if ui.add_enabled(editable, duplicate).clicked() && selected.is_some() {
+                    self.duplicate_selected();
+                }
+                let deletable =
+                    selected.is_some_and(|id| tree::check_delete(&self.world, id).is_ok()) && !busy;
+                let delete = egui::Button::new(theme::with_icon(icons::TRASH, "Delete"))
+                    .shortcut_text(DELETE_KEY_TEXT);
+                if ui.add_enabled(deletable, delete).clicked() && selected.is_some() {
+                    self.delete_selected();
+                }
+            });
+            ui.menu_button("View", |ui| {
+                ui.weak("Theme");
+                for (preference, icon, label) in [
+                    (egui::ThemePreference::Dark, icons::MOON, "Dark"),
+                    (egui::ThemePreference::Light, icons::SUN, "Light"),
+                    (
+                        egui::ThemePreference::System,
+                        icons::DESKTOP,
+                        "Match System",
+                    ),
+                ] {
+                    let item = egui::Button::selectable(
+                        self.theme == preference,
+                        theme::with_icon(icon, label),
+                    );
+                    if ui.add(item).clicked() {
+                        self.theme = preference;
+                        ui.ctx().set_theme(preference);
+                    }
+                }
+                ui.separator();
+                ui.weak("Panels");
+                for pane in Pane::CLOSABLE {
+                    let item = egui::Button::selectable(
+                        self.layout.is_open(pane),
+                        theme::with_icon(pane.icon(), pane.label()),
+                    );
+                    if ui
+                        .add(item)
+                        .on_hover_text("Show or hide it. Drag a panel by its tab to move it.")
+                        .clicked()
+                    {
+                        self.layout.toggle(pane);
+                    }
+                }
+                if ui
+                    .button(theme::with_icon(icons::ARROW_COUNTER_CLOCKWISE, "Reset Layout"))
+                    .on_hover_text("Put every panel back where it starts.")
+                    .clicked()
+                {
+                    self.layout.reset();
+                }
+                ui.separator();
+                let cones = egui::Button::selectable(
+                    self.light_cones,
+                    theme::with_icon(icons::FLASHLIGHT, "Light Cones"),
+                );
+                if ui
+                    .add(cones)
+                    .on_hover_text(
+                        "Show where every light shines in the viewport. Off, only the selected light (or the part it's in) shows its cone.",
+                    )
+                    .clicked()
+                {
+                    self.light_cones = !self.light_cones;
+                }
+                ui.separator();
+                if ui
+                    .button(theme::with_icon(icons::STAR, "New Ribbon Tab…"))
+                    .on_hover_text("Make your own ribbon tab from any of the ribbon's groups.")
+                    .clicked()
+                {
+                    self.ribbon_tabs.edit(None);
+                }
+            });
+            // Only in debug builds (`cargo run`), never in a release.
+            if cfg!(debug_assertions) {
+                ui.menu_button("Debug", |ui| {
+                    let panic =
+                        egui::Button::new(theme::with_icon(icons::WARNING, "Panic during Play"));
+                    if ui
+                        .add_enabled(self.playing(), panic)
+                        .on_hover_text(
+                            "Makes the engine panic on the next frame, to check that \
+                             Play stops and reports it instead of closing the editor.",
+                        )
+                        .on_disabled_hover_text("Press Play first.")
+                        .clicked()
+                        && let Some(session) = &mut self.play
+                    {
+                        session.panic_next_frame();
+                    }
+                });
+            }
+            ui.menu_button("Help", |ui| {
+                if ui
+                    .button(theme::with_icon(icons::INFO, "About Axcenity"))
+                    .clicked()
+                {
+                    self.about_open = true;
+                }
+            });
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if self.unsaved() {
+                    ui.weak(theme::with_icon(icons::FLOPPY_DISK, "Unsaved changes"));
+                }
+                if self.playing() {
+                    playing_badge(ui);
+                }
+            });
+        });
+    }
+    /// The ribbon under the menu bar: Play and Stop, the tools, the snapping
+    /// settings, then buttons that insert each primitive and each kind of script.
+    pub(super) fn toolbar(&mut self, ui: &mut egui::Ui) {
+        self.ribbon_tabs.tab_bar(ui);
+        ui.add_space(2.0);
+        let mut clicks = RibbonClicks::default();
+        let groups = self.ribbon_tabs.groups();
+        egui::ScrollArea::horizontal().show(ui, |ui| {
+            ui.horizontal(|ui| {
+                for (index, &group) in groups.iter().enumerate() {
+                    if index > 0 {
+                        ui.separator();
+                    }
+                    self.ribbon_group(ui, group, &mut clicks);
+                }
+            });
+        });
+        if let Some(what) = clicks.insert {
+            let near = self.selected;
+            self.act(Action::Insert { what, near });
+        }
+        if let Some(class) = clicks.insert_script {
+            self.act(Action::InsertScript(class));
+        }
+        if clicks.import {
+            self.import_model_with_dialog();
+        }
+        if clicks.play {
+            self.play();
+        }
+        if clicks.stop {
+            self.stop();
+        }
+    }
+    /// Draws one of the ribbon's groups. Buttons that act on the whole app
+    /// are noted in `clicks`, and the toolbar acts on them once it's drawn.
+    pub(super) fn ribbon_group(
+        &mut self,
+        ui: &mut egui::Ui,
+        group: RibbonGroup,
+        clicks: &mut RibbonClicks,
+    ) {
+        let playing = self.playing();
+        let can_play = self.project.is_some();
+        match group {
+            RibbonGroup::Game => ribbon::group(ui, "Game", |ui| {
+                let play_button = RibbonButton::new(filled_icons::PLAY, "Play")
+                    .family(theme::filled())
+                    .color(theme::PLAY_GREEN);
+                clicks.play = ui
+                    .add_enabled(!playing && can_play, play_button)
+                    .on_hover_text(format!(
+                        "Save, then run the game here ({})",
+                        ui.ctx().format_shortcut(&PLAY_SHORTCUT)
+                    ))
+                    .on_disabled_hover_text(if playing {
+                        "The game is playing."
+                    } else {
+                        "Open a project first."
+                    })
+                    .clicked();
+                let stop_button = RibbonButton::new(filled_icons::STOP, "Stop")
+                    .family(theme::filled())
+                    .color(theme::STOP_RED);
+                clicks.stop = ui
+                    .add_enabled(playing, stop_button)
+                    .on_hover_text(format!(
+                        "Stop the game and go back to editing ({})",
+                        ui.ctx().format_shortcut(&STOP_SHORTCUT)
+                    ))
+                    .clicked();
+            }),
+            RibbonGroup::Tools => ribbon::group(ui, "Tools", |ui| {
+                for tool in Tool::ALL {
+                    let keys: Vec<String> = tool
+                        .shortcut()
+                        .map(|shortcut| ui.ctx().format_shortcut(&shortcut))
+                        .into_iter()
+                        .chain(tool.key().map(|key| key.name().to_owned()))
+                        .collect();
+                    let hover = match keys.as_slice() {
+                        [] => format!("{} tool", tool.label()),
+                        keys => format!("{} tool ({})", tool.label(), keys.join(" or ")),
+                    };
+                    let button = RibbonButton::new(theme::tool_icon(tool), tool.label())
+                        .selected(self.tool == tool);
+                    if ui.add(button).on_hover_text(hover).clicked() {
+                        self.tool = tool;
+                    }
+                }
+            }),
+            RibbonGroup::Snapping => ribbon::group(ui, "Snapping", |ui| {
+                let snap = &mut self.snap;
+                egui::Grid::new("snapping")
+                    .num_columns(2)
+                    .spacing([6.0, 4.0])
+                    .show(ui, |ui| {
+                        ui.checkbox(
+                            &mut snap.move_on,
+                            theme::with_icon(icons::GRID_FOUR, "Move"),
+                        )
+                        .on_hover_text("Move and scale in steps of this many studs.");
+                        ui.add_enabled(
+                            snap.move_on,
+                            egui::DragValue::new(&mut snap.move_step)
+                                .range(Snap::MIN_MOVE_STEP..=1000.0)
+                                .speed(0.05)
+                                .max_decimals(3)
+                                .suffix(" studs"),
+                        );
+                        ui.end_row();
+                        ui.checkbox(
+                            &mut snap.rotate_on,
+                            theme::with_icon(icons::ANGLE, "Rotate"),
+                        )
+                        .on_hover_text("Rotate in steps of this many degrees.");
+                        ui.add_enabled(
+                            snap.rotate_on,
+                            egui::DragValue::new(&mut snap.rotate_step)
+                                .range(Snap::MIN_ROTATE_STEP..=180.0)
+                                .speed(0.5)
+                                .max_decimals(2)
+                                .suffix("°"),
+                        );
+                        ui.end_row();
+                    });
+            }),
+            RibbonGroup::Parts => ribbon::group(ui, "Parts", |ui| {
+                for what in Insertable::PARTS {
+                    let hover = format!(
+                        "Insert a {} part at the camera's focus point, inside the selected \
+                         Model or Folder if there is one.",
+                        what.label().to_lowercase()
+                    );
+                    let color = theme::class_color(what.class(), ui.visuals());
+                    let button =
+                        RibbonButton::new(theme::insert_icon(what), what.label()).color(color);
+                    if ui
+                        .add_enabled(!playing, button)
+                        .on_hover_text(hover)
+                        .on_disabled_hover_text("Press Stop to edit.")
+                        .clicked()
+                    {
+                        clicks.insert = Some(what);
+                    }
+                }
+            }),
+            RibbonGroup::Effects => ribbon::group(ui, "Effects", |ui| {
+                for what in Insertable::AUDIO {
+                    let button = RibbonButton::new(theme::insert_icon(what), what.label())
+                        .color(theme::class_color(what.class(), ui.visuals()));
+                    if ui
+                        .add_enabled(!playing, button)
+                        .on_hover_text("Insert a Sound into the selected part or the Workspace.")
+                        .on_disabled_hover_text("Press Stop to edit.")
+                        .clicked()
+                    {
+                        clicks.insert = Some(what);
+                    }
+                }
+                for what in Insertable::EFFECTS {
+                    let button = RibbonButton::new(theme::insert_icon(what), what.label())
+                        .color(theme::class_color(what.class(), ui.visuals()));
+                    if ui
+                        .add_enabled(!playing, button)
+                        .on_hover_text(
+                            "Insert a ParticleEmitter into the selected part (an invisible \
+                             holder part is made if none is selected).",
+                        )
+                        .on_disabled_hover_text("Press Stop to edit.")
+                        .clicked()
+                    {
+                        clicks.insert = Some(what);
+                    }
+                }
+                for what in Insertable::LIGHTS {
+                    let button = RibbonButton::new(theme::insert_icon(what), what.label())
+                        .color(theme::class_color(what.class(), ui.visuals()));
+                    if ui
+                        .add_enabled(!playing, button)
+                        .on_hover_text("Insert a light into the selected part.")
+                        .on_disabled_hover_text("Press Stop to edit.")
+                        .clicked()
+                    {
+                        clicks.insert = Some(what);
+                    }
+                }
+            }),
+            RibbonGroup::Import => ribbon::group(ui, "Import", |ui| {
+                let color = theme::class_color(ClassName::MeshPart, ui.visuals());
+                let button = RibbonButton::new(icons::FILE_ARROW_DOWN, "Import").color(color);
+                clicks.import = ui
+                    .add_enabled(!playing, button)
+                    .on_hover_text(IMPORT_HOVER)
+                    .on_disabled_hover_text("Press Stop to edit.")
+                    .clicked();
+            }),
+            RibbonGroup::Ui => ribbon::group(ui, "UI", |ui| {
+                for what in Insertable::UI {
+                    let label = match what {
+                        Insertable::ScreenGui => "Screen",
+                        Insertable::Frame => "Frame",
+                        Insertable::TextLabel => "Text",
+                        Insertable::TextButton => "Button",
+                        Insertable::ImageLabel => "Image",
+                        Insertable::TextBox => "TextBox",
+                        Insertable::PageLayout => "Pages",
+                        Insertable::Page => "Page",
+                        Insertable::Table => "Table",
+                        Insertable::BillboardGui => "Billboard",
+                        _ => what.label(),
+                    };
+                    let hover = match what {
+                        Insertable::ScreenGui => {
+                            "Insert a ScreenGui: a layer of UI over the game.".to_owned()
+                        }
+                        Insertable::PageLayout => {
+                            "Insert a PageLayout. Its child Frames are pages; a script or the \
+                             show-page block sets CurrentPage."
+                                .to_owned()
+                        }
+                        Insertable::Page => {
+                            "Insert a page Frame into the selected PageLayout (a PageLayout \
+                             and a ScreenGui are made if there isn't one)."
+                                .to_owned()
+                        }
+                        Insertable::BillboardGui => {
+                            "Insert a BillboardGui into the selected part. It floats in the \
+                             world and is drawn with the screen UI."
+                                .to_owned()
+                        }
+                        _ => format!(
+                            "Insert a {} into the selected ScreenGui or Frame (or the first \
+                             ScreenGui; one is made if there's none). Drag its handles in the \
+                             viewport, and style it with CSS in the Style section of Properties.",
+                            what.label()
+                        ),
+                    };
+                    let button = RibbonButton::new(theme::insert_icon(what), label)
+                        .color(theme::class_color(what.class(), ui.visuals()));
+                    if ui
+                        .add_enabled(!playing, button)
+                        .on_hover_text(hover)
+                        .on_disabled_hover_text("Press Stop to edit.")
+                        .clicked()
+                    {
+                        clicks.insert = Some(what);
+                    }
+                }
+            }),
+            RibbonGroup::Scripts => ribbon::group(ui, "Scripts", |ui| {
+                for class in explorer::SCRIPT_CLASSES {
+                    let color = theme::class_color(class, ui.visuals());
+                    let button =
+                        RibbonButton::new(theme::class_icon(class), class.as_str()).color(color);
+                    if ui
+                        .add_enabled(!playing && can_play, button)
+                        .on_hover_text(explorer::script_hover(class))
+                        .on_disabled_hover_text(if playing {
+                            "Press Stop to edit."
+                        } else {
+                            "Open a project first."
+                        })
+                        .clicked()
+                    {
+                        clicks.insert_script = Some(class);
+                    }
+                }
+            }),
+            RibbonGroup::Panels => ribbon::group(ui, "Panels", |ui| {
+                for pane in Pane::CLOSABLE {
+                    let button = RibbonButton::new(pane.icon(), pane.label())
+                        .selected(self.layout.is_open(pane));
+                    if ui
+                        .add(button)
+                        .on_hover_text(format!(
+                            "Show or hide the {} panel. Drag a panel by its tab to move it.",
+                            pane.label()
+                        ))
+                        .clicked()
+                    {
+                        self.layout.toggle(pane);
+                    }
+                }
+                let reset = RibbonButton::new(icons::ARROW_COUNTER_CLOCKWISE, "Reset");
+                if ui
+                    .add(reset)
+                    .on_hover_text("Put every panel back where it starts.")
+                    .clicked()
+                {
+                    self.layout.reset();
+                }
+            }),
+        }
+    }
+    /// The keyboard shortcuts for undo, redo, the tools, and renaming,
+    /// duplicating and deleting the selection.
+    pub(super) fn shortcuts(&mut self, ctx: &egui::Context) {
+        // Stop first: egui counts Shift+F5 as F5 too.
+        let (stop, play) = ctx.input_mut(|input| {
+            let stop = input.consume_shortcut(&STOP_SHORTCUT);
+            (stop, input.consume_shortcut(&PLAY_SHORTCUT))
+        });
+        if stop {
+            self.stop();
+        } else if play {
+            self.play();
+        }
+
+        // A text box being typed in has its own undo, and uses Delete and
+        // Backspace itself, so leave those keys to it then.
+        let typing = ctx.wants_keyboard_input();
+        let playing = self.playing();
+        let studio_tool = |input: &mut egui::InputState| {
+            Tool::ALL.into_iter().find(|tool| {
+                tool.shortcut()
+                    .is_some_and(|shortcut| input.consume_shortcut(&shortcut))
+            })
+        };
+        // F3X's single keys only while editing, so a game gets every key.
+        let f3x_tool = |input: &mut egui::InputState| {
+            if playing {
+                return None;
+            }
+            Tool::ALL.into_iter().find(|tool| {
+                tool.key()
+                    .is_some_and(|key| input.consume_key(egui::Modifiers::NONE, key))
+            })
+        };
+        let keys = ctx.input_mut(|input| {
+            if typing {
+                return Keys {
+                    tool: studio_tool(input),
+                    ..Keys::default()
+                };
+            }
+            // Redo first: egui counts Ctrl+Shift+Z as Ctrl+Z too.
+            let redo = input.consume_shortcut(&REDO_SHIFT_SHORTCUT)
+                || input.consume_shortcut(&REDO_SHORTCUT);
+            let none = egui::Modifiers::NONE;
+            Keys {
+                redo,
+                undo: input.consume_shortcut(&UNDO_SHORTCUT),
+                tool: studio_tool(input).or_else(|| f3x_tool(input)),
+                toggle: !playing && input.consume_key(none, egui::Key::Enter),
+                // Taken before the viewport sees them, so Ctrl+D doesn't
+                // also fly the camera right.
+                duplicate: input.consume_shortcut(&DUPLICATE_SHORTCUT),
+                rename: input.consume_key(none, RENAME_KEY),
+                delete: input.consume_key(none, egui::Key::Delete)
+                    || (cfg!(target_os = "macos") && input.consume_key(none, egui::Key::Backspace)),
+            }
+        });
+        if keys.redo {
+            self.redo();
+        }
+        if keys.undo {
+            self.undo();
+        }
+        if let Some(tool) = keys.tool {
+            self.tool = tool;
+        }
+        if keys.toggle && self.tool == Tool::Angular {
+            self.extend_angular();
+        } else if keys.toggle && matches!(self.tool, Tool::Anchor | Tool::Collision) {
+            let property = if self.tool == Tool::Anchor {
+                "Anchored"
+            } else {
+                "CanCollide"
+            };
+            let parts = self.tool_parts();
+            let all_on = parts.iter().all(|&id| {
+                self.world
+                    .get(id)
+                    .and_then(|i| i.property(property))
+                    .and_then(Value::as_bool)
+                    != Some(false)
+            });
+            self.set_on_parts(&parts, property, Value::Bool(!all_on));
+            self.history.seal();
+        }
+        // Undo, duplicate and delete check for Play themselves; renaming
+        // only opens a text box, so it's checked here.
+        if let Some(id) = self.selected {
+            if keys.rename && !self.playing() {
+                self.explorer.start_rename(&self.world, id);
+            }
+            if keys.duplicate {
+                self.duplicate_selected();
+            }
+            if keys.delete {
+                self.delete_selected();
+            }
+        }
+    }
+    /// File > Version History: the saves kept for this project, and restoring one.
+    pub(super) fn version_window(&mut self, ctx: &egui::Context) {
+        let Some(folder) = self.project.as_ref().map(|project| project.folder.clone()) else {
+            self.versions_open = false;
+            return;
+        };
+        let mut open = self.versions_open;
+        let mut restore = None;
+        let mut checkpoint = false;
+        egui::Window::new("Version History")
+            .open(&mut open)
+            .resizable(true)
+            .default_width(420.0)
+            .show(ctx, |ui| {
+                ui.weak(
+                    "Each save keeps the world, scripts and styles. Restoring puts that \
+                     version back. Assets and the project name stay as they are.",
+                );
+                ui.add_space(6.0);
+                if ui.button("Save a version now").clicked() {
+                    checkpoint = true;
+                }
+                ui.add_space(6.0);
+                let versions = axcenity_project::list_versions(&folder);
+                if versions.is_empty() {
+                    ui.weak("No versions yet. Save the project to keep the first one.");
+                }
+                egui::ScrollArea::vertical()
+                    .max_height(320.0)
+                    .show(ui, |ui| {
+                        for version in &versions {
+                            ui.horizontal(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.label(version.label.as_str());
+                                    ui.weak(version.when());
+                                });
+                                if ui.button("Restore").clicked() {
+                                    restore = Some(version.id.clone());
+                                }
+                            });
+                            ui.separator();
+                        }
+                    });
+            });
+        self.versions_open = open;
+        if checkpoint {
+            if self.unsaved() {
+                self.save();
+            } else {
+                match axcenity_project::record_version(&folder, "Checkpoint") {
+                    Ok(true) => self
+                        .output
+                        .info("Kept a version of the world, scripts and styles."),
+                    Ok(false) => self
+                        .output
+                        .info("The newest version already matches these files."),
+                    Err(err) => self
+                        .output
+                        .warning(format!("Could not keep a version: {err}")),
+                }
+            }
+        }
+        if let Some(id) = restore {
+            self.restore_version(&id);
+        }
+    }
+    /// Puts version `id` back, keeping the current files as a version first.
+    pub(super) fn restore_version(&mut self, id: &str) {
+        let Some(folder) = self.project.as_ref().map(|project| project.folder.clone()) else {
+            return;
+        };
+        if self.unsaved() && !self.save() {
+            return;
+        }
+        if let Err(err) = axcenity_project::record_version(&folder, "Before restore") {
+            self.output.warning(format!(
+                "Could not keep the current files before restoring: {err}"
+            ));
+        }
+        match axcenity_project::restore_version(&folder, id) {
+            Ok(()) => {
+                self.open(&folder);
+                self.output.info("Restored that version. The files it replaced were kept as a version named \"Before restore\".");
+                self.versions_open = true;
+            }
+            Err(err) => self
+                .output
+                .error(format!("Could not restore that version: {err}")),
+        }
+    }
+}
+
+/// `a`, `b` and `c`, each in backticks.
+/// The green "Playing" badge in the menu bar during Play.
+pub(super) fn playing_badge(ui: &mut egui::Ui) {
+    egui::Frame::new()
+        .fill(theme::PLAY_GREEN.gamma_multiply(0.2))
+        .corner_radius(10)
+        .inner_margin(egui::Margin::symmetric(8, 1))
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            ui.label(
+                egui::RichText::new("Playing")
+                    .color(theme::PLAY_GREEN)
+                    .strong(),
+            );
+            ui.label(
+                egui::RichText::new(filled_icons::CIRCLE)
+                    .family(theme::filled())
+                    .size(9.0)
+                    .color(theme::PLAY_GREEN),
+            );
+        })
+        .response
+        .on_hover_text(
+            "Only the Properties panel can change the game, until you press \
+             Stop. Those changes are undone at Stop.",
+        );
+}
+
+/// Every object in the Workspace, for the block editor's object menus: its
+/// path of names below the Workspace (`Pad.Chime`) and its class.
+fn block_objects(world: &World) -> Vec<block_editor::ObjectInfo> {
+    let workspace = world.workspace();
+    world
+        .descendants(workspace)
+        .into_iter()
+        .filter_map(|id| {
+            let instance = world.get(id)?;
+            let mut names = vec![instance.name().to_owned()];
+            let mut parent = instance.parent();
+            while let Some(above) = parent.filter(|&above| above != workspace) {
+                let above = world.get(above)?;
+                names.push(above.name().to_owned());
+                parent = above.parent();
+            }
+            names.reverse();
+            Some(block_editor::ObjectInfo {
+                path: names.join("."),
+                class: instance.class(),
+            })
+        })
+        .collect()
+}

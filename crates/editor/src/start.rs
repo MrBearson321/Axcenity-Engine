@@ -1636,7 +1636,11 @@ mod tests {
         let mut png_bytes = Vec::new();
         let mut encoder = png::Encoder::new(&mut png_bytes, 320, 180);
         encoder.set_color(png::ColorType::Rgb);
-        encoder.write_header().unwrap().write_image_data(&rgb).unwrap();
+        encoder
+            .write_header()
+            .unwrap()
+            .write_image_data(&rgb)
+            .unwrap();
         std::fs::write(pictured.join(axcenity_project::THUMBNAIL_FILE), png_bytes).unwrap();
         projects[0].folder = pictured.clone();
         let snapshots = std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from);
