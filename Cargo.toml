@@ -35,6 +35,10 @@ env_logger = "0.11"
 # Phosphor icons as a font, for the editor (MIT OR Apache-2.0; the icons are MIT).
 # 0.10 is the release for egui 0.32: upgrade it with eframe.
 egui-phosphor = { version = "0.10", default-features = false, features = ["fill", "regular"] }
+# Dockable, draggable editor panels (tabs, splits and floating windows), MIT.
+# 0.17 is the release for egui 0.32: upgrade it with eframe. `serde` saves the
+# layout between runs.
+egui_dock = { version = "0.17", features = ["serde"] }
 glam = "0.34"
 glyphon = "0.9"
 # Loads glTF 2.0 models (.gltf and .glb), MIT OR Apache-2.0. The default

@@ -340,9 +340,7 @@ pub fn class_color(class: ClassName, visuals: &egui::Visuals) -> Color32 {
         | ClassName::TextBox
         | ClassName::PageLayout
         | ClassName::Table
-        | ClassName::BillboardGui => {
-            pick((120, 190, 255), (0, 105, 180))
-        }
+        | ClassName::BillboardGui => pick((120, 190, 255), (0, 105, 180)),
         ClassName::Sound => pick((245, 166, 35), (175, 105, 0)),
         ClassName::PointLight | ClassName::SpotLight => pick((255, 220, 90), (170, 130, 0)),
         ClassName::ParticleEmitter => pick((255, 150, 90), (190, 80, 20)),
@@ -353,17 +351,6 @@ pub fn class_color(class: ClassName, visuals: &egui::Visuals) -> Color32 {
         ClassName::Player => pick((120, 205, 120), (40, 130, 50)),
         _ => visuals.weak_text_color(),
     }
-}
-
-/// A panel's title, such as "Explorer", with its icon.
-pub fn panel_title(ui: &mut egui::Ui, icon: &str, title: &str) {
-    let color = ui.visuals().strong_text_color();
-    ui.label(
-        egui::RichText::new(format!("{icon}  {title}"))
-            .family(heading_family())
-            .size(13.5)
-            .color(color),
-    );
 }
 
 /// The text of a menu item with an icon in front, such as "💾 Save".
@@ -437,7 +424,10 @@ mod tests {
                     heading_family(),
                     filled(),
                 ] {
-                    assert!(fonts.has_glyph(&FontId::new(13.0, family.clone()), '?'), "{family:?}");
+                    assert!(
+                        fonts.has_glyph(&FontId::new(13.0, family.clone()), '?'),
+                        "{family:?}"
+                    );
                 }
             });
             for theme in [egui::Theme::Dark, egui::Theme::Light] {

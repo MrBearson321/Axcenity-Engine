@@ -761,11 +761,7 @@ const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "Grey text shown while Text is empty.",
     ),
     (ClassName::TextBox, "TextColor3", "The text color."),
-    (
-        ClassName::TextBox,
-        "TextSize",
-        "The text size in pixels.",
-    ),
+    (ClassName::TextBox, "TextSize", "The text size in pixels."),
     (
         ClassName::TextBox,
         "MultiLine",
@@ -957,6 +953,11 @@ const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "True while the sound plays. Set it to false to pause and true to carry on. Saved as true, the sound plays as soon as the game starts, with no script needed.",
     ),
     (
+        ClassName::Workspace,
+        "GlobalWind",
+        "The wind everywhere, in studs a second. It carries particles from emitters with WindAffectsDrag and pushes unanchored parts with WindAffected.",
+    ),
+    (
         ClassName::Lighting,
         "ShadowsEnabled",
         "If false, the sun casts no shadows. Turn this off on low-end machines.",
@@ -1110,6 +1111,11 @@ const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     ),
     (
         ClassName::ParticleEmitter,
+        "WindAffectsDrag",
+        "If true, Drag slows particles toward workspace.GlobalWind instead of to a stop, so the wind carries them. Needs a Drag above 0.",
+    ),
+    (
+        ClassName::ParticleEmitter,
         "Size",
         "How many studs across a particle is when it's born.",
     ),
@@ -1216,6 +1222,11 @@ const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     ),
     (
         ClassName::Part,
+        "WindAffected",
+        "If true and the part isn't anchored, workspace.GlobalWind pushes it, harder for parts with bigger faces.",
+    ),
+    (
+        ClassName::Part,
         "EmissiveColor",
         "The color the part glows in when Emission is above 0.",
     ),
@@ -1238,6 +1249,11 @@ const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::MeshPart,
         "CanCollide",
         "If false, other parts pass through it. It still fires Touched.",
+    ),
+    (
+        ClassName::MeshPart,
+        "WindAffected",
+        "If true and the part isn't anchored, workspace.GlobalWind pushes it, harder for parts with bigger faces.",
     ),
     (
         ClassName::MeshPart,
@@ -1454,7 +1470,9 @@ fn class_doc(class: ClassName) -> &'static str {
         ClassName::TextButton => {
             "A clickable UI element. Text and Image can each be empty; both filled shows an icon and a label. Fires Activated when clicked. The old name TextButton still loads."
         }
-        ClassName::ImageLabel => "A UI element that displays an image from the project. It is not clickable.",
+        ClassName::ImageLabel => {
+            "A UI element that displays an image from the project. It is not clickable."
+        }
         ClassName::TextBox => {
             "A box the player can type in. MultiLine off (the default): Enter finishes. MultiLine on: Enter is a new line and clicking away finishes. Fires FocusLost."
         }
@@ -2028,7 +2046,10 @@ mod tests {
             (ClassName::Players, "game.Players"),
             (ClassName::RemoteEvent, "Instance.new('RemoteEvent')"),
             (ClassName::Sound, "Instance.new('Sound')"),
-            (ClassName::ParticleEmitter, "Instance.new('ParticleEmitter')"),
+            (
+                ClassName::ParticleEmitter,
+                "Instance.new('ParticleEmitter')",
+            ),
         ];
         let instance = |class: ClassName| {
             instances

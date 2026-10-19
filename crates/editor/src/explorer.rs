@@ -287,9 +287,6 @@ impl Explorer {
         selected: &[InstanceId],
         editable: bool,
     ) -> ExplorerOutput {
-        theme::panel_title(ui, icons::TREE_STRUCTURE, "Explorer");
-        ui.separator();
-
         // A rename of something that has left the tree (undone, say) can't
         // finish, and nothing is renamed during Play.
         if self
@@ -727,7 +724,13 @@ mod tests {
             false,
         );
         assert_eq!(selection, vec![a, c]);
-        update_selection(&mut selection, None, egui::Modifiers::default(), None, false);
+        update_selection(
+            &mut selection,
+            None,
+            egui::Modifiers::default(),
+            None,
+            false,
+        );
         assert!(selection.is_empty());
     }
 

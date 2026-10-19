@@ -58,6 +58,8 @@ struct Settings {
     spread: f32,
     acceleration: Vec3,
     drag: f32,
+    /// True if Drag slows particles toward the wind rather than to a stop.
+    wind_affects_drag: bool,
 }
 
 impl Settings {
@@ -83,6 +85,10 @@ impl Settings {
             spread: number("SpreadAngle", 0.0).clamp(0.0, 360.0),
             acceleration: vector("Acceleration", Vec3::ZERO),
             drag: number("Drag", 0.0).max(0.0),
+            wind_affects_drag: instance
+                .property("WindAffectsDrag")
+                .and_then(Value::as_bool)
+                == Some(true),
         }
     }
 }
@@ -167,12 +173,21 @@ impl Particles {
                 .collect();
         self.emitters
             .retain(|id, _| live.iter().any(|(live, _, _)| live == id));
+        let wind = global_wind(world);
         for (id, settings, transform) in live {
             let mut state = self.emitters.remove(&id).unwrap_or_default();
             // Older particles first: move them, and let them die.
+            // Drag slows particles toward the air's speed: still air, or
+            // the wind for emitters it affects.
             let slow = 1.0 / (1.0 + settings.drag * seconds);
+            let air = if settings.wind_affects_drag {
+                wind
+            } else {
+                Vec3::ZERO
+            };
             for particle in &mut state.particles {
-                particle.velocity = (particle.velocity + settings.acceleration * seconds) * slow;
+                let velocity = particle.velocity + settings.acceleration * seconds;
+                particle.velocity = air + (velocity - air) * slow;
                 particle.position += particle.velocity * seconds;
                 particle.age += seconds;
             }
@@ -324,6 +339,18 @@ impl Look {
             texture,
         }
     }
+}
+
+/// The Workspace's `GlobalWind`, in studs a second.
+fn global_wind(world: &World) -> Vec3 {
+    world
+        .get(world.workspace())
+        .and_then(|workspace| workspace.property("GlobalWind"))
+        .and_then(Value::as_vector3)
+        .map(|wind| Vec3::new(wind.x, wind.y, wind.z))
+        // A NaN or infinite wind would send every particle away for good.
+        .filter(|wind| wind.is_finite())
+        .unwrap_or(Vec3::ZERO)
 }
 
 fn lerp((from, to): (f32, f32), t: f32) -> f32 {
@@ -589,5 +616,46 @@ mod tests {
         let b = built_in(ParticleType::Fire);
         assert_eq!(a.key(), b.key());
         assert_ne!(a.key(), built_in(ParticleType::Smoke).key());
+    }
+
+    #[test]
+    fn wind_carries_particles_only_from_emitters_it_affects() {
+        let (mut world, _, emitter) = world_with_emitter(0.0);
+        let workspace = world.workspace();
+        world
+            .set_property(
+                workspace,
+                "GlobalWind",
+                Value::Vector3(Vector3::new(20.0, 0.0, 0.0)),
+            )
+            .unwrap();
+        for (name, value) in [
+            ("Speed", Value::Number(0.0)),
+            ("Drag", Value::Number(5.0)),
+            ("Lifetime", Value::Number(10.0)),
+        ] {
+            world.set_property(emitter, name, value).unwrap();
+        }
+        let drift = |world: &World| {
+            let mut particles = Particles::new();
+            particles.emit(world, emitter, 20);
+            let start = particles.sprites(world, &Assets::default());
+            for _ in 0..30 {
+                particles.update(world, 1.0 / 30.0);
+            }
+            let end = particles.sprites(world, &Assets::default());
+            let sum: f32 = start
+                .iter()
+                .zip(&end)
+                .map(|(a, b)| b.position.x - a.position.x)
+                .sum();
+            sum / start.len() as f32
+        };
+        assert!(drift(&world).abs() < 1e-4);
+        world
+            .set_property(emitter, "WindAffectsDrag", Value::Bool(true))
+            .unwrap();
+        // Close to the wind's 20 studs/s by the end of the second.
+        assert!(drift(&world) > 10.0, "{}", drift(&world));
     }
 }

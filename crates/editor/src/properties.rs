@@ -6,7 +6,7 @@
 //! and gives one place to notice unsaved changes.
 
 use axcenity_core::{
-    ClassName, Color3, Instance, InstanceId, Material, ParticleType, PartType, TextureChannel,
+    ClassName, Color3, Instance, InstanceId, Material, PartType, ParticleType, TextureChannel,
     Value, World,
 };
 use eframe::egui;
@@ -38,7 +38,7 @@ pub struct Section {
 
 /// The groups, in panel order, and which properties go in each. Name and
 /// ClassName come first, under "Data", and aren't in the property map.
-const GROUPS: [(&str, &[&str]); 13] = [
+const GROUPS: [(&str, &[&str]); 14] = [
     (
         "Appearance",
         &[
@@ -52,7 +52,8 @@ const GROUPS: [(&str, &[&str]); 13] = [
             "CastShadow",
         ],
     ),
-    ("Behavior", &["Anchored", "CanCollide"]),
+    ("Behavior", &["Anchored", "CanCollide", "WindAffected"]),
+    ("Wind", &["GlobalWind"]),
     (
         "Part",
         &["Shape", "MeshId", "Position", "Orientation", "Size"],
@@ -157,6 +158,7 @@ const GROUPS: [(&str, &[&str]); 13] = [
             "SpreadAngle",
             "Acceleration",
             "Drag",
+            "WindAffectsDrag",
         ],
     ),
     (
@@ -256,7 +258,6 @@ pub fn show(
     selection_count: usize,
     more: impl FnOnce(&mut egui::Ui),
 ) -> Option<Edit> {
-    theme::panel_title(ui, icons::SLIDERS_HORIZONTAL, "Properties");
     if playing {
         ui.weak(theme::with_icon(
             icons::INFO,
@@ -480,9 +481,8 @@ fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
             } else {
                 "Fixed"
             };
-            choice_control(ui, name, current, &["Fixed", "Fit"], |mode| mode).map(|mode| {
-                Value::String(mode.to_owned())
-            })
+            choice_control(ui, name, current, &["Fixed", "Fit"], |mode| mode)
+                .map(|mode| Value::String(mode.to_owned()))
         }
         Value::String(mut text) if name == "MeshId" => {
             ui.add_enabled(false, egui::TextEdit::singleline(&mut text))
@@ -642,6 +642,7 @@ mod tests {
                 "CastShadow",
                 "Anchored",
                 "CanCollide",
+                "WindAffected",
                 "Shape",
                 "Position",
                 "Orientation",
@@ -689,10 +690,14 @@ mod tests {
     }
 
     #[test]
-    fn services_have_no_property_sections() {
+    fn the_workspace_shows_only_its_wind_and_other_services_nothing() {
         let world = World::new();
         let workspace = world.get(world.workspace()).unwrap();
-        assert!(sections(workspace).is_empty());
+        let sections = sections(workspace);
+        assert_eq!(titles(&sections), ["Wind"]);
+        assert_eq!(sections[0].properties[0].0, "GlobalWind");
+        let storage = world.get(world.replicated_storage()).unwrap();
+        assert!(super::sections(storage).is_empty());
     }
 
     #[test]

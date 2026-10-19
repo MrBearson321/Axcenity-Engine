@@ -195,7 +195,6 @@ impl ClassName {
     pub fn default_properties(self) -> Vec<(&'static str, Value)> {
         match self {
             ClassName::DataModel
-            | ClassName::Workspace
             | ClassName::Players
             | ClassName::ReplicatedStorage
             | ClassName::ServerScriptService
@@ -208,6 +207,12 @@ impl ClassName {
             | ClassName::Player
             | ClassName::Model
             | ClassName::Folder => Vec::new(),
+            ClassName::Workspace => vec![
+                // The wind everywhere, in studs a second. It pushes particles
+                // from emitters with WindAffectsDrag, and parts with
+                // WindAffected.
+                ("GlobalWind", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
+            ],
             ClassName::Lighting => vec![
                 ("ShadowsEnabled", Value::Bool(true)),
                 ("ShadowDistance", Value::Number(150.0)),
@@ -265,6 +270,9 @@ impl ClassName {
                 // (0, -196.2, 0)), and how quickly particles slow down.
                 ("Acceleration", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
                 ("Drag", Value::Number(0.0)),
+                // On, Drag slows particles toward the Workspace's
+                // GlobalWind instead of to a stop, so the wind carries them.
+                ("WindAffectsDrag", Value::Bool(false)),
                 // Studs across, color and transparency at birth, each
                 // blending to its End value by the end of the particle's life.
                 ("Size", Value::Number(1.0)),
@@ -441,6 +449,9 @@ impl ClassName {
                     ("Transparency", Value::Number(0.0)),
                     // Off, other parts pass through it (it still fires Touched).
                     ("CanCollide", Value::Bool(true)),
+                    // On, the Workspace's GlobalWind pushes the part (if
+                    // it isn't anchored).
+                    ("WindAffected", Value::Bool(false)),
                     // The part glows in EmissiveColor, Emission times as
                     // brightly as a plain white surface. 0 is no glow.
                     ("EmissiveColor", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
@@ -459,6 +470,7 @@ impl ClassName {
                 ("CastShadow", Value::Bool(true)),
                 ("Transparency", Value::Number(0.0)),
                 ("CanCollide", Value::Bool(true)),
+                ("WindAffected", Value::Bool(false)),
             ],
             ClassName::SurfaceAppearance => {
                 let map = |name| (name, Value::String(String::new()));

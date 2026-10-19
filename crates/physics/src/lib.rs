@@ -14,6 +14,10 @@
 //!
 //! After each step it also notes which parts started touching, for the
 //! `Touched` event. The host collects them with [`Physics::take_touches`].
+//!
+//! The Workspace's `GlobalWind` pushes unanchored parts that have
+//! `WindAffected` on: before each step, each gets a drag force toward the
+//! wind's speed, larger for parts with bigger faces (see [`WIND_DRAG`]).
 
 mod shapes;
 
@@ -45,6 +49,12 @@ const STEP_TOLERANCE: f64 = 1e-6;
 /// How quickly spinning slows down by itself. rapier has no rolling
 /// resistance, so without this a ball on flat ground would roll forever.
 const ANGULAR_DAMPING: f32 = 0.5;
+
+/// How hard the wind pushes: the force on a part is this times its average
+/// face area times how much faster the wind moves than the part. With
+/// density 1, a 50 studs/s wind blows a thin 2×0.2×2 sheet along the
+/// ground, while a 4×1×2 block stays put there and only drifts in the air.
+pub const WIND_DRAG: f32 = 2.0;
 
 /// How many steps in a row two parts must be apart before touching again
 /// counts as a new touch. Parts resting on each other can lose and regain
@@ -95,6 +105,8 @@ struct PartState {
     size: Vector3,
     position: Vector3,
     orientation: Vector3,
+    /// True if the Workspace's wind pushes the part.
+    wind_affected: bool,
 }
 
 impl PartState {
@@ -115,6 +127,8 @@ impl PartState {
             _ => Form::Primitive(instance.property("Shape").and_then(Value::as_part_type)?),
         };
         let can_collide = instance.property("CanCollide").and_then(Value::as_bool) != Some(false);
+        let wind_affected =
+            instance.property("WindAffected").and_then(Value::as_bool) == Some(true);
         let state = Self {
             anchored,
             can_collide,
@@ -122,6 +136,7 @@ impl PartState {
             size: vector("Size")?,
             position: vector("Position")?,
             orientation: vector("Orientation")?,
+            wind_affected,
         };
         let finite = [state.size, state.position, state.orientation]
             .iter()
@@ -174,6 +189,7 @@ impl Physics {
     /// `world` after each one. Returns how many steps ran.
     pub fn step(&mut self, world: &mut World, seconds: f64) -> u32 {
         self.sync_from_world(world);
+        let wind = global_wind(world);
 
         // `max` also turns NaN into 0, so a bad time can't stop physics forever.
         self.unsimulated_seconds += seconds.max(0.0);
@@ -183,6 +199,7 @@ impl Physics {
                 self.unsimulated_seconds = 0.0;
                 break;
             }
+            self.blow(wind);
             self.rapier.step();
             self.write_to_world(world);
             self.find_touches();
@@ -327,6 +344,28 @@ impl Physics {
         }
     }
 
+    /// Sets the wind's push on every unanchored part for the next step. A
+    /// part's force stays until it's reset, so every part's is reset first,
+    /// in case its WindAffected was just turned off or the wind stopped.
+    fn blow(&mut self, wind: Vec3) {
+        for part in self.parts.values() {
+            let Some(body) = self.rapier.bodies.get_mut(part.body) else {
+                continue;
+            };
+            if !body.is_dynamic() {
+                continue;
+            }
+            body.reset_forces(false);
+            if !part.seen.wind_affected || wind == Vec3::ZERO {
+                continue;
+            }
+            let size = part.seen.size;
+            let area = (size.x * size.y + size.y * size.z + size.z * size.x) / 3.0;
+            // Waking the part means a resting part feels the wind too.
+            body.add_force((wind - body.linvel()) * (WIND_DRAG * area), true);
+        }
+    }
+
     /// Compares the parts touching after this step with those touching
     /// before, and records the pairs that are new.
     fn find_touches(&mut self) {
@@ -399,6 +438,17 @@ impl Default for Physics {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// The Workspace's `GlobalWind`, or none if it isn't a finite vector.
+fn global_wind(world: &World) -> Vec3 {
+    world
+        .get(world.workspace())
+        .and_then(|workspace| workspace.property("GlobalWind"))
+        .and_then(Value::as_vector3)
+        .map(to_vec3)
+        .filter(|wind| wind.is_finite())
+        .unwrap_or(Vec3::ZERO)
 }
 
 fn to_vec3(v: Vector3) -> Vec3 {

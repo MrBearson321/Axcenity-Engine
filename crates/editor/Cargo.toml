@@ -20,13 +20,15 @@ axcenity-ui.workspace = true
 anyhow.workspace = true
 eframe.workspace = true
 egui-phosphor.workspace = true
+egui_dock.workspace = true
 env_logger.workspace = true
 log.workspace = true
 png.workspace = true
 rfd.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
 # Draws editor UI offscreen in tests (see `snapshot.rs`).
 pollster.workspace = true
 

@@ -81,7 +81,6 @@ impl Output {
     /// clicked, to open the script there.
     pub fn show(&mut self, ui: &mut egui::Ui) -> Option<Location> {
         ui.horizontal(|ui| {
-            theme::panel_title(ui, icons::TERMINAL_WINDOW, "Output");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
                     .small_button(theme::with_icon(icons::BROOM, "Clear"))

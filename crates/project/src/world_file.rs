@@ -20,6 +20,8 @@
 //! ```
 //!
 //! Only the Workspace, ReplicatedStorage and the Lighting settings are saved.
+//! The Workspace's own properties (`GlobalWind`) are only written when they
+//! aren't their defaults, so `"workspace": {}` stays as short as ever.
 //! `replicated_storage` can be left out, and is only written when it has
 //! something in it. `lighting` (`{ "properties": { "ShadowsEnabled": false } }`)
 //! can be left out too, and is only written when a setting isn't its default.
@@ -34,7 +36,7 @@
 //! world always produces the same text.
 
 use axcenity_core::{
-    ClassName, InstanceId, Material, ParticleType, PartType, TextureChannel, Value, ValueKind,
+    ClassName, InstanceId, Material, PartType, ParticleType, TextureChannel, Value, ValueKind,
     World,
 };
 use serde::Deserialize;
@@ -432,8 +434,15 @@ fn write_instance(world: &World, id: InstanceId, depth: usize, out: &mut String)
         ));
     }
 
+    // The Workspace leaves out its defaults (see the module docs).
+    let defaults = if instance.class() == ClassName::Workspace {
+        instance.class().default_properties()
+    } else {
+        Vec::new()
+    };
     let properties: Vec<String> = instance
         .properties()
+        .filter(|(name, value)| !defaults.iter().any(|(n, v)| n == name && v == *value))
         .map(|(name, value)| format!("{inner_indent}{}: {}", json_string(name), json_value(value)))
         .collect();
     if !properties.is_empty() {
@@ -898,7 +907,8 @@ mod tests {
                 format!("{indent}    \"Roughness\": {roughness},"),
                 format!("{indent}    \"Shape\": \"Block\","),
                 format!("{indent}    \"Size\": [4, 1, 2],"),
-                format!("{indent}    \"Transparency\": 0"),
+                format!("{indent}    \"Transparency\": 0,"),
+                format!("{indent}    \"WindAffected\": false"),
                 format!("{indent}  }}"),
             ]
             .join("\n")
@@ -965,6 +975,29 @@ mod tests {
         assert_eq!(
             write_world(&world),
             "{\n  \"format_version\": 1,\n  \"workspace\": {}\n}\n"
+        );
+    }
+
+    #[test]
+    fn global_wind_is_saved_only_when_it_blows() {
+        let mut world = World::new();
+        let workspace = world.workspace();
+        world
+            .set_property(
+                workspace,
+                "GlobalWind",
+                Value::Vector3(axcenity_core::Vector3::new(10.0, 0.0, -5.0)),
+            )
+            .unwrap();
+        let text = write_world(&world);
+        assert!(text.contains("\"GlobalWind\": [10, 0, -5]"), "{text}");
+        let reloaded = parse_world(&text).unwrap();
+        assert_eq!(
+            reloaded
+                .get(reloaded.workspace())
+                .unwrap()
+                .property("GlobalWind"),
+            world.get(workspace).unwrap().property("GlobalWind")
         );
     }
 

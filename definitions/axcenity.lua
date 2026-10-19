@@ -232,6 +232,7 @@ function DataModelClass:GetService(className) end
 
 ---The service that holds the 3D world. Parts inside it are drawn.
 ---@class Workspace: Instance
+---@field GlobalWind Vector3 The wind everywhere, in studs a second. It carries particles from emitters with WindAffectsDrag and pushes unanchored parts with WindAffected.
 ---@field CurrentCamera Camera The camera the player sees through. LocalScripts only.
 
 ---The service with a Player for everyone in the game.
@@ -279,6 +280,7 @@ function DataModelClass:GetService(className) end
 ---@field CastShadow boolean If false, the part casts no sun shadow. It's still shaded by other parts' shadows.
 ---@field Transparency number From 0 (as solid as its material) to 1 (invisible).
 ---@field CanCollide boolean If false, other parts pass through it. It still fires Touched. An unanchored part that can't collide falls through the floor.
+---@field WindAffected boolean If true and the part isn't anchored, workspace.GlobalWind pushes it, harder for parts with bigger faces.
 ---@field EmissiveColor Color3 The color the part glows in when Emission is above 0.
 ---@field Emission number How brightly the part glows in EmissiveColor: 0 is no glow, 1 as bright as a white surface in full light, higher values bloom.
 ---@field Touched Signal Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.
@@ -293,6 +295,7 @@ function DataModelClass:GetService(className) end
 ---@field CastShadow boolean If false, the part casts no sun shadow. It's still shaded by other parts' shadows.
 ---@field Transparency number From 0 (as solid as its model) to 1 (invisible).
 ---@field CanCollide boolean If false, other parts pass through it. It still fires Touched.
+---@field WindAffected boolean If true and the part isn't anchored, workspace.GlobalWind pushes it, harder for parts with bigger faces.
 ---@field Touched Signal Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.
 
 ---Lua code that runs on the server, from a `.server.lua` file.
@@ -521,6 +524,7 @@ function SoundClass:Resume() end
 ---@field SpreadAngle number How wide the cone particles leave in is, in degrees: 0 is a straight line, 360 every way.
 ---@field Acceleration Vector3 Added to every particle's speed each second, in world studs (gravity is Vector3.new(0, -196.2, 0)).
 ---@field Drag number How quickly particles slow down: 0 never, higher sooner.
+---@field WindAffectsDrag boolean If true, Drag slows particles toward workspace.GlobalWind instead of to a stop, so the wind carries them. Needs a Drag above 0.
 ---@field Size number How many studs across a particle is when it's born.
 ---@field SizeEnd number How many studs across a particle is when it dies; it grows or shrinks smoothly.
 ---@field Color Color3 A particle's color when it's born. It tints the picture.

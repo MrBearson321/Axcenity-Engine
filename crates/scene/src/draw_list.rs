@@ -112,6 +112,8 @@ fn light_of(world: &World, instance: &Instance) -> Option<Light> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct LightMarker {
     pub id: InstanceId,
+    /// The part the light is in.
+    pub part: InstanceId,
     pub spot: bool,
     pub enabled: bool,
     /// Just above the parent part, where the light shines from.
@@ -136,11 +138,10 @@ pub fn light_markers(world: &World) -> Vec<LightMarker> {
             ClassName::SpotLight => true,
             _ => continue,
         };
-        let Some((_, transform)) = instance
-            .parent()
-            .and_then(|parent| world.get(parent))
-            .and_then(part_placement)
-        else {
+        let Some(part) = instance.parent() else {
+            continue;
+        };
+        let Some((_, transform)) = world.get(part).and_then(part_placement) else {
             continue;
         };
         let position = light_origin(transform);
@@ -167,6 +168,7 @@ pub fn light_markers(world: &World) -> Vec<LightMarker> {
             .map_or([1.0; 3], |color| [color.r, color.g, color.b]);
         markers.push(LightMarker {
             id,
+            part,
             spot,
             enabled: instance.property("Enabled").and_then(Value::as_bool) == Some(true),
             position,

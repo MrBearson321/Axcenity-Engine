@@ -1,6 +1,7 @@
-//! The editor window: a menu bar, the Explorer and Properties on the right,
-//! the Output panel along the bottom, and the 3D viewport filling the rest,
-//! like Roblox Studio.
+//! The editor window: a menu bar, the ribbon with its tabs, and dockable
+//! panels (`layout.rs`): by default the Explorer and Properties on the
+//! right, Output and Assets along the bottom, and the Scene (the 3D
+//! viewport) filling the rest, like Roblox Studio.
 //!
 //! Play runs the game on a copy of the world (see `play.rs`). While it
 //! plays, every panel shows that copy. Only the Properties panel can change
@@ -32,14 +33,16 @@ use crate::autocomplete;
 use crate::block_editor;
 use crate::build_tools::{self, BuildSettings, PanelScene, ToolAction};
 use crate::dialog;
-use crate::explorer::{self, Action, Explorer, ExplorerOutput};
+use crate::explorer::{self, Action, Explorer};
 use crate::gizmo::{Modes, Pose, Snap, Tool};
 use crate::history::{self, Field, History, Move, Place};
 use crate::import_dialog::ImportDialog;
+use crate::layout::{self, Layout, Pane};
 use crate::output::{Output, OutputKind};
 use crate::play::{self, Crash, GameKeys, Session};
 use crate::properties::{self, Edit};
 use crate::ribbon::{self, RibbonButton};
+use crate::ribbon_tabs::{RibbonGroup, RibbonTabs};
 use crate::scripts::{self, ScriptTabs};
 use crate::side_warnings::{self, WarningCache};
 use crate::start::{self, Brand, ProjectLink, StartAction, StartScreen};
@@ -48,8 +51,10 @@ use crate::theme::{self, filled_icons, icons};
 use crate::thumbnail;
 use crate::tree::{self, Insertable};
 use crate::ui_handles::{CssEdit, UiDragEdit, apply_css_edits};
-use crate::viewport::{self, DragEdit, DragKind, Viewport, ViewportScene};
+use crate::viewport::{self, DragEdit, DragKind, Viewport, ViewportOutput, ViewportScene};
 use crate::watcher::Watcher;
+use eframe::egui_wgpu::RenderState;
+use egui_dock::DockState;
 
 /// The hover text of Import Model, in the File menu and the toolbar.
 const IMPORT_HOVER: &str = "Import a 3D model (.gltf, .glb or .fbx), such as one exported from \
@@ -174,15 +179,81 @@ pub struct EditorApp {
     sound_preview: Option<axcenity_audio::AudioEngine>,
     /// The Assets panel, which shares the bottom of the window with Output.
     asset_browser: AssetBrowser,
-    bottom_tab: BottomTab,
+    /// Where the dockable panels are. Saved between runs.
+    layout: Layout,
+    /// The ribbon's tabs, including the ones people made. Saved between runs.
+    ribbon_tabs: RibbonTabs,
+    /// View > Light Cones: show every light's reach in the viewport, not
+    /// just the selected one's. Saved between runs.
+    light_cones: bool,
 }
 
-/// Which panel the bottom of the window shows.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum BottomTab {
-    #[default]
-    Output,
-    Assets,
+/// Ribbon buttons that act on the whole app, noted while the ribbon is
+/// drawn and acted on after.
+#[derive(Default)]
+struct RibbonClicks {
+    insert: Option<Insertable>,
+    insert_script: Option<ClassName>,
+    import: bool,
+    play: bool,
+    stop: bool,
+}
+
+/// Draws each dockable panel for `egui_dock`.
+struct DockViewer<'a> {
+    app: &'a mut EditorApp,
+    render_state: Option<&'a RenderState>,
+    /// What happened in the viewport, handled once everything is drawn.
+    viewport: &'a mut ViewportOutput,
+}
+
+impl egui_dock::TabViewer for DockViewer<'_> {
+    type Tab = Pane;
+
+    fn title(&mut self, pane: &mut Pane) -> egui::WidgetText {
+        pane.title().into()
+    }
+
+    fn id(&mut self, pane: &mut Pane) -> egui::Id {
+        egui::Id::new(("dock pane", *pane))
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, pane: &mut Pane) {
+        match pane {
+            Pane::Scene => *self.viewport = self.app.scene_pane(ui, self.render_state),
+            Pane::Explorer => self.app.explorer_pane(ui),
+            Pane::Properties => self.app.properties_pane(ui),
+            Pane::Output => self.app.output_pane(ui),
+            Pane::Assets => self.app.assets_pane(ui),
+        }
+    }
+
+    fn is_closeable(&self, pane: &Pane) -> bool {
+        *pane != Pane::Scene
+    }
+
+    /// The Scene stays docked, so the main window is never left empty.
+    fn allowed_in_windows(&self, pane: &mut Pane) -> bool {
+        *pane != Pane::Scene
+    }
+
+    /// Each panel scrolls its own contents.
+    fn scroll_bars(&self, _pane: &Pane) -> [bool; 2] {
+        [false, false]
+    }
+
+    /// The viewport goes right to the panel's edges.
+    fn tab_style_override(
+        &self,
+        pane: &Pane,
+        global: &egui_dock::TabStyle,
+    ) -> Option<egui_dock::TabStyle> {
+        (*pane == Pane::Scene).then(|| {
+            let mut style = global.clone();
+            style.tab_body.inner_margin = egui::Margin::ZERO;
+            style
+        })
+    }
 }
 
 struct BlockDocument {
@@ -196,6 +267,9 @@ struct BlockDocument {
 /// The keys the editor's settings are saved under (see [`EditorApp::load_settings`]).
 const THEME_KEY: &str = "theme";
 const RECENT_KEY: &str = "recent projects";
+const LAYOUT_KEY: &str = "panel layout";
+const RIBBON_TABS_KEY: &str = "ribbon tabs";
+const LIGHT_CONES_KEY: &str = "light cones";
 
 /// Something that throws unsaved changes away, so it has to ask first if
 /// there are any.
@@ -312,7 +386,9 @@ impl EditorApp {
             about_open: false,
             sound_preview: None,
             asset_browser: AssetBrowser::default(),
-            bottom_tab: BottomTab::default(),
+            layout: Layout::default(),
+            ribbon_tabs: RibbonTabs::default(),
+            light_cones: false,
         };
         if let Some(folder) = folder {
             app.open(folder);
@@ -455,6 +531,13 @@ impl EditorApp {
                 start::remember(&mut self.recent, link);
             }
             self.recent.truncate(start::MAX_TRACKED);
+            if let Some(text) = storage.get_string(LAYOUT_KEY) {
+                self.layout = Layout::from_text(&text);
+            }
+            if let Some(text) = storage.get_string(RIBBON_TABS_KEY) {
+                self.ribbon_tabs = RibbonTabs::from_text(&text);
+            }
+            self.light_cones = storage.get_string(LIGHT_CONES_KEY).as_deref() == Some("on");
         }
         ctx.set_theme(self.theme);
     }
@@ -1909,6 +1992,230 @@ impl EditorApp {
         }
     }
 
+    /// The Explorer panel, then whatever was clicked or done in it.
+    fn explorer_pane(&mut self, ui: &mut egui::Ui) {
+        let editing = !self.playing();
+        // The game's world during Play, otherwise the one being edited.
+        let world = shown(&self.world, &self.play);
+        let explorer = self.explorer.show(ui, world, &self.selection, editing);
+        let rows: Vec<InstanceId> = if explorer.clicked.is_some() {
+            self.explorer
+                .rows(world)
+                .into_iter()
+                .map(|row| row.id)
+                .collect()
+        } else {
+            Vec::new()
+        };
+        if explorer.clicked.is_some() || explorer.keep_group {
+            self.select_clicked(
+                explorer.clicked,
+                explorer.modifiers,
+                Some(&rows),
+                explorer.keep_group,
+            );
+            ui.ctx().request_repaint();
+        }
+        if let Some(action) = explorer.action {
+            self.act(action);
+            // The Explorer was drawn before this change, so draw it again.
+            ui.ctx().request_repaint();
+        }
+        if let Some(id) = explorer.open {
+            self.open_script_instance(id);
+        }
+    }
+
+    /// The Properties panel (with the Style section for UI elements), then
+    /// the edit made in it.
+    fn properties_pane(&mut self, ui: &mut egui::Ui) {
+        let editing = !self.playing();
+        let world = shown(&self.world, &self.play);
+        let stylesheets = self
+            .project
+            .as_ref()
+            .map_or(&[][..], |project| project.stylesheets.as_slice());
+        let selected = self.selected;
+        let mut style_edit = None;
+        let edit = properties::show(ui, world, selected, !editing, self.selection.len(), |ui| {
+            // Stylesheets are edited, not the game, so not during Play.
+            if editing {
+                style_edit = style_panel::show(ui, world, selected, stylesheets);
+            }
+        });
+        // Other panels may already be drawn this frame, so draw again to
+        // show the change everywhere.
+        if let (Some(id), Some(edit)) = (selected, edit) {
+            self.apply(id, edit);
+            ui.ctx().request_repaint();
+        }
+        if let (Some(id), Some(edit)) = (selected, style_edit) {
+            self.apply_style(id, edit);
+            ui.ctx().request_repaint();
+        }
+    }
+
+    /// The Output panel. A clicked script error opens the script there.
+    fn output_pane(&mut self, ui: &mut egui::Ui) {
+        if let Some(location) = self.output.show(ui) {
+            self.open_script(&location.path, Some(location.line));
+        }
+    }
+
+    /// The Assets panel, then what was asked for in it.
+    fn assets_pane(&mut self, ui: &mut egui::Ui) {
+        let can_save = assets::any_prefab(&self.world, &self.selection_roots());
+        let action = self
+            .asset_browser
+            .show(ui, &self.assets, !self.playing(), can_save);
+        match action {
+            Some(BrowserAction::Place(entry)) => self.drop_asset(&entry, None),
+            Some(BrowserAction::Import { image_folder }) => self.import_assets(image_folder),
+            Some(BrowserAction::SavePrefab) => self.save_prefab(),
+            None => {}
+        }
+    }
+
+    /// The Scene panel: the tabs for the viewport ("World") and the open
+    /// scripts, Code/Blocks for a Script, and the viewport or the script.
+    fn scene_pane(
+        &mut self,
+        ui: &mut egui::Ui,
+        render_state: Option<&RenderState>,
+    ) -> ViewportOutput {
+        let ctx = ui.ctx().clone();
+        let close_tab = egui::TopBottomPanel::top("tabs")
+            .show_inside(ui, |ui| self.tabs.tab_bar(ui))
+            .inner;
+        if let Some(path) = close_tab {
+            self.request_and_go_ahead(&ctx, Discard::CloseTab(path));
+        }
+        // Scripts and LocalScripts switch between Code and Blocks here.
+        let switchable = self
+            .tabs
+            .active_path()
+            .filter(|path| axcenity_project::switched_script_path(path).is_some())
+            .map(str::to_owned);
+        if let Some(path) = switchable {
+            let blocks = axcenity_project::is_block_script(&path);
+            let playing = self.playing();
+            let switch = egui::TopBottomPanel::top("script mode")
+                .frame(
+                    egui::Frame::side_top_panel(&ctx.style())
+                        .inner_margin(egui::Margin::symmetric(10, 5)),
+                )
+                .show_inside(ui, |ui| scripts::mode_bar(ui, blocks, !playing))
+                .inner;
+            if switch {
+                self.switch_script_mode(&path);
+                ctx.request_repaint();
+            }
+        }
+
+        let world = shown(&self.world, &self.play);
+        let stylesheets = self
+            .project
+            .as_ref()
+            .map_or(&[][..], |project| project.stylesheets.as_slice());
+        // No tool during Play, so nothing can be dragged.
+        let tool = (!self.playing()).then_some(self.tool);
+        let preview = self.angular_preview();
+        let active_block_path = self
+            .tabs
+            .active_path()
+            .filter(|path| axcenity_project::is_block_script(path))
+            .map(str::to_owned);
+        if self.tabs.world_shown() {
+            let emits = std::mem::take(&mut self.pending_emits);
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show_inside(ui, |ui| match render_state {
+                    Some(render_state) => {
+                        self.viewport_rect = Some(ui.available_rect_before_wrap());
+                        self.viewport.show(
+                            ui,
+                            render_state,
+                            ViewportScene {
+                                world,
+                                assets: &self.assets,
+                                selected: self.selected,
+                                selection: &self.selection,
+                                tool,
+                                snap: self.snap,
+                                modes: self.modes,
+                                preview: &preview,
+                                emits: &emits,
+                                stylesheets,
+                                focused_text: self.focused_text,
+                                light_cones: self.light_cones,
+                            },
+                        )
+                    }
+                    // Can't happen: main.rs always picks the wgpu renderer.
+                    None => {
+                        ui.label("The viewport needs the wgpu renderer.");
+                        Default::default()
+                    }
+                })
+                .inner
+        } else if let Some(path) = &active_block_path {
+            let mut changed = false;
+            let objects = block_objects(&self.world);
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show_inside(ui, |ui| {
+                    if let Some(document) = self.project.as_mut().and_then(|project| {
+                        project
+                            .block_scripts
+                            .iter_mut()
+                            .find(|document| document.path == *path)
+                    }) {
+                        changed = block_editor::show(
+                            ui,
+                            &mut document.script,
+                            block_editor::BlockContext {
+                                key: path,
+                                client: axcenity_project::script_class(path)
+                                    == ClassName::LocalScript,
+                                highlighted: document.highlighted,
+                                objects: &objects,
+                            },
+                        );
+                        if changed {
+                            document.highlighted = None;
+                        }
+                    }
+                });
+            if changed {
+                self.update_block_lua(path);
+            }
+            Default::default()
+        } else {
+            let stylesheet_path = self
+                .tabs
+                .active_path()
+                .filter(|path| axcenity_project::is_stylesheet(path))
+                .map(str::to_owned);
+            let previous_source = stylesheet_path
+                .as_deref()
+                .and_then(|path| self.tabs.get(path))
+                .map(|tab| tab.text.clone());
+            egui::CentralPanel::default().show_inside(ui, |ui| self.tabs.show_active(ui));
+            if let (Some(path), Some(previous_source)) = (stylesheet_path, previous_source) {
+                let current_source = self
+                    .tabs
+                    .get(&path)
+                    .map(|tab| tab.text.clone())
+                    .unwrap_or_default();
+                if current_source != previous_source {
+                    self.refresh_stylesheet(&path, &current_source);
+                    ctx.request_repaint();
+                }
+            }
+            Default::default()
+        }
+    }
+
     fn menu_bar(&mut self, ui: &mut egui::Ui) {
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
@@ -2138,6 +2445,50 @@ impl EditorApp {
                         ui.ctx().set_theme(preference);
                     }
                 }
+                ui.separator();
+                ui.weak("Panels");
+                for pane in Pane::CLOSABLE {
+                    let item = egui::Button::selectable(
+                        self.layout.is_open(pane),
+                        theme::with_icon(pane.icon(), pane.label()),
+                    );
+                    if ui
+                        .add(item)
+                        .on_hover_text("Show or hide it. Drag a panel by its tab to move it.")
+                        .clicked()
+                    {
+                        self.layout.toggle(pane);
+                    }
+                }
+                if ui
+                    .button(theme::with_icon(icons::ARROW_COUNTER_CLOCKWISE, "Reset Layout"))
+                    .on_hover_text("Put every panel back where it starts.")
+                    .clicked()
+                {
+                    self.layout.reset();
+                }
+                ui.separator();
+                let cones = egui::Button::selectable(
+                    self.light_cones,
+                    theme::with_icon(icons::FLASHLIGHT, "Light Cones"),
+                );
+                if ui
+                    .add(cones)
+                    .on_hover_text(
+                        "Show where every light shines in the viewport. Off, only the selected light (or the part it's in) shows its cone.",
+                    )
+                    .clicked()
+                {
+                    self.light_cones = !self.light_cones;
+                }
+                ui.separator();
+                if ui
+                    .button(theme::with_icon(icons::STAR, "New Ribbon Tab…"))
+                    .on_hover_text("Make your own ribbon tab from any of the ribbon's groups.")
+                    .clicked()
+                {
+                    self.ribbon_tabs.edit(None);
+                }
             });
             // Only in debug builds (`cargo run`), never in a release.
             if cfg!(debug_assertions) {
@@ -2180,268 +2531,292 @@ impl EditorApp {
     /// The ribbon under the menu bar: Play and Stop, the tools, the snapping
     /// settings, then buttons that insert each primitive and each kind of script.
     fn toolbar(&mut self, ui: &mut egui::Ui) {
-        let mut insert = None;
-        let mut insert_script = None;
-        let mut import = false;
-        let (mut play, mut stop) = (false, false);
-        let playing = self.playing();
-        let can_play = self.project.is_some();
+        self.ribbon_tabs.tab_bar(ui);
+        ui.add_space(2.0);
+        let mut clicks = RibbonClicks::default();
+        let groups = self.ribbon_tabs.groups();
         egui::ScrollArea::horizontal().show(ui, |ui| {
             ui.horizontal(|ui| {
-                ribbon::group(ui, "Game", |ui| {
-                    let play_button = RibbonButton::new(filled_icons::PLAY, "Play")
-                        .family(theme::filled())
-                        .color(theme::PLAY_GREEN);
-                    play = ui
-                        .add_enabled(!playing && can_play, play_button)
-                        .on_hover_text(format!(
-                            "Save, then run the game here ({})",
-                            ui.ctx().format_shortcut(&PLAY_SHORTCUT)
-                        ))
-                        .on_disabled_hover_text(if playing {
-                            "The game is playing."
-                        } else {
-                            "Open a project first."
-                        })
-                        .clicked();
-                    let stop_button = RibbonButton::new(filled_icons::STOP, "Stop")
-                        .family(theme::filled())
-                        .color(theme::STOP_RED);
-                    stop = ui
-                        .add_enabled(playing, stop_button)
-                        .on_hover_text(format!(
-                            "Stop the game and go back to editing ({})",
-                            ui.ctx().format_shortcut(&STOP_SHORTCUT)
-                        ))
-                        .clicked();
-                });
-                ui.separator();
-
-                ribbon::group(ui, "Tools", |ui| {
-                    for tool in Tool::ALL {
-                        let keys: Vec<String> = tool
-                            .shortcut()
-                            .map(|shortcut| ui.ctx().format_shortcut(&shortcut))
-                            .into_iter()
-                            .chain(tool.key().map(|key| key.name().to_owned()))
-                            .collect();
-                        let hover = match keys.as_slice() {
-                            [] => format!("{} tool", tool.label()),
-                            keys => format!("{} tool ({})", tool.label(), keys.join(" or ")),
-                        };
-                        let button = RibbonButton::new(theme::tool_icon(tool), tool.label())
-                            .selected(self.tool == tool);
-                        if ui
-                            .add(button)
-                            .on_hover_text(hover)
-                            .clicked()
-                        {
-                            self.tool = tool;
-                        }
+                for (index, &group) in groups.iter().enumerate() {
+                    if index > 0 {
+                        ui.separator();
                     }
-                });
-                ui.separator();
-
-                ribbon::group(ui, "Snapping", |ui| {
-                    let snap = &mut self.snap;
-                    egui::Grid::new("snapping")
-                        .num_columns(2)
-                        .spacing([6.0, 4.0])
-                        .show(ui, |ui| {
-                            ui.checkbox(
-                                &mut snap.move_on,
-                                theme::with_icon(icons::GRID_FOUR, "Move"),
-                            )
-                            .on_hover_text("Move and scale in steps of this many studs.");
-                            ui.add_enabled(
-                                snap.move_on,
-                                egui::DragValue::new(&mut snap.move_step)
-                                    .range(Snap::MIN_MOVE_STEP..=1000.0)
-                                    .speed(0.05)
-                                    .max_decimals(3)
-                                    .suffix(" studs"),
-                            );
-                            ui.end_row();
-                            ui.checkbox(
-                                &mut snap.rotate_on,
-                                theme::with_icon(icons::ANGLE, "Rotate"),
-                            )
-                            .on_hover_text("Rotate in steps of this many degrees.");
-                            ui.add_enabled(
-                                snap.rotate_on,
-                                egui::DragValue::new(&mut snap.rotate_step)
-                                    .range(Snap::MIN_ROTATE_STEP..=180.0)
-                                    .speed(0.5)
-                                    .max_decimals(2)
-                                    .suffix("°"),
-                            );
-                            ui.end_row();
-                        });
-                });
-                ui.separator();
-
-                ribbon::group(ui, "Insert", |ui| {
-                    for what in Insertable::PARTS {
-                        let hover = format!(
-                            "Insert a {} part at the camera's focus point, inside the selected \
-                             Model or Folder if there is one.",
-                            what.label().to_lowercase()
-                        );
-                        let color = theme::class_color(what.class(), ui.visuals());
-                        let button =
-                            RibbonButton::new(theme::insert_icon(what), what.label()).color(color);
-                        if ui
-                            .add_enabled(!playing, button)
-                            .on_hover_text(hover)
-                            .on_disabled_hover_text("Press Stop to edit.")
-                            .clicked()
-                        {
-                            insert = Some(what);
-                        }
-                    }
-                    for what in Insertable::AUDIO {
-                        let button = RibbonButton::new(theme::insert_icon(what), what.label())
-                            .color(theme::class_color(what.class(), ui.visuals()));
-                        if ui
-                            .add_enabled(!playing, button)
-                            .on_hover_text(
-                                "Insert a Sound into the selected part or the Workspace.",
-                            )
-                            .on_disabled_hover_text("Press Stop to edit.")
-                            .clicked()
-                        {
-                            insert = Some(what);
-                        }
-                    }
-                    for what in Insertable::EFFECTS {
-                        let button = RibbonButton::new(theme::insert_icon(what), what.label())
-                            .color(theme::class_color(what.class(), ui.visuals()));
-                        if ui
-                            .add_enabled(!playing, button)
-                            .on_hover_text(
-                                "Insert a ParticleEmitter into the selected part (an invisible \
-                                 holder part is made if none is selected).",
-                            )
-                            .on_disabled_hover_text("Press Stop to edit.")
-                            .clicked()
-                        {
-                            insert = Some(what);
-                        }
-                    }
-                    for what in Insertable::LIGHTS {
-                        let button = RibbonButton::new(theme::insert_icon(what), what.label())
-                            .color(theme::class_color(what.class(), ui.visuals()));
-                        if ui
-                            .add_enabled(!playing, button)
-                            .on_hover_text("Insert a light into the selected part.")
-                            .on_disabled_hover_text("Press Stop to edit.")
-                            .clicked()
-                        {
-                            insert = Some(what);
-                        }
-                    }
-                    let color = theme::class_color(ClassName::MeshPart, ui.visuals());
-                    let button = RibbonButton::new(icons::FILE_ARROW_DOWN, "Import").color(color);
-                    import = ui
-                        .add_enabled(!playing, button)
-                        .on_hover_text(IMPORT_HOVER)
-                        .on_disabled_hover_text("Press Stop to edit.")
-                        .clicked();
-                });
-                ui.separator();
-
-                ribbon::group(ui, "UI", |ui| {
-                    for what in Insertable::UI {
-                        let label = match what {
-                            Insertable::ScreenGui => "Screen",
-                            Insertable::Frame => "Frame",
-                            Insertable::TextLabel => "Text",
-                            Insertable::TextButton => "Button",
-                            Insertable::ImageLabel => "Image",
-                            Insertable::TextBox => "TextBox",
-                            Insertable::PageLayout => "Pages",
-                            Insertable::Page => "Page",
-                            Insertable::Table => "Table",
-                            Insertable::BillboardGui => "Billboard",
-                            _ => what.label(),
-                        };
-                        let hover = match what {
-                            Insertable::ScreenGui => {
-                                "Insert a ScreenGui: a layer of UI over the game.".to_owned()
-                            }
-                            Insertable::PageLayout => {
-                                "Insert a PageLayout. Its child Frames are pages; a script or the \
-                                 show-page block sets CurrentPage."
-                                    .to_owned()
-                            }
-                            Insertable::Page => {
-                                "Insert a page Frame into the selected PageLayout (a PageLayout \
-                                 and a ScreenGui are made if there isn't one)."
-                                    .to_owned()
-                            }
-                            Insertable::BillboardGui => {
-                                "Insert a BillboardGui into the selected part. It floats in the \
-                                 world and is drawn with the screen UI."
-                                    .to_owned()
-                            }
-                            _ => format!(
-                                "Insert a {} into the selected ScreenGui or Frame (or the first \
-                                 ScreenGui; one is made if there's none). Drag its handles in the \
-                                 viewport, and style it with CSS in the Style section of Properties.",
-                                what.label()
-                            ),
-                        };
-                        let button = RibbonButton::new(theme::insert_icon(what), label)
-                            .color(theme::class_color(what.class(), ui.visuals()));
-                        if ui
-                            .add_enabled(!playing, button)
-                            .on_hover_text(hover)
-                            .on_disabled_hover_text("Press Stop to edit.")
-                            .clicked()
-                        {
-                            insert = Some(what);
-                        }
-                    }
-                });
-                ui.separator();
-
-                ribbon::group(ui, "Scripts", |ui| {
-                    for class in explorer::SCRIPT_CLASSES {
-                        let color = theme::class_color(class, ui.visuals());
-                        let button = RibbonButton::new(theme::class_icon(class), class.as_str())
-                            .color(color);
-                        if ui
-                            .add_enabled(!playing && can_play, button)
-                            .on_hover_text(explorer::script_hover(class))
-                            .on_disabled_hover_text(if playing {
-                                "Press Stop to edit."
-                            } else {
-                                "Open a project first."
-                            })
-                            .clicked()
-                        {
-                            insert_script = Some(class);
-                        }
-                    }
-                });
-
+                    self.ribbon_group(ui, group, &mut clicks);
+                }
             });
         });
-        if let Some(what) = insert {
+        if let Some(what) = clicks.insert {
             let near = self.selected;
             self.act(Action::Insert { what, near });
         }
-        if let Some(class) = insert_script {
+        if let Some(class) = clicks.insert_script {
             self.act(Action::InsertScript(class));
         }
-        if import {
+        if clicks.import {
             self.import_model_with_dialog();
         }
-        if play {
+        if clicks.play {
             self.play();
         }
-        if stop {
+        if clicks.stop {
             self.stop();
+        }
+    }
+
+    /// Draws one of the ribbon's groups. Buttons that act on the whole app
+    /// are noted in `clicks`, and the toolbar acts on them once it's drawn.
+    fn ribbon_group(&mut self, ui: &mut egui::Ui, group: RibbonGroup, clicks: &mut RibbonClicks) {
+        let playing = self.playing();
+        let can_play = self.project.is_some();
+        match group {
+            RibbonGroup::Game => ribbon::group(ui, "Game", |ui| {
+                let play_button = RibbonButton::new(filled_icons::PLAY, "Play")
+                    .family(theme::filled())
+                    .color(theme::PLAY_GREEN);
+                clicks.play = ui
+                    .add_enabled(!playing && can_play, play_button)
+                    .on_hover_text(format!(
+                        "Save, then run the game here ({})",
+                        ui.ctx().format_shortcut(&PLAY_SHORTCUT)
+                    ))
+                    .on_disabled_hover_text(if playing {
+                        "The game is playing."
+                    } else {
+                        "Open a project first."
+                    })
+                    .clicked();
+                let stop_button = RibbonButton::new(filled_icons::STOP, "Stop")
+                    .family(theme::filled())
+                    .color(theme::STOP_RED);
+                clicks.stop = ui
+                    .add_enabled(playing, stop_button)
+                    .on_hover_text(format!(
+                        "Stop the game and go back to editing ({})",
+                        ui.ctx().format_shortcut(&STOP_SHORTCUT)
+                    ))
+                    .clicked();
+            }),
+            RibbonGroup::Tools => ribbon::group(ui, "Tools", |ui| {
+                for tool in Tool::ALL {
+                    let keys: Vec<String> = tool
+                        .shortcut()
+                        .map(|shortcut| ui.ctx().format_shortcut(&shortcut))
+                        .into_iter()
+                        .chain(tool.key().map(|key| key.name().to_owned()))
+                        .collect();
+                    let hover = match keys.as_slice() {
+                        [] => format!("{} tool", tool.label()),
+                        keys => format!("{} tool ({})", tool.label(), keys.join(" or ")),
+                    };
+                    let button = RibbonButton::new(theme::tool_icon(tool), tool.label())
+                        .selected(self.tool == tool);
+                    if ui.add(button).on_hover_text(hover).clicked() {
+                        self.tool = tool;
+                    }
+                }
+            }),
+            RibbonGroup::Snapping => ribbon::group(ui, "Snapping", |ui| {
+                let snap = &mut self.snap;
+                egui::Grid::new("snapping")
+                    .num_columns(2)
+                    .spacing([6.0, 4.0])
+                    .show(ui, |ui| {
+                        ui.checkbox(
+                            &mut snap.move_on,
+                            theme::with_icon(icons::GRID_FOUR, "Move"),
+                        )
+                        .on_hover_text("Move and scale in steps of this many studs.");
+                        ui.add_enabled(
+                            snap.move_on,
+                            egui::DragValue::new(&mut snap.move_step)
+                                .range(Snap::MIN_MOVE_STEP..=1000.0)
+                                .speed(0.05)
+                                .max_decimals(3)
+                                .suffix(" studs"),
+                        );
+                        ui.end_row();
+                        ui.checkbox(
+                            &mut snap.rotate_on,
+                            theme::with_icon(icons::ANGLE, "Rotate"),
+                        )
+                        .on_hover_text("Rotate in steps of this many degrees.");
+                        ui.add_enabled(
+                            snap.rotate_on,
+                            egui::DragValue::new(&mut snap.rotate_step)
+                                .range(Snap::MIN_ROTATE_STEP..=180.0)
+                                .speed(0.5)
+                                .max_decimals(2)
+                                .suffix("°"),
+                        );
+                        ui.end_row();
+                    });
+            }),
+            RibbonGroup::Parts => ribbon::group(ui, "Parts", |ui| {
+                for what in Insertable::PARTS {
+                    let hover = format!(
+                        "Insert a {} part at the camera's focus point, inside the selected \
+                         Model or Folder if there is one.",
+                        what.label().to_lowercase()
+                    );
+                    let color = theme::class_color(what.class(), ui.visuals());
+                    let button =
+                        RibbonButton::new(theme::insert_icon(what), what.label()).color(color);
+                    if ui
+                        .add_enabled(!playing, button)
+                        .on_hover_text(hover)
+                        .on_disabled_hover_text("Press Stop to edit.")
+                        .clicked()
+                    {
+                        clicks.insert = Some(what);
+                    }
+                }
+            }),
+            RibbonGroup::Effects => ribbon::group(ui, "Effects", |ui| {
+                for what in Insertable::AUDIO {
+                    let button = RibbonButton::new(theme::insert_icon(what), what.label())
+                        .color(theme::class_color(what.class(), ui.visuals()));
+                    if ui
+                        .add_enabled(!playing, button)
+                        .on_hover_text("Insert a Sound into the selected part or the Workspace.")
+                        .on_disabled_hover_text("Press Stop to edit.")
+                        .clicked()
+                    {
+                        clicks.insert = Some(what);
+                    }
+                }
+                for what in Insertable::EFFECTS {
+                    let button = RibbonButton::new(theme::insert_icon(what), what.label())
+                        .color(theme::class_color(what.class(), ui.visuals()));
+                    if ui
+                        .add_enabled(!playing, button)
+                        .on_hover_text(
+                            "Insert a ParticleEmitter into the selected part (an invisible \
+                             holder part is made if none is selected).",
+                        )
+                        .on_disabled_hover_text("Press Stop to edit.")
+                        .clicked()
+                    {
+                        clicks.insert = Some(what);
+                    }
+                }
+                for what in Insertable::LIGHTS {
+                    let button = RibbonButton::new(theme::insert_icon(what), what.label())
+                        .color(theme::class_color(what.class(), ui.visuals()));
+                    if ui
+                        .add_enabled(!playing, button)
+                        .on_hover_text("Insert a light into the selected part.")
+                        .on_disabled_hover_text("Press Stop to edit.")
+                        .clicked()
+                    {
+                        clicks.insert = Some(what);
+                    }
+                }
+            }),
+            RibbonGroup::Import => ribbon::group(ui, "Import", |ui| {
+                let color = theme::class_color(ClassName::MeshPart, ui.visuals());
+                let button = RibbonButton::new(icons::FILE_ARROW_DOWN, "Import").color(color);
+                clicks.import = ui
+                    .add_enabled(!playing, button)
+                    .on_hover_text(IMPORT_HOVER)
+                    .on_disabled_hover_text("Press Stop to edit.")
+                    .clicked();
+            }),
+            RibbonGroup::Ui => ribbon::group(ui, "UI", |ui| {
+                for what in Insertable::UI {
+                    let label = match what {
+                        Insertable::ScreenGui => "Screen",
+                        Insertable::Frame => "Frame",
+                        Insertable::TextLabel => "Text",
+                        Insertable::TextButton => "Button",
+                        Insertable::ImageLabel => "Image",
+                        Insertable::TextBox => "TextBox",
+                        Insertable::PageLayout => "Pages",
+                        Insertable::Page => "Page",
+                        Insertable::Table => "Table",
+                        Insertable::BillboardGui => "Billboard",
+                        _ => what.label(),
+                    };
+                    let hover = match what {
+                        Insertable::ScreenGui => {
+                            "Insert a ScreenGui: a layer of UI over the game.".to_owned()
+                        }
+                        Insertable::PageLayout => {
+                            "Insert a PageLayout. Its child Frames are pages; a script or the \
+                             show-page block sets CurrentPage."
+                                .to_owned()
+                        }
+                        Insertable::Page => {
+                            "Insert a page Frame into the selected PageLayout (a PageLayout \
+                             and a ScreenGui are made if there isn't one)."
+                                .to_owned()
+                        }
+                        Insertable::BillboardGui => {
+                            "Insert a BillboardGui into the selected part. It floats in the \
+                             world and is drawn with the screen UI."
+                                .to_owned()
+                        }
+                        _ => format!(
+                            "Insert a {} into the selected ScreenGui or Frame (or the first \
+                             ScreenGui; one is made if there's none). Drag its handles in the \
+                             viewport, and style it with CSS in the Style section of Properties.",
+                            what.label()
+                        ),
+                    };
+                    let button = RibbonButton::new(theme::insert_icon(what), label)
+                        .color(theme::class_color(what.class(), ui.visuals()));
+                    if ui
+                        .add_enabled(!playing, button)
+                        .on_hover_text(hover)
+                        .on_disabled_hover_text("Press Stop to edit.")
+                        .clicked()
+                    {
+                        clicks.insert = Some(what);
+                    }
+                }
+            }),
+            RibbonGroup::Scripts => ribbon::group(ui, "Scripts", |ui| {
+                for class in explorer::SCRIPT_CLASSES {
+                    let color = theme::class_color(class, ui.visuals());
+                    let button =
+                        RibbonButton::new(theme::class_icon(class), class.as_str()).color(color);
+                    if ui
+                        .add_enabled(!playing && can_play, button)
+                        .on_hover_text(explorer::script_hover(class))
+                        .on_disabled_hover_text(if playing {
+                            "Press Stop to edit."
+                        } else {
+                            "Open a project first."
+                        })
+                        .clicked()
+                    {
+                        clicks.insert_script = Some(class);
+                    }
+                }
+            }),
+            RibbonGroup::Panels => ribbon::group(ui, "Panels", |ui| {
+                for pane in Pane::CLOSABLE {
+                    let button = RibbonButton::new(pane.icon(), pane.label())
+                        .selected(self.layout.is_open(pane));
+                    if ui
+                        .add(button)
+                        .on_hover_text(format!(
+                            "Show or hide the {} panel. Drag a panel by its tab to move it.",
+                            pane.label()
+                        ))
+                        .clicked()
+                    {
+                        self.layout.toggle(pane);
+                    }
+                }
+                let reset = RibbonButton::new(icons::ARROW_COUNTER_CLOCKWISE, "Reset");
+                if ui
+                    .add(reset)
+                    .on_hover_text("Put every panel back where it starts.")
+                    .clicked()
+                {
+                    self.layout.reset();
+                }
+            }),
         }
     }
 
@@ -2858,265 +3233,30 @@ impl eframe::App for EditorApp {
                 )
                 .show(ctx, |ui| self.toolbar(ui));
         }
-        let mut edit = None;
-        let mut style_edit = None;
-        let mut explorer = ExplorerOutput::default();
-        let mut explorer_rows = Vec::new();
-        let editing = !self.playing();
-        // The game's world during Play, otherwise the one being edited.
-        let world = shown(&self.world, &self.play);
-        let stylesheets = self
-            .project
-            .as_ref()
-            .map_or(&[][..], |project| project.stylesheets.as_slice());
-        if has_project {
-            egui::SidePanel::right("explorer")
-                .default_width(300.0)
-                .show(ctx, |ui| {
-                    egui::TopBottomPanel::bottom("properties")
-                        .resizable(true)
-                        .default_height(340.0)
-                        .show_inside(ui, |ui| {
-                            let selected = self.selected;
-                            edit = properties::show(
-                                ui,
-                                world,
-                                selected,
-                                !editing,
-                                self.selection.len(),
-                                |ui| {
-                                    // Stylesheets are edited, not the game, so not during Play.
-                                    if editing {
-                                        style_edit =
-                                            style_panel::show(ui, world, selected, stylesheets);
-                                    }
-                                },
-                            );
-                        });
-                    explorer = self.explorer.show(ui, world, &self.selection, editing);
-                    if explorer.clicked.is_some() {
-                        explorer_rows = self
-                            .explorer
-                            .rows(world)
-                            .into_iter()
-                            .map(|row| row.id)
-                            .collect();
-                    }
-                });
-        }
-        // Applied before the viewport draws, so it shows the change this frame.
-        if let (Some(id), Some(edit)) = (self.selected, edit) {
-            self.apply(id, edit);
-        }
-        if let (Some(id), Some(edit)) = (self.selected, style_edit) {
-            self.apply_style(id, edit);
-        }
-        if explorer.clicked.is_some() || explorer.keep_group {
-            self.select_clicked(
-                explorer.clicked,
-                explorer.modifiers,
-                Some(&explorer_rows),
-                explorer.keep_group,
-            );
-            ctx.request_repaint();
-        }
-        if let Some(action) = explorer.action {
-            self.act(action);
-            // The Explorer was drawn before this change, so draw it again.
-            ctx.request_repaint();
-        }
-        if let Some(id) = explorer.open {
-            self.open_script_instance(id);
-        }
-        let mut browser_action = None;
-        let clicked_error = has_project
-            .then(|| {
-                egui::TopBottomPanel::bottom("output")
-                    .resizable(true)
-                    .default_height(160.0)
-                    .show(ctx, |ui| {
-                        ui.horizontal(|ui| {
-                            for (tab, icon, label) in [
-                                (BottomTab::Output, icons::TERMINAL_WINDOW, "Output"),
-                                (BottomTab::Assets, icons::SHAPES, "Assets"),
-                            ] {
-                                if ui
-                                    .selectable_label(
-                                        self.bottom_tab == tab,
-                                        theme::with_icon(icon, label),
-                                    )
-                                    .clicked()
-                                {
-                                    self.bottom_tab = tab;
-                                }
-                            }
-                        });
-                        match self.bottom_tab {
-                            BottomTab::Output => self.output.show(ui),
-                            BottomTab::Assets => {
-                                let can_save =
-                                    assets::any_prefab(&self.world, &self.selection_roots());
-                                browser_action = self.asset_browser.show(
-                                    ui,
-                                    &self.assets,
-                                    !self.playing(),
-                                    can_save,
-                                );
-                                None
-                            }
-                        }
-                    })
-                    .inner
-            })
-            .flatten();
-        match browser_action {
-            Some(BrowserAction::Place(entry)) => self.drop_asset(&entry, None),
-            Some(BrowserAction::Import { image_folder }) => self.import_assets(image_folder),
-            Some(BrowserAction::SavePrefab) => self.save_prefab(),
-            None => {}
-        }
-        if let Some(location) = clicked_error {
-            self.open_script(&location.path, Some(location.line));
-        }
-        // The tabs sit above the center only, between the panels added so far.
-        let close_tab = has_project
-            .then(|| {
-                egui::TopBottomPanel::top("tabs")
-                    .show(ctx, |ui| self.tabs.tab_bar(ui))
-                    .inner
-            })
-            .flatten();
-        if let Some(path) = close_tab {
-            self.request_and_go_ahead(ctx, Discard::CloseTab(path));
-        }
-        // Scripts and LocalScripts switch between Code and Blocks here.
-        let switchable = self
-            .tabs
-            .active_path()
-            .filter(|path| axcenity_project::switched_script_path(path).is_some())
-            .map(str::to_owned);
-        if has_project && let Some(path) = switchable {
-            let blocks = axcenity_project::is_block_script(&path);
-            let playing = self.playing();
-            let switch = egui::TopBottomPanel::top("script mode")
-                .frame(
-                    egui::Frame::side_top_panel(&ctx.style())
-                        .inner_margin(egui::Margin::symmetric(10, 5)),
-                )
-                .show(ctx, |ui| scripts::mode_bar(ui, blocks, !playing))
-                .inner;
-            if switch {
-                self.switch_script_mode(&path);
-                ctx.request_repaint();
-            }
-        }
-
-        // Again, as the edits above may have changed which world to show.
-        let world = shown(&self.world, &self.play);
-        let stylesheets = self
-            .project
-            .as_ref()
-            .map_or(&[][..], |project| project.stylesheets.as_slice());
-        // No tool during Play, so nothing can be dragged.
-        let tool = (!self.playing()).then_some(self.tool);
-        let preview = self.angular_preview();
-        let emits = std::mem::take(&mut self.pending_emits);
-        let active_block_path = self
-            .tabs
-            .active_path()
-            .filter(|path| axcenity_project::is_block_script(path))
-            .map(str::to_owned);
+        // Every panel is a tab in the docking area, which fills the rest of
+        // the window (see `layout.rs`). Each panel acts on what was done in
+        // it as soon as it's drawn; the viewport's output is handled below.
         self.viewport_rect = None;
-        let output = if !has_project {
-            self.start_screen(ctx);
-            Default::default()
-        } else if self.tabs.world_shown() {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE)
-                .show(ctx, |ui| match frame.wgpu_render_state() {
-                    Some(render_state) => {
-                        self.viewport_rect = Some(ui.available_rect_before_wrap());
-                        self.viewport.show(
-                            ui,
-                            render_state,
-                            ViewportScene {
-                                world,
-                                assets: &self.assets,
-                                selected: self.selected,
-                                selection: &self.selection,
-                                tool,
-                                snap: self.snap,
-                                modes: self.modes,
-                                preview: &preview,
-                                emits: &emits,
-                                stylesheets,
-                                focused_text: self.focused_text,
-                            },
-                        )
-                    }
-                    // Can't happen: main.rs always picks the wgpu renderer.
-                    None => {
-                        ui.label("The viewport needs the wgpu renderer.");
-                        Default::default()
-                    }
-                })
-                .inner
-        } else if let Some(path) = &active_block_path {
-            let mut changed = false;
-            let objects = block_objects(&self.world);
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE)
-                .show(ctx, |ui| {
-                    if let Some(document) = self.project.as_mut().and_then(|project| {
-                        project
-                            .block_scripts
-                            .iter_mut()
-                            .find(|document| document.path == *path)
-                    }) {
-                        changed = block_editor::show(
-                            ui,
-                            &mut document.script,
-                            block_editor::BlockContext {
-                                key: path,
-                                client: axcenity_project::script_class(path)
-                                    == ClassName::LocalScript,
-                                highlighted: document.highlighted,
-                                objects: &objects,
-                            },
-                        );
-                        if changed {
-                            document.highlighted = None;
-                        }
-                    }
-                });
-            if changed {
-                self.update_block_lua(path);
-            }
-            Default::default()
+        let mut output = ViewportOutput::default();
+        if has_project {
+            // Taken out while it's drawn, so the panels can borrow the app.
+            let mut dock = std::mem::replace(&mut self.layout.dock, DockState::new(Vec::new()));
+            egui_dock::DockArea::new(&mut dock)
+                .style(layout::style(&ctx.style()))
+                .show_leaf_collapse_buttons(false)
+                .show_leaf_close_all_buttons(false)
+                .show(
+                    ctx,
+                    &mut DockViewer {
+                        app: self,
+                        render_state: frame.wgpu_render_state(),
+                        viewport: &mut output,
+                    },
+                );
+            self.layout.dock = dock;
         } else {
-            let stylesheet_path = self
-                .tabs
-                .active_path()
-                .filter(|path| axcenity_project::is_stylesheet(path))
-                .map(str::to_owned);
-            let previous_source = stylesheet_path
-                .as_deref()
-                .and_then(|path| self.tabs.get(path))
-                .map(|tab| tab.text.clone());
-            egui::CentralPanel::default().show(ctx, |ui| self.tabs.show_active(ui));
-            if let (Some(path), Some(previous_source)) = (stylesheet_path, previous_source) {
-                let current_source = self
-                    .tabs
-                    .get(&path)
-                    .map(|tab| tab.text.clone())
-                    .unwrap_or_default();
-                if current_source != previous_source {
-                    self.refresh_stylesheet(&path, &current_source);
-                    ctx.request_repaint();
-                }
-            }
-            Default::default()
-        };
+            self.start_screen(ctx);
+        }
         if let Some(clicked) = output.clicked {
             if self.tool == Tool::Paint
                 && !self.playing()
@@ -3198,6 +3338,7 @@ impl eframe::App for EditorApp {
         self.unsaved_changes_prompt(ctx);
         self.delete_script_prompt(ctx);
         self.import_prompt(ctx);
+        self.ribbon_tabs.editor_window(ctx);
         self.start_thumbnail(ctx);
         if self.about_open
             && let Some(brand) = &self.brand
@@ -3220,6 +3361,10 @@ impl eframe::App for EditorApp {
             .iter()
             .map(|link| link.folder.display().to_string())
             .collect();
+        storage.set_string(LAYOUT_KEY, self.layout.to_text());
+        storage.set_string(RIBBON_TABS_KEY, self.ribbon_tabs.to_text());
+        let cones = if self.light_cones { "on" } else { "off" };
+        storage.set_string(LIGHT_CONES_KEY, cones.to_owned());
         storage.set_string(RECENT_KEY, recent.join("\n"));
     }
 }

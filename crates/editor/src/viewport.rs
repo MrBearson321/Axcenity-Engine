@@ -160,6 +160,8 @@ pub struct ViewportScene<'a> {
     pub stylesheets: &'a [Stylesheet],
     /// The TextBox being typed in during Play, so it gets a focus ring.
     pub focused_text: Option<InstanceId>,
+    /// Show every light's reach, not just the selected ones' (View > Light Cones).
+    pub light_cones: bool,
 }
 
 /// What the left button holds, from going down on it until it's let go.
@@ -353,6 +355,7 @@ impl Viewport {
             emits,
             stylesheets,
             focused_text,
+            light_cones,
         } = scene;
         let size = ui.available_size();
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
@@ -410,17 +413,20 @@ impl Viewport {
 
         // Lights only show as icons while editing (there's a tool), as in
         // Unreal's editor; the game itself doesn't show them.
-        let lights: Vec<(LightMarker, egui::Pos2)> = if tool.is_some() {
+        let markers = if tool.is_some() {
             axcenity_scene::light_markers(world)
-                .into_iter()
-                .filter_map(|marker| {
-                    let at = screen.point(marker.position)?;
-                    rect.contains(at).then_some((marker, at))
-                })
-                .collect()
         } else {
             Vec::new()
         };
+        // Only lights whose icon is on screen can be clicked, but a light
+        // just off screen can still shine into view.
+        let lights: Vec<(LightMarker, egui::Pos2)> = markers
+            .iter()
+            .filter_map(|marker| {
+                let at = screen.point(marker.position)?;
+                rect.contains(at).then(|| (marker.clone(), at))
+            })
+            .collect();
         let drag = self.drag_input(
             ui,
             &response,
@@ -524,7 +530,14 @@ impl Viewport {
         if let Some(selected) = selected {
             paint_selection_box(ui, rect, &screen, world, selected, eye);
         }
-        paint_lights(ui, rect, &screen, &lights, selected, pointer);
+        let painter = ui.painter_at(rect);
+        for marker in &markers {
+            let chosen = selection.contains(&marker.id) || selection.contains(&marker.part);
+            if chosen || light_cones {
+                paint_light_reach(&painter, &screen, world, marker, chosen);
+            }
+        }
+        paint_lights(ui, rect, &lights, selected, pointer);
         let painter = ui.painter_at(rect);
         for &pose in preview {
             for (a, b) in crate::angular::box_edges(pose) {
@@ -1012,21 +1025,15 @@ fn light_color(marker: &LightMarker) -> egui::Color32 {
 }
 
 /// Draws each light's icon (a bulb for a PointLight, a flashlight for a
-/// SpotLight) in the light's color, and how far the selected one reaches.
+/// SpotLight) in the light's color.
 fn paint_lights(
     ui: &egui::Ui,
     rect: egui::Rect,
-    screen: &Screen,
     lights: &[(LightMarker, egui::Pos2)],
     selected: Option<InstanceId>,
     pointer: Option<egui::Pos2>,
 ) {
     let painter = ui.painter_at(rect);
-    for (marker, _) in lights {
-        if Some(marker.id) == selected {
-            paint_light_reach(&painter, screen, marker);
-        }
-    }
     let hovered = pointer.and_then(|pointer| light_at(lights, pointer));
     for (marker, at) in lights {
         // Grows a little under the mouse.
@@ -1067,41 +1074,102 @@ fn paint_lights(
     }
 }
 
-/// A selected light's reach, faintly in its color: three rings for a
-/// PointLight's range, or the cone a SpotLight lights.
-fn paint_light_reach(painter: &egui::Painter, screen: &Screen, marker: &LightMarker) {
+/// A light's reach in its color: three rings for a PointLight's range,
+/// or for a SpotLight the cone it lights (see-through sides, edges and the
+/// far rim), the beam's middle as an arrow, and where that beam lands on a
+/// part, as a ring the size of the spot. `chosen` (the light or its part is
+/// selected) draws it stronger; View > Light Cones draws the others faintly.
+fn paint_light_reach(
+    painter: &egui::Painter,
+    screen: &Screen,
+    world: &World,
+    marker: &LightMarker,
+    chosen: bool,
+) {
     const SEGMENTS: usize = 48;
-    let stroke = egui::Stroke::new(1.5_f32, light_color(marker).gamma_multiply(0.85));
+    let strength = if chosen { 0.85 } else { 0.4 };
+    let color = light_color(marker);
+    let stroke = egui::Stroke::new(1.5_f32, color.gamma_multiply(strength));
+    let faint = egui::Stroke::new(1.0_f32, color.gamma_multiply(strength * 0.5));
     let range = marker.range.max(0.1);
-    let ring = |center: Vec3, a: Vec3, b: Vec3, radius: f32| {
-        let point = |i: usize| {
-            let turn = i as f32 / SEGMENTS as f32 * std::f32::consts::TAU;
-            center + (a * turn.cos() + b * turn.sin()) * radius
-        };
-        for i in 0..SEGMENTS {
-            if let Some(line) = screen.line(point(i), point(i + 1)) {
+    let circle = |center: Vec3, a: Vec3, b: Vec3, radius: f32| -> Vec<Vec3> {
+        (0..=SEGMENTS)
+            .map(|i| {
+                let turn = i as f32 / SEGMENTS as f32 * std::f32::consts::TAU;
+                center + (a * turn.cos() + b * turn.sin()) * radius
+            })
+            .collect()
+    };
+    let outline = |points: &[Vec3], stroke: egui::Stroke| {
+        for pair in points.windows(2) {
+            if let Some(line) = screen.line(pair[0], pair[1]) {
                 painter.line_segment(line, stroke);
             }
         }
     };
-    match marker.cone {
-        None => {
-            ring(marker.position, Vec3::X, Vec3::Y, range);
-            ring(marker.position, Vec3::X, Vec3::Z, range);
-            ring(marker.position, Vec3::Y, Vec3::Z, range);
-        }
-        Some((direction, angle)) => {
-            let half = (angle.clamp(1.0, 179.0) * 0.5).to_radians();
-            let side = direction.any_orthonormal_vector();
-            let up = direction.cross(side);
-            let end = marker.position + direction * range * half.cos();
-            let radius = range * half.sin();
-            ring(end, side, up, radius);
-            for edge in [side, -side, up, -up] {
-                if let Some(line) = screen.line(marker.position, end + edge * radius) {
-                    painter.line_segment(line, stroke);
-                }
+    let Some((direction, angle)) = marker.cone else {
+        outline(&circle(marker.position, Vec3::X, Vec3::Y, range), stroke);
+        outline(&circle(marker.position, Vec3::X, Vec3::Z, range), stroke);
+        outline(&circle(marker.position, Vec3::Y, Vec3::Z, range), stroke);
+        return;
+    };
+
+    let half = (angle.clamp(1.0, 179.0) * 0.5).to_radians();
+    let (side, up) = direction.any_orthonormal_pair();
+    let end = marker.position + direction * range * half.cos();
+    let radius = range * half.sin();
+    let rim = circle(end, side, up, radius);
+    // The sides, as thin triangles from the light to the rim. Each one is
+    // convex, which is all egui fills.
+    let fill = color.gamma_multiply(if chosen { 0.12 } else { 0.05 });
+    if let Some(apex) = screen.point(marker.position) {
+        for pair in rim.windows(2) {
+            if let (Some(a), Some(b)) = (screen.point(pair[0]), screen.point(pair[1])) {
+                painter.add(egui::Shape::convex_polygon(
+                    vec![apex, a, b],
+                    fill,
+                    egui::Stroke::NONE,
+                ));
             }
+        }
+    }
+    outline(&rim, stroke);
+    // Halfway out, where the light is noticeably dimmer.
+    let middle = marker.position + direction * range * half.cos() * 0.5;
+    outline(&circle(middle, side, up, radius * 0.5), faint);
+    for turn in 0..8 {
+        let around = turn as f32 / 8.0 * std::f32::consts::TAU;
+        let edge = end + (side * around.cos() + up * around.sin()) * radius;
+        if let Some(line) = screen.line(marker.position, edge) {
+            painter.line_segment(line, if turn % 2 == 0 { stroke } else { faint });
+        }
+    }
+
+    // The beam's middle, out to where it first meets a part (not its own).
+    let ray = axcenity_scene::Ray {
+        origin: marker.position,
+        direction,
+    };
+    let hit = axcenity_scene::pick_hit_skipping(world, ray, &[marker.part])
+        .filter(|hit| hit.distance <= range);
+    let beam_end = ray.at(hit.map_or(range, |hit| hit.distance));
+    if let (Some(from), Some(to)) = (screen.point(marker.position), screen.point(beam_end)) {
+        let width = if chosen { 2.0_f32 } else { 1.0 };
+        painter.arrow(
+            from,
+            to - from,
+            egui::Stroke::new(width, color.gamma_multiply(strength)),
+        );
+    }
+    if let Some(hit) = hit {
+        // The spot on the surface: the cone's width at that distance, laid
+        // flat on the surface, lifted a hair so it isn't hidden in it.
+        let spot = hit.distance * half.tan();
+        let (a, b) = hit.normal.any_orthonormal_pair();
+        let lifted = beam_end + hit.normal * 0.02;
+        outline(&circle(lifted, a, b, spot), stroke);
+        if let Some(at) = screen.point(lifted) {
+            painter.circle_filled(at, 3.0, color.gamma_multiply(strength));
         }
     }
 }

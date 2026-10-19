@@ -464,3 +464,42 @@ fn a_part_that_cannot_collide_is_passed_through_but_still_touched() {
     run(&mut physics, &mut world, 3.0, 60.0);
     assert!((position(&world, second).y - 5.0).abs() < 0.05);
 }
+
+#[test]
+fn wind_pushes_only_parts_that_are_wind_affected() {
+    let mut world = World::new();
+    let workspace = world.workspace();
+    set(&mut world, workspace, "GlobalWind", vector(60.0, 0.0, 0.0));
+    let blown = part(&mut world, Vector3::new(0.0, 50.0, 0.0), false);
+    set(&mut world, blown, "WindAffected", Value::Bool(true));
+    let still = part(&mut world, Vector3::new(0.0, 50.0, 10.0), false);
+    let mut physics = Physics::new();
+    run(&mut physics, &mut world, 0.5, 60.0);
+    assert!(
+        position(&world, blown).x > 1.0,
+        "{:?}",
+        position(&world, blown)
+    );
+    assert!(position(&world, still).x.abs() < 1e-3);
+}
+
+#[test]
+fn turning_wind_affected_off_stops_the_push() {
+    let mut world = World::new();
+    let workspace = world.workspace();
+    set(&mut world, workspace, "GlobalWind", vector(60.0, 0.0, 0.0));
+    let id = part(&mut world, Vector3::new(0.0, 50.0, 0.0), false);
+    set(&mut world, id, "WindAffected", Value::Bool(true));
+    let mut physics = Physics::new();
+    run(&mut physics, &mut world, 0.25, 60.0);
+    set(&mut world, id, "WindAffected", Value::Bool(false));
+    run(&mut physics, &mut world, 1.0 / 60.0, 60.0);
+    let before = position(&world, id).x;
+    run(&mut physics, &mut world, 0.25, 60.0);
+    let after = position(&world, id).x;
+    // Still drifting at the speed it had, but no faster.
+    let early = after - before;
+    run(&mut physics, &mut world, 0.25, 60.0);
+    let late = position(&world, id).x - after;
+    assert!((late - early).abs() < 0.05, "{early} then {late}");
+}
