@@ -60,6 +60,8 @@ const POPUP_FADE_SECONDS: f64 = 0.4;
 /// the sky and most part colors.
 const SELECTION_COLOR: egui::Color32 = egui::Color32::from_rgb(25, 160, 255);
 const SELECTION_WIDTH: f32 = 2.0;
+/// The outline of parts about to be placed.
+const PREVIEW_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 196, 64);
 /// A light's icon, in points, the same size however far away the light is.
 const LIGHT_ICON_RADIUS: f32 = 13.0;
 
@@ -150,6 +152,8 @@ pub struct ViewportScene<'a> {
     pub snap: Snap,
     /// The Move, Resize and Rotate tools' options.
     pub modes: Modes,
+    /// Outlines of parts about to be placed (the Angular tool's copies).
+    pub preview: &'a [Pose],
     pub stylesheets: &'a [Stylesheet],
     /// The TextBox being typed in during Play, so it gets a focus ring.
     pub focused_text: Option<InstanceId>,
@@ -333,6 +337,7 @@ impl Viewport {
             tool,
             snap,
             modes,
+            preview,
             stylesheets,
             focused_text,
         } = scene;
@@ -497,6 +502,14 @@ impl Viewport {
             paint_selection_box(ui, rect, &screen, world, selected, eye);
         }
         paint_lights(ui, rect, &screen, &lights, selected, pointer);
+        let painter = ui.painter_at(rect);
+        for &pose in preview {
+            for (a, b) in crate::angular::box_edges(pose) {
+                if let Some(line) = screen.line(a, b) {
+                    painter.line_segment(line, egui::Stroke::new(1.5_f32, PREVIEW_COLOR));
+                }
+            }
+        }
         gizmo::paint(&ui.painter_at(rect), &drag.shapes, drag.highlighted);
         // Handles only show with a tool, so not during Play, but the
         // outline always does.

@@ -14,6 +14,8 @@
 //! - **Lighting**: add, change or remove a PointLight or SpotLight in each
 //!   selected part.
 //! - **Emission**: a glow of any color (`EmissiveColor` and `Emission`).
+//! - **Angular**: copies of the last selected part at an angle, like
+//!   Archimedes (see `angular.rs`); Enter or Extend places them.
 //!
 //! The panel only reads the world and returns [`ToolAction`]s; the app
 //! applies each as one undo step. Values shown are the last selected part's.
@@ -21,7 +23,8 @@
 use axcenity_core::{ClassName, Color3, InstanceId, Material, Value, World};
 use eframe::egui;
 
-use crate::gizmo::{Modes, MoveAxes, ResizeDirections, RotatePivot, Snap, Tool};
+use crate::angular::AngularSettings;
+use crate::gizmo::{Axis, Modes, MoveAxes, ResizeDirections, RotatePivot, Side, Snap, Tool};
 use crate::theme::{self, icons};
 
 /// F3X-style swatches, as sRGB bytes, in rows of 7.
@@ -62,12 +65,14 @@ const SWATCH: f32 = 20.0;
 pub struct BuildSettings {
     /// The Paint tool's color.
     pub paint_color: Color3,
+    pub angular: AngularSettings,
 }
 
 impl Default for BuildSettings {
     fn default() -> Self {
         Self {
             paint_color: Color3::new(0.64, 0.64, 0.64),
+            angular: AngularSettings::default(),
         }
     }
 }
@@ -90,6 +95,8 @@ pub enum ToolAction {
         property: &'static str,
         value: Value,
     },
+    /// Place the Angular tool's copies of the last selected part.
+    Extend,
 }
 
 /// What the panel shows: the world and the parts the tools act on.
@@ -274,8 +281,103 @@ pub fn panel(
             light(ui, scene, ClassName::SpotLight, &mut actions);
         }
         Tool::Emission => emission(ui, scene, &mut actions),
+        Tool::Angular => angular(ui, scene, &mut settings.angular, &mut actions),
     }
     actions
+}
+
+fn angular(
+    ui: &mut egui::Ui,
+    scene: &PanelScene,
+    settings: &mut AngularSettings,
+    actions: &mut Vec<ToolAction>,
+) {
+    egui::Grid::new("angular tool")
+        .num_columns(2)
+        .spacing([8.0, 4.0])
+        .show(ui, |ui| {
+            ui.label("Extend")
+                .on_hover_text("The face of the part each copy goes against, on its own axes.");
+            ui.horizontal(|ui| {
+                for axis in [Axis::X, Axis::Y, Axis::Z] {
+                    for (side, sign) in [(Side::Plus, "+"), (Side::Minus, "-")] {
+                        let text = format!("{sign}{axis:?}");
+                        if ui
+                            .selectable_label(settings.extend == (axis, side), text)
+                            .clicked()
+                        {
+                            settings.extend = (axis, side);
+                        }
+                    }
+                }
+            });
+            ui.end_row();
+            ui.label("Bend around")
+                .on_hover_text("The part's own axis the copies turn around.");
+            ui.horizontal(|ui| {
+                let bend = settings.bend_axis();
+                for axis in [Axis::X, Axis::Y, Axis::Z] {
+                    if axis == settings.extend.0 {
+                        continue;
+                    }
+                    if ui
+                        .selectable_label(bend == axis, format!("{axis:?}"))
+                        .clicked()
+                    {
+                        settings.bend = axis;
+                    }
+                }
+            });
+            ui.end_row();
+            ui.label("Angle");
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::DragValue::new(&mut settings.degrees)
+                        .range(-180.0..=180.0)
+                        .speed(0.5)
+                        .max_decimals(2)
+                        .suffix("°"),
+                );
+                if ui
+                    .small_button("Flip")
+                    .on_hover_text("Bend the other way.")
+                    .clicked()
+                {
+                    settings.degrees = -settings.degrees;
+                }
+            });
+            ui.end_row();
+            ui.label("Copies");
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::DragValue::new(&mut settings.count)
+                        .range(1..=AngularSettings::MAX_COUNT)
+                        .speed(0.2),
+                );
+                let close = settings.copies_to_close();
+                if ui
+                    .add_enabled(close.is_some(), egui::Button::new("Close loop").small())
+                    .on_hover_text("As many copies as close a full ring.")
+                    .on_disabled_hover_text("Pick an angle that divides 360°, such as 15° or 30°.")
+                    .clicked()
+                    && let Some(close) = close
+                {
+                    settings.count = close;
+                }
+            });
+            ui.end_row();
+        });
+    let can = scene
+        .last()
+        .is_some_and(|part| part.property("Size").is_some());
+    if ui
+        .add_enabled(can, egui::Button::new(theme::with_icon(icons::SPIRAL, "Extend")))
+        .on_hover_text("Place the copies shown by the outline (Enter). The last copy is selected, so pressing again carries on.")
+        .on_disabled_hover_text("Select a part to extend.")
+        .clicked()
+    {
+        actions.push(ToolAction::Extend);
+    }
 }
 
 /// A row of buttons picking one of `options`.

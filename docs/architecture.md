@@ -157,6 +157,7 @@ Since Phase 14, step 1 also hands LocalScripts the camera (`set_camera`) and the
   - Anchor and Collision: how many are on, and buttons to switch `Anchored` or `CanCollide` for all; Enter switches them all, as in F3X.
   - Lighting: for PointLight and SpotLight, Add (to each selected part without one), Remove, and Color, Brightness, Range and (SpotLight) Angle for every such light in the selection.
   - Emission: `EmissiveColor` and `Emission` (0–10), and No glow.
+- **Angular tool** (Phase 36, `angular.rs`, key R), modelled on Archimedes: with a part selected, pick the face to extend from (±X, ±Y or ±Z of the part's own axes), the part's axis to bend around (not the extend axis), the angle (signed; Flip reverses it) and the number of copies (up to 360; Close loop picks `360° / angle − 1` when the angle divides a turn). Each copy is the one before slid forward by its length, then turned around the edge of its end face on the inside of the bend, so neighbours share that inner edge and a wedge gap opens outside. Orange outlines preview the copies. Extend (or Enter) duplicates the part (with what's inside it) into each place, right after it in the tree, as one undo step ("Extend Rail 23 times"), and selects the last copy so the next press carries on. Positions and orientations are tidied to 3 decimals.
 
 ### Asset browser (Phase 34)
 

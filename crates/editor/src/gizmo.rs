@@ -66,10 +66,12 @@ pub enum Tool {
     Collision,
     Lighting,
     Emission,
+    /// Places copies of a part at an angle, like Archimedes (`angular.rs`).
+    Angular,
 }
 
 impl Tool {
-    pub const ALL: [Tool; 10] = [
+    pub const ALL: [Tool; 11] = [
         Tool::Select,
         Tool::Move,
         Tool::Scale,
@@ -80,6 +82,7 @@ impl Tool {
         Tool::Collision,
         Tool::Lighting,
         Tool::Emission,
+        Tool::Angular,
     ];
 
     pub fn label(self) -> &'static str {
@@ -94,6 +97,7 @@ impl Tool {
             Tool::Collision => "Collision",
             Tool::Lighting => "Lighting",
             Tool::Emission => "Emission",
+            Tool::Angular => "Angular",
         }
     }
 
@@ -123,6 +127,8 @@ impl Tool {
             Tool::Collision => egui::Key::K,
             Tool::Lighting => egui::Key::U,
             Tool::Emission => egui::Key::P,
+            // Not an F3X tool; R is free in F3X and in the camera keys.
+            Tool::Angular => egui::Key::R,
         })
     }
 

@@ -7,6 +7,7 @@
 //! Built on eframe (egui's app framework), which owns the window and the GPU
 //! device; the viewport draws with the same renderer as the player.
 
+mod angular;
 mod app;
 mod asset_browser;
 mod autocomplete;

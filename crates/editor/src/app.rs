@@ -22,16 +22,18 @@ use axcenity_assets::Assets;
 use axcenity_blocks::{BlockScript, translate};
 use axcenity_core::{ClassName, Color3, InstanceId, Material, PartType, Value, Vector3, World};
 use axcenity_project::ScriptFile;
+use axcenity_scene::orientation_from_rotation;
 use axcenity_script::{CameraState, KeyEvent};
 use eframe::egui;
 
+use crate::angular;
 use crate::asset_browser::{AssetBrowser, AssetPayload, BrowserAction};
 use crate::autocomplete;
 use crate::block_editor;
 use crate::build_tools::{self, BuildSettings, PanelScene, ToolAction};
 use crate::dialog;
 use crate::explorer::{self, Action, Explorer, ExplorerOutput};
-use crate::gizmo::{Modes, Snap, Tool};
+use crate::gizmo::{Modes, Pose, Snap, Tool};
 use crate::history::{self, Field, History, Move, Place};
 use crate::import_dialog::ImportDialog;
 use crate::output::{Output, OutputKind};
@@ -665,6 +667,7 @@ impl EditorApp {
                 self.history.record_tree(&mut self.world, label, moves);
                 self.forget_selection_outside_tree();
             }
+            ToolAction::Extend => self.extend_angular(),
             ToolAction::SetLight {
                 class,
                 property,
@@ -741,6 +744,87 @@ impl EditorApp {
             n => format!("Add {n} {class}s"),
         };
         self.history.record_tree(&mut self.world, label, moves);
+    }
+
+    /// Where the Angular tool's copies of the last selected part would go.
+    fn angular_preview(&self) -> Vec<Pose> {
+        if self.tool != Tool::Angular || self.playing() {
+            return Vec::new();
+        }
+        self.selected
+            .and_then(|id| self.world.get(id))
+            .and_then(Pose::of)
+            .map_or_else(Vec::new, |pose| angular::chain(pose, &self.build.angular))
+    }
+
+    /// The Angular tool: copies the last selected part (with what's inside
+    /// it) to each place in its chain, right after it in the tree, as one
+    /// undo step, and selects the last copy so the next press carries on.
+    fn extend_angular(&mut self) {
+        let Some(original) = self.selected else {
+            return;
+        };
+        let Some(pose) = self.world.get(original).and_then(Pose::of) else {
+            self.output
+                .info("The Angular tool extends a part: select one first.");
+            return;
+        };
+        let Some(name) = self.editable_name(original, "extend") else {
+            return;
+        };
+        let Some(start) = history::place_of(&self.world, original) else {
+            return;
+        };
+        let mut moves = Vec::new();
+        for (i, next) in angular::chain(pose, &self.build.angular)
+            .into_iter()
+            .enumerate()
+        {
+            let Ok(copy) = self.world.duplicate(original) else {
+                break;
+            };
+            let orientation = orientation_from_rotation(next.rotation);
+            let tidy = |value: f32| (value * 1000.0).round() / 1000.0 + 0.0;
+            let position = Vector3::new(
+                tidy(next.position.x),
+                tidy(next.position.y),
+                tidy(next.position.z),
+            );
+            let orientation = Vector3::new(
+                tidy(orientation.x),
+                tidy(orientation.y),
+                tidy(orientation.z),
+            );
+            let _ = self
+                .world
+                .set_property(copy, "Position", Value::Vector3(position));
+            let _ = self
+                .world
+                .set_property(copy, "Orientation", Value::Vector3(orientation));
+            let copy_name = tree::unique_name(&self.world, start.parent, &name);
+            let _ = self.world.set_name(copy, copy_name);
+            let place = Place {
+                parent: start.parent,
+                index: start.index + 1 + i,
+            };
+            if history::put(&mut self.world, copy, Some(place)).is_err() {
+                break;
+            }
+            moves.push(Move {
+                id: copy,
+                before: None,
+                after: Some(place),
+            });
+        }
+        let last = moves.last().map(|step| step.id);
+        let label = match moves.len() {
+            1 => format!("Extend {name}"),
+            n => format!("Extend {name} {n} times"),
+        };
+        self.history.record_tree(&mut self.world, label, moves);
+        if last.is_some() {
+            self.select_from_viewport(last);
+        }
     }
 
     /// The Paint tool: a click on a part paints it, and the rest of the
@@ -2340,7 +2424,9 @@ impl EditorApp {
         if let Some(tool) = keys.tool {
             self.tool = tool;
         }
-        if keys.toggle && matches!(self.tool, Tool::Anchor | Tool::Collision) {
+        if keys.toggle && self.tool == Tool::Angular {
+            self.extend_angular();
+        } else if keys.toggle && matches!(self.tool, Tool::Anchor | Tool::Collision) {
             let property = if self.tool == Tool::Anchor {
                 "Anchored"
             } else {
@@ -2845,6 +2931,7 @@ impl eframe::App for EditorApp {
             .map_or(&[][..], |project| project.stylesheets.as_slice());
         // No tool during Play, so nothing can be dragged.
         let tool = (!self.playing()).then_some(self.tool);
+        let preview = self.angular_preview();
         let active_block_path = self
             .tabs
             .active_path()
@@ -2871,6 +2958,7 @@ impl eframe::App for EditorApp {
                                 tool,
                                 snap: self.snap,
                                 modes: self.modes,
+                                preview: &preview,
                                 stylesheets,
                                 focused_text: self.focused_text,
                             },
@@ -4561,5 +4649,26 @@ mod tests {
             press(&mut app, egui::Modifiers::NONE, key);
             assert_eq!(app.tool, tool);
         }
+    }
+
+    #[test]
+    fn the_angular_tool_places_its_copies_in_one_undo_step() {
+        let mut app = EditorApp::new(Some(&example("hello-touched")));
+        let workspace = app.world.workspace();
+        let block = inserted(&mut app, Insertable::Part(PartType::Block), None);
+        let before = children(&app, workspace).len();
+        app.tool = Tool::Angular;
+        app.build.angular.count = 23;
+        let preview = app.angular_preview();
+        assert_eq!(preview.len(), 23);
+        app.apply_tool_action(ToolAction::Extend);
+        assert_eq!(children(&app, workspace).len(), before + 23);
+        let last = app.selected.unwrap();
+        assert_ne!(last, block);
+        let pose = Pose::of(app.world.get(last).unwrap()).unwrap();
+        assert!(pose.position.abs_diff_eq(preview[22].position, 1e-3));
+        assert_eq!(app.history.undo_label(), Some("Extend Part 23 times"));
+        app.undo();
+        assert_eq!(children(&app, workspace).len(), before);
     }
 }

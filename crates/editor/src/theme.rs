@@ -295,6 +295,7 @@ pub fn tool_icon(tool: Tool) -> &'static str {
         Tool::Collision => icons::INTERSECT,
         Tool::Lighting => icons::LIGHTBULB,
         Tool::Emission => icons::SUN_DIM,
+        Tool::Angular => icons::SPIRAL,
     }
 }
 
