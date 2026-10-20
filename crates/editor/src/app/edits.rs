@@ -699,19 +699,96 @@ impl EditorApp {
         }
     }
 
-    /// Writes restored file text from undo/redo (property clips, stylesheets).
+    /// Writes restored file text from undo/redo (property clips, stylesheets,
+    /// and clip, controller and prefab files).
     fn apply_history_texts(&mut self, texts: Vec<crate::history::TextChange>) {
         let Some(project) = self.project.as_ref().map(|p| p.folder.clone()) else {
             return;
         };
+        let mut files = Vec::new();
         for text in texts {
-            if text.path.ends_with(axcenity_anim::CLIP_EXTENSION) {
-                self.animation
-                    .apply_file_text(&project, &text.path, &text.after, &mut self.output);
-            } else if axcenity_project::is_stylesheet(&text.path) {
-                self.set_stylesheet_text(&text.path, &text.after);
+            if axcenity_project::is_stylesheet(&text.path) {
+                if let Some(updated) = text.after {
+                    self.set_stylesheet_text(&text.path, &updated);
+                }
+            } else {
+                files.push(crate::animation::store::FileDiff {
+                    path: text.path,
+                    before: text.before,
+                    after: text.after,
+                });
             }
         }
+        if files.is_empty() {
+            return;
+        }
+        if let Err(err) = crate::animation::store::apply_file_diffs(&project, &files) {
+            self.output
+                .error(format!("Could not restore a project file: {err}"));
+        }
+        self.animation.sync_after_history(
+            &project,
+            &self.assets,
+            &mut self.world,
+            &files,
+            &mut self.output,
+        );
+        self.asset_browser.refresh();
+    }
+
+    /// Records clip, controller or prefab file changes as one undo step.
+    /// `rebind_controller` updates every Animator's `Controller` from the old
+    /// path to the new one in that same step.
+    pub(super) fn record_asset_files(
+        &mut self,
+        label: String,
+        files: Vec<crate::animation::store::FileDiff>,
+        rebind_controller: Option<(String, String)>,
+    ) {
+        let mut properties = Vec::new();
+        if let Some((from, to)) = rebind_controller {
+            for id in self.world.descendants(self.world.root()) {
+                let Some(instance) = self.world.get(id) else {
+                    continue;
+                };
+                if instance.class() != ClassName::Animator {
+                    continue;
+                }
+                let Some(current) = instance.property("Controller").and_then(Value::as_str) else {
+                    continue;
+                };
+                if current != from {
+                    continue;
+                }
+                let before = Value::String(from.clone());
+                let after = Value::String(to.clone());
+                if self
+                    .world
+                    .set_property(id, "Controller", after.clone())
+                    .is_err()
+                {
+                    continue;
+                }
+                properties.push(history::PropertyEdit {
+                    id,
+                    field: Field::Property("Controller"),
+                    before,
+                    after,
+                });
+            }
+        }
+        let texts = files
+            .into_iter()
+            .map(|file| history::TextChange {
+                path: file.path,
+                before: file.before,
+                after: file.after,
+            })
+            .collect();
+        self.history
+            .record_asset(&mut self.world, label, texts, properties);
+        self.asset_browser.refresh();
+        self.animation.refresh();
     }
     /// Clears the selection if it was taken out of the tree (deleted, or an
     /// insert undone), so nothing edits an Instance that isn't in the world.

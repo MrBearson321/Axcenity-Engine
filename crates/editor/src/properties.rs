@@ -151,7 +151,17 @@ const GROUPS: [(&str, &[&str]); 18] = [
     ),
     (
         "Audio",
-        &["SoundId", "Playing", "Volume", "PlaybackSpeed", "Looped"],
+        &[
+            "SoundId",
+            "Playing",
+            "Volume",
+            "PlaybackSpeed",
+            "Looped",
+            "Spatial",
+            "Position",
+            "RollOffMinDistance",
+            "RollOffMaxDistance",
+        ],
     ),
     (
         "Animation",
@@ -672,6 +682,9 @@ fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
                 | "BackgroundTransparency"
                 | "Volume" => drag.speed(0.01).range(0.0..=1.0),
                 "PlaybackSpeed" => drag.speed(0.01).range(0.01..=20.0),
+                "RollOffMinDistance" | "RollOffMaxDistance" => {
+                    drag.speed(1.0).range(0.0..=100_000.0)
+                }
                 "NormalStrength" | "EmissiveStrength" | "TextSize" => {
                     drag.speed(0.01).range(0.0..=f64::INFINITY)
                 }

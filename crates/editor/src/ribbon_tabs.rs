@@ -17,8 +17,10 @@ use crate::widgets;
 pub enum RibbonGroup {
     /// Play and Stop.
     Game,
-    /// Select, Move, Scale, Rotate and the building tools.
+    /// Select, Move, Scale and Rotate.
     Tools,
+    /// Paint, Material, Anchor, Collision, Lighting, Emission and Angular.
+    Build,
     Snapping,
     /// Block, Ball, Cylinder and Wedge.
     Parts,
@@ -37,9 +39,10 @@ pub enum RibbonGroup {
 }
 
 impl RibbonGroup {
-    pub const ALL: [RibbonGroup; 10] = [
+    pub const ALL: [RibbonGroup; 11] = [
         RibbonGroup::Game,
         RibbonGroup::Tools,
+        RibbonGroup::Build,
         RibbonGroup::Snapping,
         RibbonGroup::Parts,
         RibbonGroup::Effects,
@@ -55,6 +58,7 @@ impl RibbonGroup {
         match self {
             RibbonGroup::Game => "Game",
             RibbonGroup::Tools => "Tools",
+            RibbonGroup::Build => "Build",
             RibbonGroup::Snapping => "Snapping",
             RibbonGroup::Parts => "Parts",
             RibbonGroup::Effects => "Effects",
@@ -69,7 +73,8 @@ impl RibbonGroup {
     fn description(self) -> &'static str {
         match self {
             RibbonGroup::Game => "Play and Stop",
-            RibbonGroup::Tools => "Select, Move, Scale, Rotate and the building tools",
+            RibbonGroup::Tools => "Select, Move, Scale and Rotate",
+            RibbonGroup::Build => "Paint, materials, anchor, collision, lights and the angular tool",
             RibbonGroup::Snapping => "Move and rotate steps",
             RibbonGroup::Parts => "Insert blocks, balls, cylinders and wedges",
             RibbonGroup::Effects => "Insert sounds, particle emitters and lights",
@@ -87,6 +92,7 @@ impl RibbonGroup {
 pub enum BuiltInTab {
     Home,
     Model,
+    Terrain,
     Ui,
     Script,
     Test,
@@ -94,9 +100,10 @@ pub enum BuiltInTab {
 }
 
 impl BuiltInTab {
-    pub const ALL: [BuiltInTab; 6] = [
+    pub const ALL: [BuiltInTab; 7] = [
         BuiltInTab::Home,
         BuiltInTab::Model,
+        BuiltInTab::Terrain,
         BuiltInTab::Ui,
         BuiltInTab::Script,
         BuiltInTab::Test,
@@ -107,6 +114,7 @@ impl BuiltInTab {
         match self {
             BuiltInTab::Home => "Home",
             BuiltInTab::Model => "Model",
+            BuiltInTab::Terrain => "Terrain",
             BuiltInTab::Ui => "UI",
             BuiltInTab::Script => "Script",
             BuiltInTab::Test => "Test",
@@ -117,8 +125,9 @@ impl BuiltInTab {
     pub fn groups(self) -> &'static [RibbonGroup] {
         use RibbonGroup::*;
         match self {
-            BuiltInTab::Home => &[Game, Tools, Snapping, Parts, Terrain],
-            BuiltInTab::Model => &[Tools, Snapping, Parts, Effects, Import, Terrain],
+            BuiltInTab::Home => &[Game, Tools, Snapping, Parts],
+            BuiltInTab::Model => &[Build, Effects, Import],
+            BuiltInTab::Terrain => &[Terrain],
             BuiltInTab::Ui => &[Ui],
             BuiltInTab::Script => &[Game, Scripts],
             BuiltInTab::Test => &[Game],
@@ -496,6 +505,19 @@ fn unique(groups: &[RibbonGroup]) -> Vec<RibbonGroup> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn home_is_only_the_everyday_groups() {
+        assert_eq!(
+            BuiltInTab::Home.groups(),
+            &[
+                RibbonGroup::Game,
+                RibbonGroup::Tools,
+                RibbonGroup::Snapping,
+                RibbonGroup::Parts,
+            ]
+        );
+    }
 
     #[test]
     fn every_group_is_on_some_built_in_tab() {

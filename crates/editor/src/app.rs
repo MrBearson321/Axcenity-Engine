@@ -774,6 +774,7 @@ impl EditorApp {
         {
             self.about_open = start::about(ctx, brand);
         }
+        self.follow_sound_preview();
         self.settings_window(ctx);
         self.toasts.show(ctx);
         theme::paint_crossfade(ctx);
@@ -1559,6 +1560,133 @@ mod tests {
         app.redo();
         assert_eq!(property(&app, pad, "Position"), vector(3.0, 0.25, 0.0));
         assert!(app.unsaved());
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn clip_controller_and_prefab_edits_undo_as_one_step_and_survive_saving() {
+        let folder = copy_of_example("hello-touched", "asset-undo");
+        let mut app = EditorApp::new(Some(&folder));
+        let pad = part(&app, "Pad");
+        app.selected = Some(pad);
+
+        app.save_prefab();
+        let prefab = "assets/prefabs/Pad.prefab.json";
+        let prefab_text = std::fs::read_to_string(folder.join(prefab)).unwrap();
+        assert_eq!(app.history.undo_label(), Some("Create Pad"));
+        app.undo();
+        assert!(!folder.join(prefab).exists());
+        assert!(
+            !app.asset_browser
+                .entries()
+                .iter()
+                .any(|entry| entry.path == prefab),
+            "the Assets panel drops the undone prefab"
+        );
+        app.redo();
+        assert_eq!(
+            std::fs::read_to_string(folder.join(prefab)).unwrap(),
+            prefab_text
+        );
+        assert!(
+            app.asset_browser
+                .entries()
+                .iter()
+                .any(|entry| entry.path == prefab),
+            "redo puts the prefab back in the Assets panel"
+        );
+
+        app.rename_prefab(prefab, "Platform");
+        assert_eq!(app.history.undo_label(), Some("Rename Platform"));
+        assert!(folder.join("assets/prefabs/Platform.prefab.json").is_file());
+        app.undo();
+        assert_eq!(
+            std::fs::read_to_string(folder.join(prefab)).unwrap(),
+            prefab_text
+        );
+
+        app.duplicate_prefab(prefab);
+        let copy = "assets/prefabs/Pad copy.prefab.json";
+        assert_eq!(app.history.undo_label(), Some("Duplicate Pad"));
+        assert_eq!(
+            std::fs::read_to_string(folder.join(copy)).unwrap(),
+            prefab_text
+        );
+        app.delete_prefab(copy);
+        assert!(!folder.join(copy).exists());
+        assert_eq!(app.history.undo_label(), Some("Delete Pad copy"));
+        assert!(app.save());
+        assert_eq!(
+            app.history.undo_label(),
+            Some("Delete Pad copy"),
+            "saving keeps the asset step"
+        );
+        app.undo();
+        assert_eq!(
+            std::fs::read_to_string(folder.join(copy)).unwrap(),
+            prefab_text
+        );
+        app.redo();
+        assert!(!folder.join(copy).exists());
+
+        let take = axcenity_assets::Take {
+            name: "Moves".into(),
+            duration: 1.0,
+            frame_rate: 30.0,
+            tracks: Vec::new(),
+        };
+        let written =
+            crate::animation::store::new_clip(&folder, "assets/models/hero.fbx", &take, "Walk")
+                .unwrap();
+        let clip = written.path.clone();
+        let clip_text = std::fs::read_to_string(folder.join(&clip)).unwrap();
+        app.record_asset_files("Create Walk".into(), written.files, None);
+        app.undo();
+        assert!(!folder.join(&clip).exists());
+        app.redo();
+        assert_eq!(
+            std::fs::read_to_string(folder.join(&clip)).unwrap(),
+            clip_text
+        );
+
+        let controller = crate::animation::store::new_controller(&folder, "Hero", &[]).unwrap();
+        app.record_asset_files("Create Hero".into(), controller.files, None);
+        let animator = app.world.create(ClassName::Animator).unwrap();
+        app.world.set_parent(animator, Some(pad)).unwrap();
+        app.world
+            .set_property(
+                animator,
+                "Controller",
+                Value::String(controller.path.clone()),
+            )
+            .unwrap();
+        let renamed =
+            crate::animation::store::rename_controller(&folder, &controller.path, "Villain")
+                .unwrap();
+        app.record_asset_files(
+            "Rename Hero".into(),
+            renamed.files,
+            Some((controller.path.clone(), renamed.path.clone())),
+        );
+        let bound = |app: &EditorApp| {
+            app.world
+                .get(animator)
+                .unwrap()
+                .property("Controller")
+                .and_then(Value::as_str)
+                .unwrap()
+                .to_owned()
+        };
+        assert_eq!(bound(&app), renamed.path);
+        assert_eq!(app.history.undo_label(), Some("Rename Hero"));
+        app.undo();
+        assert_eq!(bound(&app), controller.path);
+        assert!(folder.join(&controller.path).is_file());
+        assert!(!folder.join(&renamed.path).exists());
+        app.redo();
+        assert_eq!(bound(&app), renamed.path);
+        assert!(folder.join(&renamed.path).is_file());
+
         let _ = std::fs::remove_dir_all(&folder);
     }
 

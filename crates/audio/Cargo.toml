@@ -10,6 +10,7 @@ authors.workspace = true
 axcenity-assets.workspace = true
 axcenity-core.workspace = true
 kira.workspace = true
+mint.workspace = true
 thiserror.workspace = true
 
 [lints]

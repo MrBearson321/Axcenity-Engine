@@ -55,6 +55,7 @@ impl Session {
         scripts: &[ScriptFile],
         output: &mut Output,
         assets: Assets,
+        camera: CameraState,
     ) -> Result<Session, Crash> {
         let mut session = Session {
             world: edit_world.clone(),
@@ -86,7 +87,7 @@ impl Session {
                 );
                 session.forward_output(output);
             }
-            session.apply_audio(output);
+            session.apply_audio(camera, output);
         })?;
         Ok(session)
     }
@@ -179,7 +180,7 @@ impl Session {
             self.scripts.heartbeat(&mut self.world, seconds);
             self.forward_output(output);
             moved = self.scripts.take_camera_move();
-            self.apply_audio(output);
+            self.apply_audio(moved.unwrap_or(camera), output);
             // Animators move on and pose their models, as in the player.
             let events = self
                 .animators
@@ -237,9 +238,12 @@ impl Session {
         }
     }
 
-    fn apply_audio(&mut self, output: &mut Output) {
+    fn apply_audio(&mut self, camera: CameraState, output: &mut Output) {
         let actions = self.scripts.take_sound_actions();
-        let update = self.audio.update(actions, &self.world, &self.assets);
+        let listener = axcenity_audio::Listener::from_view(camera.position, camera.orientation);
+        let update = self
+            .audio
+            .update(actions, &self.world, &self.assets, listener);
         for err in update.errors {
             output.error(format!("Audio: {err}"));
         }
@@ -445,7 +449,14 @@ mod tests {
             "local p = Instance.new('Part') p.Name = 'Made' p.Parent = workspace print('hi')",
         )];
         let mut output = Output::default();
-        let session = Session::start(&world, &scripts, &mut output, Assets::default()).unwrap();
+        let session = Session::start(
+            &world,
+            &scripts,
+            &mut output,
+            Assets::default(),
+            CameraState::default(),
+        )
+        .unwrap();
 
         let made = session.world().find_first_child(world.workspace(), "Made");
         assert!(made.is_some());
@@ -458,7 +469,14 @@ mod tests {
         let mut world = World::new();
         let scripts = [script(&mut world, "task.wait(1)\nerror('boom')")];
         let mut output = Output::default();
-        let mut session = Session::start(&world, &scripts, &mut output, Assets::default()).unwrap();
+        let mut session = Session::start(
+            &world,
+            &scripts,
+            &mut output,
+            Assets::default(),
+            CameraState::default(),
+        )
+        .unwrap();
         for _ in 0..90 {
             session
                 .frame(1.0 / 60.0, &[], CameraState::default(), &mut output)
@@ -472,8 +490,14 @@ mod tests {
     #[test]
     fn a_panic_in_a_frame_is_caught_with_its_message() {
         let mut output = Output::default();
-        let mut session =
-            Session::start(&World::new(), &[], &mut output, Assets::default()).unwrap();
+        let mut session = Session::start(
+            &World::new(),
+            &[],
+            &mut output,
+            Assets::default(),
+            CameraState::default(),
+        )
+        .unwrap();
         let camera = CameraState::default();
         session.frame(1.0 / 60.0, &[], camera, &mut output).unwrap();
         session.panic_next_frame();
@@ -547,7 +571,14 @@ mod tests {
             .to_string(),
         }];
         let mut output = Output::default();
-        let mut session = Session::start(&world, &scripts, &mut output, Assets::default()).unwrap();
+        let mut session = Session::start(
+            &world,
+            &scripts,
+            &mut output,
+            Assets::default(),
+            CameraState::default(),
+        )
+        .unwrap();
         let space = KeyEvent {
             key: KeyCode::Space,
             pressed: true,

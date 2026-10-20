@@ -83,6 +83,9 @@ impl EditorApp {
             Some(BrowserAction::Place(entry)) => self.drop_asset(&entry, None),
             Some(BrowserAction::Import { image_folder }) => self.import_assets(image_folder),
             Some(BrowserAction::SavePrefab) => self.save_prefab(),
+            Some(BrowserAction::RenamePrefab { path, name }) => self.rename_prefab(&path, &name),
+            Some(BrowserAction::DuplicatePrefab { path }) => self.duplicate_prefab(&path),
+            Some(BrowserAction::DeletePrefab { path }) => self.delete_prefab(&path),
             None => {}
         }
     }
@@ -121,11 +124,16 @@ impl EditorApp {
                         label,
                         vec![crate::history::TextChange {
                             path,
-                            before,
-                            after,
+                            before: Some(before),
+                            after: Some(after),
                         }],
                     );
                 }
+                StudioAction::RecordFiles {
+                    label,
+                    files,
+                    rebind_controller,
+                } => self.record_asset_files(label, files, rebind_controller),
             }
         }
     }
@@ -761,6 +769,27 @@ impl EditorApp {
             self.stop();
         }
     }
+    /// The ribbon buttons for `tools`. Clicking one picks it.
+    fn tool_buttons(&mut self, ui: &mut egui::Ui, tools: &[Tool]) {
+        for tool in tools {
+            let keys: Vec<String> = tool
+                .shortcut()
+                .map(|shortcut| ui.ctx().format_shortcut(&shortcut))
+                .into_iter()
+                .chain(tool.key().map(|key| key.name().to_owned()))
+                .collect();
+            let hover = match keys.as_slice() {
+                [] => format!("{} tool", tool.label()),
+                keys => format!("{} tool ({})", tool.label(), keys.join(" or ")),
+            };
+            let button = RibbonButton::new(theme::tool_icon(*tool), tool.label())
+                .selected(self.tool == *tool);
+            if ui.add(button).on_hover_text(hover).clicked() {
+                self.tool = *tool;
+            }
+        }
+    }
+
     /// Draws one of the ribbon's groups. Buttons that act on the whole app
     /// are noted in `clicks`, and the toolbar acts on them once it's drawn.
     pub(super) fn ribbon_group(
@@ -801,23 +830,10 @@ impl EditorApp {
                     .clicked();
             }),
             RibbonGroup::Tools => ribbon::group(ui, "Tools", |ui| {
-                for tool in Tool::ALL {
-                    let keys: Vec<String> = tool
-                        .shortcut()
-                        .map(|shortcut| ui.ctx().format_shortcut(&shortcut))
-                        .into_iter()
-                        .chain(tool.key().map(|key| key.name().to_owned()))
-                        .collect();
-                    let hover = match keys.as_slice() {
-                        [] => format!("{} tool", tool.label()),
-                        keys => format!("{} tool ({})", tool.label(), keys.join(" or ")),
-                    };
-                    let button = RibbonButton::new(theme::tool_icon(tool), tool.label())
-                        .selected(self.tool == tool);
-                    if ui.add(button).on_hover_text(hover).clicked() {
-                        self.tool = tool;
-                    }
-                }
+                self.tool_buttons(ui, &Tool::TRANSFORM);
+            }),
+            RibbonGroup::Build => ribbon::group(ui, "Build", |ui| {
+                self.tool_buttons(ui, &Tool::BUILD);
             }),
             RibbonGroup::Snapping => ribbon::group(ui, "Snapping", |ui| {
                 let snap = &mut self.snap;

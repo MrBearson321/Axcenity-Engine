@@ -387,7 +387,7 @@ const CLASS_METHODS: &[(ClassName, Function)] = &[
         ClassName::Sound,
         Function {
             name: "Play",
-            doc: "Plays this sound from the start, with its SoundId, Volume, PlaybackSpeed and Looped, and sets Playing to true. Playing it again restarts it; stopping the game session stops all sounds.",
+            doc: "Plays this sound from the start, with its SoundId, Volume, PlaybackSpeed, Looped and Spatial, and sets Playing to true. Playing it again restarts it; stopping the game session stops all sounds.",
             params: &[],
             returns: "nil",
         },
@@ -1058,6 +1058,26 @@ const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::Sound,
         "Playing",
         "True while the sound plays. Set it to false to pause and true to carry on. Saved as true, the sound plays as soon as the game starts, with no script needed.",
+    ),
+    (
+        ClassName::Sound,
+        "Spatial",
+        "If true, the sound is placed in the world and panned as the camera moves. If false, it plays the same in both ears.",
+    ),
+    (
+        ClassName::Sound,
+        "Position",
+        "Where a spatial sound plays from, in studs, when it is not inside a Part, MeshPart or Terrain. Inside one of those, that ancestor's Position is used instead.",
+    ),
+    (
+        ClassName::Sound,
+        "RollOffMinDistance",
+        "A spatial sound stays at full volume within this many studs of the camera. 10 by default. Not used while Spatial is false.",
+    ),
+    (
+        ClassName::Sound,
+        "RollOffMaxDistance",
+        "A spatial sound is silent from this many studs out. 150 by default. Kept at least as large as RollOffMinDistance.",
     ),
     (
         ClassName::Workspace,
@@ -1822,7 +1842,9 @@ fn class_doc(class: ClassName) -> &'static str {
         ClassName::BillboardGui => {
             "UI that floats in the world, parented to a Part or MeshPart and drawn on the screen UI overlay. Size is on-screen; StudsOffset moves it in world studs."
         }
-        ClassName::Sound => "A sound effect or music track that scripts can play.",
+        ClassName::Sound => {
+            "A sound effect or music track that scripts can play. Spatial sounds sit on a part and get quieter with distance from the camera."
+        }
         ClassName::PointLight => {
             "A light that shines in all directions from just above its parent part. Inserting one with no part selected also inserts an anchored lamp."
         }

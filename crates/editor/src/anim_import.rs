@@ -427,7 +427,7 @@ pub fn write_animation(
         return Ok((paths, None));
     }
     // An Idle clip (by name) is where it starts; otherwise the first.
-    let path = crate::animation::store::new_controller(project, &model, &paths)?;
+    let path = crate::animation::store::new_controller(project, &model, &paths)?.path;
     Ok((paths, Some(path)))
 }
 

@@ -71,6 +71,20 @@ pub enum Tool {
 }
 
 impl Tool {
+    /// Select, Move, Resize and Rotate: the tools on the Home tab.
+    pub const TRANSFORM: [Tool; 4] = [Tool::Select, Tool::Move, Tool::Scale, Tool::Rotate];
+
+    /// Paint through Angular: the tools on the Model tab.
+    pub const BUILD: [Tool; 7] = [
+        Tool::Paint,
+        Tool::Material,
+        Tool::Anchor,
+        Tool::Collision,
+        Tool::Lighting,
+        Tool::Emission,
+        Tool::Angular,
+    ];
+
     pub const ALL: [Tool; 11] = [
         Tool::Select,
         Tool::Move,
@@ -100,6 +114,9 @@ impl Tool {
             Tool::Angular => "Angular",
         }
     }
+
+    const _TOOLS_SPLIT: () =
+        assert!(Self::TRANSFORM.len() + Self::BUILD.len() == Self::ALL.len());
 
     /// Ctrl+1 to Ctrl+4 (Cmd on macOS), as in Studio, for the first four.
     pub fn shortcut(self) -> Option<egui::KeyboardShortcut> {

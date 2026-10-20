@@ -106,7 +106,14 @@ fn main() -> Result<()> {
     property_players.update(&mut world, &assets, 0.0);
     start_scripts(&mut scripts, &mut world, &project.scripts);
     let mut audio = GameAudio::default();
-    apply_audio(&mut scripts, &mut world, &assets, &mut audio);
+    let camera = FlyCamera::looking_at(START_CAMERA_POSITION, Vec3::ZERO);
+    apply_audio(
+        &mut scripts,
+        &mut world,
+        &assets,
+        &mut audio,
+        listener_of(&camera),
+    );
     // Models load the first time a MeshPart needs one; physics and drawing
     // share them.
     let event_loop = EventLoop::new()?;
@@ -130,7 +137,7 @@ fn main() -> Result<()> {
         window: None,
         renderer: None,
         error: None,
-        camera: FlyCamera::looking_at(START_CAMERA_POSITION, Vec3::ZERO),
+        camera,
         keys: MoveKeys::default(),
         key_events: Vec::new(),
         held_keys: BTreeSet::new(),
@@ -214,13 +221,19 @@ fn print_output(runtime: &mut ScriptRuntime) {
     }
 }
 
+fn listener_of(camera: &FlyCamera) -> axcenity_audio::Listener {
+    let (position, orientation) = camera.view();
+    axcenity_audio::Listener::from_view(position, orientation)
+}
+
 fn apply_audio(
     scripts: &mut ScriptRuntime,
     world: &mut World,
     assets: &Assets,
     audio: &mut GameAudio,
+    listener: axcenity_audio::Listener,
 ) {
-    let update = audio.update(scripts.take_sound_actions(), world, assets);
+    let update = audio.update(scripts.take_sound_actions(), world, assets, listener);
     for err in update.errors {
         log::error!("audio: {err}");
     }
@@ -610,7 +623,7 @@ impl ApplicationHandler for App {
                 }
                 self.ui_mouse_events.push(false);
             }
-            // One frame, in the fixed order from docs/architecture.md.
+            // One frame, in the fixed order from docs/architecture/frame-loop.md.
             WindowEvent::RedrawRequested => {
                 let seconds = frame_seconds(&mut self.last_frame);
                 let size = self
@@ -652,6 +665,7 @@ impl ApplicationHandler for App {
                     &mut self.world,
                     &self.assets,
                     &mut self.audio,
+                    listener_of(&self.camera),
                 );
                 // Particles move on, after scripts and physics moved their parts.
                 for (emitter, count) in self.scripts.take_particle_emits() {
@@ -693,6 +707,7 @@ impl ApplicationHandler for App {
                 if let Some(view) = self.scripts.take_camera_move() {
                     self.camera.set_view(view.position, view.orientation);
                 }
+                self.audio.set_listener(listener_of(&self.camera));
 
                 let (mut draw_list, ui_layout) =
                     axcenity_scene::build_draw_list_with_ui_interaction(

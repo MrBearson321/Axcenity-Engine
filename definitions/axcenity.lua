@@ -469,17 +469,21 @@ function RemoteEventClass:FireAllClients(...) end
 ---@field StudsOffset Vector3 World studs added to the parent part's position. The offset is not rotated with the part.
 ---@field MaxDistance number The billboard hides past this many studs from the camera. 0 shows it at any distance.
 
----A sound effect or music track that scripts can play.
+---A sound effect or music track that scripts can play. Spatial sounds sit on a part and get quieter with distance from the camera.
 ---@class Sound: Instance
 ---@field SoundId string The audio file inside the project folder, such as "assets/audio/chime.wav".
 ---@field Volume number Playback volume as a non-negative amplitude; 1 is the original level and 0 is silent.
 ---@field Looped boolean If true, playback repeats until Stop is called or the game session stops.
 ---@field PlaybackSpeed number How fast the sound plays: 1 is normal, 2 twice as fast (and an octave higher), 0.5 half. Changes apply while it plays.
 ---@field Playing boolean True while the sound plays. Set it to false to pause and true to carry on. Saved as true, the sound plays as soon as the game starts, with no script needed.
+---@field Spatial boolean If true, the sound is placed in the world and panned as the camera moves. If false, it plays the same in both ears.
+---@field Position Vector3 Where a spatial sound plays from, in studs, when it is not inside a Part, MeshPart or Terrain. Inside one of those, that ancestor's Position is used instead.
+---@field RollOffMinDistance number A spatial sound stays at full volume within this many studs of the camera. 10 by default. Not used while Spatial is false.
+---@field RollOffMaxDistance number A spatial sound is silent from this many studs out. 150 by default. Kept at least as large as RollOffMinDistance.
 ---@field Ended Signal Fires when the sound plays to its end. Looped sounds, and sounds stopped with Stop, don't fire it.
 local SoundClass = {}
 
----Plays this sound from the start, with its SoundId, Volume, PlaybackSpeed and Looped, and sets Playing to true. Playing it again restarts it; stopping the game session stops all sounds.
+---Plays this sound from the start, with its SoundId, Volume, PlaybackSpeed, Looped and Spatial, and sets Playing to true. Playing it again restarts it; stopping the game session stops all sounds.
 ---@return nil
 function SoundClass:Play() end
 

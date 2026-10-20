@@ -7,7 +7,7 @@
 //! blocks hold values in slots: plain values typed in (numbers, text, ...)
 //! or reporter blocks ([`Expression`]) that work a value out.
 //!
-//! Every block translates to the documented Lua API (see `docs/scripting.md`),
+//! Every block translates to the documented Lua API (see `docs/scripting/blocks.md`),
 //! so a block script runs exactly like a typed one. [`from_lua`] goes the
 //! other way, for switching a script between Code and Blocks.
 

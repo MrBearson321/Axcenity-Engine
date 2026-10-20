@@ -464,6 +464,14 @@ impl ClassName {
                 // True while it plays. Saved true, it plays when the game
                 // starts; set false to pause and true to carry on.
                 ("Playing", Value::Bool(false)),
+                // Off, the sound is the same in both ears, wherever it sits.
+                ("Spatial", Value::Bool(false)),
+                // Used when no ancestor Part, MeshPart or Terrain has a Position.
+                ("Position", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
+                // Full volume this close to the listener, in studs. Silent at
+                // RollOffMaxDistance. Ignored while Spatial is off.
+                ("RollOffMinDistance", Value::Number(10.0)),
+                ("RollOffMaxDistance", Value::Number(150.0)),
             ],
             ClassName::Part => {
                 let material = Material::Plastic;

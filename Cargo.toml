@@ -57,6 +57,8 @@ log = "0.4"
 png = "0.18"
 # Lua 5.4, compiled from source (`vendored`) so no system Lua is needed on any OS.
 mlua = { version = "0.12", features = ["lua54", "vendored"] }
+# Math types Kira's spatial listener and emitters take (MIT OR Apache-2.0).
+mint = "0.5"
 pollster = "0.4"
 # Native file and folder dialogs for the editor (Windows, macOS, and the
 # desktop portal on Linux).

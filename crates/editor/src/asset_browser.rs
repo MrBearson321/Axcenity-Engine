@@ -216,6 +216,24 @@ pub enum BrowserAction {
     Import { image_folder: &'static str },
     /// Save the selection as a prefab.
     SavePrefab,
+    /// Rename the prefab file at `path` to `name` (already checked).
+    RenamePrefab { path: String, name: String },
+    /// Copy the prefab file at `path`.
+    DuplicatePrefab { path: String },
+    /// Delete the prefab file at `path`.
+    DeletePrefab { path: String },
+}
+
+/// A prefab question the panel is asking.
+enum PrefabDialog {
+    Rename {
+        path: String,
+        name: String,
+        error: Option<String>,
+    },
+    Delete {
+        path: String,
+    },
 }
 
 #[derive(Default)]
@@ -227,6 +245,7 @@ pub struct AssetBrowser {
     scanned_at: Option<Instant>,
     /// Image thumbnails by path, `None` for an image that can't be read.
     thumbnails: HashMap<String, Option<egui::TextureHandle>>,
+    dialog: Option<PrefabDialog>,
 }
 
 impl AssetBrowser {
@@ -236,6 +255,7 @@ impl AssetBrowser {
         self.files.clear();
         self.thumbnails.clear();
         self.scanned_at = None;
+        self.dialog = None;
     }
 
     /// Walks the folder again on the next frame the panel is shown.
@@ -377,23 +397,103 @@ impl AssetBrowser {
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
                     for entry in entries {
-                        if self.tile(ui, assets, &entry, can_edit) {
-                            action = Some(BrowserAction::Place(entry));
+                        let (place, menu) = self.tile(ui, assets, &entry, can_edit);
+                        if place {
+                            action = Some(BrowserAction::Place(entry.clone()));
+                        }
+                        match menu {
+                            Some(PrefabMenu::Rename { path, name }) => {
+                                self.dialog = Some(PrefabDialog::Rename {
+                                    path,
+                                    name,
+                                    error: None,
+                                });
+                            }
+                            Some(PrefabMenu::Duplicate { path }) => {
+                                action = Some(BrowserAction::DuplicatePrefab { path });
+                            }
+                            Some(PrefabMenu::Delete { path }) => {
+                                self.dialog = Some(PrefabDialog::Delete { path });
+                            }
+                            None => {}
                         }
                     }
                 });
             });
+        if let Some(done) = self.prefab_dialog(ui.ctx()) {
+            action = Some(done);
+        }
         action
     }
 
-    /// Draws one tile. Returns true if it was double-clicked.
+    /// The rename and delete questions for a prefab tile.
+    fn prefab_dialog(&mut self, ctx: &egui::Context) -> Option<BrowserAction> {
+        let folder = self.folder.clone();
+        let dialog = self.dialog.as_mut()?;
+        let mut action = None;
+        let mut close = false;
+        let modal = egui::Modal::new(egui::Id::new("prefab dialog")).show(ctx, |ui| {
+            ui.set_width(360.0);
+            match dialog {
+                PrefabDialog::Rename { path, name, error } => {
+                    ui.heading("Rename prefab");
+                    let response = ui.text_edit_singleline(name);
+                    if let Some(problem) = error {
+                        ui.colored_label(ui.visuals().error_fg_color, problem.as_str());
+                    }
+                    let enter =
+                        response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    ui.horizontal(|ui| {
+                        if ui.button("Rename").clicked() || enter {
+                            match check_prefab_rename(folder.as_deref(), path, name) {
+                                Ok(name) => {
+                                    action = Some(BrowserAction::RenamePrefab {
+                                        path: path.clone(),
+                                        name,
+                                    });
+                                    close = true;
+                                }
+                                Err(problem) => *error = Some(problem),
+                            }
+                        }
+                        if ui.button("Cancel").clicked() {
+                            close = true;
+                        }
+                    });
+                }
+                PrefabDialog::Delete { path } => {
+                    ui.heading("Delete?");
+                    ui.label(format!("This deletes `{path}`. Undo puts it back."));
+                    ui.horizontal(|ui| {
+                        if ui.button(format!("{} Delete", icons::TRASH)).clicked() {
+                            action = Some(BrowserAction::DeletePrefab { path: path.clone() });
+                            close = true;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            close = true;
+                        }
+                    });
+                }
+            }
+        });
+        if modal.should_close() {
+            close = true;
+        }
+        if close {
+            self.dialog = None;
+        }
+        action
+    }
+
+    /// Draws one tile. The bool is a double-click; the menu is a prefab's
+    /// right-click choice.
     fn tile(
         &mut self,
         ui: &mut egui::Ui,
         assets: &Assets,
         entry: &AssetEntry,
         can_edit: bool,
-    ) -> bool {
+    ) -> (bool, Option<PrefabMenu>) {
         let (rect, response) = ui.allocate_exact_size(TILE, egui::Sense::click_and_drag());
         let id = response.id;
         let hover = match entry.prop() {
@@ -478,7 +578,32 @@ impl AssetBrowser {
             }
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
         }
-        can_edit && response.double_clicked()
+        let mut menu = None;
+        if can_edit && entry.kind == AssetKind::Prefab {
+            let path = entry.path.clone();
+            let name = entry.name.clone();
+            response.context_menu(|ui| {
+                if ui
+                    .button(format!("{} Rename", icons::PENCIL_SIMPLE))
+                    .clicked()
+                {
+                    menu = Some(PrefabMenu::Rename {
+                        path: path.clone(),
+                        name: name.clone(),
+                    });
+                    ui.close();
+                }
+                if ui.button(format!("{} Duplicate", icons::COPY)).clicked() {
+                    menu = Some(PrefabMenu::Duplicate { path: path.clone() });
+                    ui.close();
+                }
+                if ui.button(format!("{} Delete", icons::TRASH)).clicked() {
+                    menu = Some(PrefabMenu::Delete { path: path.clone() });
+                    ui.close();
+                }
+            });
+        }
+        (can_edit && response.double_clicked(), menu)
     }
 
     fn paint_picture(
@@ -654,6 +779,36 @@ fn walk(directory: &Path, prefix: &str, found: &mut Vec<AssetEntry>) {
             });
         }
     }
+}
+
+enum PrefabMenu {
+    Rename { path: String, name: String },
+    Duplicate { path: String },
+    Delete { path: String },
+}
+
+/// Why `name` can't replace the prefab at `path`, if it can't. The `Ok`
+/// name is trimmed.
+fn check_prefab_rename(folder: Option<&Path>, path: &str, name: &str) -> Result<String, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("a prefab needs a name".to_owned());
+    }
+    if prefab_file_stem(name) != name {
+        return Err("use only letters, digits, spaces, - and _".to_owned());
+    }
+    let parent = path
+        .rsplit_once('/')
+        .map_or(PREFABS_FOLDER, |(parent, _)| parent);
+    let new_path = format!("{parent}/{name}{PREFAB_SUFFIX}");
+    if new_path == path {
+        return Ok(name.to_owned());
+    }
+    let differs_in_case_only = new_path.eq_ignore_ascii_case(path);
+    if !differs_in_case_only && folder.is_some_and(|folder| folder.join(&new_path).exists()) {
+        return Err(format!("there's already a prefab called {name}"));
+    }
+    Ok(name.to_owned())
 }
 
 /// A file name for a prefab called `name`: letters, digits, spaces, `-`

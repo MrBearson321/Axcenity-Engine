@@ -1142,9 +1142,28 @@ impl EditorApp {
                 }
             }
         }
-        if let Some(engine) = &mut self.sound_preview
-            && let Err(err) = engine.apply(action, &self.assets)
-        {
+        let (position, orientation) = self.viewport.camera_view();
+        let listener = axcenity_audio::Listener::from_view(position, orientation);
+        if let Some(engine) = &mut self.sound_preview {
+            engine.set_listener(listener);
+            if let Err(err) = engine.apply(action, &self.world, &self.assets) {
+                self.output.error(format!("Audio: {err}"));
+            }
+        }
+    }
+
+    /// Keeps a Properties preview in the place the camera and the Sound's
+    /// part are now. A spatial preview pans as the viewport camera moves.
+    pub(super) fn follow_sound_preview(&mut self) {
+        if self.playing() {
+            return;
+        }
+        let Some(engine) = &mut self.sound_preview else {
+            return;
+        };
+        let (position, orientation) = self.viewport.camera_view();
+        let listener = axcenity_audio::Listener::from_view(position, orientation);
+        for err in engine.follow(&self.world, &self.assets, listener) {
             self.output.error(format!("Audio: {err}"));
         }
     }

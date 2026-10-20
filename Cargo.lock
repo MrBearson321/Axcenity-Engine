@@ -557,6 +557,7 @@ dependencies = [
  "axcenity-assets",
  "axcenity-core",
  "kira",
+ "mint",
  "thiserror 2.0.21",
 ]
 

@@ -1,19 +1,12 @@
 # Axcenity Engine
 
-Rust 3D game engine and editor; Lua 5.4 scripting. See [README.md](README.md) for the current project status and getting started.
+Rust 3D game engine and editor; Lua 5.4 scripting. How to run it: [README.md](README.md).
 
-## Load only relevant context
+## Docs
 
-- Workspace members and dependency pins: [Cargo.toml](Cargo.toml).
-- Crate boundaries, Instance model, frame loop, editor and Play mode: [docs/architecture.md](docs/architecture.md).
-- Lua API, sandbox and scheduler: [docs/scripting.md](docs/scripting.md).
-- Renderer and materials: [docs/rendering.md](docs/rendering.md). Animation runtime: its Animation section; the Animation panel: docs/architecture.md.
-- Project files, export plans and licensing: [docs/project-and-export.md](docs/project-and-export.md).
-- In-game UI design: [docs/ui.md](docs/ui.md).
-- Product scope and stories: [prd/axcenity-engine-v1.md](prd/axcenity-engine-v1.md).
-- Roadmap and acceptance criteria: [plans/axcenity-engine-v1.md](plans/axcenity-engine-v1.md). Read only the relevant phase.
+The map is [docs/README.md](docs/README.md). Open that only to find the file for this task, then open **that one file**. Do not open a topic folder, a plan, or a PRD in full. A plan or a PRD is one phase or one story, found from its headings.
 
-Open only the source, tests and doc sections needed for the task. For large docs, search headings first; don't load the whole PRD or plan, or copy their details into these instructions. Treat source and tests as authoritative when docs disagree, then update the relevant docs.
+When behavior changes, update the topic file. Keep each crate `CLAUDE.md` under 10 lines: what the crate is, which topic file to open, and local constraints.
 
 ## Invariants
 
@@ -32,4 +25,4 @@ Open only the source, tests and doc sections needed for the task. For large docs
 - Lint: `cargo clippy --workspace --all-targets -- -D warnings`
 - Format: `cargo fmt --all`
 
-Prefer simple, idiomatic Rust. Briefly explain non-obvious Rust concepts when introducing them. When behavior or a design decision changes, update its canonical doc. Keep crate `CLAUDE.md` files under 10 lines: purpose, doc pointers and only non-obvious local constraints.
+Prefer simple, idiomatic Rust. Briefly explain non-obvious Rust concepts when introducing them. Treat source and tests as authoritative when docs disagree, then update the topic file.

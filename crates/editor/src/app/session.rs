@@ -212,7 +212,17 @@ impl EditorApp {
         // `project` borrows `self.project` and `output` borrows `self.output`:
         // different fields, so Rust allows both borrows at once.
         let scripts = play::read_scripts(&project.folder, &project.scripts, &mut self.output);
-        match Session::start(&self.world, &scripts, &mut self.output, self.assets.clone()) {
+        let (position, orientation) = self.viewport.camera_view();
+        match Session::start(
+            &self.world,
+            &scripts,
+            &mut self.output,
+            self.assets.clone(),
+            CameraState {
+                position,
+                orientation,
+            },
+        ) {
             Ok(session) => {
                 self.play = Some(session);
                 self.viewport.clear_particles();

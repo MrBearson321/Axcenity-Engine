@@ -291,7 +291,7 @@ Graphics aim for a modern, realistic look (physically based materials, shadows, 
 - **A standalone "Run" mode** separate from in-editor Play (can be added after export exists).
 - **macOS code signing and notarization.**
 - **Advanced rendering** beyond the five planned stages, such as ray tracing or global illumination.
-- **Terrain, character controllers and avatars.** These weren't decided in this round and need their own design pass. (Particles and animation were added later; see stories 69–79.)
+- **Terrain, character controllers and avatars.** Terrain sculpting, painting, layer blending, and collision shipped after this PRD; foliage and character controllers are specified in the v2 PRD. Custom avatars remain undecided. (Particles and animation were added later; see stories 69–79.)
 - **Animation beyond the Animation Studio's scope**: glTF animation, 2D blend trees, layers and avatar masks, inverse kinematics, retargeting between skeletons, morph targets (blend shapes) and GPU skinning.
 
 ## Further Notes

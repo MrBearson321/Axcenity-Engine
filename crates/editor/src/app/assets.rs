@@ -3,7 +3,8 @@
 //! files into the project's `assets` folder.
 //!
 //! Every placement is one undo step. A model, prefab or prop is moved as a
-//! whole so its bounding box rests on the surface it's dropped on.
+//! whole so its bounding box rests on the surface it's dropped on. Saving,
+//! renaming, duplicating and deleting a prefab is one undo step too.
 
 use std::path::Path;
 
@@ -406,12 +407,109 @@ impl EditorApp {
             Ok(()) => {
                 self.toasts.success(format!("Saved the prefab `{path}`"));
                 self.output.info(format!("Saved the prefab `{path}`."));
-                self.asset_browser.refresh();
+                let name = display_name(&path);
+                self.record_prefab(
+                    format!("Create {name}"),
+                    vec![prefab_diff(&path, None, Some(text))],
+                );
             }
             Err(err) => self
                 .output
                 .error(format!("Could not save the prefab `{path}`: {err}")),
         }
+    }
+
+    /// Renames the prefab file at `path` to `name`, in the same folder.
+    pub(super) fn rename_prefab(&mut self, path: &str, name: &str) {
+        let Some(folder) = self.project.as_ref().map(|p| p.folder.clone()) else {
+            return;
+        };
+        let parent = path
+            .rsplit_once('/')
+            .map_or(PREFABS_FOLDER, |(parent, _)| parent);
+        let new_path = format!("{parent}/{name}{PREFAB_SUFFIX}");
+        if new_path == path {
+            return;
+        }
+        let Some(text) = std::fs::read_to_string(folder.join(path)).ok() else {
+            self.output
+                .error(format!("Could not rename `{path}`: the file isn't there"));
+            return;
+        };
+        let differs_in_case_only = new_path.eq_ignore_ascii_case(path);
+        if !differs_in_case_only && folder.join(&new_path).exists() {
+            self.output.error(format!(
+                "Could not rename `{path}`: `{name}` is already a prefab"
+            ));
+            return;
+        }
+        if let Err(err) = std::fs::rename(folder.join(path), folder.join(&new_path)) {
+            self.output
+                .error(format!("Could not rename `{path}`: {err}"));
+            return;
+        }
+        self.output
+            .info(format!("Renamed the prefab `{path}` to `{new_path}`."));
+        self.record_prefab(
+            format!("Rename {name}"),
+            vec![
+                prefab_diff(path, Some(text.clone()), None),
+                prefab_diff(&new_path, None, Some(text)),
+            ],
+        );
+    }
+
+    /// Copies the prefab at `path` beside it, as "<name> copy".
+    pub(super) fn duplicate_prefab(&mut self, path: &str) {
+        let Some(folder) = self.project.as_ref().map(|p| p.folder.clone()) else {
+            return;
+        };
+        let Some(text) = std::fs::read_to_string(folder.join(path)).ok() else {
+            self.output
+                .error(format!("Could not copy `{path}`: the file isn't there"));
+            return;
+        };
+        let stem = prefab_file_stem(&format!("{} copy", display_name(path)));
+        let copy = tree::numbered_names(&stem)
+            .map(|stem| format!("{PREFABS_FOLDER}/{stem}{PREFAB_SUFFIX}"))
+            .find(|candidate| !folder.join(candidate).exists())
+            .expect("numbered names never run out");
+        if let Err(err) = project::write_script(&folder, &copy, &text) {
+            self.output.error(format!("Could not copy `{path}`: {err}"));
+            return;
+        }
+        self.output
+            .info(format!("Copied the prefab `{path}` as `{copy}`."));
+        self.record_prefab(
+            format!("Duplicate {}", display_name(path)),
+            vec![prefab_diff(&copy, None, Some(text))],
+        );
+    }
+
+    /// Deletes the prefab file at `path`. Undo writes its contents back.
+    pub(super) fn delete_prefab(&mut self, path: &str) {
+        let Some(folder) = self.project.as_ref().map(|p| p.folder.clone()) else {
+            return;
+        };
+        let Some(text) = std::fs::read_to_string(folder.join(path)).ok() else {
+            self.output
+                .error(format!("Could not delete `{path}`: the file isn't there"));
+            return;
+        };
+        if let Err(err) = std::fs::remove_file(folder.join(path)) {
+            self.output
+                .error(format!("Could not delete `{path}`: {err}"));
+            return;
+        }
+        self.output.info(format!("Deleted the prefab `{path}`."));
+        self.record_prefab(
+            format!("Delete {}", display_name(path)),
+            vec![prefab_diff(path, Some(text), None)],
+        );
+    }
+
+    fn record_prefab(&mut self, label: String, files: Vec<crate::animation::store::FileDiff>) {
+        self.record_asset_files(label, files, None);
     }
 
     /// Asks for files and copies each into the project's `assets` folder by
@@ -511,6 +609,18 @@ fn copy_prefab(folder: &Path, file: &Path) -> Result<String, String> {
         .expect("numbered names never run out");
     project::write_script(folder, &path, &text).map_err(|err| err.to_string())?;
     Ok(path)
+}
+
+fn prefab_diff(
+    path: &str,
+    before: Option<String>,
+    after: Option<String>,
+) -> crate::animation::store::FileDiff {
+    crate::animation::store::FileDiff {
+        path: path.to_owned(),
+        before,
+        after,
+    }
 }
 
 fn is_part(world: &World, id: InstanceId) -> bool {

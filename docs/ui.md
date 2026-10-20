@@ -1,6 +1,6 @@
 # Game UI
 
-Read before working in the `ui` crate. This covers in-game UI; the editor's own UI is `egui` and lives in `editor`.
+Read this for in-game UI. The editor's own windows are [editor/shell.md](editor/shell.md).
 
 ## Model
 

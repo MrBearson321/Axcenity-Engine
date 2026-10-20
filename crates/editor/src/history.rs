@@ -20,6 +20,12 @@
 //! Its step holds that file's text before and after as a [`TextChange`], and
 //! undo and redo hand those back for the app to put in the file's tab.
 //!
+//! Creating, renaming, duplicating or deleting a clip, an animator controller
+//! or a prefab is a file step too. `None` means the file is absent, so undoing
+//! a delete writes the old text back and undoing a create removes the file.
+//! Renaming a controller can also change Animators' `Controller` paths in the
+//! same step ([`PropertyEdit`]).
+//!
 //! A Terrain's landscape isn't a property, so its changes are steps of their
 //! own ([`TerrainChange`]): a brush stroke keeps the chunks it changed, and a
 //! whole new landscape (generated, eroded, resized) keeps both landscapes.
@@ -100,12 +106,24 @@ pub enum TerrainChange {
     },
 }
 
-/// A stylesheet's text before and after a change, by its path.
+/// A project file's text before and after a change, by its path.
+/// `None` means the file is not there: a create has `before: None`, a delete
+/// has `after: None`, and a rename is one of each.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TextChange {
     pub path: String,
-    pub before: String,
-    pub after: String,
+    pub before: Option<String>,
+    pub after: Option<String>,
+}
+
+/// One property changed as part of an asset step, such as an Animator's
+/// `Controller` path when that controller file is renamed.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PropertyEdit {
+    pub id: InstanceId,
+    pub field: Field,
+    pub before: Value,
+    pub after: Value,
 }
 
 /// One field's value before and after a step.
@@ -150,9 +168,12 @@ enum StepKind {
         key: Field,
         parts: Vec<(InstanceId, Vec<Change>)>,
     },
-    /// Project files rewritten (property animation clips, …), with no
-    /// Instance field changes.
-    Files(Vec<TextChange>),
+    /// Project files created, rewritten, renamed or deleted, plus property
+    /// changes that belong to the same action.
+    Files {
+        texts: Vec<TextChange>,
+        properties: Vec<PropertyEdit>,
+    },
     /// A Terrain's landscape, and its fields changed at the same time
     /// (a new `Size` with a generated landscape).
     Terrain {
@@ -285,15 +306,33 @@ impl History {
     /// Records rewritten project file text as one undo step named `label`
     /// (for example editing a property animation clip).
     pub fn record_files(&mut self, world: &mut World, label: String, texts: Vec<TextChange>) {
+        self.record_asset(world, label, texts, Vec::new());
+    }
+
+    /// Records project file changes, and property changes that are part of
+    /// the same action, as one step named `label`. A missing file is `None`.
+    /// The step does not merge with the next change. Does nothing if nothing
+    /// actually changed.
+    pub fn record_asset(
+        &mut self,
+        world: &mut World,
+        label: String,
+        texts: Vec<TextChange>,
+        properties: Vec<PropertyEdit>,
+    ) {
         let texts: Vec<_> = texts
             .into_iter()
             .filter(|text| text.before != text.after)
             .collect();
-        if texts.is_empty() {
+        let properties: Vec<_> = properties
+            .into_iter()
+            .filter(|edit| edit.before != edit.after)
+            .collect();
+        if texts.is_empty() && properties.is_empty() {
             return;
         }
         self.seal();
-        self.push(world, label, StepKind::Files(texts));
+        self.push(world, label, StepKind::Files { texts, properties });
     }
 
     /// Records a change to several Instances as one step named `label`,
@@ -457,7 +496,10 @@ impl History {
                     restore(world, *id, changes.iter().map(|c| (c.field, &c.before)));
                 }
             }
-            StepKind::Files(texts) => {
+            StepKind::Files { texts, properties } => {
+                for edit in properties {
+                    restore(world, edit.id, std::iter::once((edit.field, &edit.before)));
+                }
                 undone = texts
                     .iter()
                     .map(|text| TextChange {
@@ -504,7 +546,10 @@ impl History {
                     restore(world, *id, changes.iter().map(|c| (c.field, &c.after)));
                 }
             }
-            StepKind::Files(texts) => {
+            StepKind::Files { texts, properties } => {
+                for edit in properties {
+                    restore(world, edit.id, std::iter::once((edit.field, &edit.after)));
+                }
                 redone = texts.clone();
             }
             StepKind::Terrain { id, change, fields } => {
@@ -636,8 +681,8 @@ mod tests {
         let text = |before: &str, after: &str| {
             vec![TextChange {
                 path: "ui.css".into(),
-                before: before.into(),
-                after: after.into(),
+                before: Some(before.into()),
+                after: Some(after.into()),
             }]
         };
         for (before, after) in [("10px", "11px"), ("11px", "12px")] {
@@ -657,6 +702,85 @@ mod tests {
         assert_eq!(history.undo(&mut world), Some(text("12px", "10px")));
         assert_eq!(history.undo(&mut world), None, "both frames are one step");
         assert_eq!(history.redo(&mut world), Some(text("10px", "12px")));
+    }
+
+    #[test]
+    fn creating_a_file_is_one_step_and_saving_keeps_it() {
+        let mut world = World::new();
+        let mut history = History::new();
+        let path = "assets/animations/hero/Walk.anim.json";
+        history.record_files(
+            &mut world,
+            "Create Walk".into(),
+            vec![TextChange {
+                path: path.into(),
+                before: None,
+                after: Some("{}\n".into()),
+            }],
+        );
+        history.mark_saved();
+        assert!(history.is_saved());
+        assert_eq!(history.undo_label(), Some("Create Walk"));
+
+        let undone = history.undo(&mut world).unwrap();
+        assert_eq!(undone[0].path, path);
+        assert_eq!(undone[0].after, None);
+        assert_eq!(history.redo_label(), Some("Create Walk"));
+        let redone = history.redo(&mut world).unwrap();
+        assert_eq!(redone[0].after.as_deref(), Some("{}\n"));
+    }
+
+    #[test]
+    fn renaming_a_controller_file_restores_the_animator_path_too() {
+        let (mut world, part) = world_with_part();
+        let animator = world.create(ClassName::Animator).unwrap();
+        world.set_parent(animator, Some(part)).unwrap();
+        let from = "assets/animations/Hero.controller.json";
+        let to = "assets/animations/Hero2.controller.json";
+        world
+            .set_property(animator, "Controller", Value::String(from.into()))
+            .unwrap();
+        let mut history = History::new();
+        world
+            .set_property(animator, "Controller", Value::String(to.into()))
+            .unwrap();
+        history.record_asset(
+            &mut world,
+            "Rename Hero".into(),
+            vec![
+                TextChange {
+                    path: from.into(),
+                    before: Some("{}\n".into()),
+                    after: None,
+                },
+                TextChange {
+                    path: to.into(),
+                    before: None,
+                    after: Some("{}\n".into()),
+                },
+            ],
+            vec![PropertyEdit {
+                id: animator,
+                field: Field::Property("Controller"),
+                before: Value::String(from.into()),
+                after: Value::String(to.into()),
+            }],
+        );
+        assert_eq!(history.undo_label(), Some("Rename Hero"));
+        history.undo(&mut world);
+        let controller = world
+            .get(animator)
+            .unwrap()
+            .property("Controller")
+            .and_then(Value::as_str);
+        assert_eq!(controller, Some(from));
+        history.redo(&mut world);
+        let controller = world
+            .get(animator)
+            .unwrap()
+            .property("Controller")
+            .and_then(Value::as_str);
+        assert_eq!(controller, Some(to));
     }
 
     #[test]

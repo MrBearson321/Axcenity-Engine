@@ -5,10 +5,13 @@
 //! in the graph). A step bar across the top walks through the five Animator
 //! steps.
 //!
-//! Clips and controllers are files, so changes are written as soon as a
-//! gesture ends (the mouse is let go and nothing is being typed); they
-//! aren't undo steps, like scripts. The previews have their own world,
-//! camera and renderer, so they never touch the world being edited.
+//! Clips and controllers are files. Timeline and graph edits are written as
+//! soon as a gesture ends (the mouse is let go and nothing is being typed);
+//! those edits aren't undo steps, like scripts. Creating, renaming,
+//! duplicating and deleting a clip or controller is one undo step: the panel
+//! reports the file changes and the app records them. The previews have
+//! their own world, camera and renderer, so they never touch the world being
+//! edited.
 
 mod clip_editor;
 mod controller_editor;
@@ -77,6 +80,14 @@ pub enum StudioAction {
         after: String,
         label: String,
     },
+    /// Record a clip or controller create, rename, duplicate or delete.
+    /// `rebind_controller` is set when a controller file moved: Animators
+    /// whose `Controller` was the old path now use the new one, in the same step.
+    RecordFiles {
+        label: String,
+        files: Vec<store::FileDiff>,
+        rebind_controller: Option<(String, String)>,
+    },
 }
 
 /// What's open in the middle of the panel.
@@ -126,6 +137,11 @@ enum Dialog {
         name: String,
         error: Option<String>,
     },
+    RenameController {
+        path: String,
+        name: String,
+        error: Option<String>,
+    },
     /// Delete a clip or controller; for a clip, the controllers that play it.
     Delete { path: String, users: Vec<String> },
 }
@@ -161,21 +177,98 @@ impl AnimationStudio {
         actions
     }
 
-    /// Restores a property clip's file text (after undo/redo) and reloads it
-    /// if it's open.
-    pub fn apply_file_text(&mut self, project: &Path, path: &str, text: &str, output: &mut Output) {
-        if let Err(err) = axcenity_anim::files::write_file(&project.join(path), text) {
-            output.error(format!("Could not restore `{path}`: {err}"));
+    /// Forgets the library scan so the next time the panel is shown it
+    /// lists files undo or redo just put back.
+    pub fn refresh(&mut self) {
+        self.scanned = None;
+    }
+
+    /// Reloads whatever is open after undo or redo wrote `files`. A renamed
+    /// file stays open at its other path; a deleted one closes.
+    pub fn sync_after_history(
+        &mut self,
+        project: &Path,
+        assets: &Assets,
+        world: &mut World,
+        files: &[store::FileDiff],
+        output: &mut Output,
+    ) {
+        self.rescan(project);
+        let Some(open) = self.open_path() else {
             return;
-        }
-        if let Doc::Property(doc) = &mut self.doc
-            && doc.path == path
-        {
-            match axcenity_anim::PropertyClipFile::from_json(text) {
-                Ok(file) => {
-                    *doc = Box::new(PropertyDoc::open(path.to_owned(), file));
+        };
+        let Some(change) = files.iter().find(|file| file.path == open) else {
+            return;
+        };
+        match &change.after {
+            None => {
+                let replacement = files.iter().find(|file| {
+                    file.path != open
+                        && file.before.is_none()
+                        && file.after.is_some()
+                        && same_asset_kind(&file.path, &open)
+                });
+                if let Some(file) = replacement {
+                    let path = file.path.clone();
+                    self.reopen(project, assets, &path, world, output);
+                } else {
+                    self.close_preview(world);
+                    self.doc = Doc::Nothing;
                 }
-                Err(err) => output.error(format!("Could not reload `{path}`: {}", err.0)),
+            }
+            Some(_) => {
+                if open.ends_with(axcenity_anim::CONTROLLER_EXTENSION)
+                    && let Doc::Controller(doc) = &mut self.doc
+                    && let Ok(file) = store::read_controller(project, &open)
+                {
+                    doc.reload(file);
+                    return;
+                }
+                self.reopen(project, assets, &open, world, output);
+            }
+        }
+    }
+
+    /// Opens `path` from disk without writing the document that's already open.
+    fn reopen(
+        &mut self,
+        project: &Path,
+        assets: &Assets,
+        path: &str,
+        world: &mut World,
+        output: &mut Output,
+    ) {
+        let preview = match &self.doc {
+            Doc::Controller(doc) => doc.preview_model.clone(),
+            _ => None,
+        };
+        self.close_preview(world);
+        self.doc = Doc::Nothing;
+        if path.ends_with(axcenity_anim::CLIP_EXTENSION) {
+            match store::read_any_clip(project, path) {
+                Ok(axcenity_anim::AnimClipFile::Take(file)) => {
+                    self.doc = Doc::Clip(Box::new(ClipDoc::open(
+                        path.to_owned(),
+                        file,
+                        assets,
+                        &self.files.models,
+                    )));
+                }
+                Ok(axcenity_anim::AnimClipFile::Property(file)) => {
+                    self.doc = Doc::Property(Box::new(PropertyDoc::open(path.to_owned(), file)));
+                }
+                Err(err) => output.error(format!("Could not open the clip `{path}`: {err}")),
+            }
+        } else if path.ends_with(axcenity_anim::CONTROLLER_EXTENSION) {
+            match store::read_controller(project, path) {
+                Ok(file) => {
+                    let mut doc = ControllerDoc::open(path.to_owned(), file, preview);
+                    if doc.preview_model.is_none() {
+                        doc.preview_model = doc.first_clip_source(project);
+                    }
+                    self.doc = Doc::Controller(Box::new(doc));
+                }
+                Err(err) => output.error(format!("Could not open the controller `{path}`: {err}")),
             }
         }
     }
@@ -710,6 +803,17 @@ impl AnimationStudio {
                                 open = Some((true, path.clone()));
                             }
                             response.context_menu(|ui| {
+                                if ui
+                                    .button(format!("{} Rename", icons::PENCIL_SIMPLE))
+                                    .clicked()
+                                {
+                                    action = Some(("rename-controller", path.clone()));
+                                    ui.close();
+                                }
+                                if ui.button(format!("{} Duplicate", icons::COPY)).clicked() {
+                                    action = Some(("duplicate-controller", path.clone()));
+                                    ui.close();
+                                }
                                 if ui.button(format!("{} Delete", icons::TRASH)).clicked() {
                                     action = Some(("delete", path.clone()));
                                     ui.close();
@@ -768,7 +872,6 @@ impl AnimationStudio {
                         });
                 }
             });
-        let _ = actions;
         match open {
             Some((false, path)) => self.open_clip(project, assets, &path, world, output),
             Some((true, path)) => {
@@ -788,13 +891,49 @@ impl AnimationStudio {
                 });
             }
             Some(("duplicate", path)) => {
-                let _ = self.write_all(project, output);
+                actions.extend(self.write_all(project, output));
                 match store::duplicate_clip(project, &path) {
-                    Ok(copy) => {
-                        output.info(format!("Copied the clip `{path}` as `{copy}`."));
+                    Ok(written) => {
+                        output.info(format!("Copied the clip `{path}` as `{}`.", written.path));
+                        remember(
+                            actions,
+                            format!("Duplicate {}", axcenity_anim::files::clip_name(&path)),
+                            written.files,
+                            None,
+                        );
+                        let copy = written.path;
                         self.open_clip(project, assets, &copy, world, output);
                     }
                     Err(err) => output.error(format!("Could not copy the clip `{path}`: {err}")),
+                }
+            }
+            Some(("rename-controller", path)) => {
+                self.dialog = Some(Dialog::RenameController {
+                    name: store::controller_name(&path).to_owned(),
+                    path,
+                    error: None,
+                });
+            }
+            Some(("duplicate-controller", path)) => {
+                actions.extend(self.write_all(project, output));
+                match store::duplicate_controller(project, &path) {
+                    Ok(written) => {
+                        output.info(format!(
+                            "Copied the controller `{path}` as `{}`.",
+                            written.path
+                        ));
+                        remember(
+                            actions,
+                            format!("Duplicate {}", store::controller_name(&path)),
+                            written.files,
+                            None,
+                        );
+                        let copy = written.path;
+                        self.open_controller(project, assets, &copy, None, world, output);
+                    }
+                    Err(err) => {
+                        output.error(format!("Could not copy the controller `{path}`: {err}"))
+                    }
                 }
             }
             Some((_, path)) => {
@@ -884,9 +1023,15 @@ impl AnimationStudio {
                                 if ui.add_enabled(valid.is_ok(), egui::Button::new("Make clip")).clicked() {
                                     let source = &self.files.models[*model];
                                     match store::new_clip(project, source, &list[*take], name.trim()) {
-                                        Ok(path) => {
-                                            output.info(format!("Made the clip `{path}`."));
-                                            open = Some(path);
+                                        Ok(written) => {
+                                            output.info(format!("Made the clip `{}`.", written.path));
+                                            remember(
+                                                actions,
+                                                format!("Create {}", axcenity_anim::files::clip_name(&written.path)),
+                                                written.files,
+                                                None,
+                                            );
+                                            open = Some(written.path);
                                         }
                                         Err(err) => output.error(format!("Could not make the clip: {err}")),
                                     }
@@ -929,9 +1074,21 @@ impl AnimationStudio {
                         {
                             let file = property_editor::new_property_clip(1.5);
                             match store::create_property_clip(project, name.trim(), &file) {
-                                Ok(path) => {
-                                    output.info(format!("Made the property clip `{path}`."));
-                                    open = Some(path);
+                                Ok(written) => {
+                                    output.info(format!(
+                                        "Made the property clip `{}`.",
+                                        written.path
+                                    ));
+                                    remember(
+                                        actions,
+                                        format!(
+                                            "Create {}",
+                                            axcenity_anim::files::clip_name(&written.path)
+                                        ),
+                                        written.files,
+                                        None,
+                                    );
+                                    open = Some(written.path);
                                 }
                                 Err(err) => {
                                     output.error(format!("Could not make the clip: {err}"))
@@ -976,19 +1133,27 @@ impl AnimationStudio {
                         if ui.add_enabled(valid.is_ok(), egui::Button::new("Make controller")).clicked() {
                             let clips = if *with_clips { model_clips.clone() } else { Vec::new() };
                             match store::new_controller(project, name.trim(), &clips) {
-                                Ok(path) => {
-                                    output.info(format!("Made the controller `{path}`."));
+                                Ok(written) => {
+                                    output.info(format!("Made the controller `{}`.", written.path));
+                                    remember(
+                                        actions,
+                                        format!("Create {}", store::controller_name(&written.path)),
+                                        written.files,
+                                        None,
+                                    );
                                     if let Some(model) = selected
                                         && *assign
                                     {
                                         actions.push(StudioAction::SetController {
                                             part: model.part,
                                             animator: model.animator,
-                                            path: path.clone(),
+                                            path: written.path.clone(),
                                         });
                                     }
-                                    open_controller =
-                                        Some((path, selected.map(|model| model.mesh_id.clone())));
+                                    open_controller = Some((
+                                        written.path,
+                                        selected.map(|model| model.mesh_id.clone()),
+                                    ));
                                 }
                                 Err(err) => output.error(format!("Could not make the controller: {err}")),
                             }
@@ -1009,24 +1174,27 @@ impl AnimationStudio {
                     let enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                     ui.horizontal(|ui| {
                         if ui.button("Rename").clicked() || enter {
-                            let written = match &mut self.doc {
-                                Doc::Clip(clip) => clip.write(project).map(|_| ()),
-                                Doc::Property(clip) => clip.write(project).map(|_| ()),
-                                Doc::Controller(controller) => controller.write(project).map(|_| ()),
-                                Doc::Nothing => Ok(()),
-                            };
-                            if let Err(err) = written {
-                                output.error(format!("Could not save before renaming: {err}"));
+                            if let Some(record) = flush_open(&mut self.doc, project, output) {
+                                actions.push(record);
                             }
                             match store::rename_clip(project, path, name) {
-                                Ok(new) => {
-                                    output.info(format!("Renamed the clip to `{new}`."));
+                                Ok(written) => {
+                                    output.info(format!("Renamed the clip to `{}`.", written.path));
+                                    remember(
+                                        actions,
+                                        format!("Rename {}", axcenity_anim::files::clip_name(path)),
+                                        written.files,
+                                        None,
+                                    );
+                                    let new = written.path;
                                     match &mut self.doc {
                                         Doc::Clip(clip) if clip.path == *path => open = Some(new),
                                         Doc::Property(clip) if clip.path == *path => open = Some(new),
                                         // The rename rewrote the open controller's file.
                                         Doc::Controller(controller) => {
-                                            if let Ok(file) = store::read_controller(project, &controller.path) {
+                                            if let Ok(file) =
+                                                store::read_controller(project, &controller.path)
+                                            {
                                                 controller.reload(file);
                                             }
                                         }
@@ -1042,9 +1210,52 @@ impl AnimationStudio {
                         }
                     });
                 }
+                Dialog::RenameController { path, name, error } => {
+                    ui.heading("Rename controller");
+                    ui.weak("Animators that use it are updated too.");
+                    let response = ui.text_edit_singleline(name);
+                    if let Some(problem) = error {
+                        ui.colored_label(ui.visuals().error_fg_color, problem.as_str());
+                    }
+                    let enter =
+                        response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    ui.horizontal(|ui| {
+                        if ui.button("Rename").clicked() || enter {
+                            if let Some(record) = flush_open(&mut self.doc, project, output) {
+                                actions.push(record);
+                            }
+                            let old = path.clone();
+                            match store::rename_controller(project, path, name) {
+                                Ok(written) => {
+                                    output.info(format!(
+                                        "Renamed the controller to `{}`.",
+                                        written.path
+                                    ));
+                                    let rebind = (old.clone(), written.path.clone());
+                                    remember(
+                                        actions,
+                                        format!("Rename {}", store::controller_name(&old)),
+                                        written.files,
+                                        Some(rebind),
+                                    );
+                                    if let Doc::Controller(controller) = &mut self.doc
+                                        && controller.path == old
+                                    {
+                                        controller.path = written.path;
+                                    }
+                                    close = true;
+                                }
+                                Err(problem) => *error = Some(problem),
+                            }
+                        }
+                        if ui.button("Cancel").clicked() {
+                            close = true;
+                        }
+                    });
+                }
                 Dialog::Delete { path, users } => {
                     ui.heading("Delete?");
-                    ui.label(format!("This deletes `{path}`. It can't be undone."));
+                    ui.label(format!("This deletes `{path}`. Undo puts it back."));
                     if !users.is_empty() {
                         ui.colored_label(
                             ui.visuals().warn_fg_color,
@@ -1053,9 +1264,19 @@ impl AnimationStudio {
                     }
                     ui.horizontal(|ui| {
                         if ui.button(format!("{} Delete", icons::TRASH)).clicked() {
-                            match store::delete_clip(project, path) {
-                                Ok(()) => {
+                            if let Some(record) = flush_open(&mut self.doc, project, output) {
+                                actions.push(record);
+                            }
+                            match store::delete_asset(project, path) {
+                                Ok(files) => {
                                     output.info(format!("Deleted `{path}`."));
+                                    let label = if path.ends_with(axcenity_anim::CONTROLLER_EXTENSION)
+                                    {
+                                        format!("Delete {}", store::controller_name(path))
+                                    } else {
+                                        format!("Delete {}", axcenity_anim::files::clip_name(path))
+                                    };
+                                    remember(actions, label, files, None);
                                     deleted_open = open_path.as_ref() == Some(path);
                                 }
                                 Err(err) => output.error(format!("Could not delete `{path}`: {err}")),
@@ -1090,6 +1311,62 @@ impl AnimationStudio {
             self.open_controller(project, assets, &path, model, world, output);
         }
     }
+}
+
+/// Writes the open document, and records a property-clip edit when that write
+/// changed the file. Clip and controller graph edits stay unrecorded.
+fn flush_open(doc: &mut Doc, project: &Path, output: &mut Output) -> Option<StudioAction> {
+    let result = match doc {
+        Doc::Nothing => Ok(None),
+        Doc::Clip(clip) => clip.write(project).map(|_| None),
+        Doc::Controller(controller) => controller.write(project).map(|_| None),
+        Doc::Property(clip) => match clip.write(project) {
+            Ok(Some((before, after))) => Ok(Some(StudioAction::RecordFile {
+                path: clip.path.clone(),
+                before,
+                after,
+                label: format!("Edit {}", axcenity_anim::files::clip_name(&clip.path)),
+            })),
+            Ok(None) => Ok(None),
+            Err(err) => Err(err),
+        },
+    };
+    match result {
+        Ok(action) => action,
+        Err(err) => {
+            output.error(format!("Could not save before changing the file: {err}"));
+            None
+        }
+    }
+}
+
+fn remember(
+    actions: &mut Vec<StudioAction>,
+    label: String,
+    files: Vec<store::FileDiff>,
+    rebind_controller: Option<(String, String)>,
+) {
+    if files.is_empty() {
+        return;
+    }
+    actions.push(StudioAction::RecordFiles {
+        label,
+        files,
+        rebind_controller,
+    });
+}
+
+fn same_asset_kind(path: &str, other: &str) -> bool {
+    let kind = |path: &str| {
+        if path.ends_with(axcenity_anim::CLIP_EXTENSION) {
+            0
+        } else if path.ends_with(axcenity_anim::CONTROLLER_EXTENSION) {
+            1
+        } else {
+            2
+        }
+    };
+    kind(path) == kind(other)
 }
 
 /// The New controller dialog, named after the selected model if there is one.
