@@ -84,10 +84,13 @@ pub enum ClassName {
     /// Inside a MeshPart with an animated model: plays its animator
     /// controller (states, transitions and parameters) on the model.
     Animator,
+    /// Inside a Part, MeshPart or Model: plays an authored property clip
+    /// (`*.anim.json` with `"kind": "property"`) on that root.
+    Animation,
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 32] = [
+    pub const ALL: [ClassName; 33] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -120,6 +123,7 @@ impl ClassName {
         ClassName::SpotLight,
         ClassName::ParticleEmitter,
         ClassName::Animator,
+        ClassName::Animation,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -156,6 +160,7 @@ impl ClassName {
             ClassName::SpotLight => "SpotLight",
             ClassName::ParticleEmitter => "ParticleEmitter",
             ClassName::Animator => "Animator",
+            ClassName::Animation => "Animation",
         }
     }
 
@@ -432,6 +437,14 @@ impl ClassName {
                 // Plays every state this many times as fast.
                 ("Speed", Value::Number(1.0)),
             ],
+            ClassName::Animation => vec![
+                // Property clip file, such as "assets/animations/Door.anim.json".
+                ("Clip", Value::String(String::new())),
+                ("Enabled", Value::Bool(true)),
+                ("Speed", Value::Number(1.0)),
+                // When set, overrides the clip's loop flag for playback.
+                ("Looped", Value::Bool(false)),
+            ],
             ClassName::Sound => vec![
                 ("SoundId", Value::String(String::new())),
                 ("Volume", Value::Number(1.0)),
@@ -549,12 +562,15 @@ impl ClassName {
             | ClassName::BillboardGui
             | ClassName::PointLight
             | ClassName::SpotLight
-            | ClassName::ParticleEmitter => &[],
+            |             ClassName::ParticleEmitter => &[],
             // Fires when a sound that isn't looped plays to its end.
             ClassName::Sound => &["Ended"],
             // `StateChanged` fires with the new state's name and the old
             // one's; `AnimationEvent` with an event's name, as a clip passes it.
             ClassName::Animator => &["StateChanged", "AnimationEvent"],
+            // `Completed` when a non-looping property clip finishes;
+            // `AnimationEvent` with a marker name as the clip passes it.
+            ClassName::Animation => &["Completed", "AnimationEvent"],
             // Fires on both parts when two parts start touching.
             ClassName::Part | ClassName::MeshPart => &["Touched"],
             // `OnServerEvent` fires in Scripts for each `FireServer`, and

@@ -124,6 +124,20 @@ impl EditorApp {
                 );
             }
         }
+        if what == Insertable::Animation {
+            let parent = tree::insert_parent(&self.world, near.or(self.selected), what);
+            let ok = self.world.get(parent).is_some_and(|instance| {
+                matches!(
+                    instance.class(),
+                    ClassName::Part | ClassName::MeshPart | ClassName::Model
+                )
+            });
+            if !ok {
+                self.output.warning(
+                    "An Animation plays a property clip on the Part or Model it's inside.",
+                );
+            }
+        }
         if tree::needs_screen_gui(&self.world, near, what) {
             self.insert_named(Insertable::ScreenGui, None, "ScreenGui", Vec::new());
             let gui = self.selected;

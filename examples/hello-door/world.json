@@ -1,0 +1,55 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Anchored": true,
+          "Position": [0, -0.5, 0],
+          "Size": [20, 1, 20],
+          "Color": [0.35, 0.4, 0.35],
+          "Metalness": 0,
+          "Roughness": 0.8
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Door",
+        "properties": {
+          "Anchored": true,
+          "Position": [0, 2, 0],
+          "Size": [4, 4, 0.5],
+          "Color": [0.55, 0.35, 0.2],
+          "Metalness": 0,
+          "Roughness": 0.5
+        },
+        "children": [
+          {
+            "class": "Animation",
+            "name": "Open",
+            "properties": {
+              "Clip": "assets/animations/Door.anim.json",
+              "Enabled": true,
+              "Speed": 1.0,
+              "Looped": false
+            }
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "Pad",
+        "properties": {
+          "Anchored": true,
+          "Position": [0, 0.25, 6],
+          "Size": [4, 0.5, 4],
+          "Color": [0.2, 0.55, 0.85],
+          "Metalness": 0,
+          "Roughness": 0.4
+        }
+      }
+    ]
+  }
+}

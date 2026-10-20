@@ -5,8 +5,10 @@
 
 use std::path::Path;
 
-use axcenity_anim::files::{self, ClipFile, ControllerFile, Motion, StateDef};
-use axcenity_anim::{ANIMATIONS_FOLDER, CLIP_EXTENSION, CONTROLLER_EXTENSION};
+use axcenity_anim::files::{self, AnimClipFile, ClipFile, ControllerFile, Motion, StateDef};
+use axcenity_anim::{
+    ANIMATIONS_FOLDER, CLIP_EXTENSION, CONTROLLER_EXTENSION, PropertyClipFile,
+};
 use axcenity_assets::{MODELS_FOLDER, Take};
 
 /// What the project has, as paths from its folder with `/` between folders.
@@ -73,12 +75,44 @@ pub fn group_of(path: &str) -> &str {
 }
 
 pub fn read_clip(project: &Path, path: &str) -> Result<ClipFile, String> {
+    match read_any_clip(project, path)? {
+        AnimClipFile::Take(clip) => Ok(clip),
+        AnimClipFile::Property(_) => Err(
+            "it is a property clip; open it from the Animation Library as a property clip".into(),
+        ),
+    }
+}
+
+/// Reads either a take clip or a property clip.
+pub fn read_any_clip(project: &Path, path: &str) -> Result<AnimClipFile, String> {
     let text = std::fs::read_to_string(project.join(path)).map_err(|err| err.to_string())?;
-    ClipFile::from_json(&text).map_err(|err| err.0)
+    AnimClipFile::from_json(&text).map_err(|err| err.0)
 }
 
 pub fn save_clip(project: &Path, path: &str, clip: &ClipFile) -> std::io::Result<()> {
     files::write_file(&project.join(path), &clip.to_json())
+}
+
+pub fn save_property_clip(
+    project: &Path,
+    path: &str,
+    clip: &PropertyClipFile,
+) -> std::io::Result<()> {
+    files::write_file(&project.join(path), &clip.to_json())
+}
+
+/// Creates a new property clip file and returns its project-relative path.
+pub fn create_property_clip(
+    project: &Path,
+    name: &str,
+    clip: &PropertyClipFile,
+) -> Result<String, String> {
+    let name = check_name(name)?;
+    let folder = ANIMATIONS_FOLDER.to_owned();
+    std::fs::create_dir_all(project.join(&folder)).map_err(|err| err.to_string())?;
+    let path = free_clip_path(project, &folder, &name);
+    save_property_clip(project, &path, clip).map_err(|err| err.to_string())?;
+    Ok(path)
 }
 
 /// Why `name` can't be a clip's name, if it can't.

@@ -1622,7 +1622,7 @@ mod tests {
         let world_file = axcenity_project::write_world(&app.world);
         let drawn_before = drawn_parts(&app);
 
-        app.selected = Some(wheel);
+        app.select_from_viewport(Some(wheel));
         app.act(Action::Delete(model));
         assert!(!children(&app, workspace).contains(&model));
         for id in [model, wheel, hub] {
@@ -1933,7 +1933,7 @@ mod tests {
         inserted(&mut app, Insertable::Part(PartType::Wedge), Some(model));
         let folder_id = inserted(&mut app, Insertable::Folder, None);
         app.act(Action::Delete(folder_id));
-        app.selected = Some(pad);
+        app.select_from_viewport(Some(pad));
         app.play();
         let before = everything(&app);
         let game_ball = part(&app, "Ball");

@@ -1,9 +1,11 @@
 //! The animation files in a project: clips (`*.anim.json`) and animator
 //! controllers (`*.controller.json`), plain JSON like the world file.
 //!
-//! A clip names a take in a model file and the part of it to play, with
-//! how it plays (speed, looping, root motion) and its events. A controller
-//! holds an Animator's parameters, states, default state and transitions.
+//! A **take clip** names a take in a model file and the part of it to play,
+//! with how it plays (speed, looping, root motion) and its events. A
+//! **property clip** (`"kind": "property"`) stores authored Position /
+//! Orientation / Size keyframes for Parts. A controller holds an Animator's
+//! parameters, states, default state and transitions (take clips only).
 //! Paths in them are from the project folder, with `/` between folders.
 
 use std::path::Path;
@@ -89,6 +91,156 @@ pub struct ClipEvent {
     /// Seconds from the clip's start.
     pub time: f64,
     pub name: String,
+}
+
+/// How a property keyframe reaches the next one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Interp {
+    Step,
+    #[default]
+    Linear,
+}
+
+/// Which Part property a property track drives.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PropertyName {
+    Position,
+    Orientation,
+    Size,
+}
+
+impl PropertyName {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PropertyName::Position => "Position",
+            PropertyName::Orientation => "Orientation",
+            PropertyName::Size => "Size",
+        }
+    }
+}
+
+/// One key on a property track.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PropertyKeyframe {
+    pub id: String,
+    pub time: f64,
+    /// Vector3 as `[x, y, z]` (degrees for Orientation).
+    pub value: [f32; 3],
+    #[serde(default)]
+    pub interp: Interp,
+}
+
+/// One animated property on a relative target.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PropertyTrack {
+    pub id: String,
+    /// Relative to the Animation's parent: `.` is that Part/Model.
+    pub target: String,
+    pub property: PropertyName,
+    pub keys: Vec<PropertyKeyframe>,
+}
+
+/// An authored property clip (`"kind": "property"`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PropertyClipFile {
+    pub format_version: u32,
+    /// Always [`Self::KIND`].
+    pub kind: String,
+    /// Explicit length in seconds. Keys must lie in `0..=duration`.
+    pub duration: f64,
+    #[serde(rename = "loop", default = "yes")]
+    pub looping: bool,
+    #[serde(default)]
+    pub tracks: Vec<PropertyTrack>,
+    #[serde(default)]
+    pub events: Vec<ClipEvent>,
+}
+
+impl PropertyClipFile {
+    pub const KIND: &'static str = "property";
+
+    pub fn new(duration: f64) -> Self {
+        Self {
+            format_version: FORMAT_VERSION,
+            kind: Self::KIND.to_owned(),
+            duration,
+            looping: false,
+            tracks: Vec::new(),
+            events: Vec::new(),
+        }
+    }
+
+    pub fn from_json(text: &str) -> Result<Self, FileError> {
+        let clip: Self = parse(text)?;
+        check_version(clip.format_version)?;
+        if clip.kind != Self::KIND {
+            return Err(FileError(format!(
+                "its kind is `{}`, not `{}`",
+                clip.kind,
+                Self::KIND
+            )));
+        }
+        if !clip.duration.is_finite() {
+            return Err(FileError("its duration must be a number".into()));
+        }
+        Ok(clip)
+    }
+
+    pub fn to_json(&self) -> String {
+        to_json(self)
+    }
+}
+
+/// Either kind of `*.anim.json` clip.
+#[derive(Clone, Debug, PartialEq)]
+pub enum AnimClipFile {
+    Take(ClipFile),
+    Property(PropertyClipFile),
+}
+
+impl AnimClipFile {
+    /// Reads a clip file, branching on `"kind": "property"`.
+    pub fn from_json(text: &str) -> Result<Self, FileError> {
+        let value: serde_json::Value = serde_json::from_str(text).map_err(|err| {
+            FileError(format!(
+                "line {}, column {}: {err}",
+                err.line(),
+                err.column()
+            ))
+        })?;
+        match value.get("kind").and_then(|kind| kind.as_str()) {
+            Some(PropertyClipFile::KIND) => {
+                let clip: PropertyClipFile = serde_json::from_value(value).map_err(|err| {
+                    FileError(format!("it isn't a valid property clip: {err}"))
+                })?;
+                check_version(clip.format_version)?;
+                if clip.kind != PropertyClipFile::KIND {
+                    return Err(FileError(format!(
+                        "its kind is `{}`, not `{}`",
+                        clip.kind,
+                        PropertyClipFile::KIND
+                    )));
+                }
+                Ok(Self::Property(clip))
+            }
+            Some(other) => Err(FileError(format!(
+                "unknown clip kind `{other}` (expected `{kind}` or a take clip)",
+                kind = PropertyClipFile::KIND
+            ))),
+            None => {
+                let clip: ClipFile = serde_json::from_value(value)
+                    .map_err(|err| FileError(format!("it isn't a valid take clip: {err}")))?;
+                check_version(clip.format_version)?;
+                if !(clip.start.is_finite() && clip.end.is_finite() && clip.speed.is_finite()) {
+                    return Err(FileError("its start, end and speed must be numbers".into()));
+                }
+                Ok(Self::Take(clip))
+            }
+        }
+    }
 }
 
 /// An animator controller file.

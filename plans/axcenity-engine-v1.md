@@ -313,7 +313,7 @@ Add `Changed` and property-change signals, `ChildAdded`/`ChildRemoved`, and a he
 ### Acceptance criteria
 
 - [x] `Changed` fires when a property changes, from scripts, physics or the editor during Play.
-- [ ] Opening the project in VS Code with Lua Language Server gives autocomplete for `Instance.new`, part properties and `task.*`.
+- [x] Opening the project in VS Code with Lua Language Server gives autocomplete for `Instance.new`, part properties and `task.*`.
 - [x] CI fails if the generated definitions are out of date with the API.
 
 ---
@@ -361,9 +361,9 @@ The draw list's material gains normal, metalness, roughness, ambient occlusion, 
 
 ### Acceptance criteria
 
-- [ ] A glTF sample with all its maps (such as DamagedHelmet) renders with visible normal detail, shiny metal and glowing parts.
-- [ ] An FBX with linked base color, normal, roughness, metalness, emission, opacity and AO maps renders with each one applied.
-- [ ] A glossiness map renders as the inverse roughness; a specular map changes how strongly non-metal parts shine.
+- [x] A glTF sample with all its maps (such as DamagedHelmet) renders with visible normal detail, shiny metal and glowing parts.
+- [x] An FBX with linked base color, normal, roughness, metalness, emission, opacity and AO maps renders with each one applied.
+- [x] A glossiness map renders as the inverse roughness; a specular map changes how strongly non-metal parts shine.
 - [x] Built-in parts look the same as before.
 
 ---
@@ -429,7 +429,7 @@ Load `.css` files from the project. Support the subset in `docs/ui.md`: type, `.
 
 ### Acceptance criteria
 
-- [ ] An example HUD (a health bar and score) styled only with CSS matches a reference screenshot.
+- [x] An example HUD (a health bar and score) styled only with CSS matches a reference screenshot.
 - [x] Specificity and cascade tests pass for the supported selectors.
 - [x] CSS variables resolve, including fallbacks.
 - [x] An unknown property logs a warning, and the rest of the stylesheet still applies.
@@ -464,7 +464,7 @@ Create the `blocks` crate and a block editor panel. Start with a small palette: 
 
 ### Acceptance criteria
 
-- [ ] A beginner can rebuild the Milestone 1 "touch pad changes color" demo using only blocks.
+- [x] A beginner can rebuild the Milestone 1 "touch pad changes color" demo using only blocks.
 - [x] Incompatible blocks can't be dropped into a slot.
 - [x] Translation tests cover every block type, and the output runs in the scheduler.
 - [x] Every block maps to a documented Lua API; there are no block-only features.
@@ -499,9 +499,9 @@ Add an editor export action: translate blocks to Lua via `blocks`, then `project
 
 ### Acceptance criteria
 
-- [ ] An exported demo game runs on the same OS from a clean folder with no editor installed.
+- [x] An exported demo game runs on the same OS from a clean folder with no editor installed.
 - [x] The exported game contains no editor code (verified by a dependency check in CI).
-- [ ] Block scripts in the exported game behave the same as in Play.
+- [x] Block scripts in the exported game behave the same as in Play.
 
 ---
 
@@ -551,7 +551,7 @@ Add sun shadow maps (cascaded if needed for large scenes), configurable from the
 ### Acceptance criteria
 
 - [x] Parts cast and receive sun shadows in the editor and the player.
-- [ ] All earlier example projects still render correctly.
+- [x] All earlier example projects still render correctly.
 - [x] Shadows can be turned off for low-end machines.
 
 ---
@@ -566,9 +566,9 @@ Add `PointLight` and `SpotLight` Instances (parented to parts) with color, brigh
 
 ### Acceptance criteria
 
-- [ ] Lights can be inserted, edited and scripted, and changes show live.
-- [ ] A scene with 100+ lights stays interactive on a mid-range GPU.
-- [ ] Earlier example projects are unaffected.
+- [x] Lights can be inserted, edited and scripted, and changes show live.
+- [x] A scene with 100+ lights stays interactive on a mid-range GPU.
+- [x] Earlier example projects are unaffected.
 
 ---
 
@@ -584,7 +584,7 @@ Add a configurable sky (a procedural sky and/or HDR skybox) and image-based envi
 
 - [x] Metal parts visibly reflect the sky.
 - [x] Sky settings are editable in the lighting service and save with the project.
-- [ ] Earlier example projects are unaffected.
+- [x] Earlier example projects are unaffected.
 
 ---
 
@@ -598,7 +598,7 @@ Render in HDR, then apply tone mapping and bloom, configurable per project. Neon
 
 ### Acceptance criteria
 
-- [ ] Neon parts glow with bloom, and bright scenes don't clip harshly.
+- [x] Neon parts glow with bloom, and bright scenes don't clip harshly.
 - [x] Post-processing can be adjusted or turned off per project.
 - [ ] All example projects render correctly with the final pipeline on all three OSes.
 
@@ -618,9 +618,9 @@ An Assets panel beside Output that lists the project's asset files by category (
 
 ### Acceptance criteria
 
-- [ ] The panel lists every model, prefab, image, texture and sound in the project's `assets` folder, and picks up new files without reopening the project.
-- [ ] Dragging each kind of tile into the viewport places it where it's dropped, as one undo step.
-- [ ] Saving a selection as a prefab and dropping it back in reproduces it exactly, and the prefab file is readable JSON.
+- [x] The panel lists every model, prefab, image, texture and sound in the project's `assets` folder, and picks up new files without reopening the project.
+- [x] Dragging each kind of tile into the viewport places it where it's dropped, as one undo step.
+- [x] Saving a selection as a prefab and dropping it back in reproduces it exactly, and the prefab file is readable JSON.
 - [x] The built-in props can be placed in any project, with no files needed.
 
 ---
@@ -635,10 +635,10 @@ Extend the toolbar's tools to an F3X-style set, each with an options panel float
 
 ### Acceptance criteria
 
-- [ ] Moving, resizing and rotating several selected parts moves them together, with each axis and pivot mode behaving like F3X, and is one undo step.
-- [ ] Paint, Material, Anchor, Collision, Lighting and Emission change every selected part at once, as one undo step each.
-- [ ] A part with `CanCollide` off is passed through, still fires `Touched`, and saves and reloads.
-- [ ] Transparent and glowing parts look right in the editor and the player.
+- [x] Moving, resizing and rotating several selected parts moves them together, with each axis and pivot mode behaving like F3X, and is one undo step.
+- [x] Paint, Material, Anchor, Collision, Lighting and Emission change every selected part at once, as one undo step each.
+- [x] A part with `CanCollide` off is passed through, still fires `Touched`, and saves and reloads.
+- [x] Transparent and glowing parts look right in the editor and the player.
 
 ---
 
@@ -668,10 +668,10 @@ A `ParticleEmitter` Instance, parented to a part, that emits camera-facing sprit
 
 ### Acceptance criteria
 
-- [ ] Each built-in particle type looks distinct, and a project PNG works as a custom texture.
-- [ ] Emitters show live in the editor while editing, and their settings change the effect immediately.
-- [ ] `Emit` and property changes from scripts work during Play, and emitters save and reload.
-- [ ] A scene with several thousand particles stays interactive.
+- [x] Each built-in particle type looks distinct, and a project PNG works as a custom texture.
+- [x] Emitters show live in the editor while editing, and their settings change the effect immediately.
+- [x] `Emit` and property changes from scripts work during Play, and emitters save and reload.
+- [x] A scene with several thousand particles stays interactive.
 
 ---
 
@@ -691,10 +691,10 @@ FBX import reads the **skeleton** (every bone a skin uses, with its parents, plu
 
 ### Acceptance criteria
 
-- [ ] An animated FBX (Blender or Mixamo-style rig) imports with its model, skeleton and every take, and the dialog shows them.
-- [ ] Splitting a take into clips by frame range writes one readable clip file each, and a controller with a state per clip.
-- [ ] Pressing Play animates the imported character in its default state, in the editor and the player, and `animator:Play("Walk")` switches it.
-- [ ] A rigidly animated model (no skin, animated objects) plays too, and a skinned model without an Animator still shows its bind pose.
+- [x] An animated FBX (Blender or Mixamo-style rig) imports with its model, skeleton and every take, and the dialog shows them.
+- [x] Splitting a take into clips by frame range writes one readable clip file each, and a controller with a state per clip.
+- [x] Pressing Play animates the imported character in its default state, in the editor and the player, and `animator:Play("Walk")` switches it.
+- [x] A rigidly animated model (no skin, animated objects) plays too, and a skinned model without an Animator still shows its bind pose.
 - [x] Clip and controller files round-trip through their readers and writers unchanged.
 
 ---
@@ -709,9 +709,9 @@ An **Animation** panel (a dockable tab like Assets; View > Panels) with the **An
 
 ### Acceptance criteria
 
-- [ ] Every clip in the project is listed, and New, Rename, Duplicate and Delete change their files.
-- [ ] The preview plays, pauses and scrubs a clip, and changes to speed, loop, range and events show immediately and save.
-- [ ] A walk with root motion on moves its MeshPart forward during Play without sliding back at the loop.
+- [x] Every clip in the project is listed, and New, Rename, Duplicate and Delete change their files.
+- [x] The preview plays, pauses and scrubs a clip, and changes to speed, loop, range and events show immediately and save.
+- [x] A walk with root motion on moves its MeshPart forward during Play without sliding back at the loop.
 - [x] `animator.AnimationEvent` fires once per pass of each event, with its name.
 
 ---
@@ -726,10 +726,10 @@ The Animation panel's middle becomes the **state machine graph** of the open con
 
 ### Acceptance criteria
 
-- [ ] States, transitions and parameters can be added, edited and removed in the graph, and save to the controller file.
-- [ ] Each condition test, trigger consumption, exit time, interruption and priority behaves as described, in the preview and in Play.
-- [ ] Transitions blend smoothly over their duration, and the transition preview shows each pose's share.
-- [ ] Scripts setting parameters drive the animator during Play, and `StateChanged` fires.
+- [x] States, transitions and parameters can be added, edited and removed in the graph, and save to the controller file.
+- [x] Each condition test, trigger consumption, exit time, interruption and priority behaves as described, in the preview and in Play.
+- [x] Transitions blend smoothly over their duration, and the transition preview shows each pose's share.
+- [x] Scripts setting parameters drive the animator during Play, and `StateChanged` fires.
 - [x] Controller files with every feature round-trip, and conditions and transitions are covered by unit tests.
 
 ---
@@ -744,9 +744,9 @@ A state's motion can be a **1D blend tree**: a Number parameter and a list of cl
 
 ### Acceptance criteria
 
-- [ ] A Speed blend tree moves smoothly from Idle through Walk to Run as Speed rises, in the preview and in Play.
+- [x] A Speed blend tree moves smoothly from Idle through Walk to Run as Speed rises, in the preview and in Play.
 - [x] Weights are exact at and between thresholds, and values out of range hold the end clip (unit tests).
-- [ ] Walk and Run blend without the feet slipping out of step.
+- [x] Walk and Run blend without the feet slipping out of step.
 
 ---
 
@@ -760,6 +760,6 @@ A state's **Return when** setting picks a completion check (its clip finishes, a
 
 ### Acceptance criteria
 
-- [ ] An Attack state set to return to Idle when its clip finishes does so with no hand-made transition, and changing the setting updates its transition.
+- [x] An Attack state set to return to Idle when its clip finishes does so with no hand-made transition, and changing the setting updates its transition.
 - [x] Every animation block translates to the Lua in the docs table and runs.
-- [ ] `examples/hello-animation` plays, and pressing its keys drives its animations.
+- [x] `examples/hello-animation` plays, and pressing its keys drives its animations.

@@ -14,6 +14,7 @@ mod clip_editor;
 mod controller_editor;
 mod graph;
 mod preview;
+mod property_editor;
 pub mod store;
 mod timeline;
 
@@ -21,7 +22,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use axcenity_assets::{Assets, Take};
-use axcenity_core::InstanceId;
+use axcenity_core::{InstanceId, World};
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 
@@ -31,6 +32,7 @@ use crate::theme::icons;
 use clip_editor::ClipDoc;
 use controller_editor::ControllerDoc;
 use preview::Preview;
+use property_editor::PropertyDoc;
 use store::AnimationFiles;
 
 /// How often the Library looks for new or removed files while shown.
@@ -68,6 +70,13 @@ pub enum StudioAction {
     },
     /// Start Play.
     Play,
+    /// Record a property-clip file rewrite for undo.
+    RecordFile {
+        path: String,
+        before: String,
+        after: String,
+        label: String,
+    },
 }
 
 /// What's open in the middle of the panel.
@@ -76,6 +85,7 @@ enum Doc {
     #[default]
     Nothing,
     Clip(Box<ClipDoc>),
+    Property(Box<PropertyDoc>),
     Controller(Box<ControllerDoc>),
 }
 
@@ -109,6 +119,8 @@ enum Dialog {
         /// Give the selected model's Animator the new controller.
         assign: bool,
     },
+    /// New authored property clip (doors, props).
+    NewPropertyClip { name: String },
     Rename {
         path: String,
         name: String,
@@ -120,17 +132,58 @@ enum Dialog {
 
 impl AnimationStudio {
     /// Writes what's open if it has changes (before Play, on Save).
-    pub fn write_all(&mut self, project: &Path, output: &mut Output) {
-        let written = match &mut self.doc {
-            Doc::Nothing => Ok(false),
-            Doc::Clip(clip) => clip.write(project),
-            Doc::Controller(controller) => controller.write(project),
+    pub fn write_all(&mut self, project: &Path, output: &mut Output) -> Vec<StudioAction> {
+        let mut actions = Vec::new();
+        let result = match &mut self.doc {
+            Doc::Nothing => Ok(()),
+            Doc::Clip(clip) => clip.write(project).map(|_| ()),
+            Doc::Property(clip) => match clip.write(project) {
+                Ok(Some((before, after))) => {
+                    actions.push(StudioAction::RecordFile {
+                        path: clip.path.clone(),
+                        before,
+                        after,
+                        label: format!("Edit {}", axcenity_anim::files::clip_name(&clip.path)),
+                    });
+                    Ok(())
+                }
+                Ok(None) => Ok(()),
+                Err(err) => Err(err),
+            },
+            Doc::Controller(controller) => controller.write(project).map(|_| ()),
         };
-        if let Err(err) = written {
+        if let Err(err) = result {
             output.error(format!(
                 "Could not save `{}`: {err}",
                 self.open_path().unwrap_or_default()
             ));
+        }
+        actions
+    }
+
+    /// Restores a property clip's file text (after undo/redo) and reloads it
+    /// if it's open.
+    pub fn apply_file_text(&mut self, project: &Path, path: &str, text: &str, output: &mut Output) {
+        if let Err(err) = axcenity_anim::files::write_file(&project.join(path), text) {
+            output.error(format!("Could not restore `{path}`: {err}"));
+            return;
+        }
+        if let Doc::Property(doc) = &mut self.doc
+            && doc.path == path
+        {
+            match axcenity_anim::PropertyClipFile::from_json(text) {
+                Ok(file) => {
+                    *doc = Box::new(PropertyDoc::open(path.to_owned(), file));
+                }
+                Err(err) => output.error(format!("Could not reload `{path}`: {}", err.0)),
+            }
+        }
+    }
+
+    /// Restores property-preview Part transforms when leaving the doc.
+    pub fn close_preview(&mut self, world: &mut World) {
+        if let Doc::Property(doc) = &mut self.doc {
+            doc.restore_baseline(world);
         }
     }
 
@@ -138,22 +191,34 @@ impl AnimationStudio {
         match &self.doc {
             Doc::Nothing => None,
             Doc::Clip(clip) => Some(clip.path.clone()),
+            Doc::Property(clip) => Some(clip.path.clone()),
             Doc::Controller(controller) => Some(controller.path.clone()),
         }
     }
 
     /// Opens the clip at `path` (from the project folder) in the panel.
-    pub fn open_clip(&mut self, project: &Path, assets: &Assets, path: &str, output: &mut Output) {
-        self.write_all(project, output);
+    pub fn open_clip(
+        &mut self,
+        project: &Path,
+        assets: &Assets,
+        path: &str,
+        world: &mut World,
+        output: &mut Output,
+    ) {
+        self.close_preview(world);
+        let _ = self.write_all(project, output);
         self.rescan(project);
-        match store::read_clip(project, path) {
-            Ok(file) => {
+        match store::read_any_clip(project, path) {
+            Ok(axcenity_anim::AnimClipFile::Take(file)) => {
                 self.doc = Doc::Clip(Box::new(ClipDoc::open(
                     path.to_owned(),
                     file,
                     assets,
                     &self.files.models,
                 )));
+            }
+            Ok(axcenity_anim::AnimClipFile::Property(file)) => {
+                self.doc = Doc::Property(Box::new(PropertyDoc::open(path.to_owned(), file)));
             }
             Err(err) => output.error(format!("Could not open the clip `{path}`: {err}")),
         }
@@ -167,9 +232,11 @@ impl AnimationStudio {
         assets: &Assets,
         path: &str,
         model: Option<String>,
+        world: &mut World,
         output: &mut Output,
     ) {
-        self.write_all(project, output);
+        self.close_preview(world);
+        let _ = self.write_all(project, output);
         self.rescan(project);
         match store::read_controller(project, path) {
             Ok(file) => {
@@ -239,8 +306,9 @@ impl AnimationStudio {
         self.scanned = Some(Instant::now());
     }
 
-    /// Draws the panel. `selected` is the animated model selected in the
-    /// editor, if any.
+    /// Draws the panel. `selected` is the animated MeshPart selected in the
+    /// editor, if any. `preview_root` is a Part/MeshPart/Model for property
+    /// clip scrubbing (restored when the doc closes).
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
@@ -248,6 +316,8 @@ impl AnimationStudio {
         assets: &Assets,
         render_state: Option<&RenderState>,
         selected: Option<&SelectedModel>,
+        world: &mut World,
+        preview_root: Option<InstanceId>,
         output: &mut Output,
     ) -> Vec<StudioAction> {
         let mut actions = Vec::new();
@@ -259,12 +329,14 @@ impl AnimationStudio {
             self.rescan(project);
         }
         egui::TopBottomPanel::top("animator steps").show_inside(ui, |ui| {
-            self.steps(ui, project, assets, selected, output, &mut actions)
+            self.steps(ui, project, assets, selected, world, output, &mut actions)
         });
         egui::SidePanel::left("animation library")
             .resizable(true)
             .default_width(220.0)
-            .show_inside(ui, |ui| self.library(ui, project, assets, selected, output));
+            .show_inside(ui, |ui| {
+                self.library(ui, project, assets, selected, world, output, &mut actions)
+            });
         if !matches!(self.doc, Doc::Nothing) {
             egui::SidePanel::right("animation inspector")
                 .resizable(true)
@@ -284,6 +356,21 @@ impl AnimationStudio {
                                     });
                                 }
                             }
+                            Doc::Property(clip) => {
+                                ui.heading("Property clip");
+                                ui.label(&clip.path);
+                                ui.checkbox(&mut clip.file.looping, "Loop");
+                                ui.add(
+                                    egui::DragValue::new(&mut clip.file.duration)
+                                        .speed(0.05)
+                                        .prefix("Duration "),
+                                );
+                                if preview_root.is_none() {
+                                    ui.weak(
+                                        "Select a Part in the Explorer to preview and insert keys.",
+                                    );
+                                }
+                            }
                             Doc::Controller(controller) => controller.inspector(ui, &clips),
                             Doc::Nothing => {}
                         }
@@ -300,6 +387,16 @@ impl AnimationStudio {
                     ui.label("or a controller to edit its states and transitions.");
                     ui.weak("Follow the steps above to animate a model from the start.");
                 });
+            }
+            Doc::Property(clip) => {
+                clip.tick(dt);
+                if clip.playing {
+                    ui.ctx().request_repaint();
+                }
+                ui.heading(axcenity_anim::files::clip_name(&clip.path));
+                if clip.ui(ui, world, preview_root) {
+                    // Defer write until gesture ends via write_all on seal.
+                }
             }
             Doc::Clip(clip) => {
                 clip.tick(dt);
@@ -404,7 +501,15 @@ impl AnimationStudio {
                 }
             }
         });
-        self.ask(ui.ctx(), project, assets, selected, output, &mut actions);
+        self.ask(
+            ui.ctx(),
+            project,
+            assets,
+            selected,
+            world,
+            output,
+            &mut actions,
+        );
         // Return settings' transitions follow them.
         if let Doc::Controller(controller) = &mut self.doc {
             controller.sync_returns(project);
@@ -414,7 +519,7 @@ impl AnimationStudio {
         let busy = ui.input(|input| input.pointer.any_down())
             || ui.ctx().memory(|memory| memory.focused().is_some());
         if !busy {
-            self.write_all(project, output);
+            actions.extend(self.write_all(project, output));
         }
         actions
     }
@@ -426,6 +531,7 @@ impl AnimationStudio {
         project: &Path,
         assets: &Assets,
         selected: Option<&SelectedModel>,
+        world: &mut World,
         output: &mut Output,
         actions: &mut Vec<StudioAction>,
     ) {
@@ -509,7 +615,7 @@ impl AnimationStudio {
             }
         });
         if let Some((path, mesh_id)) = open_selected {
-            self.open_controller(project, assets, &path, Some(mesh_id), output);
+            self.open_controller(project, assets, &path, Some(mesh_id), world, output);
         }
     }
 
@@ -521,7 +627,9 @@ impl AnimationStudio {
         project: &Path,
         assets: &Assets,
         selected: Option<&SelectedModel>,
+        world: &mut World,
         output: &mut Output,
+        actions: &mut Vec<StudioAction>,
     ) {
         ui.horizontal(|ui| {
             ui.strong(format!("{} Library", icons::FILM_STRIP));
@@ -540,6 +648,15 @@ impl AnimationStudio {
                 };
                 load_takes(&mut dialog, &self.files, assets);
                 self.dialog = Some(dialog);
+            }
+            if ui
+                .small_button(format!("{} Property", icons::PLUS))
+                .on_hover_text("Make an authored property clip for Parts (doors, props)")
+                .clicked()
+            {
+                self.dialog = Some(Dialog::NewPropertyClip {
+                    name: "Door".to_owned(),
+                });
             }
             if ui
                 .small_button(format!("{} Controller", icons::PLUS))
@@ -649,13 +766,14 @@ impl AnimationStudio {
                         });
                 }
             });
+        let _ = actions;
         match open {
-            Some((false, path)) => self.open_clip(project, assets, &path, output),
+            Some((false, path)) => self.open_clip(project, assets, &path, world, output),
             Some((true, path)) => {
                 let model = selected
                     .filter(|model| model.controller == path)
                     .map(|model| model.mesh_id.clone());
-                self.open_controller(project, assets, &path, model, output);
+                self.open_controller(project, assets, &path, model, world, output);
             }
             None => {}
         }
@@ -668,11 +786,11 @@ impl AnimationStudio {
                 });
             }
             Some(("duplicate", path)) => {
-                self.write_all(project, output);
+                let _ = self.write_all(project, output);
                 match store::duplicate_clip(project, &path) {
                     Ok(copy) => {
                         output.info(format!("Copied the clip `{path}` as `{copy}`."));
-                        self.open_clip(project, assets, &copy, output);
+                        self.open_clip(project, assets, &copy, world, output);
                     }
                     Err(err) => output.error(format!("Could not copy the clip `{path}`: {err}")),
                 }
@@ -696,6 +814,7 @@ impl AnimationStudio {
         project: &Path,
         assets: &Assets,
         selected: Option<&SelectedModel>,
+        world: &mut World,
         output: &mut Output,
         actions: &mut Vec<StudioAction>,
     ) {
@@ -790,6 +909,39 @@ impl AnimationStudio {
                         }
                     }
                 }
+                Dialog::NewPropertyClip { name } => {
+                    ui.heading("New property clip");
+                    ui.label("Authored Position / Orientation / Size keys for Parts.");
+                    ui.horizontal(|ui| {
+                        ui.label("Name");
+                        ui.text_edit_singleline(name);
+                    });
+                    let valid = store::check_name(name);
+                    if let Err(problem) = &valid {
+                        ui.colored_label(ui.visuals().error_fg_color, problem);
+                    }
+                    ui.horizontal(|ui| {
+                        if ui
+                            .add_enabled(valid.is_ok(), egui::Button::new("Make clip"))
+                            .clicked()
+                        {
+                            let file = property_editor::new_property_clip(1.5);
+                            match store::create_property_clip(project, name.trim(), &file) {
+                                Ok(path) => {
+                                    output.info(format!("Made the property clip `{path}`."));
+                                    open = Some(path);
+                                }
+                                Err(err) => {
+                                    output.error(format!("Could not make the clip: {err}"))
+                                }
+                            }
+                            close = true;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            close = true;
+                        }
+                    });
+                }
                 Dialog::NewController {
                     name,
                     with_clips,
@@ -856,9 +1008,10 @@ impl AnimationStudio {
                     ui.horizontal(|ui| {
                         if ui.button("Rename").clicked() || enter {
                             let written = match &mut self.doc {
-                                Doc::Clip(clip) => clip.write(project),
-                                Doc::Controller(controller) => controller.write(project),
-                                Doc::Nothing => Ok(false),
+                                Doc::Clip(clip) => clip.write(project).map(|_| ()),
+                                Doc::Property(clip) => clip.write(project).map(|_| ()),
+                                Doc::Controller(controller) => controller.write(project).map(|_| ()),
+                                Doc::Nothing => Ok(()),
                             };
                             if let Err(err) = written {
                                 output.error(format!("Could not save before renaming: {err}"));
@@ -868,6 +1021,7 @@ impl AnimationStudio {
                                     output.info(format!("Renamed the clip to `{new}`."));
                                     match &mut self.doc {
                                         Doc::Clip(clip) if clip.path == *path => open = Some(new),
+                                        Doc::Property(clip) if clip.path == *path => open = Some(new),
                                         // The rename rewrote the open controller's file.
                                         Doc::Controller(controller) => {
                                             if let Ok(file) = store::read_controller(project, &controller.path) {
@@ -917,6 +1071,7 @@ impl AnimationStudio {
             close = true;
         }
         if deleted_open {
+            self.close_preview(world);
             self.doc = Doc::Nothing;
         }
         if close {
@@ -925,11 +1080,12 @@ impl AnimationStudio {
         }
         if let Some(path) = open {
             // A renamed clip is opened fresh from its new file.
+            self.close_preview(world);
             self.doc = Doc::Nothing;
-            self.open_clip(project, assets, &path, output);
+            self.open_clip(project, assets, &path, world, output);
         }
         if let Some((path, model)) = open_controller {
-            self.open_controller(project, assets, &path, model, output);
+            self.open_controller(project, assets, &path, model, world, output);
         }
     }
 }

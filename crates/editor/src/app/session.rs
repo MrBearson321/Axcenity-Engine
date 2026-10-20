@@ -184,7 +184,7 @@ impl EditorApp {
         self.sound_preview = None;
         // The game reads clips from their files.
         if let Some(project) = &self.project {
-            self.animation.write_all(&project.folder, &mut self.output);
+            let _ = self.animation.write_all(&project.folder, &mut self.output);
         }
         if self.unsaved() && !self.save() {
             self.output
@@ -415,7 +415,7 @@ impl EditorApp {
     /// Puts the open project away and shows the start screen.
     pub(super) fn finish_closing_project(&mut self) {
         if let Some(project) = &self.project {
-            self.animation.write_all(&project.folder, &mut self.output);
+            let _ = self.animation.write_all(&project.folder, &mut self.output);
         }
         self.animation = AnimationStudio::default();
         self.project = None;

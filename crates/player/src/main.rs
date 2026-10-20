@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
-use axcenity_anim::Animators;
+use axcenity_anim::{Animators, PropertyPlayers};
 use axcenity_assets::Assets;
 use axcenity_audio::GameAudio;
 use axcenity_core::{InstanceId, World};
@@ -102,6 +102,8 @@ fn main() -> Result<()> {
     // their defaults) before any script runs, so scripts can read them.
     let mut animators = Animators::new();
     animators.update(&mut world, &assets, 0.0);
+    let mut property_players = PropertyPlayers::new();
+    property_players.update(&mut world, &assets, 0.0);
     start_scripts(&mut scripts, &mut world, &project.scripts);
     let mut audio = GameAudio::default();
     apply_audio(&mut scripts, &mut world, &assets, &mut audio);
@@ -122,6 +124,7 @@ fn main() -> Result<()> {
         physics: Physics::with_assets(assets.clone()),
         particles: axcenity_scene::Particles::new(),
         animators,
+        property_players,
         assets,
         window: None,
         renderer: None,
@@ -244,6 +247,8 @@ struct App {
     particles: axcenity_scene::Particles,
     /// Plays the Animators and poses their MeshParts.
     animators: Animators,
+    /// Plays property Animation Instances on Parts.
+    property_players: PropertyPlayers,
     /// The project's models, for MeshParts.
     assets: Assets,
     window: Option<Arc<Window>>,
@@ -662,6 +667,20 @@ impl ApplicationHandler for App {
                 }
                 print_output(&mut self.scripts);
                 for error in self.animators.take_errors() {
+                    eprintln!("error: {error}");
+                }
+                let events = self.property_players.update(
+                    &mut self.world,
+                    &self.assets,
+                    f64::from(seconds),
+                );
+                for event in events {
+                    let (animation, name, args) = event.script_event();
+                    self.scripts
+                        .fire_instance_event(&mut self.world, animation, name, &args);
+                }
+                print_output(&mut self.scripts);
+                for error in self.property_players.take_errors() {
                     eprintln!("error: {error}");
                 }
 

@@ -1,0 +1,41 @@
+{
+  "format_version": 1,
+  "kind": "property",
+  "duration": 1.5,
+  "loop": false,
+  "tracks": [
+    {
+      "id": "position",
+      "target": ".",
+      "property": "Position",
+      "keys": [
+        {
+          "id": "k1",
+          "time": 0.0,
+          "value": [
+            0.0,
+            2.0,
+            0.0
+          ],
+          "interp": "Linear"
+        },
+        {
+          "id": "k2",
+          "time": 1.5,
+          "value": [
+            0.0,
+            8.0,
+            0.0
+          ],
+          "interp": "Linear"
+        }
+      ]
+    }
+  ],
+  "events": [
+    {
+      "time": 1.4,
+      "name": "Opened"
+    }
+  ]
+}

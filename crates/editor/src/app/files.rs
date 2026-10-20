@@ -24,6 +24,7 @@ use eframe::egui;
 
 use super::{BlockDocument, EditorApp};
 use crate::anim_import::AnimationImport;
+use crate::animation::store;
 use crate::dialog;
 use crate::history::{self, Move, Place};
 use crate::import_dialog::{Answer, ImportDialog, Placement};
@@ -251,7 +252,7 @@ impl EditorApp {
         let Some(project) = &self.project else {
             return false;
         };
-        self.animation.write_all(&project.folder, &mut self.output);
+        let _ = self.animation.write_all(&project.folder, &mut self.output);
         let name = project.name.clone();
         let mut scripts = self.tabs.unsaved_paths();
         if let Some(project) = &self.project {
@@ -1048,6 +1049,53 @@ impl EditorApp {
             ));
         }
         relative
+    }
+
+    /// Asks for a property clip (`.anim.json` with `"kind": "property"`).
+    pub(super) fn pick_property_clip(&mut self) -> Option<String> {
+        let project = self.project.as_ref()?;
+        let animations = project.folder.join(axcenity_anim::ANIMATIONS_FOLDER);
+        let start = if animations.is_dir() {
+            animations
+        } else {
+            project.folder.clone()
+        };
+        let file = rfd::FileDialog::new()
+            .set_title("Choose a property clip")
+            .add_filter("Animation clip", &["json"])
+            .set_directory(&start)
+            .pick_file()?;
+        let relative = file
+            .strip_prefix(&project.folder)
+            .ok()
+            .map(|path| {
+                path.components()
+                    .map(|part| part.as_os_str().to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/")
+            })
+            .filter(|path| path.ends_with(axcenity_anim::CLIP_EXTENSION));
+        let Some(path) = relative else {
+            self.output.error(format!(
+                "Could not use `{}`: choose a `.anim.json` file inside the project folder.",
+                file.display()
+            ));
+            return None;
+        };
+        match store::read_any_clip(&project.folder, &path) {
+            Ok(axcenity_anim::AnimClipFile::Property(_)) => Some(path),
+            Ok(axcenity_anim::AnimClipFile::Take(_)) => {
+                self.output.error(format!(
+                    "`{path}` is a take clip for skeletal Animators, not a property clip."
+                ));
+                None
+            }
+            Err(err) => {
+                self.output
+                    .error(format!("Could not read `{path}`: {err}"));
+                None
+            }
+        }
     }
 
     /// Plays the Sound `id` in the editor (or stops it), with its own

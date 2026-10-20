@@ -2,3 +2,11 @@ Axcenity Engine
 Copyright 2026 Paul Janota and contributors
 
 Built with Axcenity Engine, © 2026 Paul Janota and contributors.
+
+Third-party sample assets
+-------------------------
+examples/hello-pbr/assets/models/DamagedHelmet/DamagedHelmet.glb is
+"Damaged Helmet" by theblueturtle_ (Cesare Ferronato), from the Khronos
+glTF-Sample-Models repository, licensed under Creative Commons
+Attribution 4.0 International (CC BY 4.0).
+https://creativecommons.org/licenses/by/4.0/

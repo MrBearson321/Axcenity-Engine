@@ -1721,4 +1721,39 @@ Connections:  {
         let empty = "; FBX 7.4.0 project file\nFBXHeaderExtension:  {\n\tFBXVersion: 7400\n}\n";
         assert_eq!(error(empty.as_bytes()), "it has no triangles to draw");
     }
+
+    #[test]
+    fn hello_pbr_examples_load_their_maps() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-pbr");
+        let models = root.join("assets/models");
+        let helmet = std::fs::read(models.join("DamagedHelmet/DamagedHelmet.glb")).unwrap();
+        let helmet = load_model(&helmet, &models.join("DamagedHelmet"), ModelFormat::Gltf).unwrap();
+        let material = &helmet.primitives[0].material;
+        assert!(material.base_color_texture.is_some());
+        assert!(material.normal_texture.is_some());
+        assert!(material.metalness_texture.is_some());
+        assert!(material.roughness_texture.is_some());
+        assert!(material.occlusion_texture.is_some());
+        assert!(material.emissive_texture.is_some());
+
+        let pbr = std::fs::read_to_string(models.join("pbr_panel.fbx")).unwrap();
+        let pbr = load_fbx(&pbr, &models).unwrap();
+        assert!(pbr.warnings.is_empty(), "{:?}", pbr.warnings);
+        let material = &pbr.primitives[0].material;
+        assert!(material.base_color_texture.is_some());
+        assert!(material.normal_texture.is_some());
+        assert!(material.roughness_texture.is_some());
+        assert!(material.metalness_texture.is_some());
+        assert!(material.emissive_texture.is_some());
+        assert!(material.opacity_texture.is_some());
+        assert!(material.occlusion_texture.is_some());
+
+        let phong = std::fs::read_to_string(models.join("phong_panel.fbx")).unwrap();
+        let phong = load_fbx(&phong, &models).unwrap();
+        assert!(phong.warnings.is_empty(), "{:?}", phong.warnings);
+        let material = &phong.primitives[0].material;
+        let roughness = material.roughness_texture.as_ref().unwrap();
+        assert!(roughness.invert, "glossiness should invert to roughness");
+        assert!(material.specular_texture.is_some());
+    }
 }

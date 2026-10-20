@@ -422,6 +422,42 @@ pub fn animator_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str,
     ])
 }
 
+/// Property `Animation` methods: Play, Stop, Pause, Resume.
+pub fn property_animation_methods(
+    lua: &Lua,
+) -> mlua::Result<Vec<(ClassName, &'static str, Function)>> {
+    let play = lua.create_function(|lua, this: LuaInstance| {
+        let mut world = world_mut(lua)?;
+        let live = world.property_animation_mut(this.0).ok_or_else(destroyed)?;
+        live.play = true;
+        Ok(())
+    })?;
+    let stop = lua.create_function(|lua, this: LuaInstance| {
+        let mut world = world_mut(lua)?;
+        let live = world.property_animation_mut(this.0).ok_or_else(destroyed)?;
+        live.stop = true;
+        Ok(())
+    })?;
+    let pause = lua.create_function(|lua, this: LuaInstance| {
+        let mut world = world_mut(lua)?;
+        let live = world.property_animation_mut(this.0).ok_or_else(destroyed)?;
+        live.pause = true;
+        Ok(())
+    })?;
+    let resume = lua.create_function(|lua, this: LuaInstance| {
+        let mut world = world_mut(lua)?;
+        let live = world.property_animation_mut(this.0).ok_or_else(destroyed)?;
+        live.resume = true;
+        Ok(())
+    })?;
+    Ok(vec![
+        (ClassName::Animation, "Play", play),
+        (ClassName::Animation, "Stop", stop),
+        (ClassName::Animation, "Pause", pause),
+        (ClassName::Animation, "Resume", resume),
+    ])
+}
+
 /// A parameter's name, given to `method`.
 fn parameter_name(lua: &Lua, name: &mlua::Value, method: &str) -> mlua::Result<String> {
     match name {

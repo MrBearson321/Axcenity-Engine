@@ -7,7 +7,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use crate::animation::AnimatorState;
+use crate::animation::{AnimatorState, PropertyAnimationState};
 use crate::arena::{Arena, Id};
 use crate::class::ClassName;
 use crate::value::{Value, ValueKind};
@@ -147,6 +147,8 @@ pub struct World {
     /// Each Animator's live state (see [`AnimatorState`]), made the first
     /// time something asks for it.
     animators: HashMap<InstanceId, AnimatorState>,
+    /// Each property Animation's live playback (see [`PropertyAnimationState`]).
+    property_animations: HashMap<InstanceId, PropertyAnimationState>,
 }
 
 impl World {
@@ -193,6 +195,7 @@ impl World {
             starter_player_scripts,
             changes: ChangeLog::default(),
             animators: HashMap::new(),
+            property_animations: HashMap::new(),
         }
     }
 
@@ -208,6 +211,23 @@ impl World {
             return None;
         }
         Some(self.animators.entry(id).or_default())
+    }
+
+    /// The live playback of the property Animation `id`, if any yet.
+    pub fn property_animation(&self, id: InstanceId) -> Option<&PropertyAnimationState> {
+        self.property_animations.get(&id)
+    }
+
+    /// The live playback of the property Animation `id`, made empty the first
+    /// time. `None` if `id` isn't an Animation.
+    pub fn property_animation_mut(
+        &mut self,
+        id: InstanceId,
+    ) -> Option<&mut PropertyAnimationState> {
+        if self.get(id)?.class != ClassName::Animation {
+            return None;
+        }
+        Some(self.property_animations.entry(id).or_default())
     }
 
     /// Starts keeping a list of every [`Change`] from now on, for
@@ -437,9 +457,11 @@ impl World {
         for descendant in self.descendants(id) {
             self.instances.remove(descendant.0);
             self.animators.remove(&descendant);
+            self.property_animations.remove(&descendant);
         }
         self.instances.remove(id.0);
         self.animators.remove(&id);
+        self.property_animations.remove(&id);
         Ok(())
     }
 

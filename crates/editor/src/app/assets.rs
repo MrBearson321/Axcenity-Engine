@@ -76,8 +76,13 @@ impl EditorApp {
             return;
         };
         let folder = project.folder.clone();
-        self.animation
-            .open_clip(&folder, &self.assets, path, &mut self.output);
+        self.animation.open_clip(
+            &folder,
+            &self.assets,
+            path,
+            &mut self.world,
+            &mut self.output,
+        );
         self.layout.open(Pane::Animation);
     }
 
@@ -105,8 +110,14 @@ impl EditorApp {
         if path.is_empty() {
             return;
         }
-        self.animation
-            .open_controller(&folder, &self.assets, &path, model, &mut self.output);
+        self.animation.open_controller(
+            &folder,
+            &self.assets,
+            &path,
+            model,
+            &mut self.world,
+            &mut self.output,
+        );
         self.layout.open(Pane::Animation);
     }
 

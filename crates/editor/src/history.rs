@@ -131,6 +131,9 @@ enum StepKind {
         key: Field,
         parts: Vec<(InstanceId, Vec<Change>)>,
     },
+    /// Project files rewritten (property animation clips, …), with no
+    /// Instance field changes.
+    Files(Vec<TextChange>),
 }
 
 /// One Instance's snapshots either side of a change, for [`History::record_many`].
@@ -251,6 +254,20 @@ impl History {
             top.number = number;
             self.open = Some(number);
         }
+    }
+
+    /// Records rewritten project file text as one undo step named `label`
+    /// (for example editing a property animation clip).
+    pub fn record_files(&mut self, world: &mut World, label: String, texts: Vec<TextChange>) {
+        let texts: Vec<_> = texts
+            .into_iter()
+            .filter(|text| text.before != text.after)
+            .collect();
+        if texts.is_empty() {
+            return;
+        }
+        self.seal();
+        self.push(world, label, StepKind::Files(texts));
     }
 
     /// Records a change to several Instances as one step named `label`,
@@ -398,6 +415,16 @@ impl History {
                     restore(world, *id, changes.iter().map(|c| (c.field, &c.before)));
                 }
             }
+            StepKind::Files(texts) => {
+                undone = texts
+                    .iter()
+                    .map(|text| TextChange {
+                        path: text.path.clone(),
+                        before: text.after.clone(),
+                        after: text.before.clone(),
+                    })
+                    .collect();
+            }
         }
         self.redo.push(step);
         Some(undone)
@@ -425,6 +452,9 @@ impl History {
                 for (id, changes) in parts {
                     restore(world, *id, changes.iter().map(|c| (c.field, &c.after)));
                 }
+            }
+            StepKind::Files(texts) => {
+                redone = texts.clone();
             }
         }
         self.undo.push(step);

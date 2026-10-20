@@ -90,12 +90,15 @@ impl EditorApp {
     pub(super) fn animation_pane(&mut self, ui: &mut egui::Ui, render_state: Option<&RenderState>) {
         let folder = self.project.as_ref().map(|project| project.folder.clone());
         let selected = self.selected_model();
+        let preview_root = self.property_preview_root();
         let actions = self.animation.show(
             ui,
             folder.as_deref(),
             &self.assets,
             render_state,
             selected.as_ref(),
+            &mut self.world,
+            preview_root,
             &mut self.output,
         );
         for action in actions {
@@ -107,7 +110,34 @@ impl EditorApp {
                     animator,
                     path,
                 } => self.set_controller(part, animator, path),
+                StudioAction::RecordFile {
+                    path,
+                    before,
+                    after,
+                    label,
+                } => {
+                    self.history.record_files(
+                        &mut self.world,
+                        label,
+                        vec![crate::history::TextChange {
+                            path,
+                            before,
+                            after,
+                        }],
+                    );
+                }
             }
+        }
+    }
+
+    /// A Part, MeshPart or Model selected for property-clip preview.
+    fn property_preview_root(&self) -> Option<InstanceId> {
+        let id = self.selected?;
+        let instance = self.world.get(id)?;
+        match instance.class() {
+            ClassName::Part | ClassName::MeshPart | ClassName::Model => Some(id),
+            ClassName::Animation => instance.parent(),
+            _ => None,
         }
     }
 

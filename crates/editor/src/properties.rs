@@ -28,6 +28,10 @@ pub enum Edit {
     PickController,
     /// Opens the Animator's controller in the Animation panel.
     OpenController,
+    /// Asks for a property clip file for an Animation's `Clip`.
+    PickClip,
+    /// Opens the property clip in the Animation panel.
+    OpenClip,
     /// Plays the selected Sound in the editor, to hear it without pressing
     /// Play, or (false) stops that.
     PreviewSound(bool),
@@ -122,7 +126,10 @@ const GROUPS: [(&str, &[&str]); 15] = [
         "Audio",
         &["SoundId", "Playing", "Volume", "PlaybackSpeed", "Looped"],
     ),
-    ("Animation", &["Controller", "Enabled", "Speed"]),
+    (
+        "Animation",
+        &["Controller", "Clip", "Enabled", "Speed", "Looped"],
+    ),
     (
         "Shadows",
         &["ShadowsEnabled", "ShadowDistance", "ShadowSoftness"],
@@ -213,7 +220,10 @@ pub fn sections(instance: &Instance) -> Vec<Section> {
                 ClassName::PointLight | ClassName::SpotLight
             ),
             "Emitter" | "Particles" => instance.class() == ClassName::ParticleEmitter,
-            "Animation" => instance.class() == ClassName::Animator,
+            "Animation" => matches!(
+                instance.class(),
+                ClassName::Animator | ClassName::Animation
+            ),
             "Appearance" | "Behavior" => instance.class() != ClassName::ParticleEmitter,
             _ => true,
         })
@@ -377,6 +387,7 @@ fn value_control(ui: &mut egui::Ui, name: &'static str, value: Value) -> Option<
         Value::String(path) if is_map(name) => map_control(ui, name, &path),
         Value::String(path) if name == "SoundId" => sound_control(ui, &path),
         Value::String(path) if name == "Controller" => controller_control(ui, &path),
+        Value::String(path) if name == "Clip" => clip_control(ui, &path),
         value => value_edit(ui, name, value).map(|value| Edit::Property(name, value)),
     }
 }
@@ -403,6 +414,41 @@ fn map_control(ui: &mut egui::Ui, name: &'static str, path: &str) -> Option<Edit
             .clicked()
         {
             edit = Some(Edit::Property(name, Value::String(String::new())));
+        }
+        let file = path.rsplit('/').next().unwrap_or(path);
+        ui.label(file).on_hover_text(path);
+    });
+    edit
+}
+
+/// A property Animation's clip file.
+fn clip_control(ui: &mut egui::Ui, path: &str) -> Option<Edit> {
+    let mut edit = None;
+    ui.horizontal(|ui| {
+        if ui
+            .small_button(icons::FOLDER_OPEN)
+            .on_hover_text("Choose a property clip (.anim.json with kind property) in the project")
+            .clicked()
+        {
+            edit = Some(Edit::PickClip);
+        }
+        if path.is_empty() {
+            ui.weak("None");
+            return;
+        }
+        if ui
+            .small_button(icons::FILM_SLATE)
+            .on_hover_text("Open it in the Animation panel")
+            .clicked()
+        {
+            edit = Some(Edit::OpenClip);
+        }
+        if ui
+            .small_button(icons::X)
+            .on_hover_text("Play no clip")
+            .clicked()
+        {
+            edit = Some(Edit::Property("Clip", Value::String(String::new())));
         }
         let file = path.rsplit('/').next().unwrap_or(path);
         ui.label(file).on_hover_text(path);

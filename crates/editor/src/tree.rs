@@ -33,6 +33,7 @@ pub enum Insertable {
     SpotLight,
     ParticleEmitter,
     Animator,
+    Animation,
 }
 
 impl Insertable {
@@ -63,8 +64,8 @@ impl Insertable {
     pub const LIGHTS: [Insertable; 2] = [Insertable::PointLight, Insertable::SpotLight];
     /// Effects give off particles from the part they are inside.
     pub const EFFECTS: [Insertable; 1] = [Insertable::ParticleEmitter];
-    /// Animators animate the MeshPart they are inside.
-    pub const ANIMATION: [Insertable; 1] = [Insertable::Animator];
+    /// Animators (skeletal) and Animations (property clips).
+    pub const ANIMATION: [Insertable; 2] = [Insertable::Animator, Insertable::Animation];
 
     /// What the buttons and menus call it. A Ball is a "Sphere", as in Studio.
     pub fn label(self) -> &'static str {
@@ -92,6 +93,7 @@ impl Insertable {
             Insertable::SpotLight => "SpotLight",
             Insertable::ParticleEmitter => "Particles",
             Insertable::Animator => "Animator",
+            Insertable::Animation => "Animation",
         }
     }
 
@@ -117,6 +119,7 @@ impl Insertable {
             Insertable::SpotLight => ClassName::SpotLight,
             Insertable::ParticleEmitter => ClassName::ParticleEmitter,
             Insertable::Animator => ClassName::Animator,
+            Insertable::Animation => ClassName::Animation,
         }
     }
 
@@ -254,7 +257,7 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
         let is_ui_container = is_ui_container(world, id);
         let is_sound_container = matches!(
             world.get(id).map(|instance| instance.class()),
-            Some(ClassName::Part | ClassName::MeshPart)
+            Some(ClassName::Part | ClassName::MeshPart | ClassName::Model)
         );
         id == world.replicated_storage()
             || (is_group && is_saved(world, id))
@@ -268,6 +271,7 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
                         | Insertable::ParticleEmitter
                         | Insertable::BillboardGui
                         | Insertable::Animator
+                        | Insertable::Animation
                 )
                 && is_saved(world, id))
     })

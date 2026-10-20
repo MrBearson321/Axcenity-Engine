@@ -1,0 +1,207 @@
+{
+  "blocks": [
+    {
+      "id": 1,
+      "kind": {
+        "type": "when_started",
+        "body": [
+          {
+            "id": 2,
+            "kind": {
+              "type": "set_variable",
+              "name": "listening",
+              "value": { "type": "boolean", "value": true }
+            }
+          },
+          {
+            "id": 3,
+            "kind": {
+              "type": "set_variable",
+              "name": "landings",
+              "value": { "type": "number", "value": 0 }
+            }
+          },
+          {
+            "id": 4,
+            "kind": {
+              "type": "wait",
+              "seconds": { "type": "number", "value": 3 }
+            }
+          },
+          {
+            "id": 5,
+            "kind": {
+              "type": "set_anchored",
+              "target": "BlueBall",
+              "anchored": { "type": "boolean", "value": false }
+            }
+          },
+          {
+            "id": 6,
+            "kind": {
+              "type": "wait",
+              "seconds": { "type": "number", "value": 3 }
+            }
+          },
+          {
+            "id": 7,
+            "kind": {
+              "type": "set_variable",
+              "name": "listening",
+              "value": { "type": "boolean", "value": false }
+            }
+          },
+          {
+            "id": 8,
+            "kind": {
+              "type": "print",
+              "value": {
+                "type": "text",
+                "value": "stopped listening for touches"
+              }
+            }
+          },
+          {
+            "id": 9,
+            "kind": {
+              "type": "set_anchored",
+              "target": "IgnoredBall",
+              "anchored": { "type": "boolean", "value": false }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": 10,
+      "kind": {
+        "type": "when_touched",
+        "part": "Pad",
+        "body": [
+          {
+            "id": 11,
+            "kind": {
+              "type": "if",
+              "condition": { "type": "variable", "name": "listening" },
+              "body": [
+                {
+                  "id": 12,
+                  "kind": {
+                    "type": "change_variable",
+                    "name": "landings",
+                    "by": { "type": "number", "value": 1 }
+                  }
+                },
+                {
+                  "id": 13,
+                  "kind": {
+                    "type": "print",
+                    "value": {
+                      "type": "join",
+                      "left": { "type": "touching_part" },
+                      "right": {
+                        "type": "text",
+                        "value": " touched the pad"
+                      }
+                    }
+                  }
+                },
+                {
+                  "id": 14,
+                  "kind": {
+                    "type": "if_else",
+                    "condition": {
+                      "type": "compare",
+                      "op": "equal",
+                      "left": {
+                        "type": "math",
+                        "op": "modulo",
+                        "left": { "type": "variable", "name": "landings" },
+                        "right": { "type": "number", "value": 3 }
+                      },
+                      "right": { "type": "number", "value": 1 }
+                    },
+                    "then_body": [
+                      {
+                        "id": 15,
+                        "kind": {
+                          "type": "set_color",
+                          "target": "Pad",
+                          "color": { "type": "color3", "r": 0.314, "g": 0.863, "b": 0.392 }
+                        }
+                      }
+                    ],
+                    "else_body": [
+                      {
+                        "id": 16,
+                        "kind": {
+                          "type": "if_else",
+                          "condition": {
+                            "type": "compare",
+                            "op": "equal",
+                            "left": {
+                              "type": "math",
+                              "op": "modulo",
+                              "left": { "type": "variable", "name": "landings" },
+                              "right": { "type": "number", "value": 3 }
+                            },
+                            "right": { "type": "number", "value": 2 }
+                          },
+                          "then_body": [
+                            {
+                              "id": 17,
+                              "kind": {
+                                "type": "set_color",
+                                "target": "Pad",
+                                "color": { "type": "color3", "r": 0.314, "g": 0.627, "b": 1 }
+                              }
+                            }
+                          ],
+                          "else_body": [
+                            {
+                              "id": 18,
+                              "kind": {
+                                "type": "set_color",
+                                "target": "Pad",
+                                "color": { "type": "color3", "r": 1, "g": 0.784, "b": 0.235 }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": 19,
+                  "kind": {
+                    "type": "set_property",
+                    "target": "Pad",
+                    "property": "Material",
+                    "value": { "type": "text", "value": "Neon" }
+                  }
+                },
+                {
+                  "id": 20,
+                  "kind": {
+                    "type": "wait",
+                    "seconds": { "type": "number", "value": 0.5 }
+                  }
+                },
+                {
+                  "id": 21,
+                  "kind": {
+                    "type": "set_property",
+                    "target": "Pad",
+                    "property": "Material",
+                    "value": { "type": "text", "value": "Plastic" }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

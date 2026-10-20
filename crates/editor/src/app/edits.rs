@@ -102,6 +102,25 @@ impl EditorApp {
                 self.open_animator_controller(id);
                 return;
             }
+            Edit::PickClip => {
+                if let Some(path) = self.pick_property_clip() {
+                    self.apply(id, Edit::Property("Clip", Value::String(path)));
+                    self.history.seal();
+                }
+                return;
+            }
+            Edit::OpenClip => {
+                if let Some(path) = self
+                    .world
+                    .get(id)
+                    .and_then(|i| i.property("Clip"))
+                    .and_then(Value::as_str)
+                {
+                    let path = path.to_owned();
+                    self.open_animation_clip(&path);
+                }
+                return;
+            }
             &Edit::PreviewSound(play) => {
                 self.preview_sound(id, play);
                 return;
@@ -663,14 +682,37 @@ impl EditorApp {
     /// is playing (undo would change a world that isn't on screen).
     pub(super) fn undo(&mut self) {
         if !self.viewport.is_dragging() && !self.playing() {
-            self.history.undo(&mut self.world);
+            if let Some(texts) = self.history.undo(&mut self.world) {
+                self.apply_history_texts(texts);
+            }
             self.forget_selection_outside_tree();
         }
     }
     pub(super) fn redo(&mut self) {
         if !self.viewport.is_dragging() && !self.playing() {
-            self.history.redo(&mut self.world);
+            if let Some(texts) = self.history.redo(&mut self.world) {
+                self.apply_history_texts(texts);
+            }
             self.forget_selection_outside_tree();
+        }
+    }
+
+    /// Writes restored file text from undo/redo (property clips, stylesheets).
+    fn apply_history_texts(&mut self, texts: Vec<crate::history::TextChange>) {
+        let Some(project) = self.project.as_ref().map(|p| p.folder.clone()) else {
+            return;
+        };
+        for text in texts {
+            if text.path.ends_with(axcenity_anim::CLIP_EXTENSION) {
+                self.animation.apply_file_text(
+                    &project,
+                    &text.path,
+                    &text.after,
+                    &mut self.output,
+                );
+            } else if axcenity_project::is_stylesheet(&text.path) {
+                self.set_stylesheet_text(&text.path, &text.after);
+            }
         }
     }
     /// Clears the selection if it was taken out of the tree (deleted, or an
@@ -679,13 +721,19 @@ impl EditorApp {
     pub(super) fn forget_selection_outside_tree(&mut self) {
         let world = shown(&self.world, &self.play);
         let root = world.root();
-        self.selection
-            .retain(|id| *id == root || world.is_descendant_of(*id, root));
-        if self
-            .selected
-            .is_some_and(|id| !self.selection.contains(&id))
-        {
-            self.selected = self.selection.last().copied();
+        let in_tree = |id: InstanceId| id == root || world.is_descendant_of(id, root);
+        self.selection.retain(|id| in_tree(*id));
+        match self.selected {
+            Some(id) if in_tree(id) => {
+                // Keep the primary pick even when `selection` was left empty
+                // (some tests and call sites set `selected` alone).
+                if !self.selection.contains(&id) {
+                    self.selection.push(id);
+                }
+            }
+            _ => {
+                self.selected = self.selection.last().copied();
+            }
         }
     }
 }
@@ -713,6 +761,8 @@ fn set(world: &mut World, id: InstanceId, edit: Edit) -> anyhow::Result<()> {
         | Edit::PickAudio
         | Edit::PickController
         | Edit::OpenController
+        | Edit::PickClip
+        | Edit::OpenClip
         | Edit::PreviewSound(_) => {}
     }
     Ok(())

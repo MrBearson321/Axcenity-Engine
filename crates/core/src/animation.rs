@@ -1,11 +1,10 @@
-//! What an Animator is doing while the game runs: its parameters, the
-//! state it's in, and a state a script asked it to play.
+//! What an Animator or property Animation is doing while the game runs.
 //!
-//! This isn't saved and isn't made of properties: scripts read and set it
-//! through the Animator's methods (`animator:SetBool`, `CurrentState`...),
-//! and the host's animation system (the `anim` crate) reads and updates it
-//! every frame. It lives in the [`World`](crate::World), beside the
-//! Instances, so both sides see the same values at once.
+//! Animator state (parameters, current state, Play requests) and property
+//! Animation playback (time, playing / paused, Play/Stop requests) are not
+//! saved as Instance properties: scripts read and set them through methods,
+//! and the host's animation system reads and updates them every frame. They
+//! live in the [`World`](crate::World), beside the Instances.
 
 use std::collections::BTreeMap;
 
@@ -53,4 +52,25 @@ pub struct AnimatorState {
     pub current_state: String,
     /// A state to switch to, which the host takes at its next update.
     pub play: Option<PlayRequest>,
+}
+
+/// One property [`Animation`](crate::ClassName::Animation)'s live playback.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PropertyAnimationState {
+    /// Seconds into the clip (may grow past duration when looping).
+    pub time: f64,
+    /// Advancing when true.
+    pub playing: bool,
+    /// True after Pause until Resume or Play/Stop.
+    pub paused: bool,
+    /// Script asked to Play from the start.
+    pub play: bool,
+    /// Script asked to Stop (time back to 0, not playing).
+    pub stop: bool,
+    /// Script asked to Pause.
+    pub pause: bool,
+    /// Script asked to Resume from a pause.
+    pub resume: bool,
+    /// Seek to this time on the next host update.
+    pub seek: Option<f64>,
 }

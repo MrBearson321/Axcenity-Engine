@@ -68,6 +68,10 @@ impl Context {
             instance::animator_methods(&lua)
                 .expect("creating Animator methods only fails when out of memory"),
         );
+        methods.extend(
+            instance::property_animation_methods(&lua)
+                .expect("creating Animation methods only fails when out of memory"),
+        );
         methods.push((
             axcenity_core::ClassName::DataModel,
             "GetService",

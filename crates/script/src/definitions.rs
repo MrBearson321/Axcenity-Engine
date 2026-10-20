@@ -474,6 +474,42 @@ const CLASS_METHODS: &[(ClassName, Function)] = &[
         },
     ),
     (
+        ClassName::Animation,
+        Function {
+            name: "Play",
+            doc: "Plays this Animation's property clip from the start.",
+            params: &[],
+            returns: "nil",
+        },
+    ),
+    (
+        ClassName::Animation,
+        Function {
+            name: "Stop",
+            doc: "Stops playback and resets to the start of the clip.",
+            params: &[],
+            returns: "nil",
+        },
+    ),
+    (
+        ClassName::Animation,
+        Function {
+            name: "Pause",
+            doc: "Pauses at the current time. Resume continues from there.",
+            params: &[],
+            returns: "nil",
+        },
+    ),
+    (
+        ClassName::Animation,
+        Function {
+            name: "Resume",
+            doc: "Continues after Pause.",
+            params: &[],
+            returns: "nil",
+        },
+    ),
+    (
         ClassName::ParticleEmitter,
         Function {
             name: "Emit",
@@ -1593,6 +1629,9 @@ fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::Animator => {
             "Inside a MeshPart with an animated (FBX) model: plays its animator controller's states and transitions on the model while the game runs."
+        }
+        ClassName::Animation => {
+            "Inside a Part, MeshPart or Model: plays an authored property clip (`*.anim.json` with kind property) on that root while the game runs."
         }
     }
 }

@@ -1,0 +1,62 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Anchored": true,
+          "Color": [0.18, 0.19, 0.22],
+          "Material": "Plastic",
+          "Metalness": 0,
+          "Orientation": [0, 0, 0],
+          "Position": [0, -0.5, 0],
+          "Roughness": 0.85,
+          "Shape": "Block",
+          "Size": [40, 1, 24]
+        }
+      },
+      {
+        "class": "MeshPart",
+        "name": "DamagedHelmet",
+        "properties": {
+          "Anchored": true,
+          "MeshId": "assets/models/DamagedHelmet/DamagedHelmet.glb",
+          "Orientation": [0, 35, 0],
+          "Position": [-6, 2.5, 0],
+          "Size": [4, 4, 4]
+        }
+      },
+      {
+        "class": "MeshPart",
+        "name": "PbrPanel",
+        "properties": {
+          "Anchored": true,
+          "MeshId": "assets/models/pbr_panel.fbx",
+          "Orientation": [0, -25, 0],
+          "Position": [2, 1.5, 0],
+          "Size": [4, 3, 4]
+        }
+      },
+      {
+        "class": "MeshPart",
+        "name": "PhongPanel",
+        "properties": {
+          "Anchored": true,
+          "MeshId": "assets/models/phong_panel.fbx",
+          "Orientation": [0, 20, 0],
+          "Position": [8, 1.5, 0],
+          "Size": [4, 3, 4]
+        }
+      }
+    ]
+  },
+  "lighting": {
+    "properties": {
+      "EnvironmentIntensity": 0.45,
+      "Exposure": 1.1,
+      "BloomIntensity": 0.5
+    }
+  }
+}

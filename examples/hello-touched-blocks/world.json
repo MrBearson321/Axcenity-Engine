@@ -1,0 +1,82 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Anchored": true,
+          "Color": [0.35, 0.37, 0.4],
+          "Material": "Plastic",
+          "Metalness": 0,
+          "Orientation": [0, 0, 0],
+          "Position": [0, -0.5, 0],
+          "Roughness": 0.5,
+          "Shape": "Block",
+          "Size": [40, 1, 40]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Pad",
+        "properties": {
+          "Anchored": true,
+          "Color": [0.8, 0.8, 0.82],
+          "Material": "Plastic",
+          "Metalness": 0,
+          "Orientation": [0, -90, 0],
+          "Position": [0, 0.25, 0],
+          "Roughness": 0.5,
+          "Shape": "Block",
+          "Size": [8, 0.5, 8]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Ball",
+        "properties": {
+          "Anchored": false,
+          "Color": [0.9, 0.2, 0.2],
+          "Material": "Plastic",
+          "Metalness": 0,
+          "Orientation": [0, 0, 0],
+          "Position": [0, 10, 0],
+          "Roughness": 0.5,
+          "Shape": "Ball",
+          "Size": [2, 2, 2]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "BlueBall",
+        "properties": {
+          "Anchored": true,
+          "Color": [0.235, 0.353, 0.902],
+          "Material": "Plastic",
+          "Metalness": 0,
+          "Orientation": [0, 0, 0],
+          "Position": [1.5, 10, 1.5],
+          "Roughness": 0.5,
+          "Shape": "Ball",
+          "Size": [2, 2, 2]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "IgnoredBall",
+        "properties": {
+          "Anchored": true,
+          "Color": [0.7, 0.7, 0.72],
+          "Material": "Plastic",
+          "Metalness": 0,
+          "Orientation": [0, 0, 0],
+          "Position": [-1.5, 10, -1.5],
+          "Roughness": 0.5,
+          "Shape": "Ball",
+          "Size": [2, 2, 2]
+        }
+      }
+    ]
+  }
+}

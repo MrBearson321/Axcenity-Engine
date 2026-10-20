@@ -339,6 +339,26 @@ mod tests {
     }
 
     #[test]
+    fn hello_touched_blocks_exports_translated_lua() {
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-touched-blocks");
+        let packed = pack_game(&source).unwrap();
+        let output = temp_folder("hello-touched-blocks-export");
+        unpack_game(&packed, &output).unwrap();
+        let lua = fs::read_to_string(output.join("scripts/pad.server.lua")).unwrap();
+        assert!(
+            lua.contains("Touched:Connect") && lua.contains("Neon") && lua.contains("listening"),
+            "{lua}"
+        );
+        assert!(!output.join("scripts/pad.server.blocks.json").exists());
+        if let Ok(dest) = std::env::var("AXCENITY_EXPORT_SMOKE") {
+            let dest = PathBuf::from(dest);
+            fs::create_dir_all(&dest).unwrap();
+            fs::write(dest.join("game.axgame"), packed).unwrap();
+        }
+        fs::remove_dir_all(output).unwrap();
+    }
+
+    #[test]
     fn unpacking_rejects_traversal_and_trailing_bytes() {
         let folder = temp_folder("unsafe");
         let mut archive = Vec::new();
