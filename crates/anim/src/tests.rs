@@ -44,12 +44,15 @@ fn an_animator_starts_in_its_default_state_and_poses_its_part() {
     let mut animators = Animators::new();
     let events = animators.update(&mut world, &assets, 0.0);
     assert_eq!(animators.take_errors(), Vec::<String>::new());
-    assert_eq!(world.animator(animator).unwrap().current_state, "Idle");
+    assert_eq!(
+        world.animator(animator).unwrap().current_state,
+        "Locomotion"
+    );
     assert_eq!(
         events,
         [AnimatorEvent::StateChanged {
             animator,
-            state: "Idle".into(),
+            state: "Locomotion".into(),
             previous: String::new(),
         }]
     );
@@ -57,7 +60,10 @@ fn an_animator_starts_in_its_default_state_and_poses_its_part() {
     animators.update(&mut world, &assets, 0.5);
     let later = animators.poses()[&part].clone();
     assert_ne!(first.version, later.version);
-    assert_ne!(first.primitives, later.primitives, "Idle sways the noodle");
+    assert_ne!(
+        first.primitives, later.primitives,
+        "Idle (Speed 0) sways the noodle"
+    );
 }
 
 #[test]
@@ -76,7 +82,7 @@ fn play_switches_state_and_reports_the_change() {
         [AnimatorEvent::StateChanged {
             animator,
             state: "Wave".into(),
-            previous: "Idle".into(),
+            previous: "Locomotion".into(),
         }]
     );
     world.animator_mut(animator).unwrap().play = Some(PlayRequest {
@@ -99,8 +105,8 @@ fn parameters_drive_the_example_through_its_transitions() {
     let state = |world: &World| world.animator(animator).unwrap().current_state.clone();
     // The controller's parameters arrive at their defaults.
     assert_eq!(
-        world.animator(animator).unwrap().parameters["IsWalking"],
-        Parameter::Bool(false)
+        world.animator(animator).unwrap().parameters["Speed"],
+        Parameter::Number(0.0)
     );
     let set = |world: &mut World, name: &str, value| {
         world
@@ -109,16 +115,10 @@ fn parameters_drive_the_example_through_its_transitions() {
             .parameters
             .insert(name.into(), value);
     };
-    set(&mut world, "IsWalking", Parameter::Bool(true));
+    // Speed moves the Locomotion blend tree, not the state.
+    set(&mut world, "Speed", Parameter::Number(4.0));
     animators.update(&mut world, &assets, 0.1);
-    assert_eq!(state(&world), "Walk");
-    // Each blend (a quarter second, not interruptible) finishes before the
-    // next transition can start.
-    set(&mut world, "IsWalking", Parameter::Bool(false));
-    for _ in 0..8 {
-        animators.update(&mut world, &assets, 0.1);
-    }
-    assert_eq!(state(&world), "Idle");
+    assert_eq!(state(&world), "Locomotion");
     set(&mut world, "Wave", Parameter::Trigger(true));
     animators.update(&mut world, &assets, 0.1);
     assert_eq!(state(&world), "Wave");
@@ -127,11 +127,11 @@ fn parameters_drive_the_example_through_its_transitions() {
         Parameter::Trigger(false),
         "used up"
     );
-    // Wave (1 s) goes back to Idle by itself.
+    // Wave (1 s) goes back to Locomotion by itself.
     for _ in 0..12 {
         animators.update(&mut world, &assets, 0.1);
     }
-    assert_eq!(state(&world), "Idle");
+    assert_eq!(state(&world), "Locomotion");
     assert_eq!(animators.take_errors(), Vec::<String>::new());
 }
 
@@ -182,7 +182,7 @@ fn the_example_files_are_saved_as_the_engine_writes_them() {
     let read = |path: PathBuf| std::fs::read_to_string(path).unwrap().replace("\r\n", "\n");
     let text = read(folder.join("noodle.controller.json"));
     assert_eq!(ControllerFile::from_json(&text).unwrap().to_json(), text);
-    for clip in ["Idle", "Wave", "Hop", "Walk"] {
+    for clip in ["Idle", "Wave", "Hop", "Walk", "Run"] {
         let text = read(folder.join(format!("noodle/{clip}.anim.json")));
         assert_eq!(
             ClipFile::from_json(&text).unwrap().to_json(),
@@ -230,6 +230,105 @@ fn root_motion_moves_the_model_instead_of_the_root_bone() {
         still.root_motion(rig, 0.0, 0.5),
         crate::RootMotion::default()
     );
+}
+
+/// A controller with one blend tree state: the example's Idle (2 s) at
+/// Speed 0 and Walk (1 s) at Speed 2.
+fn locomotion() -> (crate::Compiled, std::sync::Arc<axcenity_assets::Model>) {
+    use crate::files::{BlendChild, BlendTree, Motion, ParameterDef, StateDef};
+    let assets = Assets::new(example());
+    let model = assets.model("assets/models/noodle.fbx").unwrap();
+    let file = ControllerFile {
+        parameters: vec![ParameterDef::Number {
+            name: "Speed".into(),
+            default: 0.0,
+        }],
+        default_state: "Move".into(),
+        states: vec![StateDef::new(
+            "Move",
+            Motion::BlendTree(BlendTree {
+                parameter: "Speed".into(),
+                children: vec![
+                    BlendChild {
+                        clip: "assets/animations/noodle/Idle.anim.json".into(),
+                        threshold: 0.0,
+                    },
+                    BlendChild {
+                        clip: "assets/animations/noodle/Walk.anim.json".into(),
+                        threshold: 2.0,
+                    },
+                ],
+            }),
+            [0.0, 0.0],
+        )],
+        ..ControllerFile::default()
+    };
+    let (compiled, problems) = crate::Compiled::new(file, model.rig.as_ref().unwrap(), |path| {
+        crate::load_clip(&assets, path)
+    });
+    assert_eq!(problems, Vec::<String>::new());
+    (compiled, model)
+}
+
+fn speed(value: f64) -> crate::Parameters {
+    [("Speed".to_owned(), axcenity_core::Parameter::Number(value))].into()
+}
+
+#[test]
+fn a_blend_tree_mixes_its_clips_by_the_parameter() {
+    let (compiled, model) = locomotion();
+    let rig = model.rig.as_ref().unwrap();
+    assert_eq!(
+        compiled.tree_weights(0, &speed(0.5)),
+        Some(vec![0.75, 0.25])
+    );
+    assert_eq!(compiled.tree_weights(0, &speed(9.0)), Some(vec![0.0, 1.0]));
+    // Cycles stay in step: the pass lasts the clips' lengths by their shares.
+    assert!((compiled.duration(0, &speed(0.0)) - 2.0).abs() < 1e-9);
+    assert!((compiled.duration(0, &speed(1.0)) - 1.5).abs() < 1e-9);
+    assert!((compiled.duration(0, &speed(2.0)) - 1.0).abs() < 1e-9);
+    // Halfway, the root is halfway between Idle's (still) and Walk's place.
+    let root = rig.bone("Root").unwrap();
+    let z = |value: f64| {
+        let mut pose = rig.rest_pose();
+        compiled.sample(0, 0.5, rig, &speed(value), &mut pose);
+        rig.world(&pose)[root].transform_point3(glam::Vec3::ZERO).z
+    };
+    assert!(z(0.0).abs() < 1e-4);
+    assert!((z(2.0) - 1.0).abs() < 1e-3, "{}", z(2.0));
+    assert!((z(1.0) - 0.5).abs() < 1e-3, "{}", z(1.0));
+}
+
+#[test]
+fn a_blend_tree_with_a_missing_or_wrong_parameter_is_reported() {
+    use crate::files::{BlendTree, Motion, ParameterDef, StateDef};
+    let file = ControllerFile {
+        parameters: vec![ParameterDef::Bool {
+            name: "Speed".into(),
+            default: false,
+        }],
+        states: vec![StateDef::new(
+            "Move",
+            Motion::BlendTree(BlendTree {
+                parameter: "Speed".into(),
+                children: Vec::new(),
+            }),
+            [0.0, 0.0],
+        )],
+        ..ControllerFile::default()
+    };
+    let rig = axcenity_assets::Rig {
+        bones: Vec::new(),
+        joints: Vec::new(),
+        fit: glam::Mat4::IDENTITY,
+    };
+    let (compiled, problems) = crate::Compiled::new(file, &rig, |_| Err("none".into()));
+    assert!(
+        problems[0].contains("needs a Number parameter"),
+        "{problems:?}"
+    );
+    // With nothing to play it holds still and lasts a second.
+    assert_eq!(compiled.duration(0, &speed(1.0)), 1.0);
 }
 
 #[test]

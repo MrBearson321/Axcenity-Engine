@@ -745,7 +745,7 @@ A state's motion can be a **1D blend tree**: a Number parameter and a list of cl
 ### Acceptance criteria
 
 - [ ] A Speed blend tree moves smoothly from Idle through Walk to Run as Speed rises, in the preview and in Play.
-- [ ] Weights are exact at and between thresholds, and values out of range hold the end clip (unit tests).
+- [x] Weights are exact at and between thresholds, and values out of range hold the end clip (unit tests).
 - [ ] Walk and Run blend without the feet slipping out of step.
 
 ---

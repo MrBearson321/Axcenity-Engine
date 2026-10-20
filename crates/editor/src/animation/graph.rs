@@ -72,6 +72,8 @@ pub enum GraphEvent {
     Delete(Selected),
     /// Add a state here, playing this clip (or nothing).
     AddState([f32; 2], Option<String>),
+    /// Add a state here playing a blend tree.
+    AddBlendTree([f32; 2]),
 }
 
 /// The state playing in the preview, to show in the graph.
@@ -273,6 +275,11 @@ impl GraphView {
                     let subtitle = match &state.motion {
                         Motion::Clip(path) if path.is_empty() => "(no clip)".to_owned(),
                         Motion::Clip(path) => axcenity_anim::files::clip_name(path).to_owned(),
+                        Motion::BlendTree(tree) => format!(
+                            "blend tree · {} · {} clips",
+                            tree.parameter,
+                            tree.children.len()
+                        ),
                     };
                     (fill, state.name.clone(), subtitle)
                 }
@@ -395,6 +402,14 @@ impl GraphView {
             let at = self.menu_at.unwrap_or([0.0, 0.0]);
             if ui.button("Add Empty State").clicked() {
                 events.push(GraphEvent::AddState(at, None));
+                ui.close();
+            }
+            if ui
+                .button("Add Blend Tree")
+                .on_hover_text("A state that mixes related clips by a Number, such as Idle, Walk and Run by Speed")
+                .clicked()
+            {
+                events.push(GraphEvent::AddBlendTree(at));
                 ui.close();
             }
             ui.menu_button("Add State with Clip", |ui| {

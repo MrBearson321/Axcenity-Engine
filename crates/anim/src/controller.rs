@@ -7,7 +7,10 @@ use axcenity_assets::{Pose, Rig, Take};
 use axcenity_core::Parameter;
 
 use crate::clip::{BoundClip, RootMotion};
-use crate::files::{ANY_STATE, ClipFile, Condition, ControllerFile, Motion, Test};
+use crate::files::{ANY_STATE, ClipFile, Condition, ControllerFile, Motion, Test, blend_weights};
+
+/// An animator's parameters, by name.
+pub type Parameters = BTreeMap<String, Parameter>;
 
 /// A controller with its clips bound to one rig.
 #[derive(Debug)]
@@ -22,9 +25,54 @@ pub struct Compiled {
 struct CompiledState {
     name: String,
     speed: f64,
-    /// `None` when it has no clip, or its clip couldn't be loaded: it holds
-    /// the rest pose.
-    clip: Option<BoundClip>,
+    motion: CompiledMotion,
+}
+
+/// What a state plays, with its clips bound. A clip that's `None` has no
+/// path or couldn't be loaded.
+#[derive(Debug)]
+enum CompiledMotion {
+    Clip(Option<BoundClip>),
+    Tree {
+        parameter: String,
+        /// Each child's threshold and clip.
+        children: Vec<(f64, Option<BoundClip>)>,
+    },
+}
+
+impl CompiledState {
+    /// The clips playing now, each with its share (adding up to 1), by
+    /// `parameters` for a blend tree. Empty for a state with nothing to
+    /// play: it holds the rest pose.
+    fn playing(&self, parameters: &Parameters) -> Vec<(&BoundClip, f64)> {
+        match &self.motion {
+            CompiledMotion::Clip(Some(clip)) => vec![(clip, 1.0)],
+            CompiledMotion::Clip(None) => Vec::new(),
+            CompiledMotion::Tree {
+                parameter,
+                children,
+            } => {
+                let value = match parameters.get(parameter) {
+                    Some(Parameter::Number(value)) => *value,
+                    _ => 0.0,
+                };
+                let thresholds: Vec<f64> = children.iter().map(|(t, _)| *t).collect();
+                let weights = blend_weights(&thresholds, value);
+                let playing: Vec<(&BoundClip, f64)> = children
+                    .iter()
+                    .zip(weights)
+                    .filter(|(_, weight)| *weight > 0.0)
+                    .filter_map(|((_, clip), weight)| Some((clip.as_ref()?, weight)))
+                    .collect();
+                // Shares of clips that didn't load go to the others.
+                let total: f64 = playing.iter().map(|(_, weight)| weight).sum();
+                playing
+                    .into_iter()
+                    .map(|(clip, weight)| (clip, weight / total.max(1e-12)))
+                    .collect()
+            }
+        }
+    }
 }
 
 /// A transition with its states found.
@@ -43,34 +91,60 @@ struct CompiledTransition {
 }
 
 impl Compiled {
-    /// Binds every state's clip to `rig`. `load_clip` reads a clip file and
+    /// Binds every state's clips to `rig`. `load_clip` reads a clip file and
     /// the takes of the model file it names. A clip that can't be loaded
-    /// leaves its state still, and its reason (and any transition that can't
-    /// work) is in the returned list.
+    /// leaves its state (or its part of a blend tree) still, and its reason
+    /// (and any transition that can't work) is in the returned list.
     pub fn new(
         file: ControllerFile,
         rig: &Rig,
         mut load_clip: impl FnMut(&str) -> Result<(ClipFile, Arc<Vec<Take>>), String>,
     ) -> (Self, Vec<String>) {
         let mut problems = Vec::new();
+        let mut bind = |state: &str, path: &str, problems: &mut Vec<String>| {
+            if path.is_empty() {
+                return None;
+            }
+            match load_clip(path).and_then(|(clip, takes)| BoundClip::bind(clip, takes, rig)) {
+                Ok(clip) => Some(clip),
+                Err(problem) => {
+                    problems.push(format!(
+                        "the state `{state}` can't play `{path}`: {problem}"
+                    ));
+                    None
+                }
+            }
+        };
         let states: Vec<CompiledState> = file
             .states
             .iter()
             .map(|state| {
-                let clip = match &state.motion {
-                    Motion::Clip(path) if path.is_empty() => None,
-                    Motion::Clip(path) => match load_clip(path)
-                        .and_then(|(clip, takes)| BoundClip::bind(clip, takes, rig))
-                    {
-                        Ok(clip) => Some(clip),
-                        Err(problem) => {
+                let motion = match &state.motion {
+                    Motion::Clip(path) => CompiledMotion::Clip(bind(&state.name, path, &mut problems)),
+                    Motion::BlendTree(tree) => {
+                        let is_number = file.parameters.iter().any(|def| {
+                            def.name() == tree.parameter
+                                && matches!(def, crate::files::ParameterDef::Number { .. })
+                        });
+                        if !is_number {
                             problems.push(format!(
-                                "the state `{}` can't play `{path}`: {problem}",
-                                state.name
+                                "the blend tree of `{}` needs a Number parameter, and `{}` isn't one",
+                                state.name, tree.parameter
                             ));
-                            None
                         }
-                    },
+                        CompiledMotion::Tree {
+                            parameter: tree.parameter.clone(),
+                            children: tree
+                                .children
+                                .iter()
+                                .map(|child| {
+                                    let threshold =
+                                        if child.threshold.is_finite() { child.threshold } else { 0.0 };
+                                    (threshold, bind(&state.name, &child.clip, &mut problems))
+                                })
+                                .collect(),
+                        }
+                    }
                 };
                 CompiledState {
                     name: state.name.clone(),
@@ -79,7 +153,7 @@ impl Compiled {
                     } else {
                         1.0
                     },
-                    clip,
+                    motion,
                 }
             })
             .collect();
@@ -153,49 +227,132 @@ impl Compiled {
         self.start
     }
 
+    /// The clips `state` plays now, with their shares.
+    fn playing(&self, state: usize, parameters: &Parameters) -> Vec<(&BoundClip, f64)> {
+        self.states
+            .get(state)
+            .map_or_else(Vec::new, |s| s.playing(parameters))
+    }
+
+    /// The clip counting most in `state` now.
+    fn main_clip(&self, state: usize, parameters: &Parameters) -> Option<&BoundClip> {
+        self.playing(state, parameters)
+            .into_iter()
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(clip, _)| clip)
+    }
+
     /// Seconds one pass of `state`'s motion lasts at its speed (and the
-    /// state's).
-    pub fn duration(&self, state: usize) -> f64 {
+    /// state's): a blend tree's is its clips' lengths, by their shares, so
+    /// their cycles stay in step. A state with nothing to play lasts a second.
+    pub fn duration(&self, state: usize, parameters: &Parameters) -> f64 {
         let Some(compiled) = self.states.get(state) else {
             return 1.0;
         };
         let speed = compiled.speed.abs().max(1e-3);
-        compiled.clip.as_ref().map_or(1.0, BoundClip::duration) / speed
+        let playing = compiled.playing(parameters);
+        let length = if playing.is_empty() {
+            1.0
+        } else {
+            playing
+                .iter()
+                .map(|(clip, weight)| clip.duration() * weight)
+                .sum()
+        };
+        length.max(1.0 / 60.0) / speed
     }
 
-    /// Whether `state`'s motion loops (a state with no clip counts as looping).
-    pub fn looping(&self, state: usize) -> bool {
-        self.clip(state).is_none_or(|clip| clip.file.looping)
+    /// Whether `state`'s motion loops (its main clip's; a state with nothing
+    /// to play counts as looping).
+    pub fn looping(&self, state: usize, parameters: &Parameters) -> bool {
+        self.main_clip(state, parameters)
+            .is_none_or(|clip| clip.file.looping)
     }
 
-    /// Poses `pose` (already at rest) as `state` is at `phase`.
-    pub fn sample(&self, state: usize, phase: f64, rig: &Rig, pose: &mut Pose) {
-        if let Some(clip) = self.clip(state) {
-            clip.sample(phase, rig, pose);
+    /// Poses `pose` (already at rest) as `state` is at `phase`: a blend
+    /// tree samples each of its clips at the same phase and mixes them by
+    /// their shares.
+    pub fn sample(
+        &self,
+        state: usize,
+        phase: f64,
+        rig: &Rig,
+        parameters: &Parameters,
+        pose: &mut Pose,
+    ) {
+        let playing = self.playing(state, parameters);
+        match playing.as_slice() {
+            [] => {}
+            [(clip, _)] => clip.sample(phase, rig, pose),
+            [(first, first_weight), rest @ ..] => {
+                first.sample(phase, rig, pose);
+                let mut counted = *first_weight;
+                for (clip, weight) in rest {
+                    let mut other = rig.rest_pose();
+                    clip.sample(phase, rig, &mut other);
+                    counted += weight;
+                    let share = (weight / counted.max(1e-12)) as f32;
+                    for (bone, other) in pose.iter_mut().zip(&other) {
+                        *bone = bone.lerp(other, share);
+                    }
+                }
+            }
         }
     }
 
-    /// `state`'s clip, if it has one that loaded.
+    /// `state`'s clip, if it plays one clip that loaded (not a blend tree).
     pub fn clip(&self, state: usize) -> Option<&BoundClip> {
-        self.states.get(state).and_then(|s| s.clip.as_ref())
+        match &self.states.get(state)?.motion {
+            CompiledMotion::Clip(clip) => clip.as_ref(),
+            CompiledMotion::Tree { .. } => None,
+        }
     }
 
-    /// How far `state`'s root motion moves the model from phase `from` to `to`.
-    pub fn root_motion(&self, state: usize, rig: &Rig, from: f64, to: f64) -> RootMotion {
-        self.clip(state)
-            .map_or_else(RootMotion::default, |clip| clip.root_motion(rig, from, to))
+    /// How far `state`'s root motion moves the model from phase `from` to
+    /// `to`: its clips' travel, by their shares.
+    pub fn root_motion(
+        &self,
+        state: usize,
+        rig: &Rig,
+        parameters: &Parameters,
+        from: f64,
+        to: f64,
+    ) -> RootMotion {
+        self.playing(state, parameters)
+            .into_iter()
+            .fold(RootMotion::default(), |motion, (clip, weight)| {
+                motion + clip.root_motion(rig, from, to).scaled(weight as f32)
+            })
     }
 
-    /// The events `state`'s clip passes from phase `from` to `to`.
-    pub fn events(&self, state: usize, from: f64, to: f64) -> Vec<String> {
-        self.clip(state)
+    /// The events `state`'s main clip passes from phase `from` to `to`.
+    pub fn events(&self, state: usize, parameters: &Parameters, from: f64, to: f64) -> Vec<String> {
+        self.main_clip(state, parameters)
             .map_or_else(Vec::new, |clip| clip.events_between(from, to))
+    }
+
+    /// Each child's share in `state`'s blend tree now, in the file's order,
+    /// for the editor. `None` if it isn't a blend tree.
+    pub fn tree_weights(&self, state: usize, parameters: &Parameters) -> Option<Vec<f64>> {
+        let CompiledMotion::Tree {
+            parameter,
+            children,
+        } = &self.states.get(state)?.motion
+        else {
+            return None;
+        };
+        let value = match parameters.get(parameter) {
+            Some(Parameter::Number(value)) => *value,
+            _ => 0.0,
+        };
+        let thresholds: Vec<f64> = children.iter().map(|(t, _)| *t).collect();
+        Some(blend_weights(&thresholds, value))
     }
 }
 
 /// Whether `condition` holds for `parameters`. A parameter that isn't there,
 /// or is of another type than its test is for, doesn't hold.
-pub fn holds(condition: &Condition, parameters: &BTreeMap<String, Parameter>) -> bool {
+pub fn holds(condition: &Condition, parameters: &Parameters) -> bool {
     match (condition.test, parameters.get(&condition.parameter)) {
         (Test::IsTrue, Some(Parameter::Bool(value))) => *value,
         (Test::IsFalse, Some(Parameter::Bool(value))) => !*value,
@@ -299,12 +456,13 @@ impl Machine {
     pub fn evaluate(
         &mut self,
         controller: &Compiled,
-        parameters: &mut BTreeMap<String, Parameter>,
+        parameters: &mut Parameters,
     ) -> Option<usize> {
         if self.fade.is_some_and(|fade| !fade.interruptible) {
             return None;
         }
         let current = self.current;
+        let looping = controller.looping(current.state, parameters);
         let chosen = controller
             .transitions
             .iter()
@@ -313,9 +471,8 @@ impl Machine {
                 Some(from) => from == current.state,
             })
             .filter(|t| {
-                t.exit_time.is_none_or(|exit| {
-                    exit_reached(exit, current.phase, controller.looping(current.state))
-                })
+                t.exit_time
+                    .is_none_or(|exit| exit_reached(exit, current.phase, looping))
             })
             .filter(|t| t.conditions.iter().all(|c| holds(c, parameters)))
             // `max_by_key` keeps the last of equals, so ties go to the
@@ -340,22 +497,40 @@ impl Machine {
 
     /// Moves on by `dt` seconds, returning the events the current state's
     /// clip passed and how far root motion moved the model (both states'
-    /// travel, by their share of the blend).
-    pub fn advance(&mut self, controller: &Compiled, rig: &Rig, dt: f64) -> Advanced {
+    /// travel, by their share of the blend). `parameters` set blend trees'
+    /// mixes.
+    pub fn advance(
+        &mut self,
+        controller: &Compiled,
+        rig: &Rig,
+        parameters: &Parameters,
+        dt: f64,
+    ) -> Advanced {
         if !(dt.is_finite() && dt > 0.0) {
             return Advanced::default();
         }
         let before = (self.current, self.fade);
-        self.step(controller, dt);
-        let events = controller.events(before.0.state, before.0.phase, self.current.phase);
+        self.step(controller, parameters, dt);
+        let events = controller.events(
+            before.0.state,
+            parameters,
+            before.0.phase,
+            self.current.phase,
+        );
         let weight = self.fade.map_or(1.0, |fade| fade.weight()) as f32;
         let mut motion = controller
-            .root_motion(before.0.state, rig, before.0.phase, self.current.phase)
+            .root_motion(
+                before.0.state,
+                rig,
+                parameters,
+                before.0.phase,
+                self.current.phase,
+            )
             .scaled(weight);
         if let Some(old) = before.1 {
-            let to = old.from.phase + dt / controller.duration(old.from.state);
+            let to = old.from.phase + dt / controller.duration(old.from.state, parameters);
             let from = controller
-                .root_motion(old.from.state, rig, old.from.phase, to)
+                .root_motion(old.from.state, rig, parameters, old.from.phase, to)
                 .scaled(1.0 - weight);
             motion = motion + from;
         }
@@ -363,10 +538,10 @@ impl Machine {
     }
 
     /// Moves the phases and the blend on by `dt` seconds.
-    fn step(&mut self, controller: &Compiled, dt: f64) {
-        self.current.phase += dt / controller.duration(self.current.state);
+    fn step(&mut self, controller: &Compiled, parameters: &Parameters, dt: f64) {
+        self.current.phase += dt / controller.duration(self.current.state, parameters);
         if let Some(fade) = &mut self.fade {
-            fade.from.phase += dt / controller.duration(fade.from.state);
+            fade.from.phase += dt / controller.duration(fade.from.state, parameters);
             fade.elapsed += dt;
             if fade.elapsed >= fade.duration {
                 self.fade = None;
@@ -376,19 +551,31 @@ impl Machine {
 
     /// The pose now: the current state's, blended with the old one's while
     /// fading.
-    pub fn pose(&self, controller: &Compiled, rig: &Rig) -> Pose {
+    pub fn pose(&self, controller: &Compiled, rig: &Rig, parameters: &Parameters) -> Pose {
         let weight = self.fade.map_or(1.0, |fade| fade.weight());
-        self.pose_at(controller, rig, weight)
+        self.pose_at(controller, rig, parameters, weight)
     }
 
     /// The pose with the fade's new state counting `weight` (0 is all the
     /// old state, 1 all the new), for scrubbing a blend in the editor.
-    pub fn pose_at(&self, controller: &Compiled, rig: &Rig, weight: f64) -> Pose {
+    pub fn pose_at(
+        &self,
+        controller: &Compiled,
+        rig: &Rig,
+        parameters: &Parameters,
+        weight: f64,
+    ) -> Pose {
         let mut pose = rig.rest_pose();
-        controller.sample(self.current.state, self.current.phase, rig, &mut pose);
+        controller.sample(
+            self.current.state,
+            self.current.phase,
+            rig,
+            parameters,
+            &mut pose,
+        );
         if let Some(fade) = &self.fade {
             let mut old = rig.rest_pose();
-            controller.sample(fade.from.state, fade.from.phase, rig, &mut old);
+            controller.sample(fade.from.state, fade.from.phase, rig, parameters, &mut old);
             let weight = weight.clamp(0.0, 1.0) as f32;
             for (new, old) in pose.iter_mut().zip(&old) {
                 *new = old.lerp(new, weight);

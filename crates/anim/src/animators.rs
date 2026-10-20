@@ -193,8 +193,15 @@ impl Animators {
                 }
             }
             let mut markers = Vec::new();
+            // Blend trees mix by the parameters as they are now.
+            let parameters = world
+                .animator(id)
+                .map(|live| live.parameters.clone())
+                .unwrap_or_default();
             if enabled {
-                let advanced = running.machine.advance(&compiled, &rig, dt * speed);
+                let advanced = running
+                    .machine
+                    .advance(&compiled, &rig, &parameters, dt * speed);
                 markers = advanced.events;
                 move_by_root_motion(world, part, &rig, advanced.motion);
                 // Transitions whose time has come, now the clock has moved on.
@@ -229,7 +236,7 @@ impl Animators {
                 }
             }
 
-            let pose = running.machine.pose(&compiled, &rig);
+            let pose = running.machine.pose(&compiled, &rig, &parameters);
             if let Some(posed) = model.pose(&pose) {
                 self.poses.insert(part, Arc::new(posed));
                 posed_parts.insert(part);

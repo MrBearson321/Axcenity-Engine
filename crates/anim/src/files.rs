@@ -206,6 +206,85 @@ impl StateDef {
 pub enum Motion {
     /// A clip file's path, such as `assets/animations/hero/Walk.anim.json`.
     Clip(String),
+    /// Related clips mixed by a Number parameter, such as Idle, Walk and
+    /// Run by Speed.
+    BlendTree(BlendTree),
+}
+
+impl Motion {
+    /// Every clip path it plays.
+    pub fn clips(&self) -> Vec<&String> {
+        match self {
+            Motion::Clip(path) => vec![path],
+            Motion::BlendTree(tree) => tree.children.iter().map(|child| &child.clip).collect(),
+        }
+    }
+
+    /// Every clip path it plays, to change.
+    pub fn clips_mut(&mut self) -> Vec<&mut String> {
+        match self {
+            Motion::Clip(path) => vec![path],
+            Motion::BlendTree(tree) => tree
+                .children
+                .iter_mut()
+                .map(|child| &mut child.clip)
+                .collect(),
+        }
+    }
+}
+
+/// A 1D blend tree: clips at thresholds of a Number parameter. The two
+/// either side of the parameter's value are mixed by how far it is
+/// between their thresholds; below the first or above the last, that clip
+/// plays alone.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BlendTree {
+    /// A Number parameter's name.
+    pub parameter: String,
+    pub children: Vec<BlendChild>,
+}
+
+/// One clip of a blend tree, at its threshold.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BlendChild {
+    pub clip: String,
+    pub threshold: f64,
+}
+
+/// Each child's weight in a 1D blend at `value`, by their `thresholds` (in
+/// any order): the two around the value share it by how close it is to
+/// each; outside the range, the end one counts alone. The weights add up
+/// to 1 (none for no thresholds).
+pub fn blend_weights(thresholds: &[f64], value: f64) -> Vec<f64> {
+    let mut weights = vec![0.0; thresholds.len()];
+    if thresholds.is_empty() {
+        return weights;
+    }
+    let mut order: Vec<usize> = (0..thresholds.len()).collect();
+    order.sort_by(|&a, &b| thresholds[a].total_cmp(&thresholds[b]));
+    let value = if value.is_finite() { value } else { 0.0 };
+    let (first, last) = (order[0], order[order.len() - 1]);
+    if value <= thresholds[first] {
+        weights[first] = 1.0;
+        return weights;
+    }
+    if value >= thresholds[last] {
+        weights[last] = 1.0;
+        return weights;
+    }
+    for pair in order.windows(2) {
+        let (low, high) = (pair[0], pair[1]);
+        let (a, b) = (thresholds[low], thresholds[high]);
+        if value >= a && value <= b {
+            let t = if b > a { (value - a) / (b - a) } else { 1.0 };
+            weights[low] = 1.0 - t;
+            weights[high] = t;
+            break;
+        }
+    }
+    weights
 }
 
 impl TransitionDef {
@@ -490,6 +569,47 @@ mod tests {
         assert!(err.0.starts_with("line 3"), "{err}");
         let err = ControllerFile::from_json(r#"{ "format_version": 99 }"#).unwrap_err();
         assert!(err.0.contains("newer"), "{err}");
+    }
+
+    #[test]
+    fn blend_weights_are_exact_at_and_between_thresholds() {
+        let thresholds = [0.0, 2.0, 6.0];
+        assert_eq!(blend_weights(&thresholds, 0.0), [1.0, 0.0, 0.0]);
+        assert_eq!(blend_weights(&thresholds, 1.0), [0.5, 0.5, 0.0]);
+        assert_eq!(blend_weights(&thresholds, 2.0), [0.0, 1.0, 0.0]);
+        assert_eq!(blend_weights(&thresholds, 5.0), [0.0, 0.25, 0.75]);
+        assert_eq!(blend_weights(&thresholds, 6.0), [0.0, 0.0, 1.0]);
+        // Out of range holds the end clip.
+        assert_eq!(blend_weights(&thresholds, -3.0), [1.0, 0.0, 0.0]);
+        assert_eq!(blend_weights(&thresholds, 9.0), [0.0, 0.0, 1.0]);
+        // Any order, and two at the same threshold.
+        assert_eq!(blend_weights(&[6.0, 0.0], 3.0), [0.5, 0.5]);
+        let same = blend_weights(&[1.0, 1.0, 3.0], 2.0);
+        assert!((same.iter().sum::<f64>() - 1.0).abs() < 1e-12);
+        assert!(blend_weights(&[], 1.0).is_empty());
+        assert_eq!(blend_weights(&[0.0, 2.0], f64::NAN), [1.0, 0.0]);
+    }
+
+    #[test]
+    fn blend_trees_round_trip() {
+        let mut controller = sample_controller();
+        controller.states[0].motion = Motion::BlendTree(BlendTree {
+            parameter: "Speed".into(),
+            children: vec![
+                BlendChild {
+                    clip: "assets/animations/hero/Idle.anim.json".into(),
+                    threshold: 0.0,
+                },
+                BlendChild {
+                    clip: "assets/animations/hero/Run.anim.json".into(),
+                    threshold: 6.0,
+                },
+            ],
+        });
+        let text = controller.to_json();
+        assert!(text.contains("\"blend_tree\""), "{text}");
+        assert_eq!(ControllerFile::from_json(&text).unwrap(), controller);
+        assert_eq!(controller.states[0].motion.clips().len(), 2);
     }
 
     #[test]

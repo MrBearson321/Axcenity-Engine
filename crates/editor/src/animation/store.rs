@@ -283,9 +283,7 @@ pub fn read_controller(project: &Path, path: &str) -> Result<ControllerFile, Str
 fn clips_of(file: &ControllerFile) -> Vec<String> {
     file.states
         .iter()
-        .flat_map(|state| match &state.motion {
-            Motion::Clip(path) => vec![path.clone()],
-        })
+        .flat_map(|state| state.motion.clips().into_iter().cloned())
         .collect()
 }
 
@@ -302,12 +300,10 @@ fn update_controller(
     };
     let mut changed = false;
     for state in &mut file.states {
-        match &mut state.motion {
-            Motion::Clip(clip) => {
-                if let Some(new) = change(clip) {
-                    *clip = new;
-                    changed = true;
-                }
+        for clip in state.motion.clips_mut() {
+            if let Some(new) = change(clip) {
+                *clip = new;
+                changed = true;
             }
         }
     }

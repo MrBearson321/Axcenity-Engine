@@ -80,7 +80,7 @@ fn frame(
     parameters: &mut BTreeMap<String, Parameter>,
     dt: f64,
 ) -> Option<usize> {
-    machine.advance(compiled, &rig(), dt);
+    machine.advance(compiled, &rig(), parameters, dt);
     machine.evaluate(compiled, parameters)
 }
 
@@ -221,9 +221,9 @@ fn blends_mix_the_two_poses_by_their_share() {
     frame(&mut machine, &compiled, &mut params, 0.1);
     let fade = machine.fade.expect("blending");
     assert_eq!(fade.weight(), 0.0);
-    machine.advance(&compiled, &rig(), 0.25);
+    machine.advance(&compiled, &rig(), &params, 0.25);
     assert!((machine.fade.unwrap().weight() - 0.5).abs() < 1e-9);
-    machine.advance(&compiled, &rig(), 0.3);
+    machine.advance(&compiled, &rig(), &params, 0.3);
     assert!(machine.fade.is_none(), "done after its blend");
 }
 

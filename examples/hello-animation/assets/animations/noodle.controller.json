@@ -2,9 +2,9 @@
   "format_version": 1,
   "parameters": [
     {
-      "type": "Bool",
-      "name": "IsWalking",
-      "default": false
+      "type": "Number",
+      "name": "Speed",
+      "default": 0.0
     },
     {
       "type": "Trigger",
@@ -15,12 +15,28 @@
       "name": "Hop"
     }
   ],
-  "default_state": "Idle",
+  "default_state": "Locomotion",
   "states": [
     {
-      "name": "Idle",
+      "name": "Locomotion",
       "motion": {
-        "clip": "assets/animations/noodle/Idle.anim.json"
+        "blend_tree": {
+          "parameter": "Speed",
+          "children": [
+            {
+              "clip": "assets/animations/noodle/Idle.anim.json",
+              "threshold": 0.0
+            },
+            {
+              "clip": "assets/animations/noodle/Walk.anim.json",
+              "threshold": 2.0
+            },
+            {
+              "clip": "assets/animations/noodle/Run.anim.json",
+              "threshold": 6.0
+            }
+          ]
+        }
       },
       "speed": 1.0,
       "position": [
@@ -35,8 +51,8 @@
       },
       "speed": 1.0,
       "position": [
-        240.0,
-        -120.0
+        260.0,
+        -80.0
       ]
     },
     {
@@ -46,53 +62,12 @@
       },
       "speed": 1.0,
       "position": [
-        240.0,
-        0.0
-      ]
-    },
-    {
-      "name": "Walk",
-      "motion": {
-        "clip": "assets/animations/noodle/Walk.anim.json"
-      },
-      "speed": 1.0,
-      "position": [
-        240.0,
-        120.0
+        260.0,
+        80.0
       ]
     }
   ],
   "transitions": [
-    {
-      "from": "Idle",
-      "to": "Walk",
-      "conditions": [
-        {
-          "parameter": "IsWalking",
-          "test": "IsTrue",
-          "value": 0.0
-        }
-      ],
-      "blend": 0.25,
-      "exit_time": null,
-      "interruptible": false,
-      "priority": 0
-    },
-    {
-      "from": "Walk",
-      "to": "Idle",
-      "conditions": [
-        {
-          "parameter": "IsWalking",
-          "test": "IsFalse",
-          "value": 0.0
-        }
-      ],
-      "blend": 0.25,
-      "exit_time": null,
-      "interruptible": false,
-      "priority": 0
-    },
     {
       "from": "Any State",
       "to": "Wave",
@@ -110,7 +85,7 @@
     },
     {
       "from": "Wave",
-      "to": "Idle",
+      "to": "Locomotion",
       "conditions": [],
       "blend": 0.25,
       "exit_time": 1.0,
@@ -134,7 +109,7 @@
     },
     {
       "from": "Hop",
-      "to": "Idle",
+      "to": "Locomotion",
       "conditions": [],
       "blend": 0.25,
       "exit_time": 1.0,

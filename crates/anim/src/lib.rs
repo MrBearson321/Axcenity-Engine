@@ -18,11 +18,11 @@ pub mod files;
 
 pub use animators::{AnimatorEvent, Animators, Poses, load_clip};
 pub use clip::{BoundClip, RootMotion};
-pub use controller::{Advanced, Compiled, Fade, Machine, Playing, exit_reached, holds};
+pub use controller::{Advanced, Compiled, Fade, Machine, Parameters, Playing, exit_reached, holds};
 pub use files::{
-    ANIMATIONS_FOLDER, ANY_STATE, CLIP_EXTENSION, CONTROLLER_EXTENSION, ClipEvent, ClipFile,
-    Condition, ControllerFile, DEFAULT_BLEND, FileError, Motion, ParameterDef, StateDef, Test,
-    TransitionDef,
+    ANIMATIONS_FOLDER, ANY_STATE, BlendChild, BlendTree, CLIP_EXTENSION, CONTROLLER_EXTENSION,
+    ClipEvent, ClipFile, Condition, ControllerFile, DEFAULT_BLEND, FileError, Motion, ParameterDef,
+    StateDef, Test, TransitionDef, blend_weights,
 };
 
 #[cfg(test)]

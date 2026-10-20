@@ -8,7 +8,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use axcenity_anim::files::{
-    self, Condition, ControllerFile, Motion, ParameterDef, StateDef, Test, TransitionDef,
+    self, BlendChild, BlendTree, Condition, ControllerFile, Motion, ParameterDef, StateDef, Test,
+    TransitionDef,
 };
 use axcenity_anim::{ANY_STATE, Compiled, DEFAULT_BLEND, Fade, Machine, Playing};
 use axcenity_assets::{Assets, Posed};
@@ -103,12 +104,10 @@ impl ControllerDoc {
         self.file
             .states
             .iter()
-            .find_map(|state| match &state.motion {
-                Motion::Clip(path) if !path.is_empty() => super::store::read_clip(project, path)
-                    .ok()
-                    .map(|clip| clip.source),
-                Motion::Clip(_) => None,
-            })
+            .flat_map(|state| state.motion.clips())
+            .filter(|path| !path.is_empty())
+            .find_map(|path| super::store::read_clip(project, path).ok())
+            .map(|clip| clip.source)
     }
 
     /// Does what the graph reports.
@@ -141,6 +140,22 @@ impl ControllerDoc {
                     self.selected = Selected::Node(Node::State(index));
                 }
                 GraphEvent::Delete(selected) => self.delete(selected),
+                GraphEvent::AddBlendTree(at) => {
+                    let name = self.free_state_name("Blend Tree");
+                    let parameter = self.number_parameter();
+                    if self.file.states.is_empty() {
+                        self.file.default_state = name.clone();
+                    }
+                    self.file.states.push(StateDef::new(
+                        &name,
+                        Motion::BlendTree(BlendTree {
+                            parameter,
+                            children: Vec::new(),
+                        }),
+                        at,
+                    ));
+                    self.selected = Selected::Node(Node::State(self.file.states.len() - 1));
+                }
                 GraphEvent::AddState(at, clip) => {
                     let wanted = clip
                         .as_deref()
@@ -158,6 +173,24 @@ impl ControllerDoc {
                 }
             }
         }
+    }
+
+    /// The first Number parameter's name, adding `Speed` if there's none.
+    fn number_parameter(&mut self) -> String {
+        if let Some(def) = self
+            .file
+            .parameters
+            .iter()
+            .find(|def| matches!(def, ParameterDef::Number { .. }))
+        {
+            return def.name().to_owned();
+        }
+        let name = self.free_parameter_name("Speed");
+        self.file.parameters.push(ParameterDef::Number {
+            name: name.clone(),
+            default: 0.0,
+        });
+        name
     }
 
     fn free_state_name(&self, wanted: &str) -> String {
@@ -295,7 +328,8 @@ impl ControllerDoc {
         }
         let run = self.preview.as_mut().expect("made above");
         if self.playing {
-            run.machine.advance(&run.compiled, &rig, dt);
+            run.machine
+                .advance(&run.compiled, &rig, &run.parameters, dt);
             run.machine.evaluate(&run.compiled, &mut run.parameters);
         }
         // Scrubbing a selected transition shows its two poses mixed.
@@ -320,12 +354,12 @@ impl ControllerDoc {
                                 transition: Some(index),
                             }),
                         };
-                        mixed.pose_at(&run.compiled, &rig, self.scrub)
+                        mixed.pose_at(&run.compiled, &rig, &run.parameters, self.scrub)
                     }
-                    _ => run.machine.pose(&run.compiled, &rig),
+                    _ => run.machine.pose(&run.compiled, &rig, &run.parameters),
                 }
             }
-            _ => run.machine.pose(&run.compiled, &rig),
+            _ => run.machine.pose(&run.compiled, &rig, &run.parameters),
         };
         model
             .pose(&pose)
@@ -339,7 +373,7 @@ impl ControllerDoc {
             return Live::default();
         };
         let current = run.machine.current;
-        let through = if run.compiled.looping(current.state) {
+        let through = if run.compiled.looping(current.state, &run.parameters) {
             current.phase.rem_euclid(1.0)
         } else {
             current.phase.min(1.0)
@@ -620,32 +654,58 @@ impl ControllerDoc {
             self.file.default_state = name.clone();
         }
         ui.add_space(4.0);
+        // Clip or blend tree.
+        let is_tree = matches!(self.file.states[index].motion, Motion::BlendTree(_));
+        let mut make_tree = false;
+        ui.horizontal(|ui| {
+            ui.label("Plays");
+            if ui.selectable_label(!is_tree, "A clip").clicked() && is_tree {
+                let first = self.file.states[index]
+                    .motion
+                    .clips()
+                    .first()
+                    .map(|clip| (*clip).clone())
+                    .unwrap_or_default();
+                self.file.states[index].motion = Motion::Clip(first);
+            }
+            if ui
+                .selectable_label(is_tree, "A blend tree")
+                .on_hover_text(
+                    "Mix related clips by a Number parameter, such as Idle, Walk and Run by Speed",
+                )
+                .clicked()
+                && !is_tree
+            {
+                make_tree = true;
+            }
+        });
+        if make_tree {
+            let parameter = self.number_parameter();
+            let children = match &self.file.states[index].motion {
+                Motion::Clip(clip) if !clip.is_empty() => vec![BlendChild {
+                    clip: clip.clone(),
+                    threshold: 0.0,
+                }],
+                _ => Vec::new(),
+            };
+            self.file.states[index].motion = Motion::BlendTree(BlendTree {
+                parameter,
+                children,
+            });
+        }
+        if matches!(self.file.states[index].motion, Motion::BlendTree(_)) {
+            self.blend_tree_editor(ui, index, clips);
+        }
         egui::Grid::new("state settings")
             .num_columns(2)
             .spacing([10.0, 6.0])
             .show(ui, |ui| {
-                ui.label("Clip");
                 let state = &mut self.file.states[index];
-                let Motion::Clip(current) = &mut state.motion;
-                let shown = if current.is_empty() {
-                    "(none)".to_owned()
-                } else {
-                    axcenity_anim::files::clip_name(current).to_owned()
-                };
-                egui::ComboBox::from_id_salt("state clip")
-                    .selected_text(shown)
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(current, String::new(), "(none)");
-                        for clip in clips {
-                            let label = format!(
-                                "{}  ({})",
-                                axcenity_anim::files::clip_name(clip),
-                                super::store::group_of(clip)
-                            );
-                            ui.selectable_value(current, clip.clone(), label);
-                        }
-                    });
-                ui.end_row();
+                if let Motion::Clip(current) = &mut state.motion {
+                    ui.label("Clip");
+                    clip_picker(ui, "state clip", current, clips);
+                    ui.end_row();
+                }
                 ui.label("Speed");
                 ui.add(
                     egui::DragValue::new(&mut state.speed)
@@ -869,8 +929,264 @@ impl ControllerDoc {
     }
 }
 
+/// A combo box picking one of the project's `clips` (or none) for `current`.
+fn clip_picker(
+    ui: &mut egui::Ui,
+    id: impl std::hash::Hash,
+    current: &mut String,
+    clips: &[String],
+) {
+    let shown = if current.is_empty() {
+        "(none)".to_owned()
+    } else {
+        axcenity_anim::files::clip_name(current).to_owned()
+    };
+    egui::ComboBox::from_id_salt(id)
+        .selected_text(shown)
+        .show_ui(ui, |ui| {
+            ui.selectable_value(current, String::new(), "(none)");
+            for clip in clips {
+                let label = format!(
+                    "{}  ({})",
+                    axcenity_anim::files::clip_name(clip),
+                    super::store::group_of(clip)
+                );
+                ui.selectable_value(current, clip.clone(), label);
+            }
+        });
+}
+
+/// The clip in `clips` whose name has `word` in it, preferring ones in
+/// `folder` (a clip's group).
+fn clip_named(clips: &[String], word: &str, folder: Option<&str>) -> Option<String> {
+    let matching: Vec<&String> = clips
+        .iter()
+        .filter(|clip| {
+            axcenity_anim::files::clip_name(clip)
+                .to_lowercase()
+                .contains(word)
+        })
+        .collect();
+    matching
+        .iter()
+        .find(|clip| folder.is_some_and(|folder| super::store::group_of(clip) == folder))
+        .or(matching.first())
+        .map(|clip| (*clip).clone())
+}
+
+impl ControllerDoc {
+    /// The blend tree of state `index`: its parameter, each clip with its
+    /// threshold (a slider and a number) and its share now in the preview,
+    /// a line of the thresholds with the value now, and Add Locomotion.
+    fn blend_tree_editor(&mut self, ui: &mut egui::Ui, index: usize, clips: &[String]) {
+        // The preview's mix now, and its parameter's value.
+        let state_name = self.file.states[index].name.clone();
+        let (weights, value) = match &self.preview {
+            Some(run) => {
+                let state = run.compiled.state_index(&state_name);
+                let weights = state.and_then(|s| run.compiled.tree_weights(s, &run.parameters));
+                let Motion::BlendTree(tree) = &self.file.states[index].motion else {
+                    return;
+                };
+                let value = match run.parameters.get(&tree.parameter) {
+                    Some(Parameter::Number(value)) => Some(*value),
+                    _ => None,
+                };
+                (weights, value)
+            }
+            None => (None, None),
+        };
+        let numbers: Vec<String> = self
+            .file
+            .parameters
+            .iter()
+            .filter(|def| matches!(def, ParameterDef::Number { .. }))
+            .map(|def| def.name().to_owned())
+            .collect();
+        let mut locomotion = false;
+        let Motion::BlendTree(tree) = &mut self.file.states[index].motion else {
+            return;
+        };
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.strong(format!("{} Blend tree", icons::SLIDERS_HORIZONTAL));
+            ui.horizontal(|ui| {
+                ui.label("By");
+                egui::ComboBox::from_id_salt("tree parameter")
+                    .selected_text(&tree.parameter)
+                    .show_ui(ui, |ui| {
+                        for name in &numbers {
+                            ui.selectable_value(&mut tree.parameter, name.clone(), name);
+                        }
+                    });
+                ui.weak("(a Number parameter)");
+            });
+            let low = tree
+                .children
+                .iter()
+                .map(|c| c.threshold)
+                .fold(0.0_f64, f64::min);
+            let high = tree
+                .children
+                .iter()
+                .map(|c| c.threshold)
+                .fold(6.0_f64, f64::max);
+            let mut remove = None;
+            egui::Grid::new("tree children")
+                .num_columns(4)
+                .spacing([6.0, 4.0])
+                .show(ui, |ui| {
+                    ui.weak("Clip");
+                    ui.weak("Threshold");
+                    ui.weak("Share");
+                    ui.end_row();
+                    for (c, child) in tree.children.iter_mut().enumerate() {
+                        clip_picker(ui, ("tree clip", c), &mut child.clip, clips);
+                        ui.horizontal(|ui| {
+                            ui.add(
+                                egui::Slider::new(&mut child.threshold, low..=high)
+                                    .show_value(false),
+                            );
+                            ui.add(egui::DragValue::new(&mut child.threshold).speed(0.05));
+                        });
+                        let share = weights.as_ref().and_then(|w| w.get(c)).copied().unwrap_or(0.0);
+                        ui.add(
+                            egui::ProgressBar::new(share as f32)
+                                .desired_width(60.0)
+                                .text(format!("{:.0}%", share * 100.0)),
+                        );
+                        if ui.small_button(icons::X).on_hover_text("Remove").clicked() {
+                            remove = Some(c);
+                        }
+                        ui.end_row();
+                    }
+                });
+            if let Some(c) = remove {
+                tree.children.remove(c);
+            }
+            ui.horizontal(|ui| {
+                if ui.button(format!("{} Add clip", icons::PLUS)).clicked() {
+                    let threshold = tree
+                        .children
+                        .iter()
+                        .map(|c| c.threshold + 1.0)
+                        .fold(0.0, f64::max);
+                    tree.children.push(BlendChild {
+                        clip: String::new(),
+                        threshold,
+                    });
+                }
+                if ui
+                    .button("Sort")
+                    .on_hover_text("Put the clips in threshold order")
+                    .clicked()
+                {
+                    tree.children
+                        .sort_by(|a, b| a.threshold.total_cmp(&b.threshold));
+                }
+                if ui
+                    .button("Add Locomotion")
+                    .on_hover_text("Speed (0–6 m/s): Idle at 0, Walk at 2, Run at 6, with the project's clips of those names")
+                    .clicked()
+                {
+                    locomotion = true;
+                }
+            });
+            threshold_line(ui, tree, value, low, high);
+        });
+        if locomotion {
+            let folder = self.file.states[index]
+                .motion
+                .clips()
+                .into_iter()
+                .find(|clip| !clip.is_empty())
+                .map(|clip| super::store::group_of(clip).to_owned());
+            let parameter = if self
+                .file
+                .parameters
+                .iter()
+                .any(|def| def.name() == "Speed" && matches!(def, ParameterDef::Number { .. }))
+            {
+                "Speed".to_owned()
+            } else if self.file.parameters.iter().any(|def| def.name() == "Speed") {
+                self.number_parameter()
+            } else {
+                self.file.parameters.push(ParameterDef::Number {
+                    name: "Speed".to_owned(),
+                    default: 0.0,
+                });
+                "Speed".to_owned()
+            };
+            let children = [("idle", 0.0), ("walk", 2.0), ("run", 6.0)]
+                .into_iter()
+                .map(|(word, threshold)| BlendChild {
+                    clip: clip_named(clips, word, folder.as_deref()).unwrap_or_default(),
+                    threshold,
+                })
+                .collect();
+            self.file.states[index].motion = Motion::BlendTree(BlendTree {
+                parameter,
+                children,
+            });
+        }
+    }
+}
+
+/// The blend tree's thresholds on a line, each clip's name over its tick,
+/// with the parameter's value now as a marker.
+fn threshold_line(ui: &mut egui::Ui, tree: &BlendTree, value: Option<f64>, low: f64, high: f64) {
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 40.0), egui::Sense::hover());
+    let painter = ui.painter_at(rect);
+    let visuals = ui.visuals();
+    let line_y = rect.bottom() - 10.0;
+    let x_of = |v: f64| {
+        let t = ((v - low) / (high - low).max(1e-9)).clamp(0.0, 1.0) as f32;
+        egui::lerp(rect.left() + 8.0..=rect.right() - 8.0, t)
+    };
+    painter.line_segment(
+        [
+            egui::pos2(rect.left() + 8.0, line_y),
+            egui::pos2(rect.right() - 8.0, line_y),
+        ],
+        egui::Stroke::new(2.0_f32, visuals.weak_text_color()),
+    );
+    for child in &tree.children {
+        let x = x_of(child.threshold);
+        painter.circle_filled(egui::pos2(x, line_y), 4.0, visuals.selection.bg_fill);
+        let name = if child.clip.is_empty() {
+            "?".to_owned()
+        } else {
+            axcenity_anim::files::clip_name(&child.clip).to_owned()
+        };
+        painter.text(
+            egui::pos2(x, line_y - 8.0),
+            egui::Align2::CENTER_BOTTOM,
+            format!("{name} {}", child.threshold),
+            egui::FontId::proportional(10.0),
+            visuals.text_color(),
+        );
+    }
+    if let Some(value) = value {
+        let x = x_of(value);
+        painter.line_segment(
+            [
+                egui::pos2(x, rect.top() + 2.0),
+                egui::pos2(x, rect.bottom()),
+            ],
+            egui::Stroke::new(2.0_f32, egui::Color32::from_rgb(255, 120, 80)),
+        );
+        painter.text(
+            egui::pos2(x + 4.0, rect.bottom()),
+            egui::Align2::LEFT_BOTTOM,
+            format!("{value:.2}"),
+            egui::FontId::proportional(10.0),
+            egui::Color32::from_rgb(255, 120, 80),
+        );
+    }
+}
+
 /// A slider range for each Number parameter: from 0 (or lower) to past
-/// the biggest value its conditions test.
+/// the biggest value its conditions test and its blend trees' thresholds.
 fn number_ranges(file: &ControllerFile) -> BTreeMap<String, (f64, f64)> {
     let mut ranges = BTreeMap::new();
     for def in &file.parameters {
@@ -881,6 +1197,16 @@ fn number_ranges(file: &ControllerFile) -> BTreeMap<String, (f64, f64)> {
                 if condition.parameter == *name {
                     low = low.min(condition.value);
                     high = high.max(condition.value * 1.5);
+                }
+            }
+            for state in &file.states {
+                if let Motion::BlendTree(tree) = &state.motion
+                    && tree.parameter == *name
+                {
+                    for child in &tree.children {
+                        low = low.min(child.threshold);
+                        high = high.max(child.threshold);
+                    }
                 }
             }
             ranges.insert(name.clone(), (low, high.max(low + 1.0)));
