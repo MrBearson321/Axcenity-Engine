@@ -74,7 +74,9 @@ impl RibbonGroup {
         match self {
             RibbonGroup::Game => "Play and Stop",
             RibbonGroup::Tools => "Select, Move, Scale and Rotate",
-            RibbonGroup::Build => "Paint, materials, anchor, collision, lights and the angular tool",
+            RibbonGroup::Build => {
+                "Paint, materials, anchor, collision, lights and the angular tool"
+            }
             RibbonGroup::Snapping => "Move and rotate steps",
             RibbonGroup::Parts => "Insert blocks, balls, cylinders and wedges",
             RibbonGroup::Effects => "Insert sounds, particle emitters and lights",

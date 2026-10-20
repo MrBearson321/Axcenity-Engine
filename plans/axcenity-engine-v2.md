@@ -53,9 +53,9 @@ Opening a project whose format version is older than the engine's upgrades it in
 
 ### Acceptance criteria
 
-- [ ] Opening an older project rewrites it to the current format version, and the world, scripts, and assets still load.
-- [ ] A copy of the previous files is kept beside the upgrade and is not overwritten by a later save.
-- [ ] Opening a project newer than this engine fails with a message to update Axcenity, and the folder is left unchanged.
+- [x] Opening an older project rewrites it to the current format version, and the world, scripts, and assets still load.
+- [x] A copy of the previous files is kept beside the upgrade and is not overwritten by a later save.
+- [x] Opening a project newer than this engine fails with a message to update Axcenity, and the folder is left unchanged.
 - [ ] New Project, Open, recent projects, and Project Settings behave as they do today on a current project.
 
 ---

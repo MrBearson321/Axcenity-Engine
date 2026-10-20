@@ -289,7 +289,10 @@ mod tests {
         let output = temp_folder("output");
         fs::write(
             source.join("axcenity.json"),
-            r#"{"name":"Game","format_version":1}"#,
+            format!(
+                r#"{{"name":"Game","format_version":{}}}"#,
+                crate::FORMAT_VERSION
+            ),
         )
         .unwrap();
         fs::write(source.join("world.json"), r#"{"format_version":1}"#).unwrap();

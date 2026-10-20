@@ -115,8 +115,7 @@ impl Tool {
         }
     }
 
-    const _TOOLS_SPLIT: () =
-        assert!(Self::TRANSFORM.len() + Self::BUILD.len() == Self::ALL.len());
+    const _TOOLS_SPLIT: () = assert!(Self::TRANSFORM.len() + Self::BUILD.len() == Self::ALL.len());
 
     /// Ctrl+1 to Ctrl+4 (Cmd on macOS), as in Studio, for the first four.
     pub fn shortcut(self) -> Option<egui::KeyboardShortcut> {

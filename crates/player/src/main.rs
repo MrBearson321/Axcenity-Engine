@@ -81,6 +81,18 @@ fn main() -> Result<()> {
     };
     let project = axcenity_project::load(&folder.path)
         .with_context(|| format!("could not open the project in `{}`", folder.path.display()))?;
+    if let Some(from) = project.migrated_from {
+        let kept = project
+            .migration_backup
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| axcenity_project::PREVIOUS_FORMAT_DIR.to_owned());
+        eprintln!(
+            "Upgraded \"{}\" from project format {from} to {}. The previous files are kept in `{kept}`.",
+            project.manifest.name,
+            axcenity_project::FORMAT_VERSION,
+        );
+    }
     log::info!("loaded project \"{}\"", project.manifest.name);
     let show_splash = project.manifest.show_splash;
     // A damaged file only takes itself out: say which, and run the rest.

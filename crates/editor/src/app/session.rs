@@ -24,6 +24,19 @@ impl EditorApp {
             }
         };
 
+        if let Some(from) = project.migrated_from {
+            let kept = project
+                .migration_backup
+                .as_ref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| axcenity_project::PREVIOUS_FORMAT_DIR.to_owned());
+            self.output.info(format!(
+                "Upgraded \"{}\" from project format {from} to {}. The previous files are kept in `{kept}`.",
+                project.manifest.name,
+                axcenity_project::FORMAT_VERSION,
+            ));
+        }
+
         let scripts = project.scripts.len();
         let show_splash = project.manifest.show_splash;
         self.output.info(format!(

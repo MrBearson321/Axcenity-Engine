@@ -838,10 +838,14 @@ mod tests {
 
     #[test]
     fn unsupported_css_properties_are_reported_as_output_warnings() {
+        let manifest = format!(
+            r#"{{"name":"CSS","format_version":{}}}"#,
+            axcenity_project::FORMAT_VERSION
+        );
         let folder = temp_project(
             "unsupported-css",
             &[
-                ("axcenity.json", r#"{"name":"CSS","format_version":1}"#),
+                ("axcenity.json", &manifest),
                 ("world.json", r#"{"format_version":1}"#),
                 ("ui.css", ".hud { animation: fade 1s; opacity: .5 }"),
             ],
@@ -1129,13 +1133,14 @@ mod tests {
 
     #[test]
     fn a_broken_world_file_is_reported_with_its_line_and_the_rest_still_opens() {
+        let manifest = format!(
+            r#"{{ "name": "Broken", "format_version": {} }}"#,
+            axcenity_project::FORMAT_VERSION
+        );
         let folder = temp_project(
             "broken-world",
             &[
-                (
-                    "axcenity.json",
-                    r#"{ "name": "Broken", "format_version": 1 }"#,
-                ),
+                ("axcenity.json", &manifest),
                 (
                     "world.json",
                     "{\n  \"format_version\": 1,\n  \"workspace\": oops\n}\n",

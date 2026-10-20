@@ -42,7 +42,9 @@ use axcenity_core::{
 use serde::Deserialize;
 use serde_json::{Map, Value as Json};
 
-use crate::FORMAT_VERSION;
+/// `world.json` and prefab files. The manifest version is separate: a project
+/// upgrade can leave these files unchanged.
+const WORLD_FORMAT_VERSION: u32 = 1;
 
 #[derive(Debug, thiserror::Error)]
 pub enum WorldError {
@@ -51,7 +53,7 @@ pub enum WorldError {
     #[error(transparent)]
     Json(serde_json::Error),
     #[error(
-        "world format {found} is newer than this engine understands ({FORMAT_VERSION}); update Axcenity to open it"
+        "world format {found} is newer than this engine understands ({WORLD_FORMAT_VERSION}); update Axcenity to open it"
     )]
     TooNew { found: u32 },
     #[error("{path}: there is no class named `{class}`")]
@@ -124,7 +126,7 @@ struct InstanceNode {
 /// Builds a [`World`] from the text of a world file.
 pub fn parse_world(text: &str) -> Result<World, WorldError> {
     let file: WorldFile = serde_json::from_str(text).map_err(WorldError::Json)?;
-    if file.format_version > FORMAT_VERSION {
+    if file.format_version > WORLD_FORMAT_VERSION {
         return Err(WorldError::TooNew {
             found: file.format_version,
         });
@@ -169,7 +171,7 @@ pub fn parse_prefab(
     parent: InstanceId,
 ) -> Result<Vec<InstanceId>, WorldError> {
     let file: PrefabFile = serde_json::from_str(text).map_err(WorldError::Json)?;
-    if file.format_version > FORMAT_VERSION {
+    if file.format_version > WORLD_FORMAT_VERSION {
         return Err(WorldError::TooNew {
             found: file.format_version,
         });
@@ -190,7 +192,8 @@ pub fn parse_prefab(
 /// The text of a prefab file holding `ids` and everything inside them
 /// (scripts are left out, as in the world file).
 pub fn write_prefab(world: &World, ids: &[InstanceId]) -> String {
-    let mut out = format!("{{\n  \"format_version\": {FORMAT_VERSION},\n  \"instances\": [\n");
+    let mut out =
+        format!("{{\n  \"format_version\": {WORLD_FORMAT_VERSION},\n  \"instances\": [\n");
     let ids: Vec<InstanceId> = ids
         .iter()
         .copied()
@@ -374,7 +377,7 @@ fn four_numbers(json: &Json) -> Option<[f32; 4]> {
 /// The text of a world file for `world`, in the same layout people write by
 /// hand: two-space indents, and `[x, y, z]` values on one line.
 pub fn write_world(world: &World) -> String {
-    let mut out = format!("{{\n  \"format_version\": {FORMAT_VERSION},\n  \"workspace\": ");
+    let mut out = format!("{{\n  \"format_version\": {WORLD_FORMAT_VERSION},\n  \"workspace\": ");
     write_instance(world, world.workspace(), 1, &mut out);
     // Left out when empty, so worlds without one look as they always have.
     let replicated = world.replicated_storage();

@@ -10,7 +10,7 @@ Chosen over RON because every editor (including VS Code) highlights and validate
 
 ```text
 my-game/
-  axcenity.json   { "name": "My Game", "format_version": 1 }
+  axcenity.json   { "name": "My Game", "format_version": 2 }
   world.json      the Workspace and its descendants
   scripts/        server scripts: build.server.lua, doors/open.server.lua, ...
                   client scripts: keys.client.lua, ...
@@ -78,5 +78,5 @@ my-game/
 - **Prefabs** (Phase 34): `assets/prefabs/*.prefab.json` holds Instances saved to be placed again: `{ "format_version": 1, "instances": [ ... ] }`, each written exactly like a child in `world.json` (scripts are left out). `project::parse_prefab` checks the whole file before adding anything, so a bad prefab adds nothing; `project::write_prefab` writes it. Positions are absolute as saved; the editor moves the whole prefab where it's placed.
 ## Versions and errors
 
-- `format_version` appears in both files. The engine refuses newer versions with a "please update" message.
+- `format_version` appears in both files. The manifest's number is the project format (`2` in this engine). Opening an older manifest upgrades the project and keeps the previous files; see `docs/project/layout.md`. A newer manifest refuses to open and asks the creator to update Axcenity. `world.json` and prefab files stay at format `1` until their own shape changes, and a newer world file still refuses to load.
 - Errors name the file and, for JSON syntax problems, the line and column. For bad property values they name the Instance path (for example `Workspace.Block.Color`).

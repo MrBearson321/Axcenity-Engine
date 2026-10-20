@@ -16,10 +16,12 @@
 //! out and lists it in [`Project::problems`].
 //!
 //! `lib.rs` owns the manifest, templates, script paths and stylesheets.
-//! `world_file.rs` reads and writes `world.json`. `terrain_files.rs` reads
-//! and writes Terrains' heightfields. `packed.rs` packs a game folder.
+//! `world_file.rs` reads and writes `world.json`. `migrate.rs` upgrades an
+//! older manifest and keeps the previous files. `terrain_files.rs` reads and
+//! writes Terrains' heightfields. `packed.rs` packs a game folder.
 //! `versions.rs` keeps the copies made on save.
 
+mod migrate;
 mod packed;
 mod terrain_files;
 mod versions;
@@ -33,6 +35,7 @@ use std::path::{Path, PathBuf};
 use axcenity_core::{ClassName, InstanceId, World};
 use serde::Deserialize;
 
+pub use migrate::PREVIOUS_FORMAT_DIR;
 pub use packed::{PackError, pack_game, unpack_game};
 pub use terrain_files::{
     TERRAIN_FOLDER, data_folder, is_safe_folder, keep_terrain_folder, load_terrains,
@@ -59,8 +62,10 @@ pub const MODULE_SCRIPT_SUFFIX: &str = ".module.lua";
 pub const SERVER_BLOCK_SCRIPT_SUFFIX: &str = ".server.blocks.json";
 pub const CLIENT_BLOCK_SCRIPT_SUFFIX: &str = ".client.blocks.json";
 
-/// The newest project format this version of the engine understands.
-pub const FORMAT_VERSION: u32 = 1;
+/// The newest manifest (`axcenity.json`) this engine writes. Opening an older
+/// one upgrades the project and keeps the previous files. `world.json` and
+/// prefabs have their own version and are not this number.
+pub const FORMAT_VERSION: u32 = 2;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -353,6 +358,12 @@ pub struct Project {
     /// flat). The editor keeps each ([`keep_terrain_folder`]) before saving
     /// over it.
     pub damaged_terrains: Vec<String>,
+    /// The manifest version this open upgraded from. `None` when the project
+    /// was already current, or the manifest could not be read.
+    pub migrated_from: Option<u32>,
+    /// The copy of the project files from before [`Self::migrated_from`].
+    /// Later saves do not write it.
+    pub migration_backup: Option<PathBuf>,
 }
 
 /// Stores whether exported players show the brief engine splash screen.
@@ -432,6 +443,15 @@ pub enum LoadError {
     },
     #[error("`{}` uses project format {found}, but this engine only understands up to {FORMAT_VERSION}; update Axcenity to open it", path.display())]
     TooNew { path: PathBuf, found: u32 },
+    #[error(
+        "could not upgrade `{}` from project format {found}: {message}",
+        path.display()
+    )]
+    Upgrade {
+        path: PathBuf,
+        found: u32,
+        message: String,
+    },
     #[error("`{}` is not a valid world file", path.display())]
     World {
         path: PathBuf,
@@ -463,16 +483,19 @@ impl BlockSaveError {
 
 /// Loads the project in `folder`.
 ///
-/// Only a missing or unreadable manifest (so this isn't a project folder),
-/// or one from a newer engine, stops it. Any other file that can't be loaded
-/// is left out and listed in [`Project::problems`]: a broken manifest gives
-/// the project its folder's name, a broken world file an empty Workspace,
-/// and a broken script no Script.
+/// A manifest from an older engine is upgraded first: the previous files are
+/// copied under [`PREVIOUS_FORMAT_DIR`], then the manifest version is
+/// rewritten. That copy is left alone by a later save. Only a missing or
+/// unreadable manifest (so this isn't a project folder), one from a newer
+/// engine, or an upgrade that cannot finish stops loading. Any other file
+/// that can't be loaded is left out and listed in [`Project::problems`]: a
+/// broken manifest gives the project its folder's name, a broken world file
+/// an empty Workspace, and a broken script no Script.
 pub fn load(folder: &Path) -> Result<Project, LoadError> {
     let manifest_path = folder.join(MANIFEST_FILE);
     let manifest_text = read(&manifest_path)?;
     let mut problems = Vec::new();
-    let manifest = match serde_json::from_str::<Manifest>(&manifest_text) {
+    let mut manifest = match serde_json::from_str::<Manifest>(&manifest_text) {
         Ok(manifest) => manifest,
         Err(source) => {
             problems.push(LoadError::Manifest {
@@ -493,6 +516,13 @@ pub fn load(folder: &Path) -> Result<Project, LoadError> {
             found: manifest.format_version,
         });
     }
+    let (migrated_from, migration_backup) = if manifest.format_version < FORMAT_VERSION {
+        let upgrade = migrate::upgrade(folder, manifest.format_version)?;
+        manifest.format_version = FORMAT_VERSION;
+        (Some(upgrade.from), Some(upgrade.backup))
+    } else {
+        (None, None)
+    };
 
     let (mut world, world_loaded) = match load_world(folder) {
         Ok(world) => (world, true),
@@ -515,6 +545,8 @@ pub fn load(folder: &Path) -> Result<Project, LoadError> {
         problems,
         world_loaded,
         damaged_terrains,
+        migrated_from,
+        migration_backup,
     })
 }
 
@@ -1328,7 +1360,7 @@ mod tests {
         let folder = temp_folder(name);
         fs::write(
             folder.join(MANIFEST_FILE),
-            r#"{"name": "T", "format_version": 1}"#,
+            format!(r#"{{"name": "T", "format_version": {FORMAT_VERSION}}}"#),
         )
         .unwrap();
         fs::write(folder.join(WORLD_FILE), r#"{"format_version": 1}"#).unwrap();
@@ -1477,7 +1509,10 @@ mod tests {
         assert_eq!(manifest.name, "Renamed");
         assert_eq!(manifest.description, "A test");
         assert!(!manifest.show_splash);
+        assert_eq!(manifest.format_version, FORMAT_VERSION);
         let project = load(&folder).unwrap();
+        assert!(project.migrated_from.is_none());
+        assert!(project.migration_backup.is_none());
         assert!(project.problems.is_empty(), "{:?}", project.problems);
         assert!(project.world_loaded);
         let _ = fs::remove_dir_all(&parent);
