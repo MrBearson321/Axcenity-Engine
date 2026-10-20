@@ -1187,6 +1187,26 @@ const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "Plays every state this many times as fast (1 is normal, 0 pauses).",
     ),
     (
+        ClassName::Animation,
+        "Clip",
+        "The property clip file inside the project folder, such as \"assets/animations/Door.anim.json\".",
+    ),
+    (
+        ClassName::Animation,
+        "Enabled",
+        "If false, playback pauses at its current time; set true to continue.",
+    ),
+    (
+        ClassName::Animation,
+        "Speed",
+        "Plays the clip this many times as fast (1 is normal, 0 pauses).",
+    ),
+    (
+        ClassName::Animation,
+        "Looped",
+        "If true, playback repeats instead of firing Completed at the end.",
+    ),
+    (
         ClassName::ParticleEmitter,
         "ParticleType",
         "The built-in picture each particle shows: Circle, Spark, Smoke, Fire, Star or Magic. Texture, if set, is used instead.",
@@ -1551,6 +1571,16 @@ const EVENT_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::Animator,
         "AnimationEvent",
         "Fires when a playing clip passes one of its animation events. The handler gets the event's name.",
+    ),
+    (
+        ClassName::Animation,
+        "Completed",
+        "Fires when a non-looping property clip reaches its end. The handler gets no arguments.",
+    ),
+    (
+        ClassName::Animation,
+        "AnimationEvent",
+        "Fires when the property clip passes a named event. The handler gets the event's name.",
     ),
 ];
 
@@ -2189,6 +2219,7 @@ mod tests {
                 "Instance.new('ParticleEmitter')",
             ),
             (ClassName::Animator, "Instance.new('Animator')"),
+            (ClassName::Animation, "Instance.new('Animation')"),
         ];
         let instance = |class: ClassName| {
             instances

@@ -180,7 +180,7 @@ function UserInputServiceClass:IsKeyDown(key) end
 ---@field Changed Signal Fires when a property (or `Name` or `Parent`) gets a different value, whether a script, physics or the editor changed it. The handler gets the property's name: `function(property) ... end`.
 ---@field ChildAdded Signal Fires when an Instance is put inside this one. The handler gets the child.
 ---@field ChildRemoved Signal Fires when an Instance is taken out of this one. The handler gets the child.
----@field [string] Workspace|Players|Lighting|ReplicatedStorage|ServerScriptService|StarterPlayer|StarterPlayerScripts|Part|MeshPart|Script|LocalScript|ModuleScript|RemoteEvent|Player|Model|Folder|SurfaceAppearance|ScreenGui|Frame|TextLabel|TextButton|ImageLabel|TextBox|PageLayout|Table|BillboardGui|Sound|PointLight|SpotLight|ParticleEmitter|Animator A child, found by its name.
+---@field [string] Workspace|Players|Lighting|ReplicatedStorage|ServerScriptService|StarterPlayer|StarterPlayerScripts|Part|MeshPart|Script|LocalScript|ModuleScript|RemoteEvent|Player|Model|Folder|SurfaceAppearance|ScreenGui|Frame|TextLabel|TextButton|ImageLabel|TextBox|PageLayout|Table|BillboardGui|Sound|PointLight|SpotLight|ParticleEmitter|Animator|Animation A child, found by its name.
 local InstanceClass = {}
 
 ---The first child with this name, or nil. With `recursive`, searches every descendant.
@@ -592,6 +592,33 @@ function AnimatorClass:ResetTrigger(name) end
 function AnimatorClass:Play(state, blend) end
 
 
+---Inside a Part, MeshPart or Model: plays an authored property clip (`*.anim.json` with kind property) on that root while the game runs.
+---@class Animation: Instance
+---@field Clip string The property clip file inside the project folder, such as "assets/animations/Door.anim.json".
+---@field Enabled boolean If false, playback pauses at its current time; set true to continue.
+---@field Speed number Plays the clip this many times as fast (1 is normal, 0 pauses).
+---@field Looped boolean If true, playback repeats instead of firing Completed at the end.
+---@field Completed Signal Fires when a non-looping property clip reaches its end. The handler gets no arguments.
+---@field AnimationEvent Signal Fires when the property clip passes a named event. The handler gets the event's name.
+local AnimationClass = {}
+
+---Plays this Animation's property clip from the start.
+---@return nil
+function AnimationClass:Play() end
+
+---Stops playback and resets to the start of the clip.
+---@return nil
+function AnimationClass:Stop() end
+
+---Pauses at the current time. Resume continues from there.
+---@return nil
+function AnimationClass:Pause() end
+
+---Continues after Pause.
+---@return nil
+function AnimationClass:Resume() end
+
+
 -- Globals -------------------------------------------------------------------
 
 ---The root of the game. Every service is inside it.
@@ -645,6 +672,7 @@ Instance = {}
 ---@overload fun(className: "SpotLight"): SpotLight
 ---@overload fun(className: "ParticleEmitter"): ParticleEmitter
 ---@overload fun(className: "Animator"): Animator
+---@overload fun(className: "Animation"): Animation
 function Instance.new(className) end
 
 ---Creates Vector3 values.
