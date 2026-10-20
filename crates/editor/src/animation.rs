@@ -25,6 +25,7 @@ use axcenity_core::InstanceId;
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 
+use crate::block_editor::NameKind;
 use crate::output::Output;
 use crate::theme::icons;
 use clip_editor::ClipDoc;
@@ -86,6 +87,10 @@ pub struct AnimationStudio {
     doc: Doc,
     preview: Preview,
     dialog: Option<Dialog>,
+    /// Each controller's names, for the blocks' menus, read again every
+    /// [`RESCAN`].
+    names: std::collections::HashMap<String, Vec<(NameKind, String)>>,
+    names_read: Option<Instant>,
 }
 
 /// A question the panel is asking.
@@ -182,6 +187,51 @@ impl AnimationStudio {
             }
             Err(err) => output.error(format!("Could not open the controller `{path}`: {err}")),
         }
+    }
+
+    /// The parameters (by kind), states and clip events of the controller at
+    /// `path`, for the animation blocks' menus. Empty if it can't be read.
+    pub fn controller_names(&mut self, project: &Path, path: &str) -> Vec<(NameKind, String)> {
+        if self.names_read.is_none_or(|at| at.elapsed() >= RESCAN) {
+            self.names.clear();
+            self.names_read = Some(Instant::now());
+        }
+        self.names
+            .entry(path.to_owned())
+            .or_insert_with(|| {
+                let Ok(file) = store::read_controller(project, path) else {
+                    return Vec::new();
+                };
+                let mut names: Vec<(NameKind, String)> = file
+                    .parameters
+                    .iter()
+                    .map(|def| {
+                        let kind = match def {
+                            axcenity_anim::ParameterDef::Bool { .. } => NameKind::Bool,
+                            axcenity_anim::ParameterDef::Number { .. } => NameKind::Number,
+                            axcenity_anim::ParameterDef::Trigger { .. } => NameKind::Trigger,
+                        };
+                        (kind, def.name().to_owned())
+                    })
+                    .collect();
+                names.extend(
+                    file.states
+                        .iter()
+                        .map(|s| (NameKind::State, s.name.clone())),
+                );
+                for clip in file.states.iter().flat_map(|s| s.motion.clips()) {
+                    if let Ok(clip) = store::read_clip(project, clip) {
+                        for event in clip.events {
+                            let entry = (NameKind::Event, event.name);
+                            if !names.contains(&entry) {
+                                names.push(entry);
+                            }
+                        }
+                    }
+                }
+                names
+            })
+            .clone()
     }
 
     fn rescan(&mut self, project: &Path) {
@@ -355,6 +405,10 @@ impl AnimationStudio {
             }
         });
         self.ask(ui.ctx(), project, assets, selected, output, &mut actions);
+        // Return settings' transitions follow them.
+        if let Doc::Controller(controller) = &mut self.doc {
+            controller.sync_returns(project);
+        }
 
         // Changes are written once the gesture making them ends.
         let busy = ui.input(|input| input.pointer.any_down())

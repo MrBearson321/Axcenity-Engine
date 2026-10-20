@@ -22,7 +22,7 @@ pub use controller::{Advanced, Compiled, Fade, Machine, Parameters, Playing, exi
 pub use files::{
     ANIMATIONS_FOLDER, ANY_STATE, BlendChild, BlendTree, CLIP_EXTENSION, CONTROLLER_EXTENSION,
     ClipEvent, ClipFile, Condition, ControllerFile, DEFAULT_BLEND, FileError, Motion, ParameterDef,
-    StateDef, Test, TransitionDef, blend_weights,
+    ReturnDef, ReturnWhen, StateDef, Test, TransitionDef, blend_weights, with_returns,
 };
 
 #[cfg(test)]

@@ -187,6 +187,10 @@ pub struct StateDef {
     /// Where it's drawn in the editor's graph.
     #[serde(default)]
     pub position: [f32; 2],
+    /// Goes back to another state when this happens, by a transition made
+    /// for it (see [`with_returns`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub returns: Option<ReturnDef>,
 }
 
 impl StateDef {
@@ -196,8 +200,78 @@ impl StateDef {
             motion,
             speed: 1.0,
             position,
+            returns: None,
         }
     }
+}
+
+/// A state's Return setting: which state to go back to, when, and how
+/// smoothly.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReturnDef {
+    pub to: String,
+    pub when: ReturnWhen,
+    #[serde(default = "default_blend")]
+    pub blend: f64,
+}
+
+/// When a state returns.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum ReturnWhen {
+    /// Its clip has played once through.
+    Finished,
+    /// A Bool parameter becomes `value`.
+    BoolIs { parameter: String, value: bool },
+    /// A Trigger is set (and is used up).
+    Triggered { parameter: String },
+    /// This many seconds after it starts.
+    After { seconds: f64 },
+}
+
+/// `file` with its generated transitions made again from its states' Return
+/// settings: one per state that returns to a state it has, at the end of
+/// the list, in state order. `seconds_per_pass` gives a state's pass length
+/// (for After), if known; otherwise a pass counts as a second.
+pub fn with_returns(
+    file: &ControllerFile,
+    mut seconds_per_pass: impl FnMut(&StateDef) -> Option<f64>,
+) -> ControllerFile {
+    let mut out = file.clone();
+    out.transitions.retain(|transition| !transition.generated);
+    for state in &file.states {
+        let Some(returns) = &state.returns else {
+            continue;
+        };
+        if file.state(&returns.to).is_none() {
+            continue;
+        }
+        let mut transition = TransitionDef::new(&state.name, &returns.to);
+        transition.blend = returns.blend;
+        transition.generated = true;
+        match &returns.when {
+            ReturnWhen::Finished => transition.exit_time = Some(1.0),
+            ReturnWhen::BoolIs { parameter, value } => transition.conditions.push(Condition {
+                parameter: parameter.clone(),
+                test: if *value { Test::IsTrue } else { Test::IsFalse },
+                value: 0.0,
+            }),
+            ReturnWhen::Triggered { parameter } => transition.conditions.push(Condition {
+                parameter: parameter.clone(),
+                test: Test::Triggered,
+                value: 0.0,
+            }),
+            ReturnWhen::After { seconds } => {
+                let pass = seconds_per_pass(state)
+                    .filter(|pass| *pass > 0.0)
+                    .unwrap_or(1.0);
+                transition.exit_time = Some((seconds.max(0.0) / pass).max(0.0));
+            }
+        }
+        out.transitions.push(transition);
+    }
+    out
 }
 
 /// What a state plays.
@@ -610,6 +684,43 @@ mod tests {
         assert!(text.contains("\"blend_tree\""), "{text}");
         assert_eq!(ControllerFile::from_json(&text).unwrap(), controller);
         assert_eq!(controller.states[0].motion.clips().len(), 2);
+    }
+
+    #[test]
+    fn return_settings_make_their_transitions() {
+        let mut controller = sample_controller();
+        controller.states[1].returns = Some(ReturnDef {
+            to: "Idle".into(),
+            when: ReturnWhen::Finished,
+            blend: 0.1,
+        });
+        let made = with_returns(&controller, |_| None);
+        let back = made.transitions.last().unwrap();
+        assert!(back.generated);
+        assert_eq!((back.from.as_str(), back.to.as_str()), ("Jump", "Idle"));
+        assert_eq!(back.exit_time, Some(1.0));
+        // Making them again replaces, rather than adds to, the old ones.
+        let again = with_returns(&made, |_| None);
+        assert_eq!(again, made);
+        // A Bool, a Trigger and seconds.
+        controller.states[1].returns.as_mut().unwrap().when = ReturnWhen::BoolIs {
+            parameter: "IsGrounded".into(),
+            value: true,
+        };
+        let bool_made = with_returns(&controller, |_| None);
+        assert_eq!(
+            bool_made.transitions.last().unwrap().conditions[0].test,
+            Test::IsTrue
+        );
+        controller.states[1].returns.as_mut().unwrap().when = ReturnWhen::After { seconds: 3.0 };
+        let timed = with_returns(&controller, |_| Some(2.0));
+        assert_eq!(timed.transitions.last().unwrap().exit_time, Some(1.5));
+        // A return to a state that isn't there makes nothing.
+        controller.states[1].returns.as_mut().unwrap().to = "Nowhere".into();
+        assert_eq!(with_returns(&controller, |_| None).transitions.len(), 1);
+        // And it all round-trips.
+        let text = timed.to_json();
+        assert_eq!(ControllerFile::from_json(&text).unwrap(), timed);
     }
 
     #[test]

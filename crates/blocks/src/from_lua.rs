@@ -349,6 +349,51 @@ impl<'a> Converter<'a> {
                 let body = self.body(&function.body, Scope::default());
                 Some(Block::new(BlockKind::WhenSoundEnded { sound, body }))
             }
+            "StateChanged" => {
+                let animator = self.target(object)?;
+                let function = self.handler(handler, 2)?;
+                let body = self.body(&function.body, Scope::default());
+                // The blocks can't use the handler's parameters.
+                if function.params.iter().any(|param| code_mentions(&body, param)) {
+                    return None;
+                }
+                Some(Block::new(BlockKind::WhenStateChanged { animator, body }))
+            }
+            "AnimationEvent" => {
+                let animator = self.target(object)?;
+                let function = self.handler(handler, 1)?;
+                let param = function.params.first()?;
+                let [
+                    Stat {
+                        kind: StatKind::If { arms, otherwise },
+                        ..
+                    },
+                ] = function.body.as_slice()
+                else {
+                    return None;
+                };
+                let ([(condition, inner)], None) = (arms.as_slice(), otherwise) else {
+                    return None;
+                };
+                let ExprKind::Binary("==", left, right) = &condition.kind else {
+                    return None;
+                };
+                let (ExprKind::Name(name), ExprKind::Str(event)) = (&left.kind, &right.kind) else {
+                    return None;
+                };
+                if name != param {
+                    return None;
+                }
+                let body = self.body(inner, Scope::default());
+                if code_mentions(&body, param) {
+                    return None;
+                }
+                Some(Block::new(BlockKind::WhenAnimationEvent {
+                    animator,
+                    event: event.clone(),
+                    body,
+                }))
+            }
             "Heartbeat" if self.is_service(object, "RunService") => {
                 let function = self.handler(handler, 1)?;
                 let body = self.body(&function.body, Scope::default());
@@ -551,6 +596,41 @@ impl<'a> Converter<'a> {
                     });
                 }
                 None
+            }
+            // An Animator's parameters and states, named by a string.
+            ExprKind::Method(object, method, args)
+                if matches!(args.first().map(|arg| &arg.kind), Some(ExprKind::Str(_))) =>
+            {
+                let animator = self.target(object)?;
+                let ExprKind::Str(name) = &args[0].kind else {
+                    return None;
+                };
+                let name = name.clone();
+                Some(match (method.as_str(), &args[1..]) {
+                    ("SetBool", [value]) => BlockKind::SetAnimatorBool {
+                        animator,
+                        parameter: name,
+                        value: self.condition(value, scope),
+                    },
+                    ("SetNumber", [value]) => BlockKind::SetAnimatorNumber {
+                        animator,
+                        parameter: name,
+                        value: self.expression(value, scope),
+                    },
+                    ("SetTrigger", []) => BlockKind::SetAnimatorTrigger {
+                        animator,
+                        parameter: name,
+                    },
+                    ("ResetTrigger", []) => BlockKind::ResetAnimatorTrigger {
+                        animator,
+                        parameter: name,
+                    },
+                    ("Play", []) => BlockKind::PlayAnimatorState {
+                        animator,
+                        state: name,
+                    },
+                    _ => return None,
+                })
             }
             ExprKind::Method(object, method, args) if args.is_empty() => {
                 let target = self.target(object)?;
@@ -853,6 +933,23 @@ impl<'a> Converter<'a> {
                     return Some(Expression::KeyDown {
                         key: self.key(key)?,
                     });
+                }
+                if let [arg] = args.as_slice()
+                    && let ExprKind::Str(parameter) = &arg.kind
+                {
+                    let animator = self.target(object)?;
+                    let parameter = parameter.clone();
+                    return match method.as_str() {
+                        "GetBool" => Some(Expression::AnimatorBool {
+                            animator,
+                            parameter,
+                        }),
+                        "GetNumber" => Some(Expression::AnimatorNumber {
+                            animator,
+                            parameter,
+                        }),
+                        _ => None,
+                    };
                 }
                 return None;
             }

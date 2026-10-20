@@ -275,7 +275,12 @@ impl EditorApp {
                 .inner
         } else if let Some(path) = &active_block_path {
             let mut changed = false;
-            let objects = block_objects(&self.world);
+            let folder = self.project.as_ref().map(|project| project.folder.clone());
+            let animation = &mut self.animation;
+            let objects = block_objects(&self.world, |controller| match &folder {
+                Some(folder) => animation.controller_names(folder, controller),
+                None => Vec::new(),
+            });
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
                 .show_inside(ui, |ui| {
@@ -1158,13 +1163,28 @@ pub(super) fn playing_badge(ui: &mut egui::Ui) {
 
 /// Every object in the Workspace, for the block editor's object menus: its
 /// path of names below the Workspace (`Pad.Chime`) and its class.
-fn block_objects(world: &World) -> Vec<block_editor::ObjectInfo> {
+/// Every object under the Workspace, by path, for the blocks' menus.
+/// Animators also get their controller's names (from `names_of`, given the
+/// `Controller` path).
+fn block_objects(
+    world: &World,
+    mut names_of: impl FnMut(&str) -> Vec<(block_editor::NameKind, String)>,
+) -> Vec<block_editor::ObjectInfo> {
     let workspace = world.workspace();
     world
         .descendants(workspace)
         .into_iter()
         .filter_map(|id| {
             let instance = world.get(id)?;
+            let controller_names = match instance.class() {
+                ClassName::Animator => instance
+                    .property("Controller")
+                    .and_then(Value::as_str)
+                    .filter(|path| !path.is_empty())
+                    .map(&mut names_of)
+                    .unwrap_or_default(),
+                _ => Vec::new(),
+            };
             let mut names = vec![instance.name().to_owned()];
             let mut parent = instance.parent();
             while let Some(above) = parent.filter(|&above| above != workspace) {
@@ -1176,6 +1196,7 @@ fn block_objects(world: &World) -> Vec<block_editor::ObjectInfo> {
             Some(block_editor::ObjectInfo {
                 path: names.join("."),
                 class: instance.class(),
+                names: controller_names,
             })
         })
         .collect()

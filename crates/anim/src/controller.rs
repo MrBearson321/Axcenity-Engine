@@ -7,7 +7,9 @@ use axcenity_assets::{Pose, Rig, Take};
 use axcenity_core::Parameter;
 
 use crate::clip::{BoundClip, RootMotion};
-use crate::files::{ANY_STATE, ClipFile, Condition, ControllerFile, Motion, Test, blend_weights};
+use crate::files::{
+    ANY_STATE, ClipFile, Condition, ControllerFile, Motion, Test, blend_weights, with_returns,
+};
 
 /// An animator's parameters, by name.
 pub type Parameters = BTreeMap<String, Parameter>;
@@ -157,6 +159,17 @@ impl Compiled {
                 }
             })
             .collect();
+        // Return settings make their transitions here too, so a file edited
+        // by hand works the same as one saved by the editor.
+        let no_parameters = Parameters::new();
+        let file = with_returns(&file, |def| {
+            let state = states.iter().find(|state| state.name == def.name)?;
+            let playing = state.playing(&no_parameters);
+            (!playing.is_empty()).then(|| {
+                let length: f64 = playing.iter().map(|(clip, w)| clip.duration() * w).sum();
+                length / state.speed.abs().max(1e-3)
+            })
+        });
         let index_of = |name: &str| states.iter().position(|state| state.name == name);
         let mut transitions = Vec::new();
         for (index, transition) in file.transitions.iter().enumerate() {

@@ -53,7 +53,12 @@
       "position": [
         260.0,
         -80.0
-      ]
+      ],
+      "returns": {
+        "to": "Locomotion",
+        "when": "finished",
+        "blend": 0.25
+      }
     },
     {
       "name": "Hop",
@@ -64,7 +69,12 @@
       "position": [
         260.0,
         80.0
-      ]
+      ],
+      "returns": {
+        "to": "Locomotion",
+        "when": "finished",
+        "blend": 0.25
+      }
     }
   ],
   "transitions": [
@@ -84,15 +94,6 @@
       "priority": 0
     },
     {
-      "from": "Wave",
-      "to": "Locomotion",
-      "conditions": [],
-      "blend": 0.25,
-      "exit_time": 1.0,
-      "interruptible": false,
-      "priority": 0
-    },
-    {
       "from": "Any State",
       "to": "Hop",
       "conditions": [
@@ -108,13 +109,24 @@
       "priority": 0
     },
     {
+      "from": "Wave",
+      "to": "Locomotion",
+      "conditions": [],
+      "blend": 0.25,
+      "exit_time": 1.0,
+      "interruptible": false,
+      "priority": 0,
+      "generated": true
+    },
+    {
       "from": "Hop",
       "to": "Locomotion",
       "conditions": [],
       "blend": 0.25,
       "exit_time": 1.0,
       "interruptible": false,
-      "priority": 0
+      "priority": 0,
+      "generated": true
     }
   ]
 }

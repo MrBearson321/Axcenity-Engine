@@ -40,6 +40,42 @@ use crate::theme::{self, icons};
 pub struct ObjectInfo {
     pub path: String,
     pub class: ClassName,
+    /// For an Animator, the names its controller has, to offer in its
+    /// blocks' menus. Empty for anything else.
+    pub names: Vec<(NameKind, String)>,
+}
+
+/// What a name typed into an animation block names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NameKind {
+    Bool,
+    Number,
+    Trigger,
+    State,
+    Event,
+}
+
+impl NameKind {
+    /// What the menu offers for a block with nothing to suggest.
+    fn example(self) -> &'static str {
+        match self {
+            NameKind::Bool => "IsGrounded",
+            NameKind::Number => "Speed",
+            NameKind::Trigger => "Jump",
+            NameKind::State => "Idle",
+            NameKind::Event => "Footstep",
+        }
+    }
+
+    fn what(self) -> &'static str {
+        match self {
+            NameKind::Bool => "Bool parameter",
+            NameKind::Number => "Number parameter",
+            NameKind::Trigger => "Trigger",
+            NameKind::State => "state",
+            NameKind::Event => "animation event",
+        }
+    }
 }
 
 /// What the block editor needs besides the script.
@@ -93,6 +129,8 @@ enum Category {
     Operators,
     Variables,
     Sensing,
+    /// An Animator's parameters and states.
+    Animation,
     More,
     /// Grey blocks of Lua that have no blocks, from a script switched from
     /// Code. Not in the palette.
@@ -100,7 +138,7 @@ enum Category {
 }
 
 impl Category {
-    const ALL: [Category; 9] = [
+    const ALL: [Category; 10] = [
         Category::Events,
         Category::Control,
         Category::Motion,
@@ -109,6 +147,7 @@ impl Category {
         Category::Operators,
         Category::Variables,
         Category::Sensing,
+        Category::Animation,
         Category::More,
     ];
 
@@ -122,6 +161,7 @@ impl Category {
             Category::Operators => "Operators",
             Category::Variables => "Variables",
             Category::Sensing => "Sensing",
+            Category::Animation => "Animation",
             Category::More => "More",
             Category::Lua => "Lua",
         }
@@ -138,6 +178,7 @@ impl Category {
             Category::Operators => Color32::from_rgb(89, 192, 89),
             Category::Variables => Color32::from_rgb(255, 140, 26),
             Category::Sensing => Color32::from_rgb(92, 177, 214),
+            Category::Animation => Color32::from_rgb(64, 186, 140),
             Category::More => Color32::from_rgb(255, 102, 128),
             Category::Lua => Color32::from_rgb(108, 117, 138),
         }
@@ -154,6 +195,7 @@ impl Category {
             Category::Operators => Color32::from_rgb(56, 148, 56),
             Category::Variables => Color32::from_rgb(219, 110, 0),
             Category::Sensing => Color32::from_rgb(46, 142, 184),
+            Category::Animation => Color32::from_rgb(36, 148, 106),
             Category::More => Color32::from_rgb(255, 51, 85),
             Category::Lua => Color32::from_rgb(78, 86, 105),
         }
@@ -193,6 +235,13 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::PauseSound { .. }
         | BlockKind::ResumeSound { .. }
         | BlockKind::SetVolume { .. } => Category::Sound,
+        BlockKind::WhenStateChanged { .. }
+        | BlockKind::WhenAnimationEvent { .. }
+        | BlockKind::SetAnimatorBool { .. }
+        | BlockKind::SetAnimatorNumber { .. }
+        | BlockKind::SetAnimatorTrigger { .. }
+        | BlockKind::ResetAnimatorTrigger { .. }
+        | BlockKind::PlayAnimatorState { .. } => Category::Animation,
         BlockKind::SetVariable { .. } | BlockKind::ChangeVariable { .. } => Category::Variables,
         BlockKind::Print { .. } | BlockKind::Destroy { .. } => Category::More,
         BlockKind::Code { .. } | BlockKind::TopCode { .. } => Category::Lua,
@@ -202,9 +251,11 @@ fn block_category(kind: &BlockKind) -> Category {
 fn reporter_category(expression: &Expression) -> Category {
     match expression {
         Expression::Variable { .. } => Category::Variables,
+        Expression::Property { property, .. } if property == "CurrentState" => Category::Animation,
         Expression::Property { .. } | Expression::TouchingPart | Expression::KeyDown { .. } => {
             Category::Sensing
         }
+        Expression::AnimatorBool { .. } | Expression::AnimatorNumber { .. } => Category::Animation,
         Expression::Code { .. } => Category::Lua,
         _ => Category::Operators,
     }
@@ -219,6 +270,7 @@ enum Filter {
     Texts,
     PageLayouts,
     Gui,
+    Animators,
     Any,
 }
 
@@ -235,6 +287,7 @@ impl Filter {
                 )
             }
             Filter::PageLayouts => class == ClassName::PageLayout,
+            Filter::Animators => class == ClassName::Animator,
             Filter::Gui => matches!(
                 class,
                 ClassName::ScreenGui
@@ -259,6 +312,7 @@ impl Filter {
             Filter::Texts => "TextLabel",
             Filter::PageLayouts => "PageLayout",
             Filter::Gui => "Frame",
+            Filter::Animators => "Model.Animator",
         }
     }
 }
@@ -321,6 +375,9 @@ enum Part<'a> {
     Property(&'a mut String, Option<ClassName>),
     Variable(&'a mut String),
     Key(&'a mut String),
+    /// A name in an Animator's controller (a parameter, state or event),
+    /// with the Animator's path, for the menu's suggestions.
+    Name(&'a mut String, NameKind, String),
     Math(&'a mut MathOp),
     Compare(&'a mut Comparison),
     Logic(&'a mut LogicOp),
@@ -396,6 +453,85 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
             Object(sound, Filter::Sounds),
             label("ends"),
         ])],
+        BlockKind::WhenStateChanged { animator, .. } => vec![Row(vec![
+            label("when"),
+            Object(animator, Filter::Animators),
+            label("changes state"),
+        ])],
+        BlockKind::WhenAnimationEvent {
+            animator, event, ..
+        } => {
+            let path = animator.clone();
+            vec![Row(vec![
+                label("when"),
+                Object(animator, Filter::Animators),
+                label("reaches event"),
+                Part::Name(event, NameKind::Event, path),
+            ])]
+        }
+        BlockKind::SetAnimatorBool {
+            animator,
+            parameter,
+            value,
+        } => {
+            let path = animator.clone();
+            vec![Row(vec![
+                label("set"),
+                Part::Name(parameter, NameKind::Bool, path),
+                label("of"),
+                Object(animator, Filter::Animators),
+                label("to"),
+                Slot(value, SlotKind::Truth),
+            ])]
+        }
+        BlockKind::SetAnimatorNumber {
+            animator,
+            parameter,
+            value,
+        } => {
+            let path = animator.clone();
+            vec![Row(vec![
+                label("set"),
+                Part::Name(parameter, NameKind::Number, path),
+                label("of"),
+                Object(animator, Filter::Animators),
+                label("to"),
+                Slot(value, SlotKind::Number),
+            ])]
+        }
+        BlockKind::SetAnimatorTrigger {
+            animator,
+            parameter,
+        } => {
+            let path = animator.clone();
+            vec![Row(vec![
+                label("set trigger"),
+                Part::Name(parameter, NameKind::Trigger, path),
+                label("of"),
+                Object(animator, Filter::Animators),
+            ])]
+        }
+        BlockKind::ResetAnimatorTrigger {
+            animator,
+            parameter,
+        } => {
+            let path = animator.clone();
+            vec![Row(vec![
+                label("reset trigger"),
+                Part::Name(parameter, NameKind::Trigger, path),
+                label("of"),
+                Object(animator, Filter::Animators),
+            ])]
+        }
+        BlockKind::PlayAnimatorState { animator, state } => {
+            let path = animator.clone();
+            vec![Row(vec![
+                label("play state"),
+                Part::Name(state, NameKind::State, path),
+                label("of"),
+                Object(animator, Filter::Animators),
+            ])]
+        }
         BlockKind::Unattached { .. } => Vec::new(),
         BlockKind::Wait { seconds } => vec![Row(vec![
             label("wait"),
@@ -615,6 +751,28 @@ fn reporter_parts<'a>(expression: &'a mut Expression, objects: &[ObjectInfo]) ->
         }
         Expression::TouchingPart => vec![label("touching part")],
         Expression::KeyDown { key } => vec![label("key"), Key(key), label("pressed?")],
+        Expression::AnimatorBool {
+            animator,
+            parameter,
+        } => {
+            let path = animator.clone();
+            vec![
+                Part::Name(parameter, NameKind::Bool, path),
+                label("of"),
+                Object(animator, Filter::Animators),
+            ]
+        }
+        Expression::AnimatorNumber {
+            animator,
+            parameter,
+        } => {
+            let path = animator.clone();
+            vec![
+                Part::Name(parameter, NameKind::Number, path),
+                label("of"),
+                Object(animator, Filter::Animators),
+            ]
+        }
         Expression::Code { code } => vec![Part::Code(shown_code(code))],
         // Values typed in aren't reporters, and are drawn as inputs.
         Expression::Number { .. }
@@ -873,6 +1031,7 @@ impl<'a> BlockPainter<'a> {
                 self.dropdown_size(ui, text)
             }
             Part::Variable(name) => self.dropdown_size(ui, name),
+            Part::Name(name, _, _) => self.dropdown_size(ui, name),
             Part::Math(op) => self.dropdown_size(ui, op.symbol()),
             Part::Compare(op) => self.dropdown_size(ui, op.symbol()),
             Part::Logic(op) => self.dropdown_size(ui, op.lua()),
@@ -1348,6 +1507,26 @@ impl<'a> BlockPainter<'a> {
                 Part::Key(key) => {
                     if let Some(response) = self.dropdown(ui, rect, part_id, key) {
                         egui::Popup::menu(&response).show(|ui| key_menu(ui, key));
+                    }
+                }
+                Part::Name(name, kind, animator) => {
+                    let (kind, objects) = (*kind, self.objects);
+                    let suggestions: Vec<String> = objects
+                        .iter()
+                        .find(|object| object.path == *animator)
+                        .map(|object| {
+                            object
+                                .names
+                                .iter()
+                                .filter(|(of, _)| *of == kind)
+                                .map(|(_, name)| name.clone())
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    if let Some(response) = self.dropdown(ui, rect, part_id, name) {
+                        egui::Popup::menu(&response)
+                            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                            .show(|ui| name_menu(ui, name, kind, &suggestions));
                     }
                 }
                 Part::Math(op) => {
@@ -1958,6 +2137,29 @@ fn variable_menu(ui: &mut egui::Ui, name: &mut String, variables: &[String]) {
     }
 }
 
+/// The names the Animator's controller has of this kind, and a box to type
+/// another.
+fn name_menu(ui: &mut egui::Ui, name: &mut String, kind: NameKind, suggestions: &[String]) {
+    for suggestion in suggestions {
+        if ui
+            .selectable_label(name == suggestion, suggestion)
+            .clicked()
+        {
+            *name = suggestion.clone();
+            ui.close();
+        }
+    }
+    if suggestions.is_empty() {
+        ui.weak(format!(
+            "Its controller has no {} yet (or pick the Animator first).",
+            kind.what()
+        ));
+    }
+    ui.separator();
+    ui.weak(format!("Or type the {}'s name:", kind.what()));
+    ui.text_edit_singleline(name);
+}
+
 fn key_menu(ui: &mut egui::Ui, key: &mut String) {
     egui::ScrollArea::vertical()
         .max_height(280.0)
@@ -2204,6 +2406,61 @@ fn palette(
                 property: "Position".to_owned(),
             }),
         ],
+        Category::Animation => {
+            let animator = first(Filter::Animators);
+            let name = |kind: NameKind| {
+                objects
+                    .iter()
+                    .find(|object| object.path == animator)
+                    .and_then(|object| object.names.iter().find(|(of, _)| *of == kind))
+                    .map_or_else(|| kind.example().to_owned(), |(_, name)| name.clone())
+            };
+            vec![
+                B(BlockKind::SetAnimatorTrigger {
+                    animator: animator.clone(),
+                    parameter: name(NameKind::Trigger),
+                }),
+                B(BlockKind::SetAnimatorBool {
+                    animator: animator.clone(),
+                    parameter: name(NameKind::Bool),
+                    value: Expression::Boolean { value: true },
+                }),
+                B(BlockKind::SetAnimatorNumber {
+                    animator: animator.clone(),
+                    parameter: name(NameKind::Number),
+                    value: number(1.0),
+                }),
+                B(BlockKind::ResetAnimatorTrigger {
+                    animator: animator.clone(),
+                    parameter: name(NameKind::Trigger),
+                }),
+                B(BlockKind::PlayAnimatorState {
+                    animator: animator.clone(),
+                    state: name(NameKind::State),
+                }),
+                B(BlockKind::WhenStateChanged {
+                    animator: animator.clone(),
+                    body: Vec::new(),
+                }),
+                B(BlockKind::WhenAnimationEvent {
+                    animator: animator.clone(),
+                    event: name(NameKind::Event),
+                    body: Vec::new(),
+                }),
+                R(Expression::AnimatorBool {
+                    animator: animator.clone(),
+                    parameter: name(NameKind::Bool),
+                }),
+                R(Expression::AnimatorNumber {
+                    animator: animator.clone(),
+                    parameter: name(NameKind::Number),
+                }),
+                R(Expression::Property {
+                    target: animator,
+                    property: "CurrentState".to_owned(),
+                }),
+            ]
+        }
         Category::More => vec![
             B(BlockKind::Print {
                 value: text("Hello!"),
@@ -3064,10 +3321,12 @@ mod tests {
             ObjectInfo {
                 path: "Floor".to_owned(),
                 class: ClassName::Part,
+                names: Vec::new(),
             },
             ObjectInfo {
                 path: "Floor.Chime".to_owned(),
                 class: ClassName::Sound,
+                names: Vec::new(),
             },
         ];
         let sound = palette(Category::Sound, false, &objects, &[]);
@@ -3219,10 +3478,12 @@ end"
             ObjectInfo {
                 path: "Pad".to_owned(),
                 class: ClassName::Part,
+                names: Vec::new(),
             },
             ObjectInfo {
                 path: "Pad.Chime".to_owned(),
                 class: ClassName::Sound,
+                names: Vec::new(),
             },
         ];
         let script = sample_script(&objects);

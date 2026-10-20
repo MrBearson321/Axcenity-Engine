@@ -39,6 +39,8 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         | BlockKind::WhenClicked { .. }
         | BlockKind::EveryFrame { .. }
         | BlockKind::WhenSoundEnded { .. }
+        | BlockKind::WhenStateChanged { .. }
+        | BlockKind::WhenAnimationEvent { .. }
         | BlockKind::Unattached { .. }
         | BlockKind::TopCode { .. } => return None,
         BlockKind::Wait { .. } => 0,
@@ -70,9 +72,14 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         BlockKind::Destroy { .. } => 26,
         BlockKind::ShowPage { .. } => 27,
         BlockKind::Code { .. } => 28,
+        BlockKind::SetAnimatorBool { .. } => 29,
+        BlockKind::SetAnimatorNumber { .. } => 30,
+        BlockKind::SetAnimatorTrigger { .. } => 31,
+        BlockKind::ResetAnimatorTrigger { .. } => 32,
+        BlockKind::PlayAnimatorState { .. } => 33,
     })
 }
-const STATEMENT_COUNT: usize = 29;
+const STATEMENT_COUNT: usize = 34;
 
 /// One of each statement block, with the Lua it must produce.
 fn every_statement() -> Vec<(BlockKind, &'static str)> {
@@ -279,7 +286,48 @@ fn every_statement() -> Vec<(BlockKind, &'static str)> {
             },
             "    for i = 1, 2 do\n        print(i)\n    end",
         ),
+        (
+            BlockKind::SetAnimatorBool {
+                animator: animator(),
+                parameter: "IsGrounded".to_owned(),
+                value: truth(),
+            },
+            "workspace.Hero.Animator:SetBool(\"IsGrounded\", true)",
+        ),
+        (
+            BlockKind::SetAnimatorNumber {
+                animator: animator(),
+                parameter: "Speed".to_owned(),
+                value: number(4.0),
+            },
+            "workspace.Hero.Animator:SetNumber(\"Speed\", 4)",
+        ),
+        (
+            BlockKind::SetAnimatorTrigger {
+                animator: animator(),
+                parameter: "Jump".to_owned(),
+            },
+            "workspace.Hero.Animator:SetTrigger(\"Jump\")",
+        ),
+        (
+            BlockKind::ResetAnimatorTrigger {
+                animator: animator(),
+                parameter: "Jump".to_owned(),
+            },
+            "workspace.Hero.Animator:ResetTrigger(\"Jump\")",
+        ),
+        (
+            BlockKind::PlayAnimatorState {
+                animator: animator(),
+                state: "Jump".to_owned(),
+            },
+            "workspace.Hero.Animator:Play(\"Jump\")",
+        ),
     ]
+}
+
+fn animator() -> String {
+    "Hero.Animator".to_owned()
 }
 
 #[test]
@@ -349,6 +397,21 @@ fn translation_covers_every_event_block() {
             },
         ),
         block(7, BlockKind::Unattached { body: quiet(17) }),
+        block(
+            8,
+            BlockKind::WhenStateChanged {
+                animator: animator(),
+                body: quiet(18),
+            },
+        ),
+        block(
+            9,
+            BlockKind::WhenAnimationEvent {
+                animator: animator(),
+                event: "Footstep".to_owned(),
+                body: quiet(19),
+            },
+        ),
     ];
     let source = translate(&script(blocks)).unwrap().source;
     for lua in [
@@ -362,11 +425,14 @@ fn translation_covers_every_event_block() {
         "workspace.Menu.Start.Activated:Connect(function()",
         "RunService.Heartbeat:Connect(function(deltaTime)",
         "workspace.Music.Ended:Connect(function()",
+        "workspace.Hero.Animator.StateChanged:Connect(function(state, previous)",
+        "workspace.Hero.Animator.AnimationEvent:Connect(function(name)",
+        "    if name == \"Footstep\" then",
     ] {
         assert!(source.contains(lua), "missing `{lua}`:\n{source}");
     }
     // Unattached blocks don't run.
-    assert_eq!(source.matches("do return end").count(), 5, "{source}");
+    assert_eq!(source.matches("do return end").count(), 7, "{source}");
 }
 
 #[test]
@@ -587,6 +653,59 @@ fn translated_blocks_run_in_the_scheduler_like_typed_lua() {
 }
 
 #[test]
+fn the_animation_examples_blocks_drive_its_animator() {
+    use axcenity_core::{KeyCode, Parameter};
+    use axcenity_script::KeyEvent;
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/hello-animation/scripts/Keys.client.blocks.json");
+    let text = std::fs::read_to_string(path).unwrap();
+    let blocks: BlockScript = serde_json::from_str(&text).unwrap();
+    let source = translate(&blocks).unwrap().source;
+    for lua in [
+        "workspace.Noodle.Animator:SetNumber(\"Speed\", 2)",
+        "workspace.Noodle.Animator:SetTrigger(\"Hop\")",
+        "workspace.Noodle.Animator:Play(\"Wave\")",
+        "workspace.Noodle.Animator.StateChanged:Connect(function(state, previous)",
+    ] {
+        assert!(source.contains(lua), "missing `{lua}`:\n{source}");
+    }
+
+    // A world with the noodle's Animator, and the blocks as a LocalScript.
+    let mut world = World::new();
+    let noodle = world.create(ClassName::MeshPart).unwrap();
+    world.set_name(noodle, "Noodle").unwrap();
+    world.set_parent(noodle, Some(world.workspace())).unwrap();
+    let animator = world.create(ClassName::Animator).unwrap();
+    world.set_parent(animator, Some(noodle)).unwrap();
+    let keys = world.create(ClassName::LocalScript).unwrap();
+    world
+        .set_parent(keys, Some(world.starter_player_scripts()))
+        .unwrap();
+    let mut runtime = ScriptRuntime::new();
+    runtime.start_script(&mut world, keys, "scripts/Keys.client.blocks.json", &source);
+    let press = |key, pressed| KeyEvent { key, pressed };
+    runtime.input(
+        &mut world,
+        &[press(KeyCode::W, true), press(KeyCode::Space, true)],
+    );
+    runtime.step(&mut world, 1.0 / 60.0);
+    runtime.heartbeat(&mut world, 1.0 / 60.0);
+    let live = world.animator(animator).unwrap();
+    assert_eq!(live.parameters["Speed"], Parameter::Number(2.0));
+    assert_eq!(live.parameters["Hop"], Parameter::Trigger(true));
+    runtime.input(&mut world, &[press(KeyCode::Q, true)]);
+    let request = world.animator(animator).unwrap().play.clone().unwrap();
+    assert_eq!(request.state, "Wave");
+    let errors: Vec<String> = runtime
+        .take_output()
+        .into_iter()
+        .filter(|line| line.kind == OutputKind::Error)
+        .map(|line| line.text)
+        .collect();
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
 fn the_first_saved_format_still_loads() {
     let saved = r#"{ "blocks": [ { "id": 1, "kind": { "type": "when_started", "body": [
         { "id": 2, "kind": { "type": "if_else",
@@ -734,6 +853,21 @@ fn every_block_script() -> BlockScript {
                 body: body(),
             },
         ),
+        block(
+            7,
+            BlockKind::WhenStateChanged {
+                animator: animator(),
+                body: body(),
+            },
+        ),
+        block(
+            8,
+            BlockKind::WhenAnimationEvent {
+                animator: animator(),
+                event: "Footstep".to_owned(),
+                body: body(),
+            },
+        ),
     ];
     // New IDs all the way down, as the statements are copies.
     script(stacks.iter().map(Block::duplicate).collect())
@@ -743,12 +877,14 @@ fn every_block_script() -> BlockScript {
 fn has_code(script: &BlockScript) -> bool {
     let mut found = false;
     script.for_each_block(&mut |block| {
-        found |= matches!(block.kind, BlockKind::Code { .. } | BlockKind::TopCode { .. })
-            || block
-                .kind
-                .expressions()
-                .iter()
-                .any(|e| matches!(e, Expression::Code { .. }));
+        found |= matches!(
+            block.kind,
+            BlockKind::Code { .. } | BlockKind::TopCode { .. }
+        ) || block
+            .kind
+            .expressions()
+            .iter()
+            .any(|e| matches!(e, Expression::Code { .. }));
     });
     found
 }
@@ -810,6 +946,18 @@ fn reporters_switched_to_code_and_back_are_the_same_reporters() {
             g: 0.5,
             b: 1.0,
         },
+        Expression::AnimatorBool {
+            animator: animator(),
+            parameter: "IsGrounded".to_owned(),
+        },
+        Expression::AnimatorNumber {
+            animator: animator(),
+            parameter: "Speed".to_owned(),
+        },
+        Expression::Property {
+            target: animator(),
+            property: "CurrentState".to_owned(),
+        },
     ];
     let body = every_reporter
         .into_iter()
@@ -819,7 +967,10 @@ fn reporters_switched_to_code_and_back_are_the_same_reporters() {
     let original = script(vec![block(1, BlockKind::EveryFrame { body })]);
     let lua = translate(&original).unwrap().source;
     let back = from_lua(&lua).unwrap();
-    assert!(!has_code(&back), "every reporter should come back:\n{back:#?}");
+    assert!(
+        !has_code(&back),
+        "every reporter should come back:\n{back:#?}"
+    );
     assert_eq!(translate(&back).unwrap().source, lua);
 }
 

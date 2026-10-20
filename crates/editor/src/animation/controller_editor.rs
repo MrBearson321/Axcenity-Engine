@@ -11,7 +11,9 @@ use axcenity_anim::files::{
     self, BlendChild, BlendTree, Condition, ControllerFile, Motion, ParameterDef, StateDef, Test,
     TransitionDef,
 };
-use axcenity_anim::{ANY_STATE, Compiled, DEFAULT_BLEND, Fade, Machine, Playing};
+use axcenity_anim::{
+    ANY_STATE, Compiled, DEFAULT_BLEND, Fade, Machine, Playing, ReturnDef, ReturnWhen,
+};
 use axcenity_assets::{Assets, Posed};
 use axcenity_core::Parameter;
 use eframe::egui;
@@ -37,6 +39,9 @@ pub struct ControllerDoc {
     pub playing: bool,
     /// The transition preview's slider: how much of the new pose shows.
     pub scrub: f64,
+    /// Each clip's pass length in seconds (0 if it can't be read), for
+    /// Return settings given in seconds.
+    clip_lengths: std::collections::HashMap<String, f64>,
 }
 
 /// The state machine running in the preview.
@@ -73,6 +78,34 @@ impl ControllerDoc {
             preview: None,
             playing: true,
             scrub: 1.0,
+            clip_lengths: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Makes the Return settings' transitions again, so they always match
+    /// the settings (see `files::with_returns`).
+    pub fn sync_returns(&mut self, project: &Path) {
+        let lengths = &mut self.clip_lengths;
+        let made = files::with_returns(&self.file, |state| {
+            let clip = state
+                .motion
+                .clips()
+                .into_iter()
+                .find(|clip| !clip.is_empty())?;
+            let length = *lengths.entry(clip.clone()).or_insert_with(|| {
+                super::store::read_clip(project, clip)
+                    .map(|clip| clip.length() / clip.speed.abs().max(1e-3))
+                    .unwrap_or(0.0)
+            });
+            (length > 0.0).then(|| length / state.speed.abs().max(1e-3))
+        });
+        if made != self.file {
+            self.file = made;
+            if let Selected::Transition(index) = self.selected
+                && index >= self.file.transitions.len()
+            {
+                self.selected = Selected::Controller;
+            }
         }
     }
 
@@ -211,6 +244,11 @@ impl ControllerDoc {
                 self.file
                     .transitions
                     .retain(|t| t.from != name && t.to != name);
+                for state in &mut self.file.states {
+                    if state.returns.as_ref().is_some_and(|r| r.to == name) {
+                        state.returns = None;
+                    }
+                }
                 if self.file.default_state == name {
                     self.file.default_state = self
                         .file
@@ -222,7 +260,17 @@ impl ControllerDoc {
                 self.selected = Selected::Controller;
             }
             Selected::Transition(index) if index < self.file.transitions.len() => {
-                self.file.transitions.remove(index);
+                let transition = self.file.transitions.remove(index);
+                // A made one goes with its state's Return setting.
+                if transition.generated
+                    && let Some(state) = self
+                        .file
+                        .states
+                        .iter_mut()
+                        .find(|state| state.name == transition.from)
+                {
+                    state.returns = None;
+                }
                 self.selected = Selected::Controller;
             }
             _ => {}
@@ -258,6 +306,13 @@ impl ControllerDoc {
         }
         if self.file.default_state == old {
             self.file.default_state = name.to_owned();
+        }
+        for state in &mut self.file.states {
+            if let Some(returns) = &mut state.returns
+                && returns.to == old
+            {
+                returns.to = name.to_owned();
+            }
         }
         Ok(())
     }
@@ -715,6 +770,7 @@ impl ControllerDoc {
                 );
                 ui.end_row();
             });
+        self.return_editor(ui, index);
         ui.separator();
         ui.strong("Transitions");
         let outgoing: Vec<(usize, String, bool)> = self
@@ -753,12 +809,198 @@ impl ControllerDoc {
         }
     }
 
+    /// A state's Return setting: when it goes back, to which state, and how
+    /// smoothly. It makes a transition (dashed in the graph).
+    fn return_editor(&mut self, ui: &mut egui::Ui, index: usize) {
+        ui.separator();
+        let others: Vec<String> = self
+            .file
+            .states
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != index)
+            .map(|(_, s)| s.name.clone())
+            .collect();
+        let parameters = self.file.parameters.clone();
+        let default = self.file.default_state.clone();
+        let state = &mut self.file.states[index];
+        let mut on = state.returns.is_some();
+        if ui
+            .checkbox(&mut on, egui::RichText::new("Return when…").strong())
+            .on_hover_text("Go back to another state by itself, such as Attack back to Idle when its clip finishes. This makes the transition for you.")
+            .changed()
+        {
+            state.returns = on.then(|| ReturnDef {
+                to: others
+                    .iter()
+                    .find(|name| **name == default)
+                    .or(others.first())
+                    .cloned()
+                    .unwrap_or_default(),
+                when: ReturnWhen::Finished,
+                blend: DEFAULT_BLEND,
+            });
+        }
+        let Some(returns) = &mut state.returns else {
+            return;
+        };
+        let names = |of: fn(&ParameterDef) -> bool| -> Vec<String> {
+            parameters
+                .iter()
+                .filter(|def| of(def))
+                .map(|def| def.name().to_owned())
+                .collect()
+        };
+        let bools = names(|def| matches!(def, ParameterDef::Bool { .. }));
+        let triggers = names(|def| matches!(def, ParameterDef::Trigger { .. }));
+        egui::Grid::new("return settings")
+            .num_columns(2)
+            .spacing([10.0, 6.0])
+            .show(ui, |ui| {
+                ui.label("When");
+                let label = match &returns.when {
+                    ReturnWhen::Finished => "its clip finishes",
+                    ReturnWhen::BoolIs { .. } => "a Bool becomes",
+                    ReturnWhen::Triggered { .. } => "a Trigger is set",
+                    ReturnWhen::After { .. } => "some seconds pass",
+                };
+                egui::ComboBox::from_id_salt("return when")
+                    .selected_text(label)
+                    .show_ui(ui, |ui| {
+                        if ui
+                            .selectable_label(
+                                matches!(returns.when, ReturnWhen::Finished),
+                                "its clip finishes",
+                            )
+                            .clicked()
+                        {
+                            returns.when = ReturnWhen::Finished;
+                        }
+                        if ui
+                            .selectable_label(
+                                matches!(returns.when, ReturnWhen::BoolIs { .. }),
+                                "a Bool becomes",
+                            )
+                            .clicked()
+                        {
+                            returns.when = ReturnWhen::BoolIs {
+                                parameter: bools.first().cloned().unwrap_or_default(),
+                                value: false,
+                            };
+                        }
+                        if ui
+                            .selectable_label(
+                                matches!(returns.when, ReturnWhen::Triggered { .. }),
+                                "a Trigger is set",
+                            )
+                            .clicked()
+                        {
+                            returns.when = ReturnWhen::Triggered {
+                                parameter: triggers.first().cloned().unwrap_or_default(),
+                            };
+                        }
+                        if ui
+                            .selectable_label(
+                                matches!(returns.when, ReturnWhen::After { .. }),
+                                "some seconds pass",
+                            )
+                            .clicked()
+                        {
+                            returns.when = ReturnWhen::After { seconds: 1.0 };
+                        }
+                    });
+                ui.end_row();
+                match &mut returns.when {
+                    ReturnWhen::Finished => {}
+                    ReturnWhen::BoolIs { parameter, value } => {
+                        ui.label("Bool");
+                        ui.horizontal(|ui| {
+                            egui::ComboBox::from_id_salt("return bool")
+                                .selected_text(parameter.as_str())
+                                .show_ui(ui, |ui| {
+                                    for name in &bools {
+                                        ui.selectable_value(parameter, name.clone(), name);
+                                    }
+                                });
+                            ui.label("is");
+                            ui.selectable_value(value, true, "true");
+                            ui.selectable_value(value, false, "false");
+                        });
+                        ui.end_row();
+                    }
+                    ReturnWhen::Triggered { parameter } => {
+                        ui.label("Trigger");
+                        egui::ComboBox::from_id_salt("return trigger")
+                            .selected_text(parameter.as_str())
+                            .show_ui(ui, |ui| {
+                                for name in &triggers {
+                                    ui.selectable_value(parameter, name.clone(), name);
+                                }
+                            });
+                        ui.end_row();
+                    }
+                    ReturnWhen::After { seconds } => {
+                        ui.label("After");
+                        ui.add(
+                            egui::DragValue::new(seconds)
+                                .range(0.0..=600.0)
+                                .speed(0.05)
+                                .suffix(" s"),
+                        );
+                        ui.end_row();
+                    }
+                }
+                ui.label("Back to");
+                egui::ComboBox::from_id_salt("return to")
+                    .selected_text(returns.to.as_str())
+                    .show_ui(ui, |ui| {
+                        for name in &others {
+                            ui.selectable_value(&mut returns.to, name.clone(), name);
+                        }
+                    });
+                ui.end_row();
+                ui.label("Blend");
+                ui.horizontal(|ui| {
+                    ui.add(egui::Slider::new(&mut returns.blend, 0.0..=2.0).suffix(" s"));
+                });
+                ui.end_row();
+            });
+        let missing = match &returns.when {
+            ReturnWhen::BoolIs { parameter, .. } | ReturnWhen::Triggered { parameter } => {
+                parameter.is_empty()
+            }
+            _ => false,
+        };
+        if missing {
+            ui.colored_label(
+                ui.visuals().warn_fg_color,
+                "Add a parameter of that kind (in the controller's settings) to test.",
+            );
+        } else {
+            ui.weak("Makes its transition for you (dashed in the graph).");
+        }
+    }
+
     fn transition_inspector(&mut self, ui: &mut egui::Ui, index: usize) {
         let parameters = self.file.parameters.clone();
         let transition = &mut self.file.transitions[index];
         ui.heading(format!("{} → {}", transition.from, transition.to));
         if transition.generated {
-            ui.weak("Made by a state's Return setting: change that setting to change it.");
+            ui.label("Made by its state's Return setting, so it can't be changed here.");
+            let from = transition.from.clone();
+            if ui.button("Edit the Return setting").clicked()
+                && let Some(state) = self.file.states.iter().position(|s| s.name == from)
+            {
+                self.selected = Selected::Node(Node::State(state));
+            }
+            if ui
+                .button(format!("{} Remove it", icons::TRASH))
+                .on_hover_text("Turns off its state's Return setting")
+                .clicked()
+            {
+                self.delete(Selected::Transition(index));
+            }
+            return;
         }
         ui.add_space(4.0);
         ui.strong("Conditions");
@@ -1229,6 +1471,31 @@ mod tests {
             ..ControllerFile::default()
         };
         ControllerDoc::open("assets/animations/hero.controller.json".into(), file, None)
+    }
+
+    #[test]
+    fn a_return_setting_keeps_its_transition_in_step() {
+        let mut doc = doc();
+        let nowhere = std::path::Path::new("no such project");
+        doc.file.states[1].returns = Some(ReturnDef {
+            to: "Idle".into(),
+            when: ReturnWhen::Finished,
+            blend: 0.1,
+        });
+        doc.sync_returns(nowhere);
+        let made = &doc.file.transitions[0];
+        assert!(made.generated);
+        assert_eq!((made.from.as_str(), made.to.as_str()), ("Walk", "Idle"));
+        // Renaming the state it returns to keeps it pointing there.
+        doc.rename_state(0, "Rest").unwrap();
+        doc.sync_returns(nowhere);
+        assert_eq!(doc.file.states[1].returns.as_ref().unwrap().to, "Rest");
+        assert_eq!(doc.file.transitions[0].to, "Rest");
+        // Removing the made transition turns the setting off.
+        doc.delete(Selected::Transition(0));
+        doc.sync_returns(nowhere);
+        assert!(doc.file.states[1].returns.is_none());
+        assert!(doc.file.transitions.is_empty());
     }
 
     #[test]

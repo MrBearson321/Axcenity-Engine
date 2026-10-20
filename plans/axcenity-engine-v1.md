@@ -761,5 +761,5 @@ A state's **Return when** setting picks a completion check (its clip finishes, a
 ### Acceptance criteria
 
 - [ ] An Attack state set to return to Idle when its clip finishes does so with no hand-made transition, and changing the setting updates its transition.
-- [ ] Every animation block translates to the Lua in the docs table and runs.
+- [x] Every animation block translates to the Lua in the docs table and runs.
 - [ ] `examples/hello-animation` plays, and pressing its keys drives its animations.

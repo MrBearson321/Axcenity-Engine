@@ -1,0 +1,180 @@
+{
+  "blocks": [
+    {
+      "id": 6,
+      "kind": {
+        "type": "every_frame",
+        "body": [
+          {
+            "id": 3,
+            "kind": {
+              "type": "if_else",
+              "condition": {
+                "type": "key_down",
+                "key": "W"
+              },
+              "then_body": [
+                {
+                  "id": 1,
+                  "kind": {
+                    "type": "set_animator_number",
+                    "animator": "Noodle.Animator",
+                    "parameter": "Speed",
+                    "value": {
+                      "type": "number",
+                      "value": 2.0
+                    }
+                  }
+                }
+              ],
+              "else_body": [
+                {
+                  "id": 2,
+                  "kind": {
+                    "type": "set_animator_number",
+                    "animator": "Noodle.Animator",
+                    "parameter": "Speed",
+                    "value": {
+                      "type": "number",
+                      "value": 0.0
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "id": 5,
+            "kind": {
+              "type": "if",
+              "condition": {
+                "type": "logic",
+                "op": "and",
+                "left": {
+                  "type": "key_down",
+                  "key": "W"
+                },
+                "right": {
+                  "type": "key_down",
+                  "key": "LeftShift"
+                }
+              },
+              "body": [
+                {
+                  "id": 4,
+                  "kind": {
+                    "type": "set_animator_number",
+                    "animator": "Noodle.Animator",
+                    "parameter": "Speed",
+                    "value": {
+                      "type": "number",
+                      "value": 6.0
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "position": [
+        40.0,
+        40.0
+      ]
+    },
+    {
+      "id": 8,
+      "kind": {
+        "type": "when_key_pressed",
+        "key": "Space",
+        "body": [
+          {
+            "id": 7,
+            "kind": {
+              "type": "set_animator_trigger",
+              "animator": "Noodle.Animator",
+              "parameter": "Hop"
+            }
+          }
+        ]
+      },
+      "position": [
+        40.0,
+        300.0
+      ]
+    },
+    {
+      "id": 10,
+      "kind": {
+        "type": "when_key_pressed",
+        "key": "E",
+        "body": [
+          {
+            "id": 9,
+            "kind": {
+              "type": "set_animator_trigger",
+              "animator": "Noodle.Animator",
+              "parameter": "Wave"
+            }
+          }
+        ]
+      },
+      "position": [
+        40.0,
+        420.0
+      ]
+    },
+    {
+      "id": 12,
+      "kind": {
+        "type": "when_key_pressed",
+        "key": "Q",
+        "body": [
+          {
+            "id": 11,
+            "kind": {
+              "type": "play_animator_state",
+              "animator": "Noodle.Animator",
+              "state": "Wave"
+            }
+          }
+        ]
+      },
+      "position": [
+        40.0,
+        540.0
+      ]
+    },
+    {
+      "id": 14,
+      "kind": {
+        "type": "when_state_changed",
+        "animator": "Noodle.Animator",
+        "body": [
+          {
+            "id": 13,
+            "kind": {
+              "type": "print",
+              "value": {
+                "type": "join",
+                "left": {
+                  "type": "text",
+                  "value": "Noodle is now: "
+                },
+                "right": {
+                  "type": "property",
+                  "target": "Noodle.Animator",
+                  "property": "CurrentState"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "position": [
+        420.0,
+        300.0
+      ]
+    }
+  ]
+}

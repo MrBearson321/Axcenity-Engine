@@ -185,6 +185,18 @@ pub enum BlockKind {
         sound: String,
         body: Vec<Block>,
     },
+    /// When an Animator moves to another state (`StateChanged`).
+    WhenStateChanged {
+        animator: String,
+        body: Vec<Block>,
+    },
+    /// When an Animator's clip passes the event named `event`
+    /// (`AnimationEvent`).
+    WhenAnimationEvent {
+        animator: String,
+        event: String,
+        body: Vec<Block>,
+    },
     /// Loose blocks on the canvas, under no event. They don't run.
     Unattached {
         body: Vec<Block>,
@@ -295,6 +307,30 @@ pub enum BlockKind {
         volume: Expression,
     },
 
+    // Animation: an Animator's parameters and states.
+    SetAnimatorBool {
+        animator: String,
+        parameter: String,
+        value: Expression,
+    },
+    SetAnimatorNumber {
+        animator: String,
+        parameter: String,
+        value: Expression,
+    },
+    SetAnimatorTrigger {
+        animator: String,
+        parameter: String,
+    },
+    ResetAnimatorTrigger {
+        animator: String,
+        parameter: String,
+    },
+    PlayAnimatorState {
+        animator: String,
+        state: String,
+    },
+
     // Variables.
     SetVariable {
         name: String,
@@ -339,6 +375,8 @@ impl BlockKind {
                 | BlockKind::WhenClicked { .. }
                 | BlockKind::EveryFrame { .. }
                 | BlockKind::WhenSoundEnded { .. }
+                | BlockKind::WhenStateChanged { .. }
+                | BlockKind::WhenAnimationEvent { .. }
                 | BlockKind::Unattached { .. }
                 | BlockKind::TopCode { .. }
         )
@@ -361,6 +399,8 @@ impl BlockKind {
             | BlockKind::WhenClicked { body, .. }
             | BlockKind::EveryFrame { body }
             | BlockKind::WhenSoundEnded { body, .. }
+            | BlockKind::WhenStateChanged { body, .. }
+            | BlockKind::WhenAnimationEvent { body, .. }
             | BlockKind::Unattached { body }
             | BlockKind::Repeat { body, .. }
             | BlockKind::Forever { body }
@@ -383,6 +423,8 @@ impl BlockKind {
             | BlockKind::WhenClicked { body, .. }
             | BlockKind::EveryFrame { body }
             | BlockKind::WhenSoundEnded { body, .. }
+            | BlockKind::WhenStateChanged { body, .. }
+            | BlockKind::WhenAnimationEvent { body, .. }
             | BlockKind::Unattached { body }
             | BlockKind::Repeat { body, .. }
             | BlockKind::Forever { body }
@@ -416,6 +458,8 @@ impl BlockKind {
             | BlockKind::ShowPage { page: e, .. }
             | BlockKind::SetProperty { value: e, .. }
             | BlockKind::SetVolume { volume: e, .. }
+            | BlockKind::SetAnimatorBool { value: e, .. }
+            | BlockKind::SetAnimatorNumber { value: e, .. }
             | BlockKind::SetVariable { value: e, .. }
             | BlockKind::ChangeVariable { by: e, .. }
             | BlockKind::Print { value: e } => vec![e],
@@ -448,6 +492,8 @@ impl BlockKind {
             | BlockKind::ShowPage { page: e, .. }
             | BlockKind::SetProperty { value: e, .. }
             | BlockKind::SetVolume { volume: e, .. }
+            | BlockKind::SetAnimatorBool { value: e, .. }
+            | BlockKind::SetAnimatorNumber { value: e, .. }
             | BlockKind::SetVariable { value: e, .. }
             | BlockKind::ChangeVariable { by: e, .. }
             | BlockKind::Print { value: e } => vec![e],
@@ -555,6 +601,16 @@ pub enum Expression {
     KeyDown {
         key: String,
     },
+    /// An Animator's Bool parameter (`animator:GetBool`).
+    AnimatorBool {
+        animator: String,
+        parameter: String,
+    },
+    /// An Animator's Number parameter (`animator:GetNumber`).
+    AnimatorNumber {
+        animator: String,
+        parameter: String,
+    },
     /// Lua that has no block, kept word for word from a script switched
     /// from Code to Blocks. Pointed, so it fits any slot.
     Code {
@@ -570,6 +626,7 @@ impl Expression {
             | Expression::Logic { .. }
             | Expression::Not { .. }
             | Expression::KeyDown { .. }
+            | Expression::AnimatorBool { .. }
             | Expression::Code { .. } => BlockShape::Boolean,
             _ => BlockShape::Value,
         }
@@ -943,6 +1000,30 @@ impl Writer {
             BlockKind::WhenSoundEnded { sound, body } => {
                 (format!("{}.Ended:Connect(function()", target(sound)?), body)
             }
+            BlockKind::WhenStateChanged { animator, body } => (
+                format!(
+                    "{}.StateChanged:Connect(function(state, previous)",
+                    target(animator)?
+                ),
+                body,
+            ),
+            BlockKind::WhenAnimationEvent {
+                animator,
+                event,
+                body,
+            } => {
+                self.line(format!(
+                    "{}.AnimationEvent:Connect(function(name)",
+                    target(animator)?
+                ));
+                self.indent += 1;
+                self.line(format!("if name == {} then", quote(event)));
+                self.nested(body, ids)?;
+                self.line("end");
+                self.indent -= 1;
+                self.line("end)");
+                return Ok(());
+            }
             BlockKind::TopCode { code } => {
                 self.code(code);
                 return Ok(());
@@ -1132,6 +1213,49 @@ impl Writer {
                 let value = self.expression(volume)?;
                 self.line(format!("{}.Volume = {value}", target(t)?));
             }
+            BlockKind::SetAnimatorBool {
+                animator,
+                parameter,
+                value,
+            } => {
+                let value = self.expression(value)?;
+                self.line(format!(
+                    "{}:SetBool({}, {value})",
+                    target(animator)?,
+                    quote(parameter)
+                ));
+            }
+            BlockKind::SetAnimatorNumber {
+                animator,
+                parameter,
+                value,
+            } => {
+                let value = self.expression(value)?;
+                self.line(format!(
+                    "{}:SetNumber({}, {value})",
+                    target(animator)?,
+                    quote(parameter)
+                ));
+            }
+            BlockKind::SetAnimatorTrigger {
+                animator,
+                parameter,
+            } => self.line(format!(
+                "{}:SetTrigger({})",
+                target(animator)?,
+                quote(parameter)
+            )),
+            BlockKind::ResetAnimatorTrigger {
+                animator,
+                parameter,
+            } => self.line(format!(
+                "{}:ResetTrigger({})",
+                target(animator)?,
+                quote(parameter)
+            )),
+            BlockKind::PlayAnimatorState { animator, state } => {
+                self.line(format!("{}:Play({})", target(animator)?, quote(state)));
+            }
             BlockKind::SetVariable { name, value } => {
                 let value = self.expression(value)?;
                 self.line(format!("{name} = {value}"));
@@ -1152,6 +1276,8 @@ impl Writer {
             | BlockKind::WhenClicked { .. }
             | BlockKind::EveryFrame { .. }
             | BlockKind::WhenSoundEnded { .. }
+            | BlockKind::WhenStateChanged { .. }
+            | BlockKind::WhenAnimationEvent { .. }
             | BlockKind::Unattached { .. }
             | BlockKind::TopCode { .. } => {
                 return Err(TranslateError::InvalidEventPlacement);
@@ -1239,6 +1365,14 @@ impl Writer {
             Expression::KeyDown { key: name } => {
                 format!("UserInputService:IsKeyDown({})", key(name)?)
             }
+            Expression::AnimatorBool {
+                animator,
+                parameter,
+            } => format!("{}:GetBool({})", target(animator)?, quote(parameter)),
+            Expression::AnimatorNumber {
+                animator,
+                parameter,
+            } => format!("{}:GetNumber({})", target(animator)?, quote(parameter)),
             // Bracketed already where it needs to be (see `from_lua`).
             Expression::Code { code } => code.clone(),
         })

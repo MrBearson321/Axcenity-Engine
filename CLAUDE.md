@@ -7,7 +7,7 @@ Rust 3D game engine and editor; Lua 5.4 scripting. See [README.md](README.md) fo
 - Workspace members and dependency pins: [Cargo.toml](Cargo.toml).
 - Crate boundaries, Instance model, frame loop, editor and Play mode: [docs/architecture.md](docs/architecture.md).
 - Lua API, sandbox and scheduler: [docs/scripting.md](docs/scripting.md).
-- Renderer and materials: [docs/rendering.md](docs/rendering.md).
+- Renderer and materials: [docs/rendering.md](docs/rendering.md). Animation runtime: its Animation section; the Animation panel: docs/architecture.md.
 - Project files, export plans and licensing: [docs/project-and-export.md](docs/project-and-export.md).
 - In-game UI design: [docs/ui.md](docs/ui.md).
 - Product scope and stories: [prd/axcenity-engine-v1.md](prd/axcenity-engine-v1.md).
