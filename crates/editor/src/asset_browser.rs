@@ -50,6 +50,10 @@ pub enum AssetKind {
     Texture,
     Audio,
     Particle,
+    /// An animation clip (`*.anim.json`).
+    Animation,
+    /// An animator controller (`*.controller.json`).
+    Controller,
 }
 
 impl AssetKind {
@@ -62,6 +66,8 @@ impl AssetKind {
             AssetKind::Texture => icons::IMAGE_SQUARE,
             AssetKind::Audio => icons::WAVEFORM,
             AssetKind::Particle => icons::SPARKLE,
+            AssetKind::Animation => icons::FILM_SLATE,
+            AssetKind::Controller => icons::FLOW_ARROW,
         }
     }
 
@@ -76,6 +82,9 @@ impl AssetKind {
             }
             AssetKind::Audio => theme::class_color(ClassName::Sound, visuals),
             AssetKind::Particle => theme::class_color(ClassName::PointLight, visuals),
+            AssetKind::Animation | AssetKind::Controller => {
+                theme::class_color(ClassName::Animator, visuals)
+            }
         }
     }
 
@@ -97,6 +106,10 @@ impl AssetKind {
             }
             AssetKind::Particle => {
                 "Drag onto a part to give it a ParticleEmitter with this texture."
+            }
+            AssetKind::Animation => "Double-click to open it in the Animation panel.",
+            AssetKind::Controller => {
+                "Drag onto an animated MeshPart to give its Animator this controller."
             }
         }
     }
@@ -137,10 +150,11 @@ pub enum Category {
     Textures,
     Audio,
     Particles,
+    Animations,
 }
 
 impl Category {
-    const ALL: [Category; 8] = [
+    const ALL: [Category; 9] = [
         Category::All,
         Category::Props,
         Category::Models,
@@ -149,6 +163,7 @@ impl Category {
         Category::Textures,
         Category::Audio,
         Category::Particles,
+        Category::Animations,
     ];
 
     fn label(self) -> &'static str {
@@ -161,6 +176,7 @@ impl Category {
             Category::Textures => "Textures",
             Category::Audio => "Audio",
             Category::Particles => "Particles",
+            Category::Animations => "Animations",
         }
     }
 
@@ -174,6 +190,9 @@ impl Category {
             Category::Textures => kind == AssetKind::Texture,
             Category::Audio => kind == AssetKind::Audio,
             Category::Particles => kind == AssetKind::Particle,
+            Category::Animations => {
+                matches!(kind, AssetKind::Animation | AssetKind::Controller)
+            }
         }
     }
 
@@ -520,6 +539,12 @@ pub fn kind_of(path: &str) -> Option<AssetKind> {
     if lower.ends_with(PREFAB_SUFFIX) {
         return Some(AssetKind::Prefab);
     }
+    if lower.ends_with(axcenity_anim::CLIP_EXTENSION) {
+        return Some(AssetKind::Animation);
+    }
+    if lower.ends_with(axcenity_anim::CONTROLLER_EXTENSION) {
+        return Some(AssetKind::Controller);
+    }
     let extension = lower.rsplit_once('.')?.1;
     if MODEL_EXTENSIONS.contains(&extension) {
         Some(AssetKind::Model)
@@ -542,8 +567,14 @@ pub fn kind_of(path: &str) -> Option<AssetKind> {
 pub fn display_name(path: &str) -> String {
     let file = path.rsplit('/').next().unwrap_or(path);
     let lower = file.to_lowercase();
-    if lower.ends_with(PREFAB_SUFFIX) {
-        return file[..file.len() - PREFAB_SUFFIX.len()].to_owned();
+    for suffix in [
+        PREFAB_SUFFIX,
+        axcenity_anim::CLIP_EXTENSION,
+        axcenity_anim::CONTROLLER_EXTENSION,
+    ] {
+        if lower.ends_with(suffix) {
+            return file[..file.len() - suffix.len()].to_owned();
+        }
     }
     file.rsplit_once('.')
         .map_or(file, |(stem, _)| stem)

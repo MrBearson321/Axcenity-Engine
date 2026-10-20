@@ -4,8 +4,11 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use axcenity_assets::{Assets, Model, Posed, Take};
-use axcenity_core::{ClassName, InstanceId, Value, World};
+use axcenity_assets::{Assets, Model, Posed, Rig, Take};
+use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
+use glam::{EulerRot, Quat, Vec3};
+
+use crate::clip::RootMotion;
 
 use crate::controller::{Compiled, Machine};
 use crate::files::{ClipFile, ControllerFile, DEFAULT_BLEND};
@@ -23,6 +26,8 @@ pub enum AnimatorEvent {
         state: String,
         previous: String,
     },
+    /// The Animator's `AnimationEvent`: a playing clip passed this event.
+    Marker { animator: InstanceId, name: String },
 }
 
 impl AnimatorEvent {
@@ -39,6 +44,9 @@ impl AnimatorEvent {
                 "StateChanged",
                 vec![state.clone(), previous.clone()],
             ),
+            AnimatorEvent::Marker { animator, name } => {
+                (*animator, "AnimationEvent", vec![name.clone()])
+            }
         }
     }
 }
@@ -184,8 +192,11 @@ impl Animators {
                     }
                 }
             }
+            let mut markers = Vec::new();
             if enabled {
-                running.machine.advance(&compiled, dt * speed);
+                let advanced = running.machine.advance(&compiled, &rig, dt * speed);
+                markers = advanced.events;
+                move_by_root_motion(world, part, &rig, advanced.motion);
             }
 
             let pose = running.machine.pose(&compiled, &rig);
@@ -207,6 +218,11 @@ impl Animators {
                     previous,
                 });
             }
+            events.extend(
+                markers
+                    .into_iter()
+                    .map(|name| AnimatorEvent::Marker { animator: id, name }),
+            );
         }
         // A MeshPart whose animator is gone (or broke) goes back to its
         // still model.
@@ -299,6 +315,50 @@ impl Animators {
 fn report(errors: &mut Vec<String>, reported: &mut HashSet<String>, message: String) {
     if reported.insert(message.clone()) {
         errors.push(message);
+    }
+}
+
+/// Moves and turns the MeshPart `part` by root `motion` (in its model's
+/// file space): fitted into the model's box, stretched by the part's `Size`,
+/// then turned with the part. The turn is around the world's up.
+fn move_by_root_motion(world: &mut World, part: InstanceId, rig: &Rig, motion: RootMotion) {
+    if motion == RootMotion::default() {
+        return;
+    }
+    let Some(instance) = world.get(part) else {
+        return;
+    };
+    let vector = |name| instance.property(name).and_then(Value::as_vector3);
+    let (Some(position), Some(orientation), Some(size)) =
+        (vector("Position"), vector("Orientation"), vector("Size"))
+    else {
+        return;
+    };
+    // Orientation is degrees, applied around Z, then X, then Y.
+    let rotation = Quat::from_euler(
+        EulerRot::YXZ,
+        orientation.y.to_radians(),
+        orientation.x.to_radians(),
+        orientation.z.to_radians(),
+    );
+    let fitted = rig.fit.transform_vector3(motion.travel);
+    let moved = rotation * (fitted * Vec3::new(size.x, size.y, size.z));
+    if !moved.is_finite() || !motion.yaw.is_finite() {
+        return;
+    }
+    let position = Vector3::new(
+        position.x + moved.x,
+        position.y + moved.y,
+        position.z + moved.z,
+    );
+    let turned = Vector3::new(
+        orientation.x,
+        orientation.y + motion.yaw.to_degrees(),
+        orientation.z,
+    );
+    let _ = world.set_property(part, "Position", Value::Vector3(position));
+    if motion.yaw != 0.0 {
+        let _ = world.set_property(part, "Orientation", Value::Vector3(turned));
     }
 }
 

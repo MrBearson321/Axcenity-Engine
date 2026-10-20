@@ -9,6 +9,7 @@
 
 mod angular;
 mod anim_import;
+mod animation;
 mod app;
 mod asset_browser;
 mod autocomplete;

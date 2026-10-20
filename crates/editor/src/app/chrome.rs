@@ -86,6 +86,17 @@ impl EditorApp {
             None => {}
         }
     }
+    /// The Animation panel (see `animation.rs`).
+    pub(super) fn animation_pane(&mut self, ui: &mut egui::Ui, render_state: Option<&RenderState>) {
+        let folder = self.project.as_ref().map(|project| project.folder.clone());
+        self.animation.show(
+            ui,
+            folder.as_deref(),
+            &self.assets,
+            render_state,
+            &mut self.output,
+        );
+    }
     /// The Scene panel: the tabs for the viewport ("World") and the open
     /// scripts, Code/Blocks for a Script, and the viewport or the script.
     pub(super) fn scene_pane(

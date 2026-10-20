@@ -17,6 +17,7 @@ use crate::asset_browser::{
 };
 use crate::gizmo::Pose;
 use crate::history::Field;
+use crate::layout::Pane;
 use crate::properties::Edit;
 use crate::tree::{self, Insertable};
 use crate::viewport::DropTarget;
@@ -64,6 +65,68 @@ impl EditorApp {
             AssetKind::Image => self.drop_image(entry, spot),
             AssetKind::Texture => self.drop_texture(entry, spot),
             AssetKind::Particle => self.drop_particle_texture(entry, spot),
+            AssetKind::Animation => self.open_animation_clip(&entry.path),
+            AssetKind::Controller => self.drop_controller(entry, spot),
+        }
+    }
+
+    /// Opens the clip at `path` in the Animation panel, and shows the panel.
+    pub(super) fn open_animation_clip(&mut self, path: &str) {
+        let Some(project) = &self.project else {
+            return;
+        };
+        let folder = project.folder.clone();
+        self.animation
+            .open_clip(&folder, &self.assets, path, &mut self.output);
+        self.layout.open(Pane::Animation);
+    }
+
+    /// Gives the Animator of the MeshPart under the drop this controller
+    /// (adding an Animator if it has none), as one undo step.
+    fn drop_controller(&mut self, entry: &AssetEntry, spot: Spot) {
+        let part = spot.part.filter(|&part| {
+            self.world
+                .get(part)
+                .is_some_and(|instance| instance.class() == ClassName::MeshPart)
+        });
+        let Some(part) = part else {
+            self.output
+                .warning("Drop an animator controller onto a MeshPart to animate it.");
+            return;
+        };
+        let animator = self.world.get(part).and_then(|instance| {
+            instance.children().iter().copied().find(|&child| {
+                self.world
+                    .get(child)
+                    .is_some_and(|c| c.class() == ClassName::Animator)
+            })
+        });
+        let controller = Value::String(entry.path.clone());
+        match animator {
+            Some(animator) => {
+                let label = format!(
+                    "Set Controller of {}",
+                    self.world.get(animator).map_or("Animator", |a| a.name())
+                );
+                self.change(
+                    animator,
+                    Field::Property("Controller"),
+                    label,
+                    vec![Edit::Property("Controller", controller)],
+                );
+                self.history.seal();
+                self.select_from_viewport(Some(animator));
+            }
+            None => {
+                let id = self
+                    .world
+                    .create(ClassName::Animator)
+                    .expect("not a service");
+                self.world
+                    .set_property(id, "Controller", controller)
+                    .expect("every Animator has a Controller");
+                self.place_new(part, vec![id], format!("Animate {}", entry.name));
+            }
         }
     }
 
@@ -348,6 +411,12 @@ impl EditorApp {
                     .map_err(|err| err.to_string())
             }
             Some(AssetKind::Prefab) => copy_prefab(folder, file),
+            // Clips and controllers name files in their own project, so
+            // they come with an imported FBX instead.
+            Some(AssetKind::Animation | AssetKind::Controller) => Err(
+                "animation clips and controllers come from importing an animated FBX model"
+                    .to_owned(),
+            ),
             Some(AssetKind::Prop) | None => {
                 Err("it isn't a model, image, sound or prefab (`.prefab.json`) file".to_owned())
             }

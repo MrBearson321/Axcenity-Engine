@@ -22,11 +22,19 @@ pub enum Pane {
     Properties,
     Output,
     Assets,
+    /// The Animation Studio: clips, controllers and their preview.
+    Animation,
 }
 
 impl Pane {
     /// The panels that can be closed and opened again, in menu order.
-    pub const CLOSABLE: [Pane; 4] = [Pane::Explorer, Pane::Properties, Pane::Output, Pane::Assets];
+    pub const CLOSABLE: [Pane; 5] = [
+        Pane::Explorer,
+        Pane::Properties,
+        Pane::Output,
+        Pane::Assets,
+        Pane::Animation,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -35,6 +43,7 @@ impl Pane {
             Pane::Properties => "Properties",
             Pane::Output => "Output",
             Pane::Assets => "Assets",
+            Pane::Animation => "Animation",
         }
     }
 
@@ -45,6 +54,7 @@ impl Pane {
             Pane::Properties => icons::SLIDERS_HORIZONTAL,
             Pane::Output => icons::TERMINAL_WINDOW,
             Pane::Assets => icons::SHAPES,
+            Pane::Animation => icons::PERSON_SIMPLE_RUN,
         }
     }
 
@@ -100,6 +110,8 @@ impl Layout {
             Pane::Properties => Some(Pane::Explorer),
             Pane::Output => Some(Pane::Assets),
             Pane::Assets => Some(Pane::Output),
+            // A tab beside the Scene, with room for its graph and preview.
+            Pane::Animation => Some(Pane::Scene),
         };
         let beside = neighbor
             .and_then(|neighbor| self.dock.find_main_surface_tab(&neighbor))
@@ -167,11 +179,17 @@ fn zero_nulls(json: &mut serde_json::Value) {
     }
 }
 
-/// Like Roblox Studio: the Scene in the middle, the Explorer with
+/// Like Roblox Studio: the Scene in the middle (with the Animation Studio as
+/// a tab beside it, like Unity's Animator window), the Explorer with
 /// Properties under it down the right, and Output and Assets as tabs under
 /// the Scene.
 fn default_dock() -> DockState<Pane> {
-    let mut dock = DockState::new(vec![Pane::Scene]);
+    let mut dock = DockState::new(vec![Pane::Scene, Pane::Animation]);
+    dock.set_active_tab((
+        egui_dock::SurfaceIndex::main(),
+        NodeIndex::root(),
+        egui_dock::TabIndex(0),
+    ));
     let tree = dock.main_surface_mut();
     let [scene, explorer] = tree.split_right(NodeIndex::root(), 0.78, vec![Pane::Explorer]);
     tree.split_below(explorer, 0.45, vec![Pane::Properties]);

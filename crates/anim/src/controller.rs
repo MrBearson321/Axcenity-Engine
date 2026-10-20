@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use axcenity_assets::{Pose, Rig, Take};
 
-use crate::clip::BoundClip;
+use crate::clip::{BoundClip, RootMotion};
 use crate::files::{ClipFile, ControllerFile, Motion};
 
 /// A controller with its clips bound to one rig.
@@ -106,9 +106,26 @@ impl Compiled {
 
     /// Poses `pose` (already at rest) as `state` is at `phase`.
     pub fn sample(&self, state: usize, phase: f64, rig: &Rig, pose: &mut Pose) {
-        if let Some(clip) = self.states.get(state).and_then(|s| s.clip.as_ref()) {
+        if let Some(clip) = self.clip(state) {
             clip.sample(phase, rig, pose);
         }
+    }
+
+    /// `state`'s clip, if it has one that loaded.
+    pub fn clip(&self, state: usize) -> Option<&BoundClip> {
+        self.states.get(state).and_then(|s| s.clip.as_ref())
+    }
+
+    /// How far `state`'s root motion moves the model from phase `from` to `to`.
+    pub fn root_motion(&self, state: usize, rig: &Rig, from: f64, to: f64) -> RootMotion {
+        self.clip(state)
+            .map_or_else(RootMotion::default, |clip| clip.root_motion(rig, from, to))
+    }
+
+    /// The events `state`'s clip passes from phase `from` to `to`.
+    pub fn events(&self, state: usize, from: f64, to: f64) -> Vec<String> {
+        self.clip(state)
+            .map_or_else(Vec::new, |clip| clip.events_between(from, to))
     }
 }
 
@@ -137,6 +154,14 @@ impl Fade {
             (self.elapsed / self.duration).clamp(0.0, 1.0)
         }
     }
+}
+
+/// What happened as a [`Machine`] moved on.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Advanced {
+    /// The current state's clip's events passed, in order.
+    pub events: Vec<String>,
+    pub motion: RootMotion,
 }
 
 /// Where an animator is in its controller: the state playing, and the
@@ -175,11 +200,32 @@ impl Machine {
         });
     }
 
-    /// Moves on by `dt` seconds.
-    pub fn advance(&mut self, controller: &Compiled, dt: f64) {
+    /// Moves on by `dt` seconds, returning the events the current state's
+    /// clip passed and how far root motion moved the model (both states'
+    /// travel, by their share of the blend).
+    pub fn advance(&mut self, controller: &Compiled, rig: &Rig, dt: f64) -> Advanced {
         if !(dt.is_finite() && dt > 0.0) {
-            return;
+            return Advanced::default();
         }
+        let before = (self.current, self.fade);
+        self.step(controller, dt);
+        let events = controller.events(before.0.state, before.0.phase, self.current.phase);
+        let weight = self.fade.map_or(1.0, |fade| fade.weight()) as f32;
+        let mut motion = controller
+            .root_motion(before.0.state, rig, before.0.phase, self.current.phase)
+            .scaled(weight);
+        if let Some(old) = before.1 {
+            let to = old.from.phase + dt / controller.duration(old.from.state);
+            let from = controller
+                .root_motion(old.from.state, rig, old.from.phase, to)
+                .scaled(1.0 - weight);
+            motion = motion + from;
+        }
+        Advanced { events, motion }
+    }
+
+    /// Moves the phases and the blend on by `dt` seconds.
+    fn step(&mut self, controller: &Compiled, dt: f64) {
         self.current.phase += dt / controller.duration(self.current.state);
         if let Some(fade) = &mut self.fade {
             fade.from.phase += dt / controller.duration(fade.from.state);

@@ -40,6 +40,7 @@ use axcenity_script::{CameraState, KeyEvent};
 use eframe::egui;
 
 use crate::angular;
+use crate::animation::AnimationStudio;
 use crate::asset_browser::{AssetBrowser, AssetPayload, BrowserAction};
 use crate::autocomplete;
 use crate::block_editor;
@@ -191,6 +192,8 @@ pub struct EditorApp {
     sound_preview: Option<axcenity_audio::AudioEngine>,
     /// The Assets panel, which shares the bottom of the window with Output.
     asset_browser: AssetBrowser,
+    /// The Animation panel's clips, open clip and preview.
+    animation: AnimationStudio,
     /// Where the dockable panels are. Saved between runs.
     layout: Layout,
     /// The ribbon's tabs, including the ones people made. Saved between runs.
@@ -237,6 +240,7 @@ impl egui_dock::TabViewer for DockViewer<'_> {
             Pane::Properties => self.app.properties_pane(ui),
             Pane::Output => self.app.output_pane(ui),
             Pane::Assets => self.app.assets_pane(ui),
+            Pane::Animation => self.app.animation_pane(ui, self.render_state),
         }
     }
 
@@ -398,6 +402,7 @@ impl EditorApp {
             about_open: false,
             sound_preview: None,
             asset_browser: AssetBrowser::default(),
+            animation: AnimationStudio::default(),
             layout: Layout::default(),
             ribbon_tabs: RibbonTabs::default(),
             light_cones: false,

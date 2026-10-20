@@ -118,6 +118,7 @@ impl EditorApp {
             world_text,
             keep_world_file: !project.world_loaded,
         });
+        self.animation = AnimationStudio::default();
         self.replace_world(project.world);
     }
     /// Puts `world` in place of the world being edited, with nothing
@@ -181,6 +182,10 @@ impl EditorApp {
         self.history.seal();
         // The game has its own audio; a preview would play over it.
         self.sound_preview = None;
+        // The game reads clips from their files.
+        if let Some(project) = &self.project {
+            self.animation.write_all(&project.folder, &mut self.output);
+        }
         if self.unsaved() && !self.save() {
             self.output
                 .error("Play didn't start, because the project couldn't be saved first.");
@@ -409,6 +414,10 @@ impl EditorApp {
     }
     /// Puts the open project away and shows the start screen.
     pub(super) fn finish_closing_project(&mut self) {
+        if let Some(project) = &self.project {
+            self.animation.write_all(&project.folder, &mut self.output);
+        }
+        self.animation = AnimationStudio::default();
         self.project = None;
         self.play = None;
         self.pending_ui_activation = None;

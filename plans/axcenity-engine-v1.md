@@ -712,7 +712,7 @@ An **Animation** panel (a dockable tab like Assets; View > Panels) with the **An
 - [ ] Every clip in the project is listed, and New, Rename, Duplicate and Delete change their files.
 - [ ] The preview plays, pauses and scrubs a clip, and changes to speed, loop, range and events show immediately and save.
 - [ ] A walk with root motion on moves its MeshPart forward during Play without sliding back at the loop.
-- [ ] `animator.AnimationEvent` fires once per pass of each event, with its name.
+- [x] `animator.AnimationEvent` fires once per pass of each event, with its name.
 
 ---
 

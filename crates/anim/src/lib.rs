@@ -17,8 +17,8 @@ mod controller;
 pub mod files;
 
 pub use animators::{AnimatorEvent, Animators, Poses, load_clip};
-pub use clip::BoundClip;
-pub use controller::{Compiled, Fade, Machine, Playing};
+pub use clip::{BoundClip, RootMotion};
+pub use controller::{Advanced, Compiled, Fade, Machine, Playing};
 pub use files::{
     ANIMATIONS_FOLDER, ANY_STATE, CLIP_EXTENSION, CONTROLLER_EXTENSION, ClipEvent, ClipFile,
     Condition, ControllerFile, DEFAULT_BLEND, FileError, Motion, ParameterDef, StateDef, Test,

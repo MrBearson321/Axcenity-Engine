@@ -251,6 +251,7 @@ impl EditorApp {
         let Some(project) = &self.project else {
             return false;
         };
+        self.animation.write_all(&project.folder, &mut self.output);
         let name = project.name.clone();
         let mut scripts = self.tabs.unsaved_paths();
         if let Some(project) = &self.project {
