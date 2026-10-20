@@ -18,12 +18,14 @@ pub mod files;
 
 pub use animators::{AnimatorEvent, Animators, Poses, load_clip};
 pub use clip::{BoundClip, RootMotion};
-pub use controller::{Advanced, Compiled, Fade, Machine, Playing};
+pub use controller::{Advanced, Compiled, Fade, Machine, Playing, exit_reached, holds};
 pub use files::{
     ANIMATIONS_FOLDER, ANY_STATE, CLIP_EXTENSION, CONTROLLER_EXTENSION, ClipEvent, ClipFile,
     Condition, ControllerFile, DEFAULT_BLEND, FileError, Motion, ParameterDef, StateDef, Test,
     TransitionDef,
 };
 
+#[cfg(test)]
+mod state_machine_tests;
 #[cfg(test)]
 mod tests;

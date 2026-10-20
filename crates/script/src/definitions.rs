@@ -413,6 +413,60 @@ const CLASS_METHODS: &[(ClassName, Function)] = &[
     (
         ClassName::Animator,
         Function {
+            name: "SetBool",
+            doc: "Sets a Bool parameter, such as `IsGrounded`: something that stays true or false until it's changed.",
+            params: &[("name", "string"), ("value", "boolean")],
+            returns: "nil",
+        },
+    ),
+    (
+        ClassName::Animator,
+        Function {
+            name: "GetBool",
+            doc: "A Bool parameter's value.",
+            params: &[("name", "string")],
+            returns: "boolean",
+        },
+    ),
+    (
+        ClassName::Animator,
+        Function {
+            name: "SetNumber",
+            doc: "Sets a Number parameter, such as `Speed`: a value that changes gradually, for conditions and blend trees.",
+            params: &[("name", "string"), ("value", "number")],
+            returns: "nil",
+        },
+    ),
+    (
+        ClassName::Animator,
+        Function {
+            name: "GetNumber",
+            doc: "A Number parameter's value.",
+            params: &[("name", "string")],
+            returns: "number",
+        },
+    ),
+    (
+        ClassName::Animator,
+        Function {
+            name: "SetTrigger",
+            doc: "Sets a Trigger parameter, such as `Jump`: a one-time request, used up by the transition it starts.",
+            params: &[("name", "string")],
+            returns: "nil",
+        },
+    ),
+    (
+        ClassName::Animator,
+        Function {
+            name: "ResetTrigger",
+            doc: "Clears a Trigger that no transition has used yet.",
+            params: &[("name", "string")],
+            returns: "nil",
+        },
+    ),
+    (
+        ClassName::Animator,
+        Function {
             name: "Play",
             doc: "Switches to the state named `state`, from its start, blending from the pose now over `blend` seconds (0.25 if left out; 0 snaps).",
             params: &[("state", "string"), ("blend?", "number")],

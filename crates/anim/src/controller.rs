@@ -1,17 +1,20 @@
 //! A controller file made ready to run, and the state machine that runs it.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use axcenity_assets::{Pose, Rig, Take};
+use axcenity_core::Parameter;
 
 use crate::clip::{BoundClip, RootMotion};
-use crate::files::{ClipFile, ControllerFile, Motion};
+use crate::files::{ANY_STATE, ClipFile, Condition, ControllerFile, Motion, Test};
 
 /// A controller with its clips bound to one rig.
 #[derive(Debug)]
 pub struct Compiled {
     pub file: ControllerFile,
     states: Vec<CompiledState>,
+    transitions: Vec<CompiledTransition>,
     start: usize,
 }
 
@@ -19,25 +22,43 @@ pub struct Compiled {
 struct CompiledState {
     name: String,
     speed: f64,
-    /// `None` when its clip couldn't be loaded: it holds the rest pose.
+    /// `None` when it has no clip, or its clip couldn't be loaded: it holds
+    /// the rest pose.
     clip: Option<BoundClip>,
+}
+
+/// A transition with its states found.
+#[derive(Clone, Debug)]
+struct CompiledTransition {
+    /// Its place in the file's list, which breaks ties of priority.
+    index: usize,
+    /// `None` for Any State.
+    from: Option<usize>,
+    to: usize,
+    conditions: Vec<Condition>,
+    blend: f64,
+    exit_time: Option<f64>,
+    interruptible: bool,
+    priority: i32,
 }
 
 impl Compiled {
     /// Binds every state's clip to `rig`. `load_clip` reads a clip file and
     /// the takes of the model file it names. A clip that can't be loaded
-    /// leaves its state still, and its reason is in the returned list.
+    /// leaves its state still, and its reason (and any transition that can't
+    /// work) is in the returned list.
     pub fn new(
         file: ControllerFile,
         rig: &Rig,
         mut load_clip: impl FnMut(&str) -> Result<(ClipFile, Arc<Vec<Take>>), String>,
     ) -> (Self, Vec<String>) {
         let mut problems = Vec::new();
-        let states = file
+        let states: Vec<CompiledState> = file
             .states
             .iter()
             .map(|state| {
                 let clip = match &state.motion {
+                    Motion::Clip(path) if path.is_empty() => None,
                     Motion::Clip(path) => match load_clip(path)
                         .and_then(|(clip, takes)| BoundClip::bind(clip, takes, rig))
                     {
@@ -62,6 +83,43 @@ impl Compiled {
                 }
             })
             .collect();
+        let index_of = |name: &str| states.iter().position(|state| state.name == name);
+        let mut transitions = Vec::new();
+        for (index, transition) in file.transitions.iter().enumerate() {
+            let from = if transition.from == ANY_STATE {
+                Some(None)
+            } else {
+                index_of(&transition.from).map(Some)
+            };
+            let (Some(from), Some(to)) = (from, index_of(&transition.to)) else {
+                problems.push(format!(
+                    "the transition from `{}` to `{}` names a state it doesn't have",
+                    transition.from, transition.to
+                ));
+                continue;
+            };
+            if transition.conditions.is_empty() && transition.exit_time.is_none() {
+                problems.push(format!(
+                    "the transition from `{}` to `{}` never happens: give it a condition or an exit time",
+                    transition.from, transition.to
+                ));
+                continue;
+            }
+            transitions.push(CompiledTransition {
+                index,
+                from,
+                to,
+                conditions: transition.conditions.clone(),
+                blend: if transition.blend.is_finite() {
+                    transition.blend.max(0.0)
+                } else {
+                    0.0
+                },
+                exit_time: transition.exit_time.filter(|time| time.is_finite()),
+                interruptible: transition.interruptible,
+                priority: transition.priority,
+            });
+        }
         let start = file
             .starting_state()
             .and_then(|start| file.states.iter().position(|s| s.name == start.name))
@@ -70,6 +128,7 @@ impl Compiled {
             Self {
                 file,
                 states,
+                transitions,
                 start,
             },
             problems,
@@ -104,6 +163,11 @@ impl Compiled {
         compiled.clip.as_ref().map_or(1.0, BoundClip::duration) / speed
     }
 
+    /// Whether `state`'s motion loops (a state with no clip counts as looping).
+    pub fn looping(&self, state: usize) -> bool {
+        self.clip(state).is_none_or(|clip| clip.file.looping)
+    }
+
     /// Poses `pose` (already at rest) as `state` is at `phase`.
     pub fn sample(&self, state: usize, phase: f64, rig: &Rig, pose: &mut Pose) {
         if let Some(clip) = self.clip(state) {
@@ -129,6 +193,19 @@ impl Compiled {
     }
 }
 
+/// Whether `condition` holds for `parameters`. A parameter that isn't there,
+/// or is of another type than its test is for, doesn't hold.
+pub fn holds(condition: &Condition, parameters: &BTreeMap<String, Parameter>) -> bool {
+    match (condition.test, parameters.get(&condition.parameter)) {
+        (Test::IsTrue, Some(Parameter::Bool(value))) => *value,
+        (Test::IsFalse, Some(Parameter::Bool(value))) => !*value,
+        (Test::Triggered, Some(Parameter::Trigger(set))) => *set,
+        (Test::Greater, Some(Parameter::Number(value))) => *value > condition.value,
+        (Test::Less, Some(Parameter::Number(value))) => *value < condition.value,
+        _ => false,
+    }
+}
+
 /// A state playing: which one, and how far through its motion it is, in
 /// passes (0.5 is halfway through the first, 2 the end of the second).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -143,6 +220,11 @@ pub struct Fade {
     pub from: Playing,
     pub elapsed: f64,
     pub duration: f64,
+    /// Whether another transition may take over before it ends.
+    pub interruptible: bool,
+    /// The transition (its index in the file) doing it, or `None` for a
+    /// script's `Play`.
+    pub transition: Option<usize>,
 }
 
 impl Fade {
@@ -185,9 +267,15 @@ impl Machine {
     }
 
     /// Switches to `state` from its start, blending from the pose now over
-    /// `blend` seconds. Blending from a blend starts from whichever of its
-    /// two states counts more.
+    /// `blend` seconds, as a script's `Play` does. A script can always
+    /// interrupt, and what it starts can be interrupted.
     pub fn play(&mut self, state: usize, blend: f64) {
+        self.start(state, blend, true, None);
+    }
+
+    /// Blending from a blend starts from whichever of its two states counts
+    /// more.
+    fn start(&mut self, state: usize, blend: f64, interruptible: bool, transition: Option<usize>) {
         let from = match self.fade {
             Some(fade) if fade.weight() < 0.5 => fade.from,
             _ => self.current,
@@ -197,7 +285,57 @@ impl Machine {
             from,
             elapsed: 0.0,
             duration: blend,
+            interruptible,
+            transition,
         });
+    }
+
+    /// Takes the transition whose time has come, if any: from Any State
+    /// (never to the state already playing) or from the current state, with
+    /// every condition holding and its exit time reached; the highest
+    /// priority wins, then the first in the file. A fade that can't be
+    /// interrupted is let finish first. The triggers its conditions test are
+    /// used up. Returns the transition taken (its index in the file).
+    pub fn evaluate(
+        &mut self,
+        controller: &Compiled,
+        parameters: &mut BTreeMap<String, Parameter>,
+    ) -> Option<usize> {
+        if self.fade.is_some_and(|fade| !fade.interruptible) {
+            return None;
+        }
+        let current = self.current;
+        let chosen = controller
+            .transitions
+            .iter()
+            .filter(|t| match t.from {
+                None => t.to != current.state,
+                Some(from) => from == current.state,
+            })
+            .filter(|t| {
+                t.exit_time.is_none_or(|exit| {
+                    exit_reached(exit, current.phase, controller.looping(current.state))
+                })
+            })
+            .filter(|t| t.conditions.iter().all(|c| holds(c, parameters)))
+            // `max_by_key` keeps the last of equals, so ties go to the
+            // earlier transition by comparing indices the other way.
+            .max_by_key(|t| (t.priority, std::cmp::Reverse(t.index)))?
+            .clone();
+        for condition in &chosen.conditions {
+            if condition.test == Test::Triggered
+                && let Some(Parameter::Trigger(set)) = parameters.get_mut(&condition.parameter)
+            {
+                *set = false;
+            }
+        }
+        self.start(
+            chosen.to,
+            chosen.blend,
+            chosen.interruptible,
+            Some(chosen.index),
+        );
+        Some(chosen.index)
     }
 
     /// Moves on by `dt` seconds, returning the events the current state's
@@ -239,16 +377,34 @@ impl Machine {
     /// The pose now: the current state's, blended with the old one's while
     /// fading.
     pub fn pose(&self, controller: &Compiled, rig: &Rig) -> Pose {
+        let weight = self.fade.map_or(1.0, |fade| fade.weight());
+        self.pose_at(controller, rig, weight)
+    }
+
+    /// The pose with the fade's new state counting `weight` (0 is all the
+    /// old state, 1 all the new), for scrubbing a blend in the editor.
+    pub fn pose_at(&self, controller: &Compiled, rig: &Rig, weight: f64) -> Pose {
         let mut pose = rig.rest_pose();
         controller.sample(self.current.state, self.current.phase, rig, &mut pose);
         if let Some(fade) = &self.fade {
             let mut old = rig.rest_pose();
             controller.sample(fade.from.state, fade.from.phase, rig, &mut old);
-            let weight = fade.weight() as f32;
+            let weight = weight.clamp(0.0, 1.0) as f32;
             for (new, old) in pose.iter_mut().zip(&old) {
                 *new = old.lerp(new, weight);
             }
         }
         pose
+    }
+}
+
+/// Whether a state at `phase` has reached exit time `exit`: in each pass
+/// from `exit` to its end for a looping state with an exit time below 1,
+/// otherwise once it has played that much in all.
+pub fn exit_reached(exit: f64, phase: f64, looping: bool) -> bool {
+    if looping && exit < 1.0 {
+        phase.rem_euclid(1.0) >= exit.max(0.0)
+    } else {
+        phase >= exit
     }
 }

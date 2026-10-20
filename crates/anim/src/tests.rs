@@ -90,6 +90,69 @@ fn play_switches_state_and_reports_the_change() {
 }
 
 #[test]
+fn parameters_drive_the_example_through_its_transitions() {
+    use axcenity_core::Parameter;
+    let (mut world, _, animator) = noodle(CONTROLLER);
+    let assets = Assets::new(example());
+    let mut animators = Animators::new();
+    animators.update(&mut world, &assets, 0.0);
+    let state = |world: &World| world.animator(animator).unwrap().current_state.clone();
+    // The controller's parameters arrive at their defaults.
+    assert_eq!(
+        world.animator(animator).unwrap().parameters["IsWalking"],
+        Parameter::Bool(false)
+    );
+    let set = |world: &mut World, name: &str, value| {
+        world
+            .animator_mut(animator)
+            .unwrap()
+            .parameters
+            .insert(name.into(), value);
+    };
+    set(&mut world, "IsWalking", Parameter::Bool(true));
+    animators.update(&mut world, &assets, 0.1);
+    assert_eq!(state(&world), "Walk");
+    // Each blend (a quarter second, not interruptible) finishes before the
+    // next transition can start.
+    set(&mut world, "IsWalking", Parameter::Bool(false));
+    for _ in 0..8 {
+        animators.update(&mut world, &assets, 0.1);
+    }
+    assert_eq!(state(&world), "Idle");
+    set(&mut world, "Wave", Parameter::Trigger(true));
+    animators.update(&mut world, &assets, 0.1);
+    assert_eq!(state(&world), "Wave");
+    assert_eq!(
+        world.animator(animator).unwrap().parameters["Wave"],
+        Parameter::Trigger(false),
+        "used up"
+    );
+    // Wave (1 s) goes back to Idle by itself.
+    for _ in 0..12 {
+        animators.update(&mut world, &assets, 0.1);
+    }
+    assert_eq!(state(&world), "Idle");
+    assert_eq!(animators.take_errors(), Vec::<String>::new());
+}
+
+#[test]
+fn a_parameter_the_controller_lacks_is_reported() {
+    let (mut world, _, animator) = noodle(CONTROLLER);
+    let assets = Assets::new(example());
+    let mut animators = Animators::new();
+    world
+        .animator_mut(animator)
+        .unwrap()
+        .parameters
+        .insert("IsFlying".into(), axcenity_core::Parameter::Bool(true));
+    animators.update(&mut world, &assets, 0.1);
+    animators.update(&mut world, &assets, 0.1);
+    let errors = animators.take_errors();
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(errors[0].contains("IsFlying"));
+}
+
+#[test]
 fn a_missing_controller_is_reported_once_and_leaves_the_model_still() {
     let (mut world, part, _) = noodle("assets/animations/nothing.controller.json");
     let assets = Assets::new(example());

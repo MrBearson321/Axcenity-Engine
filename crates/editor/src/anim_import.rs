@@ -9,8 +9,8 @@
 
 use std::path::Path;
 
-use axcenity_anim::files::{self, ClipFile, ControllerFile, Motion, StateDef};
-use axcenity_anim::{ANIMATIONS_FOLDER, CLIP_EXTENSION, CONTROLLER_EXTENSION};
+use axcenity_anim::files::{self, ClipFile};
+use axcenity_anim::{ANIMATIONS_FOLDER, CLIP_EXTENSION};
 use axcenity_assets::{Rig, Take};
 use eframe::egui;
 
@@ -417,46 +417,17 @@ pub fn write_animation(
     let model = files::file_safe(model);
     let folder = format!("{ANIMATIONS_FOLDER}/{model}");
     let mut paths = Vec::new();
-    let mut states = Vec::new();
-    for (index, (name, clip)) in clips.iter().enumerate() {
+    for (name, clip) in clips {
         let name = free_file(project, &folder, name, CLIP_EXTENSION);
         let path = format!("{folder}/{name}{CLIP_EXTENSION}");
         files::write_file(&project.join(&path), &clip.to_json())?;
-        // States in rows of four, beside the default one.
-        let (column, row) = (index % 4, index / 4);
-        states.push(StateDef::new(
-            &name,
-            Motion::Clip(path.clone()),
-            [240.0 + column as f32 * 200.0, row as f32 * 110.0],
-        ));
         paths.push(path);
     }
-    if !controller || states.is_empty() {
+    if !controller || paths.is_empty() {
         return Ok((paths, None));
     }
-    // An Idle clip (by name) is where it starts; otherwise the first. The
-    // default state sits on its own at the left.
-    let start = states
-        .iter()
-        .position(|state| state.name.eq_ignore_ascii_case("idle"))
-        .unwrap_or(0);
-    let default = states.remove(start);
-    let default_name = default.name.clone();
-    states.insert(
-        0,
-        StateDef {
-            position: [0.0, 0.0],
-            ..default
-        },
-    );
-    let file = ControllerFile {
-        default_state: default_name,
-        states,
-        ..ControllerFile::default()
-    };
-    let name = free_file(project, ANIMATIONS_FOLDER, &model, CONTROLLER_EXTENSION);
-    let path = format!("{ANIMATIONS_FOLDER}/{name}{CONTROLLER_EXTENSION}");
-    files::write_file(&project.join(&path), &file.to_json())?;
+    // An Idle clip (by name) is where it starts; otherwise the first.
+    let path = crate::animation::store::new_controller(project, &model, &paths)?;
     Ok((paths, Some(path)))
 }
 
@@ -489,6 +460,7 @@ fn free_file(project: &Path, folder: &str, name: &str, extension: &str) -> Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axcenity_anim::ControllerFile;
 
     fn take(name: &str, seconds: f32) -> Take {
         Take {

@@ -197,6 +197,36 @@ impl Animators {
                 let advanced = running.machine.advance(&compiled, &rig, dt * speed);
                 markers = advanced.events;
                 move_by_root_motion(world, part, &rig, advanced.motion);
+                // Transitions whose time has come, now the clock has moved on.
+                if let Some(live) = world.animator_mut(id) {
+                    running.machine.evaluate(&compiled, &mut live.parameters);
+                }
+            }
+            // Parameters a script set that the controller doesn't have
+            // can't change anything: say so, once each.
+            if let Some(live) = world.animator(id) {
+                let unknown: Vec<String> = live
+                    .parameters
+                    .keys()
+                    .filter(|name| {
+                        !compiled
+                            .file
+                            .parameters
+                            .iter()
+                            .any(|def| def.name() == name.as_str())
+                    })
+                    .cloned()
+                    .collect();
+                if !unknown.is_empty() {
+                    let name = world.full_name(id).unwrap_or_default();
+                    for parameter in unknown {
+                        let message = format!(
+                            "The Animator `{name}` was given the parameter `{parameter}`, which its controller `{controller}` doesn't have, so it changes nothing.",
+                            controller = running.controller
+                        );
+                        report(&mut self.errors, &mut self.reported, message);
+                    }
+                }
             }
 
             let pose = running.machine.pose(&compiled, &rig);

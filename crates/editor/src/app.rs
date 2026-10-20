@@ -40,7 +40,7 @@ use axcenity_script::{CameraState, KeyEvent};
 use eframe::egui;
 
 use crate::angular;
-use crate::animation::AnimationStudio;
+use crate::animation::{AnimationStudio, SelectedModel, StudioAction};
 use crate::asset_browser::{AssetBrowser, AssetPayload, BrowserAction};
 use crate::autocomplete;
 use crate::block_editor;

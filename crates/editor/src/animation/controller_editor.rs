@@ -1,0 +1,954 @@
+//! An animator controller open in the Animation panel: the graph's
+//! selection, the inspector for the controller, a state or a transition,
+//! and the live preview that runs the state machine with its own
+//! parameters (never the game's).
+
+use std::collections::BTreeMap;
+use std::path::Path;
+use std::sync::Arc;
+
+use axcenity_anim::files::{
+    self, Condition, ControllerFile, Motion, ParameterDef, StateDef, Test, TransitionDef,
+};
+use axcenity_anim::{ANY_STATE, Compiled, DEFAULT_BLEND, Fade, Machine, Playing};
+use axcenity_assets::{Assets, Posed};
+use axcenity_core::Parameter;
+use eframe::egui;
+
+use super::graph::{GraphEvent, GraphView, Live, Node, Selected, from_node};
+use crate::theme::icons;
+
+/// Blend presets: Instant, Smooth and Slow, in seconds.
+const BLENDS: [(&str, f64); 3] = [("Instant", 0.0), ("Smooth", DEFAULT_BLEND), ("Slow", 0.75)];
+
+/// A controller being looked at and changed.
+pub struct ControllerDoc {
+    pub path: String,
+    pub file: ControllerFile,
+    written: ControllerFile,
+    pub selected: Selected,
+    pub view: GraphView,
+    /// A state being renamed, and the name typed so far.
+    renaming: Option<(usize, String)>,
+    /// The model the preview shows (a `MeshId`).
+    pub preview_model: Option<String>,
+    preview: Option<PreviewRun>,
+    pub playing: bool,
+    /// The transition preview's slider: how much of the new pose shows.
+    pub scrub: f64,
+}
+
+/// The state machine running in the preview.
+struct PreviewRun {
+    /// What it was made from: the model's key and the controller without
+    /// its graph positions (moving a box doesn't start it again).
+    made_from: (u64, ControllerFile),
+    compiled: Arc<Compiled>,
+    machine: Machine,
+    parameters: BTreeMap<String, Parameter>,
+    problems: Vec<String>,
+}
+
+/// The controller as far as playing it goes: without where boxes are drawn.
+fn behaviour(file: &ControllerFile) -> ControllerFile {
+    let mut file = file.clone();
+    file.any_state_position = None;
+    for state in &mut file.states {
+        state.position = [0.0, 0.0];
+    }
+    file
+}
+
+impl ControllerDoc {
+    pub fn open(path: String, file: ControllerFile, preview_model: Option<String>) -> Self {
+        Self {
+            path,
+            written: file.clone(),
+            file,
+            selected: Selected::Controller,
+            view: GraphView::default(),
+            renaming: None,
+            preview_model,
+            preview: None,
+            playing: true,
+            scrub: 1.0,
+        }
+    }
+
+    pub fn unwritten(&self) -> bool {
+        self.file != self.written
+    }
+
+    pub fn write(&mut self, project: &Path) -> std::io::Result<bool> {
+        if !self.unwritten() {
+            return Ok(false);
+        }
+        files::write_file(&project.join(&self.path), &self.file.to_json())?;
+        self.written = self.file.clone();
+        Ok(true)
+    }
+
+    /// Takes the file as it is on disk now (after a clip rename rewrote it).
+    pub fn reload(&mut self, file: ControllerFile) {
+        self.written = file.clone();
+        self.file = file;
+    }
+
+    pub fn transitions(&self) -> usize {
+        self.file.transitions.len()
+    }
+
+    /// The first clip's model, for a preview when nothing better is known.
+    pub fn first_clip_source(&self, project: &Path) -> Option<String> {
+        self.file
+            .states
+            .iter()
+            .find_map(|state| match &state.motion {
+                Motion::Clip(path) if !path.is_empty() => super::store::read_clip(project, path)
+                    .ok()
+                    .map(|clip| clip.source),
+                Motion::Clip(_) => None,
+            })
+    }
+
+    /// Does what the graph reports.
+    pub fn apply(&mut self, events: Vec<GraphEvent>) {
+        for event in events {
+            match event {
+                GraphEvent::Select(selected) => self.selected = selected,
+                GraphEvent::Move(node, position) => match node {
+                    Node::State(index) => {
+                        if let Some(state) = self.file.states.get_mut(index) {
+                            state.position = position;
+                        }
+                    }
+                    Node::Any => self.file.any_state_position = Some(position),
+                },
+                GraphEvent::Link(from, to) => {
+                    let from = match from {
+                        Node::State(index) => self.file.states[index].name.clone(),
+                        Node::Any => ANY_STATE.to_owned(),
+                    };
+                    let to = self.file.states[to].name.clone();
+                    self.file.transitions.push(TransitionDef::new(&from, &to));
+                    self.selected = Selected::Transition(self.file.transitions.len() - 1);
+                }
+                GraphEvent::SetDefault(index) => {
+                    self.file.default_state = self.file.states[index].name.clone();
+                }
+                GraphEvent::Rename(index) => {
+                    self.renaming = Some((index, self.file.states[index].name.clone()));
+                    self.selected = Selected::Node(Node::State(index));
+                }
+                GraphEvent::Delete(selected) => self.delete(selected),
+                GraphEvent::AddState(at, clip) => {
+                    let wanted = clip
+                        .as_deref()
+                        .map_or("New State", axcenity_anim::files::clip_name);
+                    let name = self.free_state_name(wanted);
+                    if self.file.states.is_empty() {
+                        self.file.default_state = name.clone();
+                    }
+                    self.file.states.push(StateDef::new(
+                        &name,
+                        Motion::Clip(clip.unwrap_or_default()),
+                        at,
+                    ));
+                    self.selected = Selected::Node(Node::State(self.file.states.len() - 1));
+                }
+            }
+        }
+    }
+
+    fn free_state_name(&self, wanted: &str) -> String {
+        (1u32..)
+            .map(|n| match n {
+                1 => wanted.to_owned(),
+                n => format!("{wanted} {n}"),
+            })
+            .find(|name| *name != ANY_STATE && self.file.state(name).is_none())
+            .expect("some number is always free")
+    }
+
+    /// Deletes a state (and its transitions) or a transition.
+    fn delete(&mut self, selected: Selected) {
+        match selected {
+            Selected::Node(Node::State(index)) if index < self.file.states.len() => {
+                let name = self.file.states.remove(index).name;
+                self.file
+                    .transitions
+                    .retain(|t| t.from != name && t.to != name);
+                if self.file.default_state == name {
+                    self.file.default_state = self
+                        .file
+                        .states
+                        .first()
+                        .map(|s| s.name.clone())
+                        .unwrap_or_default();
+                }
+                self.selected = Selected::Controller;
+            }
+            Selected::Transition(index) if index < self.file.transitions.len() => {
+                self.file.transitions.remove(index);
+                self.selected = Selected::Controller;
+            }
+            _ => {}
+        }
+    }
+
+    /// Renames state `index` to `name`, and every transition naming it.
+    fn rename_state(&mut self, index: usize, name: &str) -> Result<(), String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("A state needs a name.".to_owned());
+        }
+        if name == ANY_STATE {
+            return Err(format!("`{ANY_STATE}` is taken by the Any State."));
+        }
+        if self
+            .file
+            .states
+            .iter()
+            .enumerate()
+            .any(|(i, s)| i != index && s.name == name)
+        {
+            return Err(format!("There's already a state called `{name}`."));
+        }
+        let old = std::mem::replace(&mut self.file.states[index].name, name.to_owned());
+        for transition in &mut self.file.transitions {
+            if transition.from == old {
+                transition.from = name.to_owned();
+            }
+            if transition.to == old {
+                transition.to = name.to_owned();
+            }
+        }
+        if self.file.default_state == old {
+            self.file.default_state = name.to_owned();
+        }
+        Ok(())
+    }
+
+    /// Runs the preview's state machine on by `dt` seconds, rebuilding it
+    /// when the controller or model changed. Returns the posed model.
+    pub fn tick(&mut self, assets: &Assets, dt: f64) -> Result<Arc<Posed>, String> {
+        let mesh_id = self
+            .preview_model
+            .clone()
+            .ok_or("Pick a model to preview on below.")?;
+        let model = assets
+            .model(&mesh_id)
+            .ok_or_else(|| format!("`{mesh_id}` can't be loaded"))?;
+        let rig = model
+            .rig
+            .clone()
+            .ok_or_else(|| format!("`{mesh_id}` has no skeleton"))?;
+        if self.file.states.is_empty() {
+            return Err("Add a state to preview it.".to_owned());
+        }
+        let made_from = (model.key(), behaviour(&self.file));
+        if self
+            .preview
+            .as_ref()
+            .is_none_or(|run| run.made_from != made_from)
+        {
+            let (compiled, problems) = Compiled::new(self.file.clone(), &rig, |path| {
+                axcenity_anim::load_clip(assets, path)
+            });
+            let compiled = Arc::new(compiled);
+            // Keep playing where it was if that state is still there; keep
+            // the parameters that still mean the same.
+            let old = self.preview.take();
+            let mut machine = Machine::new(&compiled);
+            let mut parameters: BTreeMap<String, Parameter> = self
+                .file
+                .parameters
+                .iter()
+                .map(|def| (def.name().to_owned(), def.initial()))
+                .collect();
+            if let Some(old) = old {
+                let name = old
+                    .compiled
+                    .state_name(old.machine.current.state)
+                    .to_owned();
+                if let Some(state) = compiled.state_index(&name) {
+                    machine.current = Playing {
+                        state,
+                        phase: old.machine.current.phase,
+                    };
+                }
+                for (name, value) in old.parameters {
+                    if let Some(slot) = parameters.get_mut(&name)
+                        && slot.kind() == value.kind()
+                    {
+                        *slot = value;
+                    }
+                }
+            }
+            self.preview = Some(PreviewRun {
+                made_from,
+                compiled,
+                machine,
+                parameters,
+                problems,
+            });
+        }
+        let run = self.preview.as_mut().expect("made above");
+        if self.playing {
+            run.machine.advance(&run.compiled, &rig, dt);
+            run.machine.evaluate(&run.compiled, &mut run.parameters);
+        }
+        // Scrubbing a selected transition shows its two poses mixed.
+        let pose = match self.selected {
+            Selected::Transition(index) if self.scrub < 1.0 => {
+                let transition = &self.file.transitions[index];
+                let to = run.compiled.state_index(&transition.to);
+                let from = match from_node(&self.file, &transition.from) {
+                    Some(Node::State(state)) => Some(state),
+                    _ => Some(run.machine.current.state),
+                };
+                match (from, to) {
+                    (Some(from), Some(to)) => {
+                        let phase = run.machine.current.phase;
+                        let mixed = Machine {
+                            current: Playing { state: to, phase },
+                            fade: Some(Fade {
+                                from: Playing { state: from, phase },
+                                elapsed: 0.0,
+                                duration: 1.0,
+                                interruptible: true,
+                                transition: Some(index),
+                            }),
+                        };
+                        mixed.pose_at(&run.compiled, &rig, self.scrub)
+                    }
+                    _ => run.machine.pose(&run.compiled, &rig),
+                }
+            }
+            _ => run.machine.pose(&run.compiled, &rig),
+        };
+        model
+            .pose(&pose)
+            .map(Arc::new)
+            .ok_or_else(|| "the model can't be posed".to_owned())
+    }
+
+    /// What the graph shows of the preview: the state playing and the blend.
+    pub fn live(&self) -> Live {
+        let Some(run) = &self.preview else {
+            return Live::default();
+        };
+        let current = run.machine.current;
+        let through = if run.compiled.looping(current.state) {
+            current.phase.rem_euclid(1.0)
+        } else {
+            current.phase.min(1.0)
+        };
+        let state = self
+            .file
+            .states
+            .iter()
+            .position(|s| s.name == run.compiled.state_name(current.state));
+        Live {
+            state: state.map(|state| (state, through as f32)),
+            fade: run.machine.fade.and_then(|fade| {
+                let from = self
+                    .file
+                    .states
+                    .iter()
+                    .position(|s| s.name == run.compiled.state_name(fade.from.state))?;
+                Some((from, fade.transition, fade.weight() as f32))
+            }),
+        }
+    }
+
+    /// Starts the preview again from the default state with the default
+    /// parameters.
+    pub fn restart(&mut self) {
+        self.preview = None;
+        self.playing = true;
+    }
+
+    /// The preview's parameter controls, the state playing and its blend.
+    pub fn live_controls(&mut self, ui: &mut egui::Ui) {
+        let Some(run) = &mut self.preview else {
+            return;
+        };
+        let state = run
+            .compiled
+            .state_name(run.machine.current.state)
+            .to_owned();
+        ui.horizontal(|ui| {
+            ui.strong(format!("{} {state}", icons::PLAY_CIRCLE));
+            if let Some(fade) = run.machine.fade {
+                ui.weak(format!(
+                    "blending from {}: {:.0}% new",
+                    run.compiled.state_name(fade.from.state),
+                    fade.weight() * 100.0
+                ));
+            }
+        });
+        for problem in &run.problems {
+            ui.colored_label(ui.visuals().warn_fg_color, problem);
+        }
+        if self.file.parameters.is_empty() {
+            ui.weak("Add parameters (in the controller's settings) to drive transitions here.");
+        }
+        let ranges = number_ranges(&self.file);
+        egui::Grid::new("live parameters")
+            .num_columns(2)
+            .spacing([8.0, 4.0])
+            .show(ui, |ui| {
+                for def in &self.file.parameters {
+                    let name = def.name().to_owned();
+                    ui.label(&name);
+                    let slot = run
+                        .parameters
+                        .entry(name.clone())
+                        .or_insert_with(|| def.initial());
+                    match slot {
+                        Parameter::Bool(value) => {
+                            ui.checkbox(value, "");
+                        }
+                        Parameter::Number(value) => {
+                            let (low, high) = ranges.get(&name).copied().unwrap_or((0.0, 10.0));
+                            ui.add(egui::Slider::new(value, low..=high));
+                        }
+                        Parameter::Trigger(set) => {
+                            ui.horizontal(|ui| {
+                                if ui.button("Fire").clicked() {
+                                    *set = true;
+                                }
+                                if *set {
+                                    ui.weak("waiting for a transition");
+                                }
+                            });
+                        }
+                    }
+                    ui.end_row();
+                }
+            });
+    }
+
+    /// The inspector: the selected state or transition, or the controller's
+    /// own settings (parameters, default state).
+    pub fn inspector(&mut self, ui: &mut egui::Ui, clips: &[String]) {
+        match self.selected {
+            Selected::Node(Node::State(index)) if index < self.file.states.len() => {
+                self.state_inspector(ui, index, clips)
+            }
+            Selected::Transition(index) if index < self.file.transitions.len() => {
+                self.transition_inspector(ui, index)
+            }
+            Selected::Node(Node::Any) => {
+                ui.heading(ANY_STATE);
+                ui.label("Transitions from the Any State can happen whatever state is playing (but never to the state already playing). Use them for things that can happen at any time, such as Jump or TakeDamage.");
+                ui.weak("Right-click it in the graph and pick Make Transition.");
+            }
+            _ => self.controller_inspector(ui),
+        }
+    }
+
+    fn controller_inspector(&mut self, ui: &mut egui::Ui) {
+        ui.heading(
+            axcenity_anim::files::clip_name(&self.path).trim_end_matches(".controller.json"),
+        );
+        ui.weak(&self.path);
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.label("Default state");
+            let names: Vec<String> = self.file.states.iter().map(|s| s.name.clone()).collect();
+            egui::ComboBox::from_id_salt("default state")
+                .selected_text(&self.file.default_state)
+                .show_ui(ui, |ui| {
+                    for name in names {
+                        ui.selectable_value(&mut self.file.default_state, name.clone(), name);
+                    }
+                });
+        });
+        ui.weak("The state it starts in (orange in the graph): usually Idle.");
+        ui.separator();
+        ui.strong("Parameters");
+        ui.weak("Bool: stays true or false (IsGrounded). Trigger: a one-time request, used up by its transition (Jump). Number: changes gradually (Speed).");
+        let mut remove = None;
+        let mut renamed = None;
+        egui::Grid::new("parameters")
+            .num_columns(4)
+            .spacing([6.0, 4.0])
+            .show(ui, |ui| {
+                for (index, def) in self.file.parameters.iter_mut().enumerate() {
+                    let kind = match def {
+                        ParameterDef::Bool { .. } => "Bool",
+                        ParameterDef::Number { .. } => "Number",
+                        ParameterDef::Trigger { .. } => "Trigger",
+                    };
+                    ui.weak(kind);
+                    let mut name = def.name().to_owned();
+                    if ui
+                        .add(egui::TextEdit::singleline(&mut name).desired_width(110.0))
+                        .changed()
+                    {
+                        renamed = Some((def.name().to_owned(), name.clone()));
+                        match def {
+                            ParameterDef::Bool { name: n, .. }
+                            | ParameterDef::Number { name: n, .. }
+                            | ParameterDef::Trigger { name: n } => *n = name,
+                        }
+                    }
+                    match def {
+                        ParameterDef::Bool { default, .. } => {
+                            ui.checkbox(default, "")
+                                .on_hover_text("Its value when the game starts");
+                        }
+                        ParameterDef::Number { default, .. } => {
+                            ui.add(egui::DragValue::new(default).speed(0.05))
+                                .on_hover_text("Its value when the game starts");
+                        }
+                        ParameterDef::Trigger { .. } => {
+                            ui.label("");
+                        }
+                    }
+                    if ui.small_button(icons::X).on_hover_text("Remove").clicked() {
+                        remove = Some(index);
+                    }
+                    ui.end_row();
+                }
+            });
+        // Conditions follow a renamed parameter.
+        if let Some((old, new)) = renamed {
+            for transition in &mut self.file.transitions {
+                for condition in &mut transition.conditions {
+                    if condition.parameter == old {
+                        condition.parameter = new.clone();
+                    }
+                }
+            }
+        }
+        if let Some(index) = remove {
+            self.file.parameters.remove(index);
+        }
+        ui.horizontal(|ui| {
+            for kind in ["Bool", "Number", "Trigger"] {
+                if ui.button(format!("{} {kind}", icons::PLUS)).clicked() {
+                    let name = self.free_parameter_name(match kind {
+                        "Bool" => "IsGrounded",
+                        "Number" => "Speed",
+                        _ => "Jump",
+                    });
+                    self.file.parameters.push(match kind {
+                        "Bool" => ParameterDef::Bool {
+                            name,
+                            default: false,
+                        },
+                        "Number" => ParameterDef::Number { name, default: 0.0 },
+                        _ => ParameterDef::Trigger { name },
+                    });
+                }
+            }
+        });
+        let duplicates = self.file.parameters.iter().enumerate().any(|(i, a)| {
+            self.file.parameters[..i]
+                .iter()
+                .any(|b| b.name() == a.name())
+        });
+        if duplicates {
+            ui.colored_label(
+                ui.visuals().error_fg_color,
+                "Two parameters have the same name.",
+            );
+        }
+        ui.separator();
+        ui.weak("Right-click the graph to add states; right-click a state to make a transition.");
+    }
+
+    fn free_parameter_name(&self, wanted: &str) -> String {
+        (1u32..)
+            .map(|n| match n {
+                1 => wanted.to_owned(),
+                n => format!("{wanted}{n}"),
+            })
+            .find(|name| !self.file.parameters.iter().any(|p| p.name() == name))
+            .expect("some number is always free")
+    }
+
+    fn state_inspector(&mut self, ui: &mut egui::Ui, index: usize, clips: &[String]) {
+        let name = self.file.states[index].name.clone();
+        match &mut self.renaming {
+            Some((renaming, text)) if *renaming == index => {
+                let mut done = false;
+                let mut text = text.clone();
+                ui.horizontal(|ui| {
+                    let response = ui.text_edit_singleline(&mut text);
+                    if ui.button("Rename").clicked()
+                        || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
+                    {
+                        done = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        self.renaming = None;
+                    }
+                });
+                if done {
+                    match self.rename_state(index, &text) {
+                        Ok(()) => self.renaming = None,
+                        Err(problem) => {
+                            ui.colored_label(ui.visuals().error_fg_color, problem);
+                            self.renaming = Some((index, text));
+                        }
+                    }
+                } else if self.renaming.is_some() {
+                    self.renaming = Some((index, text));
+                }
+            }
+            _ => {
+                ui.horizontal(|ui| {
+                    ui.heading(&name);
+                    if ui
+                        .small_button(icons::PENCIL_SIMPLE)
+                        .on_hover_text("Rename this state")
+                        .clicked()
+                    {
+                        self.renaming = Some((index, name.clone()));
+                    }
+                });
+            }
+        }
+        let is_default = self.file.default_state == name;
+        if is_default {
+            ui.weak("The default state: the animator starts here.");
+        } else if ui.button("Set as default state").clicked() {
+            self.file.default_state = name.clone();
+        }
+        ui.add_space(4.0);
+        egui::Grid::new("state settings")
+            .num_columns(2)
+            .spacing([10.0, 6.0])
+            .show(ui, |ui| {
+                ui.label("Clip");
+                let state = &mut self.file.states[index];
+                let Motion::Clip(current) = &mut state.motion;
+                let shown = if current.is_empty() {
+                    "(none)".to_owned()
+                } else {
+                    axcenity_anim::files::clip_name(current).to_owned()
+                };
+                egui::ComboBox::from_id_salt("state clip")
+                    .selected_text(shown)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(current, String::new(), "(none)");
+                        for clip in clips {
+                            let label = format!(
+                                "{}  ({})",
+                                axcenity_anim::files::clip_name(clip),
+                                super::store::group_of(clip)
+                            );
+                            ui.selectable_value(current, clip.clone(), label);
+                        }
+                    });
+                ui.end_row();
+                ui.label("Speed");
+                ui.add(
+                    egui::DragValue::new(&mut state.speed)
+                        .range(-10.0..=10.0)
+                        .speed(0.01)
+                        .suffix("×"),
+                );
+                ui.end_row();
+            });
+        ui.separator();
+        ui.strong("Transitions");
+        let outgoing: Vec<(usize, String, bool)> = self
+            .file
+            .transitions
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| t.from == name || t.to == name)
+            .map(|(i, t)| {
+                let out = t.from == name;
+                (
+                    i,
+                    if out {
+                        format!("→ {}", t.to)
+                    } else {
+                        format!("← {}", t.from)
+                    },
+                    out,
+                )
+            })
+            .collect();
+        if outgoing.is_empty() {
+            ui.weak("None yet. Right-click the state in the graph and pick Make Transition.");
+        }
+        for (index, label, _) in outgoing {
+            if ui.selectable_label(false, label).clicked() {
+                self.selected = Selected::Transition(index);
+            }
+        }
+        ui.separator();
+        if ui
+            .button(format!("{} Delete state", icons::TRASH))
+            .clicked()
+        {
+            self.delete(Selected::Node(Node::State(index)));
+        }
+    }
+
+    fn transition_inspector(&mut self, ui: &mut egui::Ui, index: usize) {
+        let parameters = self.file.parameters.clone();
+        let transition = &mut self.file.transitions[index];
+        ui.heading(format!("{} → {}", transition.from, transition.to));
+        if transition.generated {
+            ui.weak("Made by a state's Return setting: change that setting to change it.");
+        }
+        ui.add_space(4.0);
+        ui.strong("Conditions");
+        ui.weak("All must hold for the transition to happen.");
+        let mut remove = None;
+        egui::Grid::new("conditions")
+            .num_columns(4)
+            .spacing([6.0, 4.0])
+            .show(ui, |ui| {
+                for (c, condition) in transition.conditions.iter_mut().enumerate() {
+                    egui::ComboBox::from_id_salt(("condition parameter", c))
+                        .width(100.0)
+                        .selected_text(&condition.parameter)
+                        .show_ui(ui, |ui| {
+                            for def in &parameters {
+                                ui.selectable_value(
+                                    &mut condition.parameter,
+                                    def.name().to_owned(),
+                                    def.name(),
+                                );
+                            }
+                        });
+                    let kind = parameters
+                        .iter()
+                        .find(|def| def.name() == condition.parameter);
+                    let tests: &[(Test, &str)] = match kind {
+                        Some(ParameterDef::Bool { .. }) => {
+                            &[(Test::IsTrue, "is true"), (Test::IsFalse, "is false")]
+                        }
+                        Some(ParameterDef::Trigger { .. }) => &[(Test::Triggered, "is set")],
+                        Some(ParameterDef::Number { .. }) => &[
+                            (Test::Greater, "is more than"),
+                            (Test::Less, "is less than"),
+                        ],
+                        None => &[],
+                    };
+                    if let Some(&(first, _)) = tests.first()
+                        && !tests.iter().any(|(test, _)| *test == condition.test)
+                    {
+                        condition.test = first;
+                    }
+                    let label = tests
+                        .iter()
+                        .find(|(test, _)| *test == condition.test)
+                        .map_or("(pick a parameter)", |(_, label)| label);
+                    egui::ComboBox::from_id_salt(("condition test", c))
+                        .width(90.0)
+                        .selected_text(label)
+                        .show_ui(ui, |ui| {
+                            for &(test, label) in tests {
+                                ui.selectable_value(&mut condition.test, test, label);
+                            }
+                        });
+                    if matches!(condition.test, Test::Greater | Test::Less) {
+                        ui.add(egui::DragValue::new(&mut condition.value).speed(0.05));
+                    } else {
+                        ui.label("");
+                    }
+                    if ui.small_button(icons::X).on_hover_text("Remove").clicked() {
+                        remove = Some(c);
+                    }
+                    ui.end_row();
+                }
+            });
+        if let Some(c) = remove {
+            transition.conditions.remove(c);
+        }
+        if parameters.is_empty() {
+            ui.weak("Add parameters in the controller's settings (click the graph's background) to test them here.");
+        } else if ui
+            .button(format!("{} Add condition", icons::PLUS))
+            .clicked()
+        {
+            let def = &parameters[0];
+            transition.conditions.push(Condition {
+                parameter: def.name().to_owned(),
+                test: match def {
+                    ParameterDef::Bool { .. } => Test::IsTrue,
+                    ParameterDef::Number { .. } => Test::Greater,
+                    ParameterDef::Trigger { .. } => Test::Triggered,
+                },
+                value: 0.0,
+            });
+        }
+
+        ui.separator();
+        ui.strong("Blend");
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::Slider::new(&mut transition.blend, 0.0..=2.0)
+                    .suffix(" s")
+                    .text("duration"),
+            )
+            .on_hover_text("How long the old pose takes to turn into the new one");
+        });
+        ui.horizontal(|ui| {
+            for (label, seconds) in BLENDS {
+                if ui
+                    .selectable_label((transition.blend - seconds).abs() < 1e-9, label)
+                    .clicked()
+                {
+                    transition.blend = seconds;
+                }
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label("Preview the blend:");
+            ui.add(egui::Slider::new(&mut self.scrub, 0.0..=1.0).show_value(false));
+        });
+        let new = (self.scrub * 100.0).round();
+        ui.weak(format!(
+            "{}: {:.0}%  ·  {}: {new:.0}%{}",
+            transition.from,
+            100.0 - new,
+            transition.to,
+            if self.scrub >= 1.0 {
+                "  (drag left to see the mix)"
+            } else {
+                ""
+            }
+        ));
+
+        ui.separator();
+        egui::Grid::new("transition settings")
+            .num_columns(2)
+            .spacing([10.0, 6.0])
+            .show(ui, |ui| {
+                ui.label("Exit time");
+                ui.horizontal(|ui| {
+                    let mut on = transition.exit_time.is_some();
+                    if ui
+                        .checkbox(&mut on, "")
+                        .on_hover_text("Only once the state has played this much of its clip (1 is once through)")
+                        .changed()
+                    {
+                        transition.exit_time = on.then_some(0.9);
+                    }
+                    if let Some(exit) = &mut transition.exit_time {
+                        ui.add(egui::DragValue::new(exit).range(0.0..=10.0).speed(0.01));
+                        ui.weak("of the clip");
+                    }
+                });
+                ui.end_row();
+                ui.label("Interruptible");
+                ui.checkbox(&mut transition.interruptible, "")
+                    .on_hover_text("On, another transition can take over while this one blends");
+                ui.end_row();
+                ui.label("Priority");
+                ui.add(egui::DragValue::new(&mut transition.priority).range(-100..=100))
+                    .on_hover_text("When several transitions could happen at once, the highest goes");
+                ui.end_row();
+            });
+        if transition.conditions.is_empty() && transition.exit_time.is_none() {
+            ui.colored_label(
+                ui.visuals().warn_fg_color,
+                "This never happens: add a condition, or turn on Exit time to go on by itself.",
+            );
+        } else if transition.conditions.is_empty() {
+            ui.weak("With no conditions, it happens by itself at its exit time.");
+        }
+        ui.separator();
+        if ui
+            .button(format!("{} Delete transition", icons::TRASH))
+            .clicked()
+        {
+            self.delete(Selected::Transition(index));
+        }
+    }
+}
+
+/// A slider range for each Number parameter: from 0 (or lower) to past
+/// the biggest value its conditions test.
+fn number_ranges(file: &ControllerFile) -> BTreeMap<String, (f64, f64)> {
+    let mut ranges = BTreeMap::new();
+    for def in &file.parameters {
+        if let ParameterDef::Number { name, default } = def {
+            let mut low: f64 = default.min(0.0);
+            let mut high: f64 = default.max(1.0);
+            for condition in file.transitions.iter().flat_map(|t| &t.conditions) {
+                if condition.parameter == *name {
+                    low = low.min(condition.value);
+                    high = high.max(condition.value * 1.5);
+                }
+            }
+            ranges.insert(name.clone(), (low, high.max(low + 1.0)));
+        }
+    }
+    ranges
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn doc() -> ControllerDoc {
+        let file = ControllerFile {
+            default_state: "Idle".into(),
+            states: vec![
+                StateDef::new("Idle", Motion::Clip(String::new()), [0.0, 0.0]),
+                StateDef::new("Walk", Motion::Clip(String::new()), [200.0, 0.0]),
+            ],
+            ..ControllerFile::default()
+        };
+        ControllerDoc::open("assets/animations/hero.controller.json".into(), file, None)
+    }
+
+    #[test]
+    fn linking_states_makes_a_transition_and_selects_it() {
+        let mut doc = doc();
+        doc.apply(vec![GraphEvent::Link(Node::State(0), 1)]);
+        assert_eq!(doc.file.transitions[0].from, "Idle");
+        assert_eq!(doc.file.transitions[0].to, "Walk");
+        assert_eq!(doc.selected, Selected::Transition(0));
+        doc.apply(vec![GraphEvent::Link(Node::Any, 0)]);
+        assert_eq!(doc.file.transitions[1].from, ANY_STATE);
+    }
+
+    #[test]
+    fn renaming_and_deleting_states_keep_transitions_right() {
+        let mut doc = doc();
+        doc.apply(vec![
+            GraphEvent::Link(Node::State(0), 1),
+            GraphEvent::Link(Node::State(1), 0),
+        ]);
+        doc.rename_state(0, "Rest").unwrap();
+        assert_eq!(doc.file.default_state, "Rest");
+        assert_eq!(doc.file.transitions[0].from, "Rest");
+        assert_eq!(doc.file.transitions[1].to, "Rest");
+        assert!(doc.rename_state(0, "Walk").is_err());
+        assert!(doc.rename_state(0, ANY_STATE).is_err());
+        doc.delete(Selected::Node(Node::State(1)));
+        assert!(doc.file.transitions.is_empty());
+        assert_eq!(doc.file.states.len(), 1);
+    }
+
+    #[test]
+    fn added_states_get_free_names_and_moving_doesnt_change_behaviour() {
+        let mut doc = doc();
+        doc.apply(vec![
+            GraphEvent::AddState([10.0, 20.0], None),
+            GraphEvent::AddState(
+                [10.0, 20.0],
+                Some("assets/animations/hero/Walk.anim.json".into()),
+            ),
+        ]);
+        assert_eq!(doc.file.states[2].name, "New State");
+        assert_eq!(doc.file.states[3].name, "Walk 2");
+        let before = behaviour(&doc.file);
+        doc.apply(vec![GraphEvent::Move(Node::State(0), [99.0, 99.0])]);
+        assert_eq!(behaviour(&doc.file), before);
+        assert_eq!(doc.file.states[0].position, [99.0, 99.0]);
+    }
+}

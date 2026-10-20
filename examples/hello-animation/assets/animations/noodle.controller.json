@@ -1,6 +1,20 @@
 {
   "format_version": 1,
-  "parameters": [],
+  "parameters": [
+    {
+      "type": "Bool",
+      "name": "IsWalking",
+      "default": false
+    },
+    {
+      "type": "Trigger",
+      "name": "Wave"
+    },
+    {
+      "type": "Trigger",
+      "name": "Hop"
+    }
+  ],
   "default_state": "Idle",
   "states": [
     {
@@ -48,5 +62,84 @@
       ]
     }
   ],
-  "transitions": []
+  "transitions": [
+    {
+      "from": "Idle",
+      "to": "Walk",
+      "conditions": [
+        {
+          "parameter": "IsWalking",
+          "test": "IsTrue",
+          "value": 0.0
+        }
+      ],
+      "blend": 0.25,
+      "exit_time": null,
+      "interruptible": false,
+      "priority": 0
+    },
+    {
+      "from": "Walk",
+      "to": "Idle",
+      "conditions": [
+        {
+          "parameter": "IsWalking",
+          "test": "IsFalse",
+          "value": 0.0
+        }
+      ],
+      "blend": 0.25,
+      "exit_time": null,
+      "interruptible": false,
+      "priority": 0
+    },
+    {
+      "from": "Any State",
+      "to": "Wave",
+      "conditions": [
+        {
+          "parameter": "Wave",
+          "test": "Triggered",
+          "value": 0.0
+        }
+      ],
+      "blend": 0.25,
+      "exit_time": null,
+      "interruptible": false,
+      "priority": 0
+    },
+    {
+      "from": "Wave",
+      "to": "Idle",
+      "conditions": [],
+      "blend": 0.25,
+      "exit_time": 1.0,
+      "interruptible": false,
+      "priority": 0
+    },
+    {
+      "from": "Any State",
+      "to": "Hop",
+      "conditions": [
+        {
+          "parameter": "Hop",
+          "test": "Triggered",
+          "value": 0.0
+        }
+      ],
+      "blend": 0.1,
+      "exit_time": null,
+      "interruptible": false,
+      "priority": 0
+    },
+    {
+      "from": "Hop",
+      "to": "Idle",
+      "conditions": [],
+      "blend": 0.25,
+      "exit_time": 1.0,
+      "interruptible": false,
+      "priority": 0
+    }
+  ]
 }

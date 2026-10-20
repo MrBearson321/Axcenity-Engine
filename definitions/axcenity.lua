@@ -553,6 +553,38 @@ function ParticleEmitterClass:Emit(count) end
 ---@field AnimationEvent Signal Fires when a playing clip passes one of its animation events. The handler gets the event's name.
 local AnimatorClass = {}
 
+---Sets a Bool parameter, such as `IsGrounded`: something that stays true or false until it's changed.
+---@param name string
+---@param value boolean
+---@return nil
+function AnimatorClass:SetBool(name, value) end
+
+---A Bool parameter's value.
+---@param name string
+---@return boolean
+function AnimatorClass:GetBool(name) end
+
+---Sets a Number parameter, such as `Speed`: a value that changes gradually, for conditions and blend trees.
+---@param name string
+---@param value number
+---@return nil
+function AnimatorClass:SetNumber(name, value) end
+
+---A Number parameter's value.
+---@param name string
+---@return number
+function AnimatorClass:GetNumber(name) end
+
+---Sets a Trigger parameter, such as `Jump`: a one-time request, used up by the transition it starts.
+---@param name string
+---@return nil
+function AnimatorClass:SetTrigger(name) end
+
+---Clears a Trigger that no transition has used yet.
+---@param name string
+---@return nil
+function AnimatorClass:ResetTrigger(name) end
+
 ---Switches to the state named `state`, from its start, blending from the pose now over `blend` seconds (0.25 if left out; 0 snaps).
 ---@param state string
 ---@param blend? number

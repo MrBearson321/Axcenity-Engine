@@ -105,6 +105,9 @@ pub struct ControllerFile {
     pub states: Vec<StateDef>,
     #[serde(default)]
     pub transitions: Vec<TransitionDef>,
+    /// Where the editor's graph draws the Any State node, once it's moved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub any_state_position: Option<[f32; 2]>,
 }
 
 impl Default for ControllerFile {
@@ -115,6 +118,7 @@ impl Default for ControllerFile {
             default_state: String::new(),
             states: Vec::new(),
             transitions: Vec::new(),
+            any_state_position: None,
         }
     }
 }
@@ -202,6 +206,23 @@ impl StateDef {
 pub enum Motion {
     /// A clip file's path, such as `assets/animations/hero/Walk.anim.json`.
     Clip(String),
+}
+
+impl TransitionDef {
+    /// A transition from `from` to `to` with no conditions yet, blending
+    /// smoothly.
+    pub fn new(from: &str, to: &str) -> Self {
+        Self {
+            from: from.to_owned(),
+            to: to.to_owned(),
+            conditions: Vec::new(),
+            blend: DEFAULT_BLEND,
+            exit_time: None,
+            interruptible: false,
+            priority: 0,
+            generated: false,
+        }
+    }
 }
 
 /// A way from one state to another.
@@ -422,6 +443,7 @@ mod tests {
                 priority: 2,
                 generated: false,
             }],
+            any_state_position: Some([-200.0, 40.0]),
         }
     }
 

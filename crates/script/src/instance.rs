@@ -3,7 +3,7 @@
 //! Lua while scripts run (see `with_world` in `lib.rs`).
 
 use axcenity_audio::SoundAction;
-use axcenity_core::{ClassName, INSTANCE_EVENTS, InstanceId, Value, World};
+use axcenity_core::{ClassName, INSTANCE_EVENTS, InstanceId, Parameter, Value, World};
 use mlua::{
     AppDataRef, AppDataRefMut, FromLua, Function, IntoLua, Lua, MetaMethod, UserData,
     UserDataMethods,
@@ -358,7 +358,134 @@ pub fn animator_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str,
             Ok(())
         },
     )?;
-    Ok(vec![(ClassName::Animator, "Play", play)])
+    let set_bool = lua.create_function(
+        |lua, (this, name, value): (LuaInstance, mlua::Value, mlua::Value)| {
+            let name = parameter_name(lua, &name, "SetBool")?;
+            let mlua::Value::Boolean(value) = value else {
+                return Err(mlua::Error::runtime(format!(
+                    "SetBool needs true or false, not a {}",
+                    type_name(lua, &value)
+                )));
+            };
+            set_parameter(lua, this.0, name, Parameter::Bool(value))
+        },
+    )?;
+    let set_number = lua.create_function(
+        |lua, (this, name, value): (LuaInstance, mlua::Value, mlua::Value)| {
+            let name = parameter_name(lua, &name, "SetNumber")?;
+            let number = match value {
+                mlua::Value::Number(n) => n,
+                mlua::Value::Integer(n) => n as f64,
+                other => {
+                    return Err(mlua::Error::runtime(format!(
+                        "SetNumber needs a number, not a {}",
+                        type_name(lua, &other)
+                    )));
+                }
+            };
+            if !number.is_finite() {
+                return Err(mlua::Error::runtime("SetNumber needs a finite number"));
+            }
+            set_parameter(lua, this.0, name, Parameter::Number(number))
+        },
+    )?;
+    let set_trigger = lua.create_function(|lua, (this, name): (LuaInstance, mlua::Value)| {
+        let name = parameter_name(lua, &name, "SetTrigger")?;
+        set_parameter(lua, this.0, name, Parameter::Trigger(true))
+    })?;
+    let reset_trigger = lua.create_function(|lua, (this, name): (LuaInstance, mlua::Value)| {
+        let name = parameter_name(lua, &name, "ResetTrigger")?;
+        set_parameter(lua, this.0, name, Parameter::Trigger(false))
+    })?;
+    let get_bool = lua.create_function(|lua, (this, name): (LuaInstance, mlua::Value)| {
+        let name = parameter_name(lua, &name, "GetBool")?;
+        match get_parameter(lua, this.0, &name, "Bool")? {
+            Parameter::Bool(value) => Ok(value),
+            _ => unreachable!("get_parameter checks the kind"),
+        }
+    })?;
+    let get_number = lua.create_function(|lua, (this, name): (LuaInstance, mlua::Value)| {
+        let name = parameter_name(lua, &name, "GetNumber")?;
+        match get_parameter(lua, this.0, &name, "Number")? {
+            Parameter::Number(value) => Ok(value),
+            _ => unreachable!("get_parameter checks the kind"),
+        }
+    })?;
+    Ok(vec![
+        (ClassName::Animator, "Play", play),
+        (ClassName::Animator, "SetBool", set_bool),
+        (ClassName::Animator, "GetBool", get_bool),
+        (ClassName::Animator, "SetNumber", set_number),
+        (ClassName::Animator, "GetNumber", get_number),
+        (ClassName::Animator, "SetTrigger", set_trigger),
+        (ClassName::Animator, "ResetTrigger", reset_trigger),
+    ])
+}
+
+/// A parameter's name, given to `method`.
+fn parameter_name(lua: &Lua, name: &mlua::Value, method: &str) -> mlua::Result<String> {
+    match name {
+        mlua::Value::String(name) => Ok(name.to_string_lossy()),
+        other => Err(mlua::Error::runtime(format!(
+            "{method} needs a parameter's name, such as animator:{method}(\"Speed\", ...), not a {}",
+            type_name(lua, other)
+        ))),
+    }
+}
+
+/// Sets the animator's parameter `name`, which mustn't be of another kind.
+/// A parameter the animator doesn't have yet is added (the host reports
+/// it if its controller doesn't have it either).
+fn set_parameter(lua: &Lua, id: InstanceId, name: String, value: Parameter) -> mlua::Result<()> {
+    let mut world = world_mut(lua)?;
+    let live = world.animator_mut(id).ok_or_else(destroyed)?;
+    if let Some(existing) = live.parameters.get(&name)
+        && existing.kind() != value.kind()
+    {
+        let kind = existing.kind();
+        return Err(mlua::Error::runtime(format!(
+            "`{name}` is a {kind} parameter; use {}",
+            match kind {
+                "Bool" => "SetBool(name, true or false)",
+                "Number" => "SetNumber(name, number)",
+                _ => "SetTrigger(name) or ResetTrigger(name)",
+            }
+        )));
+    }
+    live.parameters.insert(name, value);
+    Ok(())
+}
+
+/// The animator's parameter `name`, which must be a `kind` one.
+fn get_parameter(lua: &Lua, id: InstanceId, name: &str, kind: &str) -> mlua::Result<Parameter> {
+    let world = world(lua)?;
+    if world.get(id).is_none() {
+        return Err(destroyed());
+    }
+    let parameters = world.animator(id).map(|live| &live.parameters);
+    match parameters.and_then(|parameters| parameters.get(name)) {
+        Some(value) if value.kind() == kind => Ok(*value),
+        Some(value) => Err(mlua::Error::runtime(format!(
+            "`{name}` is a {} parameter, not a {kind} one",
+            value.kind()
+        ))),
+        None => {
+            let names: Vec<&str> = parameters
+                .into_iter()
+                .flat_map(|parameters| parameters.keys().map(String::as_str))
+                .collect();
+            Err(mlua::Error::runtime(if names.is_empty() {
+                format!(
+                    "the Animator has no parameter named `{name}` (it gets its controller's parameters when the game runs)"
+                )
+            } else {
+                format!(
+                    "the Animator has no parameter named `{name}`; it has {}",
+                    names.join(", ")
+                )
+            }))
+        }
+    }
 }
 
 /// The most particles one `Emit` call gives off, so a typo can't freeze the game.

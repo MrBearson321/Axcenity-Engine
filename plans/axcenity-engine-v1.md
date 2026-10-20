@@ -730,7 +730,7 @@ The Animation panel's middle becomes the **state machine graph** of the open con
 - [ ] Each condition test, trigger consumption, exit time, interruption and priority behaves as described, in the preview and in Play.
 - [ ] Transitions blend smoothly over their duration, and the transition preview shows each pose's share.
 - [ ] Scripts setting parameters drive the animator during Play, and `StateChanged` fires.
-- [ ] Controller files with every feature round-trip, and conditions and transitions are covered by unit tests.
+- [x] Controller files with every feature round-trip, and conditions and transitions are covered by unit tests.
 
 ---
 

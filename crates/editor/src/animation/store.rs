@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use axcenity_anim::files::{self, ClipFile, ControllerFile, Motion};
+use axcenity_anim::files::{self, ClipFile, ControllerFile, Motion, StateDef};
 use axcenity_anim::{ANIMATIONS_FOLDER, CLIP_EXTENSION, CONTROLLER_EXTENSION};
 use axcenity_assets::{MODELS_FOLDER, Take};
 
@@ -125,6 +125,94 @@ pub fn folder_for(source: &str) -> String {
     let file = source.rsplit('/').next().unwrap_or(source);
     let stem = file.rsplit_once('.').map_or(file, |(stem, _)| stem);
     format!("{ANIMATIONS_FOLDER}/{}", files::file_safe(stem))
+}
+
+/// The clips made from the model at `mesh_id` (anything after `#` is
+/// ignored): the ones in its folder, `assets/animations/<its name>`.
+pub fn clips_of_model(files: &AnimationFiles, mesh_id: &str) -> Vec<String> {
+    let source = mesh_id.split('#').next().unwrap_or(mesh_id);
+    let folder = format!("{}/", folder_for(source));
+    files
+        .clips
+        .iter()
+        .filter(|clip| {
+            clip.strip_prefix(&folder)
+                .is_some_and(|rest| !rest.contains('/'))
+        })
+        .cloned()
+        .collect()
+}
+
+/// A controller with a state per clip in `clips`: one named Idle (or else
+/// the first) as the default state at the left of the graph, the rest in
+/// rows of four beside it.
+pub fn controller_for(clips: &[String]) -> ControllerFile {
+    let mut states: Vec<StateDef> = clips
+        .iter()
+        .enumerate()
+        .map(|(index, path)| {
+            let (column, row) = (index % 4, index / 4);
+            StateDef::new(
+                files::clip_name(path),
+                Motion::Clip(path.clone()),
+                [240.0 + column as f32 * 200.0, row as f32 * 110.0],
+            )
+        })
+        .collect();
+    let default_state = if states.is_empty() {
+        String::new()
+    } else {
+        let start = states
+            .iter()
+            .position(|state| state.name.eq_ignore_ascii_case("idle"))
+            .unwrap_or(0);
+        let mut default = states.remove(start);
+        default.position = [0.0, 0.0];
+        let name = default.name.clone();
+        states.insert(0, default);
+        name
+    };
+    ControllerFile {
+        default_state,
+        states,
+        ..ControllerFile::default()
+    }
+}
+
+/// Writes a controller named `name` (a number added if taken) with a state
+/// per clip in `clips` to `assets/animations`, and returns its path.
+pub fn new_controller(project: &Path, name: &str, clips: &[String]) -> std::io::Result<String> {
+    let path = free_controller_path(project, name);
+    files::write_file(&project.join(&path), &controller_for(clips).to_json())?;
+    Ok(path)
+}
+
+/// The path a controller named `name` gets in `assets/animations`: the
+/// name itself, or with 2, 3… after it if a file has it (ignoring case).
+pub fn free_controller_path(project: &Path, name: &str) -> String {
+    let existing: Vec<String> = std::fs::read_dir(project.join(ANIMATIONS_FOLDER))
+        .map(|entries| {
+            entries
+                .flatten()
+                .map(|entry| entry.file_name().to_string_lossy().to_lowercase())
+                .collect()
+        })
+        .unwrap_or_default();
+    let gap = if name.ends_with(|c: char| c.is_ascii_digit()) {
+        " "
+    } else {
+        ""
+    };
+    let name = (1u32..)
+        .map(|n| match n {
+            1 => name.to_owned(),
+            n => format!("{name}{gap}{n}"),
+        })
+        .find(|candidate| {
+            !existing.contains(&format!("{candidate}{CONTROLLER_EXTENSION}").to_lowercase())
+        })
+        .expect("some number is always free");
+    format!("{ANIMATIONS_FOLDER}/{name}{CONTROLLER_EXTENSION}")
 }
 
 /// Makes a clip of the whole of `take`, from the model file `source`, named
@@ -264,6 +352,27 @@ mod tests {
         assert_eq!(group_of(&found.clips[0]), "hero");
         let clip = read_clip(&folder, &walk).unwrap();
         assert_eq!((clip.take.as_str(), clip.end), ("Moves", 2.0));
+        std::fs::remove_dir_all(&folder).unwrap();
+    }
+
+    #[test]
+    fn a_new_controller_gets_a_state_per_clip_starting_at_idle() {
+        let folder = project("controller");
+        let walk = new_clip(&folder, "assets/models/hero.fbx", &take(), "Walk").unwrap();
+        let idle = new_clip(&folder, "assets/models/hero.fbx", &take(), "Idle").unwrap();
+        new_clip(&folder, "assets/models/other.fbx", &take(), "Run").unwrap();
+        let files = scan(&folder);
+        let clips = clips_of_model(&files, "assets/models/hero.fbx#Body");
+        assert_eq!(clips, [idle.clone(), walk.clone()]);
+        let path = new_controller(&folder, "Hero", &clips).unwrap();
+        assert_eq!(path, "assets/animations/Hero.controller.json");
+        let controller = read_controller(&folder, &path).unwrap();
+        assert_eq!(controller.default_state, "Idle");
+        assert_eq!(controller.states[0].position, [0.0, 0.0]);
+        assert_eq!(
+            new_controller(&folder, "hero", &[]).unwrap(),
+            "assets/animations/hero2.controller.json"
+        );
         std::fs::remove_dir_all(&folder).unwrap();
     }
 

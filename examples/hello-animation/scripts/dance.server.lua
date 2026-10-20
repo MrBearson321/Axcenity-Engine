@@ -1,5 +1,8 @@
--- Cycles the noodle through its animator controller's states.
--- The Animator starts in its default state, Idle.
+-- Drives the noodle's animator controller with its parameters.
+-- The Animator starts in its default state, Idle. Its transitions:
+--   Idle <-> Walk while the Bool IsWalking is true or false,
+--   Any State -> Wave and Any State -> Hop when those Triggers are set,
+--   and Wave and Hop go back to Idle by themselves when they finish.
 local animator = workspace.Noodle.Animator
 
 animator.StateChanged:Connect(function(state, previous)
@@ -8,11 +11,11 @@ end)
 
 while true do
 	task.wait(3)
-	animator:Play("Wave")
+	animator:SetTrigger("Wave")
 	task.wait(2)
-	animator:Play("Hop", 0.1)
-	task.wait(1.5)
-	animator:Play("Walk")
+	animator:SetTrigger("Hop")
+	task.wait(2)
+	animator:SetBool("IsWalking", true)
 	task.wait(3)
-	animator:Play("Idle")
+	animator:SetBool("IsWalking", false)
 end

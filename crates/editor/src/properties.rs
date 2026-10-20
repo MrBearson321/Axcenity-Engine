@@ -26,6 +26,8 @@ pub enum Edit {
     PickAudio,
     /// Asks for an animator controller file for the Animator's `Controller`.
     PickController,
+    /// Opens the Animator's controller in the Animation panel.
+    OpenController,
     /// Plays the selected Sound in the editor, to hear it without pressing
     /// Play, or (false) stops that.
     PreviewSound(bool),
@@ -422,6 +424,13 @@ fn controller_control(ui: &mut egui::Ui, path: &str) -> Option<Edit> {
         if path.is_empty() {
             ui.weak("None");
             return;
+        }
+        if ui
+            .small_button(icons::FLOW_ARROW)
+            .on_hover_text("Open it in the Animation panel: its states, transitions and parameters")
+            .clicked()
+        {
+            edit = Some(Edit::OpenController);
         }
         if ui
             .small_button(icons::X)

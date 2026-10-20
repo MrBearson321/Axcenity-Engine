@@ -81,6 +81,35 @@ impl EditorApp {
         self.layout.open(Pane::Animation);
     }
 
+    /// Opens the controller of the Animator `animator` in the Animation
+    /// panel, previewed on its MeshPart's model, and shows the panel.
+    pub(super) fn open_animator_controller(&mut self, animator: InstanceId) {
+        let Some(project) = &self.project else {
+            return;
+        };
+        let folder = project.folder.clone();
+        let world = super::shown(&self.world, &self.play);
+        let Some(instance) = world.get(animator) else {
+            return;
+        };
+        let path = instance
+            .property("Controller")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        let model = instance
+            .parent()
+            .and_then(|part| world.get(part))
+            .and_then(|part| part.property("MeshId").and_then(Value::as_str))
+            .map(str::to_owned);
+        if path.is_empty() {
+            return;
+        }
+        self.animation
+            .open_controller(&folder, &self.assets, &path, model, &mut self.output);
+        self.layout.open(Pane::Animation);
+    }
+
     /// Gives the Animator of the MeshPart under the drop this controller
     /// (adding an Animator if it has none), as one undo step.
     fn drop_controller(&mut self, entry: &AssetEntry, spot: Spot) {

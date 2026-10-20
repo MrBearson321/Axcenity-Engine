@@ -98,6 +98,10 @@ impl EditorApp {
                 }
                 return;
             }
+            Edit::OpenController => {
+                self.open_animator_controller(id);
+                return;
+            }
             &Edit::PreviewSound(play) => {
                 self.preview_sound(id, play);
                 return;
@@ -705,7 +709,11 @@ fn set(world: &mut World, id: InstanceId, edit: Edit) -> anyhow::Result<()> {
             }
         }
         // Turned into a property edit, or done, by `apply`.
-        Edit::PickTexture(_) | Edit::PickAudio | Edit::PickController | Edit::PreviewSound(_) => {}
+        Edit::PickTexture(_)
+        | Edit::PickAudio
+        | Edit::PickController
+        | Edit::OpenController
+        | Edit::PreviewSound(_) => {}
     }
     Ok(())
 }

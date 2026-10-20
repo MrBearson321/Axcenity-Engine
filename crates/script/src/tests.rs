@@ -1151,6 +1151,48 @@ fn emitters_emit_bursts_and_take_particle_types() {
 }
 
 #[test]
+fn animator_parameters_are_set_and_read_by_kind() {
+    let mut world = World::new();
+    let animator = world.create(ClassName::Animator).unwrap();
+    world.set_parent(animator, Some(world.workspace())).unwrap();
+    world
+        .animator_mut(animator)
+        .unwrap()
+        .parameters
+        .insert("Speed".into(), axcenity_core::Parameter::Number(0.0));
+    let mut runtime = ScriptRuntime::new();
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/params.server.lua",
+        "local animator = workspace.Animator
+         animator:SetNumber('Speed', 4.5)
+         print(animator:GetNumber('Speed'))
+         animator:SetBool('IsGrounded', true)
+         print(animator:GetBool('IsGrounded'))
+         animator:SetTrigger('Jump')
+         print(pcall(animator.SetBool, animator, 'Speed', true))
+         print(pcall(animator.GetBool, animator, 'Nothing'))
+         print(pcall(animator.SetNumber, animator, 'Speed', 'fast'))",
+    );
+    let output = lines(&mut runtime);
+    assert_eq!(output[0], "4.5");
+    assert_eq!(output[1], "true");
+    assert!(output[2].contains("is a Number parameter"), "{}", output[2]);
+    assert!(
+        output[3].contains("has no parameter named `Nothing`"),
+        "{}",
+        output[3]
+    );
+    assert!(output[4].contains("needs a number"), "{}", output[4]);
+    let live = world.animator(animator).unwrap();
+    assert_eq!(
+        live.parameters["Jump"],
+        axcenity_core::Parameter::Trigger(true)
+    );
+}
+
+#[test]
 fn animators_take_play_requests_and_report_their_state() {
     let mut world = World::new();
     let animator = world.create(ClassName::Animator).unwrap();

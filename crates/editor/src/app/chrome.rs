@@ -89,13 +89,106 @@ impl EditorApp {
     /// The Animation panel (see `animation.rs`).
     pub(super) fn animation_pane(&mut self, ui: &mut egui::Ui, render_state: Option<&RenderState>) {
         let folder = self.project.as_ref().map(|project| project.folder.clone());
-        self.animation.show(
+        let selected = self.selected_model();
+        let actions = self.animation.show(
             ui,
             folder.as_deref(),
             &self.assets,
             render_state,
+            selected.as_ref(),
             &mut self.output,
         );
+        for action in actions {
+            match action {
+                StudioAction::ImportModel => self.import_model_with_dialog(),
+                StudioAction::Play => self.play(),
+                StudioAction::SetController {
+                    part,
+                    animator,
+                    path,
+                } => self.set_controller(part, animator, path),
+            }
+        }
+    }
+
+    /// The MeshPart selected (or the one around a selected Animator), for
+    /// the Animation panel, with its Animator if it has one.
+    fn selected_model(&self) -> Option<SelectedModel> {
+        let world = &self.world;
+        let mut id = self.selected?;
+        let mut instance = world.get(id)?;
+        if instance.class() == ClassName::Animator {
+            id = instance.parent()?;
+            instance = world.get(id)?;
+        }
+        if instance.class() != ClassName::MeshPart {
+            return None;
+        }
+        let mesh_id = instance
+            .property("MeshId")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        let animated = self
+            .assets
+            .model(&mesh_id)
+            .is_some_and(|model| model.rig.is_some());
+        let animator = instance.children().iter().copied().find(|&child| {
+            world
+                .get(child)
+                .is_some_and(|c| c.class() == ClassName::Animator)
+        });
+        let controller = animator
+            .and_then(|a| world.get(a))
+            .and_then(|a| a.property("Controller").and_then(Value::as_str))
+            .unwrap_or_default()
+            .to_owned();
+        Some(SelectedModel {
+            part: id,
+            name: instance.name().to_owned(),
+            mesh_id,
+            animated,
+            animator,
+            controller,
+        })
+    }
+
+    /// Gives `part`'s Animator (making one if `animator` is `None`) the
+    /// controller at `path`, as one undo step.
+    pub(super) fn set_controller(
+        &mut self,
+        part: InstanceId,
+        animator: Option<InstanceId>,
+        path: String,
+    ) {
+        if self.playing() {
+            return;
+        }
+        match animator {
+            Some(animator) => {
+                let name = self
+                    .world
+                    .get(animator)
+                    .map_or("Animator".to_owned(), |a| a.name().to_owned());
+                self.change(
+                    animator,
+                    Field::Property("Controller"),
+                    format!("Set Controller of {name}"),
+                    vec![Edit::Property("Controller", Value::String(path))],
+                );
+                self.history.seal();
+            }
+            None => {
+                let id = self
+                    .world
+                    .create(ClassName::Animator)
+                    .expect("not a service");
+                self.world
+                    .set_property(id, "Controller", Value::String(path))
+                    .expect("every Animator has a Controller");
+                self.place_new(part, vec![id], "Insert Animator".to_owned());
+            }
+        }
     }
     /// The Scene panel: the tabs for the viewport ("World") and the open
     /// scripts, Code/Blocks for a Script, and the viewport or the script.
