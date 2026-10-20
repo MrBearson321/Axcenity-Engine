@@ -9,7 +9,7 @@ Colours: blue `#004AAD`, orange `#F1892D`, yellows `#F9BF3B` and `#FFCF4B`, grey
 | `wordmark-source.png` | 1536×1024 | The master, as supplied, on white. Every other file is made from it by `build.py`. |
 | `wordmark.png` | 840 wide | The wordmark for light backgrounds, transparent. The editor's About box (light theme). |
 | `wordmark-dark.png` | 840 wide | The wordmark for dark backgrounds, transparent: the "Axc" letters are light with a soft grey outline. The same place, dark theme. |
-| `wordmark-small.png`, `wordmark-dark-small.png` | 336 wide | The same, for the start screen's sidebar, where they're drawn 168 points wide. |
+| `wordmark-small.png`, `wordmark-dark-small.png` | 336 wide | The same, smaller. Not used by the editor now: its header and start screen draw `mark.svg`'s lines in the theme's colours (`widgets::paint_mark`). |
 | `mark.svg` | vector | The hexagon on its own, redrawn as strokes (in the source, the letters cover parts of it). |
 | `mark.png` | 1024×1024 | The hexagon in brand blue, transparent. |
 | `icon.png` | 1024×1024 | The app icon: the hexagon on a white rounded square, so it shows on light and dark taskbars. |

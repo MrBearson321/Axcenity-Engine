@@ -503,3 +503,42 @@ fn turning_wind_affected_off_stops_the_push() {
     let late = position(&world, id).x - after;
     assert!((late - early).abs() < 0.05, "{early} then {late}");
 }
+
+#[test]
+fn parts_land_on_terrain_and_edits_to_it_are_felt() {
+    let mut world = World::new();
+    let terrain = world.create(ClassName::Terrain).unwrap();
+    world.set_parent(terrain, Some(world.workspace())).unwrap();
+    // The default terrain's ground is flat at Y = 0 (a quarter of 128
+    // studs up from -32), with 2 studs between samples.
+    let ball = part(&mut world, Vector3::new(10.0, 20.0, 10.0), false);
+    set(&mut world, ball, "Shape", Value::PartType(PartType::Ball));
+    set(&mut world, ball, "Size", vector(2.0, 2.0, 2.0));
+    let mut physics = Physics::new();
+    run(&mut physics, &mut world, 3.0, 60.0);
+    let resting = position(&world, ball);
+    assert!((resting.y - 1.0).abs() < 0.05, "{resting:?}");
+    assert!(physics.has_body(terrain));
+
+    // Raise a plateau 16 studs high under where the next block falls.
+    let data = world.terrain_mut(terrain).unwrap();
+    let rect = axcenity_core::SampleRect::new(90, 90, 120, 120);
+    let heights = data.heights_mut_in(rect);
+    for z in 90..120 {
+        for x in 90..120 {
+            heights[z * 257 + x] = 0.375;
+        }
+    }
+    // Sample 105 is 210 studs from the edge: -46 in the world.
+    let block = part(&mut world, Vector3::new(-46.0, 40.0, -46.0), false);
+    run(&mut physics, &mut world, 3.0, 60.0);
+    let landed = position(&world, block);
+    assert!((landed.y - 16.5).abs() < 0.05, "{landed:?}");
+    // The ball, elsewhere, didn't move.
+    assert_eq!(position(&world, ball), resting);
+
+    // Turning CanCollide off lets things fall through.
+    set(&mut world, terrain, "CanCollide", Value::Bool(false));
+    run(&mut physics, &mut world, 1.0, 60.0);
+    assert!(position(&world, ball).y < 0.0);
+}

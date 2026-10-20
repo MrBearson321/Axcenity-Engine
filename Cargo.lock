@@ -593,6 +593,7 @@ dependencies = [
  "axcenity-render",
  "axcenity-scene",
  "axcenity-script",
+ "axcenity-terrain",
  "axcenity-ui",
  "eframe",
  "egui-phosphor",
@@ -643,6 +644,7 @@ version = "0.1.0"
 dependencies = [
  "axcenity-blocks",
  "axcenity-core",
+ "axcenity-terrain",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -668,6 +670,7 @@ dependencies = [
  "axcenity-assets",
  "axcenity-core",
  "axcenity-render",
+ "axcenity-terrain",
  "axcenity-ui",
 ]
 
@@ -678,6 +681,18 @@ dependencies = [
  "axcenity-audio",
  "axcenity-core",
  "mlua",
+]
+
+[[package]]
+name = "axcenity-terrain"
+version = "0.1.0"
+dependencies = [
+ "axcenity-core",
+ "glam 0.34.1",
+ "png",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

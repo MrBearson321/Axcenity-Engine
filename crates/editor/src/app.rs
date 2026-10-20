@@ -25,6 +25,8 @@ mod chrome;
 mod edits;
 mod files;
 mod session;
+mod settings;
+mod terrain;
 mod tree_ops;
 
 use std::collections::HashMap;
@@ -60,12 +62,15 @@ use crate::scripts::{self, ScriptTabs};
 use crate::side_warnings::{self, WarningCache};
 use crate::start::{self, Brand, ProjectLink, StartAction, StartScreen};
 use crate::style_panel::{self, StyleEdit};
-use crate::theme::{self, filled_icons, icons};
+use crate::terrain_studio::TerrainStudio;
+use crate::theme::{self, Appearance, filled_icons, icons};
 use crate::thumbnail;
+use crate::toast::Toasts;
 use crate::tree::{self, Insertable};
 use crate::ui_handles::{CssEdit, UiDragEdit, apply_css_edits};
 use crate::viewport::{self, DragEdit, DragKind, Viewport, ViewportOutput, ViewportScene};
 use crate::watcher::Watcher;
+use crate::widgets;
 use eframe::egui_wgpu::RenderState;
 use egui_dock::DockState;
 
@@ -171,8 +176,12 @@ pub struct EditorApp {
     confirm_delete: Option<InstanceId>,
     /// A model file waiting for its objects to be chosen.
     importing: Option<ImportDialog>,
-    /// Dark, light or the system's, picked in View > Theme. Saved between runs.
-    theme: egui::ThemePreference,
+    /// The theme, accent, density and motion, picked in Settings. Saved between runs.
+    appearance: Appearance,
+    /// The Settings window.
+    settings: settings::SettingsWindow,
+    /// Confirmations such as "Saved", in the bottom-right corner.
+    toasts: Toasts,
     /// The logo images, loaded on the first frame (they need the egui context).
     brand: Option<Brand>,
     /// Projects opened lately, newest first, for the start screen. Saved between runs.
@@ -194,6 +203,8 @@ pub struct EditorApp {
     asset_browser: AssetBrowser,
     /// The Animation panel's clips, open clip and preview.
     animation: AnimationStudio,
+    /// The Terrain panel's tools, settings, previews and work under way.
+    terrain: TerrainStudio,
     /// Where the dockable panels are. Saved between runs.
     layout: Layout,
     /// The ribbon's tabs, including the ones people made. Saved between runs.
@@ -226,7 +237,7 @@ impl egui_dock::TabViewer for DockViewer<'_> {
     type Tab = Pane;
 
     fn title(&mut self, pane: &mut Pane) -> egui::WidgetText {
-        pane.title().into()
+        pane.title()
     }
 
     fn id(&mut self, pane: &mut Pane) -> egui::Id {
@@ -241,6 +252,7 @@ impl egui_dock::TabViewer for DockViewer<'_> {
             Pane::Output => self.app.output_pane(ui),
             Pane::Assets => self.app.assets_pane(ui),
             Pane::Animation => self.app.animation_pane(ui, self.render_state),
+            Pane::Terrain => self.app.terrain_pane(ui),
         }
     }
 
@@ -281,7 +293,9 @@ struct BlockDocument {
 }
 
 /// The keys the editor's settings are saved under (see [`EditorApp::load_settings`]).
+/// Only read, from saves made before Settings had more than the theme.
 const THEME_KEY: &str = "theme";
+const APPEARANCE_KEY: &str = "appearance";
 const RECENT_KEY: &str = "recent projects";
 const LAYOUT_KEY: &str = "panel layout";
 const RIBBON_TABS_KEY: &str = "ribbon tabs";
@@ -355,6 +369,12 @@ struct OpenProject {
     /// it was damaged, or changed elsewhere while the world had unsaved
     /// changes. Saving keeps it as `world.backup.json` first.
     keep_world_file: bool,
+    /// Terrains' data folders that couldn't be loaded: saving keeps each as
+    /// `<folder>.backup` before writing over it.
+    damaged_terrains: Vec<String>,
+    /// Each terrain's landscape (number and revision) as last loaded or
+    /// saved, so saving writes only the ones that changed.
+    saved_terrains: HashMap<InstanceId, (u64, u64)>,
 }
 
 impl EditorApp {
@@ -392,7 +412,9 @@ impl EditorApp {
             importing: None,
             game_keys: GameKeys::default(),
             warnings: WarningCache::default(),
-            theme: egui::ThemePreference::Dark,
+            appearance: Appearance::default(),
+            settings: settings::SettingsWindow::default(),
+            toasts: Toasts::default(),
             brand: None,
             recent: Vec::new(),
             start: StartScreen::default(),
@@ -403,6 +425,7 @@ impl EditorApp {
             sound_preview: None,
             asset_browser: AssetBrowser::default(),
             animation: AnimationStudio::default(),
+            terrain: TerrainStudio::default(),
             layout: Layout::default(),
             ribbon_tabs: RibbonTabs::default(),
             light_cones: false,
@@ -414,13 +437,19 @@ impl EditorApp {
     }
 
     /// Restores the settings saved by [`eframe::App::save`] (none in tests, or
-    /// on the first run) and applies the theme.
+    /// on the first run) and applies the look.
     pub fn load_settings(&mut self, ctx: &egui::Context, storage: Option<&dyn eframe::Storage>) {
         if let Some(storage) = storage {
-            self.theme = match storage.get_string(THEME_KEY).as_deref() {
-                Some("light") => egui::ThemePreference::Light,
-                Some("system") => egui::ThemePreference::System,
-                _ => egui::ThemePreference::Dark,
+            self.appearance = match storage.get_string(APPEARANCE_KEY) {
+                Some(text) => Appearance::from_text(&text),
+                None => Appearance {
+                    theme: match storage.get_string(THEME_KEY).as_deref() {
+                        Some("light") => theme::ThemeChoice::Light,
+                        Some("system") => theme::ThemeChoice::System,
+                        _ => theme::ThemeChoice::Dark,
+                    },
+                    ..Appearance::default()
+                },
             };
             // One folder per line. The project opened at startup stays first.
             let opened = std::mem::take(&mut self.recent);
@@ -441,7 +470,7 @@ impl EditorApp {
             }
             self.light_cones = storage.get_string(LIGHT_CONES_KEY).as_deref() == Some("on");
         }
-        ctx.set_theme(self.theme);
+        theme::apply(ctx, &self.appearance);
     }
 }
 
@@ -469,6 +498,31 @@ impl eframe::App for EditorApp {
     /// Called by eframe to draw each frame (only when something changed,
     /// such as mouse movement, unless a frame is requested).
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        self.frame(ctx, frame.wgpu_render_state());
+    }
+
+    /// Saves the look, the layout and the recent projects. eframe calls
+    /// this now and then, and when the window closes.
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        storage.set_string(APPEARANCE_KEY, self.appearance.to_text());
+        let recent: Vec<String> = self
+            .recent
+            .iter()
+            .map(|link| link.folder.display().to_string())
+            .collect();
+        storage.set_string(LAYOUT_KEY, self.layout.to_text());
+        storage.set_string(RIBBON_TABS_KEY, self.ribbon_tabs.to_text());
+        let cones = if self.light_cones { "on" } else { "off" };
+        storage.set_string(LIGHT_CONES_KEY, cones.to_owned());
+        storage.set_string(RECENT_KEY, recent.join("\n"));
+    }
+}
+
+impl EditorApp {
+    /// One frame: game time during Play, then the menu bar, the ribbon and
+    /// the dock (or the start screen), then windows and overlays. Separate
+    /// from `update` so tests can draw it without a window.
+    pub(crate) fn frame(&mut self, ctx: &egui::Context, render_state: Option<&RenderState>) {
         // The window's close button: stop it and ask first if there are
         // unsaved changes. `closing` lets the close through once allowed.
         if ctx.input(|input| input.viewport().close_requested()) && !self.closing && self.unsaved()
@@ -487,6 +541,10 @@ impl eframe::App for EditorApp {
         if ctx.input_mut(|input| input.consume_shortcut(&SAVE_SHORTCUT)) {
             self.save();
         }
+        if ctx.input_mut(|input| input.consume_shortcut(&settings::SETTINGS_SHORTCUT)) {
+            self.settings.open = !self.settings.open;
+        }
+        self.terrain_frame(ctx);
         self.shortcuts(ctx);
 
         // During Play, run a game frame before anything is drawn, so every
@@ -578,12 +636,25 @@ impl eframe::App for EditorApp {
         // spans the whole top, then the Explorer (with Properties under it)
         // runs down the whole right side, then the Output fits under the viewport.
         self.update_warnings();
-        egui::TopBottomPanel::top("menu bar").show(ctx, |ui| self.menu_bar(ui));
+        let palette = theme::palette(ctx);
+        egui::TopBottomPanel::top("menu bar")
+            .frame(
+                egui::Frame::new()
+                    .fill(palette.app_bg)
+                    .inner_margin(egui::Margin::symmetric(10, 4)),
+            )
+            .show(ctx, |ui| self.menu_bar(ui));
         if has_project {
             egui::TopBottomPanel::top("toolbar")
                 .frame(
-                    egui::Frame::side_top_panel(&ctx.style())
-                        .inner_margin(egui::Margin::symmetric(8, 4)),
+                    egui::Frame::new()
+                        .fill(palette.app_bg)
+                        .inner_margin(egui::Margin {
+                            left: 8,
+                            right: 8,
+                            top: 2,
+                            bottom: 6,
+                        }),
                 )
                 .show(ctx, |ui| self.toolbar(ui));
         }
@@ -596,14 +667,14 @@ impl eframe::App for EditorApp {
             // Taken out while it's drawn, so the panels can borrow the app.
             let mut dock = std::mem::replace(&mut self.layout.dock, DockState::new(Vec::new()));
             egui_dock::DockArea::new(&mut dock)
-                .style(layout::style(&ctx.style()))
+                .style(layout::style(&ctx.style(), &palette))
                 .show_leaf_collapse_buttons(false)
                 .show_leaf_close_all_buttons(false)
                 .show(
                     ctx,
                     &mut DockViewer {
                         app: self,
-                        render_state: frame.wgpu_render_state(),
+                        render_state,
                         viewport: &mut output,
                     },
                 );
@@ -624,6 +695,10 @@ impl eframe::App for EditorApp {
             self.select_clicked(clicked.part, clicked.modifiers, None, clicked.keep_group);
             // The panels were already drawn this frame, so draw again to
             // show the new selection there.
+            ctx.request_repaint();
+        }
+        if let Some(pointer) = output.terrain {
+            self.terrain_pointer(pointer);
             ctx.request_repaint();
         }
         if output.activated.is_some() {
@@ -699,27 +774,9 @@ impl eframe::App for EditorApp {
         {
             self.about_open = start::about(ctx, brand);
         }
-    }
-
-    /// Saves the theme and the recent projects. eframe calls this now and
-    /// then, and when the window closes.
-    fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        let theme = match self.theme {
-            egui::ThemePreference::Dark => "dark",
-            egui::ThemePreference::Light => "light",
-            egui::ThemePreference::System => "system",
-        };
-        storage.set_string(THEME_KEY, theme.to_string());
-        let recent: Vec<String> = self
-            .recent
-            .iter()
-            .map(|link| link.folder.display().to_string())
-            .collect();
-        storage.set_string(LAYOUT_KEY, self.layout.to_text());
-        storage.set_string(RIBBON_TABS_KEY, self.ribbon_tabs.to_text());
-        let cones = if self.light_cones { "on" } else { "off" };
-        storage.set_string(LIGHT_CONES_KEY, cones.to_owned());
-        storage.set_string(RECENT_KEY, recent.join("\n"));
+        self.settings_window(ctx);
+        self.toasts.show(ctx);
+        theme::paint_crossfade(ctx);
     }
 }
 
@@ -973,6 +1030,59 @@ mod tests {
         );
         drop(app);
         std::fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn the_whole_editor_draws_in_each_theme_and_density() {
+        let snapshots = std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from);
+        for (name, appearance) in [
+            ("editor-dark", Appearance::default()),
+            (
+                "editor-light",
+                Appearance {
+                    theme: theme::ThemeChoice::Light,
+                    ..Appearance::default()
+                },
+            ),
+            (
+                "editor-compact",
+                Appearance {
+                    density: theme::Density::Compact,
+                    accent: theme::Accent::Violet,
+                    ..Appearance::default()
+                },
+            ),
+        ] {
+            let mut app = EditorApp::new(Some(&example("hello-touched")));
+            let pad = app
+                .world
+                .get(app.world.workspace())
+                .and_then(|workspace| workspace.children().last().copied())
+                .expect("the example has parts");
+            app.select_clicked(Some(pad), egui::Modifiers::NONE, None, false);
+            app.output.warning("A warning, to see how warnings look.");
+            app.output
+                .error("scripts/Pad.server.lua:3: an error, to see how errors look");
+            let mut draw = |ctx: &egui::Context| {
+                theme::apply(ctx, &appearance);
+                app.frame(ctx, None);
+            };
+            match &snapshots {
+                Some(folder) => crate::snapshot::snapshot(
+                    &folder.join(format!("{name}.png")),
+                    egui::vec2(1440.0, 900.0),
+                    vec![Vec::new(); 3],
+                    &mut draw,
+                ),
+                None => {
+                    let ctx = theme::test_context();
+                    for _ in 0..3 {
+                        let _ = ctx.run(Default::default(), &mut draw);
+                    }
+                }
+            }
+            assert_eq!(app.selected, Some(pad), "drawing keeps the selection");
+        }
     }
 
     #[test]

@@ -6,10 +6,12 @@
 //! [`World`], which owns every Instance in an [`Arena`].
 
 use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 
 use crate::animation::{AnimatorState, PropertyAnimationState};
 use crate::arena::{Arena, Id};
 use crate::class::ClassName;
+use crate::terrain::TerrainData;
 use crate::value::{Value, ValueKind};
 
 /// A handle to an Instance in a [`World`]. It stays valid until the Instance
@@ -149,6 +151,9 @@ pub struct World {
     animators: HashMap<InstanceId, AnimatorState>,
     /// Each property Animation's live playback (see [`PropertyAnimationState`]).
     property_animations: HashMap<InstanceId, PropertyAnimationState>,
+    /// Each Terrain's heightfield and paint. Every Terrain has one, made
+    /// with it. Shared with copies of the world until one changes it.
+    terrains: HashMap<InstanceId, Arc<TerrainData>>,
 }
 
 impl World {
@@ -196,7 +201,29 @@ impl World {
             changes: ChangeLog::default(),
             animators: HashMap::new(),
             property_animations: HashMap::new(),
+            terrains: HashMap::new(),
         }
+    }
+
+    /// The heightfield and paint of the Terrain `id`.
+    pub fn terrain(&self, id: InstanceId) -> Option<&Arc<TerrainData>> {
+        self.terrains.get(&id)
+    }
+
+    /// The Terrain `id`'s data, to change. If a copy of the world shares
+    /// it, this world gets its own copy first (`Arc::make_mut`).
+    pub fn terrain_mut(&mut self, id: InstanceId) -> Option<&mut TerrainData> {
+        self.terrains.get_mut(&id).map(Arc::make_mut)
+    }
+
+    /// Gives the Terrain `id` this data. False (and nothing changes) if
+    /// `id` isn't a Terrain.
+    pub fn set_terrain(&mut self, id: InstanceId, data: Arc<TerrainData>) -> bool {
+        if self.get(id).map(Instance::class) != Some(ClassName::Terrain) {
+            return false;
+        }
+        self.terrains.insert(id, data);
+        true
     }
 
     /// The live state of the Animator `id`, if it has any yet.
@@ -336,7 +363,11 @@ impl World {
         if class.is_service() {
             return Err(TreeError::Service(class));
         }
-        Ok(InstanceId(self.instances.insert(Instance::new(class))))
+        let id = InstanceId(self.instances.insert(Instance::new(class)));
+        if class == ClassName::Terrain {
+            self.terrains.insert(id, Arc::new(TerrainData::default()));
+        }
+        Ok(id)
     }
 
     /// Moves `id` under `new_parent` as its last child, or detaches it when
@@ -426,6 +457,7 @@ impl World {
         copy.parent = None;
         copy.children.clear();
         let root = InstanceId(self.instances.insert(copy));
+        self.copy_terrain(id, root);
 
         // `descendants` lists parents before their children, so each
         // descendant's parent has already been copied when it's reached.
@@ -441,9 +473,18 @@ impl World {
                 .expect("copied above")
                 .children
                 .push(new);
+            self.copy_terrain(old, new);
             copies.insert(old, new);
         }
         Ok(root)
+    }
+
+    /// Gives a copy of a Terrain its original's landscape. They share it
+    /// until one is changed.
+    fn copy_terrain(&mut self, original: InstanceId, copy: InstanceId) {
+        if let Some(data) = self.terrains.get(&original).cloned() {
+            self.terrains.insert(copy, data);
+        }
     }
 
     /// Destroys `id` and all of its descendants. Their IDs become stale.
@@ -458,10 +499,12 @@ impl World {
             self.instances.remove(descendant.0);
             self.animators.remove(&descendant);
             self.property_animations.remove(&descendant);
+            self.terrains.remove(&descendant);
         }
         self.instances.remove(id.0);
         self.animators.remove(&id);
         self.property_animations.remove(&id);
+        self.terrains.remove(&id);
         Ok(())
     }
 
@@ -1060,5 +1103,32 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn every_terrain_has_data_that_copies_share_until_one_changes() {
+        let mut world = World::new();
+        let terrain = world.create(ClassName::Terrain).unwrap();
+        world.set_parent(terrain, Some(world.workspace())).unwrap();
+        let data = world.terrain(terrain).unwrap().clone();
+        assert_eq!(data.size(), (257, 257));
+
+        // Play's copy shares it; changing it there leaves the original alone.
+        let mut played = world.clone();
+        assert!(Arc::ptr_eq(played.terrain(terrain).unwrap(), &data));
+        let all = data.bounds();
+        played.terrain_mut(terrain).unwrap().heights_mut_in(all)[0] = 1.0;
+        assert_eq!(world.terrain(terrain).unwrap().heights()[0], 0.25);
+        assert_ne!(played.terrain(terrain).unwrap().uid(), data.uid());
+
+        // A duplicate gets the same landscape; destroying drops it.
+        let copy = world.duplicate(terrain).unwrap();
+        assert_eq!(world.terrain(copy).unwrap().heights(), data.heights());
+        world.destroy(copy).unwrap();
+        assert!(world.terrain(copy).is_none());
+
+        let part = world.create(ClassName::Part).unwrap();
+        assert!(world.terrain(part).is_none());
+        assert!(!world.set_terrain(part, data));
     }
 }

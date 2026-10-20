@@ -340,7 +340,8 @@ mod tests {
 
     #[test]
     fn hello_touched_blocks_exports_translated_lua() {
-        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-touched-blocks");
+        let source =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-touched-blocks");
         let packed = pack_game(&source).unwrap();
         let output = temp_folder("hello-touched-blocks-export");
         unpack_game(&packed, &output).unwrap();

@@ -19,8 +19,15 @@
 //! Dragging a UI handle can also rewrite a stylesheet (see `ui_handles.rs`).
 //! Its step holds that file's text before and after as a [`TextChange`], and
 //! undo and redo hand those back for the app to put in the file's tab.
+//!
+//! A Terrain's landscape isn't a property, so its changes are steps of their
+//! own ([`TerrainChange`]): a brush stroke keeps the chunks it changed, and a
+//! whole new landscape (generated, eroded, resized) keeps both landscapes.
 
-use axcenity_core::{InstanceId, TreeError, Value, World};
+use std::sync::Arc;
+
+use axcenity_core::{InstanceId, TerrainData, TreeError, Value, World};
+use axcenity_terrain::brush::TerrainEdit;
 
 /// Something about an Instance that can be changed: its name or one property.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -81,6 +88,18 @@ pub struct Move {
     pub after: Option<Place>,
 }
 
+/// What a step did to a Terrain's landscape.
+#[derive(Debug)]
+pub enum TerrainChange {
+    /// A brush stroke: each chunk it changed, before and after.
+    Stroke(TerrainEdit),
+    /// A whole new landscape.
+    Replace {
+        before: Arc<TerrainData>,
+        after: Arc<TerrainData>,
+    },
+}
+
 /// A stylesheet's text before and after a change, by its path.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TextChange {
@@ -134,6 +153,13 @@ enum StepKind {
     /// Project files rewritten (property animation clips, …), with no
     /// Instance field changes.
     Files(Vec<TextChange>),
+    /// A Terrain's landscape, and its fields changed at the same time
+    /// (a new `Size` with a generated landscape).
+    Terrain {
+        id: InstanceId,
+        change: TerrainChange,
+        fields: Vec<Change>,
+    },
 }
 
 /// One Instance's snapshots either side of a change, for [`History::record_many`].
@@ -348,6 +374,22 @@ impl History {
         self.open = None;
     }
 
+    /// Records a change to the Terrain `id`'s landscape as one step, with
+    /// its fields' snapshots either side (for a `Size` changed with it).
+    pub fn record_terrain(
+        &mut self,
+        world: &mut World,
+        id: InstanceId,
+        label: String,
+        change: TerrainChange,
+        before: Snapshot,
+        after: Snapshot,
+    ) {
+        let fields = differences(before, after);
+        self.push(world, label, StepKind::Terrain { id, change, fields });
+        self.open = None;
+    }
+
     /// Adds a new step on top and returns its number. The undone steps can't
     /// be redone after that, so they're dropped.
     fn push(&mut self, world: &mut World, label: String, kind: StepKind) -> u64 {
@@ -425,6 +467,15 @@ impl History {
                     })
                     .collect();
             }
+            StepKind::Terrain { id, change, fields } => {
+                restore(world, *id, fields.iter().map(|c| (c.field, &c.before)));
+                if let Some(data) = world.terrain_mut(*id) {
+                    match change {
+                        TerrainChange::Stroke(edit) => edit.undo(data),
+                        TerrainChange::Replace { before, .. } => data.replace_with(before),
+                    }
+                }
+            }
         }
         self.redo.push(step);
         Some(undone)
@@ -455,6 +506,15 @@ impl History {
             }
             StepKind::Files(texts) => {
                 redone = texts.clone();
+            }
+            StepKind::Terrain { id, change, fields } => {
+                restore(world, *id, fields.iter().map(|c| (c.field, &c.after)));
+                if let Some(data) = world.terrain_mut(*id) {
+                    match change {
+                        TerrainChange::Stroke(edit) => edit.redo(data),
+                        TerrainChange::Replace { after, .. } => data.replace_with(after),
+                    }
+                }
             }
         }
         self.undo.push(step);
@@ -835,5 +895,75 @@ mod tests {
         assert!(!history.is_saved());
         history.redo(&mut world);
         assert!(history.is_saved());
+    }
+
+    #[test]
+    fn terrain_strokes_and_new_landscapes_undo_and_redo() {
+        use axcenity_render::glam::{Vec2, Vec3};
+        use axcenity_terrain::Placement;
+        use axcenity_terrain::brush::{self, Brush, EditRecorder, Operation};
+
+        let mut world = World::new();
+        let terrain = world.create(ClassName::Terrain).unwrap();
+        world.set_parent(terrain, Some(world.workspace())).unwrap();
+        let placement = Placement::of(world.get(terrain).unwrap()).unwrap();
+        let original = world.terrain(terrain).unwrap().heights().to_vec();
+        let mut history = History::new();
+
+        // A stroke.
+        let brush = Brush::default();
+        let data = world.terrain_mut(terrain).unwrap();
+        let mut recorder = EditRecorder::new();
+        let rect = brush::footprint(data, &placement, Vec2::ZERO, brush.radius);
+        recorder.before_change(data, rect);
+        brush::apply(data, &placement, &brush, &Operation::Raise, Vec3::ZERO);
+        let edit = recorder.finish(data).unwrap();
+        let raised = data.heights().to_vec();
+        let snapshot_now = snapshot(&world, terrain);
+        history.record_terrain(
+            &mut world,
+            terrain,
+            "Raise Terrain".to_owned(),
+            TerrainChange::Stroke(edit),
+            snapshot_now.clone(),
+            snapshot_now,
+        );
+        assert_eq!(history.undo_label(), Some("Raise Terrain"));
+        history.undo(&mut world);
+        assert_eq!(
+            world.terrain(terrain).unwrap().heights(),
+            original.as_slice()
+        );
+        history.redo(&mut world);
+        assert_eq!(world.terrain(terrain).unwrap().heights(), raised.as_slice());
+
+        // A new, bigger landscape with a new Size, in one step.
+        let before = world.terrain(terrain).unwrap().clone();
+        let after = Arc::new(TerrainData::flat(65, 65, 0.9).unwrap());
+        let fields_before = snapshot(&world, terrain);
+        world.set_property(terrain, "Size", at(64.0)).unwrap();
+        world.terrain_mut(terrain).unwrap().replace_with(&after);
+        let fields_after = snapshot(&world, terrain);
+        history.record_terrain(
+            &mut world,
+            terrain,
+            "Generate Terrain".to_owned(),
+            TerrainChange::Replace { before, after },
+            fields_before,
+            fields_after,
+        );
+        history.undo(&mut world);
+        assert_eq!(world.terrain(terrain).unwrap().size(), (257, 257));
+        assert_eq!(world.terrain(terrain).unwrap().heights(), raised.as_slice());
+        assert_ne!(
+            world.get(terrain).unwrap().property("Size"),
+            Some(&at(64.0))
+        );
+        history.redo(&mut world);
+        assert_eq!(world.terrain(terrain).unwrap().size(), (65, 65));
+        assert_eq!(
+            world.get(terrain).unwrap().property("Size"),
+            Some(&at(64.0))
+        );
     }
 }

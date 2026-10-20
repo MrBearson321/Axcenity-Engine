@@ -1,0 +1,20 @@
+[package]
+name = "axcenity-terrain"
+description = "Axcenity terrain: sculpting brushes, procedural generation, erosion, material rules and chunk meshes for Terrain heightfields."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+# Plain algorithms over `core::TerrainData`, with no UI or GPU types, so the
+# editor, the scene builder and tests share them.
+[dependencies]
+axcenity-core.workspace = true
+glam.workspace = true
+png.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

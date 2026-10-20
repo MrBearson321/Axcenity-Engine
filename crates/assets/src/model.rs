@@ -14,6 +14,7 @@ mod rig;
 #[cfg(test)]
 mod test_rig;
 
+pub use maps::{MapSlot, TextureRole, texture_roles};
 pub use objects::{ModelObject, Pick};
 pub use rig::{
     Blend, Bone, BoneTransform, Joint, Keys, Pose, Posed, PosedPrimitive, Rig, Take, Track,

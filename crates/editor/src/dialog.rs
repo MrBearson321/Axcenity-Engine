@@ -1,11 +1,13 @@
 //! The editor's question boxes ("Save changes?", "Delete script?"): an
-//! icon in a colored tile, a title and a message, an optional list of what
-//! it's about, and a row of buttons with icons, the main one filled.
-//! Enter picks the main button; Escape or a click outside cancels.
+//! icon in a tinted tile, a title and a message, an optional list of what
+//! it's about, and a row of buttons, the main one filled. Enter picks the
+//! main button; Escape or a click outside cancels. The box fades in (see
+//! `theme::MOTION_SECONDS`).
 
-use eframe::egui::{self, Color32, CornerRadius, FontId, RichText, Stroke, vec2};
+use eframe::egui::{self, CornerRadius, FontId, RichText, Stroke, vec2};
 
-use crate::theme::{self, icons};
+use crate::theme::{self, icons, type_scale};
+use crate::widgets::{self, Role};
 
 /// How a button looks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -24,11 +26,20 @@ pub struct Button<'a> {
     pub kind: Kind,
 }
 
+/// The colour of the box's icon, by what kind of question it is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tone {
+    /// Something might be lost, such as unsaved changes.
+    Warning,
+    /// Something will be destroyed.
+    Danger,
+}
+
 /// What the box is about, besides its buttons.
 pub struct Question<'a> {
     pub id: &'a str,
     pub icon: &'static str,
-    pub accent: Color32,
+    pub tone: Tone,
     pub title: &'a str,
     pub message: &'a str,
     /// Things to list under the message (such as the unsaved files), each
@@ -45,36 +56,49 @@ pub enum Outcome {
     Dismissed,
 }
 
-const WIDTH: f32 = 440.0;
+const WIDTH: f32 = 420.0;
 
 /// Shows the box. Returns what was picked, if anything, this frame.
 pub fn ask(ctx: &egui::Context, question: &Question, buttons: &[Button]) -> Option<Outcome> {
     let mut outcome = None;
+    let palette = theme::palette(ctx);
+    let accent = match question.tone {
+        Tone::Warning => palette.warning,
+        Tone::Danger => palette.error,
+    };
     let frame = egui::Frame::popup(&ctx.style())
-        .corner_radius(14)
-        .inner_margin(egui::Margin::same(22));
+        .corner_radius(12)
+        .inner_margin(egui::Margin::same(20));
     let modal = egui::Modal::new(egui::Id::new(question.id))
         .frame(frame)
         .show(ctx, |ui| {
             ui.set_width(WIDTH);
             ui.horizontal_top(|ui| {
-                icon_tile(ui, question.icon, question.accent);
-                ui.add_space(6.0);
+                icon_tile(ui, question.icon, accent);
+                ui.add_space(4.0);
                 ui.vertical(|ui| {
-                    ui.add_space(2.0);
                     ui.label(
                         RichText::new(question.title)
-                            .font(FontId::new(18.0, theme::heading_family()))
-                            .strong(),
+                            .font(FontId::new(
+                                type_scale::HEADING + 1.0,
+                                theme::heading_family(),
+                            ))
+                            .color(palette.text_strong),
                     );
-                    ui.add_space(4.0);
-                    ui.add(egui::Label::new(question.message).wrap());
+                    ui.add_space(2.0);
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(question.message).color(palette.text_secondary),
+                        )
+                        .wrap(),
+                    );
                 });
             });
             if !question.items.is_empty() {
-                ui.add_space(12.0);
+                ui.add_space(14.0);
                 egui::Frame::new()
-                    .fill(ui.visuals().extreme_bg_color)
+                    .fill(palette.inset)
+                    .stroke(Stroke::new(1.0_f32, palette.border))
                     .corner_radius(8)
                     .inner_margin(egui::Margin::symmetric(12, 8))
                     .show(ui, |ui| {
@@ -87,7 +111,7 @@ pub fn ask(ctx: &egui::Context, question: &Question, buttons: &[Button]) -> Opti
                         }
                     });
             }
-            ui.add_space(18.0);
+            ui.add_space(20.0);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
                 // Right to left, so the main button ends up at the right.
@@ -110,41 +134,35 @@ pub fn ask(ctx: &egui::Context, question: &Question, buttons: &[Button]) -> Opti
     outcome
 }
 
-/// The box's icon, in a rounded tile of its accent color.
-fn icon_tile(ui: &mut egui::Ui, icon: &str, accent: Color32) {
-    let (rect, _) = ui.allocate_exact_size(vec2(44.0, 44.0), egui::Sense::hover());
+/// The box's icon, in a rounded tile tinted with its tone.
+fn icon_tile(ui: &mut egui::Ui, icon: &str, accent: egui::Color32) {
+    let (rect, _) = ui.allocate_exact_size(vec2(36.0, 36.0), egui::Sense::hover());
     ui.painter()
-        .rect_filled(rect, CornerRadius::same(12), accent.gamma_multiply(0.18));
+        .rect_filled(rect, CornerRadius::same(8), accent.gamma_multiply(0.14));
     ui.painter().text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
         icon,
-        FontId::new(24.0, theme::filled()),
+        FontId::proportional(19.0),
         accent,
     );
 }
 
 fn dialog_button(ui: &mut egui::Ui, button: &Button) -> egui::Response {
-    let text = theme::with_icon(button.icon, button.label);
-    let (fill, color) = match button.kind {
-        Kind::Main => (theme::BRAND_BLUE_BRIGHT, Color32::WHITE),
-        Kind::Danger => (theme::STOP_RED, Color32::WHITE),
-        Kind::Plain => (Color32::TRANSPARENT, ui.visuals().text_color()),
+    let role = match button.kind {
+        Kind::Main => Role::Primary,
+        Kind::Danger => Role::Danger,
+        Kind::Plain => Role::Secondary,
     };
-    let mut widget = egui::Button::new(RichText::new(text).color(color))
-        .corner_radius(8)
-        .min_size(vec2(96.0, 32.0));
-    widget = if button.kind == Kind::Plain {
-        widget.stroke(ui.visuals().widgets.inactive.bg_stroke)
-    } else {
-        widget.fill(fill).stroke(Stroke::NONE)
-    };
-    ui.add(widget)
+    let palette = theme::palette(ui.ctx());
+    ui.add(
+        widgets::button(role, Some(button.icon), button.label, &palette).min_size(vec2(84.0, 30.0)),
+    )
 }
 
-/// The unsaved-changes box's icon and color.
-pub fn unsaved_style() -> (&'static str, Color32) {
-    (icons::FLOPPY_DISK, Color32::from_rgb(240, 170, 50))
+/// The unsaved-changes box's icon and tone.
+pub fn unsaved_style() -> (&'static str, Tone) {
+    (icons::FLOPPY_DISK, Tone::Warning)
 }
 
 #[cfg(test)]
@@ -154,7 +172,7 @@ mod tests {
     #[test]
     fn question_boxes_draw_and_escape_dismisses_them() {
         let snapshots = std::env::var_os("AXCENITY_SNAPSHOTS").map(std::path::PathBuf::from);
-        let (icon, accent) = unsaved_style();
+        let (icon, tone) = unsaved_style();
         // Shared with the drawing closure, which pushes each frame's outcome.
         let outcomes = std::cell::RefCell::new(Vec::new());
         let mut draw = |ctx: &egui::Context| {
@@ -164,7 +182,7 @@ mod tests {
                 &Question {
                     id: "test",
                     icon,
-                    accent,
+                    tone,
                     title: "Save changes?",
                     message: "\"Space Race\" has unsaved changes. Save them before closing?",
                     items: vec![

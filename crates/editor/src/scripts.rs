@@ -225,50 +225,76 @@ impl ScriptTabs {
     pub fn tab_bar(&mut self, ui: &mut egui::Ui) -> Option<String> {
         let mut show = None;
         let mut close = None;
+        let mut active_rect = None;
         egui::ScrollArea::horizontal().show(ui, |ui| {
             ui.horizontal(|ui| {
-                let world = theme::with_icon(icons::GLOBE_HEMISPHERE_WEST, "World");
-                if ui
-                    .selectable_label(self.active.is_none(), world)
-                    .on_hover_text("The 3D view of the world")
-                    .clicked()
-                {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                let palette = theme::palette(ui.ctx());
+                let world = script_tab(
+                    ui,
+                    (icons::GLOBE_HEMISPHERE_WEST, palette.text_secondary),
+                    "World",
+                    TabMarks::default(),
+                    self.active.is_none(),
+                )
+                .0
+                .on_hover_text("The 3D view of the world");
+                if self.active.is_none() {
+                    active_rect = Some(world.rect);
+                }
+                if world.clicked() {
                     show = Some(None);
                 }
                 for (index, tab) in self.tabs.iter().enumerate() {
-                    ui.separator();
-                    // A dot after the name means unsaved changes, as in VS Code.
-                    let name = if tab.unsaved() {
-                        format!("{} ●", tab.name())
-                    } else {
-                        tab.name().to_string()
-                    };
                     let icon = if tab.is_stylesheet() {
-                        egui::RichText::new(icons::PAINT_BRUSH)
-                            .color(theme::class_color(ClassName::ScreenGui, ui.visuals()))
+                        (
+                            icons::PAINT_BRUSH,
+                            theme::class_color(ClassName::ScreenGui, ui.visuals()),
+                        )
                     } else {
                         let class = axcenity_project::script_class(&tab.path);
-                        egui::RichText::new(theme::class_icon(class))
-                            .color(theme::class_color(class, ui.visuals()))
+                        (
+                            theme::class_icon(class),
+                            theme::class_color(class, ui.visuals()),
+                        )
                     };
-                    let mut title = egui::Atoms::new((icon, name));
-                    if self.warnings.contains_key(&tab.path) {
-                        let warning = ui.visuals().warn_fg_color;
-                        title.push_right(egui::RichText::new(icons::WARNING).color(warning));
+                    let marks = TabMarks {
+                        // A dot after the name means unsaved changes, as in VS Code.
+                        unsaved: tab.unsaved(),
+                        warning: self.warnings.contains_key(&tab.path),
+                        closable: true,
+                    };
+                    let active = self.active == Some(index);
+                    let (label, cross) = script_tab(ui, icon, tab.name(), marks, active);
+                    let label = label.on_hover_text(&tab.path);
+                    if active {
+                        active_rect = Some(label.rect);
                     }
-                    let label = ui
-                        .add(egui::Button::selectable(self.active == Some(index), title))
-                        .on_hover_text(&tab.path);
                     if label.clicked() {
                         show = Some(Some(index));
                     }
-                    let cross = ui.small_button(icons::X).on_hover_text("Close");
-                    if label.middle_clicked() || cross.clicked() {
+                    if label.middle_clicked() || cross {
                         close = Some(tab.path.clone());
                     }
                 }
             });
         });
+        // The accent line under the tab shown, sliding to a newly picked one.
+        if let Some(rect) = active_rect {
+            let ctx = ui.ctx();
+            let time = ctx.style().animation_time * 1.4;
+            let id = egui::Id::new("script tab underline");
+            let left = ctx.animate_value_with_time(id.with("left"), rect.left() + 6.0, time);
+            let right = ctx.animate_value_with_time(id.with("right"), rect.right() - 6.0, time);
+            ui.painter().rect_filled(
+                egui::Rect::from_min_max(
+                    egui::pos2(left, rect.bottom() - 2.0),
+                    egui::pos2(right, rect.bottom()),
+                ),
+                1,
+                theme::palette(ctx).accent,
+            );
+        }
         if let Some(active) = show {
             self.active = active;
         }
@@ -334,48 +360,167 @@ impl ScriptTabs {
     }
 }
 
+/// What a script tab shows after its name.
+#[derive(Clone, Copy, Default)]
+struct TabMarks {
+    unsaved: bool,
+    warning: bool,
+    closable: bool,
+}
+
+/// One tab above the viewport: an icon in its class's colour, the name, a
+/// dot when unsaved, a warning badge, and × (shown while the tab is active
+/// or hovered). Returns the tab and whether × was clicked.
+fn script_tab(
+    ui: &mut egui::Ui,
+    (icon, icon_color): (&str, egui::Color32),
+    name: &str,
+    marks: TabMarks,
+    active: bool,
+) -> (egui::Response, bool) {
+    let palette = theme::palette(ui.ctx());
+    let font = egui::FontId::new(theme::type_scale::BODY - 0.5, theme::medium_family());
+    let name_galley =
+        ui.painter()
+            .layout_no_wrap(name.to_owned(), font, egui::Color32::PLACEHOLDER);
+    let mut width = 12.0 + 16.0 + 4.0 + name_galley.size().x + 12.0;
+    if marks.unsaved {
+        width += 12.0;
+    }
+    if marks.warning {
+        width += 18.0;
+    }
+    if marks.closable {
+        width += 18.0;
+    }
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 28.0), egui::Sense::click());
+    response
+        .widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, name));
+    let hovered = ui.rect_contains_pointer(rect);
+    let hover = theme::ease(ui.ctx(), response.id.with("hover"), hovered && !active);
+    if hover > 0.0 {
+        ui.painter().rect_filled(
+            rect.shrink2(egui::vec2(0.0, 3.0)),
+            5,
+            palette.control_hover.gamma_multiply(hover),
+        );
+    }
+    if response.has_focus() {
+        ui.painter().rect_stroke(
+            rect.shrink2(egui::vec2(0.0, 3.0)),
+            5,
+            egui::Stroke::new(1.0_f32, palette.accent),
+            egui::StrokeKind::Inside,
+        );
+    }
+    let text_color = if active || hovered {
+        palette.text_strong
+    } else {
+        palette.text_weak
+    };
+    let mut x = rect.left() + 12.0;
+    ui.painter().text(
+        egui::pos2(x + 7.0, rect.center().y),
+        egui::Align2::CENTER_CENTER,
+        icon,
+        egui::FontId::proportional(14.0),
+        if active || hovered {
+            icon_color
+        } else {
+            icon_color.gamma_multiply(0.75)
+        },
+    );
+    x += 20.0;
+    let name_size = name_galley.size();
+    ui.painter().galley(
+        egui::pos2(x, rect.center().y - name_size.y / 2.0),
+        name_galley,
+        text_color,
+    );
+    x += name_size.x + 4.0;
+    if marks.unsaved {
+        ui.painter().circle_filled(
+            egui::pos2(x + 4.0, rect.center().y),
+            3.0,
+            palette.text_secondary,
+        );
+        x += 12.0;
+    }
+    if marks.warning {
+        ui.painter().text(
+            egui::pos2(x + 7.0, rect.center().y),
+            egui::Align2::CENTER_CENTER,
+            icons::WARNING,
+            egui::FontId::proportional(13.0),
+            palette.warning,
+        );
+        x += 18.0;
+    }
+    let mut closed = false;
+    if marks.closable {
+        let cross = egui::Rect::from_center_size(
+            egui::pos2(x + 8.0, rect.center().y),
+            egui::vec2(16.0, 16.0),
+        );
+        let cross_response = ui
+            .interact(cross, response.id.with("close"), egui::Sense::click())
+            .on_hover_text("Close");
+        if active || hovered {
+            if cross_response.hovered() {
+                ui.painter().rect_filled(cross, 4, palette.control_active);
+            }
+            ui.painter().text(
+                cross.center(),
+                egui::Align2::CENTER_CENTER,
+                icons::X,
+                egui::FontId::proportional(11.0),
+                if cross_response.hovered() {
+                    palette.text_strong
+                } else {
+                    palette.text_weak
+                },
+            );
+        }
+        closed = cross_response.clicked();
+    }
+    (response, closed)
+}
+
 /// The ID of the code editor's text box for the script at `path`. egui
 /// keeps the cursor and scroll position under it.
 /// The bar above a Script or LocalScript's tab that switches it between
 /// Code and Blocks. Returns true when the other one is picked.
 pub fn mode_bar(ui: &mut egui::Ui, blocks: bool, enabled: bool) -> bool {
     let mut switch = false;
+    let palette = theme::palette(ui.ctx());
     ui.horizontal(|ui| {
         ui.add_enabled_ui(enabled, |ui| {
-            egui::Frame::new()
-                .fill(ui.visuals().extreme_bg_color)
-                .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
-                .corner_radius(8)
-                .inner_margin(egui::Margin::same(2))
-                .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.x = 2.0;
-                    let modes = [
-                        (false, icons::CODE, "Code", "Type the script as Lua."),
-                        (
-                            true,
-                            icons::PUZZLE_PIECE,
-                            "Blocks",
-                            "Snap the script together from blocks. Lua that has no                              blocks shows as grey Lua blocks, so nothing is lost.",
-                        ),
-                    ];
-                    for (is_blocks, icon, label, tip) in modes {
-                        let selected = is_blocks == blocks;
-                        let button = egui::Button::new(theme::with_icon(icon, label))
-                            .selected(selected)
-                            .frame(selected)
-                            .corner_radius(6)
-                            .min_size(egui::vec2(84.0, 24.0));
-                        let response = ui
-                            .add(button)
-                            .on_hover_text(tip)
-                            .on_disabled_hover_text("Press Stop to switch.");
-                        if response.clicked() && !selected {
-                            switch = true;
-                        }
-                    }
-                });
+            let mut picked = blocks;
+            let response = ui
+                .scope(|ui| {
+                    crate::widgets::segmented(
+                        ui,
+                        &mut picked,
+                        &[
+                            (false, Some(icons::CODE), "Code"),
+                            (true, Some(icons::PUZZLE_PIECE), "Blocks"),
+                        ],
+                    )
+                })
+                .response;
+            response
+                .on_hover_text(
+                    "Code: type the script as Lua. Blocks: snap it together from blocks; Lua \
+                     that has no blocks shows as grey Lua blocks, so nothing is lost.",
+                )
+                .on_disabled_hover_text("Press Stop to switch.");
+            switch = picked != blocks;
         });
-        ui.weak("Switch any time: the script runs the same either way.");
+        ui.label(
+            egui::RichText::new("Switch any time: the script runs the same either way.")
+                .size(theme::type_scale::SMALL)
+                .color(palette.text_weak),
+        );
     });
     switch
 }

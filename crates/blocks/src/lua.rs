@@ -107,12 +107,17 @@ pub(crate) fn tokenize(source: &str) -> Result<(Vec<Spanned>, Vec<Range<usize>>)
             };
             let mut text = &source[body_start..body_start + end];
             // A newline straight after the opening bracket isn't part of it.
-            if let Some(rest) = text.strip_prefix("\r\n").or_else(|| text.strip_prefix('\n')) {
+            if let Some(rest) = text
+                .strip_prefix("\r\n")
+                .or_else(|| text.strip_prefix('\n'))
+            {
                 text = rest;
             }
             at = body_start + end + close.len();
             Token::Str(text.to_owned())
-        } else if let Some(symbol) = SYMBOLS.iter().find(|symbol| source[at..].starts_with(**symbol))
+        } else if let Some(symbol) = SYMBOLS
+            .iter()
+            .find(|symbol| source[at..].starts_with(**symbol))
         {
             at += symbol.len();
             Token::Symbol(symbol)
@@ -163,7 +168,9 @@ fn number(source: &str, start: usize) -> (Option<f64>, usize) {
     }
     let text = &source[start..at];
     let value = if hex {
-        i64::from_str_radix(&text[2..], 16).ok().map(|value| value as f64)
+        i64::from_str_radix(&text[2..], 16)
+            .ok()
+            .map(|value| value as f64)
     } else {
         text.parse::<f64>().ok()
     };
@@ -197,7 +204,8 @@ fn quoted(source: &str, start: usize) -> Result<(String, usize), SyntaxError> {
                         }
                     }
                     'x' => {
-                        let digits: String = (0..2).filter_map(|_| chars.next()).map(|c| c.1).collect();
+                        let digits: String =
+                            (0..2).filter_map(|_| chars.next()).map(|c| c.1).collect();
                         match u8::from_str_radix(&digits, 16) {
                             Ok(byte) => value.push(byte as char),
                             Err(_) => return error(source, at, "bad \\x escape"),
@@ -214,7 +222,10 @@ fn quoted(source: &str, start: usize) -> Result<(String, usize), SyntaxError> {
                             }
                             digits.push(next);
                         }
-                        match u32::from_str_radix(&digits, 16).ok().and_then(char::from_u32) {
+                        match u32::from_str_radix(&digits, 16)
+                            .ok()
+                            .and_then(char::from_u32)
+                        {
                             Some(character) => value.push(character),
                             None => return error(source, at, "bad \\u escape"),
                         }
@@ -400,7 +411,11 @@ impl Parser<'_> {
             Token::Eof => "the end of the script".to_owned(),
             _ => format!("`{}`", &self.source[self.tokens[self.at].span.clone()]),
         };
-        error(self.source, self.start(), format!("{message}, found {found}"))
+        error(
+            self.source,
+            self.start(),
+            format!("{message}, found {found}"),
+        )
     }
 
     fn check(&self, symbol: &str) -> bool {
@@ -776,7 +791,8 @@ impl Parser<'_> {
                 self.expect("]")?;
                 self.expect("=")?;
                 self.expression()?;
-            } else if matches!(self.peek(), Token::Name(_)) && self.peek_at(1) == &Token::Symbol("=")
+            } else if matches!(self.peek(), Token::Name(_))
+                && self.peek_at(1) == &Token::Symbol("=")
             {
                 self.next();
                 self.next();
@@ -889,7 +905,6 @@ pub(crate) fn mentions(code: &str, name: &str) -> bool {
     };
     tokens.iter().enumerate().any(|(index, token)| {
         token.token == Token::Name(name.to_owned())
-            && !(index > 0
-                && matches!(tokens[index - 1].token, Token::Symbol("." | ":")))
+            && !(index > 0 && matches!(tokens[index - 1].token, Token::Symbol("." | ":")))
     })
 }

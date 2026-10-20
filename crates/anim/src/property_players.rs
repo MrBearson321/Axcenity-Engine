@@ -61,7 +61,12 @@ impl PropertyPlayers {
 
     /// Advances every Animation under the Workspace by `dt` seconds of game
     /// time (0 evaluates the current time only). Returns script events.
-    pub fn update(&mut self, world: &mut World, assets: &Assets, dt: f64) -> Vec<PropertyAnimationEvent> {
+    pub fn update(
+        &mut self,
+        world: &mut World,
+        assets: &Assets,
+        dt: f64,
+    ) -> Vec<PropertyAnimationEvent> {
         let mut events = Vec::new();
         let animations: Vec<InstanceId> = world
             .descendants(world.workspace())
@@ -114,7 +119,11 @@ impl PropertyPlayers {
             return None;
         }
 
-        if self.loaded.get(&id).is_none_or(|loaded| loaded.path != clip_path) {
+        if self
+            .loaded
+            .get(&id)
+            .is_none_or(|loaded| loaded.path != clip_path)
+        {
             match load_property_clip(assets, &clip_path) {
                 Ok(clip) => {
                     self.loaded.insert(
@@ -136,15 +145,11 @@ impl PropertyPlayers {
                 }
             }
         }
-        let Some(loaded) = self.loaded.get_mut(&id) else {
-            return None;
-        };
+        let loaded = self.loaded.get_mut(&id)?;
         let clip = loaded.clip.clone();
 
         let mut out = Vec::new();
-        let Some(state) = world.property_animation_mut(id) else {
-            return None;
-        };
+        let state = world.property_animation_mut(id)?;
 
         if let Some(time) = state.seek.take() {
             state.time = time.max(0.0);
@@ -187,10 +192,14 @@ impl PropertyPlayers {
                     state.time = next;
                 }
                 let markers = clip.events_between(from, state.time);
-                out.extend(markers.into_iter().map(|name| PropertyAnimationEvent::Marker {
-                    animation: id,
-                    name,
-                }));
+                out.extend(
+                    markers
+                        .into_iter()
+                        .map(|name| PropertyAnimationEvent::Marker {
+                            animation: id,
+                            name,
+                        }),
+                );
             } else {
                 let duration = clip.duration();
                 if next >= duration {
@@ -202,10 +211,14 @@ impl PropertyPlayers {
                     state.time = next;
                 }
                 let markers = clip.events_between(from, state.time);
-                out.extend(markers.into_iter().map(|name| PropertyAnimationEvent::Marker {
-                    animation: id,
-                    name,
-                }));
+                out.extend(
+                    markers
+                        .into_iter()
+                        .map(|name| PropertyAnimationEvent::Marker {
+                            animation: id,
+                            name,
+                        }),
+                );
             }
         }
 
@@ -347,9 +360,9 @@ mod tests {
 
         let events = players.update(&mut world, &assets, 0.51);
         assert!(
-            events
-                .iter()
-                .any(|e| matches!(e, PropertyAnimationEvent::Marker { name, .. } if name == "Halfway")),
+            events.iter().any(
+                |e| matches!(e, PropertyAnimationEvent::Marker { name, .. } if name == "Halfway")
+            ),
             "{events:?}"
         );
         let y = world

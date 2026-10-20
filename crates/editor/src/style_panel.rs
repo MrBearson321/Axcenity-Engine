@@ -145,12 +145,17 @@ pub fn show(
         return None;
     }
     let mut edit = None;
+    let palette = theme::palette(ui.ctx());
+    ui.add_space(4.0);
+    crate::widgets::divider(ui);
     let header = egui::RichText::new(theme::with_icon(icons::PAINT_BRUSH, "Style (CSS)"))
-        .family(theme::heading_family());
+        .family(theme::medium_family())
+        .color(palette.text_secondary);
     egui::CollapsingHeader::new(header)
         .id_salt("style section")
         .default_open(true)
-        .show(ui, |ui| {
+        .icon(crate::widgets::chevron)
+        .show_unindented(ui, |ui| {
             let declarations = axcenity_ui::applied_declarations(world, id, stylesheets);
             if declarations.is_empty() {
                 ui.weak(
@@ -190,8 +195,7 @@ pub fn show(
                 });
                 egui::Grid::new(("style rule", path, selector))
                     .num_columns(2)
-                    .striped(true)
-                    .spacing([12.0, 4.0])
+                    .spacing([10.0, 5.0])
                     .show(ui, |ui| {
                         for declaration in declarations
                             .iter()

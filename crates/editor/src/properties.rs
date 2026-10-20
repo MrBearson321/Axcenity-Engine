@@ -46,7 +46,7 @@ pub struct Section {
 
 /// The groups, in panel order, and which properties go in each. Name and
 /// ClassName come first, under "Data", and aren't in the property map.
-const GROUPS: [(&str, &[&str]); 15] = [
+const GROUPS: [(&str, &[&str]); 18] = [
     (
         "Appearance",
         &[
@@ -66,6 +66,7 @@ const GROUPS: [(&str, &[&str]); 15] = [
         "Part",
         &["Shape", "MeshId", "Position", "Orientation", "Size"],
     ),
+    ("Terrain", &["Position", "Size", "DataFolder"]),
     (
         "Surface",
         &[
@@ -78,6 +79,7 @@ const GROUPS: [(&str, &[&str]); 15] = [
             "AmbientOcclusionMap",
             "OpacityMap",
             "SpecularMap",
+            "HeightMap",
         ],
     ),
     (
@@ -93,6 +95,31 @@ const GROUPS: [(&str, &[&str]); 15] = [
             "OpacityChannel",
             "InvertOpacity",
             "EmissiveStrength",
+        ],
+    ),
+    (
+        "Tiling",
+        &[
+            "TileSize",
+            "TextureRotation",
+            "Triplanar",
+            "AntiTiling",
+            "HeightBlend",
+        ],
+    ),
+    (
+        "Auto Material",
+        &[
+            "AutoEnabled",
+            "MinHeight",
+            "MaxHeight",
+            "HeightFade",
+            "MinSlope",
+            "MaxSlope",
+            "SlopeFade",
+            "RuleStrength",
+            "RuleNoise",
+            "NoiseScale",
         ],
     ),
     (
@@ -211,7 +238,12 @@ pub fn sections(instance: &Instance) -> Vec<Section> {
         .iter()
         .filter(|(title, _)| match *title {
             "Part" => matches!(instance.class(), ClassName::Part | ClassName::MeshPart),
-            "Surface" | "Map Settings" => instance.class() == ClassName::SurfaceAppearance,
+            "Surface" | "Map Settings" => matches!(
+                instance.class(),
+                ClassName::SurfaceAppearance | ClassName::TerrainLayer
+            ),
+            "Terrain" => instance.class() == ClassName::Terrain,
+            "Tiling" | "Auto Material" => instance.class() == ClassName::TerrainLayer,
             "UI" => crate::style_panel::is_styled(instance.class()),
             "Audio" => instance.class() == ClassName::Sound,
             "Shadows" | "Sky" | "Post-processing" => instance.class() == ClassName::Lighting,
@@ -220,10 +252,7 @@ pub fn sections(instance: &Instance) -> Vec<Section> {
                 ClassName::PointLight | ClassName::SpotLight
             ),
             "Emitter" | "Particles" => instance.class() == ClassName::ParticleEmitter,
-            "Animation" => matches!(
-                instance.class(),
-                ClassName::Animator | ClassName::Animation
-            ),
+            "Animation" => matches!(instance.class(), ClassName::Animator | ClassName::Animation),
             "Appearance" | "Behavior" => instance.class() != ClassName::ParticleEmitter,
             _ => true,
         })
@@ -274,18 +303,23 @@ pub fn show(
     selection_count: usize,
     more: impl FnOnce(&mut egui::Ui),
 ) -> Option<Edit> {
+    let palette = theme::palette(ui.ctx());
     if playing {
-        ui.weak(theme::with_icon(
+        notice(
+            ui,
             icons::INFO,
             "Changes made during Play are undone at Stop.",
-        ));
+        );
     }
     if selection_count > 1 {
-        ui.weak(format!(
-            "{selection_count} selected. Properties are for the last one clicked. Delete and Duplicate apply to all of them."
-        ));
+        notice(
+            ui,
+            icons::STACK,
+            &format!(
+                "{selection_count} selected. Properties are for the last one clicked. Delete and Duplicate apply to all of them."
+            ),
+        );
     }
-    ui.separator();
     let mut edit = None;
     // The scroll area fills the panel even when nothing is selected. Without
     // it the panel would shrink to fit one line of text and stay that small.
@@ -293,15 +327,51 @@ pub fn show(
         .auto_shrink(false)
         .show(ui, |ui| {
             let Some((id, instance)) = selected.and_then(|id| Some((id, world.get(id)?))) else {
-                ui.weak("Select something in the Explorer or the viewport to see its properties.");
+                ui.add_space(24.0);
+                ui.vertical_centered(|ui| {
+                    ui.label(
+                        egui::RichText::new(icons::CURSOR_CLICK)
+                            .size(22.0)
+                            .color(palette.text_muted),
+                    );
+                    ui.label(
+                        egui::RichText::new(
+                            "Select something in the Explorer or the viewport to see its \
+                             properties.",
+                        )
+                        .color(palette.text_weak),
+                    );
+                });
                 return;
             };
+            // What's selected, so it's clear what the fields below change.
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(theme::class_icon(instance.class()))
+                        .size(16.0)
+                        .color(theme::class_color(instance.class(), ui.visuals())),
+                );
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(instance.name())
+                            .family(theme::heading_family())
+                            .color(palette.text_strong),
+                    )
+                    .truncate(),
+                );
+                ui.label(
+                    egui::RichText::new(instance.class().as_str())
+                        .size(theme::type_scale::SMALL)
+                        .color(palette.text_weak),
+                );
+            });
+            ui.add_space(2.0);
             // Widgets remember things such as half-typed numbers by ID. Mixing in
             // the selection gives each Instance its own, so nothing typed for one
             // part turns up on the next one selected.
             ui.push_id(id, |ui| {
                 section(ui, "Data", |ui| {
-                    ui.label("Name");
+                    field_name(ui, "Name");
                     let mut name = instance.name().to_string();
                     if can_rename_here(instance) {
                         if ui.text_edit_singleline(&mut name).changed() {
@@ -317,7 +387,7 @@ pub fn show(
                             .on_disabled_hover_text(hint);
                     }
                     ui.end_row();
-                    ui.label("ClassName");
+                    field_name(ui, "ClassName");
                     ui.label(instance.class().as_str());
                     ui.end_row();
                 });
@@ -325,7 +395,7 @@ pub fn show(
                 for group in sections(instance) {
                     section(ui, group.title, |ui| {
                         for (name, value) in group.properties {
-                            ui.label(name);
+                            field_name(ui, name);
                             if let Some(made) = value_control(ui, name, value) {
                                 edit = Some(made);
                             }
@@ -359,6 +429,9 @@ fn section(ui: &mut egui::Ui, title: &str, rows: impl FnOnce(&mut egui::Ui)) {
         "Part" => icons::CUBE,
         "Surface" => icons::IMAGE,
         "Map Settings" => icons::SLIDERS,
+        "Terrain" => icons::MOUNTAINS,
+        "Tiling" => icons::GRID_FOUR,
+        "Auto Material" => icons::MAGIC_WAND,
         "UI" => icons::LAYOUT,
         "Audio" => icons::SPEAKER_HIGH,
         "Shadows" => icons::SUN,
@@ -367,17 +440,57 @@ fn section(ui: &mut egui::Ui, title: &str, rows: impl FnOnce(&mut egui::Ui)) {
         "Light" => icons::LIGHTBULB,
         _ => icons::DOTS_THREE_OUTLINE,
     };
-    let header = egui::RichText::new(theme::with_icon(icon, title)).family(theme::heading_family());
+    let palette = theme::palette(ui.ctx());
+    ui.add_space(4.0);
+    crate::widgets::divider(ui);
+    let header = egui::RichText::new(theme::with_icon(icon, title))
+        .family(theme::medium_family())
+        .color(palette.text_secondary);
+    // Every section's names take the same width, so the fields line up
+    // from one section to the next.
+    let name_width = (ui.available_width() * 0.38).clamp(84.0, 150.0);
     egui::CollapsingHeader::new(header)
         .id_salt(title)
         .default_open(true)
-        .show(ui, |ui| {
+        .icon(crate::widgets::chevron)
+        .show_unindented(ui, |ui| {
             egui::Grid::new(title)
                 .num_columns(2)
-                .striped(true)
-                .spacing([12.0, 4.0])
+                .min_col_width(name_width)
+                .spacing([10.0, 5.0])
                 .show(ui, rows);
         });
+}
+
+/// A property's name, in the left column.
+fn field_name(ui: &mut egui::Ui, name: &str) {
+    let palette = theme::palette(ui.ctx());
+    ui.add(egui::Label::new(egui::RichText::new(name).color(palette.text_secondary)).truncate());
+}
+
+/// A note above the properties, such as during Play.
+fn notice(ui: &mut egui::Ui, icon: &str, text: &str) {
+    let palette = theme::palette(ui.ctx());
+    egui::Frame::new()
+        .fill(palette.surface)
+        .stroke(egui::Stroke::new(1.0_f32, palette.border))
+        .corner_radius(6)
+        .inner_margin(egui::Margin::symmetric(8, 5))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal_top(|ui| {
+                ui.label(egui::RichText::new(icon).color(palette.text_weak));
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(text)
+                            .size(theme::type_scale::SMALL)
+                            .color(palette.text_secondary),
+                    )
+                    .wrap(),
+                );
+            });
+        });
+    ui.add_space(4.0);
 }
 
 /// Draws the control for one property and returns the edit if the user
@@ -388,6 +501,16 @@ fn value_control(ui: &mut egui::Ui, name: &'static str, value: Value) -> Option<
         Value::String(path) if name == "SoundId" => sound_control(ui, &path),
         Value::String(path) if name == "Controller" => controller_control(ui, &path),
         Value::String(path) if name == "Clip" => clip_control(ui, &path),
+        // Picked by the editor; the Terrain Studio says where it is.
+        Value::String(path) if name == "DataFolder" => {
+            ui.label(if path.is_empty() {
+                "(chosen on save)"
+            } else {
+                path.as_str()
+            })
+            .on_hover_text("Where this terrain's heights and paint are saved, in the project.");
+            None
+        }
         value => value_edit(ui, name, value).map(|value| Edit::Property(name, value)),
     }
 }
@@ -654,14 +777,22 @@ fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
 }
 
 /// A color swatch that opens a color picker, with the 0–255 values beside it.
-fn color_control(ui: &mut egui::Ui, color: Color3) -> Option<Color3> {
+pub(crate) fn color_control(ui: &mut egui::Ui, color: Color3) -> Option<Color3> {
     // `Color3` is sRGB, but egui's float color picker works in linear light,
     // so convert there and back.
     use egui::ecolor::{gamma_from_linear, linear_from_gamma};
     let mut linear = [color.r, color.g, color.b].map(linear_from_gamma);
     let mut picked = None;
     ui.horizontal(|ui| {
-        if ui.color_edit_button_rgb(&mut linear).changed() {
+        let swatch = ui.color_edit_button_rgb(&mut linear);
+        // A thin outline, so white shows on a white panel and black on black.
+        ui.painter().rect_stroke(
+            swatch.rect,
+            2,
+            egui::Stroke::new(1.0_f32, theme::palette(ui.ctx()).border_strong),
+            egui::StrokeKind::Inside,
+        );
+        if swatch.changed() {
             let [r, g, b] = linear.map(gamma_from_linear);
             picked = Some(Color3::new(r, g, b));
         }

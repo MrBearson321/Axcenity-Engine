@@ -228,7 +228,13 @@ impl EditorApp {
         render_state: Option<&RenderState>,
     ) -> ViewportOutput {
         let ctx = ui.ctx().clone();
+        let palette = theme::palette(&ctx);
         let close_tab = egui::TopBottomPanel::top("tabs")
+            .frame(
+                egui::Frame::new()
+                    .fill(palette.panel)
+                    .inner_margin(egui::Margin::symmetric(4, 0)),
+            )
             .show_inside(ui, |ui| self.tabs.tab_bar(ui))
             .inner;
         if let Some(path) = close_tab {
@@ -245,7 +251,8 @@ impl EditorApp {
             let playing = self.playing();
             let switch = egui::TopBottomPanel::top("script mode")
                 .frame(
-                    egui::Frame::side_top_panel(&ctx.style())
+                    egui::Frame::new()
+                        .fill(palette.panel)
                         .inner_margin(egui::Margin::symmetric(10, 5)),
                 )
                 .show_inside(ui, |ui| scripts::mode_bar(ui, blocks, !playing))
@@ -264,6 +271,7 @@ impl EditorApp {
         // No tool during Play, so nothing can be dragged.
         let tool = (!self.playing()).then_some(self.tool);
         let preview = self.angular_preview();
+        let terrain_brush = self.terrain_brush_view(&ctx);
         let active_block_path = self
             .tabs
             .active_path()
@@ -293,6 +301,7 @@ impl EditorApp {
                                 focused_text: self.focused_text,
                                 light_cones: self.light_cones,
                                 poses: self.play.as_ref().map(Session::poses),
+                                terrain_brush,
                             },
                         )
                     }
@@ -365,8 +374,14 @@ impl EditorApp {
             Default::default()
         }
     }
+    /// The header: the logo, the menus, and at the right the project's
+    /// name, whether it has unsaved changes, Play's badge and Settings.
     pub(super) fn menu_bar(&mut self, ui: &mut egui::Ui) {
+        let palette = theme::palette(ui.ctx());
         egui::MenuBar::new().ui(ui, |ui| {
+            let (mark, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
+            widgets::paint_mark(ui.painter(), mark.shrink(1.0), palette.text_strong);
+            ui.add_space(4.0);
             ui.menu_button("File", |ui| {
                 if ui
                     .button(theme::with_icon(icons::FOLDER_OPEN, "Open Project…"))
@@ -502,6 +517,12 @@ impl EditorApp {
                     self.set_up_autocomplete();
                 }
                 ui.separator();
+                let settings = egui::Button::new(theme::with_icon(icons::GEAR_SIX, "Settings…"))
+                    .shortcut_text(ui.ctx().format_shortcut(&settings::SETTINGS_SHORTCUT));
+                if ui.add(settings).clicked() {
+                    self.settings.open = true;
+                }
+                ui.separator();
                 if ui
                     .button(theme::with_icon(icons::SIGN_OUT, "Quit"))
                     .clicked()
@@ -576,23 +597,30 @@ impl EditorApp {
             });
             ui.menu_button("View", |ui| {
                 ui.weak("Theme");
-                for (preference, icon, label) in [
-                    (egui::ThemePreference::Dark, icons::MOON, "Dark"),
-                    (egui::ThemePreference::Light, icons::SUN, "Light"),
-                    (
-                        egui::ThemePreference::System,
-                        icons::DESKTOP,
-                        "Match System",
-                    ),
-                ] {
+                for choice in theme::ThemeChoice::ALL {
+                    let label = match choice {
+                        theme::ThemeChoice::System => "Match System",
+                        other => other.label(),
+                    };
                     let item = egui::Button::selectable(
-                        self.theme == preference,
-                        theme::with_icon(icon, label),
+                        self.appearance.theme == choice,
+                        theme::with_icon(choice.icon(), label),
                     );
                     if ui.add(item).clicked() {
-                        self.theme = preference;
-                        ui.ctx().set_theme(preference);
+                        let appearance = theme::Appearance {
+                            theme: choice,
+                            ..self.appearance.clone()
+                        };
+                        self.set_appearance(ui.ctx(), appearance);
                     }
+                }
+                if ui
+                    .button(theme::with_icon(icons::PALETTE, "Appearance…"))
+                    .on_hover_text("Accent colour, density, text size and motion.")
+                    .clicked()
+                {
+                    self.settings.open = true;
+                    self.settings.page = settings::SettingsPage::Appearance;
                 }
                 ui.separator();
                 ui.weak("Panels");
@@ -667,11 +695,33 @@ impl EditorApp {
                 }
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if self.unsaved() {
-                    ui.weak(theme::with_icon(icons::FLOPPY_DISK, "Unsaved changes"));
+                ui.spacing_mut().item_spacing.x = 10.0;
+                if widgets::icon_button(ui, icons::GEAR_SIX, "Settings", self.settings.open)
+                    .clicked()
+                {
+                    self.settings.open = !self.settings.open;
                 }
                 if self.playing() {
                     playing_badge(ui);
+                }
+                if let Some(name) = self.project.as_ref().map(|project| project.name.clone()) {
+                    if self.unsaved() {
+                        ui.label(
+                            egui::RichText::new(filled_icons::CIRCLE)
+                                .family(theme::filled())
+                                .size(7.0)
+                                .color(palette.text_secondary),
+                        )
+                        .on_hover_text("Unsaved changes");
+                    }
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(name)
+                                .family(theme::medium_family())
+                                .color(palette.text_secondary),
+                        )
+                        .truncate(),
+                    );
                 }
             });
         });
@@ -680,14 +730,15 @@ impl EditorApp {
     /// settings, then buttons that insert each primitive and each kind of script.
     pub(super) fn toolbar(&mut self, ui: &mut egui::Ui) {
         self.ribbon_tabs.tab_bar(ui);
-        ui.add_space(2.0);
+        ui.add_space(4.0);
         let mut clicks = RibbonClicks::default();
         let groups = self.ribbon_tabs.groups();
         egui::ScrollArea::horizontal().show(ui, |ui| {
             ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
                 for (index, &group) in groups.iter().enumerate() {
                     if index > 0 {
-                        ui.separator();
+                        ui.add(egui::Separator::default().vertical().spacing(10.0));
                     }
                     self.ribbon_group(ui, group, &mut clicks);
                 }
@@ -722,9 +773,10 @@ impl EditorApp {
         let can_play = self.project.is_some();
         match group {
             RibbonGroup::Game => ribbon::group(ui, "Game", |ui| {
+                let palette = theme::palette(ui.ctx());
                 let play_button = RibbonButton::new(filled_icons::PLAY, "Play")
                     .family(theme::filled())
-                    .color(theme::PLAY_GREEN);
+                    .color(palette.success);
                 clicks.play = ui
                     .add_enabled(!playing && can_play, play_button)
                     .on_hover_text(format!(
@@ -739,7 +791,7 @@ impl EditorApp {
                     .clicked();
                 let stop_button = RibbonButton::new(filled_icons::STOP, "Stop")
                     .family(theme::filled())
-                    .color(theme::STOP_RED);
+                    .color(palette.error);
                 clicks.stop = ui
                     .add_enabled(playing, stop_button)
                     .on_hover_text(format!(
@@ -810,9 +862,7 @@ impl EditorApp {
                          Model or Folder if there is one.",
                         what.label().to_lowercase()
                     );
-                    let color = theme::class_color(what.class(), ui.visuals());
-                    let button =
-                        RibbonButton::new(theme::insert_icon(what), what.label()).color(color);
+                    let button = RibbonButton::new(theme::insert_icon(what), what.label());
                     if ui
                         .add_enabled(!playing, button)
                         .on_hover_text(hover)
@@ -825,8 +875,7 @@ impl EditorApp {
             }),
             RibbonGroup::Effects => ribbon::group(ui, "Effects", |ui| {
                 for what in Insertable::AUDIO {
-                    let button = RibbonButton::new(theme::insert_icon(what), what.label())
-                        .color(theme::class_color(what.class(), ui.visuals()));
+                    let button = RibbonButton::new(theme::insert_icon(what), what.label());
                     if ui
                         .add_enabled(!playing, button)
                         .on_hover_text("Insert a Sound into the selected part or the Workspace.")
@@ -837,8 +886,7 @@ impl EditorApp {
                     }
                 }
                 for what in Insertable::EFFECTS {
-                    let button = RibbonButton::new(theme::insert_icon(what), what.label())
-                        .color(theme::class_color(what.class(), ui.visuals()));
+                    let button = RibbonButton::new(theme::insert_icon(what), what.label());
                     if ui
                         .add_enabled(!playing, button)
                         .on_hover_text(
@@ -852,8 +900,7 @@ impl EditorApp {
                     }
                 }
                 for what in Insertable::LIGHTS {
-                    let button = RibbonButton::new(theme::insert_icon(what), what.label())
-                        .color(theme::class_color(what.class(), ui.visuals()));
+                    let button = RibbonButton::new(theme::insert_icon(what), what.label());
                     if ui
                         .add_enabled(!playing, button)
                         .on_hover_text("Insert a light into the selected part.")
@@ -865,8 +912,7 @@ impl EditorApp {
                 }
             }),
             RibbonGroup::Import => ribbon::group(ui, "Import", |ui| {
-                let color = theme::class_color(ClassName::MeshPart, ui.visuals());
-                let button = RibbonButton::new(icons::FILE_ARROW_DOWN, "Import").color(color);
+                let button = RibbonButton::new(icons::FILE_ARROW_DOWN, "Import");
                 clicks.import = ui
                     .add_enabled(!playing, button)
                     .on_hover_text(IMPORT_HOVER)
@@ -914,8 +960,7 @@ impl EditorApp {
                             what.label()
                         ),
                     };
-                    let button = RibbonButton::new(theme::insert_icon(what), label)
-                        .color(theme::class_color(what.class(), ui.visuals()));
+                    let button = RibbonButton::new(theme::insert_icon(what), label);
                     if ui
                         .add_enabled(!playing, button)
                         .on_hover_text(hover)
@@ -928,9 +973,7 @@ impl EditorApp {
             }),
             RibbonGroup::Scripts => ribbon::group(ui, "Scripts", |ui| {
                 for class in explorer::SCRIPT_CLASSES {
-                    let color = theme::class_color(class, ui.visuals());
-                    let button =
-                        RibbonButton::new(theme::class_icon(class), class.as_str()).color(color);
+                    let button = RibbonButton::new(theme::class_icon(class), class.as_str());
                     if ui
                         .add_enabled(!playing && can_play, button)
                         .on_hover_text(explorer::script_hover(class))
@@ -942,6 +985,42 @@ impl EditorApp {
                         .clicked()
                     {
                         clicks.insert_script = Some(class);
+                    }
+                }
+            }),
+            RibbonGroup::Terrain => ribbon::group(ui, "Terrain", |ui| {
+                use crate::terrain_studio::TerrainTool;
+                let editor = RibbonButton::new(icons::MOUNTAINS, "Terrain")
+                    .selected(self.layout.is_open(Pane::Terrain));
+                if ui
+                    .add_enabled(can_play, editor)
+                    .on_hover_text(
+                        "Open the Terrain Studio: make, sculpt, paint and generate terrain.",
+                    )
+                    .on_disabled_hover_text("Open a project first.")
+                    .clicked()
+                {
+                    self.layout.open(Pane::Terrain);
+                }
+                for tool in [
+                    TerrainTool::Raise,
+                    TerrainTool::Paint,
+                    TerrainTool::Generate,
+                ] {
+                    let button = RibbonButton::new(tool.icon(), tool.label())
+                        .selected(self.terrain.tool == Some(tool));
+                    if ui
+                        .add_enabled(!playing && can_play, button)
+                        .on_hover_text(tool.hint())
+                        .on_disabled_hover_text(if playing {
+                            "Press Stop to edit."
+                        } else {
+                            "Open a project first."
+                        })
+                        .clicked()
+                    {
+                        self.terrain.tool = Some(tool);
+                        self.layout.open(Pane::Terrain);
                     }
                 }
             }),
@@ -1163,25 +1242,36 @@ impl EditorApp {
     }
 }
 
-/// `a`, `b` and `c`, each in backticks.
-/// The green "Playing" badge in the menu bar during Play.
+/// The green "Playing" badge in the header during Play, with a dot that
+/// pulses gently (steady when motion is reduced).
 pub(super) fn playing_badge(ui: &mut egui::Ui) {
+    let palette = theme::palette(ui.ctx());
+    let green = palette.success;
+    let pulse = if ui.ctx().style().animation_time > 0.0 {
+        let time = ui.input(|input| input.time);
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(50));
+        0.6 + 0.4 * (time * 2.5).sin().abs() as f32
+    } else {
+        1.0
+    };
     egui::Frame::new()
-        .fill(theme::PLAY_GREEN.gamma_multiply(0.2))
-        .corner_radius(10)
+        .fill(green.gamma_multiply(0.14))
+        .corner_radius(9)
         .inner_margin(egui::Margin::symmetric(8, 1))
         .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            ui.label(
-                egui::RichText::new("Playing")
-                    .color(theme::PLAY_GREEN)
-                    .strong(),
-            );
+            ui.spacing_mut().item_spacing.x = 5.0;
             ui.label(
                 egui::RichText::new(filled_icons::CIRCLE)
                     .family(theme::filled())
-                    .size(9.0)
-                    .color(theme::PLAY_GREEN),
+                    .size(7.0)
+                    .color(green.gamma_multiply(pulse)),
+            );
+            ui.label(
+                egui::RichText::new("Playing")
+                    .family(theme::medium_family())
+                    .size(theme::type_scale::SMALL)
+                    .color(green),
             );
         })
         .response

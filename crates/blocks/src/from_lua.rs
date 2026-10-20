@@ -80,10 +80,12 @@ fn service_declaration(stat: &Stat) -> Option<String> {
     };
     let is_game = matches!(&object.kind, ExprKind::Name(game) if game == "game");
     let service = match args.as_slice() {
-        [Expr {
-            kind: ExprKind::Str(service),
-            ..
-        }] => service,
+        [
+            Expr {
+                kind: ExprKind::Str(service),
+                ..
+            },
+        ] => service,
         _ => return None,
     };
     (is_game && method == "GetService" && service == name && SERVICES.contains(&name.as_str()))
@@ -161,7 +163,11 @@ impl<'a> Converter<'a> {
         let column = self.source[line_start..span.start].chars().count();
         let text = &self.source[span];
         let mut lines = text.split('\n');
-        let mut result = lines.next().unwrap_or_default().trim_end_matches('\r').to_owned();
+        let mut result = lines
+            .next()
+            .unwrap_or_default()
+            .trim_end_matches('\r')
+            .to_owned();
         for line in lines {
             let line = line.trim_end_matches('\r');
             let spaces = line
@@ -354,7 +360,11 @@ impl<'a> Converter<'a> {
                 let function = self.handler(handler, 2)?;
                 let body = self.body(&function.body, Scope::default());
                 // The blocks can't use the handler's parameters.
-                if function.params.iter().any(|param| code_mentions(&body, param)) {
+                if function
+                    .params
+                    .iter()
+                    .any(|param| code_mentions(&body, param))
+                {
                     return None;
                 }
                 Some(Block::new(BlockKind::WhenStateChanged { animator, body }))
@@ -861,9 +871,9 @@ impl<'a> Converter<'a> {
             ExprKind::Name(name) if scope.touched == Some(name.as_str()) => {
                 Expression::TouchingPart
             }
-            ExprKind::Name(name) if self.variables.contains(name) => Expression::Variable {
-                name: name.clone(),
-            },
+            ExprKind::Name(name) if self.variables.contains(name) => {
+                Expression::Variable { name: name.clone() }
+            }
             ExprKind::Binary(op, left, right) => {
                 let math = match *op {
                     "+" => Some(MathOp::Add),
@@ -896,7 +906,11 @@ impl<'a> Converter<'a> {
                         right: boxed(right),
                     }
                 } else if *op == "and" || *op == "or" {
-                    let op = if *op == "and" { LogicOp::And } else { LogicOp::Or };
+                    let op = if *op == "and" {
+                        LogicOp::And
+                    } else {
+                        LogicOp::Or
+                    };
                     Expression::Logic {
                         op,
                         left: Box::new(self.condition(left, scope)),
@@ -1086,4 +1100,3 @@ fn code_mentions(blocks: &[Block], name: &str) -> bool {
             .any(|body| code_mentions(body, name))
     })
 }
-

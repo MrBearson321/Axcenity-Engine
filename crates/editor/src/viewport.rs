@@ -22,6 +22,11 @@
 //! to move and resize it, and a drag snaps to other UI edges and centers
 //! (see `ui_handles.rs`).
 //!
+//! With a Terrain Studio brush (see `terrain_studio.rs`), the left button
+//! sculpts or paints the terrain instead: the brush shows on the ground
+//! under the mouse, and nothing is selected or dragged. The camera works
+//! as always (right-drag, Alt+left-drag, the wheel, WASD).
+//!
 //! During Play there's no tool: the camera and selecting still work, but
 //! nothing can be dragged.
 
@@ -30,7 +35,7 @@ use axcenity_core::{InstanceId, Value, World};
 use axcenity_render::TextureRenderer;
 use axcenity_render::glam::Vec3;
 use axcenity_render::wgpu;
-use axcenity_scene::{FlyCamera, LightMarker, MoveKeys, Particles};
+use axcenity_scene::{FlyCamera, LightMarker, MoveKeys, Particles, TerrainCache};
 use axcenity_ui::{Stylesheet, UiLayout, UiRect};
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
@@ -123,6 +128,38 @@ pub struct ViewportOutput {
     /// Where something dragged from another panel (an asset) would land,
     /// while it's over the viewport.
     pub drop: Option<DropTarget>,
+    /// The mouse over the terrain being brushed, while a Terrain Studio
+    /// brush is on.
+    pub terrain: Option<TerrainPointer>,
+}
+
+/// A Terrain Studio brush, as the viewport shows it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TerrainBrush {
+    pub terrain: InstanceId,
+    /// Studs from the middle to the rim.
+    pub radius: f32,
+    /// 0 to 1: how much of the radius fades.
+    pub falloff: f32,
+    pub square: bool,
+    pub color: egui::Color32,
+}
+
+/// The mouse and left button over the terrain being brushed this frame.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TerrainPointer {
+    /// The ground under the mouse, if it's over the terrain.
+    pub point: Option<Vec3>,
+    /// The left button went down this frame (starting a stroke).
+    pub pressed: bool,
+    /// A stroke is under way: the button went down over the viewport and
+    /// hasn't been let go.
+    pub down: bool,
+    /// The stroke ended this frame.
+    pub released: bool,
+    pub modifiers: egui::Modifiers,
+    /// Seconds since the last frame.
+    pub seconds: f32,
 }
 
 /// What's under the mouse while an asset is dragged over the viewport.
@@ -164,6 +201,8 @@ pub struct ViewportScene<'a> {
     pub light_cones: bool,
     /// Animated MeshParts' poses during Play; `None` draws every model still.
     pub poses: Option<&'a axcenity_scene::Poses>,
+    /// A Terrain Studio brush, which takes the left button while it's on.
+    pub terrain_brush: Option<TerrainBrush>,
 }
 
 /// What the left button holds, from going down on it until it's let go.
@@ -267,6 +306,12 @@ pub struct Viewport {
     drag: Option<Dragging>,
     /// The ParticleEmitters' particles, shown while editing and during Play.
     particles: Particles,
+    /// True from the left button going down with a terrain brush until
+    /// it's let go.
+    terrain_stroke: bool,
+    /// Terrains' chunk meshes and weights, kept between frames, and the
+    /// Terrain Studio's previews and views.
+    pub terrain: TerrainCache,
 }
 
 /// The texture the scene is drawn into, and egui's name for it.
@@ -285,6 +330,8 @@ impl Viewport {
             speed_changed_at: None,
             drag: None,
             particles: Particles::new(),
+            terrain_stroke: false,
+            terrain: TerrainCache::new(),
         }
     }
 
@@ -329,9 +376,10 @@ impl Viewport {
         self.camera = FlyCamera::looking_at(position, target);
     }
 
-    /// True while a part or a handle is being dragged.
+    /// True while a part or a handle is being dragged, or a terrain stroke
+    /// is under way.
     pub fn is_dragging(&self) -> bool {
-        self.drag.is_some()
+        self.drag.is_some() || self.terrain_stroke
     }
 
     /// Fills `ui` with the viewport: moves the camera from this frame's
@@ -359,7 +407,11 @@ impl Viewport {
             focused_text,
             light_cones,
             poses,
+            terrain_brush,
         } = scene;
+        // A brush takes the left button: no handles, dragging or picking.
+        let brush = terrain_brush.filter(|_| tool.is_some());
+        let drag_tool = if brush.is_some() { None } else { tool };
         let size = ui.available_size();
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
         self.handle_input(ui, &response, rect.height());
@@ -440,19 +492,20 @@ impl Viewport {
                 selection,
                 modes,
             },
-            tool,
+            drag_tool,
             snap,
             &ui_scene,
             stylesheets,
         );
         let modifiers = ui.input(|input| input.modifiers);
+        let terrain = brush.map(|brush| self.terrain_input(ui, &response, &screen, world, brush));
         let clicked = match drag.grabbed {
             Some(part) => Some(Clicked {
                 part: Some(part),
                 modifiers,
                 keep_group: selection.contains(&part),
             }),
-            None if drag.in_use => None,
+            None if drag.in_use || brush.is_some() => None,
             None => self.clicked_part(ui, &response, &screen, world, &ui_scene, &lights),
         };
         let playing = tool.is_none() && response.clicked_by(egui::PointerButton::Primary);
@@ -504,7 +557,8 @@ impl Viewport {
         }
         let still = axcenity_scene::Poses::new();
         let poses = poses.unwrap_or(&still);
-        let mut draw_list = axcenity_scene::build_draw_list_posed(world, assets, camera, poses);
+        let mut draw_list =
+            axcenity_scene::build_draw_list_posed(world, assets, camera, poses, &mut self.terrain);
         draw_list.sprites = self.particles.sprites(world, assets);
         draw_list.ui = ui_layout.draw_items.clone();
         axcenity_scene::attach_ui_textures(&mut draw_list.ui, assets);
@@ -552,6 +606,9 @@ impl Viewport {
             }
         }
         gizmo::paint(&ui.painter_at(rect), &drag.shapes, drag.highlighted);
+        if let (Some(brush), Some(point)) = (brush, terrain.and_then(|t| t.point)) {
+            paint_terrain_brush(&ui.painter_at(rect), &screen, world, brush, point);
+        }
         // Handles only show with a tool, so not during Play, but the
         // outline always does.
         if let Some(handles) = &handles {
@@ -610,6 +667,55 @@ impl Viewport {
             ui_drag: drag.ui_edit,
             drag_released: drag.released,
             drop,
+            terrain,
+        }
+    }
+
+    /// The mouse and left button over the terrain `brush` works on.
+    fn terrain_input(
+        &mut self,
+        ui: &egui::Ui,
+        response: &egui::Response,
+        screen: &Screen,
+        world: &World,
+        brush: TerrainBrush,
+    ) -> TerrainPointer {
+        let (pressed, down, pointer, modifiers, seconds) = ui.input(|input| {
+            (
+                input.pointer.primary_pressed(),
+                input.pointer.primary_down(),
+                input.pointer.latest_pos(),
+                input.modifiers,
+                input.stable_dt.min(MAX_FRAME_SECONDS),
+            )
+        });
+        let over = pointer.filter(|_| response.contains_pointer());
+        let point =
+            over.and_then(|pointer| ground_point(world, brush.terrain, screen.ray(pointer)));
+        // Alt+left-drag orbits the camera instead.
+        let pressed = pressed && over.is_some() && !modifiers.alt;
+        if pressed {
+            self.terrain_stroke = true;
+        }
+        let released = self.terrain_stroke && !down;
+        if released {
+            self.terrain_stroke = false;
+        }
+        if over.is_some() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+        }
+        // Held still, a stroke keeps working (raising, smoothing), so keep
+        // drawing frames.
+        if self.terrain_stroke {
+            ui.ctx().request_repaint();
+        }
+        TerrainPointer {
+            point,
+            pressed,
+            down: self.terrain_stroke,
+            released,
+            modifiers,
+            seconds,
         }
     }
 
@@ -758,6 +864,8 @@ impl Viewport {
         } else if body_drag
             && let Some(origin) = press_origin
             && let Some(hit) = axcenity_scene::pick_hit(world, screen.ray(origin), None)
+            // Terrain is ground, not something to carry around.
+            && world.get(hit.part).map(|i| i.class()) != Some(axcenity_core::ClassName::Terrain)
             && let Some(mut place) =
                 PlaceDrag::start(world, hit.part, screen.ray(origin).at(hit.distance))
         {
@@ -886,15 +994,26 @@ impl Viewport {
         ui.ctx().request_repaint();
 
         let painter = ui.painter_at(rect);
+        // A dark scrim, not the theme's colours: it has to read over
+        // whatever the scene shows.
         let galley = painter.layout_no_wrap(
             speed_label(self.camera.speed()),
-            egui::FontId::proportional(18.0),
+            egui::FontId::new(15.0, crate::theme::medium_family()),
             egui::Color32::WHITE.gamma_multiply(opacity),
         );
         let background =
-            egui::Rect::from_center_size(rect.center(), galley.size() + egui::vec2(28.0, 16.0));
-        let shade = egui::Color32::from_black_alpha((170.0 * opacity) as u8);
-        painter.rect_filled(background, 6.0, shade);
+            egui::Rect::from_center_size(rect.center(), galley.size() + egui::vec2(28.0, 14.0));
+        let shade = egui::Color32::from_black_alpha((160.0 * opacity) as u8);
+        painter.rect_filled(background, 8.0, shade);
+        painter.rect_stroke(
+            background,
+            8.0,
+            egui::Stroke::new(
+                1.0_f32,
+                egui::Color32::from_white_alpha((28.0 * opacity) as u8),
+            ),
+            egui::StrokeKind::Inside,
+        );
         painter.galley(
             rect.center() - galley.size() / 2.0,
             galley,
@@ -1176,6 +1295,87 @@ fn paint_light_reach(
         if let Some(at) = screen.point(lifted) {
             painter.circle_filled(at, 3.0, color.gamma_multiply(strength));
         }
+    }
+}
+
+/// Where `ray` meets the ground of the Terrain `terrain`.
+pub fn ground_point(world: &World, terrain: InstanceId, ray: axcenity_scene::Ray) -> Option<Vec3> {
+    let placement = axcenity_terrain::Placement::of(world.get(terrain)?)?;
+    let data = world.terrain(terrain)?;
+    let distance = axcenity_terrain::raycast::raycast(data, &placement, ray.origin, ray.direction)?;
+    Some(ray.at(distance))
+}
+
+/// The brush's rim (and the inner edge of its fade, fainter) laid on the
+/// ground around `center`, and a dot in the middle.
+fn paint_terrain_brush(
+    painter: &egui::Painter,
+    screen: &Screen,
+    world: &World,
+    brush: TerrainBrush,
+    center: Vec3,
+) {
+    let ground = world.get(brush.terrain).and_then(|instance| {
+        Some((
+            axcenity_terrain::Placement::of(instance)?,
+            world.terrain(brush.terrain)?.clone(),
+        ))
+    });
+    let on_ground = |x: f32, z: f32| {
+        let y = ground
+            .as_ref()
+            .and_then(|(placement, data)| placement.ground_y(data, x, z))
+            .unwrap_or(center.y);
+        // A little above, so the line isn't hidden in the ground.
+        Vec3::new(x, y + 0.05, z)
+    };
+    let outline = |radius: f32| -> Vec<Vec3> {
+        const SEGMENTS: usize = 72;
+        (0..=SEGMENTS)
+            .map(|i| {
+                let t = i as f32 / SEGMENTS as f32;
+                let (x, z) = if brush.square {
+                    // Round the square's edge, a quarter per side.
+                    let side = (t * 4.0).floor().min(3.0);
+                    let along = t * 4.0 - side;
+                    let s = along * 2.0 - 1.0;
+                    match side as u8 {
+                        0 => (s, -1.0),
+                        1 => (1.0, s),
+                        2 => (-s, 1.0),
+                        _ => (-1.0, -s),
+                    }
+                } else {
+                    let angle = t * std::f32::consts::TAU;
+                    (angle.cos(), angle.sin())
+                };
+                on_ground(center.x + x * radius, center.z + z * radius)
+            })
+            .collect()
+    };
+    let draw = |points: Vec<Vec3>, stroke: egui::Stroke| {
+        for pair in points.windows(2) {
+            if let Some(line) = screen.line(pair[0], pair[1]) {
+                painter.line_segment(line, stroke);
+            }
+        }
+    };
+    // A dark line under a bright one, so it reads on any ground.
+    let shadow = egui::Stroke::new(3.5_f32, egui::Color32::from_black_alpha(110));
+    draw(outline(brush.radius), shadow);
+    draw(
+        outline(brush.radius),
+        egui::Stroke::new(1.6_f32, brush.color),
+    );
+    let inner = brush.radius * (1.0 - brush.falloff.clamp(0.0, 1.0));
+    if inner > 0.05 && brush.falloff > 0.02 {
+        draw(
+            outline(inner),
+            egui::Stroke::new(1.0_f32, brush.color.gamma_multiply(0.55)),
+        );
+    }
+    if let Some(at) = screen.point(on_ground(center.x, center.z)) {
+        painter.circle_filled(at, 3.0, brush.color);
     }
 }
 

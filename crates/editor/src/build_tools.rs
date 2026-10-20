@@ -165,7 +165,7 @@ pub fn panel(
         ui.label(
             egui::RichText::new(theme::with_icon(theme::tool_icon(tool), tool.label()))
                 .family(theme::heading_family())
-                .strong(),
+                .color(theme::palette(ui.ctx()).text_strong),
         );
         ui.weak(match scene.parts.len() {
             0 => "nothing selected".to_owned(),

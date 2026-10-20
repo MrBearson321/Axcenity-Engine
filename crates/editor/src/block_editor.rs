@@ -2577,18 +2577,19 @@ fn show_toolbar(
             .max_rect(rect.shrink2(vec2(10.0, 6.0)))
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
     );
+    let palette = theme::palette(ui.ctx());
     let (icon, side, color, tip) = if context.client {
         (
             icons::USER,
             "Client blocks",
-            theme::PLAY_GREEN,
+            palette.success,
             "Runs on each player's side, like a LocalScript: it can use the keyboard and UI clicks.",
         )
     } else {
         (
             icons::CLOUD,
             "Server blocks",
-            theme::BRAND_BLUE_BRIGHT,
+            palette.accent,
             "Runs on the server, like a Script. Keyboard and UI click blocks need a client block script.",
         )
     };
@@ -3613,8 +3614,9 @@ end"
         // "wait 1 seconds" (the first Control block) to just under it: it
         // snaps into the event's stack.
         let hat_top_left = pos2(CATEGORY_WIDTH + PALETTE_WIDTH, TOOLBAR_HEIGHT) + vec2(x, y);
-        let wait_grab = pos2(110.0, 598.0);
-        let wait_palette_top_left = pos2(88.0, 578.0);
+        // Where the palette draws it (Inter's line height sets the rows).
+        let wait_grab = pos2(110.0, 610.0);
+        let wait_palette_top_left = pos2(88.0, 590.0);
         let target =
             hat_top_left + vec2(0.0, CAP + ROW_HEIGHT + 10.0) + (wait_grab - wait_palette_top_left);
         run_editor(&mut script, drag_frames(wait_grab, target), "drag-wait");

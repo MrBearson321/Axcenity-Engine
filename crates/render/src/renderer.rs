@@ -4,6 +4,7 @@
 //! uniforms, tiles, shadows and batches. `post.rs` blooms and tone-maps.
 //! `ui_pass.rs` builds screen-space quads and the UI and sky pipelines.
 //! `gpu.rs` uploads meshes, textures and materials. `sprites.rs` draws particles.
+//! `terrain.rs` draws terrain chunks with their blended layers.
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -23,6 +24,7 @@ mod gpu;
 mod lighting;
 mod post;
 mod sprites;
+mod terrain;
 mod ui_pass;
 
 #[cfg(test)]
@@ -34,8 +36,8 @@ use gpu::mip_levels;
 use gpu::{
     create_depth_view, create_frame_bind_group, create_instance_buffer, create_material,
     create_pipeline, create_shadow_pipeline, create_shadow_views, create_target_texture,
-    create_texture, drawable_size, update_custom_mesh, upload_custom_mesh, upload_mesh,
-    upload_texture,
+    create_texture, drawable_size, shader_module, update_custom_mesh, upload_custom_mesh,
+    upload_mesh, upload_texture,
 };
 #[cfg(test)]
 use lighting::{cascade_ends, light_raw};
@@ -246,6 +248,9 @@ const MATERIAL_TEXTURES: usize = 8;
 struct MaterialKey {
     textures: [Option<u64>; MATERIAL_TEXTURES],
     maps: [u32; 28],
+    /// A terrain chunk's binding (see `terrain::TerrainKey`), all 0 for
+    /// everything else.
+    terrain: terrain::TerrainKey,
 }
 
 /// Something of a caller's on the GPU, and the frame it was last drawn in.
@@ -418,6 +423,8 @@ struct ScenePipeline {
     custom_meshes: HashMap<u64, Cached<GpuMesh>>,
     textures: HashMap<u64, Cached<GpuTexture>>,
     materials: HashMap<MaterialKey, Cached<GpuMaterial>>,
+    /// Terrain chunks' pipeline, layer textures and bindings.
+    terrain: terrain::TerrainPass,
     /// How many frames have been drawn, to tell what wasn't drawn lately.
     frame: u64,
 }
@@ -804,10 +811,26 @@ impl ScenePipeline {
             maps_uniform_of(&MaterialKey::default()),
         );
 
-        let opaque_pipeline =
-            create_pipeline(&device, &frame_layout, &material_layout, HDR_FORMAT, false);
-        let transparent_pipeline =
-            create_pipeline(&device, &frame_layout, &material_layout, HDR_FORMAT, true);
+        let scene_shader = shader_module(&device, "scene", gpu::SCENE_SHADER);
+        let entry_points = ("vs_main", "fs_main");
+        let layouts = [&frame_layout, &material_layout];
+        let opaque_pipeline = create_pipeline(
+            &device,
+            &scene_shader,
+            entry_points,
+            &layouts,
+            HDR_FORMAT,
+            false,
+        );
+        let transparent_pipeline = create_pipeline(
+            &device,
+            &scene_shader,
+            entry_points,
+            &layouts,
+            HDR_FORMAT,
+            true,
+        );
+        let terrain = terrain::TerrainPass::new(&device, &frame_layout);
         let sky_pipeline = create_sky_pipeline(&device, &frame_layout);
         let sprites = sprites::SpritePass::new(&device, &white_texture.srgb);
         let post = PostPasses::new(&device, color_format);
@@ -891,6 +914,7 @@ impl ScenePipeline {
             custom_meshes: HashMap::new(),
             textures: HashMap::new(),
             materials: HashMap::new(),
+            terrain,
             frame: 0,
         }
     }
@@ -1070,22 +1094,30 @@ impl ScenePipeline {
             pass.draw(0..3, 0..1);
             pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             for batch in batches {
-                let pipeline = if batch.transparent {
-                    &self.transparent_pipeline
-                } else {
-                    &self.opaque_pipeline
-                };
                 // A caller's mesh with broken data was never uploaded.
                 let Some(mesh) = self.gpu_mesh(batch.mesh) else {
                     continue;
                 };
-                let material = self
-                    .materials
-                    .get(&batch.material)
-                    .and_then(|cached| cached.gpu.as_ref())
-                    .unwrap_or(&self.plain_material);
-                pass.set_pipeline(pipeline);
-                pass.set_bind_group(1, &material.bind_group, &[]);
+                if batch.material.terrain != terrain::TerrainKey::default() {
+                    let Some(group) = self.terrain.group(&batch.material.terrain) else {
+                        continue;
+                    };
+                    pass.set_pipeline(&self.terrain.pipeline);
+                    pass.set_bind_group(1, group, &[]);
+                } else {
+                    let pipeline = if batch.transparent {
+                        &self.transparent_pipeline
+                    } else {
+                        &self.opaque_pipeline
+                    };
+                    let material = self
+                        .materials
+                        .get(&batch.material)
+                        .and_then(|cached| cached.gpu.as_ref())
+                        .unwrap_or(&self.plain_material);
+                    pass.set_pipeline(pipeline);
+                    pass.set_bind_group(1, &material.bind_group, &[]);
+                }
                 pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                 pass.set_index_buffer(mesh.indices.slice(..), mesh.index_format);
                 pass.draw_indexed(0..mesh.index_count, 0, batch.instances);
@@ -1260,6 +1292,25 @@ impl ScenePipeline {
                     }
                 }
             }
+            if let Some(surface) = &item.material.terrain {
+                for weights in &surface.weights {
+                    self.note_texture(weights.as_ref(), frame);
+                }
+                let weights = surface.weights.each_ref().map(|source| {
+                    self.textures
+                        .get(&source.key())
+                        .and_then(|cached| cached.gpu.as_ref())
+                });
+                self.terrain.prepare(
+                    &self.device,
+                    &self.queue,
+                    surface,
+                    weights,
+                    &self.white_texture,
+                    frame,
+                );
+                continue;
+            }
             let sources = material_textures(item);
             for source in sources.iter().flatten() {
                 self.note_texture(source.as_ref(), frame);
@@ -1389,6 +1440,7 @@ impl ScenePipeline {
             .retain(|key, _| self.textures.contains_key(key));
         self.sprites.forget(|key| self.textures.contains_key(&key));
         self.materials.retain(|_, cached| recent(cached.last_drawn));
+        self.terrain.forget(frame);
     }
 
     /// Replaces the instance buffer with a bigger one if `count` won't fit.
@@ -2144,5 +2196,101 @@ mod tests {
         assert_eq!(renderer.size(), (1, 1));
         renderer.resize(300, 0);
         assert_eq!(renderer.size(), (300, 1));
+    }
+
+    /// Flat ground 20 studs across, as a terrain chunk would be.
+    struct Ground;
+
+    impl MeshSource for Ground {
+        fn key(&self) -> u64 {
+            9001
+        }
+        fn positions(&self) -> &[[f32; 3]] {
+            &[
+                [-10.0, 0.0, -10.0],
+                [-10.0, 0.0, 10.0],
+                [10.0, 0.0, -10.0],
+                [10.0, 0.0, 10.0],
+            ]
+        }
+        fn normals(&self) -> &[[f32; 3]] {
+            &[[0.0, 1.0, 0.0]; 4]
+        }
+        fn uvs(&self) -> &[[f32; 2]] {
+            &[[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]]
+        }
+        fn indices(&self) -> &[u32] {
+            &[0, 1, 2, 1, 3, 2]
+        }
+    }
+
+    /// The same weights everywhere.
+    struct Weights(u64, [u8; 4]);
+
+    impl TextureSource for Weights {
+        fn key(&self) -> u64 {
+            self.0
+        }
+        fn size(&self) -> (u32, u32) {
+            (1, 1)
+        }
+        fn rgba(&self) -> &[u8] {
+            &self.1
+        }
+    }
+
+    #[test]
+    fn terrain_chunks_show_the_layer_their_weights_pick() {
+        let Some((device, queue)) = test_device() else {
+            eprintln!("skipped: no graphics adapter on this machine");
+            return;
+        };
+        let layer = |color| crate::TerrainLayer {
+            color,
+            ..terrain::tests::layer()
+        };
+        let layers = Arc::new(crate::TerrainLayers {
+            id: 1,
+            key: 1,
+            layers: vec![layer([1.0, 0.0, 0.0]), layer([0.0, 0.0, 1.0])],
+            view: crate::TerrainView::Shaded,
+            height_range: [0.0, 1.0],
+            grid_origin: [-10.0, -10.0],
+            grid_cell: [1.0, 1.0],
+        });
+        let ground = |weights: [u8; 4], key| {
+            let mut list = list_of(vec![DrawItem {
+                shape: Shape::Mesh(Arc::new(Ground)),
+                transform: Mat4::from_translation(Vec3::new(0.0, -2.0, 0.0)),
+                material: Material {
+                    terrain: Some(crate::TerrainSurface {
+                        layers: layers.clone(),
+                        weights: [
+                            Arc::new(Weights(key, weights)),
+                            Arc::new(Weights(key + 1, [0; 4])),
+                        ],
+                    }),
+                    ..Material::default()
+                },
+                casts_shadow: true,
+            }]);
+            // Looking straight down at it, in sunlight.
+            list.camera.look_at = Vec3::new(0.0, -1.0, -0.001);
+            list.ambient.intensity = 0.2;
+            list
+        };
+        let [red, _, blue, _] = middle_pixel(&device, &queue, &ground([255, 0, 0, 0], 10));
+        // Some of the blue is the sun's white highlight.
+        assert!(
+            red > 100 && red > blue * 3,
+            "the first layer: {red}, {blue}"
+        );
+        let [red, _, blue, _] = middle_pixel(&device, &queue, &ground([0, 255, 0, 0], 20));
+        assert!(
+            blue > 100 && blue > red * 3,
+            "the second layer: {red}, {blue}"
+        );
+        let [red, _, blue, _] = middle_pixel(&device, &queue, &ground([128, 127, 0, 0], 30));
+        assert!(red > 40 && blue > 40, "half and half: {red}, {blue}");
     }
 }

@@ -32,7 +32,7 @@ use crate::output::Output;
 use crate::properties::MIN_SIZE;
 use crate::scripts::{Disk, new_script_source};
 use crate::surface::{self, MapFile};
-use crate::theme::{self, icons};
+use crate::theme::icons;
 use crate::tree::{self, Insertable};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -81,7 +81,7 @@ impl ExportTarget {
 }
 
 /// An error and its causes on one line, the way `{:#}` shows an `anyhow::Error`.
-fn chain(err: &dyn std::error::Error) -> String {
+pub(super) fn chain(err: &dyn std::error::Error) -> String {
     let mut text = err.to_string();
     let mut source = err.source();
     while let Some(cause) = source {
@@ -270,12 +270,14 @@ impl EditorApp {
         let mut saved = Vec::new();
         if save_world {
             if !self.save_world_file() {
+                self.toasts.error("Could not save. Output says why.");
                 return false;
             }
             saved.push(project::WORLD_FILE.to_string());
         }
         for path in scripts {
             if !self.write_tab(&path) {
+                self.toasts.error("Could not save. Output says why.");
                 return false;
             }
             saved.push(path);
@@ -286,6 +288,7 @@ impl EditorApp {
         } else {
             self.output
                 .info(format!("Saved \"{name}\": {}.", saved.join(", ")));
+            self.toasts.success(format!("Saved \"{name}\""));
             if let Some(folder) = self.project.as_ref().map(|project| project.folder.clone()) {
                 match project::record_version(&folder, "Save") {
                     Ok(_) => {}
@@ -540,6 +543,13 @@ impl EditorApp {
             }
             project.keep_world_file = false;
         }
+        // Terrains first: a duplicate may be given its own data folder.
+        if !self.save_terrains() {
+            return false;
+        }
+        let Some(project) = &mut self.project else {
+            return false;
+        };
         match project::save_world(&project.folder, &self.world) {
             Ok(()) => {
                 // So the watcher's report of this change is known to be ours.
@@ -1091,8 +1101,7 @@ impl EditorApp {
                 None
             }
             Err(err) => {
-                self.output
-                    .error(format!("Could not read `{path}`: {err}"));
+                self.output.error(format!("Could not read `{path}`: {err}"));
                 None
             }
         }
@@ -1662,7 +1671,7 @@ impl EditorApp {
             &dialog::Question {
                 id: "delete script",
                 icon: icons::TRASH,
-                accent: theme::STOP_RED,
+                tone: dialog::Tone::Danger,
                 title: &title,
                 message: &message,
                 items: Vec::new(),
@@ -1803,6 +1812,13 @@ impl EditorApp {
         };
         match parsed {
             Ok(mut world) => {
+                let mut problems = Vec::new();
+                let damaged = project::load_terrains(&project.folder, &mut world, &mut problems);
+                for problem in &problems {
+                    self.output
+                        .error(format!("Skipped a damaged file: {}", chain(problem)));
+                }
+                project.damaged_terrains = damaged;
                 // The new world has no Scripts yet: they come from the files.
                 for script in &mut project.scripts {
                     script.instance = project::add_script_instance(&mut world, &script.path);

@@ -87,10 +87,16 @@ pub enum ClassName {
     /// Inside a Part, MeshPart or Model: plays an authored property clip
     /// (`*.anim.json` with `"kind": "property"`) on that root.
     Animation,
+    /// A landscape: a heightfield (kept beside the Instance, see
+    /// [`TerrainData`](crate::TerrainData)) shaded by its TerrainLayers.
+    Terrain,
+    /// Inside a Terrain: one material it can be painted with, and the rule
+    /// that lays it down by itself (by height and slope).
+    TerrainLayer,
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 33] = [
+    pub const ALL: [ClassName; 35] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -124,6 +130,8 @@ impl ClassName {
         ClassName::ParticleEmitter,
         ClassName::Animator,
         ClassName::Animation,
+        ClassName::Terrain,
+        ClassName::TerrainLayer,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -161,6 +169,8 @@ impl ClassName {
             ClassName::ParticleEmitter => "ParticleEmitter",
             ClassName::Animator => "Animator",
             ClassName::Animation => "Animation",
+            ClassName::Terrain => "Terrain",
+            ClassName::TerrainLayer => "TerrainLayer",
         }
     }
 
@@ -499,6 +509,76 @@ impl ClassName {
                 ("CanCollide", Value::Bool(true)),
                 ("WindAffected", Value::Bool(false)),
             ],
+            ClassName::Terrain => vec![
+                // The middle of the terrain's footprint, at the bottom of its
+                // height range.
+                ("Position", Value::Vector3(Vector3::new(0.0, -32.0, 0.0))),
+                // Studs along X, the full height range, and studs along Z.
+                ("Size", Value::Vector3(Vector3::new(512.0, 128.0, 512.0))),
+                ("CastShadow", Value::Bool(true)),
+                ("CanCollide", Value::Bool(true)),
+                // The folder its heights and paint are saved in, relative to
+                // the project, such as "assets/terrain/Terrain". The editor
+                // picks one.
+                ("DataFolder", Value::String(String::new())),
+            ],
+            ClassName::TerrainLayer => vec![
+                // The material: a tint, the texture maps (files relative to
+                // the project, empty for none) and how they're read, as on a
+                // SurfaceAppearance.
+                ("Color", Value::Color3(Color3::new(0.45, 0.6, 0.3))),
+                ("ColorMap", Value::String(String::new())),
+                ("NormalMap", Value::String(String::new())),
+                ("RoughnessMap", Value::String(String::new())),
+                ("MetalnessMap", Value::String(String::new())),
+                ("AmbientOcclusionMap", Value::String(String::new())),
+                // Light means high: where layers meet, the higher one's
+                // bumps show through (stones poking out of sand).
+                ("HeightMap", Value::String(String::new())),
+                ("Metalness", Value::Number(0.0)),
+                ("Roughness", Value::Number(0.9)),
+                ("NormalStrength", Value::Number(1.0)),
+                ("NormalMapDirectX", Value::Bool(false)),
+                // Which channel of each map holds its value, so one
+                // channel-packed texture (such as an ORM map) can fill several.
+                (
+                    "RoughnessChannel",
+                    Value::TextureChannel(TextureChannel::Red),
+                ),
+                ("InvertRoughness", Value::Bool(false)),
+                (
+                    "MetalnessChannel",
+                    Value::TextureChannel(TextureChannel::Red),
+                ),
+                (
+                    "AmbientOcclusionChannel",
+                    Value::TextureChannel(TextureChannel::Red),
+                ),
+                // Studs one copy of the textures covers, and its turn in degrees.
+                ("TileSize", Value::Number(8.0)),
+                ("TextureRotation", Value::Number(0.0)),
+                // Projects the textures from the side too, so cliffs don't stretch them.
+                ("Triplanar", Value::Bool(false)),
+                // 0 to 1: mixes in a larger, turned copy so repeats show less.
+                ("AntiTiling", Value::Number(0.3)),
+                // 0 to 1: how sharply layers meet where it has a HeightMap.
+                ("HeightBlend", Value::Number(0.5)),
+                // The automatic rule: where this layer covers the layers
+                // before it. Heights are studs above the terrain's bottom,
+                // slopes degrees from flat. The fades soften each edge.
+                ("AutoEnabled", Value::Bool(false)),
+                ("MinHeight", Value::Number(0.0)),
+                ("MaxHeight", Value::Number(10000.0)),
+                ("HeightFade", Value::Number(4.0)),
+                ("MinSlope", Value::Number(0.0)),
+                ("MaxSlope", Value::Number(90.0)),
+                ("SlopeFade", Value::Number(5.0)),
+                // 0 to 1: how fully it covers where the rule holds.
+                ("RuleStrength", Value::Number(1.0)),
+                // 0 to 1: breaks the rule's edges up with noise NoiseScale studs across.
+                ("RuleNoise", Value::Number(0.3)),
+                ("NoiseScale", Value::Number(24.0)),
+            ],
             ClassName::SurfaceAppearance => {
                 let map = |name| (name, Value::String(String::new()));
                 let channel = |name, channel| (name, Value::TextureChannel(channel));
@@ -562,7 +642,9 @@ impl ClassName {
             | ClassName::BillboardGui
             | ClassName::PointLight
             | ClassName::SpotLight
-            |             ClassName::ParticleEmitter => &[],
+            | ClassName::ParticleEmitter
+            | ClassName::Terrain
+            | ClassName::TerrainLayer => &[],
             // Fires when a sound that isn't looped plays to its end.
             ClassName::Sound => &["Ended"],
             // `StateChanged` fires with the new state's name and the old

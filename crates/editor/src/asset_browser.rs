@@ -26,6 +26,7 @@ use eframe::egui;
 
 use crate::props::{PROPS, Prop};
 use crate::theme::{self, icons};
+use crate::widgets;
 
 /// Where prefabs are saved, in the project folder.
 pub const PREFABS_FOLDER: &str = "assets/prefabs";
@@ -277,20 +278,26 @@ impl AssetBrowser {
         can_save: bool,
     ) -> Option<BrowserAction> {
         let mut action = None;
+        let palette = theme::palette(ui.ctx());
         ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
             for category in Category::ALL {
-                if ui
-                    .selectable_label(self.category == category, category.label())
-                    .clicked()
-                {
+                if chip(ui, category.label(), self.category == category).clicked() {
                     self.category = category;
                 }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
                 if ui
                     .add_enabled(
                         can_edit && can_save,
-                        egui::Button::new(theme::with_icon(icons::FLOPPY_DISK, "Save prefab")),
+                        widgets::button(
+                            widgets::Role::Secondary,
+                            Some(icons::FLOPPY_DISK),
+                            "Save prefab",
+                            &palette,
+                        )
+                        .min_size(egui::vec2(0.0, 24.0)),
                     )
                     .on_hover_text(
                         "Save the selected parts and Models as a prefab in assets/prefabs, to \
@@ -304,7 +311,13 @@ impl AssetBrowser {
                 if ui
                     .add_enabled(
                         can_edit && self.folder.is_some(),
-                        egui::Button::new(theme::with_icon(icons::PLUS, "Import")),
+                        widgets::button(
+                            widgets::Role::Secondary,
+                            Some(icons::PLUS),
+                            "Import",
+                            &palette,
+                        )
+                        .min_size(egui::vec2(0.0, 24.0)),
                     )
                     .on_hover_text(
                         "Copy models, images, sounds or prefabs into the project's assets folder.",
@@ -315,21 +328,17 @@ impl AssetBrowser {
                         image_folder: self.category.image_folder(),
                     });
                 }
-                if ui
-                    .small_button(icons::ARROW_CLOCKWISE)
-                    .on_hover_text("Look for new files now")
+                if widgets::icon_button(ui, icons::ARROW_CLOCKWISE, "Look for new files now", false)
                     .clicked()
                 {
                     self.refresh();
                 }
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.search)
-                        .hint_text(format!("{} Search", icons::MAGNIFYING_GLASS))
-                        .desired_width(160.0),
-                );
+                widgets::search_field(ui, &mut self.search, "Search assets", 170.0);
             });
         });
-        ui.separator();
+        ui.add_space(4.0);
+        widgets::divider(ui);
+        ui.add_space(4.0);
 
         let search = self.search.trim().to_lowercase();
         let entries: Vec<AssetEntry> = self
@@ -342,10 +351,27 @@ impl AssetBrowser {
             .auto_shrink(false)
             .show(ui, |ui| {
                 if entries.is_empty() {
-                    ui.weak(
-                        "Nothing here yet. Import files, or copy them into the project's assets \
-                         folder.",
-                    );
+                    ui.add_space(16.0);
+                    ui.vertical_centered(|ui| {
+                        ui.label(
+                            egui::RichText::new(if search.is_empty() {
+                                icons::FOLDER_DASHED
+                            } else {
+                                icons::MAGNIFYING_GLASS
+                            })
+                            .size(20.0)
+                            .color(palette.text_muted),
+                        );
+                        ui.label(
+                            egui::RichText::new(if search.is_empty() {
+                                "Nothing here yet. Import files, or copy them into the project's \
+                                 assets folder."
+                            } else {
+                                "No asset's path has that in it."
+                            })
+                            .color(palette.text_weak),
+                        );
+                    });
                     return;
                 }
                 ui.horizontal_wrapped(|ui| {
@@ -378,14 +404,22 @@ impl AssetBrowser {
         if can_edit && response.drag_started() {
             egui::DragAndDrop::set_payload(ui.ctx(), AssetPayload(entry.clone()));
         }
-        let visuals = ui.visuals();
-        let fill = if response.hovered() || response.dragged() {
-            visuals.widgets.hovered.weak_bg_fill
-        } else {
-            visuals.faint_bg_color
-        };
+        let palette = theme::palette(ui.ctx());
+        let hover = theme::ease(
+            ui.ctx(),
+            id.with("hover"),
+            response.hovered() || response.dragged(),
+        );
         let painter = ui.painter();
-        painter.rect_filled(rect, 6.0, fill);
+        painter.rect_filled(rect, 6.0, palette.control_hover.gamma_multiply(hover));
+        if response.has_focus() {
+            painter.rect_stroke(
+                rect,
+                6.0,
+                egui::Stroke::new(1.0_f32, palette.accent),
+                egui::StrokeKind::Inside,
+            );
+        }
         let picture = egui::Rect::from_center_size(
             egui::pos2(rect.center().x, rect.min.y + 6.0 + PICTURE / 2.0),
             egui::vec2(PICTURE, PICTURE),
@@ -397,20 +431,22 @@ impl AssetBrowser {
         .then(|| self.thumbnail(ui.ctx(), assets, &entry.path))
         .flatten();
         self.paint_picture(ui, picture, entry, thumbnail.as_ref());
-        let text_color = ui.visuals().text_color();
-        let galley = ui.painter().layout(
+        let text_color = if response.hovered() {
+            palette.text_strong
+        } else {
+            palette.text
+        };
+        // Long names show two lines, then "…".
+        let galley = widgets::elided(
+            ui,
             entry.name.clone(),
-            egui::FontId::proportional(11.5),
+            egui::FontId::proportional(theme::type_scale::SMALL),
             text_color,
-            TILE.x - 6.0,
+            TILE.x - 8.0,
+            2,
         );
-        // Long names show their first two lines.
-        let text_rect = egui::Rect::from_min_size(
-            egui::pos2(rect.min.x + 3.0, picture.max.y + 4.0),
-            egui::vec2(TILE.x - 6.0, rect.max.y - picture.max.y - 6.0),
-        );
-        ui.painter().with_clip_rect(text_rect).galley(
-            egui::pos2(rect.center().x - galley.size().x / 2.0, text_rect.min.y),
+        ui.painter().galley(
+            egui::pos2(rect.center().x - galley.size().x / 2.0, picture.max.y + 5.0),
             galley,
             text_color,
         );
@@ -453,6 +489,14 @@ impl AssetBrowser {
         thumbnail: Option<&egui::TextureHandle>,
     ) {
         let painter = ui.painter();
+        let palette = theme::palette(ui.ctx());
+        painter.rect(
+            picture,
+            5.0,
+            palette.inset,
+            egui::Stroke::new(1.0_f32, palette.border),
+            egui::StrokeKind::Inside,
+        );
         match thumbnail {
             Some(texture) => {
                 // Fitted inside the square, keeping its shape.
@@ -460,8 +504,6 @@ impl AssetBrowser {
                 let scale = (PICTURE / w).min(PICTURE / h);
                 let fitted =
                     egui::Rect::from_center_size(picture.center(), egui::vec2(w, h) * scale);
-                // Checkers behind see-through images, such as particles.
-                painter.rect_filled(picture, 4.0, egui::Color32::from_gray(40));
                 painter.image(texture.id(), fitted, uv(), egui::Color32::WHITE);
             }
             None => {
@@ -469,7 +511,7 @@ impl AssetBrowser {
                     picture.center(),
                     egui::Align2::CENTER_CENTER,
                     icon_of(entry),
-                    egui::FontId::proportional(34.0),
+                    egui::FontId::proportional(28.0),
                     entry.kind.color(ui.visuals()),
                 );
             }
@@ -632,6 +674,33 @@ pub fn prefab_file_stem(name: &str) -> String {
         "" => "Prefab".to_owned(),
         stem => stem.to_owned(),
     }
+}
+
+/// A category to filter by: quiet text, filled while it's picked.
+fn chip(ui: &mut egui::Ui, label: &str, selected: bool) -> egui::Response {
+    let palette = theme::palette(ui.ctx());
+    let galley = ui.painter().layout_no_wrap(
+        label.to_owned(),
+        egui::FontId::new(theme::type_scale::SMALL + 0.5, theme::medium_family()),
+        egui::Color32::PLACEHOLDER,
+    );
+    let size = egui::vec2(galley.size().x + 16.0, 24.0);
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::RadioButton, true, selected, label)
+    });
+    widgets::paint_hover(ui, rect, &response, false, 12.0);
+    if selected {
+        ui.painter().rect_filled(rect, 12.0, palette.control_active);
+    }
+    let color = if selected || response.hovered() {
+        palette.text_strong
+    } else {
+        palette.text_weak
+    };
+    ui.painter()
+        .galley(rect.center() - galley.size() / 2.0, galley, color);
+    response
 }
 
 #[cfg(test)]

@@ -123,6 +123,7 @@ fn main() -> Result<()> {
         audio,
         physics: Physics::with_assets(assets.clone()),
         particles: axcenity_scene::Particles::new(),
+        terrain: axcenity_scene::TerrainCache::new(),
         animators,
         property_players,
         assets,
@@ -245,6 +246,8 @@ struct App {
     physics: Physics,
     /// What the ParticleEmitters have given off.
     particles: axcenity_scene::Particles,
+    /// Terrains' chunk meshes and weights, kept between frames.
+    terrain: axcenity_scene::TerrainCache,
     /// Plays the Animators and poses their MeshParts.
     animators: Animators,
     /// Plays property Animation Instances on Parts.
@@ -669,11 +672,9 @@ impl ApplicationHandler for App {
                 for error in self.animators.take_errors() {
                     eprintln!("error: {error}");
                 }
-                let events = self.property_players.update(
-                    &mut self.world,
-                    &self.assets,
-                    f64::from(seconds),
-                );
+                let events =
+                    self.property_players
+                        .update(&mut self.world, &self.assets, f64::from(seconds));
                 for event in events {
                     let (animation, name, args) = event.script_event();
                     self.scripts
@@ -704,6 +705,7 @@ impl ApplicationHandler for App {
                         self.ui_pressed_button,
                         self.text_focus,
                         self.animators.poses(),
+                        &mut self.terrain,
                     );
                 self.note_ui_warnings(&ui_layout.warnings);
                 draw_list.sprites = self.particles.sprites(&self.world, &self.assets);

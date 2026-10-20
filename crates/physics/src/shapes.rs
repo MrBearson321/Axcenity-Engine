@@ -1,12 +1,14 @@
-//! Collision shapes for each `PartType`, and for MeshParts. They match the
-//! meshes the renderer draws (`render/src/mesh.rs`), including how balls and
-//! cylinders stay round.
+//! Collision shapes for each `PartType`, for MeshParts and for Terrains.
+//! They match the meshes the renderer draws (`render/src/mesh.rs`),
+//! including how balls and cylinders stay round, and how terrain cells are
+//! split into triangles (`terrain/src/mesh.rs`).
 
 use std::f32::consts::FRAC_PI_2;
 use std::sync::Arc;
 
 use axcenity_assets::Model;
-use axcenity_core::PartType;
+use axcenity_core::{PartType, TerrainData};
+use rapier3d::geometry::Array2;
 use rapier3d::glamx::Vec3;
 use rapier3d::prelude::{Collider, ColliderBuilder};
 
@@ -28,6 +30,21 @@ pub enum Form {
     /// `MeshId`, or a model that can't be loaded). Models compare by which
     /// load they are, so a model loaded later counts as a change.
     Mesh(Option<Arc<Model>>),
+    /// A Terrain's heightfield, stretched to its `Size`.
+    Terrain(TerrainShape),
+}
+
+/// A Terrain's landscape. Two compare equal while they're the same data,
+/// unchanged, so the collider is only rebuilt after an edit.
+#[derive(Clone)]
+pub struct TerrainShape {
+    pub data: Arc<TerrainData>,
+}
+
+impl PartialEq for TerrainShape {
+    fn eq(&self, other: &Self) -> bool {
+        self.data.uid() == other.data.uid() && self.data.revision() == other.data.revision()
+    }
 }
 
 /// The collider for a part of this form and size, centered on the part.
@@ -44,6 +61,7 @@ pub fn collider(form: &Form, size: Vec3) -> Collider {
         }
         Form::Primitive(PartType::Wedge) => wedge(half),
         Form::Mesh(Some(model)) => hull(model, half),
+        Form::Terrain(terrain) => heightfield(&terrain.data, size),
     };
     builder.friction(FRICTION).restitution(RESTITUTION).build()
 }
@@ -84,4 +102,20 @@ fn hull(model: &Model, half: Vec3) -> ColliderBuilder {
         .map(|&corner| Vec3::from(corner) * half * 2.0)
         .collect();
     ColliderBuilder::convex_hull(&corners).unwrap_or_else(|| cuboid(half))
+}
+
+/// A Terrain's heights as a heightfield `size` studs across, centered on
+/// its position in X and Z, rising from it in Y. parry wants the heights
+/// with a row per Z sample, stored column by column (X), and splits each
+/// cell from (x, z+1) to (x+1, z), as the drawn chunks do.
+fn heightfield(data: &TerrainData, size: Vec3) -> ColliderBuilder {
+    let (size_x, size_z) = data.size();
+    let mut heights = Vec::with_capacity(size_x * size_z);
+    for x in 0..size_x {
+        for z in 0..size_z {
+            heights.push(data.height(x as isize, z as isize));
+        }
+    }
+    let scale = size.abs().max(Vec3::splat(MIN_SIZE));
+    ColliderBuilder::heightfield(Array2::new(size_z, size_x, heights), scale)
 }

@@ -1522,6 +1522,181 @@ const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "EmissiveStrength",
         "Multiplies the glow.",
     ),
+    (
+        ClassName::Terrain,
+        "Position",
+        "The middle of the terrain's bottom: its lowest possible ground.",
+    ),
+    (
+        ClassName::Terrain,
+        "Size",
+        "Width (X), height range (Y) and length (Z) in studs. Heights are stored as parts of the height range, so changing Y stretches the hills.",
+    ),
+    (
+        ClassName::Terrain,
+        "CastShadow",
+        "Whether the terrain casts shadows.",
+    ),
+    (
+        ClassName::Terrain,
+        "CanCollide",
+        "Whether parts and characters stand on the terrain.",
+    ),
+    (
+        ClassName::Terrain,
+        "DataFolder",
+        "The project folder its heights and painted materials are saved in, such as \"assets/terrain/Terrain\". The editor picks it.",
+    ),
+    (
+        ClassName::TerrainLayer,
+        "Color",
+        "Tints the layer's color map, or is its color without one.",
+    ),
+    (
+        ClassName::TerrainLayer,
+        "ColorMap",
+        "The layer's color texture, relative to the project folder. Empty means none.",
+    ),
+    (
+        ClassName::TerrainLayer,
+        "NormalMap",
+        "The layer's normal map. Empty means none.",
+    ),
+    (
+        ClassName::TerrainLayer,
+        "RoughnessMap",
+        "The layer's roughness map. Empty means none.",
+    ),
+    (
+        ClassName::TerrainLayer,
+        "MetalnessMap",
+        "The layer's metalness map. Empty means none.",
+    ),
+    (
+        ClassName::TerrainLayer,
+        "AmbientOcclusionMap",
+        "The layer's ambient occlusion map. Empty means none.",
+    ),
+    (
+        ClassName::TerrainLayer,
+        "HeightMap",
+        "The layer's height map: light is high. Where layers meet, the higher one shows through.",
+    ),
+    (
+        ClassName::TerrainLayer,
+        "Metalness",
+        "0 to 1: how metallic the layer is, without a metalness map.",
+    ),
+    (
+        ClassName::TerrainLayer,
+        "Roughness",
+        "0 to 1: how rough the layer is, without a roughness map.",
+    ),
+    (
+        ClassName::TerrainLayer,
+        "NormalStrength",
+        "Scales the normal map's bumps.",
+    ),
+    (
+        ClassName::TerrainLayer,
+        "NormalMapDirectX",
+        "True for a DirectX-style normal map, whose green points down.",
+    ),
+    (
+        ClassName::TerrainLayer,
+        "RoughnessChannel",
+        "Which channel of RoughnessMap holds the roughness.",
+    ),
+    (
+        ClassName::TerrainLayer,
+        "InvertRoughness",
+        "Reads RoughnessMap as smoothness (1 minus the value).",
+    ),
+    (
+        ClassName::TerrainLayer,
+        "MetalnessChannel",
+        "Which channel of MetalnessMap holds the metalness.",
+    ),
+    (
+        ClassName::TerrainLayer,
+        "AmbientOcclusionChannel",
+        "Which channel of AmbientOcclusionMap holds the occlusion.",
+    ),
+    (
+        ClassName::TerrainLayer,
+        "TileSize",
+        "Studs one copy of the textures covers.",
+    ),
+    (
+        ClassName::TerrainLayer,
+        "TextureRotation",
+        "Turns the textures, in degrees.",
+    ),
+    (
+        ClassName::TerrainLayer,
+        "Triplanar",
+        "Projects the textures from the sides too, so cliffs don't stretch them.",
+    ),
+    (
+        ClassName::TerrainLayer,
+        "AntiTiling",
+        "0 to 1: mixes in a larger, turned copy of the textures so repeats show less.",
+    ),
+    (
+        ClassName::TerrainLayer,
+        "HeightBlend",
+        "0 to 1: how sharply layers meet where they have height maps.",
+    ),
+    (
+        ClassName::TerrainLayer,
+        "AutoEnabled",
+        "Whether the layer lays itself down by its height and slope rule.",
+    ),
+    (
+        ClassName::TerrainLayer,
+        "MinHeight",
+        "The rule's lowest height, in studs above the terrain's bottom.",
+    ),
+    (
+        ClassName::TerrainLayer,
+        "MaxHeight",
+        "The rule's highest height, in studs above the terrain's bottom.",
+    ),
+    (
+        ClassName::TerrainLayer,
+        "HeightFade",
+        "Studs over which the rule fades at its heights.",
+    ),
+    (
+        ClassName::TerrainLayer,
+        "MinSlope",
+        "The rule's gentlest slope, in degrees from flat.",
+    ),
+    (
+        ClassName::TerrainLayer,
+        "MaxSlope",
+        "The rule's steepest slope, in degrees from flat.",
+    ),
+    (
+        ClassName::TerrainLayer,
+        "SlopeFade",
+        "Degrees over which the rule fades at its slopes.",
+    ),
+    (
+        ClassName::TerrainLayer,
+        "RuleStrength",
+        "0 to 1: how fully the layer covers where its rule holds.",
+    ),
+    (
+        ClassName::TerrainLayer,
+        "RuleNoise",
+        "0 to 1: breaks the rule's edges up with noise.",
+    ),
+    (
+        ClassName::TerrainLayer,
+        "NoiseScale",
+        "Studs across the rule's noise patches.",
+    ),
 ];
 
 /// What each event means, including what its handler receives. A test
@@ -1662,6 +1837,12 @@ fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::Animation => {
             "Inside a Part, MeshPart or Model: plays an authored property clip (`*.anim.json` with kind property) on that root while the game runs."
+        }
+        ClassName::Terrain => {
+            "A landscape: a heightfield shaped in the editor's Terrain Studio, drawn with its TerrainLayers and colliding as its ground. Position is the middle of its footprint at the bottom of its height range; Size is its width, height range and length."
+        }
+        ClassName::TerrainLayer => {
+            "Inside a Terrain: one material it's painted with (a tint, texture maps and tiling), and an optional rule that lays it down by height and slope."
         }
     }
 }

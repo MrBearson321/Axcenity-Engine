@@ -22,6 +22,7 @@ axcenity-project = { path = "crates/project" }
 axcenity-render = { path = "crates/render" }
 axcenity-scene = { path = "crates/scene" }
 axcenity-script = { path = "crates/script" }
+axcenity-terrain = { path = "crates/terrain" }
 axcenity-ui = { path = "crates/ui" }
 
 # Third-party crates.

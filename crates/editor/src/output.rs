@@ -8,6 +8,7 @@
 use eframe::egui;
 
 use crate::theme::{self, icons};
+use crate::widgets;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutputKind {
@@ -37,6 +38,9 @@ pub struct Location {
 #[derive(Default)]
 pub struct Output {
     lines: Vec<OutputLine>,
+    /// Kinds of line switched off with the filter buttons. Only what's
+    /// shown changes; every line is kept.
+    hidden: Vec<OutputKind>,
 }
 
 impl Output {
@@ -80,10 +84,53 @@ impl Output {
     /// Draws the panel. Returns the location of a script error that was
     /// clicked, to open the script there.
     pub fn show(&mut self, ui: &mut egui::Ui) -> Option<Location> {
+        let palette = theme::palette(ui.ctx());
         ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            for (kind, icon, color, name) in [
+                (
+                    OutputKind::Info,
+                    icons::INFO,
+                    palette.text_secondary,
+                    "messages",
+                ),
+                (
+                    OutputKind::Warning,
+                    icons::WARNING,
+                    palette.warning,
+                    "warnings",
+                ),
+                (OutputKind::Error, icons::X_CIRCLE, palette.error, "errors"),
+            ] {
+                let count = self.lines.iter().filter(|line| line.kind == kind).count();
+                let shown = !self.hidden.contains(&kind);
+                if filter_toggle(ui, icon, color, count, shown)
+                    .on_hover_text(if shown {
+                        format!("Hide {name}")
+                    } else {
+                        format!("Show {name}")
+                    })
+                    .clicked()
+                {
+                    if shown {
+                        self.hidden.push(kind);
+                    } else {
+                        self.hidden.retain(|hidden| *hidden != kind);
+                    }
+                }
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
-                    .small_button(theme::with_icon(icons::BROOM, "Clear"))
+                    .add_enabled(
+                        !self.lines.is_empty(),
+                        widgets::button(
+                            widgets::Role::Ghost,
+                            Some(icons::BROOM),
+                            "Clear",
+                            &palette,
+                        )
+                        .min_size(egui::vec2(0.0, 22.0)),
+                    )
                     .on_hover_text("Remove every line")
                     .clicked()
                 {
@@ -91,7 +138,8 @@ impl Output {
                 }
             });
         });
-        ui.separator();
+        ui.add_space(2.0);
+        widgets::divider(ui);
 
         let mut clicked = None;
         egui::ScrollArea::vertical()
@@ -99,27 +147,33 @@ impl Output {
             .stick_to_bottom(true)
             .auto_shrink(false)
             .show(ui, |ui| {
-                for line in &self.lines {
-                    let visuals = ui.visuals();
+                ui.add_space(4.0);
+                ui.spacing_mut().item_spacing.y = 2.0;
+                if self.lines.is_empty() {
+                    ui.label(
+                        egui::RichText::new(
+                            "Nothing yet. Editor messages, and what scripts print during Play, \
+                             show here.",
+                        )
+                        .color(palette.text_weak),
+                    );
+                }
+                for line in self
+                    .lines
+                    .iter()
+                    .filter(|line| !self.hidden.contains(&line.kind))
+                {
                     let (icon, icon_color, color) = match line.kind {
-                        OutputKind::Info => {
-                            (icons::INFO, visuals.weak_text_color(), visuals.text_color())
-                        }
-                        OutputKind::Warning => {
-                            (icons::INFO, visuals.warn_fg_color, visuals.warn_fg_color)
-                        }
-                        OutputKind::Error => (
-                            icons::X_CIRCLE,
-                            visuals.error_fg_color,
-                            visuals.error_fg_color,
-                        ),
+                        OutputKind::Info => (icons::INFO, palette.text_muted, palette.text),
+                        OutputKind::Warning => (icons::WARNING, palette.warning, palette.warning),
+                        OutputKind::Error => (icons::X_CIRCLE, palette.error, palette.error),
                     };
                     let font = egui::TextStyle::Monospace.resolve(ui.style());
                     // The icon sits left of the text, which wraps beside it.
                     ui.horizontal_top(|ui| {
                         ui.label(
                             egui::RichText::new(icon)
-                                .font(font.clone())
+                                .font(egui::FontId::proportional(font.size))
                                 .color(icon_color),
                         );
                         match &line.location {
@@ -138,6 +192,47 @@ impl Output {
             });
         clicked
     }
+}
+
+/// A filter button: the kind's icon and how many lines of it there are,
+/// dimmed while that kind is hidden.
+fn filter_toggle(
+    ui: &mut egui::Ui,
+    icon: &str,
+    color: egui::Color32,
+    count: usize,
+    shown: bool,
+) -> egui::Response {
+    let palette = theme::palette(ui.ctx());
+    let text = count.to_string();
+    let galley = ui.painter().layout_no_wrap(
+        text,
+        egui::FontId::new(theme::type_scale::SMALL, theme::medium_family()),
+        egui::Color32::PLACEHOLDER,
+    );
+    let size = egui::vec2(galley.size().x + 34.0, 22.0);
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    response
+        .widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, shown, icon));
+    widgets::paint_hover(ui, rect, &response, false, 5.0);
+    let (icon_color, text_color) = if shown {
+        (color, palette.text)
+    } else {
+        (palette.text_muted, palette.text_muted)
+    };
+    ui.painter().text(
+        rect.left_center() + egui::vec2(13.0, 0.0),
+        egui::Align2::CENTER_CENTER,
+        icon,
+        egui::FontId::proportional(13.0),
+        icon_color,
+    );
+    ui.painter().galley(
+        egui::pos2(rect.left() + 24.0, rect.center().y - galley.size().y / 2.0),
+        galley,
+        text_color,
+    );
+    response
 }
 
 /// A script error's text, with the `path:line` it starts with underlined

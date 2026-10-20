@@ -307,10 +307,19 @@ impl Explorer {
         let dragged = egui::DragAndDrop::payload::<DraggedRow>(ui.ctx()).map(|row| row.0);
         #[cfg(test)]
         self.drawn.clear();
+        let palette = theme::palette(ui.ctx());
         egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
+            // Rows touch, so their highlights join into one column.
+            ui.spacing_mut().item_spacing.y = 0.0;
+            let row_height = ui.spacing().interact_size.y;
             for row in self.rows(world) {
-                ui.horizontal(|ui| {
-                    ui.add_space(row.depth as f32 * INDENT);
+                // Filled in once the row is drawn and its size is known, but
+                // painted behind it.
+                let background = ui.painter().add(egui::Shape::Noop);
+                let is_selected = selected.contains(&row.id);
+                let drawn = ui.horizontal(|ui| {
+                    ui.set_min_height(row_height);
+                    ui.add_space(4.0 + row.depth as f32 * INDENT);
                     let arrow_sense = if row.has_children {
                         egui::Sense::click()
                     } else {
@@ -324,17 +333,16 @@ impl Explorer {
                         } else {
                             icons::CARET_RIGHT
                         };
-                        let visuals = ui.visuals();
                         let color = if arrow.hovered() {
-                            visuals.strong_text_color()
+                            palette.text_strong
                         } else {
-                            visuals.weak_text_color()
+                            palette.text_weak
                         };
                         ui.painter().text(
                             arrow.rect.center(),
                             egui::Align2::CENTER_CENTER,
                             caret,
-                            egui::FontId::proportional(12.0),
+                            egui::FontId::proportional(11.0),
                             color,
                         );
                     }
@@ -353,13 +361,14 @@ impl Explorer {
                     // Clicks select; dragging moves the row onto another.
                     let icon = egui::RichText::new(row_icon(world, &row))
                         .color(theme::class_color(row.class, ui.visuals()));
+                    // The row's background shows the selection and hover,
+                    // so the label itself has no frame.
                     let label = ui
                         .add(
-                            egui::Button::selectable(
-                                selected.contains(&row.id),
-                                (icon, row.name.as_str()),
-                            )
-                            .sense(egui::Sense::click_and_drag()),
+                            egui::Button::new((icon, row.name.as_str()))
+                                .selected(is_selected)
+                                .frame(false)
+                                .sense(egui::Sense::click_and_drag()),
                         )
                         .on_hover_text(row.class.as_str());
                     #[cfg(test)]
@@ -377,7 +386,11 @@ impl Explorer {
                     }
                     // Show the class too when the name doesn't already say it.
                     if row.name != row.class.as_str() {
-                        ui.weak(row.class.as_str());
+                        ui.label(
+                            egui::RichText::new(row.class.as_str())
+                                .size(theme::type_scale::SMALL)
+                                .color(palette.text_muted),
+                        );
                     }
                     if row.has_children && label.double_clicked() {
                         toggled = Some(row.id);
@@ -406,6 +419,31 @@ impl Explorer {
                         None => {}
                     });
                 });
+                // The row's full width: the selection or a hover fill, and
+                // a faint guide for each level it's nested in.
+                let clip = ui.clip_rect();
+                let row_rect =
+                    egui::Rect::from_x_y_ranges(clip.x_range(), drawn.response.rect.y_range());
+                let hovered = ui.rect_contains_pointer(row_rect) && dragged.is_none();
+                let hover = theme::ease(ui.ctx(), egui::Id::new(("explorer row", row.id)), hovered);
+                let fill = if is_selected {
+                    palette.accent_soft
+                } else {
+                    palette.control.gamma_multiply(hover)
+                };
+                ui.painter().set(
+                    background,
+                    egui::Shape::rect_filled(row_rect.shrink2(egui::vec2(2.0, 0.0)), 4, fill),
+                );
+                let left = drawn.response.rect.left() + 4.0;
+                for depth in 1..=row.depth {
+                    let x = left + (depth - 1) as f32 * INDENT + ARROW_SIZE / 2.0;
+                    ui.painter().vline(
+                        x.round() + 0.5,
+                        row_rect.y_range(),
+                        egui::Stroke::new(1.0_f32, palette.border),
+                    );
+                }
             }
         });
 

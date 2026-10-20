@@ -6,7 +6,8 @@
 //! into the [`World`].
 //!
 //! MeshParts collide as the convex hull of their model, which comes from
-//! the [`Assets`] given to [`Physics::with_assets`].
+//! the [`Assets`] given to [`Physics::with_assets`]. Terrains collide as
+//! their heightfield, rebuilt only when the terrain changes.
 //!
 //! Physics never gets told about changes. Instead, before stepping it compares
 //! every Part with what it last saw (or wrote), so a script that moves,
@@ -113,8 +114,12 @@ impl PartState {
     /// Reads a Part or MeshPart, or `None` for other classes. A part with a
     /// NaN or infinite Position, Orientation or Size also gives `None`, so
     /// it is left out of physics instead of breaking the simulation.
-    fn read(instance: &Instance, assets: &Assets) -> Option<Self> {
+    fn read(world: &World, id: InstanceId, assets: &Assets) -> Option<Self> {
+        let instance = world.get(id)?;
         let vector = |name| instance.property(name).and_then(Value::as_vector3);
+        if instance.class() == ClassName::Terrain {
+            return Self::read_terrain(world, id, instance);
+        }
         let anchored = match instance.property("Anchored") {
             Some(Value::Bool(anchored)) => *anchored,
             _ => return None,
@@ -139,6 +144,25 @@ impl PartState {
             wind_affected,
         };
         let finite = [state.size, state.position, state.orientation]
+            .iter()
+            .all(|v| v.x.is_finite() && v.y.is_finite() && v.z.is_finite());
+        finite.then_some(state)
+    }
+
+    /// A Terrain: always anchored, never turned, colliding as its heightfield.
+    fn read_terrain(world: &World, id: InstanceId, instance: &Instance) -> Option<Self> {
+        let vector = |name| instance.property(name).and_then(Value::as_vector3);
+        let data = world.terrain(id)?.clone();
+        let state = Self {
+            anchored: true,
+            can_collide: instance.property("CanCollide").and_then(Value::as_bool) != Some(false),
+            shape: Form::Terrain(shapes::TerrainShape { data }),
+            size: vector("Size")?,
+            position: vector("Position")?,
+            orientation: Vector3::default(),
+            wind_affected: false,
+        };
+        let finite = [state.size, state.position]
             .iter()
             .all(|v| v.x.is_finite() && v.y.is_finite() && v.z.is_finite());
         finite.then_some(state)
@@ -232,7 +256,7 @@ impl Physics {
         let current: BTreeMap<InstanceId, PartState> = world
             .descendants(world.workspace())
             .into_iter()
-            .filter_map(|id| Some((id, PartState::read(world.get(id)?, &self.assets)?)))
+            .filter_map(|id| Some((id, PartState::read(world, id, &self.assets)?)))
             .collect();
         let mut anything_changed = false;
 

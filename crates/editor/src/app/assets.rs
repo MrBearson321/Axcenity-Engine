@@ -404,6 +404,7 @@ impl EditorApp {
         let text = project::write_prefab(&self.world, &roots);
         match project::write_script(&folder, &path, &text) {
             Ok(()) => {
+                self.toasts.success(format!("Saved the prefab `{path}`"));
                 self.output.info(format!("Saved the prefab `{path}`."));
                 self.asset_browser.refresh();
             }
@@ -462,10 +463,16 @@ impl EditorApp {
             }
         };
         match result {
-            Ok(path) => self.output.info(format!("Imported `{path}`.")),
-            Err(err) => self
-                .output
-                .error(format!("Could not import `{}`: {err}", file.display())),
+            Ok(path) => {
+                self.toasts.success(format!("Imported `{path}`"));
+                self.output.info(format!("Imported `{path}`."));
+            }
+            Err(err) => {
+                self.toasts
+                    .error("Could not import that file. Output says why.");
+                self.output
+                    .error(format!("Could not import `{}`: {err}", file.display()));
+            }
         }
     }
 

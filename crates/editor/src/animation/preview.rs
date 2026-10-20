@@ -235,7 +235,13 @@ impl Preview {
         if let (Some(part), Some(posed)) = (self.part, posed) {
             poses.insert(part, posed);
         }
-        let list = axcenity_scene::build_draw_list_posed(&self.world, assets, camera, &poses);
+        let list = axcenity_scene::build_draw_list_posed(
+            &self.world,
+            assets,
+            camera,
+            &poses,
+            &mut axcenity_scene::TerrainCache::new(),
+        );
         if let Err(error) = target.renderer.render(&list) {
             log::error!("could not render the animation preview: {error:#}");
         }

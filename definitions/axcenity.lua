@@ -180,7 +180,7 @@ function UserInputServiceClass:IsKeyDown(key) end
 ---@field Changed Signal Fires when a property (or `Name` or `Parent`) gets a different value, whether a script, physics or the editor changed it. The handler gets the property's name: `function(property) ... end`.
 ---@field ChildAdded Signal Fires when an Instance is put inside this one. The handler gets the child.
 ---@field ChildRemoved Signal Fires when an Instance is taken out of this one. The handler gets the child.
----@field [string] Workspace|Players|Lighting|ReplicatedStorage|ServerScriptService|StarterPlayer|StarterPlayerScripts|Part|MeshPart|Script|LocalScript|ModuleScript|RemoteEvent|Player|Model|Folder|SurfaceAppearance|ScreenGui|Frame|TextLabel|TextButton|ImageLabel|TextBox|PageLayout|Table|BillboardGui|Sound|PointLight|SpotLight|ParticleEmitter|Animator|Animation A child, found by its name.
+---@field [string] Workspace|Players|Lighting|ReplicatedStorage|ServerScriptService|StarterPlayer|StarterPlayerScripts|Part|MeshPart|Script|LocalScript|ModuleScript|RemoteEvent|Player|Model|Folder|SurfaceAppearance|ScreenGui|Frame|TextLabel|TextButton|ImageLabel|TextBox|PageLayout|Table|BillboardGui|Sound|PointLight|SpotLight|ParticleEmitter|Animator|Animation|Terrain|TerrainLayer A child, found by its name.
 local InstanceClass = {}
 
 ---The first child with this name, or nil. With `recursive`, searches every descendant.
@@ -619,6 +619,47 @@ function AnimationClass:Pause() end
 function AnimationClass:Resume() end
 
 
+---A landscape: a heightfield shaped in the editor's Terrain Studio, drawn with its TerrainLayers and colliding as its ground. Position is the middle of its footprint at the bottom of its height range; Size is its width, height range and length.
+---@class Terrain: Instance
+---@field Position Vector3 The middle of the terrain's bottom: its lowest possible ground.
+---@field Size Vector3 Width (X), height range (Y) and length (Z) in studs. Heights are stored as parts of the height range, so changing Y stretches the hills.
+---@field CastShadow boolean Whether the terrain casts shadows.
+---@field CanCollide boolean Whether parts and characters stand on the terrain.
+---@field DataFolder string The project folder its heights and painted materials are saved in, such as "assets/terrain/Terrain". The editor picks it.
+
+---Inside a Terrain: one material it's painted with (a tint, texture maps and tiling), and an optional rule that lays it down by height and slope.
+---@class TerrainLayer: Instance
+---@field Color Color3 Tints the layer's color map, or is its color without one.
+---@field ColorMap string The layer's color texture, relative to the project folder. Empty means none.
+---@field NormalMap string The layer's normal map. Empty means none.
+---@field RoughnessMap string The layer's roughness map. Empty means none.
+---@field MetalnessMap string The layer's metalness map. Empty means none.
+---@field AmbientOcclusionMap string The layer's ambient occlusion map. Empty means none.
+---@field HeightMap string The layer's height map: light is high. Where layers meet, the higher one shows through.
+---@field Metalness number 0 to 1: how metallic the layer is, without a metalness map.
+---@field Roughness number 0 to 1: how rough the layer is, without a roughness map.
+---@field NormalStrength number Scales the normal map's bumps.
+---@field NormalMapDirectX boolean True for a DirectX-style normal map, whose green points down.
+---@field RoughnessChannel EnumItem.TextureChannel|"Red"|"Green"|"Blue"|"Alpha" Which channel of RoughnessMap holds the roughness.
+---@field InvertRoughness boolean Reads RoughnessMap as smoothness (1 minus the value).
+---@field MetalnessChannel EnumItem.TextureChannel|"Red"|"Green"|"Blue"|"Alpha" Which channel of MetalnessMap holds the metalness.
+---@field AmbientOcclusionChannel EnumItem.TextureChannel|"Red"|"Green"|"Blue"|"Alpha" Which channel of AmbientOcclusionMap holds the occlusion.
+---@field TileSize number Studs one copy of the textures covers.
+---@field TextureRotation number Turns the textures, in degrees.
+---@field Triplanar boolean Projects the textures from the sides too, so cliffs don't stretch them.
+---@field AntiTiling number 0 to 1: mixes in a larger, turned copy of the textures so repeats show less.
+---@field HeightBlend number 0 to 1: how sharply layers meet where they have height maps.
+---@field AutoEnabled boolean Whether the layer lays itself down by its height and slope rule.
+---@field MinHeight number The rule's lowest height, in studs above the terrain's bottom.
+---@field MaxHeight number The rule's highest height, in studs above the terrain's bottom.
+---@field HeightFade number Studs over which the rule fades at its heights.
+---@field MinSlope number The rule's gentlest slope, in degrees from flat.
+---@field MaxSlope number The rule's steepest slope, in degrees from flat.
+---@field SlopeFade number Degrees over which the rule fades at its slopes.
+---@field RuleStrength number 0 to 1: how fully the layer covers where its rule holds.
+---@field RuleNoise number 0 to 1: breaks the rule's edges up with noise.
+---@field NoiseScale number Studs across the rule's noise patches.
+
 -- Globals -------------------------------------------------------------------
 
 ---The root of the game. Every service is inside it.
@@ -673,6 +714,8 @@ Instance = {}
 ---@overload fun(className: "ParticleEmitter"): ParticleEmitter
 ---@overload fun(className: "Animator"): Animator
 ---@overload fun(className: "Animation"): Animation
+---@overload fun(className: "Terrain"): Terrain
+---@overload fun(className: "TerrainLayer"): TerrainLayer
 function Instance.new(className) end
 
 ---Creates Vector3 values.

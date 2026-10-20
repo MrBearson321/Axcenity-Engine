@@ -18,6 +18,7 @@ use axcenity_render::{
 use axcenity_ui::{Stylesheet, UiLayout, layout_ui_interactive};
 
 use crate::orientation::rotation_from_orientation;
+use crate::terrain::TerrainCache;
 
 const SUN: Sun = Sun {
     direction: Vec3::new(0.5, 1.0, 0.25),
@@ -188,16 +189,26 @@ pub fn light_markers(world: &World) -> Vec<LightMarker> {
 
 /// The draw list for everything in the Workspace, seen from `camera`.
 /// MeshParts' models come from `assets`, loaded the first time they're drawn.
+/// Terrains are built from scratch; hosts that draw every frame keep a
+/// [`TerrainCache`] and use [`build_draw_list_posed`].
 pub fn build_draw_list(world: &World, assets: &Assets, camera: Camera) -> DrawList {
-    build_draw_list_posed(world, assets, camera, &Poses::new())
+    build_draw_list_posed(
+        world,
+        assets,
+        camera,
+        &Poses::new(),
+        &mut TerrainCache::new(),
+    )
 }
 
-/// Like [`build_draw_list`], drawing the MeshParts in `poses` as posed.
+/// Like [`build_draw_list`], drawing the MeshParts in `poses` as posed, and
+/// Terrains with what `terrain` kept from earlier frames.
 pub fn build_draw_list_posed(
     world: &World,
     assets: &Assets,
     camera: Camera,
     poses: &Poses,
+    terrain: &mut TerrainCache,
 ) -> DrawList {
     let settings = lighting_settings(world);
     let glow = if settings.post.enabled && settings.post.bloom_enabled {
@@ -220,6 +231,8 @@ pub fn build_draw_list_posed(
             ClassName::PointLight | ClassName::SpotLight => {
                 lights.extend(light_of(world, instance))
             }
+            // Drawn chunk by chunk below.
+            ClassName::Terrain => {}
             _ => {
                 if let Some(mut item) = part_draw_item(instance, glow) {
                     if let Some(extra) = fixture_glow(world, instance) {
@@ -232,6 +245,8 @@ pub fn build_draw_list_posed(
             }
         }
     }
+
+    terrain.draw_all(world, assets, &camera, &mut items);
 
     DrawList {
         sky: settings.sky,
@@ -265,6 +280,7 @@ pub fn build_draw_list_with_ui(
         None,
         None,
         &Poses::new(),
+        &mut TerrainCache::new(),
     )
     .0
 }
@@ -282,8 +298,9 @@ pub fn build_draw_list_with_ui_interaction(
     pressed_button: Option<InstanceId>,
     focused: Option<InstanceId>,
     poses: &Poses,
+    terrain: &mut TerrainCache,
 ) -> (DrawList, UiLayout) {
-    let mut list = build_draw_list_posed(world, assets, camera, poses);
+    let mut list = build_draw_list_posed(world, assets, camera, poses, terrain);
     let layout = layout_ui_interactive(
         world,
         viewport_size.0,
@@ -631,6 +648,7 @@ fn model_material(material: &ModelMaterial) -> Material {
             opacity: material.opacity_texture.as_ref().map(channel_map),
             specular: material.specular_texture.as_ref().map(texture),
         },
+        terrain: None,
     }
 }
 

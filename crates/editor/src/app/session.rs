@@ -117,6 +117,8 @@ impl EditorApp {
             remembered_blocks: HashMap::new(),
             world_text,
             keep_world_file: !project.world_loaded,
+            damaged_terrains: project.damaged_terrains,
+            saved_terrains: HashMap::new(),
         });
         self.animation = AnimationStudio::default();
         self.replace_world(project.world);
@@ -129,6 +131,10 @@ impl EditorApp {
         self.selection.clear();
         self.history = History::new();
         self.explorer = Explorer::new(&self.world);
+        self.forget_terrain_work();
+        if let Some(project) = &mut self.project {
+            project.saved_terrains = terrain::terrain_revisions(&self.world);
+        }
     }
     /// File > Set Up VS Code Autocomplete: writes the files Lua Language
     /// Server needs into the project, and says what to do next.
@@ -182,6 +188,8 @@ impl EditorApp {
         self.history.seal();
         // The game has its own audio; a preview would play over it.
         self.sound_preview = None;
+        // A stroke ends, and a terrain preview is dropped: Play shows the world.
+        self.put_terrain_tools_down();
         // The game reads clips from their files.
         if let Some(project) = &self.project {
             let _ = self.animation.write_all(&project.folder, &mut self.output);
@@ -510,14 +518,14 @@ impl EditorApp {
                 }
             }
         }
-        let (icon, accent) = dialog::unsaved_style();
+        let (icon, tone) = dialog::unsaved_style();
         let message = format!("\"{name}\" has unsaved changes. Save them before {doing}?");
         let outcome = dialog::ask(
             ctx,
             &dialog::Question {
                 id: "unsaved changes",
                 icon,
-                accent,
+                tone,
                 title: "Save changes?",
                 message: &message,
                 items,
@@ -562,15 +570,17 @@ impl EditorApp {
     /// Fills the window under the menu bar with the start screen, and opens
     /// what's picked there.
     pub(super) fn start_screen(&mut self, ctx: &egui::Context) {
-        let Some(brand) = &self.brand else {
-            return;
-        };
         let picked = egui::CentralPanel::default()
-            .show(ctx, |ui| self.start.show(ui, brand, &mut self.recent))
+            .frame(egui::Frame::NONE.fill(theme::palette(ctx).panel))
+            .show(ctx, |ui| self.start.show(ui, &mut self.recent))
             .inner;
         match picked {
             Some(StartAction::OpenDialog) => self.open_with_dialog(),
             Some(StartAction::Open(folder)) => self.open(&folder),
+            Some(StartAction::Settings) => {
+                self.settings.open = true;
+                return;
+            }
             None => return,
         }
         // Nothing opened, so say why here: Output isn't shown without a project.

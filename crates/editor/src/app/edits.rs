@@ -420,6 +420,8 @@ impl EditorApp {
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
                 egui::Frame::popup(ui.style())
+                    .corner_radius(8)
+                    .inner_margin(egui::Margin::same(10))
                     .show(ui, |ui| {
                         ui.set_max_width(260.0);
                         build_tools::panel(ui, tool, &scene, settings, modes, snap)
@@ -704,12 +706,8 @@ impl EditorApp {
         };
         for text in texts {
             if text.path.ends_with(axcenity_anim::CLIP_EXTENSION) {
-                self.animation.apply_file_text(
-                    &project,
-                    &text.path,
-                    &text.after,
-                    &mut self.output,
-                );
+                self.animation
+                    .apply_file_text(&project, &text.path, &text.after, &mut self.output);
             } else if axcenity_project::is_stylesheet(&text.path) {
                 self.set_stylesheet_text(&text.path, &text.after);
             }

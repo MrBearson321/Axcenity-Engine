@@ -2,7 +2,7 @@
 //!
 //! Rectangle vertices are pixels from the top left. Glyphs are drawn by glyphon
 //! inside `ScenePipeline`; this module builds the quads and the pipelines
-//! (`ui.wgsl`, and the sky entry of `shader.wgsl`).
+//! (`ui.wgsl`, and the sky entry of `shader.wgsl`, after `lighting.wgsl`).
 
 use glyphon::{Buffer, Color as GlyphColor};
 
@@ -279,7 +279,7 @@ pub(super) fn create_sky_pipeline(
     device: &wgpu::Device,
     frame_layout: &wgpu::BindGroupLayout,
 ) -> wgpu::RenderPipeline {
-    let shader = device.create_shader_module(wgpu::include_wgsl!("../shader.wgsl"));
+    let shader = super::gpu::shader_module(device, "sky", super::gpu::SCENE_SHADER);
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("sky"),
         bind_group_layouts: &[frame_layout],

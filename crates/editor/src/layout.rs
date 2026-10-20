@@ -24,16 +24,19 @@ pub enum Pane {
     Assets,
     /// The Animation Studio: clips, controllers and their preview.
     Animation,
+    /// The Terrain Studio: sculpting, painting and generating terrains.
+    Terrain,
 }
 
 impl Pane {
     /// The panels that can be closed and opened again, in menu order.
-    pub const CLOSABLE: [Pane; 5] = [
+    pub const CLOSABLE: [Pane; 6] = [
         Pane::Explorer,
         Pane::Properties,
         Pane::Output,
         Pane::Assets,
         Pane::Animation,
+        Pane::Terrain,
     ];
 
     pub fn label(self) -> &'static str {
@@ -44,6 +47,7 @@ impl Pane {
             Pane::Output => "Output",
             Pane::Assets => "Assets",
             Pane::Animation => "Animation",
+            Pane::Terrain => "Terrain",
         }
     }
 
@@ -55,12 +59,16 @@ impl Pane {
             Pane::Output => icons::TERMINAL_WINDOW,
             Pane::Assets => icons::SHAPES,
             Pane::Animation => icons::PERSON_SIMPLE_RUN,
+            Pane::Terrain => icons::MOUNTAINS,
         }
     }
 
     /// The title shown on the panel's tab.
-    pub fn title(self) -> String {
-        theme::with_icon(self.icon(), self.label())
+    pub fn title(self) -> egui::WidgetText {
+        egui::RichText::new(theme::with_icon(self.icon(), self.label()))
+            .family(theme::medium_family())
+            .size(theme::type_scale::BODY - 0.5)
+            .into()
     }
 }
 
@@ -112,6 +120,8 @@ impl Layout {
             Pane::Assets => Some(Pane::Output),
             // A tab beside the Scene, with room for its graph and preview.
             Pane::Animation => Some(Pane::Scene),
+            // A tab beside Properties, down the right.
+            Pane::Terrain => Some(Pane::Properties),
         };
         let beside = neighbor
             .and_then(|neighbor| self.dock.find_main_surface_tab(&neighbor))
@@ -123,7 +133,7 @@ impl Layout {
                 tree.push_to_focused_leaf(pane);
             }
             // Its neighbor is closed too: split it off the Scene's side.
-            (Pane::Explorer | Pane::Properties, None) => {
+            (Pane::Explorer | Pane::Properties | Pane::Terrain, None) => {
                 tree.split_right(NodeIndex::root(), 0.78, vec![pane]);
             }
             _ => {
@@ -181,8 +191,8 @@ fn zero_nulls(json: &mut serde_json::Value) {
 
 /// Like Roblox Studio: the Scene in the middle (with the Animation Studio as
 /// a tab beside it, like Unity's Animator window), the Explorer with
-/// Properties under it down the right, and Output and Assets as tabs under
-/// the Scene.
+/// Properties (and the Terrain Studio as a tab beside it) under it down the
+/// right, and Output and Assets as tabs under the Scene.
 fn default_dock() -> DockState<Pane> {
     let mut dock = DockState::new(vec![Pane::Scene, Pane::Animation]);
     dock.set_active_tab((
@@ -192,17 +202,80 @@ fn default_dock() -> DockState<Pane> {
     ));
     let tree = dock.main_surface_mut();
     let [scene, explorer] = tree.split_right(NodeIndex::root(), 0.78, vec![Pane::Explorer]);
-    tree.split_below(explorer, 0.45, vec![Pane::Properties]);
+    tree.split_below(explorer, 0.45, vec![Pane::Properties, Pane::Terrain]);
     tree.split_below(scene, 0.78, vec![Pane::Output, Pane::Assets]);
     dock
 }
 
-/// The docking area's look, taken from the editor's theme so tabs match the
-/// rest of the window.
-pub fn style(style: &egui::Style) -> egui_dock::Style {
+/// The docking area's look, from the theme's tokens: quiet tab bars on the
+/// app background, the active tab joined to its panel, thin dividers that
+/// light up in the accent when hovered or dragged, and a minimum panel size.
+pub fn style(style: &egui::Style, palette: &theme::Palette) -> egui_dock::Style {
     let mut dock = egui_dock::Style::from_egui(style);
-    dock.tab_bar.height = 26.0;
-    dock.tab.tab_body.inner_margin = egui::Margin::same(6);
+    let radius = egui::CornerRadius {
+        nw: 6,
+        ne: 6,
+        sw: 0,
+        se: 0,
+    };
+    dock.dock_area_padding = None;
+    dock.main_surface_border_stroke = egui::Stroke::NONE;
+
+    dock.tab_bar.bg_fill = palette.app_bg;
+    dock.tab_bar.height = 30.0;
+    dock.tab_bar.hline_color = palette.border;
+    dock.tab_bar.corner_radius = egui::CornerRadius::ZERO;
+
+    let tab = |bg_fill, text_color, outline_color| egui_dock::TabInteractionStyle {
+        bg_fill,
+        text_color,
+        outline_color,
+        corner_radius: radius,
+    };
+    // The active tab shares its panel's colour, so it reads as part of it.
+    dock.tab.active = tab(palette.panel, palette.text, palette.border);
+    dock.tab.focused = tab(palette.panel, palette.text_strong, palette.border);
+    dock.tab.inactive = tab(
+        palette.app_bg,
+        palette.text_weak,
+        egui::Color32::TRANSPARENT,
+    );
+    dock.tab.hovered = tab(
+        palette.control,
+        palette.text_strong,
+        egui::Color32::TRANSPARENT,
+    );
+    dock.tab.active_with_kb_focus = tab(palette.panel, palette.text_strong, palette.accent);
+    dock.tab.focused_with_kb_focus = tab(palette.panel, palette.text_strong, palette.accent);
+    dock.tab.inactive_with_kb_focus = tab(palette.app_bg, palette.text_strong, palette.accent);
+    dock.tab.hline_below_active_tab_name = false;
+    dock.tab.spacing = 2.0;
+    dock.tab.minimum_width = Some(72.0);
+    dock.tab.tab_body.bg_fill = palette.panel;
+    dock.tab.tab_body.stroke = egui::Stroke::NONE;
+    dock.tab.tab_body.corner_radius = egui::CornerRadius::ZERO;
+    dock.tab.tab_body.inner_margin = egui::Margin::symmetric(8, 6);
+
+    dock.buttons.close_tab_color = palette.text_muted;
+    dock.buttons.close_tab_active_color = palette.text_strong;
+    dock.buttons.close_tab_bg_fill = palette.control_hover;
+    dock.buttons.add_tab_bg_fill = palette.control_hover;
+
+    // A 1-point divider in the border colour; the accent shows where it can
+    // be dragged. Panels can't be squeezed below `extra` points.
+    dock.separator.width = 1.0;
+    dock.separator.extra_interact_width = 6.0;
+    dock.separator.extra = 140.0;
+    dock.separator.color_idle = palette.border;
+    dock.separator.color_hovered = palette.accent;
+    dock.separator.color_dragged = palette.accent;
+
+    dock.overlay.selection_color = palette.accent.gamma_multiply(0.25);
+    dock.overlay.button_color = palette.elevated;
+    dock.overlay.button_border_stroke = egui::Stroke::new(1.0_f32, palette.border_strong);
+    dock.overlay.hovered_leaf_highlight.color = palette.accent.gamma_multiply(0.08);
+    dock.overlay.hovered_leaf_highlight.stroke = egui::Stroke::new(1.0_f32, palette.accent);
+    dock.overlay.hovered_leaf_highlight.corner_radius = egui::CornerRadius::same(6);
     dock
 }
 

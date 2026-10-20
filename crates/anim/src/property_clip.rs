@@ -129,7 +129,13 @@ impl PropertyClip {
     /// mapping through looping the same way playback advances. `from` is
     /// counted, `to` is not. Seeking backward should pass an empty range.
     pub fn events_between(&self, from: f64, to: f64) -> Vec<String> {
-        events_between(&self.file.events, self.file.duration, self.file.looping, from, to)
+        events_between(
+            &self.file.events,
+            self.file.duration,
+            self.file.looping,
+            from,
+            to,
+        )
     }
 }
 
@@ -162,11 +168,7 @@ pub fn sample_time(time: f64, duration: f64, looping: bool) -> f64 {
         }
         // Exactly on a loop boundary (time == n * duration) is the end of a
         // pass, which holds the last frame for sampling.
-        if t == 0.0 && time > 0.0 {
-            duration
-        } else {
-            t
-        }
+        if t == 0.0 && time > 0.0 { duration } else { t }
     } else {
         time.clamp(0.0, duration)
     }
@@ -195,7 +197,12 @@ fn sample_track(track: &PropertyTrack, time: f64) -> Option<Vector3> {
         Interp::Linear => {
             let span = (b.time - a.time).max(1e-12);
             let t = ((time - a.time) / span) as f32;
-            Some(lerp_property(track.property, vector3(a.value), vector3(b.value), t))
+            Some(lerp_property(
+                track.property,
+                vector3(a.value),
+                vector3(b.value),
+                t,
+            ))
         }
     }
 }
@@ -295,7 +302,9 @@ pub fn apply_evaluated(
         };
         let name = item.property.as_str();
         if world.set_property(id, name, item.as_value()).is_err() {
-            missing.entry(format!("{}:{}", item.target, name)).or_insert(());
+            missing
+                .entry(format!("{}:{}", item.target, name))
+                .or_insert(());
         }
     }
 }
@@ -376,14 +385,8 @@ mod tests {
             events: vec![],
         })
         .unwrap();
-        assert_eq!(
-            clip.evaluate(0.0)[0].value,
-            Vector3::new(1.0, 2.0, 3.0)
-        );
-        assert_eq!(
-            clip.evaluate(5.0)[0].value,
-            Vector3::new(1.0, 2.0, 3.0)
-        );
+        assert_eq!(clip.evaluate(0.0)[0].value, Vector3::new(1.0, 2.0, 3.0));
+        assert_eq!(clip.evaluate(5.0)[0].value, Vector3::new(1.0, 2.0, 3.0));
     }
 
     #[test]

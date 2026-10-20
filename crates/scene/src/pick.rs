@@ -114,8 +114,9 @@ impl CameraView {
     }
 }
 
-/// The Workspace Part that `ray` hits first, if any. Parts the ray starts
-/// inside of are skipped, so a camera inside a part can still pick past it.
+/// The Workspace Part (or Terrain) that `ray` hits first, if any. Parts the
+/// ray starts inside of are skipped, so a camera inside a part can still
+/// pick past it.
 pub fn pick(world: &World, ray: Ray) -> Option<InstanceId> {
     pick_hit(world, ray, None).map(|hit| hit.part)
 }
@@ -138,9 +139,16 @@ pub fn pick_hit(world: &World, ray: Ray, skip: Option<InstanceId>) -> Option<Hit
 }
 
 /// Like [`pick_hit`], leaving out every part in `skip` (such as all the
-/// parts being dragged together).
+/// parts being dragged together). Terrains count, by their ground.
 pub fn pick_hit_skipping(world: &World, ray: Ray, skip: &[InstanceId]) -> Option<Hit> {
-    let mut nearest: Option<Hit> = None;
+    let mut nearest: Option<Hit> =
+        crate::terrain::terrain_hit(world, ray.origin, ray.direction, skip).map(
+            |(terrain, distance, normal)| Hit {
+                part: terrain,
+                distance,
+                normal,
+            },
+        );
     for id in world.descendants(world.workspace()) {
         if skip.contains(&id) {
             continue;

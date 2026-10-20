@@ -353,6 +353,9 @@ pub struct Material {
     /// More textures, placed like `base_color_texture`. Built-in shapes
     /// ignore them too.
     pub maps: TextureMaps,
+    /// For a terrain chunk: its blended layers, which replace everything
+    /// above but `opacity` (terrain is always solid).
+    pub terrain: Option<TerrainSurface>,
 }
 
 impl Default for Material {
@@ -366,6 +369,7 @@ impl Default for Material {
             opacity: 1.0,
             alpha_cutoff: 0.0,
             maps: TextureMaps::default(),
+            terrain: None,
         }
     }
 }
@@ -440,4 +444,81 @@ pub enum Channel {
     Green,
     Blue,
     Alpha,
+}
+
+/// One terrain chunk's material: up to eight layers, blended by weights
+/// that vary across the chunk. The mesh's texture coordinates place the
+/// weight textures; the layers' own textures are placed in the world.
+#[derive(Clone, Debug)]
+pub struct TerrainSurface {
+    /// Shared by every chunk of the terrain.
+    pub layers: Arc<TerrainLayers>,
+    /// The weights of layers 1 to 4 (red, green, blue, alpha) and 5 to 8,
+    /// as plain values adding up to 1 at each texel.
+    pub weights: [Arc<dyn TextureSource>; 2],
+}
+
+/// What a terrain is drawn with, besides each chunk's weights.
+#[derive(Clone, Debug)]
+pub struct TerrainLayers {
+    /// The same for the same terrain from frame to frame, so its GPU copy
+    /// is updated in place.
+    pub id: u64,
+    /// Changes whenever anything else here does.
+    pub key: u64,
+    /// At most eight; more are left out.
+    pub layers: Vec<TerrainLayer>,
+    pub view: TerrainView,
+    /// The world Y of the bottom and top of the terrain's height range,
+    /// for the Height view.
+    pub height_range: [f32; 2],
+    /// The world X and Z of the terrain's corner, and the studs between
+    /// samples, for the Grid view.
+    pub grid_origin: [f32; 2],
+    pub grid_cell: [f32; 2],
+}
+
+/// How a terrain is shown: shaded, or one of the editor's views of it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum TerrainView {
+    #[default]
+    Shaded,
+    /// Colored by height, blue low to white high.
+    Height,
+    /// Colored by steepness, green flat to red steep.
+    Slope,
+    /// Each layer in its own color, blended by its weights.
+    Weights,
+    /// Shaded, with lines along the grid of samples.
+    Grid,
+}
+
+/// One material layer of a terrain. Maps are optional, as on other
+/// materials; without one, the plain value is used everywhere.
+#[derive(Clone, Debug)]
+pub struct TerrainLayer {
+    /// An sRGB tint that multiplies the base color texture.
+    pub color: [f32; 3],
+    pub base_color_texture: Option<Arc<dyn TextureSource>>,
+    pub normal: Option<NormalMap>,
+    /// Multiply `metalness` and `roughness`.
+    pub metalness_map: Option<ChannelMap>,
+    pub roughness_map: Option<ChannelMap>,
+    pub occlusion: Option<ChannelMap>,
+    /// Light is high: where layers meet, the higher one shows through.
+    pub height: Option<ChannelMap>,
+    pub metalness: f32,
+    pub roughness: f32,
+    /// Studs one copy of the textures covers.
+    pub tile_size: f32,
+    /// The textures' turn around the up axis.
+    pub rotation_degrees: f32,
+    /// Also project the textures from the sides, for cliffs.
+    pub triplanar: bool,
+    /// 0 to 1: how much a larger, turned copy is mixed in to hide repeats.
+    pub anti_tiling: f32,
+    /// 0 to 1: how sharply its height map decides where it meets others.
+    pub height_blend: f32,
+    /// Its sRGB color in the Weights view.
+    pub debug_color: [f32; 3],
 }

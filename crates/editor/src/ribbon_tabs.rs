@@ -9,7 +9,8 @@
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 
-use crate::theme::{self, icons};
+use crate::theme::{self, icons, type_scale};
+use crate::widgets;
 
 /// One captioned group of ribbon buttons.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -29,12 +30,14 @@ pub enum RibbonGroup {
     Ui,
     /// Script, LocalScript and ModuleScript.
     Scripts,
+    /// The Terrain Studio and its main tools.
+    Terrain,
     /// Open and close the dockable panels, and reset the layout.
     Panels,
 }
 
 impl RibbonGroup {
-    pub const ALL: [RibbonGroup; 9] = [
+    pub const ALL: [RibbonGroup; 10] = [
         RibbonGroup::Game,
         RibbonGroup::Tools,
         RibbonGroup::Snapping,
@@ -43,6 +46,7 @@ impl RibbonGroup {
         RibbonGroup::Import,
         RibbonGroup::Ui,
         RibbonGroup::Scripts,
+        RibbonGroup::Terrain,
         RibbonGroup::Panels,
     ];
 
@@ -57,6 +61,7 @@ impl RibbonGroup {
             RibbonGroup::Import => "Import",
             RibbonGroup::Ui => "UI",
             RibbonGroup::Scripts => "Scripts",
+            RibbonGroup::Terrain => "Terrain",
             RibbonGroup::Panels => "Panels",
         }
     }
@@ -71,6 +76,7 @@ impl RibbonGroup {
             RibbonGroup::Import => "Import a 3D model",
             RibbonGroup::Ui => "Insert screens, frames, text, buttons and other UI",
             RibbonGroup::Scripts => "Insert scripts",
+            RibbonGroup::Terrain => "Sculpt, paint and generate terrain",
             RibbonGroup::Panels => "Show or hide the Explorer, Properties, Output and Assets",
         }
     }
@@ -111,8 +117,8 @@ impl BuiltInTab {
     pub fn groups(self) -> &'static [RibbonGroup] {
         use RibbonGroup::*;
         match self {
-            BuiltInTab::Home => &[Game, Tools, Snapping, Parts],
-            BuiltInTab::Model => &[Tools, Snapping, Parts, Effects, Import],
+            BuiltInTab::Home => &[Game, Tools, Snapping, Parts, Terrain],
+            BuiltInTab::Model => &[Tools, Snapping, Parts, Effects, Import, Terrain],
             BuiltInTab::Ui => &[Ui],
             BuiltInTab::Script => &[Game, Scripts],
             BuiltInTab::Test => &[Game],
@@ -212,29 +218,35 @@ impl RibbonTabs {
     }
 
     /// Draws the row of tabs: the built-in ones, the custom ones (right-click
-    /// to change or delete), and + to make a new one.
+    /// to change or delete), and + to make a new one. The active tab is
+    /// underlined in the accent colour, and the line slides to a newly
+    /// picked tab.
     pub fn tab_bar(&mut self, ui: &mut egui::Ui) {
+        let mut active_rect = None;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             for tab in BuiltInTab::ALL {
                 let active = ActiveTab::BuiltIn(tab);
-                if ui
-                    .selectable_label(self.active == active, tab.label())
-                    .clicked()
-                {
+                let response = tab_button(ui, tab.label(), self.active == active);
+                if self.active == active {
+                    active_rect = Some(response.rect);
+                }
+                if response.clicked() {
                     self.active = active;
                 }
             }
             if !self.custom.is_empty() {
-                ui.separator();
+                ui.add(egui::Separator::default().vertical().spacing(8.0));
             }
             let mut remove = None;
             for index in 0..self.custom.len() {
                 let active = ActiveTab::Custom(index);
                 let label = theme::with_icon(icons::STAR, &self.custom[index].name);
-                let response = ui
-                    .selectable_label(self.active == active, label)
+                let response = tab_button(ui, &label, self.active == active)
                     .on_hover_text("Your tab. Right-click to change or delete it.");
+                if self.active == active {
+                    active_rect = Some(response.rect);
+                }
                 if response.clicked() {
                     self.active = active;
                 }
@@ -258,14 +270,35 @@ impl RibbonTabs {
             if let Some(index) = remove {
                 self.remove_custom(index);
             }
-            if ui
-                .small_button(icons::PLUS)
-                .on_hover_text("Make your own tab from any of the ribbon's groups.")
-                .clicked()
+            ui.add_space(2.0);
+            if widgets::icon_button(
+                ui,
+                icons::PLUS,
+                "Make your own tab from any of the ribbon's groups.",
+                false,
+            )
+            .clicked()
             {
                 self.edit(None);
             }
         });
+        // The accent line under the active tab, sliding from where it was.
+        if let Some(rect) = active_rect {
+            let ctx = ui.ctx();
+            let time = ctx.style().animation_time * 1.4;
+            let id = egui::Id::new("ribbon tab underline");
+            let left = ctx.animate_value_with_time(id.with("left"), rect.left() + 8.0, time);
+            let right = ctx.animate_value_with_time(id.with("right"), rect.right() - 8.0, time);
+            let palette = theme::palette(ctx);
+            ui.painter().rect_filled(
+                egui::Rect::from_min_max(
+                    egui::pos2(left, rect.bottom() - 2.0),
+                    egui::pos2(right, rect.bottom()),
+                ),
+                1,
+                palette.accent,
+            );
+        }
     }
 
     /// Opens the window that makes a custom tab (`None`) or changes one.
@@ -408,6 +441,40 @@ impl RibbonTabs {
         tabs.set_active(saved.active);
         tabs
     }
+}
+
+/// One ribbon tab: its name, brighter when hovered or active.
+fn tab_button(ui: &mut egui::Ui, label: &str, active: bool) -> egui::Response {
+    let palette = theme::palette(ui.ctx());
+    let galley = ui.painter().layout_no_wrap(
+        label.to_owned(),
+        egui::FontId::new(type_scale::BODY, theme::medium_family()),
+        egui::Color32::PLACEHOLDER,
+    );
+    let size = egui::vec2(galley.size().x + 16.0, 26.0);
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    response
+        .widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, label));
+    let hover = theme::ease(ui.ctx(), response.id.with("hover"), response.hovered());
+    let color = if active {
+        palette.text_strong
+    } else {
+        theme::mix(palette.text_weak, palette.text_strong, hover)
+    };
+    if response.has_focus() {
+        ui.painter().rect_stroke(
+            rect,
+            5,
+            egui::Stroke::new(1.0_f32, palette.accent),
+            egui::StrokeKind::Inside,
+        );
+    }
+    ui.painter().galley(
+        rect.center() - galley.size() / 2.0 - egui::vec2(0.0, 1.0),
+        galley,
+        color,
+    );
+    response
 }
 
 enum Reorder {

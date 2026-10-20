@@ -16,19 +16,44 @@ use super::{
     SHADOW_CASCADES, TARGET_DRAW_FORMAT, TARGET_SHOW_FORMAT, TEXTURE_FORMAT, TEXTURE_SRGB_FORMAT,
 };
 
-/// The pipeline for solid items, or for see-through ones when `transparent`
-/// is true. Both use the same shader.
+/// The shader for parts and models, and the shadow and sky passes: the
+/// shared lighting, then `shader.wgsl`.
+pub(super) const SCENE_SHADER: &str = concat!(
+    include_str!("../lighting.wgsl"),
+    include_str!("../shader.wgsl")
+);
+/// The shader for terrain chunks: the shared lighting, then `terrain.wgsl`.
+pub(super) const TERRAIN_SHADER: &str = concat!(
+    include_str!("../lighting.wgsl"),
+    include_str!("../terrain.wgsl")
+);
+
+pub(super) fn shader_module(
+    device: &wgpu::Device,
+    label: &str,
+    source: &'static str,
+) -> wgpu::ShaderModule {
+    device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some(label),
+        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(source)),
+    })
+}
+
+/// A pipeline that draws meshes with their instances into the HDR scene:
+/// solid items, see-through ones when `transparent` is true, or terrain
+/// chunks, by `shader`'s `entry_points` (vertex, fragment). `layouts` are
+/// its bind groups: the frame's, then the material's.
 pub(super) fn create_pipeline(
     device: &wgpu::Device,
-    frame_layout: &wgpu::BindGroupLayout,
-    material_layout: &wgpu::BindGroupLayout,
+    shader: &wgpu::ShaderModule,
+    (vertex_entry, fragment_entry): (&str, &str),
+    layouts: &[&wgpu::BindGroupLayout],
     color_format: wgpu::TextureFormat,
     transparent: bool,
 ) -> wgpu::RenderPipeline {
-    let shader = device.create_shader_module(wgpu::include_wgsl!("../shader.wgsl"));
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("scene"),
-        bind_group_layouts: &[frame_layout, material_layout],
+        bind_group_layouts: layouts,
         push_constant_ranges: &[],
     });
 
@@ -73,11 +98,15 @@ pub(super) fn create_pipeline(
     };
 
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some(if transparent { "transparent" } else { "opaque" }),
+        label: Some(if transparent {
+            "transparent"
+        } else {
+            fragment_entry
+        }),
         layout: Some(&layout),
         vertex: wgpu::VertexState {
-            module: &shader,
-            entry_point: Some("vs_main"),
+            module: shader,
+            entry_point: Some(vertex_entry),
             compilation_options: Default::default(),
             buffers: &[vertex_layout, instance_layout],
         },
@@ -98,8 +127,8 @@ pub(super) fn create_pipeline(
         }),
         multisample: Default::default(),
         fragment: Some(wgpu::FragmentState {
-            module: &shader,
-            entry_point: Some("fs_main"),
+            module: shader,
+            entry_point: Some(fragment_entry),
             compilation_options: Default::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format: color_format,
@@ -192,7 +221,7 @@ pub(super) fn create_shadow_pipeline(
     device: &wgpu::Device,
     shadow_layout: &wgpu::BindGroupLayout,
 ) -> wgpu::RenderPipeline {
-    let shader = device.create_shader_module(wgpu::include_wgsl!("../shader.wgsl"));
+    let shader = shader_module(device, "shadow", SCENE_SHADER);
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("shadow"),
         bind_group_layouts: &[shadow_layout],

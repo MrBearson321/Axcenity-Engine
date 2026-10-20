@@ -213,9 +213,8 @@ impl AnimClipFile {
         })?;
         match value.get("kind").and_then(|kind| kind.as_str()) {
             Some(PropertyClipFile::KIND) => {
-                let clip: PropertyClipFile = serde_json::from_value(value).map_err(|err| {
-                    FileError(format!("it isn't a valid property clip: {err}"))
-                })?;
+                let clip: PropertyClipFile = serde_json::from_value(value)
+                    .map_err(|err| FileError(format!("it isn't a valid property clip: {err}")))?;
                 check_version(clip.format_version)?;
                 if clip.kind != PropertyClipFile::KIND {
                     return Err(FileError(format!(

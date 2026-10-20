@@ -38,12 +38,15 @@ mod snapshot;
 mod start;
 mod style_panel;
 mod surface;
+mod terrain_studio;
 mod theme;
 mod thumbnail;
+mod toast;
 mod tree;
 mod ui_handles;
 mod viewport;
 mod watcher;
+mod widgets;
 
 use std::path::PathBuf;
 

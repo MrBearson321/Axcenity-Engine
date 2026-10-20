@@ -6,7 +6,7 @@
 //! is wrapped in a small struct, such as `LuaVector3(Vector3)`.
 
 use axcenity_core::{
-    Color3, KeyCode, Material, ParticleType, PartType, TextureChannel, UDim, UDim2, Value,
+    Color3, KeyCode, Material, PartType, ParticleType, TextureChannel, UDim, UDim2, Value,
     ValueKind, Vector3,
 };
 use mlua::{FromLua, IntoLua, Lua, MetaMethod, UserData, UserDataFields, UserDataMethods};
@@ -406,11 +406,9 @@ pub fn value_to_lua(lua: &Lua, value: &Value) -> mlua::Result<mlua::Value> {
         Value::PartType(_)
         | Value::Material(_)
         | Value::TextureChannel(_)
-        | Value::ParticleType(_) => {
-            LuaEnumItem::from_value(value)
-                .expect("enum property values are enum items")
-                .into_lua(lua)
-        }
+        | Value::ParticleType(_) => LuaEnumItem::from_value(value)
+            .expect("enum property values are enum items")
+            .into_lua(lua),
     }
 }
 
@@ -452,12 +450,10 @@ pub fn value_from_lua(lua: &Lua, value: mlua::Value, kind: ValueKind) -> Result<
             | ValueKind::TextureChannel
             | ValueKind::ParticleType,
             _,
-        ) => {
-            LuaEnumItem::from_lua(value.clone(), lua)
-                .ok()
-                .and_then(LuaEnumItem::to_value)
-                .filter(|item| item.kind() == kind)
-        }
+        ) => LuaEnumItem::from_lua(value.clone(), lua)
+            .ok()
+            .and_then(LuaEnumItem::to_value)
+            .filter(|item| item.kind() == kind),
         _ => None,
     };
     converted.ok_or_else(|| wrong_type(&value))

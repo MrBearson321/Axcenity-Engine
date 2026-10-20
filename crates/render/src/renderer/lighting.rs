@@ -403,7 +403,7 @@ pub(super) fn plan_draws(list: &DrawList) -> (Vec<InstanceRaw>, Vec<Batch>) {
 pub(super) fn material_textures(
     item: &DrawItem,
 ) -> [Option<&Arc<dyn TextureSource>>; MATERIAL_TEXTURES] {
-    if !matches!(item.shape, Shape::Mesh(_)) {
+    if !matches!(item.shape, Shape::Mesh(_)) || item.material.terrain.is_some() {
         return [None; MATERIAL_TEXTURES];
     }
     let material = &item.material;
@@ -422,6 +422,12 @@ pub(super) fn material_textures(
 
 /// The material binding an item is drawn with (see [`MaterialKey`]).
 pub(super) fn material_key(item: &DrawItem) -> MaterialKey {
+    if let Some(surface) = &item.material.terrain {
+        return MaterialKey {
+            terrain: super::terrain::terrain_key(surface),
+            ..MaterialKey::default()
+        };
+    }
     let textures = material_textures(item).map(|source| source.map(|source| source.key()));
     if textures.iter().all(Option::is_none) {
         return MaterialKey::default();
@@ -464,6 +470,7 @@ pub(super) fn material_key(item: &DrawItem) -> MaterialKey {
     MaterialKey {
         textures,
         maps: bytemuck::cast(uniform),
+        terrain: Default::default(),
     }
 }
 

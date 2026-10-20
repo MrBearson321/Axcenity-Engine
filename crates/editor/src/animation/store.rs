@@ -6,9 +6,7 @@
 use std::path::Path;
 
 use axcenity_anim::files::{self, AnimClipFile, ClipFile, ControllerFile, Motion, StateDef};
-use axcenity_anim::{
-    ANIMATIONS_FOLDER, CLIP_EXTENSION, CONTROLLER_EXTENSION, PropertyClipFile,
-};
+use axcenity_anim::{ANIMATIONS_FOLDER, CLIP_EXTENSION, CONTROLLER_EXTENSION, PropertyClipFile};
 use axcenity_assets::{MODELS_FOLDER, Take};
 
 /// What the project has, as paths from its folder with `/` between folders.

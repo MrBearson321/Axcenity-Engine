@@ -9,6 +9,7 @@ authors.workspace = true
 [dependencies]
 axcenity-blocks.workspace = true
 axcenity-core.workspace = true
+axcenity-terrain.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

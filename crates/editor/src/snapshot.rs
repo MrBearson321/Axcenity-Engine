@@ -20,10 +20,13 @@ pub fn snapshot(
     let ctx = crate::theme::test_context();
     let mut renderer = Renderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, None, 1, false);
     let mut last = None;
-    for events in frames {
+    for (index, events) in frames.into_iter().enumerate() {
         let input = egui::RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)),
             events,
+            // Half a second a frame, so fades and other transitions have
+            // finished by the frame that's saved.
+            time: Some(index as f64 * 0.5),
             ..Default::default()
         };
         let output = ctx.run(input, |ctx| show(ctx));

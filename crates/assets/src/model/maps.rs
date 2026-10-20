@@ -450,6 +450,97 @@ impl ModelMaterial {
     }
 }
 
+/// A material map a texture file can fill.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MapSlot {
+    BaseColor,
+    Normal,
+    Metalness,
+    Roughness,
+    Occlusion,
+    Height,
+    Emissive,
+    Opacity,
+    Specular,
+}
+
+/// One map a texture file fills: which, from which channel, and how.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TextureRole {
+    pub slot: MapSlot,
+    pub channel: Channel,
+    /// Read as 1 minus the value (smoothness as roughness).
+    pub invert: bool,
+    /// A DirectX-style normal map, whose green points down.
+    pub flip_green: bool,
+}
+
+/// What a texture file is for, judged by its name the same way as model
+/// textures (`Rock_BaseColor_2K.png`, `T_Rock_N.png`, `rock_ORM.png`): the
+/// maps it fills. Empty when the name doesn't say.
+pub fn texture_roles(file_name: &str) -> Vec<TextureRole> {
+    let role = |slot, channel, invert| TextureRole {
+        slot,
+        channel,
+        invert,
+        flip_green: false,
+    };
+    use Channel::{Alpha, Blue, Green, Red};
+    match role_from_name(file_name) {
+        None => Vec::new(),
+        Some(Role::BaseColor) | Some(Role::Packed(Packing::ColorAlpha)) => {
+            vec![role(MapSlot::BaseColor, Red, false)]
+        }
+        Some(Role::Normal { flip_green }) => vec![TextureRole {
+            flip_green,
+            ..role(MapSlot::Normal, Red, false)
+        }],
+        Some(Role::Metalness) => vec![role(MapSlot::Metalness, Red, false)],
+        Some(Role::Roughness) => vec![role(MapSlot::Roughness, Red, false)],
+        Some(Role::Glossiness) => vec![role(MapSlot::Roughness, Red, true)],
+        Some(Role::Occlusion) => vec![role(MapSlot::Occlusion, Red, false)],
+        Some(Role::Height) => vec![role(MapSlot::Height, Red, false)],
+        Some(Role::Emissive) => vec![role(MapSlot::Emissive, Red, false)],
+        Some(Role::Opacity) => vec![role(MapSlot::Opacity, Red, false)],
+        Some(Role::Specular) => vec![role(MapSlot::Specular, Red, false)],
+        Some(Role::Packed(packing)) => match packing {
+            Packing::Orm => vec![
+                role(MapSlot::Occlusion, Red, false),
+                role(MapSlot::Roughness, Green, false),
+                role(MapSlot::Metalness, Blue, false),
+            ],
+            Packing::Rma => vec![
+                role(MapSlot::Roughness, Red, false),
+                role(MapSlot::Metalness, Green, false),
+                role(MapSlot::Occlusion, Blue, false),
+            ],
+            Packing::Mra => vec![
+                role(MapSlot::Metalness, Red, false),
+                role(MapSlot::Roughness, Green, false),
+                role(MapSlot::Occlusion, Blue, false),
+            ],
+            Packing::MetallicRoughness => vec![
+                role(MapSlot::Roughness, Green, false),
+                role(MapSlot::Metalness, Blue, false),
+            ],
+            Packing::MetallicSmoothness => vec![
+                role(MapSlot::Metalness, Red, false),
+                role(MapSlot::Roughness, Alpha, true),
+            ],
+            Packing::MaskMap => vec![
+                role(MapSlot::Metalness, Red, false),
+                role(MapSlot::Occlusion, Green, false),
+                role(MapSlot::Roughness, Alpha, true),
+            ],
+            Packing::SpecularSmoothness => vec![
+                role(MapSlot::Specular, Red, false),
+                role(MapSlot::Roughness, Alpha, true),
+            ],
+            Packing::ColorAlpha => vec![role(MapSlot::BaseColor, Red, false)],
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -532,5 +623,33 @@ mod tests {
         );
         assert_eq!(material.alpha_mode, AlphaMode::Mask { cutoff: 0.5 });
         assert!(!material.set_map(Role::Height, image([0; 4])));
+    }
+
+    #[test]
+    fn texture_sets_are_sorted_into_maps_by_name() {
+        let slots = |name: &str| -> Vec<(MapSlot, Channel, bool)> {
+            texture_roles(name)
+                .into_iter()
+                .map(|role| (role.slot, role.channel, role.invert))
+                .collect()
+        };
+        assert_eq!(
+            slots("Rock_BaseColor_2K.png"),
+            vec![(MapSlot::BaseColor, Channel::Red, false)]
+        );
+        assert!(texture_roles("T_Rock_NormalDX.png")[0].flip_green);
+        assert_eq!(
+            slots("rock_ORM.png"),
+            vec![
+                (MapSlot::Occlusion, Channel::Red, false),
+                (MapSlot::Roughness, Channel::Green, false),
+                (MapSlot::Metalness, Channel::Blue, false),
+            ]
+        );
+        assert_eq!(
+            slots("grass_height.png"),
+            vec![(MapSlot::Height, Channel::Red, false)]
+        );
+        assert!(texture_roles("photo.png").is_empty());
     }
 }

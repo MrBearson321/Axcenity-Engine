@@ -27,9 +27,10 @@ pub use import::{
     import_picks, import_texture, list_model_objects, load_model_file, load_takes_file,
 };
 pub use model::{
-    AlphaMode, Blend, Bone, BoneTransform, Channel, ChannelTexture, Image, Joint, Keys, Model,
-    ModelError, ModelFormat, ModelMaterial, ModelObject, Pick, Pose, Posed, PosedPrimitive,
-    Primitive, Rig, Take, Track, list_objects, load_model, load_models, load_takes,
+    AlphaMode, Blend, Bone, BoneTransform, Channel, ChannelTexture, Image, Joint, Keys, MapSlot,
+    Model, ModelError, ModelFormat, ModelMaterial, ModelObject, Pick, Pose, Posed, PosedPrimitive,
+    Primitive, Rig, Take, TextureRole, Track, list_objects, load_model, load_models, load_takes,
+    texture_roles,
 };
 
 /// The project's loaded assets. Cloning gives another handle to the same

@@ -16,10 +16,12 @@
 //! out and lists it in [`Project::problems`].
 //!
 //! `lib.rs` owns the manifest, templates, script paths and stylesheets.
-//! `world_file.rs` reads and writes `world.json`. `packed.rs` packs a game
-//! folder. `versions.rs` keeps the copies made on save.
+//! `world_file.rs` reads and writes `world.json`. `terrain_files.rs` reads
+//! and writes Terrains' heightfields. `packed.rs` packs a game folder.
+//! `versions.rs` keeps the copies made on save.
 
 mod packed;
+mod terrain_files;
 mod versions;
 mod world_file;
 
@@ -32,6 +34,10 @@ use axcenity_core::{ClassName, InstanceId, World};
 use serde::Deserialize;
 
 pub use packed::{PackError, pack_game, unpack_game};
+pub use terrain_files::{
+    TERRAIN_FOLDER, data_folder, is_safe_folder, keep_terrain_folder, load_terrains,
+    new_terrain_folder, save_terrain, terrain_folder_path,
+};
 pub use versions::{Version, list_versions, record_version, restore_version};
 pub use world_file::{WorldError, parse_prefab, parse_world, write_prefab, write_world};
 
@@ -343,6 +349,10 @@ pub struct Project {
     /// started empty. Saving would then replace a file that may only need a
     /// small fix, so the editor keeps it first ([`keep_world_file`]).
     pub world_loaded: bool,
+    /// Terrains' data folders that couldn't be read (those terrains are
+    /// flat). The editor keeps each ([`keep_terrain_folder`]) before saving
+    /// over it.
+    pub damaged_terrains: Vec<String>,
 }
 
 /// Stores whether exported players show the brief engine splash screen.
@@ -430,6 +440,8 @@ pub enum LoadError {
     },
     #[error("`{}` is not a valid block script: {message}", path.display())]
     BlockScript { path: PathBuf, message: String },
+    #[error("the terrain in `{}` couldn't be loaded, so it's flat: {message}", path.display())]
+    Terrain { path: PathBuf, message: String },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -489,6 +501,7 @@ pub fn load(folder: &Path) -> Result<Project, LoadError> {
             (World::new(), false)
         }
     };
+    let damaged_terrains = terrain_files::load_terrains(folder, &mut world, &mut problems);
     let (scripts, block_scripts) = load_scripts(folder, &mut world, &mut problems);
     let stylesheets = load_stylesheets(folder, &mut problems);
 
@@ -501,6 +514,7 @@ pub fn load(folder: &Path) -> Result<Project, LoadError> {
         stylesheets,
         problems,
         world_loaded,
+        damaged_terrains,
     })
 }
 
@@ -976,7 +990,7 @@ pub struct SaveError {
 }
 
 impl SaveError {
-    fn new(path: &Path) -> impl FnOnce(std::io::Error) -> SaveError + '_ {
+    pub(crate) fn new(path: &Path) -> impl FnOnce(std::io::Error) -> SaveError + '_ {
         move |source| SaveError {
             path: path.to_owned(),
             source,

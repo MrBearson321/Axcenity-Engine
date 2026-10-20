@@ -691,6 +691,7 @@ impl AnimationStudio {
                 egui::CollapsingHeader::new(format!("{} Controllers", icons::FLOW_ARROW))
                     .id_salt("controllers")
                     .default_open(true)
+                    .icon(crate::widgets::chevron)
                     .show(ui, |ui| {
                         if self.files.controllers.is_empty() {
                             ui.weak("None yet: + Controller makes one.");
@@ -732,6 +733,7 @@ impl AnimationStudio {
                     egui::CollapsingHeader::new(format!("{} {title}", icons::FOLDER))
                         .id_salt(("clip group", group))
                         .default_open(true)
+                        .icon(crate::widgets::chevron)
                         .show(ui, |ui| {
                             for path in paths {
                                 let name = axcenity_anim::files::clip_name(path);

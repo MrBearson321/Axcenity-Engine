@@ -78,8 +78,9 @@ impl PropertyDoc {
         if let Ok(clip) = PropertyClip::from_file(self.file.clone()) {
             for track in &clip.file.tracks {
                 if let Some(id) = axcenity_anim::resolve_target(world, root, &track.target)
-                    && let Some(Value::Vector3(v)) =
-                        world.get(id).and_then(|i| i.property(track.property.as_str()))
+                    && let Some(Value::Vector3(v)) = world
+                        .get(id)
+                        .and_then(|i| i.property(track.property.as_str()))
                 {
                     props.push((format!("{}:{}", track.target, track.property.as_str()), *v));
                     let _ = (id, track);
@@ -191,11 +192,19 @@ impl PropertyDoc {
     }
 
     /// Draws the inspector and dope sheet. Returns true if the file changed.
-    pub fn ui(&mut self, ui: &mut egui::Ui, world: &mut World, preview_root: Option<InstanceId>) -> bool {
+    pub fn ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        world: &mut World,
+        preview_root: Option<InstanceId>,
+    ) -> bool {
         let before = self.file.clone();
         ui.horizontal(|ui| {
             if ui
-                .add_enabled(!self.playing, egui::Button::new(format!("{} Play", icons::PLAY)))
+                .add_enabled(
+                    !self.playing,
+                    egui::Button::new(format!("{} Play", icons::PLAY)),
+                )
                 .clicked()
             {
                 self.playing = true;
@@ -264,12 +273,20 @@ impl PropertyDoc {
         {
             ui.separator();
             ui.heading("Keyframe");
-            ui.add(egui::DragValue::new(&mut key.time).speed(0.01).prefix("Time "));
+            ui.add(
+                egui::DragValue::new(&mut key.time)
+                    .speed(0.01)
+                    .prefix("Time "),
+            );
             key.time = key.time.clamp(0.0, self.file.duration);
             ui.horizontal(|ui| {
                 ui.label("Value");
                 for (i, label) in ["X", "Y", "Z"].iter().enumerate() {
-                    ui.add(egui::DragValue::new(&mut key.value[i]).speed(0.1).prefix(*label));
+                    ui.add(
+                        egui::DragValue::new(&mut key.value[i])
+                            .speed(0.1)
+                            .prefix(*label),
+                    );
                 }
             });
             egui::ComboBox::from_label("Interpolation")
@@ -367,7 +384,11 @@ impl PropertyDoc {
             );
             let selected = self.selected_track.as_deref() == Some(track.id.as_str());
             if selected {
-                painter.rect_filled(row_rect, 0.0, Color32::from_rgba_unmultiplied(40, 80, 120, 60));
+                painter.rect_filled(
+                    row_rect,
+                    0.0,
+                    Color32::from_rgba_unmultiplied(40, 80, 120, 60),
+                );
             }
             painter.text(
                 egui::pos2(rect.left() + 4.0, y + 4.0),
@@ -379,8 +400,8 @@ impl PropertyDoc {
             for key in &track.keys {
                 let x = x_of(key.time);
                 let center = egui::pos2(x, y + 12.0);
-                let key_selected = self.selected_key.as_ref()
-                    == Some(&(track.id.clone(), key.id.clone()));
+                let key_selected =
+                    self.selected_key.as_ref() == Some(&(track.id.clone(), key.id.clone()));
                 let color = if key_selected {
                     Color32::from_rgb(255, 200, 80)
                 } else {
