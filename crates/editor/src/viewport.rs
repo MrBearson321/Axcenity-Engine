@@ -162,6 +162,8 @@ pub struct ViewportScene<'a> {
     pub focused_text: Option<InstanceId>,
     /// Show every light's reach, not just the selected ones' (View > Light Cones).
     pub light_cones: bool,
+    /// Animated MeshParts' poses during Play; `None` draws every model still.
+    pub poses: Option<&'a axcenity_scene::Poses>,
 }
 
 /// What the left button holds, from going down on it until it's let go.
@@ -356,6 +358,7 @@ impl Viewport {
             stylesheets,
             focused_text,
             light_cones,
+            poses,
         } = scene;
         let size = ui.available_size();
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
@@ -499,7 +502,9 @@ impl Viewport {
         if self.particles.is_active(world) {
             ui.ctx().request_repaint();
         }
-        let mut draw_list = axcenity_scene::build_draw_list(world, assets, camera);
+        let still = axcenity_scene::Poses::new();
+        let poses = poses.unwrap_or(&still);
+        let mut draw_list = axcenity_scene::build_draw_list_posed(world, assets, camera, poses);
         draw_list.sprites = self.particles.sprites(world, assets);
         draw_list.ui = ui_layout.draw_items.clone();
         axcenity_scene::attach_ui_textures(&mut draw_list.ui, assets);

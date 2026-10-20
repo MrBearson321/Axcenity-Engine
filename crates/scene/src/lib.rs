@@ -17,8 +17,8 @@ mod pick;
 
 pub use camera::{FlyCamera, MoveKeys};
 pub use draw_list::{
-    LightMarker, attach_ui_textures, build_draw_list, build_draw_list_with_ui,
-    build_draw_list_with_ui_interaction, light_markers,
+    LightMarker, Poses, attach_ui_textures, build_draw_list, build_draw_list_posed,
+    build_draw_list_with_ui, build_draw_list_with_ui_interaction, light_markers,
 };
 pub use orientation::{orientation_from_rotation, rotation_from_orientation};
 pub use particles::{MAX_PER_EMITTER, Particles, built_in as built_in_particle};

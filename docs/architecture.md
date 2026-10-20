@@ -7,7 +7,8 @@ Read before creating a crate, adding a dependency between crates, or touching th
 | Crate | Owns | May depend on |
 |---|---|---|
 | `core` | Instance tree, arena, properties, events, services | nothing engine-internal |
-| `assets` | the asset system: loading glTF/FBX models, reading project files (`Assets`) and importing models | nothing engine-internal; plain data out |
+| `assets` | the asset system: loading glTF/FBX models (with FBX skeletons, skin weights and takes), posing them, reading project files (`Assets`) and importing models | nothing engine-internal; plain data out |
+| `anim` | animation: clip and animator controller files, state machines and blending, and `Animators`, which plays every Animator and poses its MeshPart | `assets`, `core` |
 | `audio` | Kira playback for project sounds: `GameAudio` applies queued `SoundAction`s and keeps playback in line with each Sound's properties | `assets`, `core` |
 | `blocks` | persisted block-script data and its one-way Lua translation | nothing engine-internal |
 | `render` | `wgpu` renderer | nothing engine-internal; takes a draw list |
@@ -16,8 +17,8 @@ Read before creating a crate, adding a dependency between crates, or touching th
 | `script` | Lua 5.4 (`mlua`), sandbox, scheduler, engine API | `audio`, `core` |
 | `ui` | UI Instance layout, CSS cascade (`taffy`) and screen-space draw data | `core`, `render` |
 | `project` | project folder load and save, including CSS and block-script sources | `blocks`, `core` |
-| `player` | runtime shipped with games (binary) | `audio`, `core`, `assets`, `render`, `scene`, `physics`, `script`, `project`, `ui` |
-| `editor` | `egui` editor app (binary) | `audio`, `blocks`, `core`, `assets`, `physics`, `project`, `render`, `scene`, `script`, `ui` |
+| `player` | runtime shipped with games (binary) | `anim`, `audio`, `core`, `assets`, `render`, `scene`, `physics`, `script`, `project`, `ui` |
+| `editor` | `egui` editor app (binary) | `anim`, `audio`, `blocks`, `core`, `assets`, `physics`, `project`, `render`, `scene`, `script`, `ui` |
 
 Block scripts are translated to Lua at project load and run through the same `ScriptRuntime` as handwritten scripts. Hosts hand queued sound actions to their `GameAudio` after script steps, and fire `Ended` for the sounds it reports finished; the player owns playback for its lifetime, while editor Play owns a separate `GameAudio` that is dropped on Stop.
 
@@ -39,7 +40,7 @@ Rules:
 1. Read input
 2. Resume coroutines whose wait has expired, and fire queued events
 3. Step physics at a fixed 60 Hz (accumulator; may run 0–N steps per frame)
-4. Fire `Touched` and collision events, then `RunService.Heartbeat`
+4. Fire `Touched` and collision events, then `RunService.Heartbeat`; then particles and Animators move on (Animators pose their MeshParts and fire `StateChanged`)
 5. Update UI layout (`taffy`) and shape text
 6. Build the draw list and render
 
@@ -145,6 +146,8 @@ Since Phase 14, step 1 also hands LocalScripts the camera (`set_camera`) and the
 - **SurfaceAppearances on import:** every new MeshPart gets one SurfaceAppearance child per material its model uses, named after the material (`MaterialName` set), with the maps as in the dialog. The model's own textures are paths into the copy's folder (embedded ones are copied out to its `textures` folder on import); files picked in the dialog are copied into that `textures` folder too, once each, under a free name. They're part of the insert's undo step.
 - **Maps in Properties:** a SurfaceAppearance shows Appearance (`Color`), Surface (`MaterialName` and the eight maps) and Map Settings. A map shows its file name (full path on hover), a Browse button and a Clear button; it can't be typed, as each half-typed path would be loaded. Browse returns `Edit::PickTexture`, and the app asks for a file: one inside the project keeps its path, one outside is copied into `assets/textures` first (`assets::import_texture`). The change is one undo step, and the viewport shows it on the next frame.
 - It moves, scales, rotates, duplicates, saves and reloads like a Part. Picking, the selection box, handles and drag-to-place all use its box (the model fills it). `MeshId` shows in Properties under Part but is read-only (importing sets it). Explorer icon: a see-through cube, part blue.
+- **Animated FBX files** (Phase 38, `anim_import.rs`): a file whose model has a skeleton (or whose objects a take moves), or that has takes, opens the dialog with an **Animation** section: the skeleton's bone tree and joint count, each take with its frames, frame rate and the bones it moves, and a table of **clips to make** (name, take, start and end frame, loop), one per whole take to begin with. Add clip adds a row; Split replaces a take's rows with N equal parts ("Moves 1", "Moves 2"…), so one long take becomes Idle, Walk and so on. A clip of a file's only take with a meaningless name ("Take 001", "mixamo.com") is named after the file; Blender's `Armature|` prefix is dropped. Names must be unique (ignoring case) and each clip must end after it starts, or Import is off. An animated file comes in as one MeshPart by default. Importing writes each clip to `assets/animations/<model>/<name>.anim.json` and, with "Add an Animator" ticked (the default), a controller `assets/animations/<model>.controller.json` with a state per clip (one named Idle, or else the first, as the default state, at the left of the graph; the rest in rows of four), and gives every new MeshPart with a skeleton an Animator playing it (part of the insert's undo step; the files stay). A name already taken gets a number. A file with takes but nothing to draw (an animation exported "without skin") imports as clips only: the file is copied to `assets/models` and its clips are written, for a model with the same skeleton.
+- **Animators** (Phase 38): Insert ▸ Animator (Explorer menu) puts one in the selected MeshPart, with a warning if there isn't one. Properties shows its Animation group: `Controller` (a Browse button that picks a `.controller.json` inside the project, and a Clear button), `Enabled` and `Speed`. Animators only play during Play (each Play makes a fresh `anim::Animators`, primed before the scripts start, run after Heartbeat; its problems go to Output once each); while editing, models show their bind pose.
 - **Models load when first drawn** (or simulated) through the project's shared `Assets`, made on open. A model that can't be loaded is reported once in Output ("Could not load the model `assets/models/x.glb`: the file isn't there") and drawn as a grey box. Model files aren't watched: a changed model shows after opening the project again.
 
 ### Building tools (Phase 35)

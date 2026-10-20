@@ -614,7 +614,11 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
                 chosen = Some(RowCommand::Insert(what));
             }
         }
-        for what in Insertable::LIGHTS.into_iter().chain(Insertable::EFFECTS) {
+        for what in Insertable::LIGHTS
+            .into_iter()
+            .chain(Insertable::EFFECTS)
+            .chain(Insertable::ANIMATION)
+        {
             if ui.button(insert_item(ui, what)).clicked() {
                 chosen = Some(RowCommand::Insert(what));
             }

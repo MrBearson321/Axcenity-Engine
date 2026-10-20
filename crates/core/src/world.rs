@@ -7,6 +7,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
+use crate::animation::AnimatorState;
 use crate::arena::{Arena, Id};
 use crate::class::ClassName;
 use crate::value::{Value, ValueKind};
@@ -143,6 +144,9 @@ pub struct World {
     server_script_service: InstanceId,
     starter_player_scripts: InstanceId,
     changes: ChangeLog,
+    /// Each Animator's live state (see [`AnimatorState`]), made the first
+    /// time something asks for it.
+    animators: HashMap<InstanceId, AnimatorState>,
 }
 
 impl World {
@@ -188,7 +192,22 @@ impl World {
             server_script_service,
             starter_player_scripts,
             changes: ChangeLog::default(),
+            animators: HashMap::new(),
         }
+    }
+
+    /// The live state of the Animator `id`, if it has any yet.
+    pub fn animator(&self, id: InstanceId) -> Option<&AnimatorState> {
+        self.animators.get(&id)
+    }
+
+    /// The live state of the Animator `id`, made (empty) the first time.
+    /// `None` if `id` isn't an Animator.
+    pub fn animator_mut(&mut self, id: InstanceId) -> Option<&mut AnimatorState> {
+        if self.get(id)?.class != ClassName::Animator {
+            return None;
+        }
+        Some(self.animators.entry(id).or_default())
     }
 
     /// Starts keeping a list of every [`Change`] from now on, for
@@ -417,8 +436,10 @@ impl World {
         self.set_parent(id, None)?;
         for descendant in self.descendants(id) {
             self.instances.remove(descendant.0);
+            self.animators.remove(&descendant);
         }
         self.instances.remove(id.0);
+        self.animators.remove(&id);
         Ok(())
     }
 

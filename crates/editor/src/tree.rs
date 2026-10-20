@@ -32,6 +32,7 @@ pub enum Insertable {
     PointLight,
     SpotLight,
     ParticleEmitter,
+    Animator,
 }
 
 impl Insertable {
@@ -62,6 +63,8 @@ impl Insertable {
     pub const LIGHTS: [Insertable; 2] = [Insertable::PointLight, Insertable::SpotLight];
     /// Effects give off particles from the part they are inside.
     pub const EFFECTS: [Insertable; 1] = [Insertable::ParticleEmitter];
+    /// Animators animate the MeshPart they are inside.
+    pub const ANIMATION: [Insertable; 1] = [Insertable::Animator];
 
     /// What the buttons and menus call it. A Ball is a "Sphere", as in Studio.
     pub fn label(self) -> &'static str {
@@ -88,6 +91,7 @@ impl Insertable {
             Insertable::PointLight => "PointLight",
             Insertable::SpotLight => "SpotLight",
             Insertable::ParticleEmitter => "Particles",
+            Insertable::Animator => "Animator",
         }
     }
 
@@ -112,6 +116,7 @@ impl Insertable {
             Insertable::PointLight => ClassName::PointLight,
             Insertable::SpotLight => ClassName::SpotLight,
             Insertable::ParticleEmitter => ClassName::ParticleEmitter,
+            Insertable::Animator => ClassName::Animator,
         }
     }
 
@@ -262,6 +267,7 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
                         | Insertable::SpotLight
                         | Insertable::ParticleEmitter
                         | Insertable::BillboardGui
+                        | Insertable::Animator
                 )
                 && is_saved(world, id))
     })

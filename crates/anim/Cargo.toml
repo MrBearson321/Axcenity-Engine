@@ -1,0 +1,19 @@
+[package]
+name = "axcenity-anim"
+description = "Axcenity animation: clip and animator controller files, state machines and blending, and the Animators every host runs."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+# Plays Animators over the Instance tree, posing models loaded by `assets`.
+# No renderer, windowing or UI crates, so the player and editor share it.
+[dependencies]
+axcenity-assets.workspace = true
+axcenity-core.workspace = true
+glam.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

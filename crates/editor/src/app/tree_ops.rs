@@ -112,6 +112,18 @@ impl EditorApp {
             self.output
                 .warning("BillboardGui shows when it is inside a part.");
         }
+        if what == Insertable::Animator {
+            let parent = tree::insert_parent(&self.world, near.or(self.selected), what);
+            let in_mesh_part = self
+                .world
+                .get(parent)
+                .is_some_and(|instance| instance.class() == ClassName::MeshPart);
+            if !in_mesh_part {
+                self.output.warning(
+                    "An Animator animates the MeshPart it's inside: select an imported animated model first.",
+                );
+            }
+        }
         if tree::needs_screen_gui(&self.world, near, what) {
             self.insert_named(Insertable::ScreenGui, None, "ScreenGui", Vec::new());
             let gui = self.selected;

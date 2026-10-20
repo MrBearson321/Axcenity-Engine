@@ -24,6 +24,8 @@ pub enum Edit {
     PickTexture(&'static str),
     /// Asks for an audio file for the Sound's `SoundId`, like [`Edit::PickTexture`].
     PickAudio,
+    /// Asks for an animator controller file for the Animator's `Controller`.
+    PickController,
     /// Plays the selected Sound in the editor, to hear it without pressing
     /// Play, or (false) stops that.
     PreviewSound(bool),
@@ -38,7 +40,7 @@ pub struct Section {
 
 /// The groups, in panel order, and which properties go in each. Name and
 /// ClassName come first, under "Data", and aren't in the property map.
-const GROUPS: [(&str, &[&str]); 14] = [
+const GROUPS: [(&str, &[&str]); 15] = [
     (
         "Appearance",
         &[
@@ -118,6 +120,7 @@ const GROUPS: [(&str, &[&str]); 14] = [
         "Audio",
         &["SoundId", "Playing", "Volume", "PlaybackSpeed", "Looped"],
     ),
+    ("Animation", &["Controller", "Enabled", "Speed"]),
     (
         "Shadows",
         &["ShadowsEnabled", "ShadowDistance", "ShadowSoftness"],
@@ -208,6 +211,7 @@ pub fn sections(instance: &Instance) -> Vec<Section> {
                 ClassName::PointLight | ClassName::SpotLight
             ),
             "Emitter" | "Particles" => instance.class() == ClassName::ParticleEmitter,
+            "Animation" => instance.class() == ClassName::Animator,
             "Appearance" | "Behavior" => instance.class() != ClassName::ParticleEmitter,
             _ => true,
         })
@@ -370,6 +374,7 @@ fn value_control(ui: &mut egui::Ui, name: &'static str, value: Value) -> Option<
     match value {
         Value::String(path) if is_map(name) => map_control(ui, name, &path),
         Value::String(path) if name == "SoundId" => sound_control(ui, &path),
+        Value::String(path) if name == "Controller" => controller_control(ui, &path),
         value => value_edit(ui, name, value).map(|value| Edit::Property(name, value)),
     }
 }
@@ -396,6 +401,34 @@ fn map_control(ui: &mut egui::Ui, name: &'static str, path: &str) -> Option<Edit
             .clicked()
         {
             edit = Some(Edit::Property(name, Value::String(String::new())));
+        }
+        let file = path.rsplit('/').next().unwrap_or(path);
+        ui.label(file).on_hover_text(path);
+    });
+    edit
+}
+
+/// An Animator's controller file, with buttons to pick another and to clear it.
+fn controller_control(ui: &mut egui::Ui, path: &str) -> Option<Edit> {
+    let mut edit = None;
+    ui.horizontal(|ui| {
+        if ui
+            .small_button(icons::FOLDER_OPEN)
+            .on_hover_text("Choose an animator controller (.controller.json) in the project")
+            .clicked()
+        {
+            edit = Some(Edit::PickController);
+        }
+        if path.is_empty() {
+            ui.weak("None");
+            return;
+        }
+        if ui
+            .small_button(icons::X)
+            .on_hover_text("Play no controller")
+            .clicked()
+        {
+            edit = Some(Edit::Property("Controller", Value::String(String::new())));
         }
         let file = path.rsplit('/').next().unwrap_or(path);
         ui.label(file).on_hover_text(path);

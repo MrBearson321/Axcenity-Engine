@@ -703,7 +703,7 @@ fn every_block_script() -> BlockScript {
             value: Expression::TouchingPart,
         },
     ));
-    let stacks = vec![
+    let stacks = [
         block(1, BlockKind::WhenStarted { body: body() }),
         block(
             2,

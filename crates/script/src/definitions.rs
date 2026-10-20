@@ -411,6 +411,15 @@ const CLASS_METHODS: &[(ClassName, Function)] = &[
         },
     ),
     (
+        ClassName::Animator,
+        Function {
+            name: "Play",
+            doc: "Switches to the state named `state`, from its start, blending from the pose now over `blend` seconds (0.25 if left out; 0 snaps).",
+            params: &[("state", "string"), ("blend?", "number")],
+            returns: "nil",
+        },
+    ),
+    (
         ClassName::ParticleEmitter,
         Function {
             name: "Emit",
@@ -462,6 +471,14 @@ const CLASS_FIELDS: &[(ClassName, Field)] = &[
             name: "LocalPlayer",
             ty: "Player",
             doc: "The player on this device.",
+        },
+    ),
+    (
+        ClassName::Animator,
+        Field {
+            name: "CurrentState",
+            ty: "string",
+            doc: "The name of the state playing (read-only; use `Play` to change it). Empty until the animator first runs.",
         },
     ),
 ];
@@ -1065,6 +1082,21 @@ const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "If false, it stops giving off particles; those already out live on.",
     ),
     (
+        ClassName::Animator,
+        "Controller",
+        "The animator controller file it plays, inside the project folder, such as \"assets/animations/hero.controller.json\". The Animation panel makes and edits them.",
+    ),
+    (
+        ClassName::Animator,
+        "Enabled",
+        "If false, the model holds its pose: the animator stops moving on.",
+    ),
+    (
+        ClassName::Animator,
+        "Speed",
+        "Plays every state this many times as fast (1 is normal, 0 pauses).",
+    ),
+    (
         ClassName::ParticleEmitter,
         "ParticleType",
         "The built-in picture each particle shows: Circle, Spark, Smoke, Fire, Star or Magic. Texture, if set, is used instead.",
@@ -1420,6 +1452,16 @@ const EVENT_DOCS: &[(ClassName, &str, &str)] = &[
         "Ended",
         "Fires when the sound plays to its end. Looped sounds, and sounds stopped with Stop, don't fire it.",
     ),
+    (
+        ClassName::Animator,
+        "StateChanged",
+        "Fires when the animator moves to another state. The handler gets the new state's name, then the old one's: `function(state, previous) ... end`.",
+    ),
+    (
+        ClassName::Animator,
+        "AnimationEvent",
+        "Fires when a playing clip passes one of its animation events. The handler gets the event's name.",
+    ),
 ];
 
 /// What each class is. A `match` with no `_` case, so adding a class won't
@@ -1494,6 +1536,9 @@ fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::ParticleEmitter => {
             "Gives off particles (sparks, smoke, fire, stars...) from inside its parent part, shown in the editor and the game."
+        }
+        ClassName::Animator => {
+            "Inside a MeshPart with an animated (FBX) model: plays its animator controller's states and transitions on the model while the game runs."
         }
     }
 }
@@ -2050,6 +2095,7 @@ mod tests {
                 ClassName::ParticleEmitter,
                 "Instance.new('ParticleEmitter')",
             ),
+            (ClassName::Animator, "Instance.new('Animator')"),
         ];
         let instance = |class: ClassName| {
             instances

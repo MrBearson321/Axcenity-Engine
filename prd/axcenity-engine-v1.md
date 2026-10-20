@@ -54,6 +54,19 @@ Graphics aim for a modern, realistic look (physically based materials, shadows, 
 68. As a creator, I want an angular tool like Archimedes that keeps placing copies of a part at a set angle, a set number of times, so that I can build arches, loops, curved roads and round towers.
 69. As a creator, I want particle emitters with built-in particle types (sparks, smoke, fire, stars, magic) and my own particle textures (such as Kenney's free Particle Pack), editable live in the editor and from scripts, so that my game has effects.
 
+### Animating characters
+
+70. As a creator, I want to import FBX characters with their skeleton and animation clips, and see what the file holds (model, skeleton, clips), so that animated assets from Blender, Mixamo-style rigs or asset stores just work.
+71. As a creator, I want to split one long take into several named clips by frame range, while importing or later, so that a file with every move on one timeline becomes a usable set of clips.
+72. As a creator, I want an Animation Library where I can preview, organise and store clips and set each one's playback speed, looping, root motion and animation events, so that clips behave right before I use them.
+73. As a creator, I want an animation state machine with a default (idle) state and transitions between states, so that my character switches between idle, walk, jump and attack as the game changes.
+74. As a creator, I want transitions with conditions, a blend duration, exit time, interruption and priority, so that changes between animations look smooth and happen exactly when they should.
+75. As a creator, I want Bool, Trigger and Number parameters on an animator, set by scripts and blocks, so that gameplay (IsGrounded, Jump, Speed) drives the animations.
+76. As a creator, I want to preview an animator in its own window (changing parameters, firing triggers and scrubbing blends) without playing the game, so that I can tune animations quickly.
+77. As a creator, I want 1D blend trees that mix related motions by a number (Idle, Walk and Run by Speed), so that movement speeds up smoothly instead of popping between clips.
+78. As a creator, I want a state to return to another state when its clip finishes or a condition holds, with the transitions made for me, so that one-shot moves such as attacks and jumps need no hand-wired exits.
+79. As a creator who uses blocks, I want animation blocks (when a key is pressed, set a trigger, play a state), so that I can drive animations without writing Lua.
+
 ### Scripting with Lua
 
 14. As a creator who codes, I want to add a `Script` (runs on the server side) or a `LocalScript` (runs on the player's side) to my game, so that my game logic is organized the same way Roblox's is.
@@ -226,6 +239,14 @@ Graphics aim for a modern, realistic look (physically based materials, shadows, 
   - catching Rust panics during Play where possible, and reporting them instead of crashing the editor
 - A "Run standalone" option can be added later on top of export.
 
+### Animation
+- Inspired by Unity's Animator, kept small. **FBX** is the animation source: importing one reads its model, its **skeleton** (the bones its skin uses, and their parents) and its **takes**, which can be split into named **clips** by frame range.
+- A clip is a readable file (`assets/animations/*.anim.json`) naming its FBX take and range, with its playback speed, looping, root motion and animation events. The **Animation Library** lists, previews and edits them.
+- An **Animator** Instance inside a MeshPart plays an **animator controller** (`*.controller.json`): parameters (Bool: persistent state; Trigger: a one-time request, consumed when a transition uses it; Number: a continuous value), states (a clip, or a 1D blend tree of clips by a Number), a default state and transitions (conditions, blend duration, exit time, interruption, priority). A state can **return** to another when its clip finishes or a condition holds, which generates its transitions.
+- Blending: level 1 is **transitions** (cross-fading the old pose into the new one over the blend duration); level 2 is **blend trees** (mixing related motions by a parameter, such as Speed).
+- Gameplay drives animation through parameters: Input → Condition → Action → Animation. Lua (`animator:SetBool`, `SetNumber`, `SetTrigger`, `Play`) and blocks (an Animation category, which translates to the same Lua) set them; there is still one scripting runtime.
+- Skinning runs on the CPU in v1 (`assets` poses a model; the renderer just redraws changed vertices), which is simple and plenty for a few characters. The **Animation Studio** panel in the editor holds the library, a state machine graph, an inspector and an interactive preview with its own camera, separate from Play.
+
 ### Project format
 - A project is a **folder of readable text files**:
   - a project manifest
@@ -270,7 +291,8 @@ Graphics aim for a modern, realistic look (physically based materials, shadows, 
 - **A standalone "Run" mode** separate from in-editor Play (can be added after export exists).
 - **macOS code signing and notarization.**
 - **Advanced rendering** beyond the five planned stages, such as ray tracing or global illumination.
-- **Terrain, animation, particles, character controllers and avatars.** These weren't decided in this round and need their own design pass.
+- **Terrain, character controllers and avatars.** These weren't decided in this round and need their own design pass. (Particles and animation were added later; see stories 69–79.)
+- **Animation beyond the Animation Studio's scope**: glTF animation, 2D blend trees, layers and avatar masks, inverse kinematics, retargeting between skeletons, morph targets (blend shapes) and GPU skinning.
 
 ## Further Notes
 

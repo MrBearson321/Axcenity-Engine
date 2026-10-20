@@ -10,8 +10,14 @@
 mod fbx;
 mod maps;
 mod objects;
+mod rig;
+#[cfg(test)]
+mod test_rig;
 
 pub use objects::{ModelObject, Pick};
+pub use rig::{
+    Blend, Bone, BoneTransform, Joint, Keys, Pose, Posed, PosedPrimitive, Rig, Take, Track,
+};
 
 #[cfg(test)]
 pub(crate) use fbx::tests::{TestTexture, checker_png, pyramid_fbx, pyramid_fbx_with_textures};
@@ -86,6 +92,9 @@ pub struct Model {
     /// isn't there (the model is drawn without it). They finish the sentence
     /// "The model `…` ".
     pub warnings: Vec<String>,
+    /// The skeleton its triangles are weighted to, if it's animated (an
+    /// FBX file with a skin or animation). See [`Model::pose`].
+    pub rig: Option<Arc<Rig>>,
 }
 
 impl Model {
@@ -130,6 +139,12 @@ pub struct Primitive {
     /// Three per triangle, counter-clockwise seen from outside.
     pub indices: Vec<u32>,
     pub material: ModelMaterial,
+    /// For an animated model ([`Model::rig`]), one per position: up to 4
+    /// [`Joint`]s (indices into [`Rig::joints`]) it moves with, and how much
+    /// each counts (adding up to 1, or all 0 for a corner that never
+    /// moves). Empty when the model isn't animated.
+    pub joints: Vec<[u16; 4]>,
+    pub weights: Vec<[f32; 4]>,
 }
 
 impl Primitive {
@@ -351,6 +366,16 @@ pub fn load_models(
     panic::catch_unwind(AssertUnwindSafe(|| match format {
         ModelFormat::Gltf => read(bytes, folder, picks),
         ModelFormat::Fbx => fbx::load(bytes, folder, picks),
+    }))
+    .unwrap_or(Err(ModelError::Damaged))
+}
+
+/// Every take (animation timeline) in a model file's `bytes`, baked into
+/// keys per bone. Only FBX files give takes for now; a glTF file has none.
+pub fn load_takes(bytes: &[u8], format: ModelFormat) -> Result<Vec<Take>, ModelError> {
+    panic::catch_unwind(AssertUnwindSafe(|| match format {
+        ModelFormat::Gltf => Ok(Vec::new()),
+        ModelFormat::Fbx => fbx::load_takes(bytes),
     }))
     .unwrap_or(Err(ModelError::Damaged))
 }
@@ -844,6 +869,8 @@ impl Reader<'_> {
                 tangents: Vec::new(),
                 indices,
                 material,
+                joints: Vec::new(),
+                weights: Vec::new(),
             });
         }
         Ok(())
@@ -1161,7 +1188,16 @@ fn fit(mut primitives: Vec<Primitive>) -> Result<Model, ModelError> {
         primitives,
         hull_points,
         warnings: Vec::new(),
+        rig: None,
     })
+}
+
+/// The transform [`fit`] applied to `model`: from the file's space into
+/// the 1×1×1 cube.
+fn fit_matrix(model: &Model) -> Mat4 {
+    let size = Vec3::from(model.size);
+    let scale = Vec3::select(size.cmpgt(Vec3::splat(FLAT)), size.recip(), Vec3::ONE);
+    Mat4::from_scale(scale) * Mat4::from_translation(-Vec3::from(model.center))
 }
 
 #[cfg(test)]

@@ -12,6 +12,7 @@ authors = ["Paul Janota and contributors"]
 # Crates opt in with `name.workspace = true`. Upgrade deliberately, never by accident.
 [workspace.dependencies]
 # Engine crates. In code they're named with underscores, for example `axcenity_core`.
+axcenity-anim = { path = "crates/anim" }
 axcenity-assets = { path = "crates/assets" }
 axcenity-audio = { path = "crates/audio" }
 axcenity-blocks = { path = "crates/blocks" }

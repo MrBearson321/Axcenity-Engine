@@ -4,9 +4,11 @@
 //! which keeps `render` free of engine types. The player and the editor
 //! viewport both use it, so they draw a world the same way.
 
+use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 
-use axcenity_assets::{AlphaMode, Assets, ChannelTexture, Image, Model, ModelMaterial};
+use axcenity_assets::{AlphaMode, Assets, ChannelTexture, Image, Model, ModelMaterial, Posed};
 use axcenity_core::{ClassName, Instance, InstanceId, PartType, TextureChannel, Value, World};
 use axcenity_render::glam::{Mat4, Vec3};
 use axcenity_render::{
@@ -30,6 +32,10 @@ const AMBIENT: AmbientLight = AmbientLight {
 /// How much brighter than its color a glowing part is drawn when bloom is
 /// on, so it goes past the bloom threshold and glows.
 const GLOW_BOOST: f32 = 2.5;
+
+/// Animated MeshParts' posed models, by MeshPart (the host's animators make
+/// them). A MeshPart in here is drawn posed; the rest are drawn still.
+pub type Poses = HashMap<InstanceId, Arc<Posed>>;
 
 /// Everything the Lighting service's properties set.
 struct LightingSettings {
@@ -183,6 +189,16 @@ pub fn light_markers(world: &World) -> Vec<LightMarker> {
 /// The draw list for everything in the Workspace, seen from `camera`.
 /// MeshParts' models come from `assets`, loaded the first time they're drawn.
 pub fn build_draw_list(world: &World, assets: &Assets, camera: Camera) -> DrawList {
+    build_draw_list_posed(world, assets, camera, &Poses::new())
+}
+
+/// Like [`build_draw_list`], drawing the MeshParts in `poses` as posed.
+pub fn build_draw_list_posed(
+    world: &World,
+    assets: &Assets,
+    camera: Camera,
+    poses: &Poses,
+) -> DrawList {
     let settings = lighting_settings(world);
     let glow = if settings.post.enabled && settings.post.bloom_enabled {
         GLOW_BOOST
@@ -191,13 +207,16 @@ pub fn build_draw_list(world: &World, assets: &Assets, camera: Camera) -> DrawLi
     };
     let mut items = Vec::new();
     let mut lights = Vec::new();
-    for instance in world
+    for (id, instance) in world
         .descendants(world.workspace())
         .into_iter()
-        .filter_map(|id| world.get(id))
+        .filter_map(|id| Some((id, world.get(id)?)))
     {
         match instance.class() {
-            ClassName::MeshPart => mesh_part_draw_items(world, instance, assets, &mut items),
+            ClassName::MeshPart => {
+                let posed = poses.get(&id).map(|posed| (id, posed));
+                mesh_part_draw_items(world, instance, assets, posed, &mut items)
+            }
             ClassName::PointLight | ClassName::SpotLight => {
                 lights.extend(light_of(world, instance))
             }
@@ -245,12 +264,14 @@ pub fn build_draw_list_with_ui(
         None,
         None,
         None,
+        &Poses::new(),
     )
     .0
 }
 
 /// Builds a scene and interactive UI layout for the given physical-pixel
-/// pointer position and button currently held.
+/// pointer position and button currently held, with `poses` drawn posed.
+#[allow(clippy::too_many_arguments)] // Each is a different input to the frame.
 pub fn build_draw_list_with_ui_interaction(
     world: &World,
     assets: &Assets,
@@ -260,8 +281,9 @@ pub fn build_draw_list_with_ui_interaction(
     pointer: Option<[f32; 2]>,
     pressed_button: Option<InstanceId>,
     focused: Option<InstanceId>,
+    poses: &Poses,
 ) -> (DrawList, UiLayout) {
-    let mut list = build_draw_list(world, assets, camera);
+    let mut list = build_draw_list_posed(world, assets, camera, poses);
     let layout = layout_ui_interactive(
         world,
         viewport_size.0,
@@ -421,11 +443,13 @@ fn part_draw_item(instance: &Instance, glow: f32) -> Option<DrawItem> {
 /// model's own material, or with the maps of the SurfaceAppearance inside
 /// it for that material. Until it has a model (no `MeshId` yet, or one
 /// that can't be loaded), it's drawn as a plain grey box, so it can still
-/// be seen and picked.
+/// be seen and picked. With `posed` (the MeshPart's ID and a pose of its
+/// model), the model is drawn in that pose.
 fn mesh_part_draw_items(
     world: &World,
     instance: &Instance,
     assets: &Assets,
+    posed: Option<(InstanceId, &Arc<Posed>)>,
     items: &mut Vec<DrawItem>,
 ) {
     let Some((_, transform)) = part_placement(instance) else {
@@ -455,6 +479,10 @@ fn mesh_part_draw_items(
         .filter_map(|&id| world.get(id))
         .filter(|child| child.class() == ClassName::SurfaceAppearance)
         .collect();
+    // A pose of another model (the MeshId just changed) isn't used.
+    let posed = posed.filter(|(_, posed)| {
+        posed.model_key == model.key() && posed.primitives.len() == model.primitives.len()
+    });
     for (index, primitive) in model.primitives.iter().enumerate() {
         let appearance = appearances.iter().find(|appearance| {
             appearance.property("MaterialName").and_then(Value::as_str)
@@ -464,11 +492,20 @@ fn mesh_part_draw_items(
             Some(appearance) => surface_material(&primitive.material, appearance, assets),
             None => model_material(&primitive.material),
         };
-        items.push(DrawItem {
-            shape: Shape::Mesh(Arc::new(ModelMesh {
+        let shape: Arc<dyn MeshSource> = match posed {
+            Some((part, posed)) => Arc::new(PosedMesh {
+                key: posed_key(part, primitive.key()),
+                model: model.clone(),
+                posed: posed.clone(),
+                index,
+            }),
+            None => Arc::new(ModelMesh {
                 model: model.clone(),
                 index,
-            })),
+            }),
+        };
+        items.push(DrawItem {
+            shape: Shape::Mesh(shape),
             transform,
             material,
             casts_shadow: casts_shadow(instance),
@@ -656,6 +693,48 @@ impl MeshSource for ModelMesh {
     fn indices(&self) -> &[u32] {
         &self.model.primitives[self.index].indices
     }
+}
+
+/// One primitive of a posed model: the pose's corners, with the model's
+/// texture coordinates and triangles. Each MeshPart's copy has its own
+/// key, so two parts posed differently don't share one GPU copy.
+struct PosedMesh {
+    key: u64,
+    model: Arc<Model>,
+    posed: Arc<Posed>,
+    index: usize,
+}
+
+impl MeshSource for PosedMesh {
+    fn key(&self) -> u64 {
+        self.key
+    }
+    fn positions(&self) -> &[[f32; 3]] {
+        &self.posed.primitives[self.index].positions
+    }
+    fn normals(&self) -> &[[f32; 3]] {
+        &self.posed.primitives[self.index].normals
+    }
+    fn uvs(&self) -> &[[f32; 2]] {
+        &self.model.primitives[self.index].uvs
+    }
+    fn tangents(&self) -> &[[f32; 4]] {
+        &self.posed.primitives[self.index].tangents
+    }
+    fn indices(&self) -> &[u32] {
+        &self.model.primitives[self.index].indices
+    }
+    fn version(&self) -> u64 {
+        self.posed.version
+    }
+}
+
+/// The key of `part`'s posed copy of a primitive. The top bit is set, so it
+/// never matches a still model's key (those count up from 1).
+fn posed_key(part: InstanceId, primitive: u64) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    (part, primitive).hash(&mut hasher);
+    hasher.finish() | 1 << 63
 }
 
 /// A model's texture, handed to the renderer without copying it.

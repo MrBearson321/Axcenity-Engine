@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
+use axcenity_anim::Animators;
 use axcenity_assets::Assets;
 use axcenity_audio::GameAudio;
 use axcenity_core::{InstanceId, World};
@@ -97,6 +98,10 @@ fn main() -> Result<()> {
     let mut world = project.world;
     let assets = Assets::new(&project.folder);
     let mut scripts = ScriptRuntime::new();
+    // Animators start in their default states (with their parameters at
+    // their defaults) before any script runs, so scripts can read them.
+    let mut animators = Animators::new();
+    animators.update(&mut world, &assets, 0.0);
     start_scripts(&mut scripts, &mut world, &project.scripts);
     let mut audio = GameAudio::default();
     apply_audio(&mut scripts, &mut world, &assets, &mut audio);
@@ -116,6 +121,7 @@ fn main() -> Result<()> {
         audio,
         physics: Physics::with_assets(assets.clone()),
         particles: axcenity_scene::Particles::new(),
+        animators,
         assets,
         window: None,
         renderer: None,
@@ -236,6 +242,8 @@ struct App {
     physics: Physics,
     /// What the ParticleEmitters have given off.
     particles: axcenity_scene::Particles,
+    /// Plays the Animators and poses their MeshParts.
+    animators: Animators,
     /// The project's models, for MeshParts.
     assets: Assets,
     window: Option<Arc<Window>>,
@@ -306,8 +314,9 @@ impl App {
                     }
                 }
             } else {
-                if self.ui_pressed_button.is_some() && self.ui_pressed_button == hit {
-                    let button = self.ui_pressed_button.expect("checked above");
+                if let Some(button) = self.ui_pressed_button
+                    && self.ui_pressed_button == hit
+                {
                     self.scripts.activate_ui_button(&mut self.world, button);
                     print_output(&mut self.scripts);
                 }
@@ -641,6 +650,20 @@ impl ApplicationHandler for App {
                     self.particles.emit(&self.world, emitter, count);
                 }
                 self.particles.update(&self.world, seconds);
+                // Animators move on and pose their models, after scripts
+                // asked for states and physics moved the parts.
+                let events =
+                    self.animators
+                        .update(&mut self.world, &self.assets, f64::from(seconds));
+                for event in events {
+                    let (animator, name, args) = event.script_event();
+                    self.scripts
+                        .fire_instance_event(&mut self.world, animator, name, &args);
+                }
+                print_output(&mut self.scripts);
+                for error in self.animators.take_errors() {
+                    eprintln!("error: {error}");
+                }
 
                 // 5. Lay out ScreenGuis at this window's current pixel size.
                 let ui_size = (size.width, size.height);
@@ -661,6 +684,7 @@ impl ApplicationHandler for App {
                         self.pointer,
                         self.ui_pressed_button,
                         self.text_focus,
+                        self.animators.poses(),
                     );
                 self.note_ui_warnings(&ui_layout.warnings);
                 draw_list.sprites = self.particles.sprites(&self.world, &self.assets);

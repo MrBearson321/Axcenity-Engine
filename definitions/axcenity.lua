@@ -180,7 +180,7 @@ function UserInputServiceClass:IsKeyDown(key) end
 ---@field Changed Signal Fires when a property (or `Name` or `Parent`) gets a different value, whether a script, physics or the editor changed it. The handler gets the property's name: `function(property) ... end`.
 ---@field ChildAdded Signal Fires when an Instance is put inside this one. The handler gets the child.
 ---@field ChildRemoved Signal Fires when an Instance is taken out of this one. The handler gets the child.
----@field [string] Workspace|Players|Lighting|ReplicatedStorage|ServerScriptService|StarterPlayer|StarterPlayerScripts|Part|MeshPart|Script|LocalScript|ModuleScript|RemoteEvent|Player|Model|Folder|SurfaceAppearance|ScreenGui|Frame|TextLabel|TextButton|ImageLabel|TextBox|PageLayout|Table|BillboardGui|Sound|PointLight|SpotLight|ParticleEmitter A child, found by its name.
+---@field [string] Workspace|Players|Lighting|ReplicatedStorage|ServerScriptService|StarterPlayer|StarterPlayerScripts|Part|MeshPart|Script|LocalScript|ModuleScript|RemoteEvent|Player|Model|Folder|SurfaceAppearance|ScreenGui|Frame|TextLabel|TextButton|ImageLabel|TextBox|PageLayout|Table|BillboardGui|Sound|PointLight|SpotLight|ParticleEmitter|Animator A child, found by its name.
 local InstanceClass = {}
 
 ---The first child with this name, or nil. With `recursive`, searches every descendant.
@@ -543,6 +543,23 @@ local ParticleEmitterClass = {}
 function ParticleEmitterClass:Emit(count) end
 
 
+---Inside a MeshPart with an animated (FBX) model: plays its animator controller's states and transitions on the model while the game runs.
+---@class Animator: Instance
+---@field Controller string The animator controller file it plays, inside the project folder, such as "assets/animations/hero.controller.json". The Animation panel makes and edits them.
+---@field Enabled boolean If false, the model holds its pose: the animator stops moving on.
+---@field Speed number Plays every state this many times as fast (1 is normal, 0 pauses).
+---@field CurrentState string The name of the state playing (read-only; use `Play` to change it). Empty until the animator first runs.
+---@field StateChanged Signal Fires when the animator moves to another state. The handler gets the new state's name, then the old one's: `function(state, previous) ... end`.
+---@field AnimationEvent Signal Fires when a playing clip passes one of its animation events. The handler gets the event's name.
+local AnimatorClass = {}
+
+---Switches to the state named `state`, from its start, blending from the pose now over `blend` seconds (0.25 if left out; 0 snaps).
+---@param state string
+---@param blend? number
+---@return nil
+function AnimatorClass:Play(state, blend) end
+
+
 -- Globals -------------------------------------------------------------------
 
 ---The root of the game. Every service is inside it.
@@ -595,6 +612,7 @@ Instance = {}
 ---@overload fun(className: "PointLight"): PointLight
 ---@overload fun(className: "SpotLight"): SpotLight
 ---@overload fun(className: "ParticleEmitter"): ParticleEmitter
+---@overload fun(className: "Animator"): Animator
 function Instance.new(className) end
 
 ---Creates Vector3 values.

@@ -211,6 +211,7 @@ pub fn layout_ui_viewed(
 
 /// Lays out UI with CSS pointer states. The active element is the button held
 /// from the mouse-down event; it only gets `:active` while still hovered.
+#[allow(clippy::too_many_arguments)] // Each is a different input to layout.
 pub fn layout_ui_interactive(
     world: &World,
     width: u32,

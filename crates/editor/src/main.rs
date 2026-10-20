@@ -8,6 +8,7 @@
 //! device; the viewport draws with the same renderer as the player.
 
 mod angular;
+mod anim_import;
 mod app;
 mod asset_browser;
 mod autocomplete;

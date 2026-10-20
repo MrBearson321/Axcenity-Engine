@@ -25,6 +25,9 @@ my-game/
                   tree/tree.gltf with the .bin and textures it uses (see Assets)
   assets/audio/   project audio files referenced by Sound.SoundId
   assets/prefabs/ prefabs saved from the editor's Assets panel: lamp.prefab.json, ...
+  assets/animations/
+                  animation clips (hero/Walk.anim.json, ...) and animator
+                  controllers (hero.controller.json), see Animation files
   assets/images/, assets/textures/, assets/particles/
                   UI images, SurfaceAppearance textures and particle textures
   .luarc.json, .axcenity/, .vscode/extensions.json
@@ -69,6 +72,10 @@ my-game/
 - **UI Instances** (Phase 22) are saved in the Workspace like other Instances. `ScreenGui` holds `Frame` and `TextLabel` children; a UDim2 position/size is written as `[xScale, xOffset, yScale, yOffset]`.
 - **CSS stylesheets** (Phase 23) are plain `.css` files anywhere in the project folder. The loader reads them in stable path order; a file that cannot be read is reported without blocking the rest of the project.
 - **Prefabs** (Phase 34): `assets/prefabs/*.prefab.json` holds Instances saved to be placed again: `{ "format_version": 1, "instances": [ ... ] }`, each written exactly like a child in `world.json` (scripts are left out). `project::parse_prefab` checks the whole file before adding anything, so a bad prefab adds nothing; `project::write_prefab` writes it. Positions are absolute as saved; the editor moves the whole prefab where it's placed.
+- **Animation files** (Phase 38, `anim::files`): pretty JSON, written with every field in a fixed order (`to_json`, through a `.saving` temporary file), so saving the same thing gives the same text; unknown fields are errors that name the line. Paths in them are from the project folder.
+  - A **clip** (`*.anim.json`, named by its file): `{ "format_version": 1, "source": "assets/models/noodle.fbx", "take": "Moves", "start": 0.0, "end": 1.0, "speed": 1.0, "loop": true, "root_motion": false, "events": [ { "time": 0.5, "name": "Wave" } ] }`. `start` and `end` are seconds in the take; `speed`, `loop`, `root_motion` and `events` may be left out (1, true, false, none).
+  - A **controller** (`*.controller.json`): `{ "format_version": 1, "parameters": [ { "type": "Bool", "name": "IsGrounded", "default": true }, { "type": "Number", "name": "Speed", "default": 0.0 }, { "type": "Trigger", "name": "Jump" } ], "default_state": "Idle", "states": [ { "name": "Idle", "motion": { "clip": "assets/animations/noodle/Idle.anim.json" }, "speed": 1.0, "position": [0.0, 0.0] } ], "transitions": [ { "from": "Any State", "to": "Jump", "conditions": [ { "parameter": "Jump", "test": "Triggered", "value": 0.0 } ], "blend": 0.25, "exit_time": null, "interruptible": false, "priority": 0 } ] }`. `position` places a state in the editor's graph. Condition tests are `IsTrue`, `IsFalse` (Bools), `Triggered` (Triggers), `Greater` and `Less` (Numbers, against `value`). An empty or unknown `default_state` starts in the first state. Phase 38 plays states, the default state and `Play`; parameters and transitions are read and kept, and run from Phase 40.
+  - `examples/hello-animation` has a generated rig (`noodle.fbx`, from `assets` `model/test_rig.rs`; a test checks it's up to date, and `AXCENITY_WRITE_EXAMPLES=1` rewrites it), four clips and a controller; tests check those files are saved as the engine writes them.
 - `format_version` appears in both files. The engine refuses newer versions with a "please update" message.
 - Errors name the file and, for JSON syntax problems, the line and column. For bad property values they name the Instance path (for example `Workspace.Block.Color`).
 

@@ -13,6 +13,7 @@ use std::collections::BTreeSet;
 use std::panic::{self, AssertUnwindSafe};
 use std::path::Path;
 
+use axcenity_anim::Animators;
 use axcenity_assets::Assets;
 use axcenity_audio::GameAudio;
 use axcenity_core::{InstanceId, KeyCode, World};
@@ -33,6 +34,8 @@ pub struct Session {
     world: World,
     scripts: ScriptRuntime,
     physics: Physics,
+    /// Plays the Animators and poses their MeshParts.
+    animators: Animators,
     assets: Assets,
     /// Dropped at Stop, which silences every sound.
     audio: GameAudio,
@@ -55,11 +58,18 @@ impl Session {
             world: edit_world.clone(),
             scripts: ScriptRuntime::new(),
             physics: Physics::with_assets(assets.clone()),
+            animators: Animators::new(),
             assets,
             audio: GameAudio::default(),
             panic_next_frame: false,
         };
         guard(|| {
+            // Animators start in their default states before any script
+            // runs, as in the player, so scripts can read them.
+            session
+                .animators
+                .update(&mut session.world, &session.assets, 0.0);
+            session.forward_animator_errors(output);
             for script in scripts {
                 session.scripts.start_script(
                     &mut session.world,
@@ -163,8 +173,30 @@ impl Session {
             self.forward_output(output);
             moved = self.scripts.take_camera_move();
             self.apply_audio(output);
+            // Animators move on and pose their models, as in the player.
+            let events = self
+                .animators
+                .update(&mut self.world, &self.assets, seconds);
+            for event in events {
+                let (animator, name, args) = event.script_event();
+                self.scripts
+                    .fire_instance_event(&mut self.world, animator, name, &args);
+            }
+            self.forward_output(output);
+            self.forward_animator_errors(output);
         })?;
         Ok(moved)
+    }
+
+    /// The posed models of the animated MeshParts, for the viewport.
+    pub fn poses(&self) -> &axcenity_scene::Poses {
+        self.animators.poses()
+    }
+
+    fn forward_animator_errors(&mut self, output: &mut Output) {
+        for error in self.animators.take_errors() {
+            output.error(error);
+        }
     }
 
     /// The `emitter:Emit(count)` calls scripts made since the last call.

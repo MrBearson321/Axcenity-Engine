@@ -333,6 +333,46 @@ pub(super) fn upload_custom_mesh(
     device: &wgpu::Device,
     source: &dyn MeshSource,
 ) -> Option<GpuMesh> {
+    let vertices = custom_vertices(source)?;
+    let indices = source.indices();
+    let mut mesh = upload_buffers(
+        device,
+        "mesh",
+        &vertices,
+        bytemuck::cast_slice(indices),
+        indices.len(),
+        wgpu::IndexFormat::Uint32,
+    );
+    mesh.version = source.version();
+    Some(mesh)
+}
+
+/// Brings `mesh` up to date with a new [`MeshSource::version`] of the same
+/// mesh: its corners are written over the old ones, or, if their number
+/// changed, the whole mesh is uploaded again. Broken data keeps the old.
+pub(super) fn update_custom_mesh(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    mesh: &mut GpuMesh,
+    source: &dyn MeshSource,
+) {
+    mesh.version = source.version();
+    let Some(vertices) = custom_vertices(source) else {
+        return;
+    };
+    let bytes: &[u8] = bytemuck::cast_slice(&vertices);
+    if bytes.len() as u64 == mesh.vertices.size()
+        && source.indices().len() == mesh.index_count as usize
+    {
+        queue.write_buffer(&mesh.vertices, 0, bytes);
+    } else if let Some(fresh) = upload_custom_mesh(device, source) {
+        *mesh = fresh;
+    }
+}
+
+/// A caller's mesh as the GPU's corners, or `None` (with a warning) if
+/// its data doesn't fit together.
+fn custom_vertices(source: &dyn MeshSource) -> Option<Vec<Vertex>> {
     let positions = source.positions();
     let normals = source.normals();
     let uvs = source.uvs();
@@ -350,22 +390,16 @@ pub(super) fn upload_custom_mesh(
         log::warn!("mesh #{} has broken data, so it isn't drawn", source.key());
         return None;
     }
-    let vertices: Vec<Vertex> = (0..count)
-        .map(|i| Vertex {
-            position: positions[i],
-            normal: normals[i],
-            uv: uvs.get(i).copied().unwrap_or_default(),
-            tangent: tangents.get(i).copied().unwrap_or(mesh::NO_TANGENT),
-        })
-        .collect();
-    Some(upload_buffers(
-        device,
-        "mesh",
-        &vertices,
-        bytemuck::cast_slice(indices),
-        indices.len(),
-        wgpu::IndexFormat::Uint32,
-    ))
+    Some(
+        (0..count)
+            .map(|i| Vertex {
+                position: positions[i],
+                normal: normals[i],
+                uv: uvs.get(i).copied().unwrap_or_default(),
+                tangent: tangents.get(i).copied().unwrap_or(mesh::NO_TANGENT),
+            })
+            .collect(),
+    )
 }
 
 pub(super) fn upload_buffers(
@@ -379,7 +413,8 @@ pub(super) fn upload_buffers(
     let vertices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some(name),
         contents: bytemuck::cast_slice(vertices),
-        usage: wgpu::BufferUsages::VERTEX,
+        // COPY_DST so a posed mesh's corners can be rewritten in place.
+        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
     });
     let indices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some(name),
@@ -391,6 +426,7 @@ pub(super) fn upload_buffers(
         indices,
         index_count: index_count as u32,
         index_format,
+        version: 0,
     }
 }
 

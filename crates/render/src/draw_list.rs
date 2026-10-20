@@ -295,6 +295,12 @@ pub trait MeshSource: Send + Sync {
     }
     /// Three per triangle, counter-clockwise seen from outside.
     fn indices(&self) -> &[u32];
+    /// Changes when the corners do (an animated, posed mesh), with the same
+    /// key and indices: the renderer then rewrites its copy's corners in
+    /// place. A mesh that never changes keeps the default.
+    fn version(&self) -> u64 {
+        0
+    }
 }
 
 /// An image the caller owns, to put on a surface ([`Material`]'s textures).

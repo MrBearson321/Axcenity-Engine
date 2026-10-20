@@ -1,0 +1,52 @@
+{
+  "format_version": 1,
+  "parameters": [],
+  "default_state": "Idle",
+  "states": [
+    {
+      "name": "Idle",
+      "motion": {
+        "clip": "assets/animations/noodle/Idle.anim.json"
+      },
+      "speed": 1.0,
+      "position": [
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "Wave",
+      "motion": {
+        "clip": "assets/animations/noodle/Wave.anim.json"
+      },
+      "speed": 1.0,
+      "position": [
+        240.0,
+        -120.0
+      ]
+    },
+    {
+      "name": "Hop",
+      "motion": {
+        "clip": "assets/animations/noodle/Hop.anim.json"
+      },
+      "speed": 1.0,
+      "position": [
+        240.0,
+        0.0
+      ]
+    },
+    {
+      "name": "Walk",
+      "motion": {
+        "clip": "assets/animations/noodle/Walk.anim.json"
+      },
+      "speed": 1.0,
+      "position": [
+        240.0,
+        120.0
+      ]
+    }
+  ],
+  "transitions": []
+}

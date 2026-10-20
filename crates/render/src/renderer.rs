@@ -34,7 +34,8 @@ use gpu::mip_levels;
 use gpu::{
     create_depth_view, create_frame_bind_group, create_instance_buffer, create_material,
     create_pipeline, create_shadow_pipeline, create_shadow_views, create_target_texture,
-    create_texture, drawable_size, upload_custom_mesh, upload_mesh, upload_texture,
+    create_texture, drawable_size, update_custom_mesh, upload_custom_mesh, upload_mesh,
+    upload_texture,
 };
 #[cfg(test)]
 use lighting::{cascade_ends, light_raw};
@@ -194,6 +195,8 @@ struct GpuMesh {
     /// 16-bit for the built-in shapes, 32-bit for callers' meshes, which
     /// can have more than 65,536 corners.
     index_format: wgpu::IndexFormat,
+    /// The caller's [`MeshSource::version`] these vertices are of.
+    version: u64,
 }
 
 /// How a material's texture maps are read. Must match `Maps` in
@@ -1239,7 +1242,16 @@ impl ScenePipeline {
         for item in &list.items {
             if let Shape::Mesh(source) = &item.shape {
                 match self.custom_meshes.entry(source.key()) {
-                    Entry::Occupied(mut cached) => cached.get_mut().last_drawn = frame,
+                    Entry::Occupied(mut cached) => {
+                        let cached = cached.get_mut();
+                        cached.last_drawn = frame;
+                        // A posed (animated) mesh has new corners: rewrite them.
+                        if let Some(gpu) = &mut cached.gpu
+                            && gpu.version != source.version()
+                        {
+                            update_custom_mesh(&self.device, &self.queue, gpu, source.as_ref());
+                        }
+                    }
                     Entry::Vacant(slot) => {
                         slot.insert(Cached {
                             gpu: upload_custom_mesh(&self.device, source.as_ref()),

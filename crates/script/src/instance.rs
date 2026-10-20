@@ -128,6 +128,11 @@ fn get(lua: &Lua, id: InstanceId, key: &str) -> mlua::Result<mlua::Value> {
         return value_to_lua(lua, value);
     }
     let class = instance.class();
+    // Live animator state, not a saved property (see `core::AnimatorState`).
+    if class == ClassName::Animator && key == "CurrentState" {
+        let state = world.animator(id).map(|s| s.current_state.clone());
+        return state.unwrap_or_default().into_lua(lua);
+    }
     if let Some(member) = class_member(lua, class, key)? {
         return Ok(member);
     }
@@ -176,6 +181,15 @@ fn set(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> mlua::Result
                 .map_err(|err| mlua::Error::runtime(format!("can't set Parent: {err}")))
         }
         "ClassName" => Err(mlua::Error::runtime("ClassName can't be changed")),
+        "CurrentState"
+            if world(lua)?
+                .get(id)
+                .is_some_and(|i| i.class() == ClassName::Animator) =>
+        {
+            Err(mlua::Error::runtime(
+                "Animator.CurrentState can't be set; use animator:Play(\"StateName\") to change state",
+            ))
+        }
         _ => {
             let (class, kind) = {
                 let world = world(lua)?;
@@ -317,6 +331,34 @@ pub fn sound_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Fu
         (ClassName::Sound, "Pause", pause),
         (ClassName::Sound, "Resume", resume),
     ])
+}
+
+/// `animator:Play(state, blend?)`, which asks the host's animator to
+/// switch to a state, blending over `blend` seconds (default a quarter).
+pub fn animator_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Function)>> {
+    let play = lua.create_function(
+        |lua, (this, state, blend): (LuaInstance, mlua::Value, Option<f64>)| {
+            let mlua::Value::String(state) = &state else {
+                return Err(mlua::Error::runtime(format!(
+                    "Play needs the name of a state, such as animator:Play(\"Walk\"), not a {}",
+                    type_name(lua, &state)
+                )));
+            };
+            if let Some(blend) = blend
+                && !(blend.is_finite() && blend >= 0.0)
+            {
+                return Err(mlua::Error::runtime(
+                    "Play's blend must be a number of seconds, 0 or more",
+                ));
+            }
+            let state = state.to_string_lossy();
+            let mut world = world_mut(lua)?;
+            let live = world.animator_mut(this.0).ok_or_else(destroyed)?;
+            live.play = Some(axcenity_core::PlayRequest { state, blend });
+            Ok(())
+        },
+    )?;
+    Ok(vec![(ClassName::Animator, "Play", play)])
 }
 
 /// The most particles one `Emit` call gives off, so a typo can't freeze the game.

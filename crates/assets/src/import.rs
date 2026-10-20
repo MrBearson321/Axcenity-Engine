@@ -5,7 +5,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::model::{self, Model, ModelError, ModelFormat, ModelObject, Pick};
+use crate::model::{self, Model, ModelError, ModelFormat, ModelObject, Pick, Take};
 
 /// Where imported models go, inside the project folder.
 pub const MODELS_FOLDER: &str = "assets/models";
@@ -167,6 +167,38 @@ fn import_file(
     let folder = project.join(into);
     let name = unique_file_name(&name, |taken| folder.join(taken).exists());
     Some(copy(file, &folder.join(&name)).map(|()| format!("{}/{name}", into.trim_end_matches('/'))))
+}
+
+/// Every take (animation timeline) in the model file at `file` (outside
+/// the project), for looking at before importing it.
+pub fn load_takes_file(file: &Path) -> Result<Vec<Take>, ImportError> {
+    let format = ModelFormat::of(file).ok_or(ImportError::NotAModel)?;
+    let bytes = fs::read(file).map_err(ImportError::Read)?;
+    Ok(model::load_takes(&bytes, format)?)
+}
+
+/// Copies an FBX file that holds only animation (takes, but nothing to
+/// draw, such as an animation exported "without skin") into `project`'s
+/// [`MODELS_FOLDER`], as `<name>.fbx` (a number added if taken), and
+/// returns its path in the project for clips' `source`.
+pub fn import_animation_file(project: &Path, file: &Path) -> Result<String, ImportError> {
+    let format = ModelFormat::of(file).ok_or(ImportError::NotAModel)?;
+    let extension = file
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .ok_or(ImportError::NotAModel)?
+        .to_ascii_lowercase();
+    let bytes = fs::read(file).map_err(ImportError::Read)?;
+    // Checked first, so a file that isn't an animation is never copied.
+    model::load_takes(&bytes, format)?;
+    let name = free_name(
+        &project.join(MODELS_FOLDER),
+        &file_name(file),
+        &format!(".{extension}"),
+    );
+    let path = format!("{MODELS_FOLDER}/{name}.{extension}");
+    copy(file, &project.join(&path))?;
+    Ok(path)
 }
 
 /// The model at `file` (outside the project), loaded from where it is,

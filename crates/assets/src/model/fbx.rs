@@ -15,15 +15,19 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use glam::{DMat3, DMat4, DVec3, Vec3};
+use glam::{DMat3, DMat4, DVec3, Mat4, Quat, Vec3};
 use ufbx::{CoordinateAxes, CoordinateAxis, ShaderType};
 
 use super::maps::{self, Role};
 use super::objects::{self, Listed, Siblings};
 use super::{
-    AlphaMode, Channel, ChannelTexture, Image, MAX_NODE_DEPTH, Model, ModelError, ModelMaterial,
-    ModelObject, Pick, Primitive, decode_image, fit, missing, new_key, smooth_normals, want,
+    AlphaMode, Bone, BoneTransform, Channel, ChannelTexture, Image, Joint, Keys, MAX_NODE_DEPTH,
+    Model, ModelError, ModelMaterial, ModelObject, Pick, Primitive, Rig, Take, Track, decode_image,
+    fit, fit_matrix, missing, new_key, smooth_normals, want,
 };
+
+/// Takes are baked at this many frames a second when the file doesn't say.
+const DEFAULT_FRAME_RATE: f64 = 30.0;
 
 /// Reads an FBX file's `bytes`, making one model for each of `picks`.
 /// Textures that aren't embedded in it are read from `folder`, the folder
@@ -31,6 +35,8 @@ use super::{
 pub(super) fn load(bytes: &[u8], folder: &Path, picks: &[Pick]) -> Result<Vec<Model>, ModelError> {
     let scene = parse(bytes)?;
     let mut reader = Reader {
+        animated: animated_nodes(&scene),
+        joints: Vec::new(),
         folder,
         images: HashMap::new(),
         materials: HashMap::new(),
@@ -46,6 +52,7 @@ pub(super) fn load(bytes: &[u8], folder: &Path, picks: &[Pick]) -> Result<Vec<Mo
     for pick in picks {
         // Each model notes its own materials' problems.
         reader.materials.clear();
+        reader.joints.clear();
         let wanted = pick.paths();
         let mut found = HashSet::new();
         reader.children(&scene.root_node, "", &wanted, &mut found);
@@ -53,6 +60,9 @@ pub(super) fn load(bytes: &[u8], folder: &Path, picks: &[Pick]) -> Result<Vec<Mo
             return Err(ModelError::NoObject(path));
         }
         let mut model = fit(std::mem::take(&mut reader.primitives))?;
+        if !reader.joints.is_empty() {
+            model.rig = Some(Arc::new(rig(&scene, &reader.joints, fit_matrix(&model))));
+        }
         // A texture that can't be used is noted by the first model that has it.
         model.warnings = std::mem::take(&mut reader.warnings);
         models.push(model);
@@ -238,12 +248,230 @@ pub(super) fn files_used(bytes: &[u8], folder: &Path) -> Result<Vec<PathBuf>, Mo
     Ok(files)
 }
 
+/// Every take (animation stack) in an FBX file's `bytes`, baked into keys.
+pub(super) fn load_takes(bytes: &[u8]) -> Result<Vec<Take>, ModelError> {
+    let scene = parse(bytes)?;
+    Ok(takes(&scene))
+}
+
+/// The scene's takes, each baked at the file's frame rate into keys for
+/// every node it moves.
+fn takes(scene: &ufbx::Scene) -> Vec<Take> {
+    let fps = scene.settings.frames_per_second;
+    let fps = if fps.is_finite() && fps > 0.0 {
+        fps
+    } else {
+        DEFAULT_FRAME_RATE
+    };
+    let mut takes = Vec::new();
+    for stack in &scene.anim_stacks {
+        let opts = ufbx::BakeOpts {
+            // Keys from 0 seconds, wherever the take starts in the file.
+            trim_start_time: true,
+            resample_rate: fps,
+            ..Default::default()
+        };
+        let Ok(baked) = ufbx::bake_anim(scene, &stack.anim, opts) else {
+            continue;
+        };
+        let mut tracks = Vec::new();
+        let mut end = 0.0_f64;
+        for node in &baked.nodes {
+            let Some(scene_node) = scene.nodes.get(node.typed_id as usize) else {
+                continue;
+            };
+            for key in node.translation_keys.iter().chain(&node.scale_keys) {
+                end = end.max(key.time);
+            }
+            for key in &node.rotation_keys {
+                end = end.max(key.time);
+            }
+            tracks.push(Track {
+                bone: scene_node.element.name.to_string(),
+                translation: Keys {
+                    times: node
+                        .translation_keys
+                        .iter()
+                        .map(|k| k.time as f32)
+                        .collect(),
+                    values: node
+                        .translation_keys
+                        .iter()
+                        .map(|k| vec3(k.value))
+                        .collect(),
+                },
+                rotation: Keys {
+                    times: node.rotation_keys.iter().map(|k| k.time as f32).collect(),
+                    values: node.rotation_keys.iter().map(|k| quat(k.value)).collect(),
+                },
+                scale: Keys {
+                    times: node.scale_keys.iter().map(|k| k.time as f32).collect(),
+                    values: node.scale_keys.iter().map(|k| vec3(k.value)).collect(),
+                },
+            });
+        }
+        let duration = if baked.playback_duration.is_finite() && baked.playback_duration > 0.0 {
+            baked.playback_duration
+        } else {
+            end
+        };
+        takes.push(Take {
+            name: stack.element.name.to_string(),
+            duration: duration as f32,
+            frame_rate: fps as f32,
+            tracks,
+        });
+    }
+    takes
+}
+
+/// The typed IDs of the nodes some take really moves. Empty for a file
+/// with no animation, so loading a still model bakes nothing.
+fn animated_nodes(scene: &ufbx::Scene) -> HashSet<u32> {
+    if scene.anim_curves.is_empty() {
+        return HashSet::new();
+    }
+    let mut nodes = HashSet::new();
+    for take in takes(scene) {
+        for track in &take.tracks {
+            let moves = track.translation.values.windows(2).any(|w| w[0] != w[1])
+                || track.rotation.values.windows(2).any(|w| w[0] != w[1])
+                || track.scale.values.windows(2).any(|w| w[0] != w[1]);
+            if !moves {
+                continue;
+            }
+            nodes.extend(
+                scene
+                    .nodes
+                    .iter()
+                    .filter(|node| node.element.name.as_ref() == track.bone.as_str())
+                    .map(|node| node.element.typed_id),
+            );
+        }
+    }
+    nodes
+}
+
+/// The skeleton for `joints` (each a node's typed ID and its inverse bind
+/// matrix): their nodes and every node above them, parents first.
+fn rig(scene: &ufbx::Scene, joints: &[(u32, DMat4)], fit: Mat4) -> Rig {
+    let mut wanted = HashSet::new();
+    for &(id, _) in joints {
+        let mut node = scene.nodes.get(id as usize).map(|node| &**node);
+        while let Some(current) = node {
+            if !wanted.insert(current.element.typed_id) {
+                break;
+            }
+            node = current.parent.as_deref();
+        }
+    }
+    let mut bones = Vec::new();
+    let mut index_of = HashMap::new();
+    add_bones(
+        &scene.root_node,
+        None,
+        0,
+        &wanted,
+        &mut bones,
+        &mut index_of,
+    );
+    let joints = joints
+        .iter()
+        .map(|&(id, inverse_bind)| Joint {
+            bone: index_of.get(&id).copied().unwrap_or(0),
+            inverse_bind: inverse_bind.as_mat4(),
+        })
+        .collect();
+    Rig { bones, joints, fit }
+}
+
+/// Adds `node` (if wanted) and the wanted nodes inside it, parents first.
+fn add_bones(
+    node: &ufbx::Node,
+    parent: Option<usize>,
+    depth: usize,
+    wanted: &HashSet<u32>,
+    bones: &mut Vec<Bone>,
+    index_of: &mut HashMap<u32, usize>,
+) {
+    if depth > MAX_NODE_DEPTH {
+        return;
+    }
+    let mut parent = parent;
+    if wanted.contains(&node.element.typed_id) {
+        index_of.insert(node.element.typed_id, bones.len());
+        bones.push(Bone {
+            name: node.element.name.to_string(),
+            parent,
+            rest: bone_transform(&node.local_transform),
+        });
+        parent = Some(bones.len() - 1);
+    }
+    for child in &node.children {
+        add_bones(child, parent, depth + 1, wanted, bones, index_of);
+    }
+}
+
+fn bone_transform(transform: &ufbx::Transform) -> BoneTransform {
+    BoneTransform {
+        translation: vec3(transform.translation),
+        rotation: quat(transform.rotation),
+        scale: vec3(transform.scale),
+    }
+}
+
+fn vec3(v: ufbx::Vec3) -> Vec3 {
+    Vec3::new(v.x as f32, v.y as f32, v.z as f32)
+}
+
+fn quat(q: ufbx::Quat) -> Quat {
+    Quat::from_xyzw(q.x as f32, q.y as f32, q.z as f32, q.w as f32).normalize()
+}
+
+/// A vertex's 4 strongest joints in `skin` (indices into the model's
+/// joints, by `cluster_joints`) and their weights, adding up to 1. All 0
+/// for a vertex no bone moves.
+fn skin_weights(
+    skin: &ufbx::SkinDeformer,
+    vertex: usize,
+    cluster_joints: &[Option<u16>],
+) -> ([u16; 4], [f32; 4]) {
+    let mut found: Vec<(u16, f32)> = Vec::new();
+    if let Some(entry) = skin.vertices.get(vertex) {
+        for i in 0..entry.num_weights {
+            let Some(weight) = skin.weights.get((entry.weight_begin + i) as usize) else {
+                continue;
+            };
+            let joint = cluster_joints
+                .get(weight.cluster_index as usize)
+                .copied()
+                .flatten();
+            if let Some(joint) = joint
+                && weight.weight > 0.0
+            {
+                found.push((joint, weight.weight as f32));
+            }
+        }
+    }
+    found.sort_by(|a, b| b.1.total_cmp(&a.1));
+    found.truncate(4);
+    let total: f32 = found.iter().map(|(_, weight)| weight).sum();
+    let (mut joints, mut weights) = ([0; 4], [0.0; 4]);
+    if total > 0.0 {
+        for (slot, (joint, weight)) in found.into_iter().enumerate() {
+            joints[slot] = joint;
+            weights[slot] = weight / total;
+        }
+    }
+    (joints, weights)
+}
+
 fn parse(bytes: &[u8]) -> Result<ufbx::SceneRoot, ModelError> {
     let opts = ufbx::LoadOpts {
         // Only the bytes given, and only as FBX (not OBJ).
         load_external_files: false,
         file_format: ufbx::FileFormat::Fbx,
-        ignore_animation: true,
+        ignore_animation: false,
         generate_missing_normals: true,
         // Blender saves its Principled BSDF's metalness and roughness in
         // its own properties.
@@ -270,6 +498,11 @@ fn parse(bytes: &[u8]) -> Result<ufbx::SceneRoot, ModelError> {
 
 /// Collects each mesh's triangles in model space.
 struct Reader<'a> {
+    /// The nodes some take moves (see [`animated_nodes`]).
+    animated: HashSet<u32>,
+    /// The model's joints so far: each a node's typed ID and its inverse
+    /// bind matrix (see [`super::Joint`]).
+    joints: Vec<(u32, DMat4)>,
     folder: &'a Path,
     /// Textures decoded so far, by element ID, so shared ones decode once.
     /// `None` means it couldn't be, and was noted.
@@ -323,6 +556,34 @@ impl Reader<'_> {
         // Room for the triangles of the biggest face (polygon).
         let mut corners = vec![0u32; mesh.max_face_triangles * 3];
 
+        // A skinned mesh moves with its bones; a mesh under a moving node
+        // moves with that node, as one rigid joint.
+        let skin = mesh.skin_deformers.first().map(|skin| &**skin);
+        let mut cluster_joints: Vec<Option<u16>> = Vec::new();
+        let mut rigid_joint = None;
+        if let Some(skin) = skin {
+            let inverse_mesh = transform.inverse();
+            for cluster in &skin.clusters {
+                let index = u16::try_from(self.joints.len()).ok();
+                match (&cluster.bone_node, index) {
+                    (Some(bone), Some(index)) => {
+                        self.joints.push((
+                            bone.element.typed_id,
+                            mat4(&cluster.geometry_to_bone) * inverse_mesh,
+                        ));
+                        cluster_joints.push(Some(index));
+                    }
+                    _ => cluster_joints.push(None),
+                }
+            }
+        } else if self.moves(node)
+            && let Ok(index) = u16::try_from(self.joints.len())
+        {
+            self.joints
+                .push((node.element.typed_id, mat4(&node.node_to_world).inverse()));
+            rigid_joint = Some(index);
+        }
+
         for part in &mesh.material_parts {
             if part.num_triangles == 0 {
                 continue;
@@ -343,9 +604,13 @@ impl Reader<'_> {
             let mut normals = Vec::new();
             let mut uvs = Vec::new();
             let mut indices = Vec::new();
+            let mut joints = Vec::new();
+            let mut weights = Vec::new();
             // Corners with the same position, normal and UV become one
-            // vertex. The bit patterns compare exactly.
-            let mut vertices: HashMap<[u32; 8], u32> = HashMap::new();
+            // vertex. The bit patterns compare exactly. Skin weights belong
+            // to the file's vertices, so skinned corners of different ones
+            // stay apart.
+            let mut vertices: HashMap<[u32; 9], u32> = HashMap::new();
             for &face in &part.face_indices {
                 let Some(&face) = mesh.faces.get(face as usize) else {
                     continue;
@@ -370,7 +635,11 @@ impl Reader<'_> {
                     } else {
                         [0.0; 2]
                     };
-                    let mut key = [0; 8];
+                    let vertex_index = mesh.vertex_indices.get(index).copied().unwrap_or(0);
+                    let mut key = [0; 9];
+                    if skin.is_some() {
+                        key[8] = vertex_index;
+                    }
                     for (slot, value) in key.iter_mut().zip(
                         position
                             .to_array()
@@ -386,6 +655,14 @@ impl Reader<'_> {
                         normals.push(normal.to_array());
                         if want_uvs {
                             uvs.push(uv);
+                        }
+                        if let Some(skin) = skin {
+                            let (j, w) = skin_weights(skin, vertex_index as usize, &cluster_joints);
+                            joints.push(j);
+                            weights.push(w);
+                        } else if let Some(joint) = rigid_joint {
+                            joints.push([joint, 0, 0, 0]);
+                            weights.push([1.0, 0.0, 0.0, 0.0]);
                         }
                         next
                     });
@@ -412,8 +689,22 @@ impl Reader<'_> {
                 tangents: Vec::new(),
                 indices,
                 material,
+                joints,
+                weights,
             });
         }
+    }
+
+    /// Whether a take moves `node` or a node above it.
+    fn moves(&self, node: &ufbx::Node) -> bool {
+        let mut current = Some(node);
+        while let Some(node) = current {
+            if self.animated.contains(&node.element.typed_id) {
+                return true;
+            }
+            current = node.parent.as_deref();
+        }
+        false
     }
 
     /// An FBX material as metallic-roughness. `ufbx` works out PBR values

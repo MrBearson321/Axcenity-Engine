@@ -81,10 +81,13 @@ pub enum ClassName {
     SpotLight,
     /// Gives off particles (sparks, smoke, fire...) from inside its parent part.
     ParticleEmitter,
+    /// Inside a MeshPart with an animated model: plays its animator
+    /// controller (states, transitions and parameters) on the model.
+    Animator,
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 31] = [
+    pub const ALL: [ClassName; 32] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -116,6 +119,7 @@ impl ClassName {
         ClassName::PointLight,
         ClassName::SpotLight,
         ClassName::ParticleEmitter,
+        ClassName::Animator,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -151,6 +155,7 @@ impl ClassName {
             ClassName::PointLight => "PointLight",
             ClassName::SpotLight => "SpotLight",
             ClassName::ParticleEmitter => "ParticleEmitter",
+            ClassName::Animator => "Animator",
         }
     }
 
@@ -418,6 +423,15 @@ impl ClassName {
                 ("ImageTransparency", Value::Number(0.0)),
                 ("Visible", Value::Bool(true)),
             ],
+            ClassName::Animator => vec![
+                // The animator controller it plays, relative to the project
+                // folder, such as "assets/animations/hero.controller.json".
+                ("Controller", Value::String(String::new())),
+                // Off, the model stays where it last was.
+                ("Enabled", Value::Bool(true)),
+                // Plays every state this many times as fast.
+                ("Speed", Value::Number(1.0)),
+            ],
             ClassName::Sound => vec![
                 ("SoundId", Value::String(String::new())),
                 ("Volume", Value::Number(1.0)),
@@ -538,6 +552,9 @@ impl ClassName {
             | ClassName::ParticleEmitter => &[],
             // Fires when a sound that isn't looped plays to its end.
             ClassName::Sound => &["Ended"],
+            // `StateChanged` fires with the new state's name and the old
+            // one's; `AnimationEvent` with an event's name, as a clip passes it.
+            ClassName::Animator => &["StateChanged", "AnimationEvent"],
             // Fires on both parts when two parts start touching.
             ClassName::Part | ClassName::MeshPart => &["Touched"],
             // `OnServerEvent` fires in Scripts for each `FireServer`, and

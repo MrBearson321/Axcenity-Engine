@@ -158,6 +158,7 @@ impl EditorApp {
                                 stylesheets,
                                 focused_text: self.focused_text,
                                 light_cones: self.light_cones,
+                                poses: self.play.as_ref().map(Session::poses),
                             },
                         )
                     }

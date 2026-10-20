@@ -23,12 +23,13 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 pub use import::{
     AUDIO_EXTENSIONS, ImportError, MODELS_FOLDER, PROJECT_AUDIO_FOLDER, PROJECT_TEXTURES_FOLDER,
-    TEXTURE_EXTENSIONS, TEXTURES_FOLDER, import_audio, import_model, import_picks, import_texture,
-    list_model_objects, load_model_file,
+    TEXTURE_EXTENSIONS, TEXTURES_FOLDER, import_animation_file, import_audio, import_model,
+    import_picks, import_texture, list_model_objects, load_model_file, load_takes_file,
 };
 pub use model::{
-    AlphaMode, Channel, ChannelTexture, Image, Model, ModelError, ModelFormat, ModelMaterial,
-    ModelObject, Pick, Primitive, list_objects, load_model, load_models,
+    AlphaMode, Blend, Bone, BoneTransform, Channel, ChannelTexture, Image, Joint, Keys, Model,
+    ModelError, ModelFormat, ModelMaterial, ModelObject, Pick, Pose, Posed, PosedPrimitive,
+    Primitive, Rig, Take, Track, list_objects, load_model, load_models, load_takes,
 };
 
 /// The project's loaded assets. Cloning gives another handle to the same
@@ -52,6 +53,8 @@ struct Shared {
     models: HashMap<String, Option<Arc<Model>>>,
     /// Every texture file asked for so far, by its path, the same way.
     textures: HashMap<String, Option<Arc<Image>>>,
+    /// The takes of every model file asked for so far, by its path.
+    takes: HashMap<String, Option<Arc<Vec<Take>>>>,
     /// Loading errors not yet collected by [`Assets::take_errors`].
     errors: Vec<String>,
 }
@@ -128,6 +131,34 @@ impl Assets {
         texture
     }
 
+    /// The takes (animation timelines) in the model file at `path`, such
+    /// as `assets/models/hero.fbx` (anything after a `#` is ignored), read
+    /// the first time. `None` if it can't be read; the reason goes to
+    /// [`take_errors`](Self::take_errors), once. A file with no animation
+    /// has no takes.
+    pub fn takes(&self, path: &str) -> Option<Arc<Vec<Take>>> {
+        let path = path.split('#').next().unwrap_or(path);
+        if path.is_empty() {
+            return None;
+        }
+        let mut shared = self.lock();
+        if let Some(takes) = shared.takes.get(path) {
+            return takes.clone();
+        }
+        let folder = shared.folder.clone()?;
+        let takes = match read_takes(&folder, path) {
+            Ok(takes) => Some(Arc::new(takes)),
+            Err(message) => {
+                shared.errors.push(format!(
+                    "Could not load the animation in `{path}`: {message}"
+                ));
+                None
+            }
+        };
+        shared.takes.insert(path.to_owned(), takes.clone());
+        takes
+    }
+
     /// Reads a project asset by a relative path such as
     /// `assets/audio/chime.wav`. Paths that leave the project are refused.
     pub fn read_file(&self, path: &str) -> Result<Vec<u8>, String> {
@@ -184,6 +215,19 @@ fn read_model(folder: &Path, mesh_id: &str) -> Result<Model, String> {
     load_models(&bytes, base, format, &[pick])
         .map(|mut models| models.remove(0))
         .map_err(|err| with_causes(&err))
+}
+
+/// Reads the takes of the model file at `path` inside `folder`, or
+/// explains why it can't.
+fn read_takes(folder: &Path, path: &str) -> Result<Vec<Take>, String> {
+    let relative = safe_path(path)
+        .ok_or("an animation must come from a model file inside the project folder")?;
+    let format = ModelFormat::of(&relative).ok_or("animations come from .fbx files")?;
+    let bytes = std::fs::read(folder.join(relative)).map_err(|err| match err.kind() {
+        std::io::ErrorKind::NotFound => "the file isn't there".to_owned(),
+        _ => err.to_string(),
+    })?;
+    load_takes(&bytes, format).map_err(|err| with_causes(&err))
 }
 
 /// Reads the texture at `path` inside `folder`, or explains why it can't.

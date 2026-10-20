@@ -1140,9 +1140,51 @@ fn emitters_emit_bursts_and_take_particle_types() {
     let output = lines(&mut runtime);
     assert_eq!(output[0], "true");
     assert!(output[1].starts_with("false"), "{}", output[1]);
-    assert_eq!(runtime.take_particle_emits(), [(emitter, 12), (emitter, 1000)]);
+    assert_eq!(
+        runtime.take_particle_emits(),
+        [(emitter, 12), (emitter, 1000)]
+    );
     assert_eq!(
         property(&world, emitter, "ParticleType"),
         Value::ParticleType(axcenity_core::ParticleType::Smoke)
     );
+}
+
+#[test]
+fn animators_take_play_requests_and_report_their_state() {
+    let mut world = World::new();
+    let animator = world.create(ClassName::Animator).unwrap();
+    world.set_parent(animator, Some(world.workspace())).unwrap();
+    world.animator_mut(animator).unwrap().current_state = "Idle".into();
+    let mut runtime = ScriptRuntime::new();
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/anim.server.lua",
+        "local animator = workspace.Animator
+         print(animator.CurrentState)
+         animator.StateChanged:Connect(function(state, previous)
+             print(previous .. ' -> ' .. state)
+         end)
+         animator:Play('Walk', 0.5)
+         print(pcall(function() animator.CurrentState = 'Run' end))
+         print(pcall(animator.Play, animator, 3))",
+    );
+    runtime.fire_instance_event(
+        &mut world,
+        animator,
+        "StateChanged",
+        &["Walk".into(), "Idle".into()],
+    );
+    let output = lines(&mut runtime);
+    assert_eq!(output[0], "Idle");
+    assert!(
+        output[1].starts_with("false") && output[1].contains("Play"),
+        "{}",
+        output[1]
+    );
+    assert!(output[2].starts_with("false"), "{}", output[2]);
+    assert_eq!(output[3], "Idle -> Walk");
+    let request = world.animator(animator).unwrap().play.clone().unwrap();
+    assert_eq!((request.state.as_str(), request.blend), ("Walk", Some(0.5)));
 }

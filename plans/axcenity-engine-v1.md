@@ -672,3 +672,94 @@ A `ParticleEmitter` Instance, parented to a part, that emits camera-facing sprit
 - [ ] Emitters show live in the editor while editing, and their settings change the effect immediately.
 - [ ] `Emit` and property changes from scripts work during Play, and emitters save and reload.
 - [ ] A scene with several thousand particles stays interactive.
+
+---
+
+# Milestone 8: Animation Studio
+
+The Studio guides the Animator steps: (1) select the MeshPart and its Animator (the controller source), (2) import the FBX model with its skeleton and clips, (3) create the animator controller, (4) connect transitions, (5) test in the preview, then in Play.
+
+---
+
+## Phase 38: Skinned FBX models and clips
+
+**User stories**: 70, 71
+
+### What to build
+
+FBX import reads the **skeleton** (every bone a skin uses, with its parents, plus animated mesh objects so rigid animation works), each vertex's 4 strongest **skin weights**, and every **take**, baked at 30 frames a second into per-bone translation, rotation and scale keys (`assets`). Poses are skinned on the CPU into fitted vertices (`Model::pose`); the renderer gains dynamic meshes (`MeshSource::version`) whose vertices are rewritten in place when the version changes, so each posed MeshPart keeps one GPU copy. A new `anim` crate reads **clip files** (`assets/animations/<model>/<clip>.anim.json`: FBX source, take, start and end in seconds, speed, loop, root motion, events) and **controller files** (`*.controller.json`: parameters, states, default state, transitions; this phase plays states and the default state only), and runs every **Animator** (a new Instance inside a MeshPart, with `Controller` and read-only `CurrentState`) in `Animators`, owned by the host like `Particles`. The import dialog shows an animated FBX's Model, Skeleton (bone tree, count) and Clips (each take with its length in frames), and lets you split a take into named clips by frame range. Importing writes the clips and a controller with a state per clip (one named Idle, or else the first, is the default) and gives the MeshPart an Animator. Animators run during Play in the editor and in the player (after Heartbeat, before UI layout); scripts call `animator:Play(stateName)`.
+
+### Acceptance criteria
+
+- [ ] An animated FBX (Blender or Mixamo-style rig) imports with its model, skeleton and every take, and the dialog shows them.
+- [ ] Splitting a take into clips by frame range writes one readable clip file each, and a controller with a state per clip.
+- [ ] Pressing Play animates the imported character in its default state, in the editor and the player, and `animator:Play("Walk")` switches it.
+- [ ] A rigidly animated model (no skin, animated objects) plays too, and a skinned model without an Animator still shows its bind pose.
+- [x] Clip and controller files round-trip through their readers and writers unchanged.
+
+---
+
+## Phase 39: Animation Library and preview
+
+**User stories**: 72, 76
+
+### What to build
+
+An **Animation** panel (a dockable tab like Assets; View > Panels) with the **Animation Library** on the left: every clip in the project, grouped by model folder, searchable, with New clip (from a take), Rename, Duplicate and Delete. Selecting a clip shows its **inspector**: start and end (frames), playback speed, Loop, Root motion and **animation events** (a name at a time, added at the playhead). A **preview** pane with its own camera (orbit, zoom) and renderer draws the clip's model alone on a grid, with play/pause, a scrubbable timeline (event markers, frame counter), speed and loop; it never touches the world or Play. **Root motion**: a clip with it on moves its MeshPart by the root bone's horizontal travel (and turn around Y) instead of moving the bone; the preview keeps it in place. Clip events fire the Animator's `AnimationEvent` (with the event's name) during Play. The Assets panel gets an Animations category; double-clicking a clip opens it in the Library.
+
+### Acceptance criteria
+
+- [ ] Every clip in the project is listed, and New, Rename, Duplicate and Delete change their files.
+- [ ] The preview plays, pauses and scrubs a clip, and changes to speed, loop, range and events show immediately and save.
+- [ ] A walk with root motion on moves its MeshPart forward during Play without sliding back at the loop.
+- [ ] `animator.AnimationEvent` fires once per pass of each event, with its name.
+
+---
+
+## Phase 40: State machine and transitions
+
+**User stories**: 73, 74, 75, 76
+
+### What to build
+
+The Animation panel's middle becomes the **state machine graph** of the open controller (New controller, or open the one the selected MeshPart's Animator uses): states as nodes (drag to move; right-click to add a state or one from a clip, set as default, rename, delete), the **default state** in orange, an **Any State** node, and **transitions** as arrows (right-click a state > Make Transition, then click the target). The **Parameters** list adds and removes Bool, Trigger and Number parameters with defaults. The **transition inspector** edits conditions (parameter, test, value: a Bool is true or false, a Trigger is set, a Number is greater or less than…), the **blend duration** (a slider in seconds with Instant, Smooth and Slow presets), **interruptible**, **exit time** (on/off, normalized) and **priority**. The runtime cross-fades poses over the blend duration, checks conditions each frame (highest priority first, then list order), consumes triggers a transition uses, honours exit time (a transition with no conditions fires at its exit time), and lets an interruptible transition be overtaken. Lua: `animator:SetBool/GetBool`, `SetNumber/GetNumber`, `SetTrigger/ResetTrigger`, `Play(state, blend?)`, and `StateChanged` (new state, old state). The **interactive preview** plays the controller: parameter controls (checkboxes, trigger buttons, number sliders), the current state highlighted in the graph with its progress, the transition's progress, and a **transition preview** slider that scrubs from the old pose to the new one, showing each side's share. A step bar across the top walks through the five Animator steps.
+
+### Acceptance criteria
+
+- [ ] States, transitions and parameters can be added, edited and removed in the graph, and save to the controller file.
+- [ ] Each condition test, trigger consumption, exit time, interruption and priority behaves as described, in the preview and in Play.
+- [ ] Transitions blend smoothly over their duration, and the transition preview shows each pose's share.
+- [ ] Scripts setting parameters drive the animator during Play, and `StateChanged` fires.
+- [ ] Controller files with every feature round-trip, and conditions and transitions are covered by unit tests.
+
+---
+
+## Phase 41: Blend trees
+
+**User stories**: 77, 76
+
+### What to build
+
+A state's motion can be a **1D blend tree**: a Number parameter and a list of clips, each with a threshold (a slider and a number), kept sorted by threshold. The two clips either side of the parameter's value are mixed by how far it is between their thresholds (below the first or above the last, that clip alone), with their cycles kept in step by normalized time so feet don't slip. The inspector shows the thresholds on a line with the current value and each clip's weight, and Add Locomotion makes the classic tree: Speed (0–6 m/s) with Idle at 0, Walk at 2 and Run at 6. The preview's parameter slider drives it live.
+
+### Acceptance criteria
+
+- [ ] A Speed blend tree moves smoothly from Idle through Walk to Run as Speed rises, in the preview and in Play.
+- [ ] Weights are exact at and between thresholds, and values out of range hold the end clip (unit tests).
+- [ ] Walk and Run blend without the feet slipping out of step.
+
+---
+
+## Phase 42: Return states and animation blocks
+
+**User stories**: 78, 79, 75
+
+### What to build
+
+A state's **Return when** setting picks a completion check (its clip finishes, a Bool becomes true or false, or a number of seconds pass), the state to return to and a blend; it generates the matching transition (marked as generated, drawn dashed, updated whenever the setting changes and read-only in the inspector). The block editor gets an **Animation** category: set *bool* of *animator* to *true/false*, set *number* to *n*, set trigger, reset trigger, play state, when *animator* changes state, when *animator* reaches event *e*, and reporters for a parameter's value and the current state, each translating to the Lua API (and listed in `docs/scripting.md`). So "when Space key pressed → set trigger Jump → play state Jump" is built from blocks. `examples/hello-animation` shows a generated rigged FBX driven by blocks.
+
+### Acceptance criteria
+
+- [ ] An Attack state set to return to Idle when its clip finishes does so with no hand-made transition, and changing the setting updates its transition.
+- [ ] Every animation block translates to the Lua in the docs table and runs.
+- [ ] `examples/hello-animation` plays, and pressing its keys drives its animations.

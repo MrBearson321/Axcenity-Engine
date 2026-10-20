@@ -301,6 +301,26 @@ impl ScriptRuntime {
         }
     }
 
+    /// Fires `event` of `instance` with `args`, in Scripts and then in
+    /// LocalScripts, for events the host finds, such as an Animator's
+    /// `StateChanged` (new state, old state). An Instance a handler
+    /// destroyed is skipped.
+    pub fn fire_instance_event(
+        &mut self,
+        world: &mut World,
+        instance: InstanceId,
+        event: &'static str,
+        args: &[String],
+    ) {
+        self.fire_changes(world);
+        for side in [Side::Server, Side::Client] {
+            self.context(side)
+                .fire_instance_event_with(world, instance, event, args);
+            self.collect(side);
+            self.fire_changes(world);
+        }
+    }
+
     /// Fires `Changed`, `GetPropertyChangedSignal`, `ChildAdded` and
     /// `ChildRemoved` for everything that changed in `world` since the last
     /// call, in the order it happened, in Scripts and then in LocalScripts.

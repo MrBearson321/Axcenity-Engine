@@ -1,5 +1,7 @@
 //! The Import Model dialog, shown when a model file holds more than one
-//! object: tick which objects to import, and choose how they arrive.
+//! object, has texture maps or is animated: tick which objects to import,
+//! choose how they arrive, look over the maps, and make clips from the
+//! file's takes (see `anim_import.rs`).
 //!
 //! The ticking rules are plain methods, so they're easy to test; the app
 //! turns the answer into Instances.
@@ -10,6 +12,7 @@ use std::path::PathBuf;
 use axcenity_assets::{Channel, ModelObject};
 use eframe::egui;
 
+use crate::anim_import::AnimationImport;
 use crate::surface::{MapFile, MaterialMaps, Slot};
 use crate::theme::icons;
 
@@ -48,6 +51,11 @@ pub struct ImportDialog {
     pub pick_objects: bool,
     /// The maps of each of the file's materials, as found, then as changed.
     pub materials: Vec<MaterialMaps>,
+    /// The file's skeleton and takes, and the clips to make, if it's animated.
+    pub animation: Option<AnimationImport>,
+    /// True for a file with only animation in it (nothing to draw): only
+    /// its clips are imported.
+    pub animation_only: bool,
 }
 
 impl ImportDialog {
@@ -67,13 +75,35 @@ impl ImportDialog {
             filter: String::new(),
             pick_objects: meshes > 1,
             materials,
+            animation: None,
+            animation_only: false,
         }
     }
 
-    /// True if there's anything to ask: objects to choose from, or texture
-    /// maps to look over.
+    /// The dialog for a file with only animation in it.
+    pub fn animation_only(file: PathBuf, animation: AnimationImport) -> Self {
+        Self {
+            animation: Some(animation),
+            animation_only: true,
+            ..Self::new(file, Vec::new(), Vec::new())
+        }
+    }
+
+    /// Adds the file's animation. An animated file comes in as one
+    /// MeshPart by default, so one Animator moves all of it.
+    pub fn with_animation(mut self, animation: Option<AnimationImport>) -> Self {
+        if animation.is_some() {
+            self.placement = Placement::Merged;
+        }
+        self.animation = animation;
+        self
+    }
+
+    /// True if there's anything to ask: objects to choose from, texture
+    /// maps to look over, or clips to make.
     pub fn worth_asking(&self) -> bool {
         self.pick_objects
+            || self.animation.is_some()
             || self
                 .materials
                 .iter()
@@ -149,18 +179,33 @@ impl ImportDialog {
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default();
         let modal = egui::Modal::new(egui::Id::new("import model")).show(ctx, |ui| {
-            ui.set_width(560.0);
+            ui.set_width(640.0);
             ui.heading(format!("Import {file_name}"));
-            if self.pick_objects {
+            if self.animation_only {
+                ui.label("This file has animation but nothing to draw: its takes become clips, for a model with the same skeleton.");
+            } else if self.pick_objects {
                 self.objects_section(ui);
+            } else if self.animation.is_some() {
+                self.model_summary(ui);
             }
             if !self.materials.is_empty() {
                 ui.separator();
                 self.materials_section(ui);
             }
+            let animation_only = self.animation_only;
+            if let Some(animation) = &mut self.animation {
+                ui.separator();
+                animation.show(ui, !animation_only);
+            }
 
             ui.add_space(8.0);
-            let can_import = !self.pick_objects || !self.chosen().is_empty();
+            let can_import = (self.animation_only
+                || !self.pick_objects
+                || !self.chosen().is_empty())
+                && self
+                    .animation
+                    .as_ref()
+                    .is_none_or(|animation| animation.problem().is_none());
             ui.horizontal(|ui| {
                 if ui
                     .add_enabled(can_import, egui::Button::new("Import"))
@@ -178,6 +223,30 @@ impl ImportDialog {
             answer = Some(Answer::Cancel);
         }
         answer
+    }
+
+    /// What the file's model holds, for a file with one object.
+    fn model_summary(&self, ui: &mut egui::Ui) {
+        let meshes = self.objects.iter().filter(|o| o.has_mesh()).count();
+        let triangles: usize = self.objects.iter().map(|o| o.triangles).sum();
+        let mut materials: Vec<&str> = self
+            .objects
+            .iter()
+            .flat_map(|o| o.materials.iter().map(String::as_str))
+            .collect();
+        materials.sort_unstable();
+        materials.dedup();
+        ui.strong(format!("{} Model", icons::CUBE_TRANSPARENT));
+        ui.weak(format!(
+            "{meshes} {} · {} triangles · materials: {}",
+            if meshes == 1 { "object" } else { "objects" },
+            thousands(triangles),
+            if materials.is_empty() {
+                "none".to_owned()
+            } else {
+                materials.join(", ")
+            }
+        ));
     }
 
     /// The object tree, with its search box, and how the objects arrive.

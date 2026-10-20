@@ -1,0 +1,298 @@
+; FBX 7.4.0 project file
+; Noodle: a rigged test model made by axcenity-assets (model/test_rig.rs).
+FBXHeaderExtension:  {
+	FBXHeaderVersion: 1003
+	FBXVersion: 7400
+}
+GlobalSettings:  {
+	Version: 1000
+	Properties70:  {
+		P: "UpAxis", "int", "Integer", "",1
+		P: "UpAxisSign", "int", "Integer", "",1
+		P: "FrontAxis", "int", "Integer", "",2
+		P: "FrontAxisSign", "int", "Integer", "",1
+		P: "CoordAxis", "int", "Integer", "",0
+		P: "CoordAxisSign", "int", "Integer", "",1
+		P: "UnitScaleFactor", "double", "Number", "",100
+		P: "TimeMode", "enum", "", "",6
+	}
+}
+Objects:  {
+	Geometry: 1000, "Geometry::Body", "Mesh" {
+		Vertices: *48 {
+			a: -0.5,0,-0.5,0.5,0,-0.5,0.5,0,0.5,-0.5,0,0.5,-0.5,1,-0.5,0.5,1,-0.5,0.5,1,0.5,-0.5,1,0.5,-0.5,2,-0.5,0.5,2,-0.5,0.5,2,0.5,-0.5,2,0.5,-0.5,3,-0.5,0.5,3,-0.5,0.5,3,0.5,-0.5,3,0.5
+		}
+		PolygonVertexIndex: *56 {
+			a: 0,4,5,-2,1,5,6,-3,2,6,7,-4,3,7,4,-1,4,8,9,-6,5,9,10,-7,6,10,11,-8,7,11,8,-5,8,12,13,-10,9,13,14,-11,10,14,15,-12,11,15,12,-9,0,1,2,-4,12,15,14,-14
+		}
+		GeometryVersion: 124
+	}
+	Geometry: 1001, "Geometry::Hat", "Mesh" {
+		Vertices: *24 {
+			a: -0.4,-0.4,-0.4,0.4,-0.4,-0.4,0.4,0.4,-0.4,-0.4,0.4,-0.4,-0.4,-0.4,0.4,0.4,-0.4,0.4,0.4,0.4,0.4,-0.4,0.4,0.4
+		}
+		PolygonVertexIndex: *24 {
+			a: 0,3,2,-2,4,5,6,-8,0,1,5,-5,2,3,7,-7,1,2,6,-6,0,4,7,-4
+		}
+		GeometryVersion: 124
+	}
+	Model: 2000, "Model::Body", "Mesh" {
+		Version: 232
+	}
+	Model: 2001, "Model::Root", "LimbNode" {
+		Version: 232
+	}
+	Model: 2002, "Model::Mid", "LimbNode" {
+		Version: 232
+		Properties70:  {
+			P: "Lcl Translation", "Lcl Translation", "", "A",0,1,0
+		}
+	}
+	Model: 2003, "Model::Top", "LimbNode" {
+		Version: 232
+		Properties70:  {
+			P: "Lcl Translation", "Lcl Translation", "", "A",0,1,0
+		}
+	}
+	Model: 2010, "Model::Hat", "Mesh" {
+		Version: 232
+		Properties70:  {
+			P: "Lcl Translation", "Lcl Translation", "", "A",0,1.4,0
+		}
+	}
+	NodeAttribute: 2101, "NodeAttribute::Root", "LimbNode" {
+		TypeFlags: "Skeleton"
+	}
+	NodeAttribute: 2102, "NodeAttribute::Mid", "LimbNode" {
+		TypeFlags: "Skeleton"
+	}
+	NodeAttribute: 2103, "NodeAttribute::Top", "LimbNode" {
+		TypeFlags: "Skeleton"
+	}
+	Material: 2500, "Material::Green", "" {
+		Version: 102
+		ShadingModel: "phong"
+		Properties70:  {
+			P: "DiffuseColor", "Color", "", "A",0.2,0.7,0.3
+		}
+	}
+	Deformer: 3000, "Deformer::Skin", "Skin" {
+		Version: 101
+		Link_DeformAcuracy: 50
+	}
+	Deformer: 3001, "SubDeformer::Cluster0", "Cluster" {
+		Version: 100
+		Indexes: *8 {
+			a: 0,1,2,3,4,5,6,7
+		}
+		Weights: *8 {
+			a: 1,1,1,1,0.5,0.5,0.5,0.5
+		}
+		Transform: *16 {
+			a: 1,0,0,0,0,1,0,0,0,0,1,0,0,-0,0,1
+		}
+		TransformLink: *16 {
+			a: 1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1
+		}
+	}
+	Deformer: 3002, "SubDeformer::Cluster1", "Cluster" {
+		Version: 100
+		Indexes: *8 {
+			a: 4,5,6,7,8,9,10,11
+		}
+		Weights: *8 {
+			a: 0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5
+		}
+		Transform: *16 {
+			a: 1,0,0,0,0,1,0,0,0,0,1,0,0,-1,0,1
+		}
+		TransformLink: *16 {
+			a: 1,0,0,0,0,1,0,0,0,0,1,0,0,1,0,1
+		}
+	}
+	Deformer: 3003, "SubDeformer::Cluster2", "Cluster" {
+		Version: 100
+		Indexes: *8 {
+			a: 8,9,10,11,12,13,14,15
+		}
+		Weights: *8 {
+			a: 0.5,0.5,0.5,0.5,1,1,1,1
+		}
+		Transform: *16 {
+			a: 1,0,0,0,0,1,0,0,0,0,1,0,0,-2,0,1
+		}
+		TransformLink: *16 {
+			a: 1,0,0,0,0,1,0,0,0,0,1,0,0,2,0,1
+		}
+	}
+	AnimationStack: 6000, "AnimStack::Idle", "" {
+		Properties70:  {
+			P: "LocalStart", "KTime", "Time", "",0
+			P: "LocalStop", "KTime", "Time", "",92372316000
+			P: "ReferenceStart", "KTime", "Time", "",0
+			P: "ReferenceStop", "KTime", "Time", "",92372316000
+		}
+	}
+	AnimationLayer: 6001, "AnimLayer::BaseLayer", "" {
+	}
+	AnimationCurveNode: 6010, "AnimCurveNode::R", "" {
+		Properties70:  {
+			P: "d|X", "Number", "", "A",0
+			P: "d|Y", "Number", "", "A",0
+			P: "d|Z", "Number", "", "A",0
+		}
+	}
+	AnimationCurve: 6011, "AnimCurve::", "" {
+		Default: 0
+		KeyVer: 4009
+		KeyTime: *5 {
+			a: 0,23093079000,46186158000,69279237000,92372316000
+		}
+		KeyValueFloat: *5 {
+			a: 0,15,0,-15,0
+		}
+		KeyAttrFlags: *1 {
+			a: 4
+		}
+		KeyAttrDataFloat: *4 {
+			a: 0,0,0,0
+		}
+		KeyAttrRefCount: *1 {
+			a: 5
+		}
+	}
+	AnimationStack: 6100, "AnimStack::Moves", "" {
+		Properties70:  {
+			P: "LocalStart", "KTime", "Time", "",0
+			P: "LocalStop", "KTime", "Time", "",92372316000
+			P: "ReferenceStart", "KTime", "Time", "",0
+			P: "ReferenceStop", "KTime", "Time", "",92372316000
+		}
+	}
+	AnimationLayer: 6101, "AnimLayer::BaseLayer", "" {
+	}
+	AnimationCurveNode: 6110, "AnimCurveNode::R", "" {
+		Properties70:  {
+			P: "d|X", "Number", "", "A",0
+			P: "d|Y", "Number", "", "A",0
+			P: "d|Z", "Number", "", "A",0
+		}
+	}
+	AnimationCurve: 6111, "AnimCurve::", "" {
+		Default: 0
+		KeyVer: 4009
+		KeyTime: *3 {
+			a: 0,23093079000,46186158000
+		}
+		KeyValueFloat: *3 {
+			a: 0,60,0
+		}
+		KeyAttrFlags: *1 {
+			a: 4
+		}
+		KeyAttrDataFloat: *4 {
+			a: 0,0,0,0
+		}
+		KeyAttrRefCount: *1 {
+			a: 3
+		}
+	}
+	AnimationCurveNode: 6112, "AnimCurveNode::T", "" {
+		Properties70:  {
+			P: "d|X", "Number", "", "A",0
+			P: "d|Y", "Number", "", "A",0
+			P: "d|Z", "Number", "", "A",0
+		}
+	}
+	AnimationCurve: 6113, "AnimCurve::", "" {
+		Default: 0
+		KeyVer: 4009
+		KeyTime: *4 {
+			a: 0,46186158000,69279237000,92372316000
+		}
+		KeyValueFloat: *4 {
+			a: 0,0,1,0
+		}
+		KeyAttrFlags: *1 {
+			a: 4
+		}
+		KeyAttrDataFloat: *4 {
+			a: 0,0,0,0
+		}
+		KeyAttrRefCount: *1 {
+			a: 4
+		}
+	}
+	AnimationStack: 6200, "AnimStack::Walk", "" {
+		Properties70:  {
+			P: "LocalStart", "KTime", "Time", "",0
+			P: "LocalStop", "KTime", "Time", "",46186158000
+			P: "ReferenceStart", "KTime", "Time", "",0
+			P: "ReferenceStop", "KTime", "Time", "",46186158000
+		}
+	}
+	AnimationLayer: 6201, "AnimLayer::BaseLayer", "" {
+	}
+	AnimationCurveNode: 6210, "AnimCurveNode::T", "" {
+		Properties70:  {
+			P: "d|X", "Number", "", "A",0
+			P: "d|Y", "Number", "", "A",0
+			P: "d|Z", "Number", "", "A",0
+		}
+	}
+	AnimationCurve: 6211, "AnimCurve::", "" {
+		Default: 0
+		KeyVer: 4009
+		KeyTime: *2 {
+			a: 0,46186158000
+		}
+		KeyValueFloat: *2 {
+			a: 0,2
+		}
+		KeyAttrFlags: *1 {
+			a: 4
+		}
+		KeyAttrDataFloat: *4 {
+			a: 0,0,0,0
+		}
+		KeyAttrRefCount: *1 {
+			a: 2
+		}
+	}
+}
+Connections:  {
+	C: "OO",2000,0
+	C: "OO",2001,0
+	C: "OO",2002,2001
+	C: "OO",2003,2002
+	C: "OO",2010,2003
+	C: "OO",2101,2001
+	C: "OO",2102,2002
+	C: "OO",2103,2003
+	C: "OO",1000,2000
+	C: "OO",1001,2010
+	C: "OO",2500,2000
+	C: "OO",2500,2010
+	C: "OO",3000,1000
+	C: "OO",3001,3000
+	C: "OO",2001,3001
+	C: "OO",3002,3000
+	C: "OO",2002,3002
+	C: "OO",3003,3000
+	C: "OO",2003,3003
+	C: "OO",6001,6000
+	C: "OO",6010,6001
+	C: "OP",6010,2002, "Lcl Rotation"
+	C: "OP",6011,6010, "d|Z"
+	C: "OO",6101,6100
+	C: "OO",6110,6101
+	C: "OP",6110,2003, "Lcl Rotation"
+	C: "OP",6111,6110, "d|Z"
+	C: "OO",6112,6101
+	C: "OP",6112,2001, "Lcl Translation"
+	C: "OP",6113,6112, "d|Y"
+	C: "OO",6201,6200
+	C: "OO",6210,6201
+	C: "OP",6210,2001, "Lcl Translation"
+	C: "OP",6211,6210, "d|Z"
+}

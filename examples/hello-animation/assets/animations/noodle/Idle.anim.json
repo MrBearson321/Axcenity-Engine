@@ -1,0 +1,11 @@
+{
+  "format_version": 1,
+  "source": "assets/models/noodle.fbx",
+  "take": "Idle",
+  "start": 0.0,
+  "end": 2.0,
+  "speed": 1.0,
+  "loop": true,
+  "root_motion": false,
+  "events": []
+}

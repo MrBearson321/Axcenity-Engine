@@ -23,6 +23,7 @@ use axcenity_project::{self as project, LoadError, Project, ScriptFile};
 use eframe::egui;
 
 use super::{BlockDocument, EditorApp};
+use crate::anim_import::AnimationImport;
 use crate::dialog;
 use crate::history::{self, Move, Place};
 use crate::import_dialog::{Answer, ImportDialog, Placement};
@@ -1014,6 +1015,40 @@ impl EditorApp {
         }
     }
 
+    /// Asks for an animator controller file inside the project, and returns
+    /// its path there for an Animator's `Controller`.
+    pub(super) fn pick_controller(&mut self) -> Option<String> {
+        let project = self.project.as_ref()?;
+        let animations = project.folder.join(axcenity_anim::ANIMATIONS_FOLDER);
+        let start = if animations.is_dir() {
+            animations
+        } else {
+            project.folder.clone()
+        };
+        let file = rfd::FileDialog::new()
+            .set_title("Choose an animator controller")
+            .add_filter("Animator controller", &["json"])
+            .set_directory(&start)
+            .pick_file()?;
+        let relative = file
+            .strip_prefix(&project.folder)
+            .ok()
+            .map(|path| {
+                path.components()
+                    .map(|part| part.as_os_str().to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/")
+            })
+            .filter(|path| path.ends_with(axcenity_anim::CONTROLLER_EXTENSION));
+        if relative.is_none() {
+            self.output.error(format!(
+                "Could not use `{}`: choose a `.controller.json` file inside the project folder.",
+                file.display()
+            ));
+        }
+        relative
+    }
+
     /// Plays the Sound `id` in the editor (or stops it), with its own
     /// settings. Starting Play stops it too.
     pub(super) fn preview_sound(&mut self, id: InstanceId, play: bool) {
@@ -1069,8 +1104,21 @@ impl EditorApp {
             let model = axcenity_assets::load_model_file(file)?;
             Ok((objects, model))
         });
+        // A file's takes, if it has any. One that can't be read just has none.
+        let takes = axcenity_assets::load_takes_file(file).unwrap_or_default();
+        let model_name = file
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+            .unwrap_or_default();
         let (objects, model) = match read {
             Ok(read) => read,
+            // Nothing to draw, but takes: an animation-only file.
+            Err(axcenity_assets::ImportError::Model(axcenity_assets::ModelError::NoTriangles))
+                if let Some(animation) = AnimationImport::new(None, &takes, &model_name) =>
+            {
+                self.importing = Some(ImportDialog::animation_only(file.to_owned(), animation));
+                return;
+            }
             Err(err) => {
                 let err = chain(&err);
                 self.output
@@ -1079,7 +1127,9 @@ impl EditorApp {
             }
         };
         let materials = surface::materials_maps(model.primitives.iter().map(|p| &p.material));
-        let dialog = ImportDialog::new(file.to_owned(), objects, materials);
+        let animation = AnimationImport::new(model.rig.as_deref(), &takes, &model_name);
+        let dialog =
+            ImportDialog::new(file.to_owned(), objects, materials).with_animation(animation);
         if dialog.worth_asking() {
             self.importing = Some(dialog);
         } else {
@@ -1096,7 +1146,11 @@ impl EditorApp {
         match dialog.show(ctx) {
             Some(Answer::Import) => {
                 let dialog = self.importing.take().expect("checked above");
-                self.import_chosen(&dialog);
+                if dialog.animation_only {
+                    self.import_animation_only(&dialog);
+                } else {
+                    self.import_chosen(&dialog);
+                }
             }
             Some(Answer::Cancel) => self.importing = None,
             None => {}
@@ -1143,6 +1197,10 @@ impl EditorApp {
             "Imported `{}` into the project as `{copy}`.",
             file.display()
         ));
+        let controller = dialog
+            .animation
+            .as_ref()
+            .and_then(|animation| self.write_import_animation(animation, copy));
         // The copy's folder in the project, which its maps' paths start from.
         let folder = copy
             .rsplit_once('/')
@@ -1173,6 +1231,7 @@ impl EditorApp {
                 let id = self.new_mesh_part(mesh_id, &model, position);
                 self.world.set_name(id, &file_name).expect("just made");
                 self.add_surfaces(id, &model, dialog, &folder, &mut copied);
+                self.add_animator(id, &model, controller.as_deref());
                 self.place_new(parent, vec![id], format!("Import {file_name}"));
             }
             Placement::Separate => {
@@ -1186,6 +1245,7 @@ impl EditorApp {
                             .set_name(id, object_name(&dialog.objects[i].name))
                             .expect("just made");
                         self.add_surfaces(id, &model, dialog, &folder, &mut copied);
+                        self.add_animator(id, &model, controller.as_deref());
                         id
                     })
                     .collect();
@@ -1215,6 +1275,7 @@ impl EditorApp {
                     );
                     let id = self.new_mesh_part(mesh_id, &model, at);
                     self.add_surfaces(id, &model, dialog, &folder, &mut copied);
+                    self.add_animator(id, &model, controller.as_deref());
                     let container = self.group_of(dialog, i, root, &mut groups);
                     let name = tree::unique_name(
                         &self.world,
@@ -1227,6 +1288,101 @@ impl EditorApp {
                         .expect("a new part can go in a new Model");
                 }
                 self.place_new(parent, vec![root], format!("Import {file_name}"));
+            }
+        }
+    }
+
+    /// Writes the clips `animation` makes, from the model copied to
+    /// `copy` in the project, and their controller if an Animator was
+    /// asked for. Returns the controller's path. Files aren't undo steps;
+    /// a problem is reported in Output.
+    fn write_import_animation(
+        &mut self,
+        animation: &AnimationImport,
+        copy: &str,
+    ) -> Option<String> {
+        let project = self.project.as_ref()?.folder.clone();
+        if animation.clips.is_empty() {
+            return None;
+        }
+        let model = copy
+            .rsplit('/')
+            .next()
+            .and_then(|file| file.rsplit_once('.'))
+            .map_or(copy, |(stem, _)| stem);
+        let clips = animation.clip_files(copy);
+        match crate::anim_import::write_animation(&project, model, &clips, animation.add_animator) {
+            Ok((paths, controller)) => {
+                self.output.info(format!(
+                    "Made {} {} in `{}/{model}`{}.",
+                    paths.len(),
+                    if paths.len() == 1 { "clip" } else { "clips" },
+                    axcenity_anim::ANIMATIONS_FOLDER,
+                    controller
+                        .as_ref()
+                        .map_or_else(String::new, |path| format!(" and the controller `{path}`"))
+                ));
+                controller
+            }
+            Err(err) => {
+                self.output
+                    .error(format!("Could not write the animation clips: {err}"));
+                None
+            }
+        }
+    }
+
+    /// Puts an Animator playing `controller` in the new MeshPart `part`,
+    /// if there's a controller and its `model` has a skeleton to move.
+    fn add_animator(
+        &mut self,
+        part: InstanceId,
+        model: &axcenity_assets::Model,
+        controller: Option<&str>,
+    ) {
+        let Some(controller) = controller else {
+            return;
+        };
+        if model.rig.is_none() {
+            return;
+        }
+        let id = self
+            .world
+            .create(ClassName::Animator)
+            .expect("not a service");
+        self.world
+            .set_property(id, "Controller", Value::String(controller.to_owned()))
+            .expect("every Animator has a Controller");
+        self.world
+            .set_parent(id, Some(part))
+            .expect("an Animator can go in a new MeshPart");
+    }
+
+    /// Imports a file with only animation: copies it into the project and
+    /// writes the clips the dialog made from its takes.
+    pub(super) fn import_animation_only(&mut self, dialog: &ImportDialog) {
+        let Some(project) = &self.project else {
+            return;
+        };
+        let Some(animation) = &dialog.animation else {
+            return;
+        };
+        match axcenity_assets::import_animation_file(&project.folder, &dialog.file) {
+            Ok(copy) => {
+                self.output.info(format!(
+                    "Imported the animation `{}` into the project as `{copy}`.",
+                    dialog.file.display()
+                ));
+                let mut clips = animation.clone();
+                clips.add_animator = false;
+                self.write_import_animation(&clips, &copy);
+            }
+            Err(err) => {
+                let err = chain(&err);
+                self.output.error(format!(
+                    "Could not import `{}`: {err}",
+                    dialog.file.display()
+                ));
             }
         }
     }

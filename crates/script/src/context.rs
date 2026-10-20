@@ -64,6 +64,10 @@ impl Context {
             instance::particle_methods(&lua)
                 .expect("creating ParticleEmitter methods only fails when out of memory"),
         );
+        methods.extend(
+            instance::animator_methods(&lua)
+                .expect("creating Animator methods only fails when out of memory"),
+        );
         methods.push((
             axcenity_core::ClassName::DataModel,
             "GetService",
@@ -173,9 +177,22 @@ impl Context {
         instance: InstanceId,
         event: &'static str,
     ) {
+        self.fire_instance_event_with(world, instance, event, &[]);
+    }
+
+    /// Like [`fire_instance_event`](Self::fire_instance_event), giving
+    /// handlers `args`.
+    pub fn fire_instance_event_with(
+        &self,
+        world: &mut World,
+        instance: InstanceId,
+        event: &'static str,
+        args: &[String],
+    ) {
         with_world(&self.lua, world, || {
             if instance::world(&self.lua).is_ok_and(|world| world.contains(instance)) {
-                events::fire(&self.lua, events::Owner::Instance(instance), event, ());
+                let args = mlua::Variadic::from_iter(args.iter().cloned());
+                events::fire(&self.lua, events::Owner::Instance(instance), event, args);
             }
         });
     }
