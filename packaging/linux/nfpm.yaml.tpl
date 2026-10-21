@@ -12,9 +12,12 @@ description: |-
   Build worlds from parts, script them in Lua 5.4 or with blocks, press Play
   to test, and export standalone games for Windows, macOS and Linux.
 vendor: Axcenity Engine
-packager: Paul Janota and contributors
 homepage: https://github.com/MrBearson321/Axcenity-Engine
 license: Apache-2.0
+rpm:
+  packager: Paul Janota and contributors
+archlinux:
+  packager: Paul Janota and contributors
 contents:
   - src: ${STAGE}/axcenity-editor
     dst: /opt/axcenity/axcenity-editor

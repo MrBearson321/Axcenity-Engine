@@ -147,9 +147,7 @@ jobs:
         run: |
           choco install nsis -y
           python -m pip install --upgrade pillow
-      - name: Stage and build installer
-        env:
-          VERSION: ${{ needs.version.outputs.version }}
+      - name: Stage payload
         run: |
           set -euo pipefail
           python packaging/generate-assets.py
@@ -161,18 +159,29 @@ jobs:
             --player-macos ci-bins/bin-macos/axcenity-player \
             --player-linux ci-bins/bin-linux/axcenity-player \
             --out dist/stage
-          mkdir -p dist/out
-          STAGE_WIN="$(cygpath -w "$PWD/dist/stage")"
-          ROOT_WIN="$(cygpath -w "$PWD")"
-          "/c/Program Files (x86)/NSIS/makensis.exe" \
-            "/DVERSION=$VERSION" \
-            "/DSTAGE=$STAGE_WIN" \
-            "/DOUTFILE=${ROOT_WIN}\\dist\\out\\AxcenityEditor-${VERSION}-windows-x86_64.exe" \
-            "/DICON=${ROOT_WIN}\\assets\\branding\\icon.ico" \
-            "/DHEADER=${ROOT_WIN}\\packaging\\assets\\nsis-header.bmp" \
-            "/DSIDEBAR=${ROOT_WIN}\\packaging\\assets\\nsis-sidebar.bmp" \
-            "${ROOT_WIN}\\packaging\\windows\\installer.nsi"
-          ls -la dist/out
+      - name: Build NSIS installer
+        shell: powershell
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $root = (Get-Location).Path
+          $nsis = Join-Path ${env:ProgramFiles(x86)} "NSIS\makensis.exe"
+          if (-not (Test-Path $nsis)) { throw "makensis not found at $nsis" }
+          $outDir = Join-Path $root "dist\out"
+          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+          $out = Join-Path $outDir "AxcenityEditor-$($env:VERSION)-windows-x86_64.exe"
+          # Git Bash converts /D... into paths; this step is PowerShell so NSIS sees real defines.
+          & $nsis `
+            "/DVERSION=$($env:VERSION)" `
+            "/DSTAGE=$(Join-Path $root 'dist\stage')" `
+            "/DOUTFILE=$out" `
+            "/DICON=$(Join-Path $root 'assets\branding\icon.ico')" `
+            "/DHEADER=$(Join-Path $root 'packaging\assets\nsis-header.bmp')" `
+            "/DSIDEBAR=$(Join-Path $root 'packaging\assets\nsis-sidebar.bmp')" `
+            (Join-Path $root "packaging\windows\installer.nsi")
+          if ($LASTEXITCODE -ne 0) { throw "makensis failed with exit code $LASTEXITCODE" }
+          Get-ChildItem $outDir
       - uses: actions/upload-artifact@v4
         with:
           name: package-windows

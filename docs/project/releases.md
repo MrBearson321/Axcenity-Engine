@@ -13,7 +13,7 @@ Public releases use **SemVer** with a channel suffix while the engine is in alph
 | `v0.1.0-rc.1` | Release candidate, later. |
 | `v0.1.0` | First stable 0.1. GitHub marks it as a full release, not a pre-release. |
 
-The first packaged alpha is **`v0.1.0-alpha.1`**. Anything with `-alpha`, `-beta` or `-rc` is uploaded as a GitHub pre-release.
+The first packaged alpha is **`v0.1.0-alpha.1`**; bump the last number when a tag is retried (`-alpha.2`, `-alpha.3`, …). Anything with `-alpha`, `-beta` or `-rc` is uploaded as a GitHub pre-release.
 
 The crate version in `Cargo.toml` stays `0.1.0` until 0.1 is stable. The tag is the product version shown in the installer and on the release.
 
