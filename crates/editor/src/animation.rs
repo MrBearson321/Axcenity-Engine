@@ -402,6 +402,7 @@ impl AnimationStudio {
     /// Draws the panel. `selected` is the animated MeshPart selected in the
     /// editor, if any. `preview_root` is a Part/MeshPart/Model for property
     /// clip scrubbing (restored when the doc closes).
+    #[allow(clippy::too_many_arguments)] // Each is a different input to the panel.
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
@@ -618,6 +619,7 @@ impl AnimationStudio {
     }
 
     /// The five Animator steps, each ticked once it's done.
+    #[allow(clippy::too_many_arguments)] // Each is a different input to the panel.
     fn steps(
         &mut self,
         ui: &mut egui::Ui,
@@ -714,6 +716,7 @@ impl AnimationStudio {
 
     /// The clips, by folder, and the controllers, with the buttons that
     /// make, rename, copy and delete them.
+    #[allow(clippy::too_many_arguments)] // Each is a different input to the panel.
     fn library(
         &mut self,
         ui: &mut egui::Ui,
@@ -949,6 +952,7 @@ impl AnimationStudio {
     }
 
     /// Shows the open dialog, and does what it's answered with.
+    #[allow(clippy::too_many_arguments)] // Each is a different input to the panel.
     fn ask(
         &mut self,
         ctx: &egui::Context,
