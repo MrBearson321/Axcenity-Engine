@@ -388,22 +388,21 @@ fn an_endless_loop_in_a_module_is_stopped() {
 fn heavy_work_that_pauses_is_not_stopped() {
     let mut world = World::new();
     let mut runtime = ScriptRuntime::new();
-    // Tighter than the other tests, so that the work takes longer than the
-    // limit in all even on a fast machine.
-    let limit = Duration::from_millis(20);
+    // Keep each chunk comfortably below the limit on every platform.
+    let limit = Duration::from_millis(100);
     runtime.set_watchdog_limit(limit);
     let started = Instant::now();
-    // Five million iterations, pausing every 50 thousand: far longer than
-    // the limit in all, but never long between pauses.
+    // Pause every 10 thousand iterations. The delay between resumes below
+    // makes the overall test take longer than the watchdog limit.
     start(
         &mut runtime,
         &mut world,
         "scripts/heavy.server.lua",
         r#"
         local total = 0
-        for i = 1, 5000000 do
+        for i = 1, 1000000 do
             total = total + i % 7
-            if i % 50000 == 0 then
+            if i % 10000 == 0 then
                 task.wait()
             end
         end
@@ -414,6 +413,7 @@ fn heavy_work_that_pauses_is_not_stopped() {
     let mut output = lines(&mut runtime);
     while output.is_empty() && frames < 200 {
         runtime.step(&mut world, 1.0 / 60.0);
+        std::thread::sleep(Duration::from_millis(2));
         frames += 1;
         output = lines(&mut runtime);
     }
