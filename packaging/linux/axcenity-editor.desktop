@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Axcenity Editor
+Comment=Create 3D games with parts, Lua and blocks
+Exec=axcenity-editor %F
+Icon=axcenity-editor
+Terminal=false
+Categories=Development;IDE;Graphics;
+StartupNotify=true
+Keywords=game;engine;lua;3d;editor;

@@ -8,6 +8,10 @@ A free, open-source 3D game engine and editor inspired by Roblox Studio. Build w
 
 ## Getting started
 
+Alpha installers are on [GitHub Releases](https://github.com/MrBearson321/Axcenity-Engine/releases): a Windows `.exe` setup wizard, a macOS `.dmg`, and Linux `.deb`, `.rpm`, `.pkg.tar.zst`, `.tar.gz` and AppImage. How to install each one: [docs/project/install.md](docs/project/install.md). Tags look like `v0.1.0-alpha.1` ([versioning](docs/project/releases.md)).
+
+To run from source instead:
+
 1. Install Rust with [rustup](https://rustup.rs). On Windows, rustup also asks you to install the Microsoft C++ Build Tools; accept that.
 2. From this folder, run the player with the example project:
 

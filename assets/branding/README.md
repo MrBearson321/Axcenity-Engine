@@ -17,7 +17,7 @@ Colours: blue `#004AAD`, orange `#F1892D`, yellows `#F9BF3B` and `#FFCF4B`, grey
 | `icon.ico` | 16 to 256 | The Windows app icon for exported games and installers, and a website favicon. |
 | `favicon-32.png` | 32×32 | A PNG favicon for a website. |
 
-To change the logo, replace `wordmark-source.png` (same layout, white background) and run `python assets/branding/build.py` (needs Pillow and NumPy). If the hexagon moves, update the stroke coordinates in `build.py`.
+To change the logo, replace `wordmark-source.png` (same layout, white background) and run `python assets/branding/build.py` (needs Pillow and NumPy). If the hexagon moves, update the stroke coordinates in `build.py`. Then run `python packaging/generate-assets.py` so the Windows installer bitmaps and the macOS disk-image background match.
 
 Windows and Linux (X11) show the window icon in the title bar and taskbar. macOS and Wayland ignore window icons: there, the app bundle or desktop file sets the icon, which comes with exporting.
 

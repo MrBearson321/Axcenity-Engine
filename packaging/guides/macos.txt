@@ -1,0 +1,24 @@
+Axcenity Editor for macOS
+=========================
+
+The disk image asks you to agree to the Apache License 2.0, then opens a
+window with Axcenity Editor and Applications. Drag the app onto Applications.
+
+Opening an unsigned alpha build
+-------------------------------
+These builds are not notarized. To open the app:
+
+  1. Control-click Axcenity Editor, choose Open, then confirm.
+  2. If macOS still blocks it, open System Settings > Privacy & Security
+     and click Open Anyway.
+
+Apple Silicon and Intel
+-----------------------
+The app is a universal binary (Apple Silicon and Intel).
+
+Exporting a game
+----------------
+Players for Windows, macOS and Linux are inside the app, beside the editor
+binary, so File > Export Game can target any of them.
+
+Full guide: https://github.com/MrBearson321/Axcenity-Engine/blob/main/docs/project/install.md

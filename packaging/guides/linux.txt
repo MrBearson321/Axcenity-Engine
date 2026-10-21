@@ -1,0 +1,37 @@
+Axcenity Editor for Linux
+=========================
+
+Pick the package that matches how you install software:
+
+  .deb           Debian, Ubuntu, Linux Mint, Pop!_OS, …
+                 sudo apt install ./AxcenityEditor-*-linux-x86_64.deb
+
+  .rpm           Fedora, RHEL, openSUSE, …
+                 sudo dnf install ./AxcenityEditor-*-linux-x86_64.rpm
+                 # or: sudo zypper install ./AxcenityEditor-*-linux-x86_64.rpm
+
+  .pkg.tar.zst   Arch Linux, Manjaro, EndeavourOS, …
+                 sudo pacman -U AxcenityEditor-*-linux-x86_64.pkg.tar.zst
+
+  .tar.gz        Any distro. Extract and run ./axcenity-editor from that folder.
+                 You need a Vulkan driver (for example mesa-vulkan-drivers).
+
+  AppImage       chmod +x AxcenityEditor-*-linux-x86_64.AppImage
+                 then double-click it, or run it from a terminal.
+                 No install step. Optional: AppImageLauncher to add a menu entry.
+
+Debian, Fedora and Arch software centres will also open the .deb / .rpm /
+.pkg.tar.zst if you double-click them, and show their usual install UI.
+
+After install
+-------------
+Search for "Axcenity Editor" in your app menu, or run axcenity-editor.
+The editor and player live in /opt/axcenity, with commands on your PATH.
+
+Vulkan
+------
+You need a working Vulkan driver. On Ubuntu/Debian: mesa-vulkan-drivers
+(and nvidia-driver packages if you use NVIDIA). On Fedora: mesa-vulkan-drivers.
+On Arch: vulkan-icd-loader plus vulkan-radeon, vulkan-intel or nvidia.
+
+Full guide: https://github.com/MrBearson321/Axcenity-Engine/blob/main/docs/project/install.md

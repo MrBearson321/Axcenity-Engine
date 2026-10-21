@@ -1,0 +1,323 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version without the v prefix (for example 0.1.0-alpha.1)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  MACOSX_DEPLOYMENT_TARGET: "11.0"
+  NFPM_VERSION: "2.48.0"
+
+jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.set.outputs.version }}
+      tag: ${{ steps.set.outputs.tag }}
+      prerelease: ${{ steps.set.outputs.prerelease }}
+    steps:
+      - id: set
+        env:
+          DISPATCH_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="$DISPATCH_VERSION"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-alpha\.[0-9]+|-beta\.[0-9]+|-rc\.[0-9]+)?$'; then
+            echo "Version '$VERSION' must look like 0.1.0 or 0.1.0-alpha.1"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          if echo "$VERSION" | grep -Eq -- '-(alpha|beta|rc)\.'; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: Build (${{ matrix.host }})
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            host: windows
+          - os: macos-latest
+            host: macos
+          - os: ubuntu-22.04
+            host: linux
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        if: matrix.host != 'macos'
+      - uses: dtolnay/rust-toolchain@stable
+        if: matrix.host == 'macos'
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.host }}
+      - name: Install Linux audio libraries
+        if: matrix.host == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libdbus-1-dev pkg-config
+      - name: Build Windows
+        if: matrix.host == 'windows'
+        run: cargo build --release --locked -p axcenity-editor -p axcenity-player
+      - name: Build Linux
+        if: matrix.host == 'linux'
+        run: cargo build --release --locked -p axcenity-editor -p axcenity-player
+      - name: Build macOS universal binaries
+        if: matrix.host == 'macos'
+        run: |
+          set -euo pipefail
+          cargo build --release --locked -p axcenity-editor -p axcenity-player --target aarch64-apple-darwin
+          cargo build --release --locked -p axcenity-editor -p axcenity-player --target x86_64-apple-darwin
+          mkdir -p dist-macos
+          for bin in axcenity-editor axcenity-player; do
+            lipo -create -output "dist-macos/$bin" \
+              "target/aarch64-apple-darwin/release/$bin" \
+              "target/x86_64-apple-darwin/release/$bin"
+          done
+      - name: Upload Windows binaries
+        if: matrix.host == 'windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bin-windows
+          path: |
+            target/release/axcenity-editor.exe
+            target/release/axcenity-player.exe
+      - name: Upload Linux binaries
+        if: matrix.host == 'linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bin-linux
+          path: |
+            target/release/axcenity-editor
+            target/release/axcenity-player
+      - name: Upload macOS binaries
+        if: matrix.host == 'macos'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bin-macos
+          path: dist-macos/
+
+  package-windows:
+    name: Package Windows
+    needs: [version, build]
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bin-*
+          path: ci-bins
+      - name: Install NSIS and Pillow
+        shell: powershell
+        run: |
+          choco install nsis -y
+          python -m pip install --upgrade pillow
+      - name: Stage and build installer
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          python packaging/generate-assets.py
+          python packaging/stage.py \
+            --os windows \
+            --editor ci-bins/bin-windows/axcenity-editor.exe \
+            --player-native ci-bins/bin-windows/axcenity-player.exe \
+            --player-windows ci-bins/bin-windows/axcenity-player.exe \
+            --player-macos ci-bins/bin-macos/axcenity-player \
+            --player-linux ci-bins/bin-linux/axcenity-player \
+            --out dist/stage
+          mkdir -p dist/out
+          STAGE_WIN="$(cygpath -w "$PWD/dist/stage")"
+          ROOT_WIN="$(cygpath -w "$PWD")"
+          "/c/Program Files (x86)/NSIS/makensis.exe" \
+            "/DVERSION=$VERSION" \
+            "/DSTAGE=$STAGE_WIN" \
+            "/DOUTFILE=${ROOT_WIN}\\dist\\out\\AxcenityEditor-${VERSION}-windows-x86_64.exe" \
+            "/DICON=${ROOT_WIN}\\assets\\branding\\icon.ico" \
+            "/DHEADER=${ROOT_WIN}\\packaging\\assets\\nsis-header.bmp" \
+            "/DSIDEBAR=${ROOT_WIN}\\packaging\\assets\\nsis-sidebar.bmp" \
+            "${ROOT_WIN}\\packaging\\windows\\installer.nsi"
+          ls -la dist/out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-windows
+          path: dist/out/*.exe
+          if-no-files-found: error
+
+  package-macos:
+    name: Package macOS
+    needs: [version, build]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bin-*
+          path: ci-bins
+      - name: Stage and build disk image
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          python3 -m pip install --upgrade pillow
+          python3 packaging/generate-assets.py
+          python3 packaging/stage.py \
+            --os macos \
+            --editor ci-bins/bin-macos/axcenity-editor \
+            --player-native ci-bins/bin-macos/axcenity-player \
+            --player-windows ci-bins/bin-windows/axcenity-player.exe \
+            --player-macos ci-bins/bin-macos/axcenity-player \
+            --player-linux ci-bins/bin-linux/axcenity-player \
+            --out dist/stage
+          mkdir -p dist/out
+          bash packaging/macos/build-dmg.sh \
+            "$VERSION" \
+            "$PWD" \
+            "$PWD/dist/stage" \
+            "$PWD/dist/out/AxcenityEditor-${VERSION}-macos-universal.dmg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-macos
+          path: dist/out/*.dmg
+          if-no-files-found: error
+
+  package-linux:
+    name: Package Linux
+    needs: [version, build]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bin-*
+          path: ci-bins
+      - name: Install packaging tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y gettext-base zstd file libfuse2
+          python3 -m pip install --upgrade pillow
+          curl -sSL "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin nfpm
+          sudo curl -sSL -o /usr/local/bin/appimagetool \
+            "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
+          sudo chmod +x /usr/local/bin/appimagetool /usr/local/bin/nfpm
+      - name: Stage and build packages
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          set -euo pipefail
+          python3 packaging/stage.py \
+            --os linux \
+            --editor ci-bins/bin-linux/axcenity-editor \
+            --player-native ci-bins/bin-linux/axcenity-player \
+            --player-windows ci-bins/bin-windows/axcenity-player.exe \
+            --player-macos ci-bins/bin-macos/axcenity-player \
+            --player-linux ci-bins/bin-linux/axcenity-player \
+            --out dist/stage
+          bash packaging/linux/build-packages.sh \
+            "$VERSION" \
+            "$PWD" \
+            "$PWD/dist/stage" \
+            "$PWD/dist/out"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-linux
+          path: |
+            dist/out/*.deb
+            dist/out/*.rpm
+            dist/out/*.pkg.tar.zst
+            dist/out/*.tar.gz
+            dist/out/*.AppImage
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: [version, package-windows, package-macos, package-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: package-*
+          merge-multiple: true
+          path: dist
+      - name: Checksums and notes
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+          ls -la
+          cd ..
+          sed "s/__VERSION__/${VERSION}/g" packaging/release-notes.md.tpl > dist/RELEASE_NOTES.md
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.version.outputs.tag }}
+          VERSION: ${{ needs.version.outputs.version }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(dist/AxcenityEditor-* dist/SHA256SUMS.txt)
+          extra=()
+          if [ "$PRERELEASE" = "true" ]; then
+            extra+=(--prerelease)
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${files[@]}" --clobber
+            gh release edit "$TAG" \
+              --title "Axcenity Engine ${VERSION}" \
+              --notes-file dist/RELEASE_NOTES.md \
+              "${extra[@]}"
+          else
+            gh release create "$TAG" "${files[@]}" \
+              --title "Axcenity Engine ${VERSION}" \
+              --notes-file dist/RELEASE_NOTES.md \
+              --target "$GITHUB_SHA" \
+              "${extra[@]}"
+          fi

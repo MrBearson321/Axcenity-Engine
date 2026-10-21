@@ -1,0 +1,3 @@
+packaging/**/*.sh text eol=lf
+packaging/linux/AppRun text eol=lf
+*.nsi text eol=crlf

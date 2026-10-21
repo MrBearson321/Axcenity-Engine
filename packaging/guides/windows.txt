@@ -1,0 +1,32 @@
+Axcenity Editor for Windows
+===========================
+
+This installer puts Axcenity Editor in:
+
+  %LOCALAPPDATA%\Programs\Axcenity Engine
+
+and adds it to the Start menu. You can also tick Desktop shortcut.
+
+After setup
+-----------
+Open Axcenity Editor from the Start menu, or from the desktop shortcut if you
+kept it. Use File > Open Project to open a folder, or start from New Project.
+
+Exporting a game for Windows, macOS or Linux
+--------------------------------------------
+This build includes players for all three operating systems, next to the
+editor. File > Export Game can target any of them from Windows.
+
+Windows SmartScreen
+-------------------
+Alpha builds are not code-signed. The first time you open the installer,
+Windows may say it is an unrecognized app. Click More info, then Run anyway,
+if you trust this download (check the SHA256SUMS file on the GitHub release).
+
+Uninstall
+---------
+Windows Settings > Apps > Axcenity Editor > Uninstall, or the Uninstall
+shortcut in the Start menu folder. Project folders you created are left as
+they are.
+
+Full guide: https://github.com/MrBearson321/Axcenity-Engine/blob/main/docs/project/install.md

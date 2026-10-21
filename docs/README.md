@@ -22,7 +22,7 @@ Source and tests win when a doc is wrong. Update the topic file you used.
 | Scripts, LocalScripts, or RemoteEvents in the editor | [editor/sides.md](editor/sides.md) |
 | Lua, the sandbox, or blocks | [scripting.md](scripting.md), then one file |
 | Drawing, materials, lights, or animation playback | [rendering.md](rendering.md), then one file |
-| Project files, export, or licenses | [project-and-export.md](project-and-export.md), then one file |
+| Project files, export, licenses, or GitHub releases | [project-and-export.md](project-and-export.md), then one file |
 | In-game UI | [ui.md](ui.md) |
 | Terrain algorithms | [terrain.md](terrain.md) |
 
