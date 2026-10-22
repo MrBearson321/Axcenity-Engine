@@ -1,6 +1,7 @@
-//! The Output panel: messages from the editor, such as which project opened
-//! and why a file couldn't load, and during Play what scripts `print`, their
-//! errors, and engine crashes.
+//! The Console's log: messages from the editor, such as which project opened
+//! and why a file couldn't load, during Play what scripts `print`, their
+//! errors, and engine crashes, and the commands typed into the Console
+//! (`console.rs`) with what they printed.
 //!
 //! Script errors start with `path:line:`. That part is underlined, and
 //! clicking the line opens the script at that line.
@@ -15,6 +16,8 @@ pub enum OutputKind {
     Info,
     Warning,
     Error,
+    /// A command typed into the Console, echoed. Always shown.
+    Command,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -56,11 +59,20 @@ impl Output {
         self.push(OutputKind::Warning, text.into());
     }
 
+    pub fn command(&mut self, text: impl Into<String>) {
+        self.push(OutputKind::Command, text.into());
+    }
+
+    /// Removes every line.
+    pub fn clear(&mut self) {
+        self.lines.clear();
+    }
+
     fn push(&mut self, kind: OutputKind, text: String) {
         // Also log it, so messages show up in the terminal when the editor
         // was started from one (handy when the window won't open).
         match kind {
-            OutputKind::Info => log::info!("{text}"),
+            OutputKind::Info | OutputKind::Command => log::info!("{text}"),
             OutputKind::Warning => log::warn!("{text}"),
             OutputKind::Error => log::error!("{text}"),
         }
@@ -68,7 +80,7 @@ impl Output {
         // `x.lua:3:` shouldn't.
         let location = match kind {
             OutputKind::Error => script_location(&text),
-            OutputKind::Info | OutputKind::Warning => None,
+            OutputKind::Info | OutputKind::Warning | OutputKind::Command => None,
         };
         self.lines.push(OutputLine {
             kind,
@@ -134,7 +146,7 @@ impl Output {
                     .on_hover_text("Remove every line")
                     .clicked()
                 {
-                    self.lines.clear();
+                    self.clear();
                 }
             });
         });
@@ -153,7 +165,7 @@ impl Output {
                     ui.label(
                         egui::RichText::new(
                             "Nothing yet. Editor messages, and what scripts print during Play, \
-                             show here.",
+                             show here. Type Lua or a command (try help) below.",
                         )
                         .color(palette.text_weak),
                     );
@@ -167,6 +179,9 @@ impl Output {
                         OutputKind::Info => (icons::INFO, palette.text_muted, palette.text),
                         OutputKind::Warning => (icons::WARNING, palette.warning, palette.warning),
                         OutputKind::Error => (icons::X_CIRCLE, palette.error, palette.error),
+                        OutputKind::Command => {
+                            (icons::CARET_RIGHT, palette.accent_text, palette.text_strong)
+                        }
                     };
                     let font = egui::TextStyle::Monospace.resolve(ui.style());
                     // The icon sits left of the text, which wraps beside it.

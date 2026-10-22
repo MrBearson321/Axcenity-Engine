@@ -132,6 +132,14 @@ impl TerrainCache {
             .or_else(|| world.terrain(id))
     }
 
+    /// Builds the Terrain `id`'s chunks as `camera` would see them, ahead
+    /// of the first frame that draws it (such as on a loading screen).
+    pub fn prepare(&mut self, world: &World, id: InstanceId, assets: &Assets, camera: &Camera) {
+        if let Some(instance) = world.get(id) {
+            self.draw(world, id, instance, assets, camera, &mut Vec::new());
+        }
+    }
+
     /// Adds the chunks of every Terrain in the Workspace to `items`, and
     /// forgets terrains that are gone.
     pub(crate) fn draw_all(

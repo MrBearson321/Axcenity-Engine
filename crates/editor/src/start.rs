@@ -17,9 +17,11 @@ use crate::widgets::{self, Role};
 
 /// How many projects the start screen tracks.
 pub const MAX_TRACKED: usize = 100;
-/// How wide the wordmark is drawn in the About box, in points. The images
-/// are twice this, so they stay sharp on high-DPI screens.
-const WORDMARK_WIDTH: f32 = 360.0;
+/// How wide the About box's content is, in points.
+const ABOUT_WIDTH: f32 = 360.0;
+/// How wide the wordmark is drawn in the About box, in points. The image is
+/// over twice this, so it stays sharp on high-DPI screens.
+const WORDMARK_WIDTH: f32 = 280.0;
 const SIDEBAR_WIDTH: f32 = 220.0;
 /// Project cards are at least this wide; a row fills the page with as many
 /// as fit, all the same width.
@@ -30,11 +32,14 @@ const CARD_RADIUS: u8 = 8;
 const PAGE_MARGIN: f32 = 40.0;
 const MAX_PAGE_WIDTH: f32 = 1160.0;
 
-/// The full-colour logo, for the About box.
+/// The logo, for the header, start screen, About box and splash. Both are
+/// white on a transparent background, so a tint draws them in any colour
+/// (egui multiplies an image by its tint).
 pub struct Brand {
-    /// The wordmark for light backgrounds, and for dark ones.
+    /// The A and the name.
     wordmark: egui::TextureHandle,
-    wordmark_dark: egui::TextureHandle,
+    /// The A alone, small, for the header and the start screen.
+    mark: egui::TextureHandle,
 }
 
 impl Brand {
@@ -43,23 +48,24 @@ impl Brand {
             wordmark: texture(
                 ctx,
                 "wordmark",
-                include_bytes!("../../../assets/branding/wordmark.png"),
+                include_bytes!("../../../assets/branding/wordmark-white.png"),
             ),
-            wordmark_dark: texture(
+            mark: texture(
                 ctx,
-                "wordmark dark",
-                include_bytes!("../../../assets/branding/wordmark-dark.png"),
+                "mark",
+                include_bytes!("../../../assets/branding/mark-white-small.png"),
             ),
         }
     }
 
-    /// The wordmark that reads well on the current theme's background.
-    pub fn wordmark(&self, visuals: &egui::Visuals) -> &egui::TextureHandle {
-        if visuals.dark_mode {
-            &self.wordmark_dark
-        } else {
-            &self.wordmark
-        }
+    /// The white wordmark. Tint it with the theme's text colour.
+    pub fn wordmark(&self) -> &egui::TextureHandle {
+        &self.wordmark
+    }
+
+    /// The white A. Tint it with the theme's text colour.
+    pub fn mark(&self) -> &egui::TextureHandle {
+        &self.mark
     }
 }
 
@@ -250,6 +256,7 @@ impl StartScreen {
         &mut self,
         ui: &mut egui::Ui,
         projects: &mut Vec<ProjectLink>,
+        brand: &Brand,
     ) -> Option<StartAction> {
         let mut action = None;
         let ctx = ui.ctx().clone();
@@ -257,7 +264,7 @@ impl StartScreen {
         let sidebar = Rect::from_min_size(full.min, vec2(SIDEBAR_WIDTH, full.height()));
         let page = Rect::from_min_max(pos2(sidebar.right(), full.top()), full.max);
 
-        if self.sidebar(ui, sidebar, projects.len()) {
+        if self.sidebar(ui, sidebar, projects.len(), brand) {
             action = Some(StartAction::Settings);
         }
         let mut content = ui.new_child(egui::UiBuilder::new().max_rect(page));
@@ -294,7 +301,7 @@ impl StartScreen {
 
     /// The wordmark, the pages, Settings and the version. Returns true when
     /// Settings was clicked.
-    fn sidebar(&mut self, ui: &mut egui::Ui, rect: Rect, tracked: usize) -> bool {
+    fn sidebar(&mut self, ui: &mut egui::Ui, rect: Rect, tracked: usize, brand: &Brand) -> bool {
         let palette = theme::palette(ui.ctx());
         ui.painter().rect_filled(rect, 0, palette.app_bg);
         ui.painter().vline(
@@ -306,7 +313,7 @@ impl StartScreen {
         let mut bar = ui.new_child(egui::UiBuilder::new().max_rect(inner));
         bar.horizontal(|ui| {
             ui.add_space(6.0);
-            widgets::wordmark(ui, 15.0);
+            widgets::wordmark(ui, brand.mark(), 15.0);
         });
         bar.add_space(22.0);
         bar.spacing_mut().item_spacing.y = 2.0;
@@ -1643,12 +1650,18 @@ pub fn about(ctx: &egui::Context, brand: &Brand) -> bool {
     let modal = egui::Modal::new(egui::Id::new("about"))
         .frame(frame)
         .show(ctx, |ui| {
-            ui.set_width(WORDMARK_WIDTH);
+            ui.set_width(ABOUT_WIDTH);
             ui.vertical_centered(|ui| {
-                let texture = brand.wordmark(ui.visuals());
+                let texture = brand.wordmark();
                 let size = texture.size_vec2();
                 let height = WORDMARK_WIDTH * size.y / size.x;
-                ui.add(egui::Image::new(texture).fit_to_exact_size(vec2(WORDMARK_WIDTH, height)));
+                ui.add_space(8.0);
+                ui.add(
+                    egui::Image::new(texture)
+                        .tint(palette.text_strong)
+                        .fit_to_exact_size(vec2(WORDMARK_WIDTH, height)),
+                );
+                ui.add_space(12.0);
                 ui.label(
                     RichText::new(format!("Axcenity Engine {}", env!("CARGO_PKG_VERSION")))
                         .family(theme::heading_family())
@@ -1779,7 +1792,8 @@ mod tests {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE.fill(theme::palette(ctx).panel))
                     .show(ctx, |ui| {
-                        assert!(start.show(ui, &mut projects).is_none());
+                        let brand = Brand::load(ui.ctx());
+                        assert!(start.show(ui, &mut projects, &brand).is_none());
                     });
             };
             match &snapshots {

@@ -3,6 +3,10 @@
 //! split it, or out into a floating window. Panels other than the Scene can
 //! be closed and opened again from View > Panels or the View ribbon tab.
 //!
+//! Each open script is a tab too ([`Pane::Script`]), opened beside the Scene
+//! or the script used last, so code can sit next to the viewport. Script
+//! tabs follow `ScriptTabs` (see [`Layout::sync_scripts`]) and aren't saved.
+//!
 //! [`egui_dock`] does the docking. This module only says which panels exist,
 //! how they start out, and how the layout is saved between runs.
 
@@ -15,17 +19,22 @@ use crate::theme::{self, icons};
 /// One dockable panel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Pane {
-    /// The viewport and the open scripts, with their own tab bar. Always
-    /// there: it can be moved but not closed or floated.
+    /// The viewport. Always there: it can be moved but not closed or floated.
     Scene,
     Explorer,
     Properties,
-    Output,
+    /// The log and the command line. Saved layouts from before it was
+    /// the Console call it `Output`.
+    #[serde(alias = "Output")]
+    Console,
     Assets,
     /// The Animation Studio: clips, controllers and their preview.
     Animation,
     /// The Terrain Studio: sculpting, painting and generating terrains.
     Terrain,
+    /// An open script, stylesheet or block script, by its tab's id
+    /// (`ScriptTab::id`).
+    Script(u64),
 }
 
 impl Pane {
@@ -33,7 +42,7 @@ impl Pane {
     pub const CLOSABLE: [Pane; 6] = [
         Pane::Explorer,
         Pane::Properties,
-        Pane::Output,
+        Pane::Console,
         Pane::Assets,
         Pane::Animation,
         Pane::Terrain,
@@ -41,13 +50,14 @@ impl Pane {
 
     pub fn label(self) -> &'static str {
         match self {
-            Pane::Scene => "Scene",
+            Pane::Scene => "Scene View",
             Pane::Explorer => "Explorer",
             Pane::Properties => "Properties",
-            Pane::Output => "Output",
+            Pane::Console => "Console",
             Pane::Assets => "Assets",
             Pane::Animation => "Animation",
             Pane::Terrain => "Terrain",
+            Pane::Script(_) => "Script",
         }
     }
 
@@ -56,10 +66,11 @@ impl Pane {
             Pane::Scene => icons::CUBE,
             Pane::Explorer => icons::TREE_STRUCTURE,
             Pane::Properties => icons::SLIDERS_HORIZONTAL,
-            Pane::Output => icons::TERMINAL_WINDOW,
+            Pane::Console => icons::TERMINAL_WINDOW,
             Pane::Assets => icons::SHAPES,
             Pane::Animation => icons::PERSON_SIMPLE_RUN,
             Pane::Terrain => icons::MOUNTAINS,
+            Pane::Script(_) => icons::CODE,
         }
     }
 
@@ -75,12 +86,15 @@ impl Pane {
 /// The panels and where they are.
 pub struct Layout {
     pub dock: DockState<Pane>,
+    /// The script tab used last, which new script tabs open beside.
+    last_script: Option<u64>,
 }
 
 impl Default for Layout {
     fn default() -> Self {
         Self {
             dock: default_dock(),
+            last_script: None,
         }
     }
 }
@@ -116,12 +130,13 @@ impl Layout {
             Pane::Scene => None,
             Pane::Explorer => Some(Pane::Properties),
             Pane::Properties => Some(Pane::Explorer),
-            Pane::Output => Some(Pane::Assets),
-            Pane::Assets => Some(Pane::Output),
+            Pane::Console => Some(Pane::Assets),
+            Pane::Assets => Some(Pane::Console),
             // A tab beside the Scene, with room for its graph and preview.
             Pane::Animation => Some(Pane::Scene),
             // A tab beside Properties, down the right.
             Pane::Terrain => Some(Pane::Properties),
+            Pane::Script(_) => Some(Pane::Scene),
         };
         let beside = neighbor
             .and_then(|neighbor| self.dock.find_main_surface_tab(&neighbor))
@@ -142,14 +157,57 @@ impl Layout {
         }
     }
 
-    /// Puts every panel back where it starts.
-    pub fn reset(&mut self) {
-        self.dock = default_dock();
+    /// Makes the script tabs match the open scripts: `open` lists their ids,
+    /// `focus` is one to bring to the front, and `active` the one used last.
+    ///
+    /// A new tab opens beside the script tab used last (wherever it was
+    /// dragged), or else beside the Scene. Tabs are added before closed
+    /// ones are removed, so a script that switches between Code and Blocks
+    /// keeps its place.
+    pub fn sync_scripts(&mut self, open: &[u64], focus: Option<u64>, active: Option<u64>) {
+        for &id in open {
+            let pane = Pane::Script(id);
+            if self.dock.find_tab(&pane).is_some() {
+                continue;
+            }
+            let beside = self
+                .last_script
+                .and_then(|last| self.dock.find_tab(&Pane::Script(last)))
+                .or_else(|| self.dock.find_tab(&Pane::Scene));
+            match beside {
+                Some((surface, node, _)) => {
+                    self.dock.set_focused_node_and_surface((surface, node));
+                    self.dock.push_to_focused_leaf(pane);
+                }
+                None => self.dock.push_to_first_leaf(pane),
+            }
+        }
+        self.dock
+            .retain_tabs(|pane| !matches!(pane, Pane::Script(id) if !open.contains(id)));
+        if let Some(found) = focus.and_then(|id| self.dock.find_tab(&Pane::Script(id))) {
+            let (surface, node, _) = found;
+            self.dock.set_active_tab(found);
+            self.dock.set_focused_node_and_surface((surface, node));
+        }
+        if let Some(id) = active.filter(|id| open.contains(id)) {
+            self.last_script = Some(id);
+        }
     }
 
-    /// The layout as text, for eframe's storage.
+    /// Puts every panel back where it starts. Open scripts come back beside
+    /// the Scene.
+    pub fn reset(&mut self) {
+        self.dock = default_dock();
+        self.last_script = None;
+    }
+
+    /// The layout as text, for eframe's storage. Script tabs are left out:
+    /// scripts aren't reopened between runs.
     pub fn to_text(&self) -> String {
-        serde_json::to_string(&self.dock).unwrap_or_default()
+        let dock = self
+            .dock
+            .filter_tabs(|pane| !matches!(pane, Pane::Script(_)));
+        serde_json::to_string(&dock).unwrap_or_default()
     }
 
     /// A layout saved by [`to_text`](Self::to_text). A damaged one, or one
@@ -167,6 +225,7 @@ impl Layout {
             .filter(|dock| dock.find_main_surface_tab(&Pane::Scene).is_some());
         Self {
             dock: dock.unwrap_or_else(default_dock),
+            last_script: None,
         }
     }
 }
@@ -192,7 +251,7 @@ fn zero_nulls(json: &mut serde_json::Value) {
 /// Like Roblox Studio: the Scene in the middle (with the Animation Studio as
 /// a tab beside it, like Unity's Animator window), the Explorer with
 /// Properties (and the Terrain Studio as a tab beside it) under it down the
-/// right, and Output and Assets as tabs under the Scene.
+/// right, and the Console and Assets as tabs under the Scene.
 fn default_dock() -> DockState<Pane> {
     let mut dock = DockState::new(vec![Pane::Scene, Pane::Animation]);
     dock.set_active_tab((
@@ -203,7 +262,7 @@ fn default_dock() -> DockState<Pane> {
     let tree = dock.main_surface_mut();
     let [scene, explorer] = tree.split_right(NodeIndex::root(), 0.78, vec![Pane::Explorer]);
     tree.split_below(explorer, 0.45, vec![Pane::Properties, Pane::Terrain]);
-    tree.split_below(scene, 0.78, vec![Pane::Output, Pane::Assets]);
+    tree.split_below(scene, 0.78, vec![Pane::Console, Pane::Assets]);
     dock
 }
 
@@ -312,7 +371,43 @@ mod tests {
         layout.toggle(Pane::Assets);
         let reloaded = Layout::from_text(&layout.to_text());
         assert!(!reloaded.is_open(Pane::Assets));
-        assert!(reloaded.is_open(Pane::Output));
+        assert!(reloaded.is_open(Pane::Console));
+        // A layout saved when the Console was called Output.
+        let old = layout.to_text().replace("\"Console\"", "\"Output\"");
+        assert!(old.contains("\"Output\""));
+        assert!(Layout::from_text(&old).is_open(Pane::Console));
         assert!(Layout::from_text("not json").is_open(Pane::Assets));
+    }
+
+    /// The leaf (surface and node) a panel is in.
+    fn leaf_of(layout: &Layout, pane: Pane) -> (egui_dock::SurfaceIndex, NodeIndex) {
+        let (surface, node, _) = layout.dock.find_tab(&pane).unwrap();
+        (surface, node)
+    }
+
+    #[test]
+    fn script_tabs_follow_the_open_scripts_and_open_beside_the_last_one() {
+        let mut layout = Layout::default();
+        layout.sync_scripts(&[0], Some(0), Some(0));
+        assert_eq!(
+            leaf_of(&layout, Pane::Script(0)),
+            leaf_of(&layout, Pane::Scene)
+        );
+
+        // Dragged off beside the Explorer, the next script joins it there.
+        let found = layout.dock.find_tab(&Pane::Script(0)).unwrap();
+        layout.dock.remove_tab(found);
+        let explorer = leaf_of(&layout, Pane::Explorer);
+        layout.dock.set_focused_node_and_surface(explorer);
+        layout.dock.push_to_focused_leaf(Pane::Script(0));
+        layout.sync_scripts(&[0, 1], Some(1), Some(1));
+        assert_eq!(leaf_of(&layout, Pane::Script(1)), explorer);
+
+        // Closed scripts lose their tabs, and they're never saved.
+        assert!(!layout.to_text().contains("Script"));
+        layout.sync_scripts(&[1], None, Some(1));
+        assert!(!layout.is_open(Pane::Script(0)));
+        assert!(layout.is_open(Pane::Script(1)));
+        assert!(!Layout::from_text(&layout.to_text()).is_open(Pane::Script(1)));
     }
 }

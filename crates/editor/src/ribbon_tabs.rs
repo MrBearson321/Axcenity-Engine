@@ -84,7 +84,7 @@ impl RibbonGroup {
             RibbonGroup::Ui => "Insert screens, frames, text, buttons and other UI",
             RibbonGroup::Scripts => "Insert scripts",
             RibbonGroup::Terrain => "Sculpt, paint and generate terrain",
-            RibbonGroup::Panels => "Show or hide the Explorer, Properties, Output and Assets",
+            RibbonGroup::Panels => "Show or hide the Explorer, Properties, Console and Assets",
         }
     }
 }
@@ -121,6 +121,19 @@ impl BuiltInTab {
             BuiltInTab::Script => "Script",
             BuiltInTab::Test => "Test",
             BuiltInTab::View => "View",
+        }
+    }
+
+    /// The icon in front of its name on the tab.
+    pub fn icon(self) -> &'static str {
+        match self {
+            BuiltInTab::Home => icons::HOUSE,
+            BuiltInTab::Model => icons::CUBE,
+            BuiltInTab::Terrain => icons::MOUNTAINS,
+            BuiltInTab::Ui => icons::LAYOUT,
+            BuiltInTab::Script => icons::CODE,
+            BuiltInTab::Test => icons::FLASK,
+            BuiltInTab::View => icons::EYE,
         }
     }
 
@@ -228,17 +241,28 @@ impl RibbonTabs {
         };
     }
 
-    /// Draws the row of tabs: the built-in ones, the custom ones (right-click
-    /// to change or delete), and + to make a new one. The active tab is
-    /// underlined in the accent colour, and the line slides to a newly
-    /// picked tab.
-    pub fn tab_bar(&mut self, ui: &mut egui::Ui) {
+    /// Draws the row of tabs, centred: the built-in ones, the custom ones
+    /// (right-click to change or delete), and + to make a new one. The
+    /// active tab is filled like the ribbon under it and underlined in the
+    /// accent colour, and the line slides to a newly picked tab. Returns
+    /// where the active tab is, so the ribbon can join it.
+    pub fn tab_bar(&mut self, ui: &mut egui::Ui) -> Option<egui::Rect> {
         let mut active_rect = None;
+        // A place in the paint order behind the tabs, filled in once the
+        // active tab's place is known.
+        let background = ui.painter().add(egui::Shape::Noop);
+        // A row is only as wide as what's in it once it's drawn, so it's
+        // centred by last frame's width, and drawn again if that changed.
+        let width_id = ui.id().with("ribbon tab row width");
+        let last_width: f32 = ui.ctx().data(|data| data.get_temp(width_id)).unwrap_or(0.0);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
+            ui.add_space(((ui.available_width() - last_width) / 2.0).max(0.0));
+            let start = ui.cursor().left();
             for tab in BuiltInTab::ALL {
                 let active = ActiveTab::BuiltIn(tab);
-                let response = tab_button(ui, tab.label(), self.active == active);
+                let label = theme::with_icon(tab.icon(), tab.label());
+                let response = tab_button(ui, &label, self.active == active);
                 if self.active == active {
                     active_rect = Some(response.rect);
                 }
@@ -292,7 +316,31 @@ impl RibbonTabs {
             {
                 self.edit(None);
             }
+            let width = ui.min_rect().right() - start;
+            if (width - last_width).abs() > 0.5 {
+                ui.ctx().data_mut(|data| data.insert_temp(width_id, width));
+                ui.ctx().request_repaint();
+            }
         });
+        if let Some(rect) = active_rect {
+            let palette = theme::palette(ui.ctx());
+            let top_corners = egui::CornerRadius {
+                nw: 6,
+                ne: 6,
+                sw: 0,
+                se: 0,
+            };
+            ui.painter().set(
+                background,
+                egui::epaint::RectShape::new(
+                    rect,
+                    top_corners,
+                    palette.panel,
+                    egui::Stroke::new(1.0_f32, palette.border),
+                    egui::StrokeKind::Inside,
+                ),
+            );
+        }
         // The accent line under the active tab, sliding from where it was.
         if let Some(rect) = active_rect {
             let ctx = ui.ctx();
@@ -310,6 +358,7 @@ impl RibbonTabs {
                 palette.accent,
             );
         }
+        active_rect
     }
 
     /// Opens the window that makes a custom tab (`None`) or changes one.

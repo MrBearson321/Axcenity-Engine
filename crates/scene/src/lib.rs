@@ -6,6 +6,7 @@
 //! - [`FlyCamera`] is the camera both of them look through.
 //! - [`Particles`] moves ParticleEmitters' particles and draws them as sprites.
 //! - [`TerrainCache`] keeps Terrains' chunk meshes and weights between frames.
+//! - [`asset_files`] lists the models and textures drawing a world reads.
 //! - [`CameraView`] and [`pick`] find the part under the mouse in the editor.
 //! - [`rotation_from_orientation`] and back turn a Part's `Orientation` into
 //!   a rotation, for drawing and for the editor's rotate tool.
@@ -15,6 +16,7 @@ mod draw_list;
 mod orientation;
 mod particles;
 mod pick;
+mod preload;
 mod terrain;
 
 pub use camera::{FlyCamera, MoveKeys};
@@ -28,4 +30,5 @@ pub use pick::{
     CameraView, Hit, Ray, part_box_edges, part_half_extent, pick, pick_hit, pick_hit_skipping,
     visible_box_edges,
 };
+pub use preload::{AssetFile, asset_files};
 pub use terrain::{DEFAULT_DETAIL_DISTANCE, TerrainCache, terrain_hit};

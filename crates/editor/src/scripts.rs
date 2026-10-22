@@ -1,12 +1,13 @@
-//! Script tabs: a strip of tabs above the center of the window, with the
-//! 3D view ("World") first and one tab per open script or stylesheet, like
-//! Roblox Studio. A tab shows a code editor with Lua (or CSS) syntax
-//! highlighting and line numbers in place of the viewport.
+//! Script tabs: one dock tab per open script or stylesheet, beside the
+//! Scene View (see `layout.rs`). A tab shows a code editor with Lua (or CSS)
+//! syntax highlighting and line numbers, or a block script's blocks.
 //!
 //! Tabs are found by their script's file path, not its Instance, because
 //! the file is what's being edited: it outlives its Script Instance when the
 //! world is reloaded, and a tab can stay open after its file was deleted.
-//! [`ScriptTabs`] never touches files; the app reads and writes them.
+//! Each tab also has an id that never changes, even when its file is
+//! renamed, which is how the dock knows it. [`ScriptTabs`] never touches
+//! files; the app reads and writes them.
 
 use std::collections::HashMap;
 
@@ -48,6 +49,8 @@ pub enum Disk {
 }
 
 pub struct ScriptTab {
+    /// Names the tab's dock tab (`Pane::Script`); kept when the file is renamed.
+    pub id: u64,
     /// The script file, as a [`axcenity_project::ScriptFile::path`].
     pub path: String,
     /// The code as it is in the editor.
@@ -93,12 +96,17 @@ impl ScriptTab {
     }
 }
 
-/// The open script tabs, and which tab is shown.
+/// The open script tabs, and which one was used last.
 #[derive(Default)]
 pub struct ScriptTabs {
     tabs: Vec<ScriptTab>,
-    /// The tab shown, or `None` for the World tab (the viewport).
+    /// The tab used last, or `None` when the viewport was.
     active: Option<usize>,
+    /// The id the next new tab gets.
+    next_id: u64,
+    /// A tab that was just opened or asked for, to bring to the front of
+    /// the dock in the next frame.
+    focus: Option<u64>,
     /// Each script's uses of APIs that only work on the other side, by
     /// path. The app fills it in each frame; a tab with any shows a warning sign.
     pub warnings: HashMap<String, Vec<SideWarning>>,
@@ -110,62 +118,87 @@ impl ScriptTabs {
     pub fn open(&mut self, path: &str, source: &str, line: Option<usize>) {
         let index = match self.tabs.iter().position(|tab| tab.path == path) {
             Some(index) => index,
-            None => {
-                self.tabs.push(ScriptTab {
-                    path: path.to_string(),
-                    text: source.to_string(),
-                    saved: source.to_string(),
-                    disk: Disk::Same,
-                    go_to_line: None,
-                    highlighted: None,
-                });
-                self.tabs.len() - 1
-            }
+            None => self.push(path, source),
         };
         if line.is_some() {
             self.tabs[index].go_to_line = line;
         }
         self.active = Some(index);
+        self.focus = Some(self.tabs[index].id);
+    }
+
+    fn push(&mut self, path: &str, source: &str) -> usize {
+        self.tabs.push(ScriptTab {
+            id: self.next_id,
+            path: path.to_string(),
+            text: source.to_string(),
+            saved: source.to_string(),
+            disk: Disk::Same,
+            go_to_line: None,
+            highlighted: None,
+        });
+        self.next_id += 1;
+        self.tabs.len() - 1
     }
 
     /// Opens a tab for `path` with `source` without showing it, if it isn't
     /// open yet, and returns it. Dragging a UI handle edits a stylesheet
-    /// this way, so its unsaved changes show in the strip.
+    /// this way, so its unsaved changes show on its tab.
     pub fn open_in_background(&mut self, path: &str, source: &str) -> &mut ScriptTab {
         let index = match self.tabs.iter().position(|tab| tab.path == path) {
             Some(index) => index,
-            None => {
-                self.tabs.push(ScriptTab {
-                    path: path.to_string(),
-                    text: source.to_string(),
-                    saved: source.to_string(),
-                    disk: Disk::Same,
-                    go_to_line: None,
-                    highlighted: None,
-                });
-                self.tabs.len() - 1
-            }
+            None => self.push(path, source),
         };
         &mut self.tabs[index]
     }
 
-    /// Shows the World tab: the viewport.
+    /// The viewport was used last, not a script.
     pub fn show_world(&mut self) {
         self.active = None;
     }
 
+    #[cfg(test)]
     pub fn world_shown(&self) -> bool {
         self.active.is_none()
     }
 
-    /// The script tab shown, if it isn't the World tab.
+    /// The tab with this id was clicked or typed in.
+    pub fn activate(&mut self, id: u64) {
+        self.active = self.tabs.iter().position(|tab| tab.id == id);
+    }
+
+    /// The script tab used last, if the viewport wasn't.
     #[cfg(test)]
     pub fn active(&self) -> Option<&ScriptTab> {
         self.tabs.get(self.active?)
     }
 
+    #[cfg(test)]
     pub fn active_path(&self) -> Option<&str> {
         Some(&self.tabs.get(self.active?)?.path)
+    }
+
+    /// The id of the tab used last.
+    pub fn active_id(&self) -> Option<u64> {
+        Some(self.tabs.get(self.active?)?.id)
+    }
+
+    /// Every open tab's id, in the order they were opened.
+    pub fn ids(&self) -> Vec<u64> {
+        self.tabs.iter().map(|tab| tab.id).collect()
+    }
+
+    /// The tab to bring to the front, once.
+    pub fn take_focus(&mut self) -> Option<u64> {
+        self.focus.take()
+    }
+
+    /// The path of the tab with this id, if it's still open.
+    pub fn path_of(&self, id: u64) -> Option<&str> {
+        self.tabs
+            .iter()
+            .find(|tab| tab.id == id)
+            .map(|tab| tab.path.as_str())
     }
 
     pub fn get(&self, path: &str) -> Option<&ScriptTab> {
@@ -176,9 +209,9 @@ impl ScriptTabs {
         self.tabs.iter_mut().find(|tab| tab.path == path)
     }
 
-    /// Closes the tab for `path`, if it's open. If it was shown, the tab
-    /// that takes its place in the strip is shown instead (or the one before
-    /// it, at the end, or the World tab when no script tabs are left).
+    /// Closes the tab for `path`, if it's open. If it was used last, the
+    /// tab opened after it counts as used last instead (or the one before
+    /// it, at the end, or the viewport when no script tabs are left).
     pub fn close(&mut self, path: &str) {
         let Some(index) = self.tabs.iter().position(|tab| tab.path == path) else {
             return;
@@ -193,7 +226,7 @@ impl ScriptTabs {
         };
     }
 
-    /// Closes every tab and shows the World tab.
+    /// Closes every tab.
     pub fn close_all(&mut self) {
         self.tabs.clear();
         self.active = None;
@@ -219,91 +252,40 @@ impl ScriptTabs {
             .collect()
     }
 
-    /// Draws the strip of tabs. Returns the path of a tab whose close
-    /// button (or middle click) asked to close it: the app checks for
-    /// unsaved changes first.
-    pub fn tab_bar(&mut self, ui: &mut egui::Ui) -> Option<String> {
-        let mut show = None;
-        let mut close = None;
-        let mut active_rect = None;
-        egui::ScrollArea::horizontal().show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 2.0;
-                let palette = theme::palette(ui.ctx());
-                let world = script_tab(
-                    ui,
-                    (icons::GLOBE_HEMISPHERE_WEST, palette.text_secondary),
-                    "World",
-                    TabMarks::default(),
-                    self.active.is_none(),
-                )
-                .0
-                .on_hover_text("The 3D view of the world");
-                if self.active.is_none() {
-                    active_rect = Some(world.rect);
-                }
-                if world.clicked() {
-                    show = Some(None);
-                }
-                for (index, tab) in self.tabs.iter().enumerate() {
-                    let icon = if tab.is_stylesheet() {
-                        (
-                            icons::PAINT_BRUSH,
-                            theme::class_color(ClassName::ScreenGui, ui.visuals()),
-                        )
-                    } else {
-                        let class = axcenity_project::script_class(&tab.path);
-                        (
-                            theme::class_icon(class),
-                            theme::class_color(class, ui.visuals()),
-                        )
-                    };
-                    let marks = TabMarks {
-                        // A dot after the name means unsaved changes, as in VS Code.
-                        unsaved: tab.unsaved(),
-                        warning: self.warnings.contains_key(&tab.path),
-                        closable: true,
-                    };
-                    let active = self.active == Some(index);
-                    let (label, cross) = script_tab(ui, icon, tab.name(), marks, active);
-                    let label = label.on_hover_text(&tab.path);
-                    if active {
-                        active_rect = Some(label.rect);
-                    }
-                    if label.clicked() {
-                        show = Some(Some(index));
-                    }
-                    if label.middle_clicked() || cross {
-                        close = Some(tab.path.clone());
-                    }
-                }
-            });
-        });
-        // The accent line under the tab shown, sliding to a newly picked one.
-        if let Some(rect) = active_rect {
-            let ctx = ui.ctx();
-            let time = ctx.style().animation_time * 1.4;
-            let id = egui::Id::new("script tab underline");
-            let left = ctx.animate_value_with_time(id.with("left"), rect.left() + 6.0, time);
-            let right = ctx.animate_value_with_time(id.with("right"), rect.right() - 6.0, time);
-            ui.painter().rect_filled(
-                egui::Rect::from_min_max(
-                    egui::pos2(left, rect.bottom() - 2.0),
-                    egui::pos2(right, rect.bottom()),
-                ),
-                1,
-                theme::palette(ctx).accent,
-            );
+    /// The title of the dock tab with this id: an icon in its class's
+    /// colour, the name, a dot when unsaved (as in VS Code) and a warning
+    /// sign when it uses APIs from the other side.
+    pub fn title(&self, id: u64, visuals: &egui::Visuals) -> egui::WidgetText {
+        let Some(tab) = self.tabs.iter().find(|tab| tab.id == id) else {
+            return "Script".into();
+        };
+        let (icon, icon_color) = if tab.is_stylesheet() {
+            (
+                icons::PAINT_BRUSH,
+                theme::class_color(ClassName::ScreenGui, visuals),
+            )
+        } else {
+            let class = axcenity_project::script_class(&tab.path);
+            (theme::class_icon(class), theme::class_color(class, visuals))
+        };
+        let font = egui::FontId::new(theme::type_scale::BODY - 0.5, theme::medium_family());
+        let format = |color| egui::TextFormat::simple(font.clone(), color);
+        let mut job = egui::text::LayoutJob::default();
+        job.append(icon, 0.0, format(icon_color));
+        // A placeholder colour: the dock paints it in the tab's text colour.
+        job.append(tab.name(), 5.0, format(egui::Color32::PLACEHOLDER));
+        if tab.unsaved() {
+            job.append("\u{25CF}", 5.0, format(egui::Color32::PLACEHOLDER));
         }
-        if let Some(active) = show {
-            self.active = active;
+        if self.warnings.contains_key(&tab.path) {
+            job.append(icons::WARNING, 5.0, format(visuals.warn_fg_color));
         }
-        close
+        job.into()
     }
 
-    /// Draws the code editor for the tab shown (nothing for the World tab).
-    pub fn show_active(&mut self, ui: &mut egui::Ui) {
-        let Some(tab) = self.active.and_then(|index| self.tabs.get_mut(index)) else {
+    /// Draws the code editor for the tab at `path`.
+    pub fn show(&mut self, ui: &mut egui::Ui, path: &str) {
+        let Some(tab) = self.tabs.iter_mut().find(|tab| tab.path == path) else {
             return;
         };
         let warning = ui.visuals().warn_fg_color;
@@ -360,134 +342,6 @@ impl ScriptTabs {
     }
 }
 
-/// What a script tab shows after its name.
-#[derive(Clone, Copy, Default)]
-struct TabMarks {
-    unsaved: bool,
-    warning: bool,
-    closable: bool,
-}
-
-/// One tab above the viewport: an icon in its class's colour, the name, a
-/// dot when unsaved, a warning badge, and × (shown while the tab is active
-/// or hovered). Returns the tab and whether × was clicked.
-fn script_tab(
-    ui: &mut egui::Ui,
-    (icon, icon_color): (&str, egui::Color32),
-    name: &str,
-    marks: TabMarks,
-    active: bool,
-) -> (egui::Response, bool) {
-    let palette = theme::palette(ui.ctx());
-    let font = egui::FontId::new(theme::type_scale::BODY - 0.5, theme::medium_family());
-    let name_galley =
-        ui.painter()
-            .layout_no_wrap(name.to_owned(), font, egui::Color32::PLACEHOLDER);
-    let mut width = 12.0 + 16.0 + 4.0 + name_galley.size().x + 12.0;
-    if marks.unsaved {
-        width += 12.0;
-    }
-    if marks.warning {
-        width += 18.0;
-    }
-    if marks.closable {
-        width += 18.0;
-    }
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 28.0), egui::Sense::click());
-    response
-        .widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, name));
-    let hovered = ui.rect_contains_pointer(rect);
-    let hover = theme::ease(ui.ctx(), response.id.with("hover"), hovered && !active);
-    if hover > 0.0 {
-        ui.painter().rect_filled(
-            rect.shrink2(egui::vec2(0.0, 3.0)),
-            5,
-            palette.control_hover.gamma_multiply(hover),
-        );
-    }
-    if response.has_focus() {
-        ui.painter().rect_stroke(
-            rect.shrink2(egui::vec2(0.0, 3.0)),
-            5,
-            egui::Stroke::new(1.0_f32, palette.accent),
-            egui::StrokeKind::Inside,
-        );
-    }
-    let text_color = if active || hovered {
-        palette.text_strong
-    } else {
-        palette.text_weak
-    };
-    let mut x = rect.left() + 12.0;
-    ui.painter().text(
-        egui::pos2(x + 7.0, rect.center().y),
-        egui::Align2::CENTER_CENTER,
-        icon,
-        egui::FontId::proportional(14.0),
-        if active || hovered {
-            icon_color
-        } else {
-            icon_color.gamma_multiply(0.75)
-        },
-    );
-    x += 20.0;
-    let name_size = name_galley.size();
-    ui.painter().galley(
-        egui::pos2(x, rect.center().y - name_size.y / 2.0),
-        name_galley,
-        text_color,
-    );
-    x += name_size.x + 4.0;
-    if marks.unsaved {
-        ui.painter().circle_filled(
-            egui::pos2(x + 4.0, rect.center().y),
-            3.0,
-            palette.text_secondary,
-        );
-        x += 12.0;
-    }
-    if marks.warning {
-        ui.painter().text(
-            egui::pos2(x + 7.0, rect.center().y),
-            egui::Align2::CENTER_CENTER,
-            icons::WARNING,
-            egui::FontId::proportional(13.0),
-            palette.warning,
-        );
-        x += 18.0;
-    }
-    let mut closed = false;
-    if marks.closable {
-        let cross = egui::Rect::from_center_size(
-            egui::pos2(x + 8.0, rect.center().y),
-            egui::vec2(16.0, 16.0),
-        );
-        let cross_response = ui
-            .interact(cross, response.id.with("close"), egui::Sense::click())
-            .on_hover_text("Close");
-        if active || hovered {
-            if cross_response.hovered() {
-                ui.painter().rect_filled(cross, 4, palette.control_active);
-            }
-            ui.painter().text(
-                cross.center(),
-                egui::Align2::CENTER_CENTER,
-                icons::X,
-                egui::FontId::proportional(11.0),
-                if cross_response.hovered() {
-                    palette.text_strong
-                } else {
-                    palette.text_weak
-                },
-            );
-        }
-        closed = cross_response.clicked();
-    }
-    (response, closed)
-}
-
-/// The ID of the code editor's text box for the script at `path`. egui
-/// keeps the cursor and scroll position under it.
 /// The bar above a Script or LocalScript's tab that switches it between
 /// Code and Blocks. Returns true when the other one is picked.
 pub fn mode_bar(ui: &mut egui::Ui, blocks: bool, enabled: bool) -> bool {
@@ -525,6 +379,8 @@ pub fn mode_bar(ui: &mut egui::Ui, blocks: bool, enabled: bool) -> bool {
     switch
 }
 
+/// The ID of the code editor's text box for the script at `path`. egui
+/// keeps the cursor and scroll position under it.
 pub fn editor_id(path: &str) -> egui::Id {
     egui::Id::new(("script editor", path))
 }
@@ -665,6 +521,21 @@ mod tests {
     }
 
     #[test]
+    fn tabs_keep_their_id_when_renamed_and_ask_for_focus_when_opened() {
+        let mut tabs = ScriptTabs::default();
+        tabs.open("scripts/a.server.lua", "a", None);
+        let a = tabs.take_focus().unwrap();
+        assert_eq!(tabs.take_focus(), None, "asked for once");
+        tabs.open_in_background("styles/b.css", "");
+        assert_eq!(tabs.take_focus(), None, "background tabs don't take focus");
+        tabs.rename("scripts/a.server.lua", "scripts/z.server.lua");
+        assert_eq!(tabs.path_of(a), Some("scripts/z.server.lua"));
+        assert_eq!(tabs.ids().len(), 2);
+        tabs.activate(a);
+        assert_eq!(tabs.active_id(), Some(a));
+    }
+
+    #[test]
     fn stylesheet_tabs_are_named_by_file_and_can_open_without_showing() {
         let mut tabs = ScriptTabs::default();
         tabs.open_in_background("styles/hud.css", ".hud {}").text = ".hud { width: 1px }".into();
@@ -684,7 +555,8 @@ mod tests {
             ..Default::default()
         };
         let _ = ctx.run(input, |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| tabs.show_active(ui));
+            let path = tabs.active_path().unwrap().to_owned();
+            egui::CentralPanel::default().show(ctx, |ui| tabs.show(ui, &path));
         });
     }
 

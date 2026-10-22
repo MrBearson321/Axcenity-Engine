@@ -29,6 +29,10 @@
 //! A Terrain's landscape isn't a property, so its changes are steps of their
 //! own ([`TerrainChange`]): a brush stroke keeps the chunks it changed, and a
 //! whole new landscape (generated, eroded, resized) keeps both landscapes.
+//!
+//! A Console command can change anything, so its step keeps the whole world
+//! from the other side of it ([`History::record_world`]); undo and redo swap
+//! it with the world. Copies keep every `InstanceId`, so older steps still work.
 
 use std::sync::Arc;
 
@@ -181,6 +185,19 @@ enum StepKind {
         change: TerrainChange,
         fields: Vec<Change>,
     },
+    /// The whole world from the other side of the step: before it while
+    /// the step can be undone, after it once it has been.
+    World(WorldCopy),
+}
+
+/// A whole world kept by a step. Its own type, to print as just its size in
+/// `Debug` output.
+struct WorldCopy(Box<World>);
+
+impl std::fmt::Debug for WorldCopy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "World({} instances)", self.0.len())
+    }
 }
 
 /// One Instance's snapshots either side of a change, for [`History::record_many`].
@@ -429,6 +446,14 @@ impl History {
         self.open = None;
     }
 
+    /// Records a change that could have touched anything, such as a Console
+    /// command, as one step named `label`. `before` is the whole world as
+    /// it was; `world` is already changed.
+    pub fn record_world(&mut self, world: &mut World, label: String, before: World) {
+        self.seal();
+        self.push(world, label, StepKind::World(WorldCopy(Box::new(before))));
+    }
+
     /// Adds a new step on top and returns its number. The undone steps can't
     /// be redone after that, so they're dropped.
     fn push(&mut self, world: &mut World, label: String, kind: StepKind) -> u64 {
@@ -469,9 +494,9 @@ impl History {
     /// `before` text to its `after`.
     pub fn undo(&mut self, world: &mut World) -> Option<Vec<TextChange>> {
         self.seal();
-        let step = self.undo.pop()?;
+        let mut step = self.undo.pop()?;
         let mut undone = Vec::new();
-        match &step.kind {
+        match &mut step.kind {
             StepKind::Fields {
                 id, changes, texts, ..
             } => {
@@ -518,6 +543,7 @@ impl History {
                     }
                 }
             }
+            StepKind::World(other) => std::mem::swap(world, &mut *other.0),
         }
         self.redo.push(step);
         Some(undone)
@@ -527,9 +553,9 @@ impl History {
     /// there was nothing to redo, or the stylesheets to change, as [`History::undo`].
     pub fn redo(&mut self, world: &mut World) -> Option<Vec<TextChange>> {
         self.seal();
-        let step = self.redo.pop()?;
+        let mut step = self.redo.pop()?;
         let mut redone = Vec::new();
-        match &step.kind {
+        match &mut step.kind {
             StepKind::Fields {
                 id, changes, texts, ..
             } => {
@@ -561,6 +587,7 @@ impl History {
                     }
                 }
             }
+            StepKind::World(other) => std::mem::swap(world, &mut *other.0),
         }
         self.undo.push(step);
         Some(redone)
@@ -702,6 +729,30 @@ mod tests {
         assert_eq!(history.undo(&mut world), Some(text("12px", "10px")));
         assert_eq!(history.undo(&mut world), None, "both frames are one step");
         assert_eq!(history.redo(&mut world), Some(text("10px", "12px")));
+    }
+
+    #[test]
+    fn a_whole_world_step_undoes_property_and_tree_changes_together() {
+        let (mut world, part) = world_with_part();
+        let mut history = History::new();
+        set(&mut history, &mut world, part, "Position", at(1.0));
+        let before = world.clone();
+        world.set_property(part, "Position", at(5.0)).unwrap();
+        let made = world.create(ClassName::Part).unwrap();
+        world.set_parent(made, Some(world.workspace())).unwrap();
+        history.record_world(&mut world, "Console".into(), before);
+        assert_eq!(history.undo_label(), Some("Console"));
+
+        history.undo(&mut world).unwrap();
+        assert_eq!(position(&world, part), at(1.0));
+        assert!(!world.contains(made));
+        history.redo(&mut world).unwrap();
+        assert_eq!(position(&world, part), at(5.0));
+        assert!(world.is_descendant_of(made, world.workspace()));
+        // Older steps still work on the swapped-in world.
+        history.undo(&mut world).unwrap();
+        history.undo(&mut world).unwrap();
+        assert_ne!(position(&world, part), at(1.0));
     }
 
     #[test]

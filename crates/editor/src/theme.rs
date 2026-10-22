@@ -86,19 +86,37 @@ pub enum Accent {
     #[default]
     Blue,
     Violet,
-    Green,
+    Pink,
+    Red,
     Orange,
+    Yellow,
+    Green,
+    Teal,
 }
 
 impl Accent {
-    pub const ALL: [Accent; 4] = [Accent::Blue, Accent::Violet, Accent::Green, Accent::Orange];
+    /// In the order Settings shows them, around the colour wheel.
+    pub const ALL: [Accent; 8] = [
+        Accent::Blue,
+        Accent::Violet,
+        Accent::Pink,
+        Accent::Red,
+        Accent::Orange,
+        Accent::Yellow,
+        Accent::Green,
+        Accent::Teal,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
             Accent::Blue => "Blue",
             Accent::Violet => "Violet",
-            Accent::Green => "Green",
+            Accent::Pink => "Pink",
+            Accent::Red => "Red",
             Accent::Orange => "Orange",
+            Accent::Yellow => "Yellow",
+            Accent::Green => "Green",
+            Accent::Teal => "Teal",
         }
     }
 
@@ -110,8 +128,12 @@ impl Accent {
         let (on_dark, solid_dark, on_light) = match self {
             Accent::Blue => (0x6C8CFF, 0x4562E6, 0x3451D1),
             Accent::Violet => (0xA48AFF, 0x7650E8, 0x6741D9),
-            Accent::Green => (0x4CC38A, 0x1D7F51, 0x1C7547),
+            Accent::Pink => (0xF07AB8, 0xBE2F6E, 0xB52A68),
+            Accent::Red => (0xF47A7A, 0xC63434, 0xC02E2E),
             Accent::Orange => (0xF2A15A, 0xBF5310, 0xA8460B),
+            Accent::Yellow => (0xE8C547, 0x8A6A00, 0x806200),
+            Accent::Green => (0x4CC38A, 0x1D7F51, 0x1C7547),
+            Accent::Teal => (0x3EC6BE, 0x0F766E, 0x0F766E),
         };
         if dark {
             (hex(on_dark), hex(solid_dark))

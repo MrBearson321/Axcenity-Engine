@@ -6,24 +6,121 @@
 use super::*;
 
 impl EditorApp {
-    /// Opens the project in `folder` in place of the current one. If it
-    /// can't be loaded, the error goes to Output and the current project
-    /// stays open.
+    /// Opens the project in `folder` in place of the current one, before
+    /// returning. If it can't be loaded, the error goes to Output and the
+    /// current project stays open. [`Self::begin_open`] reads it in the
+    /// background instead.
     pub fn open(&mut self, folder: &Path) {
-        let project = match axcenity_project::load(folder) {
-            Ok(project) => project,
-            Err(err) => {
-                // `{:#}` on an `anyhow::Error` shows the whole chain of
-                // causes on one line, such as which line of which file is wrong.
-                let err = anyhow::Error::new(err);
-                self.output.error(format!(
-                    "Could not open the project in `{}`: {err:#}",
-                    folder.display()
-                ));
-                return;
+        match axcenity_project::load(folder) {
+            Ok(project) => {
+                let assets = Assets::new(&project.folder);
+                self.open_loaded(project, assets);
             }
+            // `{:#}` on an `anyhow::Error` shows the whole chain of causes
+            // on one line, such as which line of which file is wrong.
+            Err(err) => self.open_failed(folder, &format!("{:#}", anyhow::Error::new(err))),
+        }
+    }
+    /// Starts opening the project in `folder` in the background, with the
+    /// loading screen over the window until it's read (see `loading.rs`).
+    /// It opens in [`Self::follow_loading`].
+    pub fn begin_open(&mut self, ctx: &egui::Context, folder: &Path) {
+        if self.loading.is_some() {
+            return;
+        }
+        let mut terrain = TerrainCache::new();
+        terrain.view = self.viewport.terrain.view;
+        terrain.detail_distance = self.viewport.terrain.detail_distance;
+        self.loading = Some(Loading::start(ctx, folder, terrain, viewport::start_view()));
+    }
+    /// Opens the project being loaded once its thread is done. Returns true
+    /// while it's still loading, when only the loading screen is drawn.
+    pub(super) fn follow_loading(&mut self, ctx: &egui::Context) -> bool {
+        let Some(result) = self.loading.as_ref().map(Loading::poll) else {
+            return false;
         };
-
+        let Some(result) = result else {
+            return true;
+        };
+        let loading = self.loading.take().expect("checked above");
+        match result {
+            Ok(loaded) => {
+                self.open_loaded(loaded.project, loaded.assets);
+                // After opening, which forgets the old project's terrains.
+                let mut terrain = loaded.terrain;
+                terrain.view = self.viewport.terrain.view;
+                terrain.detail_distance = self.viewport.terrain.detail_distance;
+                self.viewport.terrain = terrain;
+                self.cover_until = Some(ctx.cumulative_frame_nr() + FINISHING_FRAMES);
+            }
+            Err(err) => {
+                self.open_failed(&loading.folder, &err);
+                // Output isn't shown without a project, so say it on the start screen.
+                if self.project.is_none()
+                    && let Some(line) = self.output.lines().last()
+                {
+                    self.start.set_notice(line.text.clone());
+                }
+            }
+        }
+        ctx.request_repaint();
+        false
+    }
+    /// Only the header and the loading screen, while a project loads.
+    pub(super) fn loading_frame(&mut self, ctx: &egui::Context) {
+        let palette = theme::palette(ctx);
+        egui::TopBottomPanel::top("menu bar")
+            .exact_height(window_frame::HEIGHT)
+            .frame(egui::Frame::new().fill(palette.app_bg))
+            .show(ctx, |ui| self.title_bar(ui));
+        let cancel = egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| {
+                let loading = self.loading.as_ref().expect("only drawn while loading");
+                loading.show(ui, ui.max_rect())
+            })
+            .inner;
+        if cancel {
+            // Dropping it tells the thread to stop.
+            self.loading = None;
+            ctx.request_repaint();
+        }
+        self.unsaved_changes_prompt(ctx);
+        self.settings_window(ctx);
+        self.toasts.show(ctx);
+        theme::paint_crossfade(ctx);
+    }
+    /// For a frame or two after a project opens, the loading screen stays
+    /// over the window while its scene is sent to the graphics card.
+    pub(super) fn cover_while_finishing(&mut self, ctx: &egui::Context) {
+        let Some(until) = self.cover_until else {
+            return;
+        };
+        if ctx.cumulative_frame_nr() >= until {
+            self.cover_until = None;
+            return;
+        }
+        let mut rect = ctx.screen_rect();
+        rect.min.y += window_frame::HEIGHT;
+        let name = self
+            .project
+            .as_ref()
+            .map_or("", |project| project.name.as_str());
+        egui::Area::new(egui::Id::new("finishing load"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(rect.min)
+            .constrain(false)
+            .show(ctx, |ui| loading::show_finishing(ui, rect, name));
+        ctx.request_repaint();
+    }
+    fn open_failed(&mut self, folder: &Path, err: &str) {
+        self.output.error(format!(
+            "Could not open the project in `{}`: {err}",
+            folder.display()
+        ));
+    }
+    /// Opens `project`, read with its models and textures into `assets`.
+    fn open_loaded(&mut self, project: axcenity_project::Project, assets: Assets) {
         if let Some(from) = project.migrated_from {
             let kept = project
                 .migration_backup
@@ -43,7 +140,7 @@ impl EditorApp {
             "Opened \"{}\" from `{}`: {} objects, {scripts} {}. Press Play (F5) \
              to run it.",
             project.manifest.name,
-            folder.display(),
+            project.folder.display(),
             // `game` and its services are always there, so don't count them.
             project
                 .world
@@ -91,7 +188,7 @@ impl EditorApp {
         self.pending_ui_activation = None;
         self.focused_text = None;
         self.pending_focus_lost = None;
-        self.assets = Assets::new(&project.folder);
+        self.assets = assets;
         self.asset_browser.open(Some(&project.folder));
         self.tabs.close_all();
         self.viewport.reset_camera();
@@ -177,14 +274,14 @@ impl EditorApp {
         }
     }
     /// Asks for a project folder with the system's folder picker, then opens it.
-    pub(super) fn open_with_dialog(&mut self) {
+    pub(super) fn open_with_dialog(&mut self, ctx: &egui::Context) {
         let mut dialog = rfd::FileDialog::new().set_title("Open an Axcenity project folder");
         if let Some(project) = &self.project {
             dialog = dialog.set_directory(&project.folder);
         }
         // `None` means the dialog was cancelled.
         if let Some(folder) = dialog.pick_folder() {
-            self.open(&folder);
+            self.begin_open(ctx, &folder);
         }
     }
     pub(super) fn playing(&self) -> bool {
@@ -217,6 +314,7 @@ impl EditorApp {
         };
         // Show the game, not a script.
         self.tabs.show_world();
+        self.layout.open(Pane::Scene);
         self.output.info(format!(
             "Playing \"{}\". Press Stop (Shift+F5) to go back to editing; the world \
              will be as it was before Play.",
@@ -433,7 +531,7 @@ impl EditorApp {
                 self.closing = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
-            Discard::OpenAnother => self.open_with_dialog(),
+            Discard::OpenAnother => self.open_with_dialog(ctx),
             Discard::CloseProject => self.close_project(),
             Discard::CloseTab(path) => self.tabs.close(&path),
         }
@@ -595,23 +693,20 @@ impl EditorApp {
     pub(super) fn start_screen(&mut self, ctx: &egui::Context) {
         let picked = egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(theme::palette(ctx).panel))
-            .show(ctx, |ui| self.start.show(ui, &mut self.recent))
+            .show(ctx, |ui| {
+                let brand = self
+                    .brand
+                    .as_ref()
+                    .expect("the logo is loaded before the start screen");
+                self.start.show(ui, &mut self.recent, brand)
+            })
             .inner;
+        // A failed open is told on the start screen (see `follow_loading`).
         match picked {
-            Some(StartAction::OpenDialog) => self.open_with_dialog(),
-            Some(StartAction::Open(folder)) => self.open(&folder),
-            Some(StartAction::Settings) => {
-                self.settings.open = true;
-                return;
-            }
-            None => return,
-        }
-        // Nothing opened, so say why here: Output isn't shown without a project.
-        if self.project.is_none()
-            && let Some(line) = self.output.lines().last()
-            && line.kind == OutputKind::Error
-        {
-            self.start.set_notice(line.text.clone());
+            Some(StartAction::OpenDialog) => self.open_with_dialog(ctx),
+            Some(StartAction::Open(folder)) => self.begin_open(ctx, &folder),
+            Some(StartAction::Settings) => self.settings.open = true,
+            None => {}
         }
     }
 }

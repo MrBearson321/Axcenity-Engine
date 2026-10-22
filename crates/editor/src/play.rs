@@ -147,6 +147,22 @@ impl Session {
         })
     }
 
+    /// Runs Lua typed into the Console against the game (see
+    /// `ScriptRuntime::run_command`). What it prints, and its errors, go to
+    /// `output`. The inner `Err` is the message for code that isn't valid Lua.
+    pub fn run_command(
+        &mut self,
+        source: &str,
+        output: &mut Output,
+    ) -> Result<Result<(), String>, Crash> {
+        let mut result = Ok(());
+        guard(|| {
+            result = self.scripts.run_command(&mut self.world, source);
+            self.forward_output(output);
+        })?;
+        Ok(result)
+    }
+
     /// Runs steps 1 to 4 of one frame, `seconds` long, with the keys pressed
     /// and released since the last frame and the viewport's camera. The
     /// viewport lays out UI at step 5 and draws the result at step 6.
@@ -384,9 +400,9 @@ fn script_key(key: egui::Key) -> Option<KeyCode> {
 ///
 /// `catch_unwind` wants a closure that's "unwind safe": one that can't leave
 /// half-changed state behind that someone uses after the panic. The session
-/// a panic interrupts is thrown away, never used again, so
+/// (or world copy) a panic interrupts is thrown away, never used again, so
 /// `AssertUnwindSafe` tells the compiler that's fine.
-fn guard(f: impl FnOnce()) -> Result<(), Crash> {
+pub fn guard(f: impl FnOnce()) -> Result<(), Crash> {
     panic::catch_unwind(AssertUnwindSafe(f)).map_err(|payload| Crash(panic_message(&*payload)))
 }
 

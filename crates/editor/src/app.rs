@@ -1,6 +1,6 @@
 //! The editor window: a menu bar, the ribbon with its tabs, and dockable
 //! panels (`layout.rs`): by default the Explorer and Properties on the
-//! right, Output and Assets along the bottom, and the Scene (the 3D
+//! right, the Console and Assets along the bottom, and the Scene (the 3D
 //! viewport) filling the rest, like Roblox Studio.
 //!
 //! Play runs the game on a copy of the world (see `play.rs`). While it
@@ -8,8 +8,8 @@
 //! it (the game's scripts see those changes); everything else is read-only.
 //! Stop drops the copy.
 //!
-//! Above the viewport, tabs switch between the viewport ("World") and the
-//! open scripts.
+//! Open scripts get tabs at the top of the Scene View; clicking the Scene
+//! View's own tab shows the viewport again.
 //!
 //! Where to change behavior:
 //! - `app.rs` — the frame, saved settings, and the dock shell
@@ -17,11 +17,13 @@
 //! - `edits.rs` — selection, tools, property and style edits, undo
 //! - `tree_ops.rs` — insert, duplicate, delete, reparent
 //! - `chrome.rs` — menu bar, ribbon, panels, shortcuts
+//! - `commands.rs` — the Console panel and what typed commands do
 //! - `files.rs` — save, scripts, import, and files changed outside the editor
 //! - `assets.rs` — Assets panel drops, prefabs, and imported files
 
 mod assets;
 mod chrome;
+mod commands;
 mod edits;
 mod files;
 mod session;
@@ -37,7 +39,7 @@ use axcenity_assets::Assets;
 use axcenity_blocks::{BlockScript, translate};
 use axcenity_core::{ClassName, Color3, InstanceId, Material, PartType, Value, Vector3, World};
 use axcenity_project::ScriptFile;
-use axcenity_scene::orientation_from_rotation;
+use axcenity_scene::{TerrainCache, orientation_from_rotation};
 use axcenity_script::{CameraState, KeyEvent};
 use eframe::egui;
 
@@ -47,19 +49,22 @@ use crate::asset_browser::{AssetBrowser, AssetPayload, BrowserAction};
 use crate::autocomplete;
 use crate::block_editor;
 use crate::build_tools::{self, BuildSettings, PanelScene, ToolAction};
+use crate::console::Console;
 use crate::dialog;
 use crate::explorer::{self, Action, Explorer};
 use crate::gizmo::{Modes, Pose, Snap, Tool};
 use crate::history::{self, Field, History, Move, Place};
 use crate::import_dialog::ImportDialog;
 use crate::layout::{self, Layout, Pane};
-use crate::output::{Output, OutputKind};
+use crate::loading::{self, Loading};
+use crate::output::Output;
 use crate::play::{self, Crash, GameKeys, Session};
 use crate::properties::{self, Edit};
 use crate::ribbon::{self, RibbonButton};
 use crate::ribbon_tabs::{RibbonGroup, RibbonTabs};
 use crate::scripts::{self, ScriptTabs};
 use crate::side_warnings::{self, WarningCache};
+use crate::splash::Splash;
 use crate::start::{self, Brand, ProjectLink, StartAction, StartScreen};
 use crate::style_panel::{self, StyleEdit};
 use crate::terrain_studio::TerrainStudio;
@@ -71,6 +76,7 @@ use crate::ui_handles::{CssEdit, UiDragEdit, apply_css_edits};
 use crate::viewport::{self, DragEdit, DragKind, Viewport, ViewportOutput, ViewportScene};
 use crate::watcher::Watcher;
 use crate::widgets;
+use crate::window_frame;
 use eframe::egui_wgpu::RenderState;
 use egui_dock::DockState;
 
@@ -88,6 +94,8 @@ const STOP_SHORTCUT: egui::KeyboardShortcut =
 /// the game ahead by the whole pause; treat the frame as at most this long.
 /// The same cap as the player's.
 const MAX_FRAME_SECONDS: f64 = 0.1;
+/// How many frames the loading screen stays up after a project opens.
+const FINISHING_FRAMES: u64 = 2;
 /// Ctrl+S, or Cmd+S on macOS (`COMMAND` picks the right one).
 const SAVE_SHORTCUT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::S);
@@ -147,7 +155,12 @@ pub struct EditorApp {
     /// isn't stopped again.
     closing: bool,
     explorer: Explorer,
+    /// The Console's log.
     output: Output,
+    /// The Console's command line. Its history is saved between runs.
+    console: Console,
+    /// A line typed into the Console, run once the dock is drawn.
+    pending_command: Option<String>,
     viewport: Viewport,
     /// Original stylesheet contents for the current viewport drag; CSS edit
     /// spans remain relative to this text while the pointer moves.
@@ -184,6 +197,13 @@ pub struct EditorApp {
     toasts: Toasts,
     /// The logo images, loaded on the first frame (they need the egui context).
     brand: Option<Brand>,
+    /// The launch splash, timed from the first frame the window is drawn.
+    splash: Splash,
+    /// The project being read in the background, if one is (see `loading.rs`).
+    loading: Option<Loading>,
+    /// The frame (egui's count) the loading screen goes at, after a
+    /// project opened. Frames, not calls: egui may draw a frame twice.
+    cover_until: Option<u64>,
     /// Projects opened lately, newest first, for the start screen. Saved between runs.
     recent: Vec<ProjectLink>,
     /// The start screen's thumbnails, search and dialogs.
@@ -231,13 +251,19 @@ struct DockViewer<'a> {
     render_state: Option<&'a RenderState>,
     /// What happened in the viewport, handled once everything is drawn.
     viewport: &'a mut ViewportOutput,
+    /// For script tab titles, which use class colours.
+    visuals: egui::Visuals,
+    ctx: egui::Context,
 }
 
 impl egui_dock::TabViewer for DockViewer<'_> {
     type Tab = Pane;
 
     fn title(&mut self, pane: &mut Pane) -> egui::WidgetText {
-        pane.title()
+        match pane {
+            Pane::Script(id) => self.app.tabs.title(*id, &self.visuals),
+            _ => pane.title(),
+        }
     }
 
     fn id(&mut self, pane: &mut Pane) -> egui::Id {
@@ -249,15 +275,41 @@ impl egui_dock::TabViewer for DockViewer<'_> {
             Pane::Scene => *self.viewport = self.app.scene_pane(ui, self.render_state),
             Pane::Explorer => self.app.explorer_pane(ui),
             Pane::Properties => self.app.properties_pane(ui),
-            Pane::Output => self.app.output_pane(ui),
+            Pane::Console => self.app.console_pane(ui),
             Pane::Assets => self.app.assets_pane(ui),
             Pane::Animation => self.app.animation_pane(ui, self.render_state),
             Pane::Terrain => self.app.terrain_pane(ui),
+            Pane::Script(id) => self.app.script_pane(ui, *id),
         }
     }
 
     fn is_closeable(&self, pane: &Pane) -> bool {
         *pane != Pane::Scene
+    }
+
+    /// A script tab stays until the app closes its script, after asking
+    /// about unsaved changes; then `Layout::sync_scripts` removes it.
+    fn on_close(&mut self, pane: &mut Pane) -> egui_dock::tab_viewer::OnCloseResponse {
+        if let Pane::Script(id) = pane {
+            if let Some(path) = self.app.tabs.path_of(*id).map(str::to_owned) {
+                self.app
+                    .request_and_go_ahead(&self.ctx, Discard::CloseTab(path));
+            }
+            return egui_dock::tab_viewer::OnCloseResponse::Ignore;
+        }
+        egui_dock::tab_viewer::OnCloseResponse::Close
+    }
+
+    /// Clicking a tab makes it the one used last: the Scene, or a script.
+    fn on_tab_button(&mut self, pane: &mut Pane, response: &egui::Response) {
+        if !response.clicked() {
+            return;
+        }
+        match pane {
+            Pane::Scene => self.app.tabs.show_world(),
+            Pane::Script(id) => self.app.tabs.activate(*id),
+            _ => {}
+        }
     }
 
     /// The Scene stays docked, so the main window is never left empty.
@@ -270,13 +322,13 @@ impl egui_dock::TabViewer for DockViewer<'_> {
         [false, false]
     }
 
-    /// The viewport goes right to the panel's edges.
+    /// The viewport and scripts go right to the panel's edges.
     fn tab_style_override(
         &self,
         pane: &Pane,
         global: &egui_dock::TabStyle,
     ) -> Option<egui_dock::TabStyle> {
-        (*pane == Pane::Scene).then(|| {
+        matches!(pane, Pane::Scene | Pane::Script(_)).then(|| {
             let mut style = global.clone();
             style.tab_body.inner_margin = egui::Margin::ZERO;
             style
@@ -300,6 +352,10 @@ const RECENT_KEY: &str = "recent projects";
 const LAYOUT_KEY: &str = "panel layout";
 const RIBBON_TABS_KEY: &str = "ribbon tabs";
 const LIGHT_CONES_KEY: &str = "light cones";
+const CONSOLE_HISTORY_KEY: &str = "console history";
+/// eframe's own key for the window's size and position. eframe still reads
+/// it at startup with `persist_window` off, so `save` blanks it.
+const WINDOW_KEY: &str = "window";
 
 /// Something that throws unsaved changes away, so it has to ask first if
 /// there are any.
@@ -398,6 +454,8 @@ impl EditorApp {
             asking: None,
             closing: false,
             output: Output::default(),
+            console: Console::default(),
+            pending_command: None,
             viewport: Viewport::new(),
             ui_drag_baselines: HashMap::new(),
             shown_title: String::new(),
@@ -416,6 +474,9 @@ impl EditorApp {
             settings: settings::SettingsWindow::default(),
             toasts: Toasts::default(),
             brand: None,
+            splash: Splash::default(),
+            loading: None,
+            cover_until: None,
             recent: Vec::new(),
             start: StartScreen::default(),
             thumbnail: None,
@@ -469,6 +530,9 @@ impl EditorApp {
                 self.ribbon_tabs = RibbonTabs::from_text(&text);
             }
             self.light_cones = storage.get_string(LIGHT_CONES_KEY).as_deref() == Some("on");
+            if let Some(text) = storage.get_string(CONSOLE_HISTORY_KEY) {
+                self.console.load_history(&text);
+            }
         }
         theme::apply(ctx, &self.appearance);
     }
@@ -499,6 +563,17 @@ impl eframe::App for EditorApp {
     /// such as mouse movement, unless a frame is requested).
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.frame(ctx, frame.wgpu_render_state());
+        // Tests call `frame` without a window, so the window's resize edges
+        // and the splash live here.
+        window_frame::edges(ctx);
+        if let Some(brand) = &self.brand {
+            let project = match &self.loading {
+                Some(loading) => Some(loading.name.as_str()),
+                None => self.project.as_ref().map(|project| project.name.as_str()),
+            };
+            self.splash
+                .show(ctx, brand, project, self.appearance.reduce_motion);
+        }
     }
 
     /// Saves the look, the layout and the recent projects. eframe calls
@@ -514,7 +589,10 @@ impl eframe::App for EditorApp {
         storage.set_string(RIBBON_TABS_KEY, self.ribbon_tabs.to_text());
         let cones = if self.light_cones { "on" } else { "off" };
         storage.set_string(LIGHT_CONES_KEY, cones.to_owned());
+        storage.set_string(CONSOLE_HISTORY_KEY, self.console.history_text());
         storage.set_string(RECENT_KEY, recent.join("\n"));
+        // An empty value doesn't parse, so the next start uses the default size.
+        storage.set_string(WINDOW_KEY, String::new());
     }
 }
 
@@ -529,6 +607,14 @@ impl EditorApp {
         {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.asking = Some(Discard::Quit);
+        }
+        if self.brand.is_none() {
+            self.brand = Some(Brand::load(ctx));
+        }
+        // While a project loads, only the header and the loading screen.
+        if self.follow_loading(ctx) {
+            self.loading_frame(ctx);
+            return;
         }
         // Files changed by other programs, such as a script saved in VS Code.
         if let Some(project) = &self.project {
@@ -625,9 +711,6 @@ impl EditorApp {
             self.shown_title = title;
         }
 
-        if self.brand.is_none() {
-            self.brand = Some(Brand::load(ctx));
-        }
         // With no project open, the start screen takes the place of the
         // toolbar, the Explorer, the tabs and the viewport.
         let has_project = self.project.is_some();
@@ -637,25 +720,17 @@ impl EditorApp {
         // runs down the whole right side, then the Output fits under the viewport.
         self.update_warnings();
         let palette = theme::palette(ctx);
+        // The header is the window's only title bar (see `window_frame.rs`).
         egui::TopBottomPanel::top("menu bar")
-            .frame(
-                egui::Frame::new()
-                    .fill(palette.app_bg)
-                    .inner_margin(egui::Margin::symmetric(10, 4)),
-            )
-            .show(ctx, |ui| self.menu_bar(ui));
+            .exact_height(window_frame::HEIGHT)
+            .frame(egui::Frame::new().fill(palette.app_bg))
+            .show(ctx, |ui| self.title_bar(ui));
         if has_project {
+            // The toolbar draws its own bands: the tabs on the app
+            // background, the ribbon on a panel's (see `chrome.rs`).
             egui::TopBottomPanel::top("toolbar")
-                .frame(
-                    egui::Frame::new()
-                        .fill(palette.app_bg)
-                        .inner_margin(egui::Margin {
-                            left: 8,
-                            right: 8,
-                            top: 2,
-                            bottom: 6,
-                        }),
-                )
+                .frame(egui::Frame::new().fill(palette.app_bg))
+                .show_separator_line(false)
                 .show(ctx, |ui| self.toolbar(ui));
         }
         // Every panel is a tab in the docking area, which fills the rest of
@@ -664,6 +739,11 @@ impl EditorApp {
         self.viewport_rect = None;
         let mut output = ViewportOutput::default();
         if has_project {
+            self.layout.sync_scripts(
+                &self.tabs.ids(),
+                self.tabs.take_focus(),
+                self.tabs.active_id(),
+            );
             // Taken out while it's drawn, so the panels can borrow the app.
             let mut dock = std::mem::replace(&mut self.layout.dock, DockState::new(Vec::new()));
             egui_dock::DockArea::new(&mut dock)
@@ -676,9 +756,16 @@ impl EditorApp {
                         app: self,
                         render_state,
                         viewport: &mut output,
+                        visuals: ctx.style().visuals.clone(),
+                        ctx: ctx.clone(),
                     },
                 );
             self.layout.dock = dock;
+            if let Some(command) = self.pending_command.take() {
+                self.run_console_command(&command);
+                // The panels were drawn before it ran.
+                ctx.request_repaint();
+            }
         } else {
             self.start_screen(ctx);
         }
@@ -777,6 +864,7 @@ impl EditorApp {
         self.follow_sound_preview();
         self.settings_window(ctx);
         self.toasts.show(ctx);
+        self.cover_while_finishing(ctx);
         theme::paint_crossfade(ctx);
     }
 }
@@ -1116,6 +1204,47 @@ mod tests {
         assert_eq!(app.title(), "Axcenity Editor");
         // It stays in the project list.
         assert_eq!(app.recent.len(), 1);
+    }
+
+    /// Draws frames until the project opening in the background is read.
+    fn draw_until_loaded(app: &mut EditorApp, ctx: &egui::Context) {
+        let deadline = Instant::now() + std::time::Duration::from_secs(30);
+        while app.loading.is_some() {
+            assert!(Instant::now() < deadline, "loading never finished");
+            let _ = ctx.run(Default::default(), |ctx| app.frame(ctx, None));
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    }
+
+    #[test]
+    fn a_project_opened_in_the_background_opens_once_it_is_read() {
+        let ctx = theme::test_context();
+        let mut app = EditorApp::new(None);
+        app.begin_open(&ctx, &example("hello-touched"));
+        assert_eq!(app.loading.as_ref().unwrap().name, "Hello Touched");
+        assert!(app.project.is_none(), "nothing opens before it's read");
+
+        draw_until_loaded(&mut app, &ctx);
+        assert_eq!(app.title(), "Hello Touched - Axcenity Editor");
+        assert!(last_line(&app).text.starts_with("Opened \"Hello Touched\""));
+        // The loading screen stays up while the scene first draws, then goes.
+        assert!(app.cover_until.is_some());
+        for _ in 0..FINISHING_FRAMES {
+            let _ = ctx.run(Default::default(), |ctx| app.frame(ctx, None));
+        }
+        assert_eq!(app.cover_until, None);
+    }
+
+    #[test]
+    fn a_folder_that_fails_to_open_in_the_background_is_reported() {
+        let ctx = theme::test_context();
+        let mut app = EditorApp::new(None);
+        app.begin_open(&ctx, &example("no-such-project"));
+        draw_until_loaded(&mut app, &ctx);
+        assert!(app.project.is_none());
+        let line = last_line(&app);
+        assert_eq!(line.kind, OutputKind::Error);
+        assert!(line.text.contains("axcenity.json"), "{}", line.text);
     }
 
     #[test]

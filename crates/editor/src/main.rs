@@ -15,6 +15,7 @@ mod asset_browser;
 mod autocomplete;
 mod block_editor;
 mod build_tools;
+mod console;
 mod css_syntax;
 mod dialog;
 mod explorer;
@@ -22,6 +23,7 @@ mod gizmo;
 mod history;
 mod import_dialog;
 mod layout;
+mod loading;
 mod lua_syntax;
 mod output;
 mod placing;
@@ -35,6 +37,7 @@ mod scripts;
 mod side_warnings;
 #[cfg(test)]
 mod snapshot;
+mod splash;
 mod start;
 mod style_panel;
 mod surface;
@@ -47,6 +50,7 @@ mod ui_handles;
 mod viewport;
 mod watcher;
 mod widgets;
+mod window_frame;
 
 use std::path::PathBuf;
 
@@ -82,10 +86,19 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         // The viewport draws with wgpu, so egui must too (they share the GPU device).
         renderer: eframe::Renderer::Wgpu,
-        viewport: egui::ViewportBuilder::default()
-            .with_title("Axcenity Editor")
-            .with_inner_size([1280.0, 800.0])
-            .with_icon(window_icon()),
+        // The editor draws its own title bar (`window_frame.rs`). The title
+        // still names the window in the taskbar and window switcher.
+        viewport: window_frame::viewport(
+            egui::ViewportBuilder::default()
+                .with_title("Axcenity Editor")
+                .with_inner_size([1280.0, 800.0])
+                .with_min_inner_size([800.0, 500.0])
+                .with_icon(window_icon()),
+        ),
+        // Always open at the size above, in the middle of the screen. A
+        // remembered size can outgrow a monitor (or span two) and stick.
+        persist_window: false,
+        centered: true,
         ..Default::default()
     };
     eframe::run_native(
@@ -96,8 +109,12 @@ fn main() -> eframe::Result {
         Box::new(move |creation_context| {
             let ctx = &creation_context.egui_ctx;
             theme::install(ctx);
-            let mut app = EditorApp::new(folder.as_deref());
+            let mut app = EditorApp::new(None);
             app.load_settings(ctx, creation_context.storage);
+            // Read in the background, so the window and splash show at once.
+            if let Some(folder) = &folder {
+                app.begin_open(ctx, folder);
+            }
             Ok(Box::new(app))
         }),
     )
@@ -110,5 +127,9 @@ mod tests {
         let icon = super::window_icon();
         assert_eq!((icon.width, icon.height), (256, 256));
         assert_eq!(icon.rgba.len(), 256 * 256 * 4);
+        // The tile's rounded corners are see-through; its middle is solid.
+        assert_eq!(icon.rgba[3], 0);
+        let middle = (128 * 256 + 128) * 4;
+        assert_eq!(icon.rgba[middle + 3], 255);
     }
 }

@@ -7,6 +7,7 @@
 //! Workspace, with a fly camera for looking around.
 
 mod icon;
+mod splash;
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -21,8 +22,8 @@ use axcenity_audio::GameAudio;
 use axcenity_core::{InstanceId, World};
 use axcenity_physics::Physics;
 use axcenity_project::ScriptFile;
+use axcenity_render::Renderer;
 use axcenity_render::glam::Vec3;
-use axcenity_render::{Renderer, UiRectangle, UiText};
 use axcenity_scene::{FlyCamera, MoveKeys};
 use axcenity_script::{CameraState, KeyEvent, OutputKind, ScriptRuntime};
 use winit::application::ApplicationHandler;
@@ -135,7 +136,7 @@ fn main() -> Result<()> {
     let mut app = App {
         title: format!("{} - Axcenity Player", project.manifest.name),
         show_splash,
-        started_at: Instant::now(),
+        splash: splash::Splash::new(),
         world,
         stylesheets,
         scripts,
@@ -260,7 +261,7 @@ fn apply_audio(
 struct App {
     title: String,
     show_splash: bool,
-    started_at: Instant,
+    splash: splash::Splash,
     world: World,
     stylesheets: Vec<axcenity_ui::Stylesheet>,
     /// Runs the scripts, and keeps the ones paused by `task.wait`.
@@ -578,6 +579,28 @@ impl ApplicationHandler for App {
             return;
         }
 
+        if self.show_splash && self.splash.covers() {
+            match &event {
+                WindowEvent::KeyboardInput { event: key, .. }
+                    if key.state == ElementState::Pressed && !key.repeat =>
+                {
+                    self.splash.skip();
+                }
+                WindowEvent::MouseInput {
+                    state: ElementState::Pressed,
+                    ..
+                } => self.splash.skip(),
+                _ => {}
+            }
+            match &event {
+                WindowEvent::CloseRequested
+                | WindowEvent::Resized(_)
+                | WindowEvent::RedrawRequested
+                | WindowEvent::Focused(_) => {}
+                _ => return,
+            }
+        }
+
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => {
@@ -736,28 +759,14 @@ impl ApplicationHandler for App {
                     );
                 self.note_ui_warnings(&ui_layout.warnings);
                 draw_list.sprites = self.particles.sprites(&self.world, &self.assets);
-                if self.show_splash && self.started_at.elapsed().as_secs_f32() < 2.5 {
-                    draw_list
-                        .ui
-                        .push(axcenity_render::UiDrawItem::Rectangle(UiRectangle {
-                            position: [0.0, 0.0],
-                            size: [size.width as f32, size.height as f32],
-                            color: [0.025, 0.035, 0.055, 0.9],
-                            color_end: [0.025, 0.035, 0.055, 0.9],
-                            border_color: [0.0; 4],
-                            border_width: 0.0,
-                            border_radius: 0.0,
-                        }));
-                    draw_list.ui.push(axcenity_render::UiDrawItem::Text(UiText {
-                        position: [size.width as f32 * 0.2, size.height as f32 * 0.44],
-                        size: [size.width as f32 * 0.6, 48.0],
-                        text: "Made with Axcenity".to_owned(),
-                        font_size: 28.0,
-                        font_family: "Montserrat".to_owned(),
-                        color: [0.95, 0.97, 1.0, 1.0],
-                        align: axcenity_render::TextAlign::Center,
-                        center_vertically: true,
-                    }));
+                if self.show_splash {
+                    // The first drawn frame starts the splash clock.
+                    self.splash.tick();
+                    draw_list.ui.extend(self.splash.items(
+                        size.width as f32,
+                        size.height as f32,
+                        "Made with Axcenity",
+                    ));
                 }
                 // Models that couldn't be loaded, by physics or for drawing.
                 for error in self.assets.take_errors() {

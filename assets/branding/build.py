@@ -1,182 +1,136 @@
-"""Builds the logo files in this folder from wordmark-source.png.
+"""Builds the logo files in this folder from mark-source.png and wordmark-source.png.
 
-Run it after changing wordmark-source.png: `python assets/branding/build.py`
-(needs Pillow and NumPy). It cuts the wordmark out of its white background,
-makes the dark-background version, redraws the hexagon mark as strokes (the
-letters cover parts of it in the source) and makes the app icons.
+Run after changing a source: `python assets/branding/build.py` (needs Pillow
+and NumPy). The sources are black ink on white. The white is keyed out by
+brightness, so the logo files are ink on a transparent background, in black
+and in white. Only the app icon has a plate: a rounded charcoal tile.
 """
-import itertools
+
 import os
+from collections import deque
+
 import numpy as np
 from PIL import Image, ImageDraw
 
 OUT = os.path.dirname(os.path.abspath(__file__)) + os.sep
-src = np.asarray(Image.open(OUT + "wordmark-source.png").convert("RGB")).astype(np.float32)
 
-# The logo's palette, and the same colours for dark backgrounds.
-PALETTE = {
-    "blue": ((0, 74, 173), (77, 134, 232)),
-    "dgrey": ((84, 84, 84), (238, 238, 242)),
-    "lgrey": ((170, 170, 170), (226, 228, 236)),
-    "orange": ((241, 137, 45), (241, 137, 45)),
-    "yellow": ((249, 191, 59), (249, 191, 59)),
-    "lyellow": ((255, 207, 75), (255, 207, 75)),
-}
-names = list(PALETTE)
-light = np.array([PALETTE[n][0] for n in names], np.float32)
-dark = np.array([PALETTE[n][1] for n in names], np.float32)
-W = np.float32(255)
-
-h, w, _ = src.shape
-pix = src.reshape(-1, 3)
-
-# 1. Each colour mixed with white: p = a*C + (1-a)*white.
-d = W - pix  # (N,3)
-dc = W - light  # (K,3)
-a = np.clip((d @ dc.T) / (dc * dc).sum(1), 0, 1)  # (N,K)
-fit = a[:, :, None] * light[None] + (1 - a[:, :, None]) * W
-err = np.abs(fit - pix[:, None]).sum(2)  # (N,K)
-
-# Prefer colours that appear pure nearby (radius 2), so an anti-aliased dark
-# outline isn't mistaken for the light grey fill.
-pure = (np.abs(pix[:, None] - light[None]).sum(2) < 8).reshape(h, w, len(names))
-near = np.zeros_like(pure, dtype=np.int32)
-for dy, dx in itertools.product(range(-2, 3), repeat=2):
-    near += np.roll(np.roll(pure, dy, 0), dx, 1)
-near = near.reshape(-1, len(names))
-has_near = near.sum(1) > 0
-score = err - np.where(has_near[:, None], np.minimum(near, 25) * 0.6, 0) + np.where(
-    has_near[:, None] & (near == 0), 40, 0)
-k = score.argmin(1)
-idx = np.arange(len(pix))
-alpha = a[idx, k]
-e1 = err[idx, k]
-
-# 2. Pixels that are a mix of two colours (opaque edges between them).
-best_pair = np.full(len(pix), 1e9, np.float32)
-pair_i = np.zeros(len(pix), int)
-pair_j = np.zeros(len(pix), int)
-pair_t = np.zeros(len(pix), np.float32)
-for i, j in itertools.combinations(range(len(names)), 2):
-    c1, c2 = light[i], light[j]
-    v = c1 - c2
-    t = np.clip(((pix - c2) @ v) / (v @ v), 0, 1)
-    e = np.abs(t[:, None] * c1 + (1 - t[:, None]) * c2 - pix).sum(1)
-    better = e < best_pair
-    best_pair[better], pair_i[better], pair_j[better], pair_t[better] = e[better], i, j, t[better]
-
-white = pix.min(1) >= 252
-use_pair = (best_pair + 6 < e1) & ~white
+BLACK = (0, 0, 0)
+WHITE = (255, 255, 255)
+CHARCOAL = (24, 24, 27)
+# Brightness at or below INK is solid ink; at or above PAPER it is background.
+# Between them is the anti-aliased edge. PAPER sits under the sources' faint
+# paper texture, so none of it survives.
+INK = 40
+PAPER = 215
+# Specks of ink smaller than this many pixels are noise, not logo.
+MIN_SPECK = 64
 
 
-# The pale circles: see-through yellow, never more than about half opaque nearby.
-al2 = alpha.reshape(h, w).copy()
-al2[white.reshape(h, w)] = 0
-nearmax = al2.copy()
-for dy, dx in itertools.product(range(-3, 4), repeat=2):
-    nearmax = np.maximum(nearmax, np.roll(np.roll(al2, dy, 0), dx, 1))
-pale = (nearmax.reshape(-1) < 0.6) & (k == names.index("yellow")) & ~use_pair
-
-# The dark grey outlines of "Axc" (around light grey letters), told apart from
-# the dark grey letters "enity" by having light grey right beside them.
-lgrey_pure = (k == names.index("lgrey")).reshape(h, w) & (alpha.reshape(h, w) > 0.5)
-beside = np.zeros_like(lgrey_pure)
-# The outlines are a hollow copy of the letters, offset up and left from
-# the grey ones, so their far side is up to about 20 pixels away.
-for dy, dx in itertools.product(range(-20, 21, 2), repeat=2):
-    beside |= np.roll(np.roll(lgrey_pure, dy, 0), dx, 1)
-dg = names.index("dgrey")
-outline = beside.reshape(-1) & ((k == dg) | (use_pair & ((pair_i == dg) | (pair_j == dg))))
-# On dark backgrounds the "Axc" letters are light with a soft grey outline,
-# rather than grey inside a bright ring.
-DARK_OUTLINE = np.array((112, 117, 130), np.float32)
-DARK_PALE = np.array((255, 214, 120), np.float32)
+def key(name: str) -> np.ndarray:
+    """The source's ink as alpha (0 to 1), with the background removed."""
+    gray = np.asarray(Image.open(OUT + name).convert("L")).astype(np.float32)
+    alpha = np.clip((PAPER - gray) / (PAPER - INK), 0.0, 1.0)
+    return despeckle(alpha)
 
 
-def render(colours, pale_boost=1.0, dark=False):
-    # Per pixel: the palette, with the outline colour for "Axc" outlines.
-    per_pixel = np.repeat(colours[None], len(pix), 0)
-    if dark:
-        per_pixel[outline, dg] = DARK_OUTLINE
-    rgb = per_pixel[idx, k]
-    if dark:
-        rgb[pale] = DARK_PALE
-    rgb[use_pair] = (pair_t[use_pair, None] * per_pixel[use_pair, pair_i[use_pair]]
-                     + (1 - pair_t[use_pair, None]) * per_pixel[use_pair, pair_j[use_pair]])
-    al = np.where(use_pair, 1.0, alpha)
-    al[pale] = np.minimum(al[pale] * pale_boost, 0.9 if dark else 1)
-    al[white] = 0
-    rgba = np.concatenate([rgb, al[:, None] * 255], 1).reshape(h, w, 4)
-    return Image.fromarray(np.clip(rgba + 0.5, 0, 255).astype(np.uint8), "RGBA")
+def despeckle(alpha: np.ndarray) -> np.ndarray:
+    """Clears small islands of ink (8-connected), keeping the real shapes."""
+    h, w = alpha.shape
+    ink = alpha > 0.0
+    seen = np.zeros_like(ink)
+    for y0, x0 in zip(*np.nonzero(ink)):
+        if seen[y0, x0]:
+            continue
+        seen[y0, x0] = True
+        island = [(y0, x0)]
+        queue = deque(island)
+        while queue:
+            y, x = queue.popleft()
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    ny, nx = y + dy, x + dx
+                    if 0 <= ny < h and 0 <= nx < w and ink[ny, nx] and not seen[ny, nx]:
+                        seen[ny, nx] = True
+                        island.append((ny, nx))
+                        queue.append((ny, nx))
+        if len(island) < MIN_SPECK:
+            ys, xs = zip(*island)
+            alpha[list(ys), list(xs)] = 0.0
+    return alpha
 
 
-def trim(im, pad=12):
-    x0, y0, x1, y1 = im.getchannel("A").point(lambda v: 255 if v > 8 else 0).getbbox()
-    return im.crop((x0 - pad, y0 - pad, x1 + pad, y1 + pad))
+def crop(alpha: np.ndarray, pad_frac: float) -> np.ndarray:
+    """Crops to the ink, plus `pad_frac` of its longer side as clear margin."""
+    rows, cols = np.nonzero(alpha)
+    if rows.size == 0:
+        raise SystemExit("no ink in the source")
+    y0, y1 = rows.min(), rows.max() + 1
+    x0, x1 = cols.min(), cols.max() + 1
+    pad = round(max(x1 - x0, y1 - y0) * pad_frac)
+    return np.pad(alpha[y0:y1, x0:x1], pad)
 
 
-for colours, name, boost, is_dark in ((light, "wordmark", 1.0, False),
-                                      (dark, "wordmark-dark", 2.2, True)):
-    im = trim(render(colours, boost, is_dark))
-    # Twice the size it's drawn at, so it's sharp on high-DPI screens: egui
-    # has no mipmaps, so an image drawn at under half its size looks jagged.
-    for width, suffix in ((840, ""), (336, "-small")):
-        small = im.resize((width, round(im.height * width / im.width)), Image.LANCZOS)
-        small.save(OUT + name + suffix + ".png", optimize=True)
-
-# 3. The hexagon mark, redrawn as strokes (the letters cover parts of it).
-STROKE = 23
-STROKES = [
-    [(258, 243), (515, 287), (621, 494), (548, 757), (285, 826), (76, 677), (62, 417), (258, 243)],
-    [(173, 330), (218, 452), (82, 672)],
-    [(258, 243), (345, 518), (617, 513)],
-    [(190, 738), (345, 518)],
-    [(385, 282), (426, 410), (573, 405)],
-    [(285, 826), (430, 635), (584, 631)],
-]
-BOX = (30, 224, 650, 844)  # a square around the mark in the source image
+def square(alpha: np.ndarray) -> np.ndarray:
+    """Centers the ink in a square of clear background."""
+    h, w = alpha.shape
+    side = max(h, w)
+    out = np.zeros((side, side), np.float32)
+    y, x = (side - h) // 2, (side - w) // 2
+    out[y : y + h, x : x + w] = alpha
+    return out
 
 
-def mark(size, colour, scale=4, inset=0.0):
-    big = size * scale
-    x0, y0, x1, _ = BOX
-    k_ = big * (1 - 2 * inset) / (x1 - x0)
-    off = big * inset
-    im = Image.new("RGBA", (big, big), (0, 0, 0, 0))
-    dr = ImageDraw.Draw(im)
-    sw = STROKE * k_
-    for s in STROKES:
-        pts = [((x - x0) * k_ + off, (y - y0) * k_ + off) for x, y in s]
-        dr.line(pts, fill=colour, width=round(sw), joint="curve")
-        for px_, py_ in pts:
-            dr.ellipse([px_ - sw / 2, py_ - sw / 2, px_ + sw / 2, py_ + sw / 2], fill=colour)
-    return im.resize((size, size), Image.LANCZOS)
+def ink(alpha: np.ndarray, colour: tuple[int, int, int]) -> Image.Image:
+    """`colour` everywhere, with the ink as alpha: no fringe at any size."""
+    h, w = alpha.shape
+    rgba = np.empty((h, w, 4), np.uint8)
+    rgba[..., :3] = colour
+    rgba[..., 3] = np.clip(alpha * 255.0 + 0.5, 0, 255).astype(np.uint8)
+    return Image.fromarray(rgba, "RGBA")
 
 
-mark(1024, (0, 74, 173)).save(OUT + "mark.png", optimize=True)
-
-# The vector master.
-x0, y0, x1, _ = BOX
-paths = "\n".join(
-    '  <polyline points="%s"/>' % " ".join("%d,%d" % (x - x0, y - y0) for x, y in s) for s in STROKES)
-open(OUT + "mark.svg", "w").write(
-    f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {x1 - x0} {x1 - x0}">\n'
-    f'<g fill="none" stroke="#004aad" stroke-width="{STROKE}" stroke-linecap="round" stroke-linejoin="round">\n'
-    f"{paths}\n</g>\n</svg>\n")
+def resize_width(im: Image.Image, width: int) -> Image.Image:
+    return im.resize((width, round(im.height * width / im.width)), Image.LANCZOS)
 
 
-# 4. App icon: the mark on a white rounded tile, readable on light and dark taskbars.
-def icon(size):
-    s = size * 4
-    tile = Image.new("RGBA", (s, s), (0, 0, 0, 0))
-    ImageDraw.Draw(tile).rounded_rectangle([s * 0.03, s * 0.03, s * 0.97, s * 0.97], radius=s * 0.22,
-                                           fill=(255, 255, 255, 255))
-    tile = tile.resize((size, size), Image.LANCZOS)
-    tile.alpha_composite(mark(size, (0, 74, 173), inset=0.14))
-    return tile
+def tile(mark: Image.Image, side: int) -> Image.Image:
+    """The white A on a rounded charcoal tile with see-through corners."""
+    big = 1024
+    canvas = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    ImageDraw.Draw(canvas).rounded_rectangle(
+        (0, 0, big - 1, big - 1), radius=round(big * 0.22), fill=CHARCOAL + (255,)
+    )
+    inner = round(big * 0.66)
+    fitted = mark.resize((inner, inner), Image.LANCZOS)
+    origin = (big - inner) // 2
+    canvas.alpha_composite(fitted, (origin, origin))
+    return canvas if side == big else canvas.resize((side, side), Image.LANCZOS)
 
 
-icon(1024).save(OUT + "icon.png", optimize=True)
-icon(256).save(OUT + "icon-256.png", optimize=True)
-icon(32).save(OUT + "favicon-32.png", optimize=True)
-icon(256).save(OUT + "icon.ico", sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+def save(im: Image.Image, name: str) -> None:
+    im.save(OUT + name, optimize=True)
+
+
+mark = square(crop(key("mark-source.png"), 0.0))
+mark_black = resize_width(ink(mark, BLACK), 1024)
+mark_white = resize_width(ink(mark, WHITE), 1024)
+save(mark_black, "mark.png")
+save(mark_white, "mark-white.png")
+save(resize_width(mark_white, 48), "mark-white-small.png")
+
+word = crop(key("wordmark-source.png"), 0.02)
+save(resize_width(ink(word, BLACK), 960), "wordmark.png")
+save(resize_width(ink(word, WHITE), 960), "wordmark-white.png")
+
+save(tile(mark_white, 1024), "icon.png")
+save(tile(mark_white, 256), "icon-256.png")
+save(tile(mark_white, 32), "favicon-32.png")
+tile(mark_white, 256).save(
+    OUT + "icon.ico",
+    sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)],
+)
+
+# Files from the opaque-plate builds, no longer made.
+for old in ("mark.svg", "wordmark-dark.png", "wordmark-dark-small.png", "wordmark-small.png"):
+    if os.path.exists(OUT + old):
+        os.remove(OUT + old)

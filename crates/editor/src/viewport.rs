@@ -1383,6 +1383,11 @@ fn start_camera() -> FlyCamera {
     FlyCamera::looking_at(START_CAMERA_POSITION, Vec3::ZERO)
 }
 
+/// Where a newly opened project's camera starts, as the renderer takes it.
+pub fn start_view() -> axcenity_render::Camera {
+    start_camera().to_render_camera()
+}
+
 /// How visible the speed pop-up is, from 1 (fully) to 0 (gone), `age`
 /// seconds after the speed last changed.
 fn popup_opacity(age: f64) -> f32 {

@@ -14,7 +14,7 @@ use std::sync::Arc;
 use axcenity_core::{ClassName, InstanceId, TerrainData, Value, World};
 use axcenity_terrain::files;
 
-use crate::{LoadError, SaveError};
+use crate::{LoadError, LoadStep, SaveError};
 
 /// Where new terrains' folders go.
 pub const TERRAIN_FOLDER: &str = "assets/terrain";
@@ -45,16 +45,32 @@ pub fn load_terrains(
     world: &mut World,
     problems: &mut Vec<LoadError>,
 ) -> Vec<String> {
+    load_terrains_reporting(folder, world, problems, &mut |_| {})
+}
+
+/// [`load_terrains`], telling `progress` about each terrain before it's read.
+pub(crate) fn load_terrains_reporting(
+    folder: &Path,
+    world: &mut World,
+    problems: &mut Vec<LoadError>,
+    progress: &mut dyn FnMut(LoadStep),
+) -> Vec<String> {
     let terrains: Vec<InstanceId> = [world.workspace(), world.replicated_storage()]
         .into_iter()
         .flat_map(|service| world.descendants(service))
         .filter(|&id| world.get(id).map(|i| i.class()) == Some(ClassName::Terrain))
         .collect();
     let mut damaged = Vec::new();
-    for id in terrains {
+    let total = terrains.len();
+    for (done, id) in terrains.into_iter().enumerate() {
         let Some(data_folder) = data_folder(world, id) else {
             continue;
         };
+        progress(LoadStep::Terrain {
+            name: world.get(id).map_or("", |i| i.name()),
+            done,
+            total,
+        });
         let disk = folder.join(&data_folder);
         let result = if is_safe_folder(&data_folder) {
             files::decode(|name| fs::read(disk.join(name)).ok()).map_err(|error| error.to_string())

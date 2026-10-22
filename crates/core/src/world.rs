@@ -263,6 +263,18 @@ impl World {
         self.changes.recording = true;
     }
 
+    /// True between [`record_changes`](Self::record_changes) and
+    /// [`stop_recording_changes`](Self::stop_recording_changes).
+    pub fn is_recording_changes(&self) -> bool {
+        self.changes.recording
+    }
+
+    /// Stops keeping the list, and forgets what's in it.
+    pub fn stop_recording_changes(&mut self) {
+        self.changes.recording = false;
+        self.changes.changes.clear();
+    }
+
     /// The number the next change will get. Something that starts listening
     /// now should only hear about changes numbered this or higher.
     pub fn next_change_number(&self) -> u64 {

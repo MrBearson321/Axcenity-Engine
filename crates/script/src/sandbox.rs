@@ -153,6 +153,39 @@ pub struct ScriptIds {
     pub script: InstanceId,
 }
 
+/// The engine's own globals, which `api::install` and [`environment`] add.
+const ENGINE_GLOBALS: &[&str] = &[
+    "print",
+    "game",
+    "workspace",
+    "script",
+    "Instance",
+    "Vector3",
+    "Color3",
+    "UDim2",
+    "Enum",
+    "task",
+    "pcall",
+    "xpcall",
+    "setmetatable",
+    "require",
+    "collectgarbage",
+    "os",
+    "_G",
+];
+
+/// Every global a script's environment has, sorted.
+pub fn global_names() -> Vec<&'static str> {
+    let mut names: Vec<&str> = SAFE_FUNCTIONS
+        .iter()
+        .chain(SAFE_LIBRARIES)
+        .chain(ENGINE_GLOBALS)
+        .copied()
+        .collect();
+    names.sort_unstable();
+    names
+}
+
 /// Builds a new environment for one script or module.
 pub fn environment(lua: &Lua, ids: ScriptIds) -> mlua::Result<Table> {
     let shared = lua

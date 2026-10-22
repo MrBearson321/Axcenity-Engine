@@ -67,12 +67,6 @@ impl EditorApp {
             ui.ctx().request_repaint();
         }
     }
-    /// The Output panel. A clicked script error opens the script there.
-    pub(super) fn output_pane(&mut self, ui: &mut egui::Ui) {
-        if let Some(location) = self.output.show(ui) {
-            self.open_script(&location.path, Some(location.line));
-        }
-    }
     /// The Assets panel, then what was asked for in it.
     pub(super) fn assets_pane(&mut self, ui: &mut egui::Ui) {
         let can_save = assets::any_prefab(&self.world, &self.selection_roots());
@@ -228,36 +222,74 @@ impl EditorApp {
             }
         }
     }
-    /// The Scene panel: the tabs for the viewport ("World") and the open
-    /// scripts, Code/Blocks for a Script, and the viewport or the script.
+    /// The Scene View panel: the viewport.
     pub(super) fn scene_pane(
         &mut self,
         ui: &mut egui::Ui,
         render_state: Option<&RenderState>,
     ) -> ViewportOutput {
         let ctx = ui.ctx().clone();
+        let world = shown(&self.world, &self.play);
+        let stylesheets = self
+            .project
+            .as_ref()
+            .map_or(&[][..], |project| project.stylesheets.as_slice());
+        // No tool during Play, so nothing can be dragged.
+        let tool = (!self.playing()).then_some(self.tool);
+        let preview = self.angular_preview();
+        let terrain_brush = self.terrain_brush_view(&ctx);
+        let emits = std::mem::take(&mut self.pending_emits);
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show_inside(ui, |ui| match render_state {
+                Some(render_state) => {
+                    self.viewport_rect = Some(ui.available_rect_before_wrap());
+                    self.viewport.show(
+                        ui,
+                        render_state,
+                        ViewportScene {
+                            world,
+                            assets: &self.assets,
+                            selected: self.selected,
+                            selection: &self.selection,
+                            tool,
+                            snap: self.snap,
+                            modes: self.modes,
+                            preview: &preview,
+                            emits: &emits,
+                            stylesheets,
+                            focused_text: self.focused_text,
+                            light_cones: self.light_cones,
+                            poses: self.play.as_ref().map(Session::poses),
+                            terrain_brush,
+                        },
+                    )
+                }
+                // Can't happen: main.rs always picks the wgpu renderer.
+                None => {
+                    ui.label("The viewport needs the wgpu renderer.");
+                    Default::default()
+                }
+            })
+            .inner
+    }
+    /// A script's dock tab (see `scripts.rs`): Code/Blocks for a Script or
+    /// LocalScript, then its code or blocks. `id` is its tab's id.
+    pub(super) fn script_pane(&mut self, ui: &mut egui::Ui, id: u64) {
+        let Some(path) = self.tabs.path_of(id).map(str::to_owned) else {
+            return;
+        };
+        let ctx = ui.ctx().clone();
         let palette = theme::palette(&ctx);
-        let close_tab = egui::TopBottomPanel::top("tabs")
-            .frame(
-                egui::Frame::new()
-                    .fill(palette.panel)
-                    .inner_margin(egui::Margin::symmetric(4, 0)),
-            )
-            .show_inside(ui, |ui| self.tabs.tab_bar(ui))
-            .inner;
-        if let Some(path) = close_tab {
-            self.request_and_go_ahead(&ctx, Discard::CloseTab(path));
+        // Clicking or typing in a tab makes it the script used last.
+        if ui.ui_contains_pointer() && ctx.input(|input| input.pointer.any_pressed()) {
+            self.tabs.activate(id);
         }
         // Scripts and LocalScripts switch between Code and Blocks here.
-        let switchable = self
-            .tabs
-            .active_path()
-            .filter(|path| axcenity_project::switched_script_path(path).is_some())
-            .map(str::to_owned);
-        if let Some(path) = switchable {
+        if axcenity_project::switched_script_path(&path).is_some() {
             let blocks = axcenity_project::is_block_script(&path);
             let playing = self.playing();
-            let switch = egui::TopBottomPanel::top("script mode")
+            let switch = egui::TopBottomPanel::top(egui::Id::new(("script mode", id)))
                 .frame(
                     egui::Frame::new()
                         .fill(palette.panel)
@@ -268,59 +300,11 @@ impl EditorApp {
             if switch {
                 self.switch_script_mode(&path);
                 ctx.request_repaint();
+                return;
             }
         }
 
-        let world = shown(&self.world, &self.play);
-        let stylesheets = self
-            .project
-            .as_ref()
-            .map_or(&[][..], |project| project.stylesheets.as_slice());
-        // No tool during Play, so nothing can be dragged.
-        let tool = (!self.playing()).then_some(self.tool);
-        let preview = self.angular_preview();
-        let terrain_brush = self.terrain_brush_view(&ctx);
-        let active_block_path = self
-            .tabs
-            .active_path()
-            .filter(|path| axcenity_project::is_block_script(path))
-            .map(str::to_owned);
-        if self.tabs.world_shown() {
-            let emits = std::mem::take(&mut self.pending_emits);
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE)
-                .show_inside(ui, |ui| match render_state {
-                    Some(render_state) => {
-                        self.viewport_rect = Some(ui.available_rect_before_wrap());
-                        self.viewport.show(
-                            ui,
-                            render_state,
-                            ViewportScene {
-                                world,
-                                assets: &self.assets,
-                                selected: self.selected,
-                                selection: &self.selection,
-                                tool,
-                                snap: self.snap,
-                                modes: self.modes,
-                                preview: &preview,
-                                emits: &emits,
-                                stylesheets,
-                                focused_text: self.focused_text,
-                                light_cones: self.light_cones,
-                                poses: self.play.as_ref().map(Session::poses),
-                                terrain_brush,
-                            },
-                        )
-                    }
-                    // Can't happen: main.rs always picks the wgpu renderer.
-                    None => {
-                        ui.label("The viewport needs the wgpu renderer.");
-                        Default::default()
-                    }
-                })
-                .inner
-        } else if let Some(path) = &active_block_path {
+        if axcenity_project::is_block_script(&path) {
             let mut changed = false;
             let folder = self.project.as_ref().map(|project| project.folder.clone());
             let animation = &mut self.animation;
@@ -335,14 +319,14 @@ impl EditorApp {
                         project
                             .block_scripts
                             .iter_mut()
-                            .find(|document| document.path == *path)
+                            .find(|document| document.path == path)
                     }) {
                         changed = block_editor::show(
                             ui,
                             &mut document.script,
                             block_editor::BlockContext {
-                                key: path,
-                                client: axcenity_project::script_class(path)
+                                key: &path,
+                                client: axcenity_project::script_class(&path)
                                     == ClassName::LocalScript,
                                 highlighted: document.highlighted,
                                 objects: &objects,
@@ -354,41 +338,96 @@ impl EditorApp {
                     }
                 });
             if changed {
-                self.update_block_lua(path);
+                self.update_block_lua(&path);
             }
-            Default::default()
-        } else {
-            let stylesheet_path = self
+            return;
+        }
+
+        let stylesheet = axcenity_project::is_stylesheet(&path);
+        let previous_source = stylesheet
+            .then(|| self.tabs.get(&path).map(|tab| tab.text.clone()))
+            .flatten();
+        egui::CentralPanel::default().show_inside(ui, |ui| self.tabs.show(ui, &path));
+        if let Some(previous_source) = previous_source {
+            let current_source = self
                 .tabs
-                .active_path()
-                .filter(|path| axcenity_project::is_stylesheet(path))
-                .map(str::to_owned);
-            let previous_source = stylesheet_path
-                .as_deref()
-                .and_then(|path| self.tabs.get(path))
-                .map(|tab| tab.text.clone());
-            egui::CentralPanel::default().show_inside(ui, |ui| self.tabs.show_active(ui));
-            if let (Some(path), Some(previous_source)) = (stylesheet_path, previous_source) {
-                let current_source = self
-                    .tabs
-                    .get(&path)
-                    .map(|tab| tab.text.clone())
-                    .unwrap_or_default();
-                if current_source != previous_source {
-                    self.refresh_stylesheet(&path, &current_source);
-                    ctx.request_repaint();
-                }
+                .get(&path)
+                .map(|tab| tab.text.clone())
+                .unwrap_or_default();
+            if current_source != previous_source {
+                self.refresh_stylesheet(&path, &current_source);
+                ctx.request_repaint();
             }
-            Default::default()
         }
     }
-    /// The header: the logo, the menus, and at the right the project's
-    /// name, whether it has unsaved changes, Play's badge and Settings.
-    pub(super) fn menu_bar(&mut self, ui: &mut egui::Ui) {
+    /// The header, which is also the window's title bar, like VS Code's (see
+    /// `window_frame.rs`): the logo and menus, the window title in the
+    /// middle, then Play's badge, Settings and the window buttons. Its empty
+    /// space drags the window.
+    pub(super) fn title_bar(&mut self, ui: &mut egui::Ui) {
+        let bar = ui.max_rect();
+        // First, so the menus and buttons added after it sit on top.
+        window_frame::drag_region(ui, bar);
+        if window_frame::buttons(ui, bar) {
+            self.request_and_go_ahead(ui.ctx(), Discard::Quit);
+        }
+        let row_height = ui.spacing().interact_size.y;
+        let row = egui::Rect::from_x_y_ranges(
+            bar.left() + 10.0 + window_frame::LEFT_INSET
+                ..=bar.right() - window_frame::buttons_width() - 6.0,
+            bar.center().y - row_height * 0.5..=bar.center().y + row_height * 0.5,
+        );
+        let free = ui
+            .scope_builder(
+                egui::UiBuilder::new()
+                    .max_rect(row)
+                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                |ui| {
+                    // The menus act on the open project, so not while another loads.
+                    if self.loading.is_some() {
+                        ui.disable();
+                    }
+                    self.menu_bar(ui)
+                },
+            )
+            .inner;
+
+        // Centred on the window, but kept clear of the menus and buttons.
+        let span = free.shrink2(egui::vec2(16.0, 0.0));
+        if span.width() > 48.0 {
+            let palette = theme::palette(ui.ctx());
+            let title = widgets::elided(
+                ui,
+                self.title(),
+                egui::FontId::new(12.5, theme::medium_family()),
+                palette.text_secondary,
+                span.width(),
+                1,
+            );
+            let size = title.size();
+            let x = (bar.center().x - size.x * 0.5).clamp(span.left(), span.right() - size.x);
+            ui.painter().galley(
+                egui::pos2(x, bar.center().y - size.y * 0.5),
+                title,
+                palette.text_secondary,
+            );
+        }
+    }
+
+    /// The logo and the menus, then Play's badge and Settings at the right.
+    /// Returns the space left between them, for the window title.
+    fn menu_bar(&mut self, ui: &mut egui::Ui) -> egui::Rect {
         let palette = theme::palette(ui.ctx());
         egui::MenuBar::new().ui(ui, |ui| {
             let (mark, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
-            widgets::paint_mark(ui.painter(), mark.shrink(1.0), palette.text_strong);
+            if let Some(brand) = &self.brand {
+                widgets::paint_mark(
+                    ui.painter(),
+                    mark.shrink(1.0),
+                    brand.mark(),
+                    palette.text_strong,
+                );
+            }
             ui.add_space(4.0);
             ui.menu_button("File", |ui| {
                 if ui
@@ -712,46 +751,65 @@ impl EditorApp {
                 if self.playing() {
                     playing_badge(ui);
                 }
-                if let Some(name) = self.project.as_ref().map(|project| project.name.clone()) {
-                    if self.unsaved() {
-                        ui.label(
-                            egui::RichText::new(filled_icons::CIRCLE)
-                                .family(theme::filled())
-                                .size(7.0)
-                                .color(palette.text_secondary),
-                        )
-                        .on_hover_text("Unsaved changes");
-                    }
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(name)
-                                .family(theme::medium_family())
-                                .color(palette.text_secondary),
-                        )
-                        .truncate(),
-                    );
-                }
-            });
-        });
+                ui.available_rect_before_wrap()
+            })
+            .inner
+        })
+        .inner
     }
     /// The ribbon under the menu bar: Play and Stop, the tools, the snapping
     /// settings, then buttons that insert each primitive and each kind of script.
+    /// The ribbon's tabs, on the app background like the header, over the
+    /// ribbon itself, a shade lighter with a hairline above and below, so
+    /// the tabs don't run into its buttons.
     pub(super) fn toolbar(&mut self, ui: &mut egui::Ui) {
-        self.ribbon_tabs.tab_bar(ui);
-        ui.add_space(4.0);
+        let palette = theme::palette(ui.ctx());
+        ui.spacing_mut().item_spacing.y = 0.0;
+        let active_tab = egui::Frame::new()
+            .inner_margin(egui::Margin {
+                left: 8,
+                right: 8,
+                top: 2,
+                bottom: 0,
+            })
+            .show(ui, |ui| self.ribbon_tabs.tab_bar(ui))
+            .inner;
         let mut clicks = RibbonClicks::default();
         let groups = self.ribbon_tabs.groups();
-        egui::ScrollArea::horizontal().show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
-                for (index, &group) in groups.iter().enumerate() {
-                    if index > 0 {
-                        ui.add(egui::Separator::default().vertical().spacing(10.0));
-                    }
-                    self.ribbon_group(ui, group, &mut clicks);
-                }
-            });
-        });
+        let ribbon = egui::Frame::new()
+            .fill(palette.panel)
+            .inner_margin(egui::Margin::symmetric(8, 6))
+            .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                egui::ScrollArea::horizontal().show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        for (index, &group) in groups.iter().enumerate() {
+                            if index > 0 {
+                                ui.add(egui::Separator::default().vertical().spacing(10.0));
+                            }
+                            self.ribbon_group(ui, group, &mut clicks);
+                        }
+                    });
+                });
+            })
+            .response
+            .rect;
+        let line = egui::Stroke::new(1.0_f32, palette.border);
+        let painter = ui.painter();
+        painter.hline(ribbon.x_range(), ribbon.top() + 0.5, line);
+        painter.hline(ribbon.x_range(), ribbon.bottom() - 0.5, line);
+        // The active tab is filled like the ribbon and joins it, over the line.
+        if let Some(tab) = active_tab {
+            painter.rect_filled(
+                egui::Rect::from_min_max(
+                    egui::pos2(tab.left() + 1.0, ribbon.top() - 0.5),
+                    egui::pos2(tab.right() - 1.0, ribbon.top() + 1.0),
+                ),
+                0,
+                palette.panel,
+            );
+        }
         if let Some(what) = clicks.insert {
             let near = self.selected;
             self.act(Action::Insert { what, near });

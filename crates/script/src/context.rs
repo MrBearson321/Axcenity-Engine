@@ -15,8 +15,8 @@ use crate::instance::{self, ClassMethods};
 use crate::remote::{self, Message, Outbox};
 use crate::sides::Side;
 use crate::{
-    Output, OutputKind, OutputLine, changes, events, modules, push_output, sandbox, scheduler,
-    watchdog, with_world,
+    Output, OutputKind, OutputLine, changes, console, events, modules, push_output, sandbox,
+    scheduler, watchdog, with_world,
 };
 
 pub struct Context {
@@ -107,6 +107,23 @@ impl Context {
                 Err(err) => push_output(&self.lua, OutputKind::Error, error_message(&err)),
             }
         });
+    }
+
+    /// Runs a Console command as a new coroutine until it finishes, fails or
+    /// pauses (see `console`). `Err` is the message for code that isn't
+    /// valid Lua; other errors go to the output, as a script's do.
+    pub fn run_command(&self, world: &mut World, source: &str) -> Result<(), String> {
+        let function = console::environment(&self.lua, world)
+            .map_err(|err| error_message(&err))
+            .and_then(|env| console::compile(&self.lua, &env, source))?;
+        let thread = self
+            .lua
+            .create_thread(function)
+            .map_err(|err| error_message(&err))?;
+        with_world(&self.lua, world, || {
+            scheduler::resume(&self.lua, &thread, ())
+        });
+        Ok(())
     }
 
     /// Compiles a script into a coroutine that hasn't started yet.

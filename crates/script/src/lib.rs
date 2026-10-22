@@ -19,11 +19,14 @@
 //!   `client`, and `sides` says which APIs work on which side.
 //! - [`lua_definitions`] describes that API for editors (see `definitions`).
 //! - `print` output and errors are collected as [`OutputLine`]s for the host to
-//!   show: the player's console, or the editor's Output panel during Play.
+//!   show: the player's console, or the editor's Console panel during Play.
+//! - The editor's Console runs typed Lua with [`ScriptRuntime::run_command`]
+//!   during Play and [`run_edit_command`] outside it (see `console`).
 
 mod api;
 mod changes;
 mod client;
+mod console;
 mod context;
 mod definitions;
 mod errors;
@@ -190,6 +193,18 @@ impl ScriptRuntime {
     /// The Player of whoever plays on this device, once they've joined.
     pub fn local_player(&self) -> Option<InstanceId> {
         self.client.local_player()
+    }
+
+    /// Runs Lua typed into the editor's Console during Play, on the server
+    /// side, as a coroutine of its own (so `task.wait` works). Commands
+    /// share one set of globals. What it prints, and its errors, join the
+    /// output. `Err` is the message for code that isn't valid Lua.
+    pub fn run_command(&mut self, world: &mut World, source: &str) -> Result<(), String> {
+        self.fire_changes(world);
+        let result = self.server.run_command(world, source);
+        self.collect(Side::Server);
+        self.fire_changes(world);
+        result
     }
 
     /// Frame-order step 1: the keys pressed and released since the last
@@ -412,6 +427,41 @@ impl Default for ScriptRuntime {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// What [`run_edit_command`] did.
+#[derive(Debug)]
+pub struct EditCommand {
+    /// What the command printed, and its errors.
+    pub output: Vec<OutputLine>,
+    /// True if it changed `world`.
+    pub changed: bool,
+}
+
+/// Runs Lua typed into the editor's Console outside Play, against the
+/// world being edited, with the same sandbox as scripts. It runs on the
+/// server side, in an interpreter of its own that's thrown away after, so
+/// nothing it connects or schedules (`task.wait`) lives on. `Err` is the
+/// message for code that isn't valid Lua.
+pub fn run_edit_command(world: &mut World, source: &str) -> Result<EditCommand, String> {
+    let context = Context::new(Side::Server);
+    let was_recording = world.is_recording_changes();
+    let first = world.next_change_number();
+    world.record_changes();
+    let result = context.run_command(world, source);
+    let changed = world.next_change_number() != first;
+    if !was_recording {
+        world.stop_recording_changes();
+    }
+    result.map(|()| EditCommand {
+        output: context.take_output(),
+        changed,
+    })
+}
+
+/// Every global name a script has, for the Console's autocomplete.
+pub fn global_names() -> Vec<&'static str> {
+    sandbox::global_names()
 }
 
 /// Lends `world` to Lua while `f` runs.

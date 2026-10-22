@@ -1,0 +1,253 @@
+//! The editor's own title bar, like VS Code's: the OS title bar is turned off
+//! and the header holds the menus, the window title and the window buttons.
+//!
+//! On Windows and Linux the OS frame is removed entirely, so this draws the
+//! minimize, maximize and close buttons, and resize grips along the edges.
+//! On macOS the frame stays and the content runs under a transparent title
+//! bar, so the system's traffic lights sit at the header's left.
+
+use eframe::egui::{
+    self, Color32, CursorIcon, Rect, ResizeDirection, Sense, Stroke, StrokeKind, ViewportCommand,
+    pos2, vec2,
+};
+
+use crate::theme;
+
+/// The header's height, in points.
+pub const HEIGHT: f32 = 34.0;
+
+/// Whether this OS keeps its own window buttons (macOS's traffic lights).
+const NATIVE_BUTTONS: bool = cfg!(target_os = "macos");
+
+/// Room left free at the header's left for the traffic lights.
+pub const LEFT_INSET: f32 = if NATIVE_BUTTONS { 76.0 } else { 0.0 };
+
+const BUTTON_WIDTH: f32 = 46.0;
+
+/// How far in from the window's edge a drag resizes it, in points.
+const GRIP: f32 = 5.0;
+/// Corners grip a little further along each edge.
+const CORNER: f32 = 14.0;
+
+/// Turns off the OS title bar (see the module docs).
+pub fn viewport(builder: egui::ViewportBuilder) -> egui::ViewportBuilder {
+    if NATIVE_BUTTONS {
+        builder
+            .with_fullsize_content_view(true)
+            .with_titlebar_shown(false)
+            .with_title_shown(false)
+    } else {
+        builder.with_decorations(false)
+    }
+}
+
+fn maximized(ctx: &egui::Context) -> bool {
+    ctx.input(|input| input.viewport().maximized.unwrap_or(false))
+}
+
+fn fullscreen(ctx: &egui::Context) -> bool {
+    ctx.input(|input| input.viewport().fullscreen.unwrap_or(false))
+}
+
+/// Makes `rect` move the window when dragged, and maximize or restore it when
+/// double-clicked. Call it before adding the header's widgets: egui gives the
+/// pointer to the widget added last, so they stay clickable on top of it.
+pub fn drag_region(ui: &mut egui::Ui, rect: Rect) {
+    let response = ui.interact(rect, ui.id().with("drag window"), Sense::click_and_drag());
+    if response.double_clicked() {
+        let maximized = maximized(ui.ctx());
+        ui.ctx()
+            .send_viewport_cmd(ViewportCommand::Maximized(!maximized));
+    } else if response.drag_started_by(egui::PointerButton::Primary) {
+        ui.ctx().send_viewport_cmd(ViewportCommand::StartDrag);
+    }
+}
+
+/// Width the window buttons take at the header's right.
+pub fn buttons_width() -> f32 {
+    if NATIVE_BUTTONS {
+        0.0
+    } else {
+        BUTTON_WIDTH * 3.0
+    }
+}
+
+/// Draws minimize, maximize (or restore) and close at the right of `bar`,
+/// each the bar's full height. Returns true when close was clicked; the
+/// caller decides whether the window may close.
+pub fn buttons(ui: &mut egui::Ui, bar: Rect) -> bool {
+    if NATIVE_BUTTONS {
+        return false;
+    }
+    let ctx = ui.ctx().clone();
+    let maximized = maximized(&ctx);
+    let mut x = bar.right() - buttons_width();
+    let mut next = || {
+        let rect = Rect::from_min_size(pos2(x, bar.top()), vec2(BUTTON_WIDTH, bar.height()));
+        x += BUTTON_WIDTH;
+        rect
+    };
+    let (minimize, toggle, close) = (next(), next(), next());
+
+    if button(ui, minimize, Glyph::Minimize, "Minimize").clicked() {
+        ctx.send_viewport_cmd(ViewportCommand::Minimized(true));
+    }
+    let (glyph, tip) = if maximized {
+        (Glyph::Restore, "Restore Down")
+    } else {
+        (Glyph::Maximize, "Maximize")
+    };
+    if button(ui, toggle, glyph, tip).clicked() {
+        ctx.send_viewport_cmd(ViewportCommand::Maximized(!maximized));
+    }
+    button(ui, close, Glyph::Close, "Close").clicked()
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Glyph {
+    Minimize,
+    Maximize,
+    Restore,
+    Close,
+}
+
+/// One window button: a flat cell that fills on hover, with a thin
+/// line-drawn glyph like the OS's own.
+fn button(ui: &mut egui::Ui, rect: Rect, glyph: Glyph, tooltip: &str) -> egui::Response {
+    let response = ui.interact(rect, ui.id().with(tooltip), Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tooltip));
+    let palette = theme::palette(ui.ctx());
+    let active = response.hovered() || response.is_pointer_button_down_on();
+    // Close turns the OS's own red, in both themes, as on Windows and in VS Code.
+    let (fill, ink) = match (glyph, active) {
+        (Glyph::Close, true) => (Color32::from_rgb(0xC4, 0x2B, 0x1C), Color32::WHITE),
+        (_, true) if response.is_pointer_button_down_on() => {
+            (palette.control_active, palette.text_strong)
+        }
+        (_, true) => (palette.control_hover, palette.text_strong),
+        (_, false) => (Color32::TRANSPARENT, palette.text_secondary),
+    };
+    let painter = ui.painter();
+    painter.rect_filled(rect, 0, fill);
+    let stroke = Stroke::new(1.0_f32, ink);
+    let c = rect.center();
+    let s = 5.0;
+    match glyph {
+        Glyph::Minimize => {
+            painter.hline((c.x - s)..=(c.x + s), c.y, stroke);
+        }
+        Glyph::Maximize => {
+            painter.rect_stroke(
+                Rect::from_center_size(c, vec2(2.0 * s, 2.0 * s)),
+                1,
+                stroke,
+                StrokeKind::Inside,
+            );
+        }
+        Glyph::Restore => {
+            // A square with another peeking out behind its top-right corner.
+            let front = Rect::from_min_size(pos2(c.x - s, c.y - s + 2.0), vec2(8.0, 8.0));
+            painter.rect_stroke(front, 1, stroke, StrokeKind::Inside);
+            painter.line(
+                vec![
+                    pos2(c.x - s + 2.0, c.y - s + 2.0),
+                    pos2(c.x - s + 2.0, c.y - s),
+                    pos2(c.x + s, c.y - s),
+                    pos2(c.x + s, c.y + s - 2.0),
+                    pos2(c.x + s - 2.0, c.y + s - 2.0),
+                ],
+                stroke,
+            );
+        }
+        Glyph::Close => {
+            painter.line_segment([pos2(c.x - s, c.y - s), pos2(c.x + s, c.y + s)], stroke);
+            painter.line_segment([pos2(c.x + s, c.y - s), pos2(c.x - s, c.y + s)], stroke);
+        }
+    }
+    response.on_hover_text(tooltip)
+}
+
+/// Resize grips along the window's edges and corners, and a 1-point border
+/// around the window, since the OS frame that had both is off. Nothing on
+/// macOS, or while the window is maximized or fullscreen.
+pub fn edges(ctx: &egui::Context) {
+    if NATIVE_BUTTONS || maximized(ctx) || fullscreen(ctx) {
+        return;
+    }
+    let screen = ctx.screen_rect();
+    let id = egui::Id::new("window edges");
+    // Above the panels, so the grips win where they overlap them.
+    let layer = egui::LayerId::new(egui::Order::Foreground, id);
+    let ui = egui::Ui::new(
+        ctx.clone(),
+        id,
+        egui::UiBuilder::new().layer_id(layer).max_rect(screen),
+    );
+    let palette = theme::palette(ctx);
+    ui.painter().rect_stroke(
+        screen,
+        0,
+        Stroke::new(1.0_f32, palette.border),
+        StrokeKind::Inside,
+    );
+
+    let (l, r, t, b) = (screen.left(), screen.right(), screen.top(), screen.bottom());
+    // Edges first, then corners, so a corner wins where they meet.
+    let grips = [
+        (
+            ResizeDirection::North,
+            Rect::from_x_y_ranges(l..=r, t..=t + GRIP),
+        ),
+        (
+            ResizeDirection::South,
+            Rect::from_x_y_ranges(l..=r, b - GRIP..=b),
+        ),
+        (
+            ResizeDirection::West,
+            Rect::from_x_y_ranges(l..=l + GRIP, t..=b),
+        ),
+        (
+            ResizeDirection::East,
+            Rect::from_x_y_ranges(r - GRIP..=r, t..=b),
+        ),
+        (
+            ResizeDirection::NorthWest,
+            Rect::from_min_size(pos2(l, t), vec2(CORNER, CORNER)),
+        ),
+        (
+            ResizeDirection::NorthEast,
+            Rect::from_min_size(pos2(r - CORNER, t), vec2(CORNER, CORNER)),
+        ),
+        (
+            ResizeDirection::SouthWest,
+            Rect::from_min_size(pos2(l, b - CORNER), vec2(CORNER, CORNER)),
+        ),
+        (
+            ResizeDirection::SouthEast,
+            Rect::from_min_size(pos2(r - CORNER, b - CORNER), vec2(CORNER, CORNER)),
+        ),
+    ];
+    // Read once, outside any `input` closure that touches the responses.
+    let pressed = ctx.input(|input| input.pointer.primary_pressed());
+    for (direction, rect) in grips {
+        let response = ui
+            .interact(rect, id.with(format!("{direction:?}")), Sense::drag())
+            .on_hover_cursor(cursor(direction));
+        if pressed && response.is_pointer_button_down_on() {
+            ctx.send_viewport_cmd(ViewportCommand::BeginResize(direction));
+        }
+    }
+}
+
+fn cursor(direction: ResizeDirection) -> CursorIcon {
+    match direction {
+        ResizeDirection::North => CursorIcon::ResizeNorth,
+        ResizeDirection::South => CursorIcon::ResizeSouth,
+        ResizeDirection::East => CursorIcon::ResizeEast,
+        ResizeDirection::West => CursorIcon::ResizeWest,
+        ResizeDirection::NorthEast => CursorIcon::ResizeNorthEast,
+        ResizeDirection::SouthEast => CursorIcon::ResizeSouthEast,
+        ResizeDirection::NorthWest => CursorIcon::ResizeNorthWest,
+        ResizeDirection::SouthWest => CursorIcon::ResizeSouthWest,
+    }
+}

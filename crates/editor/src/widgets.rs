@@ -368,62 +368,50 @@ pub fn divider(ui: &mut egui::Ui) {
     );
 }
 
-/// The logo's hexagon of cube faces (`assets/branding/mark.svg`), drawn as
-/// lines in `color` so it follows the theme, fitted into `rect`.
-pub fn paint_mark(painter: &egui::Painter, rect: Rect, color: Color32) {
-    // The SVG's polylines, in its 620×620 view box.
-    const LINES: [&[(f32, f32)]; 6] = [
-        &[
-            (228.0, 19.0),
-            (485.0, 63.0),
-            (591.0, 270.0),
-            (518.0, 533.0),
-            (255.0, 602.0),
-            (46.0, 453.0),
-            (32.0, 193.0),
-            (228.0, 19.0),
-        ],
-        &[(143.0, 106.0), (188.0, 228.0), (52.0, 448.0)],
-        &[(228.0, 19.0), (315.0, 294.0), (587.0, 289.0)],
-        &[(160.0, 514.0), (315.0, 294.0)],
-        &[(355.0, 58.0), (396.0, 186.0), (543.0, 181.0)],
-        &[(255.0, 602.0), (400.0, 411.0), (554.0, 407.0)],
-    ];
+/// The logo's A (`assets/branding/mark-white-small.png`, white on
+/// transparent) in `color`, fitted into `rect`.
+pub fn paint_mark(
+    painter: &egui::Painter,
+    rect: Rect,
+    texture: &egui::TextureHandle,
+    color: Color32,
+) {
     let side = rect.width().min(rect.height());
-    let scale = side / 620.0;
-    let origin = rect.center() - vec2(side, side) / 2.0;
-    let width = (23.0 * scale).max(1.25);
-    for line in LINES {
-        let points = line
-            .iter()
-            .map(|&(x, y)| origin + vec2(x, y) * scale)
-            .collect();
-        painter.add(egui::Shape::line(points, Stroke::new(width, color)));
-    }
+    let dest = Rect::from_center_size(rect.center(), vec2(side, side));
+    painter.image(
+        texture.id(),
+        dest,
+        Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+        color,
+    );
 }
 
 /// The mark and the name "Axcenity", in the theme's colours.
-pub fn wordmark(ui: &mut egui::Ui, size: f32) -> egui::Response {
+pub fn wordmark(ui: &mut egui::Ui, mark: &egui::TextureHandle, size: f32) -> egui::Response {
     let palette = theme::palette(ui.ctx());
     let galley = ui.painter().layout_no_wrap(
         "Axcenity".to_owned(),
         FontId::new(size, theme::heading_family()),
         palette.text_strong,
     );
-    let mark = size * 1.25;
+    let mark_side = size * 1.25;
     let gap = size * 0.5;
     let (rect, response) = ui.allocate_exact_size(
-        vec2(mark + gap + galley.size().x, mark.max(galley.size().y)),
+        vec2(
+            mark_side + gap + galley.size().x,
+            mark_side.max(galley.size().y),
+        ),
         Sense::hover(),
     );
     paint_mark(
         ui.painter(),
-        Rect::from_min_size(rect.left_top(), vec2(mark, mark)),
+        Rect::from_min_size(rect.left_top(), vec2(mark_side, mark_side)),
+        mark,
         palette.text_strong,
     );
     ui.painter().galley(
         egui::pos2(
-            rect.left() + mark + gap,
+            rect.left() + mark_side + gap,
             rect.center().y - galley.size().y / 2.0,
         ),
         galley,

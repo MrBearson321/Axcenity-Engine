@@ -492,6 +492,39 @@ impl BlockSaveError {
 /// broken manifest gives the project its folder's name, a broken world file
 /// an empty Workspace, and a broken script no Script.
 pub fn load(folder: &Path) -> Result<Project, LoadError> {
+    load_with_progress(folder, &mut |_| {})
+}
+
+/// What [`load_with_progress`] is about to read, for a loading screen.
+/// `done` of `total` counts the files of that kind already read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LoadStep<'a> {
+    Manifest,
+    /// Upgrading a project saved by an older engine.
+    Upgrade {
+        from: u32,
+    },
+    World,
+    Terrain {
+        name: &'a str,
+        done: usize,
+        total: usize,
+    },
+    Script {
+        path: &'a str,
+        done: usize,
+        total: usize,
+    },
+    Stylesheets,
+}
+
+/// [`load`], telling `progress` what it reads next. `&mut dyn FnMut` takes
+/// any closure without making this function generic.
+pub fn load_with_progress(
+    folder: &Path,
+    progress: &mut dyn FnMut(LoadStep),
+) -> Result<Project, LoadError> {
+    progress(LoadStep::Manifest);
     let manifest_path = folder.join(MANIFEST_FILE);
     let manifest_text = read(&manifest_path)?;
     let mut problems = Vec::new();
@@ -517,6 +550,9 @@ pub fn load(folder: &Path) -> Result<Project, LoadError> {
         });
     }
     let (migrated_from, migration_backup) = if manifest.format_version < FORMAT_VERSION {
+        progress(LoadStep::Upgrade {
+            from: manifest.format_version,
+        });
         let upgrade = migrate::upgrade(folder, manifest.format_version)?;
         manifest.format_version = FORMAT_VERSION;
         (Some(upgrade.from), Some(upgrade.backup))
@@ -524,6 +560,7 @@ pub fn load(folder: &Path) -> Result<Project, LoadError> {
         (None, None)
     };
 
+    progress(LoadStep::World);
     let (mut world, world_loaded) = match load_world(folder) {
         Ok(world) => (world, true),
         Err(err) => {
@@ -531,8 +568,10 @@ pub fn load(folder: &Path) -> Result<Project, LoadError> {
             (World::new(), false)
         }
     };
-    let damaged_terrains = terrain_files::load_terrains(folder, &mut world, &mut problems);
-    let (scripts, block_scripts) = load_scripts(folder, &mut world, &mut problems);
+    let damaged_terrains =
+        terrain_files::load_terrains_reporting(folder, &mut world, &mut problems, progress);
+    let (scripts, block_scripts) = load_scripts(folder, &mut world, &mut problems, progress);
+    progress(LoadStep::Stylesheets);
     let stylesheets = load_stylesheets(folder, &mut problems);
 
     Ok(Project {
@@ -700,10 +739,18 @@ fn load_scripts(
     folder: &Path,
     world: &mut World,
     problems: &mut Vec<LoadError>,
+    progress: &mut dyn FnMut(LoadStep),
 ) -> (Vec<ScriptFile>, Vec<BlockScriptFile>) {
     let mut scripts = Vec::new();
     let mut block_scripts = Vec::new();
-    for path in find_scripts(folder, problems) {
+    let paths = find_scripts(folder, problems);
+    let total = paths.len();
+    for (done, path) in paths.into_iter().enumerate() {
+        progress(LoadStep::Script {
+            path: &path,
+            done,
+            total,
+        });
         let loaded = if is_block_script(&path) {
             read_block_script(folder, &path).and_then(|script| {
                 translate(&script)
