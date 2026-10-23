@@ -71,9 +71,9 @@ The **Animator** tab is for controllers, with the graph, inspector and live prev
 
 ### Acceptance criteria
 
-- [ ] A clip and a controller can be open at once, each in its own tab.
+- [x] A clip and a controller can be open at once, each in its own tab.
 - [ ] Everything the old panel did (clip ranges, events, controllers, blend trees, Return when) still works.
-- [ ] The Animation tab is usable at 600×400 and stacks when narrow.
+- [x] The Animation tab is usable at 600×400 and stacks when narrow.
 
 ## Phase 5: Keyframing Parts, Models and UI
 

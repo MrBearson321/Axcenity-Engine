@@ -278,6 +278,7 @@ impl egui_dock::TabViewer for DockViewer<'_> {
             Pane::Console => self.app.console_pane(ui),
             Pane::Assets => self.app.assets_pane(ui),
             Pane::Animation => self.app.animation_pane(ui, self.render_state),
+            Pane::Animator => self.app.animator_pane(ui, self.render_state),
             Pane::Terrain => self.app.terrain_pane(ui),
             Pane::Script(id) => self.app.script_pane(ui, *id),
         }
@@ -1223,6 +1224,7 @@ mod tests {
                             Pane::Console => app.console_pane(ui),
                             Pane::Assets => app.assets_pane(ui),
                             Pane::Animation => app.animation_pane(ui, None),
+                            Pane::Animator => app.animator_pane(ui, None),
                             Pane::Terrain => app.terrain_pane(ui),
                             Pane::Scene | Pane::Script(_) => {}
                         }
@@ -1261,6 +1263,82 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A clip and a controller stay open at once, each in its own tab, and
+    /// both tabs fit 600×400 and stack in a narrow column. With
+    /// `AXCENITY_SNAPSHOTS` set, each is saved as `studio-<tab>-<shape>.png`.
+    #[test]
+    fn a_clip_and_a_controller_are_open_at_once_in_their_own_tabs() {
+        let snapshots = std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from);
+        let folder = copy_of_example("hello-touched", "animation-tabs");
+        let mut app = EditorApp::new(Some(&folder));
+        let pad = app
+            .world
+            .get(app.world.workspace())
+            .and_then(|workspace| workspace.children().last().copied())
+            .expect("the example has parts");
+        app.select_clicked(Some(pad), egui::Modifiers::NONE, None, false);
+        let clip = crate::animation::store::create_property_clip(
+            &folder,
+            "Door",
+            &axcenity_anim::PropertyClipFile::new(1.5),
+        )
+        .unwrap()
+        .path;
+        let controller = crate::animation::store::new_controller(&folder, "Hero", &[])
+            .unwrap()
+            .path;
+        app.animation
+            .open_clip(&folder, &app.assets, &clip, &mut app.world, &mut app.output);
+        app.animation
+            .open_controller(&folder, &app.assets, &controller, None, &mut app.output);
+
+        for pane in [Pane::Animation, Pane::Animator] {
+            for (size, shape) in [
+                (egui::vec2(600.0, 400.0), "600x400"),
+                (egui::vec2(260.0, 900.0), "tall"),
+            ] {
+                let mut fit = None;
+                let mut draw = |ctx: &egui::Context| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        let room = ui.max_rect();
+                        match pane {
+                            Pane::Animation => app.animation_pane(ui, None),
+                            _ => app.animator_pane(ui, None),
+                        }
+                        fit = Some((ui.min_rect(), room));
+                    });
+                };
+                let ctx = theme::test_context();
+                for _ in 0..3 {
+                    let input = egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                        ..Default::default()
+                    };
+                    let _ = ctx.run(input, &mut draw);
+                }
+                if let Some(snapshots) = &snapshots {
+                    let name = pane.label().to_lowercase();
+                    crate::snapshot::snapshot(
+                        &snapshots.join(format!("studio-{name}-{shape}.png")),
+                        size,
+                        vec![Vec::new(); 3],
+                        &mut draw,
+                    );
+                }
+                let (used, room) = fit.expect("the tab was drawn");
+                assert!(
+                    used.width() <= room.width() + 0.5 && used.height() <= room.height() + 0.5,
+                    "{pane:?} at {size:?} drew {used:?} in {room:?}"
+                );
+            }
+        }
+        assert_eq!(
+            app.animation.open_documents(),
+            [Some(clip), Some(controller)],
+            "drawing either tab keeps the other's document"
+        );
     }
 
     #[test]

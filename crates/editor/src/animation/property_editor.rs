@@ -1,5 +1,5 @@
-//! A property clip open in the Animation panel: dope-sheet tracks, keys,
-//! playback on the selected Part (with restore), and save/undo hooks.
+//! A property clip open in the Animation tab: dope-sheet tracks, keys,
+//! playback on the selected Part (with restore), Record, and save/undo hooks.
 
 use std::path::Path;
 
@@ -18,7 +18,7 @@ pub struct PropertyDoc {
     pub path: String,
     pub file: PropertyClipFile,
     written: PropertyClipFile,
-    #[allow(dead_code)] // kept for Revert
+    /// As it was opened, for Revert.
     opened: PropertyClipFile,
     pub playhead: f64,
     pub playing: bool,
@@ -28,6 +28,9 @@ pub struct PropertyDoc {
     pub selected_track: Option<String>,
     /// Baseline Part transforms when preview started, restored on stop/close.
     baseline: Option<(InstanceId, Vec<(String, Vector3)>)>,
+    /// Each track's value as the preview last set it, so Record can tell
+    /// when something else moved it.
+    applied: Vec<(String, [f32; 3])>,
     new_event: String,
 }
 
@@ -44,6 +47,7 @@ impl PropertyDoc {
             selected_key: None,
             selected_track,
             baseline: None,
+            applied: Vec::new(),
             new_event: "Opened".to_owned(),
         }
     }
@@ -61,12 +65,6 @@ impl PropertyDoc {
         axcenity_anim::files::write_file(&project.join(&self.path), &after)?;
         self.written = self.file.clone();
         Ok(Some((before, after)))
-    }
-
-    #[allow(dead_code)]
-    pub fn revert(&mut self) {
-        self.file = self.opened.clone();
-        self.written = self.opened.clone();
     }
 
     /// Snapshot `root`'s animated properties so scrubbing can be undone.
@@ -99,6 +97,7 @@ impl PropertyDoc {
     }
 
     pub fn restore_baseline(&mut self, world: &mut World) {
+        self.applied.clear();
         let Some((root, props)) = self.baseline.take() else {
             return;
         };
@@ -120,6 +119,12 @@ impl PropertyDoc {
         let evaluated = clip.evaluate(self.playhead);
         let mut missing = std::collections::HashMap::new();
         apply_evaluated(world, root, &evaluated, &mut missing);
+        self.applied = self
+            .file
+            .tracks
+            .iter()
+            .filter_map(|track| Some((track.id.clone(), track_value(world, root, track)?)))
+            .collect();
     }
 
     pub fn tick(&mut self, dt: f64) {
@@ -156,7 +161,11 @@ impl PropertyDoc {
             self.selected_key = Some((track.id.clone(), key.id.clone()));
             return;
         }
-        let id = format!("k{}", track.keys.len() + 1);
+        // The first free id, as deleting keys leaves gaps.
+        let id = (1..)
+            .map(|n| format!("k{n}"))
+            .find(|id| !track.keys.iter().any(|key| key.id == *id))
+            .expect("some id is free");
         track.keys.push(PropertyKeyframe {
             id: id.clone(),
             time,
@@ -191,51 +200,114 @@ impl PropertyDoc {
         }
     }
 
-    /// Draws the inspector and dope sheet. Returns true if the file changed.
-    pub fn ui(
+    /// Keys, at the playhead, every track whose property something else
+    /// (a drag in the Scene View) changed since the preview last set it.
+    /// Recording pauses playback.
+    pub fn record_changes(&mut self, world: &World, root: InstanceId) {
+        let moved: Vec<String> = self
+            .file
+            .tracks
+            .iter()
+            .filter(|track| {
+                let applied = self.applied.iter().find(|(id, _)| *id == track.id);
+                let now = track_value(world, root, track);
+                matches!((applied, now), (Some((_, was)), Some(now))
+                    if was.iter().zip(now).any(|(a, b)| (a - b).abs() > 1e-4))
+            })
+            .map(|track| track.id.clone())
+            .collect();
+        if !moved.is_empty() {
+            self.playing = false;
+        }
+        for track in moved {
+            self.insert_key_from_world(world, root, &track);
+        }
+    }
+
+    /// The toolbar's part: play/pause, back to the start, Stop (which puts
+    /// the Part back) and Loop.
+    pub fn controls(
         &mut self,
         ui: &mut egui::Ui,
         world: &mut World,
         preview_root: Option<InstanceId>,
-    ) -> bool {
-        let before = self.file.clone();
-        ui.horizontal_wrapped(|ui| {
-            if ui
-                .add_enabled(
-                    !self.playing,
-                    egui::Button::new(format!("{} Play", icons::PLAY)),
-                )
-                .clicked()
-            {
-                self.playing = true;
-            }
-            if ui.button(format!("{} Pause", icons::PAUSE)).clicked() {
-                self.playing = false;
-            }
-            if ui
-                .button(format!("{} Stop", icons::ARROW_COUNTER_CLOCKWISE))
-                .on_hover_text("Stop and restore the Part's saved pose")
-                .clicked()
-            {
-                self.playing = false;
+    ) {
+        let (icon, hover) = if self.playing {
+            (icons::PAUSE, "Pause")
+        } else {
+            (icons::PLAY, "Play")
+        };
+        if ui.button(icon).on_hover_text(hover).clicked() {
+            if !self.playing && self.playhead >= self.file.duration {
                 self.playhead = 0.0;
-                if preview_root.is_some() {
-                    self.restore_baseline(world);
-                }
             }
-            ui.checkbox(&mut self.file.looping, "Loop");
-            ui.label(format!("{:.2} s", self.playhead));
-            ui.add(
-                egui::DragValue::new(&mut self.file.duration)
-                    .speed(0.05)
-                    .range(0.0..=3600.0)
-                    .prefix("Duration "),
-            );
-        });
+            self.playing = !self.playing;
+        }
+        if ui
+            .button(icons::SKIP_BACK)
+            .on_hover_text("Back to the start")
+            .clicked()
+        {
+            self.playhead = 0.0;
+        }
+        if ui
+            .button(icons::STOP)
+            .on_hover_text("Stop and put the Part back as it was")
+            .clicked()
+        {
+            self.playing = false;
+            self.playhead = 0.0;
+            if preview_root.is_some() {
+                self.restore_baseline(world);
+            }
+        }
+        ui.checkbox(&mut self.file.looping, "Loop");
+        ui.monospace(format!("{:.2} s", self.playhead));
+    }
 
-        ui.separator();
-        ui.horizontal_wrapped(|ui| {
-            ui.menu_button("Add track", |ui| {
+    /// The objects it animates (each track's target) and their tracks;
+    /// clicking a track selects it. `root` names what `.` is.
+    pub fn objects(&mut self, ui: &mut egui::Ui, root: Option<&str>) {
+        if self.file.tracks.is_empty() {
+            ui.weak("No tracks yet: Add track, under the dope sheet.");
+            return;
+        }
+        let mut targets: Vec<&str> = Vec::new();
+        for track in &self.file.tracks {
+            if !targets.contains(&track.target.as_str()) {
+                targets.push(&track.target);
+            }
+        }
+        let mut picked = None;
+        for target in targets {
+            let name = match target {
+                "." | "" => root.unwrap_or("(the Part)"),
+                path => path,
+            };
+            ui.add(egui::Label::new(format!("{} {name}", icons::CUBE)).truncate());
+            for track in self.file.tracks.iter().filter(|t| t.target == target) {
+                ui.horizontal(|ui| {
+                    ui.add_space(12.0);
+                    let selected = self.selected_track.as_deref() == Some(track.id.as_str());
+                    if ui
+                        .selectable_label(selected, track.property.as_str())
+                        .on_hover_text(format!("{} keys", track.keys.len()))
+                        .clicked()
+                    {
+                        picked = Some(track.id.clone());
+                    }
+                });
+            }
+        }
+        if picked.is_some() {
+            self.selected_track = picked;
+        }
+    }
+
+    /// Add track, Insert key and Delete key, then the dope sheet.
+    pub fn keys(&mut self, ui: &mut egui::Ui, world: &mut World, preview_root: Option<InstanceId>) {
+        crate::responsive::toolbar(ui, |ui| {
+            ui.menu_button(format!("{} Add track", icons::PLUS), |ui| {
                 for property in [
                     PropertyName::Position,
                     PropertyName::Orientation,
@@ -247,12 +319,15 @@ impl PropertyDoc {
                     }
                 }
             });
-            if let Some(track_id) = self.selected_track.clone()
-                && let Some(root) = preview_root
-                && ui
-                    .button("Insert key")
-                    .on_hover_text("Key the track from the selected Part at the playhead")
-                    .clicked()
+            let can_key = self.selected_track.is_some() && preview_root.is_some();
+            if ui
+                .add_enabled(
+                    can_key,
+                    egui::Button::new(format!("{} Insert key", icons::KEY)),
+                )
+                .on_hover_text("Key the selected track from the selected Part at the playhead")
+                .clicked()
+                && let (Some(track_id), Some(root)) = (self.selected_track.clone(), preview_root)
             {
                 self.capture_baseline(world, root);
                 self.insert_key_from_world(world, root, &track_id);
@@ -263,51 +338,93 @@ impl PropertyDoc {
             {
                 self.delete_selected_key();
             }
+            ui.weak("Shift+drag moves the selected key");
         });
-
         self.dope_sheet(ui);
+    }
+
+    /// The clip's settings: its name, duration, the selected key and the
+    /// events. Returns true if Rename was pressed.
+    pub fn inspector(&mut self, ui: &mut egui::Ui, preview_root: Option<InstanceId>) -> bool {
+        let mut rename = false;
+        ui.horizontal_wrapped(|ui| {
+            ui.heading(axcenity_anim::files::clip_name(&self.path));
+            if ui
+                .small_button(icons::PENCIL_SIMPLE)
+                .on_hover_text("Rename this clip (its file)")
+                .clicked()
+            {
+                rename = true;
+            }
+        });
+        ui.weak(&self.path);
+        if preview_root.is_none() {
+            ui.weak("Select a Part, MeshPart or Model in the Explorer to preview and key it.");
+        }
+        ui.add_space(4.0);
+        crate::responsive::form(ui, "property clip settings", |ui| {
+            ui.label("Duration");
+            ui.add(
+                egui::DragValue::new(&mut self.file.duration)
+                    .speed(0.05)
+                    .range(0.0..=3600.0)
+                    .suffix(" s"),
+            );
+            ui.end_row();
+        });
 
         if let Some((track_id, key_id)) = self.selected_key.clone()
             && let Some(track) = self.file.tracks.iter_mut().find(|t| t.id == track_id)
             && let Some(key) = track.keys.iter_mut().find(|k| k.id == key_id)
         {
             ui.separator();
-            ui.heading("Keyframe");
-            ui.add(
-                egui::DragValue::new(&mut key.time)
-                    .speed(0.01)
-                    .prefix("Time "),
-            );
-            key.time = key.time.clamp(0.0, self.file.duration);
-            ui.horizontal_wrapped(|ui| {
+            ui.strong("Keyframe");
+            crate::responsive::form(ui, "property key", |ui| {
+                ui.label("Time");
+                ui.add(egui::DragValue::new(&mut key.time).speed(0.01).suffix(" s"));
+                key.time = key.time.clamp(0.0, self.file.duration);
+                ui.end_row();
                 ui.label("Value");
-                for (i, label) in ["X", "Y", "Z"].iter().enumerate() {
-                    ui.add(
-                        egui::DragValue::new(&mut key.value[i])
-                            .speed(0.1)
-                            .prefix(*label),
-                    );
-                }
-            });
-            egui::ComboBox::from_label("Interpolation")
-                .selected_text(match key.interp {
-                    Interp::Step => "Step",
-                    Interp::Linear => "Linear",
-                })
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut key.interp, Interp::Step, "Step");
-                    ui.selectable_value(&mut key.interp, Interp::Linear, "Linear");
+                ui.horizontal_wrapped(|ui| {
+                    for (i, label) in ["X ", "Y ", "Z "].iter().enumerate() {
+                        ui.add(
+                            egui::DragValue::new(&mut key.value[i])
+                                .speed(0.1)
+                                .prefix(*label),
+                        );
+                    }
                 });
+                ui.end_row();
+                ui.label("Interpolation");
+                egui::ComboBox::from_id_salt("property key interpolation")
+                    .selected_text(match key.interp {
+                        Interp::Step => "Step",
+                        Interp::Linear => "Linear",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut key.interp, Interp::Step, "Step");
+                        ui.selectable_value(&mut key.interp, Interp::Linear, "Linear");
+                    });
+                ui.end_row();
+            });
         }
 
         ui.separator();
-        ui.heading("Events");
+        ui.strong("Events");
         let mut remove = None;
         for (i, event) in self.file.events.iter_mut().enumerate() {
             ui.horizontal_wrapped(|ui| {
-                ui.add(egui::DragValue::new(&mut event.time).speed(0.01));
-                ui.text_edit_singleline(&mut event.name);
-                if ui.small_button(icons::TRASH).clicked() {
+                ui.add(
+                    egui::DragValue::new(&mut event.time)
+                        .speed(0.01)
+                        .suffix(" s"),
+                );
+                ui.add(egui::TextEdit::singleline(&mut event.name).desired_width(110.0));
+                if ui
+                    .small_button(icons::TRASH)
+                    .on_hover_text("Remove")
+                    .clicked()
+                {
                     remove = Some(i);
                 }
             });
@@ -316,8 +433,14 @@ impl PropertyDoc {
             self.file.events.remove(i);
         }
         ui.horizontal_wrapped(|ui| {
-            ui.text_edit_singleline(&mut self.new_event);
-            if ui.button("Add at playhead").clicked() && !self.new_event.trim().is_empty() {
+            ui.add(egui::TextEdit::singleline(&mut self.new_event).desired_width(110.0));
+            if ui
+                .add_enabled(
+                    !self.new_event.trim().is_empty(),
+                    egui::Button::new(format!("{} Add at playhead", icons::PLUS)),
+                )
+                .clicked()
+            {
                 self.file.events.push(axcenity_anim::ClipEvent {
                     time: self.playhead.clamp(0.0, self.file.duration),
                     name: self.new_event.trim().to_owned(),
@@ -325,11 +448,24 @@ impl PropertyDoc {
             }
         });
 
-        if let Some(root) = preview_root {
-            self.apply_preview(world, root);
-        }
-
-        self.file != before
+        ui.separator();
+        ui.horizontal_wrapped(|ui| {
+            if self.unwritten() {
+                ui.weak("Saving…");
+            } else {
+                ui.weak(format!("{} Saved", icons::CHECK));
+            }
+            if ui
+                .add_enabled(self.file != self.opened, egui::Button::new("Revert"))
+                .on_hover_text("Put the clip back as it was when it was opened")
+                .clicked()
+            {
+                self.file = self.opened.clone();
+                self.selected_key = None;
+                self.playhead = 0.0;
+            }
+        });
+        rename
     }
 
     fn dope_sheet(&mut self, ui: &mut egui::Ui) {
@@ -456,6 +592,16 @@ impl PropertyDoc {
                 key.time = t_of(pos.x);
             }
         }
+    }
+}
+
+/// The value of `track`'s property on its target under `root`, if it's
+/// there and a vector.
+fn track_value(world: &World, root: InstanceId, track: &PropertyTrack) -> Option<[f32; 3]> {
+    let id = axcenity_anim::resolve_target(world, root, &track.target)?;
+    match world.get(id)?.property(track.property.as_str())? {
+        Value::Vector3(v) => Some([v.x, v.y, v.z]),
+        _ => None,
     }
 }
 

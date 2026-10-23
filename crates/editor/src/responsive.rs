@@ -19,6 +19,15 @@ pub fn toolbar<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R 
     .inner
 }
 
+/// In a [`toolbar`], starts the next row unless `width` points are left on
+/// this one. Wrapping only moves single widgets, so a wide control built from
+/// several (a combo box) needs this before it.
+pub fn room_for(ui: &mut egui::Ui, width: f32) {
+    if ui.available_size_before_wrap().x < width {
+        ui.end_row();
+    }
+}
+
 /// Names and their controls, two to a row (`rows` adds a name, then a
 /// control, then calls `ui.end_row()`). When there's room they're a grid
 /// whose name column shrinks with the panel; in a narrow panel each control

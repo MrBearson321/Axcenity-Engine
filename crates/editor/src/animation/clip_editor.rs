@@ -1,5 +1,5 @@
-//! A clip open in the Animation panel: its settings, its timeline, and the
-//! pose its preview shows.
+//! A clip open in the Animation tab: its toolbar controls, settings,
+//! timeline and bones, and the pose its preview shows.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -173,31 +173,113 @@ impl ClipDoc {
         bound.as_ref().ok().map(BoundClip::has_root_motion)
     }
 
-    /// The play button, the frame counter and the timeline.
-    pub fn transport(&mut self, ui: &mut egui::Ui) {
+    /// The toolbar's part: play/pause, back to the start, Loop, Speed and
+    /// the model the preview shows it on (from `models`).
+    pub fn controls(&mut self, ui: &mut egui::Ui, models: &[String]) {
+        let speed = self.file.speed.abs().max(1e-3);
+        let (icon, hover) = if self.playing {
+            (icons::PAUSE, "Pause")
+        } else {
+            (icons::PLAY, "Play")
+        };
+        if ui.button(icon).on_hover_text(hover).clicked() {
+            if !self.playing && self.playhead * speed >= self.file.length() {
+                self.playhead = 0.0;
+            }
+            self.playing = !self.playing;
+        }
+        if ui
+            .button(icons::SKIP_BACK)
+            .on_hover_text("Back to the start")
+            .clicked()
+        {
+            self.playhead = 0.0;
+        }
+        ui.checkbox(&mut self.file.looping, "Loop")
+            .on_hover_text("On, it plays again from the start; off, it holds its last frame");
+        ui.add(
+            egui::DragValue::new(&mut self.file.speed)
+                .range(-10.0..=10.0)
+                .speed(0.01)
+                .prefix("Speed ")
+                .suffix("×"),
+        )
+        .on_hover_text("2 plays it twice as fast; below 0 plays it backwards");
+        let shown = self
+            .preview_model
+            .as_deref()
+            .map_or("(no model)", |path| path.rsplit('/').next().unwrap_or(path));
+        let mut picked = self.preview_model.clone();
+        crate::responsive::room_for(ui, super::MODEL_PICKER_ROOM);
+        egui::ComboBox::from_id_salt("clip preview model")
+            .selected_text(format!("{} {shown}", icons::CUBE))
+            .width(130.0)
+            .show_ui(ui, |ui| {
+                for model in models {
+                    let name = model.rsplit('/').next().unwrap_or(model);
+                    ui.selectable_value(&mut picked, Some(model.clone()), name);
+                }
+            })
+            .response
+            .on_hover_text("The model the preview shows it on");
+        if picked != self.preview_model {
+            self.preview_model = picked;
+        }
+    }
+
+    /// The bones of the preview model's skeleton as a tree, those the take
+    /// moves in the normal text colour and the rest dimmed.
+    pub fn bones(&self, ui: &mut egui::Ui, assets: &Assets) {
+        let Some(model) = self
+            .preview_model
+            .as_deref()
+            .and_then(|id| assets.model(id))
+        else {
+            ui.weak("No model to show the bones of.");
+            return;
+        };
+        let Some(rig) = &model.rig else {
+            ui.weak("This model has no skeleton.");
+            return;
+        };
+        let moved: Vec<&str> = self
+            .take()
+            .map(|take| {
+                take.tracks
+                    .iter()
+                    .map(|track| track.bone.as_str())
+                    .collect()
+            })
+            .unwrap_or_default();
+        // Parents come before their children, so each depth is known in time.
+        let mut depths = Vec::with_capacity(rig.bones.len());
+        for bone in &rig.bones {
+            let depth = bone.parent.map_or(0, |parent| depths[parent] + 1);
+            depths.push(depth);
+        }
+        ui.weak(format!("{} bones, {} moved", rig.bones.len(), moved.len()));
+        for (bone, depth) in rig.bones.iter().zip(depths) {
+            ui.horizontal(|ui| {
+                ui.add_space((depth as f32 * 8.0).min(64.0));
+                let text = egui::RichText::new(format!("{} {}", icons::BONE, bone.name));
+                let text = if moved.contains(&bone.name.as_str()) {
+                    text
+                } else {
+                    text.weak()
+                };
+                ui.add(egui::Label::new(text).truncate())
+                    .on_hover_text(&bone.name);
+            });
+        }
+    }
+
+    /// The frame counter and the timeline.
+    pub fn timeline(&mut self, ui: &mut egui::Ui) {
         let take_seconds = self
             .take()
             .map_or(self.file.end, |take| f64::from(take.duration));
         let speed = self.file.speed.abs().max(1e-3);
         ui.horizontal_wrapped(|ui| {
-            let (icon, hover) = if self.playing {
-                (icons::PAUSE, "Pause")
-            } else {
-                (icons::PLAY, "Play")
-            };
-            if ui.button(icon).on_hover_text(hover).clicked() {
-                if !self.playing && self.playhead * speed >= self.file.length() {
-                    self.playhead = 0.0;
-                }
-                self.playing = !self.playing;
-            }
-            if ui
-                .button(icons::SKIP_BACK)
-                .on_hover_text("Back to the start")
-                .clicked()
-            {
-                self.playhead = 0.0;
-            }
             let frame = self.frames(self.playhead * speed);
             let frames = self.frames(self.file.length());
             ui.monospace(format!("Frame {frame} / {frames}"));
@@ -243,8 +325,9 @@ impl ClipDoc {
         self.playhead = self.playhead.clamp(0.0, self.file.length() / speed);
     }
 
-    /// The clip's settings. Returns true if Rename was pressed.
-    pub fn inspector(&mut self, ui: &mut egui::Ui, models: &[String]) -> bool {
+    /// The clip's settings (Loop, Speed and the preview model are in the
+    /// toolbar). Returns true if Rename was pressed.
+    pub fn inspector(&mut self, ui: &mut egui::Ui) -> bool {
         let mut rename = false;
         ui.horizontal_wrapped(|ui| {
             ui.heading(axcenity_anim::files::clip_name(&self.path));
@@ -321,21 +404,6 @@ impl ClipDoc {
             }
             ui.end_row();
 
-            ui.label("Speed");
-            ui.add(
-                egui::DragValue::new(&mut self.file.speed)
-                    .range(-10.0..=10.0)
-                    .speed(0.01)
-                    .suffix("×"),
-            )
-            .on_hover_text("2 plays it twice as fast; below 0 plays it backwards");
-            ui.end_row();
-
-            ui.label("Loop");
-            ui.checkbox(&mut self.file.looping, "")
-                .on_hover_text("On, it plays again from the start; off, it holds its last frame");
-            ui.end_row();
-
             ui.label("Root motion");
             ui.horizontal_wrapped(|ui| {
                     ui.checkbox(&mut self.file.root_motion, "").on_hover_text(
@@ -345,25 +413,6 @@ impl ClipDoc {
                         ui.weak("no bone moves across the ground");
                     }
                 });
-            ui.end_row();
-
-            ui.label("Preview on");
-            let shown = self
-                .preview_model
-                .as_deref()
-                .map_or("(none)", |path| path.rsplit('/').next().unwrap_or(path));
-            let mut picked = self.preview_model.clone();
-            egui::ComboBox::from_id_salt("preview model")
-                .selected_text(shown)
-                .show_ui(ui, |ui| {
-                    for model in models {
-                        let name = model.rsplit('/').next().unwrap_or(model);
-                        ui.selectable_value(&mut picked, Some(model.clone()), name);
-                    }
-                });
-            if picked != self.preview_model {
-                self.preview_model = picked;
-            }
             ui.end_row();
         });
 

@@ -128,10 +128,6 @@ impl ControllerDoc {
         self.file = file;
     }
 
-    pub fn transitions(&self) -> usize {
-        self.file.transitions.len()
-    }
-
     /// The first clip's model, for a preview when nothing better is known.
     pub fn first_clip_source(&self, project: &Path) -> Option<String> {
         self.file

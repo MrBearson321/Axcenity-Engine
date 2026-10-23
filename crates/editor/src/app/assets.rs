@@ -71,7 +71,7 @@ impl EditorApp {
         }
     }
 
-    /// Opens the clip at `path` in the Animation panel, and shows the panel.
+    /// Opens the clip at `path` in the Animation tab, and shows the tab.
     pub(super) fn open_animation_clip(&mut self, path: &str) {
         let Some(project) = &self.project else {
             return;
@@ -87,8 +87,8 @@ impl EditorApp {
         self.layout.open(Pane::Animation);
     }
 
-    /// Opens the controller of the Animator `animator` in the Animation
-    /// panel, previewed on its MeshPart's model, and shows the panel.
+    /// Opens the controller of the Animator `animator` in the Animator tab,
+    /// previewed on its MeshPart's model, and shows the tab.
     pub(super) fn open_animator_controller(&mut self, animator: InstanceId) {
         let Some(project) = &self.project else {
             return;
@@ -111,15 +111,9 @@ impl EditorApp {
         if path.is_empty() {
             return;
         }
-        self.animation.open_controller(
-            &folder,
-            &self.assets,
-            &path,
-            model,
-            &mut self.world,
-            &mut self.output,
-        );
-        self.layout.open(Pane::Animation);
+        self.animation
+            .open_controller(&folder, &self.assets, &path, model, &mut self.output);
+        self.layout.open(Pane::Animator);
     }
 
     /// Gives the Animator of the MeshPart under the drop this controller

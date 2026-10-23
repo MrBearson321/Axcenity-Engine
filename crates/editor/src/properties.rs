@@ -576,7 +576,7 @@ fn clip_control(ui: &mut egui::Ui, path: &str) -> Option<Edit> {
         }
         if ui
             .small_button(icons::FILM_SLATE)
-            .on_hover_text("Open it in the Animation panel")
+            .on_hover_text("Open it in the Animation tab")
             .clicked()
         {
             edit = Some(Edit::OpenClip);
@@ -612,7 +612,7 @@ fn controller_control(ui: &mut egui::Ui, path: &str) -> Option<Edit> {
         }
         if ui
             .small_button(icons::FLOW_ARROW)
-            .on_hover_text("Open it in the Animation panel: its states, transitions and parameters")
+            .on_hover_text("Open it in the Animator tab: its states, transitions and parameters")
             .clicked()
         {
             edit = Some(Edit::OpenController);

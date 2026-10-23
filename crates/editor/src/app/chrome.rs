@@ -83,12 +83,12 @@ impl EditorApp {
             None => {}
         }
     }
-    /// The Animation panel (see `animation.rs`).
+    /// The Animation tab: clips (see `animation.rs`).
     pub(super) fn animation_pane(&mut self, ui: &mut egui::Ui, render_state: Option<&RenderState>) {
         let folder = self.project.as_ref().map(|project| project.folder.clone());
         let selected = self.selected_model();
         let preview_root = self.property_preview_root();
-        let actions = self.animation.show(
+        let actions = self.animation.show_clips(
             ui,
             folder.as_deref(),
             &self.assets,
@@ -98,10 +98,32 @@ impl EditorApp {
             preview_root,
             &mut self.output,
         );
+        self.studio_actions(actions);
+    }
+
+    /// The Animator tab: controllers (see `animation.rs`).
+    pub(super) fn animator_pane(&mut self, ui: &mut egui::Ui, render_state: Option<&RenderState>) {
+        let folder = self.project.as_ref().map(|project| project.folder.clone());
+        let selected = self.selected_model();
+        let actions = self.animation.show_controllers(
+            ui,
+            folder.as_deref(),
+            &self.assets,
+            render_state,
+            selected.as_ref(),
+            &mut self.world,
+            &mut self.output,
+        );
+        self.studio_actions(actions);
+    }
+
+    /// Does what the Animation or Animator tab asked for.
+    fn studio_actions(&mut self, actions: Vec<StudioAction>) {
         for action in actions {
             match action {
                 StudioAction::ImportModel => self.import_model_with_dialog(),
                 StudioAction::Play => self.play(),
+                StudioAction::Show(pane) => self.layout.open(pane),
                 StudioAction::SetController {
                     part,
                     animator,
@@ -144,7 +166,7 @@ impl EditorApp {
     }
 
     /// The MeshPart selected (or the one around a selected Animator), for
-    /// the Animation panel, with its Animator if it has one.
+    /// the Animation and Animator tabs, with its Animator if it has one.
     fn selected_model(&self) -> Option<SelectedModel> {
         let world = &self.world;
         let mut id = self.selected?;

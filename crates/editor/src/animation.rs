@@ -1,17 +1,25 @@
-//! The Animation panel (the Animation Studio): the project's clips and
-//! controllers in a Library on the left; in the middle, an open clip's
-//! preview and timeline, or an open controller's state machine graph with a
-//! live preview; and on the right, the settings of what's open (or selected
-//! in the graph). A step bar across the top walks through the five Animator
-//! steps.
+//! The Animation Studio, as two dock tabs that each have their own
+//! document and preview, so a clip and a controller can be open at once.
+//!
+//! - The **Animation** tab is for clips, top to bottom: a toolbar (a
+//!   searchable clip picker, New, the preview model, playback and Record),
+//!   the preview with a drawer listing the model's bones or the clip's
+//!   objects, the timeline or dope sheet along the bottom, and the clip's
+//!   settings in an inspector that can be hidden.
+//! - The **Animator** tab is for controllers: a toolbar with a controller
+//!   picker, the state machine graph, its inspector, and a live preview with
+//!   the parameters under it.
+//!
+//! With nothing open, a tab shows a checklist of the steps that get there.
+//! Narrower than [`STACK_BELOW`], a tab's parts stack and scroll together.
 //!
 //! Clips and controllers are files. Timeline and graph edits are written as
 //! soon as a gesture ends (the mouse is let go and nothing is being typed);
 //! those edits aren't undo steps, like scripts. Creating, renaming,
-//! duplicating and deleting a clip or controller is one undo step: the panel
-//! reports the file changes and the app records them. The previews have
-//! their own world, camera and renderer, so they never touch the world being
-//! edited.
+//! duplicating and deleting a clip or controller is one undo step: the
+//! studio reports the file changes and the app records them. The previews
+//! have their own world, camera and renderer, so they never touch the world
+//! being edited.
 
 mod clip_editor;
 mod controller_editor;
@@ -30,30 +38,36 @@ use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 
 use crate::block_editor::NameKind;
+use crate::layout::Pane;
 use crate::output::Output;
 use crate::responsive;
-use crate::theme::icons;
+use crate::theme::{self, icons};
+use crate::widgets;
 use clip_editor::ClipDoc;
 use controller_editor::ControllerDoc;
 use preview::Preview;
 use property_editor::PropertyDoc;
 use store::AnimationFiles;
 
-/// How often the Library looks for new or removed files while shown.
+/// How often the pickers look for new or removed files while shown.
 const RESCAN: Duration = Duration::from_secs(2);
 /// The preview's longest frame, so a pause doesn't jump it ahead.
 const MAX_FRAME_SECONDS: f64 = 0.1;
 /// The controller preview's height, under the graph.
 const CONTROLLER_PREVIEW: f32 = 240.0;
-/// Narrower than this, the panel's library, document and settings stack.
+/// Narrower than this, a tab's parts stack and scroll together.
 const STACK_BELOW: f32 = 560.0;
-/// The controller graph's height when the panel is stacked.
+/// The controller graph's height when the tab is stacked.
 const STACKED_GRAPH: f32 = 280.0;
 /// Narrower than this, a controller's live preview goes above its controls.
 const SPLIT_PREVIEW_BELOW: f32 = 420.0;
+/// The tallest a picker's list gets before it scrolls.
+const PICKER_HEIGHT: f32 = 320.0;
+/// What a toolbar's preview-model combo box needs on its row.
+pub(crate) const MODEL_PICKER_ROOM: f32 = 170.0;
 
 /// The animated MeshPart selected in the editor (or the one around a
-/// selected Animator), for the step bar and New controller.
+/// selected Animator), for the checklists and New controller.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SelectedModel {
     pub part: InstanceId,
@@ -66,7 +80,7 @@ pub struct SelectedModel {
     pub controller: String,
 }
 
-/// Something the panel asks the app to do.
+/// Something the studio asks the app to do.
 #[derive(Clone, Debug, PartialEq)]
 pub enum StudioAction {
     /// File > Import Model…
@@ -80,6 +94,9 @@ pub enum StudioAction {
     },
     /// Start Play.
     Play,
+    /// Bring a tab to the front (the Animation tab after a clip is made,
+    /// the Animator tab after a controller is).
+    Show(Pane),
     /// Record a property-clip file rewrite for undo.
     RecordFile {
         path: String,
@@ -97,31 +114,61 @@ pub enum StudioAction {
     },
 }
 
-/// What's open in the middle of the panel.
-#[derive(Default)]
-enum Doc {
-    #[default]
-    Nothing,
-    Clip(Box<ClipDoc>),
+/// The clip open in the Animation tab.
+enum Clip {
+    /// A part of a take in a model file.
+    Take(Box<ClipDoc>),
+    /// Authored keys for Parts.
     Property(Box<PropertyDoc>),
-    Controller(Box<ControllerDoc>),
+}
+
+impl Clip {
+    fn path(&self) -> &str {
+        match self {
+            Clip::Take(doc) => &doc.path,
+            Clip::Property(doc) => &doc.path,
+        }
+    }
+}
+
+/// The Animation tab: a clip, its preview, and which parts are shown.
+#[derive(Default)]
+struct ClipTab {
+    doc: Option<Clip>,
+    preview: Preview,
+    search: String,
+    hide_drawer: bool,
+    hide_inspector: bool,
+    /// With a property clip open, moving what it animates keys it.
+    record: bool,
+}
+
+/// The Animator tab: a controller, its live preview, and which parts are shown.
+#[derive(Default)]
+struct AnimatorTab {
+    doc: Option<Box<ControllerDoc>>,
+    preview: Preview,
+    search: String,
+    hide_inspector: bool,
 }
 
 #[derive(Default)]
 pub struct AnimationStudio {
     files: AnimationFiles,
     scanned: Option<Instant>,
-    search: String,
-    doc: Doc,
-    preview: Preview,
+    clip: ClipTab,
+    animator: AnimatorTab,
     dialog: Option<Dialog>,
+    /// The egui pass in which dialogs were last shown and edits written, so
+    /// a frame that draws both tabs does that once.
+    finished_pass: Option<u64>,
     /// Each controller's names, for the blocks' menus, read again every
     /// [`RESCAN`].
     names: std::collections::HashMap<String, Vec<(NameKind, String)>>,
     names_read: Option<Instant>,
 }
 
-/// A question the panel is asking.
+/// A question the studio is asking.
 enum Dialog {
     /// New clip: from which model file and take, and its name.
     NewClip {
@@ -153,41 +200,79 @@ enum Dialog {
     Delete { path: String, users: Vec<String> },
 }
 
+/// What a picker or a ⋯ menu asked for, on a clip or controller's path.
+enum Pick {
+    Open(String),
+    Rename(String),
+    Duplicate(String),
+    Delete(String),
+}
+
+/// What the Animation tab's New menu makes.
+enum New {
+    Clip,
+    PropertyClip,
+}
+
+/// What a picker lists.
+#[derive(Clone, Copy, PartialEq)]
+enum Kind {
+    Clip,
+    Controller,
+}
+
+impl Kind {
+    fn icon(self) -> &'static str {
+        match self {
+            Kind::Clip => icons::FILM_SLATE,
+            Kind::Controller => icons::FLOW_ARROW,
+        }
+    }
+
+    fn name(self, path: &str) -> &str {
+        match self {
+            Kind::Clip => axcenity_anim::files::clip_name(path),
+            Kind::Controller => store::controller_name(path),
+        }
+    }
+}
+
+/// One line of an empty tab's checklist.
+struct Step {
+    done: bool,
+    title: String,
+    hint: &'static str,
+    /// A button that does the step.
+    button: Option<&'static str>,
+}
+
 impl AnimationStudio {
     /// Writes what's open if it has changes (before Play, on Save).
     pub fn write_all(&mut self, project: &Path, output: &mut Output) -> Vec<StudioAction> {
-        let mut actions = Vec::new();
-        let result = match &mut self.doc {
-            Doc::Nothing => Ok(()),
-            Doc::Clip(clip) => clip.write(project).map(|_| ()),
-            Doc::Property(clip) => match clip.write(project) {
-                Ok(Some((before, after))) => {
-                    actions.push(StudioAction::RecordFile {
-                        path: clip.path.clone(),
-                        before,
-                        after,
-                        label: format!("Edit {}", axcenity_anim::files::clip_name(&clip.path)),
-                    });
-                    Ok(())
-                }
-                Ok(None) => Ok(()),
-                Err(err) => Err(err),
-            },
-            Doc::Controller(controller) => controller.write(project).map(|_| ()),
-        };
-        if let Err(err) = result {
-            output.error(format!(
-                "Could not save `{}`: {err}",
-                self.open_path().unwrap_or_default()
-            ));
-        }
-        actions
+        flush(&mut self.clip.doc, &mut self.animator.doc, project, output)
+            .into_iter()
+            .collect()
     }
 
-    /// Forgets the library scan so the next time the panel is shown it
-    /// lists files undo or redo just put back.
+    /// Forgets the file scan so the next time a tab is shown it lists
+    /// files undo or redo just put back.
     pub fn refresh(&mut self) {
         self.scanned = None;
+    }
+
+    fn clip_path(&self) -> Option<String> {
+        self.clip.doc.as_ref().map(|clip| clip.path().to_owned())
+    }
+
+    fn controller_path(&self) -> Option<String> {
+        self.animator.doc.as_ref().map(|doc| doc.path.clone())
+    }
+
+    /// The clip open in the Animation tab and the controller open in the
+    /// Animator tab.
+    #[cfg(test)]
+    pub fn open_documents(&self) -> [Option<String>; 2] {
+        [self.clip_path(), self.controller_path()]
     }
 
     /// Reloads whatever is open after undo or redo wrote `files`. A renamed
@@ -201,42 +286,53 @@ impl AnimationStudio {
         output: &mut Output,
     ) {
         self.rescan(project);
-        let Some(open) = self.open_path() else {
-            return;
-        };
-        let Some(change) = files.iter().find(|file| file.path == open) else {
-            return;
-        };
-        match &change.after {
-            None => {
+        for open in [self.clip_path(), self.controller_path()]
+            .into_iter()
+            .flatten()
+        {
+            let Some(change) = files.iter().find(|file| file.path == open) else {
+                continue;
+            };
+            if change.after.is_none() {
                 let replacement = files.iter().find(|file| {
                     file.path != open
                         && file.before.is_none()
                         && file.after.is_some()
                         && same_asset_kind(&file.path, &open)
                 });
-                if let Some(file) = replacement {
-                    let path = file.path.clone();
-                    self.reopen(project, assets, &path, world, output);
-                } else {
-                    self.close_preview(world);
-                    self.doc = Doc::Nothing;
+                match replacement {
+                    Some(file) => {
+                        let path = file.path.clone();
+                        self.reopen(project, assets, &path, world, output);
+                    }
+                    None => self.close(&open, world),
                 }
+                continue;
             }
-            Some(_) => {
-                if open.ends_with(axcenity_anim::CONTROLLER_EXTENSION)
-                    && let Doc::Controller(doc) = &mut self.doc
-                    && let Ok(file) = store::read_controller(project, &open)
-                {
-                    doc.reload(file);
-                    return;
-                }
-                self.reopen(project, assets, &open, world, output);
+            if open.ends_with(axcenity_anim::CONTROLLER_EXTENSION)
+                && let Some(doc) = &mut self.animator.doc
+                && let Ok(file) = store::read_controller(project, &open)
+            {
+                doc.reload(file);
+                continue;
             }
+            self.reopen(project, assets, &open, world, output);
         }
     }
 
-    /// Opens `path` from disk without writing the document that's already open.
+    /// Closes `path` in whichever tab has it open.
+    fn close(&mut self, path: &str, world: &mut World) {
+        if self.clip_path().as_deref() == Some(path) {
+            self.close_preview(world);
+            self.clip.doc = None;
+        }
+        if self.controller_path().as_deref() == Some(path) {
+            self.animator.doc = None;
+        }
+    }
+
+    /// Opens `path` from disk in its tab, without writing what that tab
+    /// has open.
     fn reopen(
         &mut self,
         project: &Path,
@@ -245,58 +341,54 @@ impl AnimationStudio {
         world: &mut World,
         output: &mut Output,
     ) {
-        let preview = match &self.doc {
-            Doc::Controller(doc) => doc.preview_model.clone(),
-            _ => None,
-        };
-        self.close_preview(world);
-        self.doc = Doc::Nothing;
         if path.ends_with(axcenity_anim::CLIP_EXTENSION) {
-            match store::read_any_clip(project, path) {
-                Ok(axcenity_anim::AnimClipFile::Take(file)) => {
-                    self.doc = Doc::Clip(Box::new(ClipDoc::open(
-                        path.to_owned(),
-                        file,
-                        assets,
-                        &self.files.models,
-                    )));
-                }
-                Ok(axcenity_anim::AnimClipFile::Property(file)) => {
-                    self.doc = Doc::Property(Box::new(PropertyDoc::open(path.to_owned(), file)));
-                }
-                Err(err) => output.error(format!("Could not open the clip `{path}`: {err}")),
-            }
+            self.close_preview(world);
+            self.load_clip(project, assets, path, output);
         } else if path.ends_with(axcenity_anim::CONTROLLER_EXTENSION) {
+            let preview = self
+                .animator
+                .doc
+                .as_ref()
+                .and_then(|doc| doc.preview_model.clone());
+            self.animator.doc = None;
             match store::read_controller(project, path) {
                 Ok(file) => {
                     let mut doc = ControllerDoc::open(path.to_owned(), file, preview);
                     if doc.preview_model.is_none() {
                         doc.preview_model = doc.first_clip_source(project);
                     }
-                    self.doc = Doc::Controller(Box::new(doc));
+                    self.animator.doc = Some(Box::new(doc));
                 }
                 Err(err) => output.error(format!("Could not open the controller `{path}`: {err}")),
             }
         }
     }
 
-    /// Restores property-preview Part transforms when leaving the doc.
+    /// Reads the clip at `path` into the Animation tab (nothing is open if
+    /// it can't be read).
+    fn load_clip(&mut self, project: &Path, assets: &Assets, path: &str, output: &mut Output) {
+        self.clip.doc = match store::read_any_clip(project, path) {
+            Ok(axcenity_anim::AnimClipFile::Take(file)) => Some(Clip::Take(Box::new(
+                ClipDoc::open(path.to_owned(), file, assets, &self.files.models),
+            ))),
+            Ok(axcenity_anim::AnimClipFile::Property(file)) => Some(Clip::Property(Box::new(
+                PropertyDoc::open(path.to_owned(), file),
+            ))),
+            Err(err) => {
+                output.error(format!("Could not open the clip `{path}`: {err}"));
+                None
+            }
+        };
+    }
+
+    /// Restores property-preview Part transforms when leaving the clip.
     pub fn close_preview(&mut self, world: &mut World) {
-        if let Doc::Property(doc) = &mut self.doc {
+        if let Some(Clip::Property(doc)) = &mut self.clip.doc {
             doc.restore_baseline(world);
         }
     }
 
-    fn open_path(&self) -> Option<String> {
-        match &self.doc {
-            Doc::Nothing => None,
-            Doc::Clip(clip) => Some(clip.path.clone()),
-            Doc::Property(clip) => Some(clip.path.clone()),
-            Doc::Controller(controller) => Some(controller.path.clone()),
-        }
-    }
-
-    /// Opens the clip at `path` (from the project folder) in the panel.
+    /// Opens the clip at `path` (from the project folder) in the Animation tab.
     pub fn open_clip(
         &mut self,
         project: &Path,
@@ -308,34 +400,19 @@ impl AnimationStudio {
         self.close_preview(world);
         let _ = self.write_all(project, output);
         self.rescan(project);
-        match store::read_any_clip(project, path) {
-            Ok(axcenity_anim::AnimClipFile::Take(file)) => {
-                self.doc = Doc::Clip(Box::new(ClipDoc::open(
-                    path.to_owned(),
-                    file,
-                    assets,
-                    &self.files.models,
-                )));
-            }
-            Ok(axcenity_anim::AnimClipFile::Property(file)) => {
-                self.doc = Doc::Property(Box::new(PropertyDoc::open(path.to_owned(), file)));
-            }
-            Err(err) => output.error(format!("Could not open the clip `{path}`: {err}")),
-        }
+        self.load_clip(project, assets, path, output);
     }
 
-    /// Opens the controller at `path` in the panel, previewed on `model`
-    /// (a `MeshId`) if given, or else on its first clip's model.
+    /// Opens the controller at `path` in the Animator tab, previewed on
+    /// `model` (a `MeshId`) if given, or else on its first clip's model.
     pub fn open_controller(
         &mut self,
         project: &Path,
         assets: &Assets,
         path: &str,
         model: Option<String>,
-        world: &mut World,
         output: &mut Output,
     ) {
-        self.close_preview(world);
         let _ = self.write_all(project, output);
         self.rescan(project);
         match store::read_controller(project, path) {
@@ -350,7 +427,7 @@ impl AnimationStudio {
                     .filter(animated)
                     .or_else(|| doc.first_clip_source(project).filter(animated))
                     .or_else(|| self.files.models.iter().find(|m| animated(m)).cloned());
-                self.doc = Doc::Controller(Box::new(doc));
+                self.animator.doc = Some(Box::new(doc));
             }
             Err(err) => output.error(format!("Could not open the controller `{path}`: {err}")),
         }
@@ -406,305 +483,47 @@ impl AnimationStudio {
         self.scanned = Some(Instant::now());
     }
 
-    /// Draws the panel. `selected` is the animated MeshPart selected in the
-    /// editor, if any. `preview_root` is a Part/MeshPart/Model for property
-    /// clip scrubbing (restored when the doc closes).
-    #[allow(clippy::too_many_arguments)] // Each is a different input to the panel.
-    pub fn show(
-        &mut self,
-        ui: &mut egui::Ui,
-        project: Option<&Path>,
-        assets: &Assets,
-        render_state: Option<&RenderState>,
-        selected: Option<&SelectedModel>,
-        world: &mut World,
-        preview_root: Option<InstanceId>,
-        output: &mut Output,
-    ) -> Vec<StudioAction> {
-        let mut actions = Vec::new();
-        let Some(project) = project else {
-            ui.weak("Open a project to animate its models.");
-            return actions;
-        };
+    fn rescan_if_due(&mut self, project: &Path) {
         if self.scanned.is_none_or(|at| at.elapsed() >= RESCAN) {
             self.rescan(project);
         }
-        egui::TopBottomPanel::top("animator steps").show_inside(ui, |ui| {
-            self.steps(ui, project, assets, selected, world, output, &mut actions)
-        });
-        let dt = f64::from(ui.input(|input| input.unstable_dt)).min(MAX_FRAME_SECONDS);
-        if ui.available_width() < STACK_BELOW {
-            // A narrow column: the library, the document and its settings
-            // one above the other, scrolling together.
-            egui::ScrollArea::vertical()
-                .id_salt("animation stacked")
-                .auto_shrink(false)
-                .show(ui, |ui| {
-                    egui::CollapsingHeader::new(format!("{} Library", icons::FILM_STRIP))
-                        .id_salt("animation library stacked")
-                        .default_open(matches!(self.doc, Doc::Nothing))
-                        .icon(crate::widgets::chevron)
-                        .show(ui, |ui| {
-                            self.library(
-                                ui,
-                                project,
-                                assets,
-                                selected,
-                                world,
-                                output,
-                                &mut actions,
-                                false,
-                            )
-                        });
-                    ui.separator();
-                    self.document(ui, assets, render_state, world, preview_root, dt, true);
-                    if !matches!(self.doc, Doc::Nothing) {
-                        ui.separator();
-                        egui::CollapsingHeader::new(format!("{} Settings", icons::SLIDERS))
-                            .id_salt("animation inspector stacked")
-                            .default_open(true)
-                            .icon(crate::widgets::chevron)
-                            .show(ui, |ui| self.inspector(ui, preview_root));
-                    }
-                });
-        } else {
-            egui::SidePanel::left("animation library")
-                .resizable(true)
-                .default_width(220.0)
-                .show_inside(ui, |ui| {
-                    self.library(
-                        ui,
-                        project,
-                        assets,
-                        selected,
-                        world,
-                        output,
-                        &mut actions,
-                        true,
-                    )
-                });
-            if !matches!(self.doc, Doc::Nothing) {
-                egui::SidePanel::right("animation inspector")
-                    .resizable(true)
-                    .default_width(320.0)
-                    .show_inside(ui, |ui| {
-                        egui::ScrollArea::vertical()
-                            .show(ui, |ui| self.inspector(ui, preview_root));
-                    });
-            }
-            egui::CentralPanel::default().show_inside(ui, |ui| {
-                self.document(ui, assets, render_state, world, preview_root, dt, false)
-            });
+    }
+
+    /// Once per pass, whichever tab is drawn: shows the open dialog, keeps
+    /// Return settings' transitions in step, and writes changes once the
+    /// gesture making them ends.
+    #[allow(clippy::too_many_arguments)] // Each is a different input to the studio.
+    fn finish(
+        &mut self,
+        ui: &egui::Ui,
+        project: &Path,
+        assets: &Assets,
+        selected: Option<&SelectedModel>,
+        world: &mut World,
+        output: &mut Output,
+        actions: &mut Vec<StudioAction>,
+    ) {
+        let pass = ui.ctx().cumulative_pass_nr();
+        if self.finished_pass == Some(pass) {
+            return;
         }
-        self.ask(
-            ui.ctx(),
-            project,
-            assets,
-            selected,
-            world,
-            output,
-            &mut actions,
-        );
-        // Return settings' transitions follow them.
-        if let Doc::Controller(controller) = &mut self.doc {
+        self.finished_pass = Some(pass);
+        self.ask(ui.ctx(), project, assets, selected, world, output, actions);
+        if let Some(controller) = &mut self.animator.doc {
             controller.sync_returns(project);
         }
-
-        // Changes are written once the gesture making them ends.
         let busy = ui.input(|input| input.pointer.any_down())
             || ui.ctx().memory(|memory| memory.focused().is_some());
         if !busy {
             actions.extend(self.write_all(project, output));
         }
-        actions
     }
 
-    /// The settings of the open clip or controller.
-    fn inspector(&mut self, ui: &mut egui::Ui, preview_root: Option<InstanceId>) {
-        let models = self.files.models.clone();
-        let clips = self.files.clips.clone();
-        match &mut self.doc {
-            Doc::Clip(clip) => {
-                if clip.inspector(ui, &models) {
-                    self.dialog = Some(Dialog::Rename {
-                        path: clip.path.clone(),
-                        name: axcenity_anim::files::clip_name(&clip.path).to_owned(),
-                        error: None,
-                    });
-                }
-            }
-            Doc::Property(clip) => {
-                ui.heading("Property clip");
-                ui.label(&clip.path);
-                ui.checkbox(&mut clip.file.looping, "Loop");
-                ui.add(
-                    egui::DragValue::new(&mut clip.file.duration)
-                        .speed(0.05)
-                        .prefix("Duration "),
-                );
-                if preview_root.is_none() {
-                    ui.weak("Select a Part in the Explorer to preview and insert keys.");
-                }
-            }
-            Doc::Controller(controller) => controller.inspector(ui, &clips),
-            Doc::Nothing => {}
-        }
-    }
-
-    /// The open clip or controller: its preview and timeline, or its graph
-    /// and live preview. `stacked` is for a narrow column, where it scrolls
-    /// with the rest of the panel, so it gets fixed heights.
-    #[allow(clippy::too_many_arguments)] // Each is a different input to the panel.
-    fn document(
+    /// Does what a picker or a ⋯ menu asked for.
+    #[allow(clippy::too_many_arguments)] // Each is a different input to the studio.
+    fn act(
         &mut self,
-        ui: &mut egui::Ui,
-        assets: &Assets,
-        render_state: Option<&RenderState>,
-        world: &mut World,
-        preview_root: Option<InstanceId>,
-        dt: f64,
-        stacked: bool,
-    ) {
-        match &mut self.doc {
-            Doc::Nothing => {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(40.0);
-                    ui.heading(format!("{} Animation Studio", icons::PERSON_SIMPLE_RUN));
-                    ui.label("Pick a clip in the Library to preview it and set how it plays,");
-                    ui.label("or a controller to edit its states and transitions.");
-                    ui.weak("Follow the steps above to animate a model from the start.");
-                });
-            }
-            Doc::Property(clip) => {
-                clip.tick(dt);
-                if clip.playing {
-                    ui.ctx().request_repaint();
-                }
-                ui.heading(axcenity_anim::files::clip_name(&clip.path));
-                if clip.ui(ui, world, preview_root) {
-                    // Defer write until gesture ends via write_all on seal.
-                }
-            }
-            Doc::Clip(clip) => {
-                clip.tick(dt);
-                if clip.playing {
-                    ui.ctx().request_repaint();
-                }
-                show_model(&mut self.preview, clip.preview_model.as_deref(), assets);
-                let posed = match clip.pose(assets) {
-                    Ok(posed) => Some(posed),
-                    Err(problem) => {
-                        ui.colored_label(ui.visuals().error_fg_color, problem);
-                        None
-                    }
-                };
-                let height = if stacked {
-                    (ui.available_width() * 0.75).clamp(160.0, 320.0)
-                } else {
-                    (ui.available_height() - 110.0).max(120.0)
-                };
-                self.preview.show(ui, render_state, assets, posed, height);
-                ui.add_space(4.0);
-                clip.transport(ui);
-            }
-            Doc::Controller(controller) => {
-                let graph_height = if stacked {
-                    STACKED_GRAPH
-                } else {
-                    (ui.available_height() - CONTROLLER_PREVIEW - 8.0).max(160.0)
-                };
-                let live = controller.live();
-                let selected = controller.selected;
-                let clips = self.files.clips.clone();
-                let events = ui
-                    .allocate_ui(egui::vec2(ui.available_width(), graph_height), |ui| {
-                        controller
-                            .view
-                            .show(ui, &controller.file, selected, live, &clips)
-                    })
-                    .inner;
-                controller.apply(events);
-                ui.add_space(6.0);
-                // The live preview beside its controls, or above them when
-                // narrow.
-                let size = egui::vec2(ui.available_width(), CONTROLLER_PREVIEW);
-                ui.allocate_ui(size, |ui| {
-                    responsive::split(ui, SPLIT_PREVIEW_BELOW, 0.55, |ui, pane| {
-                        if pane == 0 {
-                            show_model(
-                                &mut self.preview,
-                                controller.preview_model.as_deref(),
-                                assets,
-                            );
-                            let posed = match controller.tick(assets, dt) {
-                                Ok(posed) => Some(posed),
-                                Err(problem) => {
-                                    ui.colored_label(ui.visuals().warn_fg_color, problem);
-                                    None
-                                }
-                            };
-                            let height = ui.available_height().clamp(100.0, CONTROLLER_PREVIEW);
-                            self.preview.show(ui, render_state, assets, posed, height);
-                            return;
-                        }
-                        ui.vertical(|ui| {
-                            responsive::toolbar(ui, |ui| {
-                                ui.strong("Preview");
-                                let (icon, hover) = if controller.playing {
-                                    (icons::PAUSE, "Pause")
-                                } else {
-                                    (icons::PLAY, "Play")
-                                };
-                                if ui.small_button(icon).on_hover_text(hover).clicked() {
-                                    controller.playing = !controller.playing;
-                                }
-                                if ui
-                                    .small_button(icons::ARROW_COUNTER_CLOCKWISE)
-                                    .on_hover_text("Start again from the default state")
-                                    .clicked()
-                                {
-                                    controller.restart();
-                                }
-                            });
-                            let models = self.files.models.clone();
-                            let shown = controller
-                                .preview_model
-                                .as_deref()
-                                .map_or("(pick a model)", |path| {
-                                    path.rsplit('/').next().unwrap_or(path)
-                                });
-                            let mut picked = controller.preview_model.clone();
-                            egui::ComboBox::from_label("model")
-                                .selected_text(shown)
-                                .show_ui(ui, |ui| {
-                                    for model in &models {
-                                        let name = model.rsplit('/').next().unwrap_or(model);
-                                        ui.selectable_value(&mut picked, Some(model.clone()), name);
-                                    }
-                                });
-                            if picked != controller.preview_model {
-                                controller.preview_model = picked;
-                                controller.restart();
-                            }
-                            ui.separator();
-                            egui::ScrollArea::vertical()
-                                .id_salt("live parameters")
-                                .show(ui, |ui| controller.live_controls(ui));
-                        });
-                    });
-                });
-                if controller.playing {
-                    ui.ctx().request_repaint();
-                }
-            }
-        }
-    }
-
-    /// The five Animator steps, each ticked once it's done.
-    #[allow(clippy::too_many_arguments)] // Each is a different input to the panel.
-    fn steps(
-        &mut self,
-        ui: &mut egui::Ui,
+        pick: Pick,
         project: &Path,
         assets: &Assets,
         selected: Option<&SelectedModel>,
@@ -712,272 +531,58 @@ impl AnimationStudio {
         output: &mut Output,
         actions: &mut Vec<StudioAction>,
     ) {
-        let controller = match &self.doc {
-            Doc::Controller(controller) => Some(controller),
-            _ => None,
-        };
-        let model_done = selected.is_some_and(|model| model.animated);
-        let clips = self.files.clips.len();
-        let transitions = controller.map_or(0, |c| c.transitions());
-        let mut open_selected = None;
-        ui.horizontal_wrapped(|ui| {
-            let step = |ui: &mut egui::Ui, number: u8, done: bool, title: &str, hover: &str| {
-                let color = if done {
-                    egui::Color32::from_rgb(70, 190, 110)
-                } else {
-                    ui.visuals().weak_text_color()
-                };
-                let mark = if done { icons::CHECK_CIRCLE } else { icons::CIRCLE };
-                ui.label(egui::RichText::new(format!("{mark} {number}. {title}")).color(color))
-                    .on_hover_text(hover);
-            };
-            step(
-                ui,
-                1,
-                model_done,
-                &match selected {
-                    Some(model) if model.animated => format!("Model: {}", model.name),
-                    _ => "Select a model".to_owned(),
-                },
-                "Select an animated MeshPart (or its Animator) in the Explorer: the controller source.",
-            );
-            ui.weak(icons::CARET_RIGHT);
-            step(
-                ui,
-                2,
-                clips > 0,
-                &format!("Import FBX ({clips} clips)"),
-                "Import an FBX with its skeleton and clips (File > Import Model…).",
-            );
-            if clips == 0 && ui.small_button("Import…").clicked() {
-                actions.push(StudioAction::ImportModel);
-            }
-            ui.weak(icons::CARET_RIGHT);
-            step(
-                ui,
-                3,
-                controller.is_some(),
-                "Create controller",
-                "Make (or open) the animator controller: its states and parameters.",
-            );
-            if controller.is_none() {
-                if let Some(model) = selected
-                    && !model.controller.is_empty()
-                {
-                    if ui.small_button("Open").clicked() {
-                        open_selected = Some((model.controller.clone(), model.mesh_id.clone()));
-                    }
-                } else if ui.small_button("New").clicked() {
-                    self.dialog = Some(new_controller_dialog(selected));
+        let is_controller = |path: &str| path.ends_with(axcenity_anim::CONTROLLER_EXTENSION);
+        match pick {
+            Pick::Open(path) if is_controller(&path) => {
+                if self.controller_path().as_deref() != Some(&path) {
+                    let model = selected
+                        .filter(|model| model.controller == path)
+                        .map(|model| model.mesh_id.clone());
+                    self.open_controller(project, assets, &path, model, output);
                 }
             }
-            ui.weak(icons::CARET_RIGHT);
-            step(
-                ui,
-                4,
-                transitions > 0,
-                &format!("Connect transitions ({transitions})"),
-                "Right-click a state in the graph, Make Transition, then click where it goes.",
-            );
-            ui.weak(icons::CARET_RIGHT);
-            step(
-                ui,
-                5,
-                false,
-                "Test",
-                "Drive the preview with its parameters, then press Play to see it in the game.",
-            );
-            if ui.small_button(format!("{} Play", icons::PLAY)).clicked() {
-                actions.push(StudioAction::Play);
+            Pick::Open(path) => {
+                if self.clip_path().as_deref() != Some(&path) {
+                    self.open_clip(project, assets, &path, world, output);
+                }
             }
-        });
-        if let Some((path, mesh_id)) = open_selected {
-            self.open_controller(project, assets, &path, Some(mesh_id), world, output);
-        }
-    }
-
-    /// The clips, by folder, and the controllers, with the buttons that
-    /// make, rename, copy and delete them. `heading` is false where a
-    /// collapsing header already names it.
-    #[allow(clippy::too_many_arguments)] // Each is a different input to the panel.
-    fn library(
-        &mut self,
-        ui: &mut egui::Ui,
-        project: &Path,
-        assets: &Assets,
-        selected: Option<&SelectedModel>,
-        world: &mut World,
-        output: &mut Output,
-        actions: &mut Vec<StudioAction>,
-        heading: bool,
-    ) {
-        if heading {
-            ui.strong(format!("{} Library", icons::FILM_STRIP));
-        }
-        responsive::toolbar(ui, |ui| {
-            if ui
-                .small_button(format!("{} Clip", icons::PLUS))
-                .on_hover_text("Make a clip from a take of a model in the project")
-                .clicked()
-            {
-                let mut dialog = Dialog::NewClip {
-                    model: 0,
-                    takes: Ok(Vec::new()),
-                    take: 0,
-                    name: String::new(),
-                };
-                load_takes(&mut dialog, &self.files, assets);
-                self.dialog = Some(dialog);
-            }
-            if ui
-                .small_button(format!("{} Property", icons::PLUS))
-                .on_hover_text("Make an authored property clip for Parts (doors, props)")
-                .clicked()
-            {
-                self.dialog = Some(Dialog::NewPropertyClip {
-                    name: "Door".to_owned(),
+            Pick::Rename(path) if is_controller(&path) => {
+                self.dialog = Some(Dialog::RenameController {
+                    name: store::controller_name(&path).to_owned(),
+                    path,
+                    error: None,
                 });
             }
-            if ui
-                .small_button(format!("{} Controller", icons::PLUS))
-                .on_hover_text("Make an animator controller")
-                .clicked()
-            {
-                self.dialog = Some(new_controller_dialog(selected));
-            }
-        });
-        ui.add(
-            egui::TextEdit::singleline(&mut self.search)
-                .hint_text(format!("{} Search", icons::MAGNIFYING_GLASS))
-                .desired_width(f32::INFINITY),
-        );
-        ui.add_space(4.0);
-        let search = self.search.trim().to_lowercase();
-        let matches = |path: &&String| search.is_empty() || path.to_lowercase().contains(&search);
-        let clips: Vec<String> = self.files.clips.iter().filter(matches).cloned().collect();
-        let controllers: Vec<String> = self
-            .files
-            .controllers
-            .iter()
-            .filter(matches)
-            .cloned()
-            .collect();
-        let open_path = self.open_path();
-        let mut open = None;
-        let mut action = None;
-        egui::ScrollArea::vertical()
-            .id_salt("clip list")
-            .show(ui, |ui| {
-                egui::CollapsingHeader::new(format!("{} Controllers", icons::FLOW_ARROW))
-                    .id_salt("controllers")
-                    .default_open(true)
-                    .icon(crate::widgets::chevron)
-                    .show(ui, |ui| {
-                        if self.files.controllers.is_empty() {
-                            ui.weak("None yet: + Controller makes one.");
-                        }
-                        for path in &controllers {
-                            let name = path
-                                .rsplit('/')
-                                .next()
-                                .unwrap_or(path)
-                                .trim_end_matches(axcenity_anim::CONTROLLER_EXTENSION);
-                            let is_open = open_path.as_ref() == Some(path);
-                            let response = ui
-                                .selectable_label(is_open, format!("{} {name}", icons::FLOW_ARROW))
-                                .on_hover_text(path.as_str());
-                            if response.clicked() && !is_open {
-                                open = Some((true, path.clone()));
-                            }
-                            response.context_menu(|ui| {
-                                if ui
-                                    .button(format!("{} Rename", icons::PENCIL_SIMPLE))
-                                    .clicked()
-                                {
-                                    action = Some(("rename-controller", path.clone()));
-                                    ui.close();
-                                }
-                                if ui.button(format!("{} Duplicate", icons::COPY)).clicked() {
-                                    action = Some(("duplicate-controller", path.clone()));
-                                    ui.close();
-                                }
-                                if ui.button(format!("{} Delete", icons::TRASH)).clicked() {
-                                    action = Some(("delete", path.clone()));
-                                    ui.close();
-                                }
-                            });
-                        }
-                    });
-                if self.files.clips.is_empty() {
-                    ui.weak("No clips yet. Import an animated FBX, or make one with + Clip.");
-                }
-                let mut groups: Vec<(&str, Vec<&String>)> = Vec::new();
-                for path in &clips {
-                    let group = store::group_of(path);
-                    match groups.iter_mut().find(|(name, _)| *name == group) {
-                        Some((_, paths)) => paths.push(path),
-                        None => groups.push((group, vec![path])),
-                    }
-                }
-                for (group, paths) in groups {
-                    let title = if group.is_empty() { "Clips" } else { group };
-                    egui::CollapsingHeader::new(format!("{} {title}", icons::FOLDER))
-                        .id_salt(("clip group", group))
-                        .default_open(true)
-                        .icon(crate::widgets::chevron)
-                        .show(ui, |ui| {
-                            for path in paths {
-                                let name = axcenity_anim::files::clip_name(path);
-                                let is_open = open_path.as_ref() == Some(path);
-                                let response = ui
-                                    .selectable_label(
-                                        is_open,
-                                        format!("{} {name}", icons::FILM_SLATE),
-                                    )
-                                    .on_hover_text(path.as_str());
-                                if response.clicked() && !is_open {
-                                    open = Some((false, path.clone()));
-                                }
-                                response.context_menu(|ui| {
-                                    if ui
-                                        .button(format!("{} Rename", icons::PENCIL_SIMPLE))
-                                        .clicked()
-                                    {
-                                        action = Some(("rename", path.clone()));
-                                        ui.close();
-                                    }
-                                    if ui.button(format!("{} Duplicate", icons::COPY)).clicked() {
-                                        action = Some(("duplicate", path.clone()));
-                                        ui.close();
-                                    }
-                                    if ui.button(format!("{} Delete", icons::TRASH)).clicked() {
-                                        action = Some(("delete", path.clone()));
-                                        ui.close();
-                                    }
-                                });
-                            }
-                        });
-                }
-            });
-        match open {
-            Some((false, path)) => self.open_clip(project, assets, &path, world, output),
-            Some((true, path)) => {
-                let model = selected
-                    .filter(|model| model.controller == path)
-                    .map(|model| model.mesh_id.clone());
-                self.open_controller(project, assets, &path, model, world, output);
-            }
-            None => {}
-        }
-        match action {
-            Some(("rename", path)) => {
+            Pick::Rename(path) => {
                 self.dialog = Some(Dialog::Rename {
                     name: axcenity_anim::files::clip_name(&path).to_owned(),
                     path,
                     error: None,
                 });
             }
-            Some(("duplicate", path)) => {
+            Pick::Duplicate(path) if is_controller(&path) => {
+                actions.extend(self.write_all(project, output));
+                match store::duplicate_controller(project, &path) {
+                    Ok(written) => {
+                        output.info(format!(
+                            "Copied the controller `{path}` as `{}`.",
+                            written.path
+                        ));
+                        remember(
+                            actions,
+                            format!("Duplicate {}", store::controller_name(&path)),
+                            written.files,
+                            None,
+                        );
+                        let copy = written.path;
+                        self.open_controller(project, assets, &copy, None, output);
+                    }
+                    Err(err) => {
+                        output.error(format!("Could not copy the controller `{path}`: {err}"))
+                    }
+                }
+            }
+            Pick::Duplicate(path) => {
                 actions.extend(self.write_all(project, output));
                 match store::duplicate_clip(project, &path) {
                     Ok(written) => {
@@ -994,49 +599,741 @@ impl AnimationStudio {
                     Err(err) => output.error(format!("Could not copy the clip `{path}`: {err}")),
                 }
             }
-            Some(("rename-controller", path)) => {
-                self.dialog = Some(Dialog::RenameController {
-                    name: store::controller_name(&path).to_owned(),
-                    path,
-                    error: None,
+            Pick::Delete(path) => {
+                let users = if is_controller(&path) {
+                    Vec::new()
+                } else {
+                    store::controllers_using(project, &path)
+                };
+                self.dialog = Some(Dialog::Delete { path, users });
+            }
+        }
+    }
+
+    /// The New clip dialog, on the first model's takes.
+    fn new_clip_dialog(&mut self, assets: &Assets) {
+        let mut dialog = Dialog::NewClip {
+            model: 0,
+            takes: Ok(Vec::new()),
+            take: 0,
+            name: String::new(),
+        };
+        load_takes(&mut dialog, &self.files, assets);
+        self.dialog = Some(dialog);
+    }
+
+    fn new_property_clip_dialog(&mut self) {
+        self.dialog = Some(Dialog::NewPropertyClip {
+            name: "Door".to_owned(),
+        });
+    }
+
+    // The Animation tab.
+
+    /// Draws the Animation tab. `selected` is the animated MeshPart selected
+    /// in the editor, if any. `preview_root` is a Part/MeshPart/Model for
+    /// property-clip scrubbing (restored when the clip closes).
+    #[allow(clippy::too_many_arguments)] // Each is a different input to the tab.
+    pub fn show_clips(
+        &mut self,
+        ui: &mut egui::Ui,
+        project: Option<&Path>,
+        assets: &Assets,
+        render_state: Option<&RenderState>,
+        selected: Option<&SelectedModel>,
+        world: &mut World,
+        preview_root: Option<InstanceId>,
+        output: &mut Output,
+    ) -> Vec<StudioAction> {
+        let mut actions = Vec::new();
+        let Some(project) = project else {
+            ui.weak("Open a project to animate its models and Parts.");
+            return actions;
+        };
+        self.rescan_if_due(project);
+        let stacked = ui.available_width() < STACK_BELOW;
+        let root_name = preview_root
+            .and_then(|id| world.get(id))
+            .map(|instance| instance.name().to_owned());
+        let (pick, new) = egui::TopBottomPanel::top("clip toolbar")
+            .show_inside(ui, |ui| {
+                self.clip_toolbar(ui, world, preview_root, root_name.as_deref(), stacked)
+            })
+            .inner;
+        if let Some(pick) = pick {
+            self.act(pick, project, assets, selected, world, output, &mut actions);
+        }
+        match new {
+            Some(New::Clip) => self.new_clip_dialog(assets),
+            Some(New::PropertyClip) => self.new_property_clip_dialog(),
+            None => {}
+        }
+
+        let dt = f64::from(ui.input(|input| input.unstable_dt)).min(MAX_FRAME_SECONDS);
+        let playing = match &mut self.clip.doc {
+            Some(Clip::Take(doc)) => {
+                doc.tick(dt);
+                doc.playing
+            }
+            Some(Clip::Property(doc)) => {
+                doc.tick(dt);
+                doc.playing
+            }
+            None => false,
+        };
+        if playing {
+            ui.ctx().request_repaint();
+        }
+
+        let mut rename = false;
+        let mut step = None;
+        let property = matches!(self.clip.doc, Some(Clip::Property(_)));
+        match self.clip.doc {
+            None => {
+                egui::CentralPanel::default().show_inside(ui, |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("clip checklist")
+                        .show(ui, |ui| step = self.clip_checklist(ui, preview_root))
                 });
             }
-            Some(("duplicate-controller", path)) => {
-                actions.extend(self.write_all(project, output));
-                match store::duplicate_controller(project, &path) {
-                    Ok(written) => {
-                        output.info(format!(
-                            "Copied the controller `{path}` as `{}`.",
-                            written.path
-                        ));
-                        remember(
-                            actions,
-                            format!("Duplicate {}", store::controller_name(&path)),
-                            written.files,
-                            None,
-                        );
-                        let copy = written.path;
-                        self.open_controller(project, assets, &copy, None, world, output);
-                    }
-                    Err(err) => {
-                        output.error(format!("Could not copy the controller `{path}`: {err}"))
+            Some(_) if stacked => {
+                egui::CentralPanel::default().show_inside(ui, |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("clip stacked")
+                        .auto_shrink(false)
+                        .show(ui, |ui| {
+                            let height = (ui.available_width() * 0.75).clamp(160.0, 320.0);
+                            self.clip_preview(
+                                ui,
+                                assets,
+                                render_state,
+                                root_name.as_deref(),
+                                height,
+                            );
+                            egui::CollapsingHeader::new(self.drawer_title())
+                                .id_salt("clip drawer stacked")
+                                .icon(widgets::chevron)
+                                .show(ui, |ui| self.clip_drawer(ui, assets, root_name.as_deref()));
+                            ui.separator();
+                            self.clip_timeline(ui, world, preview_root);
+                            ui.separator();
+                            egui::CollapsingHeader::new(format!("{} Settings", icons::SLIDERS))
+                                .id_salt("clip inspector stacked")
+                                .default_open(true)
+                                .icon(widgets::chevron)
+                                .show(ui, |ui| rename = self.clip_inspector(ui, preview_root));
+                        });
+                });
+            }
+            Some(_) => {
+                // The dope sheet grows with its tracks, so it can be resized;
+                // the timeline is one strip.
+                let bottom = if property {
+                    egui::TopBottomPanel::bottom("clip dope sheet")
+                        .resizable(true)
+                        .default_height(150.0)
+                        .min_height(80.0)
+                } else {
+                    egui::TopBottomPanel::bottom("clip timeline").resizable(false)
+                };
+                bottom.show_inside(ui, |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("clip timeline scroll")
+                        .show(ui, |ui| self.clip_timeline(ui, world, preview_root))
+                });
+                if !self.clip.hide_inspector {
+                    let room = ui.available_width();
+                    egui::SidePanel::right("clip inspector")
+                        .resizable(true)
+                        .default_width(260.0)
+                        .max_width(room * 0.45)
+                        .show_inside(ui, |ui| {
+                            egui::ScrollArea::vertical()
+                                .id_salt("clip inspector scroll")
+                                .show(ui, |ui| rename = self.clip_inspector(ui, preview_root))
+                        });
+                }
+                if !self.clip.hide_drawer {
+                    let room = ui.available_width();
+                    egui::SidePanel::left("clip drawer")
+                        .resizable(true)
+                        .default_width(150.0)
+                        .max_width(room * 0.4)
+                        .show_inside(ui, |ui| {
+                            ui.strong(self.drawer_title());
+                            egui::ScrollArea::vertical()
+                                .id_salt("clip drawer scroll")
+                                .show(ui, |ui| self.clip_drawer(ui, assets, root_name.as_deref()))
+                        });
+                }
+                egui::CentralPanel::default().show_inside(ui, |ui| {
+                    let height = ui.available_height();
+                    self.clip_preview(ui, assets, render_state, root_name.as_deref(), height);
+                });
+            }
+        }
+        if rename && let Some(path) = self.clip_path() {
+            self.dialog = Some(Dialog::Rename {
+                name: axcenity_anim::files::clip_name(&path).to_owned(),
+                path,
+                error: None,
+            });
+        }
+        match step {
+            Some(0) => actions.push(StudioAction::ImportModel),
+            Some(1) => self.new_clip_dialog(assets),
+            Some(2) => self.new_property_clip_dialog(),
+            _ => {}
+        }
+
+        // A property clip poses the selected Part in the edited world; with
+        // Record on, a move made there since is keyed first.
+        if let (Some(Clip::Property(doc)), Some(root)) = (&mut self.clip.doc, preview_root) {
+            if self.clip.record {
+                doc.record_changes(world, root);
+            }
+            doc.apply_preview(world, root);
+        }
+
+        self.finish(ui, project, assets, selected, world, output, &mut actions);
+        actions
+    }
+
+    /// The clip picker, New, then what's open's playback, Record, and the
+    /// buttons that show or hide the drawer and the inspector. Returns what
+    /// was picked, and what New was asked to make.
+    fn clip_toolbar(
+        &mut self,
+        ui: &mut egui::Ui,
+        world: &mut World,
+        preview_root: Option<InstanceId>,
+        root_name: Option<&str>,
+        stacked: bool,
+    ) -> (Option<Pick>, Option<New>) {
+        let open = self.clip_path();
+        let mut new = None;
+        let pick = responsive::toolbar(ui, |ui| {
+            let shown = open
+                .as_deref()
+                .map_or("Pick a clip", axcenity_anim::files::clip_name);
+            let mut pick = picker(
+                ui,
+                Kind::Clip,
+                shown,
+                &mut self.clip.search,
+                &self.files.clips,
+                open.as_deref(),
+            );
+            ui.menu_button(format!("{} New", icons::PLUS), |ui| {
+                if ui
+                    .button(format!("{} Clip from a take…", icons::FILM_SLATE))
+                    .on_hover_text("Make a clip from a take of a model in the project")
+                    .clicked()
+                {
+                    new = Some(New::Clip);
+                    ui.close();
+                }
+                if ui
+                    .button(format!("{} Property clip…", icons::CUBE))
+                    .on_hover_text("Make an authored property clip for Parts (doors, props)")
+                    .clicked()
+                {
+                    new = Some(New::PropertyClip);
+                    ui.close();
+                }
+            });
+            let Some(doc) = &mut self.clip.doc else {
+                return pick;
+            };
+            ui.separator();
+            match doc {
+                Clip::Take(doc) => doc.controls(ui, &self.files.models),
+                Clip::Property(doc) => {
+                    doc.controls(ui, world, preview_root);
+                    responsive::room_for(ui, 120.0);
+                    let on = format!(
+                        "{} on {}",
+                        icons::CUBE,
+                        root_name.unwrap_or("(select a Part)")
+                    );
+                    ui.add(egui::Label::new(egui::RichText::new(on).weak()).truncate())
+                        .on_hover_text("Property clips play on the Part, MeshPart or Model selected in the Explorer");
+                    let record = &mut self.clip.record;
+                    let text = format!("{} Record", icons::RECORD);
+                    let text = if *record {
+                        egui::RichText::new(text).color(theme::palette(ui.ctx()).error)
+                    } else {
+                        egui::RichText::new(text)
+                    };
+                    if ui
+                        .selectable_label(*record, text)
+                        .on_hover_text(
+                            "On, moving the previewed Part in the Scene View sets a key at the playhead",
+                        )
+                        .clicked()
+                    {
+                        *record = !*record;
                     }
                 }
             }
-            Some((_, path)) => {
-                let users = if path.ends_with(axcenity_anim::CLIP_EXTENSION) {
-                    store::controllers_using(project, &path)
+            ui.separator();
+            if !stacked {
+                let drawer = if matches!(doc, Clip::Take(_)) {
+                    "Show or hide the bones"
                 } else {
-                    Vec::new()
+                    "Show or hide the objects"
                 };
-                self.dialog = Some(Dialog::Delete { path, users });
+                if widgets::icon_button(ui, icons::SIDEBAR, drawer, !self.clip.hide_drawer)
+                    .clicked()
+                {
+                    self.clip.hide_drawer = !self.clip.hide_drawer;
+                }
+                if widgets::icon_button(
+                    ui,
+                    icons::SLIDERS,
+                    "Show or hide the settings",
+                    !self.clip.hide_inspector,
+                )
+                .clicked()
+                {
+                    self.clip.hide_inspector = !self.clip.hide_inspector;
+                }
+            }
+            if let Some(path) = &open {
+                ui.menu_button(icons::DOTS_THREE, |ui| asset_menu(ui, path, &mut pick));
+            }
+            pick
+        });
+        (pick, new)
+    }
+
+    /// The drawer's heading: bones for a take clip, objects for a property clip.
+    fn drawer_title(&self) -> String {
+        match &self.clip.doc {
+            Some(Clip::Property(_)) => format!("{} Objects", icons::CUBE),
+            _ => format!("{} Bones", icons::BONE),
+        }
+    }
+
+    fn clip_drawer(&mut self, ui: &mut egui::Ui, assets: &Assets, root_name: Option<&str>) {
+        match &mut self.clip.doc {
+            Some(Clip::Take(doc)) => doc.bones(ui, assets),
+            Some(Clip::Property(doc)) => doc.objects(ui, root_name),
+            None => {}
+        }
+    }
+
+    /// The open clip's preview, `height` points tall: the model posed at the
+    /// playhead, or for a property clip, where it's being previewed.
+    fn clip_preview(
+        &mut self,
+        ui: &mut egui::Ui,
+        assets: &Assets,
+        render_state: Option<&RenderState>,
+        root_name: Option<&str>,
+        height: f32,
+    ) {
+        match &mut self.clip.doc {
+            Some(Clip::Take(doc)) => {
+                show_model(&mut self.clip.preview, doc.preview_model.as_deref(), assets);
+                let posed = match doc.pose(assets) {
+                    Ok(posed) => Some(posed),
+                    Err(problem) => {
+                        ui.colored_label(ui.visuals().error_fg_color, problem);
+                        None
+                    }
+                };
+                let height = height.min(ui.available_height()).max(80.0);
+                self.clip
+                    .preview
+                    .show(ui, render_state, assets, posed, height);
+            }
+            Some(Clip::Property(_)) => {
+                let size = egui::vec2(ui.available_width(), height.max(80.0));
+                let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+                ui.painter()
+                    .rect_filled(rect, 4.0, ui.visuals().extreme_bg_color);
+                let message = match root_name {
+                    Some(name) => format!(
+                        "{} Previewing on {name} in the Scene View.\nWith Record on, move it there to set a key at the playhead.",
+                        icons::CUBE
+                    ),
+                    None => "Select a Part, MeshPart or Model in the Explorer to preview this clip on it.".to_owned(),
+                };
+                ui.scope_builder(egui::UiBuilder::new().max_rect(rect.shrink(12.0)), |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space((rect.height() / 2.0 - 30.0).max(0.0));
+                        ui.weak(message);
+                    });
+                });
             }
             None => {}
         }
     }
 
+    /// The take clip's timeline, or the property clip's dope sheet.
+    fn clip_timeline(
+        &mut self,
+        ui: &mut egui::Ui,
+        world: &mut World,
+        preview_root: Option<InstanceId>,
+    ) {
+        match &mut self.clip.doc {
+            Some(Clip::Take(doc)) => doc.timeline(ui),
+            Some(Clip::Property(doc)) => doc.keys(ui, world, preview_root),
+            None => {}
+        }
+    }
+
+    /// The open clip's settings. Returns true if Rename was pressed.
+    fn clip_inspector(&mut self, ui: &mut egui::Ui, preview_root: Option<InstanceId>) -> bool {
+        match &mut self.clip.doc {
+            Some(Clip::Take(doc)) => doc.inspector(ui),
+            Some(Clip::Property(doc)) => doc.inspector(ui, preview_root),
+            None => false,
+        }
+    }
+
+    /// With no clip open: the steps to one. Returns the step whose button
+    /// was pressed.
+    fn clip_checklist(&self, ui: &mut egui::Ui, preview_root: Option<InstanceId>) -> Option<usize> {
+        let clips = self.files.clips.len();
+        checklist(
+            ui,
+            &format!("{} Animation", icons::PERSON_SIMPLE_RUN),
+            "Open a clip with the picker above, or get one:",
+            &[
+                Step {
+                    done: clips > 0,
+                    title: format!("Import an animated FBX ({clips} clips)"),
+                    hint: "Its takes become clips (File > Import Model…).",
+                    button: Some("Import…"),
+                },
+                Step {
+                    done: false,
+                    title: "Make a clip from a take".to_owned(),
+                    hint: "A range of a take, with its own speed, loop and events.",
+                    button: Some("New clip"),
+                },
+                Step {
+                    done: preview_root.is_some(),
+                    title: "Or animate a Part".to_owned(),
+                    hint: "Select a Part, MeshPart or Model, then make a property clip and key it.",
+                    button: Some("New property clip"),
+                },
+            ],
+        )
+    }
+
+    // The Animator tab.
+
+    /// Draws the Animator tab. `selected` is the animated MeshPart selected
+    /// in the editor, if any.
+    #[allow(clippy::too_many_arguments)] // Each is a different input to the tab.
+    pub fn show_controllers(
+        &mut self,
+        ui: &mut egui::Ui,
+        project: Option<&Path>,
+        assets: &Assets,
+        render_state: Option<&RenderState>,
+        selected: Option<&SelectedModel>,
+        world: &mut World,
+        output: &mut Output,
+    ) -> Vec<StudioAction> {
+        let mut actions = Vec::new();
+        let Some(project) = project else {
+            ui.weak("Open a project to give its models controllers.");
+            return actions;
+        };
+        self.rescan_if_due(project);
+        let stacked = ui.available_width() < STACK_BELOW;
+        let (pick, new) = egui::TopBottomPanel::top("controller toolbar")
+            .show_inside(ui, |ui| self.controller_toolbar(ui, stacked))
+            .inner;
+        if let Some(pick) = pick {
+            self.act(pick, project, assets, selected, world, output, &mut actions);
+        }
+        if new {
+            self.dialog = Some(new_controller_dialog(selected));
+        }
+
+        let dt = f64::from(ui.input(|input| input.unstable_dt)).min(MAX_FRAME_SECONDS);
+        let mut step = None;
+        if self.animator.doc.is_none() {
+            egui::CentralPanel::default().show_inside(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("controller checklist")
+                    .show(ui, |ui| step = self.controller_checklist(ui, selected))
+            });
+        } else if stacked {
+            egui::CentralPanel::default().show_inside(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("controller stacked")
+                    .auto_shrink(false)
+                    .show(ui, |ui| {
+                        let size = egui::vec2(ui.available_width(), STACKED_GRAPH);
+                        ui.allocate_ui(size, |ui| self.controller_graph(ui));
+                        ui.add_space(6.0);
+                        self.controller_live(ui, assets, render_state, dt);
+                        ui.separator();
+                        egui::CollapsingHeader::new(format!("{} Settings", icons::SLIDERS))
+                            .id_salt("controller inspector stacked")
+                            .default_open(true)
+                            .icon(widgets::chevron)
+                            .show(ui, |ui| self.controller_inspector(ui));
+                    });
+            });
+        } else {
+            // Across the whole tab, so the preview has room beside its
+            // parameters; the graph keeps at least half the height.
+            let room = ui.available_height();
+            egui::TopBottomPanel::bottom("controller preview")
+                .resizable(true)
+                .default_height(CONTROLLER_PREVIEW.min(room * 0.5))
+                .min_height(100.0)
+                .max_height((room * 0.5).max(100.0))
+                .show_inside(ui, |ui| self.controller_live(ui, assets, render_state, dt));
+            if !self.animator.hide_inspector {
+                let room = ui.available_width();
+                egui::SidePanel::right("controller inspector")
+                    .resizable(true)
+                    .default_width(320.0)
+                    .max_width(room * 0.5)
+                    .show_inside(ui, |ui| {
+                        egui::ScrollArea::vertical()
+                            .id_salt("controller inspector scroll")
+                            .show(ui, |ui| self.controller_inspector(ui))
+                    });
+            }
+            egui::CentralPanel::default().show_inside(ui, |ui| self.controller_graph(ui));
+        }
+        if self.animator.doc.as_ref().is_some_and(|doc| doc.playing) {
+            ui.ctx().request_repaint();
+        }
+        match step {
+            Some(1) => actions.push(StudioAction::ImportModel),
+            Some(2) => match selected.filter(|model| !model.controller.is_empty()) {
+                Some(model) => {
+                    let (path, mesh_id) = (model.controller.clone(), model.mesh_id.clone());
+                    self.open_controller(project, assets, &path, Some(mesh_id), output);
+                }
+                None => self.dialog = Some(new_controller_dialog(selected)),
+            },
+            Some(4) => actions.push(StudioAction::Play),
+            _ => {}
+        }
+
+        self.finish(ui, project, assets, selected, world, output, &mut actions);
+        actions
+    }
+
+    /// The controller picker, New, then what's open's preview model and
+    /// playback, and the button that shows or hides the inspector. Returns
+    /// what was picked, and whether New was pressed.
+    fn controller_toolbar(&mut self, ui: &mut egui::Ui, stacked: bool) -> (Option<Pick>, bool) {
+        let open = self.controller_path();
+        let mut new = false;
+        let pick = responsive::toolbar(ui, |ui| {
+            let shown = open
+                .as_deref()
+                .map_or("Pick a controller", store::controller_name);
+            let mut pick = picker(
+                ui,
+                Kind::Controller,
+                shown,
+                &mut self.animator.search,
+                &self.files.controllers,
+                open.as_deref(),
+            );
+            new = ui
+                .button(format!("{} New", icons::PLUS))
+                .on_hover_text("Make an animator controller")
+                .clicked();
+            let Some(doc) = &mut self.animator.doc else {
+                return pick;
+            };
+            ui.separator();
+            let shown = doc
+                .preview_model
+                .as_deref()
+                .map_or("(pick a model)", |path| {
+                    path.rsplit('/').next().unwrap_or(path)
+                });
+            let mut picked = doc.preview_model.clone();
+            responsive::room_for(ui, MODEL_PICKER_ROOM);
+            egui::ComboBox::from_id_salt("controller preview model")
+                .selected_text(format!("{} {shown}", icons::CUBE))
+                .width(130.0)
+                .show_ui(ui, |ui| {
+                    for model in &self.files.models {
+                        let name = model.rsplit('/').next().unwrap_or(model);
+                        ui.selectable_value(&mut picked, Some(model.clone()), name);
+                    }
+                })
+                .response
+                .on_hover_text("The model the live preview shows");
+            if picked != doc.preview_model {
+                doc.preview_model = picked;
+                doc.restart();
+            }
+            let (icon, hover) = if doc.playing {
+                (icons::PAUSE, "Pause the preview")
+            } else {
+                (icons::PLAY, "Play the preview")
+            };
+            if ui.button(icon).on_hover_text(hover).clicked() {
+                doc.playing = !doc.playing;
+            }
+            if ui
+                .button(icons::ARROW_COUNTER_CLOCKWISE)
+                .on_hover_text("Start again from the default state")
+                .clicked()
+            {
+                doc.restart();
+            }
+            ui.separator();
+            if !stacked
+                && widgets::icon_button(
+                    ui,
+                    icons::SLIDERS,
+                    "Show or hide the inspector",
+                    !self.animator.hide_inspector,
+                )
+                .clicked()
+            {
+                self.animator.hide_inspector = !self.animator.hide_inspector;
+            }
+            if let Some(path) = &open {
+                ui.menu_button(icons::DOTS_THREE, |ui| asset_menu(ui, path, &mut pick));
+            }
+            pick
+        });
+        (pick, new)
+    }
+
+    /// The open controller's state machine graph, filling `ui`.
+    fn controller_graph(&mut self, ui: &mut egui::Ui) {
+        let Some(controller) = &mut self.animator.doc else {
+            return;
+        };
+        let live = controller.live();
+        let selected = controller.selected;
+        let clips = &self.files.clips;
+        let size = ui.available_size();
+        let events = ui
+            .allocate_ui(size, |ui| {
+                controller
+                    .view
+                    .show(ui, &controller.file, selected, live, clips)
+            })
+            .inner;
+        controller.apply(events);
+    }
+
+    /// The live preview beside its parameters, or above them when narrow.
+    fn controller_live(
+        &mut self,
+        ui: &mut egui::Ui,
+        assets: &Assets,
+        render_state: Option<&RenderState>,
+        dt: f64,
+    ) {
+        let Some(controller) = &mut self.animator.doc else {
+            return;
+        };
+        let preview = &mut self.animator.preview;
+        let height = ui.available_height().min(CONTROLLER_PREVIEW);
+        let size = egui::vec2(ui.available_width(), height);
+        ui.allocate_ui(size, |ui| {
+            responsive::split(ui, SPLIT_PREVIEW_BELOW, 0.55, |ui, pane| {
+                if pane == 0 {
+                    show_model(preview, controller.preview_model.as_deref(), assets);
+                    let posed = match controller.tick(assets, dt) {
+                        Ok(posed) => Some(posed),
+                        Err(problem) => {
+                            ui.colored_label(ui.visuals().warn_fg_color, problem);
+                            None
+                        }
+                    };
+                    let height = ui.available_height().clamp(40.0, CONTROLLER_PREVIEW);
+                    preview.show(ui, render_state, assets, posed, height);
+                    return;
+                }
+                ui.strong("Parameters");
+                egui::ScrollArea::vertical()
+                    .id_salt("live parameters")
+                    .show(ui, |ui| controller.live_controls(ui));
+            });
+        });
+    }
+
+    fn controller_inspector(&mut self, ui: &mut egui::Ui) {
+        if let Some(controller) = &mut self.animator.doc {
+            controller.inspector(ui, &self.files.clips);
+        }
+    }
+
+    /// With no controller open: the five Animator steps. Returns the step
+    /// whose button was pressed.
+    fn controller_checklist(
+        &self,
+        ui: &mut egui::Ui,
+        selected: Option<&SelectedModel>,
+    ) -> Option<usize> {
+        let clips = self.files.clips.len();
+        let has_controller = selected.is_some_and(|model| !model.controller.is_empty());
+        checklist(
+            ui,
+            &format!("{} Animator", icons::FLOW_ARROW),
+            "Open a controller with the picker above, or follow the steps:",
+            &[
+                Step {
+                    done: selected.is_some_and(|model| model.animated),
+                    title: match selected {
+                        Some(model) if model.animated => format!("Model: {}", model.name),
+                        _ => "Select a model".to_owned(),
+                    },
+                    hint: "Select an animated MeshPart (or its Animator) in the Explorer.",
+                    button: None,
+                },
+                Step {
+                    done: clips > 0,
+                    title: format!("Import an animated FBX ({clips} clips)"),
+                    hint: "Its skeleton and clips come with it (File > Import Model…).",
+                    button: Some("Import…"),
+                },
+                Step {
+                    done: false,
+                    title: if has_controller {
+                        "Open its controller".to_owned()
+                    } else {
+                        "Make a controller".to_owned()
+                    },
+                    hint: "Its states, transitions and parameters.",
+                    button: Some(if has_controller {
+                        "Open"
+                    } else {
+                        "New controller"
+                    }),
+                },
+                Step {
+                    done: false,
+                    title: "Connect transitions".to_owned(),
+                    hint: "Right-click a state in the graph, Make Transition, then click where it goes.",
+                    button: None,
+                },
+                Step {
+                    done: false,
+                    title: "Test".to_owned(),
+                    hint: "Drive the live preview with its parameters, then press Play to see it in the game.",
+                    button: Some("Play"),
+                },
+            ],
+        )
+    }
+
     /// Shows the open dialog, and does what it's answered with.
-    #[allow(clippy::too_many_arguments)] // Each is a different input to the panel.
+    #[allow(clippy::too_many_arguments)] // Each is a different input to the studio.
     fn ask(
         &mut self,
         ctx: &egui::Context,
@@ -1047,14 +1344,13 @@ impl AnimationStudio {
         output: &mut Output,
         actions: &mut Vec<StudioAction>,
     ) {
-        let open_path = self.open_path();
         let Some(dialog) = &mut self.dialog else {
             return;
         };
         let mut close = false;
         let mut open = None;
         let mut open_controller = None;
-        let mut deleted_open = false;
+        let mut deleted = None;
         let modal = egui::Modal::new(egui::Id::new("animation dialog")).show(ctx, |ui| {
             ui.set_width(380.0);
             match dialog {
@@ -1262,7 +1558,9 @@ impl AnimationStudio {
                     let enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                     ui.horizontal(|ui| {
                         if ui.button("Rename").clicked() || enter {
-                            if let Some(record) = flush_open(&mut self.doc, project, output) {
+                            if let Some(record) =
+                                flush(&mut self.clip.doc, &mut self.animator.doc, project, output)
+                            {
                                 actions.push(record);
                             }
                             match store::rename_clip(project, path, name) {
@@ -1274,19 +1572,15 @@ impl AnimationStudio {
                                         written.files,
                                         None,
                                     );
-                                    let new = written.path;
-                                    match &mut self.doc {
-                                        Doc::Clip(clip) if clip.path == *path => open = Some(new),
-                                        Doc::Property(clip) if clip.path == *path => open = Some(new),
-                                        // The rename rewrote the open controller's file.
-                                        Doc::Controller(controller) => {
-                                            if let Ok(file) =
-                                                store::read_controller(project, &controller.path)
-                                            {
-                                                controller.reload(file);
-                                            }
-                                        }
-                                        _ => {}
+                                    if self.clip.doc.as_ref().is_some_and(|clip| clip.path() == path.as_str()) {
+                                        open = Some(written.path);
+                                    }
+                                    // The rename rewrote the open controller's file.
+                                    if let Some(controller) = &mut self.animator.doc
+                                        && let Ok(file) =
+                                            store::read_controller(project, &controller.path)
+                                    {
+                                        controller.reload(file);
                                     }
                                     close = true;
                                 }
@@ -1309,7 +1603,9 @@ impl AnimationStudio {
                         response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                     ui.horizontal(|ui| {
                         if ui.button("Rename").clicked() || enter {
-                            if let Some(record) = flush_open(&mut self.doc, project, output) {
+                            if let Some(record) =
+                                flush(&mut self.clip.doc, &mut self.animator.doc, project, output)
+                            {
                                 actions.push(record);
                             }
                             let old = path.clone();
@@ -1326,7 +1622,7 @@ impl AnimationStudio {
                                         written.files,
                                         Some(rebind),
                                     );
-                                    if let Doc::Controller(controller) = &mut self.doc
+                                    if let Some(controller) = &mut self.animator.doc
                                         && controller.path == old
                                     {
                                         controller.path = written.path;
@@ -1352,7 +1648,9 @@ impl AnimationStudio {
                     }
                     ui.horizontal(|ui| {
                         if ui.button(format!("{} Delete", icons::TRASH)).clicked() {
-                            if let Some(record) = flush_open(&mut self.doc, project, output) {
+                            if let Some(record) =
+                                flush(&mut self.clip.doc, &mut self.animator.doc, project, output)
+                            {
                                 actions.push(record);
                             }
                             match store::delete_asset(project, path) {
@@ -1365,7 +1663,7 @@ impl AnimationStudio {
                                         format!("Delete {}", axcenity_anim::files::clip_name(path))
                                     };
                                     remember(actions, label, files, None);
-                                    deleted_open = open_path.as_ref() == Some(path);
+                                    deleted = Some(path.clone());
                                 }
                                 Err(err) => output.error(format!("Could not delete `{path}`: {err}")),
                             }
@@ -1381,9 +1679,8 @@ impl AnimationStudio {
         if modal.should_close() {
             close = true;
         }
-        if deleted_open {
-            self.close_preview(world);
-            self.doc = Doc::Nothing;
+        if let Some(path) = deleted {
+            self.close(&path, world);
         }
         if close {
             self.dialog = None;
@@ -1392,40 +1689,192 @@ impl AnimationStudio {
         if let Some(path) = open {
             // A renamed clip is opened fresh from its new file.
             self.close_preview(world);
-            self.doc = Doc::Nothing;
+            self.clip.doc = None;
             self.open_clip(project, assets, &path, world, output);
+            actions.push(StudioAction::Show(Pane::Animation));
         }
         if let Some((path, model)) = open_controller {
-            self.open_controller(project, assets, &path, model, world, output);
+            self.open_controller(project, assets, &path, model, output);
+            actions.push(StudioAction::Show(Pane::Animator));
         }
     }
 }
 
-/// Writes the open document, and records a property-clip edit when that write
-/// changed the file. Clip and controller graph edits stay unrecorded.
-fn flush_open(doc: &mut Doc, project: &Path, output: &mut Output) -> Option<StudioAction> {
-    let result = match doc {
-        Doc::Nothing => Ok(None),
-        Doc::Clip(clip) => clip.write(project).map(|_| None),
-        Doc::Controller(controller) => controller.write(project).map(|_| None),
-        Doc::Property(clip) => match clip.write(project) {
-            Ok(Some((before, after))) => Ok(Some(StudioAction::RecordFile {
-                path: clip.path.clone(),
-                before,
-                after,
-                label: format!("Edit {}", axcenity_anim::files::clip_name(&clip.path)),
-            })),
-            Ok(None) => Ok(None),
-            Err(err) => Err(err),
-        },
+/// A button naming what's open, which drops down a searchable list of
+/// `paths` (clips grouped by folder). Clicking one opens it; its ⋯ menu
+/// renames, duplicates or deletes it.
+fn picker(
+    ui: &mut egui::Ui,
+    kind: Kind,
+    shown: &str,
+    search: &mut String,
+    paths: &[String],
+    open: Option<&str>,
+) -> Option<Pick> {
+    // A long name is shortened, so the button fits a narrow panel.
+    let shown: String = if shown.chars().count() > 24 {
+        shown.chars().take(22).chain(['…']).collect()
+    } else {
+        shown.to_owned()
     };
-    match result {
-        Ok(action) => action,
-        Err(err) => {
-            output.error(format!("Could not save before changing the file: {err}"));
-            None
+    let button = ui
+        .button(format!("{} {shown} {}", kind.icon(), icons::CARET_DOWN))
+        .on_hover_text(match kind {
+            Kind::Clip => "Pick a clip to open",
+            Kind::Controller => "Pick a controller to open",
+        });
+    let mut pick = None;
+    egui::Popup::menu(&button)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .width(260.0)
+        .show(|ui| {
+            let field = ui.add(
+                egui::TextEdit::singleline(search)
+                    .hint_text(format!("{} Search", icons::MAGNIFYING_GLASS))
+                    .desired_width(f32::INFINITY),
+            );
+            if button.clicked() {
+                field.request_focus();
+            }
+            let needle = search.trim().to_lowercase();
+            let matches: Vec<&String> = paths
+                .iter()
+                .filter(|path| needle.is_empty() || path.to_lowercase().contains(&needle))
+                .collect();
+            if paths.is_empty() {
+                ui.weak(match kind {
+                    Kind::Clip => "No clips yet. Import an animated FBX, or make one with New.",
+                    Kind::Controller => "No controllers yet: New makes one.",
+                });
+            } else if matches.is_empty() {
+                ui.weak("Nothing matches.");
+            }
+            // Clips by folder, in the order the folders come.
+            let mut groups: Vec<(&str, Vec<&String>)> = Vec::new();
+            for path in matches {
+                let group = match kind {
+                    Kind::Clip => store::group_of(path),
+                    Kind::Controller => "",
+                };
+                match groups.iter_mut().find(|(name, _)| *name == group) {
+                    Some((_, paths)) => paths.push(path),
+                    None => groups.push((group, vec![path])),
+                }
+            }
+            egui::ScrollArea::vertical()
+                .max_height(PICKER_HEIGHT)
+                .show(ui, |ui| {
+                    for (group, paths) in groups {
+                        if kind == Kind::Clip {
+                            let title = if group.is_empty() { "Clips" } else { group };
+                            ui.weak(format!("{} {title}", icons::FOLDER));
+                        }
+                        for path in paths {
+                            ui.horizontal(|ui| {
+                                let row = ui
+                                    .selectable_label(
+                                        open == Some(path.as_str()),
+                                        format!("{} {}", kind.icon(), kind.name(path)),
+                                    )
+                                    .on_hover_text(path.as_str());
+                                if row.clicked() {
+                                    pick = Some(Pick::Open(path.clone()));
+                                }
+                                ui.menu_button(icons::DOTS_THREE, |ui| {
+                                    asset_menu(ui, path, &mut pick)
+                                });
+                            });
+                        }
+                    }
+                });
+        });
+    if pick.is_some() {
+        egui::Popup::close_all(ui.ctx());
+    }
+    pick
+}
+
+/// Rename, Duplicate and Delete for the clip or controller at `path`.
+fn asset_menu(ui: &mut egui::Ui, path: &str, pick: &mut Option<Pick>) {
+    let path = path.to_owned();
+    if ui
+        .button(format!("{} Rename", icons::PENCIL_SIMPLE))
+        .clicked()
+    {
+        *pick = Some(Pick::Rename(path));
+        ui.close();
+    } else if ui.button(format!("{} Duplicate", icons::COPY)).clicked() {
+        *pick = Some(Pick::Duplicate(path));
+        ui.close();
+    } else if ui.button(format!("{} Delete", icons::TRASH)).clicked() {
+        *pick = Some(Pick::Delete(path));
+        ui.close();
+    }
+}
+
+/// An empty tab's heading, a line under it, and its steps, each ticked
+/// once done and with its button if it has one. Returns the index of the
+/// step whose button was pressed.
+fn checklist(ui: &mut egui::Ui, heading: &str, intro: &str, steps: &[Step]) -> Option<usize> {
+    let palette = theme::palette(ui.ctx());
+    let mut pressed = None;
+    ui.add_space(8.0);
+    ui.heading(heading);
+    ui.label(intro);
+    ui.add_space(6.0);
+    for (index, step) in steps.iter().enumerate() {
+        let (mark, color) = if step.done {
+            (icons::CHECK_CIRCLE, palette.success)
+        } else {
+            (icons::CIRCLE, palette.text_weak)
+        };
+        ui.horizontal_wrapped(|ui| {
+            ui.label(egui::RichText::new(mark).color(color));
+            ui.strong(format!("{}. {}", index + 1, step.title));
+            if let Some(button) = step.button
+                && ui.small_button(button).clicked()
+            {
+                pressed = Some(index);
+            }
+        });
+        ui.weak(step.hint);
+        ui.add_space(4.0);
+    }
+    pressed
+}
+
+/// Writes both tabs' documents, and returns a record of the property-clip
+/// edit if that write changed its file. Take-clip and controller edits stay
+/// unrecorded.
+fn flush(
+    clip: &mut Option<Clip>,
+    controller: &mut Option<Box<ControllerDoc>>,
+    project: &Path,
+    output: &mut Output,
+) -> Option<StudioAction> {
+    let mut record = None;
+    if let Some(clip) = clip {
+        let result = match clip {
+            Clip::Take(doc) => doc.write(project).map(|_| ()),
+            Clip::Property(doc) => doc.write(project).map(|written| {
+                record = written.map(|(before, after)| StudioAction::RecordFile {
+                    path: doc.path.clone(),
+                    before,
+                    after,
+                    label: format!("Edit {}", axcenity_anim::files::clip_name(&doc.path)),
+                });
+            }),
+        };
+        if let Err(err) = result {
+            output.error(format!("Could not save `{}`: {err}", clip.path()));
         }
     }
+    if let Some(doc) = controller
+        && let Err(err) = doc.write(project)
+    {
+        output.error(format!("Could not save `{}`: {err}", doc.path));
+    }
+    record
 }
 
 fn remember(
