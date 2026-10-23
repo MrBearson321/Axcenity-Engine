@@ -30,6 +30,7 @@ mod placing;
 mod play;
 mod properties;
 mod props;
+mod responsive;
 mod ribbon;
 mod ribbon_tabs;
 mod screen;

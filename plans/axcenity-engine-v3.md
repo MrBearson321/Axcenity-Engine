@@ -54,8 +54,8 @@ Every panel adapts to its width and height. In a narrow column, Assets switches 
 ### Acceptance criteria
 
 - [ ] Each panel docked into a 260-point-wide column has no horizontal overflow, and every control is reachable.
-- [ ] Assets in a narrow column shows a readable list, and in a wide panel the tiles.
-- [ ] Snapshot tests at tall and wide sizes pass.
+- [x] Assets in a narrow column shows a readable list, and in a wide panel the tiles.
+- [x] Snapshot tests at tall and wide sizes pass.
 
 ## Phase 4: Animation and Animator tabs, simpler layout
 

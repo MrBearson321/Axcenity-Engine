@@ -467,7 +467,7 @@ impl ControllerDoc {
             .compiled
             .state_name(run.machine.current.state)
             .to_owned();
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.strong(format!("{} {state}", icons::PLAY_CIRCLE));
             if let Some(fade) = run.machine.fade {
                 ui.weak(format!(
@@ -484,39 +484,36 @@ impl ControllerDoc {
             ui.weak("Add parameters (in the controller's settings) to drive transitions here.");
         }
         let ranges = number_ranges(&self.file);
-        egui::Grid::new("live parameters")
-            .num_columns(2)
-            .spacing([8.0, 4.0])
-            .show(ui, |ui| {
-                for def in &self.file.parameters {
-                    let name = def.name().to_owned();
-                    ui.label(&name);
-                    let slot = run
-                        .parameters
-                        .entry(name.clone())
-                        .or_insert_with(|| def.initial());
-                    match slot {
-                        Parameter::Bool(value) => {
-                            ui.checkbox(value, "");
-                        }
-                        Parameter::Number(value) => {
-                            let (low, high) = ranges.get(&name).copied().unwrap_or((0.0, 10.0));
-                            ui.add(egui::Slider::new(value, low..=high));
-                        }
-                        Parameter::Trigger(set) => {
-                            ui.horizontal(|ui| {
-                                if ui.button("Fire").clicked() {
-                                    *set = true;
-                                }
-                                if *set {
-                                    ui.weak("waiting for a transition");
-                                }
-                            });
-                        }
+        crate::responsive::form(ui, "live parameters", |ui| {
+            for def in &self.file.parameters {
+                let name = def.name().to_owned();
+                ui.label(&name);
+                let slot = run
+                    .parameters
+                    .entry(name.clone())
+                    .or_insert_with(|| def.initial());
+                match slot {
+                    Parameter::Bool(value) => {
+                        ui.checkbox(value, "");
                     }
-                    ui.end_row();
+                    Parameter::Number(value) => {
+                        let (low, high) = ranges.get(&name).copied().unwrap_or((0.0, 10.0));
+                        ui.add(egui::Slider::new(value, low..=high));
+                    }
+                    Parameter::Trigger(set) => {
+                        ui.horizontal_wrapped(|ui| {
+                            if ui.button("Fire").clicked() {
+                                *set = true;
+                            }
+                            if *set {
+                                ui.weak("waiting for a transition");
+                            }
+                        });
+                    }
                 }
-            });
+                ui.end_row();
+            }
+        });
     }
 
     /// The inspector: the selected state or transition, or the controller's
@@ -544,7 +541,7 @@ impl ControllerDoc {
         );
         ui.weak(&self.path);
         ui.add_space(4.0);
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label("Default state");
             let names: Vec<String> = self.file.states.iter().map(|s| s.name.clone()).collect();
             egui::ComboBox::from_id_salt("default state")
@@ -616,7 +613,7 @@ impl ControllerDoc {
         if let Some(index) = remove {
             self.file.parameters.remove(index);
         }
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             for kind in ["Bool", "Number", "Trigger"] {
                 if ui.button(format!("{} {kind}", icons::PLUS)).clicked() {
                     let name = self.free_parameter_name(match kind {
@@ -666,7 +663,7 @@ impl ControllerDoc {
             Some((renaming, text)) if *renaming == index => {
                 let mut done = false;
                 let mut text = text.clone();
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     let response = ui.text_edit_singleline(&mut text);
                     if ui.button("Rename").clicked()
                         || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
@@ -690,7 +687,7 @@ impl ControllerDoc {
                 }
             }
             _ => {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.heading(&name);
                     if ui
                         .small_button(icons::PENCIL_SIMPLE)
@@ -712,7 +709,7 @@ impl ControllerDoc {
         // Clip or blend tree.
         let is_tree = matches!(self.file.states[index].motion, Motion::BlendTree(_));
         let mut make_tree = false;
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label("Plays");
             if ui.selectable_label(!is_tree, "A clip").clicked() && is_tree {
                 let first = self.file.states[index]
@@ -751,25 +748,22 @@ impl ControllerDoc {
         if matches!(self.file.states[index].motion, Motion::BlendTree(_)) {
             self.blend_tree_editor(ui, index, clips);
         }
-        egui::Grid::new("state settings")
-            .num_columns(2)
-            .spacing([10.0, 6.0])
-            .show(ui, |ui| {
-                let state = &mut self.file.states[index];
-                if let Motion::Clip(current) = &mut state.motion {
-                    ui.label("Clip");
-                    clip_picker(ui, "state clip", current, clips);
-                    ui.end_row();
-                }
-                ui.label("Speed");
-                ui.add(
-                    egui::DragValue::new(&mut state.speed)
-                        .range(-10.0..=10.0)
-                        .speed(0.01)
-                        .suffix("×"),
-                );
+        crate::responsive::form(ui, "state settings", |ui| {
+            let state = &mut self.file.states[index];
+            if let Motion::Clip(current) = &mut state.motion {
+                ui.label("Clip");
+                clip_picker(ui, "state clip", current, clips);
                 ui.end_row();
-            });
+            }
+            ui.label("Speed");
+            ui.add(
+                egui::DragValue::new(&mut state.speed)
+                    .range(-10.0..=10.0)
+                    .speed(0.01)
+                    .suffix("×"),
+            );
+            ui.end_row();
+        });
         self.return_editor(ui, index);
         ui.separator();
         ui.strong("Transitions");
@@ -853,118 +847,115 @@ impl ControllerDoc {
         };
         let bools = names(|def| matches!(def, ParameterDef::Bool { .. }));
         let triggers = names(|def| matches!(def, ParameterDef::Trigger { .. }));
-        egui::Grid::new("return settings")
-            .num_columns(2)
-            .spacing([10.0, 6.0])
-            .show(ui, |ui| {
-                ui.label("When");
-                let label = match &returns.when {
-                    ReturnWhen::Finished => "its clip finishes",
-                    ReturnWhen::BoolIs { .. } => "a Bool becomes",
-                    ReturnWhen::Triggered { .. } => "a Trigger is set",
-                    ReturnWhen::After { .. } => "some seconds pass",
-                };
-                egui::ComboBox::from_id_salt("return when")
-                    .selected_text(label)
-                    .show_ui(ui, |ui| {
-                        if ui
-                            .selectable_label(
-                                matches!(returns.when, ReturnWhen::Finished),
-                                "its clip finishes",
-                            )
-                            .clicked()
-                        {
-                            returns.when = ReturnWhen::Finished;
-                        }
-                        if ui
-                            .selectable_label(
-                                matches!(returns.when, ReturnWhen::BoolIs { .. }),
-                                "a Bool becomes",
-                            )
-                            .clicked()
-                        {
-                            returns.when = ReturnWhen::BoolIs {
-                                parameter: bools.first().cloned().unwrap_or_default(),
-                                value: false,
-                            };
-                        }
-                        if ui
-                            .selectable_label(
-                                matches!(returns.when, ReturnWhen::Triggered { .. }),
-                                "a Trigger is set",
-                            )
-                            .clicked()
-                        {
-                            returns.when = ReturnWhen::Triggered {
-                                parameter: triggers.first().cloned().unwrap_or_default(),
-                            };
-                        }
-                        if ui
-                            .selectable_label(
-                                matches!(returns.when, ReturnWhen::After { .. }),
-                                "some seconds pass",
-                            )
-                            .clicked()
-                        {
-                            returns.when = ReturnWhen::After { seconds: 1.0 };
-                        }
-                    });
-                ui.end_row();
-                match &mut returns.when {
-                    ReturnWhen::Finished => {}
-                    ReturnWhen::BoolIs { parameter, value } => {
-                        ui.label("Bool");
-                        ui.horizontal(|ui| {
-                            egui::ComboBox::from_id_salt("return bool")
-                                .selected_text(parameter.as_str())
-                                .show_ui(ui, |ui| {
-                                    for name in &bools {
-                                        ui.selectable_value(parameter, name.clone(), name);
-                                    }
-                                });
-                            ui.label("is");
-                            ui.selectable_value(value, true, "true");
-                            ui.selectable_value(value, false, "false");
-                        });
-                        ui.end_row();
+        crate::responsive::form(ui, "return settings", |ui| {
+            ui.label("When");
+            let label = match &returns.when {
+                ReturnWhen::Finished => "its clip finishes",
+                ReturnWhen::BoolIs { .. } => "a Bool becomes",
+                ReturnWhen::Triggered { .. } => "a Trigger is set",
+                ReturnWhen::After { .. } => "some seconds pass",
+            };
+            egui::ComboBox::from_id_salt("return when")
+                .selected_text(label)
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(
+                            matches!(returns.when, ReturnWhen::Finished),
+                            "its clip finishes",
+                        )
+                        .clicked()
+                    {
+                        returns.when = ReturnWhen::Finished;
                     }
-                    ReturnWhen::Triggered { parameter } => {
-                        ui.label("Trigger");
-                        egui::ComboBox::from_id_salt("return trigger")
+                    if ui
+                        .selectable_label(
+                            matches!(returns.when, ReturnWhen::BoolIs { .. }),
+                            "a Bool becomes",
+                        )
+                        .clicked()
+                    {
+                        returns.when = ReturnWhen::BoolIs {
+                            parameter: bools.first().cloned().unwrap_or_default(),
+                            value: false,
+                        };
+                    }
+                    if ui
+                        .selectable_label(
+                            matches!(returns.when, ReturnWhen::Triggered { .. }),
+                            "a Trigger is set",
+                        )
+                        .clicked()
+                    {
+                        returns.when = ReturnWhen::Triggered {
+                            parameter: triggers.first().cloned().unwrap_or_default(),
+                        };
+                    }
+                    if ui
+                        .selectable_label(
+                            matches!(returns.when, ReturnWhen::After { .. }),
+                            "some seconds pass",
+                        )
+                        .clicked()
+                    {
+                        returns.when = ReturnWhen::After { seconds: 1.0 };
+                    }
+                });
+            ui.end_row();
+            match &mut returns.when {
+                ReturnWhen::Finished => {}
+                ReturnWhen::BoolIs { parameter, value } => {
+                    ui.label("Bool");
+                    ui.horizontal_wrapped(|ui| {
+                        egui::ComboBox::from_id_salt("return bool")
                             .selected_text(parameter.as_str())
                             .show_ui(ui, |ui| {
-                                for name in &triggers {
+                                for name in &bools {
                                     ui.selectable_value(parameter, name.clone(), name);
                                 }
                             });
-                        ui.end_row();
-                    }
-                    ReturnWhen::After { seconds } => {
-                        ui.label("After");
-                        ui.add(
-                            egui::DragValue::new(seconds)
-                                .range(0.0..=600.0)
-                                .speed(0.05)
-                                .suffix(" s"),
-                        );
-                        ui.end_row();
-                    }
-                }
-                ui.label("Back to");
-                egui::ComboBox::from_id_salt("return to")
-                    .selected_text(returns.to.as_str())
-                    .show_ui(ui, |ui| {
-                        for name in &others {
-                            ui.selectable_value(&mut returns.to, name.clone(), name);
-                        }
+                        ui.label("is");
+                        ui.selectable_value(value, true, "true");
+                        ui.selectable_value(value, false, "false");
                     });
-                ui.end_row();
-                ui.label("Blend");
-                ui.horizontal(|ui| {
-                    ui.add(egui::Slider::new(&mut returns.blend, 0.0..=2.0).suffix(" s"));
+                    ui.end_row();
+                }
+                ReturnWhen::Triggered { parameter } => {
+                    ui.label("Trigger");
+                    egui::ComboBox::from_id_salt("return trigger")
+                        .selected_text(parameter.as_str())
+                        .show_ui(ui, |ui| {
+                            for name in &triggers {
+                                ui.selectable_value(parameter, name.clone(), name);
+                            }
+                        });
+                    ui.end_row();
+                }
+                ReturnWhen::After { seconds } => {
+                    ui.label("After");
+                    ui.add(
+                        egui::DragValue::new(seconds)
+                            .range(0.0..=600.0)
+                            .speed(0.05)
+                            .suffix(" s"),
+                    );
+                    ui.end_row();
+                }
+            }
+            ui.label("Back to");
+            egui::ComboBox::from_id_salt("return to")
+                .selected_text(returns.to.as_str())
+                .show_ui(ui, |ui| {
+                    for name in &others {
+                        ui.selectable_value(&mut returns.to, name.clone(), name);
+                    }
                 });
-                ui.end_row();
+            ui.end_row();
+            ui.label("Blend");
+            ui.horizontal_wrapped(|ui| {
+                ui.add(egui::Slider::new(&mut returns.blend, 0.0..=2.0).suffix(" s"));
             });
+            ui.end_row();
+        });
         let missing = match &returns.when {
             ReturnWhen::BoolIs { parameter, .. } | ReturnWhen::Triggered { parameter } => {
                 parameter.is_empty()
@@ -1088,7 +1079,7 @@ impl ControllerDoc {
 
         ui.separator();
         ui.strong("Blend");
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.add(
                 egui::Slider::new(&mut transition.blend, 0.0..=2.0)
                     .suffix(" s")
@@ -1096,7 +1087,7 @@ impl ControllerDoc {
             )
             .on_hover_text("How long the old pose takes to turn into the new one");
         });
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             for (label, seconds) in BLENDS {
                 if ui
                     .selectable_label((transition.blend - seconds).abs() < 1e-9, label)
@@ -1106,7 +1097,7 @@ impl ControllerDoc {
                 }
             }
         });
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label("Preview the blend:");
             ui.add(egui::Slider::new(&mut self.scrub, 0.0..=1.0).show_value(false));
         });
@@ -1124,35 +1115,34 @@ impl ControllerDoc {
         ));
 
         ui.separator();
-        egui::Grid::new("transition settings")
-            .num_columns(2)
-            .spacing([10.0, 6.0])
-            .show(ui, |ui| {
-                ui.label("Exit time");
-                ui.horizontal(|ui| {
-                    let mut on = transition.exit_time.is_some();
-                    if ui
-                        .checkbox(&mut on, "")
-                        .on_hover_text("Only once the state has played this much of its clip (1 is once through)")
-                        .changed()
-                    {
-                        transition.exit_time = on.then_some(0.9);
-                    }
-                    if let Some(exit) = &mut transition.exit_time {
-                        ui.add(egui::DragValue::new(exit).range(0.0..=10.0).speed(0.01));
-                        ui.weak("of the clip");
-                    }
-                });
-                ui.end_row();
-                ui.label("Interruptible");
-                ui.checkbox(&mut transition.interruptible, "")
-                    .on_hover_text("On, another transition can take over while this one blends");
-                ui.end_row();
-                ui.label("Priority");
-                ui.add(egui::DragValue::new(&mut transition.priority).range(-100..=100))
-                    .on_hover_text("When several transitions could happen at once, the highest goes");
-                ui.end_row();
+        crate::responsive::form(ui, "transition settings", |ui| {
+            ui.label("Exit time");
+            ui.horizontal_wrapped(|ui| {
+                let mut on = transition.exit_time.is_some();
+                if ui
+                    .checkbox(&mut on, "")
+                    .on_hover_text(
+                        "Only once the state has played this much of its clip (1 is once through)",
+                    )
+                    .changed()
+                {
+                    transition.exit_time = on.then_some(0.9);
+                }
+                if let Some(exit) = &mut transition.exit_time {
+                    ui.add(egui::DragValue::new(exit).range(0.0..=10.0).speed(0.01));
+                    ui.weak("of the clip");
+                }
             });
+            ui.end_row();
+            ui.label("Interruptible");
+            ui.checkbox(&mut transition.interruptible, "")
+                .on_hover_text("On, another transition can take over while this one blends");
+            ui.end_row();
+            ui.label("Priority");
+            ui.add(egui::DragValue::new(&mut transition.priority).range(-100..=100))
+                .on_hover_text("When several transitions could happen at once, the highest goes");
+            ui.end_row();
+        });
         if transition.conditions.is_empty() && transition.exit_time.is_none() {
             ui.colored_label(
                 ui.visuals().warn_fg_color,
@@ -1251,7 +1241,7 @@ impl ControllerDoc {
         };
         egui::Frame::group(ui.style()).show(ui, |ui| {
             ui.strong(format!("{} Blend tree", icons::SLIDERS_HORIZONTAL));
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label("By");
                 egui::ComboBox::from_id_salt("tree parameter")
                     .selected_text(&tree.parameter)
@@ -1283,7 +1273,7 @@ impl ControllerDoc {
                     ui.end_row();
                     for (c, child) in tree.children.iter_mut().enumerate() {
                         clip_picker(ui, ("tree clip", c), &mut child.clip, clips);
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.add(
                                 egui::Slider::new(&mut child.threshold, low..=high)
                                     .show_value(false),
@@ -1305,7 +1295,7 @@ impl ControllerDoc {
             if let Some(c) = remove {
                 tree.children.remove(c);
             }
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 if ui.button(format!("{} Add clip", icons::PLUS)).clicked() {
                     let threshold = tree
                         .children

@@ -31,6 +31,7 @@ use eframe::egui_wgpu::RenderState;
 
 use crate::block_editor::NameKind;
 use crate::output::Output;
+use crate::responsive;
 use crate::theme::icons;
 use clip_editor::ClipDoc;
 use controller_editor::ControllerDoc;
@@ -44,6 +45,12 @@ const RESCAN: Duration = Duration::from_secs(2);
 const MAX_FRAME_SECONDS: f64 = 0.1;
 /// The controller preview's height, under the graph.
 const CONTROLLER_PREVIEW: f32 = 240.0;
+/// Narrower than this, the panel's library, document and settings stack.
+const STACK_BELOW: f32 = 560.0;
+/// The controller graph's height when the panel is stacked.
+const STACKED_GRAPH: f32 = 280.0;
+/// Narrower than this, a controller's live preview goes above its controls.
+const SPLIT_PREVIEW_BELOW: f32 = 420.0;
 
 /// The animated MeshPart selected in the editor (or the one around a
 /// selected Animator), for the step bar and New controller.
@@ -425,54 +432,140 @@ impl AnimationStudio {
         egui::TopBottomPanel::top("animator steps").show_inside(ui, |ui| {
             self.steps(ui, project, assets, selected, world, output, &mut actions)
         });
-        egui::SidePanel::left("animation library")
-            .resizable(true)
-            .default_width(220.0)
-            .show_inside(ui, |ui| {
-                self.library(ui, project, assets, selected, world, output, &mut actions)
-            });
-        if !matches!(self.doc, Doc::Nothing) {
-            egui::SidePanel::right("animation inspector")
-                .resizable(true)
-                .default_width(320.0)
-                .show_inside(ui, |ui| {
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        let models = self.files.models.clone();
-                        let clips = self.files.clips.clone();
-                        match &mut self.doc {
-                            Doc::Clip(clip) => {
-                                if clip.inspector(ui, &models) {
-                                    self.dialog = Some(Dialog::Rename {
-                                        path: clip.path.clone(),
-                                        name: axcenity_anim::files::clip_name(&clip.path)
-                                            .to_owned(),
-                                        error: None,
-                                    });
-                                }
-                            }
-                            Doc::Property(clip) => {
-                                ui.heading("Property clip");
-                                ui.label(&clip.path);
-                                ui.checkbox(&mut clip.file.looping, "Loop");
-                                ui.add(
-                                    egui::DragValue::new(&mut clip.file.duration)
-                                        .speed(0.05)
-                                        .prefix("Duration "),
-                                );
-                                if preview_root.is_none() {
-                                    ui.weak(
-                                        "Select a Part in the Explorer to preview and insert keys.",
-                                    );
-                                }
-                            }
-                            Doc::Controller(controller) => controller.inspector(ui, &clips),
-                            Doc::Nothing => {}
-                        }
-                    });
-                });
-        }
         let dt = f64::from(ui.input(|input| input.unstable_dt)).min(MAX_FRAME_SECONDS);
-        egui::CentralPanel::default().show_inside(ui, |ui| match &mut self.doc {
+        if ui.available_width() < STACK_BELOW {
+            // A narrow column: the library, the document and its settings
+            // one above the other, scrolling together.
+            egui::ScrollArea::vertical()
+                .id_salt("animation stacked")
+                .auto_shrink(false)
+                .show(ui, |ui| {
+                    egui::CollapsingHeader::new(format!("{} Library", icons::FILM_STRIP))
+                        .id_salt("animation library stacked")
+                        .default_open(matches!(self.doc, Doc::Nothing))
+                        .icon(crate::widgets::chevron)
+                        .show(ui, |ui| {
+                            self.library(
+                                ui,
+                                project,
+                                assets,
+                                selected,
+                                world,
+                                output,
+                                &mut actions,
+                                false,
+                            )
+                        });
+                    ui.separator();
+                    self.document(ui, assets, render_state, world, preview_root, dt, true);
+                    if !matches!(self.doc, Doc::Nothing) {
+                        ui.separator();
+                        egui::CollapsingHeader::new(format!("{} Settings", icons::SLIDERS))
+                            .id_salt("animation inspector stacked")
+                            .default_open(true)
+                            .icon(crate::widgets::chevron)
+                            .show(ui, |ui| self.inspector(ui, preview_root));
+                    }
+                });
+        } else {
+            egui::SidePanel::left("animation library")
+                .resizable(true)
+                .default_width(220.0)
+                .show_inside(ui, |ui| {
+                    self.library(
+                        ui,
+                        project,
+                        assets,
+                        selected,
+                        world,
+                        output,
+                        &mut actions,
+                        true,
+                    )
+                });
+            if !matches!(self.doc, Doc::Nothing) {
+                egui::SidePanel::right("animation inspector")
+                    .resizable(true)
+                    .default_width(320.0)
+                    .show_inside(ui, |ui| {
+                        egui::ScrollArea::vertical()
+                            .show(ui, |ui| self.inspector(ui, preview_root));
+                    });
+            }
+            egui::CentralPanel::default().show_inside(ui, |ui| {
+                self.document(ui, assets, render_state, world, preview_root, dt, false)
+            });
+        }
+        self.ask(
+            ui.ctx(),
+            project,
+            assets,
+            selected,
+            world,
+            output,
+            &mut actions,
+        );
+        // Return settings' transitions follow them.
+        if let Doc::Controller(controller) = &mut self.doc {
+            controller.sync_returns(project);
+        }
+
+        // Changes are written once the gesture making them ends.
+        let busy = ui.input(|input| input.pointer.any_down())
+            || ui.ctx().memory(|memory| memory.focused().is_some());
+        if !busy {
+            actions.extend(self.write_all(project, output));
+        }
+        actions
+    }
+
+    /// The settings of the open clip or controller.
+    fn inspector(&mut self, ui: &mut egui::Ui, preview_root: Option<InstanceId>) {
+        let models = self.files.models.clone();
+        let clips = self.files.clips.clone();
+        match &mut self.doc {
+            Doc::Clip(clip) => {
+                if clip.inspector(ui, &models) {
+                    self.dialog = Some(Dialog::Rename {
+                        path: clip.path.clone(),
+                        name: axcenity_anim::files::clip_name(&clip.path).to_owned(),
+                        error: None,
+                    });
+                }
+            }
+            Doc::Property(clip) => {
+                ui.heading("Property clip");
+                ui.label(&clip.path);
+                ui.checkbox(&mut clip.file.looping, "Loop");
+                ui.add(
+                    egui::DragValue::new(&mut clip.file.duration)
+                        .speed(0.05)
+                        .prefix("Duration "),
+                );
+                if preview_root.is_none() {
+                    ui.weak("Select a Part in the Explorer to preview and insert keys.");
+                }
+            }
+            Doc::Controller(controller) => controller.inspector(ui, &clips),
+            Doc::Nothing => {}
+        }
+    }
+
+    /// The open clip or controller: its preview and timeline, or its graph
+    /// and live preview. `stacked` is for a narrow column, where it scrolls
+    /// with the rest of the panel, so it gets fixed heights.
+    #[allow(clippy::too_many_arguments)] // Each is a different input to the panel.
+    fn document(
+        &mut self,
+        ui: &mut egui::Ui,
+        assets: &Assets,
+        render_state: Option<&RenderState>,
+        world: &mut World,
+        preview_root: Option<InstanceId>,
+        dt: f64,
+        stacked: bool,
+    ) {
+        match &mut self.doc {
             Doc::Nothing => {
                 ui.vertical_centered(|ui| {
                     ui.add_space(40.0);
@@ -505,13 +598,21 @@ impl AnimationStudio {
                         None
                     }
                 };
-                let height = (ui.available_height() - 110.0).max(120.0);
+                let height = if stacked {
+                    (ui.available_width() * 0.75).clamp(160.0, 320.0)
+                } else {
+                    (ui.available_height() - 110.0).max(120.0)
+                };
                 self.preview.show(ui, render_state, assets, posed, height);
                 ui.add_space(4.0);
                 clip.transport(ui);
             }
             Doc::Controller(controller) => {
-                let graph_height = (ui.available_height() - CONTROLLER_PREVIEW - 8.0).max(160.0);
+                let graph_height = if stacked {
+                    STACKED_GRAPH
+                } else {
+                    (ui.available_height() - CONTROLLER_PREVIEW - 8.0).max(160.0)
+                };
                 let live = controller.live();
                 let selected = controller.selected;
                 let clips = self.files.clips.clone();
@@ -524,28 +625,30 @@ impl AnimationStudio {
                     .inner;
                 controller.apply(events);
                 ui.add_space(6.0);
-                ui.horizontal_top(|ui| {
-                    let width = ui.available_width();
-                    ui.allocate_ui(egui::vec2(width * 0.55, CONTROLLER_PREVIEW), |ui| {
-                        show_model(
-                            &mut self.preview,
-                            controller.preview_model.as_deref(),
-                            assets,
-                        );
-                        let posed = match controller.tick(assets, dt) {
-                            Ok(posed) => Some(posed),
-                            Err(problem) => {
-                                ui.colored_label(ui.visuals().warn_fg_color, problem);
-                                None
-                            }
-                        };
-                        let height = ui.available_height().max(100.0);
-                        self.preview.show(ui, render_state, assets, posed, height);
-                    });
-                    ui.separator();
-                    ui.allocate_ui(egui::vec2(ui.available_width(), CONTROLLER_PREVIEW), |ui| {
+                // The live preview beside its controls, or above them when
+                // narrow.
+                let size = egui::vec2(ui.available_width(), CONTROLLER_PREVIEW);
+                ui.allocate_ui(size, |ui| {
+                    responsive::split(ui, SPLIT_PREVIEW_BELOW, 0.55, |ui, pane| {
+                        if pane == 0 {
+                            show_model(
+                                &mut self.preview,
+                                controller.preview_model.as_deref(),
+                                assets,
+                            );
+                            let posed = match controller.tick(assets, dt) {
+                                Ok(posed) => Some(posed),
+                                Err(problem) => {
+                                    ui.colored_label(ui.visuals().warn_fg_color, problem);
+                                    None
+                                }
+                            };
+                            let height = ui.available_height().clamp(100.0, CONTROLLER_PREVIEW);
+                            self.preview.show(ui, render_state, assets, posed, height);
+                            return;
+                        }
                         ui.vertical(|ui| {
-                            ui.horizontal(|ui| {
+                            responsive::toolbar(ui, |ui| {
                                 ui.strong("Preview");
                                 let (icon, hover) = if controller.playing {
                                     (icons::PAUSE, "Pause")
@@ -594,28 +697,7 @@ impl AnimationStudio {
                     ui.ctx().request_repaint();
                 }
             }
-        });
-        self.ask(
-            ui.ctx(),
-            project,
-            assets,
-            selected,
-            world,
-            output,
-            &mut actions,
-        );
-        // Return settings' transitions follow them.
-        if let Doc::Controller(controller) = &mut self.doc {
-            controller.sync_returns(project);
         }
-
-        // Changes are written once the gesture making them ends.
-        let busy = ui.input(|input| input.pointer.any_down())
-            || ui.ctx().memory(|memory| memory.focused().is_some());
-        if !busy {
-            actions.extend(self.write_all(project, output));
-        }
-        actions
     }
 
     /// The five Animator steps, each ticked once it's done.
@@ -715,7 +797,8 @@ impl AnimationStudio {
     }
 
     /// The clips, by folder, and the controllers, with the buttons that
-    /// make, rename, copy and delete them.
+    /// make, rename, copy and delete them. `heading` is false where a
+    /// collapsing header already names it.
     #[allow(clippy::too_many_arguments)] // Each is a different input to the panel.
     fn library(
         &mut self,
@@ -726,11 +809,12 @@ impl AnimationStudio {
         world: &mut World,
         output: &mut Output,
         actions: &mut Vec<StudioAction>,
+        heading: bool,
     ) {
-        ui.horizontal(|ui| {
+        if heading {
             ui.strong(format!("{} Library", icons::FILM_STRIP));
-        });
-        ui.horizontal(|ui| {
+        }
+        responsive::toolbar(ui, |ui| {
             if ui
                 .small_button(format!("{} Clip", icons::PLUS))
                 .on_hover_text("Make a clip from a take of a model in the project")

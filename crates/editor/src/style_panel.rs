@@ -179,7 +179,7 @@ pub fn show(
                 }
             }
             for (path, selector, line) in rules {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.label(egui::RichText::new(selector).monospace().strong());
                     let file = path.rsplit('/').next().unwrap_or(path);
                     if ui
@@ -193,20 +193,17 @@ pub fn show(
                         });
                     }
                 });
-                egui::Grid::new(("style rule", path, selector))
-                    .num_columns(2)
-                    .spacing([10.0, 5.0])
-                    .show(ui, |ui| {
-                        for declaration in declarations
-                            .iter()
-                            .filter(|d| d.path == path && d.selector == selector)
-                        {
-                            if let Some(made) = declaration_row(ui, declaration) {
-                                edit = Some(made);
-                            }
-                            ui.end_row();
+                crate::responsive::form(ui, ("style rule", path, selector), |ui| {
+                    for declaration in declarations
+                        .iter()
+                        .filter(|d| d.path == path && d.selector == selector)
+                    {
+                        if let Some(made) = declaration_row(ui, declaration) {
+                            edit = Some(made);
                         }
-                    });
+                        ui.end_row();
+                    }
+                });
                 ui.add_space(4.0);
             }
             let sized_by_css: Vec<&str> = ["width", "height"]
@@ -306,7 +303,7 @@ fn add_row(ui: &mut egui::Ui, id: InstanceId, applied: &[CssDeclaration]) -> Opt
     ui.label(egui::RichText::new("Add a style").strong());
     let mut property_focused = false;
     let mut value_focused = false;
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         let property = ui.add(
             egui::TextEdit::singleline(&mut adding.property)
                 .hint_text("property")

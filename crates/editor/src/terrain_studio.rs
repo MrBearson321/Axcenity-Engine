@@ -31,6 +31,7 @@ use axcenity_terrain::generate::{GeneratorSettings, Preset};
 use axcenity_terrain::job::Job;
 use eframe::egui;
 
+use crate::responsive;
 use crate::theme::{self, icons};
 use crate::widgets::{self, Role};
 
@@ -637,33 +638,30 @@ impl TerrainStudio {
     /// Width, length, height and resolution of a new (or regenerated) terrain.
     fn size_controls(&mut self, ui: &mut egui::Ui) {
         let size = &mut self.new_terrain;
-        egui::Grid::new("terrain size")
-            .num_columns(2)
-            .spacing([10.0, 5.0])
-            .show(ui, |ui| {
-                field(ui, "Width");
-                ui.add(studs(&mut size.width, 16.0..=16384.0));
-                ui.end_row();
-                field(ui, "Length");
-                ui.add(studs(&mut size.length, 16.0..=16384.0));
-                ui.end_row();
-                field(ui, "Height range");
-                ui.add(studs(&mut size.height, 4.0..=4096.0));
-                ui.end_row();
-                field(ui, "Resolution");
-                egui::ComboBox::from_id_salt("terrain resolution")
-                    .selected_text(format!("{0} × {0}", size.samples))
-                    .show_ui(ui, |ui| {
-                        for samples in RESOLUTIONS {
-                            ui.selectable_value(
-                                &mut size.samples,
-                                samples,
-                                format!("{samples} × {samples}"),
-                            );
-                        }
-                    });
-                ui.end_row();
-            });
+        responsive::form(ui, "terrain size", |ui| {
+            field(ui, "Width");
+            ui.add(studs(&mut size.width, 16.0..=16384.0));
+            ui.end_row();
+            field(ui, "Length");
+            ui.add(studs(&mut size.length, 16.0..=16384.0));
+            ui.end_row();
+            field(ui, "Height range");
+            ui.add(studs(&mut size.height, 4.0..=4096.0));
+            ui.end_row();
+            field(ui, "Resolution");
+            egui::ComboBox::from_id_salt("terrain resolution")
+                .selected_text(format!("{0} × {0}", size.samples))
+                .show_ui(ui, |ui| {
+                    for samples in RESOLUTIONS {
+                        ui.selectable_value(
+                            &mut size.samples,
+                            samples,
+                            format!("{samples} × {samples}"),
+                        );
+                    }
+                });
+            ui.end_row();
+        });
         let samples = size.samples * size.samples;
         // Heights (4 bytes) and paint (8), plus the copies undo keeps.
         let megabytes = (samples * 12) as f32 / (1024.0 * 1024.0);
@@ -759,7 +757,7 @@ impl TerrainStudio {
                     .size(theme::type_scale::SMALL)
                     .color(palette.text_secondary),
                 );
-                ui.horizontal(|ui| {
+                responsive::toolbar(ui, |ui| {
                     if ui
                         .add(widgets::button(
                             Role::Primary,
@@ -797,75 +795,68 @@ impl TerrainStudio {
     fn brush_settings(&mut self, ui: &mut egui::Ui, extra: Option<&mut dyn FnMut(&mut egui::Ui)>) {
         let brush = &mut self.brush;
         section(ui, "Brush", |ui| {
-            egui::Grid::new("brush")
-                .num_columns(2)
-                .spacing([10.0, 5.0])
-                .show(ui, |ui| {
-                    field(ui, "Size").on_hover_text("The brush's radius. [ and ] change it.");
-                    ui.add(
-                        egui::Slider::new(&mut brush.radius, 0.5..=256.0)
-                            .logarithmic(true)
-                            .suffix(" studs"),
-                    );
-                    ui.end_row();
-                    field(ui, "Strength");
-                    ui.add(egui::Slider::new(&mut brush.strength, 0.01..=1.0));
-                    ui.end_row();
-                    field(ui, "Falloff")
-                        .on_hover_text("How much of the brush fades toward its rim.");
-                    ui.add(egui::Slider::new(&mut brush.falloff, 0.0..=1.0));
-                    ui.end_row();
-                    if let Some(extra) = extra {
-                        extra(ui);
-                    }
-                });
+            responsive::form(ui, "brush", |ui| {
+                field(ui, "Size").on_hover_text("The brush's radius. [ and ] change it.");
+                ui.add(
+                    egui::Slider::new(&mut brush.radius, 0.5..=256.0)
+                        .logarithmic(true)
+                        .suffix(" studs"),
+                );
+                ui.end_row();
+                field(ui, "Strength");
+                ui.add(egui::Slider::new(&mut brush.strength, 0.01..=1.0));
+                ui.end_row();
+                field(ui, "Falloff").on_hover_text("How much of the brush fades toward its rim.");
+                ui.add(egui::Slider::new(&mut brush.falloff, 0.0..=1.0));
+                ui.end_row();
+                if let Some(extra) = extra {
+                    extra(ui);
+                }
+            });
             egui::CollapsingHeader::new("More brush settings")
                 .id_salt("brush more")
                 .default_open(false)
                 .show(ui, |ui| {
-                    egui::Grid::new("brush more grid")
-                        .num_columns(2)
-                        .spacing([10.0, 5.0])
-                        .show(ui, |ui| {
-                            field(ui, "Fade");
-                            egui::ComboBox::from_id_salt("brush curve")
-                                .selected_text(brush.curve.label())
-                                .show_ui(ui, |ui| {
-                                    for curve in Curve::ALL {
-                                        ui.selectable_value(&mut brush.curve, curve, curve.label());
-                                    }
-                                });
-                            ui.end_row();
-                            field(ui, "Shape");
-                            widgets::segmented(
-                                ui,
-                                &mut brush.shape,
-                                &[
-                                    (Shape::Circle, Some(icons::CIRCLE), "Circle"),
-                                    (Shape::Square, Some(icons::SQUARE), "Square"),
-                                ],
-                            );
-                            ui.end_row();
-                            field(ui, "Spacing").on_hover_text(
-                                "How far apart stamps are along a stroke, as a part of the size.",
-                            );
-                            ui.add(egui::Slider::new(&mut brush.spacing, 0.05..=1.0));
-                            ui.end_row();
-                            field(ui, "Symmetry")
-                                .on_hover_text("Mirror every stamp across the terrain's middle.");
-                            egui::ComboBox::from_id_salt("brush symmetry")
-                                .selected_text(brush.symmetry.label())
-                                .show_ui(ui, |ui| {
-                                    for symmetry in Symmetry::ALL {
-                                        ui.selectable_value(
-                                            &mut brush.symmetry,
-                                            symmetry,
-                                            symmetry.label(),
-                                        );
-                                    }
-                                });
-                            ui.end_row();
-                        });
+                    responsive::form(ui, "brush more grid", |ui| {
+                        field(ui, "Fade");
+                        egui::ComboBox::from_id_salt("brush curve")
+                            .selected_text(brush.curve.label())
+                            .show_ui(ui, |ui| {
+                                for curve in Curve::ALL {
+                                    ui.selectable_value(&mut brush.curve, curve, curve.label());
+                                }
+                            });
+                        ui.end_row();
+                        field(ui, "Shape");
+                        widgets::segmented(
+                            ui,
+                            &mut brush.shape,
+                            &[
+                                (Shape::Circle, Some(icons::CIRCLE), "Circle"),
+                                (Shape::Square, Some(icons::SQUARE), "Square"),
+                            ],
+                        );
+                        ui.end_row();
+                        field(ui, "Spacing").on_hover_text(
+                            "How far apart stamps are along a stroke, as a part of the size.",
+                        );
+                        ui.add(egui::Slider::new(&mut brush.spacing, 0.05..=1.0));
+                        ui.end_row();
+                        field(ui, "Symmetry")
+                            .on_hover_text("Mirror every stamp across the terrain's middle.");
+                        egui::ComboBox::from_id_salt("brush symmetry")
+                            .selected_text(brush.symmetry.label())
+                            .show_ui(ui, |ui| {
+                                for symmetry in Symmetry::ALL {
+                                    ui.selectable_value(
+                                        &mut brush.symmetry,
+                                        symmetry,
+                                        symmetry.label(),
+                                    );
+                                }
+                            });
+                        ui.end_row();
+                    });
                     masks_summary(ui, brush);
                 });
         });
@@ -1138,123 +1129,117 @@ impl TerrainStudio {
         let before = self.generator.clone();
         let settings = &mut self.generator;
         section(ui, "Landscape", |ui| {
-            egui::Grid::new("generate main")
-                .num_columns(2)
-                .spacing([10.0, 5.0])
-                .show(ui, |ui| {
-                    field(ui, "Preset");
-                    let mut preset = settings.preset;
-                    egui::ComboBox::from_id_salt("generator preset")
-                        .selected_text(preset.label())
-                        .show_ui(ui, |ui| {
-                            for option in Preset::ALL {
-                                ui.selectable_value(&mut preset, option, option.label())
-                                    .on_hover_text(option.description());
-                            }
-                        });
-                    if preset != settings.preset {
-                        let seed = settings.seed;
-                        *settings = GeneratorSettings {
-                            seed,
-                            ..preset.settings()
-                        };
-                    }
-                    ui.end_row();
-                    field(ui, "Seed");
-                    ui.horizontal(|ui| {
-                        ui.add(egui::DragValue::new(&mut settings.seed));
-                        if ui
-                            .small_button(icons::DICE_FIVE)
-                            .on_hover_text("Randomize the seed: another landscape like it")
-                            .clicked()
-                        {
-                            settings.seed = random_seed();
+            responsive::form(ui, "generate main", |ui| {
+                field(ui, "Preset");
+                let mut preset = settings.preset;
+                egui::ComboBox::from_id_salt("generator preset")
+                    .selected_text(preset.label())
+                    .show_ui(ui, |ui| {
+                        for option in Preset::ALL {
+                            ui.selectable_value(&mut preset, option, option.label())
+                                .on_hover_text(option.description());
                         }
                     });
-                    ui.end_row();
-                    field(ui, "Height");
-                    ui.add(egui::Slider::new(&mut settings.amplitude, 0.0..=1.0))
-                        .on_hover_text(
-                            "How much the land rises and falls, as part of the height range.",
-                        );
-                    ui.end_row();
-                    field(ui, "Base elevation");
-                    ui.add(egui::Slider::new(&mut settings.base_height, 0.0..=1.0));
-                    ui.end_row();
-                    field(ui, "Feature size");
-                    ui.add(
-                        egui::Slider::new(&mut settings.feature_size, 8.0..=4096.0)
-                            .logarithmic(true)
-                            .suffix(" studs"),
-                    );
-                    ui.end_row();
-                    field(ui, "Mountains");
-                    ui.add(egui::Slider::new(&mut settings.mountains, 0.0..=1.0));
-                    ui.end_row();
-                    field(ui, "Valleys");
-                    ui.add(egui::Slider::new(&mut settings.valleys, 0.0..=1.0));
-                    ui.end_row();
-                    field(ui, "Roughness");
-                    ui.add(egui::Slider::new(&mut settings.roughness, 0.0..=1.0));
-                    ui.end_row();
-                    field(ui, "Island");
-                    ui.add(egui::Slider::new(&mut settings.island, 0.0..=1.0));
-                    ui.end_row();
-                    field(ui, "Plains");
-                    ui.add(egui::Slider::new(&mut settings.plains, 0.0..=1.0))
-                        .on_hover_text("Flattens the lowlands.");
-                    ui.end_row();
+                if preset != settings.preset {
+                    let seed = settings.seed;
+                    *settings = GeneratorSettings {
+                        seed,
+                        ..preset.settings()
+                    };
+                }
+                ui.end_row();
+                field(ui, "Seed");
+                ui.horizontal(|ui| {
+                    ui.add(egui::DragValue::new(&mut settings.seed));
+                    if ui
+                        .small_button(icons::DICE_FIVE)
+                        .on_hover_text("Randomize the seed: another landscape like it")
+                        .clicked()
+                    {
+                        settings.seed = random_seed();
+                    }
                 });
+                ui.end_row();
+                field(ui, "Height");
+                ui.add(egui::Slider::new(&mut settings.amplitude, 0.0..=1.0))
+                    .on_hover_text(
+                        "How much the land rises and falls, as part of the height range.",
+                    );
+                ui.end_row();
+                field(ui, "Base elevation");
+                ui.add(egui::Slider::new(&mut settings.base_height, 0.0..=1.0));
+                ui.end_row();
+                field(ui, "Feature size");
+                ui.add(
+                    egui::Slider::new(&mut settings.feature_size, 8.0..=4096.0)
+                        .logarithmic(true)
+                        .suffix(" studs"),
+                );
+                ui.end_row();
+                field(ui, "Mountains");
+                ui.add(egui::Slider::new(&mut settings.mountains, 0.0..=1.0));
+                ui.end_row();
+                field(ui, "Valleys");
+                ui.add(egui::Slider::new(&mut settings.valleys, 0.0..=1.0));
+                ui.end_row();
+                field(ui, "Roughness");
+                ui.add(egui::Slider::new(&mut settings.roughness, 0.0..=1.0));
+                ui.end_row();
+                field(ui, "Island");
+                ui.add(egui::Slider::new(&mut settings.island, 0.0..=1.0));
+                ui.end_row();
+                field(ui, "Plains");
+                ui.add(egui::Slider::new(&mut settings.plains, 0.0..=1.0))
+                    .on_hover_text("Flattens the lowlands.");
+                ui.end_row();
+            });
             egui::CollapsingHeader::new("Advanced")
                 .id_salt("generate advanced")
                 .default_open(false)
                 .show(ui, |ui| {
-                    egui::Grid::new("generate advanced grid")
-                        .num_columns(2)
-                        .spacing([10.0, 5.0])
-                        .show(ui, |ui| {
-                            field(ui, "Octaves");
-                            ui.add(egui::Slider::new(&mut settings.octaves, 1..=10));
-                            ui.end_row();
-                            field(ui, "Persistence");
-                            ui.add(egui::Slider::new(&mut settings.persistence, 0.1..=0.9));
-                            ui.end_row();
-                            field(ui, "Lacunarity");
-                            ui.add(egui::Slider::new(&mut settings.lacunarity, 1.5..=3.5));
-                            ui.end_row();
-                            field(ui, "Warp");
-                            ui.add(egui::Slider::new(&mut settings.warp, 0.0..=1.0))
-                                .on_hover_text("Bends shapes so they swirl and branch.");
-                            ui.end_row();
-                            field(ui, "Height curve");
-                            ui.add(egui::Slider::new(&mut settings.curve, 0.3..=3.0))
-                                .on_hover_text("Above 1: broad valleys and steep peaks.");
-                            ui.end_row();
-                            field(ui, "Terraces");
-                            ui.add(egui::Slider::new(&mut settings.terraces, 0..=24));
-                            ui.end_row();
-                            field(ui, "Terrace sharpness");
-                            ui.add(egui::Slider::new(&mut settings.terrace_strength, 0.0..=1.0));
-                            ui.end_row();
-                            field(ui, "Dunes");
-                            ui.add(egui::Slider::new(&mut settings.dunes, 0.0..=1.0));
-                            ui.end_row();
-                            field(ui, "Dune direction");
-                            ui.add(
-                                egui::Slider::new(&mut settings.dune_direction, 0.0..=180.0)
-                                    .suffix("°"),
-                            );
-                            ui.end_row();
-                            field(ui, "Crater");
-                            ui.add(egui::Slider::new(&mut settings.crater, 0.0..=1.0));
-                            ui.end_row();
-                            field(ui, "Lowest");
-                            ui.add(egui::Slider::new(&mut settings.min_height, 0.0..=1.0));
-                            ui.end_row();
-                            field(ui, "Highest");
-                            ui.add(egui::Slider::new(&mut settings.max_height, 0.0..=1.0));
-                            ui.end_row();
-                        });
+                    responsive::form(ui, "generate advanced grid", |ui| {
+                        field(ui, "Octaves");
+                        ui.add(egui::Slider::new(&mut settings.octaves, 1..=10));
+                        ui.end_row();
+                        field(ui, "Persistence");
+                        ui.add(egui::Slider::new(&mut settings.persistence, 0.1..=0.9));
+                        ui.end_row();
+                        field(ui, "Lacunarity");
+                        ui.add(egui::Slider::new(&mut settings.lacunarity, 1.5..=3.5));
+                        ui.end_row();
+                        field(ui, "Warp");
+                        ui.add(egui::Slider::new(&mut settings.warp, 0.0..=1.0))
+                            .on_hover_text("Bends shapes so they swirl and branch.");
+                        ui.end_row();
+                        field(ui, "Height curve");
+                        ui.add(egui::Slider::new(&mut settings.curve, 0.3..=3.0))
+                            .on_hover_text("Above 1: broad valleys and steep peaks.");
+                        ui.end_row();
+                        field(ui, "Terraces");
+                        ui.add(egui::Slider::new(&mut settings.terraces, 0..=24));
+                        ui.end_row();
+                        field(ui, "Terrace sharpness");
+                        ui.add(egui::Slider::new(&mut settings.terrace_strength, 0.0..=1.0));
+                        ui.end_row();
+                        field(ui, "Dunes");
+                        ui.add(egui::Slider::new(&mut settings.dunes, 0.0..=1.0));
+                        ui.end_row();
+                        field(ui, "Dune direction");
+                        ui.add(
+                            egui::Slider::new(&mut settings.dune_direction, 0.0..=180.0)
+                                .suffix("°"),
+                        );
+                        ui.end_row();
+                        field(ui, "Crater");
+                        ui.add(egui::Slider::new(&mut settings.crater, 0.0..=1.0));
+                        ui.end_row();
+                        field(ui, "Lowest");
+                        ui.add(egui::Slider::new(&mut settings.min_height, 0.0..=1.0));
+                        ui.end_row();
+                        field(ui, "Highest");
+                        ui.add(egui::Slider::new(&mut settings.max_height, 0.0..=1.0));
+                        ui.end_row();
+                    });
                 });
         });
         // Changing anything but the seed makes the settings your own.
@@ -1299,7 +1284,8 @@ impl TerrainStudio {
             });
         });
         section(ui, "Apply", |ui| {
-            ui.horizontal(|ui| {
+            // The choices go under "Result" when narrow.
+            responsive::form(ui, "apply result", |ui| {
                 field(ui, "Result");
                 if widgets::segmented(
                     ui,
@@ -1311,6 +1297,7 @@ impl TerrainStudio {
                 ) {
                     self.changed_at = Some(cx.time);
                 }
+                ui.end_row();
             });
             ui.checkbox(
                 &mut self.setup_materials,
@@ -1323,7 +1310,7 @@ impl TerrainStudio {
                 &mut self.live_preview,
                 "Update the preview as settings change",
             );
-            ui.horizontal(|ui| {
+            responsive::toolbar(ui, |ui| {
                 let label = if self.preview.is_some() {
                     "Regenerate"
                 } else {
@@ -1368,7 +1355,7 @@ impl TerrainStudio {
                 .and_then(|data| data.generation.clone())
                 .and_then(|text| GeneratorSettings::from_json(&text).ok());
             if let Some(saved) = saved {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.label(
                         egui::RichText::new(format!(
                             "Made with {} v{}, seed {}.",
@@ -1413,68 +1400,63 @@ impl TerrainStudio {
                 .size(theme::type_scale::SMALL)
                 .color(palette.text_weak),
             );
-            egui::Grid::new("erosion")
-                .num_columns(2)
-                .spacing([10.0, 5.0])
-                .show(ui, |ui| match self.erosion {
-                    ErosionKind::Hydraulic => {
-                        let settings = &mut self.hydraulic;
-                        field(ui, "Quality");
-                        widgets::segmented(
-                            ui,
-                            &mut self.quality,
-                            &[
-                                (Quality::Draft, None, "Draft"),
-                                (Quality::Normal, None, "Normal"),
-                                (Quality::High, None, "High"),
-                            ],
-                        );
-                        ui.end_row();
-                        field(ui, "Erosion");
-                        ui.add(egui::Slider::new(&mut settings.erosion, 0.0..=1.0));
-                        ui.end_row();
-                        field(ui, "Deposition");
-                        ui.add(egui::Slider::new(&mut settings.deposition, 0.0..=1.0));
-                        ui.end_row();
-                        field(ui, "Evaporation");
-                        ui.add(egui::Slider::new(&mut settings.evaporation, 0.0..=0.2));
-                        ui.end_row();
-                        field(ui, "Capacity").on_hover_text("How much soil water carries.");
-                        ui.add(egui::Slider::new(&mut settings.capacity, 0.5..=16.0));
-                        ui.end_row();
-                        field(ui, "Inertia");
-                        ui.add(egui::Slider::new(&mut settings.inertia, 0.0..=0.5));
-                        ui.end_row();
-                        field(ui, "Radius");
-                        ui.add(egui::Slider::new(&mut settings.radius, 1..=6).suffix(" samples"));
-                        ui.end_row();
-                        field(ui, "Drop lifetime");
-                        ui.add(egui::Slider::new(&mut settings.lifetime, 8..=96).suffix(" steps"));
-                        ui.end_row();
-                        field(ui, "Seed");
-                        ui.horizontal(|ui| {
-                            ui.add(egui::DragValue::new(&mut settings.seed));
-                            if ui.small_button(icons::DICE_FIVE).clicked() {
-                                settings.seed = random_seed();
-                            }
-                        });
-                        ui.end_row();
-                    }
-                    ErosionKind::Thermal => {
-                        let settings = &mut self.thermal;
-                        field(ui, "Talus angle");
-                        ui.add(
-                            egui::Slider::new(&mut settings.talus_angle, 5.0..=80.0).suffix("°"),
-                        );
-                        ui.end_row();
-                        field(ui, "Strength");
-                        ui.add(egui::Slider::new(&mut settings.strength, 0.05..=1.0));
-                        ui.end_row();
-                        field(ui, "Iterations");
-                        ui.add(egui::Slider::new(&mut settings.iterations, 1..=400));
-                        ui.end_row();
-                    }
-                });
+            responsive::form(ui, "erosion", |ui| match self.erosion {
+                ErosionKind::Hydraulic => {
+                    let settings = &mut self.hydraulic;
+                    field(ui, "Quality");
+                    widgets::segmented(
+                        ui,
+                        &mut self.quality,
+                        &[
+                            (Quality::Draft, None, "Draft"),
+                            (Quality::Normal, None, "Normal"),
+                            (Quality::High, None, "High"),
+                        ],
+                    );
+                    ui.end_row();
+                    field(ui, "Erosion");
+                    ui.add(egui::Slider::new(&mut settings.erosion, 0.0..=1.0));
+                    ui.end_row();
+                    field(ui, "Deposition");
+                    ui.add(egui::Slider::new(&mut settings.deposition, 0.0..=1.0));
+                    ui.end_row();
+                    field(ui, "Evaporation");
+                    ui.add(egui::Slider::new(&mut settings.evaporation, 0.0..=0.2));
+                    ui.end_row();
+                    field(ui, "Capacity").on_hover_text("How much soil water carries.");
+                    ui.add(egui::Slider::new(&mut settings.capacity, 0.5..=16.0));
+                    ui.end_row();
+                    field(ui, "Inertia");
+                    ui.add(egui::Slider::new(&mut settings.inertia, 0.0..=0.5));
+                    ui.end_row();
+                    field(ui, "Radius");
+                    ui.add(egui::Slider::new(&mut settings.radius, 1..=6).suffix(" samples"));
+                    ui.end_row();
+                    field(ui, "Drop lifetime");
+                    ui.add(egui::Slider::new(&mut settings.lifetime, 8..=96).suffix(" steps"));
+                    ui.end_row();
+                    field(ui, "Seed");
+                    ui.horizontal(|ui| {
+                        ui.add(egui::DragValue::new(&mut settings.seed));
+                        if ui.small_button(icons::DICE_FIVE).clicked() {
+                            settings.seed = random_seed();
+                        }
+                    });
+                    ui.end_row();
+                }
+                ErosionKind::Thermal => {
+                    let settings = &mut self.thermal;
+                    field(ui, "Talus angle");
+                    ui.add(egui::Slider::new(&mut settings.talus_angle, 5.0..=80.0).suffix("°"));
+                    ui.end_row();
+                    field(ui, "Strength");
+                    ui.add(egui::Slider::new(&mut settings.strength, 0.05..=1.0));
+                    ui.end_row();
+                    field(ui, "Iterations");
+                    ui.add(egui::Slider::new(&mut settings.iterations, 1..=400));
+                    ui.end_row();
+                }
+            });
             if ui
                 .add(widgets::button(
                     Role::Primary,
@@ -1667,7 +1649,7 @@ impl TerrainStudio {
             .default_open(false)
             .show(ui, |ui| {
                 let current = world.terrain(terrain).map_or(0, |data| data.size().0);
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     field(ui, "Resolution");
                     let mut samples = current;
                     egui::ComboBox::from_id_salt("terrain resample")
@@ -1681,7 +1663,7 @@ impl TerrainStudio {
                         actions.push(TerrainAction::Resample(samples));
                     }
                 });
-                ui.horizontal(|ui| {
+                responsive::toolbar(ui, |ui| {
                     if ui
                         .button(theme::with_icon(icons::DOWNLOAD, "Import heightmap…"))
                         .on_hover_text("A greyscale PNG (8 or 16-bit): black is the bottom of the height range, white the top.")
@@ -1722,99 +1704,96 @@ fn layer_editor(
             .unwrap_or(0.0)
     };
     let flag = |name| instance.property(name).and_then(Value::as_bool) == Some(true);
-    egui::Grid::new(("layer", layer))
-        .num_columns(2)
-        .spacing([10.0, 5.0])
-        .show(ui, |ui| {
-            field(ui, "Tint");
-            if let Some(color) = instance.property("Color").and_then(Value::as_color3)
-                && let Some(color) = crate::properties::color_control(ui, color)
-            {
-                actions.push(TerrainAction::SetLayer(
-                    layer,
-                    "Color",
-                    Value::Color3(color),
-                ));
-            }
-            ui.end_row();
-            for (name, label) in [
-                ("ColorMap", "Color"),
-                ("NormalMap", "Normal"),
-                ("RoughnessMap", "Roughness"),
-                ("MetalnessMap", "Metalness"),
-                ("AmbientOcclusionMap", "Occlusion"),
-                ("HeightMap", "Height"),
-            ] {
-                field(ui, label);
-                ui.horizontal(|ui| {
+    responsive::form(ui, ("layer", layer), |ui| {
+        field(ui, "Tint");
+        if let Some(color) = instance.property("Color").and_then(Value::as_color3)
+            && let Some(color) = crate::properties::color_control(ui, color)
+        {
+            actions.push(TerrainAction::SetLayer(
+                layer,
+                "Color",
+                Value::Color3(color),
+            ));
+        }
+        ui.end_row();
+        for (name, label) in [
+            ("ColorMap", "Color"),
+            ("NormalMap", "Normal"),
+            ("RoughnessMap", "Roughness"),
+            ("MetalnessMap", "Metalness"),
+            ("AmbientOcclusionMap", "Occlusion"),
+            ("HeightMap", "Height"),
+        ] {
+            field(ui, label);
+            ui.horizontal(|ui| {
+                if ui
+                    .small_button(icons::FOLDER_OPEN)
+                    .on_hover_text("Choose a texture (PNG, JPEG, TGA or BMP)")
+                    .clicked()
+                {
+                    actions.push(TerrainAction::PickLayerTexture(layer, name));
+                }
+                let path = instance
+                    .property(name)
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                if path.is_empty() {
+                    ui.weak("None");
+                } else {
                     if ui
-                        .small_button(icons::FOLDER_OPEN)
-                        .on_hover_text("Choose a texture (PNG, JPEG, TGA or BMP)")
+                        .small_button(icons::X)
+                        .on_hover_text("Use no map")
                         .clicked()
                     {
-                        actions.push(TerrainAction::PickLayerTexture(layer, name));
+                        actions.push(TerrainAction::SetLayer(
+                            layer,
+                            name,
+                            Value::String(String::new()),
+                        ));
                     }
-                    let path = instance
-                        .property(name)
-                        .and_then(Value::as_str)
-                        .unwrap_or("");
-                    if path.is_empty() {
-                        ui.weak("None");
-                    } else {
-                        if ui
-                            .small_button(icons::X)
-                            .on_hover_text("Use no map")
-                            .clicked()
-                        {
-                            actions.push(TerrainAction::SetLayer(
-                                layer,
-                                name,
-                                Value::String(String::new()),
-                            ));
-                        }
-                        ui.label(path.rsplit('/').next().unwrap_or(path))
-                            .on_hover_text(path);
-                    }
-                });
-                ui.end_row();
-            }
-            let mut slider = |ui: &mut egui::Ui,
-                              name: &'static str,
-                              label: &str,
-                              range: std::ops::RangeInclusive<f64>,
-                              suffix: &str| {
-                field(ui, label);
-                let mut value = number(name);
-                if ui
-                    .add(egui::Slider::new(&mut value, range).suffix(suffix))
-                    .changed()
-                {
-                    actions.push(TerrainAction::SetLayer(layer, name, Value::Number(value)));
+                    ui.add(egui::Label::new(path.rsplit('/').next().unwrap_or(path)).truncate())
+                        .on_hover_text(path);
                 }
-                ui.end_row();
-            };
-            slider(ui, "Roughness", "Roughness", 0.0..=1.0, "");
-            slider(ui, "Metalness", "Metalness", 0.0..=1.0, "");
-            slider(ui, "NormalStrength", "Normal strength", 0.0..=3.0, "");
-            slider(ui, "TileSize", "Tile size", 0.25..=256.0, " studs");
-            slider(ui, "TextureRotation", "Turn", -180.0..=180.0, "°");
-            slider(ui, "AntiTiling", "Anti-tiling", 0.0..=1.0, "");
-            slider(ui, "HeightBlend", "Height blend", 0.0..=1.0, "");
-            field(ui, "Triplanar");
-            let mut triplanar = flag("Triplanar");
+            });
+            ui.end_row();
+        }
+        let mut slider = |ui: &mut egui::Ui,
+                          name: &'static str,
+                          label: &str,
+                          range: std::ops::RangeInclusive<f64>,
+                          suffix: &str| {
+            field(ui, label);
+            let mut value = number(name);
             if ui
-                .checkbox(&mut triplanar, "Project from the sides too")
-                .on_hover_text("For cliffs and rock: textures aren't stretched on steep ground.")
+                .add(egui::Slider::new(&mut value, range).suffix(suffix))
                 .changed()
             {
-                actions.push(TerrainAction::SetLayer(
-                    layer,
-                    "Triplanar",
-                    Value::Bool(triplanar),
-                ));
+                actions.push(TerrainAction::SetLayer(layer, name, Value::Number(value)));
             }
             ui.end_row();
-        });
+        };
+        slider(ui, "Roughness", "Roughness", 0.0..=1.0, "");
+        slider(ui, "Metalness", "Metalness", 0.0..=1.0, "");
+        slider(ui, "NormalStrength", "Normal strength", 0.0..=3.0, "");
+        slider(ui, "TileSize", "Tile size", 0.25..=256.0, " studs");
+        slider(ui, "TextureRotation", "Turn", -180.0..=180.0, "°");
+        slider(ui, "AntiTiling", "Anti-tiling", 0.0..=1.0, "");
+        slider(ui, "HeightBlend", "Height blend", 0.0..=1.0, "");
+        field(ui, "Triplanar");
+        let mut triplanar = flag("Triplanar");
+        if ui
+            .checkbox(&mut triplanar, "Project from the sides too")
+            .on_hover_text("For cliffs and rock: textures aren't stretched on steep ground.")
+            .changed()
+        {
+            actions.push(TerrainAction::SetLayer(
+                layer,
+                "Triplanar",
+                Value::Bool(triplanar),
+            ));
+        }
+        ui.end_row();
+    });
     ui.horizontal_wrapped(|ui| {
         if ui
             .button(theme::with_icon(icons::DOWNLOAD, "Import texture set…"))
@@ -1852,7 +1831,7 @@ fn rule_editor(
             .unwrap_or(0.0)
     };
     let mut enabled = instance.property("AutoEnabled").and_then(Value::as_bool) == Some(true);
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.label(
             egui::RichText::new(instance.name())
                 .family(theme::medium_family())

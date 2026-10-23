@@ -240,6 +240,8 @@ pub const MIN_SIZE: f32 = 0.001;
 /// Numbers show at most this many decimals, so a typed 0.3 doesn't show up
 /// as 0.30000001 (the closest a 32-bit float gets).
 const MAX_DECIMALS: usize = 3;
+/// The width a UDim2's two axes need side by side.
+const UDIM2_ONE_ROW: f32 = 270.0;
 
 /// `instance`'s properties grouped into sections, in panel order. Empty
 /// sections are left out.
@@ -361,19 +363,25 @@ pub fn show(
                         .size(16.0)
                         .color(theme::class_color(instance.class(), ui.visuals())),
                 );
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(instance.name())
-                            .family(theme::heading_family())
-                            .color(palette.text_strong),
-                    )
-                    .truncate(),
+                // The class keeps its room; a long name ends in "…".
+                let class = ui.painter().layout_no_wrap(
+                    instance.class().as_str().to_owned(),
+                    egui::FontId::proportional(theme::type_scale::SMALL),
+                    palette.text_weak,
                 );
-                ui.label(
-                    egui::RichText::new(instance.class().as_str())
-                        .size(theme::type_scale::SMALL)
-                        .color(palette.text_weak),
-                );
+                let name_room = ui.available_width() - class.size().x - ui.spacing().item_spacing.x;
+                ui.scope(|ui| {
+                    ui.set_max_width(name_room.max(24.0));
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(instance.name())
+                                .family(theme::heading_family())
+                                .color(palette.text_strong),
+                        )
+                        .truncate(),
+                    );
+                });
+                ui.label(class);
             });
             ui.add_space(2.0);
             // Widgets remember things such as half-typed numbers by ID. Mixing in
@@ -456,19 +464,15 @@ fn section(ui: &mut egui::Ui, title: &str, rows: impl FnOnce(&mut egui::Ui)) {
     let header = egui::RichText::new(theme::with_icon(icon, title))
         .family(theme::medium_family())
         .color(palette.text_secondary);
-    // Every section's names take the same width, so the fields line up
-    // from one section to the next.
-    let name_width = (ui.available_width() * 0.38).clamp(84.0, 150.0);
+    // Every section's names take the same width (from the panel's), so the
+    // fields line up from one section to the next. In a narrow panel the
+    // values go under their names instead.
     egui::CollapsingHeader::new(header)
         .id_salt(title)
         .default_open(true)
         .icon(crate::widgets::chevron)
         .show_unindented(ui, |ui| {
-            egui::Grid::new(title)
-                .num_columns(2)
-                .min_col_width(name_width)
-                .spacing([10.0, 5.0])
-                .show(ui, rows);
+            crate::responsive::form(ui, title, rows);
         });
 }
 
@@ -549,7 +553,8 @@ fn map_control(ui: &mut egui::Ui, name: &'static str, path: &str) -> Option<Edit
             edit = Some(Edit::Property(name, Value::String(String::new())));
         }
         let file = path.rsplit('/').next().unwrap_or(path);
-        ui.label(file).on_hover_text(path);
+        ui.add(egui::Label::new(file).truncate())
+            .on_hover_text(path);
     });
     edit
 }
@@ -584,7 +589,8 @@ fn clip_control(ui: &mut egui::Ui, path: &str) -> Option<Edit> {
             edit = Some(Edit::Property("Clip", Value::String(String::new())));
         }
         let file = path.rsplit('/').next().unwrap_or(path);
-        ui.label(file).on_hover_text(path);
+        ui.add(egui::Label::new(file).truncate())
+            .on_hover_text(path);
     });
     edit
 }
@@ -619,7 +625,8 @@ fn controller_control(ui: &mut egui::Ui, path: &str) -> Option<Edit> {
             edit = Some(Edit::Property("Controller", Value::String(String::new())));
         }
         let file = path.rsplit('/').next().unwrap_or(path);
-        ui.label(file).on_hover_text(path);
+        ui.add(egui::Label::new(file).truncate())
+            .on_hover_text(path);
     });
     edit
 }
@@ -654,7 +661,8 @@ fn sound_control(ui: &mut egui::Ui, path: &str) -> Option<Edit> {
             edit = Some(Edit::PreviewSound(false));
         }
         let file = path.rsplit('/').next().unwrap_or(path);
-        ui.label(file).on_hover_text(path);
+        ui.add(egui::Label::new(file).truncate())
+            .on_hover_text(path);
     });
     edit
 }
@@ -728,7 +736,8 @@ fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
                 _ => (0.1, f32::NEG_INFINITY),
             };
             let mut changed = false;
-            ui.horizontal(|ui| {
+            // Wraps when the value column is too narrow for all three.
+            ui.horizontal_wrapped(|ui| {
                 for (axis, number) in [
                     ("X ", &mut vector.x),
                     ("Y ", &mut vector.y),
@@ -748,25 +757,33 @@ fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
         }
         Value::UDim2(mut value) => {
             let mut changed = false;
-            ui.horizontal(|ui| {
+            // Each axis stays together; Y goes under X when narrow.
+            let layout = if ui.available_width() < UDIM2_ONE_ROW {
+                egui::Layout::top_down(egui::Align::Min)
+            } else {
+                egui::Layout::left_to_right(egui::Align::Center)
+            };
+            ui.with_layout(layout, |ui| {
                 for (prefix, component) in [("X", &mut value.x), ("Y", &mut value.y)] {
-                    ui.label(prefix);
-                    changed |= ui
-                        .add(
-                            egui::DragValue::new(&mut component.scale)
-                                .prefix("S ")
-                                .speed(0.01)
-                                .max_decimals(MAX_DECIMALS),
-                        )
-                        .changed();
-                    changed |= ui
-                        .add(
-                            egui::DragValue::new(&mut component.offset)
-                                .prefix("O ")
-                                .speed(1.0)
-                                .max_decimals(MAX_DECIMALS),
-                        )
-                        .changed();
+                    ui.horizontal(|ui| {
+                        ui.label(prefix);
+                        changed |= ui
+                            .add(
+                                egui::DragValue::new(&mut component.scale)
+                                    .prefix("S ")
+                                    .speed(0.01)
+                                    .max_decimals(MAX_DECIMALS),
+                            )
+                            .changed();
+                        changed |= ui
+                            .add(
+                                egui::DragValue::new(&mut component.offset)
+                                    .prefix("O ")
+                                    .speed(1.0)
+                                    .max_decimals(MAX_DECIMALS),
+                            )
+                            .changed();
+                    });
                 }
             });
             changed.then_some(Value::UDim2(value))

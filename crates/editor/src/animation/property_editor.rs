@@ -199,7 +199,7 @@ impl PropertyDoc {
         preview_root: Option<InstanceId>,
     ) -> bool {
         let before = self.file.clone();
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if ui
                 .add_enabled(
                     !self.playing,
@@ -234,7 +234,7 @@ impl PropertyDoc {
         });
 
         ui.separator();
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.menu_button("Add track", |ui| {
                 for property in [
                     PropertyName::Position,
@@ -279,7 +279,7 @@ impl PropertyDoc {
                     .prefix("Time "),
             );
             key.time = key.time.clamp(0.0, self.file.duration);
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label("Value");
                 for (i, label) in ["X", "Y", "Z"].iter().enumerate() {
                     ui.add(
@@ -304,7 +304,7 @@ impl PropertyDoc {
         ui.heading("Events");
         let mut remove = None;
         for (i, event) in self.file.events.iter_mut().enumerate() {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.add(egui::DragValue::new(&mut event.time).speed(0.01));
                 ui.text_edit_singleline(&mut event.name);
                 if ui.small_button(icons::TRASH).clicked() {
@@ -315,7 +315,7 @@ impl PropertyDoc {
         if let Some(i) = remove {
             self.file.events.remove(i);
         }
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.text_edit_singleline(&mut self.new_event);
             if ui.button("Add at playhead").clicked() && !self.new_event.trim().is_empty() {
                 self.file.events.push(axcenity_anim::ClipEvent {

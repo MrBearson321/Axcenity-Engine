@@ -25,6 +25,7 @@ use axcenity_assets::{AUDIO_EXTENSIONS, Assets, TEXTURE_EXTENSIONS};
 use eframe::egui;
 
 use crate::props::{PROPS, Prop};
+use crate::responsive;
 use crate::theme::{self, icons};
 use crate::widgets;
 
@@ -41,6 +42,14 @@ const RESCAN: Duration = Duration::from_secs(2);
 const THUMBNAIL_PIXELS: u32 = 96;
 const TILE: egui::Vec2 = egui::vec2(84.0, 96.0);
 const PICTURE: f32 = 60.0;
+/// Narrower than this, the panel lists its assets instead of tiling them.
+const LIST_BELOW: f32 = 360.0;
+const LIST_ROW: f32 = 30.0;
+const LIST_PICTURE: f32 = 24.0;
+/// From this width the chips, search and buttons share one row.
+const ONE_ROW_FROM: f32 = 980.0;
+/// From this width the buttons sit beside the search.
+const BUTTONS_BESIDE_FROM: f32 = 520.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AssetKind {
@@ -86,6 +95,21 @@ impl AssetKind {
             AssetKind::Animation | AssetKind::Controller => {
                 theme::class_color(ClassName::Animator, visuals)
             }
+        }
+    }
+
+    /// What it is, in a list row.
+    fn label(self) -> &'static str {
+        match self {
+            AssetKind::Prop => "Prop",
+            AssetKind::Model => "Model",
+            AssetKind::Prefab => "Prefab",
+            AssetKind::Image => "Image",
+            AssetKind::Texture => "Texture",
+            AssetKind::Audio => "Sound",
+            AssetKind::Particle => "Particle",
+            AssetKind::Animation => "Clip",
+            AssetKind::Controller => "Controller",
         }
     }
 
@@ -299,63 +323,61 @@ impl AssetBrowser {
     ) -> Option<BrowserAction> {
         let mut action = None;
         let palette = theme::palette(ui.ctx());
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 2.0;
-            for category in Category::ALL {
-                if chip(ui, category.label(), self.category == category).clicked() {
-                    self.category = category;
-                }
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        let width = ui.available_width();
+        if width >= ONE_ROW_FROM {
+            // Everything on one row: the chips, then the rest at the right.
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                self.chips(ui);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    if let Some(done) = self.buttons(ui, can_edit, can_save, true) {
+                        action = Some(done);
+                    }
+                    self.refresh_button(ui);
+                    widgets::search_field(ui, &mut self.search, "Search assets", 170.0);
+                });
+            });
+        } else {
+            // The search on its own row, with the buttons beside it when
+            // there's room, and the chips wrapping under it.
+            let buttons_beside = width >= BUTTONS_BESIDE_FROM;
+            ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
-                if ui
-                    .add_enabled(
-                        can_edit && can_save,
-                        widgets::button(
-                            widgets::Role::Secondary,
-                            Some(icons::FLOPPY_DISK),
-                            "Save prefab",
-                            &palette,
-                        )
-                        .min_size(egui::vec2(0.0, 24.0)),
-                    )
-                    .on_hover_text(
-                        "Save the selected parts and Models as a prefab in assets/prefabs, to \
-                         place copies of from here.",
-                    )
-                    .on_disabled_hover_text("Select parts or Models to save as a prefab.")
-                    .clicked()
-                {
-                    action = Some(BrowserAction::SavePrefab);
-                }
-                if ui
-                    .add_enabled(
-                        can_edit && self.folder.is_some(),
-                        widgets::button(
-                            widgets::Role::Secondary,
-                            Some(icons::PLUS),
-                            "Import",
-                            &palette,
-                        )
-                        .min_size(egui::vec2(0.0, 24.0)),
-                    )
-                    .on_hover_text(
-                        "Copy models, images, sounds or prefabs into the project's assets folder.",
-                    )
-                    .clicked()
-                {
-                    action = Some(BrowserAction::Import {
-                        image_folder: self.category.image_folder(),
+                let search_width = if buttons_beside {
+                    200.0
+                } else {
+                    // The width is the text's: the field adds its margins
+                    // (for the magnifying glass and the clear button).
+                    ui.available_width()
+                        - ui.spacing().interact_size.y
+                        - 6.0
+                        - widgets::SEARCH_FIELD_MARGINS
+                };
+                widgets::search_field(ui, &mut self.search, "Search assets", search_width);
+                self.refresh_button(ui);
+                if buttons_beside {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if let Some(done) = self.buttons(ui, can_edit, can_save, true) {
+                            action = Some(done);
+                        }
                     });
                 }
-                if widgets::icon_button(ui, icons::ARROW_CLOCKWISE, "Look for new files now", false)
-                    .clicked()
-                {
-                    self.refresh();
-                }
-                widgets::search_field(ui, &mut self.search, "Search assets", 170.0);
             });
-        });
+            ui.add_space(2.0);
+            responsive::toolbar(ui, |ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                self.chips(ui);
+            });
+            if !buttons_beside {
+                ui.add_space(2.0);
+                responsive::toolbar(ui, |ui| {
+                    if let Some(done) = self.buttons(ui, can_edit, can_save, false) {
+                        action = Some(done);
+                    }
+                });
+            }
+        }
         ui.add_space(4.0);
         widgets::divider(ui);
         ui.add_space(4.0);
@@ -394,10 +416,11 @@ impl AssetBrowser {
                     });
                     return;
                 }
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+                // A readable list in a narrow column, tiles where there's room.
+                let list = ui.available_width() < LIST_BELOW;
+                let items = |ui: &mut egui::Ui| {
                     for entry in entries {
-                        let (place, menu) = self.tile(ui, assets, &entry, can_edit);
+                        let (place, menu) = self.item(ui, assets, &entry, can_edit, list);
                         if place {
                             action = Some(BrowserAction::Place(entry.clone()));
                         }
@@ -418,10 +441,102 @@ impl AssetBrowser {
                             None => {}
                         }
                     }
-                });
+                };
+                if list {
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 1.0;
+                        items(ui);
+                    });
+                } else {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+                        items(ui);
+                    });
+                }
             });
         if let Some(done) = self.prefab_dialog(ui.ctx()) {
             action = Some(done);
+        }
+        action
+    }
+
+    /// The category chips, which pick what's shown.
+    fn chips(&mut self, ui: &mut egui::Ui) {
+        for category in Category::ALL {
+            if chip(ui, category.label(), self.category == category).clicked() {
+                self.category = category;
+            }
+        }
+    }
+
+    fn refresh_button(&mut self, ui: &mut egui::Ui) {
+        if widgets::icon_button(ui, icons::ARROW_CLOCKWISE, "Look for new files now", false)
+            .clicked()
+        {
+            self.refresh();
+        }
+    }
+
+    /// Import and Save prefab, added last-first when `right_to_left`, so
+    /// they read the same way in either layout.
+    fn buttons(
+        &mut self,
+        ui: &mut egui::Ui,
+        can_edit: bool,
+        can_save: bool,
+        right_to_left: bool,
+    ) -> Option<BrowserAction> {
+        let palette = theme::palette(ui.ctx());
+        let mut action = None;
+        let mut import = |ui: &mut egui::Ui| {
+            if ui
+                .add_enabled(
+                    can_edit && self.folder.is_some(),
+                    widgets::button(
+                        widgets::Role::Secondary,
+                        Some(icons::PLUS),
+                        "Import",
+                        &palette,
+                    )
+                    .min_size(egui::vec2(0.0, 24.0)),
+                )
+                .on_hover_text(
+                    "Copy models, images, sounds or prefabs into the project's assets folder.",
+                )
+                .clicked()
+            {
+                action = Some(BrowserAction::Import {
+                    image_folder: self.category.image_folder(),
+                });
+            }
+        };
+        let save = |ui: &mut egui::Ui| {
+            ui.add_enabled(
+                can_edit && can_save,
+                widgets::button(
+                    widgets::Role::Secondary,
+                    Some(icons::FLOPPY_DISK),
+                    "Save prefab",
+                    &palette,
+                )
+                .min_size(egui::vec2(0.0, 24.0)),
+            )
+            .on_hover_text(
+                "Save the selected parts and Models as a prefab in assets/prefabs, to                  place copies of from here.",
+            )
+            .on_disabled_hover_text("Select parts or Models to save as a prefab.")
+            .clicked()
+        };
+        let saved = if right_to_left {
+            let saved = save(ui);
+            import(ui);
+            saved
+        } else {
+            import(ui);
+            save(ui)
+        };
+        if saved {
+            action = Some(BrowserAction::SavePrefab);
         }
         action
     }
@@ -485,16 +600,22 @@ impl AssetBrowser {
         action
     }
 
-    /// Draws one tile. The bool is a double-click; the menu is a prefab's
-    /// right-click choice.
-    fn tile(
+    /// Draws one asset: a tile, or a row of the list when `list`. The bool
+    /// is a double-click; the menu is a prefab's right-click choice.
+    fn item(
         &mut self,
         ui: &mut egui::Ui,
         assets: &Assets,
         entry: &AssetEntry,
         can_edit: bool,
+        list: bool,
     ) -> (bool, Option<PrefabMenu>) {
-        let (rect, response) = ui.allocate_exact_size(TILE, egui::Sense::click_and_drag());
+        let size = if list {
+            egui::vec2(ui.available_width(), LIST_ROW)
+        } else {
+            TILE
+        };
+        let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
         let id = response.id;
         let hover = match entry.prop() {
             Some(prop) => format!("{}\n{}", prop.hover, entry.kind.hover()),
@@ -520,10 +641,17 @@ impl AssetBrowser {
                 egui::StrokeKind::Inside,
             );
         }
-        let picture = egui::Rect::from_center_size(
-            egui::pos2(rect.center().x, rect.min.y + 6.0 + PICTURE / 2.0),
-            egui::vec2(PICTURE, PICTURE),
-        );
+        let picture = if list {
+            egui::Rect::from_center_size(
+                egui::pos2(rect.min.x + 6.0 + LIST_PICTURE / 2.0, rect.center().y),
+                egui::vec2(LIST_PICTURE, LIST_PICTURE),
+            )
+        } else {
+            egui::Rect::from_center_size(
+                egui::pos2(rect.center().x, rect.min.y + 6.0 + PICTURE / 2.0),
+                egui::vec2(PICTURE, PICTURE),
+            )
+        };
         let thumbnail = matches!(
             entry.kind,
             AssetKind::Image | AssetKind::Texture | AssetKind::Particle
@@ -536,20 +664,50 @@ impl AssetBrowser {
         } else {
             palette.text
         };
-        // Long names show two lines, then "…".
-        let galley = widgets::elided(
-            ui,
-            entry.name.clone(),
-            egui::FontId::proportional(theme::type_scale::SMALL),
-            text_color,
-            TILE.x - 8.0,
-            2,
-        );
-        ui.painter().galley(
-            egui::pos2(rect.center().x - galley.size().x / 2.0, picture.max.y + 5.0),
-            galley,
-            text_color,
-        );
+        if list {
+            // The kind at the right when there's room, then the name in
+            // what's left, ending in "…" if it's too long.
+            let mut name_right = rect.max.x - 6.0;
+            if rect.width() >= 200.0 {
+                let kind = ui.painter().text(
+                    rect.right_center() - egui::vec2(8.0, 0.0),
+                    egui::Align2::RIGHT_CENTER,
+                    entry.kind.label(),
+                    egui::FontId::proportional(theme::type_scale::SMALL),
+                    palette.text_weak,
+                );
+                name_right = kind.min.x - 8.0;
+            }
+            let left = picture.max.x + 8.0;
+            let galley = widgets::elided(
+                ui,
+                entry.name.clone(),
+                egui::FontId::proportional(theme::type_scale::BODY),
+                text_color,
+                (name_right - left).max(1.0),
+                1,
+            );
+            ui.painter().galley(
+                egui::pos2(left, rect.center().y - galley.size().y / 2.0),
+                galley,
+                text_color,
+            );
+        } else {
+            // Long names show two lines, then "…".
+            let galley = widgets::elided(
+                ui,
+                entry.name.clone(),
+                egui::FontId::proportional(theme::type_scale::SMALL),
+                text_color,
+                TILE.x - 8.0,
+                2,
+            );
+            ui.painter().galley(
+                egui::pos2(rect.center().x - galley.size().x / 2.0, picture.max.y + 5.0),
+                galley,
+                text_color,
+            );
+        }
 
         // While dragged, a copy of the picture follows the mouse.
         if response.dragged()
@@ -622,11 +780,12 @@ impl AssetBrowser {
             egui::Stroke::new(1.0_f32, palette.border),
             egui::StrokeKind::Inside,
         );
+        let side = picture.width();
         match thumbnail {
             Some(texture) => {
                 // Fitted inside the square, keeping its shape.
                 let [w, h] = texture.size().map(|n| n as f32);
-                let scale = (PICTURE / w).min(PICTURE / h);
+                let scale = (side / w).min(side / h);
                 let fitted =
                     egui::Rect::from_center_size(picture.center(), egui::vec2(w, h) * scale);
                 painter.image(texture.id(), fitted, uv(), egui::Color32::WHITE);
@@ -636,7 +795,7 @@ impl AssetBrowser {
                     picture.center(),
                     egui::Align2::CENTER_CENTER,
                     icon_of(entry),
-                    egui::FontId::proportional(28.0),
+                    egui::FontId::proportional(side * 0.47),
                     entry.kind.color(ui.visuals()),
                 );
             }

@@ -179,7 +179,7 @@ impl ClipDoc {
             .take()
             .map_or(self.file.end, |take| f64::from(take.duration));
         let speed = self.file.speed.abs().max(1e-3);
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             let (icon, hover) = if self.playing {
                 (icons::PAUSE, "Pause")
             } else {
@@ -246,7 +246,7 @@ impl ClipDoc {
     /// The clip's settings. Returns true if Rename was pressed.
     pub fn inspector(&mut self, ui: &mut egui::Ui, models: &[String]) -> bool {
         let mut rename = false;
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.heading(axcenity_anim::files::clip_name(&self.path));
             if ui
                 .small_button(icons::PENCIL_SIMPLE)
@@ -269,78 +269,75 @@ impl ClipDoc {
             self.take()
                 .map_or(self.file.end, |take| f64::from(take.duration)),
         );
-        egui::Grid::new("clip settings")
-            .num_columns(2)
-            .spacing([10.0, 6.0])
-            .show(ui, |ui| {
-                ui.label("Model");
-                ui.label(self.file.source.rsplit('/').next().unwrap_or(""))
-                    .on_hover_text(&self.file.source);
-                ui.end_row();
+        crate::responsive::form(ui, "clip settings", |ui| {
+            ui.label("Model");
+            ui.label(self.file.source.rsplit('/').next().unwrap_or(""))
+                .on_hover_text(&self.file.source);
+            ui.end_row();
 
-                ui.label("Take");
-                let mut take = self.file.take.clone();
-                egui::ComboBox::from_id_salt("clip take")
-                    .selected_text(&take)
-                    .show_ui(ui, |ui| {
-                        for (name, _) in &takes {
-                            ui.selectable_value(&mut take, name.clone(), name);
-                        }
-                    });
-                if take != self.file.take
-                    && let Some((_, duration)) = takes.iter().find(|(name, _)| *name == take)
-                {
-                    self.file.take = take;
-                    self.file.start = 0.0;
-                    self.file.end = f64::from(*duration);
-                    self.playhead = 0.0;
-                }
-                ui.end_row();
+            ui.label("Take");
+            let mut take = self.file.take.clone();
+            egui::ComboBox::from_id_salt("clip take")
+                .selected_text(&take)
+                .show_ui(ui, |ui| {
+                    for (name, _) in &takes {
+                        ui.selectable_value(&mut take, name.clone(), name);
+                    }
+                });
+            if take != self.file.take
+                && let Some((_, duration)) = takes.iter().find(|(name, _)| *name == take)
+            {
+                self.file.take = take;
+                self.file.start = 0.0;
+                self.file.end = f64::from(*duration);
+                self.playhead = 0.0;
+            }
+            ui.end_row();
 
-                ui.label("Start");
-                let mut start = self.frames(self.file.start);
-                let mut end = self.frames(self.file.end);
-                if ui
-                    .add(
-                        egui::DragValue::new(&mut start)
-                            .range(0..=end.saturating_sub(1))
-                            .suffix(" f"),
-                    )
-                    .changed()
-                {
-                    self.file.start = self.seconds(start);
-                }
-                ui.end_row();
-                ui.label("End");
-                if ui
-                    .add(
-                        egui::DragValue::new(&mut end)
-                            .range(start + 1..=frames_total.max(start + 1))
-                            .suffix(" f"),
-                    )
-                    .changed()
-                {
-                    self.file.end = self.seconds(end);
-                }
-                ui.end_row();
-
-                ui.label("Speed");
-                ui.add(
-                    egui::DragValue::new(&mut self.file.speed)
-                        .range(-10.0..=10.0)
-                        .speed(0.01)
-                        .suffix("×"),
+            ui.label("Start");
+            let mut start = self.frames(self.file.start);
+            let mut end = self.frames(self.file.end);
+            if ui
+                .add(
+                    egui::DragValue::new(&mut start)
+                        .range(0..=end.saturating_sub(1))
+                        .suffix(" f"),
                 )
-                .on_hover_text("2 plays it twice as fast; below 0 plays it backwards");
-                ui.end_row();
+                .changed()
+            {
+                self.file.start = self.seconds(start);
+            }
+            ui.end_row();
+            ui.label("End");
+            if ui
+                .add(
+                    egui::DragValue::new(&mut end)
+                        .range(start + 1..=frames_total.max(start + 1))
+                        .suffix(" f"),
+                )
+                .changed()
+            {
+                self.file.end = self.seconds(end);
+            }
+            ui.end_row();
 
-                ui.label("Loop");
-                ui.checkbox(&mut self.file.looping, "")
-                    .on_hover_text("On, it plays again from the start; off, it holds its last frame");
-                ui.end_row();
+            ui.label("Speed");
+            ui.add(
+                egui::DragValue::new(&mut self.file.speed)
+                    .range(-10.0..=10.0)
+                    .speed(0.01)
+                    .suffix("×"),
+            )
+            .on_hover_text("2 plays it twice as fast; below 0 plays it backwards");
+            ui.end_row();
 
-                ui.label("Root motion");
-                ui.horizontal(|ui| {
+            ui.label("Loop");
+            ui.checkbox(&mut self.file.looping, "")
+                .on_hover_text("On, it plays again from the start; off, it holds its last frame");
+            ui.end_row();
+
+            ui.label("Root motion");
+            ui.horizontal_wrapped(|ui| {
                     ui.checkbox(&mut self.file.root_motion, "").on_hover_text(
                         "On, the root bone's travel across the ground moves the MeshPart instead (the preview stays in place)",
                     );
@@ -348,27 +345,27 @@ impl ClipDoc {
                         ui.weak("no bone moves across the ground");
                     }
                 });
-                ui.end_row();
+            ui.end_row();
 
-                ui.label("Preview on");
-                let shown = self
-                    .preview_model
-                    .as_deref()
-                    .map_or("(none)", |path| path.rsplit('/').next().unwrap_or(path));
-                let mut picked = self.preview_model.clone();
-                egui::ComboBox::from_id_salt("preview model")
-                    .selected_text(shown)
-                    .show_ui(ui, |ui| {
-                        for model in models {
-                            let name = model.rsplit('/').next().unwrap_or(model);
-                            ui.selectable_value(&mut picked, Some(model.clone()), name);
-                        }
-                    });
-                if picked != self.preview_model {
-                    self.preview_model = picked;
-                }
-                ui.end_row();
-            });
+            ui.label("Preview on");
+            let shown = self
+                .preview_model
+                .as_deref()
+                .map_or("(none)", |path| path.rsplit('/').next().unwrap_or(path));
+            let mut picked = self.preview_model.clone();
+            egui::ComboBox::from_id_salt("preview model")
+                .selected_text(shown)
+                .show_ui(ui, |ui| {
+                    for model in models {
+                        let name = model.rsplit('/').next().unwrap_or(model);
+                        ui.selectable_value(&mut picked, Some(model.clone()), name);
+                    }
+                });
+            if picked != self.preview_model {
+                self.preview_model = picked;
+            }
+            ui.end_row();
+        });
 
         ui.separator();
         ui.strong("Events");
@@ -402,7 +399,7 @@ impl ClipDoc {
         if let Some(index) = remove {
             self.file.events.remove(index);
         }
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.add(egui::TextEdit::singleline(&mut self.new_event).desired_width(110.0));
             if ui
                 .add_enabled(
@@ -422,7 +419,7 @@ impl ClipDoc {
         });
 
         ui.separator();
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if self.unwritten() {
                 ui.weak("Saving…");
             } else {

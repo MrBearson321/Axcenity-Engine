@@ -262,8 +262,12 @@ pub fn nav_item(
     response
 }
 
+/// The room [`search_field`] adds around its text, left and right together.
+pub const SEARCH_FIELD_MARGINS: f32 = 48.0;
+
 /// A text field with a magnifying glass in front and a clear button once
-/// something is typed.
+/// something is typed. `width` is the text's; the field is
+/// [`SEARCH_FIELD_MARGINS`] wider.
 pub fn search_field(
     ui: &mut egui::Ui,
     text: &mut String,

@@ -1178,6 +1178,91 @@ mod tests {
         }
     }
 
+    /// Each panel, drawn in a column 260 points wide and in a strip 260
+    /// tall (inside the dock's tab margins), keeps everything inside it.
+    /// With `AXCENITY_SNAPSHOTS` set, each is saved as `panel-<name>-tall.png`
+    /// and `panel-<name>-wide.png`.
+    #[test]
+    fn every_panel_fits_a_narrow_column_and_a_short_strip() {
+        let snapshots = std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from);
+        let mut app = EditorApp::new(Some(&example("hello-touched")));
+        let pad = app
+            .world
+            .get(app.world.workspace())
+            .and_then(|workspace| workspace.children().last().copied())
+            .expect("the example has parts");
+        app.select_clicked(Some(pad), egui::Modifiers::NONE, None, false);
+        app.output.error(
+            "scripts/Pad.server.lua:3: an error with a long message, to see it wrap in a \
+             narrow column instead of running past it",
+        );
+        // A terrain with a tool picked, so the Terrain Studio shows its forms.
+        let terrain = app.world.create(ClassName::Terrain).unwrap();
+        app.world
+            .set_parent(terrain, Some(app.world.workspace()))
+            .unwrap();
+        app.terrain.tool = Some(crate::terrain_studio::TerrainTool::Generate);
+
+        for pane in Pane::CLOSABLE {
+            for (size, shape) in [
+                (egui::vec2(260.0, 900.0), "tall"),
+                (egui::vec2(900.0, 260.0), "wide"),
+            ] {
+                // What was drawn, and the room there was for it.
+                let mut fit = None;
+                let mut draw = |ctx: &egui::Context| {
+                    let palette = theme::palette(ctx);
+                    let frame = egui::Frame::new()
+                        .fill(palette.panel)
+                        .inner_margin(egui::Margin::symmetric(8, 6));
+                    egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
+                        let room = ui.max_rect();
+                        match pane {
+                            Pane::Explorer => app.explorer_pane(ui),
+                            Pane::Properties => app.properties_pane(ui),
+                            Pane::Console => app.console_pane(ui),
+                            Pane::Assets => app.assets_pane(ui),
+                            Pane::Animation => app.animation_pane(ui, None),
+                            Pane::Terrain => app.terrain_pane(ui),
+                            Pane::Scene | Pane::Script(_) => {}
+                        }
+                        fit = Some((ui.min_rect(), room));
+                    });
+                };
+                let ctx = theme::test_context();
+                for _ in 0..3 {
+                    let input = egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                        ..Default::default()
+                    };
+                    let _ = ctx.run(input, &mut draw);
+                }
+                if let Some(folder) = &snapshots {
+                    let name = pane.label().to_lowercase();
+                    crate::snapshot::snapshot(
+                        &folder.join(format!("panel-{name}-{shape}.png")),
+                        size,
+                        vec![Vec::new(); 3],
+                        &mut draw,
+                    );
+                }
+                let (used, room) = fit.expect("the panel was drawn");
+                assert!(
+                    used.width() <= room.width() + 0.5,
+                    "{pane:?} at {size:?} drew {} points wide in {}",
+                    used.width(),
+                    room.width()
+                );
+                assert!(
+                    used.height() <= room.height() + 0.5,
+                    "{pane:?} at {size:?} drew {} points tall in {}",
+                    used.height(),
+                    room.height()
+                );
+            }
+        }
+    }
+
     #[test]
     fn starting_without_a_project_shows_nothing_open() {
         let app = EditorApp::new(None);
