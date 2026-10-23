@@ -241,7 +241,8 @@ pub fn create(world: &mut World, what: Insertable, position: Vector3) -> Instanc
 }
 
 /// Where a new `what` goes: into `near` if it's ReplicatedStorage, or a
-/// Model or Folder in a place that's saved (see [`is_saved`]). Otherwise a
+/// Model or Folder in a place that's saved (see [`is_saved`]), or for an
+/// Animation, a part or a ScreenGui or frame it can animate. Otherwise a
 /// RemoteEvent goes into ReplicatedStorage (where both sides find it, as in
 /// Roblox), and anything else into the Workspace.
 pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) -> InstanceId {
@@ -261,7 +262,9 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
         );
         id == world.replicated_storage()
             || (is_group && is_saved(world, id))
-            || (is_ui_container && what.is_ui_element() && is_saved(world, id))
+            || (is_ui_container
+                && (what.is_ui_element() || what == Insertable::Animation)
+                && is_saved(world, id))
             || (is_sound_container
                 && matches!(
                     what,

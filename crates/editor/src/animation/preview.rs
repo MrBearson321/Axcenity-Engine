@@ -7,7 +7,7 @@ use std::sync::Arc;
 use axcenity_assets::{Assets, Model, Posed};
 use axcenity_core::{ClassName, Color3, InstanceId, Value, Vector3, World};
 use axcenity_render::glam::Vec3;
-use axcenity_render::{Camera, TextureRenderer, wgpu};
+use axcenity_render::{Camera, DrawList, TextureRenderer, wgpu};
 use axcenity_scene::Poses;
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
@@ -21,9 +21,110 @@ struct Target {
     texture_id: egui::TextureId,
 }
 
+/// Somewhere a preview draws its own scene: a texture as big as the
+/// rectangle it's shown in, made the first time.
+#[derive(Default)]
+pub struct Canvas {
+    target: Option<Target>,
+}
+
+impl Canvas {
+    /// The size in physical pixels a `rect` of points needs.
+    pub fn pixels(ui: &egui::Ui, rect: egui::Rect) -> (u32, u32) {
+        let pixels = rect.size() * ui.ctx().pixels_per_point();
+        (
+            (pixels.x.round() as u32).max(1),
+            (pixels.y.round() as u32).max(1),
+        )
+    }
+
+    /// Renders `list` and shows it in `rect`.
+    pub fn paint(
+        &mut self,
+        ui: &egui::Ui,
+        rect: egui::Rect,
+        render_state: &RenderState,
+        list: &DrawList,
+    ) {
+        let (width, height) = Self::pixels(ui, rect);
+        let target = self.target.get_or_insert_with(|| {
+            let renderer =
+                TextureRenderer::new(&render_state.device, &render_state.queue, width, height);
+            let texture_id = render_state.renderer.write().register_native_texture(
+                &render_state.device,
+                renderer.view(),
+                wgpu::FilterMode::Linear,
+            );
+            Target {
+                renderer,
+                texture_id,
+            }
+        });
+        if target.renderer.size() != (width, height) {
+            target.renderer.resize(width, height);
+            render_state
+                .renderer
+                .write()
+                .update_egui_texture_from_wgpu_texture(
+                    &render_state.device,
+                    target.renderer.view(),
+                    wgpu::FilterMode::Linear,
+                    target.texture_id,
+                );
+        }
+        if let Err(error) = target.renderer.render(list) {
+            log::error!("could not render the animation preview: {error:#}");
+        }
+        let whole = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+        ui.painter_at(rect)
+            .image(target.texture_id, rect, whole, egui::Color32::WHITE);
+    }
+}
+
+/// Lays a checkered floor of `TILES` × `TILES` tiles, `tile` studs across,
+/// with its top at `top` and centred on `center`, into `world`'s Workspace.
+pub fn add_floor(world: &mut World, center: Vec3, top: f32, tile: f32) {
+    let workspace = world.workspace();
+    for x in -TILES / 2..TILES / 2 {
+        for z in -TILES / 2..TILES / 2 {
+            let light = (x + z).rem_euclid(2) == 0;
+            let color = if light {
+                Color3::new(0.42, 0.44, 0.48)
+            } else {
+                Color3::new(0.3, 0.32, 0.36)
+            };
+            let id = world.create(ClassName::Part).expect("not a service");
+            let properties = [
+                ("Anchored", Value::Bool(true)),
+                ("Color", Value::Color3(color)),
+                (
+                    "Size",
+                    Value::Vector3(Vector3::new(tile, tile * 0.05, tile)),
+                ),
+                (
+                    "Position",
+                    Value::Vector3(Vector3::new(
+                        center.x + (x as f32 + 0.5) * tile,
+                        top - tile * 0.025,
+                        center.z + (z as f32 + 0.5) * tile,
+                    )),
+                ),
+            ];
+            for (name, value) in properties {
+                world
+                    .set_property(id, name, value)
+                    .expect("Parts have these");
+            }
+            world
+                .set_parent(id, Some(workspace))
+                .expect("Parts go in the Workspace");
+        }
+    }
+}
+
 /// A model on a floor, with an orbiting camera.
 pub struct Preview {
-    target: Option<Target>,
+    canvas: Canvas,
     /// Turned around the model (degrees), looking down (degrees), and how
     /// far away, as a multiple of the model's height.
     yaw: f32,
@@ -41,7 +142,7 @@ pub struct Preview {
 impl Default for Preview {
     fn default() -> Self {
         Self {
-            target: None,
+            canvas: Canvas::default(),
             yaw: 35.0,
             pitch: 15.0,
             zoom: 2.2,
@@ -68,42 +169,7 @@ impl Preview {
         let height = size.y.max(size.x).max(size.z);
         let mut world = World::new();
         let workspace = world.workspace();
-        let tile = (height / 3.0).max(0.25);
-        for x in -TILES / 2..TILES / 2 {
-            for z in -TILES / 2..TILES / 2 {
-                let light = (x + z).rem_euclid(2) == 0;
-                let color = if light {
-                    Color3::new(0.42, 0.44, 0.48)
-                } else {
-                    Color3::new(0.3, 0.32, 0.36)
-                };
-                let id = world.create(ClassName::Part).expect("not a service");
-                let properties = [
-                    ("Anchored", Value::Bool(true)),
-                    ("Color", Value::Color3(color)),
-                    (
-                        "Size",
-                        Value::Vector3(Vector3::new(tile, tile * 0.05, tile)),
-                    ),
-                    (
-                        "Position",
-                        Value::Vector3(Vector3::new(
-                            (x as f32 + 0.5) * tile,
-                            -tile * 0.025,
-                            (z as f32 + 0.5) * tile,
-                        )),
-                    ),
-                ];
-                for (name, value) in properties {
-                    world
-                        .set_property(id, name, value)
-                        .expect("Parts have these");
-                }
-                world
-                    .set_parent(id, Some(workspace))
-                    .expect("Parts go in the Workspace");
-            }
-        }
+        add_floor(&mut world, Vec3::ZERO, 0.0, (height / 3.0).max(0.25));
         let part = world.create(ClassName::MeshPart).expect("not a service");
         for (name, value) in [
             ("Anchored", Value::Bool(true)),
@@ -200,37 +266,6 @@ impl Preview {
             return;
         }
         let camera = self.camera();
-        let pixels_per_point = ui.ctx().pixels_per_point();
-        let pixels = rect.size() * pixels_per_point;
-        let (width, height) = (
-            (pixels.x.round() as u32).max(1),
-            (pixels.y.round() as u32).max(1),
-        );
-        let target = self.target.get_or_insert_with(|| {
-            let renderer =
-                TextureRenderer::new(&render_state.device, &render_state.queue, width, height);
-            let texture_id = render_state.renderer.write().register_native_texture(
-                &render_state.device,
-                renderer.view(),
-                wgpu::FilterMode::Linear,
-            );
-            Target {
-                renderer,
-                texture_id,
-            }
-        });
-        if target.renderer.size() != (width, height) {
-            target.renderer.resize(width, height);
-            render_state
-                .renderer
-                .write()
-                .update_egui_texture_from_wgpu_texture(
-                    &render_state.device,
-                    target.renderer.view(),
-                    wgpu::FilterMode::Linear,
-                    target.texture_id,
-                );
-        }
         let mut poses = Poses::new();
         if let (Some(part), Some(posed)) = (self.part, posed) {
             poses.insert(part, posed);
@@ -242,11 +277,7 @@ impl Preview {
             &poses,
             &mut axcenity_scene::TerrainCache::new(),
         );
-        if let Err(error) = target.renderer.render(&list) {
-            log::error!("could not render the animation preview: {error:#}");
-        }
-        let whole = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-        painter.image(target.texture_id, rect, whole, egui::Color32::WHITE);
+        self.canvas.paint(ui, rect, render_state, &list);
         if response.hovered() {
             painter.text(
                 rect.left_bottom() + egui::vec2(8.0, -6.0),

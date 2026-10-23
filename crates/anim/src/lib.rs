@@ -3,7 +3,7 @@
 //! - [`files`]: the clip (`*.anim.json`) and animator controller
 //!   (`*.controller.json`) files in a project (take clips and property clips).
 //! - [`BoundClip`]: a take clip ready to pose one model's skeleton.
-//! - [`PropertyClip`]: an authored Position/Orientation/Size clip.
+//! - [`PropertyClip`]: authored keys for Parts, Models and UI elements.
 //! - [`Compiled`] and [`Machine`]: a controller made ready to run, and the
 //!   state machine that runs it (which state plays, and blends between them).
 //! - [`Animators`]: runs every Animator in a world each frame and poses its
@@ -30,7 +30,8 @@ pub use files::{
     ReturnDef, ReturnWhen, StateDef, Test, TransitionDef, blend_weights, with_returns,
 };
 pub use property_clip::{
-    EvaluatedProperty, PropertyClip, apply_evaluated, resolve_target, sample_time,
+    Applied, EvaluatedProperty, Placement, PropertyClip, apply_evaluated, model_pivot, numbers_of,
+    resolve_target, sample_time, target_path, value_from_numbers,
 };
 pub use property_players::{
     PropertyAnimationEvent, PropertyPlayers, load_property_clip, parse_property_clip,

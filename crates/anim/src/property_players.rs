@@ -8,7 +8,7 @@ use axcenity_assets::Assets;
 use axcenity_core::{ClassName, InstanceId, Value, World};
 
 use crate::files::{AnimClipFile, PropertyClipFile};
-use crate::property_clip::{PropertyClip, apply_evaluated};
+use crate::property_clip::{Applied, PropertyClip, apply_evaluated};
 
 /// Something scripts hear about from a property [`Animation`](ClassName::Animation).
 #[derive(Clone, Debug, PartialEq)]
@@ -41,8 +41,8 @@ pub struct PropertyPlayers {
 struct Loaded {
     path: String,
     clip: Arc<PropertyClip>,
-    /// Target paths already reported missing for this Animation.
-    missing: HashMap<String, ()>,
+    /// Missing targets and where carried parts sit, for this Animation.
+    applied: Applied,
 }
 
 impl PropertyPlayers {
@@ -131,7 +131,7 @@ impl PropertyPlayers {
                         Loaded {
                             path: clip_path.clone(),
                             clip,
-                            missing: HashMap::new(),
+                            applied: Applied::default(),
                         },
                     );
                 }
@@ -228,11 +228,11 @@ impl PropertyPlayers {
         let Some(loaded) = self.loaded.get_mut(&id) else {
             return Some(out);
         };
-        let before = loaded.missing.len();
-        apply_evaluated(world, root, &evaluated, &mut loaded.missing);
-        if loaded.missing.len() > before {
+        let before = loaded.applied.missing.len();
+        apply_evaluated(world, root, &evaluated, &mut loaded.applied);
+        if loaded.applied.missing.len() > before {
             let name = world.full_name(id).unwrap_or_default();
-            for target in loaded.missing.keys() {
+            for target in &loaded.applied.missing {
                 let message = format!(
                     "The Animation `{name}` has no target `{target}` under its parent, so that track is skipped."
                 );
@@ -309,13 +309,13 @@ mod tests {
                     PropertyKeyframe {
                         id: "a".into(),
                         time: 0.0,
-                        value: [0.0, 0.0, 0.0],
+                        value: vec![0.0, 0.0, 0.0],
                         interp: Interp::Linear,
                     },
                     PropertyKeyframe {
                         id: "b".into(),
                         time: 1.0,
-                        value: [0.0, 10.0, 0.0],
+                        value: vec![0.0, 10.0, 0.0],
                         interp: Interp::Linear,
                     },
                 ],

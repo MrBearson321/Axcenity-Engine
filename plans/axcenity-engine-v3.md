@@ -88,7 +88,7 @@ The dope sheet supports box select, move, copy/paste, delete and snap to frames.
 ### Acceptance criteria
 
 - [ ] A door Model can be animated by rotating its hinge part in the preview with Record on, and it plays the same in Play.
-- [ ] Older Position-only property clips still open and play.
+- [x] Older Position-only property clips still open and play.
 
 ## Phase 6: Posing skeletal rigs
 

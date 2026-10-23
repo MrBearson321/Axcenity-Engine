@@ -24,6 +24,7 @@
 mod clip_editor;
 mod controller_editor;
 mod graph;
+mod object_preview;
 mod preview;
 mod property_editor;
 pub mod store;
@@ -45,6 +46,7 @@ use crate::theme::{self, icons};
 use crate::widgets;
 use clip_editor::ClipDoc;
 use controller_editor::ControllerDoc;
+use object_preview::{ObjectPreview, PreviewEvent};
 use preview::Preview;
 use property_editor::PropertyDoc;
 use store::AnimationFiles;
@@ -118,7 +120,7 @@ pub enum StudioAction {
 enum Clip {
     /// A part of a take in a model file.
     Take(Box<ClipDoc>),
-    /// Authored keys for Parts.
+    /// Authored keys for Parts, Models and UI elements.
     Property(Box<PropertyDoc>),
 }
 
@@ -139,8 +141,13 @@ struct ClipTab {
     search: String,
     hide_drawer: bool,
     hide_inspector: bool,
-    /// With a property clip open, moving what it animates keys it.
+    /// With a property clip open, moving something in the preview keys it.
     record: bool,
+    /// A property clip's preview: a copy of what it animates.
+    objects: ObjectPreview,
+    /// Where the tab was last drawn, and in which pass, so its keys (K,
+    /// Delete, Ctrl+C) work while the mouse is over it.
+    drawn: Option<(egui::Rect, u64)>,
 }
 
 /// The Animator tab: a controller, its live preview, and which parts are shown.
@@ -305,7 +312,7 @@ impl AnimationStudio {
                         let path = file.path.clone();
                         self.reopen(project, assets, &path, world, output);
                     }
-                    None => self.close(&open, world),
+                    None => self.close(&open),
                 }
                 continue;
             }
@@ -321,9 +328,8 @@ impl AnimationStudio {
     }
 
     /// Closes `path` in whichever tab has it open.
-    fn close(&mut self, path: &str, world: &mut World) {
+    fn close(&mut self, path: &str) {
         if self.clip_path().as_deref() == Some(path) {
-            self.close_preview(world);
             self.clip.doc = None;
         }
         if self.controller_path().as_deref() == Some(path) {
@@ -342,7 +348,7 @@ impl AnimationStudio {
         output: &mut Output,
     ) {
         if path.ends_with(axcenity_anim::CLIP_EXTENSION) {
-            self.close_preview(world);
+            self.clip.objects.refresh(world);
             self.load_clip(project, assets, path, output);
         } else if path.ends_with(axcenity_anim::CONTROLLER_EXTENSION) {
             let preview = self
@@ -381,13 +387,6 @@ impl AnimationStudio {
         };
     }
 
-    /// Restores property-preview Part transforms when leaving the clip.
-    pub fn close_preview(&mut self, world: &mut World) {
-        if let Some(Clip::Property(doc)) = &mut self.clip.doc {
-            doc.restore_baseline(world);
-        }
-    }
-
     /// Opens the clip at `path` (from the project folder) in the Animation tab.
     pub fn open_clip(
         &mut self,
@@ -397,7 +396,8 @@ impl AnimationStudio {
         world: &mut World,
         output: &mut Output,
     ) {
-        self.close_preview(world);
+        // A fresh copy, with whatever was changed in the world since.
+        self.clip.objects.refresh(world);
         let _ = self.write_all(project, output);
         self.rescan(project);
         self.load_clip(project, assets, path, output);
@@ -630,9 +630,25 @@ impl AnimationStudio {
 
     // The Animation tab.
 
+    /// Whether the Animation tab takes K, Delete and Ctrl+C/X/V this frame:
+    /// a property clip is open and the mouse is over the tab, as drawn last
+    /// pass. The app leaves those keys alone then.
+    pub fn wants_keys(&self, ctx: &egui::Context) -> bool {
+        let Some((rect, pass)) = self.clip.drawn else {
+            return false;
+        };
+        matches!(self.clip.doc, Some(Clip::Property(_)))
+            && ctx.cumulative_pass_nr() <= pass + 1
+            && ctx
+                .input(|input| input.pointer.latest_pos())
+                .is_some_and(|pointer| rect.contains(pointer))
+            && !ctx.wants_keyboard_input()
+    }
+
     /// Draws the Animation tab. `selected` is the animated MeshPart selected
-    /// in the editor, if any. `preview_root` is a Part/MeshPart/Model for
-    /// property-clip scrubbing (restored when the clip closes).
+    /// in the editor, if any. `preview_root` is the Part, Model, ScreenGui
+    /// or UI element selected in the Explorer: a property clip's preview
+    /// shows a copy of it (or selects it, if it's inside what's shown).
     #[allow(clippy::too_many_arguments)] // Each is a different input to the tab.
     pub fn show_clips(
         &mut self,
@@ -643,6 +659,7 @@ impl AnimationStudio {
         selected: Option<&SelectedModel>,
         world: &mut World,
         preview_root: Option<InstanceId>,
+        stylesheets: &[axcenity_ui::Stylesheet],
         output: &mut Output,
     ) -> Vec<StudioAction> {
         let mut actions = Vec::new();
@@ -650,15 +667,12 @@ impl AnimationStudio {
             ui.weak("Open a project to animate its models and Parts.");
             return actions;
         };
+        self.clip.drawn = Some((ui.max_rect(), ui.ctx().cumulative_pass_nr()));
         self.rescan_if_due(project);
+        self.clip.objects.follow(world, preview_root);
         let stacked = ui.available_width() < STACK_BELOW;
-        let root_name = preview_root
-            .and_then(|id| world.get(id))
-            .map(|instance| instance.name().to_owned());
         let (pick, new) = egui::TopBottomPanel::top("clip toolbar")
-            .show_inside(ui, |ui| {
-                self.clip_toolbar(ui, world, preview_root, root_name.as_deref(), stacked)
-            })
+            .show_inside(ui, |ui| self.clip_toolbar(ui, world, stacked))
             .inner;
         if let Some(pick) = pick {
             self.act(pick, project, assets, selected, world, output, &mut actions);
@@ -685,9 +699,27 @@ impl AnimationStudio {
             ui.ctx().request_repaint();
         }
 
+        // A property clip poses its copy at the playhead (with moves not
+        // yet keyed on top), before anything is drawn.
+        let mut problem = None;
+        let keys = self.wants_keys(ui.ctx());
+        if let Some(Clip::Property(doc)) = &mut self.clip.doc {
+            if keys
+                && doc.shortcuts(ui)
+                && let Some(focus) = self.clip.objects.focus()
+            {
+                doc.key_focus(&focus);
+            }
+            match doc.evaluated() {
+                Ok(evaluated) => self.clip.objects.pose(&evaluated),
+                Err(err) => problem = Some(err),
+            }
+        }
+
         let mut rename = false;
         let mut step = None;
         let property = matches!(self.clip.doc, Some(Clip::Property(_)));
+        let mut events = Vec::new();
         match self.clip.doc {
             None => {
                 egui::CentralPanel::default().show_inside(ui, |ui| {
@@ -703,25 +735,26 @@ impl AnimationStudio {
                         .auto_shrink(false)
                         .show(ui, |ui| {
                             let height = (ui.available_width() * 0.75).clamp(160.0, 320.0);
-                            self.clip_preview(
+                            events.extend(self.clip_preview(
                                 ui,
                                 assets,
                                 render_state,
-                                root_name.as_deref(),
+                                stylesheets,
+                                problem.as_deref(),
                                 height,
-                            );
+                            ));
                             egui::CollapsingHeader::new(self.drawer_title())
                                 .id_salt("clip drawer stacked")
                                 .icon(widgets::chevron)
-                                .show(ui, |ui| self.clip_drawer(ui, assets, root_name.as_deref()));
+                                .show(ui, |ui| events.extend(self.clip_drawer(ui, assets)));
                             ui.separator();
-                            self.clip_timeline(ui, world, preview_root);
+                            self.clip_timeline(ui);
                             ui.separator();
                             egui::CollapsingHeader::new(format!("{} Settings", icons::SLIDERS))
                                 .id_salt("clip inspector stacked")
                                 .default_open(true)
                                 .icon(widgets::chevron)
-                                .show(ui, |ui| rename = self.clip_inspector(ui, preview_root));
+                                .show(ui, |ui| rename = self.clip_inspector(ui));
                         });
                 });
             }
@@ -731,7 +764,7 @@ impl AnimationStudio {
                 let bottom = if property {
                     egui::TopBottomPanel::bottom("clip dope sheet")
                         .resizable(true)
-                        .default_height(150.0)
+                        .default_height(170.0)
                         .min_height(80.0)
                 } else {
                     egui::TopBottomPanel::bottom("clip timeline").resizable(false)
@@ -739,7 +772,7 @@ impl AnimationStudio {
                 bottom.show_inside(ui, |ui| {
                     egui::ScrollArea::vertical()
                         .id_salt("clip timeline scroll")
-                        .show(ui, |ui| self.clip_timeline(ui, world, preview_root))
+                        .show(ui, |ui| self.clip_timeline(ui))
                 });
                 if !self.clip.hide_inspector {
                     let room = ui.available_width();
@@ -750,25 +783,32 @@ impl AnimationStudio {
                         .show_inside(ui, |ui| {
                             egui::ScrollArea::vertical()
                                 .id_salt("clip inspector scroll")
-                                .show(ui, |ui| rename = self.clip_inspector(ui, preview_root))
+                                .show(ui, |ui| rename = self.clip_inspector(ui))
                         });
                 }
                 if !self.clip.hide_drawer {
                     let room = ui.available_width();
                     egui::SidePanel::left("clip drawer")
                         .resizable(true)
-                        .default_width(150.0)
+                        .default_width(170.0)
                         .max_width(room * 0.4)
                         .show_inside(ui, |ui| {
                             ui.strong(self.drawer_title());
                             egui::ScrollArea::vertical()
                                 .id_salt("clip drawer scroll")
-                                .show(ui, |ui| self.clip_drawer(ui, assets, root_name.as_deref()))
+                                .show(ui, |ui| events.extend(self.clip_drawer(ui, assets)))
                         });
                 }
                 egui::CentralPanel::default().show_inside(ui, |ui| {
                     let height = ui.available_height();
-                    self.clip_preview(ui, assets, render_state, root_name.as_deref(), height);
+                    events.extend(self.clip_preview(
+                        ui,
+                        assets,
+                        render_state,
+                        stylesheets,
+                        problem.as_deref(),
+                        height,
+                    ));
                 });
             }
         }
@@ -786,13 +826,26 @@ impl AnimationStudio {
             _ => {}
         }
 
-        // A property clip poses the selected Part in the edited world; with
-        // Record on, a move made there since is keyed first.
-        if let (Some(Clip::Property(doc)), Some(root)) = (&mut self.clip.doc, preview_root) {
-            if self.clip.record {
-                doc.record_changes(world, root);
+        // What was done in the preview: a pick selects there; a move is
+        // keyed with Record on, or shown until the playhead moves.
+        if let Some(Clip::Property(doc)) = &mut self.clip.doc {
+            for event in events {
+                match event {
+                    PreviewEvent::Select(id) => {
+                        self.clip.objects.selected = id;
+                        let focus = self.clip.objects.focus();
+                        if let Some(track) =
+                            doc.file.tracks.iter().find(|t| {
+                                focus.as_ref().is_some_and(|focus| focus.target == t.target)
+                            })
+                        {
+                            doc.selected_track = Some(track.id.clone());
+                        }
+                    }
+                    PreviewEvent::Edit(edits) => doc.edit(edits, self.clip.record),
+                }
+                ui.ctx().request_repaint();
             }
-            doc.apply_preview(world, root);
         }
 
         self.finish(ui, project, assets, selected, world, output, &mut actions);
@@ -805,9 +858,7 @@ impl AnimationStudio {
     fn clip_toolbar(
         &mut self,
         ui: &mut egui::Ui,
-        world: &mut World,
-        preview_root: Option<InstanceId>,
-        root_name: Option<&str>,
+        world: &World,
         stacked: bool,
     ) -> (Option<Pick>, Option<New>) {
         let open = self.clip_path();
@@ -835,7 +886,9 @@ impl AnimationStudio {
                 }
                 if ui
                     .button(format!("{} Property clip…", icons::CUBE))
-                    .on_hover_text("Make an authored property clip for Parts (doors, props)")
+                    .on_hover_text(
+                        "Make a clip that keys Parts, Models and UI elements (doors, props, menus)",
+                    )
                     .clicked()
                 {
                     new = Some(New::PropertyClip);
@@ -849,15 +902,26 @@ impl AnimationStudio {
             match doc {
                 Clip::Take(doc) => doc.controls(ui, &self.files.models),
                 Clip::Property(doc) => {
-                    doc.controls(ui, world, preview_root);
-                    responsive::room_for(ui, 120.0);
+                    doc.controls(ui);
+                    responsive::room_for(ui, 140.0);
+                    let objects = &mut self.clip.objects;
                     let on = format!(
-                        "{} on {}",
+                        "{} {}",
                         icons::CUBE,
-                        root_name.unwrap_or("(select a Part)")
+                        objects.root_name().unwrap_or("(select something)")
                     );
                     ui.add(egui::Label::new(egui::RichText::new(on).weak()).truncate())
-                        .on_hover_text("Property clips play on the Part, MeshPart or Model selected in the Explorer");
+                        .on_hover_text(
+                            "The preview shows a copy of the Part, Model or ScreenGui selected in the Explorer",
+                        );
+                    if objects.root().is_some()
+                        && ui
+                            .small_button(icons::ARROWS_CLOCKWISE)
+                            .on_hover_text("Copy it again from the world, after editing it there")
+                            .clicked()
+                    {
+                        objects.refresh(world);
+                    }
                     let record = &mut self.clip.record;
                     let text = format!("{} Record", icons::RECORD);
                     let text = if *record {
@@ -868,7 +932,7 @@ impl AnimationStudio {
                     if ui
                         .selectable_label(*record, text)
                         .on_hover_text(
-                            "On, moving the previewed Part in the Scene View sets a key at the playhead",
+                            "On, moving something in the preview sets a key at the playhead",
                         )
                         .clicked()
                     {
@@ -915,24 +979,32 @@ impl AnimationStudio {
         }
     }
 
-    fn clip_drawer(&mut self, ui: &mut egui::Ui, assets: &Assets, root_name: Option<&str>) {
+    /// The bones, or the objects and their tracks. Picking an object
+    /// selects it in the preview.
+    fn clip_drawer(&mut self, ui: &mut egui::Ui, assets: &Assets) -> Option<PreviewEvent> {
         match &mut self.clip.doc {
-            Some(Clip::Take(doc)) => doc.bones(ui, assets),
-            Some(Clip::Property(doc)) => doc.objects(ui, root_name),
-            None => {}
+            Some(Clip::Take(doc)) => {
+                doc.bones(ui, assets);
+                None
+            }
+            Some(Clip::Property(doc)) => doc
+                .objects(ui, &self.clip.objects)
+                .map(|id| PreviewEvent::Select(Some(id))),
+            None => None,
         }
     }
 
     /// The open clip's preview, `height` points tall: the model posed at the
-    /// playhead, or for a property clip, where it's being previewed.
+    /// playhead, or for a property clip, the copy of what it animates.
     fn clip_preview(
         &mut self,
         ui: &mut egui::Ui,
         assets: &Assets,
         render_state: Option<&RenderState>,
-        root_name: Option<&str>,
+        stylesheets: &[axcenity_ui::Stylesheet],
+        problem: Option<&str>,
         height: f32,
-    ) {
+    ) -> Option<PreviewEvent> {
         match &mut self.clip.doc {
             Some(Clip::Take(doc)) => {
                 show_model(&mut self.clip.preview, doc.preview_model.as_deref(), assets);
@@ -947,49 +1019,58 @@ impl AnimationStudio {
                 self.clip
                     .preview
                     .show(ui, render_state, assets, posed, height);
+                None
             }
             Some(Clip::Property(_)) => {
-                let size = egui::vec2(ui.available_width(), height.max(80.0));
-                let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-                ui.painter()
-                    .rect_filled(rect, 4.0, ui.visuals().extreme_bg_color);
-                let message = match root_name {
-                    Some(name) => format!(
-                        "{} Previewing on {name} in the Scene View.\nWith Record on, move it there to set a key at the playhead.",
-                        icons::CUBE
-                    ),
-                    None => "Select a Part, MeshPart or Model in the Explorer to preview this clip on it.".to_owned(),
-                };
-                ui.scope_builder(egui::UiBuilder::new().max_rect(rect.shrink(12.0)), |ui| {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space((rect.height() / 2.0 - 30.0).max(0.0));
-                        ui.weak(message);
-                    });
+                let objects = &mut self.clip.objects;
+                let top = ui.cursor().top();
+                responsive::toolbar(ui, |ui| {
+                    objects.tools(ui);
+                    if let Some(problem) = problem {
+                        ui.colored_label(ui.visuals().error_fg_color, problem);
+                    }
+                    let missing = objects.missing();
+                    if !missing.is_empty() {
+                        ui.colored_label(
+                            theme::palette(ui.ctx()).warning,
+                            format!(
+                                "{} Not in this copy: {}",
+                                icons::WARNING,
+                                missing.join(", ")
+                            ),
+                        )
+                        .on_hover_text("Tracks whose object or property this copy hasn't");
+                    }
                 });
+                let used = ui.cursor().top() - top;
+                let height = (height - used).min(ui.available_height()).max(80.0);
+                objects.show_ui(ui, render_state, assets, stylesheets, height)
             }
-            None => {}
+            None => None,
         }
     }
 
     /// The take clip's timeline, or the property clip's dope sheet.
-    fn clip_timeline(
-        &mut self,
-        ui: &mut egui::Ui,
-        world: &mut World,
-        preview_root: Option<InstanceId>,
-    ) {
+    fn clip_timeline(&mut self, ui: &mut egui::Ui) {
         match &mut self.clip.doc {
             Some(Clip::Take(doc)) => doc.timeline(ui),
-            Some(Clip::Property(doc)) => doc.keys(ui, world, preview_root),
+            Some(Clip::Property(doc)) => {
+                let focus = self.clip.objects.focus();
+                if doc.keys(ui, focus.as_ref())
+                    && let Some(focus) = &focus
+                {
+                    doc.key_focus(focus);
+                }
+            }
             None => {}
         }
     }
 
     /// The open clip's settings. Returns true if Rename was pressed.
-    fn clip_inspector(&mut self, ui: &mut egui::Ui, preview_root: Option<InstanceId>) -> bool {
+    fn clip_inspector(&mut self, ui: &mut egui::Ui) -> bool {
         match &mut self.clip.doc {
             Some(Clip::Take(doc)) => doc.inspector(ui),
-            Some(Clip::Property(doc)) => doc.inspector(ui, preview_root),
+            Some(Clip::Property(doc)) => doc.inspector(ui, self.clip.objects.root_name()),
             None => false,
         }
     }
@@ -1017,8 +1098,8 @@ impl AnimationStudio {
                 },
                 Step {
                     done: preview_root.is_some(),
-                    title: "Or animate a Part".to_owned(),
-                    hint: "Select a Part, MeshPart or Model, then make a property clip and key it.",
+                    title: "Or animate a Part, Model or UI".to_owned(),
+                    hint: "Select it, make a property clip, then move it in the preview and key it (K).",
                     button: Some("New property clip"),
                 },
             ],
@@ -1680,7 +1761,7 @@ impl AnimationStudio {
             close = true;
         }
         if let Some(path) = deleted {
-            self.close(&path, world);
+            self.close(&path);
         }
         if close {
             self.dialog = None;
@@ -1688,7 +1769,6 @@ impl AnimationStudio {
         }
         if let Some(path) = open {
             // A renamed clip is opened fresh from its new file.
-            self.close_preview(world);
             self.clip.doc = None;
             self.open_clip(project, assets, &path, world, output);
             actions.push(StudioAction::Show(Pane::Animation));

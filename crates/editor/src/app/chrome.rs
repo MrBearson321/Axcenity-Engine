@@ -88,6 +88,10 @@ impl EditorApp {
         let folder = self.project.as_ref().map(|project| project.folder.clone());
         let selected = self.selected_model();
         let preview_root = self.property_preview_root();
+        let stylesheets = self
+            .project
+            .as_ref()
+            .map_or(&[][..], |project| &project.stylesheets[..]);
         let actions = self.animation.show_clips(
             ui,
             folder.as_deref(),
@@ -96,6 +100,7 @@ impl EditorApp {
             selected.as_ref(),
             &mut self.world,
             preview_root,
+            stylesheets,
             &mut self.output,
         );
         self.studio_actions(actions);
@@ -154,12 +159,23 @@ impl EditorApp {
         }
     }
 
-    /// A Part, MeshPart or Model selected for property-clip preview.
+    /// What a property clip's preview shows: the Part, MeshPart, Model,
+    /// ScreenGui or UI element selected (or an Animation's parent).
     fn property_preview_root(&self) -> Option<InstanceId> {
         let id = self.selected?;
         let instance = self.world.get(id)?;
         match instance.class() {
-            ClassName::Part | ClassName::MeshPart | ClassName::Model => Some(id),
+            ClassName::Part
+            | ClassName::MeshPart
+            | ClassName::Model
+            | ClassName::ScreenGui
+            | ClassName::Frame
+            | ClassName::TextLabel
+            | ClassName::TextButton
+            | ClassName::TextBox
+            | ClassName::ImageLabel
+            | ClassName::PageLayout
+            | ClassName::Table => Some(id),
             ClassName::Animation => instance.parent(),
             _ => None,
         }
@@ -1164,6 +1180,8 @@ impl EditorApp {
         // Backspace itself, so leave those keys to it then.
         let typing = ctx.wants_keyboard_input();
         let playing = self.playing();
+        // Over a property clip, K, Delete and Backspace are the dope sheet's.
+        let animating = self.animation.wants_keys(ctx);
         let studio_tool = |input: &mut egui::InputState| {
             Tool::ALL.into_iter().find(|tool| {
                 tool.shortcut()
@@ -1172,7 +1190,7 @@ impl EditorApp {
         };
         // F3X's single keys only while editing, so a game gets every key.
         let f3x_tool = |input: &mut egui::InputState| {
-            if playing {
+            if playing || animating {
                 return None;
             }
             Tool::ALL.into_iter().find(|tool| {
@@ -1200,8 +1218,10 @@ impl EditorApp {
                 // also fly the camera right.
                 duplicate: input.consume_shortcut(&DUPLICATE_SHORTCUT),
                 rename: input.consume_key(none, RENAME_KEY),
-                delete: input.consume_key(none, egui::Key::Delete)
-                    || (cfg!(target_os = "macos") && input.consume_key(none, egui::Key::Backspace)),
+                delete: !animating
+                    && (input.consume_key(none, egui::Key::Delete)
+                        || (cfg!(target_os = "macos")
+                            && input.consume_key(none, egui::Key::Backspace))),
             }
         });
         if keys.redo {

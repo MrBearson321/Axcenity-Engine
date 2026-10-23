@@ -3,8 +3,8 @@
 //!
 //! A **take clip** names a take in a model file and the part of it to play,
 //! with how it plays (speed, looping, root motion) and its events. A
-//! **property clip** (`"kind": "property"`) stores authored Position /
-//! Orientation / Size keyframes for Parts. A controller holds an Animator's
+//! **property clip** (`"kind": "property"`) stores authored keyframes for
+//! Parts, Models and UI elements. A controller holds an Animator's
 //! parameters, states, default state and transitions (take clips only).
 //! Paths in them are from the project folder, with `/` between folders.
 
@@ -101,20 +101,70 @@ pub enum Interp {
     Linear,
 }
 
-/// Which Part property a property track drives.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// Which property a property track drives. On a Model, `Position` and
+/// `Orientation` are its pivot (see `property_clip.rs`); on a UI element,
+/// `Position` and `Size` are UDim2s.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PropertyName {
     Position,
     Orientation,
     Size,
+    Color,
+    Transparency,
+    BackgroundColor3,
+    BackgroundTransparency,
+    TextColor3,
+    TextSize,
+    ImageTransparency,
 }
 
 impl PropertyName {
+    pub const ALL: [PropertyName; 10] = [
+        PropertyName::Position,
+        PropertyName::Orientation,
+        PropertyName::Size,
+        PropertyName::Color,
+        PropertyName::Transparency,
+        PropertyName::BackgroundColor3,
+        PropertyName::BackgroundTransparency,
+        PropertyName::TextColor3,
+        PropertyName::TextSize,
+        PropertyName::ImageTransparency,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
             PropertyName::Position => "Position",
             PropertyName::Orientation => "Orientation",
             PropertyName::Size => "Size",
+            PropertyName::Color => "Color",
+            PropertyName::Transparency => "Transparency",
+            PropertyName::BackgroundColor3 => "BackgroundColor3",
+            PropertyName::BackgroundTransparency => "BackgroundTransparency",
+            PropertyName::TextColor3 => "TextColor3",
+            PropertyName::TextSize => "TextSize",
+            PropertyName::ImageTransparency => "ImageTransparency",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|p| p.as_str() == name)
+    }
+
+    /// How many numbers a key of this property may hold: 3 for a Vector3 or
+    /// Color3, 4 for a UDim2 (`Position` and `Size` of UI elements), 1 for
+    /// a number.
+    pub fn widths(self) -> &'static [usize] {
+        match self {
+            PropertyName::Position | PropertyName::Size => &[3, 4],
+            PropertyName::Orientation
+            | PropertyName::Color
+            | PropertyName::BackgroundColor3
+            | PropertyName::TextColor3 => &[3],
+            PropertyName::Transparency
+            | PropertyName::BackgroundTransparency
+            | PropertyName::TextSize
+            | PropertyName::ImageTransparency => &[1],
         }
     }
 }
@@ -125,8 +175,11 @@ impl PropertyName {
 pub struct PropertyKeyframe {
     pub id: String,
     pub time: f64,
-    /// Vector3 as `[x, y, z]` (degrees for Orientation).
-    pub value: [f32; 3],
+    /// The property's value as numbers: `[x, y, z]` for a Vector3
+    /// (degrees for Orientation), `[r, g, b]` (0 to 1) for a Color3,
+    /// `[x_scale, x_offset, y_scale, y_offset]` for a UDim2, `[n]` for a
+    /// number.
+    pub value: Vec<f32>,
     #[serde(default)]
     pub interp: Interp,
 }
@@ -136,7 +189,8 @@ pub struct PropertyKeyframe {
 #[serde(deny_unknown_fields)]
 pub struct PropertyTrack {
     pub id: String,
-    /// Relative to the Animation's parent: `.` is that Part/Model.
+    /// Relative to the Animation's parent: `.` is that Part/Model, and
+    /// `Hinge/Panel` is the child `Panel` of its child `Hinge`.
     pub target: String,
     pub property: PropertyName,
     pub keys: Vec<PropertyKeyframe>,
