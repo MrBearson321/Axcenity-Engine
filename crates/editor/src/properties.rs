@@ -24,14 +24,17 @@ pub enum Edit {
     PickTexture(&'static str),
     /// Asks for an audio file for the Sound's `SoundId`, like [`Edit::PickTexture`].
     PickAudio,
-    /// Asks for an animator controller file for the Animator's `Controller`.
+    /// Asks for a state machine file for the Animator's `StateMachine`.
     PickController,
-    /// Opens the Animator's controller in the Animation panel.
+    /// Opens the Animator's state machine in the Animation tab.
     OpenController,
-    /// Asks for a property clip file for an Animation's `Clip`.
+    /// Asks for a clip file for an Animation's `Clip`.
     PickClip,
-    /// Opens the property clip in the Animation panel.
+    /// Opens the Animation's clip in the Animation tab.
     OpenClip,
+    /// Animates the selected Part, Model or UI element: an Animator, a new
+    /// clip and an Animation playing it, opened in the Animation tab.
+    Animate,
     /// Plays the selected Sound in the editor, to hear it without pressing
     /// Play, or (false) stops that.
     PreviewSound(bool),
@@ -390,6 +393,18 @@ pub fn show(
                 });
                 ui.label(class);
             });
+            if !playing && crate::animation::can_animate(instance.class()) {
+                let icon = theme::AnimKind::Animator.rich_icon(ui.visuals());
+                if ui
+                    .button((icon, format!("  Animate {}", instance.name())))
+                    .on_hover_text(
+                        "Give it an Animator, a new clip and an Animation playing it, and open the clip with Record on",
+                    )
+                    .clicked()
+                {
+                    edit = Some(Edit::Animate);
+                }
+            }
             ui.add_space(2.0);
             // Widgets remember things such as half-typed numbers by ID. Mixing in
             // the selection gives each Instance its own, so nothing typed for one
@@ -619,7 +634,7 @@ fn controller_control(ui: &mut egui::Ui, path: &str) -> Option<Edit> {
         }
         if ui
             .small_button(icons::FLOW_ARROW)
-            .on_hover_text("Open it in the Animator tab: its states, transitions and parameters")
+            .on_hover_text("Open it in the Animation tab: its states, transitions and parameters")
             .clicked()
         {
             edit = Some(Edit::OpenController);

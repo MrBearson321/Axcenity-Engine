@@ -44,7 +44,7 @@ use axcenity_script::{CameraState, KeyEvent};
 use eframe::egui;
 
 use crate::angular;
-use crate::animation::{AnimationStudio, SelectedModel, StudioAction};
+use crate::animation::{AnimationStudio, StudioAction};
 use crate::asset_browser::{AssetBrowser, AssetPayload, BrowserAction};
 use crate::autocomplete;
 use crate::block_editor;
@@ -281,7 +281,6 @@ impl egui_dock::TabViewer for DockViewer<'_> {
             Pane::Console => self.app.console_pane(ui),
             Pane::Assets => self.app.assets_pane(ui),
             Pane::Animation => self.app.animation_pane(ui, self.render_state),
-            Pane::Animator => self.app.animator_pane(ui, self.render_state),
             Pane::Terrain => self.app.terrain_pane(ui),
             Pane::Profiler => self.app.profiler.show(ui),
             Pane::Script(id) => self.app.script_pane(ui, *id),
@@ -1242,7 +1241,6 @@ mod tests {
                             Pane::Console => app.console_pane(ui),
                             Pane::Assets => app.assets_pane(ui),
                             Pane::Animation => app.animation_pane(ui, None),
-                            Pane::Animator => app.animator_pane(ui, None),
                             Pane::Terrain => app.terrain_pane(ui),
                             Pane::Profiler => app.profiler.show(ui),
                             Pane::Scene | Pane::Script(_) => {}
@@ -1284,80 +1282,179 @@ mod tests {
         }
     }
 
-    /// A clip and a controller stay open at once, each in its own tab, and
-    /// both tabs fit 600×400 and stack in a narrow column. With
-    /// `AXCENITY_SNAPSHOTS` set, each is saved as `studio-<tab>-<shape>.png`.
-    #[test]
-    fn a_clip_and_a_controller_are_open_at_once_in_their_own_tabs() {
-        let snapshots = std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from);
-        let folder = copy_of_example("hello-touched", "animation-tabs");
-        let mut app = EditorApp::new(Some(&folder));
+    /// Draws the Animation tab three times at `size`, and returns what was
+    /// drawn and the room there was for it.
+    fn draw_animation_tab(app: &mut EditorApp, size: egui::Vec2) -> (egui::Rect, egui::Rect) {
+        let mut fit = None;
+        let ctx = theme::test_context();
+        for _ in 0..3 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                ..Default::default()
+            };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let room = ui.max_rect();
+                    app.animation_pane(ui, None);
+                    fit = Some((ui.min_rect(), room));
+                });
+            });
+        }
+        fit.expect("the tab was drawn")
+    }
+
+    /// The last part in the example's Workspace, selected.
+    fn select_pad(app: &mut EditorApp) -> InstanceId {
         let pad = app
             .world
             .get(app.world.workspace())
             .and_then(|workspace| workspace.children().last().copied())
             .expect("the example has parts");
         app.select_clicked(Some(pad), egui::Modifiers::NONE, None, false);
-        let clip = crate::animation::store::create_property_clip(
-            &folder,
-            "Door",
-            &axcenity_anim::ClipFile::new(1.5),
-        )
-        .unwrap()
-        .path;
-        let controller = crate::animation::store::new_controller(&folder, "Hero", &[])
-            .unwrap()
-            .path;
-        app.animation
-            .open_clip(&folder, &app.assets, &clip, &mut app.world, &mut app.output);
-        app.animation
-            .open_controller(&folder, &app.assets, &controller, None, &mut app.output);
+        pad
+    }
 
-        for pane in [Pane::Animation, Pane::Animator] {
+    #[test]
+    fn animate_makes_an_animator_a_clip_and_an_animation_as_one_undo_step() {
+        let folder = copy_of_example("hello-touched", "animate");
+        let mut app = EditorApp::new(Some(&folder));
+        let pad = select_pad(&mut app);
+        let name = app.world.get(pad).unwrap().name().to_owned();
+        let safe = axcenity_anim::files::file_safe(&name);
+
+        app.animate(pad);
+        let subject = crate::animation::Subject::of(&app.world, pad).unwrap();
+        let animator = subject.animator.expect("an Animator was added");
+        let [animation] = subject.animations.as_slice() else {
+            panic!("one Animation: {:?}", subject.animations);
+        };
+        let clip = format!("assets/animations/{safe}/{safe}.anim.json");
+        assert_eq!(animation.clip, clip);
+        assert_eq!(animation.name, safe);
+        assert_eq!(
+            app.world.get(animation.id).unwrap().parent(),
+            Some(animator)
+        );
+        assert!(folder.join(&clip).is_file());
+        assert!(app.animation.recording(), "it opens with Record on");
+        assert_eq!(
+            app.animation.open_documents()[0].as_deref(),
+            Some(clip.as_str())
+        );
+        assert_eq!(
+            app.history.undo_label(),
+            Some(format!("Animate {name}").as_str())
+        );
+
+        // Again: another clip and Animation in the same Animator.
+        app.animate(pad);
+        let subject = crate::animation::Subject::of(&app.world, pad).unwrap();
+        assert_eq!(subject.animator, Some(animator));
+        assert_eq!(subject.animations.len(), 2);
+        assert_eq!(
+            subject.animations[1].clip,
+            format!("assets/animations/{safe}/{safe}2.anim.json")
+        );
+
+        // Undo takes back the Animation, the Animator and the file.
+        app.undo();
+        app.undo();
+        assert!(crate::animation::animator_of(&app.world, pad).is_none());
+        assert!(!folder.join(&clip).exists());
+        app.redo();
+        assert!(folder.join(&clip).is_file());
+        let subject = crate::animation::Subject::of(&app.world, pad).unwrap();
+        assert_eq!(subject.animator, Some(animator));
+        assert_eq!(subject.animations.len(), 1);
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// The breadcrumb names the object and what's being edited, and the tab
+    /// fits 600×400 and a 260×900 column with a clip or a state machine
+    /// shown. With `AXCENITY_SNAPSHOTS` set, each is saved as
+    /// `animation-<view>-<shape>.png`.
+    #[test]
+    fn the_animation_tab_says_where_you_are_and_fits_any_shape() {
+        let snapshots = std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from);
+        let folder = copy_of_example("hello-touched", "animation-tab");
+        let mut app = EditorApp::new(Some(&folder));
+        let pad = select_pad(&mut app);
+        let name = app.world.get(pad).unwrap().name().to_owned();
+        let safe = axcenity_anim::files::file_safe(&name);
+        assert_eq!(app.animation.breadcrumb_text(&app.world), "Animation");
+
+        app.animate(pad);
+        let clip = format!("assets/animations/{safe}/{safe}.anim.json");
+        assert_eq!(
+            app.animation.breadcrumb_text(&app.world),
+            format!("{name} ▸ {safe}")
+        );
+
+        // A state machine playing the clip, given to its Animator.
+        let machine =
+            crate::animation::store::new_controller(&folder, &safe, std::slice::from_ref(&clip))
+                .unwrap()
+                .path;
+        let animator = crate::animation::animator_of(&app.world, pad).unwrap();
+        app.set_controller(pad, Some(animator), machine.clone());
+        app.animation
+            .open_controller(&folder, &app.assets, &machine, None, &mut app.output);
+        assert_eq!(
+            app.animation.breadcrumb_text(&app.world),
+            format!("{name} ▸ State Machine")
+        );
+
+        for view in ["state-machine", "clip"] {
+            if view == "clip" {
+                // Double-clicking the state opens its clip, under it.
+                app.animation.open_state(
+                    &folder,
+                    &app.assets,
+                    &safe,
+                    &mut app.world,
+                    &mut app.output,
+                );
+                assert_eq!(
+                    app.animation.breadcrumb_text(&app.world),
+                    format!("{name} ▸ State Machine ▸ {safe}")
+                );
+            }
             for (size, shape) in [
                 (egui::vec2(600.0, 400.0), "600x400"),
                 (egui::vec2(260.0, 900.0), "tall"),
+                (egui::vec2(1100.0, 600.0), "wide"),
             ] {
-                let mut fit = None;
-                let mut draw = |ctx: &egui::Context| {
-                    egui::CentralPanel::default().show(ctx, |ui| {
-                        let room = ui.max_rect();
-                        match pane {
-                            Pane::Animation => app.animation_pane(ui, None),
-                            _ => app.animator_pane(ui, None),
-                        }
-                        fit = Some((ui.min_rect(), room));
-                    });
-                };
-                let ctx = theme::test_context();
-                for _ in 0..3 {
-                    let input = egui::RawInput {
-                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
-                        ..Default::default()
-                    };
-                    let _ = ctx.run(input, &mut draw);
-                }
-                if let Some(snapshots) = &snapshots {
-                    let name = pane.label().to_lowercase();
-                    crate::snapshot::snapshot(
-                        &snapshots.join(format!("studio-{name}-{shape}.png")),
-                        size,
-                        vec![Vec::new(); 3],
-                        &mut draw,
-                    );
-                }
-                let (used, room) = fit.expect("the tab was drawn");
+                let (used, room) = draw_animation_tab(&mut app, size);
                 assert!(
                     used.width() <= room.width() + 0.5 && used.height() <= room.height() + 0.5,
-                    "{pane:?} at {size:?} drew {used:?} in {room:?}"
+                    "{view} at {size:?} drew {used:?} in {room:?}"
                 );
+                if let Some(snapshots) = &snapshots {
+                    crate::snapshot::snapshot(
+                        &snapshots.join(format!("animation-{view}-{shape}.png")),
+                        size,
+                        vec![Vec::new(); 3],
+                        &mut |ctx: &egui::Context| {
+                            egui::CentralPanel::default()
+                                .show(ctx, |ui| app.animation_pane(ui, None));
+                        },
+                    );
+                }
             }
         }
         assert_eq!(
             app.animation.open_documents(),
-            [Some(clip), Some(controller)],
-            "drawing either tab keeps the other's document"
+            [Some(clip), Some(machine)],
+            "the clip and the state machine stay open together"
         );
+
+        // The breadcrumb goes back up to the graph.
+        app.animation.go_to_state_machine();
+        assert_eq!(
+            app.animation.breadcrumb_text(&app.world),
+            format!("{name} ▸ State Machine")
+        );
+        let _ = std::fs::remove_dir_all(&folder);
     }
 
     #[test]

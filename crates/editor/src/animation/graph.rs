@@ -74,6 +74,8 @@ pub enum GraphEvent {
     AddState([f32; 2], Option<String>),
     /// Add a state here playing a blend tree.
     AddBlendTree([f32; 2]),
+    /// A state was double-clicked, to open its clip.
+    Open(usize),
 }
 
 /// The state playing in the preview, to show in the graph.
@@ -348,6 +350,11 @@ impl GraphView {
                     (Some(_), _) => {}
                     (None, _) => events.push(GraphEvent::Select(Selected::Node(node))),
                 }
+            }
+            if response.double_clicked()
+                && let Node::State(index) = node
+            {
+                events.push(GraphEvent::Open(index));
             }
             if response.drag_started() {
                 events.push(GraphEvent::Select(Selected::Node(node)));

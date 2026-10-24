@@ -147,6 +147,34 @@ impl ObjectPreview {
         self.show(world, id);
     }
 
+    /// Shows a copy of `root` (taking one if it isn't shown), and follows
+    /// the Explorer inside it: picking something inside selects it here.
+    /// Picking something outside changes nothing.
+    pub fn follow_within(
+        &mut self,
+        world: &World,
+        root: InstanceId,
+        selection: Option<InstanceId>,
+    ) {
+        if self.root != Some(root) || !world.contains(root) {
+            self.show_root(world, root);
+        }
+        if selection == self.followed {
+            return;
+        }
+        self.followed = selection;
+        if let Some(id) = selection
+            && (id == root || world.is_descendant_of(id, root))
+        {
+            self.selected = Some(id);
+        }
+    }
+
+    /// Shows a fresh copy of `root`.
+    pub fn show_root(&mut self, world: &World, root: InstanceId) {
+        self.show(world, root);
+    }
+
     /// Shows nothing until something is picked again.
     pub fn forget(&mut self) {
         self.root = None;

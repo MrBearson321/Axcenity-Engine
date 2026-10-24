@@ -173,10 +173,12 @@ enum StepKind {
         parts: Vec<(InstanceId, Vec<Change>)>,
     },
     /// Project files created, rewritten, renamed or deleted, plus property
-    /// changes that belong to the same action.
+    /// changes and Instances inserted that belong to the same action (such
+    /// as Animate's clip file, Animator and Animation).
     Files {
         texts: Vec<TextChange>,
         properties: Vec<PropertyEdit>,
+        moves: Vec<Move>,
     },
     /// A Terrain's landscape, and its fields changed at the same time
     /// (a new `Size` with a generated landscape).
@@ -349,7 +351,48 @@ impl History {
             return;
         }
         self.seal();
-        self.push(world, label, StepKind::Files { texts, properties });
+        self.push(
+            world,
+            label,
+            StepKind::Files {
+                texts,
+                properties,
+                moves: Vec::new(),
+            },
+        );
+    }
+
+    /// Records project files written and Instances inserted or moved in the
+    /// tree (both already done) as one step named `label`, which never
+    /// merges with the next change.
+    pub fn record_files_and_tree(
+        &mut self,
+        world: &mut World,
+        label: String,
+        texts: Vec<TextChange>,
+        moves: Vec<Move>,
+    ) {
+        let texts: Vec<_> = texts
+            .into_iter()
+            .filter(|text| text.before != text.after)
+            .collect();
+        let moves: Vec<_> = moves
+            .into_iter()
+            .filter(|step| step.before != step.after)
+            .collect();
+        if texts.is_empty() && moves.is_empty() {
+            return;
+        }
+        self.seal();
+        self.push(
+            world,
+            label,
+            StepKind::Files {
+                texts,
+                properties: Vec::new(),
+                moves,
+            },
+        );
     }
 
     /// Records a change to several Instances as one step named `label`,
@@ -460,7 +503,7 @@ impl History {
         // An undone insert left its Instance out of the tree. With the step
         // gone, nothing can bring it back, so destroy it.
         for step in self.redo.drain(..) {
-            if let StepKind::Tree(moves) = step.kind {
+            if let StepKind::Tree(moves) | StepKind::Files { moves, .. } = step.kind {
                 for made in moves.iter().filter(|step| step.before.is_none()) {
                     let _ = world.destroy(made.id);
                 }
@@ -521,9 +564,16 @@ impl History {
                     restore(world, *id, changes.iter().map(|c| (c.field, &c.before)));
                 }
             }
-            StepKind::Files { texts, properties } => {
+            StepKind::Files {
+                texts,
+                properties,
+                moves,
+            } => {
                 for edit in properties {
                     restore(world, edit.id, std::iter::once((edit.field, &edit.before)));
+                }
+                for step in moves.iter().rev() {
+                    put_back(world, step.id, step.before);
                 }
                 undone = texts
                     .iter()
@@ -572,7 +622,14 @@ impl History {
                     restore(world, *id, changes.iter().map(|c| (c.field, &c.after)));
                 }
             }
-            StepKind::Files { texts, properties } => {
+            StepKind::Files {
+                texts,
+                properties,
+                moves,
+            } => {
+                for step in moves.iter() {
+                    put_back(world, step.id, step.after);
+                }
                 for edit in properties {
                     restore(world, edit.id, std::iter::once((edit.field, &edit.after)));
                 }

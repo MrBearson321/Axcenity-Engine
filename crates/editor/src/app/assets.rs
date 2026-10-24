@@ -66,29 +66,32 @@ impl EditorApp {
             AssetKind::Image => self.drop_image(entry, spot),
             AssetKind::Texture => self.drop_texture(entry, spot),
             AssetKind::Particle => self.drop_particle_texture(entry, spot),
-            AssetKind::Animation => self.open_animation_clip(&entry.path),
+            AssetKind::Animation => self.open_animation_clip(&entry.path, true),
             AssetKind::Controller => self.drop_controller(entry, spot),
         }
     }
 
     /// Opens the clip at `path` in the Animation tab, and shows the tab.
-    pub(super) fn open_animation_clip(&mut self, path: &str) {
+    /// `alone` (from the Assets panel) opens it on its own, following no
+    /// object; otherwise it stays with the object the tab follows.
+    pub(super) fn open_animation_clip(&mut self, path: &str, alone: bool) {
         let Some(project) = &self.project else {
             return;
         };
         let folder = project.folder.clone();
-        self.animation.open_clip(
-            &folder,
-            &self.assets,
-            path,
-            &mut self.world,
-            &mut self.output,
-        );
+        let (assets, world, output) = (&self.assets, &mut self.world, &mut self.output);
+        if alone {
+            self.animation
+                .open_clip_alone(&folder, assets, path, world, output);
+        } else {
+            self.animation
+                .open_clip(&folder, assets, path, world, output);
+        }
         self.layout.open(Pane::Animation);
     }
 
-    /// Opens the controller of the Animator `animator` in the Animator tab,
-    /// previewed on its MeshPart's model, and shows the tab.
+    /// Opens the state machine of the Animator `animator` in the Animation
+    /// tab, previewed on its MeshPart's model, and shows the tab.
     pub(super) fn open_animator_controller(&mut self, animator: InstanceId) {
         let Some(project) = &self.project else {
             return;
@@ -113,7 +116,7 @@ impl EditorApp {
         }
         self.animation
             .open_controller(&folder, &self.assets, &path, model, &mut self.output);
-        self.layout.open(Pane::Animator);
+        self.layout.open(Pane::Animation);
     }
 
     /// Gives the Animator of the part under the drop this state machine

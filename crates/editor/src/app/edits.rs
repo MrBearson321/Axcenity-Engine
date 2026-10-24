@@ -102,6 +102,10 @@ impl EditorApp {
                 self.open_animator_controller(id);
                 return;
             }
+            Edit::Animate => {
+                self.animate(id);
+                return;
+            }
             Edit::PickClip => {
                 if let Some(path) = self.pick_property_clip() {
                     self.apply(id, Edit::Property("Clip", Value::String(path)));
@@ -117,7 +121,7 @@ impl EditorApp {
                     .and_then(Value::as_str)
                 {
                     let path = path.to_owned();
-                    self.open_animation_clip(&path);
+                    self.open_animation_clip(&path, false);
                 }
                 return;
             }
@@ -839,6 +843,7 @@ fn set(world: &mut World, id: InstanceId, edit: Edit) -> anyhow::Result<()> {
         | Edit::OpenController
         | Edit::PickClip
         | Edit::OpenClip
+        | Edit::Animate
         | Edit::PreviewSound(_) => {}
     }
     Ok(())

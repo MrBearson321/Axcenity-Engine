@@ -158,19 +158,31 @@ impl ClipDoc {
     /// The clip's own model if it has one to draw with a skeleton, or the
     /// first project model its take moves.
     fn default_preview_model(&self, assets: &Assets, models: &[String]) -> Option<String> {
-        let takes = self.takes.as_ref().ok()?;
-        let fits = |mesh_id: &str| {
-            let Some(model) = assets.model(mesh_id) else {
-                return false;
-            };
-            let Some(rig) = &model.rig else {
-                return false;
-            };
-            Clip::bind(self.file.to_file(), Some(takes.clone()), Some(rig)).is_ok()
-        };
         std::iter::once(self.file.source.clone())
             .chain(models.iter().cloned())
-            .find(|mesh_id| fits(mesh_id))
+            .find(|mesh_id| self.fits(assets, mesh_id))
+    }
+
+    /// Whether the clip's take moves the skeleton of the model `mesh_id`.
+    fn fits(&self, assets: &Assets, mesh_id: &str) -> bool {
+        let Ok(takes) = &self.takes else {
+            return false;
+        };
+        let Some(model) = assets.model(mesh_id) else {
+            return false;
+        };
+        let Some(rig) = &model.rig else {
+            return false;
+        };
+        Clip::bind(self.file.to_file(), Some(takes.clone()), Some(rig)).is_ok()
+    }
+
+    /// Previews on the model `mesh_id` (the object being animated) if the
+    /// clip's take fits its skeleton.
+    pub fn prefer_model(&mut self, assets: &Assets, mesh_id: &str) {
+        if self.preview_model.as_deref() != Some(mesh_id) && self.fits(assets, mesh_id) {
+            self.preview_model = Some(mesh_id.to_owned());
+        }
     }
 
     /// True if it has changes not yet written.
@@ -314,8 +326,8 @@ impl ClipDoc {
         let mut picked = self.preview_model.clone();
         crate::responsive::room_for(ui, super::MODEL_PICKER_ROOM);
         egui::ComboBox::from_id_salt("clip preview model")
-            .selected_text(format!("{} {shown}", icons::CUBE))
-            .width(130.0)
+            .selected_text(format!("{} Preview on {shown}", icons::CUBE))
+            .width(160.0)
             .show_ui(ui, |ui| {
                 for model in models {
                     let name = model.rsplit('/').next().unwrap_or(model);

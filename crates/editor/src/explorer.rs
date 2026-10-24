@@ -110,6 +110,9 @@ pub enum Action {
         id: InstanceId,
         parent: InstanceId,
     },
+    /// Give `id` an Animator (if it has none), a new clip and an Animation
+    /// playing it, and open it in the Animation tab.
+    Animate(InstanceId),
 }
 
 /// Changes `selection` for a click. The last id is the primary one (Properties
@@ -626,6 +629,8 @@ enum RowCommand {
     InsertScript(ClassName),
     /// Open a script in a tab.
     Open,
+    /// Animate a Part, Model or UI element (see [`Action::Animate`]).
+    Animate,
     Rename,
     Duplicate,
     Delete,
@@ -643,15 +648,16 @@ impl RowCommand {
             }),
             RowCommand::InsertScript(class) => Some(Action::InsertScript(class)),
             RowCommand::Open | RowCommand::Rename => None,
+            RowCommand::Animate => Some(Action::Animate(id)),
             RowCommand::Duplicate => Some(Action::Duplicate(id)),
             RowCommand::Delete => Some(Action::Delete(id)),
         }
     }
 }
 
-/// The right-click menu of `id`'s row: Open (for scripts), Insert ▸, then
-/// Rename, Duplicate and Delete, greyed out (with the reason on hover) where
-/// they can't be done.
+/// The right-click menu of `id`'s row: Open (for scripts) or Animate (for
+/// what can animate), Insert ▸, then Rename, Duplicate and Delete, greyed
+/// out (with the reason on hover) where they can't be done.
 fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowCommand> {
     let mut chosen = None;
     let is_script = world
@@ -663,6 +669,21 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
             .clicked()
     {
         chosen = Some(RowCommand::Open);
+    }
+    let can_animate = world
+        .get(id)
+        .is_some_and(|instance| crate::animation::can_animate(instance.class()));
+    if can_animate {
+        let icon = theme::AnimKind::Animator.rich_icon(ui.visuals());
+        if ui
+            .button((icon, "  Animate"))
+            .on_hover_text(
+                "Give it an Animator, a new clip and an Animation playing it, and open the clip with Record on",
+            )
+            .clicked()
+        {
+            chosen = Some(RowCommand::Animate);
+        }
     }
     ui.menu_button(theme::with_icon(icons::PLUS, "Insert"), |ui| {
         for what in Insertable::PARTS {

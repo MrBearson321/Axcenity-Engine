@@ -158,7 +158,12 @@ pub fn folder_for(source: &str) -> String {
 /// ignored): the ones in its folder, `assets/animations/<its name>`.
 pub fn clips_of_model(files: &AnimationFiles, mesh_id: &str) -> Vec<String> {
     let source = mesh_id.split('#').next().unwrap_or(mesh_id);
-    let folder = format!("{}/", folder_for(source));
+    clips_in(files, &folder_for(source))
+}
+
+/// The clips directly in `folder` (such as `assets/animations/Door`).
+pub fn clips_in(files: &AnimationFiles, folder: &str) -> Vec<String> {
+    let folder = format!("{folder}/");
     files
         .clips
         .iter()

@@ -83,52 +83,33 @@ impl EditorApp {
             None => {}
         }
     }
-    /// The Animation tab: clips (see `animation.rs`).
+    /// The Animation tab (see `animation.rs`), following the selection.
     pub(super) fn animation_pane(&mut self, ui: &mut egui::Ui, render_state: Option<&RenderState>) {
         let folder = self.project.as_ref().map(|project| project.folder.clone());
-        let selected = self.selected_model();
-        let preview_root = self.property_preview_root();
         let stylesheets = self
             .project
             .as_ref()
             .map_or(&[][..], |project| &project.stylesheets[..]);
-        let actions = self.animation.show_clips(
+        let actions = self.animation.show(
             ui,
             folder.as_deref(),
             &self.assets,
             render_state,
-            selected.as_ref(),
+            self.selected,
             &mut self.world,
-            preview_root,
             stylesheets,
             &mut self.output,
         );
         self.studio_actions(actions);
     }
 
-    /// The Animator tab: controllers (see `animation.rs`).
-    pub(super) fn animator_pane(&mut self, ui: &mut egui::Ui, render_state: Option<&RenderState>) {
-        let folder = self.project.as_ref().map(|project| project.folder.clone());
-        let selected = self.selected_model();
-        let actions = self.animation.show_controllers(
-            ui,
-            folder.as_deref(),
-            &self.assets,
-            render_state,
-            selected.as_ref(),
-            &mut self.world,
-            &mut self.output,
-        );
-        self.studio_actions(actions);
-    }
-
-    /// Does what the Animation or Animator tab asked for.
+    /// Does what the Animation tab asked for.
     fn studio_actions(&mut self, actions: Vec<StudioAction>) {
         for action in actions {
             match action {
                 StudioAction::ImportModel => self.import_model_with_dialog(),
-                StudioAction::Play => self.play(),
-                StudioAction::Show(pane) => self.layout.open(pane),
+                StudioAction::Animate(object) => self.animate(object),
+                StudioAction::Show => self.layout.open(Pane::Animation),
                 StudioAction::SetController {
                     part,
                     animator,
@@ -159,68 +140,115 @@ impl EditorApp {
         }
     }
 
-    /// What a property clip's preview shows: the Part, MeshPart, Model,
-    /// ScreenGui or UI element selected (or an Animation's parent).
-    fn property_preview_root(&self) -> Option<InstanceId> {
-        let id = self.selected?;
-        let instance = self.world.get(id)?;
-        match instance.class() {
-            ClassName::Part
-            | ClassName::MeshPart
-            | ClassName::Model
-            | ClassName::ScreenGui
-            | ClassName::Frame
-            | ClassName::TextLabel
-            | ClassName::TextButton
-            | ClassName::TextBox
-            | ClassName::ImageLabel
-            | ClassName::PageLayout
-            | ClassName::Table => Some(id),
-            ClassName::Animation => instance.parent(),
-            _ => None,
+    /// Animates `object`, as one undo step: gives it an Animator if it has
+    /// none, writes a new keyed clip to `assets/animations/<name>/<name>.anim.json`
+    /// (a number added if taken), and puts an Animation named after the
+    /// clip, playing it, in the Animator. Then the Animation tab opens the
+    /// clip with Record on.
+    pub(super) fn animate(&mut self, object: InstanceId) {
+        if self.playing() {
+            return;
         }
-    }
-
-    /// The MeshPart selected (or the one around a selected Animator), for
-    /// the Animation and Animator tabs, with its Animator if it has one.
-    fn selected_model(&self) -> Option<SelectedModel> {
-        let world = &self.world;
-        let mut id = self.selected?;
-        let mut instance = world.get(id)?;
-        if instance.class() == ClassName::Animator {
-            id = instance.parent()?;
-            instance = world.get(id)?;
+        let Some(folder) = self.project.as_ref().map(|project| project.folder.clone()) else {
+            return;
+        };
+        let Some(instance) = self.world.get(object) else {
+            return;
+        };
+        if !crate::animation::can_animate(instance.class()) {
+            return;
         }
-        if instance.class() != ClassName::MeshPart {
-            return None;
+        let object_name = instance.name().to_owned();
+        let name = Some(axcenity_anim::files::file_safe(&object_name))
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| "Animation".to_owned());
+        let clip = crate::animation::new_keyed_clip();
+        let written = match crate::animation::store::create_property_clip(&folder, &name, &clip) {
+            Ok(written) => written,
+            Err(err) => {
+                self.output
+                    .error(format!("Could not animate {object_name}: {err}"));
+                return;
+            }
+        };
+        let mut moves = Vec::new();
+        let mut place = |world: &mut World, id: InstanceId, parent: InstanceId| {
+            let wanted = world
+                .get(id)
+                .map(|i| i.name().to_owned())
+                .unwrap_or_default();
+            let unique = tree::unique_name(world, parent, &wanted);
+            world.set_name(id, unique).expect("just made");
+            let index = world.get(parent).map_or(0, |p| p.children().len());
+            let place = Place { parent, index };
+            history::put(world, id, Some(place)).map(|()| {
+                moves.push(Move {
+                    id,
+                    before: None,
+                    after: Some(place),
+                });
+            })
+        };
+        let animator = match crate::animation::animator_of(&self.world, object) {
+            Some(animator) => animator,
+            None => {
+                let id = self
+                    .world
+                    .create(ClassName::Animator)
+                    .expect("not a service");
+                if let Err(err) = place(&mut self.world, id, object) {
+                    self.output
+                        .error(format!("Could not animate {object_name}: {err}"));
+                    return;
+                }
+                id
+            }
+        };
+        let animation = self
+            .world
+            .create(ClassName::Animation)
+            .expect("not a service");
+        let clip_name = axcenity_anim::files::clip_name(&written.path).to_owned();
+        self.world
+            .set_name(animation, clip_name)
+            .expect("just made");
+        self.world
+            .set_property(animation, "Clip", Value::String(written.path.clone()))
+            .expect("every Animation has a Clip");
+        if let Err(err) = place(&mut self.world, animation, animator) {
+            self.output
+                .error(format!("Could not animate {object_name}: {err}"));
+            return;
         }
-        let mesh_id = instance
-            .property("MeshId")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned();
-        let animated = self
-            .assets
-            .model(&mesh_id)
-            .is_some_and(|model| model.rig.is_some());
-        let animator = instance.children().iter().copied().find(|&child| {
-            world
-                .get(child)
-                .is_some_and(|c| c.class() == ClassName::Animator)
-        });
-        let controller = animator
-            .and_then(|a| world.get(a))
-            .and_then(|a| a.property("StateMachine").and_then(Value::as_str))
-            .unwrap_or_default()
-            .to_owned();
-        Some(SelectedModel {
-            part: id,
-            name: instance.name().to_owned(),
-            mesh_id,
-            animated,
-            animator,
-            controller,
-        })
+        let texts = written
+            .files
+            .into_iter()
+            .map(|file| history::TextChange {
+                path: file.path,
+                before: file.before,
+                after: file.after,
+            })
+            .collect();
+        self.history.record_files_and_tree(
+            &mut self.world,
+            format!("Animate {object_name}"),
+            texts,
+            moves,
+        );
+        self.asset_browser.refresh();
+        self.output.info(format!(
+            "Animating {object_name}: made the clip `{}`. Move it in the Animation tab with Record on; tick AutoPlay on its Animation to play it when Play starts.",
+            written.path
+        ));
+        self.animation.animated(
+            &folder,
+            &self.assets,
+            object,
+            &written.path,
+            &mut self.world,
+            &mut self.output,
+        );
+        self.layout.open(Pane::Animation);
     }
 
     /// Gives `part`'s Animator (making one if `animator` is `None`) the

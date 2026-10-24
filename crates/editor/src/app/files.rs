@@ -1268,7 +1268,7 @@ impl EditorApp {
             "Imported `{}` into the project as `{copy}`.",
             file.display()
         ));
-        let controller = dialog
+        let animation = dialog
             .animation
             .as_ref()
             .and_then(|animation| self.write_import_animation(animation, copy));
@@ -1302,7 +1302,7 @@ impl EditorApp {
                 let id = self.new_mesh_part(mesh_id, &model, position);
                 self.world.set_name(id, &file_name).expect("just made");
                 self.add_surfaces(id, &model, dialog, &folder, &mut copied);
-                self.add_animator(id, &model, controller.as_deref());
+                self.add_animator(id, &model, animation.as_ref());
                 self.place_new(parent, vec![id], format!("Import {file_name}"));
             }
             Placement::Separate => {
@@ -1316,7 +1316,7 @@ impl EditorApp {
                             .set_name(id, object_name(&dialog.objects[i].name))
                             .expect("just made");
                         self.add_surfaces(id, &model, dialog, &folder, &mut copied);
-                        self.add_animator(id, &model, controller.as_deref());
+                        self.add_animator(id, &model, animation.as_ref());
                         id
                     })
                     .collect();
@@ -1346,7 +1346,7 @@ impl EditorApp {
                     );
                     let id = self.new_mesh_part(mesh_id, &model, at);
                     self.add_surfaces(id, &model, dialog, &folder, &mut copied);
-                    self.add_animator(id, &model, controller.as_deref());
+                    self.add_animator(id, &model, animation.as_ref());
                     let container = self.group_of(dialog, i, root, &mut groups);
                     let name = tree::unique_name(
                         &self.world,
@@ -1364,14 +1364,14 @@ impl EditorApp {
     }
 
     /// Writes the clips `animation` makes, from the model copied to
-    /// `copy` in the project, and their controller if an Animator was
-    /// asked for. Returns the controller's path. Files aren't undo steps;
-    /// a problem is reported in Output.
+    /// `copy` in the project, and their state machine if an Animator was
+    /// asked for. Returns the state machine's path and the clips', for the
+    /// Animator. Files aren't undo steps; a problem is reported in Output.
     fn write_import_animation(
         &mut self,
         animation: &AnimationImport,
         copy: &str,
-    ) -> Option<String> {
+    ) -> Option<(String, Vec<String>)> {
         let project = self.project.as_ref()?.folder.clone();
         if animation.clips.is_empty() {
             return None;
@@ -1393,7 +1393,7 @@ impl EditorApp {
                         " and the state machine `{path}`"
                     ))
                 ));
-                controller
+                controller.map(|controller| (controller, paths))
             }
             Err(err) => {
                 self.output
@@ -1403,15 +1403,17 @@ impl EditorApp {
         }
     }
 
-    /// Puts an Animator playing `controller` in the new MeshPart `part`,
-    /// if there's a controller and its `model` has a skeleton to move.
+    /// Puts an Animator playing the state machine in the new MeshPart
+    /// `part`, with an Animation for each clip under it, if there's a state
+    /// machine (`animation`: its path and its clips') and the part's
+    /// `model` has a skeleton to move.
     fn add_animator(
         &mut self,
         part: InstanceId,
         model: &axcenity_assets::Model,
-        controller: Option<&str>,
+        animation: Option<&(String, Vec<String>)>,
     ) {
-        let Some(controller) = controller else {
+        let Some((controller, clips)) = animation else {
             return;
         };
         if model.rig.is_none() {
@@ -1427,6 +1429,20 @@ impl EditorApp {
         self.world
             .set_parent(id, Some(part))
             .expect("an Animator can go in a new MeshPart");
+        for clip in clips {
+            let animation = self
+                .world
+                .create(ClassName::Animation)
+                .expect("not a service");
+            let name = tree::unique_name(&self.world, id, axcenity_anim::files::clip_name(clip));
+            self.world.set_name(animation, name).expect("just made");
+            self.world
+                .set_property(animation, "Clip", Value::String(clip.clone()))
+                .expect("every Animation has a Clip");
+            self.world
+                .set_parent(animation, Some(id))
+                .expect("an Animation can go in an Animator");
+        }
     }
 
     /// Imports a file with only animation: copies it into the project and
@@ -2273,6 +2289,51 @@ end
         let file = folder.join("props.gltf");
         fs::write(&file, gltf.to_string()).unwrap();
         file
+    }
+
+    #[test]
+    fn an_animated_fbx_comes_in_with_an_animator_a_state_machine_and_an_animation_per_clip() {
+        let folder = copy_of_example("hello-part", "import-animated");
+        let mut app = EditorApp::new(Some(&folder));
+        let file = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/hello-animation/assets/models/noodle.fbx");
+        app.import_model(&file);
+        let dialog = app.importing.take().expect("an animated file asks first");
+        let clips = dialog
+            .animation
+            .as_ref()
+            .expect("it's animated")
+            .clips
+            .len();
+        assert!(clips > 0);
+        app.import_chosen(&dialog);
+
+        let workspace = app.world.workspace();
+        let part = app
+            .world
+            .find_first_child(workspace, "noodle")
+            .expect("imported");
+        let animator = crate::animation::animator_of(&app.world, part).expect("an Animator");
+        let subject = crate::animation::Subject::of(&app.world, part).unwrap();
+        assert!(
+            subject
+                .state_machine
+                .starts_with("assets/animations/noodle/"),
+            "{}",
+            subject.state_machine
+        );
+        assert_eq!(subject.animations.len(), clips);
+        for animation in &subject.animations {
+            let instance = app.world.get(animation.id).unwrap();
+            assert_eq!(instance.parent(), Some(animator));
+            assert!(animation.clip.starts_with("assets/animations/noodle/"));
+            assert_eq!(
+                axcenity_anim::files::clip_name(&animation.clip),
+                animation.name
+            );
+            assert!(folder.join(&animation.clip).is_file(), "{}", animation.clip);
+        }
+        let _ = fs::remove_dir_all(&folder);
     }
 
     /// Opens the Import Model dialog for `file`, unticks `Small`, and

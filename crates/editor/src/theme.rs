@@ -631,6 +631,72 @@ fn crossfade_id() -> egui::Id {
     egui::Id::new("theme crossfade")
 }
 
+/// The four kinds of animation thing. Each has one icon and one colour,
+/// used in the Animation tab's outline, the Explorer, the Assets panel and
+/// the pickers, so a kind looks the same everywhere.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AnimKind {
+    /// The Instance that plays animation on its parent.
+    Animator,
+    /// A `*.statemachine.json` file.
+    StateMachine,
+    /// The Instance that points at a clip.
+    Animation,
+    /// A `*.anim.json` file.
+    Clip,
+}
+
+impl AnimKind {
+    pub fn icon(self) -> &'static str {
+        match self {
+            AnimKind::Animator => icons::PERSON_SIMPLE_RUN,
+            AnimKind::StateMachine => icons::FLOW_ARROW,
+            AnimKind::Animation => icons::FILM_SLATE,
+            AnimKind::Clip => icons::FILM_STRIP,
+        }
+    }
+
+    pub fn color(self, visuals: &egui::Visuals) -> Color32 {
+        let dark = visuals.dark_mode;
+        let pick = |on_dark: (u8, u8, u8), on_light: (u8, u8, u8)| {
+            let (r, g, b) = if dark { on_dark } else { on_light };
+            mix(Color32::from_rgb(r, g, b), visuals.text_color(), 0.2)
+        };
+        match self {
+            AnimKind::Animator => pick((122, 205, 150), (30, 130, 70)),
+            AnimKind::StateMachine => pick((238, 170, 90), (175, 100, 0)),
+            AnimKind::Animation => pick((110, 190, 175), (25, 120, 105)),
+            AnimKind::Clip => pick((205, 140, 235), (130, 55, 170)),
+        }
+    }
+
+    /// What it's called in the editor.
+    pub fn label(self) -> &'static str {
+        match self {
+            AnimKind::Animator => "Animator",
+            AnimKind::StateMachine => "State Machine",
+            AnimKind::Animation => "Animation",
+            AnimKind::Clip => "Clip",
+        }
+    }
+
+    /// Its icon in its colour, to start a label with.
+    pub fn rich_icon(self, visuals: &egui::Visuals) -> egui::RichText {
+        egui::RichText::new(self.icon()).color(self.color(visuals))
+    }
+
+    /// The kind of a file by its path, if it's a clip or a state machine.
+    pub fn of_path(path: &str) -> Option<AnimKind> {
+        if path.ends_with(axcenity_anim::CLIP_EXTENSION) {
+            Some(AnimKind::Clip)
+        } else if path.ends_with(axcenity_anim::STATE_MACHINE_EXTENSION) {
+            Some(AnimKind::StateMachine)
+        } else {
+            None
+        }
+    }
+}
+
 /// The icon of `class` in the Explorer, the tabs and the Insert buttons.
 pub fn class_icon(class: ClassName) -> &'static str {
     match class {
@@ -665,9 +731,9 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::PointLight => icons::LIGHTBULB,
         ClassName::SpotLight => icons::FLASHLIGHT,
         ClassName::ParticleEmitter => icons::SPARKLE,
-        ClassName::Animator => icons::PERSON_SIMPLE_RUN,
-        ClassName::Animation => icons::FILM_SLATE,
-        ClassName::AnimationTrack => icons::FILM_STRIP,
+        ClassName::Animator => AnimKind::Animator.icon(),
+        ClassName::Animation => AnimKind::Animation.icon(),
+        ClassName::AnimationTrack => icons::PLAY_CIRCLE,
         ClassName::Terrain => icons::MOUNTAINS,
         ClassName::TerrainLayer => icons::STACK,
     }
@@ -735,8 +801,8 @@ pub fn class_color(class: ClassName, visuals: &egui::Visuals) -> Color32 {
         ClassName::Sound => pick((226, 162, 80), (165, 100, 10)),
         ClassName::PointLight | ClassName::SpotLight => pick((232, 205, 110), (150, 115, 0)),
         ClassName::ParticleEmitter => pick((232, 150, 108), (175, 80, 30)),
-        ClassName::Animator => pick((122, 205, 150), (30, 130, 70)),
-        ClassName::Animation | ClassName::AnimationTrack => pick((110, 190, 175), (25, 120, 105)),
+        ClassName::Animator => AnimKind::Animator.color(visuals),
+        ClassName::Animation | ClassName::AnimationTrack => AnimKind::Animation.color(visuals),
         ClassName::Terrain | ClassName::TerrainLayer => pick((140, 200, 110), (60, 125, 35)),
         ClassName::Script => pick((226, 145, 82), (185, 95, 10)),
         ClassName::LocalScript => pick((90, 190, 175), (10, 120, 110)),

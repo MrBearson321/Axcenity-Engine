@@ -62,7 +62,7 @@ pub enum AssetKind {
     Particle,
     /// An animation clip (`*.anim.json`).
     Animation,
-    /// An animator controller (`*.controller.json`).
+    /// A state machine (`*.statemachine.json`).
     Controller,
 }
 
@@ -76,8 +76,8 @@ impl AssetKind {
             AssetKind::Texture => icons::IMAGE_SQUARE,
             AssetKind::Audio => icons::WAVEFORM,
             AssetKind::Particle => icons::SPARKLE,
-            AssetKind::Animation => icons::FILM_SLATE,
-            AssetKind::Controller => icons::FLOW_ARROW,
+            AssetKind::Animation => theme::AnimKind::Clip.icon(),
+            AssetKind::Controller => theme::AnimKind::StateMachine.icon(),
         }
     }
 
@@ -92,9 +92,8 @@ impl AssetKind {
             }
             AssetKind::Audio => theme::class_color(ClassName::Sound, visuals),
             AssetKind::Particle => theme::class_color(ClassName::PointLight, visuals),
-            AssetKind::Animation | AssetKind::Controller => {
-                theme::class_color(ClassName::Animator, visuals)
-            }
+            AssetKind::Animation => theme::AnimKind::Clip.color(visuals),
+            AssetKind::Controller => theme::AnimKind::StateMachine.color(visuals),
         }
     }
 
@@ -132,7 +131,7 @@ impl AssetKind {
             AssetKind::Particle => {
                 "Drag onto a part to give it a ParticleEmitter with this texture."
             }
-            AssetKind::Animation => "Double-click to open it in the Animation panel.",
+            AssetKind::Animation => "Double-click to open it in the Animation tab.",
             AssetKind::Controller => "Drag onto a part to give its Animator this state machine.",
         }
     }

@@ -28,11 +28,11 @@ pub enum Pane {
     #[serde(alias = "Output")]
     Console,
     Assets,
-    /// The Animation Studio's clips: a clip, its preview and timeline.
+    /// The Animation window: the selected Animator's state machine and
+    /// clips. Saved layouts from before v3 Phase 8 also had an `Animator`
+    /// tab, which becomes this one.
+    #[serde(alias = "Animator")]
     Animation,
-    /// The Animation Studio's controllers: a state machine graph and its
-    /// live preview.
-    Animator,
     /// The Terrain Studio: sculpting, painting and generating terrains.
     Terrain,
     /// What the game costs during Play (`profiler.rs`).
@@ -44,13 +44,12 @@ pub enum Pane {
 
 impl Pane {
     /// The panels that can be closed and opened again, in menu order.
-    pub const CLOSABLE: [Pane; 8] = [
+    pub const CLOSABLE: [Pane; 7] = [
         Pane::Explorer,
         Pane::Properties,
         Pane::Console,
         Pane::Assets,
         Pane::Animation,
-        Pane::Animator,
         Pane::Terrain,
         Pane::Profiler,
     ];
@@ -63,7 +62,6 @@ impl Pane {
             Pane::Console => "Console",
             Pane::Assets => "Assets",
             Pane::Animation => "Animation",
-            Pane::Animator => "Animator",
             Pane::Terrain => "Terrain",
             Pane::Profiler => "Profiler",
             Pane::Script(_) => "Script",
@@ -77,8 +75,7 @@ impl Pane {
             Pane::Properties => icons::SLIDERS_HORIZONTAL,
             Pane::Console => icons::TERMINAL_WINDOW,
             Pane::Assets => icons::SHAPES,
-            Pane::Animation => icons::PERSON_SIMPLE_RUN,
-            Pane::Animator => icons::FLOW_ARROW,
+            Pane::Animation => theme::AnimKind::Animator.icon(),
             Pane::Terrain => icons::MOUNTAINS,
             Pane::Profiler => icons::GAUGE,
             Pane::Script(_) => icons::CODE,
@@ -143,8 +140,8 @@ impl Layout {
             Pane::Properties => Some(Pane::Explorer),
             Pane::Console => Some(Pane::Assets),
             Pane::Assets | Pane::Profiler => Some(Pane::Console),
-            // Tabs beside the Scene, with room for a preview and a graph.
-            Pane::Animation | Pane::Animator => Some(Pane::Scene),
+            // A tab beside the Scene, with room for a preview and a graph.
+            Pane::Animation => Some(Pane::Scene),
             // A tab beside Properties, down the right.
             Pane::Terrain => Some(Pane::Properties),
             Pane::Script(_) => Some(Pane::Scene),
@@ -233,7 +230,21 @@ impl Layout {
                 zero_nulls(&mut json);
                 serde_json::from_value::<DockState<Pane>>(json).ok()
             })
-            .filter(|dock| dock.find_main_surface_tab(&Pane::Scene).is_some());
+            .filter(|dock| dock.find_main_surface_tab(&Pane::Scene).is_some())
+            .map(|mut dock| {
+                // The Animation and Animator tabs of older layouts both
+                // load as Animation; keep the first.
+                let mut seen = false;
+                dock.retain_tabs(|pane| {
+                    if *pane != Pane::Animation {
+                        return true;
+                    }
+                    let first = !seen;
+                    seen = true;
+                    first
+                });
+                dock
+            });
         Self {
             dock: dock.unwrap_or_else(default_dock),
             last_script: None,
@@ -259,12 +270,12 @@ fn zero_nulls(json: &mut serde_json::Value) {
     }
 }
 
-/// Like Roblox Studio: the Scene in the middle (with the Animation and
-/// Animator tabs beside it, like Unity's), the Explorer with
+/// Like Roblox Studio: the Scene in the middle (with the Animation tab
+/// beside it, like Unity's), the Explorer with
 /// Properties (and the Terrain Studio as a tab beside it) under it down the
 /// right, and the Console, Assets and Profiler as tabs under the Scene.
 fn default_dock() -> DockState<Pane> {
-    let mut dock = DockState::new(vec![Pane::Scene, Pane::Animation, Pane::Animator]);
+    let mut dock = DockState::new(vec![Pane::Scene, Pane::Animation]);
     dock.set_active_tab((
         egui_dock::SurfaceIndex::main(),
         NodeIndex::root(),
@@ -392,6 +403,28 @@ mod tests {
         assert!(old.contains("\"Output\""));
         assert!(Layout::from_text(&old).is_open(Pane::Console));
         assert!(Layout::from_text("not json").is_open(Pane::Assets));
+    }
+
+    #[test]
+    fn a_layout_with_the_old_animator_tab_keeps_one_animation_tab() {
+        let layout = Layout::default();
+        let mut dock = layout.dock.clone();
+        let (surface, node, _) = dock.find_tab(&Pane::Animation).unwrap();
+        dock.set_focused_node_and_surface((surface, node));
+        dock.push_to_focused_leaf(Pane::Console);
+        // Saved before v3 Phase 8: the second tab was the Animator.
+        let text = serde_json::to_string(&dock)
+            .unwrap()
+            .replacen("\"Console\"", "\"Animator\"", 1);
+        let reloaded = Layout::from_text(&text);
+        let mut count = 0;
+        for (_, pane) in reloaded.dock.iter_all_tabs() {
+            if *pane == Pane::Animation {
+                count += 1;
+            }
+        }
+        assert_eq!(count, 1);
+        assert!(reloaded.is_open(Pane::Console));
     }
 
     /// The leaf (surface and node) a panel is in.

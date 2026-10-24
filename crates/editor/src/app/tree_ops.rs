@@ -44,6 +44,7 @@ impl EditorApp {
             Action::MoveInto { id, parent } => {
                 self.move_into(id, parent);
             }
+            Action::Animate(id) => self.animate(id),
         }
     }
     /// Where a new part goes: the camera's focus point, on the move grid

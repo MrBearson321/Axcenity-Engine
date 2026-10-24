@@ -185,6 +185,8 @@ impl ControllerDoc {
                     ));
                     self.selected = Selected::Node(Node::State(self.file.states.len() - 1));
                 }
+                // The Animation tab opens the state's clip.
+                GraphEvent::Open(_) => {}
                 GraphEvent::AddState(at, clip) => {
                     let wanted = clip
                         .as_deref()
