@@ -249,7 +249,7 @@ impl Session {
         for line in self.scripts.take_output() {
             match line.kind {
                 OutputKind::Print => output.info(line.text),
-                OutputKind::Error => output.error(line.text),
+                OutputKind::Error => output.script_error(line.text, line.trace),
             }
         }
     }

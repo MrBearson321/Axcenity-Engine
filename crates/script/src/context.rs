@@ -15,8 +15,8 @@ use crate::instance::{self, ClassMethods};
 use crate::remote::{self, Message, Outbox};
 use crate::sides::Side;
 use crate::{
-    Output, OutputKind, OutputLine, changes, console, events, modules, push_output, sandbox,
-    scheduler, watchdog, with_world,
+    Output, OutputLine, changes, console, events, modules, push_error, sandbox, scheduler,
+    watchdog, with_world,
 };
 
 pub struct Context {
@@ -104,7 +104,7 @@ impl Context {
         with_world(&self.lua, world, || {
             match self.load_script(ids, path, source) {
                 Ok(thread) => scheduler::resume(&self.lua, &thread, ()),
-                Err(err) => push_output(&self.lua, OutputKind::Error, error_message(&err)),
+                Err(err) => push_error(&self.lua, &err),
             }
         });
     }

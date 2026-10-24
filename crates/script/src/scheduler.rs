@@ -10,7 +10,7 @@
 use mlua::{IntoLuaMulti, Lua, MultiValue, Thread};
 
 use crate::errors::error_message;
-use crate::{OutputKind, push_output, watchdog};
+use crate::{OutputKind, push_error, push_output, watchdog};
 
 /// Frame times are summed as floating-point numbers, which aren't exact:
 /// sixty steps of 1/60 add up to slightly less than 1. A task this close to
@@ -115,7 +115,8 @@ pub fn step(lua: &Lua, seconds: f64) {
 }
 
 /// Runs `thread` until it finishes, pauses or fails. An error is added to the
-/// output and goes no further, so it never stops whoever resumed the thread.
+/// output, with its stack trace, and goes no further, so it never stops
+/// whoever resumed the thread.
 ///
 /// `impl IntoLuaMulti` accepts anything mlua can turn into Lua arguments:
 /// `()` for none, one number, or a list of values.
@@ -136,9 +137,8 @@ pub fn resume(lua: &Lua, thread: &Thread, args: impl IntoLuaMulti) {
             }
         }
         Err(err) => {
-            let message = error_message(&err);
-            if watchdog::should_report(lua, &message) {
-                push_output(lua, OutputKind::Error, message);
+            if watchdog::should_report(lua, &error_message(&err)) {
+                push_error(lua, &err);
             }
         }
     }

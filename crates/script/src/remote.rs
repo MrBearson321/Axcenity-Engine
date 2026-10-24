@@ -17,12 +17,11 @@ use axcenity_core::{ClassName, Color3, InstanceId, Vector3};
 use mlua::{FromLua, Function, IntoLua, Lua, MultiValue, Value};
 
 use crate::client::LocalPlayer;
-use crate::errors::error_message;
 use crate::events::{self, Owner};
 use crate::instance::{LuaInstance, world};
+use crate::push_error;
 use crate::sides::{self, Side};
 use crate::types::{EnumType, LuaColor3, LuaEnumItem, LuaVector3, type_name};
-use crate::{OutputKind, push_output};
 
 /// One argument of a message, as plain data.
 #[derive(Clone, Debug, PartialEq)]
@@ -103,7 +102,7 @@ pub struct Outbox(pub Vec<Message>);
 pub fn deliver(lua: &Lua, messages: Vec<Message>) {
     for message in messages {
         if let Err(err) = deliver_one(lua, &message) {
-            push_output(lua, OutputKind::Error, error_message(&err));
+            push_error(lua, &err);
         }
     }
 }

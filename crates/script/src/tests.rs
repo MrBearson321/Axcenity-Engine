@@ -381,6 +381,118 @@ fn error_raised_by_a_script_keeps_its_location() {
     assert_eq!(output, ["error: scripts/test.server.lua:1: custom problem"]);
 }
 
+/// The one error in `runtime`'s output: its text, and the `path:line` of
+/// each call in its stack trace.
+fn only_error(runtime: &mut ScriptRuntime) -> (String, Vec<String>) {
+    let output = runtime.take_output();
+    let [line] = output.as_slice() else {
+        panic!("expected one line: {output:?}");
+    };
+    assert_eq!(line.kind, OutputKind::Error);
+    let locations = line
+        .trace
+        .iter()
+        .map(|frame| frame.split_once(": in ").expect(frame).0.to_owned())
+        .collect();
+    (line.text.clone(), locations)
+}
+
+#[test]
+fn a_runtime_error_has_the_stack_of_calls_that_led_there() {
+    let mut world = World::new();
+    let mut runtime = ScriptRuntime::new();
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/test.server.lua",
+        "local function explode()\n  error('boom')\nend\nlocal function light()\n  explode()\nend\nlight()",
+    );
+    let (text, trace) = only_error(&mut runtime);
+    assert_eq!(text, "scripts/test.server.lua:2: boom");
+    assert_eq!(
+        trace,
+        [
+            "scripts/test.server.lua:2",
+            "scripts/test.server.lua:5",
+            "scripts/test.server.lua:7"
+        ]
+    );
+}
+
+#[test]
+fn an_engine_error_has_a_stack_trace_without_engine_code() {
+    let (mut world, _) = world_with_block();
+    let mut runtime = ScriptRuntime::new();
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/test.server.lua",
+        "local function grow()\n  workspace.Block.Size = 5\nend\ngrow()",
+    );
+    let (text, trace) = only_error(&mut runtime);
+    assert_eq!(
+        text,
+        "scripts/test.server.lua:2: Part.Size must be a Vector3, not a number"
+    );
+    assert_eq!(
+        trace,
+        ["scripts/test.server.lua:2", "scripts/test.server.lua:4"]
+    );
+}
+
+#[test]
+fn an_error_in_another_script_names_the_failing_line_and_the_caller() {
+    let mut world = World::new();
+    let mut runtime = ScriptRuntime::new();
+    let module = world.create(ClassName::ModuleScript).unwrap();
+    world.set_name(module, "Fuse").unwrap();
+    world
+        .set_parent(module, Some(world.replicated_storage()))
+        .unwrap();
+    runtime.start_script(
+        &mut world,
+        module,
+        "scripts/Fuse.module.lua",
+        "local Fuse = {}\nfunction Fuse.light()\n  error('boom')\nend\nreturn Fuse",
+    );
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/test.server.lua",
+        "local Fuse = require(game.ReplicatedStorage.Fuse)\nFuse.light()",
+    );
+    let (text, trace) = only_error(&mut runtime);
+    assert_eq!(text, "scripts/Fuse.module.lua:3: boom");
+    assert_eq!(
+        trace,
+        ["scripts/Fuse.module.lua:3", "scripts/test.server.lua:2"]
+    );
+}
+
+#[test]
+fn a_syntax_error_and_print_have_no_stack_trace() {
+    let mut world = World::new();
+    let mut runtime = ScriptRuntime::new();
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/test.server.lua",
+        "print('ok')",
+    );
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/bad.server.lua",
+        "local = 5",
+    );
+    let output = runtime.take_output();
+    assert_eq!(output.len(), 2, "{output:?}");
+    assert!(
+        output.iter().all(|line| line.trace.is_empty()),
+        "{output:?}"
+    );
+}
+
 #[test]
 fn scripts_cannot_see_each_others_globals() {
     let mut world = World::new();

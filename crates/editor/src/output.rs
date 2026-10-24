@@ -4,7 +4,9 @@
 //! (`console.rs`) with what they printed.
 //!
 //! Script errors start with `path:line:`. That part is underlined, and
-//! clicking the line opens the script at that line.
+//! clicking the line opens the script at that line. Under a script error is
+//! its stack trace: the calls that led to it, innermost first, each a link
+//! to its own script and line.
 
 use eframe::egui;
 
@@ -26,6 +28,16 @@ pub struct OutputLine {
     pub text: String,
     /// Where in which script an error happened, if the line starts with
     /// `path:line:`.
+    pub location: Option<Location>,
+    /// For a script error, the calls that led to it, innermost first.
+    pub trace: Vec<TraceLine>,
+}
+
+/// One call in a script error's stack trace, such as
+/// `scripts/util.module.lua:5: in field 'explode'`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TraceLine {
+    pub text: String,
     pub location: Option<Location>,
 }
 
@@ -55,6 +67,11 @@ impl Output {
         self.push(OutputKind::Error, text.into());
     }
 
+    /// A script error, with the stack trace of calls that led to it.
+    pub fn script_error(&mut self, text: impl Into<String>, trace: Vec<String>) {
+        self.push_with_trace(OutputKind::Error, text.into(), trace);
+    }
+
     pub fn warning(&mut self, text: impl Into<String>) {
         self.push(OutputKind::Warning, text.into());
     }
@@ -69,12 +86,21 @@ impl Output {
     }
 
     fn push(&mut self, kind: OutputKind, text: String) {
+        self.push_with_trace(kind, text, Vec::new());
+    }
+
+    fn push_with_trace(&mut self, kind: OutputKind, text: String, trace: Vec<String>) {
         // Also log it, so messages show up in the terminal when the editor
         // was started from one (handy when the window won't open).
         match kind {
             OutputKind::Info | OutputKind::Command => log::info!("{text}"),
             OutputKind::Warning => log::warn!("{text}"),
-            OutputKind::Error => log::error!("{text}"),
+            OutputKind::Error => {
+                log::error!("{text}");
+                for frame in &trace {
+                    log::error!("    {frame}");
+                }
+            }
         }
         // Only errors link to scripts: a `print` that happens to look like
         // `x.lua:3:` shouldn't.
@@ -82,10 +108,18 @@ impl Output {
             OutputKind::Error => script_location(&text),
             OutputKind::Info | OutputKind::Warning | OutputKind::Command => None,
         };
+        let trace = trace
+            .into_iter()
+            .map(|text| TraceLine {
+                location: script_location(&text),
+                text,
+            })
+            .collect();
         self.lines.push(OutputLine {
             kind,
             text,
             location,
+            trace,
         });
     }
 
@@ -191,17 +225,28 @@ impl Output {
                                 .font(egui::FontId::proportional(font.size))
                                 .color(icon_color),
                         );
-                        match &line.location {
-                            Some(location) => {
-                                if location_link(ui, &line.text, location, font, color) {
-                                    clicked = Some(location.clone());
-                                }
+                        // The stack trace goes under the text, beside the icon.
+                        ui.vertical(|ui| {
+                            if let Some(location) =
+                                text_or_link(ui, &line.text, &line.location, font.clone(), color)
+                            {
+                                clicked = Some(location);
                             }
-                            None => {
-                                let text = egui::RichText::new(&line.text).font(font).color(color);
-                                ui.add(egui::Label::new(text).wrap());
+                            for frame in &line.trace {
+                                ui.horizontal_top(|ui| {
+                                    ui.add_space(12.0);
+                                    if let Some(location) = text_or_link(
+                                        ui,
+                                        &frame.text,
+                                        &frame.location,
+                                        font.clone(),
+                                        palette.text_muted,
+                                    ) {
+                                        clicked = Some(location);
+                                    }
+                                });
                             }
-                        }
+                        });
                     });
                 }
             });
@@ -248,6 +293,25 @@ fn filter_toggle(
         text_color,
     );
     response
+}
+
+/// `text`, as a link if it has a script location. Returns the location
+/// when it's clicked.
+fn text_or_link(
+    ui: &mut egui::Ui,
+    text: &str,
+    location: &Option<Location>,
+    font: egui::FontId,
+    color: egui::Color32,
+) -> Option<Location> {
+    match location {
+        Some(location) => location_link(ui, text, location, font, color).then(|| location.clone()),
+        None => {
+            let text = egui::RichText::new(text).font(font).color(color);
+            ui.add(egui::Label::new(text).wrap());
+            None
+        }
+    }
 }
 
 /// A script error's text, with the `path:line` it starts with underlined
@@ -321,6 +385,38 @@ mod tests {
 
         assert_eq!(output.lines()[0].kind, OutputKind::Warning);
         assert_eq!(output.lines()[0].location, None);
+    }
+
+    #[test]
+    fn each_call_in_a_stack_trace_links_to_its_script() {
+        let mut output = Output::default();
+        output.script_error(
+            "scripts/Fuse.module.lua:3: boom",
+            vec![
+                "scripts/Fuse.module.lua:3: in field 'light'".to_string(),
+                "scripts/a.server.lua:2: in main chunk".to_string(),
+            ],
+        );
+        let line = &output.lines()[0];
+        assert_eq!(line.location.as_ref().unwrap().line, 3);
+        let links: Vec<_> = line
+            .trace
+            .iter()
+            .map(|frame| frame.location.clone().unwrap())
+            .collect();
+        assert_eq!(
+            links,
+            [
+                Location {
+                    path: "scripts/Fuse.module.lua".to_string(),
+                    line: 3
+                },
+                Location {
+                    path: "scripts/a.server.lua".to_string(),
+                    line: 2
+                }
+            ]
+        );
     }
 
     #[test]

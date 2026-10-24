@@ -68,6 +68,10 @@ pub enum OutputKind {
 pub struct OutputLine {
     pub kind: OutputKind,
     pub text: String,
+    /// For an error raised while a script ran, the script calls that led
+    /// to it, innermost first: `scripts/util.module.lua:5: in field 'explode'`.
+    /// Empty for `print`, syntax errors and engine messages.
+    pub trace: Vec<String>,
 }
 
 /// How many rounds of change events [`ScriptRuntime::fire_changes`] runs in
@@ -367,6 +371,7 @@ impl ScriptRuntime {
                      rest will fire next frame. Look for a handler that changes the \
                      property it listens to."
                 ),
+                trace: Vec::new(),
             });
         }
     }
@@ -482,8 +487,31 @@ fn with_world<R>(lua: &Lua, world: &mut World, f: impl FnOnce() -> R) -> R {
 }
 
 fn push_output(lua: &Lua, kind: OutputKind, text: String) {
+    push_line(
+        lua,
+        OutputLine {
+            kind,
+            text,
+            trace: Vec::new(),
+        },
+    );
+}
+
+/// Adds a script error to the output, with the stack trace that led to it.
+fn push_error(lua: &Lua, err: &mlua::Error) {
+    push_line(
+        lua,
+        OutputLine {
+            kind: OutputKind::Error,
+            text: errors::error_message(err),
+            trace: errors::error_trace(err),
+        },
+    );
+}
+
+fn push_line(lua: &Lua, line: OutputLine) {
     if let Some(mut output) = lua.app_data_mut::<Output>() {
-        output.0.push(OutputLine { kind, text });
+        output.0.push(line);
     }
 }
 

@@ -1,4 +1,5 @@
-//! Turning Lua and engine errors into messages that start with `path:line:`.
+//! Turning Lua and engine errors into messages that start with `path:line:`,
+//! and the stack trace of script calls that led to them.
 
 use mlua::{Function, IntoLua, Lua};
 
@@ -29,22 +30,71 @@ pub fn error_message(err: &mlua::Error) -> String {
     }
 }
 
-/// The first `path:line` of script code in a traceback. Tracebacks look like:
+/// The script calls that led to an error, innermost first, each as
+/// `path:line: in <function>` (`scripts/util.module.lua:5: in field 'explode'`).
+/// Calls through other scripts and modules are included; the engine's own
+/// code isn't. Empty for an error with no stack, such as a syntax error.
+pub fn error_trace(err: &mlua::Error) -> Vec<String> {
+    match err {
+        mlua::Error::RuntimeError(message) => message
+            .split_once("\nstack traceback:")
+            .map(|(_, traceback)| script_frames(traceback))
+            .unwrap_or_default(),
+        // An engine error inside Lua called from the engine (a Lua function
+        // that a Rust callback ran) has its own, deeper trace in `cause`.
+        // That trace covers the whole coroutine, so it's the one to show.
+        mlua::Error::CallbackError { traceback, cause } => {
+            let inner = error_trace(cause);
+            if inner.is_empty() {
+                script_frames(traceback)
+            } else {
+                inner
+            }
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// The lines of a traceback that are script code. Tracebacks look like:
 ///
 /// ```text
 /// stack traceback:
-///     [C]: in ?
+///     [C]: in function 'error'
+///     scripts/util.module.lua:5: in field 'explode'
 ///     scripts/build.server.lua:3: in main chunk
 /// ```
 ///
 /// Lines starting with `[` are Rust code (`[C]`) or the engine's own Lua
 /// (`[engine]`), and `__mlua` lines are Lua code that mlua generates (such as
 /// the `__index` that checks methods first). None of those are the script.
+/// A very deep stack has a `...` line where Lua left calls out; it's kept
+/// so the trace doesn't look like the calls were next to each other.
+fn script_frames(traceback: &str) -> Vec<String> {
+    traceback
+        .lines()
+        .map(str::trim)
+        .filter_map(|line| {
+            if is_script_frame(line) {
+                Some(line.to_owned())
+            } else if line.starts_with("...") {
+                Some(line.replace('\t', " "))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn is_script_frame(line: &str) -> bool {
+    !line.starts_with('[') && !line.starts_with("__mlua") && line.contains(": in ")
+}
+
+/// The first `path:line` of script code in a traceback (see [`script_frames`]).
 fn script_location(traceback: &str) -> Option<&str> {
     traceback
         .lines()
         .map(str::trim)
-        .filter(|line| !line.starts_with('[') && !line.starts_with("__mlua"))
+        .filter(|line| is_script_frame(line))
         .find_map(|line| line.split_once(": in ").map(|(location, _)| location))
 }
 

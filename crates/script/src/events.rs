@@ -21,10 +21,9 @@ use mlua::{
     UserDataMethods, Value,
 };
 
-use crate::errors::error_message;
 use crate::instance;
 use crate::types::type_name;
-use crate::{OutputKind, push_output, scheduler};
+use crate::{push_error, scheduler};
 
 /// What an event belongs to: an Instance (`part.Touched`), or an engine
 /// object that isn't one (`UserInputService.InputBegan`, `RunService.Heartbeat`).
@@ -152,7 +151,7 @@ fn fire_handlers(lua: &Lua, key: EventKey, change: Option<u64>, args: impl IntoL
         }
         match lua.create_thread(callback) {
             Ok(thread) => scheduler::resume(lua, &thread, args.clone()),
-            Err(err) => push_output(lua, OutputKind::Error, error_message(&err)),
+            Err(err) => push_error(lua, &err),
         }
     }
 }
