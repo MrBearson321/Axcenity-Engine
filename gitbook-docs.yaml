@@ -2,10 +2,30 @@ $schema: https://api.gitbook.com/gitbook-docs.yaml
 site:
   title: Axcenity Engine Docs
   structure:
-    - type: space
-      key: space-1
-      title: Documentation
-      path: documentation
+    - type: section
+      key: section-1
+      title: Axcenity Engine Docs
+      path: axcenity-engine-docs
       default: true
-      content:
-        directory: ./documentation
+      children:
+        - type: space
+          key: space-1
+          title: Documentation
+          path: documentation
+          default: true
+          content:
+            directory: ./documentation
+    - type: section
+      key: section-2
+      title: Landing Page
+      path: landing-page
+      icon: house-blank
+      children:
+        - type: space
+          key: space-2
+          title: Landing Page
+          path: landing-page
+          default: true
+          draft: true
+          content:
+            directory: ./landing-page
