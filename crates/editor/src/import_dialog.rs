@@ -29,6 +29,13 @@ pub enum Placement {
     Merged,
 }
 
+/// The widest the dialog gets, in points.
+const DIALOG_WIDTH: f32 = 640.0;
+/// The least room left between the dialog and the window's edges.
+const WINDOW_GAP: f32 = 16.0;
+/// Room kept under the body for the separator and the Import and Cancel row.
+const FOOTER_HEIGHT: f32 = 48.0;
+
 /// What the dialog was answered with.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Answer {
@@ -56,6 +63,9 @@ pub struct ImportDialog {
     /// True for a file with only animation in it (nothing to draw): only
     /// its clips are imported.
     pub animation_only: bool,
+    /// Where Import and Cancel were last drawn, so tests can check they're
+    /// in the window.
+    buttons: Option<egui::Rect>,
 }
 
 impl ImportDialog {
@@ -77,6 +87,7 @@ impl ImportDialog {
             materials,
             animation: None,
             animation_only: false,
+            buttons: None,
         }
     }
 
@@ -171,6 +182,10 @@ impl ImportDialog {
     }
 
     /// Shows the dialog. Returns the answer once there is one.
+    ///
+    /// The dialog fits the window: its sections scroll together in one
+    /// body, and Import and Cancel stay pinned under it, so they can be
+    /// reached however small the window is.
     pub fn show(&mut self, ctx: &egui::Context) -> Option<Answer> {
         let mut answer = None;
         let file_name = self
@@ -178,51 +193,71 @@ impl ImportDialog {
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let modal = egui::Modal::new(egui::Id::new("import model")).show(ctx, |ui| {
-            ui.set_width(640.0);
-            ui.heading(format!("Import {file_name}"));
-            if self.animation_only {
-                ui.label("This file has animation but nothing to draw: its takes become clips, for a model with the same skeleton.");
-            } else if self.pick_objects {
-                self.objects_section(ui);
-            } else if self.animation.is_some() {
-                self.model_summary(ui);
-            }
-            if !self.materials.is_empty() {
+        let frame = egui::Frame::popup(&ctx.style());
+        // The frame's margins and outline, around the contents.
+        let edges = frame.total_margin().sum();
+        let room = ctx.screen_rect().size() - egui::Vec2::splat(2.0 * WINDOW_GAP) - edges;
+        let modal = egui::Modal::new(egui::Id::new("import model"))
+            .frame(frame)
+            .show(ctx, |ui| {
+                ui.set_width(room.x.clamp(240.0, DIALOG_WIDTH));
+                ui.heading(format!("Import {file_name}"));
+                let body_height = (room.y - ui.min_rect().height() - FOOTER_HEIGHT).max(80.0);
+                egui::ScrollArea::vertical()
+                    .id_salt("import body")
+                    .max_height(body_height)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| self.sections(ui));
                 ui.separator();
-                self.materials_section(ui);
-            }
-            let animation_only = self.animation_only;
-            if let Some(animation) = &mut self.animation {
-                ui.separator();
-                animation.show(ui, !animation_only);
-            }
-
-            ui.add_space(8.0);
-            let can_import = (self.animation_only
-                || !self.pick_objects
-                || !self.chosen().is_empty())
-                && self
-                    .animation
-                    .as_ref()
-                    .is_none_or(|animation| animation.problem().is_none());
-            ui.horizontal(|ui| {
-                if ui
-                    .add_enabled(can_import, egui::Button::new("Import"))
-                    .clicked()
-                {
-                    answer = Some(Answer::Import);
-                }
-                if ui.button("Cancel").clicked() {
-                    answer = Some(Answer::Cancel);
-                }
+                self.buttons = Some(self.footer(ui, &mut answer));
             });
-        });
         // Escape or a click outside the box means Cancel.
         if answer.is_none() && modal.should_close() {
             answer = Some(Answer::Cancel);
         }
         answer
+    }
+
+    /// Everything above the buttons, in the body that scrolls.
+    fn sections(&mut self, ui: &mut egui::Ui) {
+        if self.animation_only {
+            ui.label("This file has animation but nothing to draw: its takes become clips, for a model with the same skeleton.");
+        } else if self.pick_objects {
+            self.objects_section(ui);
+        } else if self.animation.is_some() {
+            self.model_summary(ui);
+        }
+        if !self.materials.is_empty() {
+            ui.separator();
+            self.materials_section(ui);
+        }
+        let animation_only = self.animation_only;
+        if let Some(animation) = &mut self.animation {
+            ui.separator();
+            animation.show(ui, !animation_only);
+        }
+    }
+
+    /// Import and Cancel, pinned under the body. Returns where they are.
+    fn footer(&self, ui: &mut egui::Ui, answer: &mut Option<Answer>) -> egui::Rect {
+        let can_import = (self.animation_only || !self.pick_objects || !self.chosen().is_empty())
+            && self
+                .animation
+                .as_ref()
+                .is_none_or(|animation| animation.problem().is_none());
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(can_import, egui::Button::new("Import"))
+                .clicked()
+            {
+                *answer = Some(Answer::Import);
+            }
+            if ui.button("Cancel").clicked() {
+                *answer = Some(Answer::Cancel);
+            }
+        })
+        .response
+        .rect
     }
 
     /// What the file's model holds, for a file with one object.
@@ -508,6 +543,85 @@ mod tests {
         dialog.set(4, false);
         assert_eq!(dialog.chosen(), [2, 3]);
         assert_eq!(dialog.state(3), (false, true));
+    }
+
+    /// An animated, textured FBX with every section showing, in an 800×600
+    /// window: the sections are far taller than that, yet Import is in the
+    /// window and a click on it imports. With `AXCENITY_SNAPSHOTS` set, it's
+    /// saved as `import-dialog-800x600.png`.
+    #[test]
+    fn the_whole_dialog_fits_an_800_by_600_window_with_import_clickable() {
+        let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/hello-animation/assets/models/noodle.fbx");
+        let objects = axcenity_assets::list_model_objects(&file).unwrap();
+        let model = axcenity_assets::load_model_file(&file).unwrap();
+        let takes = axcenity_assets::load_takes_file(&file).unwrap();
+        let animation = AnimationImport::new(model.rig.as_deref(), &takes, "noodle");
+        assert!(animation.is_some(), "noodle.fbx is animated");
+        let mut materials =
+            crate::surface::materials_maps(model.primitives.iter().map(|p| &p.material));
+        // Three materials with every map, so each opens with all its rows.
+        materials.truncate(1);
+        let mut maps = materials.pop().unwrap();
+        for (slot, file) in maps.files.iter_mut().enumerate() {
+            *file = Some(MapFile::Model(format!("textures/map{slot}.png")));
+        }
+        let materials = ["Body", "Eyes", "Hat"].map(|name| MaterialMaps {
+            material: name.to_owned(),
+            ..maps.clone()
+        });
+        let mut dialog =
+            ImportDialog::new(file, objects, materials.to_vec()).with_animation(animation);
+        // The object list too, as for a file with several objects.
+        dialog.pick_objects = true;
+        dialog.placement = Placement::Merged;
+
+        let size = egui::vec2(800.0, 600.0);
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+        let ctx = crate::theme::test_context();
+        let mut frame = 0;
+        let mut run = |dialog: &mut ImportDialog, events: Vec<egui::Event>| {
+            let mut answer = None;
+            frame += 1;
+            let input = egui::RawInput {
+                screen_rect: Some(screen),
+                events,
+                // A tenth of a second a frame, so the dialog has faded in.
+                time: Some(f64::from(frame) * 0.1),
+                ..Default::default()
+            };
+            let _ = ctx.run(input, |ctx| answer = dialog.show(ctx));
+            answer
+        };
+        // The scroll areas take a few frames to reach their full height.
+        for _ in 0..10 {
+            assert_eq!(run(&mut dialog, Vec::new()), None);
+        }
+        let buttons = dialog.buttons.expect("the buttons were drawn");
+        assert!(screen.contains_rect(buttons), "{buttons:?} in {screen:?}");
+
+        // Import is the first button in the row.
+        let import = egui::pos2(buttons.left() + 12.0, buttons.center().y);
+        let click = |pressed| egui::Event::PointerButton {
+            pos: import,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        run(&mut dialog, vec![egui::Event::PointerMoved(import)]);
+        run(&mut dialog, vec![click(true)]);
+        assert_eq!(run(&mut dialog, vec![click(false)]), Some(Answer::Import));
+
+        if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") {
+            crate::snapshot::snapshot(
+                &PathBuf::from(folder).join("import-dialog-800x600.png"),
+                size,
+                vec![Vec::new(); 10],
+                |ctx| {
+                    dialog.show(ctx);
+                },
+            );
+        }
     }
 
     #[test]
