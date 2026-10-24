@@ -166,8 +166,8 @@ pub struct AnimationStudio {
     clip: ClipTab,
     animator: AnimatorTab,
     dialog: Option<Dialog>,
-    /// The egui pass in which dialogs were last shown and edits written, so
-    /// a frame that draws both tabs does that once.
+    /// The egui pass in which dialogs were last shown, so a frame that
+    /// draws both tabs shows them once.
     finished_pass: Option<u64>,
     /// Each controller's names, for the blocks' menus, read again every
     /// [`RESCAN`].
@@ -489,9 +489,11 @@ impl AnimationStudio {
         }
     }
 
-    /// Once per pass, whichever tab is drawn: shows the open dialog, keeps
-    /// Return settings' transitions in step, and writes changes once the
-    /// gesture making them ends.
+    /// After each tab is drawn: shows the open dialog (once per pass, however
+    /// many tabs are drawn), keeps Return settings' transitions in step, and
+    /// writes changes once the gesture making them ends. Those two run after
+    /// every tab, so an edit made in the tab drawn last is written in the
+    /// same frame; they only write what changed, so running twice is free.
     #[allow(clippy::too_many_arguments)] // Each is a different input to the studio.
     fn finish(
         &mut self,
@@ -504,11 +506,10 @@ impl AnimationStudio {
         actions: &mut Vec<StudioAction>,
     ) {
         let pass = ui.ctx().cumulative_pass_nr();
-        if self.finished_pass == Some(pass) {
-            return;
+        if self.finished_pass != Some(pass) {
+            self.finished_pass = Some(pass);
+            self.ask(ui.ctx(), project, assets, selected, world, output, actions);
         }
-        self.finished_pass = Some(pass);
-        self.ask(ui.ctx(), project, assets, selected, world, output, actions);
         if let Some(controller) = &mut self.animator.doc {
             controller.sync_returns(project);
         }
