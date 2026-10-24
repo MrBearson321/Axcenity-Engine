@@ -1681,7 +1681,7 @@ mod tests {
         // The start camera looks at the origin, where a new part sits.
         let viewport = Viewport::new();
         let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0));
-        let screen = viewport.screen(rect);
+        let screen = viewport.screen(viewport.camera.to_render_camera(), rect);
         assert_eq!(
             axcenity_scene::pick(&world, screen.ray(rect.center())),
             Some(part)

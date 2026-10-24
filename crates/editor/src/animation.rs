@@ -1996,6 +1996,7 @@ impl AnimationStudio {
 
     /// The open state machine: its toolbar, graph, inspector and live
     /// preview. Returns where double-clicking a state went (its clip).
+    #[allow(clippy::too_many_arguments)] // Each is a different input to the studio.
     fn machine_body(
         &mut self,
         ui: &mut egui::Ui,
