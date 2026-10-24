@@ -17,6 +17,7 @@ use std::time::Instant;
 use axcenity_anim::Animators;
 use axcenity_assets::Assets;
 use axcenity_audio::GameAudio;
+use axcenity_character::{CharacterCamera, Controllers, MoveInput};
 use axcenity_core::{InstanceId, KeyCode, World};
 use axcenity_physics::Physics;
 use axcenity_project::ScriptFile;
@@ -36,6 +37,8 @@ pub struct Session {
     world: World,
     scripts: ScriptRuntime,
     physics: Physics,
+    /// Walks third-person characters and owns the camera when one is present.
+    characters: Controllers,
     /// Plays the Animators (state machines, AnimationTracks and played
     /// Animations), posing skeletons and setting keyed properties.
     animators: Animators,
@@ -68,12 +71,14 @@ impl Session {
             world: edit_world.clone(),
             scripts: ScriptRuntime::new(),
             physics: Physics::with_assets(assets.clone()),
+            characters: Controllers::default(),
             animators: Animators::new(),
             assets,
             audio: GameAudio::default(),
             panic_next_frame: false,
             cost: None,
         };
+        session.scripts.set_assets(session.assets.clone());
         session.scripts.enable_debugger();
         session.scripts.set_breakpoints(breakpoints);
         guard(|| {
@@ -187,10 +192,18 @@ impl Session {
         Ok(result)
     }
 
-    /// Runs steps 1 to 4 of one frame, `seconds` long, with the keys pressed
-    /// and released since the last frame and the viewport's camera. The
-    /// viewport lays out UI at step 5 and draws the result at step 6.
-    /// Returns where a LocalScript moved the camera, if one did.
+    /// The follow camera of a third-person controller, if the play world has
+    /// one with a body. The fly camera is left alone; Stop shows it again.
+    pub fn character_camera(&self) -> Option<CharacterCamera> {
+        self.characters.view(&self.world)
+    }
+
+    /// Runs one frame, `seconds` long, with the keys pressed and released
+    /// since the last frame, character `motion`, and the viewport's fly
+    /// camera. Character controllers step after input and before scripts;
+    /// their parts are anchored just before physics. The viewport lays out
+    /// UI and draws. Returns where a LocalScript moved the camera, if one
+    /// did and no character controller owns the camera.
     ///
     /// While a script is paused at a breakpoint it does nothing, and a pause
     /// during the frame ends it there: physics, animation and the frame's
@@ -199,6 +212,7 @@ impl Session {
         &mut self,
         seconds: f64,
         keys: &[KeyEvent],
+        motion: MoveInput,
         camera: CameraState,
         output: &mut Output,
     ) -> Result<Option<CameraState>, Crash> {
@@ -215,6 +229,8 @@ impl Session {
             if self.panic_next_frame {
                 panic!("a deliberate engine panic, from Debug > Panic during Play");
             }
+            self.characters
+                .step(&mut self.world, &self.assets, motion, seconds as f32);
             let mut clock = Instant::now();
             // The time since `clock`, which then starts again.
             let mut lap = || {
@@ -223,8 +239,10 @@ impl Session {
                 clock = now;
                 took
             };
-            // 1. Input, for LocalScripts: the camera and the keys.
-            self.scripts.set_camera(camera);
+            // 1. Input, for LocalScripts: the camera and the keys. A
+            //    third-person controller owns the camera when one is present.
+            let seen = self.script_camera(camera);
+            self.scripts.set_camera(seen);
             self.scripts.input(&mut self.world, keys);
             self.forward_output(output);
             if self.scripts.pause().is_some() {
@@ -239,6 +257,10 @@ impl Session {
             if self.scripts.pause().is_some() {
                 return;
             }
+            // The character is not a dynamic body. Anchoring here, after
+            // scripts and before physics, keeps a script from dropping it
+            // for this step. Gravity and friction of other parts are unchanged.
+            self.characters.keep_kinematic(&mut self.world);
             // 3. Step physics at a fixed 60 Hz (0 to N steps this frame).
             cost.physics_steps = self.physics.step(&mut self.world, seconds);
             cost.physics += lap();
@@ -255,7 +277,13 @@ impl Session {
             if self.scripts.pause().is_some() {
                 return;
             }
-            self.apply_audio(moved.unwrap_or(camera), output);
+            let listener = self.script_camera(moved.unwrap_or(camera));
+            if self.characters.view(&self.world).is_some() {
+                // The controller owns the camera, so a LocalScript's move
+                // is not copied onto the fly camera.
+                moved = None;
+            }
+            self.apply_audio(listener, output);
             cost.audio += lap();
             // Animators move on and pose their models, as in the player.
             let events = self
@@ -276,6 +304,18 @@ impl Session {
         Ok(moved)
     }
 
+    /// The camera scripts should see: the follow camera when a controller
+    /// owns it, otherwise `fallback` (the fly camera, or a LocalScript's move).
+    fn script_camera(&self, fallback: CameraState) -> CameraState {
+        match self.characters.view(&self.world) {
+            Some(view) => CameraState {
+                position: view.position,
+                orientation: view.orientation,
+            },
+            None => fallback,
+        }
+    }
+
     /// What the last frame's steps took, or `None` if it didn't run.
     pub fn cost(&self) -> Option<FrameCost> {
         self.cost
@@ -293,6 +333,11 @@ impl Session {
     /// The posed models of the animated MeshParts, for the viewport.
     pub fn poses(&self) -> &axcenity_scene::Poses {
         self.animators.poses()
+    }
+
+    /// Recent `workspace:Raycast` calls, for the editor overlay.
+    pub fn debug_rays(&self) -> Vec<axcenity_script::DebugRay> {
+        self.scripts.debug_rays()
     }
 
     fn forward_animator_errors(&mut self, output: &mut Output) {
@@ -400,6 +445,20 @@ impl GameKeys {
             }
         }
         keys
+    }
+
+    /// Held movement keys for a third-person controller, plus mouse look
+    /// since the last frame. Arrow keys move as well as WASD.
+    pub fn motion(&self, look_dx: f32, look_dy: f32) -> MoveInput {
+        let down = |key| self.held.contains(&key);
+        MoveInput {
+            forward: down(KeyCode::W) || down(KeyCode::Up),
+            back: down(KeyCode::S) || down(KeyCode::Down),
+            left: down(KeyCode::A) || down(KeyCode::Left),
+            right: down(KeyCode::D) || down(KeyCode::Right),
+            look_dx,
+            look_dy,
+        }
     }
 }
 
@@ -559,7 +618,13 @@ mod tests {
         .unwrap();
         for _ in 0..90 {
             session
-                .frame(1.0 / 60.0, &[], CameraState::default(), &mut output)
+                .frame(
+                    1.0 / 60.0,
+                    &[],
+                    MoveInput::default(),
+                    CameraState::default(),
+                    &mut output,
+                )
                 .unwrap();
         }
         let line = output.lines().last().unwrap();
@@ -580,10 +645,12 @@ mod tests {
         )
         .unwrap();
         let camera = CameraState::default();
-        session.frame(1.0 / 60.0, &[], camera, &mut output).unwrap();
+        session
+            .frame(1.0 / 60.0, &[], MoveInput::default(), camera, &mut output)
+            .unwrap();
         session.panic_next_frame();
         let crash = session
-            .frame(1.0 / 60.0, &[], camera, &mut output)
+            .frame(1.0 / 60.0, &[], MoveInput::default(), camera, &mut output)
             .unwrap_err();
         assert!(crash.0.contains("deliberate engine panic"), "{crash:?}");
         // Formatted messages carry a `String`, which is read too.
@@ -628,7 +695,9 @@ end",
                 .unwrap()
         };
         let start = position(&session);
-        session.frame(1.0 / 60.0, &[], camera, &mut output).unwrap();
+        session
+            .frame(1.0 / 60.0, &[], MoveInput::default(), camera, &mut output)
+            .unwrap();
         let pause = session.pause().expect("paused before line 3");
         assert_eq!(
             (pause.path.as_str(), pause.line),
@@ -637,7 +706,9 @@ end",
         let at_pause = position(&session);
         // Paused frames move nothing: no scripts, no physics.
         for _ in 0..30 {
-            session.frame(1.0 / 60.0, &[], camera, &mut output).unwrap();
+            session
+                .frame(1.0 / 60.0, &[], MoveInput::default(), camera, &mut output)
+                .unwrap();
         }
         assert_eq!(position(&session), at_pause);
         assert!(!output.lines().iter().any(|line| line.text == "tick"));
@@ -648,13 +719,17 @@ end",
         assert_eq!(output.lines().last().unwrap().text, "tick");
         assert!(session.pause().is_none());
         // The next frame pauses on the same line again.
-        session.frame(1.0 / 60.0, &[], camera, &mut output).unwrap();
+        session
+            .frame(1.0 / 60.0, &[], MoveInput::default(), camera, &mut output)
+            .unwrap();
         assert!(session.pause().is_some());
         // With the breakpoint cleared, Continue lets the game run on.
         session.set_breakpoints(&Breakpoints::new());
         session.continue_from_pause(&mut output).unwrap();
         for _ in 0..30 {
-            session.frame(1.0 / 60.0, &[], camera, &mut output).unwrap();
+            session
+                .frame(1.0 / 60.0, &[], MoveInput::default(), camera, &mut output)
+                .unwrap();
         }
         assert!(session.pause().is_none());
         assert!(position(&session).y < start.y, "the unanchored part fell");
@@ -683,7 +758,13 @@ end",
         .unwrap();
         assert!(session.cost().is_none(), "no frame has run yet");
         session
-            .frame(1.0 / 30.0, &[], CameraState::default(), &mut output)
+            .frame(
+                1.0 / 30.0,
+                &[],
+                MoveInput::default(),
+                CameraState::default(),
+                &mut output,
+            )
             .unwrap();
         let cost = session.cost().expect("the frame ran");
         assert_eq!(cost.physics_steps, 2, "1/30 s is two 60 Hz steps");
@@ -770,7 +851,13 @@ end",
             pressed: true,
         };
         let moved = session
-            .frame(1.0 / 60.0, &[space], CameraState::default(), &mut output)
+            .frame(
+                1.0 / 60.0,
+                &[space],
+                MoveInput::default(),
+                CameraState::default(),
+                &mut output,
+            )
             .unwrap();
         assert_eq!(output.lines().last().unwrap().text, "Space");
         assert_eq!(

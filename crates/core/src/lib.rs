@@ -20,9 +20,10 @@ pub use arena::{Arena, Id};
 pub use class::{ClassName, INSTANCE_EVENTS};
 pub use enums::{KeyCode, Material, MaterialPreset, PartType, ParticleType, TextureChannel};
 pub use terrain::{
-    CHUNK_CELLS, DEFAULT_TERRAIN_HEIGHT, DEFAULT_TERRAIN_SAMPLES, MAX_TERRAIN_LAYERS,
-    MAX_TERRAIN_SAMPLES, MIN_TERRAIN_SAMPLES, PaintWeights, SampleRect, TerrainData, TerrainError,
-    TerrainRegion, valid_terrain_size,
+    CHUNK_CELLS, DEFAULT_TERRAIN_HEIGHT, DEFAULT_TERRAIN_SAMPLES, FoliageInstance, FoliagePlant,
+    FoliageProp, FoliageSource, MAX_FOLIAGE_INSTANCES, MAX_TERRAIN_LAYERS, MAX_TERRAIN_SAMPLES,
+    MIN_TERRAIN_SAMPLES, PaintWeights, SampleRect, TerrainData, TerrainError, TerrainRegion,
+    valid_terrain_size,
 };
 pub use value::{Color3, UDim, UDim2, Value, ValueKind, Vector3};
 pub use world::{Change, Instance, InstanceId, PropertyError, RecordedChange, TreeError, World};

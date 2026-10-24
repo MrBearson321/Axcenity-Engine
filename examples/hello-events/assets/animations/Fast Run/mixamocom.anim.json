@@ -1,0 +1,13 @@
+{
+  "format_version": 2,
+  "duration": 0.5333333611488342,
+  "loop": true,
+  "link": {
+    "source": "assets/models/Fast Run/Fast Run.fbx",
+    "take": "mixamo.com",
+    "start": 0.0,
+    "end": 0.5333333611488342
+  },
+  "tracks": [],
+  "events": []
+}

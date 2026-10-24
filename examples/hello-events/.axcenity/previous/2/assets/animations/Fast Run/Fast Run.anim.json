@@ -1,0 +1,11 @@
+{
+  "format_version": 1,
+  "source": "assets/models/Fast Run/Fast Run.fbx",
+  "take": "mixamo.com",
+  "start": 0.0,
+  "end": 0.5333333333333333,
+  "speed": 1.0,
+  "loop": true,
+  "root_motion": false,
+  "events": []
+}

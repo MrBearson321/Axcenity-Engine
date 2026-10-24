@@ -1,0 +1,82 @@
+{
+  "format_version": 2,
+  "duration": 1.5,
+  "loop": true,
+  "tracks": [
+    {
+      "id": "position1",
+      "target": ".",
+      "property": "Position",
+      "keys": [
+        {
+          "id": "k1",
+          "time": 0.03333333333333333,
+          "value": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "interp": "Linear"
+        },
+        {
+          "id": "k2",
+          "time": 0.1,
+          "value": [
+            0.0,
+            0.0,
+            2.0
+          ],
+          "interp": "Linear"
+        },
+        {
+          "id": "k3",
+          "time": 0.16666666666666666,
+          "value": [
+            0.0,
+            0.0,
+            -5.0
+          ],
+          "interp": "Linear"
+        },
+        {
+          "id": "k4",
+          "time": 0.23333333333333334,
+          "value": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "interp": "Linear"
+        },
+        {
+          "id": "k5",
+          "time": 0.3333333333333333,
+          "value": [
+            0.0,
+            4.0,
+            1.0
+          ],
+          "interp": "Linear"
+        }
+      ]
+    },
+    {
+      "id": "orientation1",
+      "target": ".",
+      "property": "Orientation",
+      "keys": [
+        {
+          "id": "k1",
+          "time": 0.03333333333333333,
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "interp": "Linear"
+        }
+      ]
+    }
+  ],
+  "events": []
+}

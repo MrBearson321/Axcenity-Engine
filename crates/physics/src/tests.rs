@@ -1,4 +1,5 @@
-use axcenity_core::{ClassName, InstanceId, PartType, Value, Vector3, World};
+use axcenity_assets::Assets;
+use axcenity_core::{ClassName, InstanceId, PartType, TerrainData, Value, Vector3, World};
 
 use super::*;
 
@@ -541,4 +542,154 @@ fn parts_land_on_terrain_and_edits_to_it_are_felt() {
     set(&mut world, terrain, "CanCollide", Value::Bool(false));
     run(&mut physics, &mut world, 1.0, 60.0);
     assert!(position(&world, ball).y < 0.0);
+}
+
+#[test]
+fn a_raycast_hits_the_shape_a_part_collides_as_including_a_sensor() {
+    let (world, floor) = world_with_floor();
+    let hit = super::cast_ray(
+        &world,
+        &Assets::default(),
+        Vector3::new(0.0, 10.0, 0.0),
+        Vector3::new(0.0, -20.0, 0.0),
+    )
+    .expect("the floor is under the ray");
+    assert_eq!(hit.instance, floor);
+    assert!((hit.position.y - 0.0).abs() < 0.05, "{:?}", hit.position);
+    assert!(
+        hit.distance > 9.0 && hit.distance < 11.0,
+        "{}",
+        hit.distance
+    );
+
+    let miss = super::cast_ray(
+        &world,
+        &Assets::default(),
+        Vector3::new(100.0, 10.0, 0.0),
+        Vector3::new(0.0, -20.0, 0.0),
+    );
+    assert_eq!(miss, None);
+
+    let mut world = World::new();
+    let ghost = part(&mut world, Vector3::new(0.0, 4.0, 0.0), true);
+    set(&mut world, ghost, "Size", vector(10.0, 1.0, 10.0));
+    set(&mut world, ghost, "CanCollide", Value::Bool(false));
+    let hit = super::cast_ray(
+        &world,
+        &Assets::default(),
+        Vector3::new(0.0, 10.0, 0.0),
+        Vector3::new(0.0, -20.0, 0.0),
+    )
+    .expect("a sensor is still a collider");
+    assert_eq!(hit.instance, ghost);
+    assert_eq!(position(&world, ghost), Vector3::new(0.0, 4.0, 0.0));
+}
+
+#[test]
+fn a_raycast_hits_terrain_and_does_not_move_it() {
+    let mut world = World::new();
+    let terrain = world.create(ClassName::Terrain).unwrap();
+    world.set_parent(terrain, Some(world.workspace())).unwrap();
+    let data = TerrainData::flat(9, 9, 0.25).unwrap();
+    world.set_terrain(terrain, std::sync::Arc::new(data));
+    set(&mut world, terrain, "Size", vector(16.0, 16.0, 16.0));
+    set(
+        &mut world,
+        terrain,
+        "Position",
+        Value::Vector3(Vector3::new(0.0, -4.0, 0.0)),
+    );
+    let before = position(&world, terrain);
+    let hit = super::cast_ray(
+        &world,
+        &Assets::default(),
+        Vector3::new(0.0, 20.0, 0.0),
+        Vector3::new(0.0, -40.0, 0.0),
+    )
+    .expect("the terrain is under the ray");
+    assert_eq!(hit.instance, terrain);
+    assert_eq!(position(&world, terrain), before);
+}
+
+#[test]
+fn debug_colliders_include_sensors_and_terrain_chunks() {
+    let mut world = World::new();
+    let ghost = part(&mut world, Vector3::new(0.0, 4.0, 0.0), true);
+    set(&mut world, ghost, "CanCollide", Value::Bool(false));
+    let ball = part(&mut world, Vector3::new(5.0, 1.0, 0.0), true);
+    set(&mut world, ball, "Shape", Value::PartType(PartType::Ball));
+    set(&mut world, ball, "Size", vector(2.0, 2.0, 2.0));
+    let terrain = world.create(ClassName::Terrain).unwrap();
+    world.set_parent(terrain, Some(world.workspace())).unwrap();
+    world.set_terrain(
+        terrain,
+        std::sync::Arc::new(TerrainData::flat(9, 9, 0.25).unwrap()),
+    );
+
+    let outlines = super::debug_colliders(&world, &Assets::default());
+    let ghost_outline = outlines
+        .iter()
+        .find(|outline| outline.instance == ghost)
+        .expect("the sensor still has a collider");
+    assert!(!ghost_outline.can_collide);
+    assert_eq!(ghost_outline.edges.len(), 12);
+
+    let ball_outline = outlines
+        .iter()
+        .find(|outline| outline.instance == ball)
+        .expect("the ball has a round collider");
+    assert!(
+        ball_outline.edges.len() > 12,
+        "a ball is rings, not a box: {}",
+        ball_outline.edges.len()
+    );
+
+    let chunks = outlines
+        .iter()
+        .filter(|outline| outline.instance == terrain)
+        .count();
+    assert!(chunks >= 1, "a terrain is drawn as its chunks");
+}
+
+#[test]
+fn a_part_lands_on_colliding_foliage_and_falls_through_visual_foliage() {
+    fn terrain_with_crate(collide: bool) -> (World, InstanceId) {
+        let mut world = World::new();
+        let terrain = world.create(ClassName::Terrain).unwrap();
+        world.set_parent(terrain, Some(world.workspace())).unwrap();
+        set(&mut world, terrain, "Position", vector(0.0, 0.0, 0.0));
+        set(&mut world, terrain, "Size", vector(32.0, 16.0, 32.0));
+        let mut data = TerrainData::flat(9, 9, 0.0).unwrap();
+        data.foliage_mut().push(axcenity_core::FoliageInstance {
+            source: axcenity_core::FoliageSource::Prop(axcenity_core::FoliageProp::Crate),
+            x: 4.0,
+            z: 4.0,
+            yaw: 0.0,
+            scale: 1.0,
+            collide,
+        });
+        world.set_terrain(terrain, std::sync::Arc::new(data));
+        (world, terrain)
+    }
+
+    let (mut world, _) = terrain_with_crate(true);
+    let block = part(&mut world, Vector3::new(0.0, 10.0, 0.0), false);
+    let mut physics = Physics::new();
+    run(&mut physics, &mut world, 3.0, 60.0);
+    let resting = position(&world, block);
+    // Crate is 3 studs tall on the ground; the 1-stud-tall block rests on it.
+    assert!(
+        (resting.y - 3.5).abs() < 0.15,
+        "should rest on the crate, got {resting:?}"
+    );
+
+    let (mut world, _) = terrain_with_crate(false);
+    let block = part(&mut world, Vector3::new(0.0, 10.0, 0.0), false);
+    let mut physics = Physics::new();
+    run(&mut physics, &mut world, 3.0, 60.0);
+    let resting = position(&world, block);
+    assert!(
+        (resting.y - 0.5).abs() < 0.15,
+        "should rest on the terrain, got {resting:?}"
+    );
 }

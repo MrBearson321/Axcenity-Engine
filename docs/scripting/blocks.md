@@ -21,12 +21,12 @@ How each block becomes Lua. One-way: blocks translate to Lua, and there is one r
 | | repeat *n* times, forever, repeat until | `for _ = 1, n do … end`; `while true do … task.wait() end`; `while not (c) do … task.wait() end` |
 | | if, if/else, stop this script | `if c then … else … end`; `do return end` |
 | Motion | move to, move by, turn to, turn by, set anchored | `Position =`, `Position = Position + v`, `Orientation =`, `Orientation = Orientation + v`, `Anchored =` |
-| Looks | set color, set text, show, hide, show page, set *property* | `Color =`, `Text = tostring(v)`, `Visible = true/false`, `layout.CurrentPage = page`, `object.Property = v` |
+| Looks | set color, set text, show, hide, show page, set *property* | `Color =`, `Text = tostring(v)`, `Visible = true/false`, `layout.CurrentPage = page`, `object.Property = v` (a third-person controller's walk or run is `controller.Movement = "Run"`) |
 | Sound | play, stop, pause, resume, set volume | `:Play()`, `:Stop()`, `:Pause()`, `:Resume()`, `Volume =` |
 | Variables | set, change by, *variable* | `name = v`, `name = name + n`, `name` |
 | More | print, destroy | `print(v)`, `object:Destroy()` |
 | Operators | + − × ÷ mod ^, pick random, join, round/abs/floor/ceiling/sqrt, < = > ≤ ≥ ≠, and, or, not | Lua operators; `math.random(math.floor(a), math.floor(b))`; `tostring(a) .. tostring(b)`; `math.floor(x + 0.5)`, `math.abs` …; `not` |
-| Sensing | touching part, key pressed? (client), *property* of *object* | `otherPart` (inside "when touched" only), `UserInputService:IsKeyDown(Enum.KeyCode.Key)`, `object.Property` |
+| Sensing | touching part, key pressed? (client), *property* of *object*, raycast from *origin* along *direction* | `otherPart` (inside "when touched" only), `UserInputService:IsKeyDown(Enum.KeyCode.Key)`, `object.Property`, `workspace:Raycast(origin, direction)` |
 | Animation | set trigger *name* of *animator*, reset trigger, set *bool* of *animator* to *true/false*, set *number* of *animator* to *n*, play state *s* of *animator*, play animation *animation* on *animator* | `animator:SetTrigger("name")`, `:ResetTrigger("name")`, `:SetBool("name", v)`, `:SetNumber("name", n)`, `:Play("s")`, `animator:LoadAnimation(animation):Play()` |
 | | when *animator* changes state, when *animator* reaches event *e* | `animator.StateChanged:Connect(function(state, previous) … end)`; `animator.AnimationEvent:Connect(function(name) if name == "e" then … end end)` |
 | | *bool* of *animator*, *number* of *animator*, CurrentState of *animator* | `animator:GetBool("name")` (pointed), `animator:GetNumber("name")`, `animator.CurrentState` (the property reporter, set to CurrentState) |

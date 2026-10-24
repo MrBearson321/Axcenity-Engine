@@ -1,10 +1,11 @@
 //! Axcenity Player: the runtime that ships with every exported game.
 //!
 //! Loads a project folder, starts its Scripts and then its LocalScripts, and
-//! runs the frame loop: pass key presses to LocalScripts, resume scripts
-//! whose `task.wait` is over (and deliver RemoteEvent messages), step
-//! physics, fire `Touched` for parts that started touching, then draw the
-//! Workspace, with a fly camera for looking around.
+//! runs the frame loop: move a third-person character when the world has
+//! one, pass key presses to LocalScripts, resume scripts whose `task.wait`
+//! is over (and deliver RemoteEvent messages), step physics, fire `Touched`
+//! for parts that started touching, then draw the Workspace. The character's
+//! camera follows it; otherwise a fly camera looks around.
 
 mod icon;
 mod splash;
@@ -19,6 +20,7 @@ use anyhow::{Context, Result, bail};
 use axcenity_anim::Animators;
 use axcenity_assets::Assets;
 use axcenity_audio::GameAudio;
+use axcenity_character::{Controllers, MoveInput};
 use axcenity_core::{InstanceId, World};
 use axcenity_physics::Physics;
 use axcenity_project::ScriptFile;
@@ -111,6 +113,7 @@ fn main() -> Result<()> {
     let mut world = project.world;
     let assets = Assets::new(&project.folder);
     let mut scripts = ScriptRuntime::new();
+    scripts.set_assets(assets.clone());
     // Animators start in their default states (with their parameters at
     // their defaults) before any script runs, so scripts can read them.
     let mut animators = Animators::new();
@@ -140,6 +143,7 @@ fn main() -> Result<()> {
         scripts,
         audio,
         physics: Physics::with_assets(assets.clone()),
+        characters: Controllers::default(),
         particles: axcenity_scene::Particles::new(),
         terrain: axcenity_scene::TerrainCache::new(),
         animators,
@@ -152,6 +156,8 @@ fn main() -> Result<()> {
         key_events: Vec::new(),
         held_keys: BTreeSet::new(),
         looking: false,
+        look_dx: 0.0,
+        look_dy: 0.0,
         pointer: None,
         text_focus: None,
         ui_warnings: Vec::new(),
@@ -239,7 +245,14 @@ fn print_output(runtime: &mut ScriptRuntime) {
 
 fn listener_of(camera: &FlyCamera) -> axcenity_audio::Listener {
     let (position, orientation) = camera.view();
-    axcenity_audio::Listener::from_view(position, orientation)
+    listener_of_state(CameraState {
+        position,
+        orientation,
+    })
+}
+
+fn listener_of_state(camera: CameraState) -> axcenity_audio::Listener {
+    axcenity_audio::Listener::from_view(camera.position, camera.orientation)
 }
 
 fn apply_audio(
@@ -273,6 +286,11 @@ struct App {
     audio: GameAudio,
     /// Simulates the unanchored parts.
     physics: Physics,
+    /// Walks a third-person character and owns the camera when one is present.
+    characters: Controllers,
+    /// Mouse look, in pixels, for the character camera. Right and down are positive.
+    look_dx: f32,
+    look_dy: f32,
     /// What the ParticleEmitters have given off.
     particles: axcenity_scene::Particles,
     /// Terrains' chunk meshes and weights, kept between frames.
@@ -315,8 +333,29 @@ impl App {
         event_loop.exit();
     }
 
+    /// The camera to draw and to hand to scripts: the follow camera when a
+    /// third-person controller has a body, otherwise the fly camera.
+    fn script_camera(&self) -> CameraState {
+        match self.characters.view(&self.world) {
+            Some(view) => CameraState {
+                position: view.position,
+                orientation: view.orientation,
+            },
+            None => camera_state(&self.camera),
+        }
+    }
+
+    fn shown_camera(&self) -> axcenity_render::Camera {
+        let state = self.script_camera();
+        if self.characters.view(&self.world).is_some() {
+            FlyCamera::from_view(state.position, state.orientation).to_render_camera()
+        } else {
+            self.camera.to_render_camera()
+        }
+    }
+
     fn process_ui_mouse_events(&mut self, size: (u32, u32)) {
-        let camera = self.camera.to_render_camera();
+        let camera = self.shown_camera();
         let events = std::mem::take(&mut self.ui_mouse_events);
         for pressed in events {
             if pressed == self.ui_mouse_down {
@@ -670,11 +709,30 @@ impl ApplicationHandler for App {
                     .inner_size();
                 self.process_ui_mouse_events((size.width, size.height));
 
-                // 1. Input: the events above have already updated the keys
-                //    and mouse look, so move the camera. Then LocalScripts
-                //    see where it is, and the keys pressed since last frame.
-                self.camera.update(&self.keys, seconds);
-                self.scripts.set_camera(camera_state(&self.camera));
+                // 1. Input. A third-person controller moves first and owns
+                //    the camera. Otherwise the fly camera moves, and
+                //    LocalScripts see that.
+                let motion = if self.text_focus.is_some() {
+                    MoveInput::default()
+                } else {
+                    MoveInput {
+                        forward: self.keys.forward,
+                        back: self.keys.back,
+                        left: self.keys.left,
+                        right: self.keys.right,
+                        look_dx: self.look_dx,
+                        look_dy: self.look_dy,
+                    }
+                };
+                self.look_dx = 0.0;
+                self.look_dy = 0.0;
+                self.characters
+                    .step(&mut self.world, &self.assets, motion, seconds);
+                if self.characters.view(&self.world).is_none() {
+                    self.camera.update(&self.keys, seconds);
+                }
+                let seen = self.script_camera();
+                self.scripts.set_camera(seen);
                 let keys = std::mem::take(&mut self.key_events);
                 self.scripts.input(&mut self.world, &keys);
                 print_output(&mut self.scripts);
@@ -685,8 +743,11 @@ impl ApplicationHandler for App {
                 self.scripts.step(&mut self.world, f64::from(seconds));
                 print_output(&mut self.scripts);
 
-                // 3. Step physics at a fixed 60 Hz (0 to N steps this frame),
-                //    after scripts so it sees what they changed this frame.
+                // 3. Hold the character kinematic, then step physics at a
+                //    fixed 60 Hz (0 to N steps this frame). Anchoring is
+                //    after scripts, so a script cannot drop the character
+                //    for this step. Other parts keep their gravity.
+                self.characters.keep_kinematic(&mut self.world);
                 self.physics.step(&mut self.world, f64::from(seconds));
 
                 // 4. Fire `Touched` for parts that started touching during
@@ -697,12 +758,13 @@ impl ApplicationHandler for App {
                 self.scripts.fire_touched(&mut self.world, &touches);
                 self.scripts.heartbeat(&mut self.world, f64::from(seconds));
                 print_output(&mut self.scripts);
+                let heard = listener_of_state(self.script_camera());
                 apply_audio(
                     &mut self.scripts,
                     &mut self.world,
                     &self.assets,
                     &mut self.audio,
-                    listener_of(&self.camera),
+                    heard,
                 );
                 // Particles move on, after scripts and physics moved their parts.
                 for (emitter, count) in self.scripts.take_particle_emits() {
@@ -727,18 +789,24 @@ impl ApplicationHandler for App {
                 // 5. Lay out ScreenGuis at this window's current pixel size.
                 let ui_size = (size.width, size.height);
 
-                // 6. Build and render, from wherever a LocalScript put the
-                //    camera (if one moved it).
-                if let Some(view) = self.scripts.take_camera_move() {
+                // 6. Build and render. A character controller owns the camera;
+                //    otherwise a LocalScript's move is applied to the fly camera.
+                if self.characters.view(&self.world).is_none()
+                    && let Some(view) = self.scripts.take_camera_move()
+                {
                     self.camera.set_view(view.position, view.orientation);
+                } else {
+                    let _ = self.scripts.take_camera_move();
                 }
-                self.audio.set_listener(listener_of(&self.camera));
+                let render_camera = self.shown_camera();
+                let heard = listener_of_state(self.script_camera());
+                self.audio.set_listener(heard);
 
                 let (mut draw_list, ui_layout) =
                     axcenity_scene::build_draw_list_with_ui_interaction(
                         &self.world,
                         &self.assets,
-                        self.camera.to_render_camera(),
+                        render_camera,
                         ui_size,
                         &self.stylesheets,
                         self.pointer,
@@ -786,7 +854,12 @@ impl ApplicationHandler for App {
         if let DeviceEvent::MouseMotion { delta: (dx, dy) } = event
             && self.looking
         {
-            self.camera.look(dx as f32, dy as f32);
+            if self.characters.view(&self.world).is_some() {
+                self.look_dx += dx as f32;
+                self.look_dy += dy as f32;
+            } else {
+                self.camera.look(dx as f32, dy as f32);
+            }
         }
     }
 
@@ -1275,6 +1348,7 @@ mod tests {
         let mut scripts = ScriptRuntime::new();
         start_scripts(&mut scripts, &mut world, &project.scripts);
         let assets = Assets::new(folder);
+        scripts.set_assets(assets.clone());
         let mut physics = Physics::with_assets(assets.clone());
         let mut clock = 0;
         run_until(&mut world, &mut scripts, &mut physics, &mut clock, 5.0);

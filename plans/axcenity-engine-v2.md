@@ -36,10 +36,10 @@ Scene edits, terrain strokes, and property-clip edits already undo as one step, 
 
 ### Acceptance criteria
 
-- [ ] Creating, renaming, duplicating, and deleting a clip, a controller, and a prefab are each one undo step, and redo puts the change back.
-- [ ] Undoing a delete restores the asset's contents, and the asset panel shows it again without reopening the project.
-- [ ] Saving the project leaves undo and redo available for those asset steps.
-- [ ] Existing scene, terrain, and property-clip undo still works, and the world editor and animation timeline still edit as they do today.
+- [x] Creating, renaming, duplicating, and deleting a clip, a controller, and a prefab are each one undo step, and redo puts the change back.
+- [x] Undoing a delete restores the asset's contents, and the asset panel shows it again without reopening the project.
+- [x] Saving the project leaves undo and redo available for those asset steps.
+- [x] Existing scene, terrain, and property-clip undo still works, and the world editor and animation timeline still edit as they do today.
 
 ---
 
@@ -56,7 +56,7 @@ Opening a project whose format version is older than the engine's upgrades it in
 - [x] Opening an older project rewrites it to the current format version, and the world, scripts, and assets still load.
 - [x] A copy of the previous files is kept beside the upgrade and is not overwritten by a later save.
 - [x] Opening a project newer than this engine fails with a message to update Axcenity, and the folder is left unchanged.
-- [ ] New Project, Open, recent projects, and Project Settings behave as they do today on a current project.
+- [x] New Project, Open, recent projects, and Project Settings behave as they do today on a current project.
 
 ---
 
@@ -70,10 +70,10 @@ A script error during Play still shows the script and line in Output, and clicki
 
 ### Acceptance criteria
 
-- [ ] A runtime error in Output shows the script, the line, and the stack of script calls that led there.
-- [ ] Clicking the error still opens that script at that line.
-- [ ] An error raised through a call from another script names both the failing line and the caller.
-- [ ] The standalone player prints the same trace, and other scripts keep running.
+- [x] A runtime error in Output shows the script, the line, and the stack of script calls that led there.
+- [x] Clicking the error still opens that script at that line.
+- [x] An error raised through a call from another script names both the failing line and the caller.
+- [x] The standalone player prints the same trace, and other scripts keep running.
 
 ---
 
@@ -87,11 +87,11 @@ During Play, the creator sets a breakpoint on a line in the script editor. When 
 
 ### Acceptance criteria
 
-- [ ] A breakpoint pauses Play on that line before it runs, in the editor only.
-- [ ] While paused, the creator can see that script's locals, and continue runs on until the next breakpoint or the end of Play.
-- [ ] Clearing the breakpoint, or pressing Stop, resumes or ends Play without leaving the game stuck.
-- [ ] The exported player never pauses on a breakpoint, and a script cannot enable the debugger.
-- [ ] If a safe pause cannot be built, the phase records that, stack traces still show in Output, and no breakpoint control is exposed.
+- [x] A breakpoint pauses Play on that line before it runs, in the editor only.
+- [x] While paused, the creator can see that script's locals, and continue runs on until the next breakpoint or the end of Play.
+- [x] Clearing the breakpoint, or pressing Stop, resumes or ends Play without leaving the game stuck.
+- [x] The exported player never pauses on a breakpoint, and a script cannot enable the debugger.
+- [x] If a safe pause cannot be built, the phase records that, stack traces still show in Output, and no breakpoint control is exposed.
 
 ---
 
@@ -105,10 +105,10 @@ A profiler panel during Play reports CPU, GPU, memory, rendering, physics, and a
 
 ### Acceptance criteria
 
-- [ ] During Play the panel shows CPU time, GPU time, and memory use.
-- [ ] The panel shows rendering, physics, and audio cost for the same session.
-- [ ] The numbers change when the scene gets heavier (more parts, lights, sounds, or physics) and drop back when that load is removed.
-- [ ] Stop hides or freezes the live readings, and an exported game has no profiler.
+- [x] During Play the panel shows CPU time, GPU time, and memory use.
+- [x] The panel shows rendering, physics, and audio cost for the same session.
+- [x] The numbers change when the scene gets heavier (more parts, lights, sounds, or physics) and drop back when that load is removed.
+- [x] Stop hides or freezes the live readings, and an exported game has no profiler.
 
 ---
 
@@ -122,10 +122,10 @@ The editor viewport gains toggles for physics colliders, raycasts, bounds, and a
 
 ### Acceptance criteria
 
-- [ ] Collider, raycast, bounds, and audio-emitter overlays can each be turned on and off.
-- [ ] A collider outline matches the shape the part actually collides with, including a part that does not collide and a terrain chunk.
-- [ ] A script raycast, while the raycast overlay is on, is visible for that cast, and an emitter marker sits on the sound's source.
-- [ ] Turning overlays on does not change physics, ray results, or audio, and an exported game does not draw them.
+- [x] Collider, raycast, bounds, and audio-emitter overlays can each be turned on and off.
+- [x] A collider outline matches the shape the part actually collides with, including a part that does not collide and a terrain chunk.
+- [x] A script raycast, while the raycast overlay is on, is visible for that cast, and an emitter marker sits on the sound's source.
+- [x] Turning overlays on does not change physics, ray results, or audio, and an exported game does not draw them.
 
 ---
 
@@ -139,9 +139,9 @@ One editor action scans the open project and reports missing files, invalid refe
 
 ### Acceptance criteria
 
-- [ ] The scan lists a missing file, an invalid reference, a failed import, and a broken dependency, each pointing at the owner of the reference.
-- [ ] A project with none of those problems reports a clear empty result.
-- [ ] Running the scan does not modify the project, and a missing file still leaves the rest of the project open.
+- [x] The scan lists a missing file, an invalid reference, a failed import, and a broken dependency, each pointing at the owner of the reference.
+- [x] A project with none of those problems reports a clear empty result.
+- [x] Running the scan does not modify the project, and a missing file still leaves the rest of the project open.
 
 ---
 
@@ -157,9 +157,9 @@ The terrain brush paints foliage as well as height and materials. The creator pi
 
 ### Acceptance criteria
 
-- [ ] Painting with a plant and with a prop scatters them on the stroked area at the chosen density, in the editor and in Play.
-- [ ] Foliage sits on the terrain surface, survives save and reload, and one undo removes the stroke.
-- [ ] Sculpting, material paint, and terrain collision still behave as they do today on a terrain that also has foliage.
+- [x] Painting with a plant and with a prop scatters them on the stroked area at the chosen density, in the editor and in Play.
+- [x] Foliage sits on the terrain surface, survives save and reload, and one undo removes the stroke.
+- [x] Sculpting, material paint, and terrain collision still behave as they do today on a terrain that also has foliage.
 
 ---
 
@@ -173,9 +173,9 @@ Each foliage paint chooses whether those plants or props collide. Colliding foli
 
 ### Acceptance criteria
 
-- [ ] A part falls onto colliding foliage and comes to rest on it.
-- [ ] The same part falls through foliage marked visual and lands on the terrain.
-- [ ] The collide choice survives save and reload, and turning it off is one undo step.
+- [x] A part falls onto colliding foliage and comes to rest on it.
+- [x] The same part falls through foliage marked visual and lands on the terrain.
+- [x] The collide choice survives save and reload, and turning it off is one undo step.
 
 ---
 

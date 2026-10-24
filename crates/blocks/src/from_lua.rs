@@ -955,6 +955,15 @@ impl<'a> Converter<'a> {
             },
             ExprKind::Call(function, args) => return self.call_expression(function, args, scope),
             ExprKind::Method(object, method, args) => {
+                if method == "Raycast"
+                    && matches!(&object.kind, ExprKind::Name(name) if name == "workspace")
+                    && let [origin, direction] = args.as_slice()
+                {
+                    return Some(Expression::Raycast {
+                        origin: boxed(origin),
+                        direction: boxed(direction),
+                    });
+                }
                 if method == "IsKeyDown"
                     && self.is_service(object, "UserInputService")
                     && let [key] = args.as_slice()

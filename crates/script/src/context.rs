@@ -5,6 +5,7 @@
 //! between them is a RemoteEvent. [`ScriptRuntime`](crate::ScriptRuntime)
 //! owns both and passes messages between them.
 
+use axcenity_assets::Assets;
 use axcenity_core::{InstanceId, RecordedChange, World};
 use mlua::chunk::ChunkMode;
 use mlua::{Lua, LuaOptions, StdLib, Thread};
@@ -42,6 +43,8 @@ impl Context {
         lua.set_app_data(Output::default());
         lua.set_app_data(crate::SoundActions::default());
         lua.set_app_data(crate::ParticleEmits::default());
+        lua.set_app_data(crate::DebugRays::default());
+        lua.set_app_data(Assets::default());
         lua.set_app_data(Outbox::default());
         lua.set_app_data(scheduler::Scheduler::default());
         lua.set_app_data(events::Connections::default());
@@ -75,6 +78,10 @@ impl Context {
         methods.extend(
             instance::animation_track_methods(&lua)
                 .expect("creating AnimationTrack methods only fails when out of memory"),
+        );
+        methods.extend(
+            instance::workspace_methods(&lua)
+                .expect("creating Workspace methods only fails when out of memory"),
         );
         methods.push((
             axcenity_core::ClassName::DataModel,
@@ -302,6 +309,19 @@ impl Context {
     pub fn take_sound_actions(&self) -> Vec<axcenity_audio::SoundAction> {
         match self.lua.app_data_mut::<crate::SoundActions>() {
             Some(mut actions) => std::mem::take(&mut actions.0),
+            None => Vec::new(),
+        }
+    }
+
+    /// Models `workspace:Raycast` uses for MeshParts.
+    pub fn set_assets(&self, assets: Assets) {
+        self.lua.set_app_data(assets);
+    }
+
+    /// Recent raycasts on this side, oldest first.
+    pub fn debug_rays(&self) -> Vec<crate::DebugRay> {
+        match self.lua.app_data_ref::<crate::DebugRays>() {
+            Some(rays) => rays.0.iter().copied().collect(),
             None => Vec::new(),
         }
     }

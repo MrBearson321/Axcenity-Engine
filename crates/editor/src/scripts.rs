@@ -683,7 +683,10 @@ mod tests {
         assert_eq!(lines(&tabs, "scripts/b.server.lua"), [7]);
         assert!(lines(&tabs, "scripts/a.server.lua").is_empty());
         tabs.toggle_breakpoint("scripts/b.server.lua", 7);
-        assert!(tabs.breakpoints().is_empty(), "no empty entries left behind");
+        assert!(
+            tabs.breakpoints().is_empty(),
+            "no empty entries left behind"
+        );
     }
 
     #[test]

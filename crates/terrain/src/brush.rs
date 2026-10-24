@@ -8,18 +8,19 @@
 //!
 //! [`EditRecorder`] keeps a copy of each chunk the first time a stroke
 //! changes it, so the whole stroke undoes as one step without copying the
-//! whole terrain.
+//! whole terrain. Foliage stamps scatter plants and props the same way.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use axcenity_core::{
-    CHUNK_CELLS, MAX_TERRAIN_LAYERS, PaintWeights, SampleRect, TerrainData, TerrainRegion,
+    CHUNK_CELLS, FoliageInstance, FoliageSource, MAX_FOLIAGE_INSTANCES, MAX_TERRAIN_LAYERS,
+    PaintWeights, SampleRect, TerrainData, TerrainRegion,
 };
 use glam::{Vec2, Vec3};
 
 use crate::Placement;
-use crate::noise::{Noise, smoothstep};
+use crate::noise::{Noise, Rng, mix, smoothstep};
 
 /// How much Raise, Lower and Sculpt move the ground in one stamp at full
 /// strength, as a fraction of the brush's radius.
@@ -29,6 +30,9 @@ const BLEND_PER_STAMP: f32 = 0.5;
 /// The most stamps one call to [`Stroke::advance`] makes, so a huge jump
 /// (the mouse leaving and coming back far away) can't freeze the editor.
 const MAX_STAMPS_PER_STEP: usize = 64;
+/// The most plants or props one foliage stamp adds, so a huge cell or a
+/// high density can't freeze the editor.
+const MAX_FOLIAGE_PER_STAMP: usize = 256;
 
 /// How the brush's edge fades, from its inner part to its rim.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -398,12 +402,24 @@ pub enum Operation {
     Erase {
         locked: [bool; MAX_TERRAIN_LAYERS],
     },
+    /// Scatters `source` at `density` plants per square stud, or removes
+    /// that source when `erase` is set. `collide` is stored on each new
+    /// instance.
+    Foliage {
+        source: FoliageSource,
+        density: f32,
+        erase: bool,
+        collide: bool,
+    },
 }
 
 impl Operation {
-    /// True for operations that change heights (the rest change paint).
+    /// True for operations that change heights (the rest change paint or foliage).
     pub fn sculpts(&self) -> bool {
-        !matches!(self, Operation::Paint { .. } | Operation::Erase { .. })
+        !matches!(
+            self,
+            Operation::Paint { .. } | Operation::Erase { .. } | Operation::Foliage { .. }
+        )
     }
 }
 
@@ -510,6 +526,19 @@ fn apply_one(
     }
     if weights.iter().all(|&weight| weight <= 0.0) {
         return SampleRect::default();
+    }
+
+    if let Operation::Foliage {
+        source,
+        density,
+        erase,
+        collide,
+    } = operation
+    {
+        apply_foliage(
+            data, placement, brush, rect, &weights, source, *density, *erase, *collide, center_xz,
+        );
+        return rect;
     }
 
     if !operation.sculpts() {
@@ -649,7 +678,9 @@ fn apply_one(
                         }
                     }
                 }
-                Operation::Paint { .. } | Operation::Erase { .. } => height,
+                Operation::Paint { .. } | Operation::Erase { .. } | Operation::Foliage { .. } => {
+                    height
+                }
             };
             let new = match limits {
                 // Raising stops at the top limit and lowering at the bottom;
@@ -697,6 +728,101 @@ fn limits_mask(
         }
     }
     1.0
+}
+
+#[allow(clippy::too_many_arguments)] // Stamp inputs: brush, samples, and what to scatter.
+fn apply_foliage(
+    data: &mut TerrainData,
+    placement: &Placement,
+    brush: &Brush,
+    rect: SampleRect,
+    weights: &[f32],
+    source: &FoliageSource,
+    density: f32,
+    erase: bool,
+    collide: bool,
+    center: Vec2,
+) {
+    if erase {
+        let drop: Vec<bool> = data
+            .foliage()
+            .iter()
+            .map(|instance| {
+                if instance.source != *source || !instance.in_rect(rect) {
+                    return false;
+                }
+                let at = placement.to_world_xz(data, Vec2::new(instance.x, instance.z));
+                brush.weight(at - center) > 0.0
+            })
+            .collect();
+        if drop.iter().any(|&drop| drop) {
+            let mut index = 0;
+            data.foliage_mut().retain(|_| {
+                let gone = drop[index];
+                index += 1;
+                !gone
+            });
+        }
+        return;
+    }
+    let density = density.max(0.0);
+    if density <= 0.0 {
+        return;
+    }
+    let (size_x, size_z) = data.size();
+    let cell = placement.cell_size(data);
+    let cell_area = cell.x * cell.y;
+    let seed = mix(source.name().len() as u64
+        ^ (center.x.to_bits() as u64)
+        ^ (center.y.to_bits() as u64).rotate_left(32));
+    let mut rng = Rng::new(seed);
+    let mut added = Vec::new();
+    let mut index = 0;
+    for z in rect.z0..rect.z1 {
+        for x in rect.x0..rect.x1 {
+            let weight = weights[index] * brush.strength;
+            index += 1;
+            if weight <= 0.0 {
+                continue;
+            }
+            let mut expected = density * cell_area * weight;
+            while expected > 0.0 && added.len() < MAX_FOLIAGE_PER_STAMP {
+                let chance = expected.min(1.0);
+                expected -= 1.0;
+                if rng.next_f32() >= chance {
+                    continue;
+                }
+                let jitter_x = (rng.next_f32() - 0.5) * 0.9;
+                let jitter_z = (rng.next_f32() - 0.5) * 0.9;
+                let gx = (x as f32 + jitter_x).clamp(0.0, (size_x - 1) as f32);
+                let gz = (z as f32 + jitter_z).clamp(0.0, (size_z - 1) as f32);
+                let at = placement.to_world_xz(data, Vec2::new(gx, gz));
+                if brush.weight(at - center) <= 0.0 {
+                    continue;
+                }
+                added.push(FoliageInstance {
+                    source: source.clone(),
+                    x: gx,
+                    z: gz,
+                    yaw: rng.next_f32() * std::f32::consts::TAU,
+                    scale: 0.85 + rng.next_f32() * 0.3,
+                    collide,
+                });
+            }
+            if added.len() >= MAX_FOLIAGE_PER_STAMP {
+                break;
+            }
+        }
+        if added.len() >= MAX_FOLIAGE_PER_STAMP {
+            break;
+        }
+    }
+    if added.is_empty() {
+        return;
+    }
+    let foliage = data.foliage_mut();
+    let room = MAX_FOLIAGE_INSTANCES.saturating_sub(foliage.len());
+    foliage.extend(added.into_iter().take(room));
 }
 
 /// One sample's paint after painting or erasing with `amount` (0 to 1).
@@ -1193,5 +1319,74 @@ mod tests {
         let mut recorder = EditRecorder::new();
         recorder.before_change(&data, SampleRect::new(0, 0, 3, 3));
         assert!(recorder.finish(&data).is_none());
+    }
+
+    #[test]
+    fn foliage_scatters_at_density_and_undo_removes_the_stroke() {
+        let (mut data, placement) = flat(0.2);
+        let brush = Brush {
+            radius: 16.0,
+            strength: 1.0,
+            falloff: 0.0,
+            ..Brush::default()
+        };
+        let plant = Operation::Foliage {
+            source: FoliageSource::Plant(axcenity_core::FoliagePlant::Grass),
+            density: 0.2,
+            erase: false,
+            collide: true,
+        };
+        let mut recorder = EditRecorder::new();
+        recorder.before_change(
+            &data,
+            footprint(&data, &placement, Vec2::ZERO, brush.radius),
+        );
+        apply(&mut data, &placement, &brush, &plant, Vec3::ZERO);
+        let count = data.foliage().len();
+        assert!(count > 5, "scattered {count} plants");
+        assert!(
+            data.foliage()
+                .iter()
+                .all(|i| i.source == FoliageSource::Plant(axcenity_core::FoliagePlant::Grass))
+        );
+        let heights = data.heights().to_vec();
+        let edit = recorder.finish(&data).unwrap();
+        edit.undo(&mut data);
+        assert!(data.foliage().is_empty());
+        assert_eq!(data.heights(), heights.as_slice());
+        edit.redo(&mut data);
+        assert_eq!(data.foliage().len(), count);
+        assert!(data.foliage().iter().all(|i| i.collide));
+
+        let crate_op = Operation::Foliage {
+            source: FoliageSource::Prop(axcenity_core::FoliageProp::Crate),
+            density: 0.05,
+            erase: false,
+            collide: false,
+        };
+        apply(
+            &mut data,
+            &placement,
+            &brush,
+            &crate_op,
+            Vec3::new(20.0, 0.0, 0.0),
+        );
+        assert!(
+            data.foliage()
+                .iter()
+                .any(|i| i.source == FoliageSource::Prop(axcenity_core::FoliageProp::Crate))
+        );
+        let erase = Operation::Foliage {
+            source: FoliageSource::Plant(axcenity_core::FoliagePlant::Grass),
+            density: 0.2,
+            erase: true,
+            collide: false,
+        };
+        apply(&mut data, &placement, &brush, &erase, Vec3::ZERO);
+        assert!(
+            data.foliage()
+                .iter()
+                .all(|i| i.source == FoliageSource::Prop(axcenity_core::FoliageProp::Crate))
+        );
     }
 }

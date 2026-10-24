@@ -5,7 +5,7 @@
 use std::collections::HashSet;
 
 use axcenity_assets::Assets;
-use axcenity_core::{ClassName, Value, World};
+use axcenity_core::{ClassName, FoliageSource, Value, World};
 
 /// The properties that name texture files, on a SurfaceAppearance or a
 /// TerrainLayer (each class has only some of them).
@@ -80,6 +80,15 @@ pub fn asset_files(world: &World) -> Vec<AssetFile> {
                 for map in MAPS {
                     if let Some(path) = text(map) {
                         add(AssetFile::Texture(path));
+                    }
+                }
+            }
+            ClassName::Terrain => {
+                if let Some(data) = world.terrain(id) {
+                    for instance in data.foliage() {
+                        if let FoliageSource::Model(path) = &instance.source {
+                            add(AssetFile::Model(path.clone()));
+                        }
                     }
                 }
             }

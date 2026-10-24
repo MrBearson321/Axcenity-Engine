@@ -34,6 +34,8 @@ pub enum Insertable {
     ParticleEmitter,
     Animator,
     Animation,
+    /// A kinematic third-person character controller.
+    ThirdPersonController,
 }
 
 impl Insertable {
@@ -66,6 +68,8 @@ impl Insertable {
     pub const EFFECTS: [Insertable; 1] = [Insertable::ParticleEmitter];
     /// Animators (skeletal) and Animations (property clips).
     pub const ANIMATION: [Insertable; 2] = [Insertable::Animator, Insertable::Animation];
+    /// The third-person character controller.
+    pub const CHARACTERS: [Insertable; 1] = [Insertable::ThirdPersonController];
 
     /// What the buttons and menus call it. A Ball is a "Sphere", as in Studio.
     pub fn label(self) -> &'static str {
@@ -94,6 +98,7 @@ impl Insertable {
             Insertable::ParticleEmitter => "Particles",
             Insertable::Animator => "Animator",
             Insertable::Animation => "Animation",
+            Insertable::ThirdPersonController => "Character",
         }
     }
 
@@ -120,6 +125,7 @@ impl Insertable {
             Insertable::ParticleEmitter => ClassName::ParticleEmitter,
             Insertable::Animator => ClassName::Animator,
             Insertable::Animation => ClassName::Animation,
+            Insertable::ThirdPersonController => ClassName::ThirdPersonController,
         }
     }
 
@@ -275,6 +281,7 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
                         | Insertable::BillboardGui
                         | Insertable::Animator
                         | Insertable::Animation
+                        | Insertable::ThirdPersonController
                 )
                 && is_saved(world, id))
     })

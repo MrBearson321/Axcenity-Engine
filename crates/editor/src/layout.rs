@@ -37,6 +37,9 @@ pub enum Pane {
     Terrain,
     /// What the game costs during Play (`profiler.rs`).
     Profiler,
+    /// Missing files, invalid references, import failures, and broken
+    /// dependencies (`asset_check.rs`). Starts closed; Check Assets opens it.
+    AssetCheck,
     /// An open script, stylesheet or block script, by its tab's id
     /// (`ScriptTab::id`).
     Script(u64),
@@ -44,7 +47,7 @@ pub enum Pane {
 
 impl Pane {
     /// The panels that can be closed and opened again, in menu order.
-    pub const CLOSABLE: [Pane; 7] = [
+    pub const CLOSABLE: [Pane; 8] = [
         Pane::Explorer,
         Pane::Properties,
         Pane::Console,
@@ -52,6 +55,7 @@ impl Pane {
         Pane::Animation,
         Pane::Terrain,
         Pane::Profiler,
+        Pane::AssetCheck,
     ];
 
     pub fn label(self) -> &'static str {
@@ -64,6 +68,7 @@ impl Pane {
             Pane::Animation => "Animation",
             Pane::Terrain => "Terrain",
             Pane::Profiler => "Profiler",
+            Pane::AssetCheck => "Asset Check",
             Pane::Script(_) => "Script",
         }
     }
@@ -78,6 +83,7 @@ impl Pane {
             Pane::Animation => theme::AnimKind::Animator.icon(),
             Pane::Terrain => icons::MOUNTAINS,
             Pane::Profiler => icons::GAUGE,
+            Pane::AssetCheck => icons::LIST,
             Pane::Script(_) => icons::CODE,
         }
     }
@@ -139,7 +145,7 @@ impl Layout {
             Pane::Explorer => Some(Pane::Properties),
             Pane::Properties => Some(Pane::Explorer),
             Pane::Console => Some(Pane::Assets),
-            Pane::Assets | Pane::Profiler => Some(Pane::Console),
+            Pane::Assets | Pane::Profiler | Pane::AssetCheck => Some(Pane::Console),
             // A tab beside the Scene, with room for a preview and a graph.
             Pane::Animation => Some(Pane::Scene),
             // A tab beside Properties, down the right.
@@ -372,6 +378,10 @@ mod tests {
     fn every_panel_starts_open() {
         let layout = Layout::default();
         for pane in Pane::CLOSABLE.into_iter().chain([Pane::Scene]) {
+            if pane == Pane::AssetCheck {
+                assert!(!layout.is_open(pane), "Asset Check starts closed");
+                continue;
+            }
             assert!(layout.is_open(pane), "{pane:?}");
         }
     }
@@ -380,7 +390,9 @@ mod tests {
     fn closed_panels_open_again_and_the_scene_never_closes() {
         let mut layout = Layout::default();
         for pane in Pane::CLOSABLE {
-            layout.toggle(pane);
+            if layout.is_open(pane) {
+                layout.toggle(pane);
+            }
             assert!(!layout.is_open(pane), "{pane:?}");
         }
         layout.toggle(Pane::Scene);

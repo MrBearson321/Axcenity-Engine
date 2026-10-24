@@ -308,6 +308,24 @@ impl EditorApp {
                     format!("Paint {name}"),
                 )
             }
+            TerrainTool::Foliage if shift => (
+                Operation::Foliage {
+                    source: studio.foliage_source.clone(),
+                    density: studio.foliage_density,
+                    erase: true,
+                    collide: studio.foliage_collide,
+                },
+                format!("Erase {} Foliage", studio.foliage_source.name()),
+            ),
+            TerrainTool::Foliage => (
+                Operation::Foliage {
+                    source: studio.foliage_source.clone(),
+                    density: studio.foliage_density,
+                    erase: false,
+                    collide: studio.foliage_collide,
+                },
+                format!("Paint {} Foliage", studio.foliage_source.name()),
+            ),
             TerrainTool::Auto | TerrainTool::Generate | TerrainTool::Erode | TerrainTool::Masks => {
                 return None;
             }
@@ -326,9 +344,14 @@ impl EditorApp {
             let first = active.stroke.advance(point, f32::MAX, seconds, None);
             first.into_iter().take(1).collect()
         } else {
+            // Foliage doesn't repeat while held still: that would pile plants.
+            let repeat = match active.operation {
+                Operation::Foliage { .. } => None,
+                _ => Some(STROKE_REPEAT),
+            };
             active
                 .stroke
-                .advance(point, brush.spacing_studs(), seconds, Some(STROKE_REPEAT))
+                .advance(point, brush.spacing_studs(), seconds, repeat)
         };
         if let (Some(placement), Some(data)) = (placement, self.world.terrain_mut(active.terrain)) {
             for center in stamps {
@@ -1454,6 +1477,69 @@ mod tests {
             ..pointer(Vec3::ZERO, true, true, false)
         });
         assert_eq!(app.terrain.paint_layer, 2);
+        std::fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn painting_foliage_scatters_plants_and_props_and_undo_removes_the_stroke() {
+        let (mut app, folder) = app_with_project("foliage");
+        let terrain = create(&mut app);
+        app.terrain.tool = Some(TerrainTool::Foliage);
+        app.terrain.foliage_source =
+            axcenity_core::FoliageSource::Plant(axcenity_core::FoliagePlant::Grass);
+        app.terrain.foliage_density = 0.4;
+        app.terrain.brush.radius = 10.0;
+        app.terrain.brush.strength = 1.0;
+        app.terrain.brush.falloff = 0.0;
+        app.terrain_pointer(pointer(Vec3::ZERO, true, true, false));
+        app.terrain_pointer(pointer(Vec3::ZERO, false, false, true));
+        let plants = app.world.terrain(terrain).unwrap().foliage().len();
+        assert!(plants > 3, "scattered {plants} plants");
+        assert_eq!(app.history.undo_label(), Some("Paint Grass Foliage"));
+        app.undo();
+        assert!(app.world.terrain(terrain).unwrap().foliage().is_empty());
+        app.redo();
+        assert_eq!(app.world.terrain(terrain).unwrap().foliage().len(), plants);
+        assert!(
+            app.world
+                .terrain(terrain)
+                .unwrap()
+                .foliage()
+                .iter()
+                .all(|i| !i.collide)
+        );
+
+        app.terrain.foliage_source =
+            axcenity_core::FoliageSource::Prop(axcenity_core::FoliageProp::Crate);
+        app.terrain.foliage_collide = true;
+        app.terrain.foliage_density = 0.15;
+        app.terrain_pointer(pointer(Vec3::new(20.0, 0.0, 0.0), true, true, false));
+        app.terrain_pointer(pointer(Vec3::new(20.0, 0.0, 0.0), false, false, true));
+        let mixed = app.world.terrain(terrain).unwrap().foliage().len();
+        assert!(
+            mixed > plants,
+            "a prop stroke adds more: {mixed} vs {plants}"
+        );
+        assert!(
+            app.world
+                .terrain(terrain)
+                .unwrap()
+                .foliage()
+                .iter()
+                .any(|i| i.source
+                    == axcenity_core::FoliageSource::Prop(axcenity_core::FoliageProp::Crate)
+                    && i.collide)
+        );
+        app.undo();
+        assert_eq!(app.world.terrain(terrain).unwrap().foliage().len(), plants);
+        assert!(
+            app.world
+                .terrain(terrain)
+                .unwrap()
+                .foliage()
+                .iter()
+                .all(|i| !i.collide)
+        );
         std::fs::remove_dir_all(folder).unwrap();
     }
 

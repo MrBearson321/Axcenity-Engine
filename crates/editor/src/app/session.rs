@@ -231,6 +231,7 @@ impl EditorApp {
             saved_terrains: HashMap::new(),
         });
         self.animation = AnimationStudio::default();
+        self.asset_check.clear();
         self.replace_world(project.world);
     }
     /// Puts `world` in place of the world being edited, with nothing
@@ -455,7 +456,13 @@ impl EditorApp {
             position,
             orientation,
         };
-        let frame = session.frame(seconds, keys, camera, &mut self.output);
+        let (look_dx, look_dy) = self.viewport.take_character_look();
+        let motion = if self.focused_text.is_some() {
+            axcenity_character::MoveInput::default()
+        } else {
+            self.game_keys.motion(look_dx, look_dy)
+        };
+        let frame = session.frame(seconds, keys, motion, camera, &mut self.output);
         if let Some(cost) = session.cost() {
             self.profiler.record_game(cost, session.load());
         }
@@ -617,6 +624,7 @@ impl EditorApp {
             let _ = self.animation.write_all(&project.folder, &mut self.output);
         }
         self.animation = AnimationStudio::default();
+        self.asset_check.clear();
         self.project = None;
         self.play = None;
         self.pending_ui_activation = None;

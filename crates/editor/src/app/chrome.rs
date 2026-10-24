@@ -70,11 +70,20 @@ impl EditorApp {
     /// The Assets panel, then what was asked for in it.
     pub(super) fn assets_pane(&mut self, ui: &mut egui::Ui) {
         let can_save = assets::any_prefab(&self.world, &self.selection_roots());
-        let action = self
-            .asset_browser
-            .show(ui, &self.assets, !self.playing(), can_save);
+        let picking_foliage =
+            self.terrain.tool == Some(crate::terrain_studio::TerrainTool::Foliage);
+        let action = {
+            let foliage = picking_foliage.then_some(&self.terrain.foliage_source);
+            self.asset_browser
+                .show(ui, &self.assets, !self.playing(), can_save, foliage)
+        };
         match action {
             Some(BrowserAction::Place(entry)) => self.drop_asset(&entry, None),
+            Some(BrowserAction::Foliage(entry)) => {
+                if let Some(source) = entry.foliage_source() {
+                    self.terrain.foliage_source = source;
+                }
+            }
             Some(BrowserAction::Import { image_folder }) => self.import_assets(image_folder),
             Some(BrowserAction::SavePrefab) => self.save_prefab(),
             Some(BrowserAction::RenamePrefab { path, name }) => self.rename_prefab(&path, &name),
@@ -251,6 +260,50 @@ impl EditorApp {
         self.layout.open(Pane::Animation);
     }
 
+    /// The Asset Check panel: scan results, and a button to run the scan.
+    pub(super) fn asset_check_pane(&mut self, ui: &mut egui::Ui) {
+        match self.asset_check.show(ui, self.project.is_some()) {
+            crate::asset_check::CheckAction::Run => self.run_asset_check(),
+            crate::asset_check::CheckAction::Select(owner) => self.select_finding_owner(&owner),
+            crate::asset_check::CheckAction::None => {}
+        }
+    }
+
+    /// File > Check Assets, the Test ribbon, and the panel's button.
+    pub(super) fn run_asset_check(&mut self) {
+        let Some(project) = &self.project else {
+            self.output.error("Open a project first.");
+            return;
+        };
+        let report = axcenity_project::check_assets(&project.folder, &self.world);
+        let count = report.findings.len();
+        if report.is_ok() {
+            self.output.info(
+                "No missing files, invalid references, import failures, or broken dependencies.",
+            );
+            self.toasts.success("No asset problems");
+        } else {
+            let noun = if count == 1 { "problem" } else { "problems" };
+            self.output.info(format!(
+                "Asset check found {count} {noun}. See the Asset Check panel."
+            ));
+            self.toasts.error(format!("{count} {noun}"));
+        }
+        self.asset_check.set(report);
+        self.layout.open(Pane::AssetCheck);
+    }
+
+    fn select_finding_owner(&mut self, owner: &str) {
+        let world = shown(&self.world, &self.play);
+        let found = world
+            .descendants(world.root())
+            .into_iter()
+            .find(|&id| world.full_name(id).as_deref() == Some(owner));
+        if let Some(id) = found {
+            self.select_from_viewport(Some(id));
+        }
+    }
+
     /// Gives `part`'s Animator (making one if `animator` is `None`) the
     /// controller at `path`, as one undo step.
     pub(super) fn set_controller(
@@ -305,6 +358,11 @@ impl EditorApp {
         let preview = self.angular_preview();
         let terrain_brush = self.terrain_brush_view(&ctx);
         let emits = std::mem::take(&mut self.pending_emits);
+        let debug_rays = self
+            .play
+            .as_ref()
+            .map(Session::debug_rays)
+            .unwrap_or_default();
         let output = egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show_inside(ui, |ui| match render_state {
@@ -326,8 +384,11 @@ impl EditorApp {
                             stylesheets,
                             focused_text: self.focused_text,
                             light_cones: self.light_cones,
+                            overlays: self.overlays,
+                            debug_rays: &debug_rays,
                             poses: self.play.as_ref().map(Session::poses),
                             terrain_brush,
+                            character_view: self.play.as_ref().and_then(Session::character_camera),
                         },
                     )
                 }
@@ -637,6 +698,23 @@ impl EditorApp {
                     .add_enabled(
                         self.project.is_some(),
                         egui::Button::new(theme::with_icon(
+                            icons::MAGNIFYING_GLASS,
+                            "Check Assets",
+                        )),
+                    )
+                    .on_hover_text(
+                        "Scan the open project for missing files, invalid references, \
+                         import failures, and broken dependencies.",
+                    )
+                    .on_disabled_hover_text("Open a project first.")
+                    .clicked()
+                {
+                    self.run_asset_check();
+                }
+                if ui
+                    .add_enabled(
+                        self.project.is_some(),
+                        egui::Button::new(theme::with_icon(
                             icons::SPARKLE,
                             "Set Up VS Code Autocomplete",
                         )),
@@ -792,6 +870,35 @@ impl EditorApp {
                 {
                     self.light_cones = !self.light_cones;
                 }
+                ui.weak("Overlays");
+                overlay_menu_item(
+                    ui,
+                    &mut self.overlays.colliders,
+                    icons::CUBE,
+                    "Colliders",
+                    "The shape each part collides with, including sensors and terrain.",
+                );
+                overlay_menu_item(
+                    ui,
+                    &mut self.overlays.raycasts,
+                    icons::LINE_SEGMENT,
+                    "Raycasts",
+                    "Recent workspace:Raycast calls during Play.",
+                );
+                overlay_menu_item(
+                    ui,
+                    &mut self.overlays.bounds,
+                    icons::SQUARE,
+                    "Bounds",
+                    "Each part's Size box.",
+                );
+                overlay_menu_item(
+                    ui,
+                    &mut self.overlays.emitters,
+                    icons::SPEAKER_HIGH,
+                    "Emitters",
+                    "Where each spatial Sound is heard from.",
+                );
                 ui.separator();
                 if ui
                     .button(theme::with_icon(icons::STAR, "New Ribbon Tab…"))
@@ -907,6 +1014,9 @@ impl EditorApp {
         if clicks.import {
             self.import_model_with_dialog();
         }
+        if clicks.check_assets {
+            self.run_asset_check();
+        }
         if clicks.play {
             if self.paused() {
                 self.continue_play();
@@ -983,6 +1093,17 @@ impl EditorApp {
                         "Stop the game and go back to editing ({})",
                         ui.ctx().format_shortcut(&STOP_SHORTCUT)
                     ))
+                    .clicked();
+            }),
+            RibbonGroup::Check => ribbon::group(ui, "Check", |ui| {
+                let button = RibbonButton::new(icons::MAGNIFYING_GLASS, "Assets");
+                clicks.check_assets = ui
+                    .add_enabled(can_play, button)
+                    .on_hover_text(
+                        "Scan the open project for missing files, invalid references, \
+                         import failures, and broken dependencies.",
+                    )
+                    .on_disabled_hover_text("Open a project first.")
                     .clicked();
             }),
             RibbonGroup::Tools => ribbon::group(ui, "Tools", |ui| {
@@ -1082,6 +1203,20 @@ impl EditorApp {
                         clicks.insert = Some(what);
                     }
                 }
+                for what in Insertable::CHARACTERS {
+                    let button = RibbonButton::new(theme::insert_icon(what), what.label());
+                    if ui
+                        .add_enabled(!playing, button)
+                        .on_hover_text(
+                            "Insert a ThirdPersonController on the selected model or part. \
+                             With nothing selected, makes a simple character.",
+                        )
+                        .on_disabled_hover_text("Press Stop to edit.")
+                        .clicked()
+                    {
+                        clicks.insert = Some(what);
+                    }
+                }
             }),
             RibbonGroup::Import => ribbon::group(ui, "Import", |ui| {
                 let button = RibbonButton::new(icons::FILE_ARROW_DOWN, "Import");
@@ -1167,7 +1302,7 @@ impl EditorApp {
                 if ui
                     .add_enabled(can_play, editor)
                     .on_hover_text(
-                        "Open the Terrain Studio: make, sculpt, paint and generate terrain.",
+                        "Open the Terrain Studio: make, sculpt, paint, scatter foliage and generate terrain.",
                     )
                     .on_disabled_hover_text("Open a project first.")
                     .clicked()
@@ -1177,6 +1312,7 @@ impl EditorApp {
                 for tool in [
                     TerrainTool::Raise,
                     TerrainTool::Paint,
+                    TerrainTool::Foliage,
                     TerrainTool::Generate,
                 ] {
                     let button = RibbonButton::new(tool.icon(), tool.label())
@@ -1219,6 +1355,36 @@ impl EditorApp {
                 {
                     self.layout.reset();
                 }
+            }),
+            RibbonGroup::Overlays => ribbon::group(ui, "Overlays", |ui| {
+                overlay_button(
+                    ui,
+                    &mut self.overlays.colliders,
+                    icons::CUBE,
+                    "Colliders",
+                    "Draw the shape each part actually collides with, including sensors and terrain chunks.",
+                );
+                overlay_button(
+                    ui,
+                    &mut self.overlays.raycasts,
+                    icons::LINE_SEGMENT,
+                    "Raycasts",
+                    "Draw recent workspace:Raycast calls during Play.",
+                );
+                overlay_button(
+                    ui,
+                    &mut self.overlays.bounds,
+                    icons::SQUARE,
+                    "Bounds",
+                    "Draw each part's Size box.",
+                );
+                overlay_button(
+                    ui,
+                    &mut self.overlays.emitters,
+                    icons::SPEAKER_HIGH,
+                    "Emitters",
+                    "Mark where each spatial Sound is heard from.",
+                );
             }),
         }
     }
@@ -1568,4 +1734,30 @@ fn block_objects(
             })
         })
         .collect()
+}
+
+fn overlay_button(
+    ui: &mut egui::Ui,
+    on: &mut bool,
+    icon: &'static str,
+    label: &'static str,
+    hint: &'static str,
+) {
+    let button = RibbonButton::new(icon, label).selected(*on);
+    if ui.add(button).on_hover_text(hint).clicked() {
+        *on = !*on;
+    }
+}
+
+fn overlay_menu_item(
+    ui: &mut egui::Ui,
+    on: &mut bool,
+    icon: &'static str,
+    label: &'static str,
+    hint: &'static str,
+) {
+    let item = egui::Button::selectable(*on, theme::with_icon(icon, label));
+    if ui.add(item).on_hover_text(hint).clicked() {
+        *on = !*on;
+    }
 }

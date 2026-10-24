@@ -22,6 +22,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use axcenity_assets::{AUDIO_EXTENSIONS, Assets, TEXTURE_EXTENSIONS};
+use axcenity_core::FoliageSource;
 use eframe::egui;
 
 use crate::props::{PROPS, Prop};
@@ -155,6 +156,25 @@ impl AssetEntry {
             .then(|| PROPS.iter().find(|prop| prop.name == self.path))
             .flatten()
     }
+
+    /// The foliage this tile paints, if the Foliage tool can use it.
+    pub fn foliage_source(&self) -> Option<FoliageSource> {
+        match self.kind {
+            AssetKind::Prop => {
+                axcenity_core::FoliageProp::from_name(&self.path).map(FoliageSource::Prop)
+            }
+            AssetKind::Model => Some(FoliageSource::Model(self.path.clone())),
+            _ => None,
+        }
+    }
+}
+
+fn foliage_matches(source: &FoliageSource, entry: &AssetEntry) -> bool {
+    match (source, entry.kind) {
+        (FoliageSource::Prop(prop), AssetKind::Prop) => prop.label() == entry.path,
+        (FoliageSource::Model(path), AssetKind::Model) => path == &entry.path,
+        _ => false,
+    }
 }
 
 /// What's dragged from the panel to the viewport.
@@ -233,6 +253,8 @@ impl Category {
 pub enum BrowserAction {
     /// Place this at the camera's focus point (a double-click).
     Place(AssetEntry),
+    /// Use this as the Terrain Studio's foliage brush (a click while Foliage is on).
+    Foliage(AssetEntry),
     /// Copy files into the project; images go in this folder.
     Import { image_folder: &'static str },
     /// Save the selection as a prefab.
@@ -310,13 +332,16 @@ impl AssetBrowser {
     }
 
     /// Draws the panel. `can_edit` is false during Play, and `can_save` is
-    /// true when something that can be a prefab is selected.
+    /// true when something that can be a prefab is selected. `foliage` is
+    /// the Terrain Studio's current item while the Foliage tool is on: a
+    /// click on a prop or model then picks it to paint.
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
         assets: &Assets,
         can_edit: bool,
         can_save: bool,
+        foliage: Option<&FoliageSource>,
     ) -> Option<BrowserAction> {
         let mut action = None;
         let palette = theme::palette(ui.ctx());
@@ -417,8 +442,11 @@ impl AssetBrowser {
                 let list = ui.available_width() < LIST_BELOW;
                 let items = |ui: &mut egui::Ui| {
                     for entry in entries {
-                        let (place, menu) = self.item(ui, assets, &entry, can_edit, list);
-                        if place {
+                        let (place, pick, menu) =
+                            self.item(ui, assets, &entry, can_edit, list, foliage);
+                        if pick {
+                            action = Some(BrowserAction::Foliage(entry.clone()));
+                        } else if place {
                             action = Some(BrowserAction::Place(entry.clone()));
                         }
                         match menu {
@@ -597,8 +625,8 @@ impl AssetBrowser {
         action
     }
 
-    /// Draws one asset: a tile, or a row of the list when `list`. The bool
-    /// is a double-click; the menu is a prefab's right-click choice.
+    /// Draws one asset: a tile, or a row of the list when `list`. The first
+    /// bool is a double-click (place); the second is a foliage pick.
     fn item(
         &mut self,
         ui: &mut egui::Ui,
@@ -606,7 +634,8 @@ impl AssetBrowser {
         entry: &AssetEntry,
         can_edit: bool,
         list: bool,
-    ) -> (bool, Option<PrefabMenu>) {
+        foliage: Option<&FoliageSource>,
+    ) -> (bool, bool, Option<PrefabMenu>) {
         let size = if list {
             egui::vec2(ui.available_width(), LIST_ROW)
         } else {
@@ -614,9 +643,15 @@ impl AssetBrowser {
         };
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
         let id = response.id;
-        let hover = match entry.prop() {
-            Some(prop) => format!("{}\n{}", prop.hover, entry.kind.hover()),
-            None => format!("{}\n{}", entry.path, entry.kind.hover()),
+        let foliage_kind = matches!(entry.kind, AssetKind::Prop | AssetKind::Model);
+        let selected = foliage.is_some_and(|source| foliage_matches(source, entry));
+        let hover = if foliage.is_some() && foliage_kind {
+            format!("{}\nClick to paint this as foliage.", entry.path)
+        } else {
+            match entry.prop() {
+                Some(prop) => format!("{}\n{}", prop.hover, entry.kind.hover()),
+                None => format!("{}\n{}", entry.path, entry.kind.hover()),
+            }
         };
         let response = response.on_hover_text(hover);
         if can_edit && response.drag_started() {
@@ -630,7 +665,7 @@ impl AssetBrowser {
         );
         let painter = ui.painter();
         painter.rect_filled(rect, 6.0, palette.control_hover.gamma_multiply(hover));
-        if response.has_focus() {
+        if response.has_focus() || selected {
             painter.rect_stroke(
                 rect,
                 6.0,
@@ -758,7 +793,9 @@ impl AssetBrowser {
                 }
             });
         }
-        (can_edit && response.double_clicked(), menu)
+        let pick = can_edit && foliage.is_some() && foliage_kind && response.clicked();
+        let place = can_edit && !pick && response.double_clicked();
+        (place, pick, menu)
     }
 
     fn paint_picture(
@@ -1017,6 +1054,34 @@ fn chip(ui: &mut egui::Ui, label: &str, selected: bool) -> egui::Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_prop_or_model_tile_is_a_foliage_source() {
+        let tree = AssetEntry {
+            kind: AssetKind::Prop,
+            path: "Tree".into(),
+            name: "Tree".into(),
+        };
+        assert_eq!(
+            tree.foliage_source(),
+            Some(FoliageSource::Prop(axcenity_core::FoliageProp::Tree))
+        );
+        let model = AssetEntry {
+            kind: AssetKind::Model,
+            path: "assets/models/Bush.glb".into(),
+            name: "Bush".into(),
+        };
+        assert_eq!(
+            model.foliage_source(),
+            Some(FoliageSource::Model("assets/models/Bush.glb".into()))
+        );
+        let sound = AssetEntry {
+            kind: AssetKind::Audio,
+            path: "assets/audio/wind.ogg".into(),
+            name: "wind".into(),
+        };
+        assert_eq!(sound.foliage_source(), None);
+    }
 
     #[test]
     fn files_are_sorted_into_kinds_by_extension_and_folder() {

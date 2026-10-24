@@ -270,6 +270,7 @@ impl TerrainCache {
                 });
             }
         }
+        crate::foliage::draw_terrain(&placement, &data, assets, items);
     }
 }
 
@@ -571,9 +572,11 @@ mod tests {
     fn chunk_versions(items: &[DrawItem]) -> Vec<(u64, u64)> {
         items
             .iter()
-            .map(|item| match &item.shape {
-                Shape::Mesh(mesh) => (mesh.key(), mesh.version()),
-                _ => panic!("terrain chunks are meshes"),
+            .filter_map(|item| match &item.shape {
+                Shape::Mesh(mesh) if item.material.terrain.is_some() => {
+                    Some((mesh.key(), mesh.version()))
+                }
+                _ => None,
             })
             .collect()
     }

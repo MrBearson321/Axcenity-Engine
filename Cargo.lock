@@ -573,6 +573,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "axcenity-character"
+version = "0.1.0"
+dependencies = [
+ "axcenity-assets",
+ "axcenity-core",
+ "axcenity-physics",
+]
+
+[[package]]
 name = "axcenity-core"
 version = "0.1.0"
 dependencies = [
@@ -588,6 +597,7 @@ dependencies = [
  "axcenity-assets",
  "axcenity-audio",
  "axcenity-blocks",
+ "axcenity-character",
  "axcenity-core",
  "axcenity-physics",
  "axcenity-project",
@@ -626,6 +636,7 @@ dependencies = [
  "axcenity-anim",
  "axcenity-assets",
  "axcenity-audio",
+ "axcenity-character",
  "axcenity-core",
  "axcenity-physics",
  "axcenity-project",
@@ -645,6 +656,7 @@ name = "axcenity-project"
 version = "0.1.0"
 dependencies = [
  "axcenity-anim",
+ "axcenity-assets",
  "axcenity-blocks",
  "axcenity-core",
  "axcenity-terrain",
@@ -681,8 +693,10 @@ dependencies = [
 name = "axcenity-script"
 version = "0.1.0"
 dependencies = [
+ "axcenity-assets",
  "axcenity-audio",
  "axcenity-core",
+ "axcenity-physics",
  "mlua",
 ]
 

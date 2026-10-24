@@ -1,9 +1,11 @@
-//! A Terrain's heightfield and hand-painted material weights.
+//! A Terrain's heightfield, hand-painted material weights, and foliage.
 //!
 //! These aren't Instance properties: a 513×513 heightfield is a quarter of a
 //! million numbers. They live in the [`World`](crate::World) beside the
 //! Terrain Instance (like an Animator's live state), behind an `Arc`, so
 //! Play's copy of the world shares them until something changes one.
+//! Painted foliage is a list of plants and props on the surface, not one
+//! Instance per plant.
 //!
 //! The grid has `size_x` samples along X and `size_z` along Z, row by row
 //! (`z * size_x + x`). Heights go from 0 (the bottom of the Terrain's
@@ -14,6 +16,8 @@
 //! or collides with the terrain only rebuilds the chunks that changed.
 
 use std::sync::atomic::{AtomicU64, Ordering};
+
+use crate::Vector3;
 
 /// The most material layers a terrain blends (its first eight
 /// TerrainLayers). The renderer reads their weights from two RGBA textures.
@@ -27,6 +31,10 @@ pub const CHUNK_CELLS: usize = 32;
 /// samples: 16 MB of heights and 33 MB of paint.
 pub const MIN_TERRAIN_SAMPLES: usize = 9;
 pub const MAX_TERRAIN_SAMPLES: usize = 2049;
+
+/// The most plants and props one terrain keeps. Painting stops adding
+/// when this is reached; erasing still works.
+pub const MAX_FOLIAGE_INSTANCES: usize = 32_768;
 
 /// How a new Terrain starts: 257 × 257 samples, flat a quarter of the way
 /// up its height range, so it can be dug into as well as raised.
@@ -115,12 +123,189 @@ impl SampleRect {
     }
 }
 
-/// A copy of part of a terrain: its heights and paint, row by row, for undo.
+/// A built-in plant painted onto terrain.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FoliagePlant {
+    Grass,
+    Bush,
+    Flower,
+    Tree,
+}
+
+impl FoliagePlant {
+    pub const ALL: [FoliagePlant; 4] = [
+        FoliagePlant::Grass,
+        FoliagePlant::Bush,
+        FoliagePlant::Flower,
+        FoliagePlant::Tree,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            FoliagePlant::Grass => "Grass",
+            FoliagePlant::Bush => "Bush",
+            FoliagePlant::Flower => "Flower",
+            FoliagePlant::Tree => "Tree",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|plant| plant.label() == name)
+    }
+}
+
+/// A built-in prop painted onto terrain (the same names as the Assets panel).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FoliageProp {
+    Floor,
+    Wall,
+    Stairs,
+    Ramp,
+    Lamp,
+    Table,
+    Tree,
+    Crate,
+}
+
+impl FoliageProp {
+    pub const ALL: [FoliageProp; 8] = [
+        FoliageProp::Floor,
+        FoliageProp::Wall,
+        FoliageProp::Stairs,
+        FoliageProp::Ramp,
+        FoliageProp::Lamp,
+        FoliageProp::Table,
+        FoliageProp::Tree,
+        FoliageProp::Crate,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            FoliageProp::Floor => "Floor",
+            FoliageProp::Wall => "Wall",
+            FoliageProp::Stairs => "Stairs",
+            FoliageProp::Ramp => "Ramp",
+            FoliageProp::Lamp => "Lamp",
+            FoliageProp::Table => "Table",
+            FoliageProp::Tree => "Tree",
+            FoliageProp::Crate => "Crate",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|prop| prop.label() == name)
+    }
+
+    /// Axis-aligned box around this prop: size, then the box's center in
+    /// instance space (origin on the ground, Y up).
+    pub fn bounds(self) -> (Vector3, Vector3) {
+        match self {
+            FoliageProp::Floor => (Vector3::new(16.0, 1.0, 16.0), Vector3::new(0.0, 0.5, 0.0)),
+            FoliageProp::Wall => (Vector3::new(16.0, 8.0, 1.0), Vector3::new(0.0, 4.0, 0.0)),
+            FoliageProp::Stairs => (Vector3::new(4.0, 6.0, 9.0), Vector3::new(0.0, 3.0, -3.75)),
+            FoliageProp::Ramp => (Vector3::new(4.0, 4.0, 8.0), Vector3::new(0.0, 2.0, 0.0)),
+            FoliageProp::Lamp => (Vector3::new(1.6, 9.5, 1.6), Vector3::new(0.0, 4.75, 0.0)),
+            FoliageProp::Table => (Vector3::new(6.0, 3.4, 4.0), Vector3::new(0.0, 1.7, 0.0)),
+            FoliageProp::Tree => (Vector3::new(6.0, 10.5, 6.0), Vector3::new(0.0, 5.25, 0.0)),
+            FoliageProp::Crate => (Vector3::new(3.0, 3.0, 3.0), Vector3::new(0.0, 1.5, 0.0)),
+        }
+    }
+}
+
+impl FoliagePlant {
+    /// Axis-aligned box around this plant: size, then the box's center in
+    /// instance space (origin on the ground, Y up).
+    pub fn bounds(self) -> (Vector3, Vector3) {
+        match self {
+            FoliagePlant::Grass => (Vector3::new(0.55, 1.1, 0.55), Vector3::new(0.0, 0.55, 0.0)),
+            FoliagePlant::Bush => (Vector3::new(2.2, 2.2, 2.2), Vector3::new(0.0, 1.0, 0.0)),
+            FoliagePlant::Flower => (
+                Vector3::new(0.7, 1.075, 0.7),
+                Vector3::new(0.0, 0.5375, 0.0),
+            ),
+            FoliagePlant::Tree => (Vector3::new(6.0, 10.5, 6.0), Vector3::new(0.0, 5.25, 0.0)),
+        }
+    }
+}
+
+/// Which plant, prop, or project model a painted instance is.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum FoliageSource {
+    /// A built-in plant. Older paints still load; new strokes pick from Assets.
+    Plant(FoliagePlant),
+    /// A built-in Assets-panel prop.
+    Prop(FoliageProp),
+    /// A model file in the project (`assets/models/…`), as a MeshId.
+    Model(String),
+}
+
+impl FoliageSource {
+    pub fn kind_label(&self) -> &'static str {
+        match self {
+            FoliageSource::Plant(_) => "Plant",
+            FoliageSource::Prop(_) => "Prop",
+            FoliageSource::Model(_) => "Model",
+        }
+    }
+
+    /// The file kind written to `foliage.json`.
+    pub fn kind_key(&self) -> &'static str {
+        match self {
+            FoliageSource::Plant(_) => "plant",
+            FoliageSource::Prop(_) => "prop",
+            FoliageSource::Model(_) => "model",
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        match self {
+            FoliageSource::Plant(plant) => plant.label(),
+            FoliageSource::Prop(prop) => prop.label(),
+            FoliageSource::Model(path) => path.rsplit('/').next().unwrap_or(path),
+        }
+    }
+
+    /// Size and center of a built-in plant or prop, or `None` for a model
+    /// (those use the file's hull).
+    pub fn bounds(&self) -> Option<(Vector3, Vector3)> {
+        match self {
+            FoliageSource::Plant(plant) => Some(plant.bounds()),
+            FoliageSource::Prop(prop) => Some(prop.bounds()),
+            FoliageSource::Model(_) => None,
+        }
+    }
+}
+
+/// One painted plant, prop, or model. `x` and `z` are sample coordinates, so
+/// the instance stays on the surface when the heights change. `collide` is
+/// whether physics treats it as solid.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FoliageInstance {
+    pub source: FoliageSource,
+    pub x: f32,
+    pub z: f32,
+    pub yaw: f32,
+    pub scale: f32,
+    pub collide: bool,
+}
+
+impl FoliageInstance {
+    /// True when this instance's sample sits inside `rect` (end excluded).
+    pub fn in_rect(&self, rect: SampleRect) -> bool {
+        self.x >= rect.x0 as f32
+            && self.x < rect.x1 as f32
+            && self.z >= rect.z0 as f32
+            && self.z < rect.z1 as f32
+    }
+}
+
+/// A copy of part of a terrain: its heights, paint, and foliage, for undo.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TerrainRegion {
     pub rect: SampleRect,
     pub heights: Vec<f32>,
     pub paint: Vec<PaintWeights>,
+    pub foliage: Vec<FoliageInstance>,
 }
 
 /// One Terrain's heightfield and paint. See the module docs.
@@ -131,6 +316,7 @@ pub struct TerrainData {
     size_z: usize,
     heights: Vec<f32>,
     paint: Vec<PaintWeights>,
+    foliage: Vec<FoliageInstance>,
     /// Per chunk, row by row: bumped each time its heights or paint change.
     height_versions: Vec<u64>,
     paint_versions: Vec<u64>,
@@ -150,6 +336,7 @@ impl Clone for TerrainData {
             size_z: self.size_z,
             heights: self.heights.clone(),
             paint: self.paint.clone(),
+            foliage: self.foliage.clone(),
             height_versions: self.height_versions.clone(),
             paint_versions: self.paint_versions.clone(),
             revision: self.revision,
@@ -222,6 +409,7 @@ impl TerrainData {
             size_z,
             heights,
             paint,
+            foliage: Vec::new(),
             height_versions: vec![1; chunks],
             paint_versions: vec![1; chunks],
             revision: 0,
@@ -254,6 +442,22 @@ impl TerrainData {
 
     pub fn paint(&self) -> &[PaintWeights] {
         &self.paint
+    }
+
+    pub fn foliage(&self) -> &[FoliageInstance] {
+        &self.foliage
+    }
+
+    /// The foliage list, for adding or removing instances. Bumps the
+    /// revision so the terrain is saved; it does not rebuild chunk meshes.
+    pub fn foliage_mut(&mut self) -> &mut Vec<FoliageInstance> {
+        self.revision += 1;
+        &mut self.foliage
+    }
+
+    /// Puts loaded foliage on this terrain without counting as an edit.
+    pub fn load_foliage(&mut self, foliage: Vec<FoliageInstance>) {
+        self.foliage = foliage;
     }
 
     /// The height at sample (`x`, `z`), with coordinates past the edges
@@ -318,10 +522,17 @@ impl TerrainData {
             heights.extend_from_slice(&self.heights[row + rect.x0..row + rect.x1]);
             paint.extend_from_slice(&self.paint[row + rect.x0..row + rect.x1]);
         }
+        let foliage = self
+            .foliage
+            .iter()
+            .filter(|instance| instance.in_rect(rect))
+            .cloned()
+            .collect();
         TerrainRegion {
             rect,
             heights,
             paint,
+            foliage,
         }
     }
 
@@ -346,6 +557,8 @@ impl TerrainData {
             self.heights[at..at + width].copy_from_slice(&region.heights[from..from + width]);
             self.paint[at..at + width].copy_from_slice(&region.paint[from..from + width]);
         }
+        self.foliage.retain(|instance| !instance.in_rect(rect));
+        self.foliage.extend(region.foliage.iter().cloned());
         true
     }
 
@@ -357,6 +570,7 @@ impl TerrainData {
         self.size_z = other.size_z;
         self.heights.clone_from(&other.heights);
         self.paint.clone_from(&other.paint);
+        self.foliage.clone_from(&other.foliage);
         self.generation.clone_from(&other.generation);
         let chunks = chunk_count(self.size_x) * chunk_count(self.size_z);
         let next = self.newest_version() + 1;
@@ -388,6 +602,20 @@ impl TerrainData {
         }
         let mut data = TerrainData::from_parts(size_x, size_z, heights, paint)?;
         data.generation.clone_from(&self.generation);
+        let to_new_x = (size_x - 1) as f32 / (self.size_x - 1) as f32;
+        let to_new_z = (size_z - 1) as f32 / (self.size_z - 1) as f32;
+        data.foliage = self
+            .foliage
+            .iter()
+            .map(|instance| FoliageInstance {
+                source: instance.source.clone(),
+                x: instance.x * to_new_x,
+                z: instance.z * to_new_z,
+                yaw: instance.yaw,
+                scale: instance.scale,
+                collide: instance.collide,
+            })
+            .collect();
         Ok(data)
     }
 
@@ -606,5 +834,46 @@ mod tests {
         assert!((bigger.height(16, 0) - 1.0).abs() < 1e-6);
         assert!((bigger.height(8, 5) - 0.5).abs() < 1e-6);
         assert!(data.resampled(3, 3).is_err());
+    }
+
+    fn grass_at(x: f32, z: f32) -> FoliageInstance {
+        FoliageInstance {
+            source: FoliageSource::Plant(FoliagePlant::Grass),
+            x,
+            z,
+            yaw: 0.5,
+            scale: 1.0,
+            collide: false,
+        }
+    }
+
+    #[test]
+    fn a_region_reads_and_writes_foliage_with_the_heights() {
+        let mut data = TerrainData::flat(17, 17, 0.2).unwrap();
+        data.foliage_mut()
+            .extend([grass_at(2.5, 3.2), grass_at(10.0, 10.0), grass_at(5.0, 4.0)]);
+        let rect = SampleRect::new(2, 3, 6, 5);
+        let saved = data.read_region(rect);
+        assert_eq!(saved.foliage.len(), 2);
+        data.foliage_mut().clear();
+        data.foliage_mut().push(grass_at(3.0, 3.5));
+        assert!(data.write_region(&saved));
+        assert_eq!(data.foliage().len(), 2);
+        assert!(data.foliage().iter().any(|i| (i.x - 2.5).abs() < 1e-6));
+        assert!(data.foliage().iter().any(|i| (i.x - 5.0).abs() < 1e-6));
+        assert!(!data.foliage().iter().any(|i| (i.x - 3.0).abs() < 1e-6));
+        // Outside the rect was left alone, then cleared above — the far
+        // plant was outside and stays gone after the write.
+        assert!(!data.foliage().iter().any(|i| (i.x - 10.0).abs() < 1e-6));
+    }
+
+    #[test]
+    fn resampling_keeps_foliage_on_the_same_spot() {
+        let mut data = TerrainData::flat(9, 9, 0.0).unwrap();
+        data.foliage_mut().push(grass_at(8.0, 0.0));
+        let bigger = data.resampled(17, 17).unwrap();
+        assert_eq!(bigger.foliage().len(), 1);
+        assert!((bigger.foliage()[0].x - 16.0).abs() < 1e-5);
+        assert!((bigger.foliage()[0].z).abs() < 1e-5);
     }
 }

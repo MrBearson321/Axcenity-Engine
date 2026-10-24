@@ -10,16 +10,23 @@
 //! - `paint-1-4.png` and `paint-5-8.png`: the hand-painted weights of
 //!   layers 1 to 4 and 5 to 8, one per colour channel (red, green, blue,
 //!   alpha). Missing files mean nothing is painted.
+//! - `foliage.json`: painted plants, props, and models, with whether each
+//!   collides. Missing means none. An extra file, so older engines ignore
+//!   it and this engine does not bump the terrain format.
 
 use std::io::Cursor;
 
-use axcenity_core::{MAX_TERRAIN_LAYERS, PaintWeights, TerrainData, valid_terrain_size};
+use axcenity_core::{
+    FoliageInstance, FoliagePlant, FoliageProp, FoliageSource, MAX_FOLIAGE_INSTANCES,
+    MAX_TERRAIN_LAYERS, PaintWeights, TerrainData, valid_terrain_size,
+};
 use serde::{Deserialize, Serialize};
 
 pub const TERRAIN_FORMAT_VERSION: u32 = 1;
 pub const MANIFEST_FILE: &str = "terrain.json";
 pub const HEIGHTS_FILE: &str = "heights.png";
 pub const PAINT_FILES: [&str; 2] = ["paint-1-4.png", "paint-5-8.png"];
+pub const FOLIAGE_FILE: &str = "foliage.json";
 
 #[derive(Debug, thiserror::Error)]
 pub enum FileError {
@@ -45,6 +52,23 @@ struct Manifest {
     size_z: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     generation: Option<serde_json::Value>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct FoliageFile {
+    instances: Vec<FoliageRecord>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct FoliageRecord {
+    kind: String,
+    name: String,
+    x: f32,
+    z: f32,
+    yaw: f32,
+    scale: f32,
+    #[serde(default)]
+    collide: bool,
 }
 
 /// Every file of `data`, by name, ready to write. The same terrain always
@@ -83,7 +107,62 @@ pub fn encode(data: &TerrainData) -> Vec<(&'static str, Vec<u8>)> {
             ),
         ));
     }
+    if !data.foliage().is_empty() {
+        files.push((FOLIAGE_FILE, encode_foliage(data.foliage())));
+    }
     files
+}
+
+fn encode_foliage(foliage: &[FoliageInstance]) -> Vec<u8> {
+    let file = FoliageFile {
+        instances: foliage.iter().map(foliage_record).collect(),
+    };
+    let mut text = serde_json::to_string_pretty(&file).expect("plain numbers and strings");
+    text.push('\n');
+    text.into_bytes()
+}
+
+fn foliage_record(instance: &FoliageInstance) -> FoliageRecord {
+    FoliageRecord {
+        kind: instance.source.kind_key().to_owned(),
+        name: match &instance.source {
+            FoliageSource::Model(path) => path.clone(),
+            other => other.name().to_owned(),
+        },
+        x: instance.x,
+        z: instance.z,
+        yaw: instance.yaw,
+        scale: instance.scale,
+        collide: instance.collide,
+    }
+}
+
+fn decode_foliage(bytes: &[u8]) -> Result<Vec<FoliageInstance>, String> {
+    let file: FoliageFile = serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
+    let mut instances = Vec::new();
+    for record in file.instances {
+        if instances.len() >= MAX_FOLIAGE_INSTANCES {
+            break;
+        }
+        let source = match record.kind.as_str() {
+            "plant" => FoliagePlant::from_name(&record.name).map(FoliageSource::Plant),
+            "prop" => FoliageProp::from_name(&record.name).map(FoliageSource::Prop),
+            "model" if !record.name.is_empty() => Some(FoliageSource::Model(record.name)),
+            _ => None,
+        };
+        let Some(source) = source else {
+            continue;
+        };
+        instances.push(FoliageInstance {
+            source,
+            x: record.x,
+            z: record.z,
+            yaw: record.yaw,
+            scale: record.scale.max(0.01),
+            collide: record.collide,
+        });
+    }
+    Ok(instances)
 }
 
 /// A terrain from its files, read by `read` (which gives `None` for a
@@ -127,6 +206,11 @@ pub fn decode(mut read: impl FnMut(&str) -> Option<Vec<u8>>) -> Result<TerrainDa
     let mut data = TerrainData::from_parts(manifest.size_x, manifest.size_z, image.values, paint)
         .map_err(|error| invalid(MANIFEST_FILE)(error.to_string()))?;
     data.generation = manifest.generation.map(|value| value.to_string());
+    if let Some(bytes) = read(FOLIAGE_FILE)
+        && let Ok(foliage) = decode_foliage(&bytes)
+    {
+        data.load_foliage(foliage);
+    }
     Ok(data)
 }
 
@@ -259,6 +343,14 @@ mod tests {
         }
         paint[5] = [10, 20, 30, 40, 50, 60, 0, 45];
         data.generation = Some(r#"{"seed":7}"#.to_owned());
+        data.foliage_mut().push(axcenity_core::FoliageInstance {
+            source: axcenity_core::FoliageSource::Plant(axcenity_core::FoliagePlant::Grass),
+            x: 3.5,
+            z: 1.25,
+            yaw: 0.4,
+            scale: 1.1,
+            collide: true,
+        });
         data
     }
 
@@ -272,6 +364,7 @@ mod tests {
             assert!((a - b).abs() <= 0.5 / 65535.0 + 1e-7);
         }
         assert_eq!(loaded.paint(), data.paint());
+        assert_eq!(loaded.foliage(), data.foliage());
         assert_eq!(loaded.generation.as_deref(), Some(r#"{"seed":7}"#));
         // Saving the loaded one gives the same files.
         let again: HashMap<&str, Vec<u8>> = encode(&loaded).into_iter().collect();
@@ -287,6 +380,14 @@ mod tests {
             .collect();
         let loaded = decode(|name| files.get(name).cloned()).unwrap();
         assert!(loaded.paint().iter().all(|w| *w == [0; 8]));
+        assert_eq!(loaded.foliage().len(), 1);
+
+        let without_foliage: HashMap<&str, Vec<u8>> = encode(&data)
+            .into_iter()
+            .filter(|(name, _)| *name != FOLIAGE_FILE)
+            .collect();
+        let loaded = decode(|name| without_foliage.get(name).cloned()).unwrap();
+        assert!(loaded.foliage().is_empty());
         let only_manifest = files.get(MANIFEST_FILE).cloned();
         let error = decode(|name| {
             (name == MANIFEST_FILE)
@@ -295,6 +396,36 @@ mod tests {
         })
         .unwrap_err();
         assert!(error.to_string().contains("heights.png"), "{error}");
+    }
+
+    #[test]
+    fn foliage_keeps_collide_and_a_model_path() {
+        let mut data = TerrainData::flat(9, 9, 0.0).unwrap();
+        data.foliage_mut().push(axcenity_core::FoliageInstance {
+            source: axcenity_core::FoliageSource::Model("assets/models/Bush.glb".into()),
+            x: 1.0,
+            z: 2.0,
+            yaw: 0.0,
+            scale: 1.0,
+            collide: true,
+        });
+        let files: HashMap<&str, Vec<u8>> = encode(&data).into_iter().collect();
+        let loaded = decode(|name| files.get(name).cloned()).unwrap();
+        assert_eq!(loaded.foliage(), data.foliage());
+        assert!(loaded.foliage()[0].collide);
+
+        let text = br#"{
+  "instances": [
+    { "kind": "prop", "name": "Crate", "x": 0.0, "z": 0.0, "yaw": 0.0, "scale": 1.0 }
+  ]
+}"#;
+        let old = decode_foliage(text).unwrap();
+        assert_eq!(old.len(), 1);
+        assert!(!old[0].collide);
+        assert_eq!(
+            old[0].source,
+            axcenity_core::FoliageSource::Prop(axcenity_core::FoliageProp::Crate)
+        );
     }
 
     #[test]

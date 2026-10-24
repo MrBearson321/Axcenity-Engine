@@ -46,10 +46,13 @@ mod task;
 mod types;
 mod watchdog;
 
+use std::collections::VecDeque;
 use std::time::Duration;
 
+use axcenity_assets::Assets;
 use axcenity_audio::SoundAction;
-use axcenity_core::{ClassName, InstanceId, Value, World};
+use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
+use axcenity_physics::RayHit;
 use mlua::Lua;
 
 use crate::context::Context;
@@ -97,6 +100,30 @@ struct SoundActions(Vec<SoundAction>);
 #[derive(Default)]
 struct ParticleEmits(Vec<(InstanceId, u32)>);
 
+/// How many recent `workspace:Raycast` calls the editor overlay can show.
+const MAX_DEBUG_RAYS: usize = 64;
+
+/// A `workspace:Raycast` the editor can draw while the raycast overlay is on.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DebugRay {
+    pub origin: Vector3,
+    pub direction: Vector3,
+    pub hit: Option<RayHit>,
+}
+
+/// The last [`MAX_DEBUG_RAYS`] casts on one side, oldest first.
+#[derive(Default)]
+pub(crate) struct DebugRays(VecDeque<DebugRay>);
+
+impl DebugRays {
+    pub(crate) fn push(&mut self, ray: DebugRay) {
+        if self.0.len() == MAX_DEBUG_RAYS {
+            self.0.pop_front();
+        }
+        self.0.push_back(ray);
+    }
+}
+
 /// Runs every script of one game: Scripts on the server side, LocalScripts
 /// on the client side (one player, on this device), and the RemoteEvent
 /// messages between them.
@@ -141,6 +168,22 @@ impl ScriptRuntime {
     /// Bytes the Lua heaps of both sides hold now, for the editor's profiler.
     pub fn used_memory(&self) -> usize {
         self.server.lua.used_memory() + self.client.lua.used_memory()
+    }
+
+    /// MeshParts `workspace:Raycast` collides as, matching physics. Cloning
+    /// `assets` shares the same loaded models. The player and editor Play
+    /// both call this; without it every MeshPart is a box.
+    pub fn set_assets(&mut self, assets: Assets) {
+        self.server.set_assets(assets.clone());
+        self.client.set_assets(assets);
+    }
+
+    /// Recent `workspace:Raycast` calls on both sides, oldest first, at most
+    /// 64. The editor draws them; the player never asks.
+    pub fn debug_rays(&self) -> Vec<DebugRay> {
+        let mut rays = self.server.debug_rays();
+        rays.extend(self.client.debug_rays());
+        rays
     }
 
     fn context(&self, side: Side) -> &Context {

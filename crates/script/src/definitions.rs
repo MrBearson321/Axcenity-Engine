@@ -215,6 +215,34 @@ const VALUE_TYPES: &[ValueType] = &[
         methods: &[],
     },
     ValueType {
+        class: "RaycastResult",
+        doc: "Where `workspace:Raycast` first met a collider, or nil when it missed.",
+        fields: &[
+            Field {
+                name: "Instance",
+                ty: "Instance",
+                doc: "The Part, MeshPart or Terrain the ray hit.",
+            },
+            Field {
+                name: "Position",
+                ty: "Vector3",
+                doc: "The point of contact, in studs.",
+            },
+            Field {
+                name: "Normal",
+                ty: "Vector3",
+                doc: "The surface direction at the hit, pointing out.",
+            },
+            Field {
+                name: "Distance",
+                ty: "number",
+                doc: "How far along the ray the hit is, in studs.",
+            },
+        ],
+        operators: &[],
+        methods: &[],
+    },
+    ValueType {
         class: "Camera",
         doc: "What the player sees through, `workspace.CurrentCamera`. LocalScripts only. Setting Position or Orientation moves the view; the player can still fly on from there.",
         fields: &[
@@ -381,6 +409,15 @@ const CLASS_METHODS: &[(ClassName, Function)] = &[
             doc: "Sends the arguments to every player, where `OnClientEvent` fires.",
             params: &[("...", "any")],
             returns: "nil",
+        },
+    ),
+    (
+        ClassName::Workspace,
+        Function {
+            name: "Raycast",
+            doc: "The first collider along `direction` from `origin`, or nil. The direction's length is how far the ray reaches. Hits sensors (`CanCollide` off) as well as solid parts and terrain. The result has Instance, Position, Normal and Distance.",
+            params: &[("origin", "Vector3"), ("direction", "Vector3")],
+            returns: "RaycastResult?",
         },
     ),
     (
@@ -1853,6 +1890,31 @@ const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "NoiseScale",
         "Studs across the rule's noise patches.",
     ),
+    (
+        ClassName::ThirdPersonController,
+        "Movement",
+        "\"Walk\" or \"Run\". Anything else moves at WalkSpeed. Set from a script or the set-property block.",
+    ),
+    (
+        ClassName::ThirdPersonController,
+        "WalkSpeed",
+        "How fast Movement \"Walk\" moves, in studs a second, on flat ground.",
+    ),
+    (
+        ClassName::ThirdPersonController,
+        "RunSpeed",
+        "How fast Movement \"Run\" moves, in studs a second, on flat ground.",
+    ),
+    (
+        ClassName::ThirdPersonController,
+        "CameraDistance",
+        "How far behind the character the camera sits during Play, in studs.",
+    ),
+    (
+        ClassName::ThirdPersonController,
+        "CameraHeight",
+        "How far above the character's feet the camera looks, in studs.",
+    ),
 ];
 
 /// What each event means, including what its handler receives. A test
@@ -2014,6 +2076,9 @@ fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::TerrainLayer => {
             "Inside a Terrain: one material it's painted with (a tint, texture maps and tiling), and an optional rule that lays it down by height and slope."
+        }
+        ClassName::ThirdPersonController => {
+            "Walks and runs the character model it is parented to, kinematically, and owns the camera during Play. Movement is \"Walk\" or \"Run\". It is not a physics body: tuning its speeds does not change how other parts fall."
         }
     }
 }
@@ -2620,6 +2685,10 @@ mod tests {
             ("RunService", "game:GetService('RunService')"),
             ("InputObject", "input"),
             ("Camera", "workspace.CurrentCamera"),
+            (
+                "RaycastResult",
+                "workspace:Raycast(Vector3.new(0, 10, 0), Vector3.new(0, -20, 0))",
+            ),
         ];
         for value_type in VALUE_TYPES {
             let (_, sample) = samples

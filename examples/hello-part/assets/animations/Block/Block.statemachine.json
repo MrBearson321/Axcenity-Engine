@@ -1,0 +1,19 @@
+{
+  "format_version": 2,
+  "parameters": [],
+  "default_state": "Block",
+  "states": [
+    {
+      "name": "Block",
+      "motion": {
+        "clip": "assets/animations/Block/Block.anim.json"
+      },
+      "speed": 1.0,
+      "position": [
+        -37.0,
+        118.0
+      ]
+    }
+  ],
+  "transitions": []
+}

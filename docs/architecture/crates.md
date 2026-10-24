@@ -12,11 +12,12 @@ Which crate owns what, and what it may depend on. Read this before adding a crat
 | `render` | `wgpu` renderer | nothing engine-internal; takes a draw list |
 | `scene` | Instance tree → draw list (`build_draw_list`), the shared `FlyCamera`, viewport picking (`pick`) | `core`, `assets`, `render` |
 | `physics` | `rapier3d` integration | `core`, `assets` |
-| `script` | Lua 5.4 (`mlua`), sandbox, scheduler, engine API | `audio`, `core` |
+| `character` | kinematic third-person walk and run; queries physics, never the reverse | `core`, `assets`, `physics` |
+| `script` | Lua 5.4 (`mlua`), sandbox, scheduler, engine API | `audio`, `core`, `physics`, `assets` |
 | `ui` | UI Instance layout, CSS cascade (`taffy`) and screen-space draw data | `core`, `render` |
-| `project` | project folder load and save, including CSS and block-script sources, and upgrading older projects (animation files through `anim`) | `anim`, `blocks`, `core`, `terrain` |
-| `player` | runtime shipped with games (binary) | `anim`, `audio`, `core`, `assets`, `render`, `scene`, `physics`, `script`, `project`, `ui` |
-| `editor` | `egui` editor app (binary) | `anim`, `audio`, `blocks`, `core`, `assets`, `physics`, `project`, `render`, `scene`, `script`, `ui` |
+| `project` | project folder load and save, including CSS and block-script sources, upgrading older projects (animation files through `anim`), and the editor's asset check | `anim`, `assets`, `blocks`, `core`, `terrain` |
+| `player` | runtime shipped with games (binary) | `anim`, `audio`, `character`, `core`, `assets`, `render`, `scene`, `physics`, `script`, `project`, `ui` |
+| `editor` | `egui` editor app (binary) | `anim`, `audio`, `blocks`, `character`, `core`, `assets`, `physics`, `project`, `render`, `scene`, `script`, `ui` |
 
 Block scripts are translated to Lua at project load and run through the same `ScriptRuntime` as handwritten scripts. Hosts hand queued sound actions to their `GameAudio` after script steps, and fire `Ended` for the sounds it reports finished; the player owns playback for its lifetime, while editor Play owns a separate `GameAudio` that is dropped on Stop.
 

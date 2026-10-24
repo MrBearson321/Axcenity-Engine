@@ -1,0 +1,53 @@
+{
+  "format_version": 2,
+  "parameters": [],
+  "default_state": "New State",
+  "states": [
+    {
+      "name": "New State",
+      "motion": {
+        "clip": "assets/animations/Walking/Walking.anim.json"
+      },
+      "speed": 1.0,
+      "position": [
+        86.0,
+        105.0
+      ]
+    },
+    {
+      "name": "Fast Run",
+      "motion": {
+        "clip": "assets/animations/Fast Run/Fast Run.anim.json"
+      },
+      "speed": 1.0,
+      "position": [
+        367.0,
+        30.0
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "from": "New State",
+      "to": "Fast Run",
+      "conditions": [],
+      "blend": 0.75,
+      "exit_time": 0.9,
+      "interruptible": true,
+      "priority": 0
+    },
+    {
+      "from": "New State",
+      "to": "Fast Run",
+      "conditions": [],
+      "blend": 0.25,
+      "exit_time": null,
+      "interruptible": false,
+      "priority": 0
+    }
+  ],
+  "any_state_position": [
+    -152.0,
+    111.0
+  ]
+}

@@ -169,6 +169,26 @@ impl EditorApp {
             theme::with_icon(icons::FLASHLIGHT, "Show every light's cone"),
         )
         .on_hover_text("Off, only the selected light (or the part it's in) shows where it shines.");
+        ui.checkbox(
+            &mut self.overlays.colliders,
+            theme::with_icon(icons::CUBE, "Show colliders"),
+        )
+        .on_hover_text("The shape each part collides with, including sensors and terrain.");
+        ui.checkbox(
+            &mut self.overlays.raycasts,
+            theme::with_icon(icons::LINE_SEGMENT, "Show raycasts"),
+        )
+        .on_hover_text("Recent workspace:Raycast calls during Play.");
+        ui.checkbox(
+            &mut self.overlays.bounds,
+            theme::with_icon(icons::SQUARE, "Show bounds"),
+        )
+        .on_hover_text("Each part's Size box.");
+        ui.checkbox(
+            &mut self.overlays.emitters,
+            theme::with_icon(icons::SPEAKER_HIGH, "Show audio emitters"),
+        )
+        .on_hover_text("Where each spatial Sound is heard from.");
         ui.add_space(16.0);
         widgets::section_label(ui, "Ribbon");
         ui.label(

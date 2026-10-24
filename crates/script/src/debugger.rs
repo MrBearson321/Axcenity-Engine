@@ -190,7 +190,9 @@ pub fn leave(lua: &Lua, thread: &Thread) {
             .as_ref()
             .is_some_and(|stop| stop.thread == *thread);
         if at_breakpoint {
-            debugger.held.push_front((thread.clone(), MultiValue::new()));
+            debugger
+                .held
+                .push_front((thread.clone(), MultiValue::new()));
         } else {
             debugger.held.push_back((thread.clone(), MultiValue::new()));
         }
@@ -307,8 +309,7 @@ fn on_line(lua: &Lua, debug: &Debug) -> mlua::Result<VmState> {
         return Ok(VmState::Continue);
     };
     // The common case, checked first: nothing to stop for.
-    if debugger.breakpoints.is_empty() && debugger.paused.is_none() && debugger.holding.is_none()
-    {
+    if debugger.breakpoints.is_empty() && debugger.paused.is_none() && debugger.holding.is_none() {
         return Ok(VmState::Continue);
     }
     let current = lua.current_thread();
@@ -477,11 +478,7 @@ fn describe_table(table: &Table, tostring: Option<&Function>) -> String {
                 next_index += 1;
                 parts.push(value);
             }
-            Value::String(name)
-                if name
-                    .to_str()
-                    .is_ok_and(|name| is_identifier(&name)) =>
-            {
+            Value::String(name) if name.to_str().is_ok_and(|name| is_identifier(&name)) => {
                 parts.push(format!("{} = {value}", name.to_string_lossy()));
             }
             key => parts.push(format!("[{}] = {value}", describe(&key, tostring, false))),

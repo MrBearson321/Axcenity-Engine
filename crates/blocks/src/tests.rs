@@ -966,6 +966,18 @@ fn reporters_switched_to_code_and_back_are_the_same_reporters() {
             target: animator(),
             property: "CurrentState".to_owned(),
         },
+        Expression::Raycast {
+            origin: boxed(Expression::Vector3 {
+                x: 0.0,
+                y: 10.0,
+                z: 0.0,
+            }),
+            direction: boxed(Expression::Vector3 {
+                x: 0.0,
+                y: -20.0,
+                z: 0.0,
+            }),
+        },
     ];
     let body = every_reporter
         .into_iter()

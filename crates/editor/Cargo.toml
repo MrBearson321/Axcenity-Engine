@@ -11,6 +11,7 @@ axcenity-anim.workspace = true
 axcenity-assets.workspace = true
 axcenity-audio.workspace = true
 axcenity-blocks.workspace = true
+axcenity-character.workspace = true
 axcenity-core.workspace = true
 axcenity-physics.workspace = true
 axcenity-project.workspace = true

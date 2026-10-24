@@ -4,16 +4,18 @@ Read this when changing terrain data, brushes, generation, or how a Terrain is s
 
 `TerrainData` lives on the Terrain Instance in `core`. This crate only computes on that data. It does not draw, simulate contacts, or touch the disk: `scene` meshes it, `physics` collides with it, and `project` reads and writes the files.
 
+Foliage is painted onto the terrain the way materials are: a brush, a density, and a choice of item from the Assets panel (a built-in prop or a model). Each stroke scatters instances on the surface (sample XZ, so they follow sculpting). They are not Instances. A stroke can mark them solid so parts rest on them, or leave them visual so parts fall through to the terrain. The Terrain Studio's Foliage tool paints them; click a prop or model in Assets to choose what to scatter. Shift erases the chosen item. One stroke is one undo step, including turning collide off. Painted foliage saves as optional `foliage.json` in the terrain's data folder; a missing file means none. Older paints that named a built-in plant still load.
+
 | Module | What it does |
 |---|---|
 | Placement | World studs and the sample grid |
-| `brush` | Raise, lower, smooth, flatten, sculpt, noise, stamps, and paint, with undo records |
+| `brush` | Raise, lower, smooth, flatten, sculpt, noise, stamps, material paint, and foliage, with undo records |
 | `generate` | Landscapes from settings and a seed, including presets |
 | `erosion` | Water and gravity |
 | `materials` | Layers by height and slope, blended with paint |
 | `mesh` | Chunk meshes at several levels of detail |
 | `raycast` | Where a ray meets the surface |
-| `files` | PNG and JSON codecs |
+| `files` | PNG and JSON codecs (`heights.png`, paint maps, optional `foliage.json`) |
 | `job` | Slow work on another thread, with progress and cancel |
 
 Generators stay deterministic for a seed and `GENERATOR_VERSION`. Saved terrains record both. Bump the version when the output changes. Chunk triangles split cells the same way as collision, so the drawn surface and the collider match.

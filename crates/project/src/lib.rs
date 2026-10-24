@@ -19,12 +19,14 @@
 //! `world_file.rs` reads and writes `world.json`. `migrate.rs` upgrades an
 //! older manifest and keeps the previous files. `terrain_files.rs` reads and
 //! writes Terrains' heightfields. `packed.rs` packs a game folder.
-//! `versions.rs` keeps the copies made on save.
+//! `versions.rs` keeps the copies made on save. `validate.rs` is the
+//! editor's asset check ([`check_assets`]); it does not write the project.
 
 mod migrate;
 mod migrate_animation;
 mod packed;
 mod terrain_files;
+mod validate;
 mod versions;
 mod world_file;
 
@@ -42,6 +44,7 @@ pub use terrain_files::{
     TERRAIN_FOLDER, data_folder, is_safe_folder, keep_terrain_folder, load_terrains,
     new_terrain_folder, save_terrain, terrain_folder_path,
 };
+pub use validate::{Finding, FindingKind, Report, check_assets};
 pub use versions::{Version, list_versions, record_version, restore_version};
 pub use world_file::{WorldError, parse_prefab, parse_world, write_prefab, write_world};
 

@@ -261,6 +261,14 @@ fn rolloff(min: f64, max: f64) -> (f32, f32) {
     (min, max)
 }
 
+/// Where a spatial Sound is heard from, in studs: the nearest ancestor
+/// Part, MeshPart or Terrain, or the Sound's own `Position`.
+pub fn source_position(world: &World, sound: InstanceId) -> Vector3 {
+    let fallback = world.get(sound).map(vector).unwrap_or([0.0, 0.0, 0.0]);
+    let [x, y, z] = emitter_position(world, sound, fallback);
+    Vector3::new(x, y, z)
+}
+
 /// Where a spatial Sound is heard from: the nearest ancestor part, or its
 /// own `Position` when nothing above it has one.
 fn emitter_position(world: &World, sound: InstanceId, fallback: [f32; 3]) -> [f32; 3] {
@@ -941,6 +949,7 @@ mod tests {
 
         world.set_parent(sound, Some(world.workspace())).unwrap();
         assert_eq!(emitter_position(&world, sound, own), [9.0, 9.0, 9.0]);
+        assert_eq!(source_position(&world, sound), Vector3::new(9.0, 9.0, 9.0));
     }
 
     #[test]

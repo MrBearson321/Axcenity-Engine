@@ -9,6 +9,7 @@ Map only. Lua 5.4 and block scripts share one runtime. Open the one file that ma
 - Particles: [scripting/api-particles.md](scripting/api-particles.md)
 - Animator and Animation: [scripting/api-animation.md](scripting/api-animation.md)
 - Transparency, collision, glow, wind, Anchored: [scripting/api-parts.md](scripting/api-parts.md)
+- Third-person walk and run: [scripting/api-character.md](scripting/api-character.md)
 - Error text: [scripting/errors.md](scripting/errors.md)
 - Sandbox: [scripting/sandbox.md](scripting/sandbox.md)
 - `require`: [scripting/modules.md](scripting/modules.md)

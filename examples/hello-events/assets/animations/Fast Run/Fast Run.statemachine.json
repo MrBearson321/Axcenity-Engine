@@ -1,0 +1,19 @@
+{
+  "format_version": 2,
+  "parameters": [],
+  "default_state": "Fast Run",
+  "states": [
+    {
+      "name": "Fast Run",
+      "motion": {
+        "clip": "assets/animations/Fast Run/Fast Run.anim.json"
+      },
+      "speed": 1.0,
+      "position": [
+        0.0,
+        0.0
+      ]
+    }
+  ],
+  "transitions": []
+}

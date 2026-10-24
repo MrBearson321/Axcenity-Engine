@@ -49,7 +49,7 @@ pub struct Section {
 
 /// The groups, in panel order, and which properties go in each. Name and
 /// ClassName come first, under "Data", and aren't in the property map.
-const GROUPS: [(&str, &[&str]); 18] = [
+const GROUPS: [(&str, &[&str]); 19] = [
     (
         "Appearance",
         &[
@@ -235,6 +235,16 @@ const GROUPS: [(&str, &[&str]); 18] = [
             "Brightness",
         ],
     ),
+    (
+        "Movement",
+        &[
+            "Movement",
+            "WalkSpeed",
+            "RunSpeed",
+            "CameraDistance",
+            "CameraHeight",
+        ],
+    ),
 ];
 
 /// True for a property that names a texture file, such as `ColorMap`.
@@ -275,6 +285,7 @@ pub fn sections(instance: &Instance) -> Vec<Section> {
             ),
             "Emitter" | "Particles" => instance.class() == ClassName::ParticleEmitter,
             "Animation" => matches!(instance.class(), ClassName::Animator | ClassName::Animation),
+            "Movement" => instance.class() == ClassName::ThirdPersonController,
             "Appearance" | "Behavior" => instance.class() != ClassName::ParticleEmitter,
             _ => true,
         })

@@ -60,6 +60,13 @@ function UserInputServiceClass:IsKeyDown(key) end
 ---@class InputObject
 ---@field KeyCode EnumItem.KeyCode Which key, such as `Enum.KeyCode.W`.
 
+---Where `workspace:Raycast` first met a collider, or nil when it missed.
+---@class RaycastResult
+---@field Instance Instance The Part, MeshPart or Terrain the ray hit.
+---@field Position Vector3 The point of contact, in studs.
+---@field Normal Vector3 The surface direction at the hit, pointing out.
+---@field Distance number How far along the ray the hit is, in studs.
+
 ---What the player sees through, `workspace.CurrentCamera`. LocalScripts only. Setting Position or Orientation moves the view; the player can still fly on from there.
 ---@class Camera
 ---@field Position Vector3 Where the camera is, in studs.
@@ -180,7 +187,7 @@ function UserInputServiceClass:IsKeyDown(key) end
 ---@field Changed Signal Fires when a property (or `Name` or `Parent`) gets a different value, whether a script, physics or the editor changed it. The handler gets the property's name: `function(property) ... end`.
 ---@field ChildAdded Signal Fires when an Instance is put inside this one. The handler gets the child.
 ---@field ChildRemoved Signal Fires when an Instance is taken out of this one. The handler gets the child.
----@field [string] Workspace|Players|Lighting|ReplicatedStorage|ServerScriptService|StarterPlayer|StarterPlayerScripts|Part|MeshPart|Script|LocalScript|ModuleScript|RemoteEvent|Player|Model|Folder|SurfaceAppearance|ScreenGui|Frame|TextLabel|TextButton|ImageLabel|TextBox|PageLayout|Table|BillboardGui|Sound|PointLight|SpotLight|ParticleEmitter|Animator|Animation|AnimationTrack|Terrain|TerrainLayer A child, found by its name.
+---@field [string] Workspace|Players|Lighting|ReplicatedStorage|ServerScriptService|StarterPlayer|StarterPlayerScripts|Part|MeshPart|Script|LocalScript|ModuleScript|RemoteEvent|Player|Model|Folder|SurfaceAppearance|ScreenGui|Frame|TextLabel|TextButton|ImageLabel|TextBox|PageLayout|Table|BillboardGui|Sound|PointLight|SpotLight|ParticleEmitter|Animator|Animation|AnimationTrack|Terrain|TerrainLayer|ThirdPersonController A child, found by its name.
 local InstanceClass = {}
 
 ---The first child with this name, or nil. With `recursive`, searches every descendant.
@@ -234,6 +241,14 @@ function DataModelClass:GetService(className) end
 ---@class Workspace: Instance
 ---@field GlobalWind Vector3 The wind everywhere, in studs a second. It carries particles from emitters with WindAffectsDrag and pushes unanchored parts with WindAffected.
 ---@field CurrentCamera Camera The camera the player sees through. LocalScripts only.
+local WorkspaceClass = {}
+
+---The first collider along `direction` from `origin`, or nil. The direction's length is how far the ray reaches. Hits sensors (`CanCollide` off) as well as solid parts and terrain. The result has Instance, Position, Normal and Distance.
+---@param origin Vector3
+---@param direction Vector3
+---@return RaycastResult?
+function WorkspaceClass:Raycast(origin, direction) end
+
 
 ---The service with a Player for everyone in the game.
 ---@class Players: Instance
@@ -717,6 +732,14 @@ function AnimationTrackClass:GetMarkerReachedSignal(name) end
 ---@field RuleNoise number 0 to 1: breaks the rule's edges up with noise.
 ---@field NoiseScale number Studs across the rule's noise patches.
 
+---Walks and runs the character model it is parented to, kinematically, and owns the camera during Play. Movement is "Walk" or "Run". It is not a physics body: tuning its speeds does not change how other parts fall.
+---@class ThirdPersonController: Instance
+---@field Movement string "Walk" or "Run". Anything else moves at WalkSpeed. Set from a script or the set-property block.
+---@field WalkSpeed number How fast Movement "Walk" moves, in studs a second, on flat ground.
+---@field RunSpeed number How fast Movement "Run" moves, in studs a second, on flat ground.
+---@field CameraDistance number How far behind the character the camera sits during Play, in studs.
+---@field CameraHeight number How far above the character's feet the camera looks, in studs.
+
 -- Globals -------------------------------------------------------------------
 
 ---The root of the game. Every service is inside it.
@@ -774,6 +797,7 @@ Instance = {}
 ---@overload fun(className: "AnimationTrack"): AnimationTrack
 ---@overload fun(className: "Terrain"): Terrain
 ---@overload fun(className: "TerrainLayer"): TerrainLayer
+---@overload fun(className: "ThirdPersonController"): ThirdPersonController
 function Instance.new(className) end
 
 ---Creates Vector3 values.

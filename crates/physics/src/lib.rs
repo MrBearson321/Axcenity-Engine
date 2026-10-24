@@ -7,7 +7,8 @@
 //!
 //! MeshParts collide as the convex hull of their model, which comes from
 //! the [`Assets`] given to [`Physics::with_assets`]. Terrains collide as
-//! their heightfield, rebuilt only when the terrain changes.
+//! their heightfield, rebuilt only when the terrain changes. Painted
+//! foliage marked to collide is extra solid colliders on that terrain.
 //!
 //! Physics never gets told about changes. Instead, before stepping it compares
 //! every Part with what it last saw (or wrote), so a script that moves,
@@ -19,8 +20,14 @@
 //! The Workspace's `GlobalWind` pushes unanchored parts that have
 //! `WindAffected` on: before each step, each gets a drag force toward the
 //! wind's speed, larger for parts with bigger faces (see [`WIND_DRAG`]).
+//!
+//! [`cast_ray`] and [`debug_colliders`] read the world the same way the
+//! simulation does, without stepping it or writing back.
 
+mod query;
 mod shapes;
+
+pub use query::{ColliderOutline, RayHit, cast_ray, cast_ray_excluding, debug_colliders};
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -92,19 +99,21 @@ pub struct Physics {
 struct Body {
     body: RigidBodyHandle,
     collider: ColliderHandle,
+    /// Extra colliders for colliding foliage, parented to a Terrain.
+    foliage: Vec<ColliderHandle>,
     seen: PartState,
 }
 
 /// The properties of a part that physics cares about.
 #[derive(Clone, PartialEq)]
-struct PartState {
+pub(crate) struct PartState {
     anchored: bool,
     /// False makes the collider a sensor: nothing bounces off it, but
     /// touches are still found.
-    can_collide: bool,
-    shape: Form,
-    size: Vector3,
-    position: Vector3,
+    pub(crate) can_collide: bool,
+    pub(crate) shape: Form,
+    pub(crate) size: Vector3,
+    pub(crate) position: Vector3,
     orientation: Vector3,
     /// True if the Workspace's wind pushes the part.
     wind_affected: bool,
@@ -114,11 +123,11 @@ impl PartState {
     /// Reads a Part or MeshPart, or `None` for other classes. A part with a
     /// NaN or infinite Position, Orientation or Size also gives `None`, so
     /// it is left out of physics instead of breaking the simulation.
-    fn read(world: &World, id: InstanceId, assets: &Assets) -> Option<Self> {
+    pub(crate) fn read(world: &World, id: InstanceId, assets: &Assets) -> Option<Self> {
         let instance = world.get(id)?;
         let vector = |name| instance.property(name).and_then(Value::as_vector3);
         if instance.class() == ClassName::Terrain {
-            return Self::read_terrain(world, id, instance);
+            return Self::read_terrain(world, id, instance, assets);
         }
         let anchored = match instance.property("Anchored") {
             Some(Value::Bool(anchored)) => *anchored,
@@ -150,13 +159,21 @@ impl PartState {
     }
 
     /// A Terrain: always anchored, never turned, colliding as its heightfield.
-    fn read_terrain(world: &World, id: InstanceId, instance: &Instance) -> Option<Self> {
+    fn read_terrain(
+        world: &World,
+        id: InstanceId,
+        instance: &Instance,
+        assets: &Assets,
+    ) -> Option<Self> {
         let vector = |name| instance.property(name).and_then(Value::as_vector3);
         let data = world.terrain(id)?.clone();
         let state = Self {
             anchored: true,
             can_collide: instance.property("CanCollide").and_then(Value::as_bool) != Some(false),
-            shape: Form::Terrain(shapes::TerrainShape { data }),
+            shape: Form::Terrain(shapes::TerrainShape {
+                foliage_models: shapes::colliding_model_keys(&data, assets),
+                data,
+            }),
             size: vector("Size")?,
             position: vector("Position")?,
             orientation: Vector3::default(),
@@ -168,7 +185,7 @@ impl PartState {
         finite.then_some(state)
     }
 
-    fn pose(&self) -> Pose {
+    pub(crate) fn pose(&self) -> Pose {
         Pose::from_parts(
             to_vec3(self.position),
             orientation_to_quat(self.orientation),
@@ -271,6 +288,9 @@ impl Physics {
                 // `true` also removes the body's collider.
                 self.rapier.remove_body_with_colliders(part.body, true);
                 self.owners.remove(&part.collider);
+                for handle in part.foliage {
+                    self.owners.remove(&handle);
+                }
                 anything_changed = true;
             }
         }
@@ -281,15 +301,20 @@ impl Physics {
         for (id, state) in current {
             match self.parts.get(&id) {
                 None => {
-                    let part = self.add_body(state);
+                    let mut part = self.add_body(state);
                     self.owners.insert(part.collider, id);
+                    self.attach_foliage(id, &mut part);
                     self.parts.insert(id, part);
                 }
                 Some(part) if part.seen != state => {
                     let mut part = self.parts.remove(&id).expect("just found");
                     self.owners.remove(&part.collider);
+                    for handle in &part.foliage {
+                        self.owners.remove(handle);
+                    }
                     self.apply_change(&mut part, state);
                     self.owners.insert(part.collider, id);
+                    self.attach_foliage(id, &mut part);
                     self.parts.insert(id, part);
                     anything_changed = true;
                 }
@@ -320,7 +345,38 @@ impl Physics {
         Body {
             body,
             collider,
+            foliage: Vec::new(),
             seen: state,
+        }
+    }
+
+    /// Parents colliding foliage colliders to a terrain body, replacing any
+    /// that were there. Other classes have none.
+    fn attach_foliage(&mut self, id: InstanceId, part: &mut Body) {
+        for handle in part.foliage.drain(..) {
+            let rapier = &mut self.rapier;
+            rapier.colliders.remove(
+                handle,
+                &mut rapier.islands,
+                &mut rapier.bodies,
+                &mut rapier.soft_bodies,
+                true,
+            );
+            self.owners.remove(&handle);
+        }
+        let Form::Terrain(terrain) = &part.seen.shape else {
+            return;
+        };
+        let colliders =
+            shapes::foliage_colliders(&terrain.data, to_vec3(part.seen.size), &self.assets);
+        for collider in colliders {
+            let handle = self.rapier.colliders.insert_with_parent(
+                collider,
+                part.body,
+                &mut self.rapier.bodies,
+            );
+            self.owners.insert(handle, id);
+            part.foliage.push(handle);
         }
     }
 
@@ -475,11 +531,11 @@ fn global_wind(world: &World) -> Vec3 {
         .unwrap_or(Vec3::ZERO)
 }
 
-fn to_vec3(v: Vector3) -> Vec3 {
+pub(crate) fn to_vec3(v: Vector3) -> Vec3 {
     Vec3::new(v.x, v.y, v.z)
 }
 
-fn to_vector3(v: Vec3) -> Vector3 {
+pub(crate) fn to_vector3(v: Vec3) -> Vector3 {
     Vector3::new(v.x, v.y, v.z)
 }
 

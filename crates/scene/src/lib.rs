@@ -13,6 +13,7 @@
 
 mod camera;
 mod draw_list;
+mod foliage;
 mod orientation;
 mod particles;
 mod pick;
@@ -24,6 +25,7 @@ pub use draw_list::{
     LightMarker, Poses, attach_ui_textures, build_draw_list, build_draw_list_posed,
     build_draw_list_with_ui, build_draw_list_with_ui_interaction, light_markers,
 };
+pub use foliage::brush_color as foliage_brush_color;
 pub use orientation::{orientation_from_rotation, rotation_from_orientation};
 pub use particles::{MAX_PER_EMITTER, Particles, built_in as built_in_particle};
 pub use pick::{

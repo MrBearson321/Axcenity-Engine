@@ -1017,4 +1017,34 @@ mod tests {
             Err(WorldError::InvalidProperty { .. })
         ));
     }
+
+    #[test]
+    fn a_third_person_controller_saves_and_loads() {
+        let mut world = World::new();
+        let controller = world.create(ClassName::ThirdPersonController).unwrap();
+        world
+            .set_parent(controller, Some(world.workspace()))
+            .unwrap();
+        world
+            .set_property(controller, "Movement", Value::String("Run".to_owned()))
+            .unwrap();
+        world
+            .set_property(controller, "WalkSpeed", Value::Number(12.0))
+            .unwrap();
+        world
+            .set_property(controller, "RunSpeed", Value::Number(40.0))
+            .unwrap();
+        let reloaded = parse_world(&write_world(&world)).unwrap();
+        let id = reloaded
+            .find_first_child(reloaded.workspace(), "ThirdPersonController")
+            .unwrap();
+        let saved = reloaded.get(id).unwrap();
+        assert_eq!(
+            saved.property("Movement"),
+            Some(&Value::String("Run".to_owned()))
+        );
+        assert_eq!(saved.property("WalkSpeed"), Some(&Value::Number(12.0)));
+        assert_eq!(saved.property("RunSpeed"), Some(&Value::Number(40.0)));
+        assert_eq!(saved.property("CameraDistance"), Some(&Value::Number(12.0)));
+    }
 }

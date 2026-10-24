@@ -60,7 +60,10 @@ fn a_breakpoint_pauses_before_its_line_and_continue_runs_on() {
     );
     assert_eq!(lines(&mut runtime), ["before"]);
     let pause = runtime.pause().expect("paused at line 4");
-    assert_eq!((pause.path.as_str(), pause.line), ("scripts/test.server.lua", 4));
+    assert_eq!(
+        (pause.path.as_str(), pause.line),
+        ("scripts/test.server.lua", 4)
+    );
     assert_eq!(pause.frames[0].function, None, "the script's main code");
     assert_eq!(local(&pause, "count"), "3");
     assert_eq!(local(&pause, "name"), "\"door\"");
@@ -152,7 +155,12 @@ fn while_paused_other_scripts_and_events_wait_then_run_in_order() {
         "scripts/test.server.lua",
         "print('a')",
     );
-    start(&mut runtime, &mut world, "scripts/b.server.lua", "print('b')");
+    start(
+        &mut runtime,
+        &mut world,
+        "scripts/b.server.lua",
+        "print('b')",
+    );
     runtime.run_command(&mut world, "print('command')").unwrap();
     assert!(lines(&mut runtime).is_empty(), "nothing runs while paused");
     runtime.continue_from_pause(&mut world);
@@ -189,7 +197,8 @@ fn a_breakpoint_in_a_scripts_own_coroutine_is_passed_and_reported_once() {
     let output = lines(&mut runtime);
     assert_eq!(output.len(), 3, "{output:?}");
     assert!(
-        output[0].starts_with("error: scripts/test.server.lua:2: Play can't pause at this breakpoint"),
+        output[0]
+            .starts_with("error: scripts/test.server.lua:2: Play can't pause at this breakpoint"),
         "{output:?}"
     );
     assert_eq!(output[1..], ["1", "2"]);
@@ -209,7 +218,11 @@ fn a_breakpoint_where_lua_cant_yield_is_passed() {
     assert_eq!(runtime.pause().map(|pause| pause.line), Some(2));
     runtime.continue_from_pause(&mut world);
     let output = lines(&mut runtime);
-    assert_eq!(output.last().map(String::as_str), Some("done"), "{output:?}");
+    assert_eq!(
+        output.last().map(String::as_str),
+        Some("done"),
+        "{output:?}"
+    );
     assert!(output.contains(&"1".to_owned()), "{output:?}");
     assert_eq!(runtime.pause(), None);
 }

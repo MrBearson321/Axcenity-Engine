@@ -253,9 +253,10 @@ fn reporter_category(expression: &Expression) -> Category {
     match expression {
         Expression::Variable { .. } => Category::Variables,
         Expression::Property { property, .. } if property == "CurrentState" => Category::Animation,
-        Expression::Property { .. } | Expression::TouchingPart | Expression::KeyDown { .. } => {
-            Category::Sensing
-        }
+        Expression::Property { .. }
+        | Expression::TouchingPart
+        | Expression::KeyDown { .. }
+        | Expression::Raycast { .. } => Category::Sensing,
         Expression::AnimatorBool { .. } | Expression::AnimatorNumber { .. } => Category::Animation,
         Expression::Code { .. } => Category::Lua,
         _ => Category::Operators,
@@ -762,6 +763,12 @@ fn reporter_parts<'a>(expression: &'a mut Expression, objects: &[ObjectInfo]) ->
                 Object(target, Filter::Any),
             ]
         }
+        Expression::Raycast { origin, direction } => vec![
+            label("raycast from"),
+            Slot(origin, SlotKind::Vector),
+            label("along"),
+            Slot(direction, SlotKind::Vector),
+        ],
         Expression::TouchingPart => vec![label("touching part")],
         Expression::KeyDown { key } => vec![label("key"), Key(key), label("pressed?")],
         Expression::AnimatorBool {
@@ -2417,6 +2424,10 @@ fn palette(
             R(Expression::Property {
                 target: part,
                 property: "Position".to_owned(),
+            }),
+            R(Expression::Raycast {
+                origin: Box::new(vector(0.0, 10.0, 0.0)),
+                direction: Box::new(vector(0.0, -20.0, 0.0)),
             }),
         ],
         Category::Animation => {

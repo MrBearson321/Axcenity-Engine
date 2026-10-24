@@ -46,6 +46,7 @@ use eframe::egui;
 use crate::angular;
 use crate::animation::{AnimationStudio, StudioAction};
 use crate::asset_browser::{AssetBrowser, AssetPayload, BrowserAction};
+use crate::asset_check::AssetCheck;
 use crate::autocomplete;
 use crate::block_editor;
 use crate::build_tools::{self, BuildSettings, PanelScene, ToolAction};
@@ -74,7 +75,9 @@ use crate::thumbnail;
 use crate::toast::Toasts;
 use crate::tree::{self, Insertable};
 use crate::ui_handles::{CssEdit, UiDragEdit, apply_css_edits};
-use crate::viewport::{self, DragEdit, DragKind, Viewport, ViewportOutput, ViewportScene};
+use crate::viewport::{
+    self, DragEdit, DragKind, OverlayToggles, Viewport, ViewportOutput, ViewportScene,
+};
 use crate::watcher::Watcher;
 use crate::widgets;
 use crate::window_frame;
@@ -184,6 +187,8 @@ pub struct EditorApp {
     game_keys: GameKeys,
     /// What Play's frames cost, for the Profiler panel.
     profiler: Profiler,
+    /// The last asset check, for the Asset Check panel.
+    asset_check: AssetCheck,
     /// Each script's uses of APIs from the other side, for the warning badges.
     warnings: WarningCache,
     /// The open script tabs, and whether the viewport or a script is shown.
@@ -235,6 +240,9 @@ pub struct EditorApp {
     /// View > Light Cones: show every light's reach in the viewport, not
     /// just the selected one's. Saved between runs.
     light_cones: bool,
+    /// View overlay toggles (colliders, raycasts, bounds, emitters). Saved
+    /// between runs. The player never draws them.
+    overlays: OverlayToggles,
 }
 
 /// Ribbon buttons that act on the whole app, noted while the ribbon is
@@ -244,6 +252,7 @@ struct RibbonClicks {
     insert: Option<Insertable>,
     insert_script: Option<ClassName>,
     import: bool,
+    check_assets: bool,
     play: bool,
     stop: bool,
 }
@@ -283,6 +292,7 @@ impl egui_dock::TabViewer for DockViewer<'_> {
             Pane::Animation => self.app.animation_pane(ui, self.render_state),
             Pane::Terrain => self.app.terrain_pane(ui),
             Pane::Profiler => self.app.profiler.show(ui),
+            Pane::AssetCheck => self.app.asset_check_pane(ui),
             Pane::Script(id) => self.app.script_pane(ui, *id),
         }
     }
@@ -356,6 +366,10 @@ const RECENT_KEY: &str = "recent projects";
 const LAYOUT_KEY: &str = "panel layout";
 const RIBBON_TABS_KEY: &str = "ribbon tabs";
 const LIGHT_CONES_KEY: &str = "light cones";
+const OVERLAY_COLLIDERS_KEY: &str = "overlay colliders";
+const OVERLAY_RAYCASTS_KEY: &str = "overlay raycasts";
+const OVERLAY_BOUNDS_KEY: &str = "overlay bounds";
+const OVERLAY_EMITTERS_KEY: &str = "overlay emitters";
 const CONSOLE_HISTORY_KEY: &str = "console history";
 /// eframe's own key for the window's size and position. eframe still reads
 /// it at startup with `persist_window` off, so `save` blanks it.
@@ -470,6 +484,7 @@ impl EditorApp {
             ui_warnings: Vec::new(),
             last_frame: None,
             profiler: Profiler::default(),
+            asset_check: AssetCheck::default(),
             tabs: ScriptTabs::default(),
             confirm_delete: None,
             importing: None,
@@ -495,6 +510,7 @@ impl EditorApp {
             layout: Layout::default(),
             ribbon_tabs: RibbonTabs::default(),
             light_cones: false,
+            overlays: OverlayToggles::default(),
         };
         if let Some(folder) = folder {
             app.open(folder);
@@ -535,6 +551,13 @@ impl EditorApp {
                 self.ribbon_tabs = RibbonTabs::from_text(&text);
             }
             self.light_cones = storage.get_string(LIGHT_CONES_KEY).as_deref() == Some("on");
+            self.overlays.colliders =
+                storage.get_string(OVERLAY_COLLIDERS_KEY).as_deref() == Some("on");
+            self.overlays.raycasts =
+                storage.get_string(OVERLAY_RAYCASTS_KEY).as_deref() == Some("on");
+            self.overlays.bounds = storage.get_string(OVERLAY_BOUNDS_KEY).as_deref() == Some("on");
+            self.overlays.emitters =
+                storage.get_string(OVERLAY_EMITTERS_KEY).as_deref() == Some("on");
             if let Some(text) = storage.get_string(CONSOLE_HISTORY_KEY) {
                 self.console.load_history(&text);
             }
@@ -594,6 +617,20 @@ impl eframe::App for EditorApp {
         storage.set_string(RIBBON_TABS_KEY, self.ribbon_tabs.to_text());
         let cones = if self.light_cones { "on" } else { "off" };
         storage.set_string(LIGHT_CONES_KEY, cones.to_owned());
+        let flag = |on| if on { "on" } else { "off" };
+        storage.set_string(
+            OVERLAY_COLLIDERS_KEY,
+            flag(self.overlays.colliders).to_owned(),
+        );
+        storage.set_string(
+            OVERLAY_RAYCASTS_KEY,
+            flag(self.overlays.raycasts).to_owned(),
+        );
+        storage.set_string(OVERLAY_BOUNDS_KEY, flag(self.overlays.bounds).to_owned());
+        storage.set_string(
+            OVERLAY_EMITTERS_KEY,
+            flag(self.overlays.emitters).to_owned(),
+        );
         storage.set_string(CONSOLE_HISTORY_KEY, self.console.history_text());
         storage.set_string(RECENT_KEY, recent.join("\n"));
         // An empty value doesn't parse, so the next start uses the default size.
@@ -1243,6 +1280,9 @@ mod tests {
                             Pane::Animation => app.animation_pane(ui, None),
                             Pane::Terrain => app.terrain_pane(ui),
                             Pane::Profiler => app.profiler.show(ui),
+                            Pane::AssetCheck => {
+                                let _ = app.asset_check.show(ui, app.project.is_some());
+                            }
                             Pane::Scene | Pane::Script(_) => {}
                         }
                         fit = Some((ui.min_rect(), room));

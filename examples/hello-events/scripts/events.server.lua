@@ -1,11 +1,12 @@
+local RunService = game:GetService("RunService")
+
 -- Events that react to changes. Press Play, then try changing the Lamp's
 -- Color or Name in the Properties panel: this script notices.
-
-local RunService = game:GetService("RunService")
 
 -- Heartbeat fires once every frame, after physics, with the frame's length
 -- in seconds. Turning 90 degrees a second looks the same at any frame rate.
 local spinner = workspace.Spinner
+
 RunService.Heartbeat:Connect(function(deltaTime)
     spinner.Orientation = spinner.Orientation + Vector3.new(0, 90 * deltaTime, 0)
 end)

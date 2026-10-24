@@ -615,6 +615,21 @@ fn surface_material(file: &ModelMaterial, appearance: &Instance, assets: &Assets
     material
 }
 
+/// A model's primitives at `transform`, using the file's own materials.
+pub(crate) fn push_model(model: &Arc<Model>, transform: Mat4, items: &mut Vec<DrawItem>) {
+    for (index, primitive) in model.primitives.iter().enumerate() {
+        items.push(DrawItem {
+            shape: Shape::Mesh(Arc::new(ModelMesh {
+                model: model.clone(),
+                index,
+            })),
+            transform,
+            material: model_material(&primitive.material),
+            casts_shadow: true,
+        });
+    }
+}
+
 /// glTF's material values, as the renderer takes them.
 fn model_material(material: &ModelMaterial) -> Material {
     let [r, g, b, alpha] = material.base_color;

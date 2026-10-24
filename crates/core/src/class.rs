@@ -98,10 +98,14 @@ pub enum ClassName {
     /// Inside a Terrain: one material it can be painted with, and the rule
     /// that lays it down by itself (by height and slope).
     TerrainLayer,
+    /// Walks and runs a character kinematically during Play, and owns the
+    /// camera. Parented to the character Model, or to a Part. Not a physics
+    /// body.
+    ThirdPersonController,
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 36] = [
+    pub const ALL: [ClassName; 37] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -138,6 +142,7 @@ impl ClassName {
         ClassName::AnimationTrack,
         ClassName::Terrain,
         ClassName::TerrainLayer,
+        ClassName::ThirdPersonController,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -178,6 +183,7 @@ impl ClassName {
             ClassName::AnimationTrack => "AnimationTrack",
             ClassName::Terrain => "Terrain",
             ClassName::TerrainLayer => "TerrainLayer",
+            ClassName::ThirdPersonController => "ThirdPersonController",
         }
     }
 
@@ -601,6 +607,17 @@ impl ClassName {
                 ("RuleNoise", Value::Number(0.3)),
                 ("NoiseScale", Value::Number(24.0)),
             ],
+            ClassName::ThirdPersonController => vec![
+                // "Walk" or "Run". Anything else moves at WalkSpeed.
+                ("Movement", Value::String("Walk".to_owned())),
+                // Studs a second across flat ground.
+                ("WalkSpeed", Value::Number(16.0)),
+                ("RunSpeed", Value::Number(32.0)),
+                // How far behind the character the camera sits, in studs.
+                ("CameraDistance", Value::Number(12.0)),
+                // How far above the character's feet the camera looks, in studs.
+                ("CameraHeight", Value::Number(4.0)),
+            ],
             ClassName::SurfaceAppearance => {
                 let map = |name| (name, Value::String(String::new()));
                 let channel = |name, channel| (name, Value::TextureChannel(channel));
@@ -666,7 +683,8 @@ impl ClassName {
             | ClassName::SpotLight
             | ClassName::ParticleEmitter
             | ClassName::Terrain
-            | ClassName::TerrainLayer => &[],
+            | ClassName::TerrainLayer
+            | ClassName::ThirdPersonController => &[],
             // Fires when a sound that isn't looped plays to its end.
             ClassName::Sound => &["Ended"],
             // `StateChanged` fires with the new state's name and the old

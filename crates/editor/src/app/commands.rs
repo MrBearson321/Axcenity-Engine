@@ -69,6 +69,7 @@ impl EditorApp {
                     self.output.info("Saved.");
                 }
             }
+            Command::Check => self.run_asset_check(),
             Command::Lua(source) => self.run_lua(source),
         }
     }

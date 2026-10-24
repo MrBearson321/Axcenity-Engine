@@ -104,12 +104,21 @@ pub fn save_terrain(folder: &Path, data_folder: &str, data: &TerrainData) -> Res
         )));
     }
     fs::create_dir_all(&disk).map_err(SaveError::new(&disk))?;
-    for (name, bytes) in files::encode(data) {
+    let encoded = files::encode(data);
+    for (name, bytes) in &encoded {
         let path = disk.join(name);
         let mut temporary = path.as_os_str().to_owned();
         temporary.push(".saving");
-        fs::write(&temporary, &bytes).map_err(SaveError::new(&path))?;
+        fs::write(&temporary, bytes).map_err(SaveError::new(&path))?;
         fs::rename(&temporary, &path).map_err(SaveError::new(&path))?;
+    }
+    // Foliage is an optional extra file: drop a leftover when this
+    // landscape has none, so undoing every plant and saving clears it.
+    if !encoded.iter().any(|(name, _)| *name == files::FOLIAGE_FILE) {
+        let leftover = disk.join(files::FOLIAGE_FILE);
+        if leftover.exists() {
+            fs::remove_file(&leftover).map_err(SaveError::new(&leftover))?;
+        }
     }
     Ok(())
 }

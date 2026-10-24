@@ -174,6 +174,15 @@ impl FlyCamera {
         )
     }
 
+    /// A camera at `position` looking the way `orientation` says, in the
+    /// same terms as [`Self::view`]. Used for a character controller's
+    /// follow camera, which is not the fly camera.
+    pub fn from_view(position: Vector3, orientation: Vector3) -> Self {
+        let mut camera = Self::looking_at(Vec3::ZERO, Vec3::NEG_Z);
+        camera.set_view(position, orientation);
+        camera
+    }
+
     /// Moves the camera to `position`, looking the way `orientation` says
     /// (in the same terms as [`Self::view`]; Z is ignored). The pitch stops
     /// just short of straight up or down, like mouse look.

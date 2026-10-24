@@ -1,0 +1,22 @@
+{
+  "blocks": [
+    {
+      "id": 4,
+      "kind": {
+        "type": "when_started",
+        "body": [
+          {
+            "id": 3,
+            "kind": {
+              "type": "print",
+              "value": {
+                "type": "text",
+                "value": "Hello world!"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

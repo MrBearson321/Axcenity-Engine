@@ -16,7 +16,7 @@ use egui::text::{CCursor, CCursorRange};
 use crate::theme::{self, icons};
 
 /// The built-in commands, with what `help` says about each.
-pub const BUILT_INS: [(&str, &str); 8] = [
+pub const BUILT_INS: [(&str, &str); 9] = [
     ("help", "help — list these commands"),
     ("clear", "clear — empty the log"),
     (
@@ -35,6 +35,11 @@ pub const BUILT_INS: [(&str, &str); 8] = [
     ("play", "play — start Play"),
     ("stop", "stop — stop Play"),
     ("save", "save — save the project"),
+    (
+        "check",
+        "check — scan the project for missing files, invalid references, \
+         import failures, and broken dependencies",
+    ),
 ];
 
 /// The most commands the history keeps.
@@ -52,6 +57,7 @@ pub enum Command<'a> {
     Play,
     Stop,
     Save,
+    Check,
     /// Anything else.
     Lua(&'a str),
 }
@@ -76,6 +82,7 @@ pub fn parse(input: &str) -> Command<'_> {
         ("play", true) => Command::Play,
         ("stop", true) => Command::Stop,
         ("save", true) => Command::Save,
+        ("check", true) => Command::Check,
         ("select", _) => Command::Select(rest),
         ("find", _) => Command::Find(rest),
         ("open", _) => Command::Open(rest),
@@ -471,6 +478,7 @@ mod tests {
         );
         assert_eq!(parse("open Spinner"), Command::Open("Spinner"));
         assert_eq!(parse("find"), Command::Find(""));
+        assert_eq!(parse("check"), Command::Check);
         for lua in [
             "clear = 5",
             "select(2, 'a', 'b')",

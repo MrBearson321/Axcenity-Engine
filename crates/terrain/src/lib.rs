@@ -5,7 +5,7 @@
 //!
 //! - [`Placement`] maps between world studs and the sample grid.
 //! - [`brush`] sculpts and paints: raise, lower, smooth, flatten, sculpt,
-//!   noise, stamps and material paint, with undo records.
+//!   noise, stamps, material paint and foliage, with undo records.
 //! - [`generate`] makes landscapes from settings and a seed, with presets.
 //! - [`erosion`] wears them down with water and with gravity.
 //! - [`materials`] lays layers down by height and slope, blended with paint.
@@ -28,8 +28,9 @@ use axcenity_core::{ClassName, Instance, TerrainData, Value};
 use glam::{Vec2, Vec3};
 
 pub use axcenity_core::{
-    CHUNK_CELLS, MAX_TERRAIN_LAYERS, MAX_TERRAIN_SAMPLES, MIN_TERRAIN_SAMPLES, PaintWeights,
-    SampleRect, TerrainRegion,
+    CHUNK_CELLS, FoliageInstance, FoliagePlant, FoliageProp, FoliageSource, MAX_FOLIAGE_INSTANCES,
+    MAX_TERRAIN_LAYERS, MAX_TERRAIN_SAMPLES, MIN_TERRAIN_SAMPLES, PaintWeights, SampleRect,
+    TerrainRegion,
 };
 
 /// Where a Terrain is: `position` is the middle of its footprint at the

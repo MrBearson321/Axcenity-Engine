@@ -79,6 +79,31 @@ impl EditorApp {
             self.insert_named(what, lamp, what.class().as_str(), Vec::new());
             return;
         }
+        if what == Insertable::ThirdPersonController {
+            let near = near.or(self.selected);
+            let parent = tree::insert_parent(&self.world, near, what);
+            let has_body = self.world.get(parent).is_some_and(|instance| {
+                matches!(
+                    instance.class(),
+                    ClassName::Model | ClassName::Part | ClassName::MeshPart
+                )
+            });
+            if !has_body {
+                self.insert_named(Insertable::Model, near, "Character", Vec::new());
+                let model = self.selected;
+                self.insert_named(
+                    Insertable::Part(PartType::Block),
+                    model,
+                    "Body",
+                    vec![
+                        ("Size", Value::Vector3(Vector3::new(2.0, 5.0, 1.0))),
+                        ("Color", Value::Color3(Color3::new(0.29, 0.45, 0.78))),
+                    ],
+                );
+                self.insert_named(what, model, "ThirdPersonController", Vec::new());
+                return;
+            }
+        }
         if what == Insertable::ParticleEmitter
             && !tree::light_has_part_parent(&self.world, near.or(self.selected))
         {

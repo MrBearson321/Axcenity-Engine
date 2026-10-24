@@ -1411,3 +1411,43 @@ fn animation_play_still_works_and_says_once_what_the_new_way_is() {
     assert!(output[0].contains("LoadAnimation"), "{}", output[0]);
     assert!(world.property_animation(animation).unwrap().play);
 }
+
+#[test]
+fn workspace_raycast_hits_a_part_including_a_sensor_and_does_not_move_it() {
+    let (mut world, block) = world_with_block();
+    let before = property(&world, block, "Position");
+    let output = output_of(
+        &mut world,
+        r#"
+        local hit = workspace:Raycast(Vector3.new(0, 10, 0), Vector3.new(0, -20, 0))
+        print(hit.Instance.Name, hit.Distance, hit.Position.Y, hit.Normal.Y)
+        local miss = workspace:Raycast(Vector3.new(100, 10, 0), Vector3.new(0, -20, 0))
+        print(miss)
+        workspace.Block.CanCollide = false
+        local sensor = workspace:Raycast(Vector3.new(0, 10, 0), Vector3.new(0, -20, 0))
+        print(sensor.Instance.Name)
+        "#,
+    );
+    assert_eq!(output.len(), 3, "{output:?}");
+    assert!(output[0].starts_with("Block\t"), "{}", output[0]);
+    assert_eq!(output[1], "nil");
+    assert_eq!(output[2], "Block");
+    assert_eq!(property(&world, block, "Position"), before);
+}
+
+#[test]
+fn workspace_raycast_keeps_the_last_casts_for_the_editor_overlay() {
+    let (mut world, _) = world_with_block();
+    let mut runtime = ScriptRuntime::new();
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/test.server.lua",
+        "workspace:Raycast(Vector3.new(0, 10, 0), Vector3.new(0, -20, 0))
+         workspace:Raycast(Vector3.new(100, 10, 0), Vector3.new(0, -20, 0))",
+    );
+    let rays = runtime.debug_rays();
+    assert_eq!(rays.len(), 2);
+    assert!(rays[0].hit.is_some());
+    assert!(rays[1].hit.is_none());
+}

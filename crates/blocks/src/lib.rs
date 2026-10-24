@@ -601,6 +601,11 @@ pub enum Expression {
         target: String,
         property: String,
     },
+    /// `workspace:Raycast(origin, direction)`.
+    Raycast {
+        origin: Box<Expression>,
+        direction: Box<Expression>,
+    },
     /// The part that touched, inside "when touched".
     TouchingPart,
     /// Whether a key is held down. Client only.
@@ -663,6 +668,7 @@ impl Expression {
             | Expression::Compare { left, right, .. }
             | Expression::Logic { left, right, .. } => vec![left, right],
             Expression::Random { min, max } => vec![min, max],
+            Expression::Raycast { origin, direction } => vec![origin, direction],
             Expression::Function { value, .. } | Expression::Not { value } => vec![value],
             _ => Vec::new(),
         }
@@ -676,6 +682,7 @@ impl Expression {
             | Expression::Compare { left, right, .. }
             | Expression::Logic { left, right, .. } => vec![left, right],
             Expression::Random { min, max } => vec![min, max],
+            Expression::Raycast { origin, direction } => vec![origin, direction],
             Expression::Function { value, .. } | Expression::Not { value } => vec![value],
             _ => Vec::new(),
         }
@@ -1375,6 +1382,13 @@ impl Writer {
                     return Err(TranslateError::InvalidProperty(property.clone()));
                 }
                 format!("{}.{property}", target(t)?)
+            }
+            Expression::Raycast { origin, direction } => {
+                format!(
+                    "workspace:Raycast({}, {})",
+                    self.expression(origin)?,
+                    self.expression(direction)?
+                )
             }
             Expression::TouchingPart if self.in_touched => "otherPart".to_owned(),
             Expression::TouchingPart => return Err(TranslateError::TouchingPartOutsideTouched),

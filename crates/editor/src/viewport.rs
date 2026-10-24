@@ -28,20 +28,24 @@
 //! as always (right-drag, Alt+left-drag, the wheel, WASD).
 //!
 //! During Play there's no tool: the camera and selecting still work, but
-//! nothing can be dragged.
+//! nothing can be dragged. View > Overlays can draw collider wireframes,
+//! recent script raycasts, Size boxes and spatial-sound markers on top;
+//! they do not change the world, and the player never draws them.
 
 use std::time::Instant;
 
 use axcenity_assets::Assets;
-use axcenity_core::{InstanceId, Value, World};
+use axcenity_core::{ClassName, Instance, InstanceId, Value, World};
 use axcenity_render::TextureRenderer;
-use axcenity_render::glam::Vec3;
+use axcenity_render::glam::{Quat, Vec3};
 use axcenity_render::wgpu;
 use axcenity_scene::{FlyCamera, LightMarker, MoveKeys, Particles, TerrainCache};
+use axcenity_script::DebugRay;
 use axcenity_ui::{Stylesheet, UiLayout, UiRect};
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 
+use crate::angular;
 use crate::gizmo::{self, Drag, Handle, Modes, PartValues, Pose, Snap, Tool};
 use crate::placing::PlaceDrag;
 use crate::profiler::RenderCost;
@@ -72,6 +76,19 @@ const SELECTION_WIDTH: f32 = 2.0;
 const PREVIEW_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 196, 64);
 /// A light's icon, in points, the same size however far away the light is.
 const LIGHT_ICON_RADIUS: f32 = 13.0;
+/// Hide terrain collider chunks farther than this from the camera.
+const TERRAIN_OVERLAY_DISTANCE: f32 = 200.0;
+/// Collider wireframes: solid (green) and sensors (amber).
+const COLLIDER_COLOR: egui::Color32 = egui::Color32::from_rgb(80, 220, 120);
+const SENSOR_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 180, 60);
+/// Size boxes, distinct from the collider shape.
+const BOUNDS_COLOR: egui::Color32 = egui::Color32::from_rgb(180, 120, 255);
+/// Script raycasts and the point they hit.
+const RAY_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 220, 80);
+const RAY_HIT_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 90, 90);
+/// Spatial sound sources.
+const EMITTER_COLOR: egui::Color32 = egui::Color32::from_rgb(90, 200, 255);
+const EMITTER_ICON_RADIUS: f32 = 11.0;
 
 /// A left click in the viewport, with the UI element or part under the
 /// mouse (`None` for empty space, which clears the selection). Starting to
@@ -204,10 +221,32 @@ pub struct ViewportScene<'a> {
     pub focused_text: Option<InstanceId>,
     /// Show every light's reach, not just the selected ones' (View > Light Cones).
     pub light_cones: bool,
+    /// Editor-only visual-debug overlays (View > Overlays).
+    pub overlays: OverlayToggles,
+    /// Recent `workspace:Raycast` calls during Play, for the raycast overlay.
+    pub debug_rays: &'a [DebugRay],
     /// Animated MeshParts' poses during Play; `None` draws every model still.
     pub poses: Option<&'a axcenity_scene::Poses>,
     /// A Terrain Studio brush, which takes the left button while it's on.
     pub terrain_brush: Option<TerrainBrush>,
+    /// The third-person follow camera during Play, when a controller owns it.
+    /// The fly camera is not moved, so Stop shows it where it was.
+    pub character_view: Option<axcenity_character::CharacterCamera>,
+}
+
+/// Which visual-debug overlays the viewport draws. Off in the player.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct OverlayToggles {
+    pub colliders: bool,
+    pub raycasts: bool,
+    pub bounds: bool,
+    pub emitters: bool,
+}
+
+impl OverlayToggles {
+    pub fn any(self) -> bool {
+        self.colliders || self.raycasts || self.bounds || self.emitters
+    }
 }
 
 /// What the left button holds, from going down on it until it's let go.
@@ -317,6 +356,9 @@ pub struct Viewport {
     /// Terrains' chunk meshes and weights, kept between frames, and the
     /// Terrain Studio's previews and views.
     pub terrain: TerrainCache,
+    /// Mouse look, in pixels, saved for the next character step while a
+    /// third-person controller owns the camera.
+    character_look: (f32, f32),
 }
 
 /// The texture the scene is drawn into, and egui's name for it.
@@ -337,7 +379,14 @@ impl Viewport {
             particles: Particles::new(),
             terrain_stroke: false,
             terrain: TerrainCache::new(),
+            character_look: (0.0, 0.0),
         }
+    }
+
+    /// Mouse look accumulated while a character controller owns the camera,
+    /// and clears it. Right and down are positive.
+    pub fn take_character_look(&mut self) -> (f32, f32) {
+        std::mem::take(&mut self.character_look)
     }
 
     /// Takes every particle away, for a new world (Play, Stop, another project).
@@ -411,16 +460,23 @@ impl Viewport {
             stylesheets,
             focused_text,
             light_cones,
+            overlays,
+            debug_rays,
             poses,
             terrain_brush,
+            character_view,
         } = scene;
         // A brush takes the left button: no handles, dragging or picking.
         let brush = terrain_brush.filter(|_| tool.is_some());
         let drag_tool = if brush.is_some() { None } else { tool };
         let size = ui.available_size();
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
-        self.handle_input(ui, &response, rect.height());
-        let screen = self.screen(rect);
+        self.handle_input(ui, &response, rect.height(), character_view.is_some());
+        let camera = match character_view {
+            Some(view) => FlyCamera::from_view(view.position, view.orientation).to_render_camera(),
+            None => self.camera.to_render_camera(),
+        };
+        let screen = self.screen(camera, rect);
 
         // The texture is sized in physical pixels, so it stays sharp on
         // high-DPI screens where one point is several pixels.
@@ -432,7 +488,6 @@ impl Viewport {
             .filter(|_| response.contains_pointer())
             .map(|pointer| (pointer - rect.min) * pixels_per_point)
             .map(|position| [position.x, position.y]);
-        let camera = self.camera.to_render_camera();
         let base_layout = axcenity_ui::layout_ui_viewed(
             world,
             width,
@@ -580,7 +635,7 @@ impl Viewport {
         let whole_texture = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
         ui.painter()
             .image(target.texture_id, rect, whole_texture, egui::Color32::WHITE);
-        let eye = self.camera.to_render_camera().position;
+        let eye = camera.position;
         for &id in selection {
             if Some(id) != selected {
                 if let Some(element) = ui_layout.element(id) {
@@ -609,6 +664,17 @@ impl Viewport {
             }
         }
         paint_lights(ui, rect, &lights, selected, pointer);
+        if overlays.any() {
+            paint_debug_overlays(
+                &ui.painter_at(rect),
+                &screen,
+                world,
+                assets,
+                overlays,
+                debug_rays,
+                eye,
+            );
+        }
         let painter = ui.painter_at(rect);
         for &pose in preview {
             for (a, b) in crate::angular::box_edges(pose) {
@@ -770,8 +836,8 @@ impl Viewport {
 
     /// The camera as it draws into `rect`, for turning between screen and
     /// world positions.
-    fn screen(&self, rect: egui::Rect) -> Screen {
-        Screen::new(self.camera.to_render_camera(), rect)
+    fn screen(&self, camera: axcenity_render::Camera, rect: egui::Rect) -> Screen {
+        Screen::new(camera, rect)
     }
 
     /// Starts, continues or ends dragging a handle of the selected part or
@@ -1034,7 +1100,13 @@ impl Viewport {
         );
     }
 
-    fn handle_input(&mut self, ui: &egui::Ui, response: &egui::Response, view_height: f32) {
+    fn handle_input(
+        &mut self,
+        ui: &egui::Ui,
+        response: &egui::Response,
+        view_height: f32,
+        character: bool,
+    ) {
         let ctx = ui.ctx();
         // Read this *before* `ui.input`: egui locks its context while the
         // `ui.input` closure runs, and `drag_delta` takes the same lock, so
@@ -1081,6 +1153,15 @@ impl Viewport {
         if looking != self.looking {
             self.looking = looking;
             capture_mouse(ctx, looking);
+        }
+        // A character controller owns the view. Look is applied on the next
+        // character step; the fly camera stays where Stop will find it.
+        if character {
+            if looking {
+                self.character_look.0 += motion.x;
+                self.character_look.1 += motion.y;
+            }
+            return;
         }
         if looking {
             self.camera.look(motion.x, motion.y);
@@ -1442,6 +1523,120 @@ fn capture_mouse(ctx: &egui::Context, captured: bool) {
     };
     ctx.send_viewport_cmd(egui::ViewportCommand::CursorGrab(grab));
     ctx.send_viewport_cmd(egui::ViewportCommand::CursorVisible(!captured));
+}
+
+fn paint_debug_overlays(
+    painter: &egui::Painter,
+    screen: &Screen,
+    world: &World,
+    assets: &Assets,
+    overlays: OverlayToggles,
+    debug_rays: &[DebugRay],
+    eye: Vec3,
+) {
+    let draw_edges = |edges: &[(Vec3, Vec3)], stroke: egui::Stroke| {
+        for &(a, b) in edges {
+            if let Some(line) = screen.line(a, b) {
+                painter.line_segment(line, stroke);
+            }
+        }
+    };
+    if overlays.colliders {
+        for outline in axcenity_physics::debug_colliders(world, assets) {
+            if outline.chunk && (v3(outline.center) - eye).length() > TERRAIN_OVERLAY_DISTANCE {
+                continue;
+            }
+            let color = if outline.can_collide {
+                COLLIDER_COLOR
+            } else {
+                SENSOR_COLOR
+            };
+            let edges: Vec<(Vec3, Vec3)> =
+                outline.edges.iter().map(|&(a, b)| (v3(a), v3(b))).collect();
+            draw_edges(&edges, egui::Stroke::new(1.0_f32, color));
+        }
+    }
+    if overlays.bounds {
+        for id in world.descendants(world.workspace()) {
+            let Some(instance) = world.get(id) else {
+                continue;
+            };
+            let Some(edges) = bounds_edges(instance) else {
+                continue;
+            };
+            draw_edges(&edges, egui::Stroke::new(1.0_f32, BOUNDS_COLOR));
+        }
+    }
+    if overlays.raycasts {
+        for ray in debug_rays {
+            let origin = v3(ray.origin);
+            let far = origin + v3(ray.direction);
+            let end = ray.hit.map(|hit| v3(hit.position)).unwrap_or(far);
+            if let Some(line) = screen.line(origin, end) {
+                painter.line_segment(line, egui::Stroke::new(2.0_f32, RAY_COLOR));
+            }
+            if let Some(hit) = ray.hit
+                && let Some(at) = screen.point(v3(hit.position))
+            {
+                painter.circle_filled(at, 4.0, RAY_HIT_COLOR);
+                painter.circle_stroke(at, 6.0, egui::Stroke::new(1.5_f32, RAY_HIT_COLOR));
+            }
+        }
+    }
+    if overlays.emitters {
+        for id in world.descendants(world.root()) {
+            let Some(instance) = world.get(id) else {
+                continue;
+            };
+            if instance.class() != ClassName::Sound
+                || instance.property("Spatial").and_then(Value::as_bool) != Some(true)
+            {
+                continue;
+            }
+            let at = v3(axcenity_audio::source_position(world, id));
+            let Some(pos) = screen.point(at) else {
+                continue;
+            };
+            painter.circle_filled(
+                pos,
+                EMITTER_ICON_RADIUS,
+                egui::Color32::from_black_alpha(160),
+            );
+            painter.circle_stroke(
+                pos,
+                EMITTER_ICON_RADIUS,
+                egui::Stroke::new(1.5_f32, EMITTER_COLOR),
+            );
+            painter.text(
+                pos,
+                egui::Align2::CENTER_CENTER,
+                icons::SPEAKER_HIGH,
+                egui::FontId::new(EMITTER_ICON_RADIUS * 1.15, theme::filled()),
+                EMITTER_COLOR,
+            );
+        }
+    }
+}
+
+fn bounds_edges(instance: &Instance) -> Option<[(Vec3, Vec3); 12]> {
+    if let Some(pose) = Pose::of(instance) {
+        return Some(angular::box_edges(pose));
+    }
+    if instance.class() != ClassName::Terrain {
+        return None;
+    }
+    let vector = |name| instance.property(name).and_then(Value::as_vector3);
+    let position = vector("Position")?;
+    let size = vector("Size")?;
+    Some(angular::box_edges(Pose {
+        position: Vec3::new(position.x, position.y + size.y * 0.5, position.z),
+        rotation: Quat::IDENTITY,
+        size: Vec3::new(size.x, size.y, size.z),
+    }))
+}
+
+fn v3(v: axcenity_core::Vector3) -> Vec3 {
+    Vec3::new(v.x, v.y, v.z)
 }
 
 #[cfg(test)]

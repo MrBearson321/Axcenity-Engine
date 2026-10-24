@@ -24,7 +24,7 @@ pub enum RibbonGroup {
     Snapping,
     /// Block, Ball, Cylinder and Wedge.
     Parts,
-    /// Sounds, particle emitters and lights.
+    /// Sounds, particle emitters, lights, and a third-person character.
     Effects,
     /// Import a model.
     Import,
@@ -36,10 +36,14 @@ pub enum RibbonGroup {
     Terrain,
     /// Open and close the dockable panels, and reset the layout.
     Panels,
+    /// Scan the open project for missing and broken assets.
+    Check,
+    /// Collider, raycast, bounds and emitter overlays.
+    Overlays,
 }
 
 impl RibbonGroup {
-    pub const ALL: [RibbonGroup; 11] = [
+    pub const ALL: [RibbonGroup; 13] = [
         RibbonGroup::Game,
         RibbonGroup::Tools,
         RibbonGroup::Build,
@@ -51,6 +55,8 @@ impl RibbonGroup {
         RibbonGroup::Scripts,
         RibbonGroup::Terrain,
         RibbonGroup::Panels,
+        RibbonGroup::Check,
+        RibbonGroup::Overlays,
     ];
 
     /// The caption under the group.
@@ -67,6 +73,8 @@ impl RibbonGroup {
             RibbonGroup::Scripts => "Scripts",
             RibbonGroup::Terrain => "Terrain",
             RibbonGroup::Panels => "Panels",
+            RibbonGroup::Check => "Check",
+            RibbonGroup::Overlays => "Overlays",
         }
     }
 
@@ -79,12 +87,16 @@ impl RibbonGroup {
             }
             RibbonGroup::Snapping => "Move and rotate steps",
             RibbonGroup::Parts => "Insert blocks, balls, cylinders and wedges",
-            RibbonGroup::Effects => "Insert sounds, particle emitters and lights",
+            RibbonGroup::Effects => {
+                "Insert sounds, particle emitters, lights, and a third-person character"
+            }
             RibbonGroup::Import => "Import a 3D model",
             RibbonGroup::Ui => "Insert screens, frames, text, buttons and other UI",
             RibbonGroup::Scripts => "Insert scripts",
             RibbonGroup::Terrain => "Sculpt, paint and generate terrain",
             RibbonGroup::Panels => "Show or hide the Explorer, Properties, Console and Assets",
+            RibbonGroup::Check => "Scan the project for missing and broken assets",
+            RibbonGroup::Overlays => "Collider, raycast, bounds and audio-emitter overlays",
         }
     }
 }
@@ -145,8 +157,8 @@ impl BuiltInTab {
             BuiltInTab::Terrain => &[Terrain],
             BuiltInTab::Ui => &[Ui],
             BuiltInTab::Script => &[Game, Scripts],
-            BuiltInTab::Test => &[Game],
-            BuiltInTab::View => &[Panels],
+            BuiltInTab::Test => &[Game, Check],
+            BuiltInTab::View => &[Panels, Overlays],
         }
     }
 }

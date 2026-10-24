@@ -21,7 +21,10 @@ mod presets;
 
 use std::sync::Arc;
 
-use axcenity_core::{ClassName, Color3, InstanceId, MAX_TERRAIN_LAYERS, TerrainData, Value, World};
+use axcenity_core::{
+    ClassName, Color3, FoliagePlant, FoliageProp, FoliageSource, InstanceId, MAX_TERRAIN_LAYERS,
+    TerrainData, Value, World,
+};
 use axcenity_render::TerrainView;
 use axcenity_terrain::brush::{
     Brush, Curve, FlattenMode, PaintMode, SculptMode, Shape, Stamp, StampMode, StampShape, Symmetry,
@@ -50,6 +53,7 @@ pub enum TerrainTool {
     Stamp,
     Noise,
     Paint,
+    Foliage,
     Auto,
     Generate,
     Erode,
@@ -65,7 +69,8 @@ impl TerrainTool {
         TerrainTool::Stamp,
         TerrainTool::Noise,
     ];
-    pub const MATERIALS: [TerrainTool; 2] = [TerrainTool::Paint, TerrainTool::Auto];
+    pub const MATERIALS: [TerrainTool; 3] =
+        [TerrainTool::Paint, TerrainTool::Foliage, TerrainTool::Auto];
     pub const WHOLE: [TerrainTool; 3] = [
         TerrainTool::Generate,
         TerrainTool::Erode,
@@ -81,6 +86,7 @@ impl TerrainTool {
             TerrainTool::Stamp => "Stamp",
             TerrainTool::Noise => "Noise",
             TerrainTool::Paint => "Paint",
+            TerrainTool::Foliage => "Foliage",
             TerrainTool::Auto => "Auto Materials",
             TerrainTool::Generate => "Generate",
             TerrainTool::Erode => "Erosion",
@@ -97,6 +103,7 @@ impl TerrainTool {
             TerrainTool::Stamp => icons::STAMP,
             TerrainTool::Noise => icons::DOTS_NINE,
             TerrainTool::Paint => icons::PAINT_BRUSH,
+            TerrainTool::Foliage => icons::TREE,
             TerrainTool::Auto => icons::MAGIC_WAND,
             TerrainTool::Generate => icons::PLANET,
             TerrainTool::Erode => icons::CLOUD_RAIN,
@@ -114,6 +121,7 @@ impl TerrainTool {
             TerrainTool::Stamp => egui::Key::Num5,
             TerrainTool::Noise => egui::Key::Num6,
             TerrainTool::Paint => egui::Key::Num7,
+            TerrainTool::Foliage => return None,
             TerrainTool::Auto => egui::Key::Num8,
             TerrainTool::Generate => egui::Key::Num9,
             TerrainTool::Erode => egui::Key::Num0,
@@ -130,7 +138,7 @@ impl TerrainTool {
 
     /// True for the tools used by brushing the terrain in the viewport.
     pub fn is_brush(self) -> bool {
-        Self::SCULPTING.contains(&self) || self == TerrainTool::Paint
+        Self::SCULPTING.contains(&self) || matches!(self, TerrainTool::Paint | TerrainTool::Foliage)
     }
 
     /// One line on how to use it.
@@ -146,6 +154,9 @@ impl TerrainTool {
             TerrainTool::Noise => "Drag to roughen the ground. Shift flips the bumps.",
             TerrainTool::Paint => {
                 "Drag to paint the chosen layer. Shift erases back to the automatic materials. Ctrl+click picks a layer."
+            }
+            TerrainTool::Foliage => {
+                "Drag to scatter the chosen plant or prop. Shift removes it. Density is how many per square stud."
             }
             TerrainTool::Auto => "Lay layers down by height and slope. Painting still wins.",
             TerrainTool::Generate => "Make a landscape from a preset and a seed.",
@@ -317,6 +328,12 @@ pub struct TerrainStudio {
     /// The layer Paint paints (an index into the terrain's layers).
     pub paint_layer: usize,
     pub paint_mode: PaintMode,
+    /// The plant, prop, or model Foliage scatters (picked from Assets).
+    pub foliage_source: FoliageSource,
+    /// Instances per square stud at full strength.
+    pub foliage_density: f32,
+    /// Whether new strokes collide with parts.
+    pub foliage_collide: bool,
     /// Layers painting doesn't take from.
     pub locked: [bool; MAX_TERRAIN_LAYERS],
     /// The layer whose material is shown for editing.
@@ -362,6 +379,9 @@ impl Default for TerrainStudio {
             stamp_image: None,
             paint_layer: 0,
             paint_mode: PaintMode::Blend,
+            foliage_source: FoliageSource::Prop(FoliageProp::Tree),
+            foliage_density: 0.08,
+            foliage_collide: false,
             locked: [false; MAX_TERRAIN_LAYERS],
             open_layer: None,
             view: TerrainView::Shaded,
@@ -445,6 +465,14 @@ impl TerrainStudio {
     /// The brush's color in the viewport: the accent for sculpting, the
     /// layer's own color for painting.
     pub fn brush_color(&self, world: &World, accent: egui::Color32) -> egui::Color32 {
+        if self.tool == Some(TerrainTool::Foliage) {
+            let color = axcenity_scene::foliage_brush_color(&self.foliage_source);
+            return egui::Color32::from_rgb(
+                (color[0] * 255.0) as u8,
+                (color[1] * 255.0) as u8,
+                (color[2] * 255.0) as u8,
+            );
+        }
         if self.tool != Some(TerrainTool::Paint) {
             return accent;
         }
@@ -495,6 +523,7 @@ impl TerrainStudio {
                         TerrainTool::Stamp => self.stamp_settings(ui, &mut actions),
                         TerrainTool::Noise => self.noise_settings(ui),
                         TerrainTool::Paint => self.paint_settings(ui),
+                        TerrainTool::Foliage => self.foliage_settings(ui),
                         TerrainTool::Auto => {
                             self.auto_settings(ui, cx.world, terrain, &mut actions)
                         }
@@ -1042,6 +1071,47 @@ impl TerrainStudio {
             }),
         );
         self.paint_mode = mode;
+    }
+
+    fn foliage_settings(&mut self, ui: &mut egui::Ui) {
+        let source = self.foliage_source.clone();
+        let mut density = self.foliage_density;
+        let mut collide = self.foliage_collide;
+        self.brush_settings(
+            ui,
+            Some(&mut |ui: &mut egui::Ui| {
+                field(ui, "Item").on_hover_text(
+                    "Click a prop or a model in the Assets panel to paint it on the terrain.",
+                );
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(format!("{} {}", foliage_icon(&source), source.name()));
+                    });
+                    ui.label(
+                        egui::RichText::new("Click a prop or model in Assets.")
+                            .size(theme::type_scale::SMALL)
+                            .color(theme::palette(ui.ctx()).text_weak),
+                    );
+                });
+                ui.end_row();
+                field(ui, "Collide").on_hover_text(
+                    "Parts rest on this foliage. Off, they fall through it onto the terrain.",
+                );
+                ui.checkbox(&mut collide, "Solid");
+                ui.end_row();
+                field(ui, "Density").on_hover_text(
+                    "How many to scatter per square stud. Shift+drag removes this item.",
+                );
+                ui.add(
+                    egui::Slider::new(&mut density, 0.01..=1.0)
+                        .logarithmic(true)
+                        .suffix(" / stud²"),
+                );
+                ui.end_row();
+            }),
+        );
+        self.foliage_density = density;
+        self.foliage_collide = collide;
     }
 
     fn mask_settings(&mut self, ui: &mut egui::Ui) {
@@ -1962,6 +2032,25 @@ fn hint(ui: &mut egui::Ui, text: &str) {
     );
 }
 
+fn foliage_icon(source: &FoliageSource) -> &'static str {
+    match source {
+        FoliageSource::Plant(FoliagePlant::Grass) => icons::LEAF,
+        FoliageSource::Plant(FoliagePlant::Bush) => icons::PLANT,
+        FoliageSource::Plant(FoliagePlant::Flower) => icons::FLOWER,
+        FoliageSource::Plant(FoliagePlant::Tree) | FoliageSource::Prop(FoliageProp::Tree) => {
+            icons::TREE
+        }
+        FoliageSource::Prop(FoliageProp::Crate) => icons::PACKAGE,
+        FoliageSource::Prop(FoliageProp::Lamp) => icons::LAMP,
+        FoliageSource::Prop(FoliageProp::Table) => icons::TABLE,
+        FoliageSource::Prop(FoliageProp::Floor) => icons::SQUARE,
+        FoliageSource::Prop(FoliageProp::Wall) => icons::WALL,
+        FoliageSource::Prop(FoliageProp::Stairs) => icons::STEPS,
+        FoliageSource::Prop(FoliageProp::Ramp) => icons::TRIANGLE,
+        FoliageSource::Model(_) => icons::CUBE_TRANSPARENT,
+    }
+}
+
 /// A name in a settings grid's left column.
 fn field(ui: &mut egui::Ui, name: &str) -> egui::Response {
     let palette = theme::palette(ui.ctx());
@@ -2013,7 +2102,7 @@ mod tests {
     #[test]
     fn only_sculpting_and_painting_tools_brush_the_viewport() {
         let brushes: Vec<TerrainTool> = TerrainTool::all().filter(|t| t.is_brush()).collect();
-        assert_eq!(brushes.len(), 7);
+        assert_eq!(brushes.len(), 8);
         assert!(!TerrainTool::Generate.is_brush());
         let keys: Vec<_> = TerrainTool::all().filter_map(TerrainTool::key).collect();
         let mut unique = keys.clone();

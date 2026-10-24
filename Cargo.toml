@@ -16,6 +16,7 @@ axcenity-anim = { path = "crates/anim" }
 axcenity-assets = { path = "crates/assets" }
 axcenity-audio = { path = "crates/audio" }
 axcenity-blocks = { path = "crates/blocks" }
+axcenity-character = { path = "crates/character" }
 axcenity-core = { path = "crates/core" }
 axcenity-physics = { path = "crates/physics" }
 axcenity-project = { path = "crates/project" }
