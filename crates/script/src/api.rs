@@ -52,6 +52,11 @@ fn instance_library(lua: &Lua) -> mlua::Result<Table> {
                     "a Player is made by the engine when someone joins, not with Instance.new",
                 ));
             }
+            if class == ClassName::AnimationTrack {
+                return Err(mlua::Error::runtime(
+                    "an AnimationTrack comes from animator:LoadAnimation(animation), not Instance.new",
+                ));
+            }
             let id = world_mut(lua)?
                 .create(class)
                 .map_err(mlua::Error::runtime)?;

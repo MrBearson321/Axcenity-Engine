@@ -1038,8 +1038,8 @@ impl EditorApp {
             project.folder.clone()
         };
         let file = rfd::FileDialog::new()
-            .set_title("Choose an animator controller")
-            .add_filter("Animator controller", &["json"])
+            .set_title("Choose a state machine")
+            .add_filter("State machine", &["json"])
             .set_directory(&start)
             .pick_file()?;
         let relative = file
@@ -1051,10 +1051,10 @@ impl EditorApp {
                     .collect::<Vec<_>>()
                     .join("/")
             })
-            .filter(|path| path.ends_with(axcenity_anim::CONTROLLER_EXTENSION));
+            .filter(|path| path.ends_with(axcenity_anim::STATE_MACHINE_EXTENSION));
         if relative.is_none() {
             self.output.error(format!(
-                "Could not use `{}`: choose a `.controller.json` file inside the project folder.",
+                "Could not use `{}`: choose a `.statemachine.json` file inside the project folder.",
                 file.display()
             ));
         }
@@ -1093,13 +1093,7 @@ impl EditorApp {
             return None;
         };
         match store::read_any_clip(&project.folder, &path) {
-            Ok(axcenity_anim::AnimClipFile::Property(_)) => Some(path),
-            Ok(axcenity_anim::AnimClipFile::Take(_)) => {
-                self.output.error(format!(
-                    "`{path}` is a take clip for skeletal Animators, not a property clip."
-                ));
-                None
-            }
+            Ok(_) => Some(path),
             Err(err) => {
                 self.output.error(format!("Could not read `{path}`: {err}"));
                 None
@@ -1395,9 +1389,9 @@ impl EditorApp {
                     paths.len(),
                     if paths.len() == 1 { "clip" } else { "clips" },
                     axcenity_anim::ANIMATIONS_FOLDER,
-                    controller
-                        .as_ref()
-                        .map_or_else(String::new, |path| format!(" and the controller `{path}`"))
+                    controller.as_ref().map_or_else(String::new, |path| format!(
+                        " and the state machine `{path}`"
+                    ))
                 ));
                 controller
             }
@@ -1428,8 +1422,8 @@ impl EditorApp {
             .create(ClassName::Animator)
             .expect("not a service");
         self.world
-            .set_property(id, "Controller", Value::String(controller.to_owned()))
-            .expect("every Animator has a Controller");
+            .set_property(id, "StateMachine", Value::String(controller.to_owned()))
+            .expect("every Animator has a StateMachine");
         self.world
             .set_parent(id, Some(part))
             .expect("an Animator can go in a new MeshPart");

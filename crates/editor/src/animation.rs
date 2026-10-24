@@ -316,7 +316,7 @@ impl AnimationStudio {
                 }
                 continue;
             }
-            if open.ends_with(axcenity_anim::CONTROLLER_EXTENSION)
+            if open.ends_with(axcenity_anim::STATE_MACHINE_EXTENSION)
                 && let Some(doc) = &mut self.animator.doc
                 && let Ok(file) = store::read_controller(project, &open)
             {
@@ -350,7 +350,7 @@ impl AnimationStudio {
         if path.ends_with(axcenity_anim::CLIP_EXTENSION) {
             self.clip.objects.refresh(world);
             self.load_clip(project, assets, path, output);
-        } else if path.ends_with(axcenity_anim::CONTROLLER_EXTENSION) {
+        } else if path.ends_with(axcenity_anim::STATE_MACHINE_EXTENSION) {
             let preview = self
                 .animator
                 .doc
@@ -365,7 +365,9 @@ impl AnimationStudio {
                     }
                     self.animator.doc = Some(Box::new(doc));
                 }
-                Err(err) => output.error(format!("Could not open the controller `{path}`: {err}")),
+                Err(err) => {
+                    output.error(format!("Could not open the state machine `{path}`: {err}"))
+                }
             }
         }
     }
@@ -373,13 +375,18 @@ impl AnimationStudio {
     /// Reads the clip at `path` into the Animation tab (nothing is open if
     /// it can't be read).
     fn load_clip(&mut self, project: &Path, assets: &Assets, path: &str, output: &mut Output) {
+        // A linked clip opens on its take; a keyed one in the property editor.
         self.clip.doc = match store::read_any_clip(project, path) {
-            Ok(axcenity_anim::AnimClipFile::Take(file)) => Some(Clip::Take(Box::new(
-                ClipDoc::open(path.to_owned(), file, assets, &self.files.models),
-            ))),
-            Ok(axcenity_anim::AnimClipFile::Property(file)) => Some(Clip::Property(Box::new(
-                PropertyDoc::open(path.to_owned(), file),
-            ))),
+            Ok(file) if file.link.is_some() => Some(Clip::Take(Box::new(ClipDoc::open(
+                path.to_owned(),
+                file,
+                assets,
+                &self.files.models,
+            )))),
+            Ok(file) => Some(Clip::Property(Box::new(PropertyDoc::open(
+                path.to_owned(),
+                file,
+            )))),
             Err(err) => {
                 output.error(format!("Could not open the clip `{path}`: {err}"));
                 None
@@ -429,7 +436,7 @@ impl AnimationStudio {
                     .or_else(|| self.files.models.iter().find(|m| animated(m)).cloned());
                 self.animator.doc = Some(Box::new(doc));
             }
-            Err(err) => output.error(format!("Could not open the controller `{path}`: {err}")),
+            Err(err) => output.error(format!("Could not open the state machine `{path}`: {err}")),
         }
     }
 
@@ -532,7 +539,7 @@ impl AnimationStudio {
         output: &mut Output,
         actions: &mut Vec<StudioAction>,
     ) {
-        let is_controller = |path: &str| path.ends_with(axcenity_anim::CONTROLLER_EXTENSION);
+        let is_controller = |path: &str| path.ends_with(axcenity_anim::STATE_MACHINE_EXTENSION);
         match pick {
             Pick::Open(path) if is_controller(&path) => {
                 if self.controller_path().as_deref() != Some(&path) {
@@ -566,7 +573,7 @@ impl AnimationStudio {
                 match store::duplicate_controller(project, &path) {
                     Ok(written) => {
                         output.info(format!(
-                            "Copied the controller `{path}` as `{}`.",
+                            "Copied the state machine `{path}` as `{}`.",
                             written.path
                         ));
                         remember(
@@ -579,7 +586,7 @@ impl AnimationStudio {
                         self.open_controller(project, assets, &copy, None, output);
                     }
                     Err(err) => {
-                        output.error(format!("Could not copy the controller `{path}`: {err}"))
+                        output.error(format!("Could not copy the state machine `{path}`: {err}"))
                     }
                 }
             }
@@ -1124,12 +1131,12 @@ impl AnimationStudio {
     ) -> Vec<StudioAction> {
         let mut actions = Vec::new();
         let Some(project) = project else {
-            ui.weak("Open a project to give its models controllers.");
+            ui.weak("Open a project to give its models state machines.");
             return actions;
         };
         self.rescan_if_due(project);
         let stacked = ui.available_width() < STACK_BELOW;
-        let (pick, new) = egui::TopBottomPanel::top("controller toolbar")
+        let (pick, new) = egui::TopBottomPanel::top("state machine toolbar")
             .show_inside(ui, |ui| self.controller_toolbar(ui, stacked))
             .inner;
         if let Some(pick) = pick {
@@ -1144,13 +1151,13 @@ impl AnimationStudio {
         if self.animator.doc.is_none() {
             egui::CentralPanel::default().show_inside(ui, |ui| {
                 egui::ScrollArea::vertical()
-                    .id_salt("controller checklist")
+                    .id_salt("state machine checklist")
                     .show(ui, |ui| step = self.controller_checklist(ui, selected))
             });
         } else if stacked {
             egui::CentralPanel::default().show_inside(ui, |ui| {
                 egui::ScrollArea::vertical()
-                    .id_salt("controller stacked")
+                    .id_salt("state machine stacked")
                     .auto_shrink(false)
                     .show(ui, |ui| {
                         let size = egui::vec2(ui.available_width(), STACKED_GRAPH);
@@ -1159,7 +1166,7 @@ impl AnimationStudio {
                         self.controller_live(ui, assets, render_state, dt);
                         ui.separator();
                         egui::CollapsingHeader::new(format!("{} Settings", icons::SLIDERS))
-                            .id_salt("controller inspector stacked")
+                            .id_salt("state machine inspector stacked")
                             .default_open(true)
                             .icon(widgets::chevron)
                             .show(ui, |ui| self.controller_inspector(ui));
@@ -1169,7 +1176,7 @@ impl AnimationStudio {
             // Across the whole tab, so the preview has room beside its
             // parameters; the graph keeps at least half the height.
             let room = ui.available_height();
-            egui::TopBottomPanel::bottom("controller preview")
+            egui::TopBottomPanel::bottom("state machine preview")
                 .resizable(true)
                 .default_height(CONTROLLER_PREVIEW.min(room * 0.5))
                 .min_height(100.0)
@@ -1177,13 +1184,13 @@ impl AnimationStudio {
                 .show_inside(ui, |ui| self.controller_live(ui, assets, render_state, dt));
             if !self.animator.hide_inspector {
                 let room = ui.available_width();
-                egui::SidePanel::right("controller inspector")
+                egui::SidePanel::right("state machine inspector")
                     .resizable(true)
                     .default_width(320.0)
                     .max_width(room * 0.5)
                     .show_inside(ui, |ui| {
                         egui::ScrollArea::vertical()
-                            .id_salt("controller inspector scroll")
+                            .id_salt("state machine inspector scroll")
                             .show(ui, |ui| self.controller_inspector(ui))
                     });
             }
@@ -1218,7 +1225,7 @@ impl AnimationStudio {
         let pick = responsive::toolbar(ui, |ui| {
             let shown = open
                 .as_deref()
-                .map_or("Pick a controller", store::controller_name);
+                .map_or("Pick a state machine", store::controller_name);
             let mut pick = picker(
                 ui,
                 Kind::Controller,
@@ -1229,7 +1236,7 @@ impl AnimationStudio {
             );
             new = ui
                 .button(format!("{} New", icons::PLUS))
-                .on_hover_text("Make an animator controller")
+                .on_hover_text("Make a state machine")
                 .clicked();
             let Some(doc) = &mut self.animator.doc else {
                 return pick;
@@ -1243,7 +1250,7 @@ impl AnimationStudio {
                 });
             let mut picked = doc.preview_model.clone();
             responsive::room_for(ui, MODEL_PICKER_ROOM);
-            egui::ComboBox::from_id_salt("controller preview model")
+            egui::ComboBox::from_id_salt("state machine preview model")
                 .selected_text(format!("{} {shown}", icons::CUBE))
                 .width(130.0)
                 .show_ui(ui, |ui| {
@@ -1367,7 +1374,7 @@ impl AnimationStudio {
         checklist(
             ui,
             &format!("{} Animator", icons::FLOW_ARROW),
-            "Open a controller with the picker above, or follow the steps:",
+            "Open a state machine with the picker above, or follow the steps:",
             &[
                 Step {
                     done: selected.is_some_and(|model| model.animated),
@@ -1387,15 +1394,15 @@ impl AnimationStudio {
                 Step {
                     done: false,
                     title: if has_controller {
-                        "Open its controller".to_owned()
+                        "Open its state machine".to_owned()
                     } else {
-                        "Make a controller".to_owned()
+                        "Make a state machine".to_owned()
                     },
                     hint: "Its states, transitions and parameters.",
                     button: Some(if has_controller {
                         "Open"
                     } else {
-                        "New controller"
+                        "New state machine"
                     }),
                 },
                 Step {
@@ -1572,7 +1579,7 @@ impl AnimationStudio {
                     with_clips,
                     assign,
                 } => {
-                    ui.heading("New controller");
+                    ui.heading("New state machine");
                     ui.horizontal(|ui| {
                         ui.label("Name");
                         ui.text_edit_singleline(name);
@@ -1593,14 +1600,14 @@ impl AnimationStudio {
                         }
                         ui.checkbox(assign, format!("Use it for {}'s Animator", model.name));
                     } else {
-                        ui.weak("Select an animated MeshPart first to give it this controller and its clips.");
+                        ui.weak("Select an animated MeshPart first to give it this state machine and its clips.");
                     }
                     ui.horizontal(|ui| {
-                        if ui.add_enabled(valid.is_ok(), egui::Button::new("Make controller")).clicked() {
+                        if ui.add_enabled(valid.is_ok(), egui::Button::new("Make state machine")).clicked() {
                             let clips = if *with_clips { model_clips.clone() } else { Vec::new() };
                             match store::new_controller(project, name.trim(), &clips) {
                                 Ok(written) => {
-                                    output.info(format!("Made the controller `{}`.", written.path));
+                                    output.info(format!("Made the state machine `{}`.", written.path));
                                     remember(
                                         actions,
                                         format!("Create {}", store::controller_name(&written.path)),
@@ -1621,7 +1628,7 @@ impl AnimationStudio {
                                         selected.map(|model| model.mesh_id.clone()),
                                     ));
                                 }
-                                Err(err) => output.error(format!("Could not make the controller: {err}")),
+                                Err(err) => output.error(format!("Could not make the state machine: {err}")),
                             }
                             close = true;
                         }
@@ -1632,7 +1639,7 @@ impl AnimationStudio {
                 }
                 Dialog::Rename { path, name, error } => {
                     ui.heading("Rename clip");
-                    ui.weak("Controllers that play it are updated too.");
+                    ui.weak("State machines that play it are updated too.");
                     let response = ui.text_edit_singleline(name);
                     if let Some(problem) = error {
                         ui.colored_label(ui.visuals().error_fg_color, problem.as_str());
@@ -1675,7 +1682,7 @@ impl AnimationStudio {
                     });
                 }
                 Dialog::RenameController { path, name, error } => {
-                    ui.heading("Rename controller");
+                    ui.heading("Rename state machine");
                     ui.weak("Animators that use it are updated too.");
                     let response = ui.text_edit_singleline(name);
                     if let Some(problem) = error {
@@ -1694,7 +1701,7 @@ impl AnimationStudio {
                             match store::rename_controller(project, path, name) {
                                 Ok(written) => {
                                     output.info(format!(
-                                        "Renamed the controller to `{}`.",
+                                        "Renamed the state machine to `{}`.",
                                         written.path
                                     ));
                                     let rebind = (old.clone(), written.path.clone());
@@ -1738,7 +1745,7 @@ impl AnimationStudio {
                             match store::delete_asset(project, path) {
                                 Ok(files) => {
                                     output.info(format!("Deleted `{path}`."));
-                                    let label = if path.ends_with(axcenity_anim::CONTROLLER_EXTENSION)
+                                    let label = if path.ends_with(axcenity_anim::STATE_MACHINE_EXTENSION)
                                     {
                                         format!("Delete {}", store::controller_name(path))
                                     } else {
@@ -1802,7 +1809,7 @@ fn picker(
         .button(format!("{} {shown} {}", kind.icon(), icons::CARET_DOWN))
         .on_hover_text(match kind {
             Kind::Clip => "Pick a clip to open",
-            Kind::Controller => "Pick a controller to open",
+            Kind::Controller => "Pick a state machine to open",
         });
     let mut pick = None;
     egui::Popup::menu(&button)
@@ -1825,7 +1832,7 @@ fn picker(
             if paths.is_empty() {
                 ui.weak(match kind {
                     Kind::Clip => "No clips yet. Import an animated FBX, or make one with New.",
-                    Kind::Controller => "No controllers yet: New makes one.",
+                    Kind::Controller => "No state machines yet: New makes one.",
                 });
             } else if matches.is_empty() {
                 ui.weak("Nothing matches.");
@@ -1978,7 +1985,7 @@ fn same_asset_kind(path: &str, other: &str) -> bool {
     let kind = |path: &str| {
         if path.ends_with(axcenity_anim::CLIP_EXTENSION) {
             0
-        } else if path.ends_with(axcenity_anim::CONTROLLER_EXTENSION) {
+        } else if path.ends_with(axcenity_anim::STATE_MACHINE_EXTENSION) {
             1
         } else {
             2
@@ -1991,7 +1998,7 @@ fn same_asset_kind(path: &str, other: &str) -> bool {
 fn new_controller_dialog(selected: Option<&SelectedModel>) -> Dialog {
     Dialog::NewController {
         name: selected.map_or_else(
-            || "Controller".to_owned(),
+            || "StateMachine".to_owned(),
             |model| axcenity_anim::files::file_safe(&model.name),
         ),
         with_clips: true,

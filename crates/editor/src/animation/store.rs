@@ -1,12 +1,13 @@
 //! The animation files in a project, for the Animation panel: finding
-//! them, and making, renaming, copying and deleting clips. A clip's name is
-//! its file's, so renaming one moves its file, and the controllers that
-//! play it are updated to the new path.
+//! them, and making, renaming, copying and deleting clips and state
+//! machines. A clip's name is its file's, so renaming one moves its file,
+//! and the state machines that play it are updated to the new path. Each
+//! animated thing has its own folder, `assets/animations/<name>/`.
 
 use std::path::Path;
 
-use axcenity_anim::files::{self, AnimClipFile, ClipFile, ControllerFile, Motion, StateDef};
-use axcenity_anim::{ANIMATIONS_FOLDER, CLIP_EXTENSION, CONTROLLER_EXTENSION, PropertyClipFile};
+use axcenity_anim::files::{self, ClipFile, Motion, StateDef, StateMachineFile};
+use axcenity_anim::{ANIMATIONS_FOLDER, CLIP_EXTENSION, STATE_MACHINE_EXTENSION};
 use axcenity_assets::{MODELS_FOLDER, Take};
 
 /// One project file before and after an asset edit. `None` means the file
@@ -43,7 +44,7 @@ pub fn scan(project: &Path) -> AnimationFiles {
         let lower = path.to_lowercase();
         if lower.ends_with(CLIP_EXTENSION) {
             found.clips.push(path);
-        } else if lower.ends_with(CONTROLLER_EXTENSION) {
+        } else if lower.ends_with(STATE_MACHINE_EXTENSION) {
             found.controllers.push(path);
         }
     }
@@ -89,41 +90,38 @@ pub fn group_of(path: &str) -> &str {
     inside.rsplit_once('/').map_or("", |(folder, _)| folder)
 }
 
+/// Reads a clip linked to a take.
 pub fn read_clip(project: &Path, path: &str) -> Result<ClipFile, String> {
-    match read_any_clip(project, path)? {
-        AnimClipFile::Take(clip) => Ok(clip),
-        AnimClipFile::Property(_) => Err(
-            "it is a property clip; open it from the Animation Library as a property clip".into(),
-        ),
+    let clip = read_any_clip(project, path)?;
+    if clip.link.is_none() {
+        return Err("it isn't linked to a take; open it as a keyed clip".into());
     }
+    Ok(clip)
 }
 
-/// Reads either a take clip or a property clip.
-pub fn read_any_clip(project: &Path, path: &str) -> Result<AnimClipFile, String> {
+/// Reads a clip, linked or keyed.
+pub fn read_any_clip(project: &Path, path: &str) -> Result<ClipFile, String> {
     let text = std::fs::read_to_string(project.join(path)).map_err(|err| err.to_string())?;
-    AnimClipFile::from_json(&text).map_err(|err| err.0)
+    ClipFile::from_json(&text).map_err(|err| err.0)
 }
 
 pub fn save_clip(project: &Path, path: &str, clip: &ClipFile) -> std::io::Result<()> {
     files::write_file(&project.join(path), &clip.to_json())
 }
 
-pub fn save_property_clip(
-    project: &Path,
-    path: &str,
-    clip: &PropertyClipFile,
-) -> std::io::Result<()> {
+pub fn save_property_clip(project: &Path, path: &str, clip: &ClipFile) -> std::io::Result<()> {
     files::write_file(&project.join(path), &clip.to_json())
 }
 
-/// Creates a new property clip file and returns its path and the file change.
+/// Creates a new keyed clip file in its own folder,
+/// `assets/animations/<name>/`, and returns its path and the file change.
 pub fn create_property_clip(
     project: &Path,
     name: &str,
-    clip: &PropertyClipFile,
+    clip: &ClipFile,
 ) -> Result<Written, String> {
     let name = check_name(name)?;
-    let folder = ANIMATIONS_FOLDER.to_owned();
+    let folder = format!("{ANIMATIONS_FOLDER}/{name}");
     std::fs::create_dir_all(project.join(&folder)).map_err(|err| err.to_string())?;
     let path = free_clip_path(project, &folder, &name);
     save_property_clip(project, &path, clip).map_err(|err| err.to_string())?;
@@ -175,7 +173,7 @@ pub fn clips_of_model(files: &AnimationFiles, mesh_id: &str) -> Vec<String> {
 /// A controller with a state per clip in `clips`: one named Idle (or else
 /// the first) as the default state at the left of the graph, the rest in
 /// rows of four beside it.
-pub fn controller_for(clips: &[String]) -> ControllerFile {
+pub fn controller_for(clips: &[String]) -> StateMachineFile {
     let mut states: Vec<StateDef> = clips
         .iter()
         .enumerate()
@@ -201,25 +199,28 @@ pub fn controller_for(clips: &[String]) -> ControllerFile {
         states.insert(0, default);
         name
     };
-    ControllerFile {
+    StateMachineFile {
         default_state,
         states,
-        ..ControllerFile::default()
+        ..StateMachineFile::default()
     }
 }
 
-/// Writes a controller named `name` (a number added if taken) with a state
-/// per clip in `clips` to `assets/animations`, and returns its path.
+/// Writes a state machine named `name` (a number added if taken) with a
+/// state per clip in `clips` to `assets/animations/<name>/`, and returns
+/// its path.
 pub fn new_controller(project: &Path, name: &str, clips: &[String]) -> std::io::Result<Written> {
     let path = free_controller_path(project, name);
     files::write_file(&project.join(&path), &controller_for(clips).to_json())?;
     Ok(written_new(&path, read_text(project, &path)))
 }
 
-/// The path a controller named `name` gets in `assets/animations`: the
-/// name itself, or with 2, 3… after it if a file has it (ignoring case).
+/// The path a state machine named `name` gets in
+/// `assets/animations/<name>/`: the name itself, or with 2, 3… after it if
+/// a file has it (ignoring case).
 pub fn free_controller_path(project: &Path, name: &str) -> String {
-    let existing: Vec<String> = std::fs::read_dir(project.join(ANIMATIONS_FOLDER))
+    let folder = format!("{ANIMATIONS_FOLDER}/{}", files::file_safe(name));
+    let existing: Vec<String> = std::fs::read_dir(project.join(&folder))
         .map(|entries| {
             entries
                 .flatten()
@@ -238,17 +239,17 @@ pub fn free_controller_path(project: &Path, name: &str) -> String {
             n => format!("{name}{gap}{n}"),
         })
         .find(|candidate| {
-            !existing.contains(&format!("{candidate}{CONTROLLER_EXTENSION}").to_lowercase())
+            !existing.contains(&format!("{candidate}{STATE_MACHINE_EXTENSION}").to_lowercase())
         })
         .expect("some number is always free");
-    format!("{ANIMATIONS_FOLDER}/{name}{CONTROLLER_EXTENSION}")
+    format!("{folder}/{name}{STATE_MACHINE_EXTENSION}")
 }
 
 /// Makes a clip of the whole of `take`, from the model file `source`, named
 /// `name` (a number added if taken), and returns its path.
 pub fn new_clip(project: &Path, source: &str, take: &Take, name: &str) -> std::io::Result<Written> {
     let path = free_clip_path(project, &folder_for(source), name);
-    let clip = ClipFile::new(source, &take.name, 0.0, f64::from(take.duration));
+    let clip = ClipFile::linked(source, &take.name, 0.0, f64::from(take.duration));
     save_clip(project, &path, &clip)?;
     Ok(written_new(&path, read_text(project, &path)))
 }
@@ -304,7 +305,7 @@ pub fn duplicate_controller(project: &Path, path: &str) -> std::io::Result<Writt
         project,
         folder,
         &format!("{} copy", controller_name(path)),
-        CONTROLLER_EXTENSION,
+        STATE_MACHINE_EXTENSION,
     );
     let text = std::fs::read_to_string(project.join(path))?;
     if let Some(parent) = project.join(&copy).parent() {
@@ -320,20 +321,19 @@ pub fn rename_controller(project: &Path, path: &str, name: &str) -> Result<Writt
     let folder = path
         .rsplit_once('/')
         .map_or(ANIMATIONS_FOLDER, |(folder, _)| folder);
-    let new = format!("{folder}/{name}{CONTROLLER_EXTENSION}");
+    let new = format!("{folder}/{name}{STATE_MACHINE_EXTENSION}");
     if new == path {
         return Ok(Written {
             path: new,
             files: Vec::new(),
         });
     }
-    move_file(project, path, &new, "controller", &name)
+    move_file(project, path, &new, "state machine", &name)
 }
 
-/// A controller file's name, without `.controller.json`.
+/// A state machine file's name, without `.statemachine.json`.
 pub fn controller_name(path: &str) -> &str {
-    let file = path.rsplit('/').next().unwrap_or(path);
-    file.strip_suffix(CONTROLLER_EXTENSION).unwrap_or(file)
+    files::clip_name(path)
 }
 
 /// Deletes the clip or controller at `path`. Controllers that play a deleted
@@ -493,13 +493,13 @@ pub fn controllers_using(project: &Path, path: &str) -> Vec<String> {
         .collect()
 }
 
-pub fn read_controller(project: &Path, path: &str) -> Result<ControllerFile, String> {
+pub fn read_controller(project: &Path, path: &str) -> Result<StateMachineFile, String> {
     let text = std::fs::read_to_string(project.join(path)).map_err(|err| err.to_string())?;
-    ControllerFile::from_json(&text).map_err(|err| err.0)
+    StateMachineFile::from_json(&text).map_err(|err| err.0)
 }
 
 /// Every clip path a controller's states play.
-fn clips_of(file: &ControllerFile) -> Vec<String> {
+fn clips_of(file: &StateMachineFile) -> Vec<String> {
     file.states
         .iter()
         .flat_map(|state| state.motion.clips().into_iter().cloned())
@@ -570,13 +570,14 @@ mod tests {
         assert_eq!(found.clips.len(), 2);
         assert_eq!(group_of(&found.clips[0]), "hero");
         let clip = read_clip(&folder, &walk).unwrap();
-        assert_eq!((clip.take.as_str(), clip.end), ("Moves", 2.0));
+        let link = clip.link.unwrap();
+        assert_eq!((link.take.as_str(), link.end), ("Moves", 2.0));
         std::fs::remove_dir_all(&folder).unwrap();
     }
 
     #[test]
     fn a_new_controller_gets_a_state_per_clip_starting_at_idle() {
-        let folder = project("controller");
+        let folder = project("statemachine");
         let walk = new_clip(&folder, "assets/models/hero.fbx", &take(), "Walk")
             .unwrap()
             .path;
@@ -588,13 +589,13 @@ mod tests {
         let clips = clips_of_model(&files, "assets/models/hero.fbx#Body");
         assert_eq!(clips, [idle.clone(), walk.clone()]);
         let path = new_controller(&folder, "Hero", &clips).unwrap().path;
-        assert_eq!(path, "assets/animations/Hero.controller.json");
+        assert_eq!(path, "assets/animations/Hero/Hero.statemachine.json");
         let controller = read_controller(&folder, &path).unwrap();
         assert_eq!(controller.default_state, "Idle");
         assert_eq!(controller.states[0].position, [0.0, 0.0]);
         assert_eq!(
-            new_controller(&folder, "hero", &[]).unwrap().path,
-            "assets/animations/hero2.controller.json"
+            new_controller(&folder, "Hero", &[]).unwrap().path,
+            "assets/animations/Hero/Hero2.statemachine.json"
         );
         std::fs::remove_dir_all(&folder).unwrap();
     }
@@ -605,16 +606,16 @@ mod tests {
         let walk = new_clip(&folder, "assets/models/hero.fbx", &take(), "Walk")
             .unwrap()
             .path;
-        let controller = ControllerFile {
+        let controller = StateMachineFile {
             default_state: "Walk".into(),
             states: vec![StateDef::new(
                 "Walk",
                 Motion::Clip(walk.clone()),
                 [0.0, 0.0],
             )],
-            ..ControllerFile::default()
+            ..StateMachineFile::default()
         };
-        let controller_path = "assets/animations/hero.controller.json";
+        let controller_path = "assets/animations/hero.statemachine.json";
         files::write_file(&folder.join(controller_path), &controller.to_json()).unwrap();
         assert_eq!(controllers_using(&folder, &walk), [controller_path]);
 
@@ -645,7 +646,10 @@ mod tests {
         let hero = new_controller(&folder, "Hero", &[]).unwrap().path;
         let text = std::fs::read_to_string(folder.join(&hero)).unwrap();
         let renamed = rename_controller(&folder, &hero, "Villain").unwrap();
-        assert_eq!(renamed.path, "assets/animations/Villain.controller.json");
+        assert_eq!(
+            renamed.path,
+            "assets/animations/Hero/Villain.statemachine.json"
+        );
         let undo: Vec<FileDiff> = renamed
             .files
             .iter()

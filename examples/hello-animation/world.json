@@ -7,9 +7,20 @@
         "name": "Floor",
         "properties": {
           "Anchored": true,
+          "CanCollide": true,
+          "CastShadow": true,
           "Color": [0.35, 0.37, 0.4],
+          "Emission": 0,
+          "EmissiveColor": [1, 1, 1],
+          "Material": "Plastic",
+          "Metalness": 0,
+          "Orientation": [0, 0, 0],
           "Position": [0, -0.5, 0],
-          "Size": [40, 1, 40]
+          "Roughness": 0.5,
+          "Shape": "Block",
+          "Size": [40, 1, 40],
+          "Transparency": 0,
+          "WindAffected": false
         }
       },
       {
@@ -17,16 +28,23 @@
         "name": "Noodle",
         "properties": {
           "Anchored": true,
+          "CanCollide": true,
+          "CastShadow": true,
           "MeshId": "assets/models/noodle.fbx",
+          "Orientation": [0, 0, 0],
           "Position": [0, 3.8, 0],
-          "Size": [2, 7.6, 2]
+          "Size": [2, 7.6, 2],
+          "Transparency": 0,
+          "WindAffected": false
         },
         "children": [
           {
             "class": "Animator",
             "name": "Animator",
             "properties": {
-              "Controller": "assets/animations/noodle.controller.json"
+              "Enabled": true,
+              "Speed": 1,
+              "StateMachine": "assets/animations/noodle/noodle.statemachine.json"
             }
           }
         ]

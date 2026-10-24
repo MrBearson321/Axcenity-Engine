@@ -642,6 +642,21 @@ impl<'a> Converter<'a> {
                     _ => return None,
                 })
             }
+            // `animator:LoadAnimation(animation):Play()`.
+            ExprKind::Method(object, method, args)
+                if method == "Play"
+                    && args.is_empty()
+                    && matches!(&object.kind, ExprKind::Method(_, load, loaded)
+                        if load == "LoadAnimation" && loaded.len() == 1) =>
+            {
+                let ExprKind::Method(animator, _, loaded) = &object.kind else {
+                    return None;
+                };
+                Some(BlockKind::PlayAnimation {
+                    animator: self.target(animator)?,
+                    animation: self.target(&loaded[0])?,
+                })
+            }
             ExprKind::Method(object, method, args) if args.is_empty() => {
                 let target = self.target(object)?;
                 Some(match method.as_str() {

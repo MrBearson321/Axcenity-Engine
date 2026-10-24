@@ -1301,7 +1301,7 @@ mod tests {
         let clip = crate::animation::store::create_property_clip(
             &folder,
             "Door",
-            &axcenity_anim::PropertyClipFile::new(1.5),
+            &axcenity_anim::ClipFile::new(1.5),
         )
         .unwrap()
         .path;
@@ -1972,7 +1972,7 @@ mod tests {
         app.world
             .set_property(
                 animator,
-                "Controller",
+                "StateMachine",
                 Value::String(controller.path.clone()),
             )
             .unwrap();
@@ -1988,7 +1988,7 @@ mod tests {
             app.world
                 .get(animator)
                 .unwrap()
-                .property("Controller")
+                .property("StateMachine")
                 .and_then(Value::as_str)
                 .unwrap()
                 .to_owned()
@@ -2647,7 +2647,9 @@ mod tests {
 
     #[test]
     fn editing_a_property_during_play_fires_changed_in_the_game() {
-        let mut app = EditorApp::new(Some(&example("hello-events")));
+        // A copy: opening an example from an older format upgrades it.
+        let folder = copy_of_example("hello-events", "edit-during-play");
+        let mut app = EditorApp::new(Some(&folder));
         let lamp = part(&app, "Lamp");
         app.play();
         play_for(&mut app, 0.5);

@@ -72,6 +72,10 @@ impl Context {
             instance::property_animation_methods(&lua)
                 .expect("creating Animation methods only fails when out of memory"),
         );
+        methods.extend(
+            instance::animation_track_methods(&lua)
+                .expect("creating AnimationTrack methods only fails when out of memory"),
+        );
         methods.push((
             axcenity_core::ClassName::DataModel,
             "GetService",
@@ -109,7 +113,9 @@ impl Context {
 
     /// Resumes what the pause held, in order (see `debugger`).
     pub fn continue_from_pause(&self, world: &mut World) {
-        with_world(&self.lua, world, || debugger::continue_from_pause(&self.lua));
+        with_world(&self.lua, world, || {
+            debugger::continue_from_pause(&self.lua)
+        });
     }
 
     /// Runs a script's code as a new coroutine until it finishes, fails or
@@ -231,8 +237,15 @@ impl Context {
     ) {
         with_world(&self.lua, world, || {
             if instance::world(&self.lua).is_ok_and(|world| world.contains(instance)) {
-                let args = mlua::Variadic::from_iter(args.iter().cloned());
-                events::fire(&self.lua, events::Owner::Instance(instance), event, args);
+                let owner = events::Owner::Instance(instance);
+                let variadic = mlua::Variadic::from_iter(args.iter().cloned());
+                events::fire(&self.lua, owner, event, variadic);
+                // A track's events also reach `GetMarkerReachedSignal(name)`.
+                if event == "KeyframeReached"
+                    && let Some(name) = args.first()
+                {
+                    events::fire_marker(&self.lua, owner, name);
+                }
             }
         });
     }

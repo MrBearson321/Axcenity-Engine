@@ -93,7 +93,7 @@ impl EditorApp {
             }
             Edit::PickController => {
                 if let Some(path) = self.pick_controller() {
-                    self.apply(id, Edit::Property("Controller", Value::String(path)));
+                    self.apply(id, Edit::Property("StateMachine", Value::String(path)));
                     self.history.seal();
                 }
                 return;
@@ -754,7 +754,8 @@ impl EditorApp {
                 if instance.class() != ClassName::Animator {
                     continue;
                 }
-                let Some(current) = instance.property("Controller").and_then(Value::as_str) else {
+                let Some(current) = instance.property("StateMachine").and_then(Value::as_str)
+                else {
                     continue;
                 };
                 if current != from {
@@ -764,14 +765,14 @@ impl EditorApp {
                 let after = Value::String(to.clone());
                 if self
                     .world
-                    .set_property(id, "Controller", after.clone())
+                    .set_property(id, "StateMachine", after.clone())
                     .is_err()
                 {
                     continue;
                 }
                 properties.push(history::PropertyEdit {
                     id,
-                    field: Field::Property("Controller"),
+                    field: Field::Property("StateMachine"),
                     before,
                     after,
                 });

@@ -180,7 +180,7 @@ function UserInputServiceClass:IsKeyDown(key) end
 ---@field Changed Signal Fires when a property (or `Name` or `Parent`) gets a different value, whether a script, physics or the editor changed it. The handler gets the property's name: `function(property) ... end`.
 ---@field ChildAdded Signal Fires when an Instance is put inside this one. The handler gets the child.
 ---@field ChildRemoved Signal Fires when an Instance is taken out of this one. The handler gets the child.
----@field [string] Workspace|Players|Lighting|ReplicatedStorage|ServerScriptService|StarterPlayer|StarterPlayerScripts|Part|MeshPart|Script|LocalScript|ModuleScript|RemoteEvent|Player|Model|Folder|SurfaceAppearance|ScreenGui|Frame|TextLabel|TextButton|ImageLabel|TextBox|PageLayout|Table|BillboardGui|Sound|PointLight|SpotLight|ParticleEmitter|Animator|Animation|Terrain|TerrainLayer A child, found by its name.
+---@field [string] Workspace|Players|Lighting|ReplicatedStorage|ServerScriptService|StarterPlayer|StarterPlayerScripts|Part|MeshPart|Script|LocalScript|ModuleScript|RemoteEvent|Player|Model|Folder|SurfaceAppearance|ScreenGui|Frame|TextLabel|TextButton|ImageLabel|TextBox|PageLayout|Table|BillboardGui|Sound|PointLight|SpotLight|ParticleEmitter|Animator|Animation|AnimationTrack|Terrain|TerrainLayer A child, found by its name.
 local InstanceClass = {}
 
 ---The first child with this name, or nil. With `recursive`, searches every descendant.
@@ -547,11 +547,11 @@ local ParticleEmitterClass = {}
 function ParticleEmitterClass:Emit(count) end
 
 
----Inside a MeshPart with an animated (FBX) model: plays its animator controller's states and transitions on the model while the game runs.
+---Inside a Part, MeshPart, Model, ScreenGui or UI element: plays animation on its parent while the game runs: its state machine, if it has one, and the AnimationTracks loaded with LoadAnimation.
 ---@class Animator: Instance
----@field Controller string The animator controller file it plays, inside the project folder, such as "assets/animations/hero.controller.json". The Animation panel makes and edits them.
----@field Enabled boolean If false, the model holds its pose: the animator stops moving on.
----@field Speed number Plays every state this many times as fast (1 is normal, 0 pauses).
+---@field StateMachine string The state machine file it plays on its parent, inside the project folder, such as "assets/animations/hero/hero.statemachine.json". Empty plays only the AnimationTracks loaded on it. The Animator tab makes and edits them.
+---@field Enabled boolean If false, everything it animates holds still: the animator stops moving on.
+---@field Speed number Plays everything this many times as fast (1 is normal, 0 pauses).
 ---@field CurrentState string The name of the state playing (read-only; use `Play` to change it). Empty until the animator first runs.
 ---@field StateChanged Signal Fires when the animator moves to another state. The handler gets the new state's name, then the old one's: `function(state, previous) ... end`.
 ---@field AnimationEvent Signal Fires when a playing clip passes one of its animation events. The handler gets the event's name.
@@ -595,22 +595,32 @@ function AnimatorClass:ResetTrigger(name) end
 ---@return nil
 function AnimatorClass:Play(state, blend) end
 
+---Loads `animation` (an Animation, whose Clip names the clip) on this Animator and returns an AnimationTrack to play, stop and blend over the state machine.
+---@param animation Animation
+---@return AnimationTrack
+function AnimatorClass:LoadAnimation(animation) end
 
----Inside a Part, MeshPart or Model: plays an authored property clip (`*.anim.json` with kind property) on that root while the game runs.
+---The AnimationTracks loaded on this Animator that are playing now.
+---@return AnimationTrack[]
+function AnimatorClass:GetPlayingAnimationTracks() end
+
+
+---Points at a clip (`*.anim.json`). Load it with `animator:LoadAnimation(animation)` to play it, or tick AutoPlay to play it when the game starts.
 ---@class Animation: Instance
----@field Clip string The property clip file inside the project folder, such as "assets/animations/Door.anim.json".
+---@field Clip string The clip file inside the project folder, such as "assets/animations/Door/Open.anim.json".
+---@field AutoPlay boolean If true, the Animator on the same parent plays it by itself when the game starts.
 ---@field Enabled boolean If false, playback pauses at its current time; set true to continue.
 ---@field Speed number Plays the clip this many times as fast (1 is normal, 0 pauses).
 ---@field Looped boolean If true, playback repeats instead of firing Completed at the end.
----@field Completed Signal Fires when a non-looping property clip reaches its end. The handler gets no arguments.
----@field AnimationEvent Signal Fires when the property clip passes a named event. The handler gets the event's name.
+---@field Completed Signal Fires when `animation:Play()` reaches the end of a clip that doesn't loop. The handler gets no arguments.
+---@field AnimationEvent Signal Fires when `animation:Play()` passes one of the clip's events. The handler gets the event's name.
 local AnimationClass = {}
 
----Plays this Animation's property clip from the start.
+---Plays this Animation's clip from the start, through the Animator on the same parent. `animator:LoadAnimation(animation)` is the newer way, with fades and weights.
 ---@return nil
 function AnimationClass:Play() end
 
----Stops playback and resets to the start of the clip.
+---Stops playback and goes back to the start of the clip.
 ---@return nil
 function AnimationClass:Stop() end
 
@@ -621,6 +631,49 @@ function AnimationClass:Pause() end
 ---Continues after Pause.
 ---@return nil
 function AnimationClass:Resume() end
+
+
+---One Animation loaded on an Animator, from `animator:LoadAnimation(animation)`: play, stop and blend it over the state machine.
+---@class AnimationTrack: Instance
+---@field IsPlaying boolean True from Play until Stop, or until a clip that doesn't loop ends (read-only).
+---@field Length number The clip's length in seconds (read-only; 0 until the clip has been read, a frame after LoadAnimation).
+---@field Looped boolean Whether it plays again from the start when it ends. Starts as the clip's own.
+---@field Speed number How fast it plays (read-only; use AdjustSpeed).
+---@field TimePosition number Seconds into the clip. Set it to jump there.
+---@field WeightCurrent number How much it counts now, from 0 to 1, while fading (read-only).
+---@field WeightTarget number The weight it's fading to (read-only; use AdjustWeight).
+---@field Animation Animation The Animation it was loaded from (read-only).
+---@field Stopped Signal Fires when the track has stopped: after Stop's fade, or at the end of a clip that doesn't loop.
+---@field KeyframeReached Signal Fires each time the track passes one of the clip's events. The handler gets the event's name; GetMarkerReachedSignal hears one name.
+local AnimationTrackClass = {}
+
+---Plays the clip from its start, fading in over `fadeTime` seconds (0.1 if left out) to `weight` (1), at `speed` (1). Where it and what plays under it animate the same thing, the track started last wins.
+---@param fadeTime? number
+---@param weight? number
+---@param speed? number
+---@return nil
+function AnimationTrackClass:Play(fadeTime, weight, speed) end
+
+---Stops it, fading out over `fadeTime` seconds (0.1 if left out). Stopped fires once it has faded out.
+---@param fadeTime? number
+---@return nil
+function AnimationTrackClass:Stop(fadeTime) end
+
+---Plays it this many times as fast from now (1 is normal, 0 holds, negative plays backwards).
+---@param speed? number
+---@return nil
+function AnimationTrackClass:AdjustSpeed(speed) end
+
+---Fades how much it counts to `weight` (0 to 1) over `fadeTime` seconds (0.1 if left out).
+---@param weight? number
+---@param fadeTime? number
+---@return nil
+function AnimationTrackClass:AdjustWeight(weight, fadeTime) end
+
+---An event that fires each time the track passes the clip's event named `name`. The handler gets the name.
+---@param name string
+---@return Signal
+function AnimationTrackClass:GetMarkerReachedSignal(name) end
 
 
 ---A landscape: a heightfield shaped in the editor's Terrain Studio, drawn with its TerrainLayers and colliding as its ground. Position is the middle of its footprint at the bottom of its height range; Size is its width, height range and length.
@@ -718,6 +771,7 @@ Instance = {}
 ---@overload fun(className: "ParticleEmitter"): ParticleEmitter
 ---@overload fun(className: "Animator"): Animator
 ---@overload fun(className: "Animation"): Animation
+---@overload fun(className: "AnimationTrack"): AnimationTrack
 ---@overload fun(className: "Terrain"): Terrain
 ---@overload fun(className: "TerrainLayer"): TerrainLayer
 function Instance.new(className) end

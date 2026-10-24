@@ -42,6 +42,44 @@ pub enum Event {
     /// `instance:GetPropertyChangedSignal(property)`: fires when that one
     /// property changes.
     PropertyChanged(&'static str),
+    /// `track:GetMarkerReachedSignal(name)`: fires when an AnimationTrack
+    /// passes the event with that name, by its number in [`MarkerNames`].
+    Marker(u32),
+}
+
+/// The event names `GetMarkerReachedSignal` was asked for, so an
+/// [`Event::Marker`] can stay a small `Copy` value.
+#[derive(Default)]
+pub struct MarkerNames(Vec<String>);
+
+/// The number of the marker `name`, giving it one the first time.
+pub fn marker_id(lua: &Lua, name: &str) -> u32 {
+    if lua.app_data_ref::<MarkerNames>().is_none() {
+        lua.set_app_data(MarkerNames::default());
+    }
+    let mut names = lua.app_data_mut::<MarkerNames>().expect("made just above");
+    match names.0.iter().position(|known| known == name) {
+        Some(index) => index as u32,
+        None => {
+            names.0.push(name.to_owned());
+            (names.0.len() - 1) as u32
+        }
+    }
+}
+
+/// Fires `owner`'s `GetMarkerReachedSignal(name)` handlers, with the name.
+pub fn fire_marker(lua: &Lua, owner: Owner, name: &str) {
+    let id = lua
+        .app_data_ref::<MarkerNames>()
+        .and_then(|names| names.0.iter().position(|known| known == name));
+    if let Some(id) = id {
+        fire_handlers(
+            lua,
+            (owner, Event::Marker(id as u32)),
+            None,
+            name.to_owned(),
+        );
+    }
 }
 
 /// One event of one owner, such as `Touched` on a Part.
@@ -193,6 +231,7 @@ impl UserData for LuaSignal {
             Ok(match this.event {
                 Event::Named(name) => format!("Signal {name}"),
                 Event::PropertyChanged(property) => format!("Signal {property} changed"),
+                Event::Marker(_) => "Signal MarkerReached".to_owned(),
             })
         });
         // `part.Touched == part.Touched` is true, although each read makes a new value.

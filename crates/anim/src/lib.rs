@@ -1,14 +1,15 @@
-//! Axcenity animation: what plays an animated MeshPart or property clip.
+//! Axcenity animation: what plays animation on Parts, Models, UI and
+//! skinned MeshParts.
 //!
-//! - [`files`]: the clip (`*.anim.json`) and animator controller
-//!   (`*.controller.json`) files in a project (take clips and property clips).
-//! - [`BoundClip`]: a take clip ready to pose one model's skeleton.
-//! - [`PropertyClip`]: authored keys for Parts, Models and UI elements.
-//! - [`Compiled`] and [`Machine`]: a controller made ready to run, and the
-//!   state machine that runs it (which state plays, and blends between them).
-//! - [`Animators`]: runs every Animator in a world each frame and poses its
-//!   MeshPart's model ([`Poses`]), owned by the host like physics.
-//! - [`PropertyPlayers`]: runs every property Animation and applies tracks.
+//! - [`files`]: the clip (`*.anim.json`) and state machine
+//!   (`*.statemachine.json`) files in a project.
+//! - [`Clip`]: a clip ready to play: its property tracks, and on a skeleton
+//!   its linked take and bone tracks.
+//! - [`Compiled`] and [`Machine`]: a state machine made ready to run, and
+//!   what runs it (which state plays, and blends between them).
+//! - [`Animators`]: runs every Animator, AnimationTrack and played Animation
+//!   in a world each frame, posing skeletons ([`Poses`]) and setting keyed
+//!   properties; owned by the host like physics.
 //!
 //! Poses come from `assets` ([`axcenity_assets::Model::pose`]); `scene`
 //! draws them.
@@ -18,23 +19,21 @@ mod clip;
 mod controller;
 pub mod files;
 mod property_clip;
-mod property_players;
 
 pub use animators::{AnimatorEvent, Animators, Poses, load_clip};
-pub use clip::{BoundClip, RootMotion};
+pub use clip::{Clip, RootMotion};
 pub use controller::{Advanced, Compiled, Fade, Machine, Parameters, Playing, exit_reached, holds};
 pub use files::{
-    ANIMATIONS_FOLDER, ANY_STATE, AnimClipFile, BlendChild, BlendTree, CLIP_EXTENSION,
-    CONTROLLER_EXTENSION, ClipEvent, ClipFile, Condition, ControllerFile, DEFAULT_BLEND, FileError,
-    Interp, Motion, ParameterDef, PropertyClipFile, PropertyKeyframe, PropertyName, PropertyTrack,
-    ReturnDef, ReturnWhen, StateDef, Test, TransitionDef, blend_weights, with_returns,
+    ANIMATIONS_FOLDER, ANY_STATE, BlendChild, BlendTree, CLIP_EXTENSION, ClipEvent, ClipFile,
+    Condition, DEFAULT_BLEND, FileError, Interp, LEGACY_CONTROLLER_EXTENSION, Motion, ParameterDef,
+    PropertyKeyframe, PropertyName, PropertyTrack, ReturnDef, ReturnWhen, SHARED_FOLDER,
+    STATE_MACHINE_EXTENSION, StateDef, StateMachineFile, TakeLink, Test, TransitionDef,
+    blend_weights, with_returns,
 };
 pub use property_clip::{
-    Applied, EvaluatedProperty, Placement, PropertyClip, apply_evaluated, model_pivot, numbers_of,
-    resolve_target, sample_time, target_path, value_from_numbers,
-};
-pub use property_players::{
-    PropertyAnimationEvent, PropertyPlayers, load_property_clip, parse_property_clip,
+    Applied, EvaluatedProperty, Placement, PropertyClip, apply_evaluated, blend_evaluated,
+    current_numbers, model_pivot, numbers_of, resolve_target, sample_time, target_path,
+    value_from_numbers,
 };
 
 #[cfg(test)]

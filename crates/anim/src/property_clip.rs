@@ -24,19 +24,19 @@ use axcenity_core::{ClassName, Color3, InstanceId, UDim2, Value, Vector3, World}
 use glam::{EulerRot, Quat, Vec3};
 
 use crate::files::{
-    ClipEvent, FileError, Interp, PropertyClipFile, PropertyKeyframe, PropertyName, PropertyTrack,
+    ClipEvent, ClipFile, FileError, Interp, PropertyKeyframe, PropertyName, PropertyTrack,
 };
 
 /// A validated property clip ready to sample.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PropertyClip {
-    pub file: PropertyClipFile,
+    pub file: ClipFile,
 }
 
 impl PropertyClip {
     /// Validates `file` (duration, key times and values, sorted keys,
     /// coalesced duplicate times) and returns a clip ready to sample.
-    pub fn from_file(mut file: PropertyClipFile) -> Result<Self, FileError> {
+    pub fn from_file(mut file: ClipFile) -> Result<Self, FileError> {
         if !file.duration.is_finite() || file.duration < 0.0 {
             return Err(FileError(
                 "its duration must be a finite number 0 or more".into(),
@@ -123,7 +123,7 @@ impl PropertyClip {
     }
 
     pub fn from_json(text: &str) -> Result<Self, FileError> {
-        Self::from_file(PropertyClipFile::from_json(text)?)
+        Self::from_file(ClipFile::from_json(text)?)
     }
 
     pub fn duration(&self) -> f64 {
@@ -145,6 +145,8 @@ impl PropertyClip {
         self.file
             .tracks
             .iter()
+            // Bones are posed by the clip's skeleton side (`clip.rs`).
+            .filter(|track| track.property != PropertyName::Bone)
             .filter_map(|track| {
                 let value = sample_track(track, t)?;
                 Some(EvaluatedProperty {
@@ -224,7 +226,9 @@ pub fn sample_time(time: f64, duration: f64, looping: bool) -> f64 {
     }
 }
 
-fn sample_track(track: &PropertyTrack, time: f64) -> Option<Vec<f32>> {
+/// `track`'s value at `time` seconds, holding before the first key and
+/// after the last.
+pub(crate) fn sample_track(track: &PropertyTrack, time: f64) -> Option<Vec<f32>> {
     let keys = &track.keys;
     if keys.is_empty() {
         return None;
@@ -252,14 +256,23 @@ fn sample_track(track: &PropertyTrack, time: f64) -> Option<Vec<f32>> {
     }
 }
 
-fn lerp_property(property: PropertyName, a: &[f32], b: &[f32], t: f32) -> Vec<f32> {
+/// `t` of the way from `a` to `b`: Orientation turns by slerp, and a bone's
+/// rotation (its numbers 3 to 6) too; everything else goes straight.
+pub(crate) fn lerp_property(property: PropertyName, a: &[f32], b: &[f32], t: f32) -> Vec<f32> {
     if let (PropertyName::Orientation, [ax, ay, az], [bx, by, bz]) = (property, a, b) {
         let qa = quat_from_orientation(Vector3::new(*ax, *ay, *az));
         let qb = quat_from_orientation(Vector3::new(*bx, *by, *bz));
         let v = orientation_from_quat(qa.slerp(qb, t));
         return vec![v.x, v.y, v.z];
     }
-    a.iter().zip(b).map(|(a, b)| a + (b - a) * t).collect()
+    let mut out: Vec<f32> = a.iter().zip(b).map(|(a, b)| a + (b - a) * t).collect();
+    if property == PropertyName::Bone && a.len() == 10 && b.len() == 10 {
+        let qa = Quat::from_xyzw(a[3], a[4], a[5], a[6]).normalize();
+        let qb = Quat::from_xyzw(b[3], b[4], b[5], b[6]).normalize();
+        let q = qa.slerp(qb, t);
+        out[3..7].copy_from_slice(&[q.x, q.y, q.z, q.w]);
+    }
+    out
 }
 
 fn quat_from_orientation(orientation: Vector3) -> Quat {
@@ -552,6 +565,54 @@ pub fn apply_evaluated(
     }
 }
 
+/// What `property` of `target` under `root` is now, as numbers: a Model's
+/// pivot for its `Position` and `Orientation`, otherwise the property's
+/// value. `None` if there's no such target or property.
+pub fn current_numbers(
+    world: &World,
+    root: InstanceId,
+    target: &str,
+    property: PropertyName,
+    applied: &Applied,
+) -> Option<Vec<f32>> {
+    let id = resolve_target(world, root, target)?;
+    let instance = world.get(id)?;
+    if instance.class() == ClassName::Model {
+        let (position, orientation) = applied.pivot(world, id)?.numbers();
+        return match property {
+            PropertyName::Position => Some(position.to_vec()),
+            PropertyName::Orientation => Some(orientation.to_vec()),
+            _ => None,
+        };
+    }
+    numbers_of(instance.property(property.as_str())?)
+}
+
+/// `evaluated` mixed `weight` (0 to 1) of the way from what each property is
+/// now, for a track fading in or out over what plays under it.
+pub fn blend_evaluated(
+    world: &World,
+    root: InstanceId,
+    evaluated: Vec<EvaluatedProperty>,
+    weight: f32,
+    applied: &Applied,
+) -> Vec<EvaluatedProperty> {
+    if weight >= 1.0 {
+        return evaluated;
+    }
+    evaluated
+        .into_iter()
+        .filter_map(|mut item| {
+            let now = current_numbers(world, root, &item.target, item.property, applied)?;
+            if now.len() != item.value.len() {
+                return None;
+            }
+            item.value = lerp_property(item.property, &now, &item.value, weight.max(0.0));
+            Some(item)
+        })
+        .collect()
+}
+
 /// Puts every part `id` carries where it sits relative to `id` at `now`.
 fn carry(world: &mut World, applied: &Applied, id: InstanceId, now: Placement) {
     let Some(rest) = applied.rest.get(&id) else {
@@ -568,9 +629,9 @@ mod tests {
     use crate::files::{Interp, PropertyKeyframe, PropertyName, PropertyTrack};
 
     fn door_clip() -> PropertyClip {
-        PropertyClip::from_file(PropertyClipFile {
-            format_version: 1,
-            kind: PropertyClipFile::KIND.to_owned(),
+        PropertyClip::from_file(ClipFile {
+            format_version: 2,
+            link: None,
             duration: 1.5,
             looping: false,
             tracks: vec![PropertyTrack {
@@ -619,9 +680,9 @@ mod tests {
 
     #[test]
     fn zero_duration_and_single_key() {
-        let clip = PropertyClip::from_file(PropertyClipFile {
-            format_version: 1,
-            kind: PropertyClipFile::KIND.to_owned(),
+        let clip = PropertyClip::from_file(ClipFile {
+            format_version: 2,
+            link: None,
             duration: 0.0,
             looping: false,
             tracks: vec![PropertyTrack {
@@ -658,9 +719,9 @@ mod tests {
 
     #[test]
     fn step_holds_until_next_key() {
-        let clip = PropertyClip::from_file(PropertyClipFile {
-            format_version: 1,
-            kind: PropertyClipFile::KIND.to_owned(),
+        let clip = PropertyClip::from_file(ClipFile {
+            format_version: 2,
+            link: None,
             duration: 2.0,
             looping: false,
             tracks: vec![PropertyTrack {
@@ -691,9 +752,9 @@ mod tests {
 
     #[test]
     fn orientation_uses_slerp() {
-        let clip = PropertyClip::from_file(PropertyClipFile {
-            format_version: 1,
-            kind: PropertyClipFile::KIND.to_owned(),
+        let clip = PropertyClip::from_file(ClipFile {
+            format_version: 2,
+            link: None,
             duration: 1.0,
             looping: false,
             tracks: vec![PropertyTrack {
@@ -738,14 +799,13 @@ mod tests {
         let text = clip.file.to_json();
         let again = PropertyClip::from_json(&text).unwrap();
         assert_eq!(again.file, clip.file);
-        assert!(text.contains("\"kind\": \"property\""));
     }
 
     #[test]
     fn rejects_key_past_duration() {
-        let err = PropertyClip::from_file(PropertyClipFile {
-            format_version: 1,
-            kind: PropertyClipFile::KIND.to_owned(),
+        let err = PropertyClip::from_file(ClipFile {
+            format_version: 2,
+            link: None,
             duration: 1.0,
             looping: false,
             tracks: vec![PropertyTrack {
@@ -767,9 +827,9 @@ mod tests {
 
     #[test]
     fn coalesce_duplicate_times() {
-        let clip = PropertyClip::from_file(PropertyClipFile {
-            format_version: 1,
-            kind: PropertyClipFile::KIND.to_owned(),
+        let clip = PropertyClip::from_file(ClipFile {
+            format_version: 2,
+            link: None,
             duration: 1.0,
             looping: false,
             tracks: vec![PropertyTrack {

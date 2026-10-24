@@ -786,14 +786,14 @@ mod tests {
         let (mut world, part) = world_with_part();
         let animator = world.create(ClassName::Animator).unwrap();
         world.set_parent(animator, Some(part)).unwrap();
-        let from = "assets/animations/Hero.controller.json";
-        let to = "assets/animations/Hero2.controller.json";
+        let from = "assets/animations/Hero.statemachine.json";
+        let to = "assets/animations/Hero2.statemachine.json";
         world
-            .set_property(animator, "Controller", Value::String(from.into()))
+            .set_property(animator, "StateMachine", Value::String(from.into()))
             .unwrap();
         let mut history = History::new();
         world
-            .set_property(animator, "Controller", Value::String(to.into()))
+            .set_property(animator, "StateMachine", Value::String(to.into()))
             .unwrap();
         history.record_asset(
             &mut world,
@@ -812,7 +812,7 @@ mod tests {
             ],
             vec![PropertyEdit {
                 id: animator,
-                field: Field::Property("Controller"),
+                field: Field::Property("StateMachine"),
                 before: Value::String(from.into()),
                 after: Value::String(to.into()),
             }],
@@ -822,14 +822,14 @@ mod tests {
         let controller = world
             .get(animator)
             .unwrap()
-            .property("Controller")
+            .property("StateMachine")
             .and_then(Value::as_str);
         assert_eq!(controller, Some(from));
         history.redo(&mut world);
         let controller = world
             .get(animator)
             .unwrap()
-            .property("Controller")
+            .property("StateMachine")
             .and_then(Value::as_str);
         assert_eq!(controller, Some(to));
     }

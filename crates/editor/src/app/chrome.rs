@@ -210,7 +210,7 @@ impl EditorApp {
         });
         let controller = animator
             .and_then(|a| world.get(a))
-            .and_then(|a| a.property("Controller").and_then(Value::as_str))
+            .and_then(|a| a.property("StateMachine").and_then(Value::as_str))
             .unwrap_or_default()
             .to_owned();
         Some(SelectedModel {
@@ -242,9 +242,9 @@ impl EditorApp {
                     .map_or("Animator".to_owned(), |a| a.name().to_owned());
                 self.change(
                     animator,
-                    Field::Property("Controller"),
-                    format!("Set Controller of {name}"),
-                    vec![Edit::Property("Controller", Value::String(path))],
+                    Field::Property("StateMachine"),
+                    format!("Set State Machine of {name}"),
+                    vec![Edit::Property("StateMachine", Value::String(path))],
                 );
                 self.history.seal();
             }
@@ -254,8 +254,8 @@ impl EditorApp {
                     .create(ClassName::Animator)
                     .expect("not a service");
                 self.world
-                    .set_property(id, "Controller", Value::String(path))
-                    .expect("every Animator has a Controller");
+                    .set_property(id, "StateMachine", Value::String(path))
+                    .expect("every Animator has a StateMachine");
                 self.place_new(part, vec![id], "Insert Animator".to_owned());
             }
         }
@@ -1518,7 +1518,7 @@ fn block_objects(
             let instance = world.get(id)?;
             let controller_names = match instance.class() {
                 ClassName::Animator => instance
-                    .property("Controller")
+                    .property("StateMachine")
                     .and_then(Value::as_str)
                     .filter(|path| !path.is_empty())
                     .map(&mut names_of)

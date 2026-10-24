@@ -241,7 +241,8 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::SetAnimatorNumber { .. }
         | BlockKind::SetAnimatorTrigger { .. }
         | BlockKind::ResetAnimatorTrigger { .. }
-        | BlockKind::PlayAnimatorState { .. } => Category::Animation,
+        | BlockKind::PlayAnimatorState { .. }
+        | BlockKind::PlayAnimation { .. } => Category::Animation,
         BlockKind::SetVariable { .. } | BlockKind::ChangeVariable { .. } => Category::Variables,
         BlockKind::Print { .. } | BlockKind::Destroy { .. } => Category::More,
         BlockKind::Code { .. } | BlockKind::TopCode { .. } => Category::Lua,
@@ -271,6 +272,7 @@ enum Filter {
     PageLayouts,
     Gui,
     Animators,
+    Animations,
     Any,
 }
 
@@ -288,6 +290,7 @@ impl Filter {
             }
             Filter::PageLayouts => class == ClassName::PageLayout,
             Filter::Animators => class == ClassName::Animator,
+            Filter::Animations => class == ClassName::Animation,
             Filter::Gui => matches!(
                 class,
                 ClassName::ScreenGui
@@ -313,6 +316,7 @@ impl Filter {
             Filter::PageLayouts => "PageLayout",
             Filter::Gui => "Frame",
             Filter::Animators => "Model.Animator",
+            Filter::Animations => "Model.Animation",
         }
     }
 }
@@ -532,6 +536,15 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
                 Object(animator, Filter::Animators),
             ])]
         }
+        BlockKind::PlayAnimation {
+            animator,
+            animation,
+        } => vec![Row(vec![
+            label("play animation"),
+            Object(animation, Filter::Animations),
+            label("on"),
+            Object(animator, Filter::Animators),
+        ])],
         BlockKind::Unattached { .. } => Vec::new(),
         BlockKind::Wait { seconds } => vec![Row(vec![
             label("wait"),
@@ -2151,7 +2164,7 @@ fn name_menu(ui: &mut egui::Ui, name: &mut String, kind: NameKind, suggestions: 
     }
     if suggestions.is_empty() {
         ui.weak(format!(
-            "Its controller has no {} yet (or pick the Animator first).",
+            "Its state machine has no {} yet (or pick the Animator first).",
             kind.what()
         ));
     }
@@ -2437,6 +2450,10 @@ fn palette(
                 B(BlockKind::PlayAnimatorState {
                     animator: animator.clone(),
                     state: name(NameKind::State),
+                }),
+                B(BlockKind::PlayAnimation {
+                    animator: animator.clone(),
+                    animation: first(Filter::Animations),
                 }),
                 B(BlockKind::WhenStateChanged {
                     animator: animator.clone(),

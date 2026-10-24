@@ -7,11 +7,20 @@
         "name": "Floor",
         "properties": {
           "Anchored": true,
-          "Position": [0, -0.5, 0],
-          "Size": [20, 1, 20],
+          "CanCollide": true,
+          "CastShadow": true,
           "Color": [0.35, 0.4, 0.35],
+          "Emission": 0,
+          "EmissiveColor": [1, 1, 1],
+          "Material": "Plastic",
           "Metalness": 0,
-          "Roughness": 0.8
+          "Orientation": [0, 0, 0],
+          "Position": [0, -0.5, 0],
+          "Roughness": 0.8,
+          "Shape": "Block",
+          "Size": [20, 1, 20],
+          "Transparency": 0,
+          "WindAffected": false
         }
       },
       {
@@ -19,21 +28,40 @@
         "name": "Door",
         "properties": {
           "Anchored": true,
-          "Position": [0, 2, 0],
-          "Size": [4, 4, 0.5],
+          "CanCollide": true,
+          "CastShadow": true,
           "Color": [0.55, 0.35, 0.2],
+          "Emission": 0,
+          "EmissiveColor": [1, 1, 1],
+          "Material": "Plastic",
           "Metalness": 0,
-          "Roughness": 0.5
+          "Orientation": [0, 0, 0],
+          "Position": [0, 2, 0],
+          "Roughness": 0.5,
+          "Shape": "Block",
+          "Size": [4, 4, 0.5],
+          "Transparency": 0,
+          "WindAffected": false
         },
         "children": [
           {
             "class": "Animation",
             "name": "Open",
             "properties": {
-              "Clip": "assets/animations/Door.anim.json",
+              "AutoPlay": false,
+              "Clip": "assets/animations/Door/Door.anim.json",
               "Enabled": true,
-              "Speed": 1.0,
-              "Looped": false
+              "Looped": false,
+              "Speed": 1
+            }
+          },
+          {
+            "class": "Animator",
+            "name": "Animator",
+            "properties": {
+              "Enabled": true,
+              "Speed": 1,
+              "StateMachine": ""
             }
           }
         ]
@@ -43,11 +71,20 @@
         "name": "Pad",
         "properties": {
           "Anchored": true,
-          "Position": [0, 0.25, 6],
-          "Size": [4, 0.5, 4],
+          "CanCollide": true,
+          "CastShadow": true,
           "Color": [0.2, 0.55, 0.85],
+          "Emission": 0,
+          "EmissiveColor": [1, 1, 1],
+          "Material": "Plastic",
           "Metalness": 0,
-          "Roughness": 0.4
+          "Orientation": [0, 0, 0],
+          "Position": [0, 0.25, 6],
+          "Roughness": 0.4,
+          "Shape": "Block",
+          "Size": [4, 0.5, 4],
+          "Transparency": 0,
+          "WindAffected": false
         }
       }
     ]

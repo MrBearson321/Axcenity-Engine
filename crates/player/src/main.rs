@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
-use axcenity_anim::{Animators, PropertyPlayers};
+use axcenity_anim::Animators;
 use axcenity_assets::Assets;
 use axcenity_audio::GameAudio;
 use axcenity_core::{InstanceId, World};
@@ -115,8 +115,6 @@ fn main() -> Result<()> {
     // their defaults) before any script runs, so scripts can read them.
     let mut animators = Animators::new();
     animators.update(&mut world, &assets, 0.0);
-    let mut property_players = PropertyPlayers::new();
-    property_players.update(&mut world, &assets, 0.0);
     start_scripts(&mut scripts, &mut world, &project.scripts);
     let mut audio = GameAudio::default();
     let camera = FlyCamera::looking_at(START_CAMERA_POSITION, Vec3::ZERO);
@@ -145,7 +143,6 @@ fn main() -> Result<()> {
         particles: axcenity_scene::Particles::new(),
         terrain: axcenity_scene::TerrainCache::new(),
         animators,
-        property_players,
         assets,
         window: None,
         renderer: None,
@@ -280,10 +277,9 @@ struct App {
     particles: axcenity_scene::Particles,
     /// Terrains' chunk meshes and weights, kept between frames.
     terrain: axcenity_scene::TerrainCache,
-    /// Plays the Animators and poses their MeshParts.
+    /// Plays the Animators (state machines, AnimationTracks and played
+    /// Animations), posing skeletons and setting keyed properties.
     animators: Animators,
-    /// Plays property Animation Instances on Parts.
-    property_players: PropertyPlayers,
     /// The project's models, for MeshParts.
     assets: Assets,
     window: Option<Arc<Window>>,
@@ -727,18 +723,6 @@ impl ApplicationHandler for App {
                 for error in self.animators.take_errors() {
                     eprintln!("error: {error}");
                 }
-                let events =
-                    self.property_players
-                        .update(&mut self.world, &self.assets, f64::from(seconds));
-                for event in events {
-                    let (animation, name, args) = event.script_event();
-                    self.scripts
-                        .fire_instance_event(&mut self.world, animation, name, &args);
-                }
-                print_output(&mut self.scripts);
-                for error in self.property_players.take_errors() {
-                    eprintln!("error: {error}");
-                }
 
                 // 5. Lay out ScreenGuis at this window's current pixel size.
                 let ui_size = (size.width, size.height);
@@ -1068,14 +1052,44 @@ mod tests {
 
     /// The example project in `examples/<name>`, with its scripts started.
     fn start_example(name: &str) -> (World, ScriptRuntime) {
-        let folder = Path::new(env!("CARGO_MANIFEST_DIR"))
+        let (world, scripts, _) = start_example_in(name);
+        (world, scripts)
+    }
+
+    /// Like [`start_example`], with the folder of the copy it opened.
+    fn start_example_in(name: &str) -> (World, ScriptRuntime, PathBuf) {
+        let example = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../examples")
             .join(name);
+        // A copy, since opening a project from an older format upgrades it.
+        let folder = std::env::temp_dir().join(format!(
+            "axcenity-player-{name}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&folder);
+        copy_folder(&example, &folder);
         let project = axcenity_project::load(&folder).unwrap();
         let mut world = project.world;
         let mut scripts = ScriptRuntime::new();
         start_scripts(&mut scripts, &mut world, &project.scripts);
-        (world, scripts)
+        (world, scripts, folder)
+    }
+
+    /// Copies the project files in `from` to `to`, leaving out `.axcenity`.
+    fn copy_folder(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for entry in std::fs::read_dir(from).unwrap().flatten() {
+            if entry.file_name() == ".axcenity" {
+                continue;
+            }
+            let target = to.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                copy_folder(&entry.path(), &target);
+            } else {
+                std::fs::copy(entry.path(), target).unwrap();
+            }
+        }
     }
 
     /// Runs frames at 60 fps until the game clock reaches `until` seconds,
@@ -1096,6 +1110,68 @@ mod tests {
             scripts.heartbeat(world, 1.0 / 60.0);
             *clock += 1;
         }
+    }
+
+    #[test]
+    fn hello_door_opens_through_load_animation_when_something_lands_on_the_pad() {
+        let (mut world, mut scripts, folder) = start_example_in("hello-door");
+        let assets = Assets::new(&folder);
+        let mut animators = Animators::new();
+        let mut physics = Physics::new();
+        let door = world.find_first_child(world.workspace(), "Door").unwrap();
+        let pad = world.find_first_child(world.workspace(), "Pad").unwrap();
+        let height = |world: &World| {
+            world
+                .get(door)
+                .and_then(|d| d.property("Position"))
+                .and_then(axcenity_core::Value::as_vector3)
+                .unwrap()
+                .y
+        };
+        // A crate dropped onto the Pad.
+        let pad_at = world
+            .get(pad)
+            .and_then(|p| p.property("Position"))
+            .and_then(axcenity_core::Value::as_vector3)
+            .unwrap();
+        let crate_part = world.create(axcenity_core::ClassName::Part).unwrap();
+        for (name, value) in [
+            ("Anchored", axcenity_core::Value::Bool(false)),
+            (
+                "Position",
+                axcenity_core::Value::Vector3(axcenity_core::Vector3::new(
+                    pad_at.x,
+                    pad_at.y + 2.0,
+                    pad_at.z,
+                )),
+            ),
+        ] {
+            world.set_property(crate_part, name, value).unwrap();
+        }
+        world
+            .set_parent(crate_part, Some(world.workspace()))
+            .unwrap();
+        assert_eq!(height(&world), 2.0);
+        for _ in 0..(4 * 60) {
+            scripts.step(&mut world, 1.0 / 60.0);
+            physics.step(&mut world, 1.0 / 60.0);
+            let touches = physics.take_touches();
+            scripts.fire_touched(&mut world, &touches);
+            scripts.heartbeat(&mut world, 1.0 / 60.0);
+            for event in animators.update(&mut world, &assets, 1.0 / 60.0) {
+                let (instance, name, args) = event.script_event();
+                scripts.fire_instance_event(&mut world, instance, name, &args);
+            }
+        }
+        assert_eq!(animators.take_errors(), Vec::<String>::new());
+        let output: Vec<String> = scripts
+            .take_output()
+            .into_iter()
+            .map(|line| line.text)
+            .collect();
+        assert_eq!(output, ["Door event: Opened", "Door opened"]);
+        assert_eq!(height(&world), 8.0, "the door stays open");
+        let _ = std::fs::remove_dir_all(&folder);
     }
 
     #[test]

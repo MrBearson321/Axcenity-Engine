@@ -1,23 +1,40 @@
-//! A clip file bound to the skeleton it poses, with its root motion and
-//! events.
+//! A clip made ready to play: its tracks checked, and, on a skeleton, its
+//! linked take and bone tracks bound to the bones they move.
+//!
+//! Playback counts in **phases**: 0 is the clip's start, 1 its end, 1.5
+//! halfway through a second pass. A looping clip goes round; one that
+//! doesn't holds its last frame.
 
 use std::sync::Arc;
 
 use axcenity_assets::{BoneTransform, Pose, Rig, Take};
 use glam::{Mat4, Quat, Vec3};
 
-use crate::files::ClipFile;
+use crate::files::{ClipFile, PropertyName, TakeLink};
+use crate::property_clip::{EvaluatedProperty, PropertyClip, sample_track};
 
-/// A clip ready to pose one rig: its file, its take, and which bone of the
-/// rig each of the take's tracks moves (matched by name, so a take from an
-/// animation-only file moves a model loaded from another).
+/// A clip ready to play on one thing: its property tracks checked and,
+/// with a rig, its take and bone tracks bound to the rig's bones (matched
+/// by name, so a take from an animation-only file moves a model loaded from
+/// another).
 #[derive(Clone, Debug)]
-pub struct BoundClip {
-    pub file: ClipFile,
+pub struct Clip {
+    clip: PropertyClip,
+    /// The linked take, bound to the rig. `None` without a link or a rig.
+    take: Option<BoundTake>,
+    /// Each bone track's rig bone and its index in the file's tracks.
+    bones: Vec<(usize, usize)>,
+    /// One per rig bone: whether the clip moves it.
+    animated: Vec<bool>,
+}
+
+#[derive(Clone, Debug)]
+struct BoundTake {
+    link: TakeLink,
     takes: Arc<Vec<Take>>,
     take: usize,
     binding: Vec<Option<usize>>,
-    /// The bone root motion takes its travel from, if the clip has root
+    /// The bone root motion takes its travel from, if the link has root
     /// motion on and the take moves one across the ground.
     root: Option<RootBone>,
 }
@@ -62,163 +79,148 @@ impl std::ops::Add for RootMotion {
     }
 }
 
-impl BoundClip {
-    /// Binds `file`'s take, found by name in `takes` (its source file's), to
-    /// `rig`. Fails, saying why, if the take isn't there or moves none of
-    /// the rig's bones.
-    pub fn bind(file: ClipFile, takes: Arc<Vec<Take>>, rig: &Rig) -> Result<Self, String> {
-        let take = takes
-            .iter()
-            .position(|take| take.name == file.take)
-            .ok_or_else(|| {
-                let names: Vec<String> = takes.iter().map(|t| format!("`{}`", t.name)).collect();
-                if names.is_empty() {
-                    format!("`{}` has no animation in it", file.source)
-                } else {
-                    format!(
-                        "`{}` has no take named `{}` (it has {})",
-                        file.source,
-                        file.take,
-                        names.join(", ")
-                    )
+impl Clip {
+    /// Makes `file` ready to play. With a `rig`, its link's take (found by
+    /// name in `takes`, the takes of the link's source file) and its bone
+    /// tracks are bound to the rig's bones; bone tracks for bones the take
+    /// moves are left out, since the take moves those. Fails, saying why, if
+    /// a track is broken, or the take isn't there or moves none of the rig's
+    /// bones. Without a rig, only its property tracks play.
+    pub fn bind(
+        file: ClipFile,
+        takes: Option<Arc<Vec<Take>>>,
+        rig: Option<&Rig>,
+    ) -> Result<Self, String> {
+        let clip = PropertyClip::from_file(file).map_err(|err| err.0)?;
+        let mut animated = rig.map_or_else(Vec::new, |rig| vec![false; rig.bones.len()]);
+        let take = match (&clip.file.link, rig) {
+            (Some(link), Some(rig)) => {
+                let takes =
+                    takes.ok_or_else(|| format!("its model `{}` can't be read", link.source))?;
+                let take = BoundTake::bind(link.clone(), takes, rig)?;
+                for bone in take.binding.iter().flatten() {
+                    animated[*bone] = true;
                 }
-            })?;
-        let binding = takes[take].bind(rig);
-        if !binding.iter().any(Option::is_some) && !takes[take].tracks.is_empty() {
-            return Err(format!(
-                "the take `{}` moves none of the model's bones (it's for another skeleton)",
-                file.take
-            ));
-        }
-        let mut clip = Self {
-            file,
-            takes,
-            take,
-            binding,
-            root: None,
+                Some(take)
+            }
+            _ => None,
         };
-        if clip.file.root_motion {
-            clip.root = clip.find_root(rig);
-        }
-        Ok(clip)
-    }
-
-    /// The first bone (parents come first, so the top-most) whose track
-    /// really moves it across the ground during the clip.
-    fn find_root(&self, rig: &Rig) -> Option<RootBone> {
-        let take = self.take();
-        let start = self.file.start as f32;
-        let end = self.file.end as f32;
-        let mut candidates: Vec<usize> = take
-            .tracks
-            .iter()
-            .zip(&self.binding)
-            .filter(|(track, _)| track.translation.values.len() > 1)
-            .filter_map(|(_, bone)| *bone)
-            .collect();
-        candidates.sort_unstable();
-        for bone in candidates {
-            let at = |time: f32| self.root_world(rig, bone, time);
-            let (first, _) = at(start);
-            let travelled = (0..=8).any(|step| {
-                let (position, _) = at(start + (end - start) * step as f32 / 8.0);
-                let moved = position - first;
-                Vec3::new(moved.x, 0.0, moved.z).length() > 1e-3
-            });
-            if travelled {
-                let (start, start_yaw) = at(start);
-                return Some(RootBone {
-                    bone,
-                    start,
-                    start_yaw,
-                });
+        let mut bones = Vec::new();
+        if let Some(rig) = rig {
+            let paths = bone_paths(rig);
+            for (index, track) in clip.file.tracks.iter().enumerate() {
+                if track.property != PropertyName::Bone {
+                    continue;
+                }
+                let Some(bone) = find_bone(rig, &paths, &track.target) else {
+                    continue;
+                };
+                if !animated[bone] {
+                    animated[bone] = true;
+                    bones.push((bone, index));
+                }
             }
         }
-        None
+        Ok(Self {
+            clip,
+            take,
+            bones,
+            animated,
+        })
     }
 
-    /// Where `bone` is in the file's space at `time` seconds of the take,
-    /// and its heading.
-    fn root_world(&self, rig: &Rig, bone: usize, time: f32) -> (Vec3, f32) {
-        let mut pose = rig.rest_pose();
-        self.take().sample(time, &self.binding, rig, &mut pose);
-        let world = rig.world(&pose);
-        let (_, rotation, position) = world[bone].to_scale_rotation_translation();
-        (position, yaw(rotation))
+    pub fn file(&self) -> &ClipFile {
+        &self.clip.file
     }
 
-    pub fn take(&self) -> &Take {
-        &self.takes[self.take]
+    pub fn looping(&self) -> bool {
+        self.clip.file.looping
+    }
+
+    /// Seconds one pass lasts. Never 0, so phases always move on.
+    pub fn duration(&self) -> f64 {
+        self.clip.file.duration.max(1.0 / 60.0)
+    }
+
+    /// The linked take, if it's bound to a rig.
+    pub fn take(&self) -> Option<&Take> {
+        self.take.as_ref().map(BoundTake::take)
     }
 
     /// True if root motion is on and found a bone to take it from.
     pub fn has_root_motion(&self) -> bool {
-        self.root.is_some()
+        self.take.as_ref().is_some_and(|take| take.root.is_some())
     }
 
-    /// Seconds one pass of the clip lasts at its speed. Never 0, so phases
-    /// always move on.
-    pub fn duration(&self) -> f64 {
-        let speed = self.file.speed.abs().max(1e-3);
-        (self.file.length() / speed).max(1.0 / 60.0)
+    /// One per rig bone: whether the clip moves it (by its take or a bone
+    /// track). Empty when it wasn't bound to a rig.
+    pub fn animated_bones(&self) -> &[bool] {
+        &self.animated
     }
 
     /// How far through one pass `phase` is, from 0 to 1: a looping clip
     /// goes round, one that doesn't holds at its end.
     fn through(&self, phase: f64) -> f64 {
-        if self.file.looping {
+        if !phase.is_finite() {
+            return 0.0;
+        }
+        if self.looping() {
             phase.rem_euclid(1.0)
         } else {
             phase.clamp(0.0, 1.0)
         }
     }
 
-    /// Where in the take (seconds) the clip is `through` (0 to 1) one pass:
-    /// a negative speed plays it backwards.
-    fn time_through(&self, through: f64) -> f64 {
-        let through = if self.file.speed < 0.0 {
-            1.0 - through
-        } else {
-            through
-        };
-        self.file.start + through * self.file.length()
+    /// Seconds into the clip at `phase` (see [`through`](Self::through)).
+    pub fn seconds_at(&self, phase: f64) -> f64 {
+        self.through(phase) * self.clip.file.duration
     }
 
-    /// Where in the take (seconds) the clip is at `phase`: 0 is its start,
-    /// 1 its end, 1.5 halfway through the second pass. A looping clip goes
-    /// round; one that doesn't holds its end. A negative speed plays it
-    /// backwards.
-    pub fn time_at(&self, phase: f64) -> f64 {
-        self.time_through(self.through(phase))
+    /// Where in the linked take (seconds) the clip is at `phase`, or `None`
+    /// without a link.
+    pub fn time_at(&self, phase: f64) -> Option<f64> {
+        let link = self.clip.file.link.as_ref()?;
+        Some(link_time(link, self.through(phase)))
     }
 
     /// Moves the bones the clip animates in `pose` to where they are at
-    /// `phase` (see [`time_at`](Self::time_at)). With root motion, the root
-    /// bone stays over where it started, facing the way it started (its
-    /// travel moves the MeshPart instead; see [`root_motion`](Self::root_motion));
-    /// it still moves up and down.
+    /// `phase`: those its take moves, then its bone tracks. With root
+    /// motion, the root bone stays over where it started, facing the way it
+    /// started (its travel moves the MeshPart instead; see
+    /// [`root_motion`](Self::root_motion)); it still moves up and down.
     pub fn sample(&self, phase: f64, rig: &Rig, pose: &mut Pose) {
-        let time = self.time_at(phase) as f32;
-        self.take().sample(time, &self.binding, rig, pose);
-        if let Some(root) = self.root {
-            pin_root(rig, pose, root);
+        let through = self.through(phase);
+        if let Some(take) = &self.take {
+            take.sample(through, rig, pose);
+        }
+        let seconds = through * self.clip.file.duration;
+        for &(bone, index) in &self.bones {
+            let track = &self.clip.file.tracks[index];
+            if let (Some(values), Some(slot)) = (sample_track(track, seconds), pose.get_mut(bone))
+                && let [tx, ty, tz, qx, qy, qz, qw, sx, sy, sz] = values[..]
+            {
+                *slot = BoneTransform {
+                    translation: Vec3::new(tx, ty, tz),
+                    rotation: Quat::from_xyzw(qx, qy, qz, qw).normalize(),
+                    scale: Vec3::new(sx, sy, sz),
+                };
+            }
         }
     }
 
-    /// The root's travel and turn from the clip's start to `through` one
-    /// pass, in the frame it started in.
-    fn root_offset(&self, rig: &Rig, root: RootBone, through: f64) -> (Vec3, f32) {
-        let time = self.time_through(through) as f32;
-        let (position, heading) = self.root_world(rig, root.bone, time);
-        let moved = position - root.start;
-        (Vec3::new(moved.x, 0.0, moved.z), heading - root.start_yaw)
+    /// Every property track's value at `phase`.
+    pub fn properties(&self, phase: f64) -> Vec<EvaluatedProperty> {
+        self.clip.evaluate(self.seconds_at(phase))
     }
 
     /// How far root motion moves the model from phase `from` to phase `to`
     /// (`to` later), counting each whole pass of a looping clip. Zero
     /// without root motion.
     pub fn root_motion(&self, rig: &Rig, from: f64, to: f64) -> RootMotion {
-        let Some(root) = self.root else {
+        let Some(take) = &self.take else {
+            return RootMotion::default();
+        };
+        let Some(root) = take.root else {
             return RootMotion::default();
         };
         if to.is_nan() || from.is_nan() || to <= from {
@@ -226,7 +228,7 @@ impl BoundClip {
         }
         // The pieces of one pass the time covers, each from..to (0 to 1).
         let mut pieces = Vec::new();
-        if self.file.looping {
+        if self.looping() {
             let (first, last) = (from.floor(), to.floor());
             if first == last {
                 pieces.push((from - first, to - first));
@@ -242,8 +244,8 @@ impl BoundClip {
         }
         let mut motion = RootMotion::default();
         for (a, b) in pieces {
-            let (start, start_yaw) = self.root_offset(rig, root, a);
-            let (end, end_yaw) = self.root_offset(rig, root, b);
+            let (start, start_yaw) = take.root_offset(rig, root, a);
+            let (end, end_yaw) = take.root_offset(rig, root, b);
             // Turned from the way the root faced into the way the model
             // faces now, which already includes the turns before.
             let facing = Quat::from_rotation_y(motion.yaw - start_yaw);
@@ -256,37 +258,163 @@ impl BoundClip {
     /// The names of the events the clip passes from phase `from` (counted)
     /// to `to` (not), in order.
     pub fn events_between(&self, from: f64, to: f64) -> Vec<String> {
-        if to.is_nan() || from.is_nan() || to <= from || self.file.events.is_empty() {
+        let events = &self.clip.file.events;
+        if to.is_nan() || from.is_nan() || to <= from || events.is_empty() {
             return Vec::new();
         }
-        let length = self.file.length().max(1e-9);
-        let mut events: Vec<(f64, &str)> = Vec::new();
-        for event in &self.file.events {
-            let mut at = (event.time / length).clamp(0.0, 1.0);
-            if self.file.speed < 0.0 {
-                at = 1.0 - at;
-            }
-            if self.file.looping {
+        let length = self.clip.file.duration.max(1e-9);
+        let mut hits: Vec<(f64, &str)> = Vec::new();
+        for event in events {
+            let at = (event.time / length).clamp(0.0, 1.0);
+            if self.looping() {
                 let mut pass = (from - at).ceil();
                 while pass + at < to {
                     if pass + at >= from {
-                        events.push((pass + at, &event.name));
+                        hits.push((pass + at, &event.name));
                     }
                     pass += 1.0;
-                    if events.len() > 10_000 {
+                    if hits.len() > 10_000 {
                         break;
                     }
                 }
             } else if (from..to).contains(&at) {
-                events.push((at, &event.name));
+                hits.push((at, &event.name));
             }
         }
-        events.sort_by(|a, b| a.0.total_cmp(&b.0));
-        events
-            .into_iter()
-            .map(|(_, name)| name.to_owned())
-            .collect()
+        hits.sort_by(|a, b| a.0.total_cmp(&b.0));
+        hits.into_iter().map(|(_, name)| name.to_owned()).collect()
     }
+}
+
+/// Where in the take (seconds) a link is `through` (0 to 1) one pass.
+fn link_time(link: &TakeLink, through: f64) -> f64 {
+    link.start + through * (link.end - link.start)
+}
+
+impl BoundTake {
+    /// Binds `link`'s take, found by name in `takes`, to `rig`.
+    fn bind(link: TakeLink, takes: Arc<Vec<Take>>, rig: &Rig) -> Result<Self, String> {
+        let take = takes
+            .iter()
+            .position(|take| take.name == link.take)
+            .ok_or_else(|| {
+                let names: Vec<String> = takes.iter().map(|t| format!("`{}`", t.name)).collect();
+                if names.is_empty() {
+                    format!("`{}` has no animation in it", link.source)
+                } else {
+                    format!(
+                        "`{}` has no take named `{}` (it has {})",
+                        link.source,
+                        link.take,
+                        names.join(", ")
+                    )
+                }
+            })?;
+        let binding = takes[take].bind(rig);
+        if !binding.iter().any(Option::is_some) && !takes[take].tracks.is_empty() {
+            return Err(format!(
+                "the take `{}` moves none of the model's bones (it's for another skeleton)",
+                link.take
+            ));
+        }
+        let mut bound = Self {
+            link,
+            takes,
+            take,
+            binding,
+            root: None,
+        };
+        if bound.link.root_motion {
+            bound.root = bound.find_root(rig);
+        }
+        Ok(bound)
+    }
+
+    fn take(&self) -> &Take {
+        &self.takes[self.take]
+    }
+
+    /// The first bone (parents come first, so the top-most) whose track
+    /// really moves it across the ground during the clip.
+    fn find_root(&self, rig: &Rig) -> Option<RootBone> {
+        let take = self.take();
+        let mut candidates: Vec<usize> = take
+            .tracks
+            .iter()
+            .zip(&self.binding)
+            .filter(|(track, _)| track.translation.values.len() > 1)
+            .filter_map(|(_, bone)| *bone)
+            .collect();
+        candidates.sort_unstable();
+        for bone in candidates {
+            let at = |through: f64| self.root_world(rig, bone, link_time(&self.link, through));
+            let (first, _) = at(0.0);
+            let travelled = (0..=8).any(|step| {
+                let (position, _) = at(f64::from(step) / 8.0);
+                let moved = position - first;
+                Vec3::new(moved.x, 0.0, moved.z).length() > 1e-3
+            });
+            if travelled {
+                let (start, start_yaw) = at(0.0);
+                return Some(RootBone {
+                    bone,
+                    start,
+                    start_yaw,
+                });
+            }
+        }
+        None
+    }
+
+    /// Where `bone` is in the file's space at `time` seconds of the take,
+    /// and its heading.
+    fn root_world(&self, rig: &Rig, bone: usize, time: f64) -> (Vec3, f32) {
+        let mut pose = rig.rest_pose();
+        self.take()
+            .sample(time as f32, &self.binding, rig, &mut pose);
+        let world = rig.world(&pose);
+        let (_, rotation, position) = world[bone].to_scale_rotation_translation();
+        (position, yaw(rotation))
+    }
+
+    fn sample(&self, through: f64, rig: &Rig, pose: &mut Pose) {
+        let time = link_time(&self.link, through) as f32;
+        self.take().sample(time, &self.binding, rig, pose);
+        if let Some(root) = self.root {
+            pin_root(rig, pose, root);
+        }
+    }
+
+    /// The root's travel and turn from the clip's start to `through` one
+    /// pass, in the frame it started in.
+    fn root_offset(&self, rig: &Rig, root: RootBone, through: f64) -> (Vec3, f32) {
+        let (position, heading) = self.root_world(rig, root.bone, link_time(&self.link, through));
+        let moved = position - root.start;
+        (Vec3::new(moved.x, 0.0, moved.z), heading - root.start_yaw)
+    }
+}
+
+/// Each bone's path from the top of the skeleton, by names (`Hips/Spine`).
+fn bone_paths(rig: &Rig) -> Vec<String> {
+    let mut paths: Vec<String> = Vec::with_capacity(rig.bones.len());
+    for bone in &rig.bones {
+        let path = match bone.parent.and_then(|parent| paths.get(parent)) {
+            Some(parent) => format!("{parent}/{}", bone.name),
+            None => bone.name.clone(),
+        };
+        paths.push(path);
+    }
+    paths
+}
+
+/// The bone a track's `target` names: by its whole path, or else by its
+/// last name.
+fn find_bone(rig: &Rig, paths: &[String], target: &str) -> Option<usize> {
+    let target = target.trim_matches('/');
+    paths.iter().position(|path| path == target).or_else(|| {
+        let name = target.rsplit('/').next()?;
+        rig.bone(name)
+    })
 }
 
 /// A rotation's turn around Y (its twist about the vertical), in radians.

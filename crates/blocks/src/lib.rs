@@ -330,6 +330,12 @@ pub enum BlockKind {
         animator: String,
         state: String,
     },
+    /// Loads an Animation on an Animator and plays the track
+    /// (`animator:LoadAnimation(animation):Play()`).
+    PlayAnimation {
+        animator: String,
+        animation: String,
+    },
 
     // Variables.
     SetVariable {
@@ -1255,6 +1261,16 @@ impl Writer {
             )),
             BlockKind::PlayAnimatorState { animator, state } => {
                 self.line(format!("{}:Play({})", target(animator)?, quote(state)));
+            }
+            BlockKind::PlayAnimation {
+                animator,
+                animation,
+            } => {
+                self.line(format!(
+                    "{}:LoadAnimation({}):Play()",
+                    target(animator)?,
+                    target(animation)?
+                ));
             }
             BlockKind::SetVariable { name, value } => {
                 let value = self.expression(value)?;

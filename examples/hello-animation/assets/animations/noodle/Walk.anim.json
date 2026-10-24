@@ -1,11 +1,13 @@
 {
-  "format_version": 1,
-  "source": "assets/models/noodle.fbx",
-  "take": "Walk",
-  "start": 0.0,
-  "end": 1.0,
-  "speed": 1.0,
+  "format_version": 2,
+  "duration": 1.0,
   "loop": true,
-  "root_motion": false,
+  "link": {
+    "source": "assets/models/noodle.fbx",
+    "take": "Walk",
+    "start": 0.0,
+    "end": 1.0
+  },
+  "tracks": [],
   "events": []
 }

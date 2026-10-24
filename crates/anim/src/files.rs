@@ -1,23 +1,37 @@
-//! The animation files in a project: clips (`*.anim.json`) and animator
-//! controllers (`*.controller.json`), plain JSON like the world file.
+//! The animation files in a project: clips (`*.anim.json`) and state
+//! machines (`*.statemachine.json`), plain JSON like the world file.
 //!
-//! A **take clip** names a take in a model file and the part of it to play,
-//! with how it plays (speed, looping, root motion) and its events. A
-//! **property clip** (`"kind": "property"`) stores authored keyframes for
-//! Parts, Models and UI elements. A controller holds an Animator's
-//! parameters, states, default state and transitions (take clips only).
-//! Paths in them are from the project folder, with `/` between folders.
+//! There is **one clip type**. A clip has a duration, whether it loops,
+//! events, and tracks: each track animates a bone or a property of
+//! something named by its path from the Animator's parent. A clip can also
+//! be **linked** to a take in a model file: its bones then move as the take
+//! does, and its own tracks animate only what the take doesn't move.
+//!
+//! A state machine holds an Animator's parameters, states, default state
+//! and transitions. Paths in these files are from the project folder, with
+//! `/` between folders. Each animated thing has its own folder,
+//! `assets/animations/<name>/`, holding its clips and its state machine;
+//! shared clips go in `assets/animations/Shared/`.
+//!
+//! Files from before format 2 (take clips, property clips with
+//! `"kind": "property"`, and `*.controller.json` controllers) are still
+//! read, turned into this shape; projects are upgraded once when they open.
 
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-/// The version these files are written in. Newer ones are refused.
-pub const FORMAT_VERSION: u32 = 1;
-/// Where the editor keeps clips and controllers.
+/// The version these files are written in. Newer ones are refused; format 1
+/// files are read and turned into this shape.
+pub const FORMAT_VERSION: u32 = 2;
+/// Where the editor keeps clips and state machines.
 pub const ANIMATIONS_FOLDER: &str = "assets/animations";
+/// The folder in [`ANIMATIONS_FOLDER`] for clips any model can play.
+pub const SHARED_FOLDER: &str = "Shared";
 pub const CLIP_EXTENSION: &str = ".anim.json";
-pub const CONTROLLER_EXTENSION: &str = ".controller.json";
+pub const STATE_MACHINE_EXTENSION: &str = ".statemachine.json";
+/// What state machines were called before format 2, as animator controllers.
+pub const LEGACY_CONTROLLER_EXTENSION: &str = ".controller.json";
 /// The name a transition's `from` uses for "from whatever state is playing".
 pub const ANY_STATE: &str = "Any State";
 
@@ -33,11 +47,33 @@ fn is_false(value: &bool) -> bool {
     !value
 }
 
-/// A clip file: part of one take of a model file.
+/// A clip file.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClipFile {
     pub format_version: u32,
+    /// Seconds one pass lasts. Keys and events lie in `0..=duration`.
+    pub duration: f64,
+    /// On, it plays again from the start when it ends; off, it holds its
+    /// last frame.
+    #[serde(rename = "loop", default = "yes")]
+    pub looping: bool,
+    /// The take its bones' motion is read from, if it's linked to one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<TakeLink>,
+    #[serde(default)]
+    pub tracks: Vec<PropertyTrack>,
+    /// Named moments, which fire events as playback passes them.
+    #[serde(default)]
+    pub events: Vec<ClipEvent>,
+}
+
+/// A clip's link to part of a take in a model file. Its bones move as the
+/// take does from `start` to `end` over the clip's duration (so a shorter
+/// duration plays it faster, and `end` before `start` plays it backwards).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TakeLink {
     /// The model file the take is in, such as `assets/models/hero.fbx`.
     pub source: String,
     /// The take's name in that file, such as `mixamo.com` or `Take 001`.
@@ -45,43 +81,189 @@ pub struct ClipFile {
     /// Where the clip starts and ends in the take, in seconds.
     pub start: f64,
     pub end: f64,
-    /// 2 plays it twice as fast.
-    #[serde(default = "one")]
-    pub speed: f64,
-    /// On, it plays again from the start when it ends; off, it holds its
-    /// last frame.
-    #[serde(rename = "loop", default = "yes")]
-    pub looping: bool,
     /// On, the root bone's travel across the ground moves the MeshPart
     /// instead of the bone.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_false")]
     pub root_motion: bool,
-    /// Named moments in the clip, which fire the Animator's
-    /// `AnimationEvent` as it passes them.
-    #[serde(default)]
-    pub events: Vec<ClipEvent>,
+}
+
+impl TakeLink {
+    /// Seconds of the take it covers, never negative.
+    pub fn length(&self) -> f64 {
+        (self.end - self.start).abs()
+    }
 }
 
 impl ClipFile {
-    /// A clip of the whole of `take`, `duration` seconds long, in `source`.
-    pub fn new(source: &str, take: &str, start: f64, end: f64) -> Self {
+    /// An empty clip `duration` seconds long that doesn't loop, for keys.
+    pub fn new(duration: f64) -> Self {
         Self {
             format_version: FORMAT_VERSION,
-            source: source.to_owned(),
-            take: take.to_owned(),
-            start,
-            end,
-            speed: 1.0,
-            looping: true,
-            root_motion: false,
+            duration,
+            looping: false,
+            link: None,
+            tracks: Vec::new(),
             events: Vec::new(),
         }
     }
 
-    /// Its length in seconds of the take (before `speed`), never negative.
-    pub fn length(&self) -> f64 {
-        (self.end - self.start).max(0.0)
+    /// A looping clip linked to `take` in `source` from `start` to `end`
+    /// seconds, playing it at its own speed.
+    pub fn linked(source: &str, take: &str, start: f64, end: f64) -> Self {
+        Self {
+            format_version: FORMAT_VERSION,
+            duration: (end - start).abs(),
+            looping: true,
+            link: Some(TakeLink {
+                source: source.to_owned(),
+                take: take.to_owned(),
+                start,
+                end,
+                root_motion: false,
+            }),
+            tracks: Vec::new(),
+            events: Vec::new(),
+        }
     }
+
+    /// How fast a linked clip plays its take: 2 is twice as fast, and a
+    /// negative speed plays it backwards. 1 for a clip with no link.
+    pub fn speed(&self) -> f64 {
+        match &self.link {
+            Some(link) if self.duration > 0.0 => (link.end - link.start) / self.duration,
+            _ => 1.0,
+        }
+    }
+
+    pub fn from_json(text: &str) -> Result<Self, FileError> {
+        let value: serde_json::Value = parse(text)?;
+        let version = value
+            .get("format_version")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0) as u32;
+        check_version(version)?;
+        // The current shape is read from the text, so a mistake names its line.
+        let clip = if version < FORMAT_VERSION {
+            legacy_clip(value)?
+        } else {
+            parse::<Self>(text)?
+        };
+        if !clip.duration.is_finite() || clip.duration < 0.0 {
+            return Err(FileError(
+                "its duration must be a number of seconds, 0 or more".into(),
+            ));
+        }
+        if let Some(link) = &clip.link
+            && !(link.start.is_finite() && link.end.is_finite())
+        {
+            return Err(FileError("its link's start and end must be numbers".into()));
+        }
+        Ok(clip)
+    }
+
+    /// Readable JSON, the same for the same clip.
+    pub fn to_json(&self) -> String {
+        to_json(self)
+    }
+}
+
+/// A clip saved before format 2, as a take clip (`source`, `take`, `start`,
+/// `end`, `speed`) or a property clip (`"kind": "property"`), in the one
+/// shape. A take clip's speed becomes its duration, and its events (seconds
+/// of the take from its start) become seconds of the clip.
+fn legacy_clip(value: serde_json::Value) -> Result<ClipFile, FileError> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct TakeClip {
+        #[serde(rename = "format_version")]
+        _format_version: u32,
+        source: String,
+        take: String,
+        start: f64,
+        end: f64,
+        #[serde(default = "one")]
+        speed: f64,
+        #[serde(rename = "loop", default = "yes")]
+        looping: bool,
+        #[serde(default)]
+        root_motion: bool,
+        #[serde(default)]
+        events: Vec<ClipEvent>,
+    }
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct PropertyClip {
+        #[serde(rename = "format_version")]
+        _format_version: u32,
+        kind: String,
+        duration: f64,
+        #[serde(rename = "loop", default = "yes")]
+        looping: bool,
+        #[serde(default)]
+        tracks: Vec<PropertyTrack>,
+        #[serde(default)]
+        events: Vec<ClipEvent>,
+    }
+    if value.get("kind").is_some() {
+        let clip: PropertyClip = serde_json::from_value(value)
+            .map_err(|err| FileError(format!("it isn't a valid property clip: {err}")))?;
+        if clip.kind != "property" {
+            return Err(FileError(format!(
+                "unknown clip kind `{}` (expected `property` or a take clip)",
+                clip.kind
+            )));
+        }
+        return Ok(ClipFile {
+            format_version: FORMAT_VERSION,
+            duration: clip.duration,
+            looping: clip.looping,
+            link: None,
+            tracks: clip.tracks,
+            events: clip.events,
+        });
+    }
+    let clip: TakeClip = serde_json::from_value(value)
+        .map_err(|err| FileError(format!("it isn't a valid take clip: {err}")))?;
+    if !(clip.start.is_finite() && clip.end.is_finite() && clip.speed.is_finite()) {
+        return Err(FileError("its start, end and speed must be numbers".into()));
+    }
+    let length = (clip.end - clip.start).max(0.0);
+    let speed = clip.speed.abs().max(1e-3);
+    let backwards = clip.speed < 0.0;
+    let (start, end) = if backwards {
+        (clip.end, clip.start)
+    } else {
+        (clip.start, clip.end)
+    };
+    let events = clip
+        .events
+        .into_iter()
+        .map(|event| {
+            let into = if backwards {
+                length - event.time
+            } else {
+                event.time
+            };
+            ClipEvent {
+                time: into.clamp(0.0, length) / speed,
+                name: event.name,
+            }
+        })
+        .collect();
+    Ok(ClipFile {
+        format_version: FORMAT_VERSION,
+        duration: length / speed,
+        looping: clip.looping,
+        link: Some(TakeLink {
+            source: clip.source,
+            take: clip.take,
+            start,
+            end,
+            root_motion: clip.root_motion,
+        }),
+        tracks: Vec::new(),
+        events,
+    })
 }
 
 /// A named moment in a clip.
@@ -93,7 +275,7 @@ pub struct ClipEvent {
     pub name: String,
 }
 
-/// How a property keyframe reaches the next one.
+/// How a keyframe reaches the next one.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Interp {
     Step,
@@ -101,9 +283,10 @@ pub enum Interp {
     Linear,
 }
 
-/// Which property a property track drives. On a Model, `Position` and
-/// `Orientation` are its pivot (see `property_clip.rs`); on a UI element,
-/// `Position` and `Size` are UDim2s.
+/// What a track drives. On a Model, `Position` and `Orientation` are its
+/// pivot (see `property_clip.rs`); on a UI element, `Position` and `Size`
+/// are UDim2s. `Bone` is a bone's transform, for a track whose target
+/// names a bone.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PropertyName {
     Position,
@@ -116,10 +299,11 @@ pub enum PropertyName {
     TextColor3,
     TextSize,
     ImageTransparency,
+    Bone,
 }
 
 impl PropertyName {
-    pub const ALL: [PropertyName; 10] = [
+    pub const ALL: [PropertyName; 11] = [
         PropertyName::Position,
         PropertyName::Orientation,
         PropertyName::Size,
@@ -130,6 +314,7 @@ impl PropertyName {
         PropertyName::TextColor3,
         PropertyName::TextSize,
         PropertyName::ImageTransparency,
+        PropertyName::Bone,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -144,6 +329,7 @@ impl PropertyName {
             PropertyName::TextColor3 => "TextColor3",
             PropertyName::TextSize => "TextSize",
             PropertyName::ImageTransparency => "ImageTransparency",
+            PropertyName::Bone => "Bone",
         }
     }
 
@@ -153,7 +339,8 @@ impl PropertyName {
 
     /// How many numbers a key of this property may hold: 3 for a Vector3 or
     /// Color3, 4 for a UDim2 (`Position` and `Size` of UI elements), 1 for
-    /// a number.
+    /// a number, and 10 for a bone (translation, rotation as a quaternion
+    /// `x, y, z, w`, and scale, relative to its parent bone).
     pub fn widths(self) -> &'static [usize] {
         match self {
             PropertyName::Position | PropertyName::Size => &[3, 4],
@@ -165,141 +352,43 @@ impl PropertyName {
             | PropertyName::BackgroundTransparency
             | PropertyName::TextSize
             | PropertyName::ImageTransparency => &[1],
+            PropertyName::Bone => &[10],
         }
     }
 }
 
-/// One key on a property track.
+/// One key on a track.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PropertyKeyframe {
     pub id: String,
     pub time: f64,
-    /// The property's value as numbers: `[x, y, z]` for a Vector3
-    /// (degrees for Orientation), `[r, g, b]` (0 to 1) for a Color3,
+    /// The value as numbers: `[x, y, z]` for a Vector3 (degrees for
+    /// Orientation), `[r, g, b]` (0 to 1) for a Color3,
     /// `[x_scale, x_offset, y_scale, y_offset]` for a UDim2, `[n]` for a
-    /// number.
+    /// number, and 10 numbers for a bone (see [`PropertyName::widths`]).
     pub value: Vec<f32>,
     #[serde(default)]
     pub interp: Interp,
 }
 
-/// One animated property on a relative target.
+/// One animated bone or property on a relative target.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PropertyTrack {
     pub id: String,
-    /// Relative to the Animation's parent: `.` is that Part/Model, and
-    /// `Hinge/Panel` is the child `Panel` of its child `Hinge`.
+    /// From the Animator's parent: `.` is that Part/Model, `Hinge/Panel` is
+    /// the child `Panel` of its child `Hinge`, and a bone is named the same
+    /// way, by the bones above it (`Hips/Spine`).
     pub target: String,
     pub property: PropertyName,
     pub keys: Vec<PropertyKeyframe>,
 }
 
-/// An authored property clip (`"kind": "property"`).
+/// A state machine file: an Animator's parameters, states and transitions.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct PropertyClipFile {
-    pub format_version: u32,
-    /// Always [`Self::KIND`].
-    pub kind: String,
-    /// Explicit length in seconds. Keys must lie in `0..=duration`.
-    pub duration: f64,
-    #[serde(rename = "loop", default = "yes")]
-    pub looping: bool,
-    #[serde(default)]
-    pub tracks: Vec<PropertyTrack>,
-    #[serde(default)]
-    pub events: Vec<ClipEvent>,
-}
-
-impl PropertyClipFile {
-    pub const KIND: &'static str = "property";
-
-    pub fn new(duration: f64) -> Self {
-        Self {
-            format_version: FORMAT_VERSION,
-            kind: Self::KIND.to_owned(),
-            duration,
-            looping: false,
-            tracks: Vec::new(),
-            events: Vec::new(),
-        }
-    }
-
-    pub fn from_json(text: &str) -> Result<Self, FileError> {
-        let clip: Self = parse(text)?;
-        check_version(clip.format_version)?;
-        if clip.kind != Self::KIND {
-            return Err(FileError(format!(
-                "its kind is `{}`, not `{}`",
-                clip.kind,
-                Self::KIND
-            )));
-        }
-        if !clip.duration.is_finite() {
-            return Err(FileError("its duration must be a number".into()));
-        }
-        Ok(clip)
-    }
-
-    pub fn to_json(&self) -> String {
-        to_json(self)
-    }
-}
-
-/// Either kind of `*.anim.json` clip.
-#[derive(Clone, Debug, PartialEq)]
-pub enum AnimClipFile {
-    Take(ClipFile),
-    Property(PropertyClipFile),
-}
-
-impl AnimClipFile {
-    /// Reads a clip file, branching on `"kind": "property"`.
-    pub fn from_json(text: &str) -> Result<Self, FileError> {
-        let value: serde_json::Value = serde_json::from_str(text).map_err(|err| {
-            FileError(format!(
-                "line {}, column {}: {err}",
-                err.line(),
-                err.column()
-            ))
-        })?;
-        match value.get("kind").and_then(|kind| kind.as_str()) {
-            Some(PropertyClipFile::KIND) => {
-                let clip: PropertyClipFile = serde_json::from_value(value)
-                    .map_err(|err| FileError(format!("it isn't a valid property clip: {err}")))?;
-                check_version(clip.format_version)?;
-                if clip.kind != PropertyClipFile::KIND {
-                    return Err(FileError(format!(
-                        "its kind is `{}`, not `{}`",
-                        clip.kind,
-                        PropertyClipFile::KIND
-                    )));
-                }
-                Ok(Self::Property(clip))
-            }
-            Some(other) => Err(FileError(format!(
-                "unknown clip kind `{other}` (expected `{kind}` or a take clip)",
-                kind = PropertyClipFile::KIND
-            ))),
-            None => {
-                let clip: ClipFile = serde_json::from_value(value)
-                    .map_err(|err| FileError(format!("it isn't a valid take clip: {err}")))?;
-                check_version(clip.format_version)?;
-                if !(clip.start.is_finite() && clip.end.is_finite() && clip.speed.is_finite()) {
-                    return Err(FileError("its start, end and speed must be numbers".into()));
-                }
-                Ok(Self::Take(clip))
-            }
-        }
-    }
-}
-
-/// An animator controller file.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ControllerFile {
+pub struct StateMachineFile {
     pub format_version: u32,
     #[serde(default)]
     pub parameters: Vec<ParameterDef>,
@@ -315,7 +404,7 @@ pub struct ControllerFile {
     pub any_state_position: Option<[f32; 2]>,
 }
 
-impl Default for ControllerFile {
+impl Default for StateMachineFile {
     fn default() -> Self {
         Self {
             format_version: FORMAT_VERSION,
@@ -328,7 +417,7 @@ impl Default for ControllerFile {
     }
 }
 
-impl ControllerFile {
+impl StateMachineFile {
     /// The state named `name`.
     pub fn state(&self, name: &str) -> Option<&StateDef> {
         self.states.iter().find(|state| state.name == name)
@@ -338,6 +427,20 @@ impl ControllerFile {
     /// or isn't one of its states.
     pub fn starting_state(&self) -> Option<&StateDef> {
         self.state(&self.default_state).or(self.states.first())
+    }
+
+    /// Reads a state machine, or an animator controller saved before
+    /// format 2 (the same content).
+    pub fn from_json(text: &str) -> Result<Self, FileError> {
+        let mut machine: Self = parse(text)?;
+        check_version(machine.format_version)?;
+        machine.format_version = FORMAT_VERSION;
+        Ok(machine)
+    }
+
+    /// Readable JSON, the same for the same state machine.
+    pub fn to_json(&self) -> String {
+        to_json(self)
     }
 }
 
@@ -440,9 +543,9 @@ pub enum ReturnWhen {
 /// the list, in state order. `seconds_per_pass` gives a state's pass length
 /// (for After), if known; otherwise a pass counts as a second.
 pub fn with_returns(
-    file: &ControllerFile,
+    file: &StateMachineFile,
     mut seconds_per_pass: impl FnMut(&StateDef) -> Option<f64>,
-) -> ControllerFile {
+) -> StateMachineFile {
     let mut out = file.clone();
     out.transitions.retain(|transition| !transition.generated);
     for state in &file.states {
@@ -678,35 +781,6 @@ fn check_version(version: u32) -> Result<(), FileError> {
     Ok(())
 }
 
-impl ClipFile {
-    pub fn from_json(text: &str) -> Result<Self, FileError> {
-        let clip: Self = parse(text)?;
-        check_version(clip.format_version)?;
-        if !(clip.start.is_finite() && clip.end.is_finite() && clip.speed.is_finite()) {
-            return Err(FileError("its start, end and speed must be numbers".into()));
-        }
-        Ok(clip)
-    }
-
-    /// Readable JSON, the same for the same clip.
-    pub fn to_json(&self) -> String {
-        to_json(self)
-    }
-}
-
-impl ControllerFile {
-    pub fn from_json(text: &str) -> Result<Self, FileError> {
-        let controller: Self = parse(text)?;
-        check_version(controller.format_version)?;
-        Ok(controller)
-    }
-
-    /// Readable JSON, the same for the same controller.
-    pub fn to_json(&self) -> String {
-        to_json(self)
-    }
-}
-
 fn to_json<T: Serialize>(value: &T) -> String {
     let mut text = serde_json::to_string_pretty(value).expect("animation files always serialize");
     text.push('\n');
@@ -725,11 +799,19 @@ pub fn write_file(path: &Path, text: &str) -> std::io::Result<()> {
     std::fs::rename(&temporary, path)
 }
 
-/// A clip's name: its file name without `.anim.json` (`Walk` for
+/// A clip's or state machine's name: its file name without its extension
+/// (`Walk` for
 /// `assets/animations/hero/Walk.anim.json`).
 pub fn clip_name(path: &str) -> &str {
     let file = path.rsplit('/').next().unwrap_or(path);
-    file.strip_suffix(CLIP_EXTENSION).unwrap_or(file)
+    [
+        CLIP_EXTENSION,
+        STATE_MACHINE_EXTENSION,
+        LEGACY_CONTROLLER_EXTENSION,
+    ]
+    .into_iter()
+    .find_map(|extension| file.strip_suffix(extension))
+    .unwrap_or(file)
 }
 
 /// A name with only letters, digits, spaces, `-` and `_`, for a file name
@@ -751,8 +833,8 @@ pub fn file_safe(name: &str) -> String {
 mod tests {
     use super::*;
 
-    fn sample_controller() -> ControllerFile {
-        ControllerFile {
+    fn sample_controller() -> StateMachineFile {
+        StateMachineFile {
             format_version: FORMAT_VERSION,
             parameters: vec![
                 ParameterDef::Bool {
@@ -806,47 +888,96 @@ mod tests {
     }
 
     #[test]
-    fn controllers_round_trip() {
+    fn state_machines_round_trip() {
         let controller = sample_controller();
         let text = controller.to_json();
-        let read = ControllerFile::from_json(&text).unwrap();
+        let read = StateMachineFile::from_json(&text).unwrap();
         assert_eq!(read, controller);
         assert_eq!(read.to_json(), text);
     }
 
     #[test]
     fn clips_round_trip() {
-        let mut clip = ClipFile::new("assets/models/noodle.fbx", "Moves", 0.0, 1.0);
+        let mut clip = ClipFile::linked("assets/models/noodle.fbx", "Moves", 0.0, 1.0);
         clip.events.push(ClipEvent {
             time: 0.5,
             name: "Wave".into(),
         });
-        clip.root_motion = true;
+        clip.link.as_mut().unwrap().root_motion = true;
+        clip.tracks.push(PropertyTrack {
+            id: "sword".into(),
+            target: "Sword".into(),
+            property: PropertyName::Transparency,
+            keys: vec![PropertyKeyframe {
+                id: "k".into(),
+                time: 0.0,
+                value: vec![1.0],
+                interp: Interp::Step,
+            }],
+        });
         let text = clip.to_json();
         assert!(text.contains("\"loop\": true"), "{text}");
         let read = ClipFile::from_json(&text).unwrap();
         assert_eq!(read, clip);
         assert_eq!(read.to_json(), text);
+        // A clip with no link leaves it out.
+        assert!(!ClipFile::new(1.0).to_json().contains("link"));
     }
 
     #[test]
-    fn left_out_fields_take_their_defaults() {
-        let clip = ClipFile::from_json(
+    fn format_1_clips_and_controllers_read_as_the_one_shape() {
+        let take = ClipFile::from_json(
+            r#"{ "format_version": 1, "source": "a.fbx", "take": "T", "start": 1, "end": 3,
+                 "speed": 2, "loop": false, "root_motion": true,
+                 "events": [ { "time": 1.0, "name": "Step" } ] }"#,
+        )
+        .unwrap();
+        let link = take.link.as_ref().unwrap();
+        assert_eq!((link.source.as_str(), link.take.as_str()), ("a.fbx", "T"));
+        assert_eq!((link.start, link.end, link.root_motion), (1.0, 3.0, true));
+        // Twice as fast: 2 seconds of the take in 1 of the clip.
+        assert_eq!(take.duration, 1.0);
+        assert_eq!(take.speed(), 2.0);
+        assert!(!take.looping);
+        assert_eq!(take.events[0].time, 0.5);
+        // Backwards: the link runs from the end to the start.
+        let back = ClipFile::from_json(
+            r#"{ "format_version": 1, "source": "a.fbx", "take": "T", "start": 0, "end": 2,
+                 "speed": -1, "events": [ { "time": 0.5, "name": "Step" } ] }"#,
+        )
+        .unwrap();
+        let link = back.link.as_ref().unwrap();
+        assert_eq!((link.start, link.end), (2.0, 0.0));
+        assert_eq!(back.speed(), -1.0);
+        assert_eq!(back.events[0].time, 1.5);
+        let property = ClipFile::from_json(
+            r#"{ "format_version": 1, "kind": "property", "duration": 1.5, "loop": false,
+                 "tracks": [ { "id": "p", "target": ".", "property": "Position",
+                   "keys": [ { "id": "k", "time": 0, "value": [0, 2, 0] } ] } ] }"#,
+        )
+        .unwrap();
+        assert!(property.link.is_none());
+        assert_eq!(property.tracks.len(), 1);
+        assert_eq!(property.format_version, FORMAT_VERSION);
+        // Left-out fields take their defaults.
+        let plain = ClipFile::from_json(
             r#"{ "format_version": 1, "source": "a.fbx", "take": "T", "start": 0, "end": 2 }"#,
         )
         .unwrap();
-        assert_eq!(clip.speed, 1.0);
-        assert!(clip.looping);
-        assert!(!clip.root_motion);
-        let controller = ControllerFile::from_json(r#"{ "format_version": 1 }"#).unwrap();
+        assert_eq!(plain.speed(), 1.0);
+        assert!(plain.looping);
+        let controller = StateMachineFile::from_json(r#"{ "format_version": 1 }"#).unwrap();
         assert!(controller.states.is_empty());
+        assert_eq!(controller.format_version, FORMAT_VERSION);
     }
 
     #[test]
     fn mistakes_name_their_line_and_newer_files_are_refused() {
-        let err = ClipFile::from_json("{\n \"format_version\": 1,\n \"sauce\": 1 }").unwrap_err();
+        let err = ClipFile::from_json("{\n \"format_version\": 2,\n \"sauce\": 1 }").unwrap_err();
         assert!(err.0.starts_with("line 3"), "{err}");
-        let err = ControllerFile::from_json(r#"{ "format_version": 99 }"#).unwrap_err();
+        let err = StateMachineFile::from_json(r#"{ "format_version": 99 }"#).unwrap_err();
+        assert!(err.0.contains("newer"), "{err}");
+        let err = ClipFile::from_json(r#"{ "format_version": 9, "duration": 1 }"#).unwrap_err();
         assert!(err.0.contains("newer"), "{err}");
     }
 
@@ -887,7 +1018,7 @@ mod tests {
         });
         let text = controller.to_json();
         assert!(text.contains("\"blend_tree\""), "{text}");
-        assert_eq!(ControllerFile::from_json(&text).unwrap(), controller);
+        assert_eq!(StateMachineFile::from_json(&text).unwrap(), controller);
         assert_eq!(controller.states[0].motion.clips().len(), 2);
     }
 
@@ -925,7 +1056,7 @@ mod tests {
         assert_eq!(with_returns(&controller, |_| None).transitions.len(), 1);
         // And it all round-trips.
         let text = timed.to_json();
-        assert_eq!(ControllerFile::from_json(&text).unwrap(), timed);
+        assert_eq!(StateMachineFile::from_json(&text).unwrap(), timed);
     }
 
     #[test]

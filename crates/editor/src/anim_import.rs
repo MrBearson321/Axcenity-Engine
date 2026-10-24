@@ -4,7 +4,7 @@
 //! A take is one timeline in the file; often a file holds one take with
 //! every move on it, one after another. Each clip row is a named part of a
 //! take, by frame, so such a take can be split into Idle, Walk, Jump and so
-//! on. Importing writes a clip file per row and, if asked, a controller
+//! on. Importing writes a clip file per row and, if asked, a state machine
 //! with a state per clip, for an Animator in the new MeshPart.
 
 use std::path::Path;
@@ -219,7 +219,7 @@ impl AnimationImport {
             .iter()
             .filter_map(|clip| {
                 let take = self.takes.get(clip.take)?;
-                let mut file = ClipFile::new(
+                let mut file = ClipFile::linked(
                     source,
                     &take.name,
                     take.seconds(clip.start),
@@ -317,7 +317,7 @@ impl AnimationImport {
         if with_animator {
             ui.checkbox(
                 &mut self.add_animator,
-                "Add an Animator, with a controller that has a state per clip",
+                "Add an Animator, with a state machine that has a state per clip",
             );
         }
     }
@@ -405,9 +405,9 @@ fn clip_name_for(take: &str, model_name: &str, takes: usize) -> String {
 }
 
 /// Writes `clips` into `assets/animations/<model>/` in `project` (each
-/// under a free name) and, if `controller` is true, a controller with a
-/// state per clip as `assets/animations/<model>.controller.json`. Returns
-/// the clip paths and the controller's path (in the project).
+/// under a free name) and, if `controller` is true, a state machine with a
+/// state per clip beside them, `assets/animations/<model>/<model>.statemachine.json`.
+/// Returns the clip paths and the state machine's path (in the project).
 pub fn write_animation(
     project: &Path,
     model: &str,
@@ -460,7 +460,7 @@ fn free_file(project: &Path, folder: &str, name: &str, extension: &str) -> Strin
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axcenity_anim::ControllerFile;
+    use axcenity_anim::StateMachineFile;
 
     fn take(name: &str, seconds: f32) -> Take {
         Take {
@@ -516,7 +516,8 @@ mod tests {
         import.clips[1].looping = false;
         let clips = import.clip_files("assets/models/noodle.fbx");
         assert_eq!(clips[1].0, "Idle");
-        assert_eq!((clips[1].1.start, clips[1].1.end), (1.0, 2.0));
+        let link = clips[1].1.link.as_ref().unwrap();
+        assert_eq!((link.start, link.end), (1.0, 2.0));
         assert!(!clips[1].1.looping);
 
         let project =
@@ -532,7 +533,7 @@ mod tests {
         );
         let controller = controller.unwrap();
         let text = std::fs::read_to_string(project.join(&controller)).unwrap();
-        let file = ControllerFile::from_json(&text).unwrap();
+        let file = StateMachineFile::from_json(&text).unwrap();
         assert_eq!(file.default_state, "Idle");
         assert_eq!(file.states[0].name, "Idle");
         // A second import doesn't overwrite the first.

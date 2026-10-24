@@ -109,7 +109,7 @@ impl AssetKind {
             AssetKind::Audio => "Sound",
             AssetKind::Particle => "Particle",
             AssetKind::Animation => "Clip",
-            AssetKind::Controller => "Controller",
+            AssetKind::Controller => "State machine",
         }
     }
 
@@ -133,9 +133,7 @@ impl AssetKind {
                 "Drag onto a part to give it a ParticleEmitter with this texture."
             }
             AssetKind::Animation => "Double-click to open it in the Animation panel.",
-            AssetKind::Controller => {
-                "Drag onto an animated MeshPart to give its Animator this controller."
-            }
+            AssetKind::Controller => "Drag onto a part to give its Animator this state machine.",
         }
     }
 }
@@ -868,7 +866,7 @@ pub fn kind_of(path: &str) -> Option<AssetKind> {
     if lower.ends_with(axcenity_anim::CLIP_EXTENSION) {
         return Some(AssetKind::Animation);
     }
-    if lower.ends_with(axcenity_anim::CONTROLLER_EXTENSION) {
+    if lower.ends_with(axcenity_anim::STATE_MACHINE_EXTENSION) {
         return Some(AssetKind::Controller);
     }
     let extension = lower.rsplit_once('.')?.1;
@@ -896,7 +894,7 @@ pub fn display_name(path: &str) -> String {
     for suffix in [
         PREFAB_SUFFIX,
         axcenity_anim::CLIP_EXTENSION,
-        axcenity_anim::CONTROLLER_EXTENSION,
+        axcenity_anim::STATE_MACHINE_EXTENSION,
     ] {
         if lower.ends_with(suffix) {
             return file[..file.len() - suffix.len()].to_owned();

@@ -22,6 +22,7 @@
 //! `versions.rs` keeps the copies made on save.
 
 mod migrate;
+mod migrate_animation;
 mod packed;
 mod terrain_files;
 mod versions;
@@ -64,8 +65,9 @@ pub const CLIENT_BLOCK_SCRIPT_SUFFIX: &str = ".client.blocks.json";
 
 /// The newest manifest (`axcenity.json`) this engine writes. Opening an older
 /// one upgrades the project and keeps the previous files. `world.json` and
-/// prefabs have their own version and are not this number.
-pub const FORMAT_VERSION: u32 = 2;
+/// prefabs have their own version and are not this number. Format 3 (v3
+/// Phase 7) is the one clip format and state machines.
+pub const FORMAT_VERSION: u32 = 3;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]

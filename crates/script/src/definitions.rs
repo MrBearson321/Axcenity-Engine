@@ -474,10 +474,77 @@ const CLASS_METHODS: &[(ClassName, Function)] = &[
         },
     ),
     (
+        ClassName::Animator,
+        Function {
+            name: "LoadAnimation",
+            doc: "Loads `animation` (an Animation, whose Clip names the clip) on this Animator and returns an AnimationTrack to play, stop and blend over the state machine.",
+            params: &[("animation", "Animation")],
+            returns: "AnimationTrack",
+        },
+    ),
+    (
+        ClassName::Animator,
+        Function {
+            name: "GetPlayingAnimationTracks",
+            doc: "The AnimationTracks loaded on this Animator that are playing now.",
+            params: &[],
+            returns: "AnimationTrack[]",
+        },
+    ),
+    (
+        ClassName::AnimationTrack,
+        Function {
+            name: "Play",
+            doc: "Plays the clip from its start, fading in over `fadeTime` seconds (0.1 if left out) to `weight` (1), at `speed` (1). Where it and what plays under it animate the same thing, the track started last wins.",
+            params: &[
+                ("fadeTime?", "number"),
+                ("weight?", "number"),
+                ("speed?", "number"),
+            ],
+            returns: "nil",
+        },
+    ),
+    (
+        ClassName::AnimationTrack,
+        Function {
+            name: "Stop",
+            doc: "Stops it, fading out over `fadeTime` seconds (0.1 if left out). Stopped fires once it has faded out.",
+            params: &[("fadeTime?", "number")],
+            returns: "nil",
+        },
+    ),
+    (
+        ClassName::AnimationTrack,
+        Function {
+            name: "AdjustSpeed",
+            doc: "Plays it this many times as fast from now (1 is normal, 0 holds, negative plays backwards).",
+            params: &[("speed?", "number")],
+            returns: "nil",
+        },
+    ),
+    (
+        ClassName::AnimationTrack,
+        Function {
+            name: "AdjustWeight",
+            doc: "Fades how much it counts to `weight` (0 to 1) over `fadeTime` seconds (0.1 if left out).",
+            params: &[("weight?", "number"), ("fadeTime?", "number")],
+            returns: "nil",
+        },
+    ),
+    (
+        ClassName::AnimationTrack,
+        Function {
+            name: "GetMarkerReachedSignal",
+            doc: "An event that fires each time the track passes the clip's event named `name`. The handler gets the name.",
+            params: &[("name", "string")],
+            returns: "Signal",
+        },
+    ),
+    (
         ClassName::Animation,
         Function {
             name: "Play",
-            doc: "Plays this Animation's property clip from the start.",
+            doc: "Plays this Animation's clip from the start, through the Animator on the same parent. `animator:LoadAnimation(animation)` is the newer way, with fades and weights.",
             params: &[],
             returns: "nil",
         },
@@ -486,7 +553,7 @@ const CLASS_METHODS: &[(ClassName, Function)] = &[
         ClassName::Animation,
         Function {
             name: "Stop",
-            doc: "Stops playback and resets to the start of the clip.",
+            doc: "Stops playback and goes back to the start of the clip.",
             params: &[],
             returns: "nil",
         },
@@ -569,6 +636,70 @@ const CLASS_FIELDS: &[(ClassName, Field)] = &[
             name: "CurrentState",
             ty: "string",
             doc: "The name of the state playing (read-only; use `Play` to change it). Empty until the animator first runs.",
+        },
+    ),
+    (
+        ClassName::AnimationTrack,
+        Field {
+            name: "IsPlaying",
+            ty: "boolean",
+            doc: "True from Play until Stop, or until a clip that doesn't loop ends (read-only).",
+        },
+    ),
+    (
+        ClassName::AnimationTrack,
+        Field {
+            name: "Length",
+            ty: "number",
+            doc: "The clip's length in seconds (read-only; 0 until the clip has been read, a frame after LoadAnimation).",
+        },
+    ),
+    (
+        ClassName::AnimationTrack,
+        Field {
+            name: "Looped",
+            ty: "boolean",
+            doc: "Whether it plays again from the start when it ends. Starts as the clip's own.",
+        },
+    ),
+    (
+        ClassName::AnimationTrack,
+        Field {
+            name: "Speed",
+            ty: "number",
+            doc: "How fast it plays (read-only; use AdjustSpeed).",
+        },
+    ),
+    (
+        ClassName::AnimationTrack,
+        Field {
+            name: "TimePosition",
+            ty: "number",
+            doc: "Seconds into the clip. Set it to jump there.",
+        },
+    ),
+    (
+        ClassName::AnimationTrack,
+        Field {
+            name: "WeightCurrent",
+            ty: "number",
+            doc: "How much it counts now, from 0 to 1, while fading (read-only).",
+        },
+    ),
+    (
+        ClassName::AnimationTrack,
+        Field {
+            name: "WeightTarget",
+            ty: "number",
+            doc: "The weight it's fading to (read-only; use AdjustWeight).",
+        },
+    ),
+    (
+        ClassName::AnimationTrack,
+        Field {
+            name: "Animation",
+            ty: "Animation",
+            doc: "The Animation it was loaded from (read-only).",
         },
     ),
 ];
@@ -1193,23 +1324,28 @@ const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     ),
     (
         ClassName::Animator,
-        "Controller",
-        "The animator controller file it plays, inside the project folder, such as \"assets/animations/hero.controller.json\". The Animation panel makes and edits them.",
+        "StateMachine",
+        "The state machine file it plays on its parent, inside the project folder, such as \"assets/animations/hero/hero.statemachine.json\". Empty plays only the AnimationTracks loaded on it. The Animator tab makes and edits them.",
     ),
     (
         ClassName::Animator,
         "Enabled",
-        "If false, the model holds its pose: the animator stops moving on.",
+        "If false, everything it animates holds still: the animator stops moving on.",
     ),
     (
         ClassName::Animator,
         "Speed",
-        "Plays every state this many times as fast (1 is normal, 0 pauses).",
+        "Plays everything this many times as fast (1 is normal, 0 pauses).",
     ),
     (
         ClassName::Animation,
         "Clip",
-        "The property clip file inside the project folder, such as \"assets/animations/Door.anim.json\".",
+        "The clip file inside the project folder, such as \"assets/animations/Door/Open.anim.json\".",
+    ),
+    (
+        ClassName::Animation,
+        "AutoPlay",
+        "If true, the Animator on the same parent plays it by itself when the game starts.",
     ),
     (
         ClassName::Animation,
@@ -1770,12 +1906,22 @@ const EVENT_DOCS: &[(ClassName, &str, &str)] = &[
     (
         ClassName::Animation,
         "Completed",
-        "Fires when a non-looping property clip reaches its end. The handler gets no arguments.",
+        "Fires when `animation:Play()` reaches the end of a clip that doesn't loop. The handler gets no arguments.",
     ),
     (
         ClassName::Animation,
         "AnimationEvent",
-        "Fires when the property clip passes a named event. The handler gets the event's name.",
+        "Fires when `animation:Play()` passes one of the clip's events. The handler gets the event's name.",
+    ),
+    (
+        ClassName::AnimationTrack,
+        "Stopped",
+        "Fires when the track has stopped: after Stop's fade, or at the end of a clip that doesn't loop.",
+    ),
+    (
+        ClassName::AnimationTrack,
+        "KeyframeReached",
+        "Fires each time the track passes one of the clip's events. The handler gets the event's name; GetMarkerReachedSignal hears one name.",
     ),
 ];
 
@@ -1855,10 +2001,13 @@ fn class_doc(class: ClassName) -> &'static str {
             "Gives off particles (sparks, smoke, fire, stars...) from inside its parent part, shown in the editor and the game."
         }
         ClassName::Animator => {
-            "Inside a MeshPart with an animated (FBX) model: plays its animator controller's states and transitions on the model while the game runs."
+            "Inside a Part, MeshPart, Model, ScreenGui or UI element: plays animation on its parent while the game runs: its state machine, if it has one, and the AnimationTracks loaded with LoadAnimation."
         }
         ClassName::Animation => {
-            "Inside a Part, MeshPart or Model: plays an authored property clip (`*.anim.json` with kind property) on that root while the game runs."
+            "Points at a clip (`*.anim.json`). Load it with `animator:LoadAnimation(animation)` to play it, or tick AutoPlay to play it when the game starts."
+        }
+        ClassName::AnimationTrack => {
+            "One Animation loaded on an Animator, from `animator:LoadAnimation(animation)`: play, stop and blend it over the state machine."
         }
         ClassName::Terrain => {
             "A landscape: a heightfield shaped in the editor's Terrain Studio, drawn with its TerrainLayers and colliding as its ground. Position is the middle of its footprint at the bottom of its height range; Size is its width, height range and length."
@@ -2423,6 +2572,10 @@ mod tests {
             ),
             (ClassName::Animator, "Instance.new('Animator')"),
             (ClassName::Animation, "Instance.new('Animation')"),
+            (
+                ClassName::AnimationTrack,
+                "Instance.new('Animator'):LoadAnimation(Instance.new('Animation'))",
+            ),
         ];
         let instance = |class: ClassName| {
             instances

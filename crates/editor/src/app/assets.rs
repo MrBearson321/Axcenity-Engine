@@ -99,7 +99,7 @@ impl EditorApp {
             return;
         };
         let path = instance
-            .property("Controller")
+            .property("StateMachine")
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_owned();
@@ -116,17 +116,17 @@ impl EditorApp {
         self.layout.open(Pane::Animator);
     }
 
-    /// Gives the Animator of the MeshPart under the drop this controller
+    /// Gives the Animator of the part under the drop this state machine
     /// (adding an Animator if it has none), as one undo step.
     fn drop_controller(&mut self, entry: &AssetEntry, spot: Spot) {
         let part = spot.part.filter(|&part| {
-            self.world
-                .get(part)
-                .is_some_and(|instance| instance.class() == ClassName::MeshPart)
+            self.world.get(part).is_some_and(|instance| {
+                matches!(instance.class(), ClassName::Part | ClassName::MeshPart)
+            })
         });
         let Some(part) = part else {
             self.output
-                .warning("Drop an animator controller onto a MeshPart to animate it.");
+                .warning("Drop a state machine onto a part to animate it.");
             return;
         };
         let animator = self.world.get(part).and_then(|instance| {
@@ -140,14 +140,14 @@ impl EditorApp {
         match animator {
             Some(animator) => {
                 let label = format!(
-                    "Set Controller of {}",
+                    "Set State Machine of {}",
                     self.world.get(animator).map_or("Animator", |a| a.name())
                 );
                 self.change(
                     animator,
-                    Field::Property("Controller"),
+                    Field::Property("StateMachine"),
                     label,
-                    vec![Edit::Property("Controller", controller)],
+                    vec![Edit::Property("StateMachine", controller)],
                 );
                 self.history.seal();
                 self.select_from_viewport(Some(animator));
@@ -158,8 +158,8 @@ impl EditorApp {
                     .create(ClassName::Animator)
                     .expect("not a service");
                 self.world
-                    .set_property(id, "Controller", controller)
-                    .expect("every Animator has a Controller");
+                    .set_property(id, "StateMachine", controller)
+                    .expect("every Animator has a StateMachine");
                 self.place_new(part, vec![id], format!("Animate {}", entry.name));
             }
         }
@@ -547,7 +547,7 @@ impl EditorApp {
             // Clips and controllers name files in their own project, so
             // they come with an imported FBX instead.
             Some(AssetKind::Animation | AssetKind::Controller) => Err(
-                "animation clips and controllers come from importing an animated FBX model"
+                "animation clips and state machines come from importing an animated FBX model"
                     .to_owned(),
             ),
             Some(AssetKind::Prop) | None => {

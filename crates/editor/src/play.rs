@@ -14,7 +14,7 @@ use std::panic::{self, AssertUnwindSafe};
 use std::path::Path;
 use std::time::Instant;
 
-use axcenity_anim::{Animators, PropertyPlayers};
+use axcenity_anim::Animators;
 use axcenity_assets::Assets;
 use axcenity_audio::GameAudio;
 use axcenity_core::{InstanceId, KeyCode, World};
@@ -36,10 +36,9 @@ pub struct Session {
     world: World,
     scripts: ScriptRuntime,
     physics: Physics,
-    /// Plays the Animators and poses their MeshParts.
+    /// Plays the Animators (state machines, AnimationTracks and played
+    /// Animations), posing skeletons and setting keyed properties.
     animators: Animators,
-    /// Plays property Animation Instances on Parts.
-    property_players: PropertyPlayers,
     assets: Assets,
     /// Dropped at Stop, which silences every sound.
     audio: GameAudio,
@@ -70,7 +69,6 @@ impl Session {
             scripts: ScriptRuntime::new(),
             physics: Physics::with_assets(assets.clone()),
             animators: Animators::new(),
-            property_players: PropertyPlayers::new(),
             assets,
             audio: GameAudio::default(),
             panic_next_frame: false,
@@ -84,11 +82,7 @@ impl Session {
             session
                 .animators
                 .update(&mut session.world, &session.assets, 0.0);
-            session
-                .property_players
-                .update(&mut session.world, &session.assets, 0.0);
             session.forward_animator_errors(output);
-            session.forward_property_animation_errors(output);
             for script in scripts {
                 session.scripts.start_script(
                     &mut session.world,
@@ -274,16 +268,6 @@ impl Session {
             }
             self.forward_output(output);
             self.forward_animator_errors(output);
-            let events = self
-                .property_players
-                .update(&mut self.world, &self.assets, seconds);
-            for event in events {
-                let (animation, name, args) = event.script_event();
-                self.scripts
-                    .fire_instance_event(&mut self.world, animation, name, &args);
-            }
-            self.forward_output(output);
-            self.forward_property_animation_errors(output);
             cost.animation += lap();
         });
         cost.total = started.elapsed();
@@ -313,12 +297,6 @@ impl Session {
 
     fn forward_animator_errors(&mut self, output: &mut Output) {
         for error in self.animators.take_errors() {
-            output.error(error);
-        }
-    }
-
-    fn forward_property_animation_errors(&mut self, output: &mut Output) {
-        for error in self.property_players.take_errors() {
             output.error(error);
         }
     }

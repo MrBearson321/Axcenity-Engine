@@ -1,19 +1,19 @@
--- Touch the Pad to open the door (property Animation clip).
+-- Touch the Pad to open the door: the Door's Animator plays its Open clip.
 local pad = workspace.Pad
 local door = workspace.Door
-local animation = door.Open
+local track = door.Animator:LoadAnimation(door.Open)
 
 pad.Touched:Connect(function(other)
-	if other == door then
+	if other == door or track.IsPlaying then
 		return
 	end
-	animation:Play()
+	track:Play()
 end)
 
-animation.Completed:Connect(function()
+track.Stopped:Connect(function()
 	print("Door opened")
 end)
 
-animation.AnimationEvent:Connect(function(name)
-	print("Door event:", name)
+track:GetMarkerReachedSignal("Opened"):Connect(function()
+	print("Door event: Opened")
 end)

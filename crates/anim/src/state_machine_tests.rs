@@ -9,7 +9,7 @@ use axcenity_core::Parameter;
 use glam::Mat4;
 
 use crate::files::{
-    ANY_STATE, Condition, ControllerFile, Motion, ParameterDef, StateDef, Test, TransitionDef,
+    ANY_STATE, Condition, Motion, ParameterDef, StateDef, StateMachineFile, Test, TransitionDef,
 };
 use crate::{Compiled, Machine};
 
@@ -22,7 +22,7 @@ fn rig() -> Rig {
 }
 
 fn controller(states: &[&str], transitions: Vec<TransitionDef>) -> Compiled {
-    let file = ControllerFile {
+    let file = StateMachineFile {
         parameters: vec![
             ParameterDef::Bool {
                 name: "IsWalking".into(),
@@ -42,9 +42,9 @@ fn controller(states: &[&str], transitions: Vec<TransitionDef>) -> Compiled {
             .map(|name| StateDef::new(name, Motion::Clip(String::new()), [0.0, 0.0]))
             .collect(),
         transitions,
-        ..ControllerFile::default()
+        ..StateMachineFile::default()
     };
-    let (compiled, problems) = Compiled::new(file, &rig(), |_| Err("no clips".into()));
+    let (compiled, problems) = Compiled::new(file, Some(&rig()), |_| Err("no clips".into()));
     assert_eq!(problems, Vec::<String>::new());
     compiled
 }
@@ -80,7 +80,7 @@ fn frame(
     parameters: &mut BTreeMap<String, Parameter>,
     dt: f64,
 ) -> Option<usize> {
-    machine.advance(compiled, &rig(), parameters, dt);
+    machine.advance(compiled, Some(&rig()), parameters, dt);
     machine.evaluate(compiled, parameters)
 }
 
@@ -221,15 +221,15 @@ fn blends_mix_the_two_poses_by_their_share() {
     frame(&mut machine, &compiled, &mut params, 0.1);
     let fade = machine.fade.expect("blending");
     assert_eq!(fade.weight(), 0.0);
-    machine.advance(&compiled, &rig(), &params, 0.25);
+    machine.advance(&compiled, Some(&rig()), &params, 0.25);
     assert!((machine.fade.unwrap().weight() - 0.5).abs() < 1e-9);
-    machine.advance(&compiled, &rig(), &params, 0.3);
+    machine.advance(&compiled, Some(&rig()), &params, 0.3);
     assert!(machine.fade.is_none(), "done after its blend");
 }
 
 #[test]
 fn transitions_that_cant_work_are_reported() {
-    let file = ControllerFile {
+    let file = StateMachineFile {
         states: vec![StateDef::new(
             "Idle",
             Motion::Clip(String::new()),
@@ -239,9 +239,9 @@ fn transitions_that_cant_work_are_reported() {
             TransitionDef::new("Idle", "Nowhere"),
             TransitionDef::new("Idle", "Idle"),
         ],
-        ..ControllerFile::default()
+        ..StateMachineFile::default()
     };
-    let (_, problems) = Compiled::new(file, &rig(), |_| Err("no clips".into()));
+    let (_, problems) = Compiled::new(file, Some(&rig()), |_| Err("no clips".into()));
     assert_eq!(problems.len(), 2, "{problems:?}");
     assert!(problems[0].contains("doesn't have"));
     assert!(problems[1].contains("never happens"));

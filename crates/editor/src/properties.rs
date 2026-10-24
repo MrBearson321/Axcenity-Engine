@@ -165,7 +165,14 @@ const GROUPS: [(&str, &[&str]); 18] = [
     ),
     (
         "Animation",
-        &["Controller", "Clip", "Enabled", "Speed", "Looped"],
+        &[
+            "StateMachine",
+            "Clip",
+            "AutoPlay",
+            "Enabled",
+            "Speed",
+            "Looped",
+        ],
     ),
     (
         "Shadows",
@@ -513,7 +520,7 @@ fn value_control(ui: &mut egui::Ui, name: &'static str, value: Value) -> Option<
     match value {
         Value::String(path) if is_map(name) => map_control(ui, name, &path),
         Value::String(path) if name == "SoundId" => sound_control(ui, &path),
-        Value::String(path) if name == "Controller" => controller_control(ui, &path),
+        Value::String(path) if name == "StateMachine" => controller_control(ui, &path),
         Value::String(path) if name == "Clip" => clip_control(ui, &path),
         // Picked by the editor; the Terrain Studio says where it is.
         Value::String(path) if name == "DataFolder" => {
@@ -601,7 +608,7 @@ fn controller_control(ui: &mut egui::Ui, path: &str) -> Option<Edit> {
     ui.horizontal(|ui| {
         if ui
             .small_button(icons::FOLDER_OPEN)
-            .on_hover_text("Choose an animator controller (.controller.json) in the project")
+            .on_hover_text("Choose a state machine (.statemachine.json) in the project")
             .clicked()
         {
             edit = Some(Edit::PickController);
@@ -619,10 +626,10 @@ fn controller_control(ui: &mut egui::Ui, path: &str) -> Option<Edit> {
         }
         if ui
             .small_button(icons::X)
-            .on_hover_text("Play no controller")
+            .on_hover_text("Play no state machine")
             .clicked()
         {
-            edit = Some(Edit::Property("Controller", Value::String(String::new())));
+            edit = Some(Edit::Property("StateMachine", Value::String(String::new())));
         }
         let file = path.rsplit('/').next().unwrap_or(path);
         ui.add(egui::Label::new(file).truncate())

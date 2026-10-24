@@ -8,7 +8,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use axcenity_anim::files::{
-    self, BlendChild, BlendTree, Condition, ControllerFile, Motion, ParameterDef, StateDef, Test,
+    self, BlendChild, BlendTree, Condition, Motion, ParameterDef, StateDef, StateMachineFile, Test,
     TransitionDef,
 };
 use axcenity_anim::{
@@ -27,8 +27,8 @@ const BLENDS: [(&str, f64); 3] = [("Instant", 0.0), ("Smooth", DEFAULT_BLEND), (
 /// A controller being looked at and changed.
 pub struct ControllerDoc {
     pub path: String,
-    pub file: ControllerFile,
-    written: ControllerFile,
+    pub file: StateMachineFile,
+    written: StateMachineFile,
     pub selected: Selected,
     pub view: GraphView,
     /// A state being renamed, and the name typed so far.
@@ -48,7 +48,7 @@ pub struct ControllerDoc {
 struct PreviewRun {
     /// What it was made from: the model's key and the controller without
     /// its graph positions (moving a box doesn't start it again).
-    made_from: (u64, ControllerFile),
+    made_from: (u64, StateMachineFile),
     compiled: Arc<Compiled>,
     machine: Machine,
     parameters: BTreeMap<String, Parameter>,
@@ -56,7 +56,7 @@ struct PreviewRun {
 }
 
 /// The controller as far as playing it goes: without where boxes are drawn.
-fn behaviour(file: &ControllerFile) -> ControllerFile {
+fn behaviour(file: &StateMachineFile) -> StateMachineFile {
     let mut file = file.clone();
     file.any_state_position = None;
     for state in &mut file.states {
@@ -66,7 +66,7 @@ fn behaviour(file: &ControllerFile) -> ControllerFile {
 }
 
 impl ControllerDoc {
-    pub fn open(path: String, file: ControllerFile, preview_model: Option<String>) -> Self {
+    pub fn open(path: String, file: StateMachineFile, preview_model: Option<String>) -> Self {
         Self {
             path,
             written: file.clone(),
@@ -93,8 +93,8 @@ impl ControllerDoc {
                 .into_iter()
                 .find(|clip| !clip.is_empty())?;
             let length = *lengths.entry(clip.clone()).or_insert_with(|| {
-                super::store::read_clip(project, clip)
-                    .map(|clip| clip.length() / clip.speed.abs().max(1e-3))
+                super::store::read_any_clip(project, clip)
+                    .map(|clip| clip.duration)
                     .unwrap_or(0.0)
             });
             (length > 0.0).then(|| length / state.speed.abs().max(1e-3))
@@ -123,7 +123,7 @@ impl ControllerDoc {
     }
 
     /// Takes the file as it is on disk now (after a clip rename rewrote it).
-    pub fn reload(&mut self, file: ControllerFile) {
+    pub fn reload(&mut self, file: StateMachineFile) {
         self.written = file.clone();
         self.file = file;
     }
@@ -136,7 +136,7 @@ impl ControllerDoc {
             .flat_map(|state| state.motion.clips())
             .filter(|path| !path.is_empty())
             .find_map(|path| super::store::read_clip(project, path).ok())
-            .map(|clip| clip.source)
+            .and_then(|clip| clip.link.map(|link| link.source))
     }
 
     /// Does what the graph reports.
@@ -336,7 +336,7 @@ impl ControllerDoc {
             .as_ref()
             .is_none_or(|run| run.made_from != made_from)
         {
-            let (compiled, problems) = Compiled::new(self.file.clone(), &rig, |path| {
+            let (compiled, problems) = Compiled::new(self.file.clone(), Some(&rig), |path| {
                 axcenity_anim::load_clip(assets, path)
             });
             let compiled = Arc::new(compiled);
@@ -380,7 +380,7 @@ impl ControllerDoc {
         let run = self.preview.as_mut().expect("made above");
         if self.playing {
             run.machine
-                .advance(&run.compiled, &rig, &run.parameters, dt);
+                .advance(&run.compiled, Some(&rig), &run.parameters, dt);
             run.machine.evaluate(&run.compiled, &mut run.parameters);
         }
         // Scrubbing a selected transition shows its two poses mixed.
@@ -477,7 +477,7 @@ impl ControllerDoc {
             ui.colored_label(ui.visuals().warn_fg_color, problem);
         }
         if self.file.parameters.is_empty() {
-            ui.weak("Add parameters (in the controller's settings) to drive transitions here.");
+            ui.weak("Add parameters (in the state machine's settings) to drive transitions here.");
         }
         let ranges = number_ranges(&self.file);
         crate::responsive::form(ui, "live parameters", |ui| {
@@ -533,7 +533,7 @@ impl ControllerDoc {
 
     fn controller_inspector(&mut self, ui: &mut egui::Ui) {
         ui.heading(
-            axcenity_anim::files::clip_name(&self.path).trim_end_matches(".controller.json"),
+            axcenity_anim::files::clip_name(&self.path).trim_end_matches(".statemachine.json"),
         );
         ui.weak(&self.path);
         ui.add_space(4.0);
@@ -961,7 +961,7 @@ impl ControllerDoc {
         if missing {
             ui.colored_label(
                 ui.visuals().warn_fg_color,
-                "Add a parameter of that kind (in the controller's settings) to test.",
+                "Add a parameter of that kind (in the state machine's settings) to test.",
             );
         } else {
             ui.weak("Makes its transition for you (dashed in the graph).");
@@ -1056,7 +1056,7 @@ impl ControllerDoc {
             transition.conditions.remove(c);
         }
         if parameters.is_empty() {
-            ui.weak("Add parameters in the controller's settings (click the graph's background) to test them here.");
+            ui.weak("Add parameters in the state machine's settings (click the graph's background) to test them here.");
         } else if ui
             .button(format!("{} Add condition", icons::PLUS))
             .clicked()
@@ -1415,7 +1415,7 @@ fn threshold_line(ui: &mut egui::Ui, tree: &BlendTree, value: Option<f64>, low: 
 
 /// A slider range for each Number parameter: from 0 (or lower) to past
 /// the biggest value its conditions test and its blend trees' thresholds.
-fn number_ranges(file: &ControllerFile) -> BTreeMap<String, (f64, f64)> {
+fn number_ranges(file: &StateMachineFile) -> BTreeMap<String, (f64, f64)> {
     let mut ranges = BTreeMap::new();
     for def in &file.parameters {
         if let ParameterDef::Number { name, default } = def {
@@ -1448,15 +1448,19 @@ mod tests {
     use super::*;
 
     fn doc() -> ControllerDoc {
-        let file = ControllerFile {
+        let file = StateMachineFile {
             default_state: "Idle".into(),
             states: vec![
                 StateDef::new("Idle", Motion::Clip(String::new()), [0.0, 0.0]),
                 StateDef::new("Walk", Motion::Clip(String::new()), [200.0, 0.0]),
             ],
-            ..ControllerFile::default()
+            ..StateMachineFile::default()
         };
-        ControllerDoc::open("assets/animations/hero.controller.json".into(), file, None)
+        ControllerDoc::open(
+            "assets/animations/hero.statemachine.json".into(),
+            file,
+            None,
+        )
     }
 
     #[test]

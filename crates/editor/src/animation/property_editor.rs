@@ -12,7 +12,7 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use axcenity_anim::{
-    EvaluatedProperty, Interp, PropertyClip, PropertyClipFile, PropertyKeyframe, PropertyName,
+    ClipFile, EvaluatedProperty, Interp, PropertyClip, PropertyKeyframe, PropertyName,
     PropertyTrack, target_path,
 };
 use axcenity_core::InstanceId;
@@ -48,10 +48,10 @@ enum Gesture {
 /// A property clip being edited.
 pub struct PropertyDoc {
     pub path: String,
-    pub file: PropertyClipFile,
-    written: PropertyClipFile,
+    pub file: ClipFile,
+    written: ClipFile,
     /// As it was opened, for Revert.
-    opened: PropertyClipFile,
+    opened: ClipFile,
     pub playhead: f64,
     pub playing: bool,
     /// Keys selected in the dope sheet.
@@ -73,7 +73,7 @@ pub struct PropertyDoc {
 }
 
 impl PropertyDoc {
-    pub fn open(path: String, file: PropertyClipFile) -> Self {
+    pub fn open(path: String, file: ClipFile) -> Self {
         let selected_track = file.tracks.first().map(|t| t.id.clone());
         Self {
             path,
@@ -1042,8 +1042,8 @@ fn value_labels(property: PropertyName, width: usize) -> &'static [&'static str]
 }
 
 /// Empty property clip for "New property clip".
-pub fn new_property_clip(duration: f64) -> PropertyClipFile {
-    PropertyClipFile::new(duration)
+pub fn new_property_clip(duration: f64) -> ClipFile {
+    ClipFile::new(duration)
 }
 
 #[cfg(test)]
@@ -1061,7 +1061,7 @@ mod tests {
     fn doc() -> PropertyDoc {
         PropertyDoc::open(
             "assets/animations/Door.anim.json".into(),
-            PropertyClipFile::new(2.0),
+            ClipFile::new(2.0),
         )
     }
 

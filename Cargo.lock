@@ -644,6 +644,7 @@ dependencies = [
 name = "axcenity-project"
 version = "0.1.0"
 dependencies = [
+ "axcenity-anim",
  "axcenity-blocks",
  "axcenity-core",
  "axcenity-terrain",

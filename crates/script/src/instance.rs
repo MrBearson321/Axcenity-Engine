@@ -133,6 +133,25 @@ fn get(lua: &Lua, id: InstanceId, key: &str) -> mlua::Result<mlua::Value> {
         let state = world.animator(id).map(|s| s.current_state.clone());
         return state.unwrap_or_default().into_lua(lua);
     }
+    // A track's live playback (see `core::AnimationTrackState`).
+    if class == ClassName::AnimationTrack
+        && let Some(track) = world.animation_track(id)
+    {
+        let value = match key {
+            "IsPlaying" => Some(track.playing.into_lua(lua)?),
+            "Length" => Some(track.length.into_lua(lua)?),
+            "Looped" => Some(track.looped.unwrap_or(false).into_lua(lua)?),
+            "Speed" => Some(track.speed.into_lua(lua)?),
+            "TimePosition" => Some(track.time.into_lua(lua)?),
+            "WeightCurrent" => Some(track.weight.into_lua(lua)?),
+            "WeightTarget" => Some(track.target_weight.into_lua(lua)?),
+            "Animation" => Some(LuaInstance(track.animation).into_lua(lua)?),
+            _ => None,
+        };
+        if let Some(value) = value {
+            return Ok(value);
+        }
+    }
     if let Some(member) = class_member(lua, class, key)? {
         return Ok(member);
     }
@@ -189,6 +208,14 @@ fn set(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> mlua::Result
             Err(mlua::Error::runtime(
                 "Animator.CurrentState can't be set; use animator:Play(\"StateName\") to change state",
             ))
+        }
+        "Looped" | "TimePosition" | "IsPlaying" | "Length" | "Speed" | "WeightCurrent"
+        | "WeightTarget" | "Animation"
+            if world(lua)?
+                .get(id)
+                .is_some_and(|i| i.class() == ClassName::AnimationTrack) =>
+        {
+            set_track_field(lua, id, key, value)
         }
         _ => {
             let (class, kind) = {
@@ -411,7 +438,7 @@ pub fn animator_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str,
             _ => unreachable!("get_parameter checks the kind"),
         }
     })?;
-    Ok(vec![
+    let mut methods = vec![
         (ClassName::Animator, "Play", play),
         (ClassName::Animator, "SetBool", set_bool),
         (ClassName::Animator, "GetBool", get_bool),
@@ -419,32 +446,262 @@ pub fn animator_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str,
         (ClassName::Animator, "GetNumber", get_number),
         (ClassName::Animator, "SetTrigger", set_trigger),
         (ClassName::Animator, "ResetTrigger", reset_trigger),
+    ];
+    methods.extend(animator_track_methods(lua)?);
+    Ok(methods)
+}
+
+/// `animator:LoadAnimation(animation)` and
+/// `animator:GetPlayingAnimationTracks()`.
+fn animator_track_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Function)>> {
+    let load = lua.create_function(|lua, (this, animation): (LuaInstance, mlua::Value)| {
+        let animation = match LuaInstance::from_lua(animation.clone(), lua) {
+            Ok(animation) => animation,
+            Err(_) => {
+                return Err(mlua::Error::runtime(format!(
+                    "LoadAnimation needs an Animation, such as animator:LoadAnimation(door.Open), not a {}",
+                    type_name(lua, &animation)
+                )));
+            }
+        };
+        let mut world = world_mut(lua)?;
+        if world.get(this.0).is_none() || world.get(animation.0).is_none() {
+            return Err(destroyed());
+        }
+        world
+            .load_animation(this.0, animation.0)
+            .map(LuaInstance)
+            .ok_or_else(|| {
+                mlua::Error::runtime("LoadAnimation needs an Animation, not another kind of Instance")
+            })
+    })?;
+    let playing = lua.create_function(|lua, this: LuaInstance| {
+        let tracks: Vec<LuaInstance> = {
+            let world = world(lua)?;
+            let state = world.animator(this.0);
+            state
+                .into_iter()
+                .flat_map(|state| state.tracks.iter().copied())
+                .filter(|&track| world.animation_track(track).is_some_and(|t| t.playing))
+                .map(LuaInstance)
+                .collect()
+        };
+        lua.create_sequence_from(tracks)
+    })?;
+    Ok(vec![
+        (ClassName::Animator, "LoadAnimation", load),
+        (ClassName::Animator, "GetPlayingAnimationTracks", playing),
     ])
 }
 
-/// Property `Animation` methods: Play, Stop, Pause, Resume.
+/// An optional number argument of `method`: finite and 0 or more.
+fn seconds_or(value: Option<f64>, default: f64, what: &str, method: &str) -> mlua::Result<f64> {
+    let value = value.unwrap_or(default);
+    if !(value.is_finite() && value >= 0.0) {
+        return Err(mlua::Error::runtime(format!(
+            "{method}'s {what} must be a number, 0 or more"
+        )));
+    }
+    Ok(value)
+}
+
+/// The seconds a track fades over when a script doesn't say, as in Roblox.
+const DEFAULT_TRACK_FADE: f64 = 0.1;
+
+/// AnimationTrack methods: `Play(fadeTime?, weight?, speed?)`,
+/// `Stop(fadeTime?)`, `AdjustSpeed(speed)`, `AdjustWeight(weight, fadeTime?)`
+/// and `GetMarkerReachedSignal(name)`.
+pub fn animation_track_methods(
+    lua: &Lua,
+) -> mlua::Result<Vec<(ClassName, &'static str, Function)>> {
+    let play = lua.create_function(
+        |lua, (this, fade, weight, speed): (LuaInstance, Option<f64>, Option<f64>, Option<f64>)| {
+            let fade = seconds_or(fade, DEFAULT_TRACK_FADE, "fade time", "Play")?;
+            let weight = seconds_or(weight, 1.0, "weight", "Play")?;
+            let speed = speed.unwrap_or(1.0);
+            if !speed.is_finite() {
+                return Err(mlua::Error::runtime("Play's speed must be a number"));
+            }
+            let mut world = world_mut(lua)?;
+            let animator = world
+                .animation_track(this.0)
+                .ok_or_else(destroyed)?
+                .animator;
+            let order = world.animator_mut(animator).map_or(0, |a| a.start_order());
+            let track = world.animation_track_mut(this.0).ok_or_else(destroyed)?;
+            track.playing = true;
+            track.stopping = false;
+            track.time = 0.0;
+            track.speed = speed;
+            track.target_weight = weight;
+            track.fade = fade;
+            if fade <= 0.0 {
+                track.weight = weight;
+            }
+            track.order = order;
+            Ok(())
+        },
+    )?;
+    let stop = lua.create_function(|lua, (this, fade): (LuaInstance, Option<f64>)| {
+        let fade = seconds_or(fade, DEFAULT_TRACK_FADE, "fade time", "Stop")?;
+        let mut world = world_mut(lua)?;
+        let track = world.animation_track_mut(this.0).ok_or_else(destroyed)?;
+        if track.playing || track.weight > 0.0 {
+            track.playing = false;
+            track.stopping = true;
+            track.target_weight = 0.0;
+            track.fade = fade;
+            if fade <= 0.0 {
+                track.weight = 0.0;
+            }
+        }
+        Ok(())
+    })?;
+    let adjust_speed = lua.create_function(|lua, (this, speed): (LuaInstance, Option<f64>)| {
+        let speed = speed.unwrap_or(1.0);
+        if !speed.is_finite() {
+            return Err(mlua::Error::runtime("AdjustSpeed needs a number"));
+        }
+        let mut world = world_mut(lua)?;
+        world
+            .animation_track_mut(this.0)
+            .ok_or_else(destroyed)?
+            .speed = speed;
+        Ok(())
+    })?;
+    let adjust_weight = lua.create_function(
+        |lua, (this, weight, fade): (LuaInstance, Option<f64>, Option<f64>)| {
+            let weight = seconds_or(weight, 1.0, "weight", "AdjustWeight")?;
+            let fade = seconds_or(fade, DEFAULT_TRACK_FADE, "fade time", "AdjustWeight")?;
+            let mut world = world_mut(lua)?;
+            let track = world.animation_track_mut(this.0).ok_or_else(destroyed)?;
+            track.target_weight = weight;
+            track.fade = fade;
+            if fade <= 0.0 {
+                track.weight = weight;
+            }
+            Ok(())
+        },
+    )?;
+    let marker = lua.create_function(|lua, (this, name): (LuaInstance, mlua::Value)| {
+        let mlua::Value::String(name) = &name else {
+            return Err(mlua::Error::runtime(format!(
+                "GetMarkerReachedSignal needs an event's name, such as track:GetMarkerReachedSignal(\"Footstep\"), not a {}",
+                type_name(lua, &name)
+            )));
+        };
+        if world(lua)?.get(this.0).is_none() {
+            return Err(destroyed());
+        }
+        let id = crate::events::marker_id(lua, &name.to_string_lossy());
+        Ok(LuaSignal {
+            owner: Owner::Instance(this.0),
+            event: Event::Marker(id),
+        })
+    })?;
+    Ok(vec![
+        (ClassName::AnimationTrack, "Play", play),
+        (ClassName::AnimationTrack, "Stop", stop),
+        (ClassName::AnimationTrack, "AdjustSpeed", adjust_speed),
+        (ClassName::AnimationTrack, "AdjustWeight", adjust_weight),
+        (ClassName::AnimationTrack, "GetMarkerReachedSignal", marker),
+    ])
+}
+
+/// Sets an AnimationTrack's `Looped` or `TimePosition`; the rest are read-only.
+fn set_track_field(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> mlua::Result<()> {
+    let message =
+        |hint: &str| mlua::Error::runtime(format!("AnimationTrack.{key} can't be set{hint}"));
+    match key {
+        "Looped" => {
+            let mlua::Value::Boolean(looped) = value else {
+                return Err(mlua::Error::runtime(format!(
+                    "AnimationTrack.Looped must be true or false, not a {}",
+                    type_name(lua, &value)
+                )));
+            };
+            world_mut(lua)?
+                .animation_track_mut(id)
+                .ok_or_else(destroyed)?
+                .looped = Some(looped);
+            Ok(())
+        }
+        "TimePosition" => {
+            let time = match value {
+                mlua::Value::Number(n) => n,
+                mlua::Value::Integer(n) => n as f64,
+                other => {
+                    return Err(mlua::Error::runtime(format!(
+                        "AnimationTrack.TimePosition must be a number of seconds, not a {}",
+                        type_name(lua, &other)
+                    )));
+                }
+            };
+            if !time.is_finite() {
+                return Err(mlua::Error::runtime(
+                    "AnimationTrack.TimePosition must be a finite number of seconds",
+                ));
+            }
+            let mut world = world_mut(lua)?;
+            let track = world.animation_track_mut(id).ok_or_else(destroyed)?;
+            track.time = if track.length > 0.0 {
+                time.clamp(0.0, track.length)
+            } else {
+                time.max(0.0)
+            };
+            Ok(())
+        }
+        "Speed" => Err(message("; use track:AdjustSpeed(speed)")),
+        "WeightCurrent" | "WeightTarget" => Err(message("; use track:AdjustWeight(weight)")),
+        _ => Err(message(": it's read-only")),
+    }
+}
+
+/// Tells scripts once, per side, that `animation:Play()` and the rest
+/// still work but `animator:LoadAnimation(animation)` is the new way.
+fn note_legacy_animation(lua: &Lua, method: &str) {
+    struct Noted;
+    if lua.app_data_ref::<Noted>().is_some() {
+        return;
+    }
+    lua.set_app_data(Noted);
+    crate::push_output(
+        lua,
+        crate::OutputKind::Print,
+        format!(
+            "animation:{method}() still works, through the Animator beside the Animation; animator:LoadAnimation(animation) is the new way, and gives an AnimationTrack to play, stop and blend."
+        ),
+    );
+}
+
+/// `Animation` methods kept from before AnimationTracks: Play, Stop, Pause
+/// and Resume, played by the Animator on the same parent.
 pub fn property_animation_methods(
     lua: &Lua,
 ) -> mlua::Result<Vec<(ClassName, &'static str, Function)>> {
     let play = lua.create_function(|lua, this: LuaInstance| {
+        note_legacy_animation(lua, "Play");
         let mut world = world_mut(lua)?;
         let live = world.property_animation_mut(this.0).ok_or_else(destroyed)?;
         live.play = true;
         Ok(())
     })?;
     let stop = lua.create_function(|lua, this: LuaInstance| {
+        note_legacy_animation(lua, "Stop");
         let mut world = world_mut(lua)?;
         let live = world.property_animation_mut(this.0).ok_or_else(destroyed)?;
         live.stop = true;
         Ok(())
     })?;
     let pause = lua.create_function(|lua, this: LuaInstance| {
+        note_legacy_animation(lua, "Pause");
         let mut world = world_mut(lua)?;
         let live = world.property_animation_mut(this.0).ok_or_else(destroyed)?;
         live.pause = true;
         Ok(())
     })?;
     let resume = lua.create_function(|lua, this: LuaInstance| {
+        note_legacy_animation(lua, "Resume");
         let mut world = world_mut(lua)?;
         let live = world.property_animation_mut(this.0).ok_or_else(destroyed)?;
         live.resume = true;
@@ -512,7 +769,7 @@ fn get_parameter(lua: &Lua, id: InstanceId, name: &str, kind: &str) -> mlua::Res
                 .collect();
             Err(mlua::Error::runtime(if names.is_empty() {
                 format!(
-                    "the Animator has no parameter named `{name}` (it gets its controller's parameters when the game runs)"
+                    "the Animator has no parameter named `{name}` (it gets its state machine's parameters when the game runs)"
                 )
             } else {
                 format!(

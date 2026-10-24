@@ -77,9 +77,10 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         BlockKind::SetAnimatorTrigger { .. } => 31,
         BlockKind::ResetAnimatorTrigger { .. } => 32,
         BlockKind::PlayAnimatorState { .. } => 33,
+        BlockKind::PlayAnimation { .. } => 34,
     })
 }
-const STATEMENT_COUNT: usize = 34;
+const STATEMENT_COUNT: usize = 35;
 
 /// One of each statement block, with the Lua it must produce.
 fn every_statement() -> Vec<(BlockKind, &'static str)> {
@@ -322,6 +323,13 @@ fn every_statement() -> Vec<(BlockKind, &'static str)> {
                 state: "Jump".to_owned(),
             },
             "workspace.Hero.Animator:Play(\"Jump\")",
+        ),
+        (
+            BlockKind::PlayAnimation {
+                animator: animator(),
+                animation: "Hero.Wave".to_owned(),
+            },
+            "workspace.Hero.Animator:LoadAnimation(workspace.Hero.Wave):Play()",
         ),
     ]
 }

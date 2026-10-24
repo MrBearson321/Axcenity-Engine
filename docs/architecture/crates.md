@@ -14,7 +14,7 @@ Which crate owns what, and what it may depend on. Read this before adding a crat
 | `physics` | `rapier3d` integration | `core`, `assets` |
 | `script` | Lua 5.4 (`mlua`), sandbox, scheduler, engine API | `audio`, `core` |
 | `ui` | UI Instance layout, CSS cascade (`taffy`) and screen-space draw data | `core`, `render` |
-| `project` | project folder load and save, including CSS and block-script sources | `blocks`, `core` |
+| `project` | project folder load and save, including CSS and block-script sources, and upgrading older projects (animation files through `anim`) | `anim`, `blocks`, `core`, `terrain` |
 | `player` | runtime shipped with games (binary) | `anim`, `audio`, `core`, `assets`, `render`, `scene`, `physics`, `script`, `project`, `ui` |
 | `editor` | `egui` editor app (binary) | `anim`, `audio`, `blocks`, `core`, `assets`, `physics`, `project`, `render`, `scene`, `script`, `ui` |
 

@@ -8,7 +8,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use crate::animation::{AnimatorState, PropertyAnimationState};
+use crate::animation::{AnimationTrackState, AnimatorState, PropertyAnimationState};
 use crate::arena::{Arena, Id};
 use crate::class::ClassName;
 use crate::terrain::TerrainData;
@@ -151,6 +151,8 @@ pub struct World {
     animators: HashMap<InstanceId, AnimatorState>,
     /// Each property Animation's live playback (see [`PropertyAnimationState`]).
     property_animations: HashMap<InstanceId, PropertyAnimationState>,
+    /// Each AnimationTrack's live playback, made by `LoadAnimation`.
+    animation_tracks: HashMap<InstanceId, AnimationTrackState>,
     /// Each Terrain's heightfield and paint. Every Terrain has one, made
     /// with it. Shared with copies of the world until one changes it.
     terrains: HashMap<InstanceId, Arc<TerrainData>>,
@@ -201,6 +203,7 @@ impl World {
             changes: ChangeLog::default(),
             animators: HashMap::new(),
             property_animations: HashMap::new(),
+            animation_tracks: HashMap::new(),
             terrains: HashMap::new(),
         }
     }
@@ -255,6 +258,41 @@ impl World {
             return None;
         }
         Some(self.property_animations.entry(id).or_default())
+    }
+
+    /// The live playback of the AnimationTrack `id`.
+    pub fn animation_track(&self, id: InstanceId) -> Option<&AnimationTrackState> {
+        self.animation_tracks.get(&id)
+    }
+
+    pub fn animation_track_mut(&mut self, id: InstanceId) -> Option<&mut AnimationTrackState> {
+        self.animation_tracks.get_mut(&id)
+    }
+
+    /// Makes an AnimationTrack (unparented, like Roblox's) for `animation`
+    /// on `animator`, and lists it on the animator. `None` if `animator`
+    /// isn't an Animator or `animation` isn't an Animation.
+    pub fn load_animation(
+        &mut self,
+        animator: InstanceId,
+        animation: InstanceId,
+    ) -> Option<InstanceId> {
+        if self.get(animation)?.class != ClassName::Animation {
+            return None;
+        }
+        self.animator_mut(animator)?;
+        let track = self
+            .create(ClassName::AnimationTrack)
+            .expect("AnimationTrack isn't a service");
+        let name = self
+            .get(animation)
+            .map(|a| a.name.clone())
+            .unwrap_or_default();
+        let _ = self.set_name(track, name);
+        self.animation_tracks
+            .insert(track, AnimationTrackState::new(animator, animation));
+        self.animator_mut(animator)?.tracks.push(track);
+        Some(track)
     }
 
     /// Starts keeping a list of every [`Change`] from now on, for
@@ -511,11 +549,13 @@ impl World {
             self.instances.remove(descendant.0);
             self.animators.remove(&descendant);
             self.property_animations.remove(&descendant);
+            self.animation_tracks.remove(&descendant);
             self.terrains.remove(&descendant);
         }
         self.instances.remove(id.0);
         self.animators.remove(&id);
         self.property_animations.remove(&id);
+        self.animation_tracks.remove(&id);
         self.terrains.remove(&id);
         Ok(())
     }

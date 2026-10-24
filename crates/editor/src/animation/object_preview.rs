@@ -827,7 +827,7 @@ mod tests {
         preview.follow(&world, Some(door));
         preview.follow(&world, Some(hinge));
         let path = "assets/animations/Door.anim.json";
-        let mut doc = PropertyDoc::open(path.into(), axcenity_anim::PropertyClipFile::new(1.0));
+        let mut doc = PropertyDoc::open(path.into(), axcenity_anim::ClipFile::new(1.0));
         preview.pose(&doc.evaluated().unwrap());
         doc.key_focus(&preview.focus().unwrap());
         doc.playhead = 1.0;
@@ -859,7 +859,7 @@ mod tests {
             .set_property(animation, "Clip", Value::String(path.into()))
             .unwrap();
         world.property_animation_mut(animation).unwrap().play = true;
-        let mut players = axcenity_anim::PropertyPlayers::new();
+        let mut players = axcenity_anim::Animators::new();
         players.update(&mut world, &assets, 0.0);
         players.update(&mut world, &assets, 1.0);
         assert!(players.take_errors().is_empty());

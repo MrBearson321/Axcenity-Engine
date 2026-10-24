@@ -1,18 +1,19 @@
-//! Animators running the `hello-animation` example's noodle.
+//! Animators running the `hello-animation` example's noodle, and doors,
+//! swords and tracks on top.
 
 use std::path::{Path, PathBuf};
 
 use axcenity_assets::Assets;
 use axcenity_core::{ClassName, InstanceId, PlayRequest, Value, Vector3, World};
 
-use crate::{AnimatorEvent, Animators, ClipFile, ControllerFile};
+use crate::{AnimatorEvent, Animators, ClipFile, StateMachineFile};
 
 fn example() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-animation")
 }
 
 /// A world with the example's noodle: a MeshPart with an Animator.
-fn noodle(controller: &str) -> (World, InstanceId, InstanceId) {
+fn noodle(state_machine: &str) -> (World, InstanceId, InstanceId) {
     let mut world = World::new();
     let part = world.create(ClassName::MeshPart).unwrap();
     world
@@ -29,17 +30,21 @@ fn noodle(controller: &str) -> (World, InstanceId, InstanceId) {
     world.set_parent(part, Some(workspace)).unwrap();
     let animator = world.create(ClassName::Animator).unwrap();
     world
-        .set_property(animator, "Controller", Value::String(controller.into()))
+        .set_property(
+            animator,
+            "StateMachine",
+            Value::String(state_machine.into()),
+        )
         .unwrap();
     world.set_parent(animator, Some(part)).unwrap();
     (world, part, animator)
 }
 
-const CONTROLLER: &str = "assets/animations/noodle.controller.json";
+const STATE_MACHINE: &str = "assets/animations/noodle/noodle.statemachine.json";
 
 #[test]
 fn an_animator_starts_in_its_default_state_and_poses_its_part() {
-    let (mut world, part, animator) = noodle(CONTROLLER);
+    let (mut world, part, animator) = noodle(STATE_MACHINE);
     let assets = Assets::new(example());
     let mut animators = Animators::new();
     let events = animators.update(&mut world, &assets, 0.0);
@@ -68,7 +73,7 @@ fn an_animator_starts_in_its_default_state_and_poses_its_part() {
 
 #[test]
 fn play_switches_state_and_reports_the_change() {
-    let (mut world, _, animator) = noodle(CONTROLLER);
+    let (mut world, _, animator) = noodle(STATE_MACHINE);
     let assets = Assets::new(example());
     let mut animators = Animators::new();
     animators.update(&mut world, &assets, 0.0);
@@ -98,7 +103,7 @@ fn play_switches_state_and_reports_the_change() {
 #[test]
 fn parameters_drive_the_example_through_its_transitions() {
     use axcenity_core::Parameter;
-    let (mut world, _, animator) = noodle(CONTROLLER);
+    let (mut world, _, animator) = noodle(STATE_MACHINE);
     let assets = Assets::new(example());
     let mut animators = Animators::new();
     animators.update(&mut world, &assets, 0.0);
@@ -136,8 +141,8 @@ fn parameters_drive_the_example_through_its_transitions() {
 }
 
 #[test]
-fn a_parameter_the_controller_lacks_is_reported() {
-    let (mut world, _, animator) = noodle(CONTROLLER);
+fn a_parameter_the_state_machine_lacks_is_reported() {
+    let (mut world, _, animator) = noodle(STATE_MACHINE);
     let assets = Assets::new(example());
     let mut animators = Animators::new();
     world
@@ -153,8 +158,8 @@ fn a_parameter_the_controller_lacks_is_reported() {
 }
 
 #[test]
-fn a_missing_controller_is_reported_once_and_leaves_the_model_still() {
-    let (mut world, part, _) = noodle("assets/animations/nothing.controller.json");
+fn a_missing_state_machine_is_reported_once_and_leaves_the_model_still() {
+    let (mut world, part, _) = noodle("assets/animations/nothing.statemachine.json");
     let assets = Assets::new(example());
     let mut animators = Animators::new();
     animators.update(&mut world, &assets, 0.1);
@@ -166,7 +171,7 @@ fn a_missing_controller_is_reported_once_and_leaves_the_model_still() {
 
 #[test]
 fn removing_the_animator_puts_the_model_back() {
-    let (mut world, part, animator) = noodle(CONTROLLER);
+    let (mut world, part, animator) = noodle(STATE_MACHINE);
     let assets = Assets::new(example());
     let mut animators = Animators::new();
     animators.update(&mut world, &assets, 0.1);
@@ -177,11 +182,19 @@ fn removing_the_animator_puts_the_model_back() {
 }
 
 #[test]
+fn hello_doors_clip_is_saved_as_the_engine_writes_it() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/hello-door/assets/animations/Door/Door.anim.json");
+    let text = std::fs::read_to_string(path).unwrap().replace("\r\n", "\n");
+    assert_eq!(ClipFile::from_json(&text).unwrap().to_json(), text);
+}
+
+#[test]
 fn the_example_files_are_saved_as_the_engine_writes_them() {
     let folder = example().join("assets/animations");
     let read = |path: PathBuf| std::fs::read_to_string(path).unwrap().replace("\r\n", "\n");
-    let text = read(folder.join("noodle.controller.json"));
-    assert_eq!(ControllerFile::from_json(&text).unwrap().to_json(), text);
+    let text = read(folder.join("noodle/noodle.statemachine.json"));
+    assert_eq!(StateMachineFile::from_json(&text).unwrap().to_json(), text);
     for clip in ["Idle", "Wave", "Hop", "Walk", "Run"] {
         let text = read(folder.join(format!("noodle/{clip}.anim.json")));
         assert_eq!(
@@ -194,13 +207,13 @@ fn the_example_files_are_saved_as_the_engine_writes_them() {
 
 /// The example's Walk clip (Root moves 2 m along +Z in 1 s), bound to the
 /// noodle, with root motion on or off.
-fn walk(root_motion: bool) -> (crate::BoundClip, std::sync::Arc<axcenity_assets::Model>) {
+fn walk(root_motion: bool) -> (crate::Clip, std::sync::Arc<axcenity_assets::Model>) {
     let assets = Assets::new(example());
     let model = assets.model("assets/models/noodle.fbx").unwrap();
     let (mut clip, takes) =
         crate::load_clip(&assets, "assets/animations/noodle/Walk.anim.json").unwrap();
-    clip.root_motion = root_motion;
-    let bound = crate::BoundClip::bind(clip, takes, model.rig.as_ref().unwrap()).unwrap();
+    clip.link.as_mut().unwrap().root_motion = root_motion;
+    let bound = crate::Clip::bind(clip, takes, model.rig.as_deref()).unwrap();
     (bound, model)
 }
 
@@ -238,7 +251,7 @@ fn locomotion() -> (crate::Compiled, std::sync::Arc<axcenity_assets::Model>) {
     use crate::files::{BlendChild, BlendTree, Motion, ParameterDef, StateDef};
     let assets = Assets::new(example());
     let model = assets.model("assets/models/noodle.fbx").unwrap();
-    let file = ControllerFile {
+    let file = StateMachineFile {
         parameters: vec![ParameterDef::Number {
             name: "Speed".into(),
             default: 0.0,
@@ -261,9 +274,9 @@ fn locomotion() -> (crate::Compiled, std::sync::Arc<axcenity_assets::Model>) {
             }),
             [0.0, 0.0],
         )],
-        ..ControllerFile::default()
+        ..StateMachineFile::default()
     };
-    let (compiled, problems) = crate::Compiled::new(file, model.rig.as_ref().unwrap(), |path| {
+    let (compiled, problems) = crate::Compiled::new(file, model.rig.as_deref(), |path| {
         crate::load_clip(&assets, path)
     });
     assert_eq!(problems, Vec::<String>::new());
@@ -302,7 +315,7 @@ fn a_blend_tree_mixes_its_clips_by_the_parameter() {
 #[test]
 fn a_blend_tree_with_a_missing_or_wrong_parameter_is_reported() {
     use crate::files::{BlendTree, Motion, ParameterDef, StateDef};
-    let file = ControllerFile {
+    let file = StateMachineFile {
         parameters: vec![ParameterDef::Bool {
             name: "Speed".into(),
             default: false,
@@ -315,14 +328,14 @@ fn a_blend_tree_with_a_missing_or_wrong_parameter_is_reported() {
             }),
             [0.0, 0.0],
         )],
-        ..ControllerFile::default()
+        ..StateMachineFile::default()
     };
     let rig = axcenity_assets::Rig {
         bones: Vec::new(),
         joints: Vec::new(),
         fit: glam::Mat4::IDENTITY,
     };
-    let (compiled, problems) = crate::Compiled::new(file, &rig, |_| Err("none".into()));
+    let (compiled, problems) = crate::Compiled::new(file, Some(&rig), |_| Err("none".into()));
     assert!(
         problems[0].contains("needs a Number parameter"),
         "{problems:?}"
@@ -333,8 +346,9 @@ fn a_blend_tree_with_a_missing_or_wrong_parameter_is_reported() {
 
 #[test]
 fn events_fire_once_per_pass_in_order() {
-    let (mut clip, model) = walk(false);
-    clip.file.events = vec![
+    let (clip, model) = walk(false);
+    let mut file = clip.file().clone();
+    file.events = vec![
         crate::ClipEvent {
             time: 0.75,
             name: "Right".into(),
@@ -344,23 +358,289 @@ fn events_fire_once_per_pass_in_order() {
             name: "Left".into(),
         },
     ];
-    let clip = crate::BoundClip::bind(
-        clip.file.clone(),
-        std::sync::Arc::new(vec![clip.take().clone()]),
-        model.rig.as_ref().unwrap(),
-    )
-    .unwrap();
+    let takes = Some(std::sync::Arc::new(vec![clip.take().unwrap().clone()]));
+    let clip = crate::Clip::bind(file, takes.clone(), model.rig.as_deref()).unwrap();
     assert_eq!(clip.events_between(0.0, 1.5), ["Left", "Right", "Left"]);
     assert_eq!(clip.events_between(0.25, 0.5), ["Left"]);
     assert!(clip.events_between(0.3, 0.7).is_empty());
-    let mut once = clip.file.clone();
+    let mut once = clip.file().clone();
     once.looping = false;
-    let once = crate::BoundClip::bind(
-        once,
-        std::sync::Arc::new(vec![clip.take().clone()]),
-        model.rig.as_ref().unwrap(),
-    )
-    .unwrap();
+    let once = crate::Clip::bind(once, takes, model.rig.as_deref()).unwrap();
     assert_eq!(once.events_between(0.0, 3.0), ["Left", "Right"]);
     assert!(once.events_between(1.0, 3.0).is_empty());
+}
+
+/// A temporary project with the example's noodle and `clips` (path, file).
+fn project(name: &str, clips: &[(&str, ClipFile)]) -> PathBuf {
+    let root = std::env::temp_dir().join(format!("axcenity-anim-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("assets/models")).unwrap();
+    std::fs::copy(
+        example().join("assets/models/noodle.fbx"),
+        root.join("assets/models/noodle.fbx"),
+    )
+    .unwrap();
+    for (path, clip) in clips {
+        crate::files::write_file(&root.join(path), &clip.to_json()).unwrap();
+    }
+    root
+}
+
+/// A door clip: up from y 0 to y 10 over a second, with an event halfway.
+fn door_clip() -> ClipFile {
+    use crate::files::{ClipEvent, Interp, PropertyKeyframe, PropertyName, PropertyTrack};
+    let key = |id: &str, time: f64, y: f32| PropertyKeyframe {
+        id: id.into(),
+        time,
+        value: vec![0.0, y, 0.0],
+        interp: Interp::Linear,
+    };
+    let mut clip = ClipFile::new(1.0);
+    clip.tracks.push(PropertyTrack {
+        id: "position".into(),
+        target: ".".into(),
+        property: PropertyName::Position,
+        keys: vec![key("a", 0.0, 0.0), key("b", 1.0, 10.0)],
+    });
+    clip.events.push(ClipEvent {
+        time: 0.5,
+        name: "Halfway".into(),
+    });
+    clip
+}
+
+const DOOR: &str = "assets/animations/Door/Door.anim.json";
+
+/// A world with a Part and an Animation of the door clip in it, and an
+/// Animator beside it if `animator`.
+fn door_world(animator: bool) -> (World, InstanceId, Option<InstanceId>, InstanceId) {
+    let mut world = World::new();
+    let part = world.create(ClassName::Part).unwrap();
+    world.set_parent(part, Some(world.workspace())).unwrap();
+    let animator = animator.then(|| {
+        let id = world.create(ClassName::Animator).unwrap();
+        world.set_parent(id, Some(part)).unwrap();
+        id
+    });
+    let animation = world.create(ClassName::Animation).unwrap();
+    world.set_parent(animation, Some(part)).unwrap();
+    world
+        .set_property(animation, "Clip", Value::String(DOOR.into()))
+        .unwrap();
+    (world, part, animator, animation)
+}
+
+fn y(world: &World, part: InstanceId) -> f32 {
+    world
+        .get(part)
+        .and_then(|p| p.property("Position"))
+        .and_then(Value::as_vector3)
+        .unwrap()
+        .y
+}
+
+#[test]
+fn a_track_from_load_animation_plays_fires_its_events_and_stops_at_its_end() {
+    let root = project("door-track", &[(DOOR, door_clip())]);
+    let assets = Assets::new(&root);
+    let (mut world, part, animator, animation) = door_world(true);
+    let animator = animator.unwrap();
+    let track = world.load_animation(animator, animation).unwrap();
+    let mut animators = Animators::new();
+    // Loaded, not played: nothing moves.
+    animators.update(&mut world, &assets, 0.1);
+    assert_eq!(y(&world, part), 0.0);
+    assert_eq!(world.animation_track(track).unwrap().length, 1.0);
+    let state = world.animation_track_mut(track).unwrap();
+    state.playing = true;
+    state.weight = 1.0;
+    state.order = 1;
+    animators.update(&mut world, &assets, 0.0);
+    let events = animators.update(&mut world, &assets, 0.6);
+    assert!((y(&world, part) - 6.0).abs() < 1e-3, "{}", y(&world, part));
+    assert_eq!(
+        events,
+        [AnimatorEvent::TrackMarker {
+            track,
+            name: "Halfway".into()
+        }]
+    );
+    // At its end it stops, keeps the door at the top, and says so.
+    let events = animators.update(&mut world, &assets, 0.6);
+    assert_eq!(events, [AnimatorEvent::TrackStopped { track }]);
+    assert_eq!(y(&world, part), 10.0);
+    assert!(!world.animation_track(track).unwrap().playing);
+    animators.update(&mut world, &assets, 0.5);
+    assert_eq!(y(&world, part), 10.0, "properties keep their last value");
+    assert_eq!(animators.take_errors(), Vec::<String>::new());
+}
+
+#[test]
+fn animation_play_works_through_the_animator_and_auto_play_starts_by_itself() {
+    let root = project("door-play", &[(DOOR, door_clip())]);
+    let assets = Assets::new(&root);
+    let (mut world, part, _, animation) = door_world(true);
+    let mut animators = Animators::new();
+    world.property_animation_mut(animation).unwrap().play = true;
+    animators.update(&mut world, &assets, 0.0);
+    let events = animators.update(&mut world, &assets, 0.51);
+    assert!(
+        events.contains(&AnimatorEvent::AnimationMarker {
+            animation,
+            name: "Halfway".into()
+        }),
+        "{events:?}"
+    );
+    assert!((y(&world, part) - 5.1).abs() < 1e-3);
+    let events = animators.update(&mut world, &assets, 0.6);
+    assert!(events.contains(&AnimatorEvent::AnimationCompleted { animation }));
+    assert_eq!(y(&world, part), 10.0);
+
+    // AutoPlay: played by itself the first frame, with no script.
+    let (mut world, part, _, animation) = door_world(true);
+    world
+        .set_property(animation, "AutoPlay", Value::Bool(true))
+        .unwrap();
+    let mut animators = Animators::new();
+    animators.update(&mut world, &assets, 0.0);
+    animators.update(&mut world, &assets, 0.25);
+    assert!((y(&world, part) - 2.5).abs() < 1e-3);
+    // Two Animations are independent.
+    assert!(world.property_animation(animation).unwrap().playing);
+}
+
+#[test]
+fn a_linked_clip_that_also_keys_a_sword_plays_both() {
+    use crate::files::{Interp, PropertyKeyframe, PropertyName, PropertyTrack};
+    let mut clip = ClipFile::linked("assets/models/noodle.fbx", "Moves", 0.0, 1.0);
+    let key = |id: &str, time: f64, value: f32| PropertyKeyframe {
+        id: id.into(),
+        time,
+        value: vec![value],
+        interp: Interp::Linear,
+    };
+    clip.tracks.push(PropertyTrack {
+        id: "sword".into(),
+        target: "Sword".into(),
+        property: PropertyName::Transparency,
+        keys: vec![key("a", 0.0, 0.0), key("b", 1.0, 1.0)],
+    });
+    let path = "assets/animations/noodle/WaveSword.anim.json";
+    let root = project("sword", &[(path, clip)]);
+    let assets = Assets::new(&root);
+    let (mut world, part, animator) = noodle("");
+    let sword = world.create(ClassName::Part).unwrap();
+    world.set_name(sword, "Sword").unwrap();
+    world.set_parent(sword, Some(part)).unwrap();
+    let animation = world.create(ClassName::Animation).unwrap();
+    world
+        .set_property(animation, "Clip", Value::String(path.into()))
+        .unwrap();
+    world.set_parent(animation, Some(animator)).unwrap();
+    let track = world.load_animation(animator, animation).unwrap();
+    let state = world.animation_track_mut(track).unwrap();
+    state.playing = true;
+    state.weight = 1.0;
+    let mut animators = Animators::new();
+    animators.update(&mut world, &assets, 0.0);
+    assert_eq!(animators.take_errors(), Vec::<String>::new());
+    let first = animators.poses()[&part].clone();
+    animators.update(&mut world, &assets, 0.5);
+    // The take moves the bones…
+    assert_ne!(first.primitives, animators.poses()[&part].primitives);
+    // …and the clip's own track fades the sword.
+    let transparency = world
+        .get(sword)
+        .and_then(|s| s.property("Transparency"))
+        .and_then(Value::as_number)
+        .unwrap();
+    assert!((transparency - 0.5).abs() < 1e-3, "{transparency}");
+}
+
+#[test]
+fn a_track_plays_over_the_state_machine_and_stop_fades_it_out() {
+    let (mut world, part, animator) = noodle(STATE_MACHINE);
+    let assets = Assets::new(example());
+    let animation = world.create(ClassName::Animation).unwrap();
+    world
+        .set_property(
+            animation,
+            "Clip",
+            Value::String("assets/animations/noodle/Wave.anim.json".into()),
+        )
+        .unwrap();
+    world.set_parent(animation, Some(animator)).unwrap();
+    // A second noodle with only the state machine, to compare with.
+    let (mut alone, alone_part, _) = noodle(STATE_MACHINE);
+    let mut animators = Animators::new();
+    let mut alone_animators = Animators::new();
+    let primitives = |animators: &Animators, part| animators.poses()[&part].primitives.clone();
+    let step = |world: &mut World, alone: &mut World, a: &mut Animators, b: &mut Animators, dt| {
+        let events = a.update(world, &assets, dt);
+        b.update(alone, &assets, dt);
+        events
+    };
+    step(
+        &mut world,
+        &mut alone,
+        &mut animators,
+        &mut alone_animators,
+        0.1,
+    );
+    assert_eq!(
+        primitives(&animators, part),
+        primitives(&alone_animators, alone_part)
+    );
+    let track = world.load_animation(animator, animation).unwrap();
+    let state = world.animation_track_mut(track).unwrap();
+    state.playing = true;
+    state.weight = 1.0;
+    state.order = 1;
+    step(
+        &mut world,
+        &mut alone,
+        &mut animators,
+        &mut alone_animators,
+        0.2,
+    );
+    assert_ne!(
+        primitives(&animators, part),
+        primitives(&alone_animators, alone_part),
+        "Wave plays over Locomotion"
+    );
+    assert_eq!(
+        world.animator(animator).unwrap().current_state,
+        "Locomotion"
+    );
+    // Stop(0.3): half faded after 0.15 s, gone (and Stopped) after 0.3 s.
+    let state = world.animation_track_mut(track).unwrap();
+    state.playing = false;
+    state.stopping = true;
+    state.target_weight = 0.0;
+    state.fade = 0.3;
+    step(
+        &mut world,
+        &mut alone,
+        &mut animators,
+        &mut alone_animators,
+        0.15,
+    );
+    let weight = world.animation_track(track).unwrap().weight;
+    assert!((weight - 0.5).abs() < 1e-6, "{weight}");
+    let events = step(
+        &mut world,
+        &mut alone,
+        &mut animators,
+        &mut alone_animators,
+        0.16,
+    );
+    assert!(
+        events.contains(&AnimatorEvent::TrackStopped { track }),
+        "{events:?}"
+    );
+    assert_eq!(
+        primitives(&animators, part),
+        primitives(&alone_animators, alone_part),
+        "back to the state machine alone"
+    );
 }

@@ -4,21 +4,122 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use axcenity_anim::{BoundClip, ClipEvent, ClipFile};
+use axcenity_anim::{Clip, ClipEvent, ClipFile, TakeLink};
 use axcenity_assets::{Assets, Posed, Take};
 use eframe::egui;
 
 use super::timeline::Timeline;
 use crate::theme::icons;
 
+/// A linked clip as this editor shows it: part of a take, played at a
+/// speed, with its events in seconds of the take from the clip's start.
+/// It turns into the one clip shape ([`ClipFile`]) to save, keeping the
+/// clip's own tracks as they were.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LinkedClip {
+    pub source: String,
+    pub take: String,
+    /// Where it starts and ends in the take, in seconds (`start <= end`).
+    pub start: f64,
+    pub end: f64,
+    /// Negative plays the take backwards.
+    pub speed: f64,
+    pub looping: bool,
+    pub root_motion: bool,
+    pub events: Vec<ClipEvent>,
+    /// The rest of the clip (its tracks), kept as it was.
+    rest: ClipFile,
+}
+
+impl LinkedClip {
+    /// `file` as a part of its take. A clip with no link gets an empty one.
+    pub fn of(file: ClipFile) -> Self {
+        let link = file.link.clone().unwrap_or(TakeLink {
+            source: String::new(),
+            take: String::new(),
+            start: 0.0,
+            end: file.duration,
+            root_motion: false,
+        });
+        let speed = file.speed();
+        let backwards = link.end < link.start;
+        let (start, end) = if backwards {
+            (link.end, link.start)
+        } else {
+            (link.start, link.end)
+        };
+        let length = end - start;
+        let events = file
+            .events
+            .iter()
+            .map(|event| {
+                let into = event.time * speed.abs();
+                ClipEvent {
+                    time: if backwards { length - into } else { into }.clamp(0.0, length),
+                    name: event.name.clone(),
+                }
+            })
+            .collect();
+        Self {
+            source: link.source,
+            take: link.take,
+            start,
+            end,
+            speed,
+            looping: file.looping,
+            root_motion: link.root_motion,
+            events,
+            rest: file,
+        }
+    }
+
+    /// Its length in seconds of the take (before `speed`), never negative.
+    pub fn length(&self) -> f64 {
+        (self.end - self.start).max(0.0)
+    }
+
+    /// It in the one clip shape.
+    pub fn to_file(&self) -> ClipFile {
+        let speed = self.speed.abs().max(1e-3);
+        let backwards = self.speed < 0.0;
+        let length = self.length();
+        let mut file = self.rest.clone();
+        file.duration = length / speed;
+        file.looping = self.looping;
+        file.link = Some(TakeLink {
+            source: self.source.clone(),
+            take: self.take.clone(),
+            start: if backwards { self.end } else { self.start },
+            end: if backwards { self.start } else { self.end },
+            root_motion: self.root_motion,
+        });
+        file.events = self
+            .events
+            .iter()
+            .map(|event| {
+                let into = if backwards {
+                    length - event.time
+                } else {
+                    event.time
+                };
+                ClipEvent {
+                    time: into.clamp(0.0, length) / speed,
+                    name: event.name.clone(),
+                }
+            })
+            .collect();
+        file
+    }
+}
+
 /// A clip being looked at and changed.
 pub struct ClipDoc {
     pub path: String,
-    pub file: ClipFile,
+    pub file: LinkedClip,
     /// As last written, to tell when it needs writing again.
-    written: ClipFile,
+    written: LinkedClip,
     /// As it was opened, for Revert.
-    opened: ClipFile,
+    opened: LinkedClip,
     /// The takes of its model file, or why they couldn't be read.
     takes: Result<Arc<Vec<Take>>, String>,
     /// Seconds into the clip (0 is its start), at its own speed.
@@ -27,13 +128,14 @@ pub struct ClipDoc {
     /// The model the preview shows it on (a `MeshId`).
     pub preview_model: Option<String>,
     /// The clip bound to the preview model, for the file as it was then.
-    bound: Option<(u64, ClipFile, Result<BoundClip, String>)>,
+    bound: Option<(u64, LinkedClip, Result<Clip, String>)>,
     /// A new event's name, typed before Add event.
     new_event: String,
 }
 
 impl ClipDoc {
     pub fn open(path: String, file: ClipFile, assets: &Assets, models: &[String]) -> Self {
+        let file = LinkedClip::of(file);
         let takes = assets
             .takes(&file.source)
             .ok_or_else(|| format!("its model file `{}` can't be read", file.source));
@@ -64,7 +166,7 @@ impl ClipDoc {
             let Some(rig) = &model.rig else {
                 return false;
             };
-            BoundClip::bind(self.file.clone(), takes.clone(), rig).is_ok()
+            Clip::bind(self.file.to_file(), Some(takes.clone()), Some(rig)).is_ok()
         };
         std::iter::once(self.file.source.clone())
             .chain(models.iter().cloned())
@@ -81,7 +183,7 @@ impl ClipDoc {
         if !self.unwritten() {
             return Ok(false);
         }
-        super::store::save_clip(project, &self.path, &self.file)?;
+        super::store::save_clip(project, &self.path, &self.file.to_file())?;
         self.written = self.file.clone();
         Ok(true)
     }
@@ -152,7 +254,7 @@ impl ClipDoc {
             .as_ref()
             .is_none_or(|(key, file, _)| *key != model.key() || *file != self.file);
         if stale {
-            let bound = BoundClip::bind(self.file.clone(), takes, rig);
+            let bound = Clip::bind(self.file.to_file(), Some(takes), Some(rig));
             self.bound = Some((model.key(), self.file.clone(), bound));
         }
         let Some((_, _, bound)) = &self.bound else {
@@ -170,7 +272,7 @@ impl ClipDoc {
     /// Whether root motion found a bone to move the model by.
     fn root_motion_found(&self) -> Option<bool> {
         let (_, _, bound) = self.bound.as_ref()?;
-        bound.as_ref().ok().map(BoundClip::has_root_motion)
+        bound.as_ref().ok().map(Clip::has_root_motion)
     }
 
     /// The toolbar's part: play/pause, back to the start, Loop, Speed and

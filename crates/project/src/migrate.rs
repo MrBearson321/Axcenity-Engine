@@ -71,6 +71,7 @@ type Migration = fn(&Path) -> Result<(), String>;
 fn step(from: u32) -> Option<Migration> {
     match from {
         1 => Some(migrate_v1_to_v2),
+        2 => Some(migrate_v2_to_v3),
         _ => None,
     }
 }
@@ -79,6 +80,13 @@ fn step(from: u32) -> Option<Migration> {
 /// manifest version so opening an older project takes the real upgrade path.
 fn migrate_v1_to_v2(folder: &Path) -> Result<(), String> {
     write_manifest_version(folder, 2)
+}
+
+/// One clip format and state machines (v3 Phase 7): see
+/// `migrate_animation.rs`.
+fn migrate_v2_to_v3(folder: &Path) -> Result<(), String> {
+    crate::migrate_animation::migrate(folder)?;
+    write_manifest_version(folder, 3)
 }
 
 fn write_manifest_version(folder: &Path, version: u32) -> Result<(), String> {

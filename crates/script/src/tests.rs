@@ -1342,3 +1342,72 @@ fn animators_take_play_requests_and_report_their_state() {
     let request = world.animator(animator).unwrap().play.clone().unwrap();
     assert_eq!((request.state.as_str(), request.blend), ("Walk", Some(0.5)));
 }
+
+#[test]
+fn load_animation_gives_a_track_to_play_stop_and_hear() {
+    let mut world = World::new();
+    let door = world.create(ClassName::Part).unwrap();
+    world.set_name(door, "Door").unwrap();
+    world.set_parent(door, Some(world.workspace())).unwrap();
+    let animator = world.create(ClassName::Animator).unwrap();
+    world.set_parent(animator, Some(door)).unwrap();
+    let animation = world.create(ClassName::Animation).unwrap();
+    world.set_name(animation, "Open").unwrap();
+    world.set_parent(animation, Some(door)).unwrap();
+    let mut runtime = ScriptRuntime::new();
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/door.server.lua",
+        "local door = workspace.Door
+         local track = door.Animator:LoadAnimation(door.Open)
+         print(track.ClassName, track.Animation == door.Open, track.IsPlaying)
+         track:GetMarkerReachedSignal('Opened'):Connect(function(name) print('marker', name) end)
+         track.Stopped:Connect(function() print('stopped') end)
+         track:Play(0.2, 0.5, 2)
+         print(track.IsPlaying, track.Speed, #door.Animator:GetPlayingAnimationTracks())
+         track.Looped = true
+         track.TimePosition = 0.25
+         print(track.Looped, track.TimePosition)
+         print(pcall(function() track.Speed = 3 end))
+         print(pcall(door.Animator.LoadAnimation, door.Animator, door))
+         print(pcall(Instance.new, 'AnimationTrack'))
+         track:Stop(0)
+         print(track.IsPlaying, track.WeightCurrent)",
+    );
+    let track = world.animator(animator).unwrap().tracks[0];
+    runtime.fire_instance_event(&mut world, track, "KeyframeReached", &["Opened".into()]);
+    runtime.fire_instance_event(&mut world, track, "KeyframeReached", &["Other".into()]);
+    runtime.fire_instance_event(&mut world, track, "Stopped", &[]);
+    let output = lines(&mut runtime);
+    assert_eq!(output[0], "AnimationTrack\ttrue\tfalse");
+    assert_eq!(output[1], "true\t2.0\t1");
+    assert_eq!(output[2], "true\t0.25");
+    assert!(output[3].contains("AdjustSpeed"), "{}", output[3]);
+    assert!(output[4].contains("needs an Animation"), "{}", output[4]);
+    assert!(output[5].contains("LoadAnimation"), "{}", output[5]);
+    assert_eq!(output[6], "false\t0.0");
+    assert_eq!(&output[7..], ["marker\tOpened", "stopped"]);
+    let state = world.animation_track(track).unwrap();
+    assert!(state.stopping && state.order == 1);
+    assert_eq!(state.animation, animation);
+}
+
+#[test]
+fn animation_play_still_works_and_says_once_what_the_new_way_is() {
+    let mut world = World::new();
+    let animation = world.create(ClassName::Animation).unwrap();
+    world
+        .set_parent(animation, Some(world.workspace()))
+        .unwrap();
+    let output = output_of(
+        &mut world,
+        "local a = workspace.Animation
+         a:Play()
+         a:Stop()
+         a:Play()",
+    );
+    assert_eq!(output.len(), 1, "{output:?}");
+    assert!(output[0].contains("LoadAnimation"), "{}", output[0]);
+    assert!(world.property_animation(animation).unwrap().play);
+}

@@ -81,12 +81,17 @@ pub enum ClassName {
     SpotLight,
     /// Gives off particles (sparks, smoke, fire...) from inside its parent part.
     ParticleEmitter,
-    /// Inside a MeshPart with an animated model: plays its animator
-    /// controller (states, transitions and parameters) on the model.
+    /// Inside a Part, MeshPart, Model, ScreenGui or UI element: plays
+    /// animation on its parent, with its state machine (if it has one) and
+    /// the AnimationTracks loaded from it.
     Animator,
-    /// Inside a Part, MeshPart or Model: plays an authored property clip
-    /// (`*.anim.json` with `"kind": "property"`) on that root.
+    /// Points at a clip (`*.anim.json`). An Animator on the same parent
+    /// plays it: from `animator:LoadAnimation(animation)`, or by itself
+    /// when the game starts if `AutoPlay` is ticked.
     Animation,
+    /// One Animation loaded on an Animator (`animator:LoadAnimation`), to
+    /// play, stop and blend. Made by the engine, never saved.
+    AnimationTrack,
     /// A landscape: a heightfield (kept beside the Instance, see
     /// [`TerrainData`](crate::TerrainData)) shaded by its TerrainLayers.
     Terrain,
@@ -96,7 +101,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 35] = [
+    pub const ALL: [ClassName; 36] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -130,6 +135,7 @@ impl ClassName {
         ClassName::ParticleEmitter,
         ClassName::Animator,
         ClassName::Animation,
+        ClassName::AnimationTrack,
         ClassName::Terrain,
         ClassName::TerrainLayer,
     ];
@@ -169,6 +175,7 @@ impl ClassName {
             ClassName::ParticleEmitter => "ParticleEmitter",
             ClassName::Animator => "Animator",
             ClassName::Animation => "Animation",
+            ClassName::AnimationTrack => "AnimationTrack",
             ClassName::Terrain => "Terrain",
             ClassName::TerrainLayer => "TerrainLayer",
         }
@@ -226,7 +233,8 @@ impl ClassName {
             | ClassName::RemoteEvent
             | ClassName::Player
             | ClassName::Model
-            | ClassName::Folder => Vec::new(),
+            | ClassName::Folder
+            | ClassName::AnimationTrack => Vec::new(),
             ClassName::Workspace => vec![
                 // The wind everywhere, in studs a second. It pushes particles
                 // from emitters with WindAffectsDrag, and parts with
@@ -439,20 +447,26 @@ impl ClassName {
                 ("Visible", Value::Bool(true)),
             ],
             ClassName::Animator => vec![
-                // The animator controller it plays, relative to the project
-                // folder, such as "assets/animations/hero.controller.json".
-                ("Controller", Value::String(String::new())),
-                // Off, the model stays where it last was.
+                // The state machine it plays, relative to the project folder,
+                // such as "assets/animations/hero/hero.statemachine.json".
+                // Empty plays only its AnimationTracks.
+                ("StateMachine", Value::String(String::new())),
+                // Off, everything it animates stays where it last was.
                 ("Enabled", Value::Bool(true)),
-                // Plays every state this many times as fast.
+                // Plays everything this many times as fast.
                 ("Speed", Value::Number(1.0)),
             ],
             ClassName::Animation => vec![
-                // Property clip file, such as "assets/animations/Door.anim.json".
+                // The clip file, such as "assets/animations/Door/Open.anim.json".
                 ("Clip", Value::String(String::new())),
+                // On, the Animator on the same parent plays it when the game
+                // starts.
+                ("AutoPlay", Value::Bool(false)),
                 ("Enabled", Value::Bool(true)),
                 ("Speed", Value::Number(1.0)),
-                // When set, overrides the clip's loop flag for playback.
+                // Whether `animation:Play()` loops it (the editor copies the
+                // clip's loop when the clip is set). A track loaded with
+                // LoadAnimation uses the clip's own.
                 ("Looped", Value::Bool(false)),
             ],
             ClassName::Sound => vec![
@@ -658,9 +672,13 @@ impl ClassName {
             // `StateChanged` fires with the new state's name and the old
             // one's; `AnimationEvent` with an event's name, as a clip passes it.
             ClassName::Animator => &["StateChanged", "AnimationEvent"],
-            // `Completed` when a non-looping property clip finishes;
-            // `AnimationEvent` with a marker name as the clip passes it.
+            // `Completed` when `animation:Play()` finishes a clip that
+            // doesn't loop; `AnimationEvent` with an event's name as it passes.
             ClassName::Animation => &["Completed", "AnimationEvent"],
+            // `Stopped` when it stops (after its fade); `KeyframeReached`
+            // with an event's name as it passes, which
+            // `GetMarkerReachedSignal(name)` hears one name of.
+            ClassName::AnimationTrack => &["Stopped", "KeyframeReached"],
             // Fires on both parts when two parts start touching.
             ClassName::Part | ClassName::MeshPart => &["Touched"],
             // `OnServerEvent` fires in Scripts for each `FireServer`, and

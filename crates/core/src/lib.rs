@@ -13,7 +13,9 @@ mod terrain;
 mod value;
 mod world;
 
-pub use animation::{AnimatorState, Parameter, PlayRequest, PropertyAnimationState};
+pub use animation::{
+    AnimationTrackState, AnimatorState, Parameter, PlayRequest, PropertyAnimationState,
+};
 pub use arena::{Arena, Id};
 pub use class::{ClassName, INSTANCE_EVENTS};
 pub use enums::{KeyCode, Material, MaterialPreset, PartType, ParticleType, TextureChannel};

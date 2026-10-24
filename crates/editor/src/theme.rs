@@ -667,6 +667,7 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::ParticleEmitter => icons::SPARKLE,
         ClassName::Animator => icons::PERSON_SIMPLE_RUN,
         ClassName::Animation => icons::FILM_SLATE,
+        ClassName::AnimationTrack => icons::FILM_STRIP,
         ClassName::Terrain => icons::MOUNTAINS,
         ClassName::TerrainLayer => icons::STACK,
     }
@@ -735,7 +736,7 @@ pub fn class_color(class: ClassName, visuals: &egui::Visuals) -> Color32 {
         ClassName::PointLight | ClassName::SpotLight => pick((232, 205, 110), (150, 115, 0)),
         ClassName::ParticleEmitter => pick((232, 150, 108), (175, 80, 30)),
         ClassName::Animator => pick((122, 205, 150), (30, 130, 70)),
-        ClassName::Animation => pick((110, 190, 175), (25, 120, 105)),
+        ClassName::Animation | ClassName::AnimationTrack => pick((110, 190, 175), (25, 120, 105)),
         ClassName::Terrain | ClassName::TerrainLayer => pick((140, 200, 110), (60, 125, 35)),
         ClassName::Script => pick((226, 145, 82), (185, 95, 10)),
         ClassName::LocalScript => pick((90, 190, 175), (10, 120, 110)),

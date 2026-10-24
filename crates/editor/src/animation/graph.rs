@@ -12,7 +12,7 @@
 //! It only reports what was done ([`GraphEvent`]); the controller editor
 //! changes the file.
 
-use axcenity_anim::{ANY_STATE, ControllerFile, Motion};
+use axcenity_anim::{ANY_STATE, Motion, StateMachineFile};
 use eframe::egui::{self, Color32, Pos2, Rect, Stroke, Vec2};
 
 /// Where the Any State node is drawn until it's moved.
@@ -85,7 +85,7 @@ pub struct Live {
     pub fade: Option<(usize, Option<usize>, f32)>,
 }
 
-fn node_position(file: &ControllerFile, node: Node) -> [f32; 2] {
+fn node_position(file: &StateMachineFile, node: Node) -> [f32; 2] {
     match node {
         Node::State(index) => file.states.get(index).map_or([0.0; 2], |s| s.position),
         Node::Any => file.any_state_position.unwrap_or(ANY_STATE_POSITION),
@@ -93,7 +93,7 @@ fn node_position(file: &ControllerFile, node: Node) -> [f32; 2] {
 }
 
 /// The node a transition's `from` names.
-pub fn from_node(file: &ControllerFile, from: &str) -> Option<Node> {
+pub fn from_node(file: &StateMachineFile, from: &str) -> Option<Node> {
     if from == ANY_STATE {
         return Some(Node::Any);
     }
@@ -113,7 +113,7 @@ impl GraphView {
         [local.x, local.y]
     }
 
-    fn node_rect(&self, rect: Rect, file: &ControllerFile, node: Node) -> Rect {
+    fn node_rect(&self, rect: Rect, file: &StateMachineFile, node: Node) -> Rect {
         let size = match node {
             Node::State(_) => NODE,
             Node::Any => Vec2::new(110.0, 36.0),
@@ -125,7 +125,7 @@ impl GraphView {
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
-        file: &ControllerFile,
+        file: &StateMachineFile,
         selected: Selected,
         live: Live,
         clips: &[String],
