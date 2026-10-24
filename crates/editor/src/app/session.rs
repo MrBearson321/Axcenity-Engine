@@ -344,6 +344,7 @@ impl EditorApp {
                 self.pending_focus_lost = None;
                 self.last_frame = None;
                 self.game_keys = GameKeys::default();
+                self.profiler.start();
                 // A breakpoint in a script's first run pauses before any frame.
                 self.tabs.take_breakpoints_changed();
                 self.follow_pause();
@@ -455,6 +456,9 @@ impl EditorApp {
             orientation,
         };
         let frame = session.frame(seconds, keys, camera, &mut self.output);
+        if let Some(cost) = session.cost() {
+            self.profiler.record_game(cost, session.load());
+        }
         self.pending_emits.extend(session.take_particle_emits());
         match frame {
             Ok(Some(moved)) => self

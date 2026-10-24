@@ -57,6 +57,9 @@ log = "0.4"
 png = "0.18"
 # Lua 5.4, compiled from source (`vendored`) so no system Lua is needed on any OS.
 mlua = { version = "0.12", features = ["lua54", "vendored"] }
+# The process's memory use for the editor's profiler, on Windows, macOS and
+# Linux (MIT OR Apache-2.0).
+memory-stats = "1.2"
 # Math types Kira's spatial listener and emitters take (MIT OR Apache-2.0).
 mint = "0.5"
 pollster = "0.4"

@@ -12,6 +12,7 @@ use std::any::Any;
 use std::collections::BTreeSet;
 use std::panic::{self, AssertUnwindSafe};
 use std::path::Path;
+use std::time::Instant;
 
 use axcenity_anim::{Animators, PropertyPlayers};
 use axcenity_assets::Assets;
@@ -23,6 +24,7 @@ use axcenity_script::{Breakpoints, CameraState, KeyEvent, OutputKind, Pause, Scr
 use eframe::egui;
 
 use crate::output::Output;
+use crate::profiler::{FrameCost, GameLoad};
 
 /// The message of a Rust panic caught during Play.
 #[derive(Debug)]
@@ -43,6 +45,9 @@ pub struct Session {
     audio: GameAudio,
     /// Set by Debug > Panic during Play, to check that a crash is caught.
     panic_next_frame: bool,
+    /// What the last frame's steps took, for the Profiler; `None` when it
+    /// didn't run (paused at a breakpoint).
+    cost: Option<FrameCost>,
 }
 
 impl Session {
@@ -69,6 +74,7 @@ impl Session {
             assets,
             audio: GameAudio::default(),
             panic_next_frame: false,
+            cost: None,
         };
         session.scripts.enable_debugger();
         session.scripts.set_breakpoints(breakpoints);
@@ -203,29 +209,45 @@ impl Session {
         output: &mut Output,
     ) -> Result<Option<CameraState>, Crash> {
         let mut moved = None;
+        self.cost = None;
         if self.scripts.pause().is_some() {
             return Ok(None);
         }
-        guard(|| {
+        // Each step's time, for the Profiler. Reading the clock costs next
+        // to nothing, so it's measured whether or not the panel is open.
+        let mut cost = FrameCost::default();
+        let started = Instant::now();
+        let result = guard(|| {
             if self.panic_next_frame {
                 panic!("a deliberate engine panic, from Debug > Panic during Play");
             }
+            let mut clock = Instant::now();
+            // The time since `clock`, which then starts again.
+            let mut lap = || {
+                let now = Instant::now();
+                let took = now - clock;
+                clock = now;
+                took
+            };
             // 1. Input, for LocalScripts: the camera and the keys.
             self.scripts.set_camera(camera);
             self.scripts.input(&mut self.world, keys);
             self.forward_output(output);
             if self.scripts.pause().is_some() {
+                cost.scripts += lap();
                 return;
             }
             // 2. Resume scripts whose wait is over (and due `task.delay`s),
             //    after delivering RemoteEvent messages.
             self.scripts.step(&mut self.world, seconds);
             self.forward_output(output);
+            cost.scripts += lap();
             if self.scripts.pause().is_some() {
                 return;
             }
             // 3. Step physics at a fixed 60 Hz (0 to N steps this frame).
-            self.physics.step(&mut self.world, seconds);
+            cost.physics_steps = self.physics.step(&mut self.world, seconds);
+            cost.physics += lap();
             // 4. Fire `Touched` for parts that started touching (and
             //    `Changed` for parts that moved), then `RunService.Heartbeat`.
             let touches = self.physics.take_touches();
@@ -235,10 +257,12 @@ impl Session {
             }
             self.forward_output(output);
             moved = self.scripts.take_camera_move();
+            cost.scripts += lap();
             if self.scripts.pause().is_some() {
                 return;
             }
             self.apply_audio(moved.unwrap_or(camera), output);
+            cost.audio += lap();
             // Animators move on and pose their models, as in the player.
             let events = self
                 .animators
@@ -260,8 +284,26 @@ impl Session {
             }
             self.forward_output(output);
             self.forward_property_animation_errors(output);
-        })?;
+            cost.animation += lap();
+        });
+        cost.total = started.elapsed();
+        self.cost = Some(cost);
+        result?;
         Ok(moved)
+    }
+
+    /// What the last frame's steps took, or `None` if it didn't run.
+    pub fn cost(&self) -> Option<FrameCost> {
+        self.cost
+    }
+
+    /// How much the game has to simulate, for the Profiler.
+    pub fn load(&self) -> GameLoad {
+        GameLoad {
+            bodies: self.physics.body_count(),
+            sounds_playing: self.audio.playing_count(),
+            lua_bytes: self.scripts.used_memory(),
+        }
     }
 
     /// The posed models of the animated MeshParts, for the viewport.
@@ -587,8 +629,7 @@ mod tests {
   print('tick')
 end",
         )];
-        let breakpoints =
-            Breakpoints::from([("scripts/test.server.lua".to_string(), [3].into())]);
+        let breakpoints = Breakpoints::from([("scripts/test.server.lua".to_string(), [3].into())]);
         let mut output = Output::default();
         let mut session = Session::start(
             &world,
@@ -611,7 +652,10 @@ end",
         let start = position(&session);
         session.frame(1.0 / 60.0, &[], camera, &mut output).unwrap();
         let pause = session.pause().expect("paused before line 3");
-        assert_eq!((pause.path.as_str(), pause.line), ("scripts/test.server.lua", 3));
+        assert_eq!(
+            (pause.path.as_str(), pause.line),
+            ("scripts/test.server.lua", 3)
+        );
         let at_pause = position(&session);
         // Paused frames move nothing: no scripts, no physics.
         for _ in 0..30 {
@@ -619,6 +663,8 @@ end",
         }
         assert_eq!(position(&session), at_pause);
         assert!(!output.lines().iter().any(|line| line.text == "tick"));
+        // A paused frame costs nothing, so the Profiler skips it.
+        assert!(session.cost().is_none());
 
         session.continue_from_pause(&mut output).unwrap();
         assert_eq!(output.lines().last().unwrap().text, "tick");
@@ -634,6 +680,41 @@ end",
         }
         assert!(session.pause().is_none());
         assert!(position(&session).y < start.y, "the unanchored part fell");
+    }
+
+    #[test]
+    fn each_frame_reports_its_steps_cost_and_the_load_for_the_profiler() {
+        let mut world = World::new();
+        for _ in 0..3 {
+            let part = world.create(ClassName::Part).unwrap();
+            world.set_parent(part, Some(world.workspace())).unwrap();
+        }
+        let scripts = [script(
+            &mut world,
+            "local x = {} for i = 1, 1000 do x[i] = i end",
+        )];
+        let mut output = Output::default();
+        let mut session = Session::start(
+            &world,
+            &scripts,
+            &Breakpoints::new(),
+            &mut output,
+            Assets::default(),
+            CameraState::default(),
+        )
+        .unwrap();
+        assert!(session.cost().is_none(), "no frame has run yet");
+        session
+            .frame(1.0 / 30.0, &[], CameraState::default(), &mut output)
+            .unwrap();
+        let cost = session.cost().expect("the frame ran");
+        assert_eq!(cost.physics_steps, 2, "1/30 s is two 60 Hz steps");
+        let steps = cost.scripts + cost.physics + cost.audio + cost.animation;
+        assert!(steps <= cost.total, "{cost:?}");
+        let load = session.load();
+        assert_eq!(load.bodies, 3);
+        assert_eq!(load.sounds_playing, 0);
+        assert!(load.lua_bytes > 0);
     }
 
     fn key(key: egui::Key, pressed: bool) -> egui::Event {

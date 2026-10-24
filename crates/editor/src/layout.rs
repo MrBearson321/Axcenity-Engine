@@ -35,6 +35,8 @@ pub enum Pane {
     Animator,
     /// The Terrain Studio: sculpting, painting and generating terrains.
     Terrain,
+    /// What the game costs during Play (`profiler.rs`).
+    Profiler,
     /// An open script, stylesheet or block script, by its tab's id
     /// (`ScriptTab::id`).
     Script(u64),
@@ -42,7 +44,7 @@ pub enum Pane {
 
 impl Pane {
     /// The panels that can be closed and opened again, in menu order.
-    pub const CLOSABLE: [Pane; 7] = [
+    pub const CLOSABLE: [Pane; 8] = [
         Pane::Explorer,
         Pane::Properties,
         Pane::Console,
@@ -50,6 +52,7 @@ impl Pane {
         Pane::Animation,
         Pane::Animator,
         Pane::Terrain,
+        Pane::Profiler,
     ];
 
     pub fn label(self) -> &'static str {
@@ -62,6 +65,7 @@ impl Pane {
             Pane::Animation => "Animation",
             Pane::Animator => "Animator",
             Pane::Terrain => "Terrain",
+            Pane::Profiler => "Profiler",
             Pane::Script(_) => "Script",
         }
     }
@@ -76,6 +80,7 @@ impl Pane {
             Pane::Animation => icons::PERSON_SIMPLE_RUN,
             Pane::Animator => icons::FLOW_ARROW,
             Pane::Terrain => icons::MOUNTAINS,
+            Pane::Profiler => icons::GAUGE,
             Pane::Script(_) => icons::CODE,
         }
     }
@@ -137,7 +142,7 @@ impl Layout {
             Pane::Explorer => Some(Pane::Properties),
             Pane::Properties => Some(Pane::Explorer),
             Pane::Console => Some(Pane::Assets),
-            Pane::Assets => Some(Pane::Console),
+            Pane::Assets | Pane::Profiler => Some(Pane::Console),
             // Tabs beside the Scene, with room for a preview and a graph.
             Pane::Animation | Pane::Animator => Some(Pane::Scene),
             // A tab beside Properties, down the right.
@@ -257,7 +262,7 @@ fn zero_nulls(json: &mut serde_json::Value) {
 /// Like Roblox Studio: the Scene in the middle (with the Animation and
 /// Animator tabs beside it, like Unity's), the Explorer with
 /// Properties (and the Terrain Studio as a tab beside it) under it down the
-/// right, and the Console and Assets as tabs under the Scene.
+/// right, and the Console, Assets and Profiler as tabs under the Scene.
 fn default_dock() -> DockState<Pane> {
     let mut dock = DockState::new(vec![Pane::Scene, Pane::Animation, Pane::Animator]);
     dock.set_active_tab((
@@ -268,7 +273,11 @@ fn default_dock() -> DockState<Pane> {
     let tree = dock.main_surface_mut();
     let [scene, explorer] = tree.split_right(NodeIndex::root(), 0.78, vec![Pane::Explorer]);
     tree.split_below(explorer, 0.45, vec![Pane::Properties, Pane::Terrain]);
-    tree.split_below(scene, 0.78, vec![Pane::Console, Pane::Assets]);
+    tree.split_below(
+        scene,
+        0.78,
+        vec![Pane::Console, Pane::Assets, Pane::Profiler],
+    );
     dock
 }
 

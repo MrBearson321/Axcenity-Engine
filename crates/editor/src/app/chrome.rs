@@ -277,7 +277,7 @@ impl EditorApp {
         let preview = self.angular_preview();
         let terrain_brush = self.terrain_brush_view(&ctx);
         let emits = std::mem::take(&mut self.pending_emits);
-        egui::CentralPanel::default()
+        let output = egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show_inside(ui, |ui| match render_state {
                 Some(render_state) => {
@@ -309,7 +309,11 @@ impl EditorApp {
                     Default::default()
                 }
             })
-            .inner
+            .inner;
+        if let Some(render) = output.render {
+            self.profiler.record_render(render);
+        }
+        output
     }
     /// A script's dock tab (see `scripts.rs`): Code/Blocks for a Script or
     /// LocalScript, then its code or blocks. `id` is its tab's id.

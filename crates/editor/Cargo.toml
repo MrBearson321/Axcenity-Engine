@@ -25,6 +25,7 @@ egui-phosphor.workspace = true
 egui_dock.workspace = true
 env_logger.workspace = true
 log.workspace = true
+memory-stats.workspace = true
 png.workspace = true
 rfd.workspace = true
 serde.workspace = true

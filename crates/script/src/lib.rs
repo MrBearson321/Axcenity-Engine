@@ -138,6 +138,11 @@ impl ScriptRuntime {
         }
     }
 
+    /// Bytes the Lua heaps of both sides hold now, for the editor's profiler.
+    pub fn used_memory(&self) -> usize {
+        self.server.lua.used_memory() + self.client.lua.used_memory()
+    }
+
     fn context(&self, side: Side) -> &Context {
         match side {
             Side::Server => &self.server,

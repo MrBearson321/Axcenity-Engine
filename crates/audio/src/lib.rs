@@ -163,6 +163,12 @@ impl GameAudio {
             engine.set_listener(listener);
         }
     }
+
+    /// How many Sounds are playing now (not paused or finished), for the
+    /// editor's profiler.
+    pub fn playing_count(&self) -> usize {
+        self.engine.as_ref().map_or(0, AudioEngine::playing_count)
+    }
 }
 
 /// A Sound's settings, as its properties have them now.
@@ -333,6 +339,16 @@ impl AudioEngine {
             decoded: HashMap::new(),
             settled: HashSet::new(),
         })
+    }
+
+    /// How many sounds are playing now: `Playing` and not yet at their end.
+    pub fn playing_count(&self) -> usize {
+        self.sounds
+            .values()
+            .filter(|playback| {
+                playback.settings.playing && playback.handle.state() != PlaybackState::Stopped
+            })
+            .count()
     }
 
     /// Points the listener at `listener`. An unmoved camera is a no-op for

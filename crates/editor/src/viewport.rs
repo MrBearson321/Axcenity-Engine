@@ -30,6 +30,8 @@
 //! During Play there's no tool: the camera and selecting still work, but
 //! nothing can be dragged.
 
+use std::time::Instant;
+
 use axcenity_assets::Assets;
 use axcenity_core::{InstanceId, Value, World};
 use axcenity_render::TextureRenderer;
@@ -42,6 +44,7 @@ use eframe::egui_wgpu::RenderState;
 
 use crate::gizmo::{self, Drag, Handle, Modes, PartValues, Pose, Snap, Tool};
 use crate::placing::PlaceDrag;
+use crate::profiler::RenderCost;
 use crate::screen::Screen;
 use crate::theme::{self, icons};
 use crate::ui_handles::{self, Grip, Handles, UiDrag, UiDragEdit};
@@ -131,6 +134,8 @@ pub struct ViewportOutput {
     /// The mouse over the terrain being brushed, while a Terrain Studio
     /// brush is on.
     pub terrain: Option<TerrainPointer>,
+    /// What drawing the scene took, for the Profiler.
+    pub render: Option<RenderCost>,
 }
 
 /// A Terrain Studio brush, as the viewport shows it.
@@ -557,6 +562,7 @@ impl Viewport {
         }
         let still = axcenity_scene::Poses::new();
         let poses = poses.unwrap_or(&still);
+        let render_started = Instant::now();
         let mut draw_list =
             axcenity_scene::build_draw_list_posed(world, assets, camera, poses, &mut self.terrain);
         draw_list.sprites = self.particles.sprites(world, assets);
@@ -565,6 +571,12 @@ impl Viewport {
         if let Err(error) = target.renderer.render(&draw_list) {
             log::error!("could not render the viewport: {error:#}");
         }
+        let render = RenderCost {
+            cpu: render_started.elapsed(),
+            items: draw_list.items.len(),
+            lights: draw_list.lights.len(),
+            stats: target.renderer.stats(),
+        };
         let whole_texture = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
         ui.painter()
             .image(target.texture_id, rect, whole_texture, egui::Color32::WHITE);
@@ -668,6 +680,7 @@ impl Viewport {
             drag_released: drag.released,
             drop,
             terrain,
+            render: Some(render),
         }
     }
 

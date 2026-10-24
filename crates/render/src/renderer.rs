@@ -5,10 +5,12 @@
 //! `ui_pass.rs` builds screen-space quads and the UI and sky pipelines.
 //! `gpu.rs` uploads meshes, textures and materials. `sprites.rs` draws particles.
 //! `terrain.rs` draws terrain chunks with their blended layers.
+//! `gpu_timer.rs` measures the GPU's time per frame, for the editor's profiler.
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::ops::Range;
+use std::time::Duration;
 
 use crate::draw_list::{DrawList, Shape, TextAlign, TextureSource, UiDrawItem, UiText};
 use crate::mesh::{self};
@@ -21,6 +23,7 @@ use glyphon::{
 };
 
 mod gpu;
+mod gpu_timer;
 mod lighting;
 mod post;
 mod sprites;
@@ -367,6 +370,20 @@ struct PostTargets {
     composite_group: wgpu::BindGroup,
 }
 
+/// What the last frame drawn cost, for the editor's profiler.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct RenderStats {
+    /// Indexed draws, including the shadow passes'.
+    pub draw_calls: u32,
+    /// Triangles those draws sent, counting every instance.
+    pub triangles: u64,
+    /// The GPU's time for a recent frame (a frame or two behind), or `None`
+    /// before the first reading or when it can't be measured.
+    pub gpu_time: Option<Duration>,
+    /// False when the device can't take timestamps, so `gpu_time` stays `None`.
+    pub gpu_timing: bool,
+}
+
 /// The GPU objects for drawing a scene, whatever it's drawn into. Both
 /// [`Renderer`] and [`TextureRenderer`] own one.
 struct ScenePipeline {
@@ -427,6 +444,10 @@ struct ScenePipeline {
     terrain: terrain::TerrainPass,
     /// How many frames have been drawn, to tell what wasn't drawn lately.
     frame: u64,
+    /// Only on devices that can take timestamps (the editor asks for them).
+    gpu_timer: Option<gpu_timer::GpuTimer>,
+    /// Draw calls and triangles of the last frame.
+    draws: (u32, u64),
 }
 
 impl Renderer {
@@ -591,6 +612,11 @@ impl TextureRenderer {
             width as f32 / height as f32,
             (width, height),
         )
+    }
+
+    /// What the last frame drawn cost, for the editor's profiler.
+    pub fn stats(&self) -> RenderStats {
+        self.scene.stats()
     }
 
     /// Reads the texture back to the CPU as rows of RGBA bytes. Slow: for
@@ -871,6 +897,7 @@ impl ScenePipeline {
             wgpu::MultisampleState::default(),
             None,
         );
+        let gpu_timer = gpu_timer::GpuTimer::new(&device, &queue);
 
         Self {
             device,
@@ -916,6 +943,8 @@ impl ScenePipeline {
             materials: HashMap::new(),
             terrain,
             frame: 0,
+            gpu_timer,
+            draws: (0, 0),
         }
     }
 
@@ -1025,6 +1054,19 @@ impl ScenePipeline {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("frame"),
             });
+        // Times this frame unless the last measurement is still being read.
+        let timed = match &mut self.gpu_timer {
+            Some(timer) => timer.collect(&self.device),
+            None => false,
+        };
+        if timed && let Some(timer) = &self.gpu_timer {
+            timer.begin(&mut encoder);
+        }
+        let mut draws = (0u32, 0u64);
+        let mut count = |index_count: u32, instances: &Range<u32>| {
+            draws.0 += 1;
+            draws.1 += u64::from(index_count / 3) * u64::from(instances.end - instances.start);
+        };
 
         // One pass per cascade, each drawing into its own layer of the map.
         let layers = self.shadow_map.iter().flat_map(|map| &map.layers);
@@ -1056,6 +1098,7 @@ impl ScenePipeline {
                 };
                 pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                 pass.set_index_buffer(mesh.indices.slice(..), mesh.index_format);
+                count(mesh.index_count, &batch.instances);
                 pass.draw_indexed(0..mesh.index_count, 0, batch.instances.clone());
             }
         }
@@ -1120,6 +1163,7 @@ impl ScenePipeline {
                 }
                 pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                 pass.set_index_buffer(mesh.indices.slice(..), mesh.index_format);
+                count(mesh.index_count, &batch.instances);
                 pass.draw_indexed(0..mesh.index_count, 0, batch.instances);
             }
             // Last, over everything, but hidden behind solid items.
@@ -1170,9 +1214,25 @@ impl ScenePipeline {
             }
         }
 
+        if timed && let Some(timer) = &self.gpu_timer {
+            timer.end(&mut encoder);
+        }
         self.queue.submit([encoder.finish()]);
+        if timed && let Some(timer) = &mut self.gpu_timer {
+            timer.submitted();
+        }
+        self.draws = draws;
         self.forget_undrawn();
         Ok(())
+    }
+
+    fn stats(&self) -> RenderStats {
+        RenderStats {
+            draw_calls: self.draws.0,
+            triangles: self.draws.1,
+            gpu_time: self.gpu_timer.as_ref().and_then(gpu_timer::GpuTimer::last),
+            gpu_timing: self.gpu_timer.is_some(),
+        }
     }
 
     /// The GPU copy of a mesh, or `None` for a caller's mesh that was never uploaded.
@@ -2044,6 +2104,55 @@ mod tests {
             middle[0] > middle[1],
             "still red, not clipped white: {middle:?}"
         );
+    }
+
+    #[test]
+    fn stats_count_draws_and_triangles_and_time_the_gpu_where_it_can() {
+        let Some((device, queue)) = test_device() else {
+            eprintln!("skipped: no graphics adapter on this machine");
+            return;
+        };
+        let mut renderer = TextureRenderer::new(&device, &queue, 32, 32);
+        renderer.render(&list_of(vec![])).unwrap();
+        assert_eq!(renderer.stats().draw_calls, 0);
+        let mut two = list_of(vec![big_block(), big_block()]);
+        two.shadows.enabled = false;
+        renderer.render(&two).unwrap();
+        let stats = renderer.stats();
+        // Both blocks share a mesh: one draw of two instances.
+        assert_eq!(stats.draw_calls, 1);
+        assert_eq!(stats.triangles, 2 * 12, "a block is 12 triangles");
+        // Each shadow cascade draws them again.
+        two.shadows.enabled = true;
+        renderer.render(&two).unwrap();
+        assert!(renderer.stats().draw_calls > 1);
+        // A device opened without timestamps never times anything.
+        assert!(!stats.gpu_timing && stats.gpu_time.is_none());
+
+        // With them (where the adapter has them), a reading arrives a frame
+        // or two after the GPU finishes, without waiting for it.
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
+            return;
+        };
+        if !adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY) {
+            eprintln!("skipped GPU timing: the adapter has no timestamps");
+            return;
+        }
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_features: wgpu::Features::TIMESTAMP_QUERY,
+            ..Default::default()
+        }))
+        .unwrap();
+        let mut renderer = TextureRenderer::new(&device, &queue, 32, 32);
+        let list = list_of(vec![big_block()]);
+        for _ in 0..10 {
+            renderer.render(&list).unwrap();
+            device.poll(wgpu::PollType::Wait).unwrap();
+        }
+        let stats = renderer.stats();
+        assert!(stats.gpu_timing);
+        assert!(stats.gpu_time.is_some(), "{stats:?}");
     }
 
     #[test]

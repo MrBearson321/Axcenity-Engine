@@ -28,6 +28,7 @@ mod lua_syntax;
 mod output;
 mod placing;
 mod play;
+mod profiler;
 mod properties;
 mod props;
 mod responsive;
@@ -72,6 +73,25 @@ fn window_icon() -> egui::IconData {
     })
 }
 
+/// eframe's GPU setup, plus timestamps where the GPU can take them, so the
+/// Profiler can show the viewport's GPU time. The player never asks for them.
+fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
+    use axcenity_render::wgpu;
+    use eframe::egui_wgpu::{WgpuSetup, WgpuSetupCreateNew};
+
+    let mut setup = WgpuSetupCreateNew::default();
+    let base = setup.device_descriptor.clone();
+    setup.device_descriptor = std::sync::Arc::new(move |adapter| {
+        let mut descriptor = base(adapter);
+        descriptor.required_features |= adapter.features() & wgpu::Features::TIMESTAMP_QUERY;
+        descriptor
+    });
+    eframe::egui_wgpu::WgpuConfiguration {
+        wgpu_setup: WgpuSetup::CreateNew(setup),
+        ..Default::default()
+    }
+}
+
 fn main() -> eframe::Result {
     // Same logging defaults as the player: warnings and errors, minus
     // harmless graphics driver chatter. Set RUST_LOG to override.
@@ -100,6 +120,7 @@ fn main() -> eframe::Result {
         // remembered size can outgrow a monitor (or span two) and stick.
         persist_window: false,
         centered: true,
+        wgpu_options: wgpu_options(),
         ..Default::default()
     };
     eframe::run_native(

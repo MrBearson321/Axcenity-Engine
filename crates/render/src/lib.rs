@@ -16,7 +16,7 @@ pub use draw_list::{
     TerrainLayers, TerrainSurface, TerrainView, TextAlign, TextureMaps, TextureSource, UiDrawItem,
     UiImage, UiRectangle, UiText,
 };
-pub use renderer::{Renderer, TextureRenderer};
+pub use renderer::{RenderStats, Renderer, TextureRenderer};
 
 /// Re-exported so callers build transforms with the same `glam` version.
 pub use glam;

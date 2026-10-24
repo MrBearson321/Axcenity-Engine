@@ -59,6 +59,7 @@ use crate::layout::{self, Layout, Pane};
 use crate::loading::{self, Loading};
 use crate::output::Output;
 use crate::play::{self, Crash, GameKeys, Session};
+use crate::profiler::Profiler;
 use crate::properties::{self, Edit};
 use crate::ribbon::{self, RibbonButton};
 use crate::ribbon_tabs::{RibbonGroup, RibbonTabs};
@@ -181,6 +182,8 @@ pub struct EditorApp {
     last_frame: Option<Instant>,
     /// Turns keyboard events into key presses for LocalScripts during Play.
     game_keys: GameKeys,
+    /// What Play's frames cost, for the Profiler panel.
+    profiler: Profiler,
     /// Each script's uses of APIs from the other side, for the warning badges.
     warnings: WarningCache,
     /// The open script tabs, and whether the viewport or a script is shown.
@@ -280,6 +283,7 @@ impl egui_dock::TabViewer for DockViewer<'_> {
             Pane::Animation => self.app.animation_pane(ui, self.render_state),
             Pane::Animator => self.app.animator_pane(ui, self.render_state),
             Pane::Terrain => self.app.terrain_pane(ui),
+            Pane::Profiler => self.app.profiler.show(ui),
             Pane::Script(id) => self.app.script_pane(ui, *id),
         }
     }
@@ -466,6 +470,7 @@ impl EditorApp {
             pending_focus_lost: None,
             ui_warnings: Vec::new(),
             last_frame: None,
+            profiler: Profiler::default(),
             tabs: ScriptTabs::default(),
             confirm_delete: None,
             importing: None,
@@ -706,6 +711,11 @@ impl EditorApp {
             let focus_lost = self.pending_focus_lost.take();
             self.play_frame(seconds, &keys, activation, focus_lost);
             ctx.request_repaint();
+        }
+        // However Play ended (Stop, a crash, another project), the
+        // Profiler's readings freeze.
+        if !self.playing() {
+            self.profiler.stop();
         }
 
         let title = self.title();
@@ -1205,6 +1215,12 @@ mod tests {
             .set_parent(terrain, Some(app.world.workspace()))
             .unwrap();
         app.terrain.tool = Some(crate::terrain_studio::TerrainTool::Generate);
+        // A few frames of readings, so the Profiler shows all of them.
+        app.profiler.start();
+        for _ in 0..3 {
+            app.profiler
+                .record_game(Default::default(), Default::default());
+        }
 
         for pane in Pane::CLOSABLE {
             for (size, shape) in [
@@ -1228,6 +1244,7 @@ mod tests {
                             Pane::Animation => app.animation_pane(ui, None),
                             Pane::Animator => app.animator_pane(ui, None),
                             Pane::Terrain => app.terrain_pane(ui),
+                            Pane::Profiler => app.profiler.show(ui),
                             Pane::Scene | Pane::Script(_) => {}
                         }
                         fit = Some((ui.min_rect(), room));
