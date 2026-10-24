@@ -37,6 +37,7 @@ impl TaskFunctions {
         let coroutine: Table = lua.globals().raw_get("coroutine")?;
         let schedule = lua.create_function(|lua, (thread, seconds): (Thread, Value)| {
             let seconds = seconds_arg(lua, "task.wait", seconds)?;
+            crate::debugger::waiting(lua, &thread);
             scheduler_mut(lua)?.wait(thread, seconds);
             Ok(())
         })?;

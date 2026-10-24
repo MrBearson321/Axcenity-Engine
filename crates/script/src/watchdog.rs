@@ -38,7 +38,7 @@ pub const DEFAULT_LIMIT: Duration = Duration::from_secs(3);
 
 /// How many Lua instructions run between checks. Reading the clock every
 /// thousand instructions costs far less than 1% of the time.
-const CHECK_EVERY: u32 = 1000;
+pub(crate) const CHECK_EVERY: u32 = 1000;
 
 /// Lives in Lua's app data, where the hook and the scheduler can reach it.
 pub struct Watchdog {
@@ -159,7 +159,7 @@ pub fn should_report(lua: &Lua, message: &str) -> bool {
 
 /// The hook Lua calls every [`CHECK_EVERY`] instructions. `Yield` pauses
 /// the running coroutine; an error is raised in the running code.
-fn check(lua: &Lua, debug: &Debug) -> mlua::Result<VmState> {
+pub(crate) fn check(lua: &Lua, debug: &Debug) -> mlua::Result<VmState> {
     // Still running after the hook asked it to pause, so it couldn't (it's
     // inside a C function): raise the error instead.
     if let Some(message) = stopped(lua) {

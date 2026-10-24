@@ -19,7 +19,7 @@ use axcenity_audio::GameAudio;
 use axcenity_core::{InstanceId, KeyCode, World};
 use axcenity_physics::Physics;
 use axcenity_project::ScriptFile;
-use axcenity_script::{CameraState, KeyEvent, OutputKind, ScriptRuntime};
+use axcenity_script::{Breakpoints, CameraState, KeyEvent, OutputKind, Pause, ScriptRuntime};
 use eframe::egui;
 
 use crate::output::Output;
@@ -49,10 +49,13 @@ impl Session {
     /// Copies `edit_world` and starts every script in it, in the order given
     /// (Scripts, then LocalScripts, as the project lists them), the same way
     /// the player does. Script output and errors go to `output`. MeshParts
-    /// collide as their models from `assets`.
+    /// collide as their models from `assets`. Unlike the player, scripts
+    /// stop at `breakpoints`; one in a script's first run pauses here, and
+    /// the scripts after it start on Continue.
     pub fn start(
         edit_world: &World,
         scripts: &[ScriptFile],
+        breakpoints: &Breakpoints,
         output: &mut Output,
         assets: Assets,
         camera: CameraState,
@@ -67,6 +70,8 @@ impl Session {
             audio: GameAudio::default(),
             panic_next_frame: false,
         };
+        session.scripts.enable_debugger();
+        session.scripts.set_breakpoints(breakpoints);
         guard(|| {
             // Animators start in their default states before any script
             // runs, as in the player, so scripts can read them.
@@ -101,6 +106,25 @@ impl Session {
     /// game's scripts see those changes at the next frame.
     pub fn world_mut(&mut self) -> &mut World {
         &mut self.world
+    }
+
+    /// Where a script is paused at a breakpoint, if one is. While paused,
+    /// [`Self::frame`] does nothing, so the whole game holds still.
+    pub fn pause(&self) -> Option<Pause> {
+        self.scripts.pause()
+    }
+
+    pub fn set_breakpoints(&mut self, breakpoints: &Breakpoints) {
+        self.scripts.set_breakpoints(breakpoints);
+    }
+
+    /// Continues from the pause: the paused script runs on from its line,
+    /// then whatever waited for it. It may pause again at a breakpoint.
+    pub fn continue_from_pause(&mut self, output: &mut Output) -> Result<(), Crash> {
+        guard(|| {
+            self.scripts.continue_from_pause(&mut self.world);
+            self.forward_output(output);
+        })
     }
 
     /// Makes the next frame panic, as an engine bug would.
@@ -167,6 +191,10 @@ impl Session {
     /// and released since the last frame and the viewport's camera. The
     /// viewport lays out UI at step 5 and draws the result at step 6.
     /// Returns where a LocalScript moved the camera, if one did.
+    ///
+    /// While a script is paused at a breakpoint it does nothing, and a pause
+    /// during the frame ends it there: physics, animation and the frame's
+    /// later events wait until after Continue.
     pub fn frame(
         &mut self,
         seconds: f64,
@@ -175,6 +203,9 @@ impl Session {
         output: &mut Output,
     ) -> Result<Option<CameraState>, Crash> {
         let mut moved = None;
+        if self.scripts.pause().is_some() {
+            return Ok(None);
+        }
         guard(|| {
             if self.panic_next_frame {
                 panic!("a deliberate engine panic, from Debug > Panic during Play");
@@ -183,19 +214,30 @@ impl Session {
             self.scripts.set_camera(camera);
             self.scripts.input(&mut self.world, keys);
             self.forward_output(output);
+            if self.scripts.pause().is_some() {
+                return;
+            }
             // 2. Resume scripts whose wait is over (and due `task.delay`s),
             //    after delivering RemoteEvent messages.
             self.scripts.step(&mut self.world, seconds);
             self.forward_output(output);
+            if self.scripts.pause().is_some() {
+                return;
+            }
             // 3. Step physics at a fixed 60 Hz (0 to N steps this frame).
             self.physics.step(&mut self.world, seconds);
             // 4. Fire `Touched` for parts that started touching (and
             //    `Changed` for parts that moved), then `RunService.Heartbeat`.
             let touches = self.physics.take_touches();
             self.scripts.fire_touched(&mut self.world, &touches);
-            self.scripts.heartbeat(&mut self.world, seconds);
+            if self.scripts.pause().is_none() {
+                self.scripts.heartbeat(&mut self.world, seconds);
+            }
             self.forward_output(output);
             moved = self.scripts.take_camera_move();
+            if self.scripts.pause().is_some() {
+                return;
+            }
             self.apply_audio(moved.unwrap_or(camera), output);
             // Animators move on and pose their models, as in the player.
             let events = self
@@ -468,6 +510,7 @@ mod tests {
         let session = Session::start(
             &world,
             &scripts,
+            &Breakpoints::new(),
             &mut output,
             Assets::default(),
             CameraState::default(),
@@ -488,6 +531,7 @@ mod tests {
         let mut session = Session::start(
             &world,
             &scripts,
+            &Breakpoints::new(),
             &mut output,
             Assets::default(),
             CameraState::default(),
@@ -509,6 +553,7 @@ mod tests {
         let mut session = Session::start(
             &World::new(),
             &[],
+            &Breakpoints::new(),
             &mut output,
             Assets::default(),
             CameraState::default(),
@@ -524,6 +569,71 @@ mod tests {
         // Formatted messages carry a `String`, which is read too.
         let crash = guard(|| panic!("{} went wrong", "this")).unwrap_err();
         assert_eq!(crash.0, "this went wrong");
+    }
+
+    #[test]
+    fn a_breakpoint_holds_the_whole_frame_until_continue() {
+        let mut world = World::new();
+        let part = world.create(ClassName::Part).unwrap();
+        world.set_parent(part, Some(world.workspace())).unwrap();
+        world.set_name(part, "Crate").unwrap();
+        world
+            .set_property(part, "Anchored", axcenity_core::Value::Bool(false))
+            .unwrap();
+        let scripts = [script(
+            &mut world,
+            "while true do
+  task.wait()
+  print('tick')
+end",
+        )];
+        let breakpoints =
+            Breakpoints::from([("scripts/test.server.lua".to_string(), [3].into())]);
+        let mut output = Output::default();
+        let mut session = Session::start(
+            &world,
+            &scripts,
+            &breakpoints,
+            &mut output,
+            Assets::default(),
+            CameraState::default(),
+        )
+        .unwrap();
+        let camera = CameraState::default();
+        let position = |session: &Session| {
+            session
+                .world()
+                .get(part)
+                .and_then(|part| part.property("Position"))
+                .and_then(axcenity_core::Value::as_vector3)
+                .unwrap()
+        };
+        let start = position(&session);
+        session.frame(1.0 / 60.0, &[], camera, &mut output).unwrap();
+        let pause = session.pause().expect("paused before line 3");
+        assert_eq!((pause.path.as_str(), pause.line), ("scripts/test.server.lua", 3));
+        let at_pause = position(&session);
+        // Paused frames move nothing: no scripts, no physics.
+        for _ in 0..30 {
+            session.frame(1.0 / 60.0, &[], camera, &mut output).unwrap();
+        }
+        assert_eq!(position(&session), at_pause);
+        assert!(!output.lines().iter().any(|line| line.text == "tick"));
+
+        session.continue_from_pause(&mut output).unwrap();
+        assert_eq!(output.lines().last().unwrap().text, "tick");
+        assert!(session.pause().is_none());
+        // The next frame pauses on the same line again.
+        session.frame(1.0 / 60.0, &[], camera, &mut output).unwrap();
+        assert!(session.pause().is_some());
+        // With the breakpoint cleared, Continue lets the game run on.
+        session.set_breakpoints(&Breakpoints::new());
+        session.continue_from_pause(&mut output).unwrap();
+        for _ in 0..30 {
+            session.frame(1.0 / 60.0, &[], camera, &mut output).unwrap();
+        }
+        assert!(session.pause().is_none());
+        assert!(position(&session).y < start.y, "the unanchored part fell");
     }
 
     fn key(key: egui::Key, pressed: bool) -> egui::Event {
@@ -590,6 +700,7 @@ mod tests {
         let mut session = Session::start(
             &world,
             &scripts,
+            &Breakpoints::new(),
             &mut output,
             Assets::default(),
             CameraState::default(),

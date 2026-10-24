@@ -341,6 +341,23 @@ impl EditorApp {
                 return;
             }
         }
+        // Paused at a breakpoint in this script: where, the locals, Continue.
+        if let Some(pause) = self.tabs.paused.clone().filter(|pause| pause.path == path) {
+            let continued = egui::TopBottomPanel::bottom(egui::Id::new(("paused", id)))
+                .resizable(true)
+                .default_height(180.0)
+                .min_height(80.0)
+                .frame(
+                    egui::Frame::new()
+                        .fill(palette.panel)
+                        .inner_margin(egui::Margin::symmetric(10, 6)),
+                )
+                .show_inside(ui, |ui| paused_panel(ui, &pause))
+                .inner;
+            if continued {
+                self.continue_play();
+            }
+        }
 
         if axcenity_project::is_block_script(&path) {
             let mut changed = false;
@@ -787,7 +804,7 @@ impl EditorApp {
                     self.settings.open = !self.settings.open;
                 }
                 if self.playing() {
-                    playing_badge(ui);
+                    playing_badge(ui, self.paused());
                 }
                 ui.available_rect_before_wrap()
             })
@@ -859,7 +876,11 @@ impl EditorApp {
             self.import_model_with_dialog();
         }
         if clicks.play {
-            self.play();
+            if self.paused() {
+                self.continue_play();
+            } else {
+                self.play();
+            }
         }
         if clicks.stop {
             self.stop();
@@ -895,17 +916,24 @@ impl EditorApp {
         clicks: &mut RibbonClicks,
     ) {
         let playing = self.playing();
+        let paused = self.paused();
         let can_play = self.project.is_some();
         match group {
             RibbonGroup::Game => ribbon::group(ui, "Game", |ui| {
                 let palette = theme::palette(ui.ctx());
-                let play_button = RibbonButton::new(filled_icons::PLAY, "Play")
+                // Paused at a breakpoint, Play is Continue, as in Studio.
+                let (label, hover) = if paused {
+                    ("Continue", "Continue the game from the breakpoint")
+                } else {
+                    ("Play", "Save, then run the game here")
+                };
+                let play_button = RibbonButton::new(filled_icons::PLAY, label)
                     .family(theme::filled())
                     .color(palette.success);
                 clicks.play = ui
-                    .add_enabled(!playing && can_play, play_button)
+                    .add_enabled((!playing || paused) && can_play, play_button)
                     .on_hover_text(format!(
-                        "Save, then run the game here ({})",
+                        "{hover} ({})",
                         ui.ctx().format_shortcut(&PLAY_SHORTCUT)
                     ))
                     .on_disabled_hover_text(if playing {
@@ -1172,6 +1200,8 @@ impl EditorApp {
         });
         if stop {
             self.stop();
+        } else if play && self.paused() {
+            self.continue_play();
         } else if play {
             self.play();
         }
@@ -1358,12 +1388,85 @@ impl EditorApp {
     }
 }
 
-/// The green "Playing" badge in the header during Play, with a dot that
-/// pulses gently (steady when motion is reduced).
-pub(super) fn playing_badge(ui: &mut egui::Ui) {
+/// The panel under a script paused at a breakpoint: the line, Continue, and
+/// each script function on the paused call stack with its locals, the
+/// breakpoint's own open. Returns true when Continue was pressed.
+pub(super) fn paused_panel(ui: &mut egui::Ui, pause: &axcenity_script::Pause) -> bool {
     let palette = theme::palette(ui.ctx());
-    let green = palette.success;
-    let pulse = if ui.ctx().style().animation_time > 0.0 {
+    let continued = crate::responsive::toolbar(ui, |ui| {
+        ui.label(
+            egui::RichText::new(theme::with_icon(
+                icons::PAUSE,
+                &format!("Paused before line {}", pause.line),
+            ))
+            .color(palette.warning)
+            .strong(),
+        );
+        ui.button(theme::with_icon(filled_icons::PLAY, "Continue"))
+            .on_hover_text(format!(
+                "Run on from here ({})",
+                ui.ctx().format_shortcut(&PLAY_SHORTCUT)
+            ))
+            .clicked()
+    });
+    ui.separator();
+    egui::ScrollArea::vertical()
+        .auto_shrink(false)
+        .show(ui, |ui| {
+            for (index, frame) in pause.frames.iter().enumerate() {
+                let file = frame.path.rsplit('/').next().unwrap_or(&frame.path);
+                let title = match &frame.function {
+                    Some(function) => format!("{function}  ·  {file}:{}", frame.line),
+                    None => format!("{file}:{}", frame.line),
+                };
+                egui::CollapsingHeader::new(title)
+                    .id_salt(("paused frame", index))
+                    .default_open(index == 0)
+                    .icon(widgets::chevron)
+                    .show(ui, |ui| {
+                        if frame.locals.is_empty() {
+                            ui.weak("No local variables here yet.");
+                            return;
+                        }
+                        crate::responsive::form(ui, ("paused locals", index), |ui| {
+                            for local in &frame.locals {
+                                ui.monospace(&local.name);
+                                ui.add(
+                                    egui::Label::new(egui::RichText::new(&local.value).monospace())
+                                        .truncate(),
+                                )
+                                .on_hover_text(&local.value);
+                                ui.end_row();
+                            }
+                        });
+                    });
+            }
+        });
+    continued
+}
+
+/// The green "Playing" badge in the header during Play, with a dot that
+/// pulses gently (steady when motion is reduced). Paused at a breakpoint,
+/// it's an amber "Paused" with a steady dot.
+pub(super) fn playing_badge(ui: &mut egui::Ui, paused: bool) {
+    let palette = theme::palette(ui.ctx());
+    let (color, text, hover) = if paused {
+        (
+            palette.warning,
+            "Paused",
+            "Paused at a breakpoint. Continue (F5) carries on; Stop (Shift+F5) ends the game.",
+        )
+    } else {
+        (
+            palette.success,
+            "Playing",
+            "Only the Properties panel can change the game, until you press \
+             Stop. Those changes are undone at Stop.",
+        )
+    };
+    let pulse = if paused {
+        1.0
+    } else if ui.ctx().style().animation_time > 0.0 {
         let time = ui.input(|input| input.time);
         ui.ctx()
             .request_repaint_after(std::time::Duration::from_millis(50));
@@ -1372,7 +1475,7 @@ pub(super) fn playing_badge(ui: &mut egui::Ui) {
         1.0
     };
     egui::Frame::new()
-        .fill(green.gamma_multiply(0.14))
+        .fill(color.gamma_multiply(0.14))
         .corner_radius(9)
         .inner_margin(egui::Margin::symmetric(8, 1))
         .show(ui, |ui| {
@@ -1381,20 +1484,17 @@ pub(super) fn playing_badge(ui: &mut egui::Ui) {
                 egui::RichText::new(filled_icons::CIRCLE)
                     .family(theme::filled())
                     .size(7.0)
-                    .color(green.gamma_multiply(pulse)),
+                    .color(color.gamma_multiply(pulse)),
             );
             ui.label(
-                egui::RichText::new("Playing")
+                egui::RichText::new(text)
                     .family(theme::medium_family())
                     .size(theme::type_scale::SMALL)
-                    .color(green),
+                    .color(color),
             );
         })
         .response
-        .on_hover_text(
-            "Only the Properties panel can change the game, until you press \
-             Stop. Those changes are undone at Stop.",
-        );
+        .on_hover_text(hover);
 }
 
 /// Every object in the Workspace, for the block editor's object menus: its

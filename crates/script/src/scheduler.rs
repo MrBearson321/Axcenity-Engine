@@ -10,7 +10,7 @@
 use mlua::{IntoLuaMulti, Lua, MultiValue, Thread};
 
 use crate::errors::error_message;
-use crate::{OutputKind, push_error, push_output, watchdog};
+use crate::{OutputKind, debugger, push_error, push_output, watchdog};
 
 /// Frame times are summed as floating-point numbers, which aren't exact:
 /// sixty steps of 1/60 add up to slightly less than 1. A task this close to
@@ -98,6 +98,7 @@ pub fn scheduler_mut(lua: &Lua) -> mlua::Result<mlua::AppDataRefMut<'_, Schedule
 /// `task.wait()` again) are due at the next step at the earliest, so this
 /// always ends.
 pub fn step(lua: &Lua, seconds: f64) {
+    debugger::release(lua);
     // The block ends the borrow of the scheduler before any task runs.
     let (due, now) = {
         let Ok(mut scheduler) = scheduler_mut(lua) else {
@@ -116,7 +117,8 @@ pub fn step(lua: &Lua, seconds: f64) {
 
 /// Runs `thread` until it finishes, pauses or fails. An error is added to the
 /// output, with its stack trace, and goes no further, so it never stops
-/// whoever resumed the thread.
+/// whoever resumed the thread. While Play is paused at a breakpoint, the
+/// thread waits for Continue instead (see `debugger`).
 ///
 /// `impl IntoLuaMulti` accepts anything mlua can turn into Lua arguments:
 /// `()` for none, one number, or a list of values.
@@ -126,8 +128,15 @@ pub fn resume(lua: &Lua, thread: &Thread, args: impl IntoLuaMulti) {
     if !thread.is_resumable() {
         return;
     }
+    let Ok(args) = args.into_lua_multi(lua) else {
+        return;
+    };
+    let Some(args) = debugger::hold_while_paused(lua, thread, args) else {
+        return;
+    };
     // The watchdog times the thread from here until it pauses or ends.
     watchdog::enter(lua);
+    debugger::enter(lua, thread);
     // `()` because whatever the thread returns or yields isn't needed here.
     match thread.resume::<()>(args) {
         // Paused or finished. The watchdog may have paused it for good.
@@ -142,5 +151,6 @@ pub fn resume(lua: &Lua, thread: &Thread, args: impl IntoLuaMulti) {
             }
         }
     }
+    debugger::leave(lua, thread);
     watchdog::leave(lua);
 }

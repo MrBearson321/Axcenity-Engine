@@ -22,12 +22,16 @@
 //!   show: the player's console, or the editor's Console panel during Play.
 //! - The editor's Console runs typed Lua with [`ScriptRuntime::run_command`]
 //!   during Play and [`run_edit_command`] outside it (see `console`).
+//! - The editor's breakpoints pause its Play on a line, show the paused
+//!   script's locals, and continue ([`ScriptRuntime::enable_debugger`], see
+//!   `debugger`). The player never turns them on, and scripts can't.
 
 mod api;
 mod changes;
 mod client;
 mod console;
 mod context;
+mod debugger;
 mod definitions;
 mod errors;
 mod events;
@@ -51,6 +55,7 @@ use mlua::Lua;
 use crate::context::Context;
 
 pub use client::{CameraState, KeyEvent};
+pub use debugger::{Breakpoints, Local, Pause, PausedFrame};
 pub use definitions::{DEFINITIONS_PATH, lua_definitions};
 pub use remote::{Loopback, Message, RemoteValue, Transport};
 pub use sides::{SIDE_ONLY_APIS, Side, SideOnlyApi, side_only};
@@ -395,6 +400,47 @@ impl ScriptRuntime {
         self.client.set_watchdog_limit(limit);
     }
 
+    /// Turns on breakpoints, for the editor's Play. Call it before starting
+    /// any script: only coroutines made after it can stop at a breakpoint.
+    /// It makes every script line call a hook, so the player never calls it.
+    pub fn enable_debugger(&mut self) {
+        self.server.enable_debugger();
+        self.client.enable_debugger();
+    }
+
+    /// Replaces every breakpoint: lines (from 1) by script path, as passed
+    /// to [`Self::start_script`]. Does nothing unless
+    /// [`Self::enable_debugger`] was called. Removing the breakpoint that's
+    /// paused doesn't continue; the host does that.
+    pub fn set_breakpoints(&mut self, breakpoints: &Breakpoints) {
+        self.server.set_breakpoints(breakpoints);
+        self.client.set_breakpoints(breakpoints);
+    }
+
+    /// Where a script is paused at a breakpoint, if one is. While paused,
+    /// the host should stop running frames: nothing in the game should move.
+    /// Anything it fires anyway (a Console command, an event) waits, and
+    /// runs on [`Self::continue_from_pause`].
+    pub fn pause(&self) -> Option<Pause> {
+        self.server.pause().or_else(|| self.client.pause())
+    }
+
+    /// Continues from the pause: the paused script runs on from its line,
+    /// then everything the pause held, in order. A breakpoint hit again
+    /// pauses again, holding the rest.
+    pub fn continue_from_pause(&mut self, world: &mut World) {
+        let Some(side) = [Side::Server, Side::Client]
+            .into_iter()
+            .find(|&side| self.context(side).pause().is_some())
+        else {
+            return;
+        };
+        self.fire_changes(world);
+        self.context(side).continue_from_pause(world);
+        self.collect(side);
+        self.fire_changes(world);
+    }
+
     /// Removes and returns the output produced since the last call.
     pub fn take_output(&mut self) -> Vec<OutputLine> {
         std::mem::take(&mut self.output)
@@ -529,3 +575,6 @@ mod sandbox_tests;
 
 #[cfg(test)]
 mod watchdog_tests;
+
+#[cfg(test)]
+mod debugger_tests;

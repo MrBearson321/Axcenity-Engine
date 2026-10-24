@@ -153,6 +153,10 @@ impl EditorApp {
     /// Runs Lua against the game during Play, or against the world being
     /// edited, where whatever it changed is one undo step.
     fn run_lua(&mut self, source: &str) {
+        if self.paused() {
+            self.output
+                .info("Play is paused at a breakpoint, so this runs when you press Continue (F5).");
+        }
         if let Some(session) = &mut self.play {
             match session.run_command(source, &mut self.output) {
                 Ok(Ok(())) => {}

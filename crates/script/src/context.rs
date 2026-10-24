@@ -15,8 +15,8 @@ use crate::instance::{self, ClassMethods};
 use crate::remote::{self, Message, Outbox};
 use crate::sides::Side;
 use crate::{
-    Output, OutputLine, changes, console, events, modules, push_error, sandbox, scheduler,
-    watchdog, with_world,
+    Output, OutputLine, changes, console, debugger, events, modules, push_error, sandbox,
+    scheduler, watchdog, with_world,
 };
 
 pub struct Context {
@@ -91,6 +91,25 @@ impl Context {
     /// stops it.
     pub fn set_watchdog_limit(&self, limit: std::time::Duration) {
         watchdog::set_limit(&self.lua, limit);
+    }
+
+    /// Turns on breakpoints for this side (see `debugger`).
+    pub fn enable_debugger(&self) {
+        debugger::install(&self.lua).expect("setting a hook only fails when out of memory");
+    }
+
+    pub fn set_breakpoints(&self, breakpoints: &debugger::Breakpoints) {
+        debugger::set_breakpoints(&self.lua, breakpoints);
+    }
+
+    /// Where this side is paused at a breakpoint, if it is.
+    pub fn pause(&self) -> Option<debugger::Pause> {
+        debugger::pause(&self.lua)
+    }
+
+    /// Resumes what the pause held, in order (see `debugger`).
+    pub fn continue_from_pause(&self, world: &mut World) {
+        with_world(&self.lua, world, || debugger::continue_from_pause(&self.lua));
     }
 
     /// Runs a script's code as a new coroutine until it finishes, fails or

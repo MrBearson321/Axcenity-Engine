@@ -327,6 +327,7 @@ impl EditorApp {
         match Session::start(
             &self.world,
             &scripts,
+            self.tabs.breakpoints(),
             &mut self.output,
             self.assets.clone(),
             CameraState {
@@ -343,13 +344,76 @@ impl EditorApp {
                 self.pending_focus_lost = None;
                 self.last_frame = None;
                 self.game_keys = GameKeys::default();
+                // A breakpoint in a script's first run pauses before any frame.
+                self.tabs.take_breakpoints_changed();
+                self.follow_pause();
             }
             Err(crash) => self.crashed(crash),
+        }
+    }
+    /// Whether Play is paused at a breakpoint.
+    pub(super) fn paused(&self) -> bool {
+        self.tabs.paused.is_some()
+    }
+    /// After the game ran scripts: if it has just paused at a breakpoint,
+    /// says so and shows that line in its tab, with the locals under it.
+    pub(super) fn follow_pause(&mut self) {
+        let pause = self.play.as_ref().and_then(Session::pause);
+        if pause == self.tabs.paused {
+            return;
+        }
+        self.tabs.paused = pause.clone();
+        if let Some(pause) = pause {
+            self.output.info(format!(
+                "Paused at {}:{}, before that line runs; its locals are under it in its \
+                 tab. Press Continue (F5) to carry on, or Stop (Shift+F5).",
+                pause.path, pause.line
+            ));
+            self.open_script(&pause.path, Some(pause.line));
+        }
+    }
+    /// Continues the game from the breakpoint it's paused at. It may pause
+    /// again straight away, at the next breakpoint it reaches.
+    pub(super) fn continue_play(&mut self) {
+        if !self.paused() {
+            return;
+        }
+        let Some(session) = &mut self.play else {
+            return;
+        };
+        let result = session.continue_from_pause(&mut self.output);
+        // The paused time isn't game time: the next frame is a normal one.
+        self.last_frame = Some(Instant::now());
+        self.tabs.paused = None;
+        match result {
+            Ok(()) => self.follow_pause(),
+            Err(crash) => self.crashed(crash),
+        }
+    }
+    /// Gives the game breakpoints that changed. Clearing the one Play is
+    /// paused at continues.
+    pub(super) fn sync_breakpoints(&mut self) {
+        if !self.tabs.take_breakpoints_changed() {
+            return;
+        }
+        let Some(session) = &mut self.play else {
+            return;
+        };
+        session.set_breakpoints(self.tabs.breakpoints());
+        let breakpoints = self.tabs.breakpoints();
+        let cleared = self.tabs.paused.as_ref().is_some_and(|pause| {
+            !breakpoints
+                .get(&pause.path)
+                .is_some_and(|lines| lines.contains(&pause.line))
+        });
+        if cleared {
+            self.continue_play();
         }
     }
     /// Stops the game and throws its world away. The world being edited was
     /// never touched, so it's back exactly as before Play.
     pub(super) fn stop(&mut self) {
+        self.tabs.paused = None;
         if self.play.take().is_some() {
             self.viewport.clear_particles();
             self.pending_emits.clear();
@@ -397,8 +461,9 @@ impl EditorApp {
                 .viewport
                 .set_camera_view(moved.position, moved.orientation),
             Ok(None) => {}
-            Err(crash) => self.crashed(crash),
+            Err(crash) => return self.crashed(crash),
         }
+        self.follow_pause();
     }
     pub(super) fn update_block_lua(&mut self, path: &str) {
         let Some(source) = self.project.as_ref().and_then(|project| {
@@ -447,6 +512,7 @@ impl EditorApp {
     /// The engine panicked during Play: say so, and go back to editing.
     pub(super) fn crashed(&mut self, crash: Crash) {
         self.play = None;
+        self.tabs.paused = None;
         self.output.error(format!(
             "The engine crashed during Play: {}. Play stopped, and the world is back \
              as it was before Play. This is a bug in Axcenity; if you started the \

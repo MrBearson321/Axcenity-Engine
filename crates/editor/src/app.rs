@@ -636,8 +636,10 @@ impl EditorApp {
 
         // During Play, run a game frame before anything is drawn, so every
         // panel shows the world as it is now. Then ask for the next frame
-        // straight away: games keep moving without input.
-        if self.playing() {
+        // straight away: games keep moving without input. Paused at a
+        // breakpoint, the game holds still and waits for Continue.
+        self.sync_breakpoints();
+        if self.playing() && !self.paused() {
             let now = Instant::now();
             let seconds = self
                 .last_frame

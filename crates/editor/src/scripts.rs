@@ -8,8 +8,15 @@
 //! Each tab also has an id that never changes, even when its file is
 //! renamed, which is how the dock knows it. [`ScriptTabs`] never touches
 //! files; the app reads and writes them.
+//!
+//! Clicking a line number sets or clears a breakpoint there (a red dot).
+//! Breakpoints are kept by file path, whether or not the tab is open, and
+//! Play stops at them (see `play.rs`). While Play is paused, the paused line
+//! has an arrow and its own background.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
+
+use axcenity_script::{Breakpoints, Pause};
 
 use axcenity_core::ClassName;
 use axcenity_project::{is_stylesheet, script_name};
@@ -34,6 +41,8 @@ pub fn new_script_source(class: ClassName) -> &'static str {
 }
 /// The background of the line jumped to from an error in Output.
 const JUMP_LINE_COLOR: egui::Color32 = egui::Color32::from_rgba_premultiplied(60, 50, 10, 60);
+/// The gutter's space for breakpoint dots, left of the line numbers.
+const MARKER_WIDTH: f32 = 14.0;
 
 /// How a tab's file is, compared with the tab.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -110,6 +119,12 @@ pub struct ScriptTabs {
     /// Each script's uses of APIs that only work on the other side, by
     /// path. The app fills it in each frame; a tab with any shows a warning sign.
     pub warnings: HashMap<String, Vec<SideWarning>>,
+    /// Every breakpoint, by script path, open or not.
+    breakpoints: Breakpoints,
+    /// Set when a breakpoint is added or removed, until the app takes it.
+    breakpoints_changed: bool,
+    /// Where Play is paused, if it is. The app sets it.
+    pub paused: Option<Pause>,
 }
 
 impl ScriptTabs {
@@ -232,11 +247,37 @@ impl ScriptTabs {
         self.active = None;
     }
 
-    /// The script at `from` was renamed to `to`.
+    /// The script at `from` was renamed to `to`. Its breakpoints go with it.
     pub fn rename(&mut self, from: &str, to: &str) {
         if let Some(tab) = self.get_mut(from) {
             tab.path = to.to_string();
         }
+        if let Some(lines) = self.breakpoints.remove(from) {
+            self.breakpoints.insert(to.to_string(), lines);
+            self.breakpoints_changed = true;
+        }
+    }
+
+    pub fn breakpoints(&self) -> &Breakpoints {
+        &self.breakpoints
+    }
+
+    /// Sets the breakpoint at `line` (from 1) of the script at `path` if
+    /// there isn't one, or clears it if there is.
+    pub fn toggle_breakpoint(&mut self, path: &str, line: usize) {
+        let lines = self.breakpoints.entry(path.to_string()).or_default();
+        if !lines.remove(&line) {
+            lines.insert(line);
+        }
+        if lines.is_empty() {
+            self.breakpoints.remove(path);
+        }
+        self.breakpoints_changed = true;
+    }
+
+    /// Whether breakpoints changed since the last call.
+    pub fn take_breakpoints_changed(&mut self) -> bool {
+        std::mem::take(&mut self.breakpoints_changed)
     }
 
     pub fn any_unsaved(&self) -> bool {
@@ -338,7 +379,16 @@ impl ScriptTabs {
                 tab.go_to_line = Some(side_warning.line);
             }
         }
-        code_editor(ui, tab);
+        let paused_line = self
+            .paused
+            .as_ref()
+            .filter(|pause| pause.path == tab.path)
+            .map(|pause| pause.line);
+        let lines = self.breakpoints.get(&tab.path).cloned().unwrap_or_default();
+        if let Some(line) = code_editor(ui, tab, &lines, paused_line) {
+            let path = tab.path.clone();
+            self.toggle_breakpoint(&path, line);
+        }
     }
 }
 
@@ -385,15 +435,21 @@ pub fn editor_id(path: &str) -> egui::Id {
     egui::Id::new(("script editor", path))
 }
 
-/// The text box with the code, colored, with line numbers down the left.
-fn code_editor(ui: &mut egui::Ui, tab: &mut ScriptTab) {
+/// The text box with the code, colored, with line numbers down the left,
+/// the `breakpoints` beside them, and the line Play is paused on marked.
+/// Returns the line whose number was clicked, to set or clear its breakpoint.
+fn code_editor(
+    ui: &mut egui::Ui,
+    tab: &mut ScriptTab,
+    breakpoints: &BTreeSet<usize>,
+    paused_line: Option<usize>,
+) -> Option<usize> {
     let font = egui::TextStyle::Monospace.resolve(ui.style());
     let id = editor_id(&tab.path);
     // `split` counts an empty last line after a final newline, which is
     // where the cursor can go, so the numbers match the text box's rows.
     let lines = tab.text.split('\n').count();
-    let width = lines.to_string().len();
-    let numbers: Vec<String> = (1..=lines).map(|n| format!("{n:>width$}")).collect();
+    let mut clicked = None;
 
     // egui calls this to lay out the text whenever it needs to. It ignores
     // the wrap width: long lines scroll sideways, so they stay one row each
@@ -413,10 +469,7 @@ fn code_editor(ui: &mut egui::Ui, tab: &mut ScriptTab) {
         .auto_shrink(false)
         .show(ui, |ui| {
             ui.horizontal_top(|ui| {
-                let gutter = egui::RichText::new(numbers.join("\n"))
-                    .font(font.clone())
-                    .color(ui.visuals().weak_text_color());
-                ui.add(egui::Label::new(gutter).selectable(false));
+                clicked = gutter(ui, &font, lines, breakpoints, paused_line);
 
                 // A placeholder painted before the text, so the jump
                 // highlight can go behind it once the text is laid out.
@@ -454,15 +507,87 @@ fn code_editor(ui: &mut egui::Ui, tab: &mut ScriptTab) {
                     ui.scroll_to_rect(at, Some(egui::Align::Center));
                     tab.highlighted = Some(line);
                 }
-                if let Some(line) = tab.highlighted {
+                // The paused line's background wins over the jump's.
+                let warning = theme::palette(ui.ctx()).warning;
+                let marked = paused_line
+                    .map(|line| (line, warning.gamma_multiply(0.22)))
+                    .or_else(|| tab.highlighted.map(|line| (line, JUMP_LINE_COLOR)));
+                if let Some((line, color)) = marked {
                     let (_, at) = line_rect(line);
                     let row =
                         egui::Rect::from_x_y_ranges(output.response.rect.x_range(), at.y_range());
                     ui.painter()
-                        .set(behind, egui::Shape::rect_filled(row, 0.0, JUMP_LINE_COLOR));
+                        .set(behind, egui::Shape::rect_filled(row, 0.0, color));
                 }
             });
         });
+    clicked
+}
+
+/// The line numbers, one row per line, with a red dot on each breakpoint
+/// and an arrow on the paused line. Clicking a row returns its line;
+/// hovering one shows a faint dot where a click would put one.
+fn gutter(
+    ui: &mut egui::Ui,
+    font: &egui::FontId,
+    lines: usize,
+    breakpoints: &BTreeSet<usize>,
+    paused_line: Option<usize>,
+) -> Option<usize> {
+    let palette = theme::palette(ui.ctx());
+    let (row, digit) = ui.fonts(|fonts| (fonts.row_height(font), fonts.glyph_width(font, '0')));
+    let numbers = digit * lines.to_string().len() as f32;
+    let size = egui::vec2(MARKER_WIDTH + numbers + 4.0, row * lines as f32);
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    let response = response
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text("Click to set or clear a breakpoint: Play pauses before that line runs.");
+    let line_at = |y: f32| {
+        let line = ((y - rect.top()) / row).floor() as usize + 1;
+        (1..=lines).contains(&line).then_some(line)
+    };
+    let hovered = response.hover_pos().and_then(|pos| line_at(pos.y));
+    let clicked = response
+        .clicked()
+        .then(|| response.interact_pointer_pos())
+        .flatten()
+        .and_then(|pos| line_at(pos.y));
+
+    // Only the rows on screen are painted, so long scripts stay quick.
+    let painter = ui.painter();
+    let visible = ui.clip_rect();
+    let first = ((visible.top() - rect.top()) / row).floor().max(0.0) as usize + 1;
+    let last = (((visible.bottom() - rect.top()) / row).ceil().max(0.0) as usize).min(lines);
+    for line in first..=last {
+        let top = rect.top() + row * (line - 1) as f32;
+        let dot = egui::pos2(rect.left() + MARKER_WIDTH / 2.0, top + row / 2.0);
+        if paused_line == Some(line) {
+            painter.text(
+                dot,
+                egui::Align2::CENTER_CENTER,
+                icons::CARET_RIGHT,
+                egui::FontId::proportional(row),
+                palette.warning,
+            );
+        } else if breakpoints.contains(&line) {
+            painter.circle_filled(dot, row * 0.28, palette.error);
+        } else if hovered == Some(line) {
+            painter.circle_filled(dot, row * 0.28, palette.error.gamma_multiply(0.35));
+        }
+        let color = if paused_line == Some(line) {
+            palette.warning
+        } else {
+            ui.visuals().weak_text_color()
+        };
+        painter.text(
+            egui::pos2(rect.right() - 4.0, top),
+            egui::Align2::RIGHT_TOP,
+            line.to_string(),
+            font.clone(),
+            color,
+        );
+    }
+    clicked
 }
 
 /// The index (in characters, which is how egui counts) of the start of
@@ -533,6 +658,32 @@ mod tests {
         assert_eq!(tabs.ids().len(), 2);
         tabs.activate(a);
         assert_eq!(tabs.active_id(), Some(a));
+    }
+
+    #[test]
+    fn breakpoints_toggle_by_line_and_follow_a_renamed_script() {
+        let mut tabs = ScriptTabs::default();
+        assert!(!tabs.take_breakpoints_changed());
+        tabs.toggle_breakpoint("scripts/a.server.lua", 3);
+        tabs.toggle_breakpoint("scripts/a.server.lua", 7);
+        assert!(tabs.take_breakpoints_changed());
+        assert!(!tabs.take_breakpoints_changed(), "taken once");
+        tabs.toggle_breakpoint("scripts/a.server.lua", 3);
+        let lines = |tabs: &ScriptTabs, path: &str| -> Vec<usize> {
+            tabs.breakpoints()
+                .get(path)
+                .map(|lines| lines.iter().copied().collect())
+                .unwrap_or_default()
+        };
+        assert_eq!(lines(&tabs, "scripts/a.server.lua"), [7]);
+        // Kept for a script whose tab isn't open, and moved with a rename.
+        tabs.take_breakpoints_changed();
+        tabs.rename("scripts/a.server.lua", "scripts/b.server.lua");
+        assert!(tabs.take_breakpoints_changed());
+        assert_eq!(lines(&tabs, "scripts/b.server.lua"), [7]);
+        assert!(lines(&tabs, "scripts/a.server.lua").is_empty());
+        tabs.toggle_breakpoint("scripts/b.server.lua", 7);
+        assert!(tabs.breakpoints().is_empty(), "no empty entries left behind");
     }
 
     #[test]
