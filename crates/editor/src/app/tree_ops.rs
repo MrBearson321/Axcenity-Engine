@@ -79,7 +79,7 @@ impl EditorApp {
             self.insert_named(what, lamp, what.class().as_str(), Vec::new());
             return;
         }
-        if what == Insertable::ThirdPersonController {
+        if what.class().is_character_controller() {
             let near = near.or(self.selected);
             let parent = tree::insert_parent(&self.world, near, what);
             let has_body = self.world.get(parent).is_some_and(|instance| {
@@ -88,7 +88,11 @@ impl EditorApp {
                     ClassName::Model | ClassName::Part | ClassName::MeshPart
                 )
             });
-            if !has_body {
+            // A character has one controller or the other. One that already
+            // has a controller keeps it, and the new one gets a new character.
+            let taken = tree::has_controller(&self.world, parent);
+            if !has_body || taken {
+                let near = if taken { None } else { near };
                 self.insert_named(Insertable::Model, near, "Character", Vec::new());
                 let model = self.selected;
                 self.insert_named(
@@ -100,7 +104,7 @@ impl EditorApp {
                         ("Color", Value::Color3(Color3::new(0.29, 0.45, 0.78))),
                     ],
                 );
-                self.insert_named(what, model, "ThirdPersonController", Vec::new());
+                self.insert_named(what, model, what.class().as_str(), Vec::new());
                 return;
             }
         }

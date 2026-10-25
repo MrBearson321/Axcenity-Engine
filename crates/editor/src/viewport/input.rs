@@ -357,12 +357,16 @@ impl Viewport {
             self.looking = looking;
             capture_mouse(ctx, looking);
         }
-        // A character controller owns the view. Look is applied on the next
-        // character step; the fly camera stays where Stop will find it.
+        // A character controller owns the view. Look and the wheel's zoom
+        // are applied on the next character step; the fly camera stays
+        // where Stop will find it.
         if character {
             if looking {
                 self.character_look.0 += motion.x;
                 self.character_look.1 += motion.y;
+            }
+            if response.hovered() || looking {
+                self.character_zoom += wheel / POINTS_PER_NOTCH;
             }
             return;
         }

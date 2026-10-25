@@ -99,13 +99,16 @@ pub enum ClassName {
     /// that lays it down by itself (by height and slope).
     TerrainLayer,
     /// Walks and runs a character kinematically during Play, and owns the
-    /// camera. Parented to the character Model, or to a Part. Not a physics
-    /// body.
+    /// camera from behind it. Parented to the character Model, or to a
+    /// Part. Not a physics body.
     ThirdPersonController,
+    /// The same movement as a ThirdPersonController, with the camera at the
+    /// character's eyes. A character has one controller or the other.
+    FirstPersonController,
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 37] = [
+    pub const ALL: [ClassName; 38] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -143,6 +146,7 @@ impl ClassName {
         ClassName::Terrain,
         ClassName::TerrainLayer,
         ClassName::ThirdPersonController,
+        ClassName::FirstPersonController,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -184,6 +188,7 @@ impl ClassName {
             ClassName::Terrain => "Terrain",
             ClassName::TerrainLayer => "TerrainLayer",
             ClassName::ThirdPersonController => "ThirdPersonController",
+            ClassName::FirstPersonController => "FirstPersonController",
         }
     }
 
@@ -196,6 +201,14 @@ impl ClassName {
             return Some(ClassName::TextButton);
         }
         Self::ALL.into_iter().find(|class| class.as_str() == name)
+    }
+
+    /// A third- or first-person character controller.
+    pub fn is_character_controller(self) -> bool {
+        matches!(
+            self,
+            ClassName::ThirdPersonController | ClassName::FirstPersonController
+        )
     }
 
     /// Services exist exactly once and are created with the [`World`](crate::World),
@@ -610,33 +623,27 @@ impl ClassName {
                 ("RuleNoise", Value::Number(0.3)),
                 ("NoiseScale", Value::Number(24.0)),
             ],
-            ClassName::ThirdPersonController => vec![
-                // "Walk" or "Run". Anything else moves at WalkSpeed.
-                ("Movement", Value::String("Walk".to_owned())),
-                // Studs a second across flat ground.
-                ("WalkSpeed", Value::Number(16.0)),
-                ("RunSpeed", Value::Number(32.0)),
-                // How high a jump rises, in studs.
-                ("JumpHeight", Value::Number(7.2)),
-                // Set true to jump once from the ground. The controller sets
-                // it back to false on its next step, in the air or not.
-                ("Jump", Value::Bool(false)),
-                // The steepest ground it walks up, in degrees from flat.
-                ("MaxSlopeAngle", Value::Number(45.0)),
-                // The tallest ledge it steps onto without jumping, in studs.
-                ("MaxStepHeight", Value::Number(1.0)),
-                // Set true to crouch, false to stand. Standing waits until
-                // nothing overhead is in the way.
-                ("Crouch", Value::Bool(false)),
-                // How tall the character is while crouched, in studs.
-                ("CrouchHeight", Value::Number(3.0)),
-                // 0 to 1: how much of its walk or run speed it keeps crouched.
-                ("CrouchSpeedScale", Value::Number(0.5)),
-                // How far behind the character the camera sits, in studs.
-                ("CameraDistance", Value::Number(12.0)),
-                // How far above the character's feet the camera looks, in studs.
-                ("CameraHeight", Value::Number(4.0)),
-            ],
+            ClassName::ThirdPersonController => {
+                let mut properties = movement_properties();
+                properties.extend([
+                    // How far behind the character the camera sits, in
+                    // studs. The mouse wheel zooms it during Play.
+                    ("CameraDistance", Value::Number(12.0)),
+                    // How close and how far the wheel zooms, in studs. The
+                    // same number in both locks the distance.
+                    ("CameraMinZoomDistance", Value::Number(0.5)),
+                    ("CameraMaxZoomDistance", Value::Number(128.0)),
+                    // How far above the character's feet the camera looks, in studs.
+                    ("CameraHeight", Value::Number(4.0)),
+                ]);
+                properties
+            }
+            ClassName::FirstPersonController => {
+                let mut properties = movement_properties();
+                // How far above the character's feet its eyes are, in studs.
+                properties.push(("EyeHeight", Value::Number(4.5)));
+                properties
+            }
             ClassName::SurfaceAppearance => {
                 let map = |name| (name, Value::String(String::new()));
                 let channel = |name, channel| (name, Value::TextureChannel(channel));
@@ -704,7 +711,8 @@ impl ClassName {
             | ClassName::ParticleEmitter
             | ClassName::Terrain
             | ClassName::TerrainLayer
-            | ClassName::ThirdPersonController => &[],
+            | ClassName::ThirdPersonController
+            | ClassName::FirstPersonController => &[],
             // Fires when a sound that isn't looped plays to its end.
             ClassName::Sound => &["Ended"],
             // `StateChanged` fires with the new state's name and the old
@@ -728,6 +736,34 @@ impl ClassName {
             ClassName::TextBox => &["FocusLost"],
         }
     }
+}
+
+/// What both character controllers have: how the character moves, jumps
+/// and crouches.
+fn movement_properties() -> Vec<(&'static str, Value)> {
+    vec![
+        // "Walk" or "Run". Anything else moves at WalkSpeed.
+        ("Movement", Value::String("Walk".to_owned())),
+        // Studs a second across flat ground.
+        ("WalkSpeed", Value::Number(16.0)),
+        ("RunSpeed", Value::Number(32.0)),
+        // How high a jump rises, in studs.
+        ("JumpHeight", Value::Number(7.2)),
+        // Set true to jump once from the ground. The controller sets
+        // it back to false on its next step, in the air or not.
+        ("Jump", Value::Bool(false)),
+        // The steepest ground it walks up, in degrees from flat.
+        ("MaxSlopeAngle", Value::Number(45.0)),
+        // The tallest ledge it steps onto without jumping, in studs.
+        ("MaxStepHeight", Value::Number(1.0)),
+        // Set true to crouch, false to stand. Standing waits until
+        // nothing overhead is in the way.
+        ("Crouch", Value::Bool(false)),
+        // How tall the character is while crouched, in studs.
+        ("CrouchHeight", Value::Number(3.0)),
+        // 0 to 1: how much of its walk or run speed it keeps crouched.
+        ("CrouchSpeedScale", Value::Number(0.5)),
+    ]
 }
 
 impl fmt::Display for ClassName {

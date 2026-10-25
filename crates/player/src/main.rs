@@ -30,7 +30,9 @@ use axcenity_scene::{FlyCamera, MoveKeys};
 use axcenity_script::{CameraState, KeyEvent, OutputKind, ScriptRuntime};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
-use winit::event::{DeviceEvent, DeviceId, ElementState, MouseButton, WindowEvent};
+use winit::event::{
+    DeviceEvent, DeviceId, ElementState, MouseButton, MouseScrollDelta, WindowEvent,
+};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window, WindowId};
@@ -40,6 +42,8 @@ const START_CAMERA_POSITION: Vec3 = Vec3::new(12.0, 8.0, 16.0);
 /// After a long pause (such as dragging the window), don't jump the camera
 /// by the whole pause; treat the frame as at most this long.
 const MAX_FRAME_SECONDS: f32 = 0.1;
+/// Touchpads scroll in pixels; this many is one mouse wheel notch.
+const PIXELS_PER_NOTCH: f32 = 40.0;
 const GAME_FILE: &str = "game.axgame";
 const USAGE: &str = "usage: axcenity-player [project-folder | game.axgame]\n\
                      example: cargo run -p axcenity-player -- examples/hello-part";
@@ -158,6 +162,7 @@ fn main() -> Result<()> {
         looking: false,
         look_dx: 0.0,
         look_dy: 0.0,
+        zoom: 0.0,
         pointer: None,
         text_focus: None,
         ui_warnings: Vec::new(),
@@ -286,11 +291,14 @@ struct App {
     audio: GameAudio,
     /// Simulates the unanchored parts.
     physics: Physics,
-    /// Walks a third-person character and owns the camera when one is present.
+    /// Walks a character and owns the camera when one is present.
     characters: Controllers,
     /// Mouse look, in pixels, for the character camera. Right and down are positive.
     look_dx: f32,
     look_dy: f32,
+    /// Mouse wheel notches since the last frame, toward the screen
+    /// positive, for a third-person camera's zoom.
+    zoom: f32,
     /// What the ParticleEmitters have given off.
     particles: axcenity_scene::Particles,
     /// Terrains' chunk meshes and weights, kept between frames.
@@ -570,6 +578,15 @@ fn camera_state(camera: &FlyCamera) -> CameraState {
     }
 }
 
+/// Mouse wheel notches in a scroll, away from the player (toward the
+/// screen) positive. Touchpads report pixels instead of notches.
+fn wheel_notches(delta: MouseScrollDelta) -> f32 {
+    match delta {
+        MouseScrollDelta::LineDelta(_, y) => y,
+        MouseScrollDelta::PixelDelta(position) => position.y as f32 / PIXELS_PER_NOTCH,
+    }
+}
+
 /// While looking around, hides the cursor and keeps it from leaving the window.
 fn capture_mouse(window: &Window, captured: bool) {
     let result = if captured {
@@ -683,6 +700,7 @@ impl ApplicationHandler for App {
                     capture_mouse(window, self.looking);
                 }
             }
+            WindowEvent::MouseWheel { delta, .. } => self.zoom += wheel_notches(delta),
             // Key releases aren't reported while another window has focus,
             // so let go of everything to avoid the camera drifting on its own.
             WindowEvent::Focused(false) => {
@@ -709,7 +727,7 @@ impl ApplicationHandler for App {
                     .inner_size();
                 self.process_ui_mouse_events((size.width, size.height));
 
-                // 1. Input. A third-person controller moves first and owns
+                // 1. Input. A character controller moves first and owns
                 //    the camera. Otherwise the fly camera moves, and
                 //    LocalScripts see that.
                 let motion = if self.text_focus.is_some() {
@@ -724,10 +742,12 @@ impl ApplicationHandler for App {
                         crouch: self.held_keys.contains(&axcenity_core::KeyCode::C),
                         look_dx: self.look_dx,
                         look_dy: self.look_dy,
+                        zoom: self.zoom,
                     }
                 };
                 self.look_dx = 0.0;
                 self.look_dy = 0.0;
+                self.zoom = 0.0;
                 self.characters
                     .step(&mut self.world, &self.assets, motion, seconds);
                 if self.characters.view(&self.world).is_none() {

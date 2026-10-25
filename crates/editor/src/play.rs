@@ -447,10 +447,10 @@ impl GameKeys {
         keys
     }
 
-    /// Held movement keys for a third-person controller, plus mouse look
-    /// since the last frame. Arrow keys move as well as WASD; Space jumps,
-    /// and C crouches.
-    pub fn motion(&self, look_dx: f32, look_dy: f32) -> MoveInput {
+    /// Held movement keys for a character controller, plus mouse look and
+    /// wheel notches since the last frame. Arrow keys move as well as WASD;
+    /// Space jumps, and C crouches.
+    pub fn motion(&self, look_dx: f32, look_dy: f32, zoom: f32) -> MoveInput {
         let down = |key| self.held.contains(&key);
         MoveInput {
             forward: down(KeyCode::W) || down(KeyCode::Up),
@@ -461,6 +461,7 @@ impl GameKeys {
             crouch: down(KeyCode::C),
             look_dx,
             look_dy,
+            zoom,
         }
     }
 }

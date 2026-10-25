@@ -96,9 +96,9 @@ A `FirstPersonController` is its own Instance class, not a mode of the third-per
 
 ### Acceptance criteria
 
-- [ ] A first-person controller walks, runs, jumps, crouches, and crosses the same slopes and steps as the third-person controller.
-- [ ] Its camera stays at the eyes during Play, and Stop restores the fly camera.
-- [ ] Inserting a first-person controller doesn't turn an existing third-person controller into one, and each saves under its own class.
+- [x] A first-person controller walks, runs, jumps, crouches, and crosses the same slopes and steps as the third-person controller.
+- [x] Its camera stays at the eyes during Play, and Stop restores the fly camera.
+- [x] Inserting a first-person controller doesn't turn an existing third-person controller into one, and each saves under its own class.
 
 ---
 

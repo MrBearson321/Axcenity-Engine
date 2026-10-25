@@ -361,8 +361,11 @@ pub struct Viewport {
     /// Terrain Studio's previews and views.
     pub terrain: TerrainCache,
     /// Mouse look, in pixels, saved for the next character step while a
-    /// third-person controller owns the camera.
+    /// character controller owns the camera.
     character_look: (f32, f32),
+    /// Mouse wheel notches, toward the screen positive, saved for the next
+    /// character step: a third-person camera zooms by them.
+    character_zoom: f32,
 }
 
 /// The texture the scene is drawn into, and egui's name for it.
@@ -384,6 +387,7 @@ impl Viewport {
             terrain_stroke: false,
             terrain: TerrainCache::new(),
             character_look: (0.0, 0.0),
+            character_zoom: 0.0,
         }
     }
 
@@ -391,6 +395,12 @@ impl Viewport {
     /// and clears it. Right and down are positive.
     pub fn take_character_look(&mut self) -> (f32, f32) {
         std::mem::take(&mut self.character_look)
+    }
+
+    /// Mouse wheel notches over the viewport while a character controller
+    /// owns the camera, and clears them. Toward the screen is positive.
+    pub fn take_character_zoom(&mut self) -> f32 {
+        std::mem::take(&mut self.character_zoom)
     }
 
     /// Takes every particle away, for a new world (Play, Stop, another project).

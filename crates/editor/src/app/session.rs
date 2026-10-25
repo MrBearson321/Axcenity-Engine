@@ -483,10 +483,11 @@ impl EditorApp {
             orientation,
         };
         let (look_dx, look_dy) = self.viewport.take_character_look();
+        let zoom = self.viewport.take_character_zoom();
         let motion = if self.focused_text.is_some() {
             axcenity_character::MoveInput::default()
         } else {
-            self.game_keys.motion(look_dx, look_dy)
+            self.game_keys.motion(look_dx, look_dy, zoom)
         };
         let frame = session.frame(seconds, keys, motion, camera, &mut self.output);
         if let Some(cost) = session.cost() {

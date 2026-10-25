@@ -2044,3 +2044,99 @@ fn every_tutorial_sample_opens_and_plays_in_the_editor() {
         let _ = std::fs::remove_dir_all(folder);
     }
 }
+
+fn class_of(world: &World, id: InstanceId) -> ClassName {
+    world.get(id).unwrap().class()
+}
+
+#[test]
+fn a_first_person_controller_leaves_a_third_person_one_alone_and_saves_as_its_own_class() {
+    let folder = copy_of_example("hello-character", "first-person-insert");
+    let mut app = EditorApp::new(Some(&folder));
+    let workspace = app.world.workspace();
+    let model = part(&app, "Character");
+    let third = app
+        .world
+        .find_first_child(model, "ThirdPersonController")
+        .unwrap();
+
+    // The character keeps its controller; the new one gets a new character.
+    let first = inserted(&mut app, Insertable::FirstPersonController, Some(model));
+    assert_eq!(
+        class_of(&app.world, third),
+        ClassName::ThirdPersonController
+    );
+    assert_eq!(
+        class_of(&app.world, first),
+        ClassName::FirstPersonController
+    );
+    assert_eq!(name(&app, first), "FirstPersonController");
+    let holder = app.world.get(first).unwrap().parent().unwrap();
+    assert_ne!(holder, model);
+    assert_eq!(app.world.get(holder).unwrap().parent(), Some(workspace));
+    assert!(app.world.find_first_child(holder, "Body").is_some());
+    // Selecting a part of the first character doesn't add a second controller to it either.
+    let body = app.world.find_first_child(model, "Body").unwrap();
+    let another = inserted(&mut app, Insertable::FirstPersonController, Some(body));
+    assert!(!app.world.is_descendant_of(another, model));
+
+    assert!(app.save());
+    let world = std::fs::read_to_string(folder.join("world.json")).unwrap();
+    assert!(world.contains(r#""class": "ThirdPersonController""#));
+    assert!(world.contains(r#""class": "FirstPersonController""#));
+    let reopened = EditorApp::new(Some(&folder));
+    let reloaded = &reopened.world;
+    let model = reloaded
+        .find_first_child(reloaded.workspace(), "Character")
+        .unwrap();
+    let third = reloaded
+        .find_first_child(model, "ThirdPersonController")
+        .unwrap();
+    assert_eq!(class_of(reloaded, third), ClassName::ThirdPersonController);
+    let holder = reloaded
+        .find_first_child(reloaded.workspace(), "Character2")
+        .unwrap();
+    let first = reloaded
+        .find_first_child(holder, "FirstPersonController")
+        .unwrap();
+    assert_eq!(class_of(reloaded, first), ClassName::FirstPersonController);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn a_first_person_camera_stays_at_the_eyes_during_play_and_stop_restores_the_fly_camera() {
+    let folder = copy_of_example("hello-touched", "first-person-play");
+    let mut app = EditorApp::new(Some(&folder));
+    let first = inserted(&mut app, Insertable::FirstPersonController, None);
+    let model = app.world.get(first).unwrap().parent().unwrap();
+    let body = app.world.find_first_child(model, "Body").unwrap();
+    let fly = app.viewport.camera_view();
+
+    app.play();
+    for seconds in [0.1, 0.5, 1.0] {
+        play_for(&mut app, seconds);
+        let game = shown(&app.world, &app.play);
+        let at = game
+            .get(body)
+            .unwrap()
+            .property("Position")
+            .and_then(Value::as_vector3)
+            .unwrap();
+        let eyes = app.play.as_ref().unwrap().character_camera().unwrap();
+        // The 5-stud body's feet are 2.5 below its middle; the eyes are 4.5 above them.
+        let expected = Vector3::new(at.x, at.y - 2.5 + 4.5, at.z);
+        for (got, want) in [
+            (eyes.position.x, expected.x),
+            (eyes.position.y, expected.y),
+            (eyes.position.z, expected.z),
+        ] {
+            assert!((got - want).abs() < 1e-3, "{eyes:?} at {at:?}");
+        }
+        assert_eq!(eyes.orientation, Vector3::new(0.0, 0.0, 0.0));
+    }
+
+    app.stop();
+    assert!(app.play.is_none());
+    assert_eq!(app.viewport.camera_view(), fly);
+    let _ = std::fs::remove_dir_all(&folder);
+}

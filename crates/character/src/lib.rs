@@ -1,8 +1,9 @@
 //! Kinematic character controllers.
 //!
 //! A [`ThirdPersonController`](axcenity_core::ClassName::ThirdPersonController)
+//! or a [`FirstPersonController`](axcenity_core::ClassName::FirstPersonController)
 //! is parented to a character [`Model`](axcenity_core::ClassName::Model) (or
-//! to one Part). During Play, [`Controllers::step`] walks or runs that
+//! to one Part). Both move the same way. During Play, [`Controllers::step`] walks or runs that
 //! character from the held movement keys, jumps and crouches it, carries it
 //! up slopes and steps within its limits, and drops it under gravity off an
 //! edge. It is not
@@ -11,7 +12,8 @@
 //! parts stay as they are.
 //!
 //! The first such controller in the Workspace that has a body receives the
-//! input and owns the camera. A first-person controller is a later phase.
+//! input and owns the camera: behind the character, zoomed with the mouse
+//! wheel, for a third-person one, or at its eyes for a first-person one.
 
 use std::collections::BTreeMap;
 
@@ -35,7 +37,12 @@ const MOUSE_SENSITIVITY: f32 = 0.003;
 const MAX_PITCH: f32 = 89.0_f32.to_radians();
 /// Looks slightly down, so the camera sits above the character as well as behind.
 const DEFAULT_PITCH: f32 = -18.0_f32.to_radians();
-const MIN_CAMERA_DISTANCE: f32 = 1.0;
+/// The closest a third-person camera comes, whatever `CameraMinZoomDistance` says.
+const MIN_CAMERA_DISTANCE: f32 = 0.5;
+/// One wheel notch zooms a fifth of the distance, and at least a stud, so
+/// zooming feels the same near the character and far from it.
+const ZOOM_PER_NOTCH: f32 = 0.2;
+const MIN_ZOOM_STEP: f32 = 1.0;
 /// The lowest a crouch squashes the character, in studs.
 const MIN_CROUCH_HEIGHT: f32 = 0.5;
 
@@ -43,6 +50,8 @@ const MIN_CROUCH_HEIGHT: f32 = 0.5;
 /// the last step. Right and down are positive, in pixels, as with the fly
 /// camera. `jump` is Space: held on landing, it jumps again. `crouch` is C:
 /// the character crouches while it is held, as if `Crouch` were true.
+/// `zoom` is mouse wheel notches since the last step, toward the screen
+/// positive: it moves a third-person camera closer.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct MoveInput {
     pub forward: bool,
@@ -53,9 +62,10 @@ pub struct MoveInput {
     pub crouch: bool,
     pub look_dx: f32,
     pub look_dy: f32,
+    pub zoom: f32,
 }
 
-/// Where the third-person camera is, in the same terms as `FlyCamera::view`:
+/// Where the character camera is, in the same terms as `FlyCamera::view`:
 /// position in studs, and orientation in degrees (X looks up and down, Y
 /// turns, Z is zero).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -64,24 +74,42 @@ pub struct CharacterCamera {
     pub orientation: Vector3,
 }
 
+/// Where a controller's camera is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Eye {
+    /// Behind the character: a ThirdPersonController.
+    Follow,
+    /// At its eyes: a FirstPersonController.
+    Eyes,
+}
+
+impl Eye {
+    fn of(world: &World, id: InstanceId) -> Option<Self> {
+        match world.get(id)?.class() {
+            ClassName::ThirdPersonController => Some(Eye::Follow),
+            ClassName::FirstPersonController => Some(Eye::Eyes),
+            _ => None,
+        }
+    }
+}
+
 /// Yaw and pitch of one controller's camera. Not saved; Play starts behind
-/// the character, looking slightly down.
+/// the character looking slightly down, or at its eyes looking ahead.
 #[derive(Clone, Copy, Debug)]
 struct Orbit {
     yaw: f32,
     pitch: f32,
 }
 
-impl Default for Orbit {
-    fn default() -> Self {
-        Self {
-            yaw: 0.0,
-            pitch: DEFAULT_PITCH,
-        }
-    }
-}
-
 impl Orbit {
+    fn start(eye: Eye) -> Self {
+        let pitch = match eye {
+            Eye::Follow => DEFAULT_PITCH,
+            Eye::Eyes => 0.0,
+        };
+        Self { yaw: 0.0, pitch }
+    }
+
     fn look(&mut self, dx: f32, dy: f32) {
         if !dx.is_finite() || !dy.is_finite() {
             return;
@@ -147,7 +175,7 @@ struct Body {
     radius: f32,
 }
 
-/// Steps every third-person controller. The player and the editor each own
+/// Steps every character controller. The player and the editor each own
 /// one for the game they are running.
 #[derive(Default)]
 pub struct Controllers {
@@ -183,9 +211,13 @@ impl Controllers {
             return None;
         };
         self.active = Some(id);
-        let orbit = self.orbits.entry(id).or_default();
+        let eye = Eye::of(world, id).unwrap_or(Eye::Follow);
+        let orbit = self.orbits.entry(id).or_insert_with(|| Orbit::start(eye));
         orbit.look(input.look_dx, input.look_dy);
         let orbit = *orbit;
+        if eye == Eye::Follow {
+            zoom(world, id, input.zoom);
+        }
         // Taken first, so a request made in the air is used up, not kept for landing.
         let jump = take_jump(world, id) || input.jump;
         let crouch = wants_crouch(world, id) || input.crouch;
@@ -211,20 +243,22 @@ impl Controllers {
         self.view(world)
     }
 
-    /// The follow camera of the controller that owns it, from where the
-    /// character is now. `None` when nothing has a body. Safe before the
-    /// first [`step`](Self::step): the camera starts behind the character.
+    /// The camera of the controller that owns it, from where the character
+    /// is now. `None` when nothing has a body. Safe before the first
+    /// [`step`](Self::step): the camera starts behind the character, or at
+    /// its eyes.
     pub fn view(&self, world: &World) -> Option<CharacterCamera> {
         let id = match self.active {
             Some(id) if is_driver(world, id) => id,
             _ => active_id(world)?,
         };
-        let orbit = self.orbits.get(&id).copied().unwrap_or_default();
+        let eye = Eye::of(world, id)?;
+        let orbit = self.orbits.get(&id).copied().unwrap_or(Orbit::start(eye));
         let standing = self.crouches.get(&id).map(|crouched| crouched.height);
-        pose_camera(world, id, orbit, standing)
+        pose_camera(world, id, eye, orbit, standing)
     }
 
-    /// Anchors every part a third-person controller moves, so the physics
+    /// Anchors every part a character controller moves, so the physics
     /// step does not treat the character as a dynamic body. Parts that are
     /// already anchored are left alone. Other parts, gravity, and friction
     /// are not touched.
@@ -250,7 +284,7 @@ fn controllers(world: &World) -> Vec<InstanceId> {
         .filter(|&id| {
             world
                 .get(id)
-                .is_some_and(|instance| instance.class() == ClassName::ThirdPersonController)
+                .is_some_and(|instance| instance.class().is_character_controller())
         })
         .collect()
 }
@@ -258,7 +292,7 @@ fn controllers(world: &World) -> Vec<InstanceId> {
 fn is_driver(world: &World, id: InstanceId) -> bool {
     world
         .get(id)
-        .is_some_and(|instance| instance.class() == ClassName::ThirdPersonController)
+        .is_some_and(|instance| instance.class().is_character_controller())
         && !parts_of(world, id).is_empty()
 }
 
@@ -515,10 +549,36 @@ fn room_to_stand(world: &World, assets: &Assets, body: &Body, rise: f32) -> bool
     })
 }
 
+/// How close and how far a third-person camera may be.
+fn zoom_limits(world: &World, id: InstanceId) -> (f32, f32) {
+    let min = number(world, id, "CameraMinZoomDistance")
+        .unwrap_or(0.5)
+        .max(MIN_CAMERA_DISTANCE);
+    let max = number(world, id, "CameraMaxZoomDistance")
+        .unwrap_or(128.0)
+        .max(min);
+    (min, max)
+}
+
 fn camera_distance(world: &World, id: InstanceId) -> f32 {
+    let (min, max) = zoom_limits(world, id);
     number(world, id, "CameraDistance")
         .unwrap_or(12.0)
-        .max(MIN_CAMERA_DISTANCE)
+        .clamp(min, max)
+}
+
+/// Moves a third-person camera `notches` wheel notches closer (out when
+/// negative), within its zoom limits, and keeps the distance in
+/// `CameraDistance`, so a script reads the zoom and can set it.
+fn zoom(world: &mut World, id: InstanceId, notches: f32) {
+    if notches == 0.0 || !notches.is_finite() {
+        return;
+    }
+    let distance = camera_distance(world, id);
+    let (min, max) = zoom_limits(world, id);
+    let step = (distance * ZOOM_PER_NOTCH).max(MIN_ZOOM_STEP);
+    let zoomed = (distance - notches * step).clamp(min, max);
+    let _ = world.set_property(id, "CameraDistance", Value::Number(f64::from(zoomed)));
 }
 
 fn camera_height(world: &World, id: InstanceId) -> f32 {
@@ -818,10 +878,13 @@ fn translate(world: &mut World, parts: &[InstanceId], dx: f32, dy: f32, dz: f32)
 }
 
 /// `standing` is the standing height of a crouched character: the camera
-/// drops as far as its top did.
+/// drops as far as its top did. A first-person camera sits at the eyes,
+/// above the middle of the body; a third-person one sits behind the point
+/// it looks at.
 fn pose_camera(
     world: &World,
     id: InstanceId,
+    eye: Eye,
     orbit: Orbit,
     standing: Option<f32>,
 ) -> Option<CharacterCamera> {
@@ -830,8 +893,11 @@ fn pose_camera(
     let (sy, cy) = orbit.yaw.sin_cos();
     let (sp, cp) = orbit.pitch.sin_cos();
     let forward = (-sy * cp, sp, -cy * cp);
-    let distance = camera_distance(world, id);
-    let look_y = body.feet_y + camera_height(world, id) - drop;
+    let (height, distance) = match eye {
+        Eye::Follow => (camera_height(world, id), camera_distance(world, id)),
+        Eye::Eyes => (number(world, id, "EyeHeight").unwrap_or(4.5), 0.0),
+    };
+    let look_y = body.feet_y + height - drop;
     let yaw = (orbit.yaw.to_degrees() + 180.0).rem_euclid(360.0) - 180.0;
     Some(CharacterCamera {
         position: Vector3::new(

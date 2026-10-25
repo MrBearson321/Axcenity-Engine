@@ -36,6 +36,8 @@ pub enum Insertable {
     Animation,
     /// A kinematic third-person character controller.
     ThirdPersonController,
+    /// The same movement, with the camera at the character's eyes.
+    FirstPersonController,
 }
 
 impl Insertable {
@@ -68,8 +70,11 @@ impl Insertable {
     pub const EFFECTS: [Insertable; 1] = [Insertable::ParticleEmitter];
     /// Animators (skeletal) and Animations (property clips).
     pub const ANIMATION: [Insertable; 2] = [Insertable::Animator, Insertable::Animation];
-    /// The third-person character controller.
-    pub const CHARACTERS: [Insertable; 1] = [Insertable::ThirdPersonController];
+    /// The character controllers: a character has one or the other.
+    pub const CHARACTERS: [Insertable; 2] = [
+        Insertable::ThirdPersonController,
+        Insertable::FirstPersonController,
+    ];
 
     /// What the buttons and menus call it. A Ball is a "Sphere", as in Studio.
     pub fn label(self) -> &'static str {
@@ -98,7 +103,8 @@ impl Insertable {
             Insertable::ParticleEmitter => "Particles",
             Insertable::Animator => "Animator",
             Insertable::Animation => "Animation",
-            Insertable::ThirdPersonController => "Character",
+            Insertable::ThirdPersonController => "Third Person",
+            Insertable::FirstPersonController => "First Person",
         }
     }
 
@@ -126,6 +132,7 @@ impl Insertable {
             Insertable::Animator => ClassName::Animator,
             Insertable::Animation => ClassName::Animation,
             Insertable::ThirdPersonController => ClassName::ThirdPersonController,
+            Insertable::FirstPersonController => ClassName::FirstPersonController,
         }
     }
 
@@ -282,10 +289,39 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
                         | Insertable::Animator
                         | Insertable::Animation
                         | Insertable::ThirdPersonController
+                        | Insertable::FirstPersonController
                 )
                 && is_saved(world, id))
     })
     .unwrap_or(default)
+}
+
+/// True when a character controller already moves `id`: one is inside it,
+/// or inside a Model or part that holds it.
+pub fn has_controller(world: &World, id: InstanceId) -> bool {
+    let is_controller = |id: InstanceId| {
+        world
+            .get(id)
+            .is_some_and(|instance| instance.class().is_character_controller())
+    };
+    if world.descendants(id).into_iter().any(is_controller) {
+        return true;
+    }
+    let mut holder = world.get(id).and_then(|instance| instance.parent());
+    while let Some(parent) = holder {
+        let Some(instance) = world.get(parent) else {
+            break;
+        };
+        if instance
+            .children()
+            .iter()
+            .any(|&child| is_controller(child))
+        {
+            return true;
+        }
+        holder = instance.parent();
+    }
+    false
 }
 
 /// True if a new `what` needs a ScreenGui made first: it's UI, and there's

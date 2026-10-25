@@ -22,6 +22,15 @@ fn arrow_and_letter_keys_reach_scripts_by_their_roblox_names() {
 }
 
 #[test]
+fn the_wheel_zooms_by_notches_and_a_touchpad_by_pixels() {
+    use winit::dpi::PhysicalPosition;
+    assert_eq!(wheel_notches(MouseScrollDelta::LineDelta(0.0, 1.0)), 1.0);
+    assert_eq!(wheel_notches(MouseScrollDelta::LineDelta(0.0, -2.0)), -2.0);
+    let pixels = MouseScrollDelta::PixelDelta(PhysicalPosition::new(0.0, 20.0));
+    assert_eq!(wheel_notches(pixels), 0.5);
+}
+
+#[test]
 fn hello_remote_example_moves_the_block_while_an_arrow_key_is_held() {
     let (mut world, mut scripts) = start_example("hello-remote");
     let mover = world.find_first_child(world.workspace(), "Mover").unwrap();

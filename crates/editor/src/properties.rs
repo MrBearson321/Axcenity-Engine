@@ -249,7 +249,10 @@ const GROUPS: [(&str, &[&str]); 19] = [
             "CrouchHeight",
             "CrouchSpeedScale",
             "CameraDistance",
+            "CameraMinZoomDistance",
+            "CameraMaxZoomDistance",
             "CameraHeight",
+            "EyeHeight",
         ],
     ),
 ];
@@ -295,7 +298,7 @@ pub fn sections(instance: &Instance) -> Vec<Section> {
             ),
             "Emitter" | "Particles" => instance.class() == ClassName::ParticleEmitter,
             "Animation" => matches!(instance.class(), ClassName::Animator | ClassName::Animation),
-            "Movement" => instance.class() == ClassName::ThirdPersonController,
+            "Movement" => instance.class().is_character_controller(),
             "Appearance" | "Behavior" => instance.class() != ClassName::ParticleEmitter,
             _ => true,
         })

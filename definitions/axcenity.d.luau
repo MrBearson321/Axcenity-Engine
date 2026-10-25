@@ -994,7 +994,7 @@ declare extern type TerrainLayer extends Instance with
 	[string]: any
 end
 
---- Walks, runs, jumps and crouches the character model it is parented to, kinematically, up slopes and steps within its limits, and owns the camera during Play. Movement is "Walk" or "Run". It is not a physics body: tuning its speeds and limits does not change how other parts fall.
+--- Walks, runs, jumps and crouches the character model it is parented to, kinematically, up slopes and steps within its limits, and owns the camera during Play: behind the character, zoomed with the mouse wheel. Movement is "Walk" or "Run". It is not a physics body: tuning its speeds and limits does not change how other parts fall.
 declare extern type ThirdPersonController extends Instance with
 	--- "Walk" or "Run". Anything else moves at WalkSpeed. Set from a script or the set-property block.
 	Movement: string
@@ -1016,10 +1016,41 @@ declare extern type ThirdPersonController extends Instance with
 	CrouchHeight: number
 	--- 0 to 1: how much of WalkSpeed or RunSpeed the character keeps while crouched.
 	CrouchSpeedScale: number
-	--- How far behind the character the camera sits during Play, in studs.
+	--- How far behind the character the camera sits during Play, in studs. The mouse wheel zooms it between CameraMinZoomDistance and CameraMaxZoomDistance and keeps the zoom here.
 	CameraDistance: number
+	--- The closest the mouse wheel zooms the camera, in studs (at least 0.5). Set it to CameraMaxZoomDistance to lock the distance.
+	CameraMinZoomDistance: number
+	--- The farthest the mouse wheel zooms the camera out, in studs.
+	CameraMaxZoomDistance: number
 	--- How far above the character's feet the camera looks, in studs.
 	CameraHeight: number
+	[string]: any
+end
+
+--- Moves the character model it is parented to just like a ThirdPersonController, with the camera at the character's eyes during Play, looking where the player looks. A character has one controller or the other.
+declare extern type FirstPersonController extends Instance with
+	--- "Walk" or "Run". Anything else moves at WalkSpeed. Set from a script or the set-property block.
+	Movement: string
+	--- How fast Movement "Walk" moves, in studs a second, on flat ground.
+	WalkSpeed: number
+	--- How fast Movement "Run" moves, in studs a second, on flat ground.
+	RunSpeed: number
+	--- How high a jump rises, in studs. Space jumps during Play.
+	JumpHeight: number
+	--- Set true to jump once if the character is on the ground. The controller sets it back to false on its next step, so a jump in the air does nothing.
+	Jump: boolean
+	--- The steepest slope the character walks up, in degrees from flat. A steeper slope stops it.
+	MaxSlopeAngle: number
+	--- The tallest ledge the character steps onto without jumping, in studs. A taller one stops it.
+	MaxStepHeight: number
+	--- Set true to crouch and false to stand. Holding C crouches too. The character stays crouched while something overhead is in the way of standing.
+	Crouch: boolean
+	--- How tall the character is while crouched, in studs. Its parts squash toward its feet, and the eyes drop as far as its top.
+	CrouchHeight: number
+	--- 0 to 1: how much of WalkSpeed or RunSpeed the character keeps while crouched.
+	CrouchSpeedScale: number
+	--- How far above the character's feet its eyes are, in studs. The camera sits there during Play.
+	EyeHeight: number
 	[string]: any
 end
 
@@ -1043,7 +1074,7 @@ declare function require(module: Instance): any
 --- Creates Instances.
 declare extern type InstanceLibrary with
 	--- Creates an Instance of this class with default properties and no parent. Set `Parent` to put it in the world.
-	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: string) -> Instance)
+	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: string) -> Instance)
 end
 
 --- Creates Instances.

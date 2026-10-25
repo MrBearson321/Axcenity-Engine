@@ -1106,12 +1106,77 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     (
         ClassName::ThirdPersonController,
         "CameraDistance",
-        "How far behind the character the camera sits during Play, in studs.",
+        "How far behind the character the camera sits during Play, in studs. The mouse wheel zooms it between CameraMinZoomDistance and CameraMaxZoomDistance and keeps the zoom here.",
+    ),
+    (
+        ClassName::ThirdPersonController,
+        "CameraMinZoomDistance",
+        "The closest the mouse wheel zooms the camera, in studs (at least 0.5). Set it to CameraMaxZoomDistance to lock the distance.",
+    ),
+    (
+        ClassName::ThirdPersonController,
+        "CameraMaxZoomDistance",
+        "The farthest the mouse wheel zooms the camera out, in studs.",
     ),
     (
         ClassName::ThirdPersonController,
         "CameraHeight",
         "How far above the character's feet the camera looks, in studs.",
+    ),
+    (
+        ClassName::FirstPersonController,
+        "Movement",
+        "\"Walk\" or \"Run\". Anything else moves at WalkSpeed. Set from a script or the set-property block.",
+    ),
+    (
+        ClassName::FirstPersonController,
+        "WalkSpeed",
+        "How fast Movement \"Walk\" moves, in studs a second, on flat ground.",
+    ),
+    (
+        ClassName::FirstPersonController,
+        "RunSpeed",
+        "How fast Movement \"Run\" moves, in studs a second, on flat ground.",
+    ),
+    (
+        ClassName::FirstPersonController,
+        "JumpHeight",
+        "How high a jump rises, in studs. Space jumps during Play.",
+    ),
+    (
+        ClassName::FirstPersonController,
+        "Jump",
+        "Set true to jump once if the character is on the ground. The controller sets it back to false on its next step, so a jump in the air does nothing.",
+    ),
+    (
+        ClassName::FirstPersonController,
+        "MaxSlopeAngle",
+        "The steepest slope the character walks up, in degrees from flat. A steeper slope stops it.",
+    ),
+    (
+        ClassName::FirstPersonController,
+        "MaxStepHeight",
+        "The tallest ledge the character steps onto without jumping, in studs. A taller one stops it.",
+    ),
+    (
+        ClassName::FirstPersonController,
+        "Crouch",
+        "Set true to crouch and false to stand. Holding C crouches too. The character stays crouched while something overhead is in the way of standing.",
+    ),
+    (
+        ClassName::FirstPersonController,
+        "CrouchHeight",
+        "How tall the character is while crouched, in studs. Its parts squash toward its feet, and the eyes drop as far as its top.",
+    ),
+    (
+        ClassName::FirstPersonController,
+        "CrouchSpeedScale",
+        "0 to 1: how much of WalkSpeed or RunSpeed the character keeps while crouched.",
+    ),
+    (
+        ClassName::FirstPersonController,
+        "EyeHeight",
+        "How far above the character's feet its eyes are, in studs. The camera sits there during Play.",
     ),
 ];
 
@@ -1276,7 +1341,10 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
             "Inside a Terrain: one material it's painted with (a tint, texture maps and tiling), and an optional rule that lays it down by height and slope."
         }
         ClassName::ThirdPersonController => {
-            "Walks, runs, jumps and crouches the character model it is parented to, kinematically, up slopes and steps within its limits, and owns the camera during Play. Movement is \"Walk\" or \"Run\". It is not a physics body: tuning its speeds and limits does not change how other parts fall."
+            "Walks, runs, jumps and crouches the character model it is parented to, kinematically, up slopes and steps within its limits, and owns the camera during Play: behind the character, zoomed with the mouse wheel. Movement is \"Walk\" or \"Run\". It is not a physics body: tuning its speeds and limits does not change how other parts fall."
+        }
+        ClassName::FirstPersonController => {
+            "Moves the character model it is parented to just like a ThirdPersonController, with the camera at the character's eyes during Play, looking where the player looks. A character has one controller or the other."
         }
     }
 }

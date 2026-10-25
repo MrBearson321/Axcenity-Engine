@@ -45,8 +45,13 @@ fn solid(world: &mut World, shape: PartType, size: Vector3, position: Vector3) -
 }
 
 /// A wide floor and a character standing on it: a Model, a 2×2×2 body
-/// whose feet are at y = 0, and a controller on the model.
+/// whose feet are at y = 0, and a third-person controller on the model.
 fn standing() -> (World, InstanceId, InstanceId) {
+    standing_as(ClassName::ThirdPersonController)
+}
+
+/// [`standing`], with a controller of `class`.
+fn standing_as(class: ClassName) -> (World, InstanceId, InstanceId) {
     let mut world = World::new();
     let workspace = world.workspace();
     solid(
@@ -71,7 +76,7 @@ fn standing() -> (World, InstanceId, InstanceId) {
             Value::Vector3(Vector3::new(0.0, 1.0, 0.0)),
         )
         .unwrap();
-    let controller = world.create(ClassName::ThirdPersonController).unwrap();
+    let controller = world.create(class).unwrap();
     world.set_parent(controller, Some(model)).unwrap();
     (world, controller, body)
 }
@@ -542,4 +547,211 @@ fn crouched_walk_and_run_are_slower_than_walking() {
     let ran = pos(&world, body).z - walked;
     assert!((ran + 16.0).abs() < 1e-3, "crouched run {ran}");
     assert_eq!(orientation(&world, body), Vector3::new(0.0, 0.0, 0.0));
+}
+
+/// The body's place and size after each frame of `inputs`, for a character
+/// driven by a `class` controller, after `build` adds to the world.
+fn course(
+    class: ClassName,
+    build: fn(&mut World, InstanceId),
+    inputs: &[MoveInput],
+) -> Vec<(Vector3, Vector3)> {
+    let (mut world, controller, body) = standing_as(class);
+    build(&mut world, controller);
+    let mut controllers = Controllers::default();
+    inputs
+        .iter()
+        .map(|&input| {
+            run(&mut world, &mut controllers, input, 1);
+            (pos(&world, body), size(&world, body))
+        })
+        .collect()
+}
+
+type Course = (
+    &'static str,
+    fn(&mut World, InstanceId),
+    Vec<MoveInput>,
+    fn(&[(Vector3, Vector3)]) -> bool,
+);
+
+#[test]
+fn a_first_person_controller_moves_exactly_like_a_third_person_one() {
+    let still = MoveInput::default();
+    let jump = MoveInput {
+        jump: true,
+        ..still
+    };
+    let last = |path: &[(Vector3, Vector3)]| path.last().unwrap().0;
+    let courses: Vec<Course> = vec![
+        (
+            "walk",
+            |_, _| {},
+            vec![forward(); 60],
+            |path| (path.last().unwrap().0.z + 16.0).abs() < 0.1,
+        ),
+        (
+            "run",
+            |world, id| {
+                world
+                    .set_property(id, "Movement", Value::String("Run".to_owned()))
+                    .unwrap();
+            },
+            vec![forward(); 60],
+            |path| (path.last().unwrap().0.z + 32.0).abs() < 0.1,
+        ),
+        (
+            "jump",
+            |_, _| {},
+            [vec![still, jump], vec![still; 60]].concat(),
+            |path| path.iter().any(|(p, _)| p.y - 1.0 > 7.0),
+        ),
+        (
+            "crouch",
+            |world, id| {
+                set(world, id, "CrouchHeight", 1.0);
+                crouch(world, id, true);
+            },
+            vec![forward(); 60],
+            |path| {
+                let (p, size) = path.last().unwrap();
+                size.y == 1.0 && (p.z + 8.0).abs() < 0.2
+            },
+        ),
+        (
+            "low step",
+            |world, _| ledge(world, 0.8),
+            vec![back(); 30],
+            |path| (path.last().unwrap().0.y - 1.8).abs() < 1e-3,
+        ),
+        (
+            "tall step",
+            |world, _| ledge(world, 1.5),
+            vec![back(); 30],
+            |path| (path.last().unwrap().0.y - 1.0).abs() < 1e-3,
+        ),
+        (
+            "gentle slope",
+            |world, _| ramp(world, 30.0),
+            vec![back(); 30],
+            |path| path.last().unwrap().0.y > 3.5,
+        ),
+        (
+            "steep slope",
+            |world, _| ramp(world, 60.0),
+            vec![back(); 60],
+            |path| (path.last().unwrap().0.y - 1.0).abs() < 0.05,
+        ),
+    ];
+    for (name, build, inputs, crossed) in courses {
+        let third = course(ClassName::ThirdPersonController, build, &inputs);
+        let first = course(ClassName::FirstPersonController, build, &inputs);
+        assert_eq!(first, third, "{name}");
+        assert!(crossed(&first), "{name}: ended at {:?}", last(&first));
+    }
+}
+
+#[test]
+fn the_first_person_camera_is_at_the_eyes_and_looks_where_the_player_looks() {
+    let (mut world, controller, body) = standing_as(ClassName::FirstPersonController);
+    set(&mut world, controller, "EyeHeight", 1.5);
+    let mut controllers = Controllers::default();
+    let start = controllers.view(&world).unwrap();
+    assert_eq!(start.position, Vector3::new(0.0, 1.5, 0.0));
+    assert_eq!(start.orientation, Vector3::new(0.0, 0.0, 0.0));
+
+    // Looking left and up turns the camera where it is.
+    let look = MoveInput {
+        look_dx: -100.0,
+        look_dy: -50.0,
+        ..MoveInput::default()
+    };
+    run(&mut world, &mut controllers, look, 1);
+    let turned = controllers.view(&world).unwrap();
+    assert_eq!(turned.position, start.position);
+    assert!((turned.orientation.y - 0.3_f32.to_degrees()).abs() < 1e-3);
+    assert!((turned.orientation.x - 0.15_f32.to_degrees()).abs() < 1e-3);
+
+    // Walking goes where it looks, and the camera stays at the eyes. The
+    // wheel doesn't move it.
+    let walk = MoveInput {
+        forward: true,
+        zoom: 5.0,
+        ..MoveInput::default()
+    };
+    run(&mut world, &mut controllers, walk, 30);
+    let at = pos(&world, body);
+    assert!(at.x < -1.0 && at.z < -4.0, "{at:?}");
+    let eyes = controllers.view(&world).unwrap().position;
+    assert!((eyes.x - at.x).abs() < 1e-4 && (eyes.z - at.z).abs() < 1e-4);
+    assert!((eyes.y - 1.5).abs() < 1e-4, "{eyes:?}");
+
+    // Crouched, the eyes drop as far as the top of the body.
+    set(&mut world, controller, "CrouchHeight", 1.0);
+    crouch(&mut world, controller, true);
+    run(&mut world, &mut controllers, MoveInput::default(), 1);
+    let low = controllers.view(&world).unwrap().position;
+    assert!((low.y - 0.5).abs() < 1e-4, "{low:?}");
+}
+
+/// How far the third-person camera is from the point it looks at, 4 studs
+/// above the feet of a [`standing`] character.
+fn zoomed(world: &World, controllers: &Controllers) -> f32 {
+    let at = controllers.view(world).unwrap().position;
+    let feet = Vector3::new(0.0, 4.0, 0.0);
+    ((at.x - feet.x).powi(2) + (at.y - feet.y).powi(2) + (at.z - feet.z).powi(2)).sqrt()
+}
+
+fn wheel(notches: f32) -> MoveInput {
+    MoveInput {
+        zoom: notches,
+        ..MoveInput::default()
+    }
+}
+
+fn camera_distance_property(world: &World, controller: InstanceId) -> f64 {
+    world
+        .get(controller)
+        .unwrap()
+        .property("CameraDistance")
+        .unwrap()
+        .as_number()
+        .unwrap()
+}
+
+#[test]
+fn the_wheel_zooms_the_third_person_camera_between_its_limits() {
+    let (mut world, controller, _) = standing();
+    set(&mut world, controller, "CameraMinZoomDistance", 4.0);
+    set(&mut world, controller, "CameraMaxZoomDistance", 20.0);
+    let mut controllers = Controllers::default();
+    run(&mut world, &mut controllers, MoveInput::default(), 1);
+    assert!((zoomed(&world, &controllers) - 12.0).abs() < 1e-3);
+
+    // One notch in is a fifth of the distance; scripts see it.
+    run(&mut world, &mut controllers, wheel(1.0), 1);
+    assert!((zoomed(&world, &controllers) - 9.6).abs() < 1e-3);
+    assert!((camera_distance_property(&world, controller) - 9.6).abs() < 1e-3);
+    run(&mut world, &mut controllers, wheel(-1.0), 1);
+    assert!(zoomed(&world, &controllers) > 11.0);
+
+    // It stops at the limits.
+    run(&mut world, &mut controllers, wheel(50.0), 1);
+    assert!((zoomed(&world, &controllers) - 4.0).abs() < 1e-3);
+    run(&mut world, &mut controllers, wheel(-50.0), 1);
+    assert!((zoomed(&world, &controllers) - 20.0).abs() < 1e-3);
+
+    // The same limit twice locks the distance.
+    set(&mut world, controller, "CameraMinZoomDistance", 8.0);
+    set(&mut world, controller, "CameraMaxZoomDistance", 8.0);
+    for notches in [3.0, -3.0, 50.0] {
+        run(&mut world, &mut controllers, wheel(notches), 1);
+        assert!((zoomed(&world, &controllers) - 8.0).abs() < 1e-3);
+    }
+
+    // Fully in, the camera comes to half a stud from where it looks.
+    set(&mut world, controller, "CameraMinZoomDistance", 0.0);
+    set(&mut world, controller, "CameraMaxZoomDistance", 128.0);
+    run(&mut world, &mut controllers, wheel(100.0), 1);
+    assert!((zoomed(&world, &controllers) - 0.5).abs() < 1e-3);
 }

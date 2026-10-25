@@ -258,10 +258,12 @@ impl EditorApp {
                     let button = RibbonButton::new(theme::insert_icon(what), what.label());
                     if ui
                         .add_enabled(!playing, button)
-                        .on_hover_text(
-                            "Insert a ThirdPersonController on the selected model or part. \
-                             With nothing selected, makes a simple character.",
-                        )
+                        .on_hover_text(format!(
+                            "Insert a {} on the selected model or part. With nothing \
+                             selected, or on a character that already has a controller, \
+                             makes a simple character.",
+                            what.class()
+                        ))
                         .on_disabled_hover_text("Press Stop to edit.")
                         .clicked()
                     {
