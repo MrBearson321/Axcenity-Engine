@@ -21,4 +21,11 @@ UserInputService.InputEnded:Connect(function(input)
     end
 end)
 
-print("WASD to walk, hold Shift to run, right-drag to turn the camera.")
+-- J jumps from Lua. Space jumps too, without a script.
+UserInputService.InputBegan:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.J then
+        controller.Jump = true
+    end
+end)
+
+print("WASD to walk, hold Shift to run, Space to jump, right-drag to turn the camera.")

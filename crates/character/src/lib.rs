@@ -3,32 +3,33 @@
 //! A [`ThirdPersonController`](axcenity_core::ClassName::ThirdPersonController)
 //! is parented to a character [`Model`](axcenity_core::ClassName::Model) (or
 //! to one Part). During Play, [`Controllers::step`] walks or runs that
-//! character on flat ground from the held movement keys. It is not a dynamic
-//! body: [`Controllers::keep_kinematic`] anchors its parts so physics does
-//! not tip or drop them, and so gravity and friction of other parts stay as
-//! they are.
+//! character from the held movement keys, jumps it, carries it up slopes and
+//! steps within its limits, and drops it under gravity off an edge. It is not
+//! a dynamic body: [`Controllers::keep_kinematic`] anchors its parts so
+//! physics does not tip or drop them, and so gravity and friction of other
+//! parts stay as they are.
 //!
 //! The first such controller in the Workspace that has a body receives the
-//! input and owns the camera. Jump, slopes, steps, crouch, and a
-//! first-person controller are later phases.
+//! input and owns the camera. Crouch and a first-person controller are later
+//! phases.
 
 use std::collections::BTreeMap;
 
 use axcenity_assets::Assets;
 use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
-use axcenity_physics::{RayHit, cast_ray_excluding};
+use axcenity_physics::{GRAVITY, RayHit, cast_ray_excluding};
 
-/// How far a flat floor may be from the feet, in studs, and still count as
-/// the ground the character is already standing on. Steeper ground and
-/// steps are a later phase.
-const SNAP: f32 = 0.75;
-/// A hit this close to straight up is flat ground. About 18 degrees.
-const FLAT_NORMAL_Y: f32 = 0.95;
-/// A hit flatter than this is not a wall, so the character is not stopped
-/// by the floor under its feet.
-const WALL_NORMAL_Y: f32 = 0.4;
-/// Gap left between the character and a wall, in studs.
+/// Gap left between the character and a wall or ceiling, in studs. Ground
+/// probes also start this far above the surface they look for.
 const SKIN: f32 = 0.05;
+/// The longest slice of one step's horizontal move, in studs. A long step
+/// goes in slices, so a slope or step on the way is met rather than jumped over.
+const MAX_SLICE: f32 = 0.5;
+const MAX_SLICES: f32 = 64.0;
+/// Steeper than this, `MaxSlopeAngle` is treated as this: a wall is never ground.
+const STEEPEST_SLOPE: f32 = 89.0;
+/// How many sensors (`CanCollide` off) one probe passes through before giving up.
+const MAX_SENSORS: usize = 8;
 /// Radians turned per pixel of mouse movement. The same as the fly camera.
 const MOUSE_SENSITIVITY: f32 = 0.003;
 const MAX_PITCH: f32 = 89.0_f32.to_radians();
@@ -38,13 +39,14 @@ const MIN_CAMERA_DISTANCE: f32 = 1.0;
 
 /// Keys held for the character that owns the camera, and mouse look since
 /// the last step. Right and down are positive, in pixels, as with the fly
-/// camera.
+/// camera. `jump` is Space: held on landing, it jumps again.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct MoveInput {
     pub forward: bool,
     pub back: bool,
     pub left: bool,
     pub right: bool,
+    pub jump: bool,
     pub look_dx: f32,
     pub look_dy: f32,
 }
@@ -85,6 +87,44 @@ impl Orbit {
     }
 }
 
+/// One controller's vertical motion. Not saved; Play starts in the air, and
+/// the first step lands the character if it stands on something.
+#[derive(Clone, Copy, Debug, Default)]
+struct Fall {
+    /// Studs a second, up positive.
+    velocity: f32,
+    grounded: bool,
+}
+
+/// What one controller can cross, read from its properties each step.
+struct Limits {
+    jump_height: f32,
+    /// Cosine of `MaxSlopeAngle`: ground whose normal points at least this
+    /// far up is walkable.
+    slope_cos: f32,
+    slope_tan: f32,
+    step: f32,
+}
+
+impl Limits {
+    fn read(world: &World, id: InstanceId) -> Self {
+        let slope = number(world, id, "MaxSlopeAngle")
+            .unwrap_or(45.0)
+            .clamp(0.0, STEEPEST_SLOPE)
+            .to_radians();
+        Self {
+            jump_height: number(world, id, "JumpHeight").unwrap_or(7.2).max(0.0),
+            slope_cos: slope.cos(),
+            slope_tan: slope.tan(),
+            step: number(world, id, "MaxStepHeight").unwrap_or(1.0).max(0.0),
+        }
+    }
+
+    fn walkable(&self, normal: Vector3) -> bool {
+        normal.y >= self.slope_cos - 1e-4
+    }
+}
+
 /// The parts one controller moves, and the box around them. The box ignores
 /// rotation: characters stand upright, and turning them is not this phase.
 struct Body {
@@ -101,6 +141,7 @@ struct Body {
 #[derive(Default)]
 pub struct Controllers {
     orbits: BTreeMap<InstanceId, Orbit>,
+    falls: BTreeMap<InstanceId, Fall>,
     /// The controller that last received input, if it is still in the world.
     active: Option<InstanceId>,
 }
@@ -123,6 +164,7 @@ impl Controllers {
             0.0
         };
         self.orbits.retain(|id, _| world.get(*id).is_some());
+        self.falls.retain(|id, _| world.get(*id).is_some());
         let Some(id) = active_id(world) else {
             self.active = None;
             return None;
@@ -131,16 +173,20 @@ impl Controllers {
         let orbit = self.orbits.entry(id).or_default();
         orbit.look(input.look_dx, input.look_dy);
         let orbit = *orbit;
-        if let Some(body) = Body::read(world, id) {
-            let distance = speed_of(world, id) * dt;
-            let (dx, dz) = wish(orbit.yaw, input, distance);
-            let (dx, dz) = walls(world, assets, &body, dx, dz);
-            if dx != 0.0 || dz != 0.0 {
-                translate(world, &body.parts, dx, 0.0, dz);
+        // Taken first, so a request made in the air is used up, not kept for landing.
+        let jump = take_jump(world, id) || input.jump;
+        if let Some(mut body) = Body::read(world, id) {
+            let limits = Limits::read(world, id);
+            let fall = self.falls.entry(id).or_default();
+            if jump && fall.grounded {
+                fall.velocity = (2.0 * GRAVITY * limits.jump_height).sqrt();
+                fall.grounded = false;
             }
-            let dy = ground(world, assets, &body, dx, dz);
-            if dy != 0.0 {
-                translate(world, &body.parts, 0.0, dy, 0.0);
+            let (dx, dz) = wish(orbit.yaw, input, speed_of(world, id) * dt);
+            let slices = (dx.hypot(dz) / MAX_SLICE).ceil().clamp(1.0, MAX_SLICES);
+            for _ in 0..slices as usize {
+                let (sx, sz) = (dx / slices, dz / slices);
+                move_slice(world, assets, &mut body, &limits, fall, sx, sz, dt / slices);
             }
         }
         self.view(world)
@@ -277,6 +323,29 @@ impl Body {
             radius: ((max.x - min.x).max(max.z - min.z) * 0.5).max(0.25),
         })
     }
+
+    /// Moves every part, and the box with them.
+    fn shift(&mut self, world: &mut World, dx: f32, dy: f32, dz: f32) {
+        if dx == 0.0 && dy == 0.0 && dz == 0.0 {
+            return;
+        }
+        translate(world, &self.parts, dx, dy, dz);
+        self.pivot_x += dx;
+        self.feet_y += dy;
+        self.pivot_z += dz;
+    }
+
+    /// Where ground is looked for: under the middle and, when moving, under
+    /// the leading edge, so the character steps up as its front reaches a
+    /// step and stays up until its middle has left an edge.
+    fn ground_points(&self, ahead: Option<(f32, f32)>) -> Vec<(f32, f32)> {
+        let mut points = vec![(self.pivot_x, self.pivot_z)];
+        if let Some((ux, uz)) = ahead {
+            let reach = self.radius - SKIN;
+            points.push((self.pivot_x + ux * reach, self.pivot_z + uz * reach));
+        }
+        points
+    }
 }
 
 fn finite(value: Vector3) -> bool {
@@ -305,6 +374,19 @@ fn speed_of(world: &World, id: InstanceId) -> f32 {
     number(world, id, name).unwrap_or(0.0).max(0.0)
 }
 
+/// True when a script or block set `Jump`. Sets it back to false.
+fn take_jump(world: &mut World, id: InstanceId) -> bool {
+    let requested = world
+        .get(id)
+        .and_then(|instance| instance.property("Jump"))
+        .and_then(Value::as_bool)
+        == Some(true);
+    if requested {
+        let _ = world.set_property(id, "Jump", Value::Bool(false));
+    }
+    requested
+}
+
 fn camera_distance(world: &World, id: InstanceId) -> f32 {
     number(world, id, "CameraDistance")
         .unwrap_or(12.0)
@@ -331,24 +413,153 @@ fn wish(yaw: f32, input: MoveInput, distance: f32) -> (f32, f32) {
     (x / len * distance, z / len * distance)
 }
 
-fn walls(world: &World, assets: &Assets, body: &Body, dx: f32, dz: f32) -> (f32, f32) {
+/// The unit direction of a move, or `None` for no move.
+fn heading(dx: f32, dz: f32) -> Option<(f32, f32)> {
     let len = dx.hypot(dz);
-    if len < 1e-5 {
-        return (dx, dz);
+    (len >= 1e-5).then(|| (dx / len, dz / len))
+}
+
+/// One slice of a step: across, then up or down.
+#[allow(clippy::too_many_arguments)]
+fn move_slice(
+    world: &mut World,
+    assets: &Assets,
+    body: &mut Body,
+    limits: &Limits,
+    fall: &mut Fall,
+    dx: f32,
+    dz: f32,
+    dt: f32,
+) {
+    let (dx, dz) = walls(world, assets, body, limits, dx, dz);
+    body.shift(world, dx, 0.0, dz);
+    let ahead = heading(dx, dz);
+    if fall.grounded {
+        match ground(world, assets, body, limits, ahead, dx.hypot(dz)) {
+            Some(dy) => {
+                body.shift(world, 0.0, dy, 0.0);
+                return;
+            }
+            // Walked off an edge.
+            None => {
+                fall.grounded = false;
+                fall.velocity = 0.0;
+            }
+        }
     }
+    fly(world, assets, body, fall, ahead, dt);
+}
+
+/// The first solid hit along a ray, passing through sensors (`CanCollide`
+/// off) and the character's own body.
+fn solid_hit(
+    world: &World,
+    assets: &Assets,
+    body: &Body,
+    origin: Vector3,
+    direction: Vector3,
+) -> Option<RayHit> {
+    let mut skip = body.parts.clone();
+    for _ in 0..MAX_SENSORS {
+        let hit = cast_ray_excluding(world, assets, origin, direction, &skip)?;
+        if hit.can_collide {
+            return Some(hit);
+        }
+        skip.push(hit.instance);
+    }
+    None
+}
+
+/// A horizontal ray from the middle of the body at height `y`, reaching the
+/// move plus the body's radius.
+fn ray_across(
+    world: &World,
+    assets: &Assets,
+    body: &Body,
+    y: f32,
+    dx: f32,
+    dz: f32,
+) -> Option<RayHit> {
+    let len = dx.hypot(dz);
     let reach = len + body.radius;
-    let origin = Vector3::new(body.pivot_x, body.feet_y + body.height * 0.5, body.pivot_z);
+    let origin = Vector3::new(body.pivot_x, y, body.pivot_z);
     let direction = Vector3::new(dx / len * reach, 0.0, dz / len * reach);
-    let Some(hit) = cast_ray_excluding(world, assets, origin, direction, &body.parts) else {
+    solid_hit(world, assets, body, origin, direction)
+}
+
+/// Heights above the step limit where anything that isn't walkable ground
+/// is a wall: just above a step, the middle, and just under the top.
+fn wall_heights(body: &Body, limits: &Limits) -> Vec<f32> {
+    let lowest = body.feet_y + limits.step + 2.0 * SKIN;
+    let top = body.feet_y + body.height - SKIN;
+    let mut heights: Vec<f32> = Vec::new();
+    for y in [lowest, body.feet_y + body.height * 0.5, top] {
+        if y >= lowest && y <= top && heights.last().is_none_or(|last| y - last > SKIN) {
+            heights.push(y);
+        }
+    }
+    heights
+}
+
+/// The move left after walls and slopes too steep to climb, which stop the
+/// character and let it slide along them. A low face it can stand on top
+/// of is a step, and does not stop it.
+fn walls(
+    world: &World,
+    assets: &Assets,
+    body: &Body,
+    limits: &Limits,
+    dx: f32,
+    dz: f32,
+) -> (f32, f32) {
+    let (mut dx, mut dz) = (dx, dz);
+    for y in wall_heights(body, limits) {
+        if heading(dx, dz).is_none() {
+            return (dx, dz);
+        }
+        if let Some(hit) = ray_across(world, assets, body, y, dx, dz)
+            && !limits.walkable(hit.normal)
+        {
+            (dx, dz) = slide(dx, dz, dx.hypot(dz), body.radius, hit);
+        }
+    }
+    let Some(ahead) = heading(dx, dz) else {
         return (dx, dz);
     };
-    slide(dx, dz, len, body.radius, hit)
+    if let Some(hit) = ray_across(world, assets, body, body.feet_y + SKIN, dx, dz)
+        && !limits.walkable(hit.normal)
+        && !can_step(world, assets, body, limits, hit, ahead)
+    {
+        (dx, dz) = slide(dx, dz, dx.hypot(dz), body.radius, hit);
+    }
+    (dx, dz)
+}
+
+/// True when the low face that `hit` found has walkable ground on top of
+/// it, no higher above the feet than the step limit.
+fn can_step(
+    world: &World,
+    assets: &Assets,
+    body: &Body,
+    limits: &Limits,
+    hit: RayHit,
+    (ux, uz): (f32, f32),
+) -> bool {
+    let up = limits.step + SKIN;
+    // Just past the face, looking down for its top.
+    let origin = Vector3::new(
+        hit.position.x + ux * 2.0 * SKIN,
+        body.feet_y + up,
+        hit.position.z + uz * 2.0 * SKIN,
+    );
+    let Some(top) = solid_hit(world, assets, body, origin, Vector3::new(0.0, -up, 0.0)) else {
+        return false;
+    };
+    // A ray that starts inside something has found a face taller than a step.
+    top.distance > 0.0 && limits.walkable(top.normal) && top.position.y - body.feet_y <= limits.step
 }
 
 fn slide(dx: f32, dz: f32, len: f32, radius: f32, hit: RayHit) -> (f32, f32) {
-    if !hit.can_collide || hit.normal.y >= WALL_NORMAL_Y {
-        return (dx, dz);
-    }
     let allowed = (hit.distance - radius - SKIN).clamp(0.0, len);
     let moved_x = dx / len * allowed;
     let moved_z = dz / len * allowed;
@@ -371,22 +582,94 @@ fn slide(dx: f32, dz: f32, len: f32, radius: f32, hit: RayHit) -> (f32, f32) {
     )
 }
 
-fn ground(world: &World, assets: &Assets, body: &Body, dx: f32, dz: f32) -> f32 {
-    let origin = Vector3::new(body.pivot_x + dx, body.feet_y + 1.0, body.pivot_z + dz);
-    let Some(hit) = cast_ray_excluding(
-        world,
-        assets,
-        origin,
-        Vector3::new(0.0, -2.0, 0.0),
-        &body.parts,
-    ) else {
-        return 0.0;
-    };
-    if !hit.can_collide || hit.normal.y < FLAT_NORMAL_Y {
-        return 0.0;
+/// How far to move the feet up (positive) or down to stay on the ground
+/// after moving `moved` studs across, or `None` when there's no ground in
+/// reach: the character walked off an edge.
+fn ground(
+    world: &World,
+    assets: &Assets,
+    body: &Body,
+    limits: &Limits,
+    ahead: Option<(f32, f32)>,
+    moved: f32,
+) -> Option<f32> {
+    let up = limits.step + SKIN;
+    // Far enough down to follow the steepest walkable slope, and to step
+    // down a ledge no taller than a step.
+    let down = limits.step.max(moved * limits.slope_tan) + SKIN;
+    let mut best: Option<f32> = None;
+    for (x, z) in body.ground_points(ahead) {
+        let origin = Vector3::new(x, body.feet_y + up, z);
+        let direction = Vector3::new(0.0, -(up + down), 0.0);
+        let Some(hit) = solid_hit(world, assets, body, origin, direction) else {
+            continue;
+        };
+        // Starting inside something means a ledge taller than a step.
+        if hit.distance <= 0.0 {
+            continue;
+        }
+        let dy = hit.position.y - body.feet_y;
+        // Moving onto ground steeper than the limit is refused. Ground the
+        // feet are already on is kept, so a character that landed on a
+        // steep slope stands still.
+        if dy > limits.step || (dy.abs() > SKIN && !limits.walkable(hit.normal)) {
+            continue;
+        }
+        best = Some(best.map_or(dy, |best| best.max(dy)));
     }
-    let dy = hit.position.y - body.feet_y;
-    if dy.abs() <= SNAP { dy } else { 0.0 }
+    best
+}
+
+/// Rises or falls under gravity for `dt` seconds, stopping under a ceiling
+/// and landing on whatever solid is below.
+fn fly(
+    world: &mut World,
+    assets: &Assets,
+    body: &mut Body,
+    fall: &mut Fall,
+    ahead: Option<(f32, f32)>,
+    dt: f32,
+) {
+    let start = fall.velocity;
+    fall.velocity -= GRAVITY * dt;
+    let dy = (start + fall.velocity) * 0.5 * dt;
+    if dy > 0.0 {
+        let origin = Vector3::new(body.pivot_x, body.feet_y + body.height - SKIN, body.pivot_z);
+        let rise = match solid_hit(
+            world,
+            assets,
+            body,
+            origin,
+            Vector3::new(0.0, dy + SKIN, 0.0),
+        ) {
+            Some(hit) => {
+                fall.velocity = 0.0;
+                (hit.distance - 2.0 * SKIN).clamp(0.0, dy)
+            }
+            None => dy,
+        };
+        body.shift(world, 0.0, rise, 0.0);
+    } else if dy < 0.0 {
+        let mut landing: Option<f32> = None;
+        for (x, z) in body.ground_points(ahead) {
+            let origin = Vector3::new(x, body.feet_y + SKIN, z);
+            let direction = Vector3::new(0.0, dy - SKIN, 0.0);
+            if let Some(hit) = solid_hit(world, assets, body, origin, direction)
+                && hit.distance > 0.0
+            {
+                let to = hit.position.y - body.feet_y;
+                landing = Some(landing.map_or(to, |landing| landing.max(to)));
+            }
+        }
+        match landing {
+            Some(to) => {
+                body.shift(world, 0.0, to, 0.0);
+                fall.grounded = true;
+                fall.velocity = 0.0;
+            }
+            None => body.shift(world, 0.0, dy, 0.0),
+        }
+    }
 }
 
 fn translate(world: &mut World, parts: &[InstanceId], dx: f32, dy: f32, dz: f32) {
@@ -425,215 +708,4 @@ fn pose_camera(world: &World, id: InstanceId, orbit: Orbit) -> Option<CharacterC
 }
 
 #[cfg(test)]
-mod tests {
-    use axcenity_core::{ClassName, Value, Vector3, World};
-    use axcenity_physics::Physics;
-
-    use super::*;
-
-    fn pos(world: &World, id: InstanceId) -> Vector3 {
-        world
-            .get(id)
-            .unwrap()
-            .property("Position")
-            .unwrap()
-            .as_vector3()
-            .unwrap()
-    }
-
-    fn orientation(world: &World, id: InstanceId) -> Vector3 {
-        world
-            .get(id)
-            .unwrap()
-            .property("Orientation")
-            .unwrap()
-            .as_vector3()
-            .unwrap()
-    }
-
-    /// A wide floor and a character standing on it: a Model, a 2×2×2 body
-    /// whose feet are at y = 0, and a controller on the model.
-    fn standing() -> (World, InstanceId, InstanceId) {
-        let mut world = World::new();
-        let workspace = world.workspace();
-        let floor = world.create(ClassName::Part).unwrap();
-        world.set_parent(floor, Some(workspace)).unwrap();
-        world
-            .set_property(floor, "Anchored", Value::Bool(true))
-            .unwrap();
-        world
-            .set_property(floor, "Size", Value::Vector3(Vector3::new(80.0, 1.0, 80.0)))
-            .unwrap();
-        world
-            .set_property(
-                floor,
-                "Position",
-                Value::Vector3(Vector3::new(0.0, -0.5, 0.0)),
-            )
-            .unwrap();
-        let model = world.create(ClassName::Model).unwrap();
-        world.set_name(model, "Character").unwrap();
-        world.set_parent(model, Some(workspace)).unwrap();
-        let body = world.create(ClassName::Part).unwrap();
-        world.set_name(body, "Body").unwrap();
-        world.set_parent(body, Some(model)).unwrap();
-        world
-            .set_property(body, "Size", Value::Vector3(Vector3::new(2.0, 2.0, 2.0)))
-            .unwrap();
-        world
-            .set_property(
-                body,
-                "Position",
-                Value::Vector3(Vector3::new(0.0, 1.0, 0.0)),
-            )
-            .unwrap();
-        let controller = world.create(ClassName::ThirdPersonController).unwrap();
-        world.set_parent(controller, Some(model)).unwrap();
-        (world, controller, body)
-    }
-
-    fn forward() -> MoveInput {
-        MoveInput {
-            forward: true,
-            ..MoveInput::default()
-        }
-    }
-
-    #[test]
-    fn walk_and_run_move_at_different_speeds_and_stay_upright() {
-        let assets = Assets::default();
-        let (mut world, controller, body) = standing();
-        world
-            .set_property(controller, "WalkSpeed", Value::Number(16.0))
-            .unwrap();
-        world
-            .set_property(controller, "RunSpeed", Value::Number(32.0))
-            .unwrap();
-        let mut controllers = Controllers::default();
-        controllers.step(&mut world, &assets, forward(), 1.0);
-        let walked = pos(&world, body);
-        assert!((walked.z + 16.0).abs() < 1e-3, "{walked:?}");
-        assert!((walked.y - 1.0).abs() < 1e-3, "{walked:?}");
-        assert_eq!(orientation(&world, body), Vector3::new(0.0, 0.0, 0.0));
-
-        world
-            .set_property(
-                body,
-                "Position",
-                Value::Vector3(Vector3::new(0.0, 1.0, 0.0)),
-            )
-            .unwrap();
-        world
-            .set_property(controller, "Movement", Value::String("Run".to_owned()))
-            .unwrap();
-        controllers.step(&mut world, &assets, forward(), 1.0);
-        let ran = pos(&world, body);
-        assert!((ran.z + 32.0).abs() < 1e-3, "{ran:?}");
-        assert!((ran.y - 1.0).abs() < 1e-3, "{ran:?}");
-        assert_eq!(orientation(&world, body), Vector3::new(0.0, 0.0, 0.0));
-    }
-
-    #[test]
-    fn the_camera_starts_behind_the_character() {
-        let (world, _, _) = standing();
-        let camera = Controllers::default().view(&world).unwrap();
-        assert!(camera.position.z > 8.0, "{:?}", camera.position);
-        assert!(camera.position.y > 4.0, "{:?}", camera.position);
-        assert!(camera.position.x.abs() < 1e-3, "{:?}", camera.position);
-    }
-
-    #[test]
-    fn a_wall_stops_the_character_and_a_crate_still_falls() {
-        let assets = Assets::default();
-        let (mut world, controller, body) = standing();
-        world
-            .set_property(controller, "WalkSpeed", Value::Number(16.0))
-            .unwrap();
-        let wall = world.create(ClassName::Part).unwrap();
-        world.set_parent(wall, Some(world.workspace())).unwrap();
-        world
-            .set_property(wall, "Anchored", Value::Bool(true))
-            .unwrap();
-        world
-            .set_property(wall, "Size", Value::Vector3(Vector3::new(6.0, 4.0, 1.0)))
-            .unwrap();
-        world
-            .set_property(
-                wall,
-                "Position",
-                Value::Vector3(Vector3::new(0.0, 1.0, -4.0)),
-            )
-            .unwrap();
-        let crate_id = world.create(ClassName::Part).unwrap();
-        world.set_parent(crate_id, Some(world.workspace())).unwrap();
-        world
-            .set_property(
-                crate_id,
-                "Position",
-                Value::Vector3(Vector3::new(0.0, 10.0, 20.0)),
-            )
-            .unwrap();
-        world
-            .set_property(
-                crate_id,
-                "Size",
-                Value::Vector3(Vector3::new(2.0, 2.0, 2.0)),
-            )
-            .unwrap();
-
-        let mut controllers = Controllers::default();
-        controllers.step(&mut world, &assets, forward(), 1.0);
-        let stopped = pos(&world, body);
-        // The wall's near face is at z = -3.5. The body is 2 studs deep, so
-        // its center stops short of that.
-        assert!(stopped.z < -1.0 && stopped.z > -3.2, "{stopped:?}");
-        assert_eq!(orientation(&world, body), Vector3::new(0.0, 0.0, 0.0));
-
-        controllers.keep_kinematic(&mut world);
-        assert_eq!(
-            world
-                .get(body)
-                .unwrap()
-                .property("Anchored")
-                .and_then(Value::as_bool),
-            Some(true)
-        );
-        let mut physics = Physics::with_assets(assets);
-        // One call runs at most ten fixed steps, so repeat until a second
-        // of falling has been simulated.
-        for _ in 0..6 {
-            physics.step(&mut world, 0.5);
-        }
-        let landed = pos(&world, crate_id);
-        assert!(landed.y < 5.0, "{landed:?}");
-        assert!((pos(&world, body).y - stopped.y).abs() < 1e-3);
-        assert_eq!(axcenity_physics::GRAVITY, 196.2);
-    }
-
-    #[test]
-    fn walk_speed_does_not_change_how_a_crate_falls() {
-        fn fallen(walk_speed: f64) -> Vector3 {
-            let assets = Assets::default();
-            let (mut world, controller, _) = standing();
-            world
-                .set_property(controller, "WalkSpeed", Value::Number(walk_speed))
-                .unwrap();
-            let crate_id = world.create(ClassName::Part).unwrap();
-            world.set_parent(crate_id, Some(world.workspace())).unwrap();
-            world
-                .set_property(
-                    crate_id,
-                    "Position",
-                    Value::Vector3(Vector3::new(0.0, 10.0, 20.0)),
-                )
-                .unwrap();
-            let mut controllers = Controllers::default();
-            controllers.step(&mut world, &assets, MoveInput::default(), 1.0 / 60.0);
-            controllers.keep_kinematic(&mut world);
-            let mut physics = Physics::with_assets(assets);
-            physics.step(&mut world, 0.5);
-            pos(&world, crate_id)
-        }
-        assert_eq!(fallen(16.0), fallen(200.0));
-    }
-}
+mod tests;

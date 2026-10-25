@@ -151,11 +151,73 @@ fn hello_character_walks_runs_and_switches_from_lua_and_blocks() {
     frame(&mut world, &press(K::Two, false), MoveInput::default());
     frame(&mut world, &press(K::One, true), MoveInput::default());
     assert_eq!(movement(&world), "Walk");
+    frame(&mut world, &press(K::One, false), MoveInput::default());
+
+    // J jumps from the LocalScript, and 3 from the block script. Each jump
+    // rises and lands back on the floor within a second.
+    for key in [K::J, K::Three] {
+        let start = body_position(&world).y;
+        frame(&mut world, &press(key, true), MoveInput::default());
+        frame(&mut world, &press(key, false), MoveInput::default());
+        let mut peak = start;
+        for _ in 0..60 {
+            frame(&mut world, &[], MoveInput::default());
+            peak = peak.max(body_position(&world).y);
+        }
+        assert!(peak - start > 6.0, "{key:?} rose {}", peak - start);
+        assert!((body_position(&world).y - start).abs() < 1e-3);
+    }
 
     // The body never fell as a physics body; the crate did, onto the floor.
     assert!((body_position(&world).y - 2.5).abs() < 1e-3);
     let crate_y = position_of(&world, "Crate").y;
     assert!(crate_y < 3.0, "crate at {crate_y}");
+}
+
+#[test]
+fn hello_character_crosses_the_grey_step_and_ramp_and_is_stopped_by_the_red_ones() {
+    let walk = MoveInput {
+        forward: true,
+        ..MoveInput::default()
+    };
+    // Walks toward -Z for `frames` 60ths of a second from x, and returns
+    // where the body's feet end up.
+    let walk_from = |x: f32, frames: usize| {
+        let (mut world, _) = start_example("hello-character");
+        let assets = Assets::default();
+        let model = world
+            .find_first_child(world.workspace(), "Character")
+            .unwrap();
+        let body = world.find_first_child(model, "Body").unwrap();
+        world
+            .set_property(body, "Position", Value::Vector3(Vector3::new(x, 2.5, 0.0)))
+            .unwrap();
+        let mut characters = Controllers::default();
+        for _ in 0..frames {
+            characters.step(&mut world, &assets, walk, 1.0 / 60.0);
+        }
+        let center = world
+            .get(body)
+            .unwrap()
+            .property("Position")
+            .and_then(Value::as_vector3)
+            .unwrap();
+        Vector3::new(center.x, center.y - 2.5, center.z)
+    };
+    let low_step = walk_from(12.0, 40);
+    assert!((low_step.y - 0.8).abs() < 1e-3, "LowStep {low_step:?}");
+    let ramp = walk_from(20.0, 60);
+    assert!((ramp.y - 5.0).abs() < 1e-3, "Ramp to Platform {ramp:?}");
+    let tall_step = walk_from(-12.0, 60);
+    assert!(
+        tall_step.y.abs() < 1e-3 && tall_step.z > -6.0,
+        "TallStep {tall_step:?}"
+    );
+    let steep = walk_from(-20.0, 60);
+    assert!(
+        steep.y.abs() < 0.05 && steep.z > -4.0,
+        "SteepRamp {steep:?}"
+    );
 }
 
 #[test]

@@ -720,6 +720,7 @@ impl ApplicationHandler for App {
                         back: self.keys.back,
                         left: self.keys.left,
                         right: self.keys.right,
+                        jump: self.held_keys.contains(&axcenity_core::KeyCode::Space),
                         look_dx: self.look_dx,
                         look_dy: self.look_dy,
                     }

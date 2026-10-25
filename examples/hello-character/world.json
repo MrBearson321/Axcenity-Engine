@@ -66,6 +66,60 @@
           "Size": [2, 0.2, 2],
           "Color": [0.95, 0.75, 0.2]
         }
+      },
+      {
+        "class": "Part",
+        "name": "LowStep",
+        "properties": {
+          "Anchored": true,
+          "Position": [12, 0.4, -10],
+          "Size": [6, 0.8, 8],
+          "Color": [0.55, 0.57, 0.6]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Ramp",
+        "properties": {
+          "Anchored": true,
+          "Shape": "Wedge",
+          "Orientation": [0, 180, 0],
+          "Position": [20, 2.5, -8.33],
+          "Size": [6, 5, 8.66],
+          "Color": [0.55, 0.57, 0.6]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Platform",
+        "properties": {
+          "Anchored": true,
+          "Position": [20, 2.5, -17.66],
+          "Size": [6, 5, 10],
+          "Color": [0.55, 0.57, 0.6]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "TallStep",
+        "properties": {
+          "Anchored": true,
+          "Position": [-12, 1, -10],
+          "Size": [6, 2, 8],
+          "Color": [0.75, 0.35, 0.3]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "SteepRamp",
+        "properties": {
+          "Anchored": true,
+          "Shape": "Wedge",
+          "Orientation": [0, 180, 0],
+          "Position": [-20, 2.5, -5.443],
+          "Size": [6, 5, 2.887],
+          "Color": [0.75, 0.35, 0.3]
+        }
       }
     ]
   }

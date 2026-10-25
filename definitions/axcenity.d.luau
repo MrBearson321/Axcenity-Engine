@@ -994,7 +994,7 @@ declare extern type TerrainLayer extends Instance with
 	[string]: any
 end
 
---- Walks and runs the character model it is parented to, kinematically, and owns the camera during Play. Movement is "Walk" or "Run". It is not a physics body: tuning its speeds does not change how other parts fall.
+--- Walks, runs and jumps the character model it is parented to, kinematically, up slopes and steps within its limits, and owns the camera during Play. Movement is "Walk" or "Run". It is not a physics body: tuning its speeds and limits does not change how other parts fall.
 declare extern type ThirdPersonController extends Instance with
 	--- "Walk" or "Run". Anything else moves at WalkSpeed. Set from a script or the set-property block.
 	Movement: string
@@ -1002,6 +1002,14 @@ declare extern type ThirdPersonController extends Instance with
 	WalkSpeed: number
 	--- How fast Movement "Run" moves, in studs a second, on flat ground.
 	RunSpeed: number
+	--- How high a jump rises, in studs. Space jumps during Play.
+	JumpHeight: number
+	--- Set true to jump once if the character is on the ground. The controller sets it back to false on its next step, so a jump in the air does nothing.
+	Jump: boolean
+	--- The steepest slope the character walks up, in degrees from flat. A steeper slope stops it.
+	MaxSlopeAngle: number
+	--- The tallest ledge the character steps onto without jumping, in studs. A taller one stops it.
+	MaxStepHeight: number
 	--- How far behind the character the camera sits during Play, in studs.
 	CameraDistance: number
 	--- How far above the character's feet the camera looks, in studs.

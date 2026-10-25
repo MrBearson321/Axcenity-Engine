@@ -1070,6 +1070,26 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     ),
     (
         ClassName::ThirdPersonController,
+        "JumpHeight",
+        "How high a jump rises, in studs. Space jumps during Play.",
+    ),
+    (
+        ClassName::ThirdPersonController,
+        "Jump",
+        "Set true to jump once if the character is on the ground. The controller sets it back to false on its next step, so a jump in the air does nothing.",
+    ),
+    (
+        ClassName::ThirdPersonController,
+        "MaxSlopeAngle",
+        "The steepest slope the character walks up, in degrees from flat. A steeper slope stops it.",
+    ),
+    (
+        ClassName::ThirdPersonController,
+        "MaxStepHeight",
+        "The tallest ledge the character steps onto without jumping, in studs. A taller one stops it.",
+    ),
+    (
+        ClassName::ThirdPersonController,
         "CameraDistance",
         "How far behind the character the camera sits during Play, in studs.",
     ),
@@ -1241,7 +1261,7 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
             "Inside a Terrain: one material it's painted with (a tint, texture maps and tiling), and an optional rule that lays it down by height and slope."
         }
         ClassName::ThirdPersonController => {
-            "Walks and runs the character model it is parented to, kinematically, and owns the camera during Play. Movement is \"Walk\" or \"Run\". It is not a physics body: tuning its speeds does not change how other parts fall."
+            "Walks, runs and jumps the character model it is parented to, kinematically, up slopes and steps within its limits, and owns the camera during Play. Movement is \"Walk\" or \"Run\". It is not a physics body: tuning its speeds and limits does not change how other parts fall."
         }
     }
 }

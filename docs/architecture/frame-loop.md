@@ -2,7 +2,7 @@
 
 The fixed order of one frame. Do not reorder it casually.
 
-1. Read input. When a `ThirdPersonController` in the Workspace has a body, `character` steps it here (walk or run, and its follow camera) before scripts run. Only the first such controller receives the keys.
+1. Read input. When a `ThirdPersonController` in the Workspace has a body, `character` steps it here (walk or run, jump and fall, slopes and steps, and its follow camera) before scripts run. Only the first such controller receives the keys.
 2. Resume coroutines whose wait has expired, and fire queued events
 3. Hold that character's parts kinematic (`Controllers::keep_kinematic`), then step physics at a fixed 60 Hz (accumulator; may run 0–N steps per frame). Other bodies keep the same gravity and friction.
 4. Fire `Touched` and collision events, then `RunService.Heartbeat`; then particles and Animators move on (Animators pose their MeshParts and fire `StateChanged`)

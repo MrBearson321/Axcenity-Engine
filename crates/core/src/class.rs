@@ -616,6 +616,15 @@ impl ClassName {
                 // Studs a second across flat ground.
                 ("WalkSpeed", Value::Number(16.0)),
                 ("RunSpeed", Value::Number(32.0)),
+                // How high a jump rises, in studs.
+                ("JumpHeight", Value::Number(7.2)),
+                // Set true to jump once from the ground. The controller sets
+                // it back to false on its next step, in the air or not.
+                ("Jump", Value::Bool(false)),
+                // The steepest ground it walks up, in degrees from flat.
+                ("MaxSlopeAngle", Value::Number(45.0)),
+                // The tallest ledge it steps onto without jumping, in studs.
+                ("MaxStepHeight", Value::Number(1.0)),
                 // How far behind the character the camera sits, in studs.
                 ("CameraDistance", Value::Number(12.0)),
                 // How far above the character's feet the camera looks, in studs.

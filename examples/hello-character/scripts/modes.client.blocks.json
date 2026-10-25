@@ -49,6 +49,31 @@
           }
         ]
       }
+    },
+    {
+      "id": 7,
+      "kind": {
+        "type": "when_key_pressed",
+        "key": "Three",
+        "body": [
+          {
+            "id": 8,
+            "kind": {
+              "type": "set_property",
+              "target": "Character.ThirdPersonController",
+              "property": "Jump",
+              "value": { "type": "boolean", "value": true }
+            }
+          },
+          {
+            "id": 9,
+            "kind": {
+              "type": "print",
+              "value": { "type": "text", "value": "jumping" }
+            }
+          }
+        ]
+      }
     }
   ]
 }
