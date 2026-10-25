@@ -1,12 +1,47 @@
 use super::*;
 
-/// One layer's material: color, maps and how they tile.
+/// The largest a picker's thumbnail is drawn, in points.
+const PICK_THUMBNAIL: f32 = 32.0;
+/// From this many choices, a picker has a search box.
+const SEARCH_FROM: usize = 7;
+
+/// One layer's material: a texture set from the project, then its color,
+/// maps and how they tile. `textures` is the project's texture sets and
+/// textures, for the pickers; `search` is what those are searching for.
 pub(super) fn layer_editor(
     ui: &mut egui::Ui,
     layer: InstanceId,
     instance: &axcenity_core::Instance,
+    textures: &[TexturePick],
+    search: &mut String,
     actions: &mut Vec<TerrainAction>,
 ) {
+    let sets: Vec<&TexturePick> = textures
+        .iter()
+        .filter(|pick| pick.entry.kind == AssetKind::TextureSet)
+        .collect();
+    let images: Vec<&TexturePick> = textures
+        .iter()
+        .filter(|pick| pick.entry.kind == AssetKind::Texture)
+        .collect();
+    ui.horizontal_wrapped(|ui| {
+        ui.menu_button(theme::with_icon(icons::SQUARES_FOUR, "Use texture set"), |ui| {
+            if let Some(entry) = texture_menu(
+                ui,
+                &sets,
+                search,
+                "No texture sets in the project yet. Get texture in the Assets panel downloads one.",
+            ) {
+                actions.push(TerrainAction::UseTextureSet(layer, entry));
+            }
+        })
+        .response
+        .on_hover_text(
+            "Fill every map from a texture set in the project. You can also drag a set here \
+             from the Assets panel.",
+        );
+    });
+    ui.add_space(2.0);
     let number = |name| {
         instance
             .property(name)
@@ -35,14 +70,31 @@ pub(super) fn layer_editor(
             ("HeightMap", "Height"),
         ] {
             field(ui, label);
-            ui.horizontal(|ui| {
-                if ui
-                    .small_button(icons::FOLDER_OPEN)
-                    .on_hover_text("Choose a texture (PNG, JPEG, TGA or BMP)")
-                    .clicked()
-                {
-                    actions.push(TerrainAction::PickLayerTexture(layer, name));
-                }
+            let row = ui.horizontal(|ui| {
+                ui.menu_button(icons::FOLDER_OPEN, |ui| {
+                    if let Some(entry) =
+                        texture_menu(ui, &images, search, "No textures in the project yet.")
+                    {
+                        actions.push(TerrainAction::SetLayer(
+                            layer,
+                            name,
+                            Value::String(entry.path),
+                        ));
+                    }
+                    ui.separator();
+                    if ui
+                        .button(theme::with_icon(icons::FOLDER_OPEN, "Browse files…"))
+                        .on_hover_text(
+                            "Choose a file (PNG, JPEG, TGA or BMP), copied into the project",
+                        )
+                        .clicked()
+                    {
+                        actions.push(TerrainAction::PickLayerTexture(layer, name));
+                        ui.close();
+                    }
+                })
+                .response
+                .on_hover_text("Use a texture in the project, or browse for a file");
                 let path = instance
                     .property(name)
                     .and_then(Value::as_str)
@@ -65,6 +117,13 @@ pub(super) fn layer_editor(
                         .on_hover_text(path);
                 }
             });
+            if let Some(entry) = dropped_asset(ui, &row.response, AssetKind::Texture) {
+                actions.push(TerrainAction::SetLayer(
+                    layer,
+                    name,
+                    Value::String(entry.path),
+                ));
+            }
             ui.end_row();
         }
         let mut slider = |ui: &mut egui::Ui,
@@ -123,6 +182,80 @@ pub(super) fn layer_editor(
             actions.push(TerrainAction::CopySurfaceAppearance(layer));
         }
     });
+}
+
+/// A list of `picks` to choose from, with their thumbnails, searchable
+/// when it's long. `empty` says why there's nothing. Returns the one
+/// clicked, and closes the menu it's in.
+pub(super) fn texture_menu(
+    ui: &mut egui::Ui,
+    picks: &[&TexturePick],
+    search: &mut String,
+    empty: &str,
+) -> Option<AssetEntry> {
+    let palette = theme::palette(ui.ctx());
+    if picks.is_empty() {
+        ui.set_max_width(260.0);
+        ui.label(egui::RichText::new(empty).color(palette.text_weak));
+        return None;
+    }
+    if picks.len() >= SEARCH_FROM {
+        widgets::search_field(ui, search, "Search textures", 220.0);
+    }
+    let needle = search.to_lowercase();
+    let mut chosen = None;
+    egui::ScrollArea::vertical()
+        .max_height(320.0)
+        .show(ui, |ui| {
+            let mut shown = 0;
+            for pick in picks {
+                if !needle.is_empty() && !pick.entry.path.to_lowercase().contains(&needle) {
+                    continue;
+                }
+                shown += 1;
+                let size = egui::vec2(PICK_THUMBNAIL, PICK_THUMBNAIL);
+                let button = match &pick.thumbnail {
+                    Some(thumbnail) => egui::Button::image_and_text(
+                        egui::Image::new(thumbnail)
+                            .fit_to_exact_size(size)
+                            .corner_radius(3),
+                        &pick.entry.name,
+                    ),
+                    None => egui::Button::new(theme::with_icon(icons::IMAGE, &pick.entry.name)),
+                };
+                if ui
+                    .add(button.min_size(egui::vec2(220.0, PICK_THUMBNAIL + 4.0)))
+                    .on_hover_text(&pick.entry.path)
+                    .clicked()
+                {
+                    chosen = Some(pick.entry.clone());
+                    ui.close();
+                }
+            }
+            if shown == 0 {
+                ui.label(egui::RichText::new("Nothing matches.").color(palette.text_weak));
+            }
+        });
+    chosen
+}
+
+/// An asset of `kind` dragged from the Assets panel and let go over
+/// `response`. While one is held over it, it's outlined.
+fn dropped_asset(ui: &egui::Ui, response: &egui::Response, kind: AssetKind) -> Option<AssetEntry> {
+    let held = response.dnd_hover_payload::<AssetPayload>()?;
+    if held.0.kind != kind {
+        return None;
+    }
+    let palette = theme::palette(ui.ctx());
+    ui.painter().rect_stroke(
+        response.rect.expand(2.0),
+        4,
+        egui::Stroke::new(1.5_f32, palette.accent),
+        egui::StrokeKind::Outside,
+    );
+    response
+        .dnd_release_payload::<AssetPayload>()
+        .map(|payload| payload.0.clone())
 }
 
 /// "Covers the layers above where the height is … and the slope is …".
@@ -237,11 +370,12 @@ impl TerrainStudio {
     pub(super) fn layers_section(
         &mut self,
         ui: &mut egui::Ui,
-        world: &World,
+        cx: &StudioContext,
         terrain: InstanceId,
         painting: bool,
         actions: &mut Vec<TerrainAction>,
     ) {
+        let world = cx.world;
         let palette = theme::palette(ui.ctx());
         let layers = axcenity_terrain::materials::layers(world, terrain);
         let all_layers: Vec<InstanceId> = world
@@ -273,7 +407,7 @@ impl TerrainStudio {
                 };
                 let open = self.open_layer == Some(layer);
                 let chosen = painting && self.paint_layer == index;
-                ui.horizontal(|ui| {
+                let row = ui.horizontal(|ui| {
                     let color = instance
                         .property("Color")
                         .and_then(Value::as_color3)
@@ -341,8 +475,20 @@ impl TerrainStudio {
                         }
                     });
                 });
+                // A texture set dragged from the Assets panel fills the layer.
+                if let Some(entry) = dropped_asset(ui, &row.response, AssetKind::TextureSet) {
+                    actions.push(TerrainAction::UseTextureSet(layer, entry));
+                }
                 if open {
-                    card(ui, |ui| layer_editor(ui, layer, instance, actions));
+                    let search = &mut self.texture_search;
+                    let card = ui.scope(|ui| {
+                        card(ui, |ui| {
+                            layer_editor(ui, layer, instance, cx.textures, search, actions)
+                        })
+                    });
+                    if let Some(entry) = dropped_asset(ui, &card.response, AssetKind::TextureSet) {
+                        actions.push(TerrainAction::UseTextureSet(layer, entry));
+                    }
                 }
             }
             if all_layers.len() > MAX_TERRAIN_LAYERS {

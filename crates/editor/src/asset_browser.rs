@@ -18,11 +18,11 @@
 //! the app places it where it's let go over the viewport. Double-clicking a
 //! tile places it at the camera's focus point.
 
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use axcenity_assets::{AUDIO_EXTENSIONS, Assets, TEXTURE_EXTENSIONS};
+use axcenity_assets::{AUDIO_EXTENSIONS, TEXTURE_EXTENSIONS};
 use axcenity_core::FoliageSource;
 use eframe::egui;
 
@@ -31,6 +31,10 @@ use crate::props::{PROPS, Prop};
 use crate::responsive;
 use crate::theme::{self, icons};
 use crate::widgets;
+
+mod thumbnails;
+
+use thumbnails::Thumbnails;
 
 /// Where prefabs are saved, in the project folder.
 pub const PREFABS_FOLDER: &str = "assets/prefabs";
@@ -41,10 +45,10 @@ pub const PARTICLES_FOLDER: &str = "assets/particles";
 const MODEL_EXTENSIONS: [&str; 3] = ["gltf", "glb", "fbx"];
 /// How often the folder is walked again while the panel is shown.
 const RESCAN: Duration = Duration::from_secs(2);
-/// Image thumbnails are scaled down to at most this many pixels across.
-const THUMBNAIL_PIXELS: u32 = 96;
 const TILE: egui::Vec2 = egui::vec2(84.0, 96.0);
 const PICTURE: f32 = 60.0;
+/// The largest a picture is shown when its tile is hovered.
+const HOVER_PICTURE: f32 = 192.0;
 /// Narrower than this, the panel lists its assets instead of tiling them.
 const LIST_BELOW: f32 = 360.0;
 const LIST_ROW: f32 = 30.0;
@@ -132,8 +136,8 @@ impl AssetKind {
                 "Drag onto a MeshPart to use it as the color map of its SurfaceAppearances."
             }
             AssetKind::TextureSet => {
-                "Drag onto a part, MeshPart, or terrain to fill its maps, or double-click to \
-                 fill the selection."
+                "Drag onto a part, MeshPart, or terrain (or a layer in the Terrain Studio) to \
+                 fill its maps, or double-click to fill the selection."
             }
             AssetKind::Audio => {
                 "Drag onto a part to put a Sound in it, or anywhere else for one in the Workspace."
@@ -186,9 +190,17 @@ fn foliage_matches(source: &FoliageSource, entry: &AssetEntry) -> bool {
     }
 }
 
-/// What's dragged from the panel to the viewport.
+/// What's dragged from the panel to the viewport (or to a terrain layer).
 #[derive(Clone, Debug)]
 pub struct AssetPayload(pub AssetEntry);
+
+/// A texture set or texture in the project, for a picker outside the panel.
+#[derive(Clone)]
+pub struct TexturePick {
+    pub entry: AssetEntry,
+    /// `None` until it has been read, or if it can't be.
+    pub thumbnail: Option<egui::TextureHandle>,
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Category {
@@ -297,8 +309,7 @@ pub struct AssetBrowser {
     folder: Option<PathBuf>,
     files: Vec<AssetEntry>,
     scanned_at: Option<Instant>,
-    /// Image thumbnails by path, `None` for an image that can't be read.
-    thumbnails: HashMap<String, Option<egui::TextureHandle>>,
+    thumbnails: Thumbnails,
     dialog: Option<PrefabDialog>,
     get_texture: Option<GetTexture>,
 }
@@ -308,7 +319,7 @@ impl AssetBrowser {
     pub fn open(&mut self, folder: Option<&Path>) {
         self.folder = folder.map(Path::to_owned);
         self.files.clear();
-        self.thumbnails.clear();
+        self.thumbnails.open(folder);
         self.scanned_at = None;
         self.dialog = None;
         self.get_texture = None;
@@ -330,6 +341,30 @@ impl AssetBrowser {
         props.chain(self.files.iter().cloned()).collect()
     }
 
+    /// The project's texture sets and textures, sets first, each with its
+    /// thumbnail once it has been read (asked for here the first time). For
+    /// pickers outside the panel, such as a terrain layer's.
+    pub fn textures(&mut self, ctx: &egui::Context) -> Vec<TexturePick> {
+        self.rescan_if_due();
+        self.thumbnails.poll(ctx);
+        let mut picks: Vec<TexturePick> = self
+            .files
+            .iter()
+            .filter(|entry| matches!(entry.kind, AssetKind::Texture | AssetKind::TextureSet))
+            .map(|entry| TexturePick {
+                thumbnail: self.thumbnails.get(
+                    ctx,
+                    &entry.path,
+                    entry.kind == AssetKind::TextureSet,
+                ),
+                entry: entry.clone(),
+            })
+            .collect();
+        // A stable sort keeps path order within sets and within textures.
+        picks.sort_by_key(|pick| pick.entry.kind != AssetKind::TextureSet);
+        picks
+    }
+
     fn rescan_if_due(&mut self) {
         if self.scanned_at.is_some_and(|at| at.elapsed() < RESCAN) {
             return;
@@ -340,8 +375,8 @@ impl AssetBrowser {
             None => Vec::new(),
         };
         let files = &self.files;
-        self.thumbnails
-            .retain(|path, _| files.iter().any(|entry| entry.path == *path));
+        let paths: HashSet<&str> = files.iter().map(|entry| entry.path.as_str()).collect();
+        self.thumbnails.retain(|path| paths.contains(path));
     }
 
     /// Draws the panel. `can_edit` is false during Play, and `can_save` is
@@ -351,12 +386,12 @@ impl AssetBrowser {
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
-        assets: &Assets,
         can_edit: bool,
         can_save: bool,
         foliage: Option<&FoliageSource>,
     ) -> Option<BrowserAction> {
         let mut action = None;
+        self.thumbnails.poll(ui.ctx());
         let palette = theme::palette(ui.ctx());
         let width = ui.available_width();
         if width >= ONE_ROW_FROM {
@@ -455,8 +490,7 @@ impl AssetBrowser {
                 let list = ui.available_width() < LIST_BELOW;
                 let items = |ui: &mut egui::Ui| {
                     for entry in entries {
-                        let (place, pick, menu) =
-                            self.item(ui, assets, &entry, can_edit, list, foliage);
+                        let (place, pick, menu) = self.item(ui, &entry, can_edit, list, foliage);
                         if pick {
                             action = Some(BrowserAction::Foliage(entry.clone()));
                         } else if place {
@@ -668,13 +702,10 @@ impl AssetBrowser {
             self.get_texture = None;
             return None;
         };
-        let Some(event) = self
+        let event = self
             .get_texture
             .as_mut()
-            .and_then(|dialog| dialog.show(ctx, &folder))
-        else {
-            return None;
-        };
+            .and_then(|dialog| dialog.show(ctx, &folder))?;
         let action = event.notice.map(|(error, text)| {
             if !error {
                 self.refresh();
@@ -692,7 +723,6 @@ impl AssetBrowser {
     fn item(
         &mut self,
         ui: &mut egui::Ui,
-        assets: &Assets,
         entry: &AssetEntry,
         can_edit: bool,
         list: bool,
@@ -715,7 +745,26 @@ impl AssetBrowser {
                 None => format!("{}\n{}", entry.path, entry.kind.hover()),
             }
         };
-        let response = response.on_hover_text(hover);
+        // Only tiles on screen ask for their thumbnail, so a long list
+        // loads what's visible first.
+        let thumbnail = (ui.is_rect_visible(rect)
+            && matches!(
+                entry.kind,
+                AssetKind::Image | AssetKind::Texture | AssetKind::TextureSet | AssetKind::Particle
+            ))
+        .then(|| {
+            self.thumbnails
+                .get(ui.ctx(), &entry.path, entry.kind == AssetKind::TextureSet)
+        })
+        .flatten();
+        // A picture's tooltip shows it larger, to see the whole texture.
+        let response = match &thumbnail {
+            Some(texture) => response.on_hover_ui(|ui| {
+                ui.add(egui::Image::new(texture).max_size(egui::Vec2::splat(HOVER_PICTURE)));
+                ui.label(hover);
+            }),
+            None => response.on_hover_text(hover),
+        };
         if can_edit && response.drag_started() {
             egui::DragAndDrop::set_payload(ui.ctx(), AssetPayload(entry.clone()));
         }
@@ -746,12 +795,6 @@ impl AssetBrowser {
                 egui::vec2(PICTURE, PICTURE),
             )
         };
-        let thumbnail = matches!(
-            entry.kind,
-            AssetKind::Image | AssetKind::Texture | AssetKind::TextureSet | AssetKind::Particle
-        )
-        .then(|| self.thumbnail(ui.ctx(), assets, entry))
-        .flatten();
         self.paint_picture(ui, picture, entry, thumbnail.as_ref());
         let text_color = if response.hovered() {
             palette.text_strong
@@ -897,50 +940,6 @@ impl AssetBrowser {
             }
         }
     }
-
-    /// The thumbnail of `entry`, made the first time. A texture set shows
-    /// its color map.
-    fn thumbnail(
-        &mut self,
-        ctx: &egui::Context,
-        assets: &Assets,
-        entry: &AssetEntry,
-    ) -> Option<egui::TextureHandle> {
-        if let Some(cached) = self.thumbnails.get(&entry.path) {
-            return cached.clone();
-        }
-        let path = self.picture_path(entry);
-        let handle = assets.texture(&path).and_then(|image| {
-            let color = shrink(image.width, image.height, &image.rgba, THUMBNAIL_PIXELS)?;
-            Some(ctx.load_texture(
-                format!("asset thumbnail {}", entry.path),
-                color,
-                egui::TextureOptions::LINEAR,
-            ))
-        });
-        self.thumbnails.insert(entry.path.clone(), handle.clone());
-        handle
-    }
-
-    /// The image a tile shows. A texture set uses its color map.
-    fn picture_path(&self, entry: &AssetEntry) -> String {
-        if entry.kind != AssetKind::TextureSet {
-            return entry.path.clone();
-        }
-        let Some(folder) = &self.folder else {
-            return entry.path.clone();
-        };
-        let Some(relative) = axcenity_assets::safe_path(&entry.path) else {
-            return entry.path.clone();
-        };
-        axcenity_assets::read_texture_set(&folder.join(relative))
-            .ok()
-            .and_then(|set| {
-                set.path(axcenity_assets::MapSlot::BaseColor)
-                    .map(str::to_owned)
-            })
-            .unwrap_or_else(|| entry.path.clone())
-    }
 }
 
 fn uv() -> egui::Rect {
@@ -949,32 +948,6 @@ fn uv() -> egui::Rect {
 
 fn icon_of(entry: &AssetEntry) -> &'static str {
     entry.prop().map_or(entry.kind.icon(), |prop| prop.icon)
-}
-
-/// `rgba` (`width` × `height`) scaled down to at most `most` pixels across,
-/// by taking the nearest pixel. `None` for an empty or short image.
-fn shrink(width: u32, height: u32, rgba: &[u8], most: u32) -> Option<egui::ColorImage> {
-    if width == 0 || height == 0 || rgba.len() < (width * height * 4) as usize {
-        return None;
-    }
-    let scale = (most as f32 / width.max(height) as f32).min(1.0);
-    let (w, h) = (
-        ((width as f32 * scale).round() as u32).max(1),
-        ((height as f32 * scale).round() as u32).max(1),
-    );
-    let mut pixels = Vec::with_capacity((w * h * 4) as usize);
-    for y in 0..h {
-        let sy = (y * height / h).min(height - 1);
-        for x in 0..w {
-            let sx = (x * width / w).min(width - 1);
-            let i = ((sy * width + sx) * 4) as usize;
-            pixels.extend_from_slice(&rgba[i..i + 4]);
-        }
-    }
-    Some(egui::ColorImage::from_rgba_unmultiplied(
-        [w as usize, h as usize],
-        &pixels,
-    ))
 }
 
 /// What kind of asset the file at `path` (in the project, with `/`
@@ -1260,13 +1233,5 @@ mod tests {
             ]
         );
         let _ = std::fs::remove_dir_all(&folder);
-    }
-
-    #[test]
-    fn thumbnails_shrink_and_keep_their_shape() {
-        let rgba = vec![255; 200 * 100 * 4];
-        let image = shrink(200, 100, &rgba, 96).unwrap();
-        assert_eq!(image.size, [96, 48]);
-        assert!(shrink(0, 10, &[], 96).is_none());
     }
 }

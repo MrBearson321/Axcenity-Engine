@@ -48,6 +48,7 @@ fn the_panel_draws_with_and_without_a_terrain() {
                         selected: None,
                         editing: true,
                         time: 0.0,
+                        textures: &[],
                     },
                 );
             });
@@ -110,10 +111,90 @@ fn the_panel_snapshots_with_its_main_tools() {
                                 selected: None,
                                 editing: true,
                                 time: 0.0,
+                                textures: &[],
                             },
                         );
                     });
             },
         );
     }
+}
+
+/// With `AXCENITY_SNAPSHOTS` set, saves an open layer and the menu its
+/// texture pickers show, to look at.
+#[test]
+fn an_open_layer_and_its_texture_menu_snapshot() {
+    let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") else {
+        return;
+    };
+    let folder = std::path::PathBuf::from(folder);
+    let mut world = World::new();
+    let terrain = world.create(ClassName::Terrain).unwrap();
+    world.set_parent(terrain, Some(world.workspace())).unwrap();
+    let mut first = None;
+    for preset in layers_for(Preset::MountainRange) {
+        let layer = world.create(ClassName::TerrainLayer).unwrap();
+        for (name, value) in preset.properties(128.0) {
+            world.set_property(layer, name, value).unwrap();
+        }
+        world.set_name(layer, preset.name).unwrap();
+        world.set_parent(layer, Some(terrain)).unwrap();
+        first.get_or_insert(layer);
+    }
+    let pick = |kind, path: &str| TexturePick {
+        entry: AssetEntry {
+            kind,
+            path: path.to_owned(),
+            name: crate::asset_browser::display_name(path),
+        },
+        thumbnail: None,
+    };
+    let textures = [
+        pick(
+            AssetKind::TextureSet,
+            "assets/textures/Grass001/Grass001.texture.json",
+        ),
+        pick(
+            AssetKind::TextureSet,
+            "assets/textures/Ground108/Ground108.texture.json",
+        ),
+        pick(AssetKind::Texture, "assets/textures/checker.png"),
+    ];
+    let mut studio = TerrainStudio {
+        open_layer: first,
+        ..TerrainStudio::default()
+    };
+    crate::snapshot::snapshot(
+        &folder.join("terrain-layer.png"),
+        egui::vec2(300.0, 900.0),
+        vec![Vec::new(); 3],
+        |ctx| {
+            egui::SidePanel::right("terrain")
+                .default_width(280.0)
+                .show(ctx, |ui| {
+                    studio.show(
+                        ui,
+                        &StudioContext {
+                            world: &world,
+                            selected: None,
+                            editing: true,
+                            time: 0.0,
+                            textures: &textures,
+                        },
+                    );
+                });
+        },
+    );
+    let sets: Vec<&TexturePick> = textures.iter().take(2).collect();
+    let mut search = String::new();
+    crate::snapshot::snapshot(
+        &folder.join("terrain-texture-menu.png"),
+        egui::vec2(280.0, 160.0),
+        vec![Vec::new(); 3],
+        |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let _ = layers::texture_menu(ui, &sets, &mut search, "None");
+            });
+        },
+    );
 }

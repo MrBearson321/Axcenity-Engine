@@ -276,3 +276,58 @@ fn layers_move_past_each_other() {
     assert_eq!(names(&app).len(), 4);
     std::fs::remove_dir_all(folder).unwrap();
 }
+
+#[test]
+fn a_project_texture_set_fills_the_chosen_layer_as_one_undo_step() {
+    let (mut app, folder) = app_with_project("texture-set");
+    let terrain = create(&mut app);
+    let dirt = materials::layers(&app.world, terrain)[1];
+    let project = app.project.as_ref().unwrap().folder.clone();
+    let set = axcenity_assets::texture_set_from_files(
+        "test",
+        "Mud",
+        "",
+        &[
+            ("Mud_Color.png", "assets/textures/Mud/Mud_Color.png"),
+            ("Mud_NormalGL.png", "assets/textures/Mud/Mud_NormalGL.png"),
+        ],
+    );
+    std::fs::create_dir_all(project.join("assets/textures/Mud")).unwrap();
+    let path = "assets/textures/Mud/Mud.texture.json";
+    axcenity_assets::write_texture_set(&project.join(path), &set).unwrap();
+    let map = |app: &EditorApp, name| {
+        app.world
+            .get(dirt)
+            .unwrap()
+            .property(name)
+            .and_then(Value::as_str)
+            .unwrap()
+            .to_owned()
+    };
+    let before = map(&app, "ColorMap");
+
+    let entry = crate::asset_browser::AssetEntry {
+        kind: crate::asset_browser::AssetKind::TextureSet,
+        path: path.to_owned(),
+        name: "Mud".to_owned(),
+    };
+    app.terrain_action(TerrainAction::UseTextureSet(dirt, entry));
+    assert_eq!(map(&app, "ColorMap"), "assets/textures/Mud/Mud_Color.png");
+    assert_eq!(
+        map(&app, "NormalMap"),
+        "assets/textures/Mud/Mud_NormalGL.png"
+    );
+    // The other layers are left alone.
+    let grass = materials::layers(&app.world, terrain)[0];
+    assert_ne!(
+        app.world
+            .get(grass)
+            .unwrap()
+            .property("ColorMap")
+            .and_then(Value::as_str),
+        Some("assets/textures/Mud/Mud_Color.png")
+    );
+    app.undo();
+    assert_eq!(map(&app, "ColorMap"), before);
+    std::fs::remove_dir_all(folder).unwrap();
+}

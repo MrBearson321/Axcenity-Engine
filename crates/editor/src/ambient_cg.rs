@@ -1,16 +1,20 @@
 //! The Assets panel's Get texture dialog: search ambientCG's public
 //! catalog, download one material, and save it as a texture set.
 //!
-//! The catalog needs a network connection. A download runs on its own
-//! thread and writes the zip to disk before extracting it, so a large
-//! package is not held in memory. Cancelling, or closing the dialog,
-//! leaves the project as it was.
+//! The catalog needs a network connection. Results show as soon as the
+//! catalog answers; their previews arrive afterwards, fetched by a few
+//! threads at once, and are kept for the rest of the dialog's life. A
+//! download runs on its own thread and writes the zip to disk before
+//! extracting it, so a large package is not held in memory. Cancelling, or
+//! closing the dialog, leaves the project as it was.
 
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axcenity_assets::{
@@ -26,6 +30,13 @@ const USER_AGENT: &str = "AxcenityEngine/0.1 (texture catalog)";
 const ZIP_LIMIT: u64 = 2 * 1024 * 1024 * 1024;
 const PREVIEW_LIMIT: u64 = 2 * 1024 * 1024;
 const JSON_LIMIT: u64 = 8 * 1024 * 1024;
+/// How many previews are fetched at once.
+const PREVIEW_FETCHERS: usize = 6;
+/// A result card's width and height, and its picture's side.
+const CARD: egui::Vec2 = egui::vec2(124.0, 178.0);
+const CARD_PICTURE: f32 = 112.0;
+/// The largest a preview is shown when its card is hovered.
+const HOVER_PREVIEW: f32 = 256.0;
 
 /// What finished while the dialog was open.
 pub struct TextureEvent {
@@ -55,7 +66,6 @@ struct SearchResult {
     offset: usize,
     total: usize,
     listings: Vec<Listing>,
-    previews: Vec<(String, egui::ColorImage)>,
 }
 
 enum DownloadResult {
@@ -65,6 +75,17 @@ enum DownloadResult {
 
 struct Job<T> {
     rx: Receiver<Result<T, String>>,
+}
+
+/// A fetched preview: the asset id, and `None` if it couldn't be fetched.
+type Preview = (String, Option<egui::ColorImage>);
+
+/// What one result card shows.
+struct Card {
+    id: String,
+    name: String,
+    detail: String,
+    available: bool,
 }
 
 /// The Get texture dialog.
@@ -78,14 +99,19 @@ pub struct GetTexture {
     search: Option<Job<SearchResult>>,
     download: Option<Job<DownloadResult>>,
     generation: u64,
-    cancel: std::sync::Arc<AtomicBool>,
-    previews: std::collections::HashMap<String, egui::TextureHandle>,
-    pending_previews: Vec<(String, egui::ColorImage)>,
+    cancel: Arc<AtomicBool>,
+    /// By asset id: `None` while fetching.
+    previews: HashMap<String, Option<egui::TextureHandle>>,
+    /// Assets whose preview couldn't be fetched, shown blank.
+    no_preview: HashSet<String>,
+    preview_tx: Sender<Preview>,
+    preview_rx: Receiver<Preview>,
 }
 
 impl GetTexture {
     /// Opens the dialog and searches the popular materials.
     pub fn open(ctx: &egui::Context) -> Self {
+        let (preview_tx, preview_rx) = mpsc::channel();
         let mut dialog = Self {
             query: String::new(),
             resolution: "2K".to_owned(),
@@ -96,9 +122,11 @@ impl GetTexture {
             search: None,
             download: None,
             generation: 0,
-            cancel: std::sync::Arc::new(AtomicBool::new(false)),
-            previews: std::collections::HashMap::new(),
-            pending_previews: Vec::new(),
+            cancel: Arc::new(AtomicBool::new(false)),
+            previews: HashMap::new(),
+            no_preview: HashSet::new(),
+            preview_tx,
+            preview_rx,
         };
         dialog.start_search(ctx, 0);
         dialog
@@ -110,16 +138,19 @@ impl GetTexture {
         if self.search.is_some() || self.download.is_some() {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
-        let notice = self.poll();
+        let notice = self.poll(ctx);
         self.load_previews(ctx);
 
+        let screen = ctx.screen_rect().size();
+        let width = (screen.x - 64.0).clamp(280.0, 800.0);
+        let height = (screen.y - 260.0).clamp(200.0, 600.0);
         let mut close = false;
         let modal = egui::Modal::new(egui::Id::new("get texture")).show(ctx, |ui| {
-            ui.set_width(520.0);
+            ui.set_width(width);
             ui.heading("Get texture");
             ui.label("Materials from ambientCG. Saved files are CC0 and work offline.");
             ui.add_space(4.0);
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 let response = ui.add(
                     egui::TextEdit::singleline(&mut self.query)
                         .hint_text("Search materials")
@@ -145,7 +176,7 @@ impl GetTexture {
                 ui.label(status);
             }
             ui.add_space(4.0);
-            self.results(ui, project);
+            self.results(ui, project, height);
             ui.add_space(6.0);
             if ui.button("Close").clicked() {
                 close = true;
@@ -180,7 +211,7 @@ impl GetTexture {
             });
     }
 
-    fn results(&mut self, ui: &mut egui::Ui, project: &Path) {
+    fn results(&mut self, ui: &mut egui::Ui, project: &Path, height: f32) {
         let attribute = format!("{}-{}", self.resolution, self.format);
         let Some(page) = self.page.as_ref() else {
             if self.search.is_some() {
@@ -194,61 +225,47 @@ impl GetTexture {
         }
         let total = page.total;
         let shown = page.listings.len();
-        let rows: Vec<(String, String, String, String, bool)> = page
+        let cards: Vec<Card> = page
             .listings
             .iter()
             .map(|listing| {
-                (
-                    listing.id.clone(),
-                    listing.name.clone(),
-                    listing.category.clone(),
-                    listing.maps.join(", "),
-                    listing
+                let maps = listing.maps.join(", ");
+                let detail = if maps.is_empty() {
+                    listing.category.clone()
+                } else if listing.category.is_empty() {
+                    maps
+                } else {
+                    format!("{} · {maps}", listing.category)
+                };
+                Card {
+                    id: listing.id.clone(),
+                    name: listing.name.clone(),
+                    detail,
+                    available: listing
                         .packages
                         .iter()
                         .any(|(known, _)| known == &attribute),
-                )
+                }
             })
             .collect();
         egui::ScrollArea::vertical()
             .id_salt("ambientcg results")
-            .max_height(360.0)
+            .max_height(height)
+            .auto_shrink([false, true])
             .show(ui, |ui| {
-                for (id, name, category, maps, available) in rows {
-                    ui.horizontal(|ui| {
-                        if let Some(preview) = self.previews.get(&id) {
-                            ui.add(
-                                egui::Image::new(preview).fit_to_exact_size(egui::vec2(48.0, 48.0)),
-                            );
-                        } else {
-                            ui.add_space(48.0);
-                        }
-                        ui.vertical(|ui| {
-                            ui.label(&name);
-                            let detail = if maps.is_empty() {
-                                category
-                            } else if category.is_empty() {
-                                maps
-                            } else {
-                                format!("{category} · {maps}")
-                            };
-                            ui.label(egui::RichText::new(detail).weak());
-                        });
-                        let mut button = ui.add_enabled(
-                            available && self.download.is_none(),
-                            egui::Button::new("Get"),
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+                    for card in &cards {
+                        ui.allocate_ui_with_layout(
+                            CARD,
+                            egui::Layout::top_down(egui::Align::Center),
+                            |ui| {
+                                ui.set_min_size(CARD);
+                                self.card(ui, project, card);
+                            },
                         );
-                        if !available {
-                            button = button.on_hover_text(format!(
-                                "{name} has no {} {} package.",
-                                self.resolution, self.format
-                            ));
-                        }
-                        if button.clicked() {
-                            self.start_download(ui.ctx(), project, &id);
-                        }
-                    });
-                }
+                    }
+                });
             });
         if shown < total
             && ui
@@ -256,6 +273,55 @@ impl GetTexture {
                 .clicked()
         {
             self.start_search(ui.ctx(), shown);
+        }
+    }
+
+    /// One result: its preview (larger when hovered), name, kind and Get.
+    fn card(&mut self, ui: &mut egui::Ui, project: &Path, card: &Card) {
+        ui.spacing_mut().item_spacing.y = 2.0;
+        let (rect, response) =
+            ui.allocate_exact_size(egui::Vec2::splat(CARD_PICTURE), egui::Sense::hover());
+        let preview = self.previews.get(&card.id);
+        ui.painter()
+            .rect_filled(rect, 4.0, ui.visuals().extreme_bg_color);
+        match preview {
+            Some(Some(texture)) => {
+                egui::Image::new(texture)
+                    .corner_radius(4.0)
+                    .paint_at(ui, rect);
+            }
+            Some(None) => {
+                egui::Spinner::new().paint_at(ui, rect.shrink(CARD_PICTURE / 3.0));
+            }
+            None => {}
+        }
+        let tip = format!("{}\n{}", card.name, card.detail);
+        match preview {
+            Some(Some(texture)) => {
+                let texture = texture.clone();
+                response.on_hover_ui(|ui| {
+                    ui.add(egui::Image::new(&texture).max_size(egui::Vec2::splat(HOVER_PREVIEW)));
+                    ui.label(&tip);
+                });
+            }
+            _ => {
+                response.on_hover_text(&tip);
+            }
+        }
+        ui.add(egui::Label::new(&card.name).truncate());
+        ui.add(egui::Label::new(egui::RichText::new(&card.detail).weak().small()).truncate());
+        let mut button = ui.add_enabled(
+            card.available && self.download.is_none(),
+            egui::Button::new("Get"),
+        );
+        if !card.available {
+            button = button.on_disabled_hover_text(format!(
+                "{} has no {} {} package.",
+                card.name, self.resolution, self.format
+            ));
+        }
+        if button.clicked() {
+            self.start_download(ui.ctx(), project, &card.id);
         }
     }
 
@@ -272,7 +338,6 @@ impl GetTexture {
         if offset == 0 {
             self.generation += 1;
             self.page = None;
-            self.previews.clear();
         }
         self.error = None;
         self.status = Some("Searching…".to_owned());
@@ -281,12 +346,11 @@ impl GetTexture {
         let (tx, rx) = mpsc::channel();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
-            let result = search(&query, offset).map(|(total, listings, previews)| SearchResult {
+            let result = search(&query, offset).map(|(total, listings)| SearchResult {
                 generation,
                 offset,
                 total,
                 listings,
-                previews,
             });
             let _ = tx.send(result);
             ctx.request_repaint();
@@ -315,8 +379,8 @@ impl GetTexture {
         let project = project.to_owned();
         self.error = None;
         self.status = Some(format!("Downloading {name}…"));
-        self.cancel = std::sync::Arc::new(AtomicBool::new(false));
-        let cancel = std::sync::Arc::clone(&self.cancel);
+        self.cancel = Arc::new(AtomicBool::new(false));
+        let cancel = Arc::clone(&self.cancel);
         let (tx, rx) = mpsc::channel();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
@@ -332,11 +396,11 @@ impl GetTexture {
     }
 
     /// Finished searches and downloads since last frame.
-    fn poll(&mut self) -> Option<(bool, String)> {
+    fn poll(&mut self, ctx: &egui::Context) -> Option<(bool, String)> {
         let search = self.search.take();
         if let Some(job) = search {
             match job.rx.try_recv() {
-                Ok(Ok(result)) => self.accept_search(result),
+                Ok(Ok(result)) => self.accept_search(ctx, result),
                 Ok(Err(err)) => {
                     self.status = None;
                     self.error = Some(format!("Could not search ambientCG: {err}"));
@@ -348,10 +412,7 @@ impl GetTexture {
                 }
             }
         }
-        let download = self.download.take();
-        let Some(job) = download else {
-            return None;
-        };
+        let job = self.download.take()?;
         match job.rx.try_recv() {
             Ok(Ok(DownloadResult::Saved(text))) => {
                 self.status = None;
@@ -379,11 +440,24 @@ impl GetTexture {
         }
     }
 
-    fn accept_search(&mut self, result: SearchResult) {
+    fn accept_search(&mut self, ctx: &egui::Context, result: SearchResult) {
         if result.generation != self.generation {
             return;
         }
         self.status = None;
+        // Previews not seen before, fetched now; the rest are kept.
+        let wanted: VecDeque<(String, String)> = result
+            .listings
+            .iter()
+            .filter(|listing| {
+                !self.previews.contains_key(&listing.id) && !self.no_preview.contains(&listing.id)
+            })
+            .filter_map(|listing| Some((listing.id.clone(), listing.preview.clone()?)))
+            .collect();
+        for (id, _) in &wanted {
+            self.previews.insert(id.clone(), None);
+        }
+        fetch_previews(ctx, wanted, &self.preview_tx);
         if result.offset == 0 || self.page.is_none() {
             self.page = Some(Page {
                 total: result.total,
@@ -393,45 +467,72 @@ impl GetTexture {
             page.total = result.total;
             page.listings.extend(result.listings);
         }
-        self.pending_previews.extend(result.previews);
     }
 
     fn load_previews(&mut self, ctx: &egui::Context) {
-        for (id, image) in self.pending_previews.drain(..) {
-            let handle = ctx.load_texture(
-                format!("ambientcg {id}"),
-                image,
-                egui::TextureOptions::LINEAR,
-            );
-            self.previews.insert(id, handle);
+        for (id, image) in self.preview_rx.try_iter() {
+            match image {
+                Some(image) => {
+                    let handle = ctx.load_texture(
+                        format!("ambientcg {id}"),
+                        image,
+                        egui::TextureOptions::LINEAR,
+                    );
+                    self.previews.insert(id, Some(handle));
+                }
+                None => {
+                    self.previews.remove(&id);
+                    self.no_preview.insert(id);
+                }
+            }
         }
     }
 }
 
-fn search(
-    query: &str,
-    offset: usize,
-) -> Result<(usize, Vec<Listing>, Vec<(String, egui::ColorImage)>), String> {
+fn search(query: &str, offset: usize) -> Result<(usize, Vec<Listing>), String> {
     let url = format!(
         "https://ambientcg.com/api/v2/full_json?type=Material&sort=Popular&limit={PAGE}&offset={offset}&include=downloadData,previewData,displayData&q={}",
         encode(query)
     );
     let text = get_text(&url, Duration::from_secs(30))?;
-    let (total, listings) = parse_catalog(&text)?;
-    let mut previews = Vec::new();
-    for listing in &listings {
-        let Some(preview) = &listing.preview else {
-            continue;
-        };
-        if let Some(image) = preview_image(preview) {
-            previews.push((listing.id.clone(), image));
-        }
-    }
-    Ok((total, listings, previews))
+    parse_catalog(&text)
 }
 
-fn preview_image(url: &str) -> Option<egui::ColorImage> {
-    let bytes = get_bytes(url, Duration::from_secs(20), PREVIEW_LIMIT).ok()?;
+/// Fetches each `(id, url)` in `wanted` on a few threads that share one
+/// connection pool, sending each preview to `tx` as soon as it's ready.
+/// They stop early once the dialog (the receiver) is gone.
+fn fetch_previews(ctx: &egui::Context, wanted: VecDeque<(String, String)>, tx: &Sender<Preview>) {
+    if wanted.is_empty() {
+        return;
+    }
+    let Ok(agent) = http_agent(Duration::from_secs(20)) else {
+        return;
+    };
+    let fetchers = PREVIEW_FETCHERS.min(wanted.len());
+    let queue = Arc::new(Mutex::new(wanted));
+    for _ in 0..fetchers {
+        let queue = Arc::clone(&queue);
+        let agent = agent.clone();
+        let tx = tx.clone();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            loop {
+                let next = queue.lock().ok().and_then(|mut queue| queue.pop_front());
+                let Some((id, url)) = next else {
+                    return;
+                };
+                let image = preview_image(&agent, &url);
+                if tx.send((id, image)).is_err() {
+                    return;
+                }
+                ctx.request_repaint();
+            }
+        });
+    }
+}
+
+fn preview_image(agent: &ureq::Agent, url: &str) -> Option<egui::ColorImage> {
+    let bytes = get_bytes(agent, url, PREVIEW_LIMIT).ok()?;
     let image = image::load_from_memory(&bytes).ok()?.to_rgba8();
     Some(egui::ColorImage::from_rgba_unmultiplied(
         [image.width() as usize, image.height() as usize],
@@ -478,7 +579,7 @@ fn download_into(
     fs::create_dir_all(&staging).map_err(|err| err.to_string())?;
     let zip_path = root.join("package.zip");
     let mut zip = fs::File::create(&zip_path).map_err(|err| err.to_string())?;
-    write_download(&url, &mut zip)?;
+    write_download(url, &mut zip)?;
     if cancel.load(Ordering::Relaxed) {
         return Ok(DownloadResult::Cancelled);
     }
@@ -572,13 +673,13 @@ fn replace_dir(staging: &Path, dest: &Path, backup: &Path) -> Result<bool, Strin
         let _ = fs::remove_dir_all(backup);
         fs::rename(dest, backup).map_err(|err| err.to_string())?;
     }
-    if fs::rename(staging, dest).is_err() {
-        if let Err(err) = copy_dir(staging, dest) {
-            if replaced {
-                let _ = fs::rename(backup, dest);
-            }
-            return Err(err);
+    if fs::rename(staging, dest).is_err()
+        && let Err(err) = copy_dir(staging, dest)
+    {
+        if replaced {
+            let _ = fs::rename(backup, dest);
         }
+        return Err(err);
     }
     if replaced {
         let _ = fs::remove_dir_all(backup);
@@ -601,15 +702,15 @@ fn copy_dir(from: &Path, to: &Path) -> Result<(), String> {
 }
 
 fn get_text(url: &str, timeout: Duration) -> Result<String, String> {
-    let bytes = get_bytes(url, timeout, JSON_LIMIT)?;
+    let bytes = get_bytes(&http_agent(timeout)?, url, JSON_LIMIT)?;
     String::from_utf8(bytes).map_err(|_| "the catalog was not text".to_owned())
 }
 
-fn get_bytes(url: &str, timeout: Duration, limit: u64) -> Result<Vec<u8>, String> {
+/// `agent` can be shared, so requests to the same host reuse a connection.
+fn get_bytes(agent: &ureq::Agent, url: &str, limit: u64) -> Result<Vec<u8>, String> {
     if !url.starts_with("https://") {
         return Err("the address is not https".to_owned());
     }
-    let agent = http_agent(timeout)?;
     let mut response = agent
         .get(url)
         .header("User-Agent", USER_AGENT)
@@ -694,15 +795,23 @@ fn parse_catalog(text: &str) -> Result<(usize, Vec<Listing>), String> {
                 packages.push((attribute.to_owned(), link.to_owned()));
             }
         }
-        let preview = ["128-JPG-242424", "128-PNG", "128-JPG-FFFFFF"]
-            .into_iter()
-            .find_map(|key| {
-                asset
-                    .pointer(&format!("/previewImage/{key}"))
-                    .and_then(serde_json::Value::as_str)
-                    .filter(|url| url.starts_with("https://"))
-            })
-            .map(str::to_owned);
+        // The larger preview when there is one, for the hover view.
+        let preview = [
+            "256-JPG-242424",
+            "256-PNG",
+            "256-JPG-FFFFFF",
+            "128-JPG-242424",
+            "128-PNG",
+            "128-JPG-FFFFFF",
+        ]
+        .into_iter()
+        .find_map(|key| {
+            asset
+                .pointer(&format!("/previewImage/{key}"))
+                .and_then(serde_json::Value::as_str)
+                .filter(|url| url.starts_with("https://"))
+        })
+        .map(str::to_owned);
         let maps = asset
             .get("maps")
             .and_then(serde_json::Value::as_array)

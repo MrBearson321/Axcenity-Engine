@@ -39,6 +39,7 @@ use axcenity_terrain::generate::{GeneratorSettings, Preset};
 use axcenity_terrain::job::Job;
 use eframe::egui;
 
+use crate::asset_browser::{AssetEntry, AssetKind, AssetPayload, TexturePick};
 use crate::responsive;
 use crate::theme::{self, icons};
 use crate::widgets::{self, Role};
@@ -230,6 +231,8 @@ pub enum TerrainAction {
     SetLayer(InstanceId, &'static str, Value),
     /// Pick a texture file for a layer's map.
     PickLayerTexture(InstanceId, &'static str),
+    /// Fill every map of a layer from a texture set in the project.
+    UseTextureSet(InstanceId, AssetEntry),
     /// Pick several texture files, sorted into the layer's maps by name.
     ImportTextureSet(InstanceId),
     /// Copy the selected SurfaceAppearance's maps into the layer.
@@ -343,6 +346,8 @@ pub struct TerrainStudio {
     pub locked: [bool; MAX_TERRAIN_LAYERS],
     /// The layer whose material is shown for editing.
     pub open_layer: Option<InstanceId>,
+    /// What the open layer's texture pickers are searching for.
+    texture_search: String,
     pub view: TerrainView,
     pub generator: GeneratorSettings,
     pub new_terrain: NewTerrain,
@@ -389,6 +394,7 @@ impl Default for TerrainStudio {
             foliage_collide: false,
             locked: [false; MAX_TERRAIN_LAYERS],
             open_layer: None,
+            texture_search: String::new(),
             view: TerrainView::Shaded,
             generator: Preset::RollingHills.settings(),
             new_terrain: NewTerrain::default(),
@@ -417,6 +423,9 @@ pub struct StudioContext<'a> {
     pub editing: bool,
     /// The time (egui seconds), for previews that wait for settings to settle.
     pub time: f64,
+    /// The project's texture sets and textures, for an open layer's
+    /// pickers. Empty while no layer is open.
+    pub textures: &'a [TexturePick],
 }
 
 /// Every Terrain in the Workspace, in tree order.
@@ -515,7 +524,7 @@ impl TerrainStudio {
                     self.status(ui, &mut actions);
                     let Some(tool) = self.tool else {
                         hint(ui, "Pick a tool to start shaping the terrain.");
-                        self.layers_section(ui, cx.world, terrain, false, &mut actions);
+                        self.layers_section(ui, cx, terrain, false, &mut actions);
                         self.view_section(ui);
                         return;
                     };
@@ -539,7 +548,7 @@ impl TerrainStudio {
                         TerrainTool::Masks => self.mask_settings(ui),
                     }
                     let painting = matches!(tool, TerrainTool::Paint | TerrainTool::Auto);
-                    self.layers_section(ui, cx.world, terrain, painting, &mut actions);
+                    self.layers_section(ui, cx, terrain, painting, &mut actions);
                     self.view_section(ui);
                     self.data_section(ui, cx.world, terrain, &mut actions);
                 });

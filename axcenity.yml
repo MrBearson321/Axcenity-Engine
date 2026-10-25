@@ -1,0 +1,24 @@
+# selene standard library for Axcenity scripts: Luau plus the engine's globals
+# (crates/script/src/api.rs). Types are checked by luau-lsp, not selene.
+---
+base: luau
+name: axcenity
+globals:
+  game:
+    any: true
+  workspace:
+    any: true
+  script:
+    any: true
+  Enum:
+    any: true
+  Instance:
+    any: true
+  Vector3:
+    any: true
+  Color3:
+    any: true
+  UDim2:
+    any: true
+  task:
+    any: true

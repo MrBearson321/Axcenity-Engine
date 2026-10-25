@@ -73,7 +73,7 @@ use crate::style_panel::{self, StyleEdit};
 use crate::terrain_studio::TerrainStudio;
 use crate::theme::{self, Appearance, filled_icons, icons};
 use crate::thumbnail;
-use crate::toast::Toasts;
+use crate::toast::{self, Toasts};
 use crate::tree::{self, Insertable};
 use crate::ui_handles::{CssEdit, UiDragEdit, apply_css_edits};
 use crate::viewport::{
@@ -664,6 +664,15 @@ impl EditorApp {
             self.loading_frame(ctx);
             return;
         }
+        // A texture dropped on or set on something is read on other threads,
+        // so the window keeps going while a 4K set decodes (the bottom-right
+        // note says how far it is). Each opened project's assets start
+        // reading on the frame they arrive.
+        if !self.assets.loads_textures_in_background() {
+            let ctx = ctx.clone();
+            self.assets
+                .load_textures_in_background(move || ctx.request_repaint());
+        }
         // Files changed by other programs, such as a script saved in VS Code.
         if let Some(project) = &self.project {
             project.watcher.wake(ctx);
@@ -928,6 +937,17 @@ impl EditorApp {
         }
         self.follow_sound_preview();
         self.settings_window(ctx);
+        self.toasts.busy = self.assets.texture_progress().map(|progress| {
+            let file = progress.current.rsplit('/').next().unwrap_or_default();
+            toast::Busy {
+                text: format!(
+                    "Loading textures {} of {}: {file}",
+                    progress.done + 1,
+                    progress.total
+                ),
+                fraction: progress.done as f32 / progress.total.max(1) as f32,
+            }
+        });
         self.toasts.show(ctx);
         self.cover_while_finishing(ctx);
         theme::paint_crossfade(ctx);

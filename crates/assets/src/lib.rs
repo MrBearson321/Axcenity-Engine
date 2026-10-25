@@ -18,7 +18,8 @@ mod import;
 mod model;
 mod texture_set;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -38,15 +39,34 @@ pub use texture_set::{
     texture_set_from_files, write_texture_set,
 };
 
+/// At most this many textures are read at once in the background, leaving
+/// cores for drawing.
+const TEXTURE_WORKERS: usize = 4;
+
 /// The project's loaded assets. Cloning gives another handle to the same
 /// assets, so a model is loaded once however many parts use it.
 ///
 /// `Arc<Mutex<…>>` shares one value between owners (`Arc`) and lets any of
-/// them change it, one at a time (`Mutex`). Only one thread uses it today,
-/// so the lock never waits.
+/// them change it, one at a time (`Mutex`). Background texture workers hold
+/// the lock only to take a path and to store what they read, never while
+/// reading.
 #[derive(Clone, Default)]
 pub struct Assets {
     shared: Arc<Mutex<Shared>>,
+}
+
+/// Called from a worker thread each time a background texture is ready.
+type Waker = Arc<dyn Fn() + Send + Sync>;
+
+/// Textures being read in the background, for a progress note.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TextureProgress {
+    /// How many of the textures asked for since none were loading are done.
+    pub done: usize,
+    /// How many were asked for since none were loading.
+    pub total: usize,
+    /// One being read now, such as `assets/textures/Ground108/…_Color.jpg`.
+    pub current: String,
 }
 
 #[derive(Default)]
@@ -63,6 +83,16 @@ struct Shared {
     takes: HashMap<String, Option<Arc<Vec<Take>>>>,
     /// Loading errors not yet collected by [`Assets::take_errors`].
     errors: Vec<String>,
+    /// Set by [`Assets::load_textures_in_background`].
+    waker: Option<Waker>,
+    /// Texture files waiting for a worker, oldest first.
+    queue: VecDeque<String>,
+    /// Texture files queued or being read.
+    loading: HashSet<String>,
+    /// Worker threads running.
+    workers: usize,
+    /// Textures asked for since none were loading, for [`TextureProgress`].
+    batch: usize,
 }
 
 impl Assets {
@@ -115,6 +145,10 @@ impl Assets {
     /// `assets/textures/wood.png`), decoded the first time. `None` if
     /// `path` is empty or it can't be read; the reason goes to
     /// [`take_errors`](Self::take_errors), once.
+    ///
+    /// After [`load_textures_in_background`](Self::load_textures_in_background),
+    /// a texture not read yet is `None` until a worker thread has read it,
+    /// instead of being read before this returns.
     pub fn texture(&self, path: &str) -> Option<Arc<Image>> {
         if path.is_empty() {
             return None;
@@ -124,17 +158,87 @@ impl Assets {
             return texture.clone();
         }
         let folder = shared.folder.clone()?;
-        let texture = match read_texture(&folder, path) {
-            Ok(image) => Some(Arc::new(image)),
-            Err(message) => {
-                shared
-                    .errors
-                    .push(format!("Could not load the texture `{path}`: {message}"));
-                None
+        if shared.waker.is_some() {
+            self.queue_texture(&mut shared, path);
+            return None;
+        }
+        store_texture(&mut shared, path, read_texture(&folder, path))
+    }
+
+    /// From now on, [`texture`](Self::texture) doesn't wait for a file it
+    /// hasn't read: up to [`TEXTURE_WORKERS`] threads read them, and
+    /// `ready` is called (on one of those threads) after each, so the host
+    /// can draw again. For the editor, where a 4K texture set takes seconds
+    /// to decode. The player reads its textures on its loading screen.
+    pub fn load_textures_in_background(&self, ready: impl Fn() + Send + Sync + 'static) {
+        self.lock().waker = Some(Arc::new(ready));
+    }
+
+    /// Whether [`load_textures_in_background`](Self::load_textures_in_background)
+    /// was called.
+    pub fn loads_textures_in_background(&self) -> bool {
+        self.lock().waker.is_some()
+    }
+
+    /// The textures being read in the background, or `None` when none are.
+    pub fn texture_progress(&self) -> Option<TextureProgress> {
+        let shared = self.lock();
+        let current = shared
+            .loading
+            .iter()
+            .find(|path| !shared.queue.contains(path))
+            .or_else(|| shared.queue.front())?
+            .clone();
+        Some(TextureProgress {
+            done: shared.batch - shared.loading.len(),
+            total: shared.batch,
+            current,
+        })
+    }
+
+    /// Queues `path` for a background worker, starting one if fewer than
+    /// [`TEXTURE_WORKERS`] are running.
+    fn queue_texture(&self, shared: &mut Shared, path: &str) {
+        if !shared.loading.insert(path.to_owned()) {
+            return;
+        }
+        shared.queue.push_back(path.to_owned());
+        shared.batch += 1;
+        if shared.workers < TEXTURE_WORKERS {
+            shared.workers += 1;
+            let assets = self.clone();
+            std::thread::spawn(move || assets.read_queued_textures());
+        }
+    }
+
+    /// A worker: reads queued textures until there are none left.
+    fn read_queued_textures(&self) {
+        loop {
+            let (path, folder) = {
+                let mut shared = self.lock();
+                let Some(path) = shared.queue.pop_front() else {
+                    shared.workers -= 1;
+                    return;
+                };
+                (path, shared.folder.clone().unwrap_or_default())
+            };
+            // A decoder that panics fails this texture, not the worker,
+            // which would leave the texture "loading" forever.
+            let read = panic::catch_unwind(AssertUnwindSafe(|| read_texture(&folder, &path)))
+                .unwrap_or_else(|_| Err("the decoder failed on it".to_owned()));
+            let waker = {
+                let mut shared = self.lock();
+                store_texture(&mut shared, &path, read);
+                shared.loading.remove(&path);
+                if shared.loading.is_empty() {
+                    shared.batch = 0;
+                }
+                shared.waker.clone()
+            };
+            if let Some(waker) = waker {
+                waker();
             }
-        };
-        shared.textures.insert(path.to_owned(), texture.clone());
-        texture
+        }
     }
 
     /// The takes (animation timelines) in the model file at `path`, such
@@ -236,8 +340,28 @@ fn read_takes(folder: &Path, path: &str) -> Result<Vec<Take>, String> {
     load_takes(&bytes, format).map_err(|err| with_causes(&err))
 }
 
+/// Keeps what reading the texture at `path` gave, reporting a failure.
+fn store_texture(
+    shared: &mut Shared,
+    path: &str,
+    read: Result<Image, String>,
+) -> Option<Arc<Image>> {
+    let texture = match read {
+        Ok(image) => Some(Arc::new(image)),
+        Err(message) => {
+            shared
+                .errors
+                .push(format!("Could not load the texture `{path}`: {message}"));
+            None
+        }
+    };
+    shared.textures.insert(path.to_owned(), texture.clone());
+    texture
+}
+
 /// Reads the texture at `path` inside `folder`, or explains why it can't.
-fn read_texture(folder: &Path, path: &str) -> Result<Image, String> {
+/// Not cached: [`Assets::texture`] is the cached way.
+pub fn read_texture(folder: &Path, path: &str) -> Result<Image, String> {
     let relative = safe_path(path).ok_or(
         "a texture must be a file inside the project folder, such as \"assets/textures/wood.png\"",
     )?;
@@ -378,6 +502,46 @@ mod tests {
         assert_eq!(errors.len(), 2, "{errors:?}");
         assert!(errors[0].contains("`assets/textures/gone.png`: the file isn't there"));
         assert!(errors[1].contains("inside the project folder"));
+    }
+
+    #[test]
+    fn background_textures_arrive_later_with_progress_and_a_wake_up() {
+        let folder = std::env::temp_dir().join("axcenity-assets-background");
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(folder.join("assets/textures")).unwrap();
+        std::fs::write(
+            folder.join("assets/textures/checker.png"),
+            model::checker_png(),
+        )
+        .unwrap();
+        let assets = Assets::new(&folder);
+        let (woken, wakes) = std::sync::mpsc::channel();
+        assets.load_textures_in_background(move || {
+            let _ = woken.send(());
+        });
+        assert!(assets.loads_textures_in_background());
+        assert!(assets.texture_progress().is_none());
+
+        // Asked for, not read yet: nothing to draw, but it's loading.
+        assert!(assets.texture("assets/textures/checker.png").is_none());
+        assert!(assets.texture("assets/textures/gone.png").is_none());
+        let progress = assets.texture_progress();
+        assert!(
+            progress.as_ref().is_none_or(|progress| progress.total == 2),
+            "{progress:?}"
+        );
+        for _ in 0..2 {
+            wakes
+                .recv_timeout(std::time::Duration::from_secs(10))
+                .expect("each texture wakes the host");
+        }
+        assert!(assets.texture_progress().is_none());
+        assert!(assets.texture("assets/textures/checker.png").is_some());
+        assert!(assets.texture("assets/textures/gone.png").is_none());
+        let errors = assets.take_errors();
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].contains("gone.png"), "{errors:?}");
+        std::fs::remove_dir_all(folder).unwrap();
     }
 
     #[test]

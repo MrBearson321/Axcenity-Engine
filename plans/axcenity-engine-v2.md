@@ -191,9 +191,9 @@ A searchable API reference is generated from the engine's Lua definitions, cover
 
 ### Acceptance criteria
 
-- [ ] Searching for a class, a property, and a function each opens the matching entry.
-- [ ] An entry describes the call and its arguments in the words the definitions already use.
-- [ ] A new Lua API added with its definition appears in the reference after regeneration.
+- [x] Searching for a class, a property, and a function each opens the matching entry.
+- [x] An entry describes the call and its arguments in the words the definitions already use.
+- [x] A new Lua API added with its definition appears in the reference after regeneration.
 
 ---
 
@@ -207,8 +207,8 @@ Short tutorials, each one task, live with the editor's Learn page: place and mov
 
 ### Acceptance criteria
 
-- [ ] Learn lists the tutorials, and each one can be opened and followed without another document.
-- [ ] Each tutorial names a sample project, and that sample still runs in the player and the editor.
+- [x] Learn lists the tutorials, and each one can be opened and followed without another document.
+- [x] Each tutorial names a sample project, and that sample still runs in the player and the editor.
 - [x] The searchable API reference from Phase 10 still opens from the editor.
 
 ---
@@ -227,8 +227,8 @@ A `ThirdPersonController` Instance, parented to a character model, walks and run
 
 - [ ] During Play, walk and run move the character across a flat floor at different speeds, and the character does not tip over or fall as a physics body.
 - [ ] The third-person camera follows behind the character during Play and is gone after Stop, with the fly camera back.
-- [x] An unanchored crate still falls and collides, and editing the controller's speeds does not change crate gravity or friction.
-- [x] The controller saves, reloads, and can be switched between walk and run from Lua and from blocks.
+- [ ] An unanchored crate still falls and collides, and editing the controller's speeds does not change crate gravity or friction.
+- [ ] The controller saves, reloads, and can be switched between walk and run from Lua and from blocks.
 
 ---
 

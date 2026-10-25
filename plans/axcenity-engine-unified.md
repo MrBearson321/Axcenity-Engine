@@ -28,10 +28,10 @@ Tick these in the source plan once they've been checked by hand. Where a test al
 
 **v2 Phase 12, third-person walk and run** (`examples/hello-character`):
 
-- [ ] During Play, walk and run move the character across a flat floor at different speeds, and it doesn't tip over or fall. Tests: `character` `walk_and_run_move_at_different_speeds_and_stay_upright`, player `hello_character_walks_runs_and_switches_from_lua_and_blocks`.
-- [ ] The third-person camera follows behind the character during Play, and after Stop the fly camera is back. Test: `the_camera_starts_behind_the_character`. Following and the handoff on Stop are checked only by hand.
-- [ ] An unanchored crate still falls and collides, and the controller's speeds don't change crate gravity or friction. Tests: `a_wall_stops_the_character_and_a_crate_still_falls`, `walk_speed_does_not_change_how_a_crate_falls`.
-- [ ] The controller saves, reloads, and switches between walk and run from Lua and from blocks. Tests: the save round trip in `project/src/world_file.rs`, and the hello-character player test.
+- [x] During Play, walk and run move the character across a flat floor at different speeds, and it doesn't tip over or fall. Tests: `character` `walk_and_run_move_at_different_speeds_and_stay_upright`, player `hello_character_walks_runs_and_switches_from_lua_and_blocks`.
+- [x] The third-person camera follows behind the character during Play, and after Stop the fly camera is back. Test: `the_camera_starts_behind_the_character`. Following and the handoff on Stop are checked only by hand.
+- [x] An unanchored crate still falls and collides, and the controller's speeds don't change crate gravity or friction. Tests: `a_wall_stops_the_character_and_a_crate_still_falls`, `walk_speed_does_not_change_how_a_crate_falls`.
+- [x] The controller saves, reloads, and switches between walk and run from Lua and from blocks. Tests: the save round trip in `project/src/world_file.rs`, and the hello-character player test.
 
 **v3 Phases 4 and 8, Animation window:**
 

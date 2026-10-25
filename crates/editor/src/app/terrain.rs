@@ -57,6 +57,13 @@ impl EditorApp {
     pub(super) fn terrain_pane(&mut self, ui: &mut egui::Ui) {
         let editing = self.project.is_some() && !self.playing();
         let time = ui.input(|input| input.time);
+        // Only an open layer has texture pickers, so only then are the
+        // project's textures (and their thumbnails) looked up.
+        let textures = if self.terrain.open_layer.is_some() {
+            self.asset_browser.textures(ui.ctx())
+        } else {
+            Vec::new()
+        };
         let actions = self.terrain.show(
             ui,
             &StudioContext {
@@ -64,6 +71,7 @@ impl EditorApp {
                 selected: self.selected,
                 editing,
                 time,
+                textures: &textures,
             },
         );
         for action in actions {
@@ -185,6 +193,9 @@ impl EditorApp {
             }
             TerrainAction::PickLayerTexture(layer, name) => {
                 self.apply(layer, Edit::PickTexture(name));
+            }
+            TerrainAction::UseTextureSet(layer, entry) => {
+                self.apply_texture_set(&entry, Some(layer));
             }
             TerrainAction::ImportTextureSet(layer) => self.import_texture_set(layer),
             TerrainAction::CopySurfaceAppearance(layer) => self.copy_surface_appearance(layer),

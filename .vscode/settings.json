@@ -1,3 +1,34 @@
 {
-    "python-envs.defaultEnvManager": "ms-python.python:system"
+    "python-envs.defaultEnvManager": "ms-python.python:system",
+    "files.associations": {
+        "*.lua": "luau"
+    },
+    "luau-lsp.platform.type": "standard",
+    "luau-lsp.sourcemap.enabled": false,
+    "luau-lsp.types.definitionFiles": {
+        "@axcenity": "definitions/axcenity.d.luau"
+    },
+    "luau-lsp.types.disabledGlobals": [
+        "debug",
+        "gcinfo",
+        "getfenv",
+        "loadstring",
+        "newproxy",
+        "setfenv",
+        "unpack",
+        "vector"
+    ],
+    "Lua.diagnostics.globals": [
+        "game",
+        "workspace",
+        "script",
+        "Enum",
+        "Instance",
+        "Vector3",
+        "Color3",
+        "UDim2",
+        "task"
+    ],
+    "Lua.diagnostics.disable": ["lowercase-global"],
+    "Lua.runtime.version": "Lua 5.1"
 }

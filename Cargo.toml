@@ -99,3 +99,15 @@ unsafe_code = "deny"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
+
+# Debug builds (`cargo run`) still optimize the libraries the engine uses,
+# such as image decoding, physics and wgpu: unoptimized, one 4K JPEG takes
+# about 4 s to decode instead of 0.2 s. The engine's own crates stay quick to
+# rebuild, except `render`, whose mipmap and terrain loops run on every new
+# texture (1.2 s for a 4K map unoptimized, 25 ms optimized). Libraries are
+# rebuilt once after this changes; debug info is kept.
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.dev.package.axcenity-render]
+opt-level = 3

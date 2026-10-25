@@ -622,7 +622,7 @@ pub(in crate::start) const TUTORIALS: &[Tutorial] = &[
                        moving the block.",
                 picture: Some(Picture::Code {
                     file: "mover.server.lua",
-                    code: "MoveRequest.OnServerEvent:Connect(function(player, direction, seconds)\n    if type(seconds) ~= \"number\" then\n        return\n    end\n    -- move the block\nend)",
+                    code: "MoveRequest.OnServerEvent:Connect(function(_player, direction, seconds)\n    if type(seconds) ~= \"number\" then\n        return\n    end\n    -- move the block\nend)",
                 }),
             },
             Step {

@@ -72,7 +72,7 @@ impl EditorApp {
         let action = {
             let foliage = picking_foliage.then_some(&self.terrain.foliage_source);
             self.asset_browser
-                .show(ui, &self.assets, !self.playing(), can_save, foliage)
+                .show(ui, !self.playing(), can_save, foliage)
         };
         match action {
             Some(BrowserAction::Place(entry)) => self.drop_asset(&entry, None),

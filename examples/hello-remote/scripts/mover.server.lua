@@ -12,8 +12,9 @@ local function clamp(x)
     return math.max(-EDGE, math.min(EDGE, x))
 end
 
--- The server's handler gets the player who sent the message first.
-MoveRequest.OnServerEvent:Connect(function(player, direction, seconds)
+-- The server's handler gets the player who sent the message first (unused
+-- here; the `_` says so on purpose).
+MoveRequest.OnServerEvent:Connect(function(_player, direction, seconds)
     if type(direction) ~= "userdata" or type(seconds) ~= "number" then
         return
     end

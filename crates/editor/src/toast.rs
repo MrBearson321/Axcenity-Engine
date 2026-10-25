@@ -1,6 +1,9 @@
 //! Small notes in the bottom-right corner that confirm something happened
 //! ("Saved", "Imported `crate.glb`") and go away on their own. They never
 //! take clicks or keys; the full message is always in Output too.
+//!
+//! Under them, work still going on ([`Busy`], such as textures loading)
+//! shows with a spinner and a bar until it's done.
 
 use eframe::egui::{self, FontId};
 
@@ -25,9 +28,20 @@ struct Toast {
     shown_at: Option<f64>,
 }
 
+/// Work going on, shown under the toasts while it lasts.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Busy {
+    /// Such as "Loading textures 2 of 5: Ground108_4K-JPG_Color.jpg".
+    pub text: String,
+    /// How much is done, from 0 to 1.
+    pub fraction: f32,
+}
+
 #[derive(Default)]
 pub struct Toasts {
     toasts: Vec<Toast>,
+    /// Set each frame by the app; `None` when nothing is going on.
+    pub busy: Option<Busy>,
 }
 
 impl Toasts {
@@ -60,7 +74,7 @@ impl Toasts {
 
     /// Draws the toasts, newest at the bottom, and forgets finished ones.
     pub fn show(&mut self, ctx: &egui::Context) {
-        if self.toasts.is_empty() {
+        if self.toasts.is_empty() && self.busy.is_none() {
             return;
         }
         let now = ctx.input(|input| input.time);
@@ -73,6 +87,39 @@ impl Toasts {
         let palette = theme::palette(ctx);
         let screen = ctx.screen_rect();
         let mut bottom = screen.bottom() - 16.0;
+        if let Some(busy) = &self.busy {
+            let area = egui::Area::new(egui::Id::new("toast busy"))
+                .order(egui::Order::Foreground)
+                .interactable(false)
+                .pivot(egui::Align2::RIGHT_BOTTOM)
+                .fixed_pos(egui::pos2(screen.right() - 16.0, bottom))
+                .show(ctx, |ui| {
+                    egui::Frame::popup(ui.style())
+                        .inner_margin(egui::Margin::symmetric(12, 8))
+                        .corner_radius(8)
+                        .show(ui, |ui| {
+                            ui.set_width(300.0);
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 8.0;
+                                ui.add(egui::Spinner::new().size(14.0));
+                                ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(&busy.text)
+                                            .size(type_scale::SMALL)
+                                            .color(palette.text_strong),
+                                    )
+                                    .truncate(),
+                                );
+                            });
+                            ui.add(
+                                egui::ProgressBar::new(busy.fraction.clamp(0.0, 1.0))
+                                    .desired_height(4.0)
+                                    .fill(palette.accent),
+                            );
+                        });
+                });
+            bottom -= area.response.rect.height() + 8.0;
+        }
         for (index, toast) in self.toasts.iter_mut().enumerate().rev() {
             let age = now - *toast.shown_at.get_or_insert(now);
             // In over FADE_SECONDS, out over the last FADE_SECONDS.
