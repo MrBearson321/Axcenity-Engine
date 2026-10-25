@@ -12,6 +12,8 @@
 //!   into luau-lsp, so they aren't declared here.
 //! - Tests check the descriptions against what scripts really get, and that
 //!   the checked-in file matches this generator.
+//! - [`api_reference`] lists the same declarations, with the same
+//!   descriptions, for the editor's searchable API reference.
 //!
 //! luau-lsp calls the format unstable and undocumented; it is Luau's own
 //! definition syntax, as in luau-lsp's Roblox definitions.
@@ -90,13 +92,103 @@ fn parameters(function: &Function, in_type: bool) -> Vec<String> {
         .collect()
 }
 
-/// Collects the file's text one line at a time.
-struct Writer(String);
+/// What an [`ApiEntry`] is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ApiKind {
+    /// An Instance class, such as `Part`.
+    Class,
+    /// A value that isn't an Instance, such as `Vector3` or `Signal`.
+    Type,
+    /// An enum, such as `Enum.Material`.
+    Enum,
+    /// A global table of functions with no type of the same name, such as `task`.
+    Library,
+    /// A global variable, such as `workspace`.
+    Global,
+    Property,
+    Event,
+    /// A function or method.
+    Function,
+    /// One choice of an enum, such as `Enum.Material.Neon`.
+    EnumItem,
+}
+
+impl ApiKind {
+    /// What the reference calls it, such as "Property".
+    pub fn label(self) -> &'static str {
+        match self {
+            ApiKind::Class => "Class",
+            ApiKind::Type => "Type",
+            ApiKind::Enum => "Enum",
+            ApiKind::Library => "Library",
+            ApiKind::Global => "Global",
+            ApiKind::Property => "Property",
+            ApiKind::Event => "Event",
+            ApiKind::Function => "Function",
+            ApiKind::EnumItem => "Enum item",
+        }
+    }
+}
+
+/// One declaration in the definitions file, for the editor's API reference.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApiEntry {
+    pub kind: ApiKind,
+    pub name: String,
+    /// The class, type, enum or library it's a member of, such as `Part`.
+    /// Empty for one of those itself, and for globals.
+    pub owner: String,
+    /// How it's written or called, such as `Part.Size: Vector3` or
+    /// `Instance:FindFirstChild(name: string, recursive: boolean?): Instance?`.
+    pub signature: String,
+    /// What it does, in the definitions' words. Empty if they have none.
+    pub doc: String,
+}
+
+impl ApiEntry {
+    /// `Owner.Name`, or the name alone without an owner.
+    pub fn qualified_name(&self) -> String {
+        if self.owner.is_empty() {
+            self.name.clone()
+        } else {
+            format!("{}.{}", self.owner, self.name)
+        }
+    }
+}
+
+/// Collects the file's text one line at a time, and the reference entry for
+/// each declaration as it's written.
+#[derive(Default)]
+struct Writer {
+    text: String,
+    /// What the members being written belong to, such as `Part`.
+    owner: String,
+    reference: Vec<ApiEntry>,
+}
 
 impl Writer {
     fn line(&mut self, text: &str) {
-        self.0.push_str(text);
-        self.0.push('\n');
+        self.text.push_str(text);
+        self.text.push('\n');
+    }
+
+    /// Adds a member of the current owner to the reference.
+    fn entry(&mut self, kind: ApiKind, name: &str, signature: String, doc: &str) {
+        self.reference.push(ApiEntry {
+            kind,
+            name: name.to_owned(),
+            owner: self.owner.clone(),
+            signature,
+            doc: doc.to_owned(),
+        });
+    }
+
+    /// Adds a class, type, enum, library or global to the reference. The
+    /// members written after it belong to it.
+    fn top(&mut self, kind: ApiKind, name: &str, signature: String, doc: &str) {
+        self.owner.clear();
+        self.entry(kind, name, signature, doc);
+        self.owner = name.to_owned();
     }
 
     /// A doc comment, which luau-lsp shows on hover and in autocomplete.
@@ -106,32 +198,44 @@ impl Writer {
         }
     }
 
-    /// A class member: `Name: type`.
-    fn member(&mut self, name: &str, ty: &str, doc: &str) {
+    /// A class member: `Name: type`, which the reference shows as
+    /// `Owner.Name: type`.
+    fn member(&mut self, kind: ApiKind, name: &str, ty: &str, doc: &str) {
         self.doc("\t", doc);
         self.line(&format!("\t{name}: {ty}"));
+        let signature = format!("{}.{name}: {ty}", self.owner);
+        self.entry(kind, name, signature, doc);
     }
 
     fn field(&mut self, field: &Field) {
-        self.member(field.name, field.ty, &with_side(field.name, field.doc));
+        let doc = with_side(field.name, field.doc);
+        self.member(ApiKind::Property, field.name, field.ty, &doc);
     }
 
     /// A method, called with `:`.
     fn method(&mut self, method: &Function) {
-        self.doc("\t", &with_side(method.name, method.doc));
-        let mut params = vec!["self".to_owned()];
-        params.extend(parameters(method, false));
+        let doc = with_side(method.name, method.doc);
+        self.doc("\t", &doc);
+        let params = parameters(method, false).join(", ");
+        let with_self = if params.is_empty() {
+            "self".to_owned()
+        } else {
+            format!("self, {params}")
+        };
         self.line(&format!(
-            "\tfunction {}({}): {}",
-            method.name,
-            params.join(", "),
-            method.returns
+            "\tfunction {}({with_self}): {}",
+            method.name, method.returns
         ));
+        let signature = format!(
+            "{}:{}({params}): {}",
+            self.owner, method.name, method.returns
+        );
+        self.entry(ApiKind::Function, method.name, signature, &doc);
     }
 
     fn heading(&mut self, title: &str) {
         // Sections already end with a blank line.
-        if !self.0.ends_with("\n\n") {
+        if !self.text.ends_with("\n\n") {
             self.line("");
         }
         self.line(&format!("-- {title} {}", "-".repeat(74 - title.len())));
@@ -147,7 +251,19 @@ impl Writer {
 
 /// The text of the definitions file for the current API.
 pub fn lua_definitions() -> String {
-    let mut w = Writer(String::new());
+    write().text
+}
+
+/// Every class, type, enum, global and member the definitions file declares,
+/// in its order and with its descriptions. It comes from the same writer, so
+/// it changes whenever the file does.
+pub fn api_reference() -> Vec<ApiEntry> {
+    write().reference
+}
+
+/// Writes the definitions file and its reference entries.
+fn write() -> Writer {
+    let mut w = Writer::default();
     w.line("-- The Axcenity Engine script API, for luau-lsp (autocomplete and type");
     w.line("-- checking in VS Code and other editors).");
     w.line(&format!(
@@ -156,8 +272,10 @@ pub fn lua_definitions() -> String {
 
     w.heading("Values");
     for value_type in VALUE_TYPES {
+        let class = value_type.class;
         w.doc("", value_type.doc);
-        w.line(&format!("declare extern type {} with", value_type.class));
+        w.line(&format!("declare extern type {class} with"));
+        w.top(ApiKind::Type, class, class.to_owned(), value_type.doc);
         for field in value_type.fields {
             w.field(field);
         }
@@ -174,13 +292,19 @@ pub fn lua_definitions() -> String {
     for enum_type in EnumType::ALL {
         let name = enum_type.name();
         let item = enum_item_class(enum_type);
-        w.doc("", &format!("One choice of `Enum.{name}`."));
+        let item_doc = format!("One choice of `Enum.{name}`.");
+        w.doc("", &item_doc);
         w.line(&format!("declare extern type {item} extends EnumItem with"));
         w.end();
-        w.doc("", &format!("The choices of `Enum.{name}`."));
+        let doc = format!("The choices of `Enum.{name}`.");
+        w.doc("", &doc);
         w.line(&format!("declare extern type {item}Items with"));
+        let qualified = format!("Enum.{name}");
+        w.top(ApiKind::Enum, &qualified, qualified.clone(), &doc);
         for choice in enum_type.item_names() {
             w.line(&format!("\t{choice}: {item}"));
+            let signature = format!("{qualified}.{choice}");
+            w.entry(ApiKind::EnumItem, choice, signature, &item_doc);
         }
         w.end();
     }
@@ -195,12 +319,19 @@ pub fn lua_definitions() -> String {
     w.heading("Instances");
     w.doc("", SIGNAL_DOC);
     w.line("declare extern type Signal with");
+    w.top(ApiKind::Type, "Signal", "Signal".to_owned(), SIGNAL_DOC);
     for method in SIGNAL_METHODS {
         w.method(method);
     }
     w.end();
     w.doc("", CONNECTION_DOC);
     w.line("declare extern type Connection with");
+    w.top(
+        ApiKind::Type,
+        "Connection",
+        "Connection".to_owned(),
+        CONNECTION_DOC,
+    );
     for field in CONNECTION_FIELDS {
         w.field(field);
     }
@@ -209,16 +340,20 @@ pub fn lua_definitions() -> String {
     }
     w.end();
 
-    w.doc(
-        "",
-        "Anything in the game tree. Every class below is a kind of Instance.",
-    );
+    let instance_doc = "Anything in the game tree. Every class below is a kind of Instance.";
+    w.doc("", instance_doc);
     w.line("declare extern type Instance with");
+    w.top(
+        ApiKind::Class,
+        "Instance",
+        "Instance".to_owned(),
+        instance_doc,
+    );
     for field in INSTANCE_FIELDS {
         w.field(field);
     }
     for (event, doc) in INSTANCE_EVENT_DOCS {
-        w.member(event, "Signal", doc);
+        w.member(ApiKind::Event, event, "Signal", doc);
     }
     w.line(CHILD_INDEXER);
     for method in INSTANCE_METHODS {
@@ -243,21 +378,28 @@ pub fn lua_definitions() -> String {
         w.line(&format!(
             "declare extern type {class} extends Instance with"
         ));
+        w.top(
+            ApiKind::Class,
+            class.as_str(),
+            class_signature(class),
+            class_doc(class),
+        );
         if class == ClassName::DataModel {
             for &service in &services {
-                w.member(service.as_str(), service.as_str(), class_doc(service));
+                let name = service.as_str();
+                w.member(ApiKind::Property, name, name, class_doc(service));
             }
         }
         for (name, default) in class.default_properties() {
             let doc = property_doc(class, name).unwrap_or("");
-            w.member(name, &luau_type(default.kind()), doc);
+            w.member(ApiKind::Property, name, &luau_type(default.kind()), doc);
         }
         for (_, field) in CLASS_FIELDS.iter().filter(|(c, _)| *c == class) {
             w.field(field);
         }
         for &event in class.events() {
             let doc = event_doc(class, event).unwrap_or("");
-            w.member(event, "Signal", &with_side(event, doc));
+            w.member(ApiKind::Event, event, "Signal", &with_side(event, doc));
         }
         w.line(CHILD_INDEXER);
         for (_, method) in CLASS_METHODS.iter().filter(|(c, _)| *c == class) {
@@ -271,19 +413,25 @@ pub fn lua_definitions() -> String {
         w.doc("", doc);
         w.line(&format!("declare {name}: {ty}"));
         w.line("");
+        w.top(ApiKind::Global, name, format!("{name}: {ty}"), doc);
     }
     w.doc("", ENUM_GLOBAL_DOC);
     w.line("declare Enum: EnumLibrary");
     w.line("");
+    w.top(ApiKind::Global, "Enum", "Enum".to_owned(), ENUM_GLOBAL_DOC);
+    w.owner.clear();
     for function in GLOBAL_FUNCTIONS {
-        w.doc("", &with_side(function.name, function.doc));
-        w.line(&format!(
-            "declare function {}({}): {}",
+        let doc = with_side(function.name, function.doc);
+        let signature = format!(
+            "{}({}): {}",
             function.name,
             parameters(function, false).join(", "),
             function.returns
-        ));
+        );
+        w.doc("", &doc);
+        w.line(&format!("declare function {signature}"));
         w.line("");
+        w.entry(ApiKind::Function, function.name, signature, &doc);
     }
 
     // Each library is a class of function fields (called with `.`), so its
@@ -292,9 +440,29 @@ pub fn lua_definitions() -> String {
         let class = format!("{}Library", library.global);
         w.doc("", library.doc);
         w.line(&format!("declare extern type {class} with"));
+        // `Vector3.new` belongs with the Vector3 type; `task` has no type.
+        let global = library.global;
+        let has_type = w
+            .reference
+            .iter()
+            .any(|entry| entry.owner.is_empty() && entry.name == global);
+        if has_type {
+            w.owner = global.to_owned();
+        } else {
+            w.top(ApiKind::Library, global, global.to_owned(), library.doc);
+        }
         for function in library.functions {
+            let doc = with_side(function.name, function.doc);
+            w.doc("\t", &doc);
             let ty = function_type(library, function);
-            w.member(function.name, &ty, &with_side(function.name, function.doc));
+            w.line(&format!("\t{}: {ty}", function.name));
+            let signature = format!(
+                "{global}.{}({}): {}",
+                function.name,
+                parameters(function, false).join(", "),
+                function.returns
+            );
+            w.entry(ApiKind::Function, function.name, signature, &doc);
         }
         w.end();
         w.doc("", library.doc);
@@ -303,11 +471,21 @@ pub fn lua_definitions() -> String {
     }
 
     // One blank line at the end, not two.
-    let mut text = w.0;
-    while text.ends_with("\n\n") {
-        text.pop();
+    while w.text.ends_with("\n\n") {
+        w.text.pop();
     }
-    text
+    w
+}
+
+/// How scripts reach a class: `game.Workspace` for a service, or
+/// `Instance.new("Part")` for one they can make.
+fn class_signature(class: ClassName) -> String {
+    match class {
+        ClassName::DataModel => "game".to_owned(),
+        _ if class.is_service() => format!("game.{class}"),
+        ClassName::Player => class.to_string(),
+        _ => format!("Instance.new(\"{class}\")"),
+    }
 }
 
 /// A library function's type, such as `(x: number?) -> Vector3`.

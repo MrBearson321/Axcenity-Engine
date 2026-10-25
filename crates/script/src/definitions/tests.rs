@@ -372,3 +372,52 @@ fn described_fields_and_methods_exist() {
     assert!(errors.is_empty(), "{errors:?}");
     assert_eq!(output.last().unwrap().text, "checked input");
 }
+
+#[test]
+fn the_reference_lists_what_the_definitions_declare_in_their_words() {
+    let text = lua_definitions();
+    let reference = api_reference();
+    let find = |owner: &str, name: &str| {
+        reference
+            .iter()
+            .find(|entry| entry.owner == owner && entry.name == name)
+            .unwrap_or_else(|| panic!("`{owner}.{name}` is missing from the reference"))
+    };
+
+    let part = find("", "Part");
+    assert_eq!(part.kind, ApiKind::Class);
+    assert_eq!(part.signature, "Instance.new(\"Part\")");
+    assert_eq!(find("", "Workspace").signature, "game.Workspace");
+    assert_eq!(find("Part", "Size").kind, ApiKind::Property);
+    assert_eq!(find("Part", "Touched").kind, ApiKind::Event);
+    let new = find("Instance", "new");
+    assert_eq!(new.kind, ApiKind::Function);
+    assert_eq!(new.signature, "Instance.new(className: string): Instance");
+    assert_eq!(
+        find("Instance", "FindFirstChild").signature,
+        "Instance:FindFirstChild(name: string, recursive: boolean?): Instance?"
+    );
+    assert_eq!(find("", "task").kind, ApiKind::Library);
+    assert_eq!(find("task", "wait").kind, ApiKind::Function);
+    assert_eq!(
+        find("Enum.Material", "Neon").signature,
+        "Enum.Material.Neon"
+    );
+    assert_eq!(find("", "require").kind, ApiKind::Function);
+    // Vector3 is a type, so `Vector3.new` belongs to it, not to a library.
+    assert_eq!(find("", "Vector3").kind, ApiKind::Type);
+    assert_eq!(find("Vector3", "new").kind, ApiKind::Function);
+
+    for entry in &reference {
+        assert!(
+            entry.owner.is_empty() || reference.iter().any(|o| o.name == entry.owner),
+            "`{}` belongs to nothing in the reference",
+            entry.qualified_name()
+        );
+        assert!(
+            entry.doc.is_empty() || text.contains(&format!("--- {}\n", entry.doc)),
+            "`{}`'s description isn't the definitions' own",
+            entry.qualified_name()
+        );
+    }
+}

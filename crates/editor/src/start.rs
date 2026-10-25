@@ -1,5 +1,6 @@
 //! The start screen shown while no project is open: a sidebar with the
-//! wordmark, the Projects and Learn pages and Settings; on Projects, a
+//! wordmark, the Projects, Learn and API Reference pages and Settings
+//! (the reference is in `reference`); on Projects, a
 //! header with New and Open Project, templates to start from, and the
 //! tracked projects as cards (or a list) with thumbnails, a search box and
 //! sorting. Also the New Project, Project Settings, Version History and
@@ -15,10 +16,12 @@ use eframe::egui::{self, CornerRadius, FontId, Rect, RichText, Sense, Stroke, po
 mod cards;
 mod dialogs;
 mod pages;
+mod reference;
 
 use cards::*;
 use dialogs::*;
 use pages::*;
+use reference::Reference;
 
 use crate::theme::{self, Palette, icons, type_scale};
 use crate::widgets::{self, Role};
@@ -136,6 +139,7 @@ enum Page {
     #[default]
     Projects,
     Learn,
+    Reference,
 }
 
 /// How tracked projects are shown.
@@ -208,6 +212,7 @@ pub struct StartScreen {
     last_parent: Option<PathBuf>,
     /// The last problem with something that has no dialog of its own.
     notice: Option<String>,
+    reference: Reference,
 }
 
 impl StartScreen {
@@ -295,6 +300,7 @@ impl StartScreen {
                                 }
                             }
                             Page::Learn => learn_page(ui),
+                            Page::Reference => self.reference.show(ui),
                         }
                     });
                 });
@@ -333,6 +339,7 @@ impl StartScreen {
                 Some(tracked),
             ),
             (Page::Learn, icons::BOOK_OPEN, "Learn", None),
+            (Page::Reference, icons::BOOKS, "API Reference", None),
         ] {
             if widgets::nav_item(&mut bar, icon, title, count, self.page == page).clicked() {
                 self.page = page;

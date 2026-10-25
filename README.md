@@ -41,7 +41,7 @@ Camera controls: hold the **right mouse button** and move the mouse to look arou
 cargo run -p axcenity-editor -- examples/hello-touched
 ```
 
-Without a project, the editor opens on its start screen: your recent projects as cards (search them, sort them, or switch to a list), **New Project** from a template (Baseplate, Empty, or a Starter scene with lights and blocks), and a **Learn** page.
+Without a project, the editor opens on its start screen: your recent projects as cards (search them, sort them, or switch to a list), **New Project** from a template (Baseplate, Empty, or a Starter scene with lights and blocks), a **Learn** page, and a searchable **API Reference** of every class, property, event and function scripts can use.
 
 The editor shows the project in a 3D viewport, the **Explorer** (right) lists every object from `Game` down (click the arrows to open and close branches), and the **Output** panel (bottom) shows messages, load errors, and what scripts print. Use **File > Open Project…** to open another project folder.
 

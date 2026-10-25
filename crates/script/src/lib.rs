@@ -17,7 +17,8 @@
 //!   (`run_service`). Change events (`part.Changed`) come from the World's
 //!   change log (`changes`). Client-only APIs (keyboard, camera) live in
 //!   `client`, and `sides` says which APIs work on which side.
-//! - [`lua_definitions`] describes that API for editors (see `definitions`).
+//! - [`lua_definitions`] describes that API for editors, and [`api_reference`]
+//!   lists it for the editor's API reference (see `definitions`).
 //! - `print` output and errors are collected as [`OutputLine`]s for the host to
 //!   show: the player's console, or the editor's Console panel during Play.
 //! - The editor's Console runs typed Lua with [`ScriptRuntime::run_command`]
@@ -59,7 +60,7 @@ use crate::context::Context;
 
 pub use client::{CameraState, KeyEvent};
 pub use debugger::{Breakpoints, Local, Pause, PausedFrame};
-pub use definitions::{DEFINITIONS_PATH, lua_definitions};
+pub use definitions::{ApiEntry, ApiKind, DEFINITIONS_PATH, api_reference, lua_definitions};
 pub use remote::{Loopback, Message, RemoteValue, Transport};
 pub use sides::{SIDE_ONLY_APIS, Side, SideOnlyApi, side_only};
 pub use watchdog::DEFAULT_LIMIT as WATCHDOG_LIMIT;

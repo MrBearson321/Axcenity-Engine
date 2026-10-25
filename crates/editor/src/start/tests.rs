@@ -68,6 +68,12 @@ fn the_start_screen_draws_each_page_and_the_new_project_dialog() {
         ),
         ("start-learn", Page::Learn, false, theme::ThemeChoice::Dark),
         (
+            "start-reference",
+            Page::Reference,
+            false,
+            theme::ThemeChoice::Dark,
+        ),
+        (
             "start-new-project",
             Page::Projects,
             true,
@@ -139,4 +145,68 @@ fn only_project_folders_can_be_deleted() {
     std::fs::write(folder.join(axcenity_project::MANIFEST_FILE), "{}").unwrap();
     delete_project(&folder).unwrap();
     assert!(!folder.exists());
+}
+
+#[test]
+fn searching_the_reference_opens_classes_properties_and_functions() {
+    let entries = axcenity_script::api_reference();
+    let first = |query: &str| {
+        let results = reference::search_entries(&entries, query);
+        entries[results[0]].qualified_name()
+    };
+    assert_eq!(first("Part"), "Part");
+    assert_eq!(first("part.size"), "Part.Size");
+    assert_eq!(first("Instance.new"), "Instance.new");
+    assert_eq!(first("instance:findfirstchild"), "Instance.FindFirstChild");
+    // A member name finds members of every class that has it.
+    let sizes = reference::search_entries(&entries, "Size");
+    assert!(sizes.len() > 1);
+    assert!(sizes.iter().all(|&i| entries[i].name.contains("Size")));
+    assert!(reference::search_entries(&entries, "no such thing").is_empty());
+}
+
+#[test]
+fn the_reference_draws_results_and_an_open_entry() {
+    let entries = axcenity_script::api_reference();
+    let part = entries
+        .iter()
+        .position(|entry| entry.owner.is_empty() && entry.name == "Part")
+        .unwrap();
+    let snapshots = std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from);
+    for (name, query, open) in [
+        ("start-reference-search", "Size", None),
+        ("start-reference-entry", "Part", Some(part)),
+    ] {
+        let mut start = StartScreen {
+            page: Page::Reference,
+            ..Default::default()
+        };
+        start.reference.query = query.to_owned();
+        start.reference.open = open;
+        let mut projects = Vec::new();
+        let mut draw = |ctx: &egui::Context| {
+            theme::apply(ctx, &theme::Appearance::default());
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.fill(theme::palette(ctx).panel))
+                .show(ctx, |ui| {
+                    let brand = Brand::load(ui.ctx());
+                    assert!(start.show(ui, &mut projects, &brand).is_none());
+                });
+        };
+        match &snapshots {
+            Some(folder) => crate::snapshot::snapshot(
+                &folder.join(format!("{name}.png")),
+                vec2(1400.0, 900.0),
+                vec![Vec::new(); 3],
+                &mut draw,
+            ),
+            None => {
+                let ctx = theme::test_context();
+                for _ in 0..3 {
+                    let _ = ctx.run(Default::default(), &mut draw);
+                }
+            }
+        }
+        assert_eq!(start.reference.open, open, "drawing alone opens nothing");
+    }
 }
