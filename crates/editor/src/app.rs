@@ -32,7 +32,7 @@ mod terrain;
 mod texture_set;
 mod tree_ops;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -85,10 +85,11 @@ use crate::window_frame;
 use eframe::egui_wgpu::RenderState;
 use egui_dock::DockState;
 
-/// The hover text of Import Model, in the File menu and the toolbar.
-const IMPORT_HOVER: &str = "Import a 3D model (.gltf, .glb or .fbx), such as one exported from \
-    Blender. It's copied into the project's assets/models folder and inserted as a MeshPart \
-    at the camera's focus point.";
+/// The hover text of Import…, in the File menu and the ribbon.
+const IMPORT_HOVER: &str = "Import models (.gltf, .glb or .fbx), images, sounds and prefabs. A \
+    model opens the Import dialog and is inserted at the camera's focus point; images and \
+    sounds are copied into the project's assets and reported in the Console. You can also \
+    drop files onto the editor.";
 
 /// F5 plays and Shift+F5 stops, as in Roblox Studio.
 const PLAY_SHORTCUT: egui::KeyboardShortcut =
@@ -198,6 +199,8 @@ pub struct EditorApp {
     confirm_delete: Option<InstanceId>,
     /// A model file waiting for its objects to be chosen.
     importing: Option<ImportDialog>,
+    /// Model files imported together, waiting for the dialog to be free.
+    import_queue: VecDeque<PathBuf>,
     /// The theme, accent, density and motion, picked in Settings. Saved between runs.
     appearance: Appearance,
     /// The Settings window.
@@ -390,6 +393,8 @@ enum Discard {
     CloseTab(String),
     /// Going back to the start screen.
     CloseProject,
+    /// File > New Project…: back to the start screen, asking for the new one.
+    NewProject,
 }
 
 /// A screenshot asked for, to make the open project's thumbnail from.
@@ -493,6 +498,7 @@ impl EditorApp {
             tabs: ScriptTabs::default(),
             confirm_delete: None,
             importing: None,
+            import_queue: VecDeque::new(),
             game_keys: GameKeys::default(),
             warnings: WarningCache::default(),
             appearance: Appearance::default(),
@@ -917,6 +923,7 @@ impl EditorApp {
         }
         self.unsaved_changes_prompt(ctx);
         self.delete_script_prompt(ctx);
+        self.import_dropped(ctx);
         self.import_prompt(ctx, render_state);
         self.ribbon_tabs.editor_window(ctx);
         self.start_thumbnail(ctx);

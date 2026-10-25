@@ -1,4 +1,4 @@
-//! The Animation part of the Import Model dialog: what an animated FBX
+//! The Animation tab of the Import dialog: what an animated FBX
 //! holds (its skeleton and takes), and the clips to make from its takes.
 //!
 //! A take is one timeline in the file; often a file holds one take with
@@ -238,7 +238,7 @@ impl AnimationImport {
         Some(file)
     }
 
-    /// The dialog's Animation step. `previewing` is the clip row the
+    /// The Import dialog's Animation tab. `previewing` is the clip row the
     /// preview plays; each row's play button picks it.
     pub fn show(&mut self, ui: &mut egui::Ui, with_animator: bool, previewing: &mut usize) {
         if !self.bones.is_empty() {

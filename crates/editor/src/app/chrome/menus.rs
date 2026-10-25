@@ -71,38 +71,25 @@ impl EditorApp {
             }
             ui.add_space(4.0);
             ui.menu_button("File", |ui| {
+                let editing = self.project.is_some() && !self.playing();
+                let not_editing = if self.playing() {
+                    "Press Stop to edit."
+                } else {
+                    "Open a project first."
+                };
+                widgets::section_label(ui, "Project");
+                if ui
+                    .button(theme::with_icon(icons::FILE_PLUS, "New Project…"))
+                    .on_hover_text("Close this project and make a new one.")
+                    .clicked()
+                {
+                    self.request_and_go_ahead(ui.ctx(), Discard::NewProject);
+                }
                 if ui
                     .button(theme::with_icon(icons::FOLDER_OPEN, "Open Project…"))
                     .clicked()
                 {
                     self.request_and_go_ahead(ui.ctx(), Discard::OpenAnother);
-                }
-                if ui
-                    .add_enabled(
-                        self.project.is_some() && !self.playing(),
-                        egui::Button::new(theme::with_icon(icons::HOUSE, "Close Project")),
-                    )
-                    .clicked()
-                {
-                    self.request_and_go_ahead(ui.ctx(), Discard::CloseProject);
-                }
-                if ui
-                    .add_enabled(
-                        self.project.is_some() && !self.playing(),
-                        egui::Button::new("Open Stylesheet…"),
-                    )
-                    .clicked()
-                {
-                    self.open_stylesheet_with_dialog();
-                }
-                if ui
-                    .add_enabled(
-                        self.project.is_some() && !self.playing(),
-                        egui::Button::new("New Stylesheet"),
-                    )
-                    .clicked()
-                {
-                    self.new_stylesheet();
                 }
                 let save = egui::Button::new(theme::with_icon(icons::FLOPPY_DISK, "Save"))
                     .shortcut_text(ui.ctx().format_shortcut(&SAVE_SHORTCUT));
@@ -111,7 +98,7 @@ impl EditorApp {
                 }
                 if ui
                     .add_enabled(
-                        self.project.is_some() && !self.playing(),
+                        editing,
                         egui::Button::new(theme::with_icon(
                             icons::CLOCK_COUNTER_CLOCKWISE,
                             "Version History…",
@@ -121,71 +108,44 @@ impl EditorApp {
                 {
                     self.versions_open = true;
                 }
-                let export_enabled = self.project.is_some() && !self.playing();
-                ui.menu_button(
-                    theme::with_icon(icons::FILE_ARROW_UP, "Export Game"),
-                    |ui| {
-                        if ui
-                            .add_enabled(export_enabled, egui::Button::new("For this OS"))
-                            .clicked()
-                        {
-                            self.export_game_with_dialog();
-                            ui.close();
-                        }
-                        ui.separator();
-                        for (target, label) in [
-                            (files::ExportTarget::Windows, "For Windows"),
-                            (files::ExportTarget::MacOS, "For macOS"),
-                            (files::ExportTarget::Linux, "For Linux"),
-                        ] {
-                            if ui
-                                .add_enabled(export_enabled, egui::Button::new(label))
-                                .clicked()
-                            {
-                                self.export_game_for_with_dialog(target);
-                                ui.close();
-                            }
-                        }
-                        if !export_enabled {
-                            ui.weak(if self.playing() {
-                                "Press Stop before exporting."
-                            } else {
-                                "Open a project first."
-                            });
-                        }
-                        ui.separator();
-                        let mut show_splash = self
-                            .project
-                            .as_ref()
-                            .is_some_and(|project| project.show_splash);
-                        if ui
-                            .add_enabled(
-                                self.project.is_some(),
-                                egui::Checkbox::new(
-                                    &mut show_splash,
-                                    "Show splash in exported games",
-                                ),
-                            )
-                            .changed()
-                        {
-                            self.set_show_splash(show_splash);
-                        }
-                    },
-                );
-                ui.separator();
-                let import =
-                    egui::Button::new(theme::with_icon(icons::FILE_ARROW_DOWN, "Import Model…"));
                 if ui
-                    .add_enabled(self.project.is_some() && !self.playing(), import)
-                    .on_hover_text(IMPORT_HOVER)
-                    .on_disabled_hover_text(if self.playing() {
-                        "Press Stop to edit."
-                    } else {
-                        "Open a project first."
-                    })
+                    .add_enabled(
+                        editing,
+                        egui::Button::new(theme::with_icon(icons::HOUSE, "Close Project")),
+                    )
                     .clicked()
                 {
-                    self.import_model_with_dialog();
+                    self.request_and_go_ahead(ui.ctx(), Discard::CloseProject);
+                }
+
+                ui.separator();
+                widgets::section_label(ui, "Import");
+                let import = egui::Button::new(theme::with_icon(icons::FILE_ARROW_DOWN, "Import…"));
+                if ui
+                    .add_enabled(editing, import)
+                    .on_hover_text(IMPORT_HOVER)
+                    .on_disabled_hover_text(not_editing)
+                    .clicked()
+                {
+                    self.import_with_dialog(axcenity_assets::PROJECT_TEXTURES_FOLDER);
+                }
+
+                ui.separator();
+                widgets::section_label(ui, "Publish");
+                self.build_game_menu(ui, editing);
+
+                ui.separator();
+                if ui
+                    .add_enabled(editing, egui::Button::new("Open Stylesheet…"))
+                    .clicked()
+                {
+                    self.open_stylesheet_with_dialog();
+                }
+                if ui
+                    .add_enabled(editing, egui::Button::new("New Stylesheet"))
+                    .clicked()
+                {
+                    self.new_stylesheet();
                 }
                 if ui
                     .add_enabled(
@@ -457,5 +417,52 @@ impl EditorApp {
             .inner
         })
         .inner
+    }
+
+    /// File > Build Game ▸: a game anyone can run without the editor, for
+    /// this OS or another, and whether it shows the splash. `enabled` is
+    /// false with no project open, or during Play.
+    fn build_game_menu(&mut self, ui: &mut egui::Ui, enabled: bool) {
+        ui.menu_button(theme::with_icon(icons::FILE_ARROW_UP, "Build Game"), |ui| {
+            if ui
+                .add_enabled(enabled, egui::Button::new("For this OS"))
+                .clicked()
+            {
+                self.export_game_with_dialog();
+                ui.close();
+            }
+            ui.separator();
+            for (target, label) in [
+                (files::ExportTarget::Windows, "For Windows"),
+                (files::ExportTarget::MacOS, "For macOS"),
+                (files::ExportTarget::Linux, "For Linux"),
+            ] {
+                if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+                    self.export_game_for_with_dialog(target);
+                    ui.close();
+                }
+            }
+            if !enabled {
+                ui.weak(if self.playing() {
+                    "Press Stop before building."
+                } else {
+                    "Open a project first."
+                });
+            }
+            ui.separator();
+            let mut show_splash = self
+                .project
+                .as_ref()
+                .is_some_and(|project| project.show_splash);
+            if ui
+                .add_enabled(
+                    self.project.is_some(),
+                    egui::Checkbox::new(&mut show_splash, "Show splash in built games"),
+                )
+                .changed()
+            {
+                self.set_show_splash(show_splash);
+            }
+        });
     }
 }

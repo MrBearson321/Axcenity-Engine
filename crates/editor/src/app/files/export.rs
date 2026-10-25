@@ -69,7 +69,7 @@ impl EditorApp {
             return;
         }
         let Some(destination) = rfd::FileDialog::new()
-            .set_title("Export game")
+            .set_title("Build game: choose a folder")
             .set_directory(&folder)
             .pick_folder()
         else {
@@ -105,7 +105,7 @@ impl EditorApp {
                 format!("in `players/{}` beside the editor", target.directory())
             };
             self.output.error(format!(
-                "Could not export: the player binary `{}` is missing. Build `axcenity-player` \
+                "Could not build the game: the player binary `{}` is missing. Build `axcenity-player` \
                  for {} and put it {}.",
                 player_source.display(),
                 target.directory(),
@@ -123,7 +123,7 @@ impl EditorApp {
         };
         if let Err(err) = fs::create_dir_all(destination) {
             self.output.error(format!(
-                "Could not create export folder `{}`: {err}",
+                "Could not create the build folder `{}`: {err}",
                 destination.display()
             ));
             return;
@@ -138,7 +138,7 @@ impl EditorApp {
         };
         if let Err(err) = fs::create_dir_all(&bundle) {
             self.output.error(format!(
-                "Could not create export folder `{}`: {err}",
+                "Could not create the build folder `{}`: {err}",
                 bundle.display()
             ));
             return;
@@ -228,7 +228,7 @@ impl EditorApp {
             return;
         }
         self.output.info(format!(
-            "Exported the game for {} to `{}` (run `{output_name}`).",
+            "Built the game for {} to `{}` (run `{output_name}`).",
             target.directory(),
             destination.display()
         ));

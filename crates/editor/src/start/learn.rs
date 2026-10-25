@@ -446,56 +446,58 @@ fn sample_box(
     clicked
 }
 
-/// Short notes on each part of the editor.
-fn topic_cards(ui: &mut egui::Ui, palette: &Palette) {
-    let topics = [
-        (
-            icons::CUBE,
-            "Build",
-            "Insert parts from the Home tab, then move, resize and rotate them with the \
+/// Short notes on each part of the editor: an icon, a title and the note.
+pub(super) const TOPICS: [(&str, &str, &str); 7] = [
+    (
+        icons::CUBE,
+        "Build",
+        "Insert parts from the Home tab, then move, resize and rotate them with the \
              handles (Ctrl+2, 3, 4). Drag a part by its body to drop it onto others.",
-        ),
-        (
-            icons::PUZZLE_PIECE,
-            "Blocks",
-            "The bar above a Script's tab switches it to Blocks. Drag blocks from the \
+    ),
+    (
+        icons::PUZZLE_PIECE,
+        "Blocks",
+        "The bar above a Script's tab switches it to Blocks. Drag blocks from the \
              palette, snap them under an event, and press View as Lua to see what they do.",
-        ),
-        (
-            icons::CODE,
-            "Lua scripts",
-            "Scripts run on the server, LocalScripts on each player's side. File > Set Up \
+    ),
+    (
+        icons::CODE,
+        "Lua scripts",
+        "Scripts run on the server, LocalScripts on each player's side. File > Set Up \
              VS Code Autocomplete gives you the whole API as you type.",
-        ),
-        (
-            icons::LAYOUT,
-            "UI and CSS",
-            "Insert a Frame, Text or Button from the UI tab. Drag its handles to place \
+    ),
+    (
+        icons::LAYOUT,
+        "UI and CSS",
+        "Insert a Frame, Text or Button from the UI tab. Drag its handles to place \
              it, or style it with CSS in the Style section of Properties.",
-        ),
-        (
-            icons::SUN,
-            "Lighting",
-            "Select Lighting in the Explorer for shadows (with softness), the sky and \
+    ),
+    (
+        icons::SUN,
+        "Lighting",
+        "Select Lighting in the Explorer for shadows (with softness), the sky and \
              bloom. Turn off CastShadow on a part to stop it casting a shadow.",
-        ),
-        (
-            icons::SPEAKER_HIGH,
-            "Sound",
-            "Insert a Sound into a part, pick a file in Properties and press ▶ to hear it. \
+    ),
+    (
+        icons::SPEAKER_HIGH,
+        "Sound",
+        "Insert a Sound into a part, pick a file in Properties and press ▶ to hear it. \
              Turn on Playing to start it with the game.",
-        ),
-        (
-            icons::PLAY,
-            "Play and export",
-            "F5 plays the game in the viewport and Shift+F5 stops it. File > Export Game \
+    ),
+    (
+        icons::PLAY,
+        "Play and build",
+        "F5 plays the game in the viewport and Shift+F5 stops it. File > Build Game \
              makes a game anyone can run without the editor.",
-        ),
-    ];
+    ),
+];
+
+/// The [`TOPICS`] as cards.
+fn topic_cards(ui: &mut egui::Ui, palette: &Palette) {
     let card_width = card_width(ui);
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = vec2(CARD_SPACING, CARD_SPACING);
-        for (icon, title, text) in topics {
+        for (icon, title, text) in TOPICS {
             let (rect, response) = ui.allocate_exact_size(vec2(card_width, 128.0), Sense::hover());
             let hover = theme::ease(ui.ctx(), response.id.with("hover"), response.hovered());
             card_frame(ui, rect, &response, hover, palette);

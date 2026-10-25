@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use super::*;
 
 /// The properties of a MeshPart showing `model` from `mesh_id`: it starts
@@ -23,20 +25,71 @@ pub(super) fn object_name(name: &str) -> String {
 }
 
 impl EditorApp {
-    /// File > Import Model… and the toolbar's Import: asks for a glTF or
-    /// FBX model with the system's file picker, then imports it.
-    pub(in crate::app) fn import_model_with_dialog(&mut self) {
+    /// Import…, the one way in from the File menu, the ribbon, the Assets
+    /// panel and the Animation tab: asks for files of any kind it can
+    /// import with the system's file picker, then imports them
+    /// ([`import_files`](Self::import_files)). Images go in `image_folder`.
+    pub(in crate::app) fn import_with_dialog(&mut self, image_folder: &str) {
         if self.project.is_none() || self.playing() || self.viewport.is_dragging() {
             return;
         }
+        const MODELS: [&str; 3] = ["gltf", "glb", "fbx"];
+        let mut everything: Vec<&str> = MODELS.to_vec();
+        everything.extend(axcenity_assets::TEXTURE_EXTENSIONS);
+        everything.extend(axcenity_assets::AUDIO_EXTENSIONS);
+        everything.push("json");
         let dialog = rfd::FileDialog::new()
-            .set_title("Import a 3D model")
-            .add_filter("3D model", &["gltf", "glb", "fbx"])
-            .add_filter("glTF model", &["gltf", "glb"])
-            .add_filter("FBX model", &["fbx"]);
+            .set_title("Import")
+            .add_filter("Models, images, sounds and prefabs", &everything)
+            .add_filter("3D model", &MODELS)
+            .add_filter("Image", &axcenity_assets::TEXTURE_EXTENSIONS)
+            .add_filter("Sound", &axcenity_assets::AUDIO_EXTENSIONS)
+            .add_filter("Prefab", &["json"]);
         // `None` means the dialog was cancelled.
-        if let Some(file) = dialog.pick_file() {
-            self.import_model(&file);
+        if let Some(files) = dialog.pick_files() {
+            self.import_files(files, image_folder);
+        }
+    }
+
+    /// Imports each of `files` by its kind: a model through the Import
+    /// dialog (one at a time, in order), and images (into `image_folder`),
+    /// sounds and prefabs straight into the project, reported in the
+    /// Console.
+    pub(in crate::app) fn import_files(&mut self, files: Vec<PathBuf>, image_folder: &str) {
+        let Some(folder) = self.project.as_ref().map(|p| p.folder.clone()) else {
+            return;
+        };
+        if self.playing() {
+            return;
+        }
+        for file in files {
+            self.import_file(&folder, &file, image_folder);
+        }
+        self.asset_browser.refresh();
+    }
+
+    /// Files dropped onto the window from the system: imported as with
+    /// Import…, images into `assets/textures`.
+    pub(in crate::app) fn import_dropped(&mut self, ctx: &egui::Context) {
+        let files: Vec<PathBuf> = ctx.input(|input| {
+            input
+                .raw
+                .dropped_files
+                .iter()
+                .filter_map(|file| file.path.clone())
+                .collect()
+        });
+        if files.is_empty() {
+            return;
+        }
+        if self.project.is_none() {
+            self.start
+                .set_notice("Open a project, then drop files on it to import them.".to_owned());
+        } else if self.playing() {
+            self.output
+                .error("Press Stop before importing files.".to_owned());
+        } else {
+            self.import_files(files, axcenity_assets::PROJECT_TEXTURES_FOLDER);
         }
     }
 
@@ -44,9 +97,14 @@ impl EditorApp {
     /// with texture maps, asks first which objects to import and shows its
     /// materials' maps for changing ([`ImportDialog`]); any other goes
     /// straight in as a MeshPart. A file that can't be read is reported in
-    /// Output.
+    /// Output. While the dialog is open for another file, this one waits
+    /// its turn.
     pub(in crate::app) fn import_model(&mut self, file: &Path) {
         if self.project.is_none() || self.playing() || self.viewport.is_dragging() {
+            return;
+        }
+        if self.importing.is_some() {
+            self.import_queue.push_back(file.to_owned());
             return;
         }
         let read = axcenity_assets::list_model_objects(file).and_then(|objects| {
@@ -87,8 +145,9 @@ impl EditorApp {
         }
     }
 
-    /// Shows the Import Model dialog while a file is waiting for it, and
-    /// imports what it says. `render_state` draws its preview.
+    /// Shows the Import dialog while a file is waiting for it, and imports
+    /// what it says, then goes on to the next model waiting. `render_state`
+    /// draws its preview.
     pub(in crate::app) fn import_prompt(
         &mut self,
         ctx: &egui::Context,
@@ -107,7 +166,18 @@ impl EditorApp {
                 }
             }
             Some(Answer::Cancel) => self.importing = None,
-            None => {}
+            None => return,
+        }
+        self.next_import();
+    }
+
+    /// Imports the models waiting their turn, until one opens the dialog
+    /// again (the others go straight in).
+    pub(in crate::app) fn next_import(&mut self) {
+        while self.importing.is_none()
+            && let Some(file) = self.import_queue.pop_front()
+        {
+            self.import_model(&file);
         }
     }
 

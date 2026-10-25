@@ -338,7 +338,7 @@ impl StartScreen {
                                 .desired_width(f32::INFINITY),
                         );
                         ui.add_space(10.0);
-                        ui.checkbox(show_splash, "Show the Axcenity splash in exported games");
+                        ui.checkbox(show_splash, "Show the Axcenity splash in built games");
                         error_line(ui, &palette, error.as_deref());
                         let (save, cancel) = dialog_buttons(
                             ui,

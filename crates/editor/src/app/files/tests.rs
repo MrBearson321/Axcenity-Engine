@@ -5,6 +5,7 @@ use super::super::tests::{copy_of_example, last_line, part, play_for, printed};
 use super::*;
 use crate::app::{Answer, Discard};
 use crate::explorer::Action;
+use crate::import_dialog::outcome::Creates;
 use crate::output::OutputKind;
 use crate::properties::Edit;
 use crate::scripts::{NEW_SCRIPT_SOURCE, ScriptView};
@@ -275,6 +276,182 @@ fn an_animated_fbx_comes_in_with_an_animator_a_state_machine_and_an_animation_pe
         );
         assert!(folder.join(&animation.clip).is_file(), "{}", animation.clip);
     }
+    let _ = fs::remove_dir_all(&folder);
+}
+
+/// Every file under `folder`, as paths relative to it with `/`.
+fn files_under(folder: &Path) -> std::collections::BTreeSet<String> {
+    let mut found = std::collections::BTreeSet::new();
+    let mut folders = vec![folder.to_owned()];
+    while let Some(at) = folders.pop() {
+        let Ok(entries) = fs::read_dir(&at) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                folders.push(path);
+            } else {
+                let relative = path.strip_prefix(folder).unwrap();
+                found.insert(relative.to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
+    found
+}
+
+/// Imports `file` with the Import dialog's choices as they start, and
+/// counts what that made the way the dialog's summary counts it: the
+/// Instances in the new one and below it, the clips and state machines
+/// written, the folder they're in, and where the file's copy went.
+/// Returns what the dialog said and what was made.
+fn import_and_count(app: &mut EditorApp, file: &Path) -> (Creates, Creates) {
+    let folder = app.project.as_ref().unwrap().folder.clone();
+    app.import_model(file);
+    let dialog = app.importing.take().expect("the dialog is open");
+    let said = dialog.creates();
+    let before = files_under(&folder);
+    app.import_chosen(&dialog);
+    let written: Vec<String> = files_under(&folder).difference(&before).cloned().collect();
+
+    let root = app.selected.expect("the import is selected");
+    let mut instances = Vec::new();
+    let mut next = vec![root];
+    while let Some(id) = next.pop() {
+        instances.push(app.world.get(id).unwrap().class());
+        next.extend(app.world.get(id).unwrap().children().iter().copied());
+    }
+    let count = |class| instances.iter().filter(|&&c| c == class).count();
+    let clips: Vec<&String> = written
+        .iter()
+        .filter(|path| path.ends_with(".anim.json"))
+        .collect();
+    let state_machines = written
+        .iter()
+        .filter(|path| path.ends_with(".statemachine.json"))
+        .count();
+    let animations_folder = clips
+        .first()
+        .map(|clip| format!("{}/", clip.rsplit_once('/').unwrap().0));
+    // The copy: its own folder if it has one, or else the file.
+    let model = written
+        .iter()
+        .find(|path| {
+            path.starts_with(axcenity_assets::MODELS_FOLDER)
+                && path.ends_with(&format!(".{}", file.extension().unwrap().to_string_lossy()))
+        })
+        .expect("the model was copied");
+    let in_own_folder = model.matches('/').count() > 2;
+    let copy = if in_own_folder {
+        format!("{}/", model.rsplit_once('/').unwrap().0)
+    } else {
+        model.clone()
+    };
+    let made = Creates {
+        models: count(ClassName::Model),
+        mesh_parts: count(ClassName::MeshPart),
+        animators: count(ClassName::Animator),
+        clips: clips.len(),
+        state_machines,
+        animations_folder,
+        copy: (copy, said.copy.1.clone()),
+    };
+    (said, made)
+}
+
+#[test]
+fn the_import_summary_matches_what_import_creates() {
+    let folder = copy_of_example("hello-part", "import-summary");
+    let mut app = EditorApp::new(Some(&folder));
+
+    // An animated FBX: one MeshPart with an Animator, its clips and state machine.
+    let noodle = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/hello-animation/assets/models/noodle.fbx");
+    let (said, made) = import_and_count(&mut app, &noodle);
+    assert_eq!(said, made);
+    assert_eq!(
+        (made.mesh_parts, made.animators, made.state_machines),
+        (1, 1, 1)
+    );
+    assert!(made.clips > 0);
+    let sentence = said.sentence();
+    assert!(
+        sentence.starts_with(&format!(
+            "Creates: 1 MeshPart · {} in `assets/animations/noodle/` · 1 state machine · an \
+             Animator. Copies the model",
+            if made.clips == 1 {
+                "1 clip".to_owned()
+            } else {
+                format!("{} clips", made.clips)
+            }
+        )),
+        "{sentence}"
+    );
+
+    // A glTF with several objects, as a Model with one for its group.
+    let props = write_props(&folder);
+    let (said, made) = import_and_count(&mut app, &props);
+    assert_eq!(said, made);
+    assert_eq!((made.models, made.mesh_parts, made.clips), (2, 3, 0));
+    assert_eq!(
+        said.sentence(),
+        "Creates: 1 Model with 3 MeshParts and 1 Model for its groups. Copies the model and 1 \
+         texture to `assets/models/props/`."
+    );
+    let _ = fs::remove_dir_all(&folder);
+}
+
+/// Import… in the File menu, the ribbon, the Assets panel and the
+/// Animation tab all pick files for `import_files`; dropping files on the
+/// window sends them there too. A model opens the one Import dialog, a
+/// second waits its turn, and an image goes straight in.
+#[test]
+fn every_way_in_opens_the_same_dialog_for_a_model() {
+    let folder = copy_of_example("hello-part", "import-ways-in");
+    let props = write_props(&folder);
+    let mut app = EditorApp::new(Some(&folder));
+    let names = |app: &EditorApp| -> Vec<String> {
+        let dialog = app.importing.as_ref().expect("the Import dialog is open");
+        dialog.objects.iter().map(|o| o.name.clone()).collect()
+    };
+    app.import_model(&props);
+    let direct = names(&app);
+    app.importing = None;
+
+    // Picked with Import…, from any of its places.
+    app.import_files(
+        vec![props.clone()],
+        axcenity_assets::PROJECT_TEXTURES_FOLDER,
+    );
+    assert_eq!(names(&app), direct);
+    app.importing = None;
+
+    // Dropped on the window, with an image from outside the project and a
+    // second model.
+    let image = folder.join("..").join("import-ways-in-dropped.png");
+    fs::write(&image, b"not checked until drawn").unwrap();
+    let ctx = crate::theme::test_context();
+    let dropped = [&props, &image, &example_model()].map(|path| egui::DroppedFile {
+        path: Some(path.to_path_buf()),
+        ..Default::default()
+    });
+    let input = egui::RawInput {
+        dropped_files: dropped.to_vec(),
+        ..Default::default()
+    };
+    let _ = ctx.run(input, |ctx| app.import_dropped(ctx));
+    assert_eq!(names(&app), direct);
+    let copy = "assets/textures/import-ways-in-dropped.png";
+    assert!(folder.join(copy).is_file());
+    assert!(printed(&app).iter().any(|line| line.contains(copy)));
+    // The pyramid waits until this dialog is answered, then opens its own.
+    assert_eq!(app.import_queue.len(), 1);
+    app.importing = None;
+    app.next_import();
+    let dialog = app.importing.as_ref().expect("the next model's dialog");
+    assert!(dialog.file.ends_with("pyramid.gltf"));
+    assert!(app.import_queue.is_empty());
+    let _ = fs::remove_file(&image);
     let _ = fs::remove_dir_all(&folder);
 }
 

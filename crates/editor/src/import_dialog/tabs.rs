@@ -1,5 +1,5 @@
-//! The Import Model dialog's steps: choosing the objects, how they arrive,
-//! and each material's texture maps. (The Animation step is
+//! The Import dialog's tabs: choosing the objects and how they arrive,
+//! and each material's texture maps. (The Animation tab is
 //! `AnimationImport::show`.)
 
 use axcenity_assets::Channel;
@@ -12,7 +12,7 @@ use crate::surface::{MapFile, MaterialMaps, Slot};
 use crate::theme::{self, icons};
 use crate::widgets;
 
-/// The side of a map's picture in the Texture maps step.
+/// The side of a map's picture on the Materials tab.
 const MAP_PICTURE: f32 = 36.0;
 /// The side of the small pictures in a material's header.
 const HEADER_PICTURE: f32 = 18.0;
@@ -503,7 +503,7 @@ fn channel_name(channel: Channel) -> &'static str {
     }
 }
 
-/// A line explaining a step, in the quiet text colour.
+/// A line explaining a part of a tab, in the quiet text colour.
 fn hint(ui: &mut egui::Ui, text: &str) {
     let palette = theme::palette(ui.ctx());
     ui.label(egui::RichText::new(text).color(palette.text_secondary));

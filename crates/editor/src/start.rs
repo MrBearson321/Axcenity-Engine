@@ -247,7 +247,8 @@ impl StartScreen {
         })
     }
 
-    fn new_project(&mut self, template: Template) {
+    /// Opens the New Project dialog, starting from `template`.
+    pub fn new_project(&mut self, template: Template) {
         self.dialog = Some(Dialog::New {
             name: String::new(),
             parent: self.last_parent.clone(),

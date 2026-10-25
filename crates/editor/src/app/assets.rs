@@ -542,30 +542,11 @@ impl EditorApp {
         self.record_asset_files(label, files, None);
     }
 
-    /// Asks for files and copies each into the project's `assets` folder by
-    /// its kind; images go in `image_folder`. Models go through the Import
-    /// Model dialog as usual.
-    pub(super) fn import_assets(&mut self, image_folder: &str) {
-        let Some(folder) = self.project.as_ref().map(|p| p.folder.clone()) else {
-            return;
-        };
-        let mut extensions: Vec<&str> = vec!["gltf", "glb", "fbx", "json"];
-        extensions.extend(axcenity_assets::TEXTURE_EXTENSIONS);
-        extensions.extend(axcenity_assets::AUDIO_EXTENSIONS);
-        let Some(files) = rfd::FileDialog::new()
-            .set_title("Import assets")
-            .add_filter("Assets", &extensions)
-            .pick_files()
-        else {
-            return;
-        };
-        for file in files {
-            self.import_asset_file(&folder, &file, image_folder);
-        }
-        self.asset_browser.refresh();
-    }
-
-    fn import_asset_file(&mut self, folder: &Path, file: &Path, image_folder: &str) {
+    /// Imports one file into the project (in `folder`) by its kind, for
+    /// Import…: a model through the Import dialog, the rest copied
+    /// straight into `assets` (images into `image_folder`) and reported in
+    /// the Console.
+    pub(in crate::app) fn import_file(&mut self, folder: &Path, file: &Path, image_folder: &str) {
         let name = file.to_string_lossy().replace('\\', "/");
         let result = match asset_browser::kind_of(&name) {
             Some(AssetKind::Model) => {

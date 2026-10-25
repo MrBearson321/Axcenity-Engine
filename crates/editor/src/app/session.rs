@@ -574,7 +574,8 @@ impl EditorApp {
             Discard::Quit
             | Discard::OpenAnother
             | Discard::OpenSample(_)
-            | Discard::CloseProject => self.unsaved(),
+            | Discard::CloseProject
+            | Discard::NewProject => self.unsaved(),
         };
         if unsaved {
             self.asking = Some(discard);
@@ -594,7 +595,8 @@ impl EditorApp {
                 Discard::Quit
                 | Discard::OpenAnother
                 | Discard::OpenSample(_)
-                | Discard::CloseProject => self.save().then_some(discard),
+                | Discard::CloseProject
+                | Discard::NewProject => self.save().then_some(discard),
             },
             Answer::DontSave => {
                 if let Discard::CloseTab(path) = &discard {
@@ -642,6 +644,12 @@ impl EditorApp {
             Discard::OpenAnother => self.open_with_dialog(ctx),
             Discard::OpenSample(folder) => self.begin_open(ctx, &folder),
             Discard::CloseProject => self.close_project(),
+            // The start screen's New Project dialog, once this one closes.
+            Discard::NewProject => {
+                self.close_project();
+                self.start
+                    .new_project(axcenity_project::Template::Baseplate);
+            }
             Discard::CloseTab(path) => self.tabs.close(&path),
         }
     }
@@ -728,7 +736,9 @@ impl EditorApp {
         let project = self.project.as_ref().map_or("", |project| &project.name);
         let (name, doing) = match discard {
             Discard::Quit => (project, "closing"),
-            Discard::OpenAnother | Discard::OpenSample(_) => (project, "opening another project"),
+            Discard::OpenAnother | Discard::OpenSample(_) | Discard::NewProject => {
+                (project, "opening another project")
+            }
             Discard::CloseProject => (project, "closing it"),
             Discard::CloseTab(path) => (axcenity_project::script_name(path), "closing it"),
         };

@@ -26,7 +26,7 @@ pub enum RibbonGroup {
     Parts,
     /// Sounds, particle emitters, lights, and a third-person character.
     Effects,
-    /// Import a model.
+    /// Import…, for models, images, sounds and prefabs.
     Import,
     /// ScreenGui, Frame, TextLabel and the other UI elements.
     Ui,
@@ -90,7 +90,7 @@ impl RibbonGroup {
             RibbonGroup::Effects => {
                 "Insert sounds, particle emitters, lights, and a third-person character"
             }
-            RibbonGroup::Import => "Import a 3D model",
+            RibbonGroup::Import => "Import models, images, sounds and prefabs",
             RibbonGroup::Ui => "Insert screens, frames, text, buttons and other UI",
             RibbonGroup::Scripts => "Insert scripts",
             RibbonGroup::Terrain => "Sculpt, paint and generate terrain",

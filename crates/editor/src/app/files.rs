@@ -255,9 +255,9 @@ impl EditorApp {
                     project.show_splash = show;
                 }
                 self.output.info(if show {
-                    "Exported games will show the Axcenity splash."
+                    "Built games will show the Axcenity splash."
                 } else {
-                    "Exported games will not show the Axcenity splash."
+                    "Built games will not show the Axcenity splash."
                 });
             }
             Err(err) => self

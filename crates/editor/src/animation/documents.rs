@@ -305,7 +305,7 @@ impl AnimationStudio {
                     actions.push(StudioAction::Animate(subject.object));
                 }
             }
-            Go::ImportModel => actions.push(StudioAction::ImportModel),
+            Go::Import => actions.push(StudioAction::Import),
         }
     }
 

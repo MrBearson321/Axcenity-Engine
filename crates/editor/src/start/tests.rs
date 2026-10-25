@@ -376,3 +376,18 @@ fn the_global_assets_page_lists_the_library_with_a_models_files_as_one_card() {
     }
     std::fs::remove_dir_all(library).unwrap();
 }
+
+#[test]
+fn the_learn_page_says_build_game() {
+    let notes: Vec<&str> = learn::TOPICS.iter().map(|&(_, _, note)| note).collect();
+    assert!(
+        notes.iter().any(|note| note.contains("File > Build Game")),
+        "{notes:?}"
+    );
+    let tutorials = learn::TUTORIALS
+        .iter()
+        .flat_map(|tutorial| tutorial.steps.iter().map(|step| step.text));
+    for text in notes.iter().copied().chain(tutorials) {
+        assert!(!text.contains("Export Game"), "{text}");
+    }
+}

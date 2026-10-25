@@ -122,8 +122,18 @@ pub fn segmented<T: Copy + PartialEq>(
     value: &mut T,
     options: &[(T, Option<&str>, &str)],
 ) -> bool {
+    segmented_at(ui, value, options).0
+}
+
+/// [`segmented`], also returning where each option was drawn, in order.
+pub fn segmented_at<T: Copy + PartialEq>(
+    ui: &mut egui::Ui,
+    value: &mut T,
+    options: &[(T, Option<&str>, &str)],
+) -> (bool, Vec<egui::Rect>) {
     let palette = theme::palette(ui.ctx());
     let mut changed = false;
+    let mut rects = Vec::with_capacity(options.len());
     egui::Frame::new()
         .fill(palette.inset)
         .stroke(Stroke::new(1.0_f32, palette.border))
@@ -151,6 +161,7 @@ pub fn segmented<T: Copy + PartialEq>(
                     let height = ui.spacing().interact_size.y - 2.0;
                     let size = vec2(galley.size().x + 20.0, height);
                     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+                    rects.push(rect);
                     response.widget_info(|| {
                         egui::WidgetInfo::selected(
                             egui::WidgetType::RadioButton,
@@ -183,7 +194,7 @@ pub fn segmented<T: Copy + PartialEq>(
                 }
             });
         });
-    changed
+    (changed, rects)
 }
 
 /// A quiet label that leads a group of controls, like "APPEARANCE".

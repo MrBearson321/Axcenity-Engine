@@ -2,7 +2,7 @@
 
 Alpha builds are on [GitHub Releases](https://github.com/MrBearson321/Axcenity-Engine/releases). Filenames look like `AxcenityEditor-0.1.0-alpha.1-<platform>.<ext>`. Check `SHA256SUMS.txt` on the same release if you want to confirm the download.
 
-Each editor package includes the player for that OS beside the editor, and players for the other two OSes under `players/windows`, `players/macos` and `players/linux`, so **File > Export Game** can target Windows, macOS or Linux.
+Each editor package includes the player for that OS beside the editor, and players for the other two OSes under `players/windows`, `players/macos` and `players/linux`, so **File > Build Game** can target Windows, macOS or Linux.
 
 This is an alpha: expect bugs and breaking changes. Builds are not code-signed.
 

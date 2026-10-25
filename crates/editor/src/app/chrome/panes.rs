@@ -83,7 +83,7 @@ impl EditorApp {
                     self.terrain.foliage_source = source;
                 }
             }
-            Some(BrowserAction::Import { image_folder }) => self.import_assets(image_folder),
+            Some(BrowserAction::Import { image_folder }) => self.import_with_dialog(image_folder),
             Some(BrowserAction::SavePrefab) => self.save_prefab(),
             Some(BrowserAction::RenamePrefab { path, name }) => self.rename_prefab(&path, &name),
             Some(BrowserAction::DuplicatePrefab { path }) => self.duplicate_prefab(&path),
@@ -127,7 +127,9 @@ impl EditorApp {
     pub(super) fn studio_actions(&mut self, actions: Vec<StudioAction>) {
         for action in actions {
             match action {
-                StudioAction::ImportModel => self.import_model_with_dialog(),
+                StudioAction::Import => {
+                    self.import_with_dialog(axcenity_assets::PROJECT_TEXTURES_FOLDER)
+                }
                 StudioAction::Animate(object) => self.animate(object),
                 StudioAction::Show => self.layout.open(Pane::Animation),
                 StudioAction::SetController {

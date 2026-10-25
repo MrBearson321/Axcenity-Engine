@@ -1,7 +1,7 @@
-//! What the Import Model dialog says importing will make: the Instances,
+//! What the Import dialog says importing will make: the Instances,
 //! as the Explorer will show them, and the files written into the
 //! project. Worked out from the dialog's choices as they are, so the list
-//! beside the steps changes as they do.
+//! beside the tabs, and the summary above the buttons, change as they do.
 
 use std::collections::HashSet;
 
@@ -26,7 +26,125 @@ pub struct Made {
     pub note: String,
 }
 
+/// What Import creates, counted, and where its files go: the summary
+/// above the buttons says it in words ([`Creates::sentence`]).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Creates {
+    /// The Model named after the file and one for each group in it.
+    pub models: usize,
+    pub mesh_parts: usize,
+    pub animators: usize,
+    pub clips: usize,
+    pub state_machines: usize,
+    /// The folder the clips and state machine go in, such as
+    /// `assets/animations/noodle/`.
+    pub animations_folder: Option<String>,
+    /// Where the file's copy goes, and what's in it: the first of
+    /// [`ImportDialog::files_made`].
+    pub copy: (String, String),
+}
+
+impl Creates {
+    /// "Creates: 1 Model with 3 MeshParts · 4 clips in
+    /// `assets/animations/noodle/` · 1 state machine · an Animator. Copies
+    /// the model to `assets/models/noodle.fbx`." Paths are between backticks.
+    pub fn sentence(&self) -> String {
+        let mut parts = Vec::new();
+        let groups = self.models.saturating_sub(1);
+        match self.models {
+            0 if self.mesh_parts > 0 => parts.push(plural(self.mesh_parts, "MeshPart")),
+            0 => {}
+            _ if groups == 0 => parts.push(format!(
+                "1 Model with {}",
+                plural(self.mesh_parts, "MeshPart")
+            )),
+            _ => parts.push(format!(
+                "1 Model with {} and {} for its groups",
+                plural(self.mesh_parts, "MeshPart"),
+                plural(groups, "Model")
+            )),
+        }
+        if self.clips > 0 {
+            let clips = plural(self.clips, "clip");
+            parts.push(match &self.animations_folder {
+                Some(folder) => format!("{clips} in `{folder}`"),
+                None => clips,
+            });
+        }
+        if self.state_machines > 0 {
+            parts.push(plural(self.state_machines, "state machine"));
+        }
+        match self.animators {
+            0 => {}
+            1 => parts.push("an Animator".to_owned()),
+            n => parts.push(format!("{n} Animators")),
+        }
+        let (path, what) = &self.copy;
+        let copies = format!("Copies {what} to `{path}`.");
+        if parts.is_empty() {
+            copies
+        } else {
+            format!("Creates: {}. {copies}", parts.join(" · "))
+        }
+    }
+}
+
 impl ImportDialog {
+    /// What importing creates with the choices as they are.
+    pub fn creates(&self) -> Creates {
+        let (models, mesh_parts) = if self.animation_only {
+            (0, 0)
+        } else {
+            match self.placement {
+                Placement::Merged => (0, 1),
+                Placement::Separate => (0, self.chosen().len()),
+                // A group gets a Model when a ticked object is inside it.
+                Placement::Grouped => {
+                    let groups = (0..self.objects.len())
+                        .filter(|&i| {
+                            !self.objects[i].has_mesh()
+                                && self
+                                    .subtree(i)
+                                    .any(|j| self.ticked[j] && self.objects[j].has_mesh())
+                        })
+                        .count();
+                    (1 + groups, self.chosen().len())
+                }
+            }
+        };
+        let clips = self
+            .animation
+            .as_ref()
+            .map_or(0, |animation| animation.clips.len());
+        let state_machine = self
+            .animation
+            .as_ref()
+            .is_some_and(|animation| animation.add_animator && !self.animation_only);
+        Creates {
+            models,
+            mesh_parts,
+            // Every new MeshPart gets one, as "What you'll get" shows.
+            animators: if self.animator_clips().is_some() {
+                mesh_parts
+            } else {
+                0
+            },
+            clips,
+            state_machines: usize::from(state_machine && clips > 0),
+            animations_folder: (clips > 0).then(|| self.animations_folder()),
+            copy: self.files_made().swap_remove(0),
+        }
+    }
+
+    /// The folder the clips and state machine are written to.
+    fn animations_folder(&self) -> String {
+        format!(
+            "{}/{}/",
+            axcenity_anim::ANIMATIONS_FOLDER,
+            axcenity_anim::files::file_safe(&file_stem(&self.file))
+        )
+    }
+
     /// The Instances importing makes, as the Explorer will show them:
     /// at most [`MADE_ROWS`] rows, the last saying how many more if there
     /// are. Empty for an animation-only file.
@@ -199,14 +317,7 @@ impl ImportDialog {
             if animation.add_animator && !self.animation_only {
                 what.push_str(" and a state machine");
             }
-            files.push((
-                format!(
-                    "{}/{}/",
-                    axcenity_anim::ANIMATIONS_FOLDER,
-                    axcenity_anim::files::file_safe(&stem)
-                ),
-                what,
-            ));
+            files.push((self.animations_folder(), what));
         }
         files
     }

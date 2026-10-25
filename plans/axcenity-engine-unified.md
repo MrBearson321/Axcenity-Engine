@@ -139,9 +139,9 @@ Either controller accepts a named custom movement mode in `Movement`. While that
 
 ### Acceptance criteria
 
-- [ ] Every way in opens the same dialog for a model.
-- [ ] The summary matches what Import creates. A test compares the two for an animated FBX and for a multi-object glTF.
-- [ ] Build Game builds the same game that Export Game did, and the Learn page and docs say Build Game.
+- [x] Every way in opens the same dialog for a model.
+- [x] The summary matches what Import creates. A test compares the two for an animated FBX and for a multi-object glTF.
+- [x] Build Game builds the same game that Export Game did, and the Learn page and docs say Build Game.
 
 ---
 

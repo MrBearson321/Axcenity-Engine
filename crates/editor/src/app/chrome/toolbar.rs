@@ -62,7 +62,7 @@ impl EditorApp {
             self.act(Action::InsertScript(class));
         }
         if clicks.import {
-            self.import_model_with_dialog();
+            self.import_with_dialog(axcenity_assets::PROJECT_TEXTURES_FOLDER);
         }
         if clicks.check_assets {
             self.run_asset_check();
@@ -272,7 +272,7 @@ impl EditorApp {
                 }
             }),
             RibbonGroup::Import => ribbon::group(ui, "Import", |ui| {
-                let button = RibbonButton::new(icons::FILE_ARROW_DOWN, "Import");
+                let button = RibbonButton::new(icons::FILE_ARROW_DOWN, "Import…");
                 clicks.import = ui
                     .add_enabled(!playing, button)
                     .on_hover_text(IMPORT_HOVER)

@@ -64,17 +64,14 @@ fn ticking_a_group_ticks_what_is_inside_it() {
 }
 
 #[test]
-fn only_the_steps_a_file_needs_are_shown_in_order() {
+fn only_the_tabs_a_file_needs_are_shown_in_order() {
     let mut dialog = dialog();
-    assert_eq!(
-        dialog.steps(),
-        [Step::Objects, Step::Placement, Step::Materials]
-    );
-    assert_eq!(dialog.current(), Step::Objects);
+    assert_eq!(dialog.tabs(), [Tab::Objects, Tab::Materials]);
+    assert_eq!(dialog.current(), Tab::Objects);
     // One object: nothing to choose, so it opens on its maps.
     dialog.pick_objects = false;
-    assert_eq!(dialog.steps(), [Step::Materials]);
-    assert_eq!(dialog.current(), Step::Materials);
+    assert_eq!(dialog.tabs(), [Tab::Materials]);
+    assert_eq!(dialog.current(), Tab::Materials);
 
     let take = axcenity_assets::Take {
         name: "Walk".into(),
@@ -84,8 +81,13 @@ fn only_the_steps_a_file_needs_are_shown_in_order() {
     };
     let animation = AnimationImport::new(None, &[take], "walk").unwrap();
     let only = ImportDialog::animation_only(PathBuf::from("walk.fbx"), animation);
-    assert_eq!(only.steps(), [Step::Animation]);
+    assert_eq!(only.tabs(), [Tab::Animation]);
     assert!(only.made().is_empty());
+    assert_eq!(
+        only.creates().sentence(),
+        "Creates: 1 clip in `assets/animations/walk/`. Copies the animation file to \
+         `assets/models/walk.fbx`."
+    );
     assert_eq!(
         only.files_made(),
         [
@@ -136,12 +138,61 @@ fn what_you_get_follows_the_placement_and_the_ticks() {
     );
     assert_eq!(dialog.made()[1].note, "colors only");
 
-    // Nothing ticked can't be imported, and the step says so.
+    // Nothing ticked can't be imported, and the tab says so.
     for i in 0..dialog.objects.len() {
         dialog.set(i, false);
     }
     assert!(dialog.problem().is_some());
-    assert_eq!(dialog.problem_step(), Some(Step::Objects));
+    assert_eq!(dialog.problem_tab(), Some(Tab::Objects));
+}
+
+#[test]
+fn the_summary_says_what_import_creates_and_where() {
+    let mut dialog = dialog();
+    assert_eq!(
+        dialog.creates().sentence(),
+        "Creates: 1 Model with 4 MeshParts and 1 Model for its groups. Copies the model to \
+         `assets/models/props.fbx`."
+    );
+    // Unticking the Street group drops its Model too.
+    dialog.set(0, false);
+    assert_eq!(
+        dialog.creates().sentence(),
+        "Creates: 1 Model with 2 MeshParts. Copies the model to `assets/models/props.fbx`."
+    );
+    dialog.placement = Placement::Separate;
+    assert!(
+        dialog
+            .creates()
+            .sentence()
+            .starts_with("Creates: 2 MeshParts. ")
+    );
+    dialog.placement = Placement::Merged;
+    assert!(
+        dialog
+            .creates()
+            .sentence()
+            .starts_with("Creates: 1 MeshPart. ")
+    );
+
+    let take = axcenity_assets::Take {
+        name: "Walk".into(),
+        duration: 1.0,
+        frame_rate: 30.0,
+        tracks: vec![axcenity_assets::Track::default()],
+    };
+    let mut animation = AnimationImport::new(None, &[take], "props").unwrap();
+    // A skeleton to move, so the MeshPart gets an Animator.
+    animation.bones = vec![crate::anim_import::BoneRow {
+        name: "Root".into(),
+        depth: 0,
+    }];
+    let dialog = dialog.with_animation(Some(animation));
+    assert_eq!(
+        dialog.creates().sentence(),
+        "Creates: 1 MeshPart · 1 clip in `assets/animations/props/` · 1 state machine · an \
+         Animator. Copies the model to `assets/models/props.fbx`."
+    );
 }
 
 #[test]
@@ -185,11 +236,11 @@ fn the_files_say_where_the_model_and_its_textures_go() {
     );
 }
 
-/// An animated, textured FBX with every step, in an 800×600 window: the
-/// steps are far taller than that, yet Import is in the window, Next goes
-/// through every step, and a click on Import imports. With
-/// `AXCENITY_SNAPSHOTS` set, each step is saved as
-/// `import-dialog-800x600-<step>.png`.
+/// An animated, textured FBX with every tab, in an 800×600 window: the
+/// tabs are far taller than that, yet Import is in the window on every
+/// tab (clicked in the tab bar), and a click on Import imports. With
+/// `AXCENITY_SNAPSHOTS` set, each tab is saved as
+/// `import-dialog-800x600-<tab>.png`.
 #[test]
 fn the_whole_dialog_fits_an_800_by_600_window_with_import_clickable() {
     let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -218,13 +269,8 @@ fn the_whole_dialog_fits_an_800_by_600_window_with_import_clickable() {
     dialog.pick_objects = true;
     dialog.placement = Placement::Merged;
     assert_eq!(
-        dialog.steps(),
-        [
-            Step::Objects,
-            Step::Placement,
-            Step::Materials,
-            Step::Animation
-        ]
+        dialog.tabs(),
+        [Tab::Objects, Tab::Materials, Tab::Animation]
     );
 
     let size = egui::vec2(800.0, 600.0);
@@ -266,13 +312,12 @@ fn the_whole_dialog_fits_an_800_by_600_window_with_import_clickable() {
     let import = dialog.import_button.expect("Import was drawn");
     assert!(screen.contains_rect(import), "{import:?} in {screen:?}");
 
-    // Next, just left of Import, goes through every step, and the
-    // buttons stay in the window on each.
+    // Clicking each tab in the tab bar shows it, and the buttons stay in
+    // the window on each.
     let mut seen = vec![dialog.current()];
-    for _ in 1..dialog.steps().len() {
-        let import = dialog.import_button.unwrap();
-        let next = egui::pos2(import.left() - 40.0, import.center().y);
-        for events in click(next) {
+    for &tab in &dialog.tabs()[1..] {
+        let at = dialog.tab_rects[&tab].center();
+        for events in click(at) {
             assert_eq!(run(&mut dialog, events), None);
         }
         for _ in 0..3 {
@@ -281,8 +326,10 @@ fn the_whole_dialog_fits_an_800_by_600_window_with_import_clickable() {
         seen.push(dialog.current());
         let buttons = dialog.buttons.unwrap();
         assert!(screen.contains_rect(buttons), "{buttons:?} on {seen:?}");
+        let import = dialog.import_button.unwrap();
+        assert!(screen.contains_rect(import), "{import:?} on {seen:?}");
     }
-    assert_eq!(seen, dialog.steps());
+    assert_eq!(seen, dialog.tabs());
 
     let import = dialog.import_button.unwrap();
     let mut answers = Vec::new();
@@ -292,9 +339,9 @@ fn the_whole_dialog_fits_an_800_by_600_window_with_import_clickable() {
     assert_eq!(answers.last(), Some(&Some(Answer::Import)));
 
     if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") {
-        for step in dialog.steps() {
-            dialog.step = step;
-            let name = step.title().to_lowercase().replace(' ', "-");
+        for tab in dialog.tabs() {
+            dialog.tab = tab;
+            let name = tab.title().to_lowercase();
             crate::snapshot::snapshot(
                 &PathBuf::from(&folder).join(format!("import-dialog-800x600-{name}.png")),
                 size,

@@ -1,9 +1,9 @@
-//! The Import Model dialog's preview: the file's model as it is in the file
+//! The Import dialog's preview: the file's model as it is in the file
 //! (its own materials), on a checkered floor, playing the clip picked in
-//! the Animation step. It has its own `Assets` holding only that model, so
+//! the Animation tab. It has its own `Assets` holding only that model, so
 //! nothing is read again and the project's assets are never touched.
 //!
-//! It also gives the Texture maps step small pictures of each map: those
+//! It also gives the Materials tab small pictures of each map: those
 //! the model uses from its already-decoded images, picked ones read once.
 
 use std::collections::HashMap;

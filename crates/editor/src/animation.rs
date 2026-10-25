@@ -246,8 +246,8 @@ impl Subject {
 /// Something the studio asks the app to do.
 #[derive(Clone, Debug, PartialEq)]
 pub enum StudioAction {
-    /// File > Import Model…
-    ImportModel,
+    /// Import…, as in the File menu.
+    Import,
     /// Animate this object: an Animator if it has none, a new clip and an
     /// Animation playing it, as one undo step, then open it with Record on.
     Animate(InstanceId),
@@ -481,7 +481,7 @@ enum Go {
     Animation(String),
     /// Animate the followed object (again): another clip and Animation.
     Animate,
-    ImportModel,
+    Import,
 }
 
 /// One step of the breadcrumb.
@@ -1019,7 +1019,7 @@ fn empty_state(ui: &mut egui::Ui, animatable: Option<&(InstanceId, String)>) -> 
         .on_hover_text("Import an animated FBX: its takes become clips")
         .clicked()
     {
-        go = Some(Go::ImportModel);
+        go = Some(Go::Import);
     }
     ui.weak("Or open a clip or state machine with Open above.");
     go
