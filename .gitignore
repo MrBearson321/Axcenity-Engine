@@ -3,3 +3,9 @@
 .DS_Store
 __pycache__/
 packaging/linux/.generated/
+
+# Editor state written into each project (undo history, snapshots, autocomplete)
+.axcenity/
+
+# Large local-only example assets
+examples/hello-part/assets/textures/
