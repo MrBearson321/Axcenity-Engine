@@ -320,17 +320,9 @@ fn uniform(layers: &TerrainLayers) -> TerrainUniform {
     for (slot, layer) in raw.iter_mut().zip(&layers.layers) {
         let tint = linear_color(layer.color);
         let debug = linear_color(layer.debug_color);
-        // With a map, the map alone gives the value (as on SurfaceAppearances).
-        let metalness = if layer.metalness_map.is_some() {
-            1.0
-        } else {
-            layer.metalness
-        };
-        let roughness = if layer.roughness_map.is_some() {
-            1.0
-        } else {
-            layer.roughness
-        };
+        // The shader multiplies these by the layer's maps (white without
+        // one), so with a map they scale it: 1 is the map as it is.
+        let (metalness, roughness) = (layer.metalness, layer.roughness);
         let (strength, green) = match &layer.normal {
             Some(map) => (map.scale, if map.flip_green { -1.0 } else { 1.0 }),
             None => (0.0, 1.0),

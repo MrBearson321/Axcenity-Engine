@@ -2,17 +2,21 @@ use super::*;
 
 /// The largest a picker's thumbnail is drawn, in points.
 const PICK_THUMBNAIL: f32 = 32.0;
+/// A map's thumbnail beside its file name, and a layer's in the list.
+const MAP_PICTURE: f32 = 16.0;
 /// From this many choices, a picker has a search box.
 const SEARCH_FROM: usize = 7;
 
 /// One layer's material: a texture set from the project, then its color,
 /// maps and how they tile. `textures` is the project's texture sets and
-/// textures, for the pickers; `search` is what those are searching for.
+/// textures, for the pickers; `search` is what those are searching for;
+/// `pictures` holds the maps' thumbnails by path.
 pub(super) fn layer_editor(
     ui: &mut egui::Ui,
     layer: InstanceId,
     instance: &axcenity_core::Instance,
     textures: &[TexturePick],
+    pictures: &HashMap<String, egui::TextureHandle>,
     search: &mut String,
     actions: &mut Vec<TerrainAction>,
 ) {
@@ -61,14 +65,7 @@ pub(super) fn layer_editor(
             ));
         }
         ui.end_row();
-        for (name, label) in [
-            ("ColorMap", "Color"),
-            ("NormalMap", "Normal"),
-            ("RoughnessMap", "Roughness"),
-            ("MetalnessMap", "Metalness"),
-            ("AmbientOcclusionMap", "Occlusion"),
-            ("HeightMap", "Height"),
-        ] {
+        for (name, label) in LAYER_MAPS {
             field(ui, label);
             let row = ui.horizontal(|ui| {
                 ui.menu_button(icons::FOLDER_OPEN, |ui| {
@@ -113,6 +110,13 @@ pub(super) fn layer_editor(
                             Value::String(String::new()),
                         ));
                     }
+                    if let Some(picture) = pictures.get(path) {
+                        ui.add(
+                            egui::Image::new(picture)
+                                .fit_to_exact_size(egui::vec2(MAP_PICTURE, MAP_PICTURE))
+                                .corner_radius(2),
+                        );
+                    }
                     ui.add(egui::Label::new(path.rsplit('/').next().unwrap_or(path)).truncate())
                         .on_hover_text(path);
                 }
@@ -126,6 +130,12 @@ pub(super) fn layer_editor(
             }
             ui.end_row();
         }
+        let has_map = |name| {
+            instance
+                .property(name)
+                .and_then(Value::as_str)
+                .is_some_and(|path| !path.is_empty())
+        };
         let mut slider = |ui: &mut egui::Ui,
                           name: &'static str,
                           label: &str,
@@ -133,16 +143,27 @@ pub(super) fn layer_editor(
                           suffix: &str| {
             field(ui, label);
             let mut value = number(name);
-            if ui
-                .add(egui::Slider::new(&mut value, range).suffix(suffix))
-                .changed()
-            {
+            let response = ui.add(egui::Slider::new(&mut value, range).suffix(suffix));
+            if response.changed() {
                 actions.push(TerrainAction::SetLayer(layer, name, Value::Number(value)));
             }
             ui.end_row();
+            response
         };
-        slider(ui, "Roughness", "Roughness", 0.0..=1.0, "");
-        slider(ui, "Metalness", "Metalness", 0.0..=1.0, "");
+        // With a map these scale it, so 1 is the map as it is.
+        for (name, map, label) in [
+            ("Roughness", "RoughnessMap", "Roughness"),
+            ("Metalness", "MetalnessMap", "Metalness"),
+        ] {
+            if has_map(map) {
+                slider(ui, name, label, 0.0..=1.0, " × map").on_hover_text(format!(
+                    "Scales the {} map: 1 shows it as it is, lower is less.",
+                    label.to_lowercase()
+                ));
+            } else {
+                slider(ui, name, label, 0.0..=1.0, "");
+            }
+        }
         slider(ui, "NormalStrength", "Normal strength", 0.0..=3.0, "");
         slider(ui, "TileSize", "Tile size", 0.25..=256.0, " studs");
         slider(ui, "TextureRotation", "Turn", -180.0..=180.0, "°");
@@ -180,6 +201,16 @@ pub(super) fn layer_editor(
             .clicked()
         {
             actions.push(TerrainAction::CopySurfaceAppearance(layer));
+        }
+        if ui
+            .button(theme::with_icon(icons::MAGIC_WAND, "Auto settings"))
+            .on_hover_text(
+                "Set roughness, metalness and normal strength to suit this layer's maps, as a \
+                 texture set does when it fills the layer.",
+            )
+            .clicked()
+        {
+            actions.push(TerrainAction::AutoLayerSettings(layer));
         }
     });
 }
@@ -412,17 +443,27 @@ impl TerrainStudio {
                         .property("Color")
                         .and_then(Value::as_color3)
                         .unwrap_or(Color3::new(0.5, 0.5, 0.5));
-                    let (rect, _) = ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
-                    ui.painter().rect_filled(
-                        rect,
-                        4,
-                        egui::Color32::from_rgb(
-                            (color.r * 255.0) as u8,
-                            (color.g * 255.0) as u8,
-                            (color.b * 255.0) as u8,
-                        ),
+                    let (rect, _) = ui.allocate_exact_size(egui::vec2(MAP_PICTURE, MAP_PICTURE), egui::Sense::hover());
+                    let tint = egui::Color32::from_rgb(
+                        (color.r * 255.0) as u8,
+                        (color.g * 255.0) as u8,
+                        (color.b * 255.0) as u8,
                     );
-                    if instance.property("ColorMap").and_then(Value::as_str).is_some_and(|p| !p.is_empty()) {
+                    let color_map = instance
+                        .property("ColorMap")
+                        .and_then(Value::as_str)
+                        .filter(|path| !path.is_empty());
+                    // The color map, tinted as the terrain tints it, once its
+                    // thumbnail is read; the color with an image icon until then.
+                    if let Some(picture) = color_map.and_then(|path| cx.pictures.get(path)) {
+                        egui::Image::new(picture)
+                            .tint(tint)
+                            .corner_radius(4)
+                            .paint_at(ui, rect);
+                    } else {
+                        ui.painter().rect_filled(rect, 4, tint);
+                    }
+                    if color_map.is_some_and(|path| !cx.pictures.contains_key(path)) {
                         ui.painter().text(
                             rect.center(),
                             egui::Align2::CENTER_CENTER,
@@ -483,7 +524,15 @@ impl TerrainStudio {
                     let search = &mut self.texture_search;
                     let card = ui.scope(|ui| {
                         card(ui, |ui| {
-                            layer_editor(ui, layer, instance, cx.textures, search, actions)
+                            layer_editor(
+                                ui,
+                                layer,
+                                instance,
+                                cx.textures,
+                                cx.pictures,
+                                search,
+                                actions,
+                            )
                         })
                     });
                     if let Some(entry) = dropped_asset(ui, &card.response, AssetKind::TextureSet) {

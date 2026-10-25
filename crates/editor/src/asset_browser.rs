@@ -365,6 +365,13 @@ impl AssetBrowser {
         picks
     }
 
+    /// The thumbnail of the image at `path` (a project path), asked for
+    /// the first time; `None` until it has been read.
+    pub fn thumbnail(&mut self, ctx: &egui::Context, path: &str) -> Option<egui::TextureHandle> {
+        self.thumbnails.poll(ctx);
+        self.thumbnails.get(ctx, path, false)
+    }
+
     fn rescan_if_due(&mut self) {
         if self.scanned_at.is_some_and(|at| at.elapsed() < RESCAN) {
             return;

@@ -49,6 +49,7 @@ fn the_panel_draws_with_and_without_a_terrain() {
                         editing: true,
                         time: 0.0,
                         textures: &[],
+                        pictures: &HashMap::new(),
                     },
                 );
             });
@@ -112,6 +113,7 @@ fn the_panel_snapshots_with_its_main_tools() {
                                 editing: true,
                                 time: 0.0,
                                 textures: &[],
+                                pictures: &HashMap::new(),
                             },
                         );
                     });
@@ -141,6 +143,14 @@ fn an_open_layer_and_its_texture_menu_snapshot() {
         world.set_parent(layer, Some(terrain)).unwrap();
         first.get_or_insert(layer);
     }
+    // A layer with a roughness map, whose slider then scales it.
+    world
+        .set_property(
+            first.unwrap(),
+            "RoughnessMap",
+            Value::String("assets/textures/Ground108/Ground108_Roughness.jpg".into()),
+        )
+        .unwrap();
     let pick = |kind, path: &str| TexturePick {
         entry: AssetEntry {
             kind,
@@ -180,6 +190,7 @@ fn an_open_layer_and_its_texture_menu_snapshot() {
                             editing: true,
                             time: 0.0,
                             textures: &textures,
+                            pictures: &HashMap::new(),
                         },
                     );
                 });

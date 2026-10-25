@@ -327,7 +327,47 @@ fn a_project_texture_set_fills_the_chosen_layer_as_one_undo_step() {
             .and_then(Value::as_str),
         Some("assets/textures/Mud/Mud_Color.png")
     );
+    // Set up to suit its maps: no roughness or metalness map, so ground
+    // values; a normal map at full strength.
+    let number = |app: &EditorApp, name| {
+        app.world
+            .get(dirt)
+            .unwrap()
+            .property(name)
+            .and_then(Value::as_number)
+            .unwrap()
+    };
+    assert_eq!(number(&app, "Roughness"), 0.9);
+    assert_eq!(number(&app, "Metalness"), 0.0);
+    assert_eq!(number(&app, "NormalStrength"), 1.0);
+
+    // A tweak stays until Auto settings puts it back, as its own undo step.
+    app.terrain_action(TerrainAction::SetLayer(
+        dirt,
+        "Roughness",
+        Value::Number(0.4),
+    ));
+    app.history.seal();
+    app.terrain_action(TerrainAction::AutoLayerSettings(dirt));
+    assert_eq!(number(&app, "Roughness"), 0.9);
+    app.undo();
+    assert_eq!(number(&app, "Roughness"), 0.4);
+    app.undo();
     app.undo();
     assert_eq!(map(&app, "ColorMap"), before);
     std::fs::remove_dir_all(folder).unwrap();
+}
+
+#[test]
+fn auto_settings_let_a_roughness_or_metalness_map_show_as_it_is() {
+    let mut world = World::new();
+    let layer = world.create(ClassName::TerrainLayer).unwrap();
+    for map in ["RoughnessMap", "MetalnessMap"] {
+        world
+            .set_property(layer, map, Value::String("assets/textures/rock.png".into()))
+            .unwrap();
+    }
+    let settings = crate::app::texture_set::auto_layer_settings(world.get(layer).unwrap());
+    assert!(settings.contains(&("Roughness", Value::Number(1.0))));
+    assert!(settings.contains(&("Metalness", Value::Number(1.0))));
 }

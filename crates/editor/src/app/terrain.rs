@@ -8,6 +8,7 @@
 //! chunks it touched are kept. Whole new landscapes (generating, erosion,
 //! importing, resampling) are one step holding the landscape before and after.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -64,6 +65,7 @@ impl EditorApp {
         } else {
             Vec::new()
         };
+        let pictures = self.layer_pictures(ui.ctx());
         let actions = self.terrain.show(
             ui,
             &StudioContext {
@@ -72,11 +74,39 @@ impl EditorApp {
                 editing,
                 time,
                 textures: &textures,
+                pictures: &pictures,
             },
         );
         for action in actions {
             self.terrain_action(action);
         }
+    }
+
+    /// Thumbnails of every terrain layer's color map, and of all the open
+    /// layer's maps, by path: what the studio's layer list and open layer
+    /// show.
+    fn layer_pictures(&mut self, ctx: &egui::Context) -> HashMap<String, egui::TextureHandle> {
+        let mut paths = Vec::new();
+        for terrain in crate::terrain_studio::terrains(&self.world) {
+            for layer in axcenity_terrain::materials::layers(&self.world, terrain) {
+                let open = self.terrain.open_layer == Some(layer);
+                let Some(instance) = self.world.get(layer) else {
+                    continue;
+                };
+                for (map, _) in crate::terrain_studio::LAYER_MAPS {
+                    if (open || map == "ColorMap")
+                        && let Some(path) = instance.property(map).and_then(Value::as_str)
+                        && !path.is_empty()
+                    {
+                        paths.push(path.to_owned());
+                    }
+                }
+            }
+        }
+        paths
+            .into_iter()
+            .filter_map(|path| Some((path.clone(), self.asset_browser.thumbnail(ctx, &path)?)))
+            .collect()
     }
 
     /// Runs every frame, before the panels are drawn: finished jobs become
@@ -197,6 +227,7 @@ impl EditorApp {
             TerrainAction::UseTextureSet(layer, entry) => {
                 self.apply_texture_set(&entry, Some(layer));
             }
+            TerrainAction::AutoLayerSettings(layer) => self.auto_layer_settings(layer),
             TerrainAction::ImportTextureSet(layer) => self.import_texture_set(layer),
             TerrainAction::CopySurfaceAppearance(layer) => self.copy_surface_appearance(layer),
             TerrainAction::Select(id) => self.select_from_viewport(Some(id)),

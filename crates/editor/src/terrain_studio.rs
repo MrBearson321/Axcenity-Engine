@@ -24,6 +24,7 @@ mod tool_settings;
 
 use layers::*;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axcenity_core::{
@@ -45,6 +46,16 @@ use crate::theme::{self, icons};
 use crate::widgets::{self, Role};
 
 pub use presets::{LayerPreset, layers_for};
+
+/// A TerrainLayer's map properties, with what the studio calls them.
+pub const LAYER_MAPS: [(&str, &str); 6] = [
+    ("ColorMap", "Color"),
+    ("NormalMap", "Normal"),
+    ("RoughnessMap", "Roughness"),
+    ("MetalnessMap", "Metalness"),
+    ("AmbientOcclusionMap", "Occlusion"),
+    ("HeightMap", "Height"),
+];
 
 /// The resolutions offered for a terrain, in samples along a side.
 pub const RESOLUTIONS: [usize; 5] = [129, 257, 513, 1025, 2049];
@@ -233,6 +244,8 @@ pub enum TerrainAction {
     PickLayerTexture(InstanceId, &'static str),
     /// Fill every map of a layer from a texture set in the project.
     UseTextureSet(InstanceId, AssetEntry),
+    /// Set a layer's roughness, metalness and normal strength to suit its maps.
+    AutoLayerSettings(InstanceId),
     /// Pick several texture files, sorted into the layer's maps by name.
     ImportTextureSet(InstanceId),
     /// Copy the selected SurfaceAppearance's maps into the layer.
@@ -426,6 +439,9 @@ pub struct StudioContext<'a> {
     /// The project's texture sets and textures, for an open layer's
     /// pickers. Empty while no layer is open.
     pub textures: &'a [TexturePick],
+    /// Thumbnails of the layers' maps by path, once read: every layer's
+    /// color map, and all the open layer's maps.
+    pub pictures: &'a HashMap<String, egui::TextureHandle>,
 }
 
 /// Every Terrain in the Workspace, in tree order.

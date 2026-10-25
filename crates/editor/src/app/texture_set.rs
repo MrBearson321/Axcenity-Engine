@@ -8,7 +8,9 @@
 use std::path::Path;
 
 use axcenity_assets::{Channel, MapSlot, TextureSet, read_texture_set};
-use axcenity_core::{ClassName, Color3, InstanceId, Material, TextureChannel, Value, World};
+use axcenity_core::{
+    ClassName, Color3, Instance, InstanceId, Material, TextureChannel, Value, World,
+};
 
 use super::EditorApp;
 use crate::asset_browser::AssetEntry;
@@ -307,16 +309,10 @@ impl EditorApp {
                 .world
                 .set_property(id, "Color", Value::Color3(Color3::new(1.0, 1.0, 1.0)));
         }
-        if terrain {
-            let metal = if set.path(MapSlot::Metalness).is_some() {
-                1.0
-            } else {
-                0.0
-            };
-            let _ = self
-                .world
-                .set_property(id, "Metalness", Value::Number(metal));
-            let _ = self.world.set_property(id, "Roughness", Value::Number(1.0));
+        if terrain && let Some(layer) = self.world.get(id) {
+            for (property, value) in auto_layer_settings(layer) {
+                let _ = self.world.set_property(id, property, value);
+            }
         }
     }
 
@@ -401,6 +397,27 @@ impl EditorApp {
         }
         Some(names)
     }
+}
+
+/// The settings that suit a TerrainLayer's maps, set when a texture set
+/// fills it and by the Terrain Studio's Auto button. With a roughness or
+/// metalness map the value scales the map, so 1 shows the map as it is;
+/// without one it's the value itself (rough, not metal: ground). A normal
+/// map shows at full strength.
+pub(super) fn auto_layer_settings(layer: &Instance) -> [(&'static str, Value); 3] {
+    let has = |name| {
+        layer
+            .property(name)
+            .and_then(Value::as_str)
+            .is_some_and(|path| !path.is_empty())
+    };
+    let pick =
+        |name, with: f64, without: f64| Value::Number(if has(name) { with } else { without });
+    [
+        ("Roughness", pick("RoughnessMap", 1.0, 0.9)),
+        ("Metalness", pick("MetalnessMap", 1.0, 0.0)),
+        ("NormalStrength", Value::Number(1.0)),
+    ]
 }
 
 fn appearances(world: &World, parent: InstanceId) -> Vec<InstanceId> {

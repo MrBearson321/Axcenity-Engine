@@ -262,3 +262,25 @@ impl EditorApp {
         self.history.seal();
     }
 }
+
+impl EditorApp {
+    /// Puts back the roughness, metalness and normal strength that suit the
+    /// layer's maps, as one undo step.
+    pub(super) fn auto_layer_settings(&mut self, layer: InstanceId) {
+        let Some(instance) = self.world.get(layer) else {
+            return;
+        };
+        let name = instance.name().to_owned();
+        let edits = crate::app::texture_set::auto_layer_settings(instance)
+            .into_iter()
+            .map(|(property, value)| Edit::Property(property, value))
+            .collect();
+        self.change(
+            layer,
+            Field::Property("Roughness"),
+            format!("Auto Settings for {name}"),
+            edits,
+        );
+        self.history.seal();
+    }
+}
