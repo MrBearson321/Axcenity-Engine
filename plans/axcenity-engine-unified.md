@@ -112,9 +112,9 @@ Either controller accepts a named custom movement mode in `Movement`. While that
 
 ### Acceptance criteria
 
-- [ ] Setting a custom mode stops built-in walking, and motion supplied by a script moves the character.
-- [ ] Blocks can set and clear the same mode, and the current mode name can be read back.
-- [ ] Clearing the mode restores walk, run or crouch, including jumping and stepping.
+- [x] Setting a custom mode stops built-in walking, and motion supplied by a script moves the character.
+- [x] Blocks can set and clear the same mode, and the current mode name can be read back.
+- [x] Clearing the mode restores walk, run or crouch, including jumping and stepping.
 
 ---
 

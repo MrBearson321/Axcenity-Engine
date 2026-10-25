@@ -994,9 +994,9 @@ declare extern type TerrainLayer extends Instance with
 	[string]: any
 end
 
---- Walks, runs, jumps and crouches the character model it is parented to, kinematically, up slopes and steps within its limits, and owns the camera during Play: behind the character, zoomed with the mouse wheel. Movement is "Walk" or "Run". It is not a physics body: tuning its speeds and limits does not change how other parts fall.
+--- Walks, runs, jumps and crouches the character model it is parented to, kinematically, up slopes and steps within its limits, and owns the camera during Play: behind the character, zoomed with the mouse wheel. Movement is "Walk", "Run", "Crouch" or a custom mode that scripts move. It is not a physics body: tuning its speeds and limits does not change how other parts fall.
 declare extern type ThirdPersonController extends Instance with
-	--- "Walk" or "Run". Anything else moves at WalkSpeed. Set from a script or the set-property block.
+	--- "Walk", "Run" or "Crouch", or any other name for a custom mode: the controller stops moving the character, and scripts and blocks move it. Set "" to clear a custom mode; the controller puts back the built-in mode it had. Set and read from a script or the set-property and property blocks.
 	Movement: string
 	--- How fast Movement "Walk" moves, in studs a second, on flat ground.
 	WalkSpeed: number
@@ -1029,7 +1029,7 @@ end
 
 --- Moves the character model it is parented to just like a ThirdPersonController, with the camera at the character's eyes during Play, looking where the player looks. A character has one controller or the other.
 declare extern type FirstPersonController extends Instance with
-	--- "Walk" or "Run". Anything else moves at WalkSpeed. Set from a script or the set-property block.
+	--- "Walk", "Run" or "Crouch", or any other name for a custom mode: the controller stops moving the character, and scripts and blocks move it. Set "" to clear a custom mode; the controller puts back the built-in mode it had. Set and read from a script or the set-property and property blocks.
 	Movement: string
 	--- How fast Movement "Walk" moves, in studs a second, on flat ground.
 	WalkSpeed: number

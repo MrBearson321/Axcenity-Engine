@@ -124,6 +124,64 @@
           }
         ]
       }
+    },
+    {
+      "id": 16,
+      "kind": {
+        "type": "when_key_pressed",
+        "key": "Six",
+        "body": [
+          {
+            "id": 17,
+            "kind": {
+              "type": "set_property",
+              "target": "Character.ThirdPersonController",
+              "property": "Movement",
+              "value": { "type": "text", "value": "Hover" }
+            }
+          },
+          {
+            "id": 18,
+            "kind": {
+              "type": "print",
+              "value": {
+                "type": "join",
+                "left": { "type": "text", "value": "movement: " },
+                "right": {
+                  "type": "property",
+                  "target": "Character.ThirdPersonController",
+                  "property": "Movement"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": 19,
+      "kind": {
+        "type": "when_key_pressed",
+        "key": "Seven",
+        "body": [
+          {
+            "id": 20,
+            "kind": {
+              "type": "set_property",
+              "target": "Character.ThirdPersonController",
+              "property": "Movement",
+              "value": { "type": "text", "value": "" }
+            }
+          },
+          {
+            "id": 21,
+            "kind": {
+              "type": "print",
+              "value": { "type": "text", "value": "hover cleared" }
+            }
+          }
+        ]
+      }
     }
   ]
 }

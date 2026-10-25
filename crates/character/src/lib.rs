@@ -6,7 +6,8 @@
 //! to one Part). Both move the same way. During Play, [`Controllers::step`] walks or runs that
 //! character from the held movement keys, jumps and crouches it, carries it
 //! up slopes and steps within its limits, and drops it under gravity off an
-//! edge. It is not
+//! edge. A custom `Movement` name stops all of that, so scripts and blocks
+//! move the character instead. It is not
 //! a dynamic body: [`Controllers::keep_kinematic`] anchors its parts so
 //! physics does not tip or drop them, and so gravity and friction of other
 //! parts stay as they are.
@@ -135,6 +136,39 @@ struct Crouched {
     height: f32,
 }
 
+/// What a controller's `Movement` asks for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Mode {
+    Walk,
+    Run,
+    /// Walks, crouched.
+    Crouch,
+    /// Any other name: the controller doesn't move the character.
+    Custom,
+}
+
+impl Mode {
+    /// `None` for an empty name, which clears a custom mode. A value that
+    /// isn't text walks.
+    fn parse(value: Option<&Value>) -> Option<Self> {
+        let Some(name) = value.and_then(Value::as_str) else {
+            return Some(Mode::Walk);
+        };
+        let name = name.trim();
+        if name.is_empty() {
+            None
+        } else if name.eq_ignore_ascii_case("walk") {
+            Some(Mode::Walk)
+        } else if name.eq_ignore_ascii_case("run") {
+            Some(Mode::Run)
+        } else if name.eq_ignore_ascii_case("crouch") {
+            Some(Mode::Crouch)
+        } else {
+            Some(Mode::Custom)
+        }
+    }
+}
+
 /// What one controller can cross, read from its properties each step.
 struct Limits {
     jump_height: f32,
@@ -182,6 +216,9 @@ pub struct Controllers {
     orbits: BTreeMap<InstanceId, Orbit>,
     falls: BTreeMap<InstanceId, Fall>,
     crouches: BTreeMap<InstanceId, Crouched>,
+    /// The built-in `Movement` each controller last had, put back when a
+    /// custom mode is cleared. Not saved.
+    built_in: BTreeMap<InstanceId, String>,
     /// The controller that last received input, if it is still in the world.
     active: Option<InstanceId>,
 }
@@ -206,6 +243,7 @@ impl Controllers {
         self.orbits.retain(|id, _| world.get(*id).is_some());
         self.falls.retain(|id, _| world.get(*id).is_some());
         self.crouches.retain(|id, _| world.get(*id).is_some());
+        self.built_in.retain(|id, _| world.get(*id).is_some());
         let Some(id) = active_id(world) else {
             self.active = None;
             return None;
@@ -217,6 +255,14 @@ impl Controllers {
         let orbit = *orbit;
         if eye == Eye::Follow {
             zoom(world, id, input.zoom);
+        }
+        if self.mode(world, id) == Mode::Custom {
+            // Scripts and blocks move the character. A jump asked for now is
+            // used up, and the built-in mode starts in the air, so it lands
+            // wherever the character was left.
+            take_jump(world, id);
+            self.falls.remove(&id);
+            return self.view(world);
         }
         // Taken first, so a request made in the air is used up, not kept for landing.
         let jump = take_jump(world, id) || input.jump;
@@ -241,6 +287,34 @@ impl Controllers {
             }
         }
         self.view(world)
+    }
+
+    /// The mode `Movement` names. Remembers a built-in one, and puts it back
+    /// in `Movement` when a custom mode was cleared.
+    fn mode(&mut self, world: &mut World, id: InstanceId) -> Mode {
+        let value = world
+            .get(id)
+            .and_then(|instance| instance.property("Movement"))
+            .cloned();
+        match Mode::parse(value.as_ref()) {
+            Some(Mode::Custom) => Mode::Custom,
+            Some(mode) => {
+                if let Some(Value::String(name)) = value {
+                    self.built_in.insert(id, name);
+                }
+                mode
+            }
+            None => {
+                let name = self
+                    .built_in
+                    .get(&id)
+                    .cloned()
+                    .unwrap_or_else(|| "Walk".to_owned());
+                let mode = Mode::parse(Some(&Value::String(name.clone()))).unwrap_or(Mode::Walk);
+                let _ = world.set_property(id, "Movement", Value::String(name));
+                mode
+            }
+        }
     }
 
     /// The camera of the controller that owns it, from where the character
@@ -411,16 +485,12 @@ fn number(world: &World, id: InstanceId, name: &str) -> Option<f32> {
     value.is_finite().then_some(value as f32)
 }
 
-fn is_run(world: &World, id: InstanceId) -> bool {
-    world
-        .get(id)
-        .and_then(|instance| instance.property("Movement"))
-        .and_then(Value::as_str)
-        .is_some_and(|mode| mode.eq_ignore_ascii_case("run"))
+fn movement(world: &World, id: InstanceId) -> Option<Mode> {
+    Mode::parse(world.get(id)?.property("Movement"))
 }
 
 fn speed_of(world: &World, id: InstanceId) -> f32 {
-    let name = if is_run(world, id) {
+    let name = if movement(world, id) == Some(Mode::Run) {
         "RunSpeed"
     } else {
         "WalkSpeed"
@@ -441,12 +511,14 @@ fn take_jump(world: &mut World, id: InstanceId) -> bool {
     requested
 }
 
+/// True when `Crouch` is set or `Movement` is `"Crouch"`.
 fn wants_crouch(world: &World, id: InstanceId) -> bool {
-    world
+    let crouch = world
         .get(id)
         .and_then(|instance| instance.property("Crouch"))
         .and_then(Value::as_bool)
-        == Some(true)
+        == Some(true);
+    crouch || movement(world, id) == Some(Mode::Crouch)
 }
 
 fn crouch_speed_scale(world: &World, id: InstanceId) -> f32 {

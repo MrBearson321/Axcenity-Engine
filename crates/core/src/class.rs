@@ -742,7 +742,8 @@ impl ClassName {
 /// and crouches.
 fn movement_properties() -> Vec<(&'static str, Value)> {
     vec![
-        // "Walk" or "Run". Anything else moves at WalkSpeed.
+        // "Walk", "Run" or "Crouch". Any other name is a custom mode that
+        // scripts move; "" clears it back to the built-in mode it replaced.
         ("Movement", Value::String("Walk".to_owned())),
         // Studs a second across flat ground.
         ("WalkSpeed", Value::Number(16.0)),

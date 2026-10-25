@@ -184,6 +184,141 @@ fn hello_character_walks_runs_and_switches_from_lua_and_blocks() {
 }
 
 #[test]
+fn hello_character_hovers_in_a_custom_mode_from_lua_and_blocks() {
+    use axcenity_core::KeyCode as K;
+    let (mut world, mut scripts) = start_example("hello-character");
+    let assets = Assets::default();
+    let mut characters = Controllers::default();
+    let mut physics = Physics::new();
+    let model = world
+        .find_first_child(world.workspace(), "Character")
+        .unwrap();
+    let controller = world
+        .find_first_child(model, "ThirdPersonController")
+        .unwrap();
+    let body = world.find_first_child(model, "Body").unwrap();
+    let movement = |world: &World| {
+        world
+            .get(controller)
+            .unwrap()
+            .property("Movement")
+            .and_then(Value::as_str)
+            .unwrap()
+            .to_owned()
+    };
+    let body_position = |world: &World| {
+        world
+            .get(body)
+            .unwrap()
+            .property("Position")
+            .and_then(Value::as_vector3)
+            .unwrap()
+    };
+    let walk = MoveInput {
+        forward: true,
+        ..MoveInput::default()
+    };
+    let back = MoveInput {
+        back: true,
+        ..MoveInput::default()
+    };
+    // The host's frame order: character, scripts, kinematic hold, physics, Heartbeat.
+    let mut frame = |world: &mut World, keys: &[KeyEvent], input: MoveInput| {
+        characters.step(world, &assets, input, 1.0 / 60.0);
+        scripts.input(world, keys);
+        scripts.step(world, 1.0 / 60.0);
+        characters.keep_kinematic(world);
+        physics.step(world, 1.0 / 60.0);
+        scripts.heartbeat(world, 1.0 / 60.0);
+    };
+    let press = |key, pressed| [KeyEvent { key, pressed }];
+    frame(&mut world, &[], MoveInput::default());
+    let floor_y = body_position(&world).y;
+
+    // H hovers from the LocalScript: walking does nothing, and nothing falls.
+    frame(&mut world, &press(K::H, true), MoveInput::default());
+    frame(&mut world, &press(K::H, false), MoveInput::default());
+    assert_eq!(movement(&world), "Hover");
+    let start = body_position(&world);
+    for _ in 0..30 {
+        frame(&mut world, &[], walk);
+    }
+    assert_eq!(body_position(&world), start, "walked while hovering");
+
+    // The script moves it: E rises and W goes where the camera looks, 12
+    // studs a second, not WalkSpeed's 16.
+    frame(&mut world, &press(K::E, true), MoveInput::default());
+    for _ in 0..59 {
+        frame(&mut world, &[], MoveInput::default());
+    }
+    frame(&mut world, &press(K::E, false), MoveInput::default());
+    let risen = body_position(&world);
+    assert!(
+        (risen.y - start.y - 12.0).abs() < 0.5,
+        "{start:?} -> {risen:?}"
+    );
+    frame(&mut world, &press(K::W, true), walk);
+    for _ in 0..59 {
+        frame(&mut world, &[], walk);
+    }
+    frame(&mut world, &press(K::W, false), MoveInput::default());
+    let flown = body_position(&world);
+    assert!(
+        (risen.z - flown.z - 12.0).abs() < 0.5,
+        "{risen:?} -> {flown:?}"
+    );
+
+    // H again clears it: the character walks again, and falls and lands first.
+    frame(&mut world, &press(K::H, true), MoveInput::default());
+    frame(&mut world, &press(K::H, false), MoveInput::default());
+    assert_eq!(movement(&world), "Walk");
+    for _ in 0..60 {
+        frame(&mut world, &[], MoveInput::default());
+    }
+    assert!((body_position(&world).y - floor_y).abs() < 1e-3);
+
+    // The blocks: 2 runs, 6 hovers and prints the mode, 7 clears it, and
+    // running comes back.
+    frame(&mut world, &press(K::Two, true), MoveInput::default());
+    frame(&mut world, &press(K::Two, false), MoveInput::default());
+    frame(&mut world, &press(K::Six, true), MoveInput::default());
+    frame(&mut world, &press(K::Six, false), MoveInput::default());
+    assert_eq!(movement(&world), "Hover");
+    let start = body_position(&world);
+    for _ in 0..30 {
+        frame(&mut world, &[], back);
+    }
+    assert_eq!(body_position(&world), start, "ran while hovering");
+    frame(&mut world, &press(K::Seven, true), MoveInput::default());
+    frame(&mut world, &press(K::Seven, false), MoveInput::default());
+    assert_eq!(movement(&world), "Run");
+    let start = body_position(&world);
+    for _ in 0..60 {
+        frame(&mut world, &[], back);
+    }
+    let ran = body_position(&world).z - start.z;
+    assert!((ran - 32.0).abs() < 0.5, "ran {ran}");
+
+    let output: Vec<String> = scripts
+        .take_output()
+        .into_iter()
+        .map(|line| match line.kind {
+            OutputKind::Print => line.text,
+            OutputKind::Error => format!("error: {}", line.text),
+        })
+        .collect();
+    assert!(
+        output.iter().any(|line| line == "movement: Hover"),
+        "{output:?}"
+    );
+    assert!(output.iter().any(|line| line == "hover cleared"));
+    assert!(
+        !output.iter().any(|line| line.starts_with("error")),
+        "{output:?}"
+    );
+}
+
+#[test]
 fn hello_character_crouches_from_lua_and_blocks_and_under_the_low_ceiling() {
     use axcenity_core::KeyCode as K;
     let (mut world, mut scripts) = start_example("hello-character");

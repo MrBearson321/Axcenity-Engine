@@ -755,3 +755,135 @@ fn the_wheel_zooms_the_third_person_camera_between_its_limits() {
     run(&mut world, &mut controllers, wheel(100.0), 1);
     assert!((zoomed(&world, &controllers) - 0.5).abs() < 1e-3);
 }
+
+fn set_movement(world: &mut World, controller: InstanceId, name: &str) {
+    world
+        .set_property(controller, "Movement", Value::String(name.to_owned()))
+        .unwrap();
+}
+
+fn movement_of(world: &World, controller: InstanceId) -> String {
+    world
+        .get(controller)
+        .unwrap()
+        .property("Movement")
+        .and_then(Value::as_str)
+        .unwrap()
+        .to_owned()
+}
+
+#[test]
+fn a_custom_mode_stops_built_in_motion_and_a_script_moves_the_character() {
+    for class in [
+        ClassName::ThirdPersonController,
+        ClassName::FirstPersonController,
+    ] {
+        let (mut world, controller, body) = standing_as(class);
+        let mut controllers = Controllers::default();
+        run(&mut world, &mut controllers, forward(), 1);
+        set_movement(&mut world, controller, "Swim");
+        let start = pos(&world, body);
+        run(&mut world, &mut controllers, forward(), 60);
+        assert_eq!(pos(&world, body), start, "{class:?} walked in Swim");
+        assert_eq!(movement_of(&world, controller), "Swim");
+
+        // A jump does nothing and is used up.
+        world
+            .set_property(controller, "Jump", Value::Bool(true))
+            .unwrap();
+        run(&mut world, &mut controllers, MoveInput::default(), 30);
+        assert_eq!(pos(&world, body), start);
+        let jump = world.get(controller).unwrap().property("Jump");
+        assert_eq!(jump, Some(&Value::Bool(false)));
+
+        // A script lifts it 5 studs a second, and gravity doesn't pull it
+        // back; the camera follows.
+        let assets = Assets::default();
+        let before = controllers.view(&world).unwrap().position;
+        for frame in 1..=60 {
+            let lifted = Vector3::new(start.x, start.y + 5.0 * frame as f32 * FRAME, start.z);
+            world
+                .set_property(body, "Position", Value::Vector3(lifted))
+                .unwrap();
+            controllers.step(&mut world, &assets, forward(), FRAME);
+        }
+        let lifted = pos(&world, body);
+        assert!((lifted.y - start.y - 5.0).abs() < 1e-3, "{lifted:?}");
+        assert_eq!((lifted.x, lifted.z), (start.x, start.z));
+        let after = controllers.view(&world).unwrap().position;
+        assert!((after.y - before.y - 5.0).abs() < 1e-3);
+    }
+}
+
+#[test]
+fn clearing_a_custom_mode_restores_run_with_jumping_and_stepping() {
+    let (mut world, controller, body) = standing();
+    ledge(&mut world, 0.8);
+    let mut controllers = Controllers::default();
+    set_movement(&mut world, controller, "Run");
+    run(&mut world, &mut controllers, MoveInput::default(), 1);
+    set_movement(&mut world, controller, "Climb");
+    run(&mut world, &mut controllers, MoveInput::default(), 1);
+    // A script left the character in the air.
+    world
+        .set_property(
+            body,
+            "Position",
+            Value::Vector3(Vector3::new(0.0, 6.0, 0.0)),
+        )
+        .unwrap();
+    set_movement(&mut world, controller, "");
+    run(&mut world, &mut controllers, MoveInput::default(), 60);
+    assert_eq!(movement_of(&world, controller), "Run");
+    assert!((pos(&world, body).y - 1.0).abs() < 1e-3, "fell and landed");
+
+    // It runs, back toward +Z and onto the 0.8-stud step.
+    let start = pos(&world, body);
+    run(&mut world, &mut controllers, back(), 30);
+    let ran = pos(&world, body);
+    assert!((ran.z - start.z - 16.0).abs() < 0.5, "{start:?} -> {ran:?}");
+    assert!((ran.y - 1.8).abs() < 1e-3, "on the step at {ran:?}");
+
+    // And jumps.
+    world
+        .set_property(controller, "Jump", Value::Bool(true))
+        .unwrap();
+    let mut peak = ran.y;
+    for _ in 0..60 {
+        run(&mut world, &mut controllers, MoveInput::default(), 1);
+        peak = peak.max(pos(&world, body).y);
+    }
+    assert!(peak - ran.y > 6.0, "rose {}", peak - ran.y);
+    assert!((pos(&world, body).y - ran.y).abs() < 1e-3);
+}
+
+#[test]
+fn clearing_a_custom_mode_restores_walk_or_crouch() {
+    let (mut world, controller, body) = standing();
+    let mut controllers = Controllers::default();
+    run(&mut world, &mut controllers, MoveInput::default(), 1);
+    // Never set: clearing walks.
+    set_movement(&mut world, controller, "Glide");
+    run(&mut world, &mut controllers, MoveInput::default(), 1);
+    set_movement(&mut world, controller, "");
+    let start = pos(&world, body);
+    run(&mut world, &mut controllers, forward(), 60);
+    assert_eq!(movement_of(&world, controller), "Walk");
+    let walked = start.z - pos(&world, body).z;
+    assert!((walked - 16.0).abs() < 0.5, "walked {walked}");
+
+    // Movement "Crouch" walks crouched, and comes back after a custom mode.
+    set(&mut world, controller, "CrouchHeight", 1.0);
+    set_movement(&mut world, controller, "crouch");
+    run(&mut world, &mut controllers, MoveInput::default(), 1);
+    assert!((size(&world, body).y - 1.0).abs() < 1e-3);
+    set_movement(&mut world, controller, "Glide");
+    run(&mut world, &mut controllers, MoveInput::default(), 1);
+    set_movement(&mut world, controller, "");
+    let start = pos(&world, body);
+    run(&mut world, &mut controllers, forward(), 60);
+    assert_eq!(movement_of(&world, controller), "crouch");
+    assert!((size(&world, body).y - 1.0).abs() < 1e-3);
+    let crept = start.z - pos(&world, body).z;
+    assert!((crept - 8.0).abs() < 0.5, "crept {crept}");
+}

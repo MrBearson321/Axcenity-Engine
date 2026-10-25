@@ -4,3 +4,4 @@
 - Behavior: `docs/scripting/api-character.md`. Frame order: `docs/architecture/frame-loop.md`.
 - Hosts call `Controllers::step` after input and before scripts, then `keep_kinematic` immediately before the physics step. The first controller in the Workspace with a body receives movement and owns the camera.
 - Movement is ray probes (`cast_ray_excluding`), not a physics body. Gravity is `physics::GRAVITY`; never change physics settings from here. Tests are in `src/tests.rs`.
+- A custom `Movement` name (not Walk, Run, Crouch or `""`) returns from `step` before any motion; `""` restores the built-in mode remembered in `Controllers::built_in`.
