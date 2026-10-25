@@ -74,6 +74,56 @@
           }
         ]
       }
+    },
+    {
+      "id": 10,
+      "kind": {
+        "type": "when_key_pressed",
+        "key": "Four",
+        "body": [
+          {
+            "id": 11,
+            "kind": {
+              "type": "set_property",
+              "target": "Character.ThirdPersonController",
+              "property": "Crouch",
+              "value": { "type": "boolean", "value": true }
+            }
+          },
+          {
+            "id": 12,
+            "kind": {
+              "type": "print",
+              "value": { "type": "text", "value": "crouching" }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": 13,
+      "kind": {
+        "type": "when_key_pressed",
+        "key": "Five",
+        "body": [
+          {
+            "id": 14,
+            "kind": {
+              "type": "set_property",
+              "target": "Character.ThirdPersonController",
+              "property": "Crouch",
+              "value": { "type": "boolean", "value": false }
+            }
+          },
+          {
+            "id": 15,
+            "kind": {
+              "type": "print",
+              "value": { "type": "text", "value": "standing" }
+            }
+          }
+        ]
+      }
     }
   ]
 }

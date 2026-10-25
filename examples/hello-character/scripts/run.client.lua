@@ -22,10 +22,13 @@ UserInputService.InputEnded:Connect(function(input)
 end)
 
 -- J jumps from Lua. Space jumps too, without a script.
+-- K crouches or stands from Lua. Holding C crouches too, without a script.
 UserInputService.InputBegan:Connect(function(input)
     if input.KeyCode == Enum.KeyCode.J then
         controller.Jump = true
+    elseif input.KeyCode == Enum.KeyCode.K then
+        controller.Crouch = not controller.Crouch
     end
 end)
 
-print("WASD to walk, hold Shift to run, Space to jump, right-drag to turn the camera.")
+print("WASD to walk, hold Shift to run, Space to jump, C to crouch, right-drag to turn the camera.")

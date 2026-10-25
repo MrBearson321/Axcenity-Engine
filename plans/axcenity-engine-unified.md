@@ -80,9 +80,9 @@ Crouch is a built-in mode on the third-person controller. While crouched, the ch
 
 ### Acceptance criteria
 
-- [ ] Crouching lowers the character and the camera, and standing restores both.
-- [ ] Under a low ceiling, standing is refused until the character is clear.
-- [ ] Crouched movement is slower than walking, and Lua and blocks can enter and leave crouch.
+- [x] Crouching lowers the character and the camera, and standing restores both.
+- [x] Under a low ceiling, standing is refused until the character is clear.
+- [x] Crouched movement is slower than walking, and Lua and blocks can enter and leave crouch.
 
 ---
 

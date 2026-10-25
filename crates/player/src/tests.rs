@@ -175,6 +175,100 @@ fn hello_character_walks_runs_and_switches_from_lua_and_blocks() {
 }
 
 #[test]
+fn hello_character_crouches_from_lua_and_blocks_and_under_the_low_ceiling() {
+    use axcenity_core::KeyCode as K;
+    let (mut world, mut scripts) = start_example("hello-character");
+    let assets = Assets::default();
+    let mut characters = Controllers::default();
+    let mut physics = Physics::new();
+    let model = world
+        .find_first_child(world.workspace(), "Character")
+        .unwrap();
+    let body = world.find_first_child(model, "Body").unwrap();
+    let property = |world: &World, name: &str| {
+        world
+            .get(body)
+            .unwrap()
+            .property(name)
+            .and_then(Value::as_vector3)
+            .unwrap()
+    };
+    let height = |world: &World| property(world, "Size").y;
+    let walk = MoveInput {
+        forward: true,
+        ..MoveInput::default()
+    };
+    let mut frame = |world: &mut World, keys: &[KeyEvent], input: MoveInput| {
+        characters.step(world, &assets, input, 1.0 / 60.0);
+        scripts.input(world, keys);
+        scripts.step(world, 1.0 / 60.0);
+        characters.keep_kinematic(world);
+        physics.step(world, 1.0 / 60.0);
+    };
+    let tap =
+        |frame: &mut dyn FnMut(&mut World, &[KeyEvent], MoveInput), world: &mut World, key| {
+            frame(
+                world,
+                &[KeyEvent { key, pressed: true }],
+                MoveInput::default(),
+            );
+            frame(
+                world,
+                &[KeyEvent {
+                    key,
+                    pressed: false,
+                }],
+                MoveInput::default(),
+            );
+            // The controller crouches or stands on the step after the script.
+            frame(world, &[], MoveInput::default());
+        };
+
+    // K toggles crouch from the LocalScript; 4 and 5 from the block script.
+    assert_eq!(height(&world), 5.0);
+    tap(&mut frame, &mut world, K::K);
+    assert_eq!(height(&world), 3.0);
+    tap(&mut frame, &mut world, K::K);
+    assert_eq!(height(&world), 5.0);
+    tap(&mut frame, &mut world, K::Four);
+    assert_eq!(height(&world), 3.0);
+    assert!((property(&world, "Position").y - 1.5).abs() < 1e-3);
+
+    // Crouched, it walks at half speed.
+    let start = property(&world, "Position").z;
+    for _ in 0..60 {
+        frame(&mut world, &[], walk);
+    }
+    let walked = start - property(&world, "Position").z;
+    assert!((walked - 8.0).abs() < 0.5, "crouched walk {walked}");
+    tap(&mut frame, &mut world, K::Five);
+    assert_eq!(height(&world), 5.0);
+
+    // Under LowCeiling, 5 is refused until the character is out the far side.
+    world
+        .set_property(
+            body,
+            "Position",
+            Value::Vector3(Vector3::new(30.0, 2.5, 0.0)),
+        )
+        .unwrap();
+    tap(&mut frame, &mut world, K::Four);
+    for _ in 0..60 {
+        frame(&mut world, &[], walk);
+    }
+    let under = property(&world, "Position").z;
+    assert!(under < -6.0 && under > -14.0, "under at z = {under}");
+    tap(&mut frame, &mut world, K::Five);
+    assert_eq!(height(&world), 3.0);
+    for _ in 0..90 {
+        frame(&mut world, &[], walk);
+    }
+    assert_eq!(height(&world), 5.0);
+    assert!(property(&world, "Position").z < -15.0);
+    assert!((property(&world, "Position").y - 2.5).abs() < 1e-3);
+}
+
+#[test]
 fn hello_character_crosses_the_grey_step_and_ramp_and_is_stopped_by_the_red_ones() {
     let walk = MoveInput {
         forward: true,

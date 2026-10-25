@@ -625,6 +625,13 @@ impl ClassName {
                 ("MaxSlopeAngle", Value::Number(45.0)),
                 // The tallest ledge it steps onto without jumping, in studs.
                 ("MaxStepHeight", Value::Number(1.0)),
+                // Set true to crouch, false to stand. Standing waits until
+                // nothing overhead is in the way.
+                ("Crouch", Value::Bool(false)),
+                // How tall the character is while crouched, in studs.
+                ("CrouchHeight", Value::Number(3.0)),
+                // 0 to 1: how much of its walk or run speed it keeps crouched.
+                ("CrouchSpeedScale", Value::Number(0.5)),
                 // How far behind the character the camera sits, in studs.
                 ("CameraDistance", Value::Number(12.0)),
                 // How far above the character's feet the camera looks, in studs.

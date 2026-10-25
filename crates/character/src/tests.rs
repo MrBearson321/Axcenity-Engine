@@ -426,3 +426,120 @@ fn raising_the_limits_lets_the_character_cross_and_a_crate_falls_the_same() {
     };
     assert_eq!(fallen_crate(|_, _| {}), fallen_crate(tuned));
 }
+
+fn size(world: &World, id: InstanceId) -> Vector3 {
+    world
+        .get(id)
+        .unwrap()
+        .property("Size")
+        .unwrap()
+        .as_vector3()
+        .unwrap()
+}
+
+fn crouch(world: &mut World, controller: InstanceId, crouched: bool) {
+    world
+        .set_property(controller, "Crouch", Value::Bool(crouched))
+        .unwrap();
+}
+
+#[test]
+fn crouching_lowers_the_character_and_the_camera_and_standing_restores_both() {
+    let (mut world, controller, body) = standing();
+    set(&mut world, controller, "CrouchHeight", 1.0);
+    let mut controllers = Controllers::default();
+    run(&mut world, &mut controllers, MoveInput::default(), 1);
+    let camera = controllers.view(&world).unwrap().position;
+
+    crouch(&mut world, controller, true);
+    run(&mut world, &mut controllers, MoveInput::default(), 1);
+    // Squashed toward the feet: 1 stud tall, feet still on the floor.
+    assert_eq!(size(&world, body), Vector3::new(2.0, 1.0, 2.0));
+    assert!(
+        (pos(&world, body).y - 0.5).abs() < 1e-3,
+        "{:?}",
+        pos(&world, body)
+    );
+    let low = controllers.view(&world).unwrap().position;
+    assert!(
+        (camera.y - low.y - 1.0).abs() < 1e-3,
+        "{camera:?} -> {low:?}"
+    );
+    assert!((camera.z - low.z).abs() < 1e-3);
+
+    crouch(&mut world, controller, false);
+    run(&mut world, &mut controllers, MoveInput::default(), 1);
+    assert_eq!(size(&world, body), Vector3::new(2.0, 2.0, 2.0));
+    assert!((pos(&world, body).y - 1.0).abs() < 1e-3);
+    let back = controllers.view(&world).unwrap().position;
+    assert!((back.y - camera.y).abs() < 1e-3, "{camera:?} -> {back:?}");
+
+    // Holding C crouches too, and letting go stands.
+    let held = MoveInput {
+        crouch: true,
+        ..MoveInput::default()
+    };
+    run(&mut world, &mut controllers, held, 1);
+    assert_eq!(size(&world, body).y, 1.0);
+    run(&mut world, &mut controllers, MoveInput::default(), 1);
+    assert_eq!(size(&world, body).y, 2.0);
+}
+
+#[test]
+fn standing_under_a_low_ceiling_waits_until_the_character_is_clear() {
+    let (mut world, controller, body) = standing();
+    set(&mut world, controller, "CrouchHeight", 1.0);
+    // Underside at y = 1.5, from z = -2 to z = -8.
+    solid(
+        &mut world,
+        PartType::Block,
+        Vector3::new(8.0, 2.0, 6.0),
+        Vector3::new(0.0, 2.5, -5.0),
+    );
+    let mut controllers = Controllers::default();
+    // Standing, the ceiling stops the character like a wall.
+    run(&mut world, &mut controllers, forward(), 30);
+    assert!(pos(&world, body).z > -1.1, "{:?}", pos(&world, body));
+
+    // Crouched, it goes under, and asking to stand there is refused.
+    crouch(&mut world, controller, true);
+    run(&mut world, &mut controllers, forward(), 30);
+    assert!(pos(&world, body).z < -3.5, "{:?}", pos(&world, body));
+    crouch(&mut world, controller, false);
+    run(&mut world, &mut controllers, MoveInput::default(), 30);
+    assert_eq!(size(&world, body).y, 1.0);
+    assert!((pos(&world, body).y - 0.5).abs() < 1e-3);
+
+    // Out the far side, it stands up by itself.
+    let mut stood_at = None;
+    for _ in 0..90 {
+        run(&mut world, &mut controllers, forward(), 1);
+        if stood_at.is_none() && size(&world, body).y == 2.0 {
+            stood_at = Some(pos(&world, body).z);
+        }
+    }
+    let stood_at = stood_at.expect("stands once clear");
+    // Its 1-stud footprint has to be past the ceiling's far edge at z = -8.
+    assert!(stood_at < -8.9, "stood at z = {stood_at}");
+    assert!((pos(&world, body).y - 1.0).abs() < 1e-3);
+}
+
+#[test]
+fn crouched_walk_and_run_are_slower_than_walking() {
+    let assets = Assets::default();
+    let (mut world, controller, body) = standing();
+    crouch(&mut world, controller, true);
+    let mut controllers = Controllers::default();
+    run(&mut world, &mut controllers, MoveInput::default(), 1);
+    controllers.step(&mut world, &assets, forward(), 1.0);
+    let walked = pos(&world, body).z;
+    assert!((walked + 8.0).abs() < 1e-3, "crouched walk {walked}");
+
+    world
+        .set_property(controller, "Movement", Value::String("Run".to_owned()))
+        .unwrap();
+    controllers.step(&mut world, &assets, forward(), 1.0);
+    let ran = pos(&world, body).z - walked;
+    assert!((ran + 16.0).abs() < 1e-3, "crouched run {ran}");
+    assert_eq!(orientation(&world, body), Vector3::new(0.0, 0.0, 0.0));
+}

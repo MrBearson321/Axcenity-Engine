@@ -721,6 +721,7 @@ impl ApplicationHandler for App {
                         left: self.keys.left,
                         right: self.keys.right,
                         jump: self.held_keys.contains(&axcenity_core::KeyCode::Space),
+                        crouch: self.held_keys.contains(&axcenity_core::KeyCode::C),
                         look_dx: self.look_dx,
                         look_dy: self.look_dy,
                     }

@@ -3,15 +3,15 @@
 //! A [`ThirdPersonController`](axcenity_core::ClassName::ThirdPersonController)
 //! is parented to a character [`Model`](axcenity_core::ClassName::Model) (or
 //! to one Part). During Play, [`Controllers::step`] walks or runs that
-//! character from the held movement keys, jumps it, carries it up slopes and
-//! steps within its limits, and drops it under gravity off an edge. It is not
+//! character from the held movement keys, jumps and crouches it, carries it
+//! up slopes and steps within its limits, and drops it under gravity off an
+//! edge. It is not
 //! a dynamic body: [`Controllers::keep_kinematic`] anchors its parts so
 //! physics does not tip or drop them, and so gravity and friction of other
 //! parts stay as they are.
 //!
 //! The first such controller in the Workspace that has a body receives the
-//! input and owns the camera. Crouch and a first-person controller are later
-//! phases.
+//! input and owns the camera. A first-person controller is a later phase.
 
 use std::collections::BTreeMap;
 
@@ -36,10 +36,13 @@ const MAX_PITCH: f32 = 89.0_f32.to_radians();
 /// Looks slightly down, so the camera sits above the character as well as behind.
 const DEFAULT_PITCH: f32 = -18.0_f32.to_radians();
 const MIN_CAMERA_DISTANCE: f32 = 1.0;
+/// The lowest a crouch squashes the character, in studs.
+const MIN_CROUCH_HEIGHT: f32 = 0.5;
 
 /// Keys held for the character that owns the camera, and mouse look since
 /// the last step. Right and down are positive, in pixels, as with the fly
-/// camera. `jump` is Space: held on landing, it jumps again.
+/// camera. `jump` is Space: held on landing, it jumps again. `crouch` is C:
+/// the character crouches while it is held, as if `Crouch` were true.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct MoveInput {
     pub forward: bool,
@@ -47,6 +50,7 @@ pub struct MoveInput {
     pub left: bool,
     pub right: bool,
     pub jump: bool,
+    pub crouch: bool,
     pub look_dx: f32,
     pub look_dy: f32,
 }
@@ -96,6 +100,13 @@ struct Fall {
     grounded: bool,
 }
 
+/// How a crouched character stood, to put back when it stands: each part's
+/// height, and how far its middle was above the feet. Not saved.
+struct Crouched {
+    parts: Vec<(InstanceId, f32, f32)>,
+    height: f32,
+}
+
 /// What one controller can cross, read from its properties each step.
 struct Limits {
     jump_height: f32,
@@ -142,6 +153,7 @@ struct Body {
 pub struct Controllers {
     orbits: BTreeMap<InstanceId, Orbit>,
     falls: BTreeMap<InstanceId, Fall>,
+    crouches: BTreeMap<InstanceId, Crouched>,
     /// The controller that last received input, if it is still in the world.
     active: Option<InstanceId>,
 }
@@ -165,6 +177,7 @@ impl Controllers {
         };
         self.orbits.retain(|id, _| world.get(*id).is_some());
         self.falls.retain(|id, _| world.get(*id).is_some());
+        self.crouches.retain(|id, _| world.get(*id).is_some());
         let Some(id) = active_id(world) else {
             self.active = None;
             return None;
@@ -175,6 +188,8 @@ impl Controllers {
         let orbit = *orbit;
         // Taken first, so a request made in the air is used up, not kept for landing.
         let jump = take_jump(world, id) || input.jump;
+        let crouch = wants_crouch(world, id) || input.crouch;
+        set_crouch(world, assets, id, &mut self.crouches, crouch);
         if let Some(mut body) = Body::read(world, id) {
             let limits = Limits::read(world, id);
             let fall = self.falls.entry(id).or_default();
@@ -182,7 +197,11 @@ impl Controllers {
                 fall.velocity = (2.0 * GRAVITY * limits.jump_height).sqrt();
                 fall.grounded = false;
             }
-            let (dx, dz) = wish(orbit.yaw, input, speed_of(world, id) * dt);
+            let mut speed = speed_of(world, id);
+            if self.crouches.contains_key(&id) {
+                speed *= crouch_speed_scale(world, id);
+            }
+            let (dx, dz) = wish(orbit.yaw, input, speed * dt);
             let slices = (dx.hypot(dz) / MAX_SLICE).ceil().clamp(1.0, MAX_SLICES);
             for _ in 0..slices as usize {
                 let (sx, sz) = (dx / slices, dz / slices);
@@ -201,7 +220,8 @@ impl Controllers {
             _ => active_id(world)?,
         };
         let orbit = self.orbits.get(&id).copied().unwrap_or_default();
-        pose_camera(world, id, orbit)
+        let standing = self.crouches.get(&id).map(|crouched| crouched.height);
+        pose_camera(world, id, orbit, standing)
     }
 
     /// Anchors every part a third-person controller moves, so the physics
@@ -385,6 +405,114 @@ fn take_jump(world: &mut World, id: InstanceId) -> bool {
         let _ = world.set_property(id, "Jump", Value::Bool(false));
     }
     requested
+}
+
+fn wants_crouch(world: &World, id: InstanceId) -> bool {
+    world
+        .get(id)
+        .and_then(|instance| instance.property("Crouch"))
+        .and_then(Value::as_bool)
+        == Some(true)
+}
+
+fn crouch_speed_scale(world: &World, id: InstanceId) -> f32 {
+    number(world, id, "CrouchSpeedScale")
+        .unwrap_or(0.5)
+        .clamp(0.0, 1.0)
+}
+
+/// Crouches the character, or stands it back up, to match `wanted`. A
+/// crouch squashes every part toward the feet until the body is
+/// `CrouchHeight` tall. Standing waits while something overhead would cut
+/// into the standing height.
+fn set_crouch(
+    world: &mut World,
+    assets: &Assets,
+    id: InstanceId,
+    crouches: &mut BTreeMap<InstanceId, Crouched>,
+    wanted: bool,
+) {
+    let crouched = crouches.contains_key(&id);
+    if wanted == crouched {
+        return;
+    }
+    let Some(body) = Body::read(world, id) else {
+        crouches.remove(&id);
+        return;
+    };
+    if wanted {
+        let target = number(world, id, "CrouchHeight")
+            .unwrap_or(3.0)
+            .max(MIN_CROUCH_HEIGHT)
+            .min(body.height);
+        let ratio = target / body.height;
+        let mut parts = Vec::new();
+        for &part in &body.parts {
+            let Some((position, size)) = placement(world, part) else {
+                continue;
+            };
+            let above = position.y - body.feet_y;
+            parts.push((part, size.y, above));
+            place(world, part, body.feet_y + above * ratio, size.y * ratio);
+        }
+        crouches.insert(
+            id,
+            Crouched {
+                parts,
+                height: body.height,
+            },
+        );
+        return;
+    }
+    let Some(standing) = crouches.get(&id) else {
+        return;
+    };
+    let rise = standing.height - body.height;
+    if rise > 0.0 && !room_to_stand(world, assets, &body, rise) {
+        return;
+    }
+    for &(part, height, above) in &standing.parts {
+        place(world, part, body.feet_y + above, height);
+    }
+    crouches.remove(&id);
+}
+
+/// A part's position and size, when both are finite.
+fn placement(world: &World, part: InstanceId) -> Option<(Vector3, Vector3)> {
+    let instance = world.get(part)?;
+    let position = instance.property("Position")?.as_vector3()?;
+    let size = instance.property("Size")?.as_vector3()?;
+    (finite(position) && finite(size)).then_some((position, size))
+}
+
+/// Sets a part's height and the height of its middle, keeping the rest.
+fn place(world: &mut World, part: InstanceId, y: f32, height: f32) {
+    let Some((position, size)) = placement(world, part) else {
+        return;
+    };
+    let position = Vector3::new(position.x, y, position.z);
+    let size = Vector3::new(size.x, height, size.z);
+    let _ = world.set_property(part, "Size", Value::Vector3(size));
+    let _ = world.set_property(part, "Position", Value::Vector3(position));
+}
+
+/// True when nothing solid is within `rise` studs above the top of the
+/// body, under its middle or the edges of its footprint.
+fn room_to_stand(world: &World, assets: &Assets, body: &Body, rise: f32) -> bool {
+    let reach = body.radius - SKIN;
+    let top = body.feet_y + body.height - SKIN;
+    let offsets = [
+        (0.0, 0.0),
+        (reach, 0.0),
+        (-reach, 0.0),
+        (0.0, reach),
+        (0.0, -reach),
+    ];
+    offsets.into_iter().all(|(ox, oz)| {
+        let origin = Vector3::new(body.pivot_x + ox, top, body.pivot_z + oz);
+        let direction = Vector3::new(0.0, rise + 2.0 * SKIN, 0.0);
+        solid_hit(world, assets, body, origin, direction).is_none()
+    })
 }
 
 fn camera_distance(world: &World, id: InstanceId) -> f32 {
@@ -689,13 +817,21 @@ fn translate(world: &mut World, parts: &[InstanceId], dx: f32, dy: f32, dz: f32)
     }
 }
 
-fn pose_camera(world: &World, id: InstanceId, orbit: Orbit) -> Option<CharacterCamera> {
+/// `standing` is the standing height of a crouched character: the camera
+/// drops as far as its top did.
+fn pose_camera(
+    world: &World,
+    id: InstanceId,
+    orbit: Orbit,
+    standing: Option<f32>,
+) -> Option<CharacterCamera> {
     let body = Body::read(world, id)?;
+    let drop = standing.map_or(0.0, |height| (height - body.height).max(0.0));
     let (sy, cy) = orbit.yaw.sin_cos();
     let (sp, cp) = orbit.pitch.sin_cos();
     let forward = (-sy * cp, sp, -cy * cp);
     let distance = camera_distance(world, id);
-    let look_y = body.feet_y + camera_height(world, id);
+    let look_y = body.feet_y + camera_height(world, id) - drop;
     let yaw = (orbit.yaw.to_degrees() + 180.0).rem_euclid(360.0) - 180.0;
     Some(CharacterCamera {
         position: Vector3::new(

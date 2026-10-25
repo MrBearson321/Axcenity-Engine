@@ -1090,6 +1090,21 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     ),
     (
         ClassName::ThirdPersonController,
+        "Crouch",
+        "Set true to crouch and false to stand. Holding C crouches too. The character stays crouched while something overhead is in the way of standing.",
+    ),
+    (
+        ClassName::ThirdPersonController,
+        "CrouchHeight",
+        "How tall the character is while crouched, in studs. Its parts squash toward its feet, and the camera drops as far as its top.",
+    ),
+    (
+        ClassName::ThirdPersonController,
+        "CrouchSpeedScale",
+        "0 to 1: how much of WalkSpeed or RunSpeed the character keeps while crouched.",
+    ),
+    (
+        ClassName::ThirdPersonController,
         "CameraDistance",
         "How far behind the character the camera sits during Play, in studs.",
     ),
@@ -1261,7 +1276,7 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
             "Inside a Terrain: one material it's painted with (a tint, texture maps and tiling), and an optional rule that lays it down by height and slope."
         }
         ClassName::ThirdPersonController => {
-            "Walks, runs and jumps the character model it is parented to, kinematically, up slopes and steps within its limits, and owns the camera during Play. Movement is \"Walk\" or \"Run\". It is not a physics body: tuning its speeds and limits does not change how other parts fall."
+            "Walks, runs, jumps and crouches the character model it is parented to, kinematically, up slopes and steps within its limits, and owns the camera during Play. Movement is \"Walk\" or \"Run\". It is not a physics body: tuning its speeds and limits does not change how other parts fall."
         }
     }
 }
