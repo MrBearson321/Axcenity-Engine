@@ -204,6 +204,8 @@ pub(in crate::animation) fn set_key(
                 time,
                 value: value.value.clone(),
                 interp: Interp::Linear,
+                easing: None,
+                bezier: None,
             });
             track.keys.sort_by(|a, b| a.time.total_cmp(&b.time));
             id

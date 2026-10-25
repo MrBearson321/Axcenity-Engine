@@ -6,7 +6,8 @@
 //! moves into keys at the playhead, making tracks as needed. The dope sheet
 //! selects keys by clicking (Shift or Ctrl adds) or dragging a box, moves
 //! them by dragging, and copies, pastes and deletes them. With Snap on,
-//! times land on whole frames.
+//! times land on whole frames. The Curves view (`curves.rs`) shows the
+//! same keys as curves, with Bezier handles.
 //!
 //! On a skinned MeshPart the clip's `Bone` tracks pose its skeleton:
 //! turning a bone in the preview is a `Bone` edit like any other, and
@@ -16,8 +17,8 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use axcenity_anim::{
-    ClipFile, EvaluatedProperty, Interp, PropertyClip, PropertyKeyframe, PropertyName,
-    PropertyTrack, bone_from_numbers, find_bone, target_path,
+    ClipFile, Easing, EasingDirection, EasingStyle, EvaluatedProperty, Interp, PropertyClip,
+    PropertyKeyframe, PropertyName, PropertyTrack, bone_from_numbers, find_bone, target_path,
 };
 use axcenity_assets::{BoneTransform, Rig};
 use axcenity_core::InstanceId;
@@ -83,6 +84,12 @@ pub struct PropertyDoc {
     pub fps: f64,
     gesture: Option<Gesture>,
     new_event: String,
+    /// Whether the Curves view shows in place of the dope sheet.
+    pub show_curves: bool,
+    pub curve_view: CurveView,
+    /// Tracks picked in the Curves view's list.
+    pub curve_picked: BTreeSet<String>,
+    curve_gesture: Option<curves::CurveGesture>,
 }
 
 impl PropertyDoc {
@@ -104,6 +111,10 @@ impl PropertyDoc {
             fps: 30.0,
             gesture: None,
             new_event: "Opened".to_owned(),
+            show_curves: false,
+            curve_view: CurveView::default(),
+            curve_picked: BTreeSet::new(),
+            curve_gesture: None,
         }
     }
 
@@ -258,13 +269,25 @@ fn value_labels(property: PropertyName, width: usize) -> &'static [&'static str]
     }
 }
 
+/// What the inspector calls an interpolation.
+fn interp_name(interp: Interp) -> &'static str {
+    match interp {
+        Interp::Step => "Constant",
+        Interp::Linear => "Linear",
+        Interp::Ease => "Ease",
+        Interp::Bezier => "Bezier",
+    }
+}
+
 /// Empty property clip for "New property clip".
 pub fn new_property_clip(duration: f64) -> ClipFile {
     ClipFile::new(duration)
 }
 
+mod curves;
 mod dope_sheet;
 mod editing;
+pub use curves::CurveView;
 pub(super) use editing::set_key;
 
 #[cfg(test)]

@@ -213,9 +213,9 @@ New easings and tangents are optional fields, so existing clips read unchanged a
 
 ### Acceptance criteria
 
-- [ ] Changing a key's easing changes the motion in the preview and in Play.
-- [ ] Bezier tangents dragged in the curve editor are saved and reloaded.
-- [ ] A clip saved before this phase opens and plays the same.
+- [x] Changing a key's easing changes the motion in the preview and in Play.
+- [x] Bezier tangents dragged in the curve editor are saved and reloaded.
+- [x] A clip saved before this phase opens and plays the same.
 
 ---
 

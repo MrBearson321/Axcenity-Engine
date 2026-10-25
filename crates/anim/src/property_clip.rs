@@ -72,6 +72,12 @@ impl PropertyClip {
                         track.id
                     )));
                 }
+                if key.bezier.is_some_and(|h| !h.iter().all(|n| n.is_finite())) {
+                    return Err(FileError(format!(
+                        "track `{}` has a key with a non-finite Bezier handle",
+                        track.id
+                    )));
+                }
                 let widths = track.property.widths();
                 if !widths.contains(&key.value.len()) {
                     return Err(FileError(format!(
@@ -227,8 +233,10 @@ pub fn sample_time(time: f64, duration: f64, looping: bool) -> f64 {
 }
 
 /// `track`'s value at `time` seconds, holding before the first key and
-/// after the last.
-pub(crate) fn sample_track(track: &PropertyTrack, time: f64) -> Option<Vec<f32>> {
+/// after the last. Between keys it moves as the earlier key's
+/// interpolation says ([`PropertyKeyframe::progress`]); the editor's
+/// curves are drawn from this too.
+pub fn sample_track(track: &PropertyTrack, time: f64) -> Option<Vec<f32>> {
     let keys = &track.keys;
     if keys.is_empty() {
         return None;
@@ -246,14 +254,17 @@ pub(crate) fn sample_track(track: &PropertyTrack, time: f64) -> Option<Vec<f32>>
     }
     let a = &keys[i];
     let b = &keys[i + 1];
-    match a.interp {
-        Interp::Step => Some(a.value.clone()),
-        Interp::Linear => {
-            let span = (b.time - a.time).max(1e-12);
-            let t = ((time - a.time) / span) as f32;
-            Some(lerp_property(track.property, &a.value, &b.value, t))
-        }
+    if a.interp == Interp::Step {
+        return Some(a.value.clone());
     }
+    let span = (b.time - a.time).max(1e-12);
+    let t = ((time - a.time) / span) as f32;
+    Some(lerp_property(
+        track.property,
+        &a.value,
+        &b.value,
+        a.progress(t),
+    ))
 }
 
 /// `t` of the way from `a` to `b`: Orientation turns by slerp, and a bone's
@@ -644,12 +655,16 @@ mod tests {
                         time: 0.0,
                         value: vec![0.0, 0.0, 0.0],
                         interp: Interp::Linear,
+                        easing: None,
+                        bezier: None,
                     },
                     PropertyKeyframe {
                         id: "k1".into(),
                         time: 1.5,
                         value: vec![0.0, 8.0, 0.0],
                         interp: Interp::Linear,
+                        easing: None,
+                        bezier: None,
                     },
                 ],
             }],
@@ -694,6 +709,8 @@ mod tests {
                     time: 0.0,
                     value: vec![1.0, 2.0, 3.0],
                     interp: Interp::Linear,
+                    easing: None,
+                    bezier: None,
                 }],
             }],
             events: vec![],
@@ -734,12 +751,16 @@ mod tests {
                         time: 0.0,
                         value: vec![0.0, 0.0, 0.0],
                         interp: Interp::Step,
+                        easing: None,
+                        bezier: None,
                     },
                     PropertyKeyframe {
                         id: "k1".into(),
                         time: 1.0,
                         value: vec![0.0, 10.0, 0.0],
                         interp: Interp::Linear,
+                        easing: None,
+                        bezier: None,
                     },
                 ],
             }],
@@ -767,12 +788,16 @@ mod tests {
                         time: 0.0,
                         value: vec![0.0, 0.0, 0.0],
                         interp: Interp::Linear,
+                        easing: None,
+                        bezier: None,
                     },
                     PropertyKeyframe {
                         id: "k1".into(),
                         time: 1.0,
                         value: vec![0.0, 90.0, 0.0],
                         interp: Interp::Linear,
+                        easing: None,
+                        bezier: None,
                     },
                 ],
             }],
@@ -817,6 +842,8 @@ mod tests {
                     time: 2.0,
                     value: vec![0.0, 0.0, 0.0],
                     interp: Interp::Linear,
+                    easing: None,
+                    bezier: None,
                 }],
             }],
             events: vec![],
@@ -842,12 +869,16 @@ mod tests {
                         time: 0.5,
                         value: vec![1.0, 0.0, 0.0],
                         interp: Interp::Linear,
+                        easing: None,
+                        bezier: None,
                     },
                     PropertyKeyframe {
                         id: "b".into(),
                         time: 0.5,
                         value: vec![2.0, 0.0, 0.0],
                         interp: Interp::Linear,
+                        easing: None,
+                        bezier: None,
                     },
                 ],
             }],

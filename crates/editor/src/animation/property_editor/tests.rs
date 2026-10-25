@@ -124,3 +124,162 @@ fn ui_keys_stay_off_vector_tracks() {
     assert_eq!(doc.file.tracks[0].keys[0].value.len(), 4);
     assert!(doc.clip().is_ok());
 }
+
+/// A doc of a clip raising the root from y 0 to y 10 over a second.
+fn rising() -> PropertyDoc {
+    let mut doc = doc();
+    doc.file.duration = 1.0;
+    for (time, y) in [(0.0, 0.0), (1.0, 10.0)] {
+        doc.playhead = time;
+        doc.key_values(&[value(".", PropertyName::Position, &[0.0, y, 0.0])]);
+    }
+    doc
+}
+
+fn y_at(doc: &mut PropertyDoc, time: f64) -> f32 {
+    doc.playhead = time;
+    doc.evaluated().unwrap()[0].value[1]
+}
+
+#[test]
+fn a_keys_easing_changes_the_preview_and_plays_the_same_in_the_game() {
+    let mut doc = rising();
+    assert!((y_at(&mut doc, 0.5) - 5.0).abs() < 1e-4);
+    let key = &mut doc.file.tracks[0].keys[0];
+    key.interp = Interp::Ease;
+    key.easing = Some(Easing::new(EasingStyle::Back, EasingDirection::In));
+    let shown = y_at(&mut doc, 0.25);
+    assert!(shown < 0.0, "Back In pulls back first: {shown}");
+
+    // The game plays the saved clip the same.
+    let folder = std::env::temp_dir().join(format!(
+        "axcenity-eased-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let _ = std::fs::remove_dir_all(&folder);
+    std::fs::create_dir_all(folder.join("assets/animations")).unwrap();
+    doc.write(&folder).unwrap();
+    let assets = axcenity_assets::Assets::new(&folder);
+    let mut world = axcenity_core::World::new();
+    let part = world.create(axcenity_core::ClassName::Part).unwrap();
+    world.set_parent(part, Some(world.workspace())).unwrap();
+    let animation = world.create(axcenity_core::ClassName::Animation).unwrap();
+    world.set_parent(animation, Some(part)).unwrap();
+    world
+        .set_property(
+            animation,
+            "Clip",
+            axcenity_core::Value::String(doc.path.clone()),
+        )
+        .unwrap();
+    world.property_animation_mut(animation).unwrap().play = true;
+    let mut players = axcenity_anim::Animators::new();
+    players.update(&mut world, &assets, 0.0);
+    players.update(&mut world, &assets, 0.25);
+    assert!(players.take_errors().is_empty());
+    let played = world
+        .get(part)
+        .and_then(|p| p.property("Position"))
+        .and_then(axcenity_core::Value::as_vector3)
+        .unwrap();
+    assert!((played.y - shown).abs() < 1e-4, "{} vs {shown}", played.y);
+    std::fs::remove_dir_all(folder).unwrap();
+}
+
+/// Dragging with the left button from `from` to `to`, then letting go.
+fn drag(from: egui::Pos2, to: egui::Pos2) -> Vec<Vec<egui::Event>> {
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Default::default(),
+    };
+    let mut frames = vec![
+        vec![egui::Event::PointerMoved(from)],
+        vec![button(from, true)],
+    ];
+    for step in 1..=4 {
+        frames.push(vec![egui::Event::PointerMoved(
+            from.lerp(to, step as f32 / 4.0),
+        )]);
+    }
+    frames.push(vec![button(to, false)]);
+    frames.push(Vec::new());
+    frames
+}
+
+/// Runs the dope sheet's area (toolbar and Curves view) for `frames`.
+fn run_curves(doc: &mut PropertyDoc, frames: Vec<Vec<egui::Event>>) {
+    let ctx = theme::test_context();
+    for events in frames {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 360.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        let _ = ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                doc.keys(ui, None);
+            });
+        });
+    }
+}
+
+#[test]
+fn bezier_handles_dragged_in_the_curves_view_are_saved_and_reloaded() {
+    let mut doc = rising();
+    let first = doc.file.tracks[0].keys[0].id.clone();
+    let track = doc.file.tracks[0].id.clone();
+    doc.file.tracks[0].keys[0].interp = Interp::Bezier;
+    doc.selected = BTreeSet::from([(track, first)]);
+    doc.show_curves = true;
+    run_curves(&mut doc, vec![Vec::new(), Vec::new()]);
+    assert!(doc.curve_view.rect.width() > 100.0, "the curves are drawn");
+
+    // Drag the handle by the last key (Y's, the one number that moves).
+    let from = doc.curve_view.screen(0.58, 10.0);
+    let to = doc.curve_view.screen(0.3, 12.0);
+    run_curves(&mut doc, drag(from, to));
+    let handles = doc.file.tracks[0].keys[0].bezier.expect("handles are set");
+    assert!((handles[0] - 0.42).abs() < 1e-3, "{handles:?}");
+    assert!((handles[1] - 0.0).abs() < 1e-3, "{handles:?}");
+    assert!((handles[2] - 0.3).abs() < 0.02, "{handles:?}");
+    assert!((handles[3] - 1.2).abs() < 0.02, "{handles:?}");
+    // It overshoots the last key on the way.
+    assert!(y_at(&mut doc, 0.8) > 10.0);
+    if let Some(snapshots) = std::env::var_os("AXCENITY_SNAPSHOTS") {
+        let mut shown = PropertyDoc::open(doc.path.clone(), doc.file.clone());
+        shown.selected = doc.selected.clone();
+        shown.show_curves = true;
+        crate::snapshot::snapshot(
+            &std::path::PathBuf::from(snapshots).join("curves-bezier.png"),
+            egui::vec2(900.0, 360.0),
+            vec![Vec::new(); 3],
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    shown.keys(ui, None);
+                });
+            },
+        );
+    }
+
+    let folder = std::env::temp_dir().join(format!(
+        "axcenity-bezier-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let _ = std::fs::remove_dir_all(&folder);
+    std::fs::create_dir_all(folder.join("assets/animations")).unwrap();
+    doc.write(&folder).unwrap();
+    let text = std::fs::read_to_string(folder.join(&doc.path)).unwrap();
+    let read = ClipFile::from_json(&text).unwrap();
+    assert_eq!(read.tracks[0].keys[0].bezier, Some(handles));
+    assert_eq!(read.tracks[0].keys[0].interp, Interp::Bezier);
+    let mut reopened = PropertyDoc::open(doc.path.clone(), read);
+    assert_eq!(y_at(&mut reopened, 0.8), y_at(&mut doc, 0.8));
+    std::fs::remove_dir_all(folder).unwrap();
+}

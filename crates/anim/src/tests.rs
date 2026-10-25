@@ -394,6 +394,8 @@ fn door_clip() -> ClipFile {
         time,
         value: vec![0.0, y, 0.0],
         interp: Interp::Linear,
+        easing: None,
+        bezier: None,
     };
     let mut clip = ClipFile::new(1.0);
     clip.tracks.push(PropertyTrack {
@@ -518,6 +520,8 @@ fn a_linked_clip_that_also_keys_a_sword_plays_both() {
         time,
         value: vec![value],
         interp: Interp::Linear,
+        easing: None,
+        bezier: None,
     };
     clip.tracks.push(PropertyTrack {
         id: "sword".into(),
@@ -643,4 +647,136 @@ fn a_track_plays_over_the_state_machine_and_stop_fades_it_out() {
         primitives(&alone_animators, alone_part),
         "back to the state machine alone"
     );
+}
+
+/// The door clip with its first key eased `easing` (or linear for `None`),
+/// played by an Animation for half a second: where the door is then.
+fn door_halfway(name: &str, easing: Option<crate::Easing>) -> f32 {
+    let mut clip = door_clip();
+    if let Some(easing) = easing {
+        let key = &mut clip.tracks[0].keys[0];
+        key.interp = crate::Interp::Ease;
+        key.easing = Some(easing);
+    }
+    let root = project(name, &[(DOOR, clip)]);
+    let assets = Assets::new(&root);
+    let (mut world, part, _, animation) = door_world(true);
+    world.property_animation_mut(animation).unwrap().play = true;
+    let mut animators = Animators::new();
+    animators.update(&mut world, &assets, 0.0);
+    animators.update(&mut world, &assets, 0.5);
+    assert!(animators.take_errors().is_empty());
+    y(&world, part)
+}
+
+#[test]
+fn a_keys_easing_changes_how_it_plays() {
+    use crate::{Easing, EasingDirection, EasingStyle};
+    let linear = door_halfway("ease-linear", None);
+    let quad_out = door_halfway(
+        "ease-quad-out",
+        Some(Easing::new(EasingStyle::Quad, EasingDirection::Out)),
+    );
+    let quad_in = door_halfway(
+        "ease-quad-in",
+        Some(Easing::new(EasingStyle::Quad, EasingDirection::In)),
+    );
+    assert!((linear - 5.0).abs() < 1e-3, "{linear}");
+    assert!((quad_out - 7.5).abs() < 1e-3, "{quad_out}");
+    assert!((quad_in - 2.5).abs() < 1e-3, "{quad_in}");
+}
+
+#[test]
+fn eased_and_bezier_keys_save_and_read_back() {
+    use crate::{Easing, EasingDirection, EasingStyle, Interp};
+    let mut clip = door_clip();
+    let keys = &mut clip.tracks[0].keys;
+    keys[0].interp = Interp::Bezier;
+    keys[0].bezier = Some([0.25, 0.1, 0.25, 1.0]);
+    keys[1].interp = Interp::Ease;
+    keys[1].easing = Some(Easing::new(EasingStyle::Elastic, EasingDirection::InOut));
+    let text = clip.to_json();
+    assert!(text.contains("\"bezier\""), "{text}");
+    assert!(text.contains("\"style\": \"Elastic\""), "{text}");
+    let read = ClipFile::from_json(&text).unwrap();
+    assert_eq!(read, clip);
+    assert_eq!(read.to_json(), text);
+    // A linear key writes neither.
+    let plain = door_clip().to_json();
+    assert!(!plain.contains("easing") && !plain.contains("bezier"));
+}
+
+/// A clip written before keys could be eased: Step and Linear keys, no
+/// easing or handles.
+const BEFORE_EASING: &str = r#"{
+  "format_version": 2,
+  "duration": 2.0,
+  "loop": false,
+  "tracks": [
+    {
+      "id": "position",
+      "target": ".",
+      "property": "Position",
+      "keys": [
+        {
+          "id": "k1",
+          "time": 0.0,
+          "value": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "interp": "Linear"
+        },
+        {
+          "id": "k2",
+          "time": 1.0,
+          "value": [
+            0.0,
+            4.0,
+            0.0
+          ],
+          "interp": "Step"
+        },
+        {
+          "id": "k3",
+          "time": 2.0,
+          "value": [
+            0.0,
+            10.0,
+            0.0
+          ],
+          "interp": "Linear"
+        }
+      ]
+    }
+  ],
+  "events": []
+}
+"#;
+
+#[test]
+fn a_clip_saved_before_easing_opens_and_plays_the_same() {
+    let clip = ClipFile::from_json(BEFORE_EASING).unwrap();
+    assert_eq!(clip.to_json(), BEFORE_EASING, "it's saved unchanged");
+    assert!(
+        clip.tracks[0]
+            .keys
+            .iter()
+            .all(|k| k.easing.is_none() && k.bezier.is_none())
+    );
+    let root = project("before-easing", &[(DOOR, clip)]);
+    let assets = Assets::new(&root);
+    let (mut world, part, _, animation) = door_world(true);
+    world.property_animation_mut(animation).unwrap().play = true;
+    let mut animators = Animators::new();
+    animators.update(&mut world, &assets, 0.0);
+    // Linear to the Step key, then held at it until the last.
+    let mut seen = Vec::new();
+    for _ in 0..4 {
+        animators.update(&mut world, &assets, 0.5);
+        seen.push(y(&world, part));
+    }
+    assert_eq!(seen, [2.0, 4.0, 4.0, 10.0]);
+    assert!(animators.take_errors().is_empty());
 }

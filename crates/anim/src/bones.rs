@@ -163,6 +163,8 @@ pub fn convert_to_keys(
                     time,
                     value,
                     interp: Interp::Linear,
+                    easing: None,
+                    bezier: None,
                 })
                 .collect(),
         });
@@ -310,6 +312,8 @@ mod tests {
                     scale: Vec3::ONE,
                 }),
                 interp: Interp::Linear,
+                easing: None,
+                bezier: None,
             }],
         });
         file.events.push(crate::ClipEvent {

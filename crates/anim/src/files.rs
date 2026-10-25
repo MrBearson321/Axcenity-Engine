@@ -21,6 +21,8 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::easing::{DEFAULT_BEZIER, Easing, cubic_bezier};
+
 /// The version these files are written in. Newer ones are refused; format 1
 /// files are read and turned into this shape.
 pub const FORMAT_VERSION: u32 = 2;
@@ -275,12 +277,16 @@ pub struct ClipEvent {
     pub name: String,
 }
 
-/// How a keyframe reaches the next one.
+/// How a keyframe reaches the next one. `Step` holds the key's value
+/// until the next (the editor calls it Constant); `Ease` follows the key's
+/// [`Easing`] and `Bezier` its handles.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Interp {
     Step,
     #[default]
     Linear,
+    Ease,
+    Bezier,
 }
 
 /// What a track drives. On a Model, `Position` and `Orientation` are its
@@ -370,6 +376,39 @@ pub struct PropertyKeyframe {
     pub value: Vec<f32>,
     #[serde(default)]
     pub interp: Interp,
+    /// An `Ease` key's style and direction (Quad InOut if left out).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub easing: Option<Easing>,
+    /// A `Bezier` key's handles to the next key, `[x1, y1, x2, y2]` as in
+    /// CSS's `cubic-bezier`: `x` is time and `y` how far along, both `0`
+    /// to `1` across the gap ([`DEFAULT_BEZIER`] if left out).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bezier: Option<[f32; 4]>,
+}
+
+impl PropertyKeyframe {
+    /// A linear key.
+    pub fn new(id: impl Into<String>, time: f64, value: Vec<f32>) -> Self {
+        Self {
+            id: id.into(),
+            time,
+            value,
+            interp: Interp::Linear,
+            easing: None,
+            bezier: None,
+        }
+    }
+
+    /// How far along the motion to the next key is at `t`, `0` to `1` of
+    /// the way there in time (`0` until the next key for a Step key).
+    pub fn progress(&self, t: f32) -> f32 {
+        match self.interp {
+            Interp::Step => 0.0,
+            Interp::Linear => t.clamp(0.0, 1.0),
+            Interp::Ease => self.easing.unwrap_or_default().apply(t),
+            Interp::Bezier => cubic_bezier(self.bezier.unwrap_or(DEFAULT_BEZIER), t),
+        }
+    }
 }
 
 /// One animated bone or property on a relative target.
@@ -913,6 +952,8 @@ mod tests {
                 time: 0.0,
                 value: vec![1.0],
                 interp: Interp::Step,
+                easing: None,
+                bezier: None,
             }],
         });
         let text = clip.to_json();

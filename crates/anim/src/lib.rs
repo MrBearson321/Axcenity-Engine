@@ -7,6 +7,8 @@
 //!   its linked take and bone tracks.
 //! - [`convert_to_keys`] and the other bone helpers: how a bone track
 //!   names its bone and stores its transform, and baking a take into keys.
+//! - [`ease`] and [`cubic_bezier`]: how an eased or Bezier key moves to the
+//!   next one, shared with tweens.
 //! - [`Compiled`] and [`Machine`]: a state machine made ready to run, and
 //!   what runs it (which state plays, and blends between them).
 //! - [`Animators`]: runs every Animator, AnimationTrack and played Animation
@@ -20,6 +22,7 @@ mod animators;
 mod bones;
 mod clip;
 mod controller;
+mod easing;
 pub mod files;
 mod property_clip;
 
@@ -29,6 +32,7 @@ pub use bones::{
 };
 pub use clip::{Clip, RootMotion};
 pub use controller::{Advanced, Compiled, Fade, Machine, Parameters, Playing, exit_reached, holds};
+pub use easing::{DEFAULT_BEZIER, Easing, EasingDirection, EasingStyle, cubic_bezier, ease};
 pub use files::{
     ANIMATIONS_FOLDER, ANY_STATE, BlendChild, BlendTree, CLIP_EXTENSION, ClipEvent, ClipFile,
     Condition, DEFAULT_BLEND, FileError, Interp, LEGACY_CONTROLLER_EXTENSION, Motion, ParameterDef,
@@ -38,8 +42,8 @@ pub use files::{
 };
 pub use property_clip::{
     Applied, EvaluatedProperty, Placement, PropertyClip, apply_evaluated, blend_evaluated,
-    current_numbers, model_pivot, numbers_of, resolve_target, sample_time, target_path,
-    value_from_numbers,
+    current_numbers, model_pivot, numbers_of, resolve_target, sample_time, sample_track,
+    target_path, value_from_numbers,
 };
 
 #[cfg(test)]

@@ -159,6 +159,28 @@ impl PropertyDoc {
     pub fn keys(&mut self, ui: &mut egui::Ui, focus: Option<&Focus>) -> bool {
         let mut key = false;
         crate::responsive::toolbar(ui, |ui| {
+            if ui
+                .selectable_label(!self.show_curves, "Dope sheet")
+                .on_hover_text("Keys in rows, one a track")
+                .clicked()
+            {
+                self.show_curves = false;
+            }
+            if ui
+                .selectable_label(self.show_curves, "Curves")
+                .on_hover_text("The shown tracks' values over time, and Bezier handles")
+                .clicked()
+            {
+                self.show_curves = true;
+            }
+            if self.show_curves
+                && ui
+                    .button(format!("{} Frame all", icons::FRAME_CORNERS))
+                    .on_hover_text("Fit the clip and its curves (F)")
+                    .clicked()
+            {
+                self.frame_all();
+            }
             let addable: Vec<&EvaluatedProperty> = focus
                 .map(|focus| {
                     focus
@@ -229,7 +251,11 @@ impl PropertyDoc {
                 );
             }
         });
-        self.dope_sheet(ui);
+        if self.show_curves {
+            self.curves(ui);
+        } else {
+            self.dope_sheet(ui);
+        }
         key
     }
 
@@ -340,15 +366,56 @@ impl PropertyDoc {
                 }
                 ui.label("Interpolation");
                 egui::ComboBox::from_id_salt("property key interpolation")
-                    .selected_text(match key.interp {
-                        Interp::Step => "Step",
-                        Interp::Linear => "Linear",
-                    })
+                    .selected_text(interp_name(key.interp))
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut key.interp, Interp::Step, "Step");
-                        ui.selectable_value(&mut key.interp, Interp::Linear, "Linear");
+                        for interp in [Interp::Step, Interp::Linear, Interp::Ease, Interp::Bezier] {
+                            ui.selectable_value(&mut key.interp, interp, interp_name(interp));
+                        }
                     });
                 ui.end_row();
+                match key.interp {
+                    Interp::Ease => {
+                        let easing = key.easing.get_or_insert_with(Easing::default);
+                        ui.label("Style");
+                        egui::ComboBox::from_id_salt("property key easing style")
+                            .selected_text(easing.style.as_str())
+                            .show_ui(ui, |ui| {
+                                for style in EasingStyle::ALL {
+                                    ui.selectable_value(&mut easing.style, style, style.as_str());
+                                }
+                            });
+                        ui.end_row();
+                        ui.label("Direction");
+                        egui::ComboBox::from_id_salt("property key easing direction")
+                            .selected_text(easing.direction.as_str())
+                            .show_ui(ui, |ui| {
+                                for direction in EasingDirection::ALL {
+                                    ui.selectable_value(
+                                        &mut easing.direction,
+                                        direction,
+                                        direction.as_str(),
+                                    );
+                                }
+                            });
+                        ui.end_row();
+                    }
+                    Interp::Bezier => {
+                        let handles = key.bezier.get_or_insert(axcenity_anim::DEFAULT_BEZIER);
+                        for (i, label) in ["Out time", "Out value", "In time", "In value"]
+                            .into_iter()
+                            .enumerate()
+                        {
+                            ui.label(label);
+                            let mut drag = egui::DragValue::new(&mut handles[i]).speed(0.01);
+                            if i % 2 == 0 {
+                                drag = drag.range(0.0..=1.0);
+                            }
+                            ui.add(drag);
+                            ui.end_row();
+                        }
+                    }
+                    _ => {}
+                }
             });
         } else if self.selected.len() > 1 {
             ui.separator();
