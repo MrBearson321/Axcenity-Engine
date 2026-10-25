@@ -1,6 +1,7 @@
 //! The start screen shown while no project is open: a sidebar with the
-//! wordmark, the Projects, Learn and API Reference pages and Settings
-//! (the tutorials are in `learn`, the reference in `reference`; both also
+//! wordmark, the Projects, Global Assets, Learn and API Reference pages and
+//! Settings (global assets are in `global`, the tutorials in `learn`, the
+//! reference in `reference`; the last two also
 //! show over an open project in Help > Learn); on Projects, a
 //! header with New and Open Project, templates to start from, and the
 //! tracked projects as cards (or a list) with thumbnails, a search box and
@@ -16,12 +17,14 @@ use eframe::egui::{self, CornerRadius, FontId, Rect, RichText, Sense, Stroke, po
 
 mod cards;
 mod dialogs;
+mod global;
 mod learn;
 mod pages;
 mod reference;
 
 use cards::*;
 use dialogs::*;
+use global::GlobalPage;
 use learn::{Learn, LearnAction, SampleState};
 use pages::*;
 use reference::Reference;
@@ -143,6 +146,7 @@ pub enum StartAction {
 enum Page {
     #[default]
     Projects,
+    Global,
     Learn,
     Reference,
 }
@@ -217,11 +221,17 @@ pub struct StartScreen {
     last_parent: Option<PathBuf>,
     /// The last problem with something that has no dialog of its own.
     notice: Option<String>,
+    global: GlobalPage,
     learn: Learn,
     reference: Reference,
 }
 
 impl StartScreen {
+    /// Lists the global assets in `library` on the Global Assets page.
+    pub fn set_library(&mut self, library: Option<PathBuf>) {
+        self.global.set_library(library);
+    }
+
     /// Forgets the loaded thumbnails, so changed ones are read again.
     pub fn reload_thumbnails(&mut self) {
         self.thumbnails.clear();
@@ -305,6 +315,7 @@ impl StartScreen {
                                     action = Some(picked);
                                 }
                             }
+                            Page::Global => self.global.show(ui),
                             Page::Learn => {
                                 let picked = self.learn.show(ui, |_| SampleState::Ready);
                                 if let Some(sample) = self.follow_learn(picked) {
@@ -349,6 +360,7 @@ impl StartScreen {
                 "Projects",
                 Some(tracked),
             ),
+            (Page::Global, icons::GLOBE, "Global Assets", None),
             (Page::Learn, icons::BOOK_OPEN, "Learn", None),
             (Page::Reference, icons::BOOKS, "API Reference", None),
         ] {

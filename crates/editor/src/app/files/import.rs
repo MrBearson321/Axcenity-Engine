@@ -80,19 +80,24 @@ impl EditorApp {
         let dialog =
             ImportDialog::new(file.to_owned(), objects, materials).with_animation(animation);
         if dialog.worth_asking() {
-            self.importing = Some(dialog);
+            // The model already loaded is what the dialog's preview draws.
+            self.importing = Some(dialog.with_preview(model, takes));
         } else {
             self.import_chosen(&dialog);
         }
     }
 
     /// Shows the Import Model dialog while a file is waiting for it, and
-    /// imports what it says.
-    pub(in crate::app) fn import_prompt(&mut self, ctx: &egui::Context) {
+    /// imports what it says. `render_state` draws its preview.
+    pub(in crate::app) fn import_prompt(
+        &mut self,
+        ctx: &egui::Context,
+        render_state: Option<&RenderState>,
+    ) {
         let Some(dialog) = &mut self.importing else {
             return;
         };
-        match dialog.show(ctx) {
+        match dialog.show(ctx, render_state) {
             Some(Answer::Import) => {
                 let dialog = self.importing.take().expect("checked above");
                 if dialog.animation_only {

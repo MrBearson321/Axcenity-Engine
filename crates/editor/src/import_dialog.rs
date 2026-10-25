@@ -1,20 +1,33 @@
 //! The Import Model dialog, shown when a model file holds more than one
-//! object, has texture maps or is animated: tick which objects to import,
-//! choose how they arrive, look over the maps, and make clips from the
-//! file's takes (see `anim_import.rs`).
+//! object, has texture maps or is animated. Its choices are split into
+//! steps (Objects, Bring in as, Texture maps, Animation; only the ones the
+//! file needs), with a preview of the model and a list of exactly what
+//! importing makes beside them. Import works from any step; Back and Next
+//! only move between them.
 //!
-//! The ticking rules are plain methods, so they're easy to test; the app
-//! turns the answer into Instances.
+//! The ticking rules and what importing makes are plain methods, so
+//! they're easy to test; the app turns the answer into Instances.
 
 use std::ops::Range;
 use std::path::PathBuf;
 
-use axcenity_assets::{Channel, ModelObject};
+use axcenity_assets::{Model, ModelObject, Take};
+use axcenity_core::ClassName;
 use eframe::egui;
+use eframe::egui_wgpu::RenderState;
 
 use crate::anim_import::AnimationImport;
-use crate::surface::{MapFile, MaterialMaps, Slot};
-use crate::theme::icons;
+use crate::surface::MaterialMaps;
+use crate::theme::{self, icons};
+use crate::widgets;
+
+mod outcome;
+mod preview;
+mod steps;
+#[cfg(test)]
+mod tests;
+
+use preview::ImportPreview;
 
 /// How the ticked objects arrive in the world.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -29,12 +42,43 @@ pub enum Placement {
     Merged,
 }
 
+/// A part of the dialog, shown one at a time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Step {
+    /// Which objects to import.
+    Objects,
+    /// How they arrive ([`Placement`]).
+    Placement,
+    /// Each material's texture maps.
+    Materials,
+    /// The skeleton, takes and clips to make.
+    Animation,
+}
+
+impl Step {
+    pub fn title(self) -> &'static str {
+        match self {
+            Step::Objects => "Objects",
+            Step::Placement => "Bring in as",
+            Step::Materials => "Texture maps",
+            Step::Animation => "Animation",
+        }
+    }
+}
+
 /// The widest the dialog gets, in points.
-const DIALOG_WIDTH: f32 = 640.0;
+const DIALOG_WIDTH: f32 = 960.0;
 /// The least room left between the dialog and the window's edges.
 const WINDOW_GAP: f32 = 16.0;
-/// Room kept under the body for the separator and the Import and Cancel row.
-const FOOTER_HEIGHT: f32 = 48.0;
+/// Room kept under the body for the separator and the buttons.
+const FOOTER_HEIGHT: f32 = 52.0;
+/// The tallest the body (preview and step) gets, so it doesn't fill a big
+/// window with empty space.
+const BODY_HEIGHT: f32 = 560.0;
+/// From this width the preview sits beside the step; narrower, above it.
+const SIDE_BY_SIDE_FROM: f32 = 700.0;
+/// The preview column's width when it's beside the step.
+const PREVIEW_WIDTH: f32 = 320.0;
 
 /// What the dialog was answered with.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,18 +98,28 @@ pub struct ImportDialog {
     /// Only objects whose names contain this are shown (ignoring case).
     filter: String,
     /// False for a file with one object: then there's nothing to choose,
-    /// and the dialog only shows the materials.
+    /// and the Objects and Bring in as steps aren't shown.
     pub pick_objects: bool,
     /// The maps of each of the file's materials, as found, then as changed.
     pub materials: Vec<MaterialMaps>,
+    /// The maps as found, to tell when they've been changed.
+    found: Vec<MaterialMaps>,
     /// The file's skeleton and takes, and the clips to make, if it's animated.
     pub animation: Option<AnimationImport>,
     /// True for a file with only animation in it (nothing to draw): only
     /// its clips are imported.
     pub animation_only: bool,
-    /// Where Import and Cancel were last drawn, so tests can check they're
-    /// in the window.
+    /// The step shown (the first step if it isn't one of [`steps`](Self::steps)).
+    pub step: Step,
+    /// The model drawn beside the steps; `None` without one (an
+    /// animation-only file, or a test).
+    preview: Option<ImportPreview>,
+    /// The clip row the preview plays.
+    previewing: usize,
+    /// Where the button row and the Import button were last drawn, so
+    /// tests can check they're in the window and click Import.
     buttons: Option<egui::Rect>,
+    import_button: Option<egui::Rect>,
 }
 
 impl ImportDialog {
@@ -84,10 +138,15 @@ impl ImportDialog {
             },
             filter: String::new(),
             pick_objects: meshes > 1,
+            found: materials.clone(),
             materials,
             animation: None,
             animation_only: false,
+            step: Step::Objects,
+            preview: None,
+            previewing: 0,
             buttons: None,
+            import_button: None,
         }
     }
 
@@ -110,6 +169,13 @@ impl ImportDialog {
         self
     }
 
+    /// Adds a preview of the file's `model` (as loaded from it), playing
+    /// clips made from its `takes`.
+    pub fn with_preview(mut self, model: Model, takes: Vec<Take>) -> Self {
+        self.preview = Some(ImportPreview::new(&self.file, model, takes));
+        self
+    }
+
     /// True if there's anything to ask: objects to choose from, texture
     /// maps to look over, or clips to make.
     pub fn worth_asking(&self) -> bool {
@@ -119,6 +185,31 @@ impl ImportDialog {
                 .materials
                 .iter()
                 .any(|maps| maps.files.iter().any(Option::is_some))
+    }
+
+    /// The steps this file needs, in order.
+    pub fn steps(&self) -> Vec<Step> {
+        let mut steps = Vec::new();
+        if self.pick_objects {
+            steps.extend([Step::Objects, Step::Placement]);
+        }
+        if !self.animation_only && !self.materials.is_empty() {
+            steps.push(Step::Materials);
+        }
+        if self.animation.is_some() {
+            steps.push(Step::Animation);
+        }
+        steps
+    }
+
+    /// The step shown now.
+    pub fn current(&self) -> Step {
+        let steps = self.steps();
+        if steps.contains(&self.step) {
+            self.step
+        } else {
+            steps.first().copied().unwrap_or(Step::Materials)
+        }
     }
 
     /// The objects inside object `index`, and it: the ones after it that
@@ -181,18 +272,85 @@ impl ImportDialog {
             .collect()
     }
 
+    /// Why it can't be imported as it is, if it can't.
+    pub fn problem(&self) -> Option<String> {
+        if !self.animation_only && self.pick_objects && self.chosen().is_empty() {
+            return Some("Tick at least one object to import.".to_owned());
+        }
+        self.animation.as_ref().and_then(AnimationImport::problem)
+    }
+
+    /// The step a problem is on, to mark it in the step bar.
+    fn problem_step(&self) -> Option<Step> {
+        if !self.animation_only && self.pick_objects && self.chosen().is_empty() {
+            Some(Step::Objects)
+        } else if self
+            .animation
+            .as_ref()
+            .is_some_and(|animation| animation.problem().is_some())
+        {
+            Some(Step::Animation)
+        } else {
+            None
+        }
+    }
+
+    /// The name the new MeshPart or Model gets: the file's.
+    fn model_name(&self) -> String {
+        self.file
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().trim().to_owned())
+            .filter(|stem| !stem.is_empty())
+            .unwrap_or_else(|| ClassName::MeshPart.as_str().to_owned())
+    }
+
+    /// How many clips an Animator will play, if one is added.
+    fn animator_clips(&self) -> Option<usize> {
+        self.animation
+            .as_ref()
+            .filter(|animation| {
+                animation.add_animator && !animation.bones.is_empty() && !animation.clips.is_empty()
+            })
+            .map(|animation| animation.clips.len())
+    }
+
+    /// What the file holds, in a few words, for under the title.
+    fn summary(&self) -> String {
+        let mut parts = Vec::new();
+        if !self.animation_only {
+            let meshes = self.objects.iter().filter(|o| o.has_mesh()).count();
+            let triangles: usize = self.objects.iter().map(|o| o.triangles).sum();
+            parts.push(plural(meshes.max(1), "object"));
+            if triangles > 0 {
+                parts.push(format!("{} triangles", thousands(triangles)));
+            }
+            parts.push(plural(self.materials.len(), "material"));
+        }
+        if let Some(animation) = &self.animation {
+            if !animation.bones.is_empty() {
+                parts.push(format!(
+                    "a skeleton of {}",
+                    plural(animation.bones.len(), "bone")
+                ));
+            }
+            if !animation.takes.is_empty() {
+                parts.push(plural(animation.takes.len(), "take"));
+            }
+        }
+        parts.join(" · ")
+    }
+
     /// Shows the dialog. Returns the answer once there is one.
     ///
-    /// The dialog fits the window: its sections scroll together in one
-    /// body, and Import and Cancel stay pinned under it, so they can be
-    /// reached however small the window is.
-    pub fn show(&mut self, ctx: &egui::Context) -> Option<Answer> {
+    /// The dialog fits the window: the body has a fixed height that's at
+    /// most what's left, each side scrolls on its own, and the buttons stay
+    /// pinned under it, so they can be reached however small the window is.
+    pub fn show(
+        &mut self,
+        ctx: &egui::Context,
+        render_state: Option<&RenderState>,
+    ) -> Option<Answer> {
         let mut answer = None;
-        let file_name = self
-            .file
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default();
         let frame = egui::Frame::popup(&ctx.style());
         // The frame's margins and outline, around the contents.
         let edges = frame.total_margin().sum();
@@ -200,14 +358,16 @@ impl ImportDialog {
         let modal = egui::Modal::new(egui::Id::new("import model"))
             .frame(frame)
             .show(ctx, |ui| {
-                ui.set_width(room.x.clamp(240.0, DIALOG_WIDTH));
-                ui.heading(format!("Import {file_name}"));
-                let body_height = (room.y - ui.min_rect().height() - FOOTER_HEIGHT).max(80.0);
-                egui::ScrollArea::vertical()
-                    .id_salt("import body")
-                    .max_height(body_height)
-                    .auto_shrink([false, true])
-                    .show(ui, |ui| self.sections(ui));
+                let width = room.x.clamp(260.0, DIALOG_WIDTH);
+                ui.set_width(width);
+                self.header(ui);
+                let body_height =
+                    (room.y - ui.min_rect().height() - FOOTER_HEIGHT).clamp(80.0, BODY_HEIGHT);
+                if width >= SIDE_BY_SIDE_FROM {
+                    self.side_by_side(ui, render_state, body_height);
+                } else {
+                    self.stacked(ui, render_state, body_height);
+                }
                 ui.separator();
                 self.buttons = Some(self.footer(ui, &mut answer));
             });
@@ -218,262 +378,340 @@ impl ImportDialog {
         answer
     }
 
-    /// Everything above the buttons, in the body that scrolls.
-    fn sections(&mut self, ui: &mut egui::Ui) {
-        if self.animation_only {
-            ui.label("This file has animation but nothing to draw: its takes become clips, for a model with the same skeleton.");
-        } else if self.pick_objects {
-            self.objects_section(ui);
-        } else if self.animation.is_some() {
-            self.model_summary(ui);
+    /// The title, what the file holds, and the step bar.
+    fn header(&mut self, ui: &mut egui::Ui) {
+        let palette = theme::palette(ui.ctx());
+        let file_name = self
+            .file
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        ui.heading(format!("Import {file_name}"));
+        ui.label(
+            egui::RichText::new(self.summary())
+                .size(theme::type_scale::SMALL)
+                .color(palette.text_weak),
+        );
+        let steps = self.steps();
+        if steps.len() > 1 {
+            ui.add_space(8.0);
+            let current = self.current();
+            let problem = self.problem_step();
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+                for (index, &step) in steps.iter().enumerate() {
+                    if index > 0 {
+                        ui.label(egui::RichText::new(icons::CARET_RIGHT).color(palette.text_muted));
+                    }
+                    if step_pill(ui, index + 1, step, step == current, problem == Some(step))
+                        .clicked()
+                    {
+                        self.step = step;
+                    }
+                }
+            });
         }
-        if !self.materials.is_empty() {
-            ui.separator();
-            self.materials_section(ui);
-        }
-        let animation_only = self.animation_only;
-        if let Some(animation) = &mut self.animation {
-            ui.separator();
-            animation.show(ui, !animation_only);
+        ui.add_space(6.0);
+        ui.separator();
+    }
+
+    /// The preview and what you'll get on the left, the step on the right.
+    fn side_by_side(
+        &mut self,
+        ui: &mut egui::Ui,
+        render_state: Option<&RenderState>,
+        body_height: f32,
+    ) {
+        ui.horizontal_top(|ui| {
+            let left = PREVIEW_WIDTH.min(ui.available_width() * 0.42);
+            let layout = egui::Layout::top_down(egui::Align::Min);
+            ui.allocate_ui_with_layout(egui::vec2(left, body_height), layout, |ui| {
+                ui.set_width(left);
+                let top = ui.min_rect().top();
+                let preview_height = (body_height * 0.55).clamp(120.0, 300.0);
+                self.preview_pane(ui, render_state, preview_height);
+                ui.add_space(6.0);
+                // What's left of the body, worked out rather than taken
+                // from `available_height`, which in a modal grows with
+                // last frame's size.
+                let used = ui.min_rect().bottom() - top;
+                egui::ScrollArea::vertical()
+                    .id_salt("import made")
+                    .max_height((body_height - used).max(40.0))
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| self.outcome(ui));
+            });
+            // A line as tall as the body: `separator` would take the
+            // row's whole height, which grows with the modal.
+            let (line, _) =
+                ui.allocate_exact_size(egui::vec2(9.0, body_height), egui::Sense::hover());
+            ui.painter().vline(
+                line.center().x,
+                line.y_range(),
+                egui::Stroke::new(1.0_f32, theme::palette(ui.ctx()).border),
+            );
+            ui.allocate_ui_with_layout(
+                egui::vec2(ui.available_width(), body_height),
+                layout,
+                |ui| {
+                    // Both ways, so a wide table (the clips) scrolls
+                    // instead of widening the dialog past the window.
+                    let width = ui.available_width();
+                    egui::ScrollArea::both()
+                        .id_salt("import body")
+                        .max_height(body_height)
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.set_max_width(width - 12.0);
+                            self.step_body(ui);
+                        });
+                },
+            );
+        });
+    }
+
+    /// In a narrow window: the preview, the step and what you'll get,
+    /// scrolling together.
+    fn stacked(&mut self, ui: &mut egui::Ui, render_state: Option<&RenderState>, body_height: f32) {
+        egui::ScrollArea::vertical()
+            .id_salt("import body")
+            .max_height(body_height)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                self.preview_pane(ui, render_state, 180.0);
+                ui.separator();
+                self.step_body(ui);
+                ui.separator();
+                self.outcome(ui);
+            });
+    }
+
+    fn preview_pane(&mut self, ui: &mut egui::Ui, render_state: Option<&RenderState>, height: f32) {
+        let changed = self.materials != self.found;
+        match &mut self.preview {
+            Some(preview) => {
+                preview.show(
+                    ui,
+                    render_state,
+                    self.animation.as_ref(),
+                    self.previewing,
+                    height,
+                );
+                if changed {
+                    ui.label(
+                        egui::RichText::new("Your map changes show once it's imported.")
+                            .size(theme::type_scale::SMALL)
+                            .color(theme::palette(ui.ctx()).text_weak),
+                    );
+                }
+            }
+            None => {
+                let palette = theme::palette(ui.ctx());
+                let (rect, _) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), height),
+                    egui::Sense::hover(),
+                );
+                ui.painter().rect_filled(rect, 6.0, palette.inset);
+                let text = if self.animation_only {
+                    "Nothing to draw: this file only has animation."
+                } else {
+                    "No preview"
+                };
+                ui.painter().text(
+                    rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    text,
+                    egui::FontId::proportional(theme::type_scale::SMALL),
+                    palette.text_weak,
+                );
+            }
         }
     }
 
-    /// Import and Cancel, pinned under the body. Returns where they are.
-    fn footer(&self, ui: &mut egui::Ui, answer: &mut Option<Answer>) -> egui::Rect {
-        let can_import = (self.animation_only || !self.pick_objects || !self.chosen().is_empty())
-            && self
-                .animation
-                .as_ref()
-                .is_none_or(|animation| animation.problem().is_none());
+    /// The step shown: its title, what it's for, and its controls.
+    fn step_body(&mut self, ui: &mut egui::Ui) {
+        let step = self.current();
+        let palette = theme::palette(ui.ctx());
+        ui.label(
+            egui::RichText::new(step.title())
+                .size(theme::type_scale::HEADING)
+                .family(theme::medium_family())
+                .color(palette.text_strong),
+        );
+        ui.add_space(2.0);
+        match step {
+            Step::Objects => steps::objects(self, ui),
+            Step::Placement => steps::placement(self, ui),
+            Step::Materials => steps::materials(self, ui),
+            Step::Animation => {
+                if self.animation_only {
+                    ui.label(
+                        "This file has animation but nothing to draw. Its takes become clips, \
+                         for a model with the same skeleton.",
+                    );
+                    ui.add_space(4.0);
+                }
+                let with_animator = !self.animation_only;
+                if let Some(animation) = &mut self.animation {
+                    animation.show(ui, with_animator, &mut self.previewing);
+                }
+            }
+        }
+    }
+
+    /// Cancel at the left; Back, Next and Import at the right. Returns
+    /// where the row is.
+    fn footer(&mut self, ui: &mut egui::Ui, answer: &mut Option<Answer>) -> egui::Rect {
+        let palette = theme::palette(ui.ctx());
+        let steps = self.steps();
+        let at = steps.iter().position(|&step| step == self.current());
+        let back = at.and_then(|at| at.checked_sub(1)).map(|at| steps[at]);
+        let next = at.and_then(|at| steps.get(at + 1)).copied();
+        let problem = self.problem();
         ui.horizontal(|ui| {
             if ui
-                .add_enabled(can_import, egui::Button::new("Import"))
+                .add(widgets::button(
+                    widgets::Role::Ghost,
+                    None,
+                    "Cancel",
+                    &palette,
+                ))
                 .clicked()
             {
-                *answer = Some(Answer::Import);
-            }
-            if ui.button("Cancel").clicked() {
                 *answer = Some(Answer::Cancel);
             }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // Added right to left: Import is at the far right.
+                let import = ui
+                    .add_enabled(
+                        problem.is_none(),
+                        widgets::button(
+                            widgets::Role::Primary,
+                            Some(icons::DOWNLOAD_SIMPLE),
+                            "Import",
+                            &palette,
+                        ),
+                    )
+                    .on_hover_text("Import now, with the choices as they are in every step.")
+                    .on_disabled_hover_text(problem.clone().unwrap_or_default());
+                self.import_button = Some(import.rect);
+                if import.clicked() {
+                    *answer = Some(Answer::Import);
+                }
+                if let Some(next) = next
+                    && ui
+                        .add(widgets::button(
+                            widgets::Role::Secondary,
+                            Some(icons::ARROW_RIGHT),
+                            &format!("Next: {}", next.title()),
+                            &palette,
+                        ))
+                        .clicked()
+                {
+                    self.step = next;
+                }
+                if let Some(back) = back
+                    && ui
+                        .add(widgets::button(
+                            widgets::Role::Ghost,
+                            Some(icons::ARROW_LEFT),
+                            "Back",
+                            &palette,
+                        ))
+                        .clicked()
+                {
+                    self.step = back;
+                }
+                if let Some(problem) = &problem {
+                    ui.label(egui::RichText::new(problem).color(palette.warning));
+                }
+            });
         })
         .response
         .rect
     }
-
-    /// What the file's model holds, for a file with one object.
-    fn model_summary(&self, ui: &mut egui::Ui) {
-        let meshes = self.objects.iter().filter(|o| o.has_mesh()).count();
-        let triangles: usize = self.objects.iter().map(|o| o.triangles).sum();
-        let mut materials: Vec<&str> = self
-            .objects
-            .iter()
-            .flat_map(|o| o.materials.iter().map(String::as_str))
-            .collect();
-        materials.sort_unstable();
-        materials.dedup();
-        ui.strong(format!("{} Model", icons::CUBE_TRANSPARENT));
-        ui.weak(format!(
-            "{meshes} {} · {} triangles · materials: {}",
-            if meshes == 1 { "object" } else { "objects" },
-            thousands(triangles),
-            if materials.is_empty() {
-                "none".to_owned()
-            } else {
-                materials.join(", ")
-            }
-        ));
-    }
-
-    /// The object tree, with its search box, and how the objects arrive.
-    fn objects_section(&mut self, ui: &mut egui::Ui) {
-        ui.label("Choose the objects to import.");
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.add(
-                egui::TextEdit::singleline(&mut self.filter)
-                    .hint_text("Search objects")
-                    .desired_width(220.0),
-            );
-            let shown = self.shown();
-            // With a search, these tick only what's shown.
-            if ui.button("Select all").clicked() {
-                for &i in &shown {
-                    self.ticked[i] = true;
-                }
-            }
-            if ui.button("Select none").clicked() {
-                for &i in &shown {
-                    self.ticked[i] = false;
-                }
-            }
-        });
-        ui.add_space(4.0);
-
-        egui::ScrollArea::vertical()
-            .id_salt("objects")
-            .max_height(260.0)
-            .auto_shrink([false, true])
-            .show(ui, |ui| {
-                let searching = !self.filter.trim().is_empty();
-                for i in self.shown() {
-                    let object = &self.objects[i];
-                    let (mut checked, partly) = self.state(i);
-                    let details = if object.has_mesh() {
-                        format!(
-                            "{} triangles · {}",
-                            thousands(object.triangles),
-                            object.materials.join(", ")
-                        )
-                    } else {
-                        "group".to_owned()
-                    };
-                    let name = object.name.clone();
-                    // A search shows matches without their place in the tree.
-                    let indent = if searching { 0 } else { object.depth };
-                    let changed = ui
-                        .horizontal(|ui| {
-                            ui.add_space(indent as f32 * 18.0);
-                            let changed = ui
-                                .add(egui::Checkbox::new(&mut checked, name).indeterminate(partly))
-                                .changed();
-                            ui.weak(details);
-                            changed
-                        })
-                        .inner;
-                    if changed {
-                        self.set(i, checked);
-                    }
-                }
-            });
-
-        let chosen = self.chosen();
-        let triangles: usize = chosen.iter().map(|&i| self.objects[i].triangles).sum();
-        let meshes = self.objects.iter().filter(|o| o.has_mesh()).count();
-        ui.add_space(4.0);
-        ui.weak(format!(
-            "{} of {meshes} objects, {} triangles",
-            chosen.len(),
-            thousands(triangles)
-        ));
-
-        ui.separator();
-        ui.label("Bring them in as:");
-        ui.radio_value(
-            &mut self.placement,
-            Placement::Grouped,
-            "A Model, laid out as in the file",
-        );
-        ui.radio_value(
-            &mut self.placement,
-            Placement::Separate,
-            "Separate MeshParts, each at the insert point",
-        );
-        ui.radio_value(
-            &mut self.placement,
-            Placement::Merged,
-            "One MeshPart with all of them",
-        );
-    }
-
-    /// Each material's maps, as found in the file, to change before importing.
-    fn materials_section(&mut self, ui: &mut egui::Ui) {
-        ui.label("The texture maps found for each material. Change any before importing:");
-        ui.weak("Each material gets a SurfaceAppearance in its MeshParts, to change later in Properties.");
-        ui.add_space(4.0);
-        egui::ScrollArea::vertical()
-            .id_salt("materials")
-            .max_height(260.0)
-            .auto_shrink([false, true])
-            .show(ui, |ui| {
-                let open = self.materials.len() <= 3;
-                for (index, maps) in self.materials.iter_mut().enumerate() {
-                    let found = maps.files.iter().flatten().count();
-                    let title = match maps.material.as_str() {
-                        "" => "(unnamed material)".to_owned(),
-                        name => name.to_owned(),
-                    };
-                    egui::CollapsingHeader::new(format!("{title}  ·  {found} maps"))
-                        .id_salt(("material", index))
-                        .default_open(open)
-                        .show(ui, |ui| material_maps(ui, index, maps));
-                }
-            });
-    }
 }
 
-/// The rows for one material's maps: each map's file with Browse and
-/// Clear, its channel for grey maps, and the settings for how they're read.
-fn material_maps(ui: &mut egui::Ui, index: usize, maps: &mut MaterialMaps) {
-    egui::Grid::new(("maps", index))
-        .num_columns(3)
-        .spacing([10.0, 4.0])
-        .show(ui, |ui| {
-            for slot in Slot::ALL {
-                ui.label(slot.label());
-                ui.horizontal(|ui| {
-                    if ui
-                        .small_button(icons::FOLDER_OPEN)
-                        .on_hover_text("Choose a texture file")
-                        .clicked()
-                        && let Some(file) = rfd::FileDialog::new()
-                            .set_title(format!("Choose a {} map", slot.label().to_lowercase()))
-                            .add_filter("Texture", &axcenity_assets::TEXTURE_EXTENSIONS)
-                            .pick_file()
-                    {
-                        maps.set_file(slot, Some(MapFile::Picked(file)));
-                    }
-                    match maps.file(slot) {
-                        Some(file) => {
-                            let name = file.file_name();
-                            if ui
-                                .small_button(icons::X)
-                                .on_hover_text("Use no map")
-                                .clicked()
-                            {
-                                maps.set_file(slot, None);
-                            }
-                            ui.label(name);
-                        }
-                        None => {
-                            ui.weak("None");
-                        }
-                    }
-                });
-                match maps.channel_mut(slot) {
-                    Some(channel) => {
-                        egui::ComboBox::from_id_salt(("channel", index, slot as usize))
-                            .width(70.0)
-                            .selected_text(channel_name(*channel))
-                            .show_ui(ui, |ui| {
-                                for item in
-                                    [Channel::Red, Channel::Green, Channel::Blue, Channel::Alpha]
-                                {
-                                    ui.selectable_value(channel, item, channel_name(item));
-                                }
-                            })
-                            .response
-                            .on_hover_text("The channel of the texture this map is in");
-                    }
-                    None => {
-                        ui.label("");
-                    }
-                }
-                ui.end_row();
-            }
-        });
-    ui.horizontal_wrapped(|ui| {
-        ui.checkbox(&mut maps.normal_directx, "Normal map is DirectX-style");
-        ui.checkbox(&mut maps.invert_roughness, "Roughness map is glossiness");
-        ui.checkbox(&mut maps.invert_opacity, "Opacity map is inverted");
+/// One step in the step bar: its number in a circle and its title,
+/// filled while it's shown, the number warning-coloured while it has a
+/// problem.
+fn step_pill(
+    ui: &mut egui::Ui,
+    number: usize,
+    step: Step,
+    selected: bool,
+    problem: bool,
+) -> egui::Response {
+    let palette = theme::palette(ui.ctx());
+    let font = egui::FontId::new(theme::type_scale::BODY, theme::medium_family());
+    let galley =
+        ui.painter()
+            .layout_no_wrap(step.title().to_owned(), font, egui::Color32::PLACEHOLDER);
+    let circle = 18.0;
+    let size = egui::vec2(8.0 + circle + 6.0 + galley.size().x + 12.0, 28.0);
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, step.title())
     });
+    widgets::paint_hover(ui, rect, &response, false, 14.0);
+    if selected {
+        ui.painter().rect_filled(rect, 14.0, palette.control_active);
+    }
+    let center = egui::pos2(rect.min.x + 8.0 + circle / 2.0, rect.center().y);
+    let (fill, number_color) = if problem {
+        (palette.warning, palette.on_accent)
+    } else if selected {
+        (palette.accent_solid, palette.on_accent)
+    } else {
+        (palette.inset, palette.text_secondary)
+    };
+    ui.painter().circle(
+        center,
+        circle / 2.0,
+        fill,
+        egui::Stroke::new(1.0_f32, palette.border),
+    );
+    ui.painter().text(
+        center,
+        egui::Align2::CENTER_CENTER,
+        if problem {
+            "!".to_owned()
+        } else {
+            number.to_string()
+        },
+        egui::FontId::new(theme::type_scale::CAPTION, theme::medium_family()),
+        number_color,
+    );
+    let color = if selected || response.hovered() {
+        palette.text_strong
+    } else {
+        palette.text_secondary
+    };
+    ui.painter().galley(
+        egui::pos2(
+            center.x + circle / 2.0 + 6.0,
+            rect.center().y - galley.size().y / 2.0,
+        ),
+        galley,
+        color,
+    );
+    response
 }
 
-fn channel_name(channel: Channel) -> &'static str {
-    match channel {
-        Channel::Red => "Red",
-        Channel::Green => "Green",
-        Channel::Blue => "Blue",
-        Channel::Alpha => "Alpha",
+/// An object's name from a model file as an Instance name.
+fn object_name(name: &str) -> String {
+    match name.trim() {
+        "" => ClassName::MeshPart.as_str().to_owned(),
+        name => name.to_owned(),
+    }
+}
+
+/// "1 clip", "3 clips".
+fn plural(n: usize, thing: &str) -> String {
+    if n == 1 {
+        format!("1 {thing}")
+    } else {
+        format!("{n} {thing}s")
     }
 }
 
@@ -488,146 +726,4 @@ fn thousands(n: usize) -> String {
         text.push(digit);
     }
     text
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Street (a group) holding Bench and Lamp, then Dumpster (a mesh)
-    /// holding Lid.
-    fn dialog() -> ImportDialog {
-        let object = |name: &str, depth, triangles| ModelObject {
-            path: name.into(),
-            name: name.into(),
-            depth,
-            triangles,
-            materials: Vec::new(),
-        };
-        ImportDialog::new(
-            PathBuf::from("props.fbx"),
-            vec![
-                object("Street", 0, 0),
-                object("Bench", 1, 10),
-                object("Lamp", 1, 20),
-                object("Dumpster", 0, 30),
-                object("Lid", 1, 5),
-            ],
-            Vec::new(),
-        )
-    }
-
-    #[test]
-    fn everything_starts_ticked_and_groups_are_not_imported_themselves() {
-        let dialog = dialog();
-        assert_eq!(dialog.chosen(), [1, 2, 3, 4]);
-        assert!(dialog.all_chosen());
-        assert_eq!(dialog.subtree(0), 0..3);
-        assert_eq!(dialog.subtree(3), 3..5);
-        assert_eq!(dialog.subtree(4), 4..5);
-        assert_eq!(dialog.parent(2), Some(0));
-        assert_eq!(dialog.parent(3), None);
-    }
-
-    #[test]
-    fn ticking_a_group_ticks_what_is_inside_it() {
-        let mut dialog = dialog();
-        dialog.set(0, false);
-        assert_eq!(dialog.chosen(), [3, 4]);
-        assert_eq!(dialog.state(0), (false, false));
-        dialog.set(2, true);
-        // Partly ticked: the Lamp is, the Bench isn't.
-        assert_eq!(dialog.state(0), (false, true));
-        assert!(!dialog.all_chosen());
-        // Unticking the Lid leaves the Dumpster itself ticked.
-        dialog.set(4, false);
-        assert_eq!(dialog.chosen(), [2, 3]);
-        assert_eq!(dialog.state(3), (false, true));
-    }
-
-    /// An animated, textured FBX with every section showing, in an 800×600
-    /// window: the sections are far taller than that, yet Import is in the
-    /// window and a click on it imports. With `AXCENITY_SNAPSHOTS` set, it's
-    /// saved as `import-dialog-800x600.png`.
-    #[test]
-    fn the_whole_dialog_fits_an_800_by_600_window_with_import_clickable() {
-        let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../examples/hello-animation/assets/models/noodle.fbx");
-        let objects = axcenity_assets::list_model_objects(&file).unwrap();
-        let model = axcenity_assets::load_model_file(&file).unwrap();
-        let takes = axcenity_assets::load_takes_file(&file).unwrap();
-        let animation = AnimationImport::new(model.rig.as_deref(), &takes, "noodle");
-        assert!(animation.is_some(), "noodle.fbx is animated");
-        let mut materials =
-            crate::surface::materials_maps(model.primitives.iter().map(|p| &p.material));
-        // Three materials with every map, so each opens with all its rows.
-        materials.truncate(1);
-        let mut maps = materials.pop().unwrap();
-        for (slot, file) in maps.files.iter_mut().enumerate() {
-            *file = Some(MapFile::Model(format!("textures/map{slot}.png")));
-        }
-        let materials = ["Body", "Eyes", "Hat"].map(|name| MaterialMaps {
-            material: name.to_owned(),
-            ..maps.clone()
-        });
-        let mut dialog =
-            ImportDialog::new(file, objects, materials.to_vec()).with_animation(animation);
-        // The object list too, as for a file with several objects.
-        dialog.pick_objects = true;
-        dialog.placement = Placement::Merged;
-
-        let size = egui::vec2(800.0, 600.0);
-        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
-        let ctx = crate::theme::test_context();
-        let mut frame = 0;
-        let mut run = |dialog: &mut ImportDialog, events: Vec<egui::Event>| {
-            let mut answer = None;
-            frame += 1;
-            let input = egui::RawInput {
-                screen_rect: Some(screen),
-                events,
-                // A tenth of a second a frame, so the dialog has faded in.
-                time: Some(f64::from(frame) * 0.1),
-                ..Default::default()
-            };
-            let _ = ctx.run(input, |ctx| answer = dialog.show(ctx));
-            answer
-        };
-        // The scroll areas take a few frames to reach their full height.
-        for _ in 0..10 {
-            assert_eq!(run(&mut dialog, Vec::new()), None);
-        }
-        let buttons = dialog.buttons.expect("the buttons were drawn");
-        assert!(screen.contains_rect(buttons), "{buttons:?} in {screen:?}");
-
-        // Import is the first button in the row.
-        let import = egui::pos2(buttons.left() + 12.0, buttons.center().y);
-        let click = |pressed| egui::Event::PointerButton {
-            pos: import,
-            button: egui::PointerButton::Primary,
-            pressed,
-            modifiers: egui::Modifiers::NONE,
-        };
-        run(&mut dialog, vec![egui::Event::PointerMoved(import)]);
-        run(&mut dialog, vec![click(true)]);
-        assert_eq!(run(&mut dialog, vec![click(false)]), Some(Answer::Import));
-
-        if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") {
-            crate::snapshot::snapshot(
-                &PathBuf::from(folder).join("import-dialog-800x600.png"),
-                size,
-                vec![Vec::new(); 10],
-                |ctx| {
-                    dialog.show(ctx);
-                },
-            );
-        }
-    }
-
-    #[test]
-    fn big_numbers_get_commas() {
-        assert_eq!(thousands(7), "7");
-        assert_eq!(thousands(1234), "1,234");
-        assert_eq!(thousands(1234567), "1,234,567");
-    }
 }

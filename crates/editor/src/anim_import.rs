@@ -215,25 +215,32 @@ impl AnimationImport {
     /// The clip files to write, each with its file name (without the
     /// extension), for a model file at `source` in the project.
     pub fn clip_files(&self, source: &str) -> Vec<(String, ClipFile)> {
-        self.clips
-            .iter()
-            .filter_map(|clip| {
-                let take = self.takes.get(clip.take)?;
-                let mut file = ClipFile::linked(
-                    source,
-                    &take.name,
-                    take.seconds(clip.start),
-                    take.seconds(clip.end),
-                );
-                file.looping = clip.looping;
-                Some((files::file_safe(&clip.name), file))
+        (0..self.clips.len())
+            .filter_map(|index| {
+                let file = self.clip_file(index, source)?;
+                Some((files::file_safe(&self.clips[index].name), file))
             })
             .collect()
     }
 
-    /// The dialog's Animation section.
-    pub fn show(&mut self, ui: &mut egui::Ui, with_animator: bool) {
-        ui.strong(format!("{} Animation", icons::PERSON_SIMPLE_RUN));
+    /// The file clip row `index` makes, for a model file at `source`.
+    /// `None` if there's no such row or its take is gone.
+    pub fn clip_file(&self, index: usize, source: &str) -> Option<ClipFile> {
+        let clip = self.clips.get(index)?;
+        let take = self.takes.get(clip.take)?;
+        let mut file = ClipFile::linked(
+            source,
+            &take.name,
+            take.seconds(clip.start),
+            take.seconds(clip.end),
+        );
+        file.looping = clip.looping;
+        Some(file)
+    }
+
+    /// The dialog's Animation step. `previewing` is the clip row the
+    /// preview plays; each row's play button picks it.
+    pub fn show(&mut self, ui: &mut egui::Ui, with_animator: bool, previewing: &mut usize) {
         if !self.bones.is_empty() {
             egui::CollapsingHeader::new(format!(
                 "Skeleton · {} bones, {} skinned joints",
@@ -260,21 +267,30 @@ impl AnimationImport {
             ui.weak("This file has a skeleton but no takes. Clips from another file for the same skeleton can play on it.");
             return;
         }
-        ui.label(format!("Takes in the file ({}):", self.takes.len()));
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new("Takes in the file").strong());
+        ui.weak("The animation timelines the file was exported with.");
         for take in &self.takes {
             ui.weak(format!(
-                "   {} {} · {} frames at {} fps ({:.2} s), moves {} bones",
+                "   {} {} · {} frames at {} fps ({:.2} s), moves {} {}",
                 icons::FILM_STRIP,
                 take.name,
                 take.frames,
                 take.frame_rate,
                 take.seconds(take.frames),
-                take.tracks
+                take.tracks,
+                if take.tracks == 1 { "bone" } else { "bones" }
             ));
         }
-        ui.add_space(4.0);
-        ui.label("Clips to make. Split a take into named parts by frame:");
-        self.clips_table(ui);
+        ui.add_space(6.0);
+        ui.label(egui::RichText::new("Clips to make").strong());
+        ui.weak(
+            "Each clip is a named part of a take, saved as its own file. If one take holds \
+             several moves, Split it and name the parts (Idle, Walk, Jump). Press ▶ to watch \
+             a clip in the preview.",
+        );
+        ui.add_space(2.0);
+        self.clips_table(ui, previewing);
         ui.horizontal(|ui| {
             if ui.button(format!("{} Add clip", icons::PLUS)).clicked() {
                 let take = self.split_take.min(self.takes.len() - 1);
@@ -315,14 +331,19 @@ impl AnimationImport {
             ui.colored_label(ui.visuals().error_fg_color, problem);
         }
         if with_animator {
+            ui.add_space(4.0);
             ui.checkbox(
                 &mut self.add_animator,
-                "Add an Animator, with a state machine that has a state per clip",
+                "Add an Animator so it can play these",
+            )
+            .on_hover_text(
+                "Puts an Animator in the new MeshPart with an Animation per clip, and a \
+                     state machine with a state per clip (Idle, if there is one, plays first).",
             );
         }
     }
 
-    fn clips_table(&mut self, ui: &mut egui::Ui) {
+    fn clips_table(&mut self, ui: &mut egui::Ui, previewing: &mut usize) {
         let mut remove = None;
         egui::ScrollArea::vertical()
             .id_salt("clips")
@@ -330,15 +351,23 @@ impl AnimationImport {
             .auto_shrink([false, true])
             .show(ui, |ui| {
                 egui::Grid::new("clip rows")
-                    .num_columns(7)
+                    .num_columns(8)
                     .spacing([8.0, 4.0])
                     .striped(true)
                     .show(ui, |ui| {
-                        for heading in ["Name", "Take", "Start", "End", "Loop", "Length", ""] {
+                        for heading in ["", "Name", "Take", "Start", "End", "Loop", "Length", ""] {
                             ui.weak(heading);
                         }
                         ui.end_row();
                         for (index, clip) in self.clips.iter_mut().enumerate() {
+                            let shown = *previewing == index;
+                            if ui
+                                .selectable_label(shown, icons::PLAY)
+                                .on_hover_text("Play this clip in the preview")
+                                .clicked()
+                            {
+                                *previewing = index;
+                            }
                             ui.add(egui::TextEdit::singleline(&mut clip.name).desired_width(110.0));
                             egui::ComboBox::from_id_salt(("clip take", index))
                                 .width(100.0)
@@ -387,6 +416,9 @@ impl AnimationImport {
             });
         if let Some(index) = remove {
             self.clips.remove(index);
+            if *previewing > index {
+                *previewing -= 1;
+            }
         }
     }
 }

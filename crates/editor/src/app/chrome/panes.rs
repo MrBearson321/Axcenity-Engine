@@ -77,7 +77,9 @@ impl EditorApp {
         match action {
             Some(BrowserAction::Place(entry)) => self.drop_asset(&entry, None),
             Some(BrowserAction::Foliage(entry)) => {
-                if let Some(source) = entry.foliage_source() {
+                if let Some(source) = entry.foliage_source()
+                    && self.use_global_asset(&entry.path)
+                {
                     self.terrain.foliage_source = source;
                 }
             }

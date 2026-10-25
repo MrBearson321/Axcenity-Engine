@@ -8,7 +8,7 @@ use axcenity_assets::{Channel, ChannelTexture, Image, ModelMaterial};
 use axcenity_core::{Color3, TextureChannel, Value};
 
 /// Where a map's file is.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum MapFile {
     /// One the model uses, relative to the model's folder (`textures/wood.png`).
     Model(String),

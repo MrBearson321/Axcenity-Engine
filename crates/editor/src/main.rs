@@ -22,6 +22,7 @@ mod css_syntax;
 mod dialog;
 mod explorer;
 mod gizmo;
+mod global_assets;
 mod history;
 mod import_dialog;
 mod layout;
@@ -61,6 +62,10 @@ use std::path::PathBuf;
 use eframe::egui;
 
 use crate::app::EditorApp;
+
+/// The editor's name to eframe, which keeps its settings in a folder of
+/// this name (`eframe::storage_dir`); the global assets are there too.
+pub const APP_ID: &str = "Axcenity Editor";
 
 /// The logo at 256×256, from `assets/branding` (see its README), built into
 /// the program. Windows and X11 show it; macOS and Wayland ignore window icons.
@@ -126,7 +131,7 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
     eframe::run_native(
-        "Axcenity Editor",
+        APP_ID,
         options,
         // `move` hands `folder` over to the closure, which eframe calls once
         // the window exists to create the app.
@@ -135,6 +140,7 @@ fn main() -> eframe::Result {
             theme::install(ctx);
             let mut app = EditorApp::new(None);
             app.load_settings(ctx, creation_context.storage);
+            app.set_global_assets(global_assets::default_folder());
             // Read in the background, so the window and splash show at once.
             if let Some(folder) = &folder {
                 app.begin_open(ctx, folder);

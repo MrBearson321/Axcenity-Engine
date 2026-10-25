@@ -319,3 +319,60 @@ fn the_learn_window_shows_tutorials_and_the_reference_over_a_project() {
         assert_eq!(start.page, page);
     }
 }
+
+#[test]
+fn the_global_assets_page_lists_the_library_with_a_models_files_as_one_card() {
+    let library =
+        std::env::temp_dir().join(format!("axcenity-start-global-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&library);
+    for file in [
+        "assets/models/Hero/Hero.fbx",
+        "assets/models/Hero/textures/Hero_Diffuse.png",
+        "assets/animations/Hero/Walk.anim.json",
+        "assets/audio/ding.wav",
+    ] {
+        let path = library.join(file);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, b"").unwrap();
+    }
+    let mut start = StartScreen {
+        page: Page::Global,
+        ..Default::default()
+    };
+    start.set_library(Some(library.clone()));
+    let names = |start: &mut StartScreen, search: &str| -> Vec<String> {
+        start
+            .global
+            .cards(search)
+            .into_iter()
+            .map(|card| card.name)
+            .collect()
+    };
+    assert_eq!(names(&mut start, ""), ["Hero", "ding"]);
+    assert_eq!(names(&mut start, "walk"), ["Walk"]);
+
+    let mut projects = Vec::new();
+    let mut draw = |ctx: &egui::Context| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE.fill(theme::palette(ctx).panel))
+            .show(ctx, |ui| {
+                let brand = Brand::load(ui.ctx());
+                assert!(start.show(ui, &mut projects, &brand).is_none());
+            });
+    };
+    match std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from) {
+        Some(folder) => crate::snapshot::snapshot(
+            &folder.join("start-global-assets.png"),
+            vec2(1400.0, 900.0),
+            vec![Vec::new(); 3],
+            &mut draw,
+        ),
+        None => {
+            let ctx = theme::test_context();
+            for _ in 0..3 {
+                let _ = ctx.run(Default::default(), &mut draw);
+            }
+        }
+    }
+    std::fs::remove_dir_all(library).unwrap();
+}

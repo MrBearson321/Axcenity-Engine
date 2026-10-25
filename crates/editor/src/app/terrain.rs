@@ -210,6 +210,12 @@ impl EditorApp {
             TerrainAction::RemoveLayer(layer) => self.delete(layer),
             TerrainAction::MoveLayer(layer, up) => self.move_terrain_layer(layer, up),
             TerrainAction::SetLayer(layer, name, value) => {
+                // A texture dropped on a map may be a global one.
+                if let Value::String(path) = &value
+                    && !self.use_global_asset(path)
+                {
+                    return;
+                }
                 let Some(instance) = self.world.get(layer) else {
                     return;
                 };
@@ -225,6 +231,9 @@ impl EditorApp {
                 self.apply(layer, Edit::PickTexture(name));
             }
             TerrainAction::UseTextureSet(layer, entry) => {
+                if !self.use_global_asset(&entry.path) {
+                    return;
+                }
                 self.apply_texture_set(&entry, Some(layer));
             }
             TerrainAction::AutoLayerSettings(layer) => self.auto_layer_settings(layer),

@@ -917,7 +917,7 @@ impl EditorApp {
         }
         self.unsaved_changes_prompt(ctx);
         self.delete_script_prompt(ctx);
-        self.import_prompt(ctx);
+        self.import_prompt(ctx, render_state);
         self.ribbon_tabs.editor_window(ctx);
         self.start_thumbnail(ctx);
         if self.learn_open && self.project.is_some() {

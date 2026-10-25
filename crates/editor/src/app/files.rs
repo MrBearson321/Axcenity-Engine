@@ -21,6 +21,7 @@ use axcenity_blocks::{from_lua, translate};
 use axcenity_core::{ClassName, InstanceId, Value, Vector3};
 use axcenity_project::{self as project, LoadError, Project, ScriptFile};
 use eframe::egui;
+use eframe::egui_wgpu::RenderState;
 
 use super::{BlockDocument, EditorApp};
 use crate::anim_import::AnimationImport;

@@ -27,13 +27,16 @@ use axcenity_core::FoliageSource;
 use eframe::egui;
 
 use crate::ambient_cg::GetTexture;
+use crate::global_assets;
 use crate::props::{PROPS, Prop};
 use crate::responsive;
 use crate::theme::{self, icons};
 use crate::widgets;
 
-mod thumbnails;
+pub mod packages;
+pub mod thumbnails;
 
+use packages::{Shown, shown};
 use thumbnails::Thumbnails;
 
 /// Where prefabs are saved, in the project folder.
@@ -76,7 +79,7 @@ pub enum AssetKind {
 }
 
 impl AssetKind {
-    fn icon(self) -> &'static str {
+    pub fn icon(self) -> &'static str {
         match self {
             AssetKind::Prop => icons::SHAPES,
             AssetKind::Model => icons::CUBE_TRANSPARENT,
@@ -90,7 +93,7 @@ impl AssetKind {
         }
     }
 
-    fn color(self, visuals: &egui::Visuals) -> egui::Color32 {
+    pub fn color(self, visuals: &egui::Visuals) -> egui::Color32 {
         use axcenity_core::ClassName;
         match self {
             AssetKind::Prop | AssetKind::Model | AssetKind::Prefab => {
@@ -107,7 +110,7 @@ impl AssetKind {
     }
 
     /// What it is, in a list row.
-    fn label(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             AssetKind::Prop => "Prop",
             AssetKind::Model => "Model",
@@ -214,10 +217,12 @@ pub enum Category {
     Audio,
     Particles,
     Animations,
+    /// The global assets, of any kind.
+    Global,
 }
 
 impl Category {
-    const ALL: [Category; 9] = [
+    const ALL: [Category; 10] = [
         Category::All,
         Category::Props,
         Category::Models,
@@ -227,6 +232,7 @@ impl Category {
         Category::Audio,
         Category::Particles,
         Category::Animations,
+        Category::Global,
     ];
 
     fn label(self) -> &'static str {
@@ -240,6 +246,7 @@ impl Category {
             Category::Audio => "Audio",
             Category::Particles => "Particles",
             Category::Animations => "Animations",
+            Category::Global => "Global",
         }
     }
 
@@ -256,6 +263,8 @@ impl Category {
             Category::Animations => {
                 matches!(kind, AssetKind::Animation | AssetKind::Controller)
             }
+            // Which files are global is the path's, checked by the panel.
+            Category::Global => kind != AssetKind::Prop,
         }
     }
 
@@ -312,6 +321,16 @@ pub struct AssetBrowser {
     thumbnails: Thumbnails,
     dialog: Option<PrefabDialog>,
     get_texture: Option<GetTexture>,
+    /// The imported model's folder shown (by its name), if one is open.
+    open_package: Option<String>,
+    /// The global assets' folder (see `global_assets.rs`), if there is one.
+    library: Option<PathBuf>,
+    /// The global assets this project hasn't got, scanned with `files`.
+    shared: Vec<AssetEntry>,
+    /// The paths of `files` and of every global asset, in lower case.
+    local_paths: HashSet<String>,
+    global_paths: HashSet<String>,
+    global_thumbnails: Thumbnails,
 }
 
 impl AssetBrowser {
@@ -319,10 +338,20 @@ impl AssetBrowser {
     pub fn open(&mut self, folder: Option<&Path>) {
         self.folder = folder.map(Path::to_owned);
         self.files.clear();
+        self.shared.clear();
         self.thumbnails.open(folder);
         self.scanned_at = None;
         self.dialog = None;
         self.get_texture = None;
+        self.open_package = None;
+    }
+
+    /// Uses the global assets in `library` (`None` for none), in every
+    /// project from now on.
+    pub fn set_library(&mut self, library: Option<PathBuf>) {
+        self.global_thumbnails.open(library.as_deref());
+        self.library = library;
+        self.scanned_at = None;
     }
 
     /// Walks the folder again on the next frame the panel is shown.
@@ -330,7 +359,8 @@ impl AssetBrowser {
         self.scanned_at = None;
     }
 
-    /// Every tile: the props, then the files in path order.
+    /// Every tile: the props, then the project's files in path order, then
+    /// the global assets it hasn't got.
     pub fn entries(&mut self) -> Vec<AssetEntry> {
         self.rescan_if_due();
         let props = PROPS.iter().map(|prop| AssetEntry {
@@ -338,26 +368,89 @@ impl AssetBrowser {
             path: prop.name.to_owned(),
             name: prop.name.to_owned(),
         });
-        props.chain(self.files.iter().cloned()).collect()
+        props.chain(self.files_and_shared()).collect()
     }
 
-    /// The project's texture sets and textures, sets first, each with its
-    /// thumbnail once it has been read (asked for here the first time). For
-    /// pickers outside the panel, such as a terrain layer's.
+    fn files_and_shared(&self) -> Vec<AssetEntry> {
+        self.files.iter().chain(&self.shared).cloned().collect()
+    }
+
+    /// True if the library has the asset at `path`.
+    pub fn is_global(&self, path: &str) -> bool {
+        self.global_paths.contains(&path.to_lowercase())
+    }
+
+    /// True if the project has the asset at `path`.
+    fn is_local(&self, path: &str) -> bool {
+        self.local_paths.contains(&path.to_lowercase())
+    }
+
+    /// Makes the asset at `path` global (copied into the library, with what
+    /// it needs) or local again (its files deleted from the library). Says
+    /// what was done, for Output.
+    pub fn set_global(&mut self, path: &str, global: bool) -> Result<String, String> {
+        let (Some(project), Some(library)) = (&self.folder, &self.library) else {
+            return Err("global assets need a project open and a folder for them".to_owned());
+        };
+        let name = display_name(path);
+        let text = if global {
+            let copied = global_assets::make_global(project, library, path)?;
+            let files = if copied == 1 { "file" } else { "files" };
+            format!("{name} is a global asset now, in every project ({copied} {files}).")
+        } else {
+            global_assets::remove(library, path)?;
+            format!(
+                "{name} is no longer a global asset. Projects that used it keep their own copy."
+            )
+        };
+        self.refresh();
+        Ok(text)
+    }
+
+    /// Copies the global asset at `path`, and what it needs, into the
+    /// project if it's missing there, before it's used. Returns how many
+    /// files were copied (0 for an asset the project already has).
+    pub fn use_here(&mut self, path: &str) -> Result<usize, String> {
+        let (Some(project), Some(library)) = (&self.folder, &self.library) else {
+            return Ok(0);
+        };
+        let copied = global_assets::use_in(library, project, path)?;
+        if copied > 0 {
+            self.refresh();
+        }
+        Ok(copied)
+    }
+
+    /// The thumbnail of `entry`'s picture: the project's file, or the
+    /// library's for a global asset the project hasn't got.
+    fn thumbnail_of(
+        &mut self,
+        ctx: &egui::Context,
+        entry: &AssetEntry,
+    ) -> Option<egui::TextureHandle> {
+        let set = entry.kind == AssetKind::TextureSet;
+        if self.is_local(&entry.path) {
+            self.thumbnails.get(ctx, &entry.path, set)
+        } else {
+            self.global_thumbnails.get(ctx, &entry.path, set)
+        }
+    }
+
+    /// The project's texture sets and textures (and the global ones), sets
+    /// first, each with its thumbnail once it has been read (asked for here
+    /// the first time). For pickers outside the panel, such as a terrain
+    /// layer's.
     pub fn textures(&mut self, ctx: &egui::Context) -> Vec<TexturePick> {
         self.rescan_if_due();
         self.thumbnails.poll(ctx);
+        self.global_thumbnails.poll(ctx);
         let mut picks: Vec<TexturePick> = self
-            .files
-            .iter()
+            .files_and_shared()
+            .into_iter()
             .filter(|entry| matches!(entry.kind, AssetKind::Texture | AssetKind::TextureSet))
             .map(|entry| TexturePick {
-                thumbnail: self.thumbnails.get(
-                    ctx,
-                    &entry.path,
-                    entry.kind == AssetKind::TextureSet,
-                ),
-                entry: entry.clone(),
+                thumbnail: self.thumbnail_of(ctx, &entry),
+                entry,
             })
             .collect();
         // A stable sort keeps path order within sets and within textures.
@@ -381,9 +474,25 @@ impl AssetBrowser {
             Some(folder) => scan(folder),
             None => Vec::new(),
         };
-        let files = &self.files;
-        let paths: HashSet<&str> = files.iter().map(|entry| entry.path.as_str()).collect();
-        self.thumbnails.retain(|path| paths.contains(path));
+        // Global assets show only with a project open, to use in it.
+        let global = match (&self.folder, &self.library) {
+            (Some(_), Some(library)) => scan(library),
+            _ => Vec::new(),
+        };
+        let lower = |entries: &[AssetEntry]| -> HashSet<String> {
+            entries
+                .iter()
+                .map(|entry| entry.path.to_lowercase())
+                .collect()
+        };
+        self.local_paths = lower(&self.files);
+        self.global_paths = lower(&global);
+        self.shared = global
+            .into_iter()
+            .filter(|entry| !self.local_paths.contains(&entry.path.to_lowercase()))
+            .collect();
+        self.thumbnails.forget_missing();
+        self.global_thumbnails.forget_missing();
     }
 
     /// Draws the panel. `can_edit` is false during Play, and `can_save` is
@@ -399,6 +508,7 @@ impl AssetBrowser {
     ) -> Option<BrowserAction> {
         let mut action = None;
         self.thumbnails.poll(ui.ctx());
+        self.global_thumbnails.poll(ui.ctx());
         let palette = theme::palette(ui.ctx());
         let width = ui.available_width();
         if width >= ONE_ROW_FROM {
@@ -464,12 +574,31 @@ impl AssetBrowser {
             .entries()
             .into_iter()
             .filter(|entry| self.category.holds(entry.kind))
+            .filter(|entry| self.category != Category::Global || self.is_global(&entry.path))
             .filter(|entry| search.is_empty() || entry.path.to_lowercase().contains(&search))
             .collect();
+        let packages = packages::packages(&self.files_and_shared());
+        // A folder that's gone (deleted, or another project) closes.
+        let open = self.open_package.as_ref().and_then(|name| {
+            packages
+                .iter()
+                .find(|package| package.name.eq_ignore_ascii_case(name))
+        });
+        if open.is_none() {
+            self.open_package = None;
+        }
+        let in_folder = open.is_some() && search.is_empty();
+        let shown = shown(entries, &packages, open, !search.is_empty());
+        if let Some(package) = open
+            && search.is_empty()
+            && self.folder_header(ui, package)
+        {
+            self.open_package = None;
+        }
         egui::ScrollArea::vertical()
             .auto_shrink(false)
             .show(ui, |ui| {
-                if entries.is_empty() {
+                if shown.is_empty() {
                     ui.add_space(16.0);
                     ui.vertical_centered(|ui| {
                         ui.label(
@@ -482,7 +611,12 @@ impl AssetBrowser {
                             .color(palette.text_muted),
                         );
                         ui.label(
-                            egui::RichText::new(if search.is_empty() {
+                            egui::RichText::new(if in_folder {
+                                "Nothing of this kind in this folder."
+                            } else if search.is_empty() && self.category == Category::Global {
+                                "No global assets yet. Right-click an asset and tick Global \
+                                 asset to use it in every project."
+                            } else if search.is_empty() {
                                 "Nothing here yet. Import files, or copy them into the project's \
                                  assets folder."
                             } else {
@@ -495,42 +629,51 @@ impl AssetBrowser {
                 }
                 // A readable list in a narrow column, tiles where there's room.
                 let list = ui.available_width() < LIST_BELOW;
-                let items = |ui: &mut egui::Ui| {
-                    for entry in entries {
-                        let (place, pick, menu) = self.item(ui, &entry, can_edit, list, foliage);
-                        if pick {
-                            action = Some(BrowserAction::Foliage(entry.clone()));
-                        } else if place {
-                            action = Some(BrowserAction::Place(entry.clone()));
-                        }
-                        match menu {
-                            Some(PrefabMenu::Rename { path, name }) => {
-                                self.dialog = Some(PrefabDialog::Rename {
-                                    path,
-                                    name,
-                                    error: None,
-                                });
-                            }
-                            Some(PrefabMenu::Duplicate { path }) => {
-                                action = Some(BrowserAction::DuplicatePrefab { path });
-                            }
-                            Some(PrefabMenu::Delete { path }) => {
-                                self.dialog = Some(PrefabDialog::Delete { path });
-                            }
-                            None => {}
-                        }
+                for block in shown {
+                    if let Some(heading) = block.heading {
+                        ui.add_space(4.0);
+                        widgets::section_label(ui, heading);
+                        ui.add_space(2.0);
                     }
-                };
-                if list {
-                    ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing.y = 1.0;
-                        items(ui);
-                    });
-                } else {
-                    ui.horizontal_wrapped(|ui| {
-                        ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-                        items(ui);
-                    });
+                    let items = |ui: &mut egui::Ui| {
+                        for item in block.items {
+                            let entry = match item {
+                                Shown::Asset(entry) => entry,
+                                Shown::Folder(package) => {
+                                    let (opened, menu) =
+                                        self.folder_item(ui, &package, can_edit, list);
+                                    if opened {
+                                        self.open_package = Some(package.name.clone());
+                                    }
+                                    if let Some(done) = self.follow_menu(menu) {
+                                        action = Some(done);
+                                    }
+                                    continue;
+                                }
+                            };
+                            let (place, pick, menu) =
+                                self.item(ui, &entry, can_edit, list, foliage);
+                            if pick {
+                                action = Some(BrowserAction::Foliage(entry.clone()));
+                            } else if place {
+                                action = Some(BrowserAction::Place(entry.clone()));
+                            }
+                            if let Some(done) = self.follow_menu(menu) {
+                                action = Some(done);
+                            }
+                        }
+                    };
+                    if list {
+                        ui.vertical(|ui| {
+                            ui.spacing_mut().item_spacing.y = 1.0;
+                            items(ui);
+                        });
+                    } else {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+                            items(ui);
+                        });
+                    }
                 }
             });
         if let Some(done) = self.prefab_dialog(ui.ctx()) {
@@ -540,6 +683,59 @@ impl AssetBrowser {
             action = Some(done);
         }
         action
+    }
+
+    /// Does what a tile's right-click menu asked for, or opens its dialog.
+    fn follow_menu(&mut self, menu: Option<ItemMenu>) -> Option<BrowserAction> {
+        match menu? {
+            ItemMenu::Global { path, global } => {
+                let (error, text) = match self.set_global(&path, global) {
+                    Ok(text) => (false, text),
+                    Err(problem) => (true, format!("Global assets: {problem}")),
+                };
+                return Some(BrowserAction::Notice { error, text });
+            }
+            ItemMenu::Rename { path, name } => {
+                self.dialog = Some(PrefabDialog::Rename {
+                    path,
+                    name,
+                    error: None,
+                });
+            }
+            ItemMenu::Duplicate { path } => {
+                return Some(BrowserAction::DuplicatePrefab { path });
+            }
+            ItemMenu::Delete { path } => {
+                self.dialog = Some(PrefabDialog::Delete { path });
+            }
+        }
+        None
+    }
+
+    /// The "Global asset" checkbox of the asset at `path`'s right-click
+    /// menu. Off while there's no folder for global assets.
+    pub(super) fn global_checkbox(&self, ui: &mut egui::Ui, path: &str) -> Option<ItemMenu> {
+        let mut global = self.is_global(path);
+        let response = ui
+            .add_enabled(
+                self.library.is_some() && self.folder.is_some(),
+                egui::Checkbox::new(&mut global, theme::with_icon(icons::GLOBE, "Global asset")),
+            )
+            .on_hover_text(if global {
+                "Untick to take it out of global assets. Projects that used it keep their copy."
+            } else {
+                "Tick to use it in every project. It's copied into a project the first time \
+                 it's used there."
+            })
+            .on_disabled_hover_text("There's no folder for global assets on this computer.");
+        if response.changed() {
+            ui.close();
+            return Some(ItemMenu::Global {
+                path: path.to_owned(),
+                global,
+            });
+        }
+        None
     }
 
     /// The category chips, which pick what's shown.
@@ -734,7 +930,7 @@ impl AssetBrowser {
         can_edit: bool,
         list: bool,
         foliage: Option<&FoliageSource>,
-    ) -> (bool, bool, Option<PrefabMenu>) {
+    ) -> (bool, bool, Option<ItemMenu>) {
         let size = if list {
             egui::vec2(ui.available_width(), LIST_ROW)
         } else {
@@ -744,7 +940,8 @@ impl AssetBrowser {
         let id = response.id;
         let foliage_kind = matches!(entry.kind, AssetKind::Prop | AssetKind::Model);
         let selected = foliage.is_some_and(|source| foliage_matches(source, entry));
-        let hover = if foliage.is_some() && foliage_kind {
+        let global = self.is_global(&entry.path);
+        let mut hover = if foliage.is_some() && foliage_kind {
             format!("{}\nClick to paint this as foliage.", entry.path)
         } else {
             match entry.prop() {
@@ -752,6 +949,11 @@ impl AssetBrowser {
                 None => format!("{}\n{}", entry.path, entry.kind.hover()),
             }
         };
+        if global && !self.is_local(&entry.path) {
+            hover.push_str("\nGlobal asset: copied into this project the first time it's used.");
+        } else if global {
+            hover.push_str("\nGlobal asset: in every project.");
+        }
         // Only tiles on screen ask for their thumbnail, so a long list
         // loads what's visible first.
         let thumbnail = (ui.is_rect_visible(rect)
@@ -759,10 +961,7 @@ impl AssetBrowser {
                 entry.kind,
                 AssetKind::Image | AssetKind::Texture | AssetKind::TextureSet | AssetKind::Particle
             ))
-        .then(|| {
-            self.thumbnails
-                .get(ui.ctx(), &entry.path, entry.kind == AssetKind::TextureSet)
-        })
+        .then(|| self.thumbnail_of(ui.ctx(), entry))
         .flatten();
         // A picture's tooltip shows it larger, to see the whole texture.
         let response = match &thumbnail {
@@ -803,6 +1002,9 @@ impl AssetBrowser {
             )
         };
         self.paint_picture(ui, picture, entry, thumbnail.as_ref());
+        if global {
+            global_badge(ui, picture);
+        }
         let text_color = if response.hovered() {
             palette.text_strong
         } else {
@@ -881,26 +1083,35 @@ impl AssetBrowser {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
         }
         let mut menu = None;
-        if can_edit && entry.kind == AssetKind::Prefab {
+        // Built-in props are in every project already.
+        if entry.kind != AssetKind::Prop {
             let path = entry.path.clone();
             let name = entry.name.clone();
+            let prefab = can_edit && entry.kind == AssetKind::Prefab && self.is_local(&path);
             response.context_menu(|ui| {
+                if let Some(picked) = self.global_checkbox(ui, &path) {
+                    menu = Some(picked);
+                }
+                if !prefab {
+                    return;
+                }
+                ui.separator();
                 if ui
                     .button(format!("{} Rename", icons::PENCIL_SIMPLE))
                     .clicked()
                 {
-                    menu = Some(PrefabMenu::Rename {
+                    menu = Some(ItemMenu::Rename {
                         path: path.clone(),
                         name: name.clone(),
                     });
                     ui.close();
                 }
                 if ui.button(format!("{} Duplicate", icons::COPY)).clicked() {
-                    menu = Some(PrefabMenu::Duplicate { path: path.clone() });
+                    menu = Some(ItemMenu::Duplicate { path: path.clone() });
                     ui.close();
                 }
                 if ui.button(format!("{} Delete", icons::TRASH)).clicked() {
-                    menu = Some(PrefabMenu::Delete { path: path.clone() });
+                    menu = Some(ItemMenu::Delete { path: path.clone() });
                     ui.close();
                 }
             });
@@ -953,7 +1164,7 @@ fn uv() -> egui::Rect {
     egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0))
 }
 
-fn icon_of(entry: &AssetEntry) -> &'static str {
+pub fn icon_of(entry: &AssetEntry) -> &'static str {
     entry.prop().map_or(entry.kind.icon(), |prop| prop.icon)
 }
 
@@ -1011,7 +1222,7 @@ pub fn display_name(path: &str) -> String {
 }
 
 /// Every asset file in `folder`'s `assets` folder, sorted by path.
-fn scan(folder: &Path) -> Vec<AssetEntry> {
+pub fn scan(folder: &Path) -> Vec<AssetEntry> {
     let mut found = Vec::new();
     walk(&folder.join("assets"), "assets", &mut found);
     let set_folders: Vec<String> = found
@@ -1066,10 +1277,39 @@ fn walk(directory: &Path, prefix: &str, found: &mut Vec<AssetEntry>) {
     }
 }
 
-enum PrefabMenu {
-    Rename { path: String, name: String },
-    Duplicate { path: String },
-    Delete { path: String },
+/// What a tile's right-click menu asked for.
+pub(super) enum ItemMenu {
+    /// Make the asset at `path` global, or local again.
+    Global {
+        path: String,
+        global: bool,
+    },
+    Rename {
+        path: String,
+        name: String,
+    },
+    Duplicate {
+        path: String,
+    },
+    Delete {
+        path: String,
+    },
+}
+
+/// A globe at the top right of a global asset's picture.
+pub(super) fn global_badge(ui: &egui::Ui, picture: egui::Rect) {
+    let palette = theme::palette(ui.ctx());
+    let radius = (picture.width() * 0.17).max(6.0);
+    let center = picture.right_top() + egui::vec2(-radius - 1.0, radius + 1.0);
+    let painter = ui.painter();
+    painter.circle_filled(center, radius, palette.accent);
+    painter.text(
+        center,
+        egui::Align2::CENTER_CENTER,
+        icons::GLOBE,
+        egui::FontId::proportional(radius * 1.5),
+        palette.on_accent,
+    );
 }
 
 /// Why `name` can't replace the prefab at `path`, if it can't. The `Ok`
@@ -1240,5 +1480,104 @@ mod tests {
             ]
         );
         let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn a_global_asset_shows_in_every_project_and_is_copied_in_when_used() {
+        let temp = |name: &str| {
+            let folder = std::env::temp_dir().join(format!(
+                "axcenity-panel-global-{name}-{}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&folder);
+            std::fs::create_dir_all(&folder).unwrap();
+            folder
+        };
+        let (first, second, library) = (temp("first"), temp("second"), temp("library"));
+        for file in [
+            "assets/models/Hero/Hero.fbx",
+            "assets/models/Hero/textures/Hero_Diffuse.png",
+            "assets/audio/ding.wav",
+        ] {
+            let path = first.join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, b"").unwrap();
+        }
+        let mut browser = AssetBrowser::default();
+        browser.set_library(Some(library.clone()));
+        browser.open(Some(&first));
+        browser.entries();
+        assert!(
+            !browser.is_global("assets/models/Hero/Hero.fbx"),
+            "local by default"
+        );
+
+        // Ticking Global asset on the model's folder tile.
+        let said = browser
+            .set_global("assets/models/Hero/Hero.fbx", true)
+            .unwrap();
+        assert!(said.contains("Hero is a global asset now"), "{said}");
+        browser.entries();
+        assert!(browser.is_global("assets/models/Hero/Hero.fbx"));
+        assert!(browser.is_global("assets/models/Hero/textures/Hero_Diffuse.png"));
+        assert!(!browser.is_global("assets/audio/ding.wav"));
+
+        // Another project lists it (in its folder) before it has a copy.
+        browser.open(Some(&second));
+        let paths: Vec<String> = browser
+            .entries()
+            .into_iter()
+            .filter(|entry| entry.kind != AssetKind::Prop)
+            .map(|entry| entry.path)
+            .collect();
+        assert_eq!(
+            paths,
+            [
+                "assets/models/Hero/Hero.fbx",
+                "assets/models/Hero/textures/Hero_Diffuse.png"
+            ]
+        );
+        assert_eq!(
+            packages::packages(&browser.files_and_shared())[0].name,
+            "Hero"
+        );
+        assert_eq!(browser.use_here("assets/models/Hero/Hero.fbx"), Ok(2));
+        assert!(second.join("assets/models/Hero/Hero.fbx").is_file());
+        assert_eq!(browser.use_here("assets/models/Hero/Hero.fbx"), Ok(0));
+        // A prop, or a project file that isn't global, copies nothing.
+        assert_eq!(browser.use_here("Table"), Ok(0));
+
+        // The Global chip shows only global assets; the panel draws them.
+        browser.category = Category::Global;
+        let ctx = theme::test_context();
+        for _ in 0..2 {
+            let _ = ctx.run(Default::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| browser.show(ui, true, false, None));
+            });
+        }
+        if let Some(snapshots) = std::env::var_os("AXCENITY_SNAPSHOTS") {
+            browser.category = Category::All;
+            browser.open_package = Some("Hero".to_owned());
+            crate::snapshot::snapshot(
+                &PathBuf::from(snapshots).join("assets-panel-global.png"),
+                egui::vec2(720.0, 320.0),
+                vec![Vec::new(); 4],
+                |ctx| {
+                    egui::CentralPanel::default()
+                        .show(ctx, |ui| browser.show(ui, true, false, None));
+                },
+            );
+        }
+        // Unticking takes it out of global assets; both projects keep it.
+        browser
+            .set_global("assets/models/Hero/Hero.fbx", false)
+            .unwrap();
+        browser.entries();
+        assert!(!browser.is_global("assets/models/Hero/Hero.fbx"));
+        assert!(first.join("assets/models/Hero/Hero.fbx").is_file());
+        assert!(second.join("assets/models/Hero/Hero.fbx").is_file());
+        for folder in [first, second, library] {
+            let _ = std::fs::remove_dir_all(folder);
+        }
     }
 }

@@ -41,7 +41,7 @@ A large module is a parent file plus a folder of the same name. The parent keeps
 | `editor/src/animation.rs` | `documents` (open, close, follow), `chrome` (show, breadcrumb, outline), `clip_ui`, `machine_ui`, `dialogs`; the clip and state-machine editors are `animation/clip_editor.rs`, `property_editor.rs` and `controller_editor.rs` (each with its own children) |
 | `editor/src/block_editor.rs` | `painter` (drawing blocks), `palette`, `canvas` (canvas, dragging, Lua preview), `menus` |
 | `editor/src/terrain_studio.rs` | `tool_settings`, `layers`, `presets` |
-| `editor/src/start.rs` | `dialogs`, `cards`, `pages` |
+| `editor/src/start.rs` | `dialogs`, `cards`, `pages`, `global` |
 | `editor/src/viewport.rs` | `input` (camera, picking, dragging), `overlays` (selection, lights, brush, debug) |
 | `render/src/renderer.rs` | `types` (GPU structs and constants), `scene` (`ScenePipeline`, the frame), `gpu`, `lighting`, `post`, `sprites`, `terrain`, `ui_pass`, `gpu_timer` |
 | `project/src/lib.rs` | `templates`, `scripts`, `stylesheets` (plus `world_file`, `migrate`, `packed`, `versions`, `validate`, `terrain_files`) |

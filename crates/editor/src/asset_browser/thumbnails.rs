@@ -39,9 +39,14 @@ impl Thumbnails {
         };
     }
 
-    /// Drops the thumbnails of files that are gone.
-    pub fn retain(&mut self, keep: impl Fn(&str) -> bool) {
-        self.done.retain(|path, _| keep(path));
+    /// Drops the thumbnails of files that are gone. It looks at the disk,
+    /// not the panel's tiles: a texture set's images aren't tiles, but a
+    /// terrain layer still shows them.
+    pub fn forget_missing(&mut self) {
+        let Some(folder) = &self.folder else {
+            return;
+        };
+        self.done.retain(|path, _| folder.join(path).is_file());
     }
 
     /// Turns finished thumbnails into textures. Call once a frame.
@@ -185,6 +190,21 @@ mod tests {
         let image = shrink(200, 100, &rgba, 96).unwrap();
         assert_eq!(image.size, [96, 48]);
         assert!(shrink(0, 10, &[], 96).is_none());
+    }
+
+    #[test]
+    fn thumbnails_are_kept_while_their_files_exist() {
+        let folder = std::env::temp_dir().join(format!("axcenity-thumbs-{}", std::process::id()));
+        std::fs::create_dir_all(folder.join("assets/set")).unwrap();
+        std::fs::write(folder.join("assets/set/color.png"), b"").unwrap();
+        let mut thumbnails = Thumbnails::default();
+        thumbnails.open(Some(&folder));
+        thumbnails.done.insert("assets/set/color.png".into(), None);
+        thumbnails.done.insert("assets/gone.png".into(), None);
+        thumbnails.forget_missing();
+        let _ = std::fs::remove_dir_all(&folder);
+        assert!(thumbnails.done.contains_key("assets/set/color.png"));
+        assert!(!thumbnails.done.contains_key("assets/gone.png"));
     }
 
     #[test]

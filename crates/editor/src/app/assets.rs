@@ -1,12 +1,13 @@
 //! The editor and the Assets panel: placing a dragged (or double-clicked)
 //! asset in the world, saving the selection as a prefab, and importing
-//! files into the project's `assets` folder.
+//! files into the project's `assets` folder. A global asset the project
+//! hasn't got is copied into it first (see `global_assets.rs`).
 //!
 //! Every placement is one undo step. A model, prefab or prop is moved as a
 //! whole so its bounding box rests on the surface it's dropped on. Saving,
 //! renaming, duplicating and deleting a prefab is one undo step too.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
 use axcenity_project as project;
@@ -45,9 +46,40 @@ impl From<DropTarget> for Spot {
 }
 
 impl EditorApp {
+    /// Uses the global assets in `library` in every project, and lists
+    /// them on the start screen.
+    pub fn set_global_assets(&mut self, library: Option<PathBuf>) {
+        self.start.set_library(library.clone());
+        self.asset_browser.set_library(library);
+    }
+
+    /// Copies the global asset at `path`, with what it needs, into the
+    /// project if it isn't there yet. False (told in Output) if that fails.
+    pub(super) fn use_global_asset(&mut self, path: &str) -> bool {
+        match self.asset_browser.use_here(path) {
+            Ok(0) => true,
+            Ok(copied) => {
+                let files = if copied == 1 { "file" } else { "files" };
+                self.output.info(format!(
+                    "Copied the global asset {} into this project ({copied} {files}).",
+                    display_name(path)
+                ));
+                true
+            }
+            Err(problem) => {
+                self.output
+                    .error(format!("Could not copy the global asset: {problem}"));
+                false
+            }
+        }
+    }
+
     /// Places `entry` at `target`, or at the camera's focus point for `None`.
     pub(super) fn drop_asset(&mut self, entry: &AssetEntry, target: Option<DropTarget>) {
         if self.playing() || self.viewport.is_dragging() || self.project.is_none() {
+            return;
+        }
+        if !self.use_global_asset(&entry.path) {
             return;
         }
         let spot = target.map(Spot::from).unwrap_or_else(|| {
@@ -755,6 +787,44 @@ mod tests {
         assert_eq!(app.history.undo_label(), Some("Place Table"));
         app.undo();
         assert_eq!(app.world.get(workspace).unwrap().children().len(), before);
+    }
+
+    #[test]
+    fn dropping_a_global_asset_copies_it_into_the_project_first() {
+        let temp =
+            std::env::temp_dir().join(format!("axcenity-drop-global-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp);
+        let library = temp.join("library");
+        std::fs::create_dir_all(library.join("assets/audio")).unwrap();
+        std::fs::write(library.join("assets/audio/ding.wav"), b"sound").unwrap();
+        let folder = project::create_project(&temp, "Uses Global").unwrap();
+        let mut app = EditorApp::new(Some(&folder));
+        app.set_global_assets(Some(library));
+        let entry = AssetEntry {
+            kind: AssetKind::Audio,
+            path: "assets/audio/ding.wav".to_owned(),
+            name: "ding".to_owned(),
+        };
+        assert!(app.asset_browser.entries().contains(&entry), "listed");
+
+        app.drop_asset(&entry, None);
+        assert_eq!(
+            std::fs::read(folder.join("assets/audio/ding.wav")).unwrap(),
+            b"sound"
+        );
+        let sound = app.selected.expect("the sound is selected");
+        assert_eq!(
+            app.world.get(sound).unwrap().property("SoundId"),
+            Some(&Value::String(entry.path.clone()))
+        );
+        assert!(
+            app.output
+                .lines()
+                .iter()
+                .any(|line| line.text.contains("Copied the global asset ding")),
+            "said in Output"
+        );
+        let _ = std::fs::remove_dir_all(&temp);
     }
 
     #[test]

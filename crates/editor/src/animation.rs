@@ -29,7 +29,7 @@ mod clip_editor;
 mod controller_editor;
 mod graph;
 mod object_preview;
-mod preview;
+pub(crate) mod preview;
 mod property_editor;
 pub mod store;
 mod timeline;
