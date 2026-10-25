@@ -422,6 +422,20 @@ impl EditorApp {
             }
             ui.menu_button("Help", |ui| {
                 if ui
+                    .add_enabled(
+                        self.project.is_some(),
+                        egui::Button::selectable(
+                            self.learn_open,
+                            theme::with_icon(icons::BOOK_OPEN, "Learn"),
+                        ),
+                    )
+                    .on_hover_text("Tutorials and the API Reference, beside your project")
+                    .on_disabled_hover_text("Learn is on the start screen until a project is open.")
+                    .clicked()
+                {
+                    self.learn_open = !self.learn_open;
+                }
+                if ui
                     .button(theme::with_icon(icons::INFO, "About Axcenity"))
                     .clicked()
                 {

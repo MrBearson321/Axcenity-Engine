@@ -1,6 +1,7 @@
 //! The start screen shown while no project is open: a sidebar with the
 //! wordmark, the Projects, Learn and API Reference pages and Settings
-//! (the reference is in `reference`); on Projects, a
+//! (the tutorials are in `learn`, the reference in `reference`; both also
+//! show over an open project in Help > Learn); on Projects, a
 //! header with New and Open Project, templates to start from, and the
 //! tracked projects as cards (or a list) with thumbnails, a search box and
 //! sorting. Also the New Project, Project Settings, Version History and
@@ -15,11 +16,13 @@ use eframe::egui::{self, CornerRadius, FontId, Rect, RichText, Sense, Stroke, po
 
 mod cards;
 mod dialogs;
+mod learn;
 mod pages;
 mod reference;
 
 use cards::*;
 use dialogs::*;
+use learn::{Learn, LearnAction, SampleState};
 use pages::*;
 use reference::Reference;
 
@@ -130,6 +133,8 @@ pub fn remember(recent: &mut Vec<ProjectLink>, project: ProjectLink) {
 pub enum StartAction {
     OpenDialog,
     Open(PathBuf),
+    /// A tutorial's sample, from Learn. The tutorial stays open in Help > Learn.
+    OpenSample(PathBuf),
     /// The Settings window, from the sidebar.
     Settings,
 }
@@ -212,6 +217,7 @@ pub struct StartScreen {
     last_parent: Option<PathBuf>,
     /// The last problem with something that has no dialog of its own.
     notice: Option<String>,
+    learn: Learn,
     reference: Reference,
 }
 
@@ -299,7 +305,12 @@ impl StartScreen {
                                     action = Some(picked);
                                 }
                             }
-                            Page::Learn => learn_page(ui),
+                            Page::Learn => {
+                                let picked = self.learn.show(ui, |_| SampleState::Ready);
+                                if let Some(sample) = self.follow_learn(picked) {
+                                    action = Some(StartAction::OpenSample(sample));
+                                }
+                            }
                             Page::Reference => self.reference.show(ui),
                         }
                     });
@@ -552,6 +563,78 @@ impl StartScreen {
         action
     }
 
+    /// Does what the Learn page asked for. Returns a sample to open.
+    fn follow_learn(&mut self, action: Option<LearnAction>) -> Option<PathBuf> {
+        match action? {
+            LearnAction::OpenSample(folder) => Some(folder),
+            LearnAction::LookUp(name) => {
+                self.reference.look_up(name);
+                self.page = Page::Reference;
+                None
+            }
+        }
+    }
+
+    /// Help > Learn: the Learn and API Reference pages in a window over the
+    /// open project, at the same place as on the start screen. `project` is
+    /// the open project's folder. Returns a tutorial's sample to open.
+    pub fn learn_window(
+        &mut self,
+        ctx: &egui::Context,
+        open: &mut bool,
+        project: Option<&Path>,
+        playing: bool,
+    ) -> Option<PathBuf> {
+        let mut sample = None;
+        if self.page == Page::Projects {
+            self.page = Page::Learn;
+        }
+        egui::Window::new(theme::with_icon(icons::BOOK_OPEN, "Learn"))
+            .id(egui::Id::new("learn window"))
+            .open(open)
+            .default_size(vec2(480.0, 640.0))
+            .min_width(300.0)
+            .collapsible(false)
+            .resizable(true)
+            .show(ctx, |ui| {
+                let mut page = self.page;
+                widgets::segmented(
+                    ui,
+                    &mut page,
+                    &[
+                        (Page::Learn, Some(icons::BOOK_OPEN), "Tutorials"),
+                        (Page::Reference, Some(icons::BOOKS), "API Reference"),
+                    ],
+                );
+                self.page = page;
+                ui.add_space(8.0);
+                egui::ScrollArea::vertical()
+                    .id_salt("learn window page")
+                    .auto_shrink(false)
+                    .show(ui, |ui| {
+                        ui.add_space(4.0);
+                        match self.page {
+                            Page::Reference => self.reference.show(ui),
+                            _ => {
+                                let picked = self.learn.show(ui, |folder| {
+                                    if playing {
+                                        SampleState::Playing
+                                    } else if project.is_some_and(|open| same_folder(open, folder))
+                                    {
+                                        SampleState::AlreadyOpen
+                                    } else {
+                                        SampleState::Ready
+                                    }
+                                });
+                                sample = self.follow_learn(picked);
+                            }
+                        }
+                        ui.add_space(12.0);
+                    });
+            });
+        sample
+    }
+
     fn open_settings(&mut self, link: ProjectLink) {
         let show_splash = axcenity_project::read_manifest(&link.folder)
             .is_none_or(|manifest| manifest.show_splash);
@@ -563,6 +646,24 @@ impl StartScreen {
             error: None,
         });
     }
+}
+
+/// True when `a` and `b` are the same folder, however they're written.
+fn same_folder(a: &Path, b: &Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
+}
+
+/// The sample folder (in `examples/`) of every tutorial, for tests that
+/// check each one still opens and plays.
+#[cfg(test)]
+pub fn tutorial_samples() -> Vec<&'static str> {
+    learn::TUTORIALS
+        .iter()
+        .map(|tutorial| tutorial.sample)
+        .collect()
 }
 
 /// The About box: the logo, the version, and the licences of what's built in.

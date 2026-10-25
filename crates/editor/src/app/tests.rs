@@ -2022,3 +2022,25 @@ fn the_angular_tool_places_its_copies_in_one_undo_step() {
     app.undo();
     assert_eq!(children(&app, workspace).len(), before);
 }
+
+#[test]
+fn every_tutorial_sample_opens_and_plays_in_the_editor() {
+    for name in crate::start::tutorial_samples() {
+        let folder = copy_of_example(name, &format!("tutorial-{name}"));
+        let mut app = EditorApp::new(Some(&folder));
+        assert!(app.project.is_some(), "{name} didn't open");
+        app.play();
+        assert!(app.playing(), "{name} didn't play");
+        play_for(&mut app, 1.0);
+        let errors: Vec<&str> = app
+            .output
+            .lines()
+            .iter()
+            .filter(|line| line.kind == OutputKind::Error)
+            .map(|line| line.text.as_str())
+            .collect();
+        assert!(errors.is_empty(), "{name}: {errors:?}");
+        drop(app);
+        let _ = std::fs::remove_dir_all(folder);
+    }
+}

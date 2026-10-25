@@ -47,10 +47,22 @@ enum Nav {
 }
 
 impl Reference {
-    pub(super) fn show(&mut self, ui: &mut egui::Ui) {
+    /// Opens the entry called `name` (`Part.Touched`), with it typed in the
+    /// search box, as if it had been searched for.
+    pub(super) fn look_up(&mut self, name: &str) {
+        self.load();
+        self.query = name.to_owned();
+        self.open = search_entries(&self.entries, name).first().copied();
+    }
+
+    fn load(&mut self) {
         if self.entries.is_empty() {
             self.entries = axcenity_script::api_reference();
         }
+    }
+
+    pub(super) fn show(&mut self, ui: &mut egui::Ui) {
+        self.load();
         let palette = theme::palette(ui.ctx());
         ui.label(
             RichText::new("API Reference")
@@ -390,7 +402,7 @@ fn entry_page(
 }
 
 /// A description with its `code` in the code font.
-fn doc_text(doc: &str, palette: &Palette) -> LayoutJob {
+pub(super) fn doc_text(doc: &str, palette: &Palette) -> LayoutJob {
     let mut job = LayoutJob::default();
     // Odd pieces are between backticks.
     for (piece, text) in doc.split('`').enumerate() {

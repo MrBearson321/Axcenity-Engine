@@ -210,3 +210,112 @@ fn the_reference_draws_results_and_an_open_entry() {
         assert_eq!(start.reference.open, open, "drawing alone opens nothing");
     }
 }
+
+#[test]
+fn every_tutorial_names_a_sample_that_loads() {
+    for tutorial in learn::TUTORIALS {
+        let folder = learn::find_sample(tutorial.sample)
+            .unwrap_or_else(|| panic!("examples/{} wasn't found", tutorial.sample));
+        let project = axcenity_project::load(&folder).unwrap();
+        assert_eq!(
+            project.manifest.name, tutorial.sample_name,
+            "{}",
+            tutorial.title
+        );
+        assert!(!tutorial.steps.is_empty(), "{}", tutorial.title);
+    }
+    // The four the roadmap asks for come first.
+    let titles: Vec<&str> = learn::TUTORIALS[..4].iter().map(|t| t.title).collect();
+    assert_eq!(
+        titles,
+        [
+            "Place and move a part",
+            "Run a script",
+            "Press Play and Stop",
+            "Open a sample"
+        ]
+    );
+}
+
+#[test]
+fn every_look_up_opens_its_api_reference_entry() {
+    for tutorial in learn::TUTORIALS {
+        for &name in tutorial.look_up {
+            let mut start = StartScreen::default();
+            start.reference.look_up(name);
+            let open = start
+                .reference
+                .open
+                .map(|i| start.reference.entries[i].qualified_name());
+            assert_eq!(open.as_deref(), Some(name), "{}", tutorial.title);
+        }
+    }
+}
+
+#[test]
+fn the_learn_page_draws_every_tutorial() {
+    let snapshots = std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from);
+    for (index, tutorial) in learn::TUTORIALS.iter().enumerate() {
+        for theme in [theme::ThemeChoice::Dark, theme::ThemeChoice::Light] {
+            let mut start = StartScreen {
+                page: Page::Learn,
+                ..Default::default()
+            };
+            start.learn.open = Some(index);
+            let appearance = theme::Appearance {
+                theme,
+                ..Default::default()
+            };
+            let mut projects = Vec::new();
+            let mut draw = |ctx: &egui::Context| {
+                theme::apply(ctx, &appearance);
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE.fill(theme::palette(ctx).panel))
+                    .show(ctx, |ui| {
+                        let brand = Brand::load(ui.ctx());
+                        assert!(start.show(ui, &mut projects, &brand).is_none());
+                    });
+            };
+            let light = if theme == theme::ThemeChoice::Light {
+                "-light"
+            } else {
+                ""
+            };
+            match &snapshots {
+                Some(folder) => crate::snapshot::snapshot(
+                    &folder.join(format!("start-learn-{}{light}.png", tutorial.sample)),
+                    vec2(1400.0, 2400.0),
+                    vec![Vec::new(); 3],
+                    &mut draw,
+                ),
+                None => {
+                    let ctx = theme::test_context();
+                    for _ in 0..3 {
+                        let _ = ctx.run(Default::default(), &mut draw);
+                    }
+                }
+            }
+            assert_eq!(start.learn.open, Some(index), "drawing alone goes nowhere");
+        }
+    }
+}
+
+#[test]
+fn the_learn_window_shows_tutorials_and_the_reference_over_a_project() {
+    let mut start = StartScreen::default();
+    start.learn.open = Some(0);
+    let sample = learn::find_sample(learn::TUTORIALS[0].sample).unwrap();
+    let ctx = theme::test_context();
+    for page in [Page::Learn, Page::Reference] {
+        start.page = page;
+        for _ in 0..3 {
+            let _ = ctx.run(Default::default(), |ctx| {
+                theme::apply(ctx, &theme::Appearance::default());
+                let mut open = true;
+                let picked = start.learn_window(ctx, &mut open, Some(&sample), false);
+                assert!(picked.is_none() && open);
+            });
+        }
+        assert_eq!(start.page, page);
+    }
+}

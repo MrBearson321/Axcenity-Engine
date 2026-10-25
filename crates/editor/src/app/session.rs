@@ -570,7 +570,10 @@ impl EditorApp {
                         })
                     })
             }
-            Discard::Quit | Discard::OpenAnother | Discard::CloseProject => self.unsaved(),
+            Discard::Quit
+            | Discard::OpenAnother
+            | Discard::OpenSample(_)
+            | Discard::CloseProject => self.unsaved(),
         };
         if unsaved {
             self.asking = Some(discard);
@@ -587,9 +590,10 @@ impl EditorApp {
             // Closing a tab only needs that script saved.
             Answer::Save => match &discard {
                 Discard::CloseTab(path) => self.save_tab(path).then_some(discard),
-                Discard::Quit | Discard::OpenAnother | Discard::CloseProject => {
-                    self.save().then_some(discard)
-                }
+                Discard::Quit
+                | Discard::OpenAnother
+                | Discard::OpenSample(_)
+                | Discard::CloseProject => self.save().then_some(discard),
             },
             Answer::DontSave => {
                 if let Discard::CloseTab(path) = &discard {
@@ -635,6 +639,7 @@ impl EditorApp {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
             Discard::OpenAnother => self.open_with_dialog(ctx),
+            Discard::OpenSample(folder) => self.begin_open(ctx, &folder),
             Discard::CloseProject => self.close_project(),
             Discard::CloseTab(path) => self.tabs.close(&path),
         }
@@ -722,7 +727,7 @@ impl EditorApp {
         let project = self.project.as_ref().map_or("", |project| &project.name);
         let (name, doing) = match discard {
             Discard::Quit => (project, "closing"),
-            Discard::OpenAnother => (project, "opening another project"),
+            Discard::OpenAnother | Discard::OpenSample(_) => (project, "opening another project"),
             Discard::CloseProject => (project, "closing it"),
             Discard::CloseTab(path) => (axcenity_project::script_name(path), "closing it"),
         };
@@ -809,6 +814,10 @@ impl EditorApp {
         match picked {
             Some(StartAction::OpenDialog) => self.open_with_dialog(ctx),
             Some(StartAction::Open(folder)) => self.begin_open(ctx, &folder),
+            Some(StartAction::OpenSample(folder)) => {
+                self.begin_open(ctx, &folder);
+                self.learn_open = true;
+            }
             Some(StartAction::Settings) => self.settings.open = true,
             None => {}
         }

@@ -226,6 +226,8 @@ pub struct EditorApp {
     viewport_rect: Option<egui::Rect>,
     /// True while Help > About is open.
     about_open: bool,
+    /// True while Help > Learn is open over the project.
+    learn_open: bool,
     /// A Sound being listened to from the Properties panel, outside Play.
     sound_preview: Option<axcenity_audio::AudioEngine>,
     /// The Assets panel, which shares the bottom of the window with Output.
@@ -382,6 +384,8 @@ const WINDOW_KEY: &str = "window";
 enum Discard {
     Quit,
     OpenAnother,
+    /// Opening a tutorial's sample from Help > Learn.
+    OpenSample(PathBuf),
     /// Closing the tab of the script at this path.
     CloseTab(String),
     /// Going back to the start screen.
@@ -504,6 +508,7 @@ impl EditorApp {
             thumbnail_wanted: None,
             viewport_rect: None,
             about_open: false,
+            learn_open: false,
             sound_preview: None,
             asset_browser: AssetBrowser::default(),
             animation: AnimationStudio::default(),
@@ -906,6 +911,16 @@ impl EditorApp {
         self.import_prompt(ctx);
         self.ribbon_tabs.editor_window(ctx);
         self.start_thumbnail(ctx);
+        if self.learn_open && self.project.is_some() {
+            let folder = self.project.as_ref().map(|project| project.folder.clone());
+            let playing = self.playing();
+            if let Some(sample) =
+                self.start
+                    .learn_window(ctx, &mut self.learn_open, folder.as_deref(), playing)
+            {
+                self.request_and_go_ahead(ctx, Discard::OpenSample(sample));
+            }
+        }
         if self.about_open
             && let Some(brand) = &self.brand
         {

@@ -209,7 +209,7 @@ Short tutorials, each one task, live with the editor's Learn page: place and mov
 
 - [ ] Learn lists the tutorials, and each one can be opened and followed without another document.
 - [ ] Each tutorial names a sample project, and that sample still runs in the player and the editor.
-- [ ] The searchable API reference from Phase 10 still opens from the editor.
+- [x] The searchable API reference from Phase 10 still opens from the editor.
 
 ---
 
