@@ -632,14 +632,15 @@ pub(super) mod tests {
         assert_eq!(arrays_key(&layers), before);
         layers.layers[0].base_color_texture = Some(Arc::new(Checker(7)));
         assert_ne!(arrays_key(&layers), before);
-        // A map's value is the map alone.
+        // With a map, the layer's value scales it (the shader multiplies).
         layers.layers[0].roughness_map = Some(ChannelMap {
             texture: Arc::new(Checker(8)),
             channel: Channel::Green,
             invert: false,
         });
+        layers.layers[0].roughness = 0.6;
         let raw = uniform(&layers);
-        assert_eq!(raw.layers[0].surface[1], 1.0);
+        assert_eq!(raw.layers[0].surface[1], 0.6);
         assert_eq!(raw.info[0], 1.0);
         assert_eq!(raw.layers[0].tint_tile[3], 3.0);
     }
