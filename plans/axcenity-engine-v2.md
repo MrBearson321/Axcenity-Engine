@@ -227,8 +227,8 @@ A `ThirdPersonController` Instance, parented to a character model, walks and run
 
 - [ ] During Play, walk and run move the character across a flat floor at different speeds, and the character does not tip over or fall as a physics body.
 - [ ] The third-person camera follows behind the character during Play and is gone after Stop, with the fly camera back.
-- [ ] An unanchored crate still falls and collides, and editing the controller's speeds does not change crate gravity or friction.
-- [ ] The controller saves, reloads, and can be switched between walk and run from Lua and from blocks.
+- [x] An unanchored crate still falls and collides, and editing the controller's speeds does not change crate gravity or friction.
+- [x] The controller saves, reloads, and can be switched between walk and run from Lua and from blocks.
 
 ---
 

@@ -1,0 +1,54 @@
+{
+  "blocks": [
+    {
+      "id": 1,
+      "kind": {
+        "type": "when_key_pressed",
+        "key": "One",
+        "body": [
+          {
+            "id": 2,
+            "kind": {
+              "type": "set_property",
+              "target": "Character.ThirdPersonController",
+              "property": "Movement",
+              "value": { "type": "text", "value": "Walk" }
+            }
+          },
+          {
+            "id": 3,
+            "kind": {
+              "type": "print",
+              "value": { "type": "text", "value": "walking" }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": 4,
+      "kind": {
+        "type": "when_key_pressed",
+        "key": "Two",
+        "body": [
+          {
+            "id": 5,
+            "kind": {
+              "type": "set_property",
+              "target": "Character.ThirdPersonController",
+              "property": "Movement",
+              "value": { "type": "text", "value": "Run" }
+            }
+          },
+          {
+            "id": 6,
+            "kind": {
+              "type": "print",
+              "value": { "type": "text", "value": "running" }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

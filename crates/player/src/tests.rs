@@ -76,6 +76,89 @@ fn hello_remote_example_moves_the_block_while_an_arrow_key_is_held() {
 }
 
 #[test]
+fn hello_character_walks_runs_and_switches_from_lua_and_blocks() {
+    use axcenity_core::KeyCode as K;
+    let (mut world, mut scripts) = start_example("hello-character");
+    let assets = Assets::default();
+    let mut characters = Controllers::default();
+    let mut physics = Physics::new();
+    let model = world
+        .find_first_child(world.workspace(), "Character")
+        .unwrap();
+    let controller = world
+        .find_first_child(model, "ThirdPersonController")
+        .unwrap();
+    let body = world.find_first_child(model, "Body").unwrap();
+    let movement = |world: &World| {
+        world
+            .get(controller)
+            .unwrap()
+            .property("Movement")
+            .and_then(Value::as_str)
+            .unwrap()
+            .to_owned()
+    };
+    let body_position = |world: &World| {
+        world
+            .get(body)
+            .unwrap()
+            .property("Position")
+            .and_then(Value::as_vector3)
+            .unwrap()
+    };
+    let walk = MoveInput {
+        forward: true,
+        ..MoveInput::default()
+    };
+    // The host's frame order: character, scripts, kinematic hold, physics.
+    let mut frame = |world: &mut World, keys: &[KeyEvent], input: MoveInput| {
+        characters.step(world, &assets, input, 1.0 / 60.0);
+        scripts.input(world, keys);
+        scripts.step(world, 1.0 / 60.0);
+        characters.keep_kinematic(world);
+        physics.step(world, 1.0 / 60.0);
+    };
+    let press = |key, pressed| [KeyEvent { key, pressed }];
+
+    // Walk for one second.
+    let start = body_position(&world);
+    for _ in 0..60 {
+        frame(&mut world, &[], walk);
+    }
+    let walked = start.z - body_position(&world).z;
+    assert!((walked - 16.0).abs() < 0.5, "walked {walked}");
+    assert!((body_position(&world).y - start.y).abs() < 1e-3);
+
+    // The LocalScript runs while Shift is held.
+    frame(&mut world, &press(K::LeftShift, true), MoveInput::default());
+    assert_eq!(movement(&world), "Run");
+    let start = body_position(&world);
+    for _ in 0..60 {
+        frame(&mut world, &[], walk);
+    }
+    let ran = start.z - body_position(&world).z;
+    assert!((ran - 32.0).abs() < 0.5, "ran {ran}");
+    frame(
+        &mut world,
+        &press(K::LeftShift, false),
+        MoveInput::default(),
+    );
+    assert_eq!(movement(&world), "Walk");
+
+    // The block script switches with 2 and 1.
+    frame(&mut world, &press(K::Two, true), MoveInput::default());
+    assert_eq!(movement(&world), "Run");
+    frame(&mut world, &press(K::Two, false), MoveInput::default());
+    frame(&mut world, &press(K::One, true), MoveInput::default());
+    assert_eq!(movement(&world), "Walk");
+
+    // The body never fell as a physics body; the crate did, onto the floor.
+    assert!((body_position(&world).y - 2.5).abs() < 1e-3);
+    let crate_y = position_of(&world, "Crate").y;
+    assert!(crate_y < 3.0, "crate at {crate_y}");
+}
+
+#[test]
 fn keys_are_recorded_and_released() {
     let mut keys = MoveKeys::default();
     set_move_key(&mut keys, KeyCode::KeyW, true);
