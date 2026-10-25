@@ -429,9 +429,21 @@ impl EditorApp {
         if ui.ui_contains_pointer() && ctx.input(|input| input.pointer.any_pressed()) {
             self.tabs.activate(id);
         }
-        // Scripts and LocalScripts switch between Code and Blocks here.
+        // Scripts and LocalScripts switch between Code, Blocks and Graph here.
+        let graph = self.project.as_ref().is_some_and(|project| {
+            project
+                .block_scripts
+                .iter()
+                .any(|document| document.path == path && document.script.graph.shown)
+        });
         if axcenity_project::switched_script_path(&path).is_some() {
-            let blocks = axcenity_project::is_block_script(&path);
+            let view = if !axcenity_project::is_block_script(&path) {
+                scripts::ScriptView::Code
+            } else if graph {
+                scripts::ScriptView::Graph
+            } else {
+                scripts::ScriptView::Blocks
+            };
             let playing = self.playing();
             let switch = egui::TopBottomPanel::top(egui::Id::new(("script mode", id)))
                 .frame(
@@ -439,10 +451,10 @@ impl EditorApp {
                         .fill(palette.panel)
                         .inner_margin(egui::Margin::symmetric(10, 5)),
                 )
-                .show_inside(ui, |ui| scripts::mode_bar(ui, blocks, !playing))
+                .show_inside(ui, |ui| scripts::mode_bar(ui, view, !playing))
                 .inner;
-            if switch {
-                self.switch_script_mode(&path);
+            if let Some(view) = switch {
+                self.switch_script_view(&path, view);
                 ctx.request_repaint();
                 return;
             }
@@ -482,17 +494,17 @@ impl EditorApp {
                             .iter_mut()
                             .find(|document| document.path == path)
                     }) {
-                        changed = block_editor::show(
-                            ui,
-                            &mut document.script,
-                            block_editor::BlockContext {
-                                key: &path,
-                                client: axcenity_project::script_class(&path)
-                                    == ClassName::LocalScript,
-                                highlighted: document.highlighted,
-                                objects: &objects,
-                            },
-                        );
+                        let context = block_editor::BlockContext {
+                            key: &path,
+                            client: axcenity_project::script_class(&path) == ClassName::LocalScript,
+                            highlighted: document.highlighted,
+                            objects: &objects,
+                        };
+                        changed = if graph {
+                            block_editor::show_graph(ui, &mut document.script, context)
+                        } else {
+                            block_editor::show(ui, &mut document.script, context)
+                        };
                         if changed {
                             document.highlighted = None;
                         }

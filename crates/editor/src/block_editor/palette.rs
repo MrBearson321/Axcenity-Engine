@@ -1,6 +1,7 @@
 use super::*;
 
 /// A block or reporter in the palette.
+#[derive(Clone, Debug)]
 pub(super) enum PaletteItem {
     Block(BlockKind),
     Reporter(Expression),

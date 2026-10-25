@@ -173,6 +173,7 @@ pub(super) fn starter_blocks() -> BlockScript {
                 ],
             }),
         ],
+        ..Default::default()
     }
 }
 

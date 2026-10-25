@@ -392,33 +392,46 @@ impl ScriptTabs {
     }
 }
 
+/// How a Script or LocalScript is shown and edited.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScriptView {
+    /// Typed Lua.
+    Code,
+    /// Scratch-style blocks.
+    Blocks,
+    /// The same blocks as Blueprint-style nodes and wires.
+    Graph,
+}
+
 /// The bar above a Script or LocalScript's tab that switches it between
-/// Code and Blocks. Returns true when the other one is picked.
-pub fn mode_bar(ui: &mut egui::Ui, blocks: bool, enabled: bool) -> bool {
-    let mut switch = false;
+/// Code, Blocks and Graph. Returns the view picked, if it's another one.
+pub fn mode_bar(ui: &mut egui::Ui, view: ScriptView, enabled: bool) -> Option<ScriptView> {
+    let mut switch = None;
     let palette = theme::palette(ui.ctx());
     ui.horizontal(|ui| {
         ui.add_enabled_ui(enabled, |ui| {
-            let mut picked = blocks;
+            let mut picked = view;
             let response = ui
                 .scope(|ui| {
                     crate::widgets::segmented(
                         ui,
                         &mut picked,
                         &[
-                            (false, Some(icons::CODE), "Code"),
-                            (true, Some(icons::PUZZLE_PIECE), "Blocks"),
+                            (ScriptView::Code, Some(icons::CODE), "Code"),
+                            (ScriptView::Blocks, Some(icons::PUZZLE_PIECE), "Blocks"),
+                            (ScriptView::Graph, Some(icons::GRAPH), "Graph"),
                         ],
                     )
                 })
                 .response;
             response
                 .on_hover_text(
-                    "Code: type the script as Lua. Blocks: snap it together from blocks; Lua \
-                     that has no blocks shows as grey Lua blocks, so nothing is lost.",
+                    "Code: type the script as Lua. Blocks: snap it together from blocks. \
+                     Graph: wire nodes together, as in Unreal Blueprints. Lua that has no \
+                     blocks shows as grey Lua blocks and nodes, so nothing is lost.",
                 )
                 .on_disabled_hover_text("Press Stop to switch.");
-            switch = picked != blocks;
+            switch = (picked != view).then_some(picked);
         });
         ui.label(
             egui::RichText::new("Switch any time: the script runs the same either way.")

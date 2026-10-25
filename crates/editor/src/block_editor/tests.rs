@@ -60,6 +60,7 @@ fn dropping_a_reporter_and_stacks_puts_them_where_aimed() {
                 seconds: Expression::Number { value: 1.0 },
             })],
         })],
+        ..Default::default()
     };
     let wait = script.blocks[0].kind.bodies()[0][0].id;
     let address = SlotAddress {
@@ -110,7 +111,7 @@ fn dropping_a_reporter_and_stacks_puts_them_where_aimed() {
 }
 
 /// A script with every palette block and reporter in it.
-fn sample_script(objects: &[ObjectInfo]) -> BlockScript {
+pub(super) fn sample_script(objects: &[ObjectInfo]) -> BlockScript {
     let mut events = Vec::new();
     let mut statements = Vec::new();
     let mut reporters = Vec::new();
@@ -177,7 +178,10 @@ end"
             ],
         })
     });
-    BlockScript { blocks }
+    BlockScript {
+        blocks,
+        ..Default::default()
+    }
 }
 
 #[test]
@@ -239,7 +243,7 @@ fn every_block_draws_in_both_themes_without_changing_the_script() {
 
 /// The frames of dragging with the left mouse button from `from` to
 /// `to`, in a few steps, then letting go.
-fn drag_frames(from: Pos2, to: Pos2) -> Vec<Vec<egui::Event>> {
+pub(super) fn drag_frames(from: Pos2, to: Pos2) -> Vec<Vec<egui::Event>> {
     let button = |pos, pressed| egui::Event::PointerButton {
         pos,
         button: egui::PointerButton::Primary,

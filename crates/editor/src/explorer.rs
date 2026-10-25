@@ -48,12 +48,12 @@ pub fn script_hover(class: ClassName) -> &'static str {
         ClassName::LocalScript => {
             "Make a new LocalScript, which runs on the player's side (keyboard, camera), in \
              StarterPlayerScripts, with its .client.lua file in the project's scripts folder, \
-             and open it. Switch it between Code and Blocks at the top of its tab."
+             and open it. Switch it between Code, Blocks and Graph at the top of its tab."
         }
         _ => {
             "Make a new Script, which runs on the server, in ServerScriptService, with its \
              .server.lua file in the project's scripts folder, and open it. Switch it between \
-             Code and Blocks at the top of its tab."
+             Code, Blocks and Graph at the top of its tab."
         }
     }
 }

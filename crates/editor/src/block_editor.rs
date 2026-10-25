@@ -35,6 +35,7 @@ use crate::lua_syntax;
 use crate::theme::{self, icons};
 
 mod canvas;
+mod graph;
 mod menus;
 mod painter;
 mod palette;
@@ -43,6 +44,8 @@ use canvas::*;
 use menus::*;
 use painter::*;
 use palette::*;
+
+pub use graph::show_graph;
 
 /// An object a block can name: its path below the Workspace, such as
 /// `Pad.Chime`, and its class.

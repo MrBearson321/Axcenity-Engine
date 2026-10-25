@@ -600,149 +600,164 @@ impl<'a> BlockPainter<'a> {
             let size = self.part_size(ui, part);
             let rect = Rect::from_min_size(pos2(x, center_y - size.y * 0.5), size);
             let part_id = id.with(index);
-            match part {
-                Part::Label(text) => {
-                    self.painter.text(
-                        rect.left_center(),
-                        egui::Align2::LEFT_CENTER,
-                        text.as_str(),
-                        self.font(),
-                        Color32::WHITE,
-                    );
-                }
-                Part::Icon(icon) => {
-                    self.painter.text(
-                        rect.center(),
-                        egui::Align2::CENTER_CENTER,
-                        *icon,
-                        FontId::proportional(16.0 * self.z),
-                        Color32::from_rgb(76, 191, 86),
-                    );
-                }
-                Part::Slot(expression, kind) => {
-                    self.slot(ui, expression, *kind, rect, part_id, address.child(slot));
-                    slot += 1;
-                }
-                Part::Object(path, filter) => {
-                    let filter = *filter;
-                    if let Some(response) = self.dropdown(ui, rect, part_id, path) {
-                        let objects = self.objects;
-                        egui::Popup::menu(&response).show(|ui| {
-                            object_menu(ui, path, filter, objects);
-                        });
-                    }
-                }
-                Part::Property(name, class) => {
-                    let class = *class;
-                    if let Some(response) = self.dropdown(ui, rect, part_id, name) {
-                        egui::Popup::menu(&response).show(|ui| property_menu(ui, name, class));
-                    }
-                }
-                Part::Variable(name) => {
-                    let variables = self.variables;
-                    if let Some(response) = self.dropdown(ui, rect, part_id, name) {
-                        egui::Popup::menu(&response)
-                            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                            .show(|ui| variable_menu(ui, name, variables));
-                    }
-                }
-                Part::Key(key) => {
-                    if let Some(response) = self.dropdown(ui, rect, part_id, key) {
-                        egui::Popup::menu(&response).show(|ui| key_menu(ui, key));
-                    }
-                }
-                Part::Name(name, kind, animator) => {
-                    let (kind, objects) = (*kind, self.objects);
-                    let suggestions: Vec<String> = objects
-                        .iter()
-                        .find(|object| object.path == *animator)
-                        .map(|object| {
-                            object
-                                .names
-                                .iter()
-                                .filter(|(of, _)| *of == kind)
-                                .map(|(_, name)| name.clone())
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    if let Some(response) = self.dropdown(ui, rect, part_id, name) {
-                        egui::Popup::menu(&response)
-                            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                            .show(|ui| name_menu(ui, name, kind, &suggestions));
-                    }
-                }
-                Part::Math(op) => {
-                    if let Some(response) = self.dropdown(ui, rect, part_id, op.symbol()) {
-                        egui::Popup::menu(&response).show(|ui| {
-                            for choice in MathOp::ALL {
-                                if ui
-                                    .selectable_label(**op == choice, choice.symbol())
-                                    .clicked()
-                                {
-                                    **op = choice;
-                                    ui.close();
-                                }
-                            }
-                        });
-                    }
-                }
-                Part::Compare(op) => {
-                    if let Some(response) = self.dropdown(ui, rect, part_id, op.symbol()) {
-                        egui::Popup::menu(&response).show(|ui| {
-                            for choice in Comparison::ALL {
-                                if ui
-                                    .selectable_label(**op == choice, choice.symbol())
-                                    .clicked()
-                                {
-                                    **op = choice;
-                                    ui.close();
-                                }
-                            }
-                        });
-                    }
-                }
-                Part::Logic(op) => {
-                    if let Some(response) = self.dropdown(ui, rect, part_id, op.lua()) {
-                        egui::Popup::menu(&response).show(|ui| {
-                            for choice in [LogicOp::And, LogicOp::Or] {
-                                if ui.selectable_label(**op == choice, choice.lua()).clicked() {
-                                    **op = choice;
-                                    ui.close();
-                                }
-                            }
-                        });
-                    }
-                }
-                Part::Code(code) => {
-                    let galley = self.code_galley(ui, code);
-                    self.painter.rect_filled(
-                        rect,
-                        self.s(4.0),
-                        Color32::from_rgba_unmultiplied(0, 0, 0, 60),
-                    );
-                    self.painter.galley(
-                        rect.min + vec2(self.s(6.0), self.s(4.0)),
-                        galley,
-                        Color32::WHITE,
-                    );
-                }
-                Part::Function(function) => {
-                    if let Some(response) = self.dropdown(ui, rect, part_id, function.name()) {
-                        egui::Popup::menu(&response).show(|ui| {
-                            for choice in MathFunction::ALL {
-                                if ui
-                                    .selectable_label(**function == choice, choice.name())
-                                    .clicked()
-                                {
-                                    **function = choice;
-                                    ui.close();
-                                }
-                            }
-                        });
-                    }
-                }
+            if let Part::Slot(expression, kind) = part {
+                self.slot(ui, expression, *kind, rect, part_id, address.child(slot));
+                slot += 1;
+            } else {
+                self.draw_field(ui, part, rect, part_id);
             }
             x += size.x + self.s(GAP);
+        }
+    }
+
+    /// Draws one part of a block that isn't a value slot (a label, a menu,
+    /// grey Lua) in `rect`.
+    pub(super) fn draw_field(
+        &mut self,
+        ui: &mut egui::Ui,
+        part: &mut Part,
+        rect: Rect,
+        part_id: egui::Id,
+    ) {
+        match part {
+            Part::Label(text) => {
+                self.painter.text(
+                    rect.left_center(),
+                    egui::Align2::LEFT_CENTER,
+                    text.as_str(),
+                    self.font(),
+                    Color32::WHITE,
+                );
+            }
+            Part::Icon(icon) => {
+                self.painter.text(
+                    rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    *icon,
+                    FontId::proportional(16.0 * self.z),
+                    Color32::from_rgb(76, 191, 86),
+                );
+            }
+            // Value slots are drawn by `slot`.
+            Part::Slot(..) => {}
+            Part::Object(path, filter) => {
+                let filter = *filter;
+                if let Some(response) = self.dropdown(ui, rect, part_id, path) {
+                    let objects = self.objects;
+                    egui::Popup::menu(&response).show(|ui| {
+                        object_menu(ui, path, filter, objects);
+                    });
+                }
+            }
+            Part::Property(name, class) => {
+                let class = *class;
+                if let Some(response) = self.dropdown(ui, rect, part_id, name) {
+                    egui::Popup::menu(&response).show(|ui| property_menu(ui, name, class));
+                }
+            }
+            Part::Variable(name) => {
+                let variables = self.variables;
+                if let Some(response) = self.dropdown(ui, rect, part_id, name) {
+                    egui::Popup::menu(&response)
+                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                        .show(|ui| variable_menu(ui, name, variables));
+                }
+            }
+            Part::Key(key) => {
+                if let Some(response) = self.dropdown(ui, rect, part_id, key) {
+                    egui::Popup::menu(&response).show(|ui| key_menu(ui, key));
+                }
+            }
+            Part::Name(name, kind, animator) => {
+                let (kind, objects) = (*kind, self.objects);
+                let suggestions: Vec<String> = objects
+                    .iter()
+                    .find(|object| object.path == *animator)
+                    .map(|object| {
+                        object
+                            .names
+                            .iter()
+                            .filter(|(of, _)| *of == kind)
+                            .map(|(_, name)| name.clone())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if let Some(response) = self.dropdown(ui, rect, part_id, name) {
+                    egui::Popup::menu(&response)
+                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                        .show(|ui| name_menu(ui, name, kind, &suggestions));
+                }
+            }
+            Part::Math(op) => {
+                if let Some(response) = self.dropdown(ui, rect, part_id, op.symbol()) {
+                    egui::Popup::menu(&response).show(|ui| {
+                        for choice in MathOp::ALL {
+                            if ui
+                                .selectable_label(**op == choice, choice.symbol())
+                                .clicked()
+                            {
+                                **op = choice;
+                                ui.close();
+                            }
+                        }
+                    });
+                }
+            }
+            Part::Compare(op) => {
+                if let Some(response) = self.dropdown(ui, rect, part_id, op.symbol()) {
+                    egui::Popup::menu(&response).show(|ui| {
+                        for choice in Comparison::ALL {
+                            if ui
+                                .selectable_label(**op == choice, choice.symbol())
+                                .clicked()
+                            {
+                                **op = choice;
+                                ui.close();
+                            }
+                        }
+                    });
+                }
+            }
+            Part::Logic(op) => {
+                if let Some(response) = self.dropdown(ui, rect, part_id, op.lua()) {
+                    egui::Popup::menu(&response).show(|ui| {
+                        for choice in [LogicOp::And, LogicOp::Or] {
+                            if ui.selectable_label(**op == choice, choice.lua()).clicked() {
+                                **op = choice;
+                                ui.close();
+                            }
+                        }
+                    });
+                }
+            }
+            Part::Code(code) => {
+                let galley = self.code_galley(ui, code);
+                self.painter.rect_filled(
+                    rect,
+                    self.s(4.0),
+                    Color32::from_rgba_unmultiplied(0, 0, 0, 60),
+                );
+                self.painter.galley(
+                    rect.min + vec2(self.s(6.0), self.s(4.0)),
+                    galley,
+                    Color32::WHITE,
+                );
+            }
+            Part::Function(function) => {
+                if let Some(response) = self.dropdown(ui, rect, part_id, function.name()) {
+                    egui::Popup::menu(&response).show(|ui| {
+                        for choice in MathFunction::ALL {
+                            if ui
+                                .selectable_label(**function == choice, choice.name())
+                                .clicked()
+                            {
+                                **function = choice;
+                                ui.close();
+                            }
+                        }
+                    });
+                }
+            }
         }
     }
 

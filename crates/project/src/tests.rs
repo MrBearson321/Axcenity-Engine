@@ -432,6 +432,7 @@ fn block_scripts_load_as_lua_scripts_and_keep_their_class_when_renamed() {
                 target: "Music".to_owned(),
             })],
         })],
+        ..Default::default()
     };
     let path = create_block_script(&folder, "Music", ClassName::LocalScript, &script).unwrap();
     assert_eq!(path, "scripts/Music.client.blocks.json");

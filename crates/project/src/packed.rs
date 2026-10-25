@@ -308,6 +308,7 @@ mod tests {
                     seconds: axcenity_blocks::Expression::Number { value: 1.0 },
                 })],
             })],
+            ..Default::default()
         };
         fs::write(
             source.join("scripts/logic.server.blocks.json"),

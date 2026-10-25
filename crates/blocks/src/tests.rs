@@ -26,7 +26,10 @@ fn block(id: u64, kind: BlockKind) -> Block {
 }
 
 fn script(blocks: Vec<Block>) -> BlockScript {
-    BlockScript { blocks }
+    BlockScript {
+        blocks,
+        ..Default::default()
+    }
 }
 
 /// Which variant `kind` is. There's no `_ =>`, so a new block type stops
@@ -1222,4 +1225,34 @@ fn every_example_script_can_switch_to_blocks_and_back() {
         }
     }
     assert!(checked > 5, "only {checked} example scripts found");
+}
+
+#[test]
+fn the_graph_view_is_saved_only_once_used_and_never_changes_the_lua() {
+    let plain = script(vec![block(
+        1,
+        BlockKind::WhenStarted {
+            body: vec![block(2, BlockKind::Print { value: number(1.0) })],
+        },
+    )]);
+    let text = serde_json::to_string(&plain).unwrap();
+    assert!(!text.contains("graph"), "{text}");
+    assert_eq!(serde_json::from_str::<BlockScript>(&text).unwrap(), plain);
+
+    let mut shown = plain.clone();
+    shown.graph.shown = true;
+    shown.graph.nodes.insert("2".to_owned(), [100.0, 40.0]);
+    shown.graph.loose.push(LooseValue {
+        id: 7,
+        value: variable("score"),
+    });
+    let text = serde_json::to_string(&shown).unwrap();
+    assert_eq!(serde_json::from_str::<BlockScript>(&text).unwrap(), shown);
+    assert_eq!(
+        translate(&shown).unwrap().source,
+        translate(&plain).unwrap().source
+    );
+    // New blocks never take a loose value node's id.
+    reserve_block_ids(&shown);
+    assert!(Block::new(BlockKind::StopScript).id > 7);
 }

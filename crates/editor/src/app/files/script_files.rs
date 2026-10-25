@@ -1,4 +1,5 @@
 use super::*;
+use crate::scripts::ScriptView;
 
 impl EditorApp {
     /// The path of the file of the Script `id`.
@@ -156,6 +157,38 @@ impl EditorApp {
         }
     }
 
+    /// Shows the Script or LocalScript at `path` as `view`. Code ↔ Blocks or
+    /// Graph replaces its file (see `switch_script_mode`); Blocks ↔ Graph is
+    /// the same file, which remembers the view (saved now, unless the
+    /// script has other unsaved changes, which are saved with it).
+    pub(in crate::app) fn switch_script_view(&mut self, path: &str, view: ScriptView) {
+        if self.playing() {
+            return;
+        }
+        let graph = view == ScriptView::Graph;
+        let blocks = project::is_block_script(path);
+        if view == ScriptView::Code || !blocks {
+            self.switch_script_mode(path, graph);
+            return;
+        }
+        let Some(document) = self.project.as_mut().and_then(|project| {
+            project
+                .block_scripts
+                .iter_mut()
+                .find(|document| document.path == path)
+        }) else {
+            return;
+        };
+        let clean = document.script == document.saved;
+        document.script.graph.shown = graph;
+        if clean {
+            self.write_block_tab(path);
+        }
+        let name = project::script_name(path).to_owned();
+        let shown = if graph { "Graph" } else { "Blocks" };
+        self.output.info(format!("Showing {name} as {shown}."));
+    }
+
     /// Switches the Script or LocalScript at `path` between Code and Blocks,
     /// keeping its Instance. Blocks become the Lua they translate to; Lua
     /// becomes blocks, with code that has no blocks kept in grey Lua blocks.
@@ -163,7 +196,8 @@ impl EditorApp {
     /// `.server.blocks.json`), so switching saves the script. Like a rename,
     /// it isn't an undo step. Blocks switched to Code and back, with the code
     /// unchanged, come back exactly as they were, loose blocks and all.
-    pub(in crate::app) fn switch_script_mode(&mut self, path: &str) {
+    /// Code switched to blocks is shown as a graph if `graph`.
+    fn switch_script_mode(&mut self, path: &str, graph: bool) {
         if self.playing() {
             return;
         }
@@ -198,7 +232,7 @@ impl EditorApp {
                 .get(path)
                 .filter(|(code, _)| *code == source)
                 .map(|(_, blocks)| blocks.clone());
-            let blocks = match remembered.map_or_else(|| from_lua(&source), Ok) {
+            let mut blocks = match remembered.map_or_else(|| from_lua(&source), Ok) {
                 Ok(blocks) => blocks,
                 Err(err) => {
                     self.output.error(format!(
@@ -207,6 +241,7 @@ impl EditorApp {
                     return;
                 }
             };
+            blocks.graph.shown = graph;
             let source = match translate(&blocks) {
                 Ok(translation) => translation.source,
                 Err(err) => {
@@ -283,7 +318,11 @@ impl EditorApp {
             tab.mark_saved();
         }
         self.sort_scripts();
-        let mode = if to_blocks { "Blocks" } else { "Code" };
+        let mode = match (to_blocks, graph) {
+            (false, _) => "Code",
+            (true, false) => "Blocks",
+            (true, true) => "Graph",
+        };
         self.output
             .info(format!("Switched {name} to {mode} (`{new_path}`)."));
     }

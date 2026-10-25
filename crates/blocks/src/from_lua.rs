@@ -285,7 +285,10 @@ impl<'a> Converter<'a> {
             }
         }
         flush(&mut code, &mut started, &mut blocks);
-        BlockScript { blocks }
+        BlockScript {
+            blocks,
+            ..Default::default()
+        }
     }
 
     /// A plain statement at the top level, if it becomes a real block (not

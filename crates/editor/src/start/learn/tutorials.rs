@@ -350,9 +350,9 @@ pub(in crate::start) const TUTORIALS: &[Tutorial] = &[
             },
             Step {
                 title: "Switch any script",
-                text: "The bar above a Script's tab switches it between Code and Blocks at \
-                       any time. Lua that has no block shows as a grey Lua block, so nothing \
-                       is lost.",
+                text: "The bar above a Script's tab switches it between Code, Blocks and \
+                       Graph (Blueprint-style nodes and wires) at any time. Lua that has no \
+                       block shows as a grey Lua block or node, so nothing is lost.",
                 picture: None,
             },
             Step {

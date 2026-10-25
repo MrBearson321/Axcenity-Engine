@@ -7,7 +7,7 @@ use crate::app::{Answer, Discard};
 use crate::explorer::Action;
 use crate::output::OutputKind;
 use crate::properties::Edit;
-use crate::scripts::NEW_SCRIPT_SOURCE;
+use crate::scripts::{NEW_SCRIPT_SOURCE, ScriptView};
 use crate::surface::Slot;
 use axcenity_assets::Channel;
 use axcenity_blocks::{Block, BlockKind};
@@ -29,6 +29,17 @@ fn script(app: &EditorApp, name: &str) -> InstanceId {
         .unwrap()
 }
 
+/// Switches the script at `path` between Code and Blocks, as the bar over
+/// its tab does.
+fn switch(app: &mut EditorApp, path: &str) {
+    let view = if project::is_block_script(path) {
+        ScriptView::Code
+    } else {
+        ScriptView::Blocks
+    };
+    app.switch_script_view(path, view);
+}
+
 fn example_model() -> std::path::PathBuf {
     super::super::tests::example("hello-mesh").join("assets/models/pyramid.gltf")
 }
@@ -40,7 +51,7 @@ fn scripts_switch_to_blocks_and_can_be_edited_saved_and_reloaded() {
     app.insert_script(ClassName::Script);
     let code_path = app.tabs.active_path().unwrap().to_owned();
     let id = script(&app, "Script");
-    app.switch_script_mode(&code_path);
+    switch(&mut app, &code_path);
     assert!(
         !folder.join(&code_path).exists(),
         "the .lua file is replaced"
@@ -111,7 +122,7 @@ fn scripts_switch_to_blocks_and_can_be_edited_saved_and_reloaded() {
 
     // Back to Code: the Lua the blocks became, in a .lua file again.
     assert_eq!(app.tabs.active_path(), Some(path.as_str()));
-    app.switch_script_mode(&path);
+    switch(&mut app, &path);
     assert_eq!(app.tabs.active_path(), Some(code_path.as_str()));
     let code = fs::read_to_string(folder.join(&code_path)).unwrap();
     assert!(code.contains("workspace.Chime:Play()"), "{code}");
@@ -126,7 +137,7 @@ return x * 2
 end
 "
     );
-    app.switch_script_mode(&code_path);
+    switch(&mut app, &code_path);
     let document = &app.project.as_ref().unwrap().block_scripts[0];
     assert!(
         document
@@ -140,9 +151,9 @@ end
     assert_eq!(script(&app, "Script"), id);
 
     // Code with a mistake in it stays code.
-    app.switch_script_mode(&path);
+    switch(&mut app, &path);
     app.tabs.get_mut(&code_path).unwrap().text = "if then".to_owned();
-    app.switch_script_mode(&code_path);
+    switch(&mut app, &code_path);
     assert!(folder.join(&code_path).exists());
     assert_eq!(app.tabs.active_path(), Some(code_path.as_str()));
     fs::remove_dir_all(folder).unwrap();
@@ -1034,4 +1045,52 @@ fn play_runs_hello_remote_and_held_arrow_keys_move_the_block() {
         "Stop puts it back"
     );
     let _ = fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn scripts_switch_between_code_graph_and_blocks_and_run_the_same() {
+    let folder = copy_of_example("hello-part", "graph-script-editor");
+    let mut app = EditorApp::new(Some(&folder));
+    app.insert_script(ClassName::Script);
+    let code_path = app.tabs.active_path().unwrap().to_owned();
+    let id = script(&app, "Script");
+
+    // Code to Graph: a block script shown as a graph, saved as one.
+    app.switch_script_view(&code_path, ScriptView::Graph);
+    let path = app.tabs.active_path().unwrap().to_owned();
+    assert!(project::is_block_script(&path), "{path}");
+    assert_eq!(script(&app, "Script"), id, "it's the same Script");
+    let saved = project::read_block_script(&folder, &path).unwrap();
+    assert!(saved.graph.shown, "the file remembers the graph view");
+    let document = &app.project.as_ref().unwrap().block_scripts[0];
+    assert_eq!(document.script, saved);
+
+    // Graph to Blocks is the same file, saved straight away.
+    app.switch_script_view(&path, ScriptView::Blocks);
+    assert_eq!(app.tabs.active_path(), Some(path.as_str()));
+    assert!(
+        !project::read_block_script(&folder, &path)
+            .unwrap()
+            .graph
+            .shown
+    );
+    assert!(!app.unsaved());
+    app.switch_script_view(&path, ScriptView::Graph);
+    assert!(
+        project::read_block_script(&folder, &path)
+            .unwrap()
+            .graph
+            .shown
+    );
+
+    // Graph back to Code: the Lua the graph is, as Blocks gives.
+    let blocks_lua = axcenity_blocks::translate(&saved).unwrap().source;
+    app.switch_script_view(&path, ScriptView::Code);
+    assert_eq!(app.tabs.active_path(), Some(code_path.as_str()));
+    let code = fs::read_to_string(folder.join(&code_path)).unwrap();
+    assert_eq!(code, blocks_lua);
+    assert!(code.contains("print(\"Hello world!\")"), "{code}");
+    assert!(!folder.join(&path).exists());
+    assert_eq!(script(&app, "Script"), id);
+    fs::remove_dir_all(folder).unwrap();
 }

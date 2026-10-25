@@ -9,9 +9,10 @@
 //!
 //! Every block translates to the documented Lua API (see `docs/scripting/blocks.md`),
 //! so a block script runs exactly like a typed one. [`from_lua`] goes the
-//! other way, for switching a script between Code and Blocks.
+//! other way, for switching a script between Code and Blocks (or Graph:
+//! the same blocks as nodes and wires, laid out by [`Graph`]).
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Deserializer, Serialize};
@@ -62,6 +63,52 @@ pub enum Side {
 #[serde(deny_unknown_fields)]
 pub struct BlockScript {
     pub blocks: Vec<Block>,
+    /// How the script looks as a node graph. Written only once it's been
+    /// shown as one, so other block scripts don't change.
+    #[serde(default, skip_serializing_if = "Graph::is_empty")]
+    pub graph: Graph,
+}
+
+/// The node-graph view of a block script (see `docs/scripting/graphs.md`).
+/// The blocks are the script; this is only where the nodes are, which view
+/// is shown, and value nodes wired to nothing, so it never changes the Lua.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Graph {
+    /// The script is shown as a node graph rather than as blocks.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub shown: bool,
+    /// Where nodes have been placed, in graph units, by node key: a block's
+    /// id (`"12"`), or a value node's owner id and slots (`"12.0.1"`).
+    /// Nodes without one are laid out after the node they're wired to.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub nodes: BTreeMap<String, [f32; 2]>,
+    /// Value nodes wired to nothing. They don't run.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub loose: Vec<LooseValue>,
+}
+
+impl Graph {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// A value node wired to nothing, with its own id (from the blocks' ids).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LooseValue {
+    pub id: u64,
+    pub value: Expression,
+}
+
+impl LooseValue {
+    pub fn new(value: Expression) -> Self {
+        Self {
+            id: NEXT_BLOCK_ID.fetch_add(1, Ordering::Relaxed),
+            value,
+        }
+    }
 }
 
 impl BlockScript {
@@ -120,6 +167,9 @@ impl BlockScript {
 pub fn reserve_block_ids(script: &BlockScript) {
     let mut maximum = 0;
     script.for_each_block(&mut |block| maximum = maximum.max(block.id));
+    for loose in &script.graph.loose {
+        maximum = maximum.max(loose.id);
+    }
     NEXT_BLOCK_ID.fetch_max(maximum.saturating_add(1), Ordering::Relaxed);
 }
 
