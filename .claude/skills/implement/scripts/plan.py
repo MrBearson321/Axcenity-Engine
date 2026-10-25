@@ -1,20 +1,27 @@
 """Reads the implementation plan so the implement skill doesn't load whole files.
 
 Usage (from the repository root):
-    python .claude/skills/implement/scripts/plan.py status
+    python .claude/skills/implement/scripts/plan.py [--plan NAME] status
         Every phase with its ticked/total criteria, and which phase is next.
-    python .claude/skills/implement/scripts/plan.py show <phase number | next>
+    python .claude/skills/implement/scripts/plan.py [--plan NAME] show <phase number | next>
         One phase's section, plus the full text of the PRD user stories it lists.
+
+NAME is a file in `plans/`, with or without the `axcenity-engine-` prefix and
+`.md` suffix (`unified`, `v2`, ...). It defaults to the unified plan.
 """
 
 import re
 import sys
 from pathlib import Path
 
-PLAN = Path("plans/axcenity-engine-v1.md")
-PRD = Path("prd/axcenity-engine-v1.md")
+PLAN = Path("plans/axcenity-engine-unified.md")
+PRD = Path("prd/axcenity-engine-v2.md")
 
 PHASE_HEADING = re.compile(r"^## Phase (\d+): (.+)$")
+# The PRD a plan cites in its header, such as "(PRD `prd/axcenity-engine-v2.md`)".
+PRD_REFERENCE = re.compile(r"`(prd/[^`]+\.md)`")
+# Stories are listed as "**User stories**: 60, 58" or "**From**: v2 Phase 13 (stories 16, 20)".
+STORIES = re.compile(r"^\*\*User stories\*\*:(.*)$|\(stor(?:y|ies) ([\d, ]+)\)")
 CHECKBOX = re.compile(r"^- \[( |x|X)\] ")
 
 
@@ -102,15 +109,31 @@ def show(which):
         print(f"\n(Previous phase {number - 1}: {ticked}/{total} criteria ticked)")
 
     for line in lines:
-        if line.startswith("**User stories**"):
-            numbers = [int(n) for n in re.findall(r"\d+", line)]
-            print("\nUser stories from the PRD:")
+        match = STORIES.search(line)
+        if match:
+            numbers = [int(n) for n in re.findall(r"\d+", match.group(1) or match.group(2))]
+            print(f"\nUser stories from {PRD}:")
             print("\n".join(user_stories(numbers)) or "(none found)")
+
+
+def select_plan(name):
+    """Point PLAN at `plans/<name>` and PRD at the PRD that plan cites."""
+    global PLAN, PRD
+    stem = name.removesuffix(".md")
+    if not stem.startswith("axcenity-engine-"):
+        stem = f"axcenity-engine-{stem}"
+    PLAN = Path("plans") / f"{stem}.md"
+    header = "\n".join(read(PLAN)[:5])
+    cited = PRD_REFERENCE.search(header)
+    PRD = Path(cited.group(1)) if cited else Path("prd") / f"{stem}.md"
 
 
 if __name__ == "__main__":
     # Windows consoles default to a legacy encoding that can't print `→`.
     sys.stdout.reconfigure(encoding="utf-8")
+    if len(sys.argv) >= 3 and sys.argv[1] == "--plan":
+        select_plan(sys.argv[2])
+        del sys.argv[1:3]
     if len(sys.argv) >= 2 and sys.argv[1] == "status":
         status()
     elif len(sys.argv) >= 3 and sys.argv[1] == "show":
