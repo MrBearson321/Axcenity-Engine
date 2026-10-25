@@ -7,14 +7,19 @@
 //! selects keys by clicking (Shift or Ctrl adds) or dragging a box, moves
 //! them by dragging, and copies, pastes and deletes them. With Snap on,
 //! times land on whole frames.
+//!
+//! On a skinned MeshPart the clip's `Bone` tracks pose its skeleton:
+//! turning a bone in the preview is a `Bone` edit like any other, and
+//! [`PropertyDoc::bone_pose`] gives the pose at the playhead.
 
 use std::collections::BTreeSet;
 use std::path::Path;
 
 use axcenity_anim::{
     ClipFile, EvaluatedProperty, Interp, PropertyClip, PropertyKeyframe, PropertyName,
-    PropertyTrack, target_path,
+    PropertyTrack, bone_from_numbers, find_bone, target_path,
 };
+use axcenity_assets::{BoneTransform, Rig};
 use axcenity_core::InstanceId;
 use eframe::egui;
 
@@ -43,6 +48,14 @@ enum Gesture {
     },
     /// Selecting the keys in a box from `from`; `add` keeps the selection.
     Box { from: egui::Pos2, add: bool },
+}
+
+/// What was clicked in the drawer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Drawn {
+    Object(InstanceId),
+    /// A bone of the copy's skinned root, by its index in the rig.
+    Bone(usize),
 }
 
 /// A property clip being edited.
@@ -130,7 +143,12 @@ impl PropertyDoc {
             self.pending.clear();
         }
         let mut evaluated = self.clip()?.evaluate(self.playhead);
-        for edit in &self.pending {
+        // Bones are posed by `bone_pose`.
+        for edit in self
+            .pending
+            .iter()
+            .filter(|p| p.property != PropertyName::Bone)
+        {
             match evaluated
                 .iter_mut()
                 .find(|e| e.target == edit.target && e.property == edit.property)
@@ -140,6 +158,29 @@ impl PropertyDoc {
             }
         }
         Ok(evaluated)
+    }
+
+    /// `rig`'s pose at the playhead: the clip's bone tracks, with bone
+    /// moves not yet keyed on top. Call [`evaluated`](Self::evaluated)
+    /// first, which drops moves made at another time.
+    pub fn bone_pose(&self, rig: &Rig) -> Vec<BoneTransform> {
+        let mut pose = rig.rest_pose();
+        let seconds = self.playhead.clamp(0.0, self.file.duration.max(0.0));
+        axcenity_anim::pose_bones(&self.file, rig, seconds, &mut pose);
+        let paths = axcenity_anim::bone_paths(rig);
+        for edit in self
+            .pending
+            .iter()
+            .filter(|p| p.property == PropertyName::Bone)
+        {
+            if let Some(bone) = find_bone(rig, &paths, &edit.target)
+                && let (Some(transform), Some(slot)) =
+                    (bone_from_numbers(&edit.value), pose.get_mut(bone))
+            {
+                *slot = transform;
+            }
+        }
+        pose
     }
 
     pub fn tick(&mut self, dt: f64) {
@@ -204,6 +245,10 @@ fn nice_step(duration: f64, width: f32) -> f64 {
 /// What each number of a key is called in the inspector.
 fn value_labels(property: PropertyName, width: usize) -> &'static [&'static str] {
     match (property, width) {
+        (PropertyName::Bone, _) => &[
+            "Move X", "Move Y", "Move Z", "Turn X", "Turn Y", "Turn Z", "Turn W", "Scale X",
+            "Scale Y", "Scale Z",
+        ],
         (_, 4) => &["X scale", "X offset", "Y scale", "Y offset"],
         (_, 1) => &["Value"],
         (PropertyName::Color | PropertyName::BackgroundColor3 | PropertyName::TextColor3, _) => {
@@ -220,6 +265,7 @@ pub fn new_property_clip(duration: f64) -> ClipFile {
 
 mod dope_sheet;
 mod editing;
+pub(super) use editing::set_key;
 
 #[cfg(test)]
 mod tests;

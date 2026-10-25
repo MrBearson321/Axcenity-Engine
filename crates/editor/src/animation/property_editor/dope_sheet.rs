@@ -33,9 +33,9 @@ impl PropertyDoc {
         ui.monospace(format!("{:.2} s", self.playhead));
     }
 
-    /// The drawer: the copy's objects as a tree, each with its tracks.
-    /// Returns the object clicked.
-    pub fn objects(&mut self, ui: &mut egui::Ui, preview: &ObjectPreview) -> Option<InstanceId> {
+    /// The drawer: the copy's objects as a tree, each with its tracks, and
+    /// under a skinned root its bones. Returns what was clicked.
+    pub fn objects(&mut self, ui: &mut egui::Ui, preview: &ObjectPreview) -> Option<Drawn> {
         let Some(root) = preview.root() else {
             ui.weak("Select a Part, Model or ScreenGui in the Explorer.");
             return None;
@@ -58,11 +58,50 @@ impl PropertyDoc {
                     theme::class_icon(instance.class()),
                     instance.name()
                 );
-                let label = egui::Button::selectable(preview.selected == Some(id), text).truncate();
+                let selected = preview.selected == Some(id) && preview.bones.selected.is_none();
+                let label = egui::Button::selectable(selected, text).truncate();
                 if ui.add(label).clicked() {
-                    picked = Some(id);
+                    picked = Some(Drawn::Object(id));
                 }
             });
+            if id == root
+                && let Some(rig) = preview.rig()
+            {
+                let paths = axcenity_anim::bone_paths(rig);
+                for (bone, bone_depth) in super::super::posing::bone_rows(rig) {
+                    let tracks: Vec<&PropertyTrack> = self
+                        .file
+                        .tracks
+                        .iter()
+                        .filter(|t| t.property == PropertyName::Bone)
+                        .filter(|t| axcenity_anim::find_bone(rig, &paths, &t.target) == Some(bone))
+                        .collect();
+                    ui.horizontal(|ui| {
+                        ui.add_space(depth as f32 * 12.0 + 12.0);
+                        let keys = tracks.iter().map(|t| t.keys.len()).sum();
+                        let row = super::super::posing::bone_row(
+                            ui,
+                            &rig.bones[bone].name,
+                            bone_depth,
+                            preview.bones.selected == Some(bone),
+                            false,
+                            keys,
+                        );
+                        if row.clicked() {
+                            picked = Some(Drawn::Bone(bone));
+                        }
+                    });
+                    for track in tracks {
+                        shown.insert(track.id.clone());
+                        ui.horizontal(|ui| {
+                            ui.add_space(
+                                depth as f32 * 12.0 + 12.0 + bone_depth as f32 * 8.0 + 18.0,
+                            );
+                            self.track_label(ui, track, &mut delete);
+                        });
+                    }
+                }
+            }
             for track in self.file.tracks.iter().filter(|t| t.target == target) {
                 shown.insert(track.id.clone());
                 ui.horizontal(|ui| {

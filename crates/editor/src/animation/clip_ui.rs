@@ -50,17 +50,23 @@ impl AnimationStudio {
         // yet keyed on top), before anything is drawn.
         let mut problem = None;
         let keys = self.wants_keys(ui.ctx());
-        if let Some(Clip::Property(doc)) = &mut self.clip.doc {
-            if keys
-                && doc.shortcuts(ui)
-                && let Some(focus) = self.clip.objects.focus()
-            {
-                doc.key_focus(&focus);
-            }
-            match doc.evaluated() {
-                Ok(evaluated) => self.clip.objects.pose(&evaluated),
-                Err(err) => problem = Some(err),
-            }
+        if let Some(Clip::Take(doc)) = &mut self.clip.doc
+            && keys
+            && let Some(bone) = self.clip.bones.selected
+            && ui.input(|input| input.modifiers.is_none() && input.key_pressed(egui::Key::K))
+            && let Err(problem) = doc.key_selected(assets, bone)
+        {
+            output.warning(problem);
+        }
+        if let Some(Clip::Property(doc)) = &mut self.clip.doc
+            && keys
+            && doc.shortcuts(ui)
+            && let Some(focus) = self.clip.objects.focus()
+        {
+            doc.key_focus(&focus);
+        }
+        if let Err(err) = self.pose_copy(assets) {
+            problem = Some(err);
         }
 
         let mut rename = false;
@@ -80,6 +86,7 @@ impl AnimationStudio {
                             stylesheets,
                             problem.as_deref(),
                             height,
+                            output,
                         ));
                         egui::CollapsingHeader::new(self.drawer_title())
                             .id_salt("clip drawer stacked")
@@ -145,6 +152,7 @@ impl AnimationStudio {
                     stylesheets,
                     problem.as_deref(),
                     height,
+                    output,
                 ));
             });
         }
@@ -156,8 +164,33 @@ impl AnimationStudio {
             });
         }
 
-        // What was done in the preview: a pick selects there; a move is
-        // keyed with Record on, or shown until the playhead moves.
+        if !events.is_empty() {
+            ui.ctx().request_repaint();
+        }
+        self.preview_events(events);
+    }
+
+    /// Poses a property clip's copy at the playhead, with moves not yet
+    /// keyed on top, and its skeleton if it's a skinned MeshPart. Fails,
+    /// saying why, if the clip can't play.
+    pub(super) fn pose_copy(&mut self, assets: &Assets) -> Result<(), String> {
+        let Some(Clip::Property(doc)) = &mut self.clip.doc else {
+            return Ok(());
+        };
+        let posed = doc
+            .evaluated()
+            .map(|evaluated| self.clip.objects.pose(&evaluated));
+        let skeleton = self.clip.objects.rigged(assets).map(|model| {
+            let pose = doc.bone_pose(model.rig.as_deref().expect("rigged"));
+            (model, pose)
+        });
+        self.clip.objects.pose_bones(skeleton);
+        posed
+    }
+
+    /// What was done in a property clip's preview: a pick selects there; a
+    /// move is keyed with Record on, or shown until the playhead moves.
+    pub(super) fn preview_events(&mut self, events: Vec<PreviewEvent>) {
         if let Some(Clip::Property(doc)) = &mut self.clip.doc {
             for event in events {
                 match event {
@@ -174,7 +207,6 @@ impl AnimationStudio {
                     }
                     PreviewEvent::Edit(edits) => doc.edit(edits, self.clip.record),
                 }
-                ui.ctx().request_repaint();
             }
         }
     }
@@ -196,7 +228,14 @@ impl AnimationStudio {
                 return pick;
             };
             match doc {
-                Clip::Take(doc) => doc.controls(ui, &self.files.models),
+                Clip::Take(doc) => {
+                    doc.controls(ui, &self.files.models);
+                    record_toggle(
+                        ui,
+                        &mut self.clip.record,
+                        "On, turning a bone in the preview sets a key at the playhead",
+                    );
+                }
                 Clip::Property(doc) => {
                     doc.controls(ui);
                     responsive::room_for(ui, 140.0);
@@ -224,22 +263,11 @@ impl AnimationStudio {
                     {
                         objects.refresh(world);
                     }
-                    let record = &mut self.clip.record;
-                    let text = format!("{} Record", icons::RECORD);
-                    let text = if *record {
-                        egui::RichText::new(text).color(theme::palette(ui.ctx()).error)
-                    } else {
-                        egui::RichText::new(text)
-                    };
-                    if ui
-                        .selectable_label(*record, text)
-                        .on_hover_text(
-                            "On, moving something in the preview sets a key at the playhead",
-                        )
-                        .clicked()
-                    {
-                        *record = !*record;
-                    }
+                    record_toggle(
+                        ui,
+                        &mut self.clip.record,
+                        "On, moving something in the preview sets a key at the playhead",
+                    );
                 }
             }
             ui.separator();
@@ -265,8 +293,24 @@ impl AnimationStudio {
                     self.clip.hide_inspector = !self.clip.hide_inspector;
                 }
             }
+            let linked = matches!(doc, Clip::Take(_));
             if let Some(path) = &open {
-                ui.menu_button(icons::DOTS_THREE, |ui| asset_menu(ui, path, &mut pick));
+                ui.menu_button(icons::DOTS_THREE, |ui| {
+                    if linked {
+                        if ui
+                            .button(format!("{} Convert to keys", icons::KEY))
+                            .on_hover_text(
+                                "Bake the take into bone keys you can edit, and unlink the clip (one undo step)",
+                            )
+                            .clicked()
+                        {
+                            pick = Some(Pick::ConvertToKeys(path.clone()));
+                            ui.close();
+                        }
+                        ui.separator();
+                    }
+                    asset_menu(ui, path, &mut pick)
+                });
             }
             pick
         })
@@ -289,18 +333,28 @@ impl AnimationStudio {
     ) -> Option<PreviewEvent> {
         match &mut self.clip.doc {
             Some(Clip::Take(doc)) => {
-                doc.bones(ui, assets);
+                doc.bones(ui, assets, &mut self.clip.bones.selected);
                 None
             }
-            Some(Clip::Property(doc)) => doc
-                .objects(ui, &self.clip.objects)
-                .map(|id| PreviewEvent::Select(Some(id))),
+            Some(Clip::Property(doc)) => match doc.objects(ui, &self.clip.objects)? {
+                Drawn::Object(id) => {
+                    self.clip.objects.select_bone(None);
+                    Some(PreviewEvent::Select(Some(id)))
+                }
+                Drawn::Bone(bone) => {
+                    self.clip.objects.select_bone(Some(bone));
+                    Some(PreviewEvent::Select(self.clip.objects.root()))
+                }
+            },
             None => None,
         }
     }
 
     /// The open clip's preview, `height` points tall: the model posed at the
-    /// playhead, or for a property clip, the copy of what it animates.
+    /// playhead, or for a property clip, the copy of what it animates. A
+    /// take clip's bones are posed here; a property clip's preview reports
+    /// its edits.
+    #[allow(clippy::too_many_arguments)] // Each is a different input to the preview.
     pub(super) fn clip_preview(
         &mut self,
         ui: &mut egui::Ui,
@@ -309,21 +363,48 @@ impl AnimationStudio {
         stylesheets: &[axcenity_ui::Stylesheet],
         problem: Option<&str>,
         height: f32,
+        output: &mut Output,
     ) -> Option<PreviewEvent> {
         match &mut self.clip.doc {
             Some(Clip::Take(doc)) => {
                 show_model(&mut self.clip.preview, doc.preview_model.as_deref(), assets);
-                let posed = match doc.pose(assets) {
-                    Ok(posed) => Some(posed),
+                let posing = match doc.pose(assets) {
+                    Ok(posing) => Some(posing),
                     Err(problem) => {
                         ui.colored_label(ui.visuals().error_fg_color, problem);
                         None
                     }
                 };
-                let height = height.min(ui.available_height()).max(80.0);
-                self.clip
-                    .preview
-                    .show(ui, render_state, assets, posed, height);
+                let top = ui.cursor().top();
+                if let Some(posing) = &posing
+                    && self.clip.bones.selected.is_some()
+                {
+                    responsive::toolbar(ui, |ui| self.clip.bones.tools(ui, posing.rig()));
+                }
+                let height = (height - (ui.cursor().top() - top))
+                    .min(ui.available_height())
+                    .max(80.0);
+                let posed = posing
+                    .as_ref()
+                    .and_then(|posing| posing.model.pose(&posing.pose))
+                    .map(std::sync::Arc::new);
+                let bones = posing.as_ref().map(|posing| preview::Bones {
+                    poser: &mut self.clip.bones,
+                    rig: posing.rig(),
+                    pose: &posing.pose,
+                    locked: &posing.locked,
+                });
+                let event =
+                    self.clip
+                        .preview
+                        .show_posing(ui, render_state, assets, posed, height, bones);
+                if let (Some(posing::BoneEvent::Pose(bone, transform)), Some(posing)) =
+                    (event, &posing)
+                    && let Err(problem) =
+                        doc.pose_bone(posing.rig(), bone, &transform, self.clip.record)
+                {
+                    output.warning(problem);
+                }
                 None
             }
             Some(Clip::Property(_)) => {
@@ -371,6 +452,58 @@ impl AnimationStudio {
         }
     }
 
+    /// Convert to keys (the linked clip's ⋯ menu): bakes its take into bone
+    /// keys and unlinks it, as one undo step, then opens it as a keyed clip.
+    pub(super) fn convert_to_keys(
+        &mut self,
+        project: &Path,
+        assets: &Assets,
+        output: &mut Output,
+        actions: &mut Vec<StudioAction>,
+    ) {
+        actions.extend(self.write_all(project, output));
+        let Some(Clip::Take(doc)) = &self.clip.doc else {
+            return;
+        };
+        let path = doc.path.clone();
+        let name = axcenity_anim::files::clip_name(&path).to_owned();
+        let root_motion = doc.file.root_motion;
+        let converted = doc.converted(assets).and_then(|file| {
+            let before = std::fs::read_to_string(project.join(&path))
+                .map_err(|err| format!("its file can't be read: {err}"))?;
+            let after = file.to_json();
+            axcenity_anim::files::write_file(&project.join(&path), &after)
+                .map_err(|err| format!("its file can't be written: {err}"))?;
+            Ok((before, after))
+        });
+        let (before, after) = match converted {
+            Ok(files) => files,
+            Err(err) => {
+                output.error(format!("Could not convert {name} to keys: {err}"));
+                return;
+            }
+        };
+        remember(
+            actions,
+            format!("Convert {name} to keys"),
+            vec![store::FileDiff {
+                path: path.clone(),
+                before: Some(before),
+                after: Some(after),
+            }],
+            None,
+        );
+        self.badges.remove(&path);
+        self.load_clip(project, assets, &path, output);
+        output.info(if root_motion {
+            format!(
+                "Converted {name} to keys. Root motion isn't kept: the keyed clip plays in place."
+            )
+        } else {
+            format!("Converted {name} to keys.")
+        });
+    }
+
     /// The open clip's settings. Returns true if Rename was pressed.
     pub(super) fn clip_inspector(&mut self, ui: &mut egui::Ui) -> bool {
         match &mut self.clip.doc {
@@ -378,5 +511,22 @@ impl AnimationStudio {
             Some(Clip::Property(doc)) => doc.inspector(ui, self.clip.objects.root_name()),
             None => false,
         }
+    }
+}
+
+/// The Record toggle: red while on.
+fn record_toggle(ui: &mut egui::Ui, record: &mut bool, hover: &str) {
+    let text = format!("{} Record", icons::RECORD);
+    let text = if *record {
+        egui::RichText::new(text).color(theme::palette(ui.ctx()).error)
+    } else {
+        egui::RichText::new(text)
+    };
+    if ui
+        .selectable_label(*record, text)
+        .on_hover_text(hover)
+        .clicked()
+    {
+        *record = !*record;
     }
 }

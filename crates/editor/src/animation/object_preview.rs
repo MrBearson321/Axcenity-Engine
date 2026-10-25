@@ -7,11 +7,18 @@
 //! part (or a UI element) to select it; the Move, Rotate and Resize handles
 //! (or a UI element's handles) then move it, and [`PreviewEvent::Edit`]
 //! says what it became. A Model's handles move its pivot.
+//!
+//! A skinned MeshPart also shows its bones as joints (see `posing.rs`):
+//! click one to select it, and its gizmo turns it (or moves the root),
+//! as a `Bone` edit.
+
+use std::sync::Arc;
 
 use axcenity_anim::{
-    Applied, EvaluatedProperty, PropertyName, apply_evaluated, numbers_of, target_path,
+    Applied, EvaluatedProperty, PropertyName, apply_evaluated, bone_numbers, bone_paths,
+    numbers_of, target_path,
 };
-use axcenity_assets::Assets;
+use axcenity_assets::{Assets, BoneTransform, Model};
 use axcenity_core::{ClassName, InstanceId, Value, World};
 use axcenity_render::Camera;
 use axcenity_render::glam::Vec3;
@@ -19,6 +26,7 @@ use axcenity_ui::{Stylesheet, UiLayout, UiRect};
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 
+use super::posing::{BoneEvent, Poser, Skeleton};
 use super::preview::{Canvas, add_floor};
 use crate::gizmo::{self, Drag, Handle, Modes, Pose, Snap, Tool};
 use crate::screen::Screen;
@@ -72,6 +80,12 @@ pub struct ObjectPreview {
     zoom: f32,
     middle: Vec3,
     height: f32,
+    /// The root's bones, when it's a skinned MeshPart: the selected bone
+    /// and its gizmo.
+    pub bones: Poser,
+    /// The root's model and its bones' pose at the playhead, when it's a
+    /// skinned MeshPart.
+    skeleton: Option<(Arc<Model>, Vec<BoneTransform>)>,
 }
 
 impl Default for ObjectPreview {
@@ -92,6 +106,8 @@ impl Default for ObjectPreview {
             zoom: 2.0,
             middle: Vec3::ZERO,
             height: 1.0,
+            bones: Poser::default(),
+            skeleton: None,
         }
     }
 }
@@ -180,6 +196,8 @@ impl ObjectPreview {
         self.root = None;
         self.selected = None;
         self.drag = None;
+        self.bones.selected = None;
+        self.skeleton = None;
         self.pristine = World::new();
         self.posed = World::new();
     }
@@ -240,6 +258,9 @@ impl ObjectPreview {
             );
         }
         self.flat = flat;
+        if self.root != Some(root) {
+            self.bones.selected = None;
+        }
         self.root = Some(root);
         self.selected = Some(root);
         self.drag = None;
@@ -256,6 +277,55 @@ impl ObjectPreview {
         self.posed = self.pristine.clone();
         self.applied = Applied::default();
         apply_evaluated(&mut self.posed, root, evaluated, &mut self.applied);
+    }
+
+    /// The root's model, if it's a MeshPart whose model has a skeleton: the
+    /// one its clip's bone tracks pose.
+    pub fn rigged(&self, assets: &Assets) -> Option<Arc<Model>> {
+        let root = self.pristine.get(self.root?)?;
+        if root.class() != ClassName::MeshPart || self.flat {
+            return None;
+        }
+        let model = assets.model(root.property("MeshId").and_then(Value::as_str)?)?;
+        model.rig.is_some().then_some(model)
+    }
+
+    /// Poses the root's bones (`None` when it has none).
+    pub fn pose_bones(&mut self, skeleton: Option<(Arc<Model>, Vec<BoneTransform>)>) {
+        if skeleton.is_none() {
+            self.bones.selected = None;
+        }
+        self.skeleton = skeleton;
+    }
+
+    /// The root's bones as posed, for tests.
+    #[cfg(test)]
+    pub fn bone_pose(&self) -> Option<&[BoneTransform]> {
+        self.skeleton.as_ref().map(|(_, pose)| &pose[..])
+    }
+
+    /// Selects `bone` of the root's skeleton (and the root).
+    pub fn select_bone(&mut self, bone: Option<usize>) {
+        self.bones.selected = bone;
+        if bone.is_some() {
+            self.selected = self.root;
+        }
+    }
+
+    /// The skeleton as posed, on the root in the posed copy.
+    pub fn skeleton(&self) -> Option<Skeleton<'_>> {
+        let (model, pose) = self.skeleton.as_ref()?;
+        Skeleton::on(&self.posed, self.root?, model.rig.as_deref()?, pose, &[])
+    }
+
+    /// The root's bone paths, as bone tracks name them.
+    pub fn bone_paths(&self) -> Vec<String> {
+        self.rig().map(bone_paths).unwrap_or_default()
+    }
+
+    /// The root's rig, when it has bones.
+    pub fn rig(&self) -> Option<&axcenity_assets::Rig> {
+        self.skeleton.as_ref()?.0.rig.as_deref()
     }
 
     /// Targets and properties the clip has that the copy hasn't.
@@ -283,8 +353,25 @@ impl ObjectPreview {
             .then_some(numbers)
     }
 
-    /// The selected object, with what can be keyed on it.
+    /// The selected object, with what can be keyed on it: the selected
+    /// bone, if one is.
     pub fn focus(&self) -> Option<Focus> {
+        if let Some(bone) = self.bones.selected
+            && let Some((model, pose)) = &self.skeleton
+            && let Some(rig) = model.rig.as_deref()
+            && let (Some(path), Some(transform)) = (bone_paths(rig).get(bone), pose.get(bone))
+        {
+            return Some(Focus {
+                target: path.clone(),
+                name: rig.bones[bone].name.clone(),
+                values: vec![EvaluatedProperty {
+                    target: path.clone(),
+                    property: PropertyName::Bone,
+                    value: bone_numbers(transform),
+                }],
+                transform: vec![PropertyName::Bone],
+            });
+        }
         let root = self.root?;
         let id = self.selected?;
         let instance = self.posed.get(id)?;
@@ -350,6 +437,13 @@ impl ObjectPreview {
         if self.flat || self.root.is_none() {
             return;
         }
+        if self.bones.selected.is_some()
+            && let Some((model, _)) = &self.skeleton
+            && let Some(rig) = model.rig.as_deref()
+        {
+            self.bones.tools(ui, rig);
+            return;
+        }
         for (tool, icon) in [
             (Tool::Move, icons::ARROWS_OUT_CARDINAL),
             (Tool::Rotate, icons::ARROW_CLOCKWISE),
@@ -409,7 +503,10 @@ impl ObjectPreview {
     ) -> Option<PreviewEvent> {
         let screen = Screen::new(self.camera(), rect);
         let tool = self.tool;
-        let pose = self.selected_pose();
+        // With a bone selected, its gizmo shows instead of the part's.
+        let pose = self
+            .selected_pose()
+            .filter(|_| self.bones.selected.is_none() || self.skeleton.is_none());
         let model = self
             .selected
             .and_then(|id| self.posed.get(id))
@@ -426,8 +523,13 @@ impl ObjectPreview {
                 input.pointer.latest_pos(),
             )
         });
+        let mut bones = std::mem::take(&mut self.bones);
+        let posing = self
+            .skeleton()
+            .map(|skeleton| bones.interact(ui, response, &screen, &skeleton));
+        let captured = posing.as_ref().is_some_and(|done| done.captured);
         let hovered = match pointer {
-            Some(pointer) if response.contains_pointer() && self.drag.is_none() => {
+            Some(pointer) if response.contains_pointer() && self.drag.is_none() && !captured => {
                 gizmo::hovered(&shapes, pointer)
             }
             _ => None,
@@ -457,7 +559,7 @@ impl ObjectPreview {
                         .map(move |(name, value)| (id, name, value))
                 }));
             }
-        } else if response.dragged() {
+        } else if response.dragged() && !captured {
             let delta = response.drag_delta();
             self.yaw -= delta.x * 0.4;
             self.pitch = (self.pitch + delta.y * 0.3).clamp(-10.0, 85.0);
@@ -468,28 +570,50 @@ impl ObjectPreview {
                 self.zoom = (self.zoom * (1.0 - scroll * 0.002)).clamp(0.4, 12.0);
             }
         }
+        match posing.as_ref().and_then(|done| done.event.clone()) {
+            Some(BoneEvent::Select(_)) => {
+                self.selected = self.root;
+                event = Some(PreviewEvent::Select(self.root));
+            }
+            Some(BoneEvent::Pose(bone, transform)) => {
+                event = self.bone_edit(bone, &transform);
+            }
+            None => {}
+        }
         if response.clicked()
             && hovered.is_none()
+            && !captured
             && let Some(pointer) = response.interact_pointer_pos()
         {
             let hit = axcenity_scene::pick(&self.posed, screen.ray(pointer))
                 .filter(|&id| self.inside(id));
             self.selected = hit;
+            bones.selected = None;
             event = Some(PreviewEvent::Select(hit));
         }
         if hovered.is_some() || self.drag.is_some() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
         }
 
+        let mut poses = axcenity_scene::Poses::new();
+        if let (Some(root), Some((model, pose))) = (self.root, &self.skeleton)
+            && let Some(posed) = model.pose(pose)
+        {
+            poses.insert(root, Arc::new(posed));
+        }
         let list = axcenity_scene::build_draw_list_posed(
             &self.posed,
             assets,
             self.camera(),
-            &axcenity_scene::Poses::new(),
+            &poses,
             &mut axcenity_scene::TerrainCache::new(),
         );
         self.canvas.paint(ui, rect, render_state, &list);
         let painter = ui.painter_at(rect);
+        if let (Some(done), Some(skeleton)) = (&posing, self.skeleton()) {
+            bones.paint(&painter, &screen, &skeleton, done);
+        }
+        self.bones = bones;
         if let Some((_, pose)) = pose {
             outline(
                 &painter,
@@ -504,7 +628,11 @@ impl ObjectPreview {
             hint(
                 &painter,
                 rect,
-                "Click to select · drag to turn · scroll to zoom",
+                if self.skeleton.is_some() {
+                    "Click a joint or part to select it · drag to turn · scroll to zoom"
+                } else {
+                    "Click to select · drag to turn · scroll to zoom"
+                },
             );
         }
         event
@@ -613,6 +741,16 @@ impl ObjectPreview {
             );
         }
         event
+    }
+
+    /// A bone turned or moved in the preview, as an edit of its `Bone`.
+    pub(super) fn bone_edit(&self, bone: usize, transform: &BoneTransform) -> Option<PreviewEvent> {
+        let path = self.bone_paths().get(bone)?.clone();
+        Some(PreviewEvent::Edit(vec![EvaluatedProperty {
+            target: path,
+            property: PropertyName::Bone,
+            value: bone_numbers(transform),
+        }]))
     }
 
     /// Whether `id` is the root or inside it (not the floor).

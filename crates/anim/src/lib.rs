@@ -5,6 +5,8 @@
 //!   (`*.statemachine.json`) files in a project.
 //! - [`Clip`]: a clip ready to play: its property tracks, and on a skeleton
 //!   its linked take and bone tracks.
+//! - [`convert_to_keys`] and the other bone helpers: how a bone track
+//!   names its bone and stores its transform, and baking a take into keys.
 //! - [`Compiled`] and [`Machine`]: a state machine made ready to run, and
 //!   what runs it (which state plays, and blends between them).
 //! - [`Animators`]: runs every Animator, AnimationTrack and played Animation
@@ -15,12 +17,16 @@
 //! draws them.
 
 mod animators;
+mod bones;
 mod clip;
 mod controller;
 pub mod files;
 mod property_clip;
 
 pub use animators::{AnimatorEvent, Animators, Poses, load_clip};
+pub use bones::{
+    bone_from_numbers, bone_numbers, bone_paths, convert_to_keys, find_bone, pose_bones, take_bones,
+};
 pub use clip::{Clip, RootMotion};
 pub use controller::{Advanced, Compiled, Fade, Machine, Parameters, Playing, exit_reached, holds};
 pub use files::{

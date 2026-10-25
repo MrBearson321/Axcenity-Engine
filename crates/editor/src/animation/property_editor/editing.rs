@@ -7,57 +7,13 @@ impl PropertyDoc {
         let time = self.snapped(self.playhead);
         let mut keyed = BTreeSet::new();
         for value in values {
-            let index = match self
-                .file
-                .tracks
-                .iter()
-                .position(|t| t.target == value.target && t.property == value.property)
-            {
-                Some(index) => index,
-                None => {
-                    let id = free_id(
-                        &value.property.as_str().to_lowercase(),
-                        self.file.tracks.iter().map(|t| t.id.as_str()),
-                    );
-                    self.file.tracks.push(PropertyTrack {
-                        id,
-                        target: value.target.clone(),
-                        property: value.property,
-                        keys: Vec::new(),
-                    });
-                    self.file.tracks.len() - 1
-                }
-            };
-            let track = &mut self.file.tracks[index];
-            if track
-                .keys
-                .first()
-                .is_some_and(|key| key.value.len() != value.value.len())
-            {
-                // A UDim2 key can't go on a Vector3 track (or the reverse).
+            let Some(key) = set_key(&mut self.file.tracks, value, time) else {
                 continue;
-            }
-            let id = match track.keys.iter_mut().find(|k| (k.time - time).abs() < 1e-6) {
-                Some(key) => {
-                    key.value = value.value.clone();
-                    key.id.clone()
-                }
-                None => {
-                    let id = free_id("k", track.keys.iter().map(|k| k.id.as_str()));
-                    track.keys.push(PropertyKeyframe {
-                        id: id.clone(),
-                        time,
-                        value: value.value.clone(),
-                        interp: Interp::Linear,
-                    });
-                    track.keys.sort_by(|a, b| a.time.total_cmp(&b.time));
-                    id
-                }
             };
             self.pending
                 .retain(|p| !(p.target == value.target && p.property == value.property));
-            self.selected_track = Some(track.id.clone());
-            keyed.insert((track.id.clone(), id));
+            self.selected_track = Some(key.0.clone());
+            keyed.insert(key);
         }
         if !keyed.is_empty() {
             self.selected = keyed;
@@ -198,4 +154,60 @@ impl PropertyDoc {
                 .any(|t| t.id == *track_id && t.keys.iter().any(|k| k.id == *key_id))
         });
     }
+}
+
+/// Keys `value` at `time` in `tracks`, making its track if there's none
+/// (`bone1`, `position1`…), or replacing a key already at that time.
+/// Returns the track's and key's ids, or `None` if the value doesn't fit
+/// the track (a UDim2 key can't go on a Vector3 track, or the reverse).
+pub(in crate::animation) fn set_key(
+    tracks: &mut Vec<PropertyTrack>,
+    value: &EvaluatedProperty,
+    time: f64,
+) -> Option<KeyRef> {
+    let index = match tracks
+        .iter()
+        .position(|t| t.target == value.target && t.property == value.property)
+    {
+        Some(index) => index,
+        None => {
+            let id = free_id(
+                &value.property.as_str().to_lowercase(),
+                tracks.iter().map(|t| t.id.as_str()),
+            );
+            tracks.push(PropertyTrack {
+                id,
+                target: value.target.clone(),
+                property: value.property,
+                keys: Vec::new(),
+            });
+            tracks.len() - 1
+        }
+    };
+    let track = &mut tracks[index];
+    if track
+        .keys
+        .first()
+        .is_some_and(|key| key.value.len() != value.value.len())
+    {
+        return None;
+    }
+    let id = match track.keys.iter_mut().find(|k| (k.time - time).abs() < 1e-6) {
+        Some(key) => {
+            key.value = value.value.clone();
+            key.id.clone()
+        }
+        None => {
+            let id = free_id("k", track.keys.iter().map(|k| k.id.as_str()));
+            track.keys.push(PropertyKeyframe {
+                id: id.clone(),
+                time,
+                value: value.value.clone(),
+                interp: Interp::Linear,
+            });
+            track.keys.sort_by(|a, b| a.time.total_cmp(&b.time));
+            id
+        }
+    };
+    Some((track.id.clone(), id))
 }

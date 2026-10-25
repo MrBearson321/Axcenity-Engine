@@ -1,11 +1,18 @@
 //! A clip open in the Animation tab: its toolbar controls, settings,
 //! timeline and bones, and the pose its preview shows.
+//!
+//! The bones its take moves are the take's (locked); the others can be
+//! posed in the preview and keyed as `Bone` tracks on the clip, which play
+//! alongside the take. Convert to keys bakes the take into bone keys.
 
 use std::path::Path;
 use std::sync::Arc;
 
-use axcenity_anim::{Clip, ClipEvent, ClipFile, TakeLink};
-use axcenity_assets::{Assets, Posed, Take};
+use axcenity_anim::{
+    Clip, ClipEvent, ClipFile, EvaluatedProperty, PropertyName, PropertyTrack, TakeLink,
+    bone_from_numbers, bone_numbers, bone_paths, find_bone, take_bones,
+};
+use axcenity_assets::{Assets, BoneTransform, Model, Rig, Take};
 use eframe::egui;
 
 use super::timeline::Timeline;
@@ -131,6 +138,24 @@ pub struct ClipDoc {
     bound: Option<(u64, LinkedClip, Result<Clip, String>)>,
     /// A new event's name, typed before Add event.
     new_event: String,
+    /// Bones turned in the preview that aren't keys (by bone path), and
+    /// the playhead they were turned at (moving it drops them).
+    pending: Vec<(String, Vec<f32>)>,
+    pending_at: f64,
+}
+
+/// The preview model's skeleton at the playhead.
+pub struct Posing {
+    pub model: Arc<Model>,
+    pub pose: Vec<BoneTransform>,
+    /// One per bone: moved by the take, so it can't be keyed.
+    pub locked: Vec<bool>,
+}
+
+impl Posing {
+    pub fn rig(&self) -> &Rig {
+        self.model.rig.as_deref().expect("a posed model has a rig")
+    }
 }
 
 impl ClipDoc {
@@ -150,6 +175,8 @@ impl ClipDoc {
             preview_model: None,
             bound: None,
             new_event: "Footstep".to_owned(),
+            pending: Vec::new(),
+            pending_at: 0.0,
         };
         doc.preview_model = doc.default_preview_model(assets, models);
         doc
@@ -247,8 +274,12 @@ impl ClipDoc {
         }
     }
 
-    /// The preview model's pose at the playhead, or why there isn't one.
-    pub fn pose(&mut self, assets: &Assets) -> Result<Arc<Posed>, String> {
+    /// The preview model's skeleton at the playhead, with bones turned but
+    /// not yet keyed on top, or why there isn't one.
+    pub fn pose(&mut self, assets: &Assets) -> Result<Posing, String> {
+        if self.playing || self.playhead != self.pending_at {
+            self.pending.clear();
+        }
         let mesh_id = self
             .preview_model
             .clone()
@@ -275,10 +306,144 @@ impl ClipDoc {
         let bound = bound.as_ref().map_err(Clone::clone)?;
         let mut pose = rig.rest_pose();
         bound.sample(self.phase(), rig, &mut pose);
-        model
-            .pose(&pose)
-            .map(Arc::new)
-            .ok_or_else(|| "the model can't be posed".to_owned())
+        let paths = bone_paths(rig);
+        for (path, numbers) in &self.pending {
+            if let Some(bone) = find_bone(rig, &paths, path)
+                && let (Some(transform), Some(slot)) =
+                    (bone_from_numbers(numbers), pose.get_mut(bone))
+            {
+                *slot = transform;
+            }
+        }
+        let locked = self.locked(rig);
+        Ok(Posing {
+            model,
+            pose,
+            locked,
+        })
+    }
+
+    /// One per bone of `rig`: whether the take moves it.
+    pub fn locked(&self, rig: &Rig) -> Vec<bool> {
+        self.take().map_or_else(
+            || vec![false; rig.bones.len()],
+            |take| take_bones(take, rig),
+        )
+    }
+
+    /// The clip's own tracks (its bone keys), which play alongside the take.
+    pub fn tracks(&self) -> &[PropertyTrack] {
+        &self.file.rest.tracks
+    }
+
+    /// The playhead on the nearest frame of the take, in seconds of the clip.
+    fn key_time(&self) -> f64 {
+        let frames_a_second = f64::from(self.frame_rate()) * self.file.speed.abs().max(1e-3);
+        let length = self.file.length() / self.file.speed.abs().max(1e-3);
+        ((self.playhead * frames_a_second).round() / frames_a_second).clamp(0.0, length)
+    }
+
+    /// `bone` of `rig` turned or moved to `transform` in the preview: keyed
+    /// at the playhead with `record`, otherwise shown until the playhead
+    /// moves. A bone the take moves can't be keyed.
+    pub fn pose_bone(
+        &mut self,
+        rig: &Rig,
+        bone: usize,
+        transform: &BoneTransform,
+        record: bool,
+    ) -> Result<(), String> {
+        let path = self.unlocked_path(rig, bone)?;
+        self.playing = false;
+        let numbers = bone_numbers(transform);
+        self.pending.retain(|(p, _)| *p != path);
+        if record {
+            self.key_bone(path, numbers);
+        } else {
+            self.pending_at = self.playhead;
+            self.pending.push((path, numbers));
+        }
+        Ok(())
+    }
+
+    /// Key selected (K): keys `bone` where it is in the preview now.
+    pub fn key_selected(&mut self, assets: &Assets, bone: usize) -> Result<(), String> {
+        let posing = self.pose(assets)?;
+        let path = self.unlocked_path(posing.rig(), bone)?;
+        let transform = posing.pose.get(bone).ok_or("there's no such bone")?;
+        self.pending.retain(|(p, _)| *p != path);
+        self.key_bone(path, bone_numbers(transform));
+        Ok(())
+    }
+
+    /// `bone`'s path, if it can be keyed, or why not.
+    fn unlocked_path(&self, rig: &Rig, bone: usize) -> Result<String, String> {
+        let name = &rig.bones.get(bone).ok_or("there's no such bone")?.name;
+        if self.locked(rig).get(bone).copied().unwrap_or(false) {
+            return Err(format!(
+                "{name} is moved by the take `{}`, so it can't be keyed. Convert to keys (⋯) to edit it.",
+                self.file.take
+            ));
+        }
+        bone_paths(rig)
+            .get(bone)
+            .filter(|path| !path.is_empty())
+            .cloned()
+            .ok_or_else(|| "that bone has no name to key it by".to_owned())
+    }
+
+    fn key_bone(&mut self, path: String, numbers: Vec<f32>) {
+        let value = EvaluatedProperty {
+            target: path,
+            property: PropertyName::Bone,
+            value: numbers,
+        };
+        let time = self.key_time();
+        super::property_editor::set_key(&mut self.file.rest.tracks, &value, time);
+    }
+
+    /// How many keys each bone of `rig` has on the clip's own tracks.
+    pub fn bone_keys(&self, rig: &Rig) -> Vec<usize> {
+        let paths = bone_paths(rig);
+        let mut keys = vec![0; rig.bones.len()];
+        for track in self
+            .tracks()
+            .iter()
+            .filter(|t| t.property == PropertyName::Bone)
+        {
+            if let Some(bone) = find_bone(rig, &paths, &track.target) {
+                keys[bone] += track.keys.len();
+            }
+        }
+        keys
+    }
+
+    /// Removes `bone`'s keys from the clip.
+    fn remove_bone_keys(&mut self, rig: &Rig, bone: usize) {
+        let paths = bone_paths(rig);
+        self.file.rest.tracks.retain(|track| {
+            track.property != PropertyName::Bone
+                || find_bone(rig, &paths, &track.target) != Some(bone)
+        });
+    }
+
+    /// Convert to keys: the clip with its take baked into bone keys on the
+    /// preview model's skeleton, and no link (see
+    /// [`axcenity_anim::convert_to_keys`]).
+    pub fn converted(&self, assets: &Assets) -> Result<ClipFile, String> {
+        let mesh_id = self
+            .preview_model
+            .as_deref()
+            .ok_or("no model in the project has this clip's skeleton")?;
+        let model = assets
+            .model(mesh_id)
+            .ok_or_else(|| format!("`{mesh_id}` can't be loaded"))?;
+        let rig = model
+            .rig
+            .as_deref()
+            .ok_or_else(|| format!("`{mesh_id}` has no skeleton"))?;
+        let takes = self.takes.clone()?;
+        axcenity_anim::convert_to_keys(&self.file.to_file(), takes, rig)
     }
 
     /// Whether root motion found a bone to move the model by.
@@ -341,9 +506,10 @@ impl ClipDoc {
         }
     }
 
-    /// The bones of the preview model's skeleton as a tree, those the take
-    /// moves in the normal text colour and the rest dimmed.
-    pub fn bones(&self, ui: &mut egui::Ui, assets: &Assets) {
+    /// The bones of the preview model's skeleton as a tree: those the take
+    /// moves locked (🔒), the rest selectable to pose, with their key
+    /// counts (right-click one to remove its keys).
+    pub fn bones(&mut self, ui: &mut egui::Ui, assets: &Assets, selected: &mut Option<usize>) {
         let Some(model) = self
             .preview_model
             .as_deref()
@@ -356,34 +522,42 @@ impl ClipDoc {
             ui.weak("This model has no skeleton.");
             return;
         };
-        let moved: Vec<&str> = self
-            .take()
-            .map(|take| {
-                take.tracks
-                    .iter()
-                    .map(|track| track.bone.as_str())
-                    .collect()
-            })
-            .unwrap_or_default();
-        // Parents come before their children, so each depth is known in time.
-        let mut depths = Vec::with_capacity(rig.bones.len());
-        for bone in &rig.bones {
-            let depth = bone.parent.map_or(0, |parent| depths[parent] + 1);
-            depths.push(depth);
+        let locked = self.locked(rig);
+        let keys = self.bone_keys(rig);
+        let rows = super::posing::bone_rows(rig);
+        let moved = rows.iter().filter(|(bone, _)| locked[*bone]).count();
+        ui.weak(format!(
+            "{} bones, {moved} moved by the take {}",
+            rows.len(),
+            icons::LOCK
+        ));
+        let mut remove = None;
+        for (bone, depth) in rows {
+            let row = super::posing::bone_row(
+                ui,
+                &rig.bones[bone].name,
+                depth,
+                *selected == Some(bone),
+                locked[bone],
+                keys[bone],
+            );
+            if row.clicked() {
+                *selected = Some(bone);
+            }
+            if keys[bone] > 0 {
+                row.context_menu(|ui| {
+                    if ui
+                        .button(format!("{} Remove its keys", icons::TRASH))
+                        .clicked()
+                    {
+                        remove = Some(bone);
+                        ui.close();
+                    }
+                });
+            }
         }
-        ui.weak(format!("{} bones, {} moved", rig.bones.len(), moved.len()));
-        for (bone, depth) in rig.bones.iter().zip(depths) {
-            ui.horizontal(|ui| {
-                ui.add_space((depth as f32 * 8.0).min(64.0));
-                let text = egui::RichText::new(format!("{} {}", icons::BONE, bone.name));
-                let text = if moved.contains(&bone.name.as_str()) {
-                    text
-                } else {
-                    text.weak()
-                };
-                ui.add(egui::Label::new(text).truncate())
-                    .on_hover_text(&bone.name);
-            });
+        if let Some(bone) = remove {
+            self.remove_bone_keys(rig, bone);
         }
     }
 

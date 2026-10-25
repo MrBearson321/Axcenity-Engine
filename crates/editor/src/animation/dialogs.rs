@@ -71,6 +71,11 @@ impl AnimationStudio {
                 self.open_subject_clip(project, assets, &path, subject.as_ref(), world, output);
                 self.from_state = None;
             }
+            Pick::ConvertToKeys(path) => {
+                if self.clip_path().as_deref() == Some(&path) {
+                    self.convert_to_keys(project, assets, output, actions);
+                }
+            }
             Pick::Rename(path) if is_controller(&path) => {
                 self.dialog = Some(Dialog::RenameController {
                     name: store::controller_name(&path).to_owned(),

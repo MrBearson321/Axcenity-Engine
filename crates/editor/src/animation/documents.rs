@@ -100,6 +100,8 @@ impl AnimationStudio {
         path: &str,
         output: &mut Output,
     ) {
+        // A bone picked on another clip's model may not be on this one's.
+        self.clip.bones.selected = None;
         // A linked clip opens on its take; a keyed one in the property editor.
         self.clip.doc = match store::read_any_clip(project, path) {
             Ok(file) if file.link.is_some() => Some(Clip::Take(Box::new(ClipDoc::open(

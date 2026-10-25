@@ -962,4 +962,6 @@ impl EditorApp {
 }
 
 #[cfg(test)]
+mod posing_tests;
+#[cfg(test)]
 mod tests;

@@ -29,9 +29,12 @@ mod clip_editor;
 mod controller_editor;
 mod graph;
 mod object_preview;
+mod posing;
 pub(crate) mod preview;
 mod property_editor;
 pub mod store;
+#[cfg(test)]
+mod testing;
 mod timeline;
 
 use std::collections::HashMap;
@@ -51,8 +54,9 @@ use crate::widgets;
 use clip_editor::ClipDoc;
 use controller_editor::ControllerDoc;
 use object_preview::{ObjectPreview, PreviewEvent};
+use posing::Poser;
 use preview::Preview;
-use property_editor::PropertyDoc;
+use property_editor::{Drawn, PropertyDoc};
 
 mod chrome;
 mod clip_ui;
@@ -373,8 +377,10 @@ struct ClipView {
     preview: Preview,
     hide_drawer: bool,
     hide_inspector: bool,
-    /// With a property clip open, moving something in the preview keys it.
+    /// Moving something (or a bone) in the preview keys it.
     record: bool,
+    /// A take clip's bones in its preview: the selected one and its gizmo.
+    bones: Poser,
     /// A property clip's preview: a copy of what it animates.
     objects: ObjectPreview,
     /// Where the clip was last drawn, and in which pass, so its keys (K,
@@ -458,6 +464,8 @@ enum Dialog {
 /// What a picker or a ⋯ menu asked for, on a clip or state machine's path.
 enum Pick {
     Open(String),
+    /// Bake a linked clip's take into bone keys.
+    ConvertToKeys(String),
     Rename(String),
     Duplicate(String),
     Delete(String),

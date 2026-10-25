@@ -8,8 +8,13 @@ impl AnimationStudio {
         let Some((rect, pass)) = self.clip.drawn else {
             return false;
         };
+        let keyed = match &self.clip.doc {
+            Some(Clip::Property(_)) => true,
+            Some(Clip::Take(_)) => self.clip.bones.selected.is_some(),
+            None => false,
+        };
         self.view == View::Clip
-            && matches!(self.clip.doc, Some(Clip::Property(_)))
+            && keyed
             && ctx.cumulative_pass_nr() <= pass + 1
             && ctx
                 .input(|input| input.pointer.latest_pos())

@@ -191,8 +191,8 @@ Files identical to the project's are skipped silently and aren't counted as clas
 
 ### Acceptance criteria
 
-- [ ] A 3-key wave made on an imported rig plays in the preview, in a state machine state, and in Play.
-- [ ] Before converting, a linked clip's locked bones can't be keyed. After Convert to keys, the clip looks the same and can be edited.
+- [x] A 3-key wave made on an imported rig plays in the preview, in a state machine state, and in Play.
+- [x] Before converting, a linked clip's locked bones can't be keyed. After Convert to keys, the clip looks the same and can be edited.
 
 ---
 

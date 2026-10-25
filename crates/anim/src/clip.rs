@@ -10,6 +10,7 @@ use std::sync::Arc;
 use axcenity_assets::{BoneTransform, Pose, Rig, Take};
 use glam::{Mat4, Quat, Vec3};
 
+use crate::bones::{bone_from_numbers, bone_paths, find_bone};
 use crate::files::{ClipFile, PropertyName, TakeLink};
 use crate::property_clip::{EvaluatedProperty, PropertyClip, sample_track};
 
@@ -197,13 +198,9 @@ impl Clip {
         for &(bone, index) in &self.bones {
             let track = &self.clip.file.tracks[index];
             if let (Some(values), Some(slot)) = (sample_track(track, seconds), pose.get_mut(bone))
-                && let [tx, ty, tz, qx, qy, qz, qw, sx, sy, sz] = values[..]
+                && let Some(transform) = bone_from_numbers(&values)
             {
-                *slot = BoneTransform {
-                    translation: Vec3::new(tx, ty, tz),
-                    rotation: Quat::from_xyzw(qx, qy, qz, qw).normalize(),
-                    scale: Vec3::new(sx, sy, sz),
-                };
+                *slot = transform;
             }
         }
     }
@@ -392,29 +389,6 @@ impl BoundTake {
         let moved = position - root.start;
         (Vec3::new(moved.x, 0.0, moved.z), heading - root.start_yaw)
     }
-}
-
-/// Each bone's path from the top of the skeleton, by names (`Hips/Spine`).
-fn bone_paths(rig: &Rig) -> Vec<String> {
-    let mut paths: Vec<String> = Vec::with_capacity(rig.bones.len());
-    for bone in &rig.bones {
-        let path = match bone.parent.and_then(|parent| paths.get(parent)) {
-            Some(parent) => format!("{parent}/{}", bone.name),
-            None => bone.name.clone(),
-        };
-        paths.push(path);
-    }
-    paths
-}
-
-/// The bone a track's `target` names: by its whole path, or else by its
-/// last name.
-fn find_bone(rig: &Rig, paths: &[String], target: &str) -> Option<usize> {
-    let target = target.trim_matches('/');
-    paths.iter().position(|path| path == target).or_else(|| {
-        let name = target.rsplit('/').next()?;
-        rig.bone(name)
-    })
 }
 
 /// A rotation's turn around Y (its twist about the vertical), in radians.

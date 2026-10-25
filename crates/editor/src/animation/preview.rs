@@ -4,13 +4,16 @@
 
 use std::sync::Arc;
 
-use axcenity_assets::{Assets, Model, Posed};
+use axcenity_assets::{Assets, BoneTransform, Model, Posed, Rig};
 use axcenity_core::{ClassName, Color3, InstanceId, Value, Vector3, World};
 use axcenity_render::glam::Vec3;
 use axcenity_render::{Camera, DrawList, TextureRenderer, wgpu};
 use axcenity_scene::Poses;
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
+
+use super::posing::{BoneEvent, Poser, Skeleton};
+use crate::screen::Screen;
 
 /// Floor tiles along each side.
 const TILES: i32 = 12;
@@ -122,6 +125,15 @@ pub fn add_floor(world: &mut World, center: Vec3, top: f32, tile: f32) {
     }
 }
 
+/// The model's skeleton as the preview shows it, to pose it.
+pub struct Bones<'a> {
+    pub poser: &'a mut Poser,
+    pub rig: &'a Rig,
+    pub pose: &'a [BoneTransform],
+    /// One per bone: moved by the take, so it can't be keyed.
+    pub locked: &'a [bool],
+}
+
 /// A model on a floor, with an orbiting camera.
 pub struct Preview {
     canvas: Canvas,
@@ -201,6 +213,16 @@ impl Preview {
         self.world = World::new();
     }
 
+    /// `rig` posed at `pose` on the model shown, as the preview draws it.
+    pub fn skeleton<'a>(
+        &self,
+        rig: &'a Rig,
+        pose: &'a [BoneTransform],
+        locked: &'a [bool],
+    ) -> Option<Skeleton<'a>> {
+        Skeleton::on(&self.world, self.part?, rig, pose, locked)
+    }
+
     pub fn has_model(&self) -> bool {
         self.part.is_some()
     }
@@ -230,9 +252,38 @@ impl Preview {
         posed: Option<Arc<Posed>>,
         height: f32,
     ) {
+        self.show_posing(ui, render_state, assets, posed, height, None);
+    }
+
+    /// [`show`](Self::show), with `bones` drawn over the model as joints to
+    /// pick and a gizmo to turn the selected one. Returns what was done to
+    /// them.
+    pub fn show_posing(
+        &mut self,
+        ui: &mut egui::Ui,
+        render_state: Option<&RenderState>,
+        assets: &Assets,
+        posed: Option<Arc<Posed>>,
+        height: f32,
+        mut bones: Option<Bones>,
+    ) -> Option<BoneEvent> {
         let size = egui::vec2(ui.available_width(), height);
-        let (rect, response) = ui.allocate_exact_size(size, egui::Sense::drag());
-        if response.dragged() {
+        let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
+        let screen = Screen::new(self.camera(), rect);
+        let skeleton = match &bones {
+            Some(bones) if render_state.is_some() => {
+                self.skeleton(bones.rig, bones.pose, bones.locked)
+            }
+            _ => None,
+        };
+        let interaction = match (&mut bones, &skeleton) {
+            (Some(bones), Some(skeleton)) => {
+                Some(bones.poser.interact(ui, &response, &screen, skeleton))
+            }
+            _ => None,
+        };
+        let captured = interaction.as_ref().is_some_and(|done| done.captured);
+        if response.dragged() && !captured {
             let delta = response.drag_delta();
             self.yaw -= delta.x * 0.4;
             self.pitch = (self.pitch + delta.y * 0.3).clamp(-10.0, 85.0);
@@ -252,7 +303,7 @@ impl Preview {
                 egui::FontId::proportional(13.0),
                 ui.visuals().weak_text_color(),
             );
-            return;
+            return None;
         };
         if !self.has_model() {
             painter.rect_filled(rect, 4.0, ui.visuals().extreme_bg_color);
@@ -263,7 +314,7 @@ impl Preview {
                 egui::FontId::proportional(13.0),
                 ui.visuals().weak_text_color(),
             );
-            return;
+            return None;
         }
         let camera = self.camera();
         let mut poses = Poses::new();
@@ -278,14 +329,23 @@ impl Preview {
             &mut axcenity_scene::TerrainCache::new(),
         );
         self.canvas.paint(ui, rect, render_state, &list);
+        if let (Some(bones), Some(skeleton), Some(done)) = (&bones, &skeleton, &interaction) {
+            bones.poser.paint(&painter, &screen, skeleton, done);
+        }
         if response.hovered() {
+            let hint = if skeleton.is_some() {
+                "Click a joint to pose it · drag to turn · scroll to zoom"
+            } else {
+                "Drag to turn · scroll to zoom"
+            };
             painter.text(
                 rect.left_bottom() + egui::vec2(8.0, -6.0),
                 egui::Align2::LEFT_BOTTOM,
-                "Drag to turn · scroll to zoom",
+                hint,
                 egui::FontId::proportional(11.0),
                 egui::Color32::from_white_alpha(160),
             );
         }
+        interaction.and_then(|done| done.event)
     }
 }
