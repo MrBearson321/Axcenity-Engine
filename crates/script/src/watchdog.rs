@@ -1,57 +1,65 @@
 //! The watchdog: stops a script that runs too long without pausing, such
 //! as `while true do end`, so a mistake can't freeze the game or the editor.
 //!
-//! Lua calls a hook every [`CHECK_EVERY`] instructions in every coroutine.
-//! The hook compares the time since the scheduler last resumed a coroutine
-//! with the limit. Pausing (`task.wait`) hands control back to the
-//! scheduler, so the next resume starts a fresh time budget: long work that
-//! pauses now and then is never stopped.
+//! Luau calls an interrupt at every function call and every loop iteration,
+//! in every coroutine. Every [`CHECK_EVERY`] interrupts, the interrupt
+//! compares the time since the scheduler last resumed a coroutine with the
+//! limit. Pausing (`task.wait`) hands control back to the scheduler, so the
+//! next resume starts a fresh time budget: long work that pauses now and
+//! then is never stopped.
 //!
-//! Once the budget is used up, the hook **pauses** the running coroutine
-//! for good: it yields, and nothing resumes it again. The scheduler then
-//! reports an error naming the script and line. A yield can't be caught by
-//! `pcall`, and runs no error handlers or `__close` metamethods, so a script
-//! can't keep itself running. The scripts' `coroutine` functions (see
+//! Once the budget is used up, the interrupt **pauses** the running
+//! coroutine for good: it yields, and nothing resumes it again. The
+//! scheduler then reports an error naming the script and line. A yield can't
+//! be caught by `pcall` and runs no error handlers, so a script can't keep
+//! itself running. The scripts' `coroutine` functions (see
 //! [`coroutine_functions`]) treat a stopped coroutine as dead, so no script
 //! can resume or close it either.
 //!
 //! Some code can't yield: Lua called from inside a C function, such as a
-//! `table.sort` comparator. There the hook raises the error instead, and the
-//! engine's `pcall` and `xpcall` pass it on rather than catch it (see
-//! `errors`). Raising is the second choice because Lua turns hooks off
-//! while its hook runs, and a coroutine left by an error from the hook may
-//! keep them off.
+//! `table.sort` comparator. There the next interrupt raises the error
+//! instead, and the engine's `pcall` and `xpcall` pass it on rather than
+//! catch it (see `errors`). Raising is the second choice because an error
+//! runs the script's error handlers on its way out.
 //!
-//! The budget stays used up until the scheduler gets control back, so a
-//! coroutine that resumed the stopped one with `coroutine.resume` is stopped
-//! too if it keeps running (`while true do coroutine.resume(...) end` would
-//! otherwise loop forever). Only a coroutine that `task.spawn`ed it gets a
-//! fresh budget: the scheduler started that one, so it's a separate task.
+//! The budget stays used up until the scheduler gets control back. When the
+//! watchdog stops a coroutine the script made itself, the task running it
+//! (the coroutine the scheduler resumed) may run [`CHECK_EVERY`] more
+//! interrupts of its own, enough to finish what it was doing, and is then
+//! stopped too (`while true do coroutine.resume(...) end` would otherwise
+//! loop forever, each check landing in a new coroutine). Only a coroutine
+//! that `task.spawn`ed it gets a fresh budget: the scheduler started that
+//! one, so it's a separate task.
 
 use std::time::{Duration, Instant};
 
 use mlua::debug::Debug;
-use mlua::{Function, HookTriggers, Lua, Table, Thread, VmState};
+use mlua::{Function, Lua, Table, Thread, VmState};
 
 /// How long a coroutine may run without pausing (decided in Phase 15).
 pub const DEFAULT_LIMIT: Duration = Duration::from_secs(3);
 
-/// How many Lua instructions run between checks. Reading the clock every
-/// thousand instructions costs far less than 1% of the time.
-pub(crate) const CHECK_EVERY: u32 = 1000;
+/// How many interrupts pass between reads of the clock, and how many a task
+/// may still run after a coroutine it resumed was stopped.
+const CHECK_EVERY: u32 = 1000;
 
-/// Lives in Lua's app data, where the hook and the scheduler can reach it.
+/// Lives in Lua's app data, where the interrupt and the scheduler can reach it.
 pub struct Watchdog {
     limit: Duration,
     /// When the time budget started: at the outermost resume by the
     /// scheduler, or when a `task.spawn`ed coroutine was stopped.
     started: Option<Instant>,
-    /// How many resumes are running inside each other. `task.spawn` resumes
-    /// a new coroutine while the one that called it is still running, and
-    /// both count against the same budget.
-    depth: u32,
+    /// The coroutines the scheduler is running, innermost last. `task.spawn`
+    /// resumes a new coroutine while the one that called it is still
+    /// running, and both count against the same budget.
+    tasks: Vec<Thread>,
     /// The coroutines the watchdog stopped in this run.
     stopped: Vec<Stopped>,
+    /// Interrupts since the clock was last read.
+    interrupts: u32,
+    /// A task whose budget is used up, and how many more interrupts it may
+    /// run before it's stopped.
+    finishing: Option<(Thread, u32)>,
     /// Every coroutine the watchdog ever stopped, with its error, for the
     /// scripts' `coroutine` functions. Its keys are weak, so Lua still
     /// frees the coroutines.
@@ -66,8 +74,7 @@ struct Stopped {
     reported: bool,
 }
 
-/// Starts watching every coroutine that `lua` creates from now on. Call it
-/// before creating any, because only coroutines made after it are watched.
+/// Starts watching every coroutine that `lua` runs.
 pub fn install(lua: &Lua) -> mlua::Result<()> {
     let ever_stopped = lua.create_table()?;
     let weak_keys = lua.create_table()?;
@@ -76,12 +83,14 @@ pub fn install(lua: &Lua) -> mlua::Result<()> {
     lua.set_app_data(Watchdog {
         limit: DEFAULT_LIMIT,
         started: None,
-        depth: 0,
+        tasks: Vec::new(),
         stopped: Vec::new(),
+        interrupts: 0,
+        finishing: None,
         ever_stopped,
     });
-    let triggers = HookTriggers::new().every_nth_instruction(CHECK_EVERY);
-    lua.set_global_hook(triggers, check)
+    lua.set_interrupt(check);
+    Ok(())
 }
 
 pub fn set_limit(lua: &Lua, limit: Duration) {
@@ -90,14 +99,14 @@ pub fn set_limit(lua: &Lua, limit: Duration) {
     }
 }
 
-/// Called by the scheduler just before it resumes a coroutine.
-pub fn enter(lua: &Lua) {
+/// Called by the scheduler just before it resumes `thread`.
+pub fn enter(lua: &Lua, thread: &Thread) {
     if let Some(mut watchdog) = lua.app_data_mut::<Watchdog>() {
-        if watchdog.depth == 0 {
+        if watchdog.tasks.is_empty() {
             watchdog.started = Some(Instant::now());
             watchdog.stopped.clear();
         }
-        watchdog.depth += 1;
+        watchdog.tasks.push(thread.clone());
     }
 }
 
@@ -105,8 +114,15 @@ pub fn enter(lua: &Lua) {
 /// finished or failed.
 pub fn leave(lua: &Lua) {
     if let Some(mut watchdog) = lua.app_data_mut::<Watchdog>() {
-        watchdog.depth = watchdog.depth.saturating_sub(1);
-        if watchdog.depth == 0 {
+        let task = watchdog.tasks.pop();
+        if watchdog
+            .finishing
+            .as_ref()
+            .is_some_and(|(thread, _)| Some(thread) == task.as_ref())
+        {
+            watchdog.finishing = None;
+        }
+        if watchdog.tasks.is_empty() {
             watchdog.started = None;
             watchdog.stopped.clear();
         } else if !watchdog.stopped.is_empty() {
@@ -120,6 +136,9 @@ pub fn leave(lua: &Lua) {
 /// The watchdog's error, if it has stopped the coroutine running now.
 pub fn stopped(lua: &Lua) -> Option<String> {
     let watchdog = lua.app_data_ref::<Watchdog>()?;
+    if watchdog.stopped.is_empty() {
+        return None;
+    }
     let current = lua.current_thread();
     watchdog
         .stopped
@@ -157,11 +176,11 @@ pub fn should_report(lua: &Lua, message: &str) -> bool {
     }
 }
 
-/// The hook Lua calls every [`CHECK_EVERY`] instructions. `Yield` pauses
-/// the running coroutine; an error is raised in the running code.
-pub(crate) fn check(lua: &Lua, debug: &Debug) -> mlua::Result<VmState> {
-    // Still running after the hook asked it to pause, so it couldn't (it's
-    // inside a C function): raise the error instead.
+/// The interrupt Luau calls at every call and loop iteration. `Yield`
+/// pauses the running coroutine; an error is raised in the running code.
+fn check(lua: &Lua) -> mlua::Result<VmState> {
+    // Still running after the interrupt asked it to pause, so it couldn't
+    // (it's inside a C function): raise the error instead.
     if let Some(message) = stopped(lua) {
         return Err(mlua::Error::runtime(message));
     }
@@ -170,19 +189,45 @@ pub(crate) fn check(lua: &Lua, debug: &Debug) -> mlua::Result<VmState> {
         let Some(mut watchdog) = lua.app_data_mut::<Watchdog>() else {
             return Ok(VmState::Continue);
         };
-        // Lua code can also run outside a resume (while the engine sets up,
-        // say); that gets a budget from its first check on.
-        let started = *watchdog.started.get_or_insert_with(Instant::now);
-        if started.elapsed() < watchdog.limit {
-            return Ok(VmState::Continue);
+        let limit = watchdog.limit.as_secs_f64();
+        let mut finished = false;
+        if let Some((task, left)) = &mut watchdog.finishing
+            && *task == lua.current_thread()
+        {
+            finished = *left == 0;
+            *left = left.saturating_sub(1);
         }
-        watchdog.limit.as_secs_f64()
+        if finished {
+            watchdog.finishing = None;
+            limit
+        } else {
+            watchdog.interrupts += 1;
+            if watchdog.interrupts < CHECK_EVERY {
+                return Ok(VmState::Continue);
+            }
+            watchdog.interrupts = 0;
+            // Lua code can also run outside a resume (while the engine sets
+            // up, say); that gets a budget from its first check on.
+            let started = *watchdog.started.get_or_insert_with(Instant::now);
+            if started.elapsed() < watchdog.limit {
+                return Ok(VmState::Continue);
+            }
+            // A coroutine the script made: its task finishes up, then stops.
+            let current = lua.current_thread();
+            if let Some(task) = watchdog.tasks.last().cloned()
+                && task != current
+                && watchdog.finishing.is_none()
+            {
+                watchdog.finishing = Some((task, CHECK_EVERY));
+            }
+            limit
+        }
     };
     let text = format!(
         "this script ran for {seconds} seconds without pausing, so it was stopped. A loop \
          that never pauses freezes the game: put task.wait() inside long loops"
     );
-    let message = match script_location(lua, debug) {
+    let message = match script_location(lua) {
         Some(location) => format!("{location}: {text}"),
         None => text,
     };
@@ -285,17 +330,15 @@ pub fn coroutine_functions(lua: &Lua, clean: &Function) -> mlua::Result<Table> {
     ))
 }
 
-/// `path:line` of the script code that's running: the function the hook
-/// stopped, or if that's the engine's own Lua, the nearest script code that
-/// called it.
-fn script_location(lua: &Lua, debug: &Debug) -> Option<String> {
-    location(debug).or_else(|| {
-        // `map_while` stops at the bottom of the call stack.
-        (1..)
-            .map_while(|level| lua.inspect_stack(level, location))
-            .flatten()
-            .next()
-    })
+/// `path:line` of the script code that's running: the function the
+/// interrupt stopped, or if that's the engine's own Lua, the nearest script
+/// code that called it.
+fn script_location(lua: &Lua) -> Option<String> {
+    // `map_while` stops at the bottom of the call stack.
+    (0..)
+        .map_while(|level| lua.inspect_stack(level, location))
+        .flatten()
+        .next()
 }
 
 /// `path:line` of one function on the call stack, if it's script code.

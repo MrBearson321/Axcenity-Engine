@@ -73,7 +73,7 @@ pub(super) fn create_pipeline(
             6 => Float32x3, 7 => Float32x3, 8 => Float32x3,
             9 => Float32x4,
             10 => Float32x3,
-            11 => Float32x3,
+            11 => Float32x4,
         ],
     };
 

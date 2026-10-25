@@ -1,4 +1,4 @@
-//! Rewrites `definitions/axcenity.lua` from the current script API. Run it
+//! Rewrites `definitions/axcenity.d.luau` from the current script API. Run it
 //! after changing the API (a test fails until you do):
 //!
 //! ```text

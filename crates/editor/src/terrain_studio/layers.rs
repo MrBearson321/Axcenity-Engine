@@ -1,0 +1,452 @@
+use super::*;
+
+/// One layer's material: color, maps and how they tile.
+pub(super) fn layer_editor(
+    ui: &mut egui::Ui,
+    layer: InstanceId,
+    instance: &axcenity_core::Instance,
+    actions: &mut Vec<TerrainAction>,
+) {
+    let number = |name| {
+        instance
+            .property(name)
+            .and_then(Value::as_number)
+            .unwrap_or(0.0)
+    };
+    let flag = |name| instance.property(name).and_then(Value::as_bool) == Some(true);
+    responsive::form(ui, ("layer", layer), |ui| {
+        field(ui, "Tint");
+        if let Some(color) = instance.property("Color").and_then(Value::as_color3)
+            && let Some(color) = crate::properties::color_control(ui, color)
+        {
+            actions.push(TerrainAction::SetLayer(
+                layer,
+                "Color",
+                Value::Color3(color),
+            ));
+        }
+        ui.end_row();
+        for (name, label) in [
+            ("ColorMap", "Color"),
+            ("NormalMap", "Normal"),
+            ("RoughnessMap", "Roughness"),
+            ("MetalnessMap", "Metalness"),
+            ("AmbientOcclusionMap", "Occlusion"),
+            ("HeightMap", "Height"),
+        ] {
+            field(ui, label);
+            ui.horizontal(|ui| {
+                if ui
+                    .small_button(icons::FOLDER_OPEN)
+                    .on_hover_text("Choose a texture (PNG, JPEG, TGA or BMP)")
+                    .clicked()
+                {
+                    actions.push(TerrainAction::PickLayerTexture(layer, name));
+                }
+                let path = instance
+                    .property(name)
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                if path.is_empty() {
+                    ui.weak("None");
+                } else {
+                    if ui
+                        .small_button(icons::X)
+                        .on_hover_text("Use no map")
+                        .clicked()
+                    {
+                        actions.push(TerrainAction::SetLayer(
+                            layer,
+                            name,
+                            Value::String(String::new()),
+                        ));
+                    }
+                    ui.add(egui::Label::new(path.rsplit('/').next().unwrap_or(path)).truncate())
+                        .on_hover_text(path);
+                }
+            });
+            ui.end_row();
+        }
+        let mut slider = |ui: &mut egui::Ui,
+                          name: &'static str,
+                          label: &str,
+                          range: std::ops::RangeInclusive<f64>,
+                          suffix: &str| {
+            field(ui, label);
+            let mut value = number(name);
+            if ui
+                .add(egui::Slider::new(&mut value, range).suffix(suffix))
+                .changed()
+            {
+                actions.push(TerrainAction::SetLayer(layer, name, Value::Number(value)));
+            }
+            ui.end_row();
+        };
+        slider(ui, "Roughness", "Roughness", 0.0..=1.0, "");
+        slider(ui, "Metalness", "Metalness", 0.0..=1.0, "");
+        slider(ui, "NormalStrength", "Normal strength", 0.0..=3.0, "");
+        slider(ui, "TileSize", "Tile size", 0.25..=256.0, " studs");
+        slider(ui, "TextureRotation", "Turn", -180.0..=180.0, "°");
+        slider(ui, "AntiTiling", "Anti-tiling", 0.0..=1.0, "");
+        slider(ui, "HeightBlend", "Height blend", 0.0..=1.0, "");
+        field(ui, "Triplanar");
+        let mut triplanar = flag("Triplanar");
+        if ui
+            .checkbox(&mut triplanar, "Project from the sides too")
+            .on_hover_text("For cliffs and rock: textures aren't stretched on steep ground.")
+            .changed()
+        {
+            actions.push(TerrainAction::SetLayer(
+                layer,
+                "Triplanar",
+                Value::Bool(triplanar),
+            ));
+        }
+        ui.end_row();
+    });
+    ui.horizontal_wrapped(|ui| {
+        if ui
+            .button(theme::with_icon(icons::DOWNLOAD, "Import texture set…"))
+            .on_hover_text(
+                "Pick a material's textures together (BaseColor, Normal, Roughness, ORM…): \
+                 each goes to its map by its name.",
+            )
+            .clicked()
+        {
+            actions.push(TerrainAction::ImportTextureSet(layer));
+        }
+        if ui
+            .button(theme::with_icon(icons::IMAGE, "From SurfaceAppearance"))
+            .on_hover_text("Copy the maps of the SurfaceAppearance selected in the Explorer.")
+            .clicked()
+        {
+            actions.push(TerrainAction::CopySurfaceAppearance(layer));
+        }
+    });
+}
+
+/// "Covers the layers above where the height is … and the slope is …".
+pub(super) fn rule_editor(
+    ui: &mut egui::Ui,
+    layer: InstanceId,
+    instance: &axcenity_core::Instance,
+    first: bool,
+    actions: &mut Vec<TerrainAction>,
+) {
+    let palette = theme::palette(ui.ctx());
+    let number = |name| {
+        instance
+            .property(name)
+            .and_then(Value::as_number)
+            .unwrap_or(0.0)
+    };
+    let mut enabled = instance.property("AutoEnabled").and_then(Value::as_bool) == Some(true);
+    ui.horizontal_wrapped(|ui| {
+        ui.label(
+            egui::RichText::new(instance.name())
+                .family(theme::medium_family())
+                .color(palette.text_strong),
+        );
+        if first {
+            ui.label(
+                egui::RichText::new("covers everything underneath")
+                    .size(theme::type_scale::SMALL)
+                    .color(palette.text_weak),
+            );
+            return;
+        }
+        if ui.checkbox(&mut enabled, "automatic").changed() {
+            actions.push(TerrainAction::SetLayer(
+                layer,
+                "AutoEnabled",
+                Value::Bool(enabled),
+            ));
+        }
+    });
+    if first || !enabled {
+        return;
+    }
+    let mut value = |ui: &mut egui::Ui,
+                     name: &'static str,
+                     speed: f64,
+                     range: std::ops::RangeInclusive<f64>,
+                     suffix: &str| {
+        let mut current = number(name);
+        if ui
+            .add(
+                egui::DragValue::new(&mut current)
+                    .speed(speed)
+                    .range(range)
+                    .suffix(suffix),
+            )
+            .changed()
+        {
+            actions.push(TerrainAction::SetLayer(layer, name, Value::Number(current)));
+        }
+    };
+    ui.horizontal_wrapped(|ui| {
+        ui.label("where the height is");
+        value(ui, "MinHeight", 0.5, -100000.0..=100000.0, "");
+        ui.label("to");
+        value(ui, "MaxHeight", 0.5, -100000.0..=100000.0, " studs,");
+        ui.label("fading over");
+        value(ui, "HeightFade", 0.25, 0.0..=10000.0, " studs");
+    });
+    ui.horizontal_wrapped(|ui| {
+        ui.label("and the slope is");
+        value(ui, "MinSlope", 0.5, 0.0..=90.0, "°");
+        ui.label("to");
+        value(ui, "MaxSlope", 0.5, 0.0..=90.0, "°,");
+        ui.label("fading over");
+        value(ui, "SlopeFade", 0.25, 0.0..=90.0, "°");
+    });
+    ui.horizontal_wrapped(|ui| {
+        ui.label("covering");
+        value(ui, "RuleStrength", 0.01, 0.0..=1.0, "");
+        ui.label("with noise");
+        value(ui, "RuleNoise", 0.01, 0.0..=1.0, "");
+        ui.label("in patches");
+        value(ui, "NoiseScale", 0.5, 0.1..=10000.0, " studs across");
+    });
+}
+
+/// What the masks are set to, so a brush that does nothing explains why.
+pub(super) fn masks_summary(ui: &mut egui::Ui, brush: &Brush) {
+    let mut parts = Vec::new();
+    if let Some((low, high)) = brush.height_limits {
+        parts.push(format!("heights {low:.0}–{high:.0} studs"));
+    }
+    if let Some((low, high)) = brush.slope_limits {
+        parts.push(format!("slopes {low:.0}–{high:.0}°"));
+    }
+    if !parts.is_empty() {
+        let palette = theme::palette(ui.ctx());
+        ui.label(
+            egui::RichText::new(theme::with_icon(
+                icons::FUNNEL,
+                &format!("Masked: only {}.", parts.join(" and ")),
+            ))
+            .size(theme::type_scale::SMALL)
+            .color(palette.warning),
+        );
+    }
+}
+
+impl TerrainStudio {
+    /// The terrain's layers, and the open one's material.
+    pub(super) fn layers_section(
+        &mut self,
+        ui: &mut egui::Ui,
+        world: &World,
+        terrain: InstanceId,
+        painting: bool,
+        actions: &mut Vec<TerrainAction>,
+    ) {
+        let palette = theme::palette(ui.ctx());
+        let layers = axcenity_terrain::materials::layers(world, terrain);
+        let all_layers: Vec<InstanceId> = world
+            .get(terrain)
+            .map(|t| t.children().to_vec())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|&c| world.get(c).map(|i| i.class()) == Some(ClassName::TerrainLayer))
+            .collect();
+        if self.paint_layer >= layers.len() {
+            self.paint_layer = 0;
+        }
+        if self.open_layer.is_some_and(|open| !layers.contains(&open)) {
+            self.open_layer = None;
+        }
+        section(ui, "Layers", |ui| {
+            if layers.is_empty() {
+                ui.label(
+                    egui::RichText::new(
+                        "No layers: the ground is plain grey. Add one to give it a material.",
+                    )
+                    .size(theme::type_scale::SMALL)
+                    .color(palette.text_weak),
+                );
+            }
+            for (index, &layer) in layers.iter().enumerate() {
+                let Some(instance) = world.get(layer) else {
+                    continue;
+                };
+                let open = self.open_layer == Some(layer);
+                let chosen = painting && self.paint_layer == index;
+                ui.horizontal(|ui| {
+                    let color = instance
+                        .property("Color")
+                        .and_then(Value::as_color3)
+                        .unwrap_or(Color3::new(0.5, 0.5, 0.5));
+                    let (rect, _) = ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
+                    ui.painter().rect_filled(
+                        rect,
+                        4,
+                        egui::Color32::from_rgb(
+                            (color.r * 255.0) as u8,
+                            (color.g * 255.0) as u8,
+                            (color.b * 255.0) as u8,
+                        ),
+                    );
+                    if instance.property("ColorMap").and_then(Value::as_str).is_some_and(|p| !p.is_empty()) {
+                        ui.painter().text(
+                            rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            icons::IMAGE,
+                            egui::FontId::proportional(10.0),
+                            egui::Color32::from_white_alpha(200),
+                        );
+                    }
+                    let name = format!("{}. {}", index + 1, instance.name());
+                    let row = ui.selectable_label(chosen || open, name);
+                    if row.clicked() {
+                        if painting {
+                            self.paint_layer = index;
+                        }
+                        self.open_layer = if open { None } else { Some(layer) };
+                    }
+                    row.context_menu(|ui| {
+                        if ui.button("Select in Explorer").clicked() {
+                            actions.push(TerrainAction::Select(layer));
+                            ui.close();
+                        }
+                        if ui.button("Move up").clicked() {
+                            actions.push(TerrainAction::MoveLayer(layer, true));
+                            ui.close();
+                        }
+                        if ui.button("Move down").clicked() {
+                            actions.push(TerrainAction::MoveLayer(layer, false));
+                            ui.close();
+                        }
+                        if ui.button("Delete").clicked() {
+                            actions.push(TerrainAction::RemoveLayer(layer));
+                            ui.close();
+                        }
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if painting {
+                            let locked = &mut self.locked[index];
+                            let (icon, tip) = if *locked {
+                                (icons::LOCK, "Locked: painting doesn't take this layer away. Click to unlock.")
+                            } else {
+                                (icons::LOCK_OPEN, "Lock this layer, so painting doesn't take it away.")
+                            };
+                            if widgets::icon_button(ui, icon, tip, *locked).clicked() {
+                                *locked = !*locked;
+                            }
+                        }
+                        if instance.property("AutoEnabled").and_then(Value::as_bool) == Some(true) {
+                            ui.label(egui::RichText::new(icons::MAGIC_WAND).color(palette.text_weak))
+                                .on_hover_text("Laid down by its rule");
+                        }
+                    });
+                });
+                if open {
+                    card(ui, |ui| layer_editor(ui, layer, instance, actions));
+                }
+            }
+            if all_layers.len() > MAX_TERRAIN_LAYERS {
+                ui.colored_label(
+                    palette.warning,
+                    format!("Only the first {MAX_TERRAIN_LAYERS} layers are drawn."),
+                );
+            }
+            ui.horizontal(|ui| {
+                ui.menu_button(theme::with_icon(icons::PLUS, "Add layer"), |ui| {
+                    for preset in presets::ALL {
+                        if ui.button(preset.name).clicked() {
+                            actions.push(TerrainAction::AddLayer(preset));
+                            ui.close();
+                        }
+                    }
+                    ui.separator();
+                    ui.label(egui::RichText::new("A set for a landscape").color(palette.text_weak));
+                    for preset in Preset::ALL {
+                        if preset == Preset::Custom {
+                            continue;
+                        }
+                        if ui.button(preset.label()).clicked() {
+                            actions.push(TerrainAction::AddLayerSet(preset));
+                            ui.close();
+                        }
+                    }
+                });
+            });
+        });
+    }
+
+    pub(super) fn view_section(&mut self, ui: &mut egui::Ui) {
+        section(ui, "View", |ui| {
+            widgets::segmented(
+                ui,
+                &mut self.view,
+                &[
+                    (TerrainView::Shaded, None, "Shaded"),
+                    (TerrainView::Height, None, "Height"),
+                    (TerrainView::Slope, None, "Slope"),
+                ],
+            );
+            widgets::segmented(
+                ui,
+                &mut self.view,
+                &[
+                    (TerrainView::Weights, None, "Layers"),
+                    (TerrainView::Grid, None, "Grid"),
+                ],
+            );
+        });
+    }
+
+    /// Resolution, heightmaps and clearing paint, folded away.
+    pub(super) fn data_section(
+        &mut self,
+        ui: &mut egui::Ui,
+        world: &World,
+        terrain: InstanceId,
+        actions: &mut Vec<TerrainAction>,
+    ) {
+        egui::CollapsingHeader::new(theme::with_icon(icons::GEAR, "Terrain data"))
+            .id_salt("terrain data")
+            .default_open(false)
+            .show(ui, |ui| {
+                let current = world.terrain(terrain).map_or(0, |data| data.size().0);
+                ui.horizontal_wrapped(|ui| {
+                    field(ui, "Resolution");
+                    let mut samples = current;
+                    egui::ComboBox::from_id_salt("terrain resample")
+                        .selected_text(format!("{samples} samples"))
+                        .show_ui(ui, |ui| {
+                            for option in RESOLUTIONS {
+                                ui.selectable_value(&mut samples, option, format!("{option} samples"));
+                            }
+                        });
+                    if samples != current {
+                        actions.push(TerrainAction::Resample(samples));
+                    }
+                });
+                responsive::toolbar(ui, |ui| {
+                    if ui
+                        .button(theme::with_icon(icons::DOWNLOAD, "Import heightmap…"))
+                        .on_hover_text("A greyscale PNG (8 or 16-bit): black is the bottom of the height range, white the top.")
+                        .clicked()
+                    {
+                        actions.push(TerrainAction::ImportHeightmap);
+                    }
+                    if ui
+                        .button(theme::with_icon(icons::UPLOAD, "Export…"))
+                        .on_hover_text("Save the heights as a 16-bit greyscale PNG.")
+                        .clicked()
+                    {
+                        actions.push(TerrainAction::ExportHeightmap);
+                    }
+                });
+                if ui
+                    .button(theme::with_icon(icons::ERASER, "Clear painted materials"))
+                    .on_hover_text("Takes away all painting, leaving the automatic rules. You can undo it.")
+                    .clicked()
+                {
+                    actions.push(TerrainAction::ClearPaint);
+                }
+            });
+    }
+}

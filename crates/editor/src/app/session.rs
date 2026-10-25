@@ -171,11 +171,17 @@ impl EditorApp {
         // A project set up for autocomplete by an older engine gets this
         // engine's API.
         match autocomplete::refresh(&project.folder) {
-            Ok(true) => self.output.info(format!(
+            Ok(autocomplete::Refresh::Updated) => self.output.info(format!(
                 "Updated `{}` to this version of the engine's script API.",
                 autocomplete::DEFINITIONS_FILE
             )),
-            Ok(false) => {}
+            Ok(autocomplete::Refresh::OldSetUp) => self.output.info(
+                "This project's VS Code autocomplete uses the old Lua 5.4 set-up, which \
+                 flags Luau such as `+=`. Choose File > Set Up VS Code Autocomplete to move \
+                 it to luau-lsp."
+                    .to_owned(),
+            ),
+            Ok(autocomplete::Refresh::Unchanged) => {}
             Err(err) => self.output.error(format!(
                 "Could not update `{}`: {err}",
                 autocomplete::DEFINITIONS_FILE
@@ -247,8 +253,8 @@ impl EditorApp {
             project.saved_terrains = terrain::terrain_revisions(&self.world);
         }
     }
-    /// File > Set Up VS Code Autocomplete: writes the files Lua Language
-    /// Server needs into the project, and says what to do next.
+    /// File > Set Up VS Code Autocomplete: writes the files luau-lsp needs
+    /// into the project, and says what to do next.
     pub(super) fn set_up_autocomplete(&mut self) {
         let Some(project) = &self.project else {
             return;
@@ -259,13 +265,33 @@ impl EditorApp {
                     "Set up autocomplete: wrote {}.",
                     quoted_list(&result.written)
                 );
+                if !result.updated.is_empty() {
+                    message.push_str(&format!(
+                        " Added the engine's settings to your own {}.",
+                        quoted_list(&result.updated)
+                    ));
+                }
                 if !result.kept.is_empty() {
                     message.push_str(&format!(" Kept your own {}.", quoted_list(&result.kept)));
                 }
+                if !result.removed.is_empty() {
+                    message.push_str(&format!(
+                        " Removed the old Lua Language Server {}.",
+                        quoted_list(&result.removed)
+                    ));
+                }
                 message.push_str(
-                    " Open the project folder in VS Code and install the Lua extension \
-                     (sumneko.lua) when it asks; scripts then autocomplete the engine's API.",
+                    " Open the project folder in VS Code and install the Luau extension \
+                     (JohnnyMorganz.luau-lsp) when it asks; scripts then autocomplete the \
+                     engine's API.",
                 );
+                if !result.not_json.is_empty() {
+                    message.push_str(&format!(
+                        " Couldn't add the engine's settings to {}: not plain JSON (it may \
+                         have comments). Remove the comments and set up again.",
+                        quoted_list(&result.not_json)
+                    ));
+                }
                 self.output.info(message);
             }
             Err(err) => self.output.error(format!(

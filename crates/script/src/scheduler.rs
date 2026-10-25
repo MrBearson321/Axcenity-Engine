@@ -135,7 +135,7 @@ pub fn resume(lua: &Lua, thread: &Thread, args: impl IntoLuaMulti) {
         return;
     };
     // The watchdog times the thread from here until it pauses or ends.
-    watchdog::enter(lua);
+    watchdog::enter(lua, thread);
     debugger::enter(lua, thread);
     // `()` because whatever the thread returns or yields isn't needed here.
     match thread.resume::<()>(args) {

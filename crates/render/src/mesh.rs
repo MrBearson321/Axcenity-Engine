@@ -24,11 +24,12 @@ pub const NO_TANGENT: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
 pub struct Vertex {
     pub position: [f32; 3],
     pub normal: [f32; 3],
-    /// Where on the texture this corner is. The built-in shapes have no
-    /// texture, so theirs are all (0, 0).
+    /// Where on the texture this corner is, as a distance along the face
+    /// in the unit mesh (a box face runs 0 to 1; a cylinder's side runs
+    /// one circumference around).
     pub uv: [f32; 2],
-    /// For normal maps (see `MeshSource::tangents`). Unused by the
-    /// built-in shapes, which have none.
+    /// A unit direction along increasing U, in the mesh's own space, and
+    /// which way V points (`cross(normal, tangent) * w`).
     pub tangent: [f32; 4],
 }
 
@@ -40,30 +41,49 @@ pub struct MeshData {
 }
 
 impl MeshData {
-    fn push_vertex(&mut self, position: Vec3, normal: Vec3) -> u16 {
+    /// `tangent` is a unit direction along increasing U. `w` makes
+    /// `cross(normal, tangent) * w` point along increasing V.
+    fn push_vertex(
+        &mut self,
+        position: Vec3,
+        normal: Vec3,
+        uv: [f32; 2],
+        tangent: Vec3,
+        w: f32,
+    ) -> u16 {
         let index = self.vertices.len() as u16;
         self.vertices.push(Vertex {
             position: position.to_array(),
             normal: normal.to_array(),
-            uv: [0.0, 0.0],
-            tangent: NO_TANGENT,
+            uv,
+            tangent: tangent.extend(w).to_array(),
         });
         index
     }
 
     /// A flat four-cornered face. Its corners are `center ± u ± v`, and
     /// `u × v` must point the same way as `normal` so the corners go
-    /// counter-clockwise.
+    /// counter-clockwise. Texture coordinates run the length of `u` and
+    /// `v` across the unit mesh, from the `-u - v` corner.
     fn push_quad(&mut self, normal: Vec3, center: Vec3, u: Vec3, v: Vec3) {
-        let [a, b, c, d] =
-            [-u - v, u - v, u + v, v - u].map(|offset| self.push_vertex(center + offset, normal));
-        self.indices.extend([a, b, c, a, c, d]);
-    }
-
-    /// A flat triangle. The corners must be counter-clockwise seen from outside.
-    fn push_triangle(&mut self, normal: Vec3, corners: [Vec3; 3]) {
-        let indices = corners.map(|corner| self.push_vertex(corner, normal));
-        self.indices.extend(indices);
+        let u_len = u.length() * 2.0;
+        let v_len = v.length() * 2.0;
+        let u_dir = u.normalize_or(Vec3::X);
+        let v_dir = v.normalize_or(Vec3::Z);
+        let w = if normal.cross(u_dir).dot(v_dir) < 0.0 {
+            -1.0
+        } else {
+            1.0
+        };
+        let corners = [
+            (center - u - v, [0.0, 0.0]),
+            (center + u - v, [u_len, 0.0]),
+            (center + u + v, [u_len, v_len]),
+            (center - u + v, [0.0, v_len]),
+        ];
+        let ids = corners.map(|(position, uv)| self.push_vertex(position, normal, uv, u_dir, w));
+        self.indices
+            .extend([ids[0], ids[1], ids[2], ids[0], ids[2], ids[3]]);
     }
 }
 
@@ -94,17 +114,24 @@ pub fn sphere() -> MeshData {
     let mut mesh = MeshData::default();
 
     // A grid of corners. The first and last column are the same points, so
-    // the seam closes without wrapping indices around.
+    // the seam closes without wrapping indices around. U runs around the
+    // sphere (one circumference of the unit mesh is π) and V from top to
+    // bottom (half a circumference, π/2).
     for ring in 0..=rings {
         let down = PI * f32::from(ring) / f32::from(rings);
         for segment in 0..=ROUND_SEGMENTS {
             let around = TAU * f32::from(segment) / f32::from(ROUND_SEGMENTS);
-            let normal = Vec3::new(
-                down.sin() * around.cos(),
-                down.cos(),
-                down.sin() * around.sin(),
-            );
-            mesh.push_vertex(normal * 0.5, normal);
+            let (sin_down, cos_down) = (down.sin(), down.cos());
+            let (sin_around, cos_around) = (around.sin(), around.cos());
+            let normal = Vec3::new(sin_down * cos_around, cos_down, sin_down * sin_around);
+            let tangent = Vec3::new(-sin_around, 0.0, cos_around);
+            let down_dir = Vec3::new(cos_down * cos_around, -sin_down, cos_down * sin_around);
+            let w = if normal.cross(tangent).dot(down_dir) < 0.0 {
+                -1.0
+            } else {
+                1.0
+            };
+            mesh.push_vertex(normal * 0.5, normal, [around * 0.5, down * 0.5], tangent, w);
         }
     }
 
@@ -136,10 +163,26 @@ pub fn cylinder() -> MeshData {
     };
 
     // The curved side: pairs of corners, one at each end, with smooth normals.
+    // U runs around (the unit mesh's circumference is π) and V along its length.
     for segment in 0..=ROUND_SEGMENTS {
+        let around = TAU * f32::from(segment) / f32::from(ROUND_SEGMENTS);
         let normal = rim(segment);
-        mesh.push_vertex(normal * 0.5 - Vec3::X * 0.5, normal);
-        mesh.push_vertex(normal * 0.5 + Vec3::X * 0.5, normal);
+        let tangent = Vec3::new(0.0, -around.sin(), around.cos());
+        let uv = around * 0.5;
+        mesh.push_vertex(
+            normal * 0.5 - Vec3::X * 0.5,
+            normal,
+            [uv, 0.0],
+            tangent,
+            1.0,
+        );
+        mesh.push_vertex(
+            normal * 0.5 + Vec3::X * 0.5,
+            normal,
+            [uv, 1.0],
+            tangent,
+            1.0,
+        );
     }
     for segment in 0..ROUND_SEGMENTS {
         let left = segment * 2;
@@ -150,8 +193,17 @@ pub fn cylinder() -> MeshData {
     }
 
     // The two flat ends, each a fan of triangles around its center.
+    // U and V are the end's Y and Z, 0 to 1 across the unit mesh.
     for end in [Vec3::X, Vec3::NEG_X] {
         let center = end * 0.5;
+        let u_dir = Vec3::Y;
+        let v_dir = Vec3::Z;
+        let w = if end.cross(u_dir).dot(v_dir) < 0.0 {
+            -1.0
+        } else {
+            1.0
+        };
+        let uv = |point: Vec3| [point.y + 0.5, point.z + 0.5];
         for segment in 0..ROUND_SEGMENTS {
             let a = center + rim(segment) * 0.5;
             let b = center + rim(segment + 1) * 0.5;
@@ -161,7 +213,8 @@ pub fn cylinder() -> MeshData {
             } else {
                 [center, b, a]
             };
-            mesh.push_triangle(end, corners);
+            let ids = corners.map(|corner| mesh.push_vertex(corner, end, uv(corner), u_dir, w));
+            mesh.indices.extend(ids);
         }
     }
     mesh
@@ -180,15 +233,27 @@ pub fn wedge() -> MeshData {
         Vec3::new(0.0, 0.5, 0.5),
     );
 
-    // The two triangular sides.
+    // The two triangular sides. U runs along Z and V along Y, 0 to 1
+    // across the unit mesh, from the front bottom corner.
     let front_bottom = Vec3::new(0.0, -0.5, -0.5);
     let back_bottom = Vec3::new(0.0, -0.5, 0.5);
     let back_top = Vec3::new(0.0, 0.5, 0.5);
     let [a, b, c] = [front_bottom, back_top, back_bottom];
+    let uv = |point: Vec3| [point.z + 0.5, point.y + 0.5];
+    let u_dir = Vec3::Z;
     let right = Vec3::X * 0.5;
-    mesh.push_triangle(Vec3::X, [a + right, b + right, c + right]);
+    let side = |mesh: &mut MeshData, normal: Vec3, corners: [Vec3; 3]| {
+        let w = if normal.cross(u_dir).dot(Vec3::Y) < 0.0 {
+            -1.0
+        } else {
+            1.0
+        };
+        let ids = corners.map(|corner| mesh.push_vertex(corner, normal, uv(corner), u_dir, w));
+        mesh.indices.extend(ids);
+    };
+    side(&mut mesh, Vec3::X, [a + right, b + right, c + right]);
     // Seen from the other side, the same corners run the opposite way around.
-    mesh.push_triangle(Vec3::NEG_X, [a - right, c - right, b - right]);
+    side(&mut mesh, Vec3::NEG_X, [a - right, c - right, b - right]);
     mesh
 }
 
@@ -267,6 +332,25 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn block_faces_have_texture_coordinates() {
+        let mesh = block();
+        assert!(
+            mesh.vertices.iter().any(|vertex| vertex.uv != [0.0, 0.0]),
+            "a block face needs coordinates for a texture"
+        );
+        let face = &mesh.vertices[..4];
+        let min_u = face
+            .iter()
+            .map(|vertex| vertex.uv[0])
+            .fold(f32::MAX, f32::min);
+        let max_u = face
+            .iter()
+            .map(|vertex| vertex.uv[0])
+            .fold(f32::MIN, f32::max);
+        assert!((min_u - 0.0).abs() < 1e-5 && (max_u - 1.0).abs() < 1e-5);
     }
 
     #[test]

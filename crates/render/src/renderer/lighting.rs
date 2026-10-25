@@ -8,9 +8,7 @@ use std::sync::Arc;
 use glam::camera::rh;
 use glam::{Mat3, Mat4, Vec2, Vec3};
 
-use crate::draw_list::{
-    ChannelMap, DrawItem, DrawList, Light, PostProcessing, Shape, TextureSource,
-};
+use crate::draw_list::{ChannelMap, DrawItem, DrawList, Light, PostProcessing, TextureSource};
 
 use super::{
     Batch, CASCADE_SPLIT_BLEND, FAR_PLANE, FrameUniform, InstanceRaw, LIGHT_SCALE, LIGHTS_PER_TILE,
@@ -398,12 +396,11 @@ pub(super) fn plan_draws(list: &DrawList) -> (Vec<InstanceRaw>, Vec<Batch>) {
 }
 
 /// The textures an item is drawn with, in binding order (see
-/// [`MATERIAL_TEXTURES`]). Only callers' meshes have texture coordinates,
-/// so the built-in shapes never use any.
+/// [`MATERIAL_TEXTURES`]). Terrain draws its own layers instead.
 pub(super) fn material_textures(
     item: &DrawItem,
 ) -> [Option<&Arc<dyn TextureSource>>; MATERIAL_TEXTURES] {
-    if !matches!(item.shape, Shape::Mesh(_)) || item.material.terrain.is_some() {
+    if item.material.terrain.is_some() {
         return [None; MATERIAL_TEXTURES];
     }
     let material = &item.material;
@@ -510,6 +507,7 @@ pub(super) fn instance_raw(item: &DrawItem) -> Option<InstanceRaw> {
             material.metalness,
             material.roughness,
             material.alpha_cutoff,
+            item.uv_tile,
         ],
     })
 }

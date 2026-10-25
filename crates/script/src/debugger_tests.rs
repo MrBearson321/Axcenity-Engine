@@ -118,7 +118,7 @@ fn locals_of_every_script_function_on_the_stack_are_shown() {
     assert_eq!(names, [(Some("open"), 3), (None, 6)]);
     assert_eq!(local(&pause, "door"), "\"Hinge\"");
     assert_eq!(local(&pause, "angle"), "90");
-    assert_eq!(local(&pause, "half"), "45.0");
+    assert_eq!(local(&pause, "half"), "45");
     assert!(
         pause.frames[1]
             .locals

@@ -240,6 +240,9 @@ pub struct DrawItem {
     /// origin, so the transform's scale is the size.
     pub transform: Mat4,
     pub material: Material,
+    /// Studs one copy of the textures covers, for a built-in shape. 0 keeps
+    /// the mesh's own coordinates (imported models, and parts with no maps).
+    pub uv_tile: f32,
     /// False draws the item without it casting a sun shadow. It is still
     /// shaded by other items' shadows.
     pub casts_shadow: bool,
@@ -336,7 +339,7 @@ impl fmt::Debug for dyn TextureSource {
 pub struct Material {
     pub base_color: [f32; 3],
     /// Multiplies `base_color` and `opacity`, placed by the mesh's texture
-    /// coordinates. Built-in shapes have none, so they ignore it.
+    /// coordinates.
     pub base_color_texture: Option<Arc<dyn TextureSource>>,
     /// 0 for non-metals such as plastic, 1 for metal.
     pub metalness: f32,
@@ -350,8 +353,7 @@ pub struct Material {
     /// Pixels whose opacity (with the texture's) is below this aren't drawn
     /// at all, for cut-out leaves and fences. 0 cuts nothing.
     pub alpha_cutoff: f32,
-    /// More textures, placed like `base_color_texture`. Built-in shapes
-    /// ignore them too.
+    /// More textures, placed like `base_color_texture`.
     pub maps: TextureMaps,
     /// For a terrain chunk: its blended layers, which replace everything
     /// above but `opacity` (terrain is always solid).

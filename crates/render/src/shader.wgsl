@@ -54,7 +54,9 @@ struct InstanceIn {
     @location(8) normal_2: vec3<f32>,
     @location(9) base_color: vec4<f32>, // rgb, opacity
     @location(10) emissive: vec3<f32>,
-    @location(11) surface: vec3<f32>, // metalness, roughness, alpha cutoff
+    // Metalness, roughness, alpha cutoff, and how many studs one copy of
+    // the texture covers (0 keeps the mesh's own coordinates).
+    @location(11) surface: vec4<f32>,
 }
 
 struct VertexOut {
@@ -80,8 +82,19 @@ fn vs_main(vertex: VertexIn, instance: InstanceIn) -> VertexOut {
     out.normal = normal_matrix * vertex.normal;
     out.base_color = instance.base_color;
     out.emissive = instance.emissive;
-    out.surface = instance.surface;
-    out.uv = vertex.uv;
+    out.surface = instance.surface.xyz;
+    let tile = instance.surface.w;
+    if (tile > 0.0) {
+        // The coordinates are distances on the unit mesh. Scale them by
+        // how long those edges are on this part, so the texture repeats
+        // every `tile` studs instead of stretching once across it.
+        let along_u = (model * vec4<f32>(vertex.tangent.xyz, 0.0)).xyz;
+        let v_dir = cross(vertex.normal, vertex.tangent.xyz) * vertex.tangent.w;
+        let along_v = (model * vec4<f32>(v_dir, 0.0)).xyz;
+        out.uv = vertex.uv * vec2<f32>(length(along_u), length(along_v)) / tile;
+    } else {
+        out.uv = vertex.uv;
+    }
     // A direction along the surface, so it stretches with the shape.
     out.tangent = vec4<f32>((model * vec4<f32>(vertex.tangent.xyz, 0.0)).xyz, vertex.tangent.w);
     return out;

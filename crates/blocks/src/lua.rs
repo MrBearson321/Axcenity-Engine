@@ -1,9 +1,13 @@
-//! A small Lua 5.4 reader: tokens, then a syntax tree with each node's
-//! place in the source. [`crate::from_lua`] uses it to turn code back into
-//! blocks. It reads all of Lua, but only keeps the detail the blocks need;
-//! everything else is kept as the source text it came from.
+//! A small Luau reader: tokens, then a syntax tree with each node's place in
+//! the source. [`crate::from_lua`] uses it to turn code back into blocks. It
+//! reads all of Luau (scripts run as Luau), but only keeps the detail the
+//! blocks need; everything else is kept as the source text it came from.
+//! Type annotations are read and skipped, and code that has them is kept as
+//! text, so they aren't lost.
 
+use std::iter::Peekable;
 use std::ops::Range;
+use std::str::CharIndices;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Token {
@@ -13,6 +17,13 @@ pub(crate) enum Token {
     Number(Option<f64>),
     Str(String),
     Symbol(&'static str),
+    /// An interpolated string such as `` `{a} and {b}!` `` is read as
+    /// `InterpStart`, `a`, `InterpMiddle`, `b`, `InterpEnd`: its text is
+    /// in the tokens' spans, and its values are tokens of their own. One
+    /// with no `{}` is a plain [`Token::Str`].
+    InterpStart,
+    InterpMiddle,
+    InterpEnd,
     Eof,
 }
 
@@ -29,15 +40,33 @@ pub struct SyntaxError {
     pub message: String,
 }
 
-const KEYWORDS: [&str; 22] = [
-    "and", "break", "do", "else", "elseif", "end", "false", "for", "function", "goto", "if", "in",
-    "local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while",
+/// Luau's reserved words. `continue`, `type` and `export` are only keywords
+/// where a statement starts, so they're read as names.
+const KEYWORDS: [&str; 21] = [
+    "and", "break", "do", "else", "elseif", "end", "false", "for", "function", "if", "in", "local",
+    "nil", "not", "or", "repeat", "return", "then", "true", "until", "while",
 ];
 
-/// Longest first, so `..` isn't read as two dots.
-const SYMBOLS: [&str; 33] = [
-    "...", "..", "==", "~=", "<=", ">=", "//", "::", "<<", ">>", "+", "-", "*", "/", "%", "^", "#",
-    "&", "~", "|", "<", ">", "=", "(", ")", "{", "}", "[", "]", ";", ":", ",", ".",
+/// Longest first, so `..` isn't read as two dots. `|`, `&` and `?` only
+/// appear in types, `@` in attributes such as `@native`. Luau has no
+/// bitwise operators (scripts use `bit32`), so `>>` is two `>`, as it is
+/// at the end of `Array<Array<number>>`.
+const SYMBOLS: &[&str] = &[
+    "...", "..=", "//=", "..", "==", "~=", "<=", ">=", "//", "::", "->", "+=", "-=", "*=", "/=",
+    "%=", "^=", "+", "-", "*", "/", "%", "^", "#", "&", "|", "?", "@", "<", ">", "=", "(", ")",
+    "{", "}", "[", "]", ";", ":", ",", ".",
+];
+
+/// Compound assignments, such as `+=`, and the operator each applies.
+const COMPOUND: [(&str, &str); 8] = [
+    ("+=", "+"),
+    ("-=", "-"),
+    ("*=", "*"),
+    ("/=", "/"),
+    ("//=", "//"),
+    ("%=", "%"),
+    ("^=", "^"),
+    ("..=", ".."),
 ];
 
 fn line_of(source: &str, at: usize) -> usize {
@@ -57,6 +86,9 @@ pub(crate) fn tokenize(source: &str) -> Result<(Vec<Spanned>, Vec<Range<usize>>)
     let bytes = source.as_bytes();
     let mut tokens = Vec::new();
     let mut comments = Vec::new();
+    // For each interpolated string we're inside a `{}` of, how many other
+    // `{` are open in it, so its own `}` can be told apart.
+    let mut interpolations: Vec<usize> = Vec::new();
     let mut at = 0;
     while at < bytes.len() {
         let start = at;
@@ -64,6 +96,34 @@ pub(crate) fn tokenize(source: &str) -> Result<(Vec<Spanned>, Vec<Range<usize>>)
         if byte.is_ascii_whitespace() {
             at += 1;
             continue;
+        }
+        if byte == b'`' || (byte == b'}' && interpolations.last() == Some(&0)) {
+            let (text, end, more) = interpolated(source, at + 1)?;
+            let token = match (byte, more) {
+                (b'`', false) => Token::Str(text),
+                (b'`', true) => {
+                    interpolations.push(0);
+                    Token::InterpStart
+                }
+                (_, true) => Token::InterpMiddle,
+                (_, false) => {
+                    interpolations.pop();
+                    Token::InterpEnd
+                }
+            };
+            at = end;
+            tokens.push(Spanned {
+                token,
+                span: start..at,
+            });
+            continue;
+        }
+        if let Some(open) = interpolations.last_mut() {
+            match byte {
+                b'{' => *open += 1,
+                b'}' => *open -= 1,
+                _ => {}
+            }
         }
         if source[at..].starts_with("--") {
             at += 2;
@@ -166,14 +226,18 @@ fn number(source: &str, start: usize) -> (Option<f64>, usize) {
             break;
         }
     }
-    let text = &source[start..at];
-    let value = if hex {
-        i64::from_str_radix(&text[2..], 16)
-            .ok()
-            .map(|value| value as f64)
-    } else {
-        text.parse::<f64>().ok()
+    // Luau allows `_` between digits, as in `1_000_000`.
+    let text = source[start..at].replace('_', "");
+    // `Some` if `text` starts with one of `prefixes`: then its digits in `base`.
+    let based = |prefixes: [&str; 2], base| {
+        prefixes
+            .iter()
+            .find_map(|prefix| text.strip_prefix(prefix))
+            .map(|digits| i64::from_str_radix(digits, base).ok().map(|n| n as f64))
     };
+    let value = based(["0x", "0X"], 16)
+        .or_else(|| based(["0b", "0B"], 2))
+        .unwrap_or_else(|| text.parse::<f64>().ok());
     (value.filter(|value| value.is_finite()), at)
 }
 
@@ -185,75 +249,104 @@ fn quoted(source: &str, start: usize) -> Result<(String, usize), SyntaxError> {
         let at = start + 1 + offset;
         match character {
             '\n' => return error(source, at, "unfinished string"),
-            '\\' => {
-                let Some((_, escape)) = chars.next() else {
-                    break;
-                };
-                match escape {
-                    'n' | '\n' => value.push('\n'),
-                    't' => value.push('\t'),
-                    'r' => value.push('\r'),
-                    'a' => value.push('\u{7}'),
-                    'b' => value.push('\u{8}'),
-                    'f' => value.push('\u{c}'),
-                    'v' => value.push('\u{b}'),
-                    '\\' | '"' | '\'' => value.push(escape),
-                    'z' => {
-                        while chars.peek().is_some_and(|(_, next)| next.is_whitespace()) {
-                            chars.next();
-                        }
-                    }
-                    'x' => {
-                        let digits: String =
-                            (0..2).filter_map(|_| chars.next()).map(|c| c.1).collect();
-                        match u8::from_str_radix(&digits, 16) {
-                            Ok(byte) => value.push(byte as char),
-                            Err(_) => return error(source, at, "bad \\x escape"),
-                        }
-                    }
-                    'u' => {
-                        let mut digits = String::new();
-                        if chars.next().map(|c| c.1) != Some('{') {
-                            return error(source, at, "bad \\u escape");
-                        }
-                        for (_, next) in chars.by_ref() {
-                            if next == '}' {
-                                break;
-                            }
-                            digits.push(next);
-                        }
-                        match u32::from_str_radix(&digits, 16)
-                            .ok()
-                            .and_then(char::from_u32)
-                        {
-                            Some(character) => value.push(character),
-                            None => return error(source, at, "bad \\u escape"),
-                        }
-                    }
-                    digit if digit.is_ascii_digit() => {
-                        let mut code = digit.to_digit(10).unwrap_or(0);
-                        for _ in 0..2 {
-                            match chars.peek() {
-                                Some((_, next)) if next.is_ascii_digit() => {
-                                    code = code * 10 + next.to_digit(10).unwrap_or(0);
-                                    chars.next();
-                                }
-                                _ => break,
-                            }
-                        }
-                        match char::from_u32(code) {
-                            Some(character) if code < 256 => value.push(character),
-                            _ => return error(source, at, "bad escape"),
-                        }
-                    }
-                    _ => return error(source, at, format!("bad escape `\\{escape}`")),
-                }
-            }
+            '\\' => escape(source, at, &mut chars, &mut value)?,
             character if character == quote => return Ok((value, at + 1)),
             character => value.push(character),
         }
     }
     error(source, start, "unfinished string")
+}
+
+/// One piece of an interpolated string's text, from `start` (just after a
+/// `` ` `` or a value's `}`) to the next `{` or the closing `` ` ``. Returns
+/// the text, where it ends, and whether a value (`{`) comes next.
+fn interpolated(source: &str, start: usize) -> Result<(String, usize, bool), SyntaxError> {
+    let mut value = String::new();
+    let mut chars = source[start..].char_indices().peekable();
+    while let Some((offset, character)) = chars.next() {
+        let at = start + offset;
+        match character {
+            '\n' => return error(source, at, "unfinished string"),
+            '\\' => escape(source, at, &mut chars, &mut value)?,
+            '`' => return Ok((value, at + 1, false)),
+            '{' => return Ok((value, at + 1, true)),
+            character => value.push(character),
+        }
+    }
+    error(source, start, "unfinished string")
+}
+
+/// Reads the escape after the `\` at `at` and adds what it stands for to
+/// `value`.
+fn escape(
+    source: &str,
+    at: usize,
+    chars: &mut Peekable<CharIndices>,
+    value: &mut String,
+) -> Result<(), SyntaxError> {
+    let Some((_, escape)) = chars.next() else {
+        return error(source, at, "unfinished string");
+    };
+    match escape {
+        'n' | '\n' => value.push('\n'),
+        't' => value.push('\t'),
+        'r' => value.push('\r'),
+        'a' => value.push('\u{7}'),
+        'b' => value.push('\u{8}'),
+        'f' => value.push('\u{c}'),
+        'v' => value.push('\u{b}'),
+        // `` \` `` and `\{` are for interpolated strings.
+        '\\' | '"' | '\'' | '`' | '{' => value.push(escape),
+        'z' => {
+            while chars.peek().is_some_and(|(_, next)| next.is_whitespace()) {
+                chars.next();
+            }
+        }
+        'x' => {
+            let digits: String = (0..2).filter_map(|_| chars.next()).map(|c| c.1).collect();
+            match u8::from_str_radix(&digits, 16) {
+                Ok(byte) => value.push(byte as char),
+                Err(_) => return error(source, at, "bad \\x escape"),
+            }
+        }
+        'u' => {
+            let mut digits = String::new();
+            if chars.next().map(|c| c.1) != Some('{') {
+                return error(source, at, "bad \\u escape");
+            }
+            for (_, next) in chars.by_ref() {
+                if next == '}' {
+                    break;
+                }
+                digits.push(next);
+            }
+            match u32::from_str_radix(&digits, 16)
+                .ok()
+                .and_then(char::from_u32)
+            {
+                Some(character) => value.push(character),
+                None => return error(source, at, "bad \\u escape"),
+            }
+        }
+        digit if digit.is_ascii_digit() => {
+            let mut code = digit.to_digit(10).unwrap_or(0);
+            for _ in 0..2 {
+                match chars.peek() {
+                    Some((_, next)) if next.is_ascii_digit() => {
+                        code = code * 10 + next.to_digit(10).unwrap_or(0);
+                        chars.next();
+                    }
+                    _ => break,
+                }
+            }
+            match char::from_u32(code) {
+                Some(character) if code < 256 => value.push(character),
+                _ => return error(source, at, "bad escape"),
+            }
+        }
+        _ => return error(source, at, format!("bad escape `\\{escape}`")),
+    }
+    Ok(())
 }
 
 // ---- The syntax tree --------------------------------------------------------
@@ -282,12 +375,21 @@ pub(crate) enum ExprKind {
     Binary(&'static str, Box<Expr>, Box<Expr>),
     Unary(&'static str, Box<Expr>),
     Paren(Box<Expr>),
+    /// `` `{a} and {b}!` ``.
+    Interpolated,
+    /// `if a then b else c`.
+    IfElse,
+    /// `value :: Type`.
+    Cast,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct FunctionBody {
     pub params: Vec<String>,
     pub vararg: bool,
+    /// Has type annotations or attributes (such as `@native`), which
+    /// the blocks can't hold.
+    pub annotated: bool,
     pub body: Vec<Stat>,
 }
 
@@ -308,6 +410,12 @@ pub(crate) enum StatKind {
         targets: Vec<Expr>,
         values: Vec<Expr>,
     },
+    /// `target += value` and the like; `op` is the operator without `=`.
+    CompoundAssign {
+        target: Expr,
+        op: &'static str,
+        value: Expr,
+    },
     Call(Expr),
     If {
         arms: Vec<(Expr, Vec<Stat>)>,
@@ -327,11 +435,12 @@ pub(crate) enum StatKind {
     Do(Vec<Stat>),
     Return(Vec<Expr>),
     /// Anything the blocks have no use for the inside of: `repeat`, a
-    /// generic `for`, function statements, `goto`, labels, `break`, `;`.
+    /// generic `for`, function statements, `break`, `continue`, `;`, type
+    /// definitions, and locals or numeric `for`s with type annotations.
     Other,
 }
 
-/// Reads a whole chunk of Lua.
+/// Reads a whole chunk of Luau.
 pub(crate) fn parse(source: &str) -> Result<Vec<Stat>, SyntaxError> {
     let (tokens, comments) = tokenize(source)?;
     let mut parser = Parser {
@@ -356,16 +465,13 @@ struct Parser<'a> {
     next_comment: usize,
 }
 
-/// Binary operators: their left and right priorities (Lua's own table).
+/// Binary operators: their left and right priorities (Lua's own table, which
+/// Luau keeps, without the bitwise operators).
 fn binary(token: &Token) -> Option<(&'static str, u8, u8)> {
     let (op, left, right) = match token {
         Token::Keyword("or") => ("or", 1, 1),
         Token::Keyword("and") => ("and", 2, 2),
         Token::Symbol(op @ ("<" | ">" | "<=" | ">=" | "~=" | "==")) => (*op, 3, 3),
-        Token::Symbol("|") => ("|", 4, 4),
-        Token::Symbol("~") => ("~", 5, 5),
-        Token::Symbol("&") => ("&", 6, 6),
-        Token::Symbol(op @ ("<<" | ">>")) => (*op, 7, 7),
         Token::Symbol("..") => ("..", 9, 8),
         Token::Symbol(op @ ("+" | "-")) => (*op, 10, 10),
         Token::Symbol(op @ ("*" | "/" | "//" | "%")) => (*op, 11, 11),
@@ -503,23 +609,37 @@ impl Parser<'_> {
     fn statement(&mut self) -> Result<Stat, SyntaxError> {
         let start = self.start();
         let kind = match self.peek().clone() {
-            Token::Symbol(";") => {
+            Token::Symbol(";") | Token::Keyword("break") => {
                 self.next();
                 StatKind::Other
             }
-            Token::Symbol("::") => {
-                self.next();
-                self.name()?;
-                self.expect("::")?;
-                StatKind::Other
-            }
-            Token::Keyword("break") => {
+            Token::Name(word) if word == "continue" && !self.continues_as_expression(1) => {
                 self.next();
                 StatKind::Other
             }
-            Token::Keyword("goto") => {
+            // `type Name = ...`, `type function name(...) ... end`, and either
+            // after `export`.
+            Token::Name(word)
+                if word == "export" && self.peek_at(1) == &Token::Name("type".to_owned()) =>
+            {
                 self.next();
-                self.name()?;
+                self.type_definition()?;
+                StatKind::Other
+            }
+            Token::Name(word)
+                if word == "type"
+                    && matches!(self.peek_at(1), Token::Name(_) | Token::Keyword("function")) =>
+            {
+                self.type_definition()?;
+                StatKind::Other
+            }
+            // `@native function ...`
+            Token::Symbol("@") => {
+                self.attributes()?;
+                if !self.check("function") && !self.check("local") {
+                    return self.fail("expected a function after its attributes");
+                }
+                self.statement()?;
                 StatKind::Other
             }
             Token::Keyword("do") => {
@@ -569,6 +689,7 @@ impl Parser<'_> {
             Token::Keyword("for") => {
                 self.next();
                 let first = self.name()?;
+                let typed = self.annotation()?;
                 if self.accept("=") {
                     let start = self.expression()?;
                     self.expect(",")?;
@@ -581,16 +702,21 @@ impl Parser<'_> {
                     self.expect("do")?;
                     let body = self.block()?;
                     self.expect("end")?;
-                    StatKind::NumericFor {
-                        variable: first,
-                        start,
-                        stop,
-                        step,
-                        body,
+                    if typed {
+                        StatKind::Other
+                    } else {
+                        StatKind::NumericFor {
+                            variable: first,
+                            start,
+                            stop,
+                            step,
+                            body,
+                        }
                     }
                 } else {
                     while self.accept(",") {
                         self.name()?;
+                        self.annotation()?;
                     }
                     self.expect("in")?;
                     self.expression_list()?;
@@ -620,14 +746,10 @@ impl Parser<'_> {
                     StatKind::Other
                 } else {
                     let mut names = Vec::new();
-                    let mut attributes = false;
+                    let mut typed = false;
                     loop {
                         names.push(self.name()?);
-                        if self.accept("<") {
-                            self.name()?;
-                            self.expect(">")?;
-                            attributes = true;
-                        }
+                        typed |= self.annotation()?;
                         if !self.accept(",") {
                             break;
                         }
@@ -637,7 +759,7 @@ impl Parser<'_> {
                     } else {
                         Vec::new()
                     };
-                    if attributes {
+                    if typed {
                         StatKind::Other
                     } else {
                         StatKind::Local { names, values }
@@ -646,7 +768,22 @@ impl Parser<'_> {
             }
             _ => {
                 let first = self.suffixed()?;
-                if self.check("=") || self.check(",") {
+                let compound = COMPOUND.iter().find(|(symbol, _)| self.check(symbol));
+                if let Some(&(_, op)) = compound {
+                    if !matches!(
+                        first.kind,
+                        ExprKind::Name(_) | ExprKind::Field(..) | ExprKind::Index(..)
+                    ) {
+                        return error(self.source, first.span.start, "can't assign to this");
+                    }
+                    self.next();
+                    let value = self.expression()?;
+                    StatKind::CompoundAssign {
+                        target: first,
+                        op,
+                        value,
+                    }
+                } else if self.check("=") || self.check(",") {
                     let mut targets = vec![first];
                     while self.accept(",") {
                         targets.push(self.suffixed()?);
@@ -679,7 +816,13 @@ impl Parser<'_> {
         })
     }
 
+    /// From the parameters (or a generic `<T>` before them) to `end`.
     fn function_body(&mut self) -> Result<FunctionBody, SyntaxError> {
+        let mut annotated = false;
+        if self.check("<") {
+            self.skip_between("<", ">")?;
+            annotated = true;
+        }
         self.expect("(")?;
         let mut params = Vec::new();
         let mut vararg = false;
@@ -687,22 +830,158 @@ impl Parser<'_> {
             loop {
                 if self.accept("...") {
                     vararg = true;
+                    annotated |= self.annotation()?;
                     break;
                 }
                 params.push(self.name()?);
+                annotated |= self.annotation()?;
                 if !self.accept(",") {
                     break;
                 }
             }
         }
         self.expect(")")?;
+        // The return type.
+        annotated |= self.annotation()?;
         let body = self.block()?;
         self.expect("end")?;
         Ok(FunctionBody {
             params,
             vararg,
+            annotated,
             body,
         })
+    }
+
+    // ---- Luau's types, which are read past -----------------------------------
+
+    /// Skips a `: Type` annotation if there is one, and says whether there was.
+    fn annotation(&mut self) -> Result<bool, SyntaxError> {
+        if !self.accept(":") {
+            return Ok(false);
+        }
+        self.skip_type()?;
+        Ok(true)
+    }
+
+    /// Whether the token `ahead` places on makes the name before it (such as
+    /// `continue`) the start of an expression statement (`continue()`,
+    /// `continue = 1`) rather than a keyword.
+    fn continues_as_expression(&self, ahead: usize) -> bool {
+        matches!(
+            self.peek_at(ahead),
+            Token::Symbol("(" | "." | "[" | ":" | "=" | "," | "{")
+                | Token::Str(_)
+                | Token::InterpStart
+        ) || matches!(self.peek_at(ahead), Token::Symbol(symbol)
+                if COMPOUND.iter().any(|(compound, _)| compound == symbol))
+    }
+
+    /// `type Name<T> = Type` or `type function name(...) ... end`, from `type`.
+    fn type_definition(&mut self) -> Result<(), SyntaxError> {
+        self.next();
+        if self.accept("function") {
+            self.name()?;
+            self.function_body()?;
+            return Ok(());
+        }
+        self.name()?;
+        if self.check("<") {
+            self.skip_between("<", ">")?;
+        }
+        self.expect("=")?;
+        self.skip_type()
+    }
+
+    /// `@native` or `@[native, checked]`, before a function.
+    fn attributes(&mut self) -> Result<(), SyntaxError> {
+        while self.accept("@") {
+            if self.check("[") {
+                self.skip_between("[", "]")?;
+            } else {
+                self.name()?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Skips from `open` to its matching `close`, counting nested pairs.
+    fn skip_between(&mut self, open: &str, close: &str) -> Result<(), SyntaxError> {
+        self.expect(open)?;
+        let mut depth = 1;
+        while depth > 0 {
+            if self.peek() == &Token::Eof {
+                return self.fail(&format!("expected `{close}`"));
+            }
+            if self.check(open) {
+                depth += 1;
+            } else if self.check(close) {
+                depth -= 1;
+            }
+            self.next();
+        }
+        Ok(())
+    }
+
+    /// A type, such as `number?`, `{ string }`, `Part | Model` or
+    /// `(number) -> ()`.
+    fn skip_type(&mut self) -> Result<(), SyntaxError> {
+        // A leading `|` or `&` is allowed, for long unions over many lines.
+        let _ = self.accept("|") || self.accept("&");
+        loop {
+            self.skip_simple_type()?;
+            while self.accept("?") {}
+            if !self.accept("|") && !self.accept("&") {
+                return Ok(());
+            }
+        }
+    }
+
+    fn skip_simple_type(&mut self) -> Result<(), SyntaxError> {
+        match self.peek().clone() {
+            Token::Name(name) if name == "typeof" && self.peek_at(1) == &Token::Symbol("(") => {
+                self.next();
+                self.skip_between("(", ")")
+            }
+            Token::Name(_) => {
+                self.next();
+                while self.accept(".") {
+                    self.name()?;
+                }
+                if self.check("<") {
+                    self.skip_between("<", ">")?;
+                }
+                // A generic type pack, `T...`.
+                self.accept("...");
+                Ok(())
+            }
+            Token::Keyword("nil" | "true" | "false") | Token::Str(_) => {
+                self.next();
+                Ok(())
+            }
+            Token::Symbol("{") => self.skip_between("{", "}"),
+            // A type in brackets, a type pack, or a function's parameters.
+            Token::Symbol("(") => {
+                self.skip_between("(", ")")?;
+                if self.accept("->") {
+                    self.skip_type()?;
+                }
+                Ok(())
+            }
+            // A generic function, `<T>(T) -> T`.
+            Token::Symbol("<") => {
+                self.skip_between("<", ">")?;
+                self.skip_between("(", ")")?;
+                self.expect("->")?;
+                self.skip_type()
+            }
+            // A variadic type, `...number`.
+            Token::Symbol("...") => {
+                self.next();
+                self.skip_type()
+            }
+            _ => self.fail("expected a type"),
+        }
     }
 
     fn expression_list(&mut self) -> Result<Vec<Expr>, SyntaxError> {
@@ -723,7 +1002,6 @@ impl Parser<'_> {
             Token::Keyword("not") => Some("not"),
             Token::Symbol("-") => Some("-"),
             Token::Symbol("#") => Some("#"),
-            Token::Symbol("~") => Some("~"),
             _ => None,
         };
         let mut left = if let Some(op) = unary {
@@ -750,9 +1028,70 @@ impl Parser<'_> {
         Ok(left)
     }
 
+    /// A value, then any `:: Type` casts of it.
     fn simple(&mut self) -> Result<Expr, SyntaxError> {
         let start = self.start();
+        let mut value = self.simple_value()?;
+        while self.accept("::") {
+            self.skip_type()?;
+            value = Expr {
+                kind: ExprKind::Cast,
+                span: start..self.end(),
+            };
+        }
+        Ok(value)
+    }
+
+    fn simple_value(&mut self) -> Result<Expr, SyntaxError> {
+        let start = self.start();
         let kind = match self.peek().clone() {
+            Token::Keyword("if") => {
+                self.next();
+                self.expression()?;
+                self.expect("then")?;
+                self.expression()?;
+                while self.accept("elseif") {
+                    self.expression()?;
+                    self.expect("then")?;
+                    self.expression()?;
+                }
+                self.expect("else")?;
+                self.expression()?;
+                return Ok(Expr {
+                    kind: ExprKind::IfElse,
+                    span: start..self.end(),
+                });
+            }
+            Token::InterpStart => {
+                self.next();
+                loop {
+                    self.expression()?;
+                    match self.peek() {
+                        Token::InterpMiddle => {
+                            self.next();
+                        }
+                        Token::InterpEnd => {
+                            self.next();
+                            break;
+                        }
+                        _ => return self.fail("expected `}` after the value in the string"),
+                    }
+                }
+                return Ok(Expr {
+                    kind: ExprKind::Interpolated,
+                    span: start..self.end(),
+                });
+            }
+            Token::Symbol("@") => {
+                self.attributes()?;
+                self.expect("function")?;
+                let mut body = self.function_body()?;
+                body.annotated = true;
+                return Ok(Expr {
+                    kind: ExprKind::Function(body),
+                    span: start..self.end(),
+                });
+            }
             Token::Number(value) => ExprKind::Number(value),
             Token::Str(value) => ExprKind::Str(value),
             Token::Keyword("nil") => ExprKind::Nil,

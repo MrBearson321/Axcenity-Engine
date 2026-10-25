@@ -1,6 +1,6 @@
 # Scripting
 
-Map only. Lua 5.4 and block scripts share one runtime. Open the one file that matches the change.
+Map only. Luau and block scripts share one runtime. Open the one file that matches the change.
 
 - Language, definitions, and naming: [scripting/language.md](scripting/language.md)
 - Globals, Instances, values, events: [scripting/api-core.md](scripting/api-core.md)

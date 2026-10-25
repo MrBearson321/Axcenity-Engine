@@ -1066,6 +1066,107 @@ print(\"Hello world!\")
 }
 
 #[test]
+fn luau_syntax_becomes_blocks_or_stays_as_lua() {
+    let typed = "\
+local count = 0
+type Point = { x: number, y: number }
+local function double(x: number): number
+    return x * 2
+end
+
+count += 2
+for i = 1, 3 do
+    if i == 2 then continue end
+    print(`step {i} of {count}`)
+end
+local label: string = if count > 1 then \"many\" else \"one\"
+print(label, double(count :: number), 0b101 + 1_000)
+";
+    let blocks = from_lua(typed).unwrap();
+    let kinds: Vec<_> = blocks.blocks.iter().map(|block| &block.kind).collect();
+    let [
+        BlockKind::TopCode { code: first },
+        BlockKind::WhenStarted { body },
+        BlockKind::TopCode { code: last },
+    ] = kinds.as_slice()
+    else {
+        panic!("unexpected blocks: {kinds:#?}");
+    };
+    assert!(first.starts_with("type Point = "), "{first}");
+    assert!(
+        matches!(&body[..], [Block { kind: BlockKind::ChangeVariable { name, .. }, .. }] if name == "count")
+    );
+    assert!(
+        last.contains("continue") && last.ends_with("1_000)"),
+        "{last}"
+    );
+
+    // Switching again changes nothing more.
+    let source = translate(&blocks).unwrap().source;
+    assert_eq!(
+        translate(&from_lua(&source).unwrap()).unwrap().source,
+        source
+    );
+
+    // And it still runs.
+    let mut world = World::new();
+    let lua = world.create(ClassName::Script).unwrap();
+    world
+        .set_parent(lua, Some(world.server_script_service()))
+        .unwrap();
+    let mut runtime = ScriptRuntime::new();
+    runtime.start_script(&mut world, lua, "scripts/Luau.server.lua", &source);
+    runtime.step(&mut world, 0.1);
+    let output: Vec<_> = runtime
+        .take_output()
+        .into_iter()
+        .map(|line| line.text)
+        .collect();
+    assert_eq!(
+        output,
+        ["step 1 of 2", "step 3 of 2", "many\t4\t1005"],
+        "{source}"
+    );
+
+    // A handler with type annotations stays Lua, so they aren't lost.
+    let typed = "workspace.Pad.Touched:Connect(function(hit: BasePart)\n    print(hit)\nend)\n";
+    let blocks = from_lua(typed).unwrap();
+    assert!(
+        matches!(&blocks.blocks[..], [Block { kind: BlockKind::TopCode { code }, .. }] if code == typed.trim_end()),
+        "{blocks:#?}"
+    );
+    // `+=` on a part's Position is a "move by" block.
+    let blocks = from_lua(
+        "workspace.Pad.Touched:Connect(function()\n    workspace.Pad.Position += Vector3.new(0, 1, 0)\nend)\n",
+    )
+    .unwrap();
+    let [
+        Block {
+            kind: BlockKind::WhenTouched { body, .. },
+            ..
+        },
+    ] = &blocks.blocks[..]
+    else {
+        panic!("{blocks:#?}");
+    };
+    assert!(matches!(&body[0].kind, BlockKind::MoveBy { target, .. } if target == "Pad"));
+}
+
+#[test]
+fn lua_5_4_syntax_that_luau_lacks_is_a_syntax_error() {
+    for code in [
+        "goto done",
+        "local x <const> = 1",
+        "print(1 << 2)",
+        "::done::",
+    ] {
+        assert!(from_lua(code).is_err(), "{code}");
+    }
+    // `goto`, `continue` and `type` are names in Luau.
+    assert!(from_lua("local goto = 1\nlocal continue = 2\nprint(type(goto), continue)").is_ok());
+}
+
+#[test]
 fn top_level_code_that_waits_stays_in_order() {
     // Moving the wait into "when game starts" would connect the event
     // before the wait is over.

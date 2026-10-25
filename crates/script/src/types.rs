@@ -488,6 +488,7 @@ pub fn type_name(lua: &Lua, value: &mlua::Value) -> String {
             ),
             (data.is::<crate::events::LuaSignal>(), "Signal"),
             (data.is::<crate::events::LuaConnection>(), "Connection"),
+            (data.is::<crate::run_service::LuaRunService>(), "RunService"),
         ];
         if let Some((_, name)) = others.into_iter().find(|(is, _)| *is) {
             return name.to_owned();
@@ -500,8 +501,27 @@ pub fn type_name(lua: &Lua, value: &mlua::Value) -> String {
         }
     }
     match value.type_name() {
-        // Lua 5.4 has whole numbers ("integer") and decimals, but both are `number` to scripts.
+        // mlua hands whole numbers over as "integer", but they are `number` to scripts.
         "integer" => "number".to_owned(),
         name => name.to_owned(),
     }
+}
+
+/// What `typeof` gives: [`type_name`], except that every Instance is
+/// `"Instance"` (even a destroyed one) and enums are `"EnumItem"`, `"Enum"`
+/// (`Enum.Material`) and `"Enums"` (`Enum` itself), as in Roblox. Luau's own
+/// `typeof` would call them all `userdata`.
+pub fn typeof_name(lua: &Lua, value: &mlua::Value) -> String {
+    if let mlua::Value::UserData(data) = value {
+        let engine = [
+            (data.is::<LuaInstance>(), "Instance"),
+            (data.is::<LuaEnumItem>(), "EnumItem"),
+            (data.is::<LuaEnumType>(), "Enum"),
+            (data.is::<LuaEnum>(), "Enums"),
+        ];
+        if let Some((_, name)) = engine.into_iter().find(|(is, _)| *is) {
+            return name.to_owned();
+        }
+    }
+    type_name(lua, value)
 }

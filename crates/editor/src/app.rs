@@ -29,6 +29,7 @@ mod files;
 mod session;
 mod settings;
 mod terrain;
+mod texture_set;
 mod tree_ops;
 
 use std::collections::HashMap;

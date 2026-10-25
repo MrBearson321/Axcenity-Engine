@@ -6,18 +6,20 @@
 //! does, and scripts have no way to: nothing here is reachable from Lua.
 //! Without it, the scheduler's calls into this module do nothing.
 //!
-//! **Pausing.** Installed, Lua calls a hook before every new line, beside
-//! the watchdog's instruction count. When the line has a breakpoint and is
-//! running in a coroutine the scheduler resumed, the hook **yields** that
-//! coroutine before the line runs, as the watchdog does when it stops one.
+//! **Pausing.** Installed, every coroutine the scheduler resumes runs in
+//! Luau's single-step mode: Luau calls a hook before every instruction. When
+//! the instruction's line has a breakpoint and is running in a coroutine the
+//! scheduler resumed, the hook **yields** that coroutine before the line
+//! runs, as the watchdog does when it stops one.
 //! The scheduler then holds it here instead of dropping it. While paused,
 //! nothing else runs either: whatever the scheduler is asked to resume
 //! (due waits, `task.delay`s, event handlers, Console commands) waits in
 //! [`Debugger::held`], in order, and a coroutine that gets control back
 //! (one that `task.spawn`ed the paused one) is held at its next line.
-//! Continue resumes them all in that order. A coroutine resumed after a
-//! hook yield carries on exactly where it stopped, without the hook firing
-//! again for that line.
+//! Continue resumes them all in that order. Luau runs the hook again for
+//! the instruction a coroutine yielded at, so the debugger remembers where
+//! each one stopped (a [`Spot`]) and lets it carry on until it reaches
+//! another line in that function.
 //!
 //! **Where it can't pause.** A coroutine the script made itself
 //! (`coroutine.wrap`) would hand the yield to the script, not the
@@ -26,18 +28,20 @@
 //! the breakpoint was passed.
 //!
 //! **Locals.** Once the coroutine has yielded, its call stack is read
-//! through Lua's C API (`lua_getlocal`), not the `debug` library, which is
-//! never loaded. Values are shown as `tostring` would show them, except
+//! through Luau's C API (`lua_getlocal`), not the `debug` library, which is
+//! never loaded. Local names are only in the bytecode at debug level 2, so
+//! installing the debugger raises the compiler's debug level. Values are shown as `tostring` would show them, except
 //! tables, which are listed without calling `__tostring` or `__pairs`, so
 //! inspecting runs no script code.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 use std::ffi::CStr;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use mlua::debug::{Debug, DebugEvent};
-use mlua::{Function, HookTriggers, Lua, MultiValue, Table, Thread, Value, VmState, ffi};
+use mlua::chunk::Compiler;
+use mlua::{Function, Lua, MultiValue, Table, Thread, Value, VmState, ffi};
 
-use crate::{OutputKind, push_output, scheduler, watchdog};
+use crate::{OutputKind, push_output, scheduler};
 
 /// Breakpoints by script path, as the host passes them: line numbers
 /// counting from 1.
@@ -98,6 +102,24 @@ struct Debugger {
     held: VecDeque<(Thread, MultiValue)>,
     /// Breakpoints Output has said it couldn't pause at, so it says so once.
     reported: HashSet<(String, usize)>,
+    /// Where the hook asked coroutines to yield. They don't stop there again
+    /// until they've moved on.
+    spots: Vec<Spot>,
+}
+
+/// A line one coroutine was stopped at, in the function `depth` calls deep.
+struct Spot {
+    thread: Thread,
+    path: String,
+    line: usize,
+    depth: i32,
+}
+
+/// Where the step hook is: the running coroutine's state, and its script
+/// path, line and call depth, if it's script code.
+struct Step {
+    state: *mut ffi::lua_State,
+    location: Option<(String, usize, i32)>,
 }
 
 /// The breakpoint Play is paused at.
@@ -105,21 +127,20 @@ struct Stop {
     path: String,
     line: usize,
     thread: Thread,
-    /// Set once the coroutine has really yielded and its frames were read.
-    frames: Option<Vec<PausedFrame>>,
+    /// Read by the hook, before the coroutine yields: afterwards Luau
+    /// reports its innermost function one instruction early.
+    frames: Vec<PausedFrame>,
+    /// Set once the coroutine has really yielded.
+    yielded: bool,
 }
 
-/// Turns the debugger on: every coroutine made from here on runs the line
-/// hook as well as the watchdog's. Call it before any script starts.
+/// Turns the debugger on: every coroutine the scheduler resumes from here
+/// on runs the step hook. Call it before any script is loaded, so scripts
+/// are compiled with their local names.
 pub fn install(lua: &Lua) -> mlua::Result<()> {
     lua.set_app_data(Debugger::default());
-    let triggers = HookTriggers::new()
-        .every_line()
-        .every_nth_instruction(watchdog::CHECK_EVERY);
-    lua.set_global_hook(triggers, |lua, debug| match debug.event() {
-        DebugEvent::Line => on_line(lua, debug),
-        _ => watchdog::check(lua, debug),
-    })
+    lua.set_compiler(Compiler::new().set_debug_level(2));
+    set_step_hook(lua)
 }
 
 /// Replaces every breakpoint. Does nothing without the debugger.
@@ -132,11 +153,11 @@ pub fn set_breakpoints(lua: &Lua, breakpoints: &Breakpoints) {
 /// Where this side is paused, once the paused coroutine has stopped.
 pub fn pause(lua: &Lua) -> Option<Pause> {
     let debugger = lua.app_data_ref::<Debugger>()?;
-    let stop = debugger.paused.as_ref()?;
+    let stop = debugger.paused.as_ref().filter(|stop| stop.yielded)?;
     Some(Pause {
         path: stop.path.clone(),
         line: stop.line,
-        frames: stop.frames.clone()?,
+        frames: stop.frames.clone(),
     })
 }
 
@@ -161,50 +182,41 @@ pub fn hold_while_paused(lua: &Lua, thread: &Thread, args: MultiValue) -> Option
 /// Called by the scheduler just before it resumes `thread`.
 pub fn enter(lua: &Lua, thread: &Thread) {
     if let Some(mut debugger) = lua.app_data_mut::<Debugger>() {
+        single_step(thread);
         debugger.running.push(thread.clone());
     }
 }
 
 /// Called by the scheduler once `thread` has paused, finished or failed. If
 /// the hook made it yield, it's held for Continue; if it's the one at the
-/// breakpoint, its frames are read now.
+/// breakpoint, Play is now paused.
 pub fn leave(lua: &Lua, thread: &Thread) {
-    let at_breakpoint = {
-        let Some(mut debugger) = lua.app_data_mut::<Debugger>() else {
-            return;
-        };
-        debugger.running.pop();
-        if debugger.holding.as_ref() != Some(thread) {
-            return;
-        }
-        if !thread.is_resumable() {
-            // It finished or failed without yielding: the yield couldn't
-            // happen where the hook asked.
-            drop(debugger);
-            hold_failed(lua, thread);
-            return;
-        }
-        debugger.holding = None;
-        let at_breakpoint = debugger
-            .paused
-            .as_ref()
-            .is_some_and(|stop| stop.thread == *thread);
-        if at_breakpoint {
+    let Some(mut debugger) = lua.app_data_mut::<Debugger>() else {
+        return;
+    };
+    debugger.running.pop();
+    if !thread.is_resumable() {
+        debugger.spots.retain(|spot| spot.thread != *thread);
+    }
+    if debugger.holding.as_ref() != Some(thread) {
+        return;
+    }
+    if !thread.is_resumable() {
+        // It finished or failed without yielding: the yield couldn't
+        // happen where the hook asked.
+        drop(debugger);
+        hold_failed(lua, thread);
+        return;
+    }
+    debugger.holding = None;
+    match &mut debugger.paused {
+        Some(stop) if stop.thread == *thread => {
+            stop.yielded = true;
             debugger
                 .held
                 .push_front((thread.clone(), MultiValue::new()));
-        } else {
-            debugger.held.push_back((thread.clone(), MultiValue::new()));
         }
-        at_breakpoint
-    };
-    if at_breakpoint {
-        let frames = read_frames(lua, thread);
-        if let Some(mut debugger) = lua.app_data_mut::<Debugger>()
-            && let Some(stop) = &mut debugger.paused
-        {
-            stop.frames = Some(frames);
-        }
+        _ => debugger.held.push_back((thread.clone(), MultiValue::new())),
     }
 }
 
@@ -302,93 +314,215 @@ fn run_held(lua: &Lua, mut queue: VecDeque<(Thread, MultiValue)>) {
     }
 }
 
-/// The line hook: pauses at a breakpoint, and holds coroutines that get
-/// control while paused.
-fn on_line(lua: &Lua, debug: &Debug) -> mlua::Result<VmState> {
+/// The step hook, before an instruction: pauses at a breakpoint, and holds
+/// coroutines that get control while paused.
+fn on_step(lua: &Lua, step: Step) -> VmState {
     let Some(mut debugger) = lua.app_data_mut::<Debugger>() else {
-        return Ok(VmState::Continue);
+        return VmState::Continue;
     };
-    // The common case, checked first: nothing to stop for.
-    if debugger.breakpoints.is_empty() && debugger.paused.is_none() && debugger.holding.is_none() {
-        return Ok(VmState::Continue);
-    }
-    let current = lua.current_thread();
-    if debugger.holding.as_ref() == Some(&current) {
+    if let Some(holding) = debugger.holding.clone()
+        && holding.state() == step.state
+    {
         // Still running after the hook asked it to yield: it couldn't.
         drop(debugger);
-        hold_failed(lua, &current);
-        return Ok(VmState::Continue);
+        hold_failed(lua, &holding);
+        return VmState::Continue;
     }
-    let pausable = debugger.running.last() == Some(&current);
-    if debugger.paused.is_some() {
-        if !pausable {
-            return Ok(VmState::Continue);
-        }
-        debugger.holding = Some(current);
-        return Ok(VmState::Yield);
-    }
-    let Some((path, line)) = script_line(debug) else {
-        return Ok(VmState::Continue);
+    let Some((path, line, depth)) = step.location else {
+        return VmState::Continue;
     };
-    let on_breakpoint = debugger
-        .breakpoints
-        .get(path.as_str())
-        .is_some_and(|lines| lines.contains(&line));
-    if !on_breakpoint {
-        return Ok(VmState::Continue);
+    if debugger.stopped_here(step.state, &path, line, depth) {
+        return VmState::Continue;
     }
-    if !pausable {
-        if debugger.reported.insert((path.clone(), line)) {
+    // Only the innermost coroutine the scheduler is running can pause: its
+    // yield goes back to the scheduler.
+    let Some(current) = debugger
+        .running
+        .last()
+        .filter(|thread| thread.state() == step.state)
+        .cloned()
+    else {
+        let missed = debugger.paused.is_none() && debugger.on_breakpoint(&path, line);
+        if missed && debugger.reported.insert((path.clone(), line)) {
             drop(debugger);
             report_missed(lua, &path, line);
         }
-        return Ok(VmState::Continue);
+        return VmState::Continue;
+    };
+    if debugger.paused.is_none() {
+        if !debugger.on_breakpoint(&path, line) {
+            return VmState::Continue;
+        }
+        debugger.paused = Some(Stop {
+            path: path.clone(),
+            line,
+            thread: current.clone(),
+            frames: Vec::new(),
+            yielded: false,
+        });
     }
-    debugger.paused = Some(Stop {
+    let at_breakpoint = debugger
+        .paused
+        .as_ref()
+        .is_some_and(|stop| stop.thread == current);
+    debugger.holding = Some(current.clone());
+    debugger.spots.push(Spot {
+        thread: current.clone(),
         path,
         line,
-        thread: current.clone(),
-        frames: None,
+        depth,
     });
-    debugger.holding = Some(current);
-    Ok(VmState::Yield)
+    drop(debugger);
+    if at_breakpoint {
+        let frames = read_frames(lua, &current);
+        if let Some(mut debugger) = lua.app_data_mut::<Debugger>()
+            && let Some(stop) = &mut debugger.paused
+        {
+            stop.frames = frames;
+        }
+    }
+    VmState::Yield
 }
 
-/// The script path and line about to run, if it's script code. Scripts are
-/// loaded with the name `@path`; the engine's Lua isn't.
-fn script_line(debug: &Debug) -> Option<(String, usize)> {
-    let source = debug.source();
-    let path = source.source?.strip_prefix('@')?.to_owned();
-    Some((path, debug.current_line()?))
+impl Debugger {
+    /// Whether the step hook has nothing to do: the common case.
+    fn is_idle(&self) -> bool {
+        self.breakpoints.is_empty()
+            && self.paused.is_none()
+            && self.holding.is_none()
+            && self.spots.is_empty()
+    }
+
+    fn on_breakpoint(&self, path: &str, line: usize) -> bool {
+        self.breakpoints
+            .get(path)
+            .is_some_and(|lines| lines.contains(&line))
+    }
+
+    /// Whether the coroutine running as `state` was stopped at this line of
+    /// this function and hasn't moved on yet. Forgets the spots it has moved
+    /// on from: in a function that returned, or at another line of this one.
+    /// Spots in the functions that called this one stay.
+    fn stopped_here(
+        &mut self,
+        state: *mut ffi::lua_State,
+        path: &str,
+        line: usize,
+        depth: i32,
+    ) -> bool {
+        self.spots.retain(|spot| {
+            spot.thread.state() != state
+                || spot.depth < depth
+                || (spot.depth == depth && spot.path == path && spot.line == line)
+        });
+        self.spots
+            .iter()
+            .any(|spot| spot.thread.state() == state && spot.depth == depth)
+    }
 }
 
-/// The script functions on the call stack of `thread`, which has yielded.
+/// Sets Luau's step hook, which runs for coroutines in single-step mode.
 ///
-/// The workspace's only `unsafe` code (decided in v2 Phase 4): mlua has no
-/// safe way to read a coroutine's locals, and loading the `debug` library
-/// would be unsafe too, with more reach. The player never gets here.
+/// The hook and [`single_step`] are, with [`read_frames`], the workspace's
+/// only `unsafe` code: mlua has no safe API for Luau's single-step mode.
+#[allow(unsafe_code)]
+fn set_step_hook(lua: &Lua) -> mlua::Result<()> {
+    // SAFETY: `lua_callbacks` points at the interpreter's callbacks, shared
+    // by all its coroutines, which live as long as `lua`. Only the
+    // `debugstep` slot is set; mlua doesn't use it.
+    unsafe {
+        lua.exec_raw::<()>((), |state| {
+            (*ffi::lua_callbacks(state)).debugstep = Some(step_hook);
+        })
+    }
+}
+
+/// Turns on single-step mode for `thread`, so the step hook runs for it and
+/// for the coroutines it creates.
+#[allow(unsafe_code)]
+fn single_step(thread: &Thread) {
+    // SAFETY: `thread` is alive (we hold it) and isn't running: the
+    // scheduler is about to resume it.
+    unsafe { ffi::lua_singlestep(thread.state(), 1) }
+}
+
+/// Luau calls this before each instruction of a single-stepping coroutine.
+#[allow(unsafe_code)]
+unsafe extern "C-unwind" fn step_hook(state: *mut ffi::lua_State, _: *mut ffi::lua_Debug) {
+    // A panic must not unwind into Luau's C++ frames: a failed hook only
+    // means this instruction isn't checked.
+    let action = catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: `state` is the running coroutine of a `Lua` that's alive,
+        // since it's running Lua code.
+        let lua = unsafe { Lua::get_or_init_from_ptr(state) };
+        let idle = lua
+            .app_data_ref::<Debugger>()
+            .is_none_or(|debugger| debugger.is_idle());
+        if idle {
+            return VmState::Continue;
+        }
+        // SAFETY: inside the hook, the running function is at level 0.
+        let location = unsafe { step_location(state) };
+        on_step(lua, Step { state, location })
+    }))
+    .unwrap_or(VmState::Continue);
+    // SAFETY: a step hook may yield its coroutine (Luau checks for that once
+    // the hook returns), but only where the coroutine can yield.
+    unsafe {
+        if matches!(action, VmState::Yield) && ffi::lua_isyieldable(state) != 0 {
+            ffi::lua_yield(state, 0);
+        }
+    }
+}
+
+/// The script path, line and call depth of the instruction about to run in
+/// `state`, if it's script code. Scripts are loaded with the name `@path`;
+/// the engine's Lua isn't.
+#[allow(unsafe_code)]
+unsafe fn step_location(state: *mut ffi::lua_State) -> Option<(String, usize, i32)> {
+    // SAFETY: the caller passes the running coroutine; `lua_getinfo` only
+    // fills `record`, whose strings Luau keeps alive while we copy them.
+    unsafe {
+        let mut record: ffi::lua_Debug = std::mem::zeroed();
+        if ffi::lua_getinfo(state, 0, c"sl".as_ptr(), &mut record) == 0 || record.source.is_null() {
+            return None;
+        }
+        let source = CStr::from_ptr(record.source).to_string_lossy();
+        let path = source.strip_prefix('@')?.to_owned();
+        let line = usize::try_from(record.currentline).ok()?;
+        Some((path, line, ffi::lua_stackdepth(state)))
+    }
+}
+
+/// The script functions on the call stack of `thread`, which the step hook
+/// is about to yield.
+///
+/// Part of the workspace's only `unsafe` code (decided in v2 Phase 4): mlua
+/// has no safe way to read a coroutine's locals, and loading the `debug`
+/// library would be unsafe too, with more reach. The player never gets here.
 #[allow(unsafe_code)]
 fn read_frames(lua: &Lua, thread: &Thread) -> Vec<PausedFrame> {
     let mut frames: Vec<(Option<String>, String, usize, Vec<String>)> = Vec::new();
     let from = thread.state();
     // SAFETY: `from` is the state of `thread`, which is alive (we hold it)
-    // and suspended, so its stack can be read; `exec_raw` runs the closure
-    // in a protected call on the interpreter's own state (`to`), and every
-    // value `lua_getlocal` pushes on `from` is moved to `to` or popped, so
-    // the paused coroutine's stack is left as it was. The values left on
+    // and stopped in the step hook, which Luau gives room on the stack, so
+    // its stack can be read; `exec_raw` runs the closure in a protected call
+    // on another state (`to`), and every value `lua_getlocal` pushes on
+    // `from` is moved to `to` or popped, so the paused coroutine's stack is
+    // left as it was. The values left on
     // `to` come back as `values`, one per name in `frames`, in order.
     let values = unsafe {
         lua.exec_raw::<MultiValue>((), |to| {
-            let mut level = 0;
+            let mut next_level = 0;
             while frames.len() < MAX_FRAMES {
+                let level = next_level;
+                next_level += 1;
                 let mut record: ffi::lua_Debug = std::mem::zeroed();
-                if ffi::lua_getstack(from, level, &mut record) == 0 {
+                // Luau's `lua_getinfo` returns 0 past the bottom of the stack.
+                if ffi::lua_getinfo(from, level, c"sln".as_ptr(), &mut record) == 0 {
                     break;
                 }
-                level += 1;
-                if ffi::lua_getinfo(from, c"Sln".as_ptr(), &mut record) == 0
-                    || record.source.is_null()
-                {
+                if record.source.is_null() {
                     continue;
                 }
                 let source = CStr::from_ptr(record.source).to_string_lossy();
@@ -403,7 +537,7 @@ fn read_frames(lua: &Lua, thread: &Thread) -> Vec<PausedFrame> {
                     if ffi::lua_checkstack(from, 1) == 0 || ffi::lua_checkstack(to, 1) == 0 {
                         break;
                     }
-                    let name = ffi::lua_getlocal(from, &record, n);
+                    let name = ffi::lua_getlocal(from, level, n);
                     if name.is_null() {
                         break;
                     }

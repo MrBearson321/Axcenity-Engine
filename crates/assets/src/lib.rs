@@ -16,6 +16,7 @@
 
 mod import;
 mod model;
+mod texture_set;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -31,6 +32,10 @@ pub use model::{
     Model, ModelError, ModelFormat, ModelMaterial, ModelObject, Pick, Pose, Posed, PosedPrimitive,
     Primitive, Rig, Take, TextureRole, Track, list_objects, load_model, load_models, load_takes,
     texture_roles,
+};
+pub use texture_set::{
+    TEXTURE_SET_SUFFIX, TextureSet, TextureSetError, TextureSetMap, read_texture_set,
+    texture_set_from_files, write_texture_set,
 };
 
 /// The project's loaded assets. Cloning gives another handle to the same

@@ -266,6 +266,7 @@ impl TerrainCache {
                         }),
                         ..Material::default()
                     },
+                    uv_tile: 0.0,
                     casts_shadow,
                 });
             }

@@ -1,0 +1,868 @@
+use super::*;
+
+impl ScenePipeline {
+    pub(super) fn new(
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        color_format: wgpu::TextureFormat,
+        width: u32,
+        height: u32,
+    ) -> Self {
+        let depth_view = create_depth_view(&device, width, height);
+        let storage_entry = |binding| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        };
+        let frame_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("frame uniform"),
+            size: size_of::<FrameUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let frame_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("frame"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                    count: None,
+                },
+                storage_entry(3),
+                storage_entry(4),
+            ],
+        });
+        let light_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("lights"),
+            size: (MAX_LIGHTS * size_of::<LightRaw>()) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let tile_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("light tiles"),
+            size: (MAX_TILES * (LIGHTS_PER_TILE + 1) * size_of::<u32>()) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("shadow map"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            compare: Some(wgpu::CompareFunction::LessEqual),
+            ..Default::default()
+        });
+        let (empty_shadow_view, _) = create_shadow_views(&device, 1);
+        // The bind group keeps the stand-in 1×1 map alive while shadows are off.
+        let frame_bind_group = create_frame_bind_group(
+            &device,
+            &frame_layout,
+            [&frame_buffer, &light_buffer, &tile_buffer],
+            &empty_shadow_view,
+            &shadow_sampler,
+        );
+        let cascade_size = size_of::<[[f32; 4]; 4]>() as u64;
+        let cascade_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("shadow cascades"),
+            size: CASCADE_UNIFORM_STRIDE * SHADOW_CASCADES as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        // Binding 5 matches `shadow_cascade` in shader.wgsl. Each pass picks
+        // its cascade with an offset into the buffer (a "dynamic offset").
+        let shadow_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("shadow pass"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 5,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: true,
+                    min_binding_size: wgpu::BufferSize::new(cascade_size),
+                },
+                count: None,
+            }],
+        });
+        let shadow_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("shadow pass"),
+            layout: &shadow_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 5,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &cascade_buffer,
+                    offset: 0,
+                    size: wgpu::BufferSize::new(cascade_size),
+                }),
+            }],
+        });
+        let shadow_pipeline = create_shadow_pipeline(&device, &shadow_layout);
+
+        // Bindings 0 and 3–9 are the textures (see `material_bindings`).
+        let texture_entry = |binding| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        };
+        let mut entries = vec![
+            texture_entry(0),
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+        ];
+        entries.extend((3..=9).map(texture_entry));
+        let material_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("material"),
+            entries: &entries,
+        });
+        // glTF's default: smooth, blending between mipmap levels, and
+        // repeating past the edges.
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("material textures"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            address_mode_w: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let white_texture = create_texture(&device, &queue, 1, 1, &[255; 4]);
+        let plain_material = create_material(
+            &device,
+            &material_layout,
+            &sampler,
+            [&white_texture; MATERIAL_TEXTURES],
+            maps_uniform_of(&MaterialKey::default()),
+        );
+
+        let scene_shader = shader_module(&device, "scene", gpu::SCENE_SHADER);
+        let entry_points = ("vs_main", "fs_main");
+        let layouts = [&frame_layout, &material_layout];
+        let opaque_pipeline = create_pipeline(
+            &device,
+            &scene_shader,
+            entry_points,
+            &layouts,
+            HDR_FORMAT,
+            false,
+        );
+        let transparent_pipeline = create_pipeline(
+            &device,
+            &scene_shader,
+            entry_points,
+            &layouts,
+            HDR_FORMAT,
+            true,
+        );
+        let terrain = terrain::TerrainPass::new(&device, &frame_layout);
+        let sky_pipeline = create_sky_pipeline(&device, &frame_layout);
+        let sprites = sprites::SpritePass::new(&device, &white_texture.srgb);
+        let post = PostPasses::new(&device, color_format);
+        let post_targets = PostTargets::new(&device, &post, width, height);
+        let ui_pipeline = create_ui_pipeline(&device, color_format);
+        let (ui_image_layout, ui_sampler, ui_image_pipeline) =
+            create_ui_image_pipeline(&device, color_format);
+        let meshes = Meshes {
+            block: upload_mesh(&device, "block", &mesh::block()),
+            sphere: upload_mesh(&device, "sphere", &mesh::sphere()),
+            cylinder: upload_mesh(&device, "cylinder", &mesh::cylinder()),
+            wedge: upload_mesh(&device, "wedge", &mesh::wedge()),
+        };
+        let instance_capacity = 64;
+        let instance_buffer = create_instance_buffer(&device, instance_capacity);
+        let ui_capacity = 128;
+        let ui_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("UI vertices"),
+            size: (ui_capacity * size_of::<UiVertex>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let mut font_system = FontSystem::new();
+        font_system.db_mut().load_font_data(
+            include_bytes!("../../../../assets/fonts/Montserrat-Regular.ttf").to_vec(),
+        );
+        font_system.db_mut().load_font_data(
+            include_bytes!("../../../../assets/fonts/JetBrainsMono-Regular.ttf").to_vec(),
+        );
+        let swash_cache = SwashCache::new();
+        let glyph_cache = GlyphCache::new(&device);
+        let text_viewport = TextViewport::new(&device, &glyph_cache);
+        let mut text_atlas = TextAtlas::new(&device, &queue, &glyph_cache, color_format);
+        let text_renderer = GlyphTextRenderer::new(
+            &mut text_atlas,
+            &device,
+            wgpu::MultisampleState::default(),
+            None,
+        );
+        let gpu_timer = gpu_timer::GpuTimer::new(&device, &queue);
+
+        Self {
+            device,
+            queue,
+            depth_view,
+            sky_pipeline,
+            opaque_pipeline,
+            transparent_pipeline,
+            sprites,
+            post,
+            post_targets,
+            light_buffer,
+            tile_buffer,
+            ui_pipeline,
+            ui_image_pipeline,
+            ui_image_layout,
+            ui_sampler,
+            ui_image_groups: HashMap::new(),
+            ui_buffer,
+            ui_capacity,
+            font_system,
+            swash_cache,
+            text_viewport,
+            text_atlas,
+            text_renderer,
+            frame_buffer,
+            frame_bind_group,
+            frame_layout,
+            shadow_sampler,
+            shadow_pipeline,
+            cascade_buffer,
+            shadow_bind_group,
+            shadow_map: None,
+            meshes,
+            instance_buffer,
+            instance_capacity,
+            material_layout,
+            sampler,
+            white_texture,
+            plain_material,
+            custom_meshes: HashMap::new(),
+            textures: HashMap::new(),
+            materials: HashMap::new(),
+            terrain,
+            frame: 0,
+            gpu_timer,
+            draws: (0, 0),
+        }
+    }
+
+    /// Call when the target changes size. Sizes are in pixels and never zero.
+    pub(super) fn resize(&mut self, width: u32, height: u32) {
+        self.depth_view = create_depth_view(&self.device, width, height);
+        self.post_targets = PostTargets::new(&self.device, &self.post, width, height);
+    }
+
+    /// Draws `list` into `view`, which must be the size last given to
+    /// `new` or `resize`, and sends the work to the GPU.
+    pub(super) fn draw(
+        &mut self,
+        list: &DrawList,
+        view: &wgpu::TextureView,
+        aspect: f32,
+        viewport_size: (u32, u32),
+    ) -> Result<()> {
+        let planned_lights = plan_lights(list, aspect, viewport_size);
+        let mut frame_uniform = frame_uniform(list, aspect);
+        frame_uniform.lights = [
+            planned_lights.lights.len() as u32,
+            planned_lights.tile_size,
+            planned_lights.tiles_across,
+            0,
+        ];
+        self.queue
+            .write_buffer(&self.frame_buffer, 0, bytemuck::bytes_of(&frame_uniform));
+        for (index, cascade) in frame_uniform.cascades.iter().enumerate() {
+            self.queue.write_buffer(
+                &self.cascade_buffer,
+                index as u64 * CASCADE_UNIFORM_STRIDE,
+                bytemuck::bytes_of(cascade),
+            );
+        }
+        if !planned_lights.lights.is_empty() {
+            self.queue.write_buffer(
+                &self.light_buffer,
+                0,
+                bytemuck::cast_slice(&planned_lights.lights),
+            );
+            self.queue.write_buffer(
+                &self.tile_buffer,
+                0,
+                bytemuck::cast_slice(&planned_lights.tiles),
+            );
+        }
+        self.queue.write_buffer(
+            &self.post.settings,
+            0,
+            bytemuck::bytes_of(&post_uniform(&list.post)),
+        );
+
+        self.frame += 1;
+        self.upload_new(list);
+        let (instances, batches) = plan_draws(list);
+        self.ensure_instance_capacity(instances.len());
+        self.queue
+            .write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&instances));
+        let mut ui_vertices = ui_vertices(&list.ui, viewport_size);
+        let rect_count = ui_vertices.len() as u32;
+        let image_draws = self.ui_image_draws(&list.ui, viewport_size, &mut ui_vertices);
+        self.ensure_ui_capacity(ui_vertices.len());
+        if !ui_vertices.is_empty() {
+            self.queue
+                .write_buffer(&self.ui_buffer, 0, bytemuck::cast_slice(&ui_vertices));
+        }
+
+        let text_buffers = self.prepare_ui_text(&list.ui, viewport_size)?;
+        let sprite_draws = {
+            let textures = &self.textures;
+            self.sprites.prepare(
+                &self.device,
+                &self.queue,
+                list,
+                view_projection(list, aspect),
+                |key| {
+                    textures
+                        .get(&key)
+                        .and_then(|cached| cached.gpu.as_ref())
+                        .map(|gpu| &gpu.srgb)
+                },
+            )
+        };
+
+        // Shadow maps cost memory, so one exists only while shadows are on.
+        let shadows_on = list.shadows.enabled;
+        if shadows_on && self.shadow_map.is_none() {
+            let (view, layers) = create_shadow_views(&self.device, SHADOW_MAP_SIZE);
+            let frame_bind_group = create_frame_bind_group(
+                &self.device,
+                &self.frame_layout,
+                [&self.frame_buffer, &self.light_buffer, &self.tile_buffer],
+                &view,
+                &self.shadow_sampler,
+            );
+            self.shadow_map = Some(ShadowMap {
+                layers,
+                frame_bind_group,
+            });
+        } else if !shadows_on {
+            self.shadow_map = None;
+        }
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("frame"),
+            });
+        // Times this frame unless the last measurement is still being read.
+        let timed = match &mut self.gpu_timer {
+            Some(timer) => timer.collect(&self.device),
+            None => false,
+        };
+        if timed && let Some(timer) = &self.gpu_timer {
+            timer.begin(&mut encoder);
+        }
+        let mut draws = (0u32, 0u64);
+        let mut count = |index_count: u32, instances: &Range<u32>| {
+            draws.0 += 1;
+            draws.1 += u64::from(index_count / 3) * u64::from(instances.end - instances.start);
+        };
+
+        // One pass per cascade, each drawing into its own layer of the map.
+        let layers = self.shadow_map.iter().flat_map(|map| &map.layers);
+        for (index, layer) in layers.enumerate() {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("shadow cascade"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: layer,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                ..Default::default()
+            });
+            pass.set_pipeline(&self.shadow_pipeline);
+            let offset = (index as u64 * CASCADE_UNIFORM_STRIDE) as u32;
+            pass.set_bind_group(0, &self.shadow_bind_group, &[offset]);
+            pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+            // See-through items, and parts with `CastShadow` off, cast no shadow.
+            for batch in batches
+                .iter()
+                .filter(|batch| !batch.transparent && batch.casts_shadow)
+            {
+                let Some(mesh) = self.gpu_mesh(batch.mesh) else {
+                    continue;
+                };
+                pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                pass.set_index_buffer(mesh.indices.slice(..), mesh.index_format);
+                count(mesh.index_count, &batch.instances);
+                pass.draw_indexed(0..mesh.index_count, 0, batch.instances.clone());
+            }
+        }
+        let frame_bind_group = self
+            .shadow_map
+            .as_ref()
+            .map_or(&self.frame_bind_group, |map| &map.frame_bind_group);
+
+        // The scene is drawn into the HDR texture; post-processing then brings
+        // it to `view`. The pass is a block so it ends (is dropped) before
+        // `encoder.finish()`, which needs the encoder back.
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("scene"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.post_targets.hdr_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Discard,
+                    }),
+                    stencil_ops: None,
+                }),
+                ..Default::default()
+            });
+
+            pass.set_bind_group(0, frame_bind_group, &[]);
+            pass.set_pipeline(&self.sky_pipeline);
+            pass.draw(0..3, 0..1);
+            pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+            for batch in batches {
+                // A caller's mesh with broken data was never uploaded.
+                let Some(mesh) = self.gpu_mesh(batch.mesh) else {
+                    continue;
+                };
+                if batch.material.terrain != terrain::TerrainKey::default() {
+                    let Some(group) = self.terrain.group(&batch.material.terrain) else {
+                        continue;
+                    };
+                    pass.set_pipeline(&self.terrain.pipeline);
+                    pass.set_bind_group(1, group, &[]);
+                } else {
+                    let pipeline = if batch.transparent {
+                        &self.transparent_pipeline
+                    } else {
+                        &self.opaque_pipeline
+                    };
+                    let material = self
+                        .materials
+                        .get(&batch.material)
+                        .and_then(|cached| cached.gpu.as_ref())
+                        .unwrap_or(&self.plain_material);
+                    pass.set_pipeline(pipeline);
+                    pass.set_bind_group(1, &material.bind_group, &[]);
+                }
+                pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                pass.set_index_buffer(mesh.indices.slice(..), mesh.index_format);
+                count(mesh.index_count, &batch.instances);
+                pass.draw_indexed(0..mesh.index_count, 0, batch.instances);
+            }
+            // Last, over everything, but hidden behind solid items.
+            self.sprites.draw(&mut pass, &sprite_draws);
+        }
+
+        self.post.draw(
+            &mut encoder,
+            &self.post_targets,
+            view,
+            list.post.enabled && list.post.bloom_enabled && list.post.bloom_intensity > 0.0,
+        );
+
+        if !ui_vertices.is_empty() || !text_buffers.is_empty() {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("UI overlay"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                ..Default::default()
+            });
+            if rect_count > 0 {
+                pass.set_pipeline(&self.ui_pipeline);
+                pass.set_vertex_buffer(0, self.ui_buffer.slice(..));
+                pass.draw(0..rect_count, 0..1);
+            }
+            if !image_draws.is_empty() {
+                pass.set_pipeline(&self.ui_image_pipeline);
+                pass.set_vertex_buffer(0, self.ui_buffer.slice(..));
+                for (key, start, count) in &image_draws {
+                    let Some(group) = self.ui_image_groups.get(key) else {
+                        continue;
+                    };
+                    pass.set_bind_group(0, group, &[]);
+                    pass.draw(*start..*start + *count, 0..1);
+                }
+            }
+            if !text_buffers.is_empty() {
+                self.text_renderer
+                    .render(&self.text_atlas, &self.text_viewport, &mut pass)
+                    .context("could not render UI text")?;
+            }
+        }
+
+        if timed && let Some(timer) = &self.gpu_timer {
+            timer.end(&mut encoder);
+        }
+        self.queue.submit([encoder.finish()]);
+        if timed && let Some(timer) = &mut self.gpu_timer {
+            timer.submitted();
+        }
+        self.draws = draws;
+        self.forget_undrawn();
+        Ok(())
+    }
+
+    pub(super) fn stats(&self) -> RenderStats {
+        RenderStats {
+            draw_calls: self.draws.0,
+            triangles: self.draws.1,
+            gpu_time: self.gpu_timer.as_ref().and_then(gpu_timer::GpuTimer::last),
+            gpu_timing: self.gpu_timer.is_some(),
+        }
+    }
+
+    /// The GPU copy of a mesh, or `None` for a caller's mesh that was never uploaded.
+    pub(super) fn gpu_mesh(&self, key: MeshKey) -> Option<&GpuMesh> {
+        match key {
+            MeshKey::Custom(key) => self
+                .custom_meshes
+                .get(&key)
+                .and_then(|cached| cached.gpu.as_ref()),
+            builtin => self.meshes.get(builtin),
+        }
+    }
+
+    pub(super) fn prepare_ui_text(
+        &mut self,
+        ui: &[UiDrawItem],
+        (width, height): (u32, u32),
+    ) -> Result<Vec<Buffer>> {
+        self.text_viewport
+            .update(&self.queue, Resolution { width, height });
+
+        let text_items: Vec<&UiText> = ui
+            .iter()
+            .filter_map(|item| match item {
+                UiDrawItem::Text(text) => Some(text),
+                UiDrawItem::Rectangle(_) | UiDrawItem::Image(_) => None,
+            })
+            .collect();
+        let mut buffers = Vec::with_capacity(text_items.len());
+        for text in &text_items {
+            let font_size = text.font_size.max(1.0);
+            let mut buffer = Buffer::new(
+                &mut self.font_system,
+                Metrics::new(font_size, font_size * 1.2),
+            );
+            buffer.set_size(
+                &mut self.font_system,
+                Some(text.size[0].max(0.0)),
+                Some(text.size[1].max(0.0)),
+            );
+            buffer.set_text(
+                &mut self.font_system,
+                &text.text,
+                &Attrs::new().family(Family::Name(&text.font_family)),
+                Shaping::Advanced,
+            );
+            let align = match text.align {
+                TextAlign::Left => None,
+                TextAlign::Center => Some(glyphon::cosmic_text::Align::Center),
+                TextAlign::Right => Some(glyphon::cosmic_text::Align::Right),
+            };
+            for line in &mut buffer.lines {
+                line.set_align(align);
+            }
+            buffer.shape_until_scroll(&mut self.font_system, false);
+            buffers.push(buffer);
+        }
+
+        if !buffers.is_empty() {
+            let areas: Vec<_> = text_items
+                .iter()
+                .zip(&buffers)
+                .map(|(text, buffer)| TextArea {
+                    buffer,
+                    left: text.position[0],
+                    top: text.position[1] + vertical_offset(text, buffer),
+                    scale: 1.0,
+                    // Where the text may show, in screen pixels (not
+                    // relative to the text's position).
+                    bounds: TextBounds {
+                        left: text.position[0].floor() as i32,
+                        top: text.position[1].floor() as i32,
+                        right: (text.position[0] + text.size[0].max(0.0)).ceil() as i32,
+                        bottom: (text.position[1] + text.size[1].max(0.0)).ceil() as i32,
+                    },
+                    default_color: glyph_color(text.color),
+                    custom_glyphs: &[],
+                })
+                .collect();
+            self.text_renderer
+                .prepare(
+                    &self.device,
+                    &self.queue,
+                    &mut self.font_system,
+                    &mut self.text_atlas,
+                    &self.text_viewport,
+                    areas,
+                    &mut self.swash_cache,
+                )
+                .context("could not prepare UI text")?;
+        }
+        Ok(buffers)
+    }
+
+    /// Uploads the callers' meshes and textures in `list` that aren't on
+    /// the GPU yet, and notes that the rest were drawn this frame.
+    pub(super) fn upload_new(&mut self, list: &DrawList) {
+        let frame = self.frame;
+        for item in &list.items {
+            if let Shape::Mesh(source) = &item.shape {
+                match self.custom_meshes.entry(source.key()) {
+                    Entry::Occupied(mut cached) => {
+                        let cached = cached.get_mut();
+                        cached.last_drawn = frame;
+                        // A posed (animated) mesh has new corners: rewrite them.
+                        if let Some(gpu) = &mut cached.gpu
+                            && gpu.version != source.version()
+                        {
+                            update_custom_mesh(&self.device, &self.queue, gpu, source.as_ref());
+                        }
+                    }
+                    Entry::Vacant(slot) => {
+                        slot.insert(Cached {
+                            gpu: upload_custom_mesh(&self.device, source.as_ref()),
+                            last_drawn: frame,
+                        });
+                    }
+                }
+            }
+            if let Some(surface) = &item.material.terrain {
+                for weights in &surface.weights {
+                    self.note_texture(weights.as_ref(), frame);
+                }
+                let weights = surface.weights.each_ref().map(|source| {
+                    self.textures
+                        .get(&source.key())
+                        .and_then(|cached| cached.gpu.as_ref())
+                });
+                self.terrain.prepare(
+                    &self.device,
+                    &self.queue,
+                    surface,
+                    weights,
+                    &self.white_texture,
+                    frame,
+                );
+                continue;
+            }
+            let sources = material_textures(item);
+            for source in sources.iter().flatten() {
+                self.note_texture(source.as_ref(), frame);
+            }
+            let key = material_key(item);
+            if key == MaterialKey::default() {
+                continue;
+            }
+            match self.materials.entry(key) {
+                Entry::Occupied(mut cached) => cached.get_mut().last_drawn = frame,
+                Entry::Vacant(slot) => {
+                    // A texture with broken data is drawn as white instead.
+                    let textures = sources.map(|source| {
+                        source
+                            .and_then(|source| self.textures.get(&source.key())?.gpu.as_ref())
+                            .unwrap_or(&self.white_texture)
+                    });
+                    slot.insert(Cached {
+                        gpu: Some(create_material(
+                            &self.device,
+                            &self.material_layout,
+                            &self.sampler,
+                            textures,
+                            maps_uniform_of(&key),
+                        )),
+                        last_drawn: frame,
+                    });
+                }
+            }
+        }
+        for item in &list.ui {
+            if let UiDrawItem::Image(image) = item
+                && let Some(source) = &image.texture
+            {
+                self.note_texture(source.as_ref(), frame);
+            }
+        }
+        for sprite in &list.sprites {
+            if let Some(source) = &sprite.texture {
+                self.note_texture(source.as_ref(), frame);
+            }
+        }
+    }
+
+    /// Appends one quad per UI image and remembers which texture it uses.
+    pub(super) fn ui_image_draws(
+        &mut self,
+        ui: &[UiDrawItem],
+        viewport: (u32, u32),
+        vertices: &mut Vec<UiVertex>,
+    ) -> Vec<(u64, u32, u32)> {
+        let mut draws = Vec::new();
+        for item in ui {
+            let UiDrawItem::Image(image) = item else {
+                continue;
+            };
+            let Some(source) = &image.texture else {
+                continue;
+            };
+            let key = source.key();
+            if self
+                .textures
+                .get(&key)
+                .and_then(|cached| cached.gpu.as_ref())
+                .is_none()
+            {
+                continue;
+            }
+            if !self.ui_image_groups.contains_key(&key) {
+                let group = {
+                    let gpu = self
+                        .textures
+                        .get(&key)
+                        .and_then(|cached| cached.gpu.as_ref())
+                        .expect("checked just above");
+                    self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("UI image"),
+                        layout: &self.ui_image_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(&gpu.srgb),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::Sampler(&self.ui_sampler),
+                            },
+                        ],
+                    })
+                };
+                self.ui_image_groups.insert(key, group);
+            }
+            let quad = image_quad(image, viewport);
+            if quad.is_empty() {
+                continue;
+            }
+            let start = vertices.len() as u32;
+            let count = quad.len() as u32;
+            vertices.extend(quad);
+            draws.push((key, start, count));
+        }
+        draws
+    }
+
+    /// Uploads `source` the first time, and marks it drawn this frame.
+    pub(super) fn note_texture(&mut self, source: &dyn TextureSource, frame: u64) {
+        match self.textures.entry(source.key()) {
+            Entry::Occupied(mut cached) => cached.get_mut().last_drawn = frame,
+            Entry::Vacant(slot) => {
+                slot.insert(Cached {
+                    gpu: upload_texture(&self.device, &self.queue, source),
+                    last_drawn: frame,
+                });
+            }
+        }
+    }
+
+    /// Frees the callers' meshes, textures and materials that haven't been
+    /// drawn lately.
+    pub(super) fn forget_undrawn(&mut self) {
+        let frame = self.frame;
+        let recent = |last_drawn: u64| frame - last_drawn < KEEP_UNDRAWN_FRAMES;
+        self.custom_meshes
+            .retain(|_, cached| recent(cached.last_drawn));
+        self.textures.retain(|_, cached| recent(cached.last_drawn));
+        self.ui_image_groups
+            .retain(|key, _| self.textures.contains_key(key));
+        self.sprites.forget(|key| self.textures.contains_key(&key));
+        self.materials.retain(|_, cached| recent(cached.last_drawn));
+        self.terrain.forget(frame);
+    }
+
+    /// Replaces the instance buffer with a bigger one if `count` won't fit.
+    pub(super) fn ensure_instance_capacity(&mut self, count: usize) {
+        if count <= self.instance_capacity {
+            return;
+        }
+        self.instance_capacity = count.next_power_of_two();
+        self.instance_buffer = create_instance_buffer(&self.device, self.instance_capacity);
+    }
+
+    pub(super) fn ensure_ui_capacity(&mut self, count: usize) {
+        if count <= self.ui_capacity {
+            return;
+        }
+        self.ui_capacity = count.next_power_of_two();
+        self.ui_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("UI vertices"),
+            size: (self.ui_capacity * size_of::<UiVertex>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+    }
+}

@@ -11,7 +11,8 @@
 //!   `.wav`, `.ogg`, `.mp3` and `.flac` sounds.
 //! - Images are particle textures in `assets/particles`, textures in
 //!   `assets/textures` or beside a model in `assets/models`, and UI images
-//!   anywhere else.
+//!   anywhere else. A `*.texture.json` file is one texture set; the images
+//!   in its folder are not listed on their own.
 //!
 //! Dragging a tile sets an egui drag-and-drop payload ([`AssetPayload`]);
 //! the app places it where it's let go over the viewport. Double-clicking a
@@ -25,6 +26,7 @@ use axcenity_assets::{AUDIO_EXTENSIONS, Assets, TEXTURE_EXTENSIONS};
 use axcenity_core::FoliageSource;
 use eframe::egui;
 
+use crate::ambient_cg::GetTexture;
 use crate::props::{PROPS, Prop};
 use crate::responsive;
 use crate::theme::{self, icons};
@@ -59,6 +61,8 @@ pub enum AssetKind {
     Prefab,
     Image,
     Texture,
+    /// A texture set (`*.texture.json`) and the maps beside it.
+    TextureSet,
     Audio,
     Particle,
     /// An animation clip (`*.anim.json`).
@@ -74,7 +78,7 @@ impl AssetKind {
             AssetKind::Model => icons::CUBE_TRANSPARENT,
             AssetKind::Prefab => icons::PACKAGE,
             AssetKind::Image => icons::IMAGE,
-            AssetKind::Texture => icons::IMAGE_SQUARE,
+            AssetKind::Texture | AssetKind::TextureSet => icons::IMAGE_SQUARE,
             AssetKind::Audio => icons::WAVEFORM,
             AssetKind::Particle => icons::SPARKLE,
             AssetKind::Animation => theme::AnimKind::Clip.icon(),
@@ -88,7 +92,7 @@ impl AssetKind {
             AssetKind::Prop | AssetKind::Model | AssetKind::Prefab => {
                 theme::class_color(ClassName::Part, visuals)
             }
-            AssetKind::Image | AssetKind::Texture => {
+            AssetKind::Image | AssetKind::Texture | AssetKind::TextureSet => {
                 theme::class_color(ClassName::SurfaceAppearance, visuals)
             }
             AssetKind::Audio => theme::class_color(ClassName::Sound, visuals),
@@ -106,6 +110,7 @@ impl AssetKind {
             AssetKind::Prefab => "Prefab",
             AssetKind::Image => "Image",
             AssetKind::Texture => "Texture",
+            AssetKind::TextureSet => "Texture set",
             AssetKind::Audio => "Sound",
             AssetKind::Particle => "Particle",
             AssetKind::Animation => "Clip",
@@ -125,6 +130,10 @@ impl AssetKind {
             }
             AssetKind::Texture => {
                 "Drag onto a MeshPart to use it as the color map of its SurfaceAppearances."
+            }
+            AssetKind::TextureSet => {
+                "Drag onto a part, MeshPart, or terrain to fill its maps, or double-click to \
+                 fill the selection."
             }
             AssetKind::Audio => {
                 "Drag onto a part to put a Sound in it, or anywhere else for one in the Workspace."
@@ -229,7 +238,7 @@ impl Category {
             Category::Models => kind == AssetKind::Model,
             Category::Prefabs => kind == AssetKind::Prefab,
             Category::Images => kind == AssetKind::Image,
-            Category::Textures => kind == AssetKind::Texture,
+            Category::Textures => matches!(kind, AssetKind::Texture | AssetKind::TextureSet),
             Category::Audio => kind == AssetKind::Audio,
             Category::Particles => kind == AssetKind::Particle,
             Category::Animations => {
@@ -265,6 +274,8 @@ pub enum BrowserAction {
     DuplicatePrefab { path: String },
     /// Delete the prefab file at `path`.
     DeletePrefab { path: String },
+    /// A line for Output. `error` is a failure.
+    Notice { error: bool, text: String },
 }
 
 /// A prefab question the panel is asking.
@@ -289,6 +300,7 @@ pub struct AssetBrowser {
     /// Image thumbnails by path, `None` for an image that can't be read.
     thumbnails: HashMap<String, Option<egui::TextureHandle>>,
     dialog: Option<PrefabDialog>,
+    get_texture: Option<GetTexture>,
 }
 
 impl AssetBrowser {
@@ -299,6 +311,7 @@ impl AssetBrowser {
         self.thumbnails.clear();
         self.scanned_at = None;
         self.dialog = None;
+        self.get_texture = None;
     }
 
     /// Walks the folder again on the next frame the panel is shown.
@@ -482,6 +495,9 @@ impl AssetBrowser {
         if let Some(done) = self.prefab_dialog(ui.ctx()) {
             action = Some(done);
         }
+        if let Some(done) = self.texture_dialog(ui.ctx()) {
+            action = Some(done);
+        }
         action
     }
 
@@ -513,6 +529,24 @@ impl AssetBrowser {
     ) -> Option<BrowserAction> {
         let palette = theme::palette(ui.ctx());
         let mut action = None;
+        let mut get_texture = |ui: &mut egui::Ui| {
+            if ui
+                .add_enabled(
+                    can_edit && self.folder.is_some(),
+                    widgets::button(
+                        widgets::Role::Secondary,
+                        Some(icons::IMAGE_SQUARE),
+                        "Get texture",
+                        &palette,
+                    )
+                    .min_size(egui::vec2(0.0, 24.0)),
+                )
+                .on_hover_text("Search ambientCG and save a texture set into assets/textures.")
+                .clicked()
+            {
+                self.get_texture = Some(GetTexture::open(ui.ctx()));
+            }
+        };
         let mut import = |ui: &mut egui::Ui| {
             if ui
                 .add_enabled(
@@ -555,8 +589,10 @@ impl AssetBrowser {
         let saved = if right_to_left {
             let saved = save(ui);
             import(ui);
+            get_texture(ui);
             saved
         } else {
+            get_texture(ui);
             import(ui);
             save(ui)
         };
@@ -625,6 +661,32 @@ impl AssetBrowser {
         action
     }
 
+    /// The ambientCG search. A finished download refreshes the tiles and
+    /// asks Output to say so.
+    fn texture_dialog(&mut self, ctx: &egui::Context) -> Option<BrowserAction> {
+        let Some(folder) = self.folder.clone() else {
+            self.get_texture = None;
+            return None;
+        };
+        let Some(event) = self
+            .get_texture
+            .as_mut()
+            .and_then(|dialog| dialog.show(ctx, &folder))
+        else {
+            return None;
+        };
+        let action = event.notice.map(|(error, text)| {
+            if !error {
+                self.refresh();
+            }
+            BrowserAction::Notice { error, text }
+        });
+        if event.close {
+            self.get_texture = None;
+        }
+        action
+    }
+
     /// Draws one asset: a tile, or a row of the list when `list`. The first
     /// bool is a double-click (place); the second is a foliage pick.
     fn item(
@@ -686,9 +748,9 @@ impl AssetBrowser {
         };
         let thumbnail = matches!(
             entry.kind,
-            AssetKind::Image | AssetKind::Texture | AssetKind::Particle
+            AssetKind::Image | AssetKind::Texture | AssetKind::TextureSet | AssetKind::Particle
         )
-        .then(|| self.thumbnail(ui.ctx(), assets, &entry.path))
+        .then(|| self.thumbnail(ui.ctx(), assets, entry))
         .flatten();
         self.paint_picture(ui, picture, entry, thumbnail.as_ref());
         let text_color = if response.hovered() {
@@ -836,25 +898,48 @@ impl AssetBrowser {
         }
     }
 
-    /// The thumbnail of the image at `path`, made the first time.
+    /// The thumbnail of `entry`, made the first time. A texture set shows
+    /// its color map.
     fn thumbnail(
         &mut self,
         ctx: &egui::Context,
         assets: &Assets,
-        path: &str,
+        entry: &AssetEntry,
     ) -> Option<egui::TextureHandle> {
-        self.thumbnails
-            .entry(path.to_owned())
-            .or_insert_with(|| {
-                let image = assets.texture(path)?;
-                let color = shrink(image.width, image.height, &image.rgba, THUMBNAIL_PIXELS)?;
-                Some(ctx.load_texture(
-                    format!("asset thumbnail {path}"),
-                    color,
-                    egui::TextureOptions::LINEAR,
-                ))
+        if let Some(cached) = self.thumbnails.get(&entry.path) {
+            return cached.clone();
+        }
+        let path = self.picture_path(entry);
+        let handle = assets.texture(&path).and_then(|image| {
+            let color = shrink(image.width, image.height, &image.rgba, THUMBNAIL_PIXELS)?;
+            Some(ctx.load_texture(
+                format!("asset thumbnail {}", entry.path),
+                color,
+                egui::TextureOptions::LINEAR,
+            ))
+        });
+        self.thumbnails.insert(entry.path.clone(), handle.clone());
+        handle
+    }
+
+    /// The image a tile shows. A texture set uses its color map.
+    fn picture_path(&self, entry: &AssetEntry) -> String {
+        if entry.kind != AssetKind::TextureSet {
+            return entry.path.clone();
+        }
+        let Some(folder) = &self.folder else {
+            return entry.path.clone();
+        };
+        let Some(relative) = axcenity_assets::safe_path(&entry.path) else {
+            return entry.path.clone();
+        };
+        axcenity_assets::read_texture_set(&folder.join(relative))
+            .ok()
+            .and_then(|set| {
+                set.path(axcenity_assets::MapSlot::BaseColor)
+                    .map(str::to_owned)
             })
-            .clone()
+            .unwrap_or_else(|| entry.path.clone())
     }
 }
 
@@ -899,6 +984,9 @@ pub fn kind_of(path: &str) -> Option<AssetKind> {
     if lower.ends_with(PREFAB_SUFFIX) {
         return Some(AssetKind::Prefab);
     }
+    if lower.ends_with(axcenity_assets::TEXTURE_SET_SUFFIX) {
+        return Some(AssetKind::TextureSet);
+    }
     if lower.ends_with(axcenity_anim::CLIP_EXTENSION) {
         return Some(AssetKind::Animation);
     }
@@ -929,6 +1017,7 @@ pub fn display_name(path: &str) -> String {
     let lower = file.to_lowercase();
     for suffix in [
         PREFAB_SUFFIX,
+        axcenity_assets::TEXTURE_SET_SUFFIX,
         axcenity_anim::CLIP_EXTENSION,
         axcenity_anim::STATE_MACHINE_EXTENSION,
     ] {
@@ -945,6 +1034,29 @@ pub fn display_name(path: &str) -> String {
 fn scan(folder: &Path) -> Vec<AssetEntry> {
     let mut found = Vec::new();
     walk(&folder.join("assets"), "assets", &mut found);
+    let set_folders: Vec<String> = found
+        .iter()
+        .filter(|entry| entry.kind == AssetKind::TextureSet)
+        .filter_map(|entry| {
+            entry
+                .path
+                .rsplit_once('/')
+                .map(|(folder, _)| folder.to_owned())
+        })
+        .collect();
+    // The set is one tile. Its images are not listed again.
+    found.retain(|entry| {
+        if !matches!(
+            entry.kind,
+            AssetKind::Image | AssetKind::Texture | AssetKind::Particle
+        ) {
+            return true;
+        }
+        entry
+            .path
+            .rsplit_once('/')
+            .is_none_or(|(folder, _)| !set_folders.iter().any(|set| set == folder))
+    });
     found.sort_by_key(|entry| entry.path.to_lowercase());
     found
 }

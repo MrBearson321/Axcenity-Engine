@@ -380,6 +380,7 @@ fn piece_item(piece: &Piece, instance: Mat4) -> DrawItem {
             opacity: 1.0,
             ..Material::default()
         },
+        uv_tile: 0.0,
         casts_shadow: true,
     }
 }

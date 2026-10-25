@@ -29,7 +29,7 @@ Work crate by crate. Keep each change behavior-preserving and small enough to re
 - Run `cargo clippy --workspace --all-targets -- -D warnings` and fix dead-code, unused import, and unused dependency warnings it reports. Note pre-existing noise (see memory) and leave untouched files alone.
 - Grep for `pub` items with no users outside their definition (`Grep` the name across `crates/`, `examples/`, `definitions/`). Remove only when there are no callers, no Lua/definitions exposure, no serialized-format role, and no test use.
 - Remove commented-out code, stale TODOs that are done, duplicate helpers (merge into the existing one), and unused workspace dependencies.
-- Do not remove: public Lua API surfaced in `definitions/axcenity.lua`, file-format fields kept for compatibility, or code the user is mid-way through (uncommitted work in files you did not touch for cleanup). When unsure, list it in the report instead of deleting.
+- Do not remove: public Lua API surfaced in `definitions/axcenity.d.luau`, file-format fields kept for compatibility, or code the user is mid-way through (uncommitted work in files you did not touch for cleanup). When unsure, list it in the report instead of deleting.
 
 ### Split long files
 

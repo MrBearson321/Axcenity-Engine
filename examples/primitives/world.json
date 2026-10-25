@@ -19,6 +19,7 @@
           "Roughness": 0.8,
           "Shape": "Block",
           "Size": [28, 1, 14],
+          "TileSize": 8,
           "Transparency": 0,
           "WindAffected": false
         }
@@ -40,6 +41,7 @@
           "Roughness": 0.5,
           "Shape": "Block",
           "Size": [3, 3, 3],
+          "TileSize": 8,
           "Transparency": 0,
           "WindAffected": false
         }
@@ -61,6 +63,7 @@
           "Roughness": 0.3,
           "Shape": "Ball",
           "Size": [3.5, 3.5, 3.5],
+          "TileSize": 8,
           "Transparency": 0,
           "WindAffected": false
         }
@@ -82,6 +85,7 @@
           "Roughness": 0.05,
           "Shape": "Cylinder",
           "Size": [4, 3, 3],
+          "TileSize": 8,
           "Transparency": 0,
           "WindAffected": false
         }
@@ -103,6 +107,7 @@
           "Roughness": 0.5,
           "Shape": "Ball",
           "Size": [1.5, 1.5, 1.5],
+          "TileSize": 8,
           "Transparency": 0,
           "WindAffected": false
         }
@@ -124,6 +129,7 @@
           "Roughness": 1,
           "Shape": "Wedge",
           "Size": [3, 3, 4],
+          "TileSize": 8,
           "Transparency": 0,
           "WindAffected": false
         }
@@ -145,6 +151,7 @@
           "Roughness": 0.65,
           "Shape": "Block",
           "Size": [8, 1, 2],
+          "TileSize": 8,
           "Transparency": 0,
           "WindAffected": false
         }

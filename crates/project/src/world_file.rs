@@ -910,6 +910,7 @@ mod tests {
                 format!("{indent}    \"Roughness\": {roughness},"),
                 format!("{indent}    \"Shape\": \"Block\","),
                 format!("{indent}    \"Size\": [4, 1, 2],"),
+                format!("{indent}    \"TileSize\": 8,"),
                 format!("{indent}    \"Transparency\": 0,"),
                 format!("{indent}    \"WindAffected\": false"),
                 format!("{indent}  }}"),

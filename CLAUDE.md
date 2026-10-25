@@ -1,6 +1,6 @@
 # Axcenity Engine
 
-Rust 3D game engine and editor; Lua 5.4 scripting. How to run it: [README.md](README.md).
+Rust 3D game engine and editor; Luau scripting. How to run it: [README.md](README.md).
 
 ## Docs
 

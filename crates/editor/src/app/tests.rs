@@ -1899,35 +1899,32 @@ fn f5_plays_and_shift_f5_stops() {
 fn set_up_autocomplete_writes_the_files_and_opening_refreshes_old_definitions() {
     let folder = copy_of_example("hello-events", "autocomplete");
     let mut app = EditorApp::new(Some(&folder));
+    let scripts = app.project.as_ref().unwrap().scripts.len();
     app.set_up_autocomplete();
     assert_eq!(
         last_line(&app).text,
-        "Set up autocomplete: wrote `.axcenity/axcenity.lua`, `.luarc.json` and \
-         `.vscode/extensions.json`. Open the project folder in VS Code and install the \
-         Lua extension (sumneko.lua) when it asks; scripts then autocomplete the \
-         engine's API."
+        "Set up autocomplete: wrote `.axcenity/axcenity.d.luau`, `.vscode/settings.json` \
+         and `.vscode/extensions.json`. Open the project folder in VS Code and install \
+         the Luau extension (JohnnyMorganz.luau-lsp) when it asks; scripts then \
+         autocomplete the engine's API."
     );
     let definitions = folder.join(autocomplete::DEFINITIONS_FILE);
     assert_eq!(
         std::fs::read_to_string(&definitions).unwrap(),
         axcenity_script::lua_definitions()
     );
-    // The project still opens as before: the new files aren't scripts.
-    assert_eq!(app.project.as_ref().unwrap().scripts.len(), 1);
-
     // Definitions from an older engine are updated when the project opens.
-    std::fs::write(&definitions, "---@meta\n").unwrap();
+    std::fs::write(&definitions, "-- old\n").unwrap();
     app.open(&folder);
-    assert!(
-        printed(&app).contains(
-            &"Updated `.axcenity/axcenity.lua` to this version of the engine's script API."
-        ),
-    );
+    assert!(printed(&app).contains(
+        &"Updated `.axcenity/axcenity.d.luau` to this version of the engine's script API."
+    ),);
     assert_eq!(
         std::fs::read_to_string(&definitions).unwrap(),
         axcenity_script::lua_definitions()
     );
-    assert_eq!(app.project.as_ref().unwrap().scripts.len(), 1);
+    // The project still opens as before: the new files aren't scripts.
+    assert_eq!(app.project.as_ref().unwrap().scripts.len(), scripts);
     let _ = std::fs::remove_dir_all(&folder);
 }
 

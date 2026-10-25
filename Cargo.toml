@@ -56,8 +56,14 @@ log = "0.4"
 # Decodes the logo PNG for the player's window icon, and writes the editor's
 # project thumbnails. (The editor gets PNG decoding through eframe.)
 png = "0.18"
-# Lua 5.4, compiled from source (`vendored`) so no system Lua is needed on any OS.
-mlua = { version = "0.12", features = ["lua54", "vendored"] }
+# Luau, compiled from source (the `luau0-src` crate, MIT) so no system Lua is
+# needed on any OS. Building it needs a C++ compiler.
+mlua = { version = "0.12", features = ["luau"] }
+# Pins the Luau sources `mlua` builds. mlua-sys 0.13.0 reads bytecode up to
+# version 11; luau0-src 0.22.1 (Luau 0.744) writes version 13, so mlua takes
+# every compiled chunk for source text and can't load it. Raise this only
+# together with `mlua`.
+luau0-src = "=0.22.0"
 # The process's memory use for the editor's profiler, on Windows, macOS and
 # Linux (MIT OR Apache-2.0).
 memory-stats = "1.2"
@@ -75,6 +81,12 @@ ufbx = "0.11"
 rapier3d = "0.36"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Reads zip archives (ambientCG texture downloads). Deflate only: that is
+# the method those archives use. MIT.
+zip = { version = "2", default-features = false, features = ["deflate"] }
+# HTTPS for the editor's texture catalog. rustls so no system TLS library
+# is required. MIT OR Apache-2.0.
+ureq = { version = "3", default-features = false, features = ["rustls"] }
 thiserror = "2"
 taffy = { version = "0.7", features = ["taffy_tree"] }
 wgpu = "25"

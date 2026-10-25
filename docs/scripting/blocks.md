@@ -6,7 +6,7 @@ How each block becomes Lua. One-way: blocks translate to Lua, and there is one r
 - There is no separate runtime: **blocks always translate to Lua**, using the same `ScriptRuntime` and API as handwritten scripts. Objects are named by their path under the Workspace (`Pad.Chime` is `workspace.Pad.Chime`, or `workspace["Red Ball"]` for names that aren't Lua names).
 - Variables belong to the whole block script, as in Scratch: each is declared once at the top as `local name = 0`. Loops that may run long (forever, repeat until, wait until) wait a frame each time round (`task.wait()`), so the game keeps running.
 - "View as Lua" shows the generated Lua beside the canvas, readable and with no markers in it. `Translation::block_lines` maps each block to the line its code starts on, so a runtime error's line highlights the block it came from (in red).
-- One-way only. Don't build Lua-to-blocks conversion.
+- Switching a script from Code to Blocks (`from_lua`, read by the Luau reader in `crates/blocks/src/lua.rs`) turns code shaped like the translation back into blocks; anything else is kept word for word in grey Lua blocks, so nothing is lost and it runs the same. All of Luau is read: `x += n` becomes change variable, move by or turn by (others such as `-=` stay Lua), and `continue`, if-expressions, backtick strings, `::` casts and anything with type annotations (typed locals and `for`s, `type` definitions, a handler with typed parameters) stay Lua, so the annotations aren't lost. Lua 5.4 syntax that Luau doesn't have (`goto`, labels, `<const>`, bitwise operators) is a syntax error, as it is when the script runs.
 - Every block must correspond to a real Lua API. Don't add block-only features. The blocks and what they become:
 
 | Category | Block | Lua |

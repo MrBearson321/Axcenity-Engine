@@ -28,7 +28,9 @@ impl Context {
     pub fn new(side: Side) -> Self {
         // Only these libraries are loaded at all. `sandbox` then picks the
         // safe parts of them for each script.
-        let libraries = StdLib::COROUTINE
+        let libraries = StdLib::BIT
+            | StdLib::BUFFER
+            | StdLib::COROUTINE
             | StdLib::MATH
             | StdLib::OS
             | StdLib::STRING

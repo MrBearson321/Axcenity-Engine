@@ -479,7 +479,7 @@ fn a_local_script_reads_and_moves_the_camera() {
         "#,
     );
     let output = lines(&mut runtime);
-    assert_eq!(output[..2], ["1, 2, 3\t-1.0", "0, 10, 20"]);
+    assert_eq!(output[..2], ["1, 2, 3\t-1", "0, 10, 20"]);
     assert!(
         output[2].contains("Camera.Position must be a Vector3, not a number"),
         "{}",

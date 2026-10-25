@@ -274,7 +274,7 @@ fn a_script_creates_and_updates_ui_instances_with_udim2() {
         print(frame.Position.X.Scale, frame.Position.X.Offset, frame.Size.Y.Scale)
         "#,
     );
-    assert_eq!(output, ["0.5\t12.0\t0.75"]);
+    assert_eq!(output, ["0.5\t12\t0.75"]);
 
     let gui = world.find_first_child(world.workspace(), "Hud").unwrap();
     let frame = world.find_first_child(gui, "Frame").unwrap();
@@ -318,8 +318,8 @@ fn safe_standard_functions_are_available() {
 #[test]
 fn compiled_bytecode_is_rejected() {
     let mut world = World::new();
-    // "\27Lua" is how compiled Lua chunks start.
-    let output = output_of(&mut world, "\x1bLua");
+    // Compiled Luau chunks start with their bytecode version, a low byte.
+    let output = output_of(&mut world, "\x06\x03");
     assert_eq!(output.len(), 1);
     assert!(
         output[0].contains("attempt to load a binary chunk"),
@@ -347,7 +347,7 @@ fn a_runtime_error_reports_the_path_and_line_and_other_scripts_keep_running() {
     assert_eq!(output.len(), 3, "{output:?}");
     assert_eq!(output[0], "before");
     assert!(
-        output[1].starts_with("error: scripts/broken.server.lua:3: attempt to index a nil value"),
+        output[1].starts_with("error: scripts/broken.server.lua:3: attempt to index nil"),
         "{output:?}"
     );
     assert_eq!(output[2], "still running");
@@ -542,7 +542,7 @@ fn vector3_supports_arithmetic_and_components() {
         output,
         [
             "2, 3, 4\t0, 0, 0\t2, 4, 6\t2, 4, 6\t1, 4, 9\t0.5, 1, 1.5\t-1, -2, -3",
-            "1.0\t2.0\t3.0\t5.0\t0, 1, 0",
+            "1\t2\t3\t5\t0, 1, 0",
             "true\tfalse\t0.1",
         ]
     );
@@ -564,7 +564,7 @@ fn color3_takes_0_to_1_or_from_rgb_0_to_255() {
         Value::Color3(Color3::new(1.0, 0.0, 0.2))
     );
     assert_eq!(output.len(), 2);
-    assert_eq!(output[0], "1.0");
+    assert_eq!(output[0], "1");
     assert!(output[1].contains("use Color3.fromRGB"), "{output:?}");
 }
 
@@ -584,10 +584,7 @@ fn enum_properties_accept_enum_items_and_names() {
     );
     assert_eq!(
         output,
-        [
-            "Enum.Material.Metal\ttrue\t1.0",
-            "Neon\tEnum.PartType.Wedge"
-        ]
+        ["Enum.Material.Metal\ttrue\t1", "Neon\tEnum.PartType.Wedge"]
     );
     assert_eq!(
         property(&world, block, "Material"),
@@ -780,7 +777,7 @@ fn task_wait_returns_the_time_that_passed_on_a_simulated_clock() {
     step_frames(&mut runtime, &mut world, 0.25, 3);
     assert_eq!(lines(&mut runtime), Vec::<String>::new());
     runtime.step(&mut world, 0.25);
-    assert_eq!(lines(&mut runtime), ["1.0"]);
+    assert_eq!(lines(&mut runtime), ["1"]);
     step_frames(&mut runtime, &mut world, 0.25, 2);
     assert_eq!(lines(&mut runtime), ["0.5"]);
     // `task.wait()` with no time waits for the next step.
@@ -895,7 +892,7 @@ print("parent still running")"#,
     let output = lines(&mut runtime);
     assert_eq!(output.len(), 1, "{output:?}");
     assert!(
-        output[0].starts_with("error: scripts/test.server.lua:8: attempt to index a nil value"),
+        output[0].starts_with("error: scripts/test.server.lua:8: attempt to index nil"),
         "{output:?}"
     );
     runtime.step(&mut world, 0.1);
@@ -1381,12 +1378,12 @@ fn load_animation_gives_a_track_to_play_stop_and_hear() {
     runtime.fire_instance_event(&mut world, track, "Stopped", &[]);
     let output = lines(&mut runtime);
     assert_eq!(output[0], "AnimationTrack\ttrue\tfalse");
-    assert_eq!(output[1], "true\t2.0\t1");
+    assert_eq!(output[1], "true\t2\t1");
     assert_eq!(output[2], "true\t0.25");
     assert!(output[3].contains("AdjustSpeed"), "{}", output[3]);
     assert!(output[4].contains("needs an Animation"), "{}", output[4]);
     assert!(output[5].contains("LoadAnimation"), "{}", output[5]);
-    assert_eq!(output[6], "false\t0.0");
+    assert_eq!(output[6], "false\t0");
     assert_eq!(&output[7..], ["marker\tOpened", "stopped"]);
     let state = world.animation_track(track).unwrap();
     assert!(state.stopping && state.order == 1);

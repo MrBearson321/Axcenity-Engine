@@ -148,41 +148,6 @@ fn an_endless_loop_in_a_coroutine_the_script_made_is_stopped() {
 }
 
 #[test]
-fn endless_close_handlers_are_stopped_too() {
-    // `<close>` variables run their `__close` when the code around them
-    // ends, even when it's stopped.
-    let mut world = World::new();
-    let mut runtime = runtime();
-    start(
-        &mut runtime,
-        &mut world,
-        "scripts/close.server.lua",
-        r#"
-        local stuck = { __close = function() while true do end end }
-        local co = coroutine.create(function()
-            local guard <close> = setmetatable({}, stuck)
-            while true do end
-        end)
-        print((coroutine.resume(co)))
-        print((coroutine.close(co)))
-        print((pcall(function()
-            local guard <close> = setmetatable({}, stuck)
-            while true do end
-        end)))
-        "#,
-    );
-    let output = lines(&mut runtime);
-    assert_eq!(output[0], "false", "{output:?}");
-    assert!(
-        output
-            .last()
-            .unwrap()
-            .starts_with("error: scripts/close.server.lua:"),
-        "{output:?}"
-    );
-}
-
-#[test]
 fn endless_loops_where_lua_cannot_pause_are_stopped_with_an_error() {
     // Lua called from inside a C function can't yield, so the watchdog
     // raises its error there instead, and `pcall` doesn't catch it.

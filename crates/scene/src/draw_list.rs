@@ -234,7 +234,7 @@ pub fn build_draw_list_posed(
             // Drawn chunk by chunk below.
             ClassName::Terrain => {}
             _ => {
-                if let Some(mut item) = part_draw_item(instance, glow) {
+                if let Some(mut item) = part_draw_item(world, instance, assets, glow) {
                     if let Some(extra) = fixture_glow(world, instance) {
                         for (channel, added) in item.material.emissive.iter_mut().zip(extra) {
                             *channel = (*channel + added).min(4.0);
@@ -404,8 +404,14 @@ fn casts_shadow(instance: &Instance) -> bool {
 }
 
 /// The draw item for a Part, or `None` for any other class. `glow` is how
-/// much brighter than its color a glowing part is drawn.
-fn part_draw_item(instance: &Instance, glow: f32) -> Option<DrawItem> {
+/// much brighter than its color a glowing part is drawn. A SurfaceAppearance
+/// inside the part replaces its flat color with that appearance's maps.
+fn part_draw_item(
+    world: &World,
+    instance: &Instance,
+    assets: &Assets,
+    glow: f32,
+) -> Option<DrawItem> {
     let number = |name| instance.property(name).and_then(Value::as_number);
     let (shape, transform) = part_placement(instance)?;
     let color = instance.property("Color").and_then(Value::as_color3)?;
@@ -434,6 +440,33 @@ fn part_draw_item(instance: &Instance, glow: f32) -> Option<DrawItem> {
             *channel += added * emission;
         }
     }
+    let mut material = Material {
+        // A glowing part shows its color as light, the same on every side,
+        // instead of being shaded by the sun.
+        base_color: if preset.glows { [0.0; 3] } else { color },
+        emissive,
+        metalness: number("Metalness")? as f32,
+        roughness: number("Roughness")? as f32,
+        opacity,
+        ..Material::default()
+    };
+    let appearance = instance.children().iter().find_map(|&id| {
+        let child = world.get(id)?;
+        (child.class() == ClassName::SurfaceAppearance).then_some(child)
+    });
+    if let Some(appearance) = appearance {
+        overlay_appearance(&mut material, appearance, assets);
+    }
+    let uv_tile = if has_texture_maps(&material) {
+        let tile = number("TileSize").unwrap_or(8.0);
+        if tile.is_finite() && tile > 0.0 {
+            tile as f32
+        } else {
+            0.0
+        }
+    } else {
+        0.0
+    };
     Some(DrawItem {
         shape: match shape {
             PartType::Block => Shape::Block,
@@ -442,18 +475,101 @@ fn part_draw_item(instance: &Instance, glow: f32) -> Option<DrawItem> {
             PartType::Wedge => Shape::Wedge,
         },
         transform,
-        material: Material {
-            // A glowing part shows its color as light, the same on every side,
-            // instead of being shaded by the sun.
-            base_color: if preset.glows { [0.0; 3] } else { color },
-            emissive,
-            metalness: number("Metalness")? as f32,
-            roughness: number("Roughness")? as f32,
-            opacity,
-            ..Material::default()
-        },
+        material,
+        uv_tile,
         casts_shadow: casts_shadow(instance),
     })
+}
+
+/// True when `material` samples a texture, so a built-in shape should
+/// tile its coordinates in studs.
+fn has_texture_maps(material: &Material) -> bool {
+    let maps = &material.maps;
+    material.base_color_texture.is_some()
+        || maps.normal.is_some()
+        || maps.metalness.is_some()
+        || maps.roughness.is_some()
+        || maps.occlusion.is_some()
+        || maps.emissive.is_some()
+        || maps.opacity.is_some()
+        || maps.specular.is_some()
+}
+
+/// Puts `appearance`'s maps onto `material`. A metalness or roughness map
+/// gives that value alone (factor 1). An empty map leaves what `material`
+/// already had.
+fn overlay_appearance(material: &mut Material, appearance: &Instance, assets: &Assets) {
+    let texture_of = |name| {
+        let path = appearance.property(name).and_then(Value::as_str)?;
+        assets.texture(path).map(|image| texture(&image))
+    };
+    let number = |name, default: f32| {
+        appearance
+            .property(name)
+            .and_then(Value::as_number)
+            .map_or(default, |n| n as f32)
+    };
+    let flag = |name| appearance.property(name).and_then(Value::as_bool) == Some(true);
+    let channel = |name| match appearance
+        .property(name)
+        .and_then(Value::as_texture_channel)
+    {
+        Some(TextureChannel::Green) => Channel::Green,
+        Some(TextureChannel::Blue) => Channel::Blue,
+        Some(TextureChannel::Alpha) => Channel::Alpha,
+        Some(TextureChannel::Red) | None => Channel::Red,
+    };
+    let channel_map = |map, channel_property, invert| {
+        texture_of(map).map(|texture| ChannelMap {
+            texture,
+            channel: channel(channel_property),
+            invert,
+        })
+    };
+    if let Some(tint) = appearance.property("Color").and_then(Value::as_color3) {
+        let [r, g, b] = material.base_color;
+        material.base_color = [r * tint.r, g * tint.g, b * tint.b];
+    }
+    if let Some(image) = texture_of("ColorMap") {
+        material.base_color_texture = Some(image);
+    }
+    if let Some(image) = texture_of("NormalMap") {
+        material.maps.normal = Some(NormalMap {
+            texture: image,
+            scale: number("NormalStrength", 1.0),
+            flip_green: flag("NormalMapDirectX"),
+        });
+    }
+    if let Some(map) = channel_map("MetalnessMap", "MetalnessChannel", false) {
+        material.maps.metalness = Some(map);
+        material.metalness = 1.0;
+    }
+    if let Some(map) = channel_map("RoughnessMap", "RoughnessChannel", flag("InvertRoughness")) {
+        material.maps.roughness = Some(map);
+        material.roughness = 1.0;
+    }
+    if let Some(map) = channel_map("AmbientOcclusionMap", "AmbientOcclusionChannel", false) {
+        material.maps.occlusion = Some(map);
+        material.maps.occlusion_strength = number("AmbientOcclusionStrength", 1.0);
+    }
+    if let Some(image) = texture_of("EmissiveMap") {
+        material.maps.emissive = Some(image);
+        let strength = number("EmissiveStrength", 1.0).max(0.0);
+        if material.emissive.iter().all(|&channel| channel <= 0.0) {
+            material.emissive = [strength; 3];
+        } else {
+            material.emissive = material.emissive.map(|channel| channel * strength);
+        }
+    }
+    if let Some(map) = channel_map("OpacityMap", "OpacityChannel", flag("InvertOpacity")) {
+        material.maps.opacity = Some(map);
+        if material.opacity >= 1.0 && material.alpha_cutoff == 0.0 {
+            material.alpha_cutoff = 0.5;
+        }
+    }
+    if let Some(image) = texture_of("SpecularMap") {
+        material.maps.specular = Some(image);
+    }
 }
 
 /// A MeshPart's draw items, one per part of its model, each with the
@@ -486,6 +602,7 @@ fn mesh_part_draw_items(
             shape: Shape::Block,
             transform,
             material: Material::default(),
+            uv_tile: 0.0,
             casts_shadow: casts_shadow(instance),
         });
         return;
@@ -525,6 +642,7 @@ fn mesh_part_draw_items(
             shape: Shape::Mesh(shape),
             transform,
             material,
+            uv_tile: 0.0,
             casts_shadow: casts_shadow(instance),
         });
     }
@@ -625,6 +743,7 @@ pub(crate) fn push_model(model: &Arc<Model>, transform: Mat4, items: &mut Vec<Dr
             })),
             transform,
             material: model_material(&primitive.material),
+            uv_tile: 0.0,
             casts_shadow: true,
         });
     }
@@ -1055,6 +1174,41 @@ mod tests {
         let errors = assets.take_errors();
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(errors[0].contains("missing.glb"), "{errors:?}");
+    }
+
+    #[test]
+    fn a_part_draws_its_surface_appearance_color_map() {
+        let project = std::env::temp_dir().join(format!(
+            "axcenity-scene-part-texture-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&project);
+        std::fs::create_dir_all(project.join("assets/textures")).unwrap();
+        let image = image::RgbaImage::from_pixel(1, 1, image::Rgba([200, 40, 40, 255]));
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(image)
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        std::fs::write(project.join("assets/textures/swatch.png"), png.into_inner()).unwrap();
+        let assets = Assets::new(&project);
+
+        let mut world = World::new();
+        let part = part(&mut world, vec![]);
+        let appearance = world.create(ClassName::SurfaceAppearance).unwrap();
+        world.set_parent(appearance, Some(part)).unwrap();
+        world
+            .set_property(
+                appearance,
+                "ColorMap",
+                Value::String("assets/textures/swatch.png".into()),
+            )
+            .unwrap();
+
+        let item = only_item_with(&world, &assets);
+        assert!(item.material.base_color_texture.is_some());
+        assert_eq!(item.uv_tile, 8.0);
+        assert!(assets.take_errors().is_empty());
+        let _ = std::fs::remove_dir_all(&project);
     }
 
     #[test]

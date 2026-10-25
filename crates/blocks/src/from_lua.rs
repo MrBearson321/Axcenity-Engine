@@ -441,10 +441,15 @@ impl<'a> Converter<'a> {
         }
     }
 
-    /// `function(...) ... end` with at most `params` parameters.
+    /// `function(...) ... end` with at most `params` parameters. One with
+    /// type annotations stays code, since an event block would lose them.
     fn handler<'e>(&self, expr: &'e Expr, params: usize) -> Option<&'e FunctionBody> {
         match &expr.kind {
-            ExprKind::Function(body) if !body.vararg && body.params.len() <= params => Some(body),
+            ExprKind::Function(body)
+                if !body.vararg && !body.annotated && body.params.len() <= params =>
+            {
+                Some(body)
+            }
             _ => None,
         }
     }
@@ -564,6 +569,11 @@ impl<'a> Converter<'a> {
                 };
                 self.assignment(target, value, scope)
             }
+            StatKind::CompoundAssign {
+                target,
+                op: "+",
+                value,
+            } => self.add_to(target, value, scope),
             StatKind::While { condition, body } => self.while_loop(condition, body, scope),
             StatKind::NumericFor {
                 variable,
@@ -769,6 +779,32 @@ impl<'a> Converter<'a> {
         })
     }
 
+    /// `name += n`, `object.Position += v` and `object.Orientation += v`:
+    /// the blocks that the translation writes as `name = name + n` and so on.
+    fn add_to(&self, target: &Expr, value: &Expr, scope: Scope) -> Option<BlockKind> {
+        match &target.kind {
+            ExprKind::Name(name) if self.variables.contains(name) => {
+                Some(BlockKind::ChangeVariable {
+                    name: name.clone(),
+                    by: self.expression(value, scope),
+                })
+            }
+            ExprKind::Field(object, property) => {
+                let target = self.target(object)?;
+                let by = self.expression(value, scope);
+                match property.as_str() {
+                    "Position" => Some(BlockKind::MoveBy { target, offset: by }),
+                    "Orientation" => Some(BlockKind::TurnBy {
+                        target,
+                        rotation: by,
+                    }),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
     fn while_loop(&self, condition: &Expr, body: &[Stat], scope: Scope) -> Option<BlockKind> {
         let waits_a_frame = |stat: &Stat| {
             matches!(&stat.kind, StatKind::Call(call)
@@ -847,9 +883,13 @@ impl<'a> Converter<'a> {
 
     fn code_expression(&self, expr: &Expr) -> Expression {
         let text = self.text(expr.span.clone());
-        // Operators are bracketed, so the code means the same wherever it goes.
+        // Operators are bracketed, so the code means the same wherever it
+        // goes. So are `if` expressions, whose `else` part would take in
+        // what follows, and casts.
         let code = match expr.kind {
-            ExprKind::Binary(..) | ExprKind::Unary(..) => format!("({text})"),
+            ExprKind::Binary(..) | ExprKind::Unary(..) | ExprKind::IfElse | ExprKind::Cast => {
+                format!("({text})")
+            }
             _ => text,
         };
         Expression::Code { code }

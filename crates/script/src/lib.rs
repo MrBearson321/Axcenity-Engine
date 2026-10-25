@@ -1,4 +1,4 @@
-//! Axcenity scripting: runs Lua 5.4 scripts against the Instance tree.
+//! Axcenity scripting: runs Luau scripts against the Instance tree.
 //!
 //! - [`ScriptRuntime`] runs every script of a game. Scripts run on the
 //!   server side and LocalScripts on the client side, each side in its own

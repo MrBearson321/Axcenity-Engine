@@ -52,8 +52,8 @@ pub enum ClassName {
     Model,
     /// Groups Instances to keep the tree tidy. Has no effect on the game.
     Folder,
-    /// Inside a MeshPart: the texture maps of one of its model's materials,
-    /// which it names in `MaterialName`, in place of the file's own.
+    /// Texture maps for a Part, or for one material of a MeshPart (named by
+    /// `MaterialName`, in place of the file's own).
     SurfaceAppearance,
     /// Root of a group of in-game UI elements.
     ScreenGui,
@@ -521,6 +521,9 @@ impl ClassName {
                     // brightly as a plain white surface. 0 is no glow.
                     ("EmissiveColor", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
                     ("Emission", Value::Number(0.0)),
+                    // Studs one copy of a SurfaceAppearance's textures covers.
+                    // 0 leaves the shape's own texture coordinates unscaled.
+                    ("TileSize", Value::Number(8.0)),
                 ]
             }
             ClassName::MeshPart => vec![
@@ -622,7 +625,8 @@ impl ClassName {
                 let map = |name| (name, Value::String(String::new()));
                 let channel = |name, channel| (name, Value::TextureChannel(channel));
                 vec![
-                    // The material of the parent MeshPart's model it's for.
+                    // On a MeshPart, the model's material this replaces.
+                    // Unused on a Part.
                     ("MaterialName", Value::String(String::new())),
                     // Multiplies the material's color.
                     ("Color", Value::Color3(Color3::new(1.0, 1.0, 1.0))),

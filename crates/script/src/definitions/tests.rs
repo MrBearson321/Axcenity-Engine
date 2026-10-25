@@ -25,9 +25,33 @@ fn definitions_file_is_up_to_date() {
     );
 }
 
+/// No Luau parser for definitions is built into the engine, so this checks
+/// the shape: every `declare extern type` is closed, and nothing is left
+/// over from the old Lua Language Server format. (Checked by hand with
+/// `luau-lsp analyze --platform=standard
+/// --definitions:@axcenity=definitions/axcenity.d.luau`.)
 #[test]
-fn definitions_are_valid_lua() {
-    mlua::Lua::new().load(lua_definitions()).exec().unwrap();
+fn definitions_are_well_formed() {
+    let text = lua_definitions();
+    let mut open = None;
+    for (number, line) in text.lines().enumerate() {
+        assert!(!line.starts_with("---@"), "line {number}: `{line}`");
+        if let Some(class) = line.strip_prefix("declare extern type ") {
+            assert!(open.is_none(), "line {number}: `{class}` inside a class");
+            open = Some(class);
+        } else if line == "end" {
+            assert!(
+                open.take().is_some(),
+                "line {number}: `end` outside a class"
+            );
+        } else if open.is_some() && !line.is_empty() {
+            assert!(
+                line.starts_with('\t'),
+                "line {number}: `{line}` isn't indented"
+            );
+        }
+    }
+    assert!(open.is_none(), "`{open:?}` is never closed");
 }
 
 #[test]
@@ -77,17 +101,19 @@ fn every_event_has_a_description() {
 fn definitions_cover_instance_new_part_properties_and_task() {
     let text = lua_definitions();
     for line in [
-        "---@overload fun(className: \"Part\"): Part",
-        "function Instance.new(className) end",
-        "---@class Part: Instance",
-        "---@field Position Vector3 ",
-        "---@field Material EnumItem.Material|\"Plastic\"",
-        "function task.wait(seconds) end",
-        "function task.spawn(callback, ...) end",
-        "function task.delay(seconds, callback, ...) end",
-        "---@field Changed Signal ",
-        "function InstanceClass:GetPropertyChangedSignal(property) end",
-        "---@field Heartbeat Signal ",
+        "\tnew: ((className: \"Part\") -> Part) & ",
+        "& ((className: string) -> Instance)\n",
+        "declare Instance: InstanceLibrary\n",
+        "declare extern type Part extends Instance with\n",
+        "\tPosition: Vector3\n",
+        "\tMaterial: EnumMaterial | \"Plastic\" | ",
+        "\twait: (seconds: number?) -> number\n",
+        "\tspawn: (callback: (...any) -> (), ...any) -> thread\n",
+        "\tdelay: (seconds: number, callback: (...any) -> (), ...any) -> thread\n",
+        "\tChanged: Signal\n",
+        "\tfunction GetPropertyChangedSignal(self, property: string): Signal\n",
+        "\tHeartbeat: Signal\n",
+        "\tfunction __mul(self, other: Vector3 | number): Vector3\n",
     ] {
         assert!(text.contains(line), "the definitions have no `{line}`");
     }
@@ -126,6 +152,7 @@ fn every_engine_global_is_described() {
             "print",
             "setmetatable",
             "collectgarbage",
+            "typeof",
         ])
         .map(|name| name.to_string())
         .collect();

@@ -362,6 +362,47 @@ impl History {
         );
     }
 
+    /// Records Instances inserted or moved, and property changes that are
+    /// part of the same action (both already done), as one step named
+    /// `label`. The step does not merge with the next change.
+    pub fn record_tree_and_properties(
+        &mut self,
+        world: &mut World,
+        label: String,
+        moves: Vec<Move>,
+        properties: Vec<PropertyEdit>,
+    ) {
+        let moves: Vec<_> = moves
+            .into_iter()
+            .filter(|step| step.before != step.after)
+            .collect();
+        let properties: Vec<_> = properties
+            .into_iter()
+            .filter(|edit| edit.before != edit.after)
+            .collect();
+        if moves.is_empty() && properties.is_empty() {
+            return;
+        }
+        if properties.is_empty() {
+            self.record_tree(world, label, moves);
+            return;
+        }
+        if moves.is_empty() {
+            self.record_asset(world, label, Vec::new(), properties);
+            return;
+        }
+        self.seal();
+        self.push(
+            world,
+            label,
+            StepKind::Files {
+                texts: Vec::new(),
+                properties,
+                moves,
+            },
+        );
+    }
+
     /// Records project files written and Instances inserted or moved in the
     /// tree (both already done) as one step named `label`, which never
     /// merges with the next change.

@@ -1,6 +1,6 @@
-//! Writes the Lua Language Server definitions file: `---@class` and
-//! `---@field` annotations describing the whole script API, so editors such
-//! as VS Code can autocomplete it and point out mistakes.
+//! Writes the luau-lsp definitions file: `declare extern type` and `declare`
+//! statements describing the whole script API, with `---` doc comments, so
+//! editors such as VS Code can autocomplete it and type-check scripts as Luau.
 //!
 //! - Classes, properties, events and enums come straight from `core`, so they
 //!   can't fall out of date. A new property only needs a line in
@@ -8,2083 +8,46 @@
 //! - APIs that only work on one side (see `sides`) say so in their
 //!   description, added from `SIDE_ONLY_APIS`.
 //! - Functions, globals and value types are described by hand below.
+//! - Luau's own globals (`math`, `bit32`, `buffer`, `typeof`, ...) are built
+//!   into luau-lsp, so they aren't declared here.
 //! - Tests check the descriptions against what scripts really get, and that
 //!   the checked-in file matches this generator.
 //!
-//! The format is documented at <https://luals.github.io/wiki/annotations/>.
+//! luau-lsp calls the format unstable and undocumented; it is Luau's own
+//! definition syntax, as in luau-lsp's Roblox definitions.
 
 use axcenity_core::{ClassName, ValueKind, World};
 
 use crate::sides::{Side, side_only};
+
+mod docs;
+mod tables;
+
 use crate::types::EnumType;
+use docs::*;
+use tables::*;
 
 /// Where the generated file is kept, relative to the repository root.
-pub const DEFINITIONS_PATH: &str = "definitions/axcenity.lua";
+pub const DEFINITIONS_PATH: &str = "definitions/axcenity.d.luau";
 
 /// The command that rewrites the file, shown in its header and in test failures.
 const REGENERATE: &str = "cargo run -p axcenity-script --bin lua-definitions";
 
-/// A function as Lua Language Server should show it.
-struct Function {
-    name: &'static str,
-    doc: &'static str,
-    /// `(name, type)` pairs. A name ending in `?` may be left out.
-    params: &'static [(&'static str, &'static str)],
-    returns: &'static str,
+/// Children found by name, such as `workspace.Pad`. A child could be of any
+/// class, and Luau only lets you use a property every member of a union has,
+/// so a union of every class would flag `workspace.Pad.Color = ...`; `any`
+/// lets it through unchecked. Every Instance class needs its own: Luau
+/// doesn't inherit indexers.
+const CHILD_INDEXER: &str = "\t[string]: any";
+
+/// The class of `Enum.<name>`'s items, such as `EnumMaterial`. Luau class
+/// names can't have dots, so this is the type for `Enum.Material.Neon`.
+fn enum_item_class(enum_type: EnumType) -> String {
+    format!("Enum{}", enum_type.name())
 }
 
-struct Field {
-    name: &'static str,
-    ty: &'static str,
-    doc: &'static str,
-}
-
-/// A type of value that isn't an Instance, such as `Vector3`, or an engine
-/// object that isn't one, such as `UserInputService`.
-struct ValueType {
-    class: &'static str,
-    doc: &'static str,
-    fields: &'static [Field],
-    /// Lua Language Server `---@operator` lines, such as `add(Vector3): Vector3`.
-    operators: &'static [&'static str],
-    methods: &'static [Function],
-}
-
-/// A global table of functions, such as `Vector3` with `Vector3.new`.
-struct Library {
-    global: &'static str,
-    doc: &'static str,
-    functions: &'static [Function],
-}
-
-const VALUE_TYPES: &[ValueType] = &[
-    ValueType {
-        class: "Vector3",
-        doc: "A position, size or direction in studs. Y is up.",
-        fields: &[
-            Field {
-                name: "X",
-                ty: "number",
-                doc: "The X component.",
-            },
-            Field {
-                name: "Y",
-                ty: "number",
-                doc: "The Y component (up).",
-            },
-            Field {
-                name: "Z",
-                ty: "number",
-                doc: "The Z component.",
-            },
-            Field {
-                name: "Magnitude",
-                ty: "number",
-                doc: "The length of the vector.",
-            },
-            Field {
-                name: "Unit",
-                ty: "Vector3",
-                doc: "The same direction with length 1 (the zero vector stays zero).",
-            },
-        ],
-        operators: &[
-            "add(Vector3): Vector3",
-            "sub(Vector3): Vector3",
-            "mul(Vector3): Vector3",
-            "mul(number): Vector3",
-            "div(Vector3): Vector3",
-            "div(number): Vector3",
-            "unm: Vector3",
-        ],
-        methods: &[],
-    },
-    ValueType {
-        class: "Color3",
-        doc: "A color, with each channel from 0 to 1.",
-        fields: &[
-            Field {
-                name: "R",
-                ty: "number",
-                doc: "Red, from 0 to 1.",
-            },
-            Field {
-                name: "G",
-                ty: "number",
-                doc: "Green, from 0 to 1.",
-            },
-            Field {
-                name: "B",
-                ty: "number",
-                doc: "Blue, from 0 to 1.",
-            },
-        ],
-        operators: &[],
-        methods: &[],
-    },
-    ValueType {
-        class: "UDim",
-        doc: "One UI axis as a scale and pixel offset.",
-        fields: &[
-            Field {
-                name: "Scale",
-                ty: "number",
-                doc: "The fraction of the parent size.",
-            },
-            Field {
-                name: "Offset",
-                ty: "number",
-                doc: "The pixel offset.",
-            },
-        ],
-        operators: &[],
-        methods: &[],
-    },
-    ValueType {
-        class: "UDim2",
-        doc: "A UI position or size with scale and pixel-offset components.",
-        fields: &[
-            Field {
-                name: "X",
-                ty: "UDim",
-                doc: "The horizontal component.",
-            },
-            Field {
-                name: "Y",
-                ty: "UDim",
-                doc: "The vertical component.",
-            },
-        ],
-        operators: &[],
-        methods: &[],
-    },
-    ValueType {
-        class: "EnumItem",
-        doc: "One choice of an enum, such as `Enum.Material.Neon`.",
-        fields: &[Field {
-            name: "Name",
-            ty: "string",
-            doc: "The item's name, such as `\"Neon\"`.",
-        }],
-        operators: &[],
-        methods: &[],
-    },
-    ValueType {
-        class: "UserInputService",
-        doc: "The player's keyboard, from `game:GetService(\"UserInputService\")`. LocalScripts only.",
-        fields: &[
-            Field {
-                name: "InputBegan",
-                ty: "Signal",
-                doc: "Fires when a key goes down. The handler gets an InputObject and `gameProcessedEvent` (always false for now): `function(input, gameProcessedEvent) ... end`.",
-            },
-            Field {
-                name: "InputEnded",
-                ty: "Signal",
-                doc: "Fires when a key comes back up, with the same arguments as InputBegan.",
-            },
-        ],
-        operators: &[],
-        methods: &[Function {
-            name: "IsKeyDown",
-            doc: "True while `key` is held down, such as `Enum.KeyCode.W`.",
-            params: &[("key", "EnumItem.KeyCode")],
-            returns: "boolean",
-        }],
-    },
-    ValueType {
-        class: "RunService",
-        doc: "The game's frame loop, from `game:GetService(\"RunService\")`.",
-        fields: &[Field {
-            name: "Heartbeat",
-            ty: "Signal",
-            doc: "Fires once every frame, after physics. The handler gets the frame's length in seconds: `function(deltaTime) ... end`.",
-        }],
-        operators: &[],
-        methods: &[],
-    },
-    ValueType {
-        class: "InputObject",
-        doc: "One key going down or up, as `InputBegan` and `InputEnded` handlers get it.",
-        fields: &[Field {
-            name: "KeyCode",
-            ty: "EnumItem.KeyCode",
-            doc: "Which key, such as `Enum.KeyCode.W`.",
-        }],
-        operators: &[],
-        methods: &[],
-    },
-    ValueType {
-        class: "RaycastResult",
-        doc: "Where `workspace:Raycast` first met a collider, or nil when it missed.",
-        fields: &[
-            Field {
-                name: "Instance",
-                ty: "Instance",
-                doc: "The Part, MeshPart or Terrain the ray hit.",
-            },
-            Field {
-                name: "Position",
-                ty: "Vector3",
-                doc: "The point of contact, in studs.",
-            },
-            Field {
-                name: "Normal",
-                ty: "Vector3",
-                doc: "The surface direction at the hit, pointing out.",
-            },
-            Field {
-                name: "Distance",
-                ty: "number",
-                doc: "How far along the ray the hit is, in studs.",
-            },
-        ],
-        operators: &[],
-        methods: &[],
-    },
-    ValueType {
-        class: "Camera",
-        doc: "What the player sees through, `workspace.CurrentCamera`. LocalScripts only. Setting Position or Orientation moves the view; the player can still fly on from there.",
-        fields: &[
-            Field {
-                name: "Position",
-                ty: "Vector3",
-                doc: "Where the camera is, in studs.",
-            },
-            Field {
-                name: "Orientation",
-                ty: "Vector3",
-                doc: "Which way it looks, in degrees like a Part's: X looks up (positive) and down, Y turns left (positive) and right. Z is ignored.",
-            },
-            Field {
-                name: "LookVector",
-                ty: "Vector3",
-                doc: "The direction the camera looks in, one stud long. Read-only.",
-            },
-        ],
-        operators: &[],
-        methods: &[],
-    },
-];
-
-/// Fields every Instance has. Properties come from `core` instead.
-const INSTANCE_FIELDS: &[Field] = &[
-    Field {
-        name: "Name",
-        ty: "string",
-        doc: "The Instance's name. Children can be found by name: `workspace.Block`.",
-    },
-    Field {
-        name: "ClassName",
-        ty: "string",
-        doc: "The Instance's class, such as `\"Part\"`. Read-only.",
-    },
-    Field {
-        name: "Parent",
-        ty: "Instance?",
-        doc: "The Instance this one is inside, or nil. Setting it moves the Instance.",
-    },
-];
-
-const INSTANCE_METHODS: &[Function] = &[
-    Function {
-        name: "FindFirstChild",
-        doc: "The first child with this name, or nil. With `recursive`, searches every descendant.",
-        params: &[("name", "string"), ("recursive?", "boolean")],
-        returns: "Instance?",
-    },
-    Function {
-        name: "GetPropertyChangedSignal",
-        doc: "An event that fires when this one property (or `Name` or `Parent`) gets a different value. The handler gets nothing: read the property to see its new value.",
-        params: &[("property", "string")],
-        returns: "Signal",
-    },
-];
-
-/// What each event every Instance has means (`core`'s `INSTANCE_EVENTS`).
-/// A test checks they match.
-const INSTANCE_EVENT_DOCS: &[(&str, &str)] = &[
-    (
-        "Changed",
-        "Fires when a property (or `Name` or `Parent`) gets a different value, whether a script, physics or the editor changed it. The handler gets the property's name: `function(property) ... end`.",
-    ),
-    (
-        "ChildAdded",
-        "Fires when an Instance is put inside this one. The handler gets the child.",
-    ),
-    (
-        "ChildRemoved",
-        "Fires when an Instance is taken out of this one. The handler gets the child.",
-    ),
-];
-
-/// What `part.Touched` and other events are.
-const SIGNAL_DOC: &str =
-    "An event, such as `part.Touched`. Connect a function to run it every time the event fires.";
-
-const SIGNAL_METHODS: &[Function] = &[Function {
-    name: "Connect",
-    doc: "Runs `callback` every time the event fires, each time as its own task (so it may `task.wait`). Returns a Connection for stopping it.",
-    params: &[("callback", "function")],
-    returns: "Connection",
-}];
-
-const CONNECTION_DOC: &str = "A function connected to an event, returned by `Connect`.";
-
-const CONNECTION_FIELDS: &[Field] = &[Field {
-    name: "Connected",
-    ty: "boolean",
-    doc: "True until `Disconnect` is called (or the Instance is destroyed).",
-}];
-
-const CONNECTION_METHODS: &[Function] = &[Function {
-    name: "Disconnect",
-    doc: "Stops the function from running when the event fires again. Calling it twice is harmless.",
-    params: &[],
-    returns: "nil",
-}];
-
-/// Globals that are Instances: name, Lua Language Server type, description.
-const INSTANCE_GLOBALS: &[(&str, &str, &str)] = &[
-    (
-        "game",
-        "DataModel",
-        "The root of the game. Every service is inside it.",
-    ),
-    (
-        "workspace",
-        "Workspace",
-        "The service that holds the 3D world (same as `game.Workspace`).",
-    ),
-    (
-        "script",
-        "Script|LocalScript|ModuleScript",
-        "The Script, LocalScript or ModuleScript that is running this code.",
-    ),
-];
-
-/// Global functions the engine adds or replaces.
-const GLOBAL_FUNCTIONS: &[Function] = &[Function {
-    name: "require",
-    doc: "Runs a ModuleScript (a `.module.lua` file, such as `require(game.ReplicatedStorage.Utils)`) the first time, and returns what it returned. Later calls on the same side return the same value.",
-    // `Instance`, not `ModuleScript`: a child found by name could be any
-    // class (see the Instance indexer), and `require` checks it when it runs.
-    params: &[("module", "Instance")],
-    returns: "any",
-}];
-
-/// Methods only some classes have.
-const CLASS_METHODS: &[(ClassName, Function)] = &[
-    (
-        ClassName::DataModel,
-        Function {
-            name: "GetService",
-            doc: "The service with this class name, such as `\"Players\"`, `\"RunService\"` or `\"UserInputService\"`.",
-            params: &[("className", "string")],
-            returns: "Instance",
-        },
-    ),
-    (
-        ClassName::RemoteEvent,
-        Function {
-            name: "FireServer",
-            doc: "Sends the arguments to the server, where `OnServerEvent` fires with this player first.",
-            params: &[("...", "any")],
-            returns: "nil",
-        },
-    ),
-    (
-        ClassName::RemoteEvent,
-        Function {
-            name: "FireClient",
-            doc: "Sends the arguments to one player, where `OnClientEvent` fires.",
-            params: &[("player", "Player"), ("...", "any")],
-            returns: "nil",
-        },
-    ),
-    (
-        ClassName::RemoteEvent,
-        Function {
-            name: "FireAllClients",
-            doc: "Sends the arguments to every player, where `OnClientEvent` fires.",
-            params: &[("...", "any")],
-            returns: "nil",
-        },
-    ),
-    (
-        ClassName::Workspace,
-        Function {
-            name: "Raycast",
-            doc: "The first collider along `direction` from `origin`, or nil. The direction's length is how far the ray reaches. Hits sensors (`CanCollide` off) as well as solid parts and terrain. The result has Instance, Position, Normal and Distance.",
-            params: &[("origin", "Vector3"), ("direction", "Vector3")],
-            returns: "RaycastResult?",
-        },
-    ),
-    (
-        ClassName::Sound,
-        Function {
-            name: "Play",
-            doc: "Plays this sound from the start, with its SoundId, Volume, PlaybackSpeed, Looped and Spatial, and sets Playing to true. Playing it again restarts it; stopping the game session stops all sounds.",
-            params: &[],
-            returns: "nil",
-        },
-    ),
-    (
-        ClassName::Sound,
-        Function {
-            name: "Stop",
-            doc: "Stops this sound and sets Playing to false. The next Play starts from the beginning.",
-            params: &[],
-            returns: "nil",
-        },
-    ),
-    (
-        ClassName::Sound,
-        Function {
-            name: "Pause",
-            doc: "Pauses this sound where it is (sets Playing to false). Resume carries on from there.",
-            params: &[],
-            returns: "nil",
-        },
-    ),
-    (
-        ClassName::Animator,
-        Function {
-            name: "SetBool",
-            doc: "Sets a Bool parameter, such as `IsGrounded`: something that stays true or false until it's changed.",
-            params: &[("name", "string"), ("value", "boolean")],
-            returns: "nil",
-        },
-    ),
-    (
-        ClassName::Animator,
-        Function {
-            name: "GetBool",
-            doc: "A Bool parameter's value.",
-            params: &[("name", "string")],
-            returns: "boolean",
-        },
-    ),
-    (
-        ClassName::Animator,
-        Function {
-            name: "SetNumber",
-            doc: "Sets a Number parameter, such as `Speed`: a value that changes gradually, for conditions and blend trees.",
-            params: &[("name", "string"), ("value", "number")],
-            returns: "nil",
-        },
-    ),
-    (
-        ClassName::Animator,
-        Function {
-            name: "GetNumber",
-            doc: "A Number parameter's value.",
-            params: &[("name", "string")],
-            returns: "number",
-        },
-    ),
-    (
-        ClassName::Animator,
-        Function {
-            name: "SetTrigger",
-            doc: "Sets a Trigger parameter, such as `Jump`: a one-time request, used up by the transition it starts.",
-            params: &[("name", "string")],
-            returns: "nil",
-        },
-    ),
-    (
-        ClassName::Animator,
-        Function {
-            name: "ResetTrigger",
-            doc: "Clears a Trigger that no transition has used yet.",
-            params: &[("name", "string")],
-            returns: "nil",
-        },
-    ),
-    (
-        ClassName::Animator,
-        Function {
-            name: "Play",
-            doc: "Switches to the state named `state`, from its start, blending from the pose now over `blend` seconds (0.25 if left out; 0 snaps).",
-            params: &[("state", "string"), ("blend?", "number")],
-            returns: "nil",
-        },
-    ),
-    (
-        ClassName::Animator,
-        Function {
-            name: "LoadAnimation",
-            doc: "Loads `animation` (an Animation, whose Clip names the clip) on this Animator and returns an AnimationTrack to play, stop and blend over the state machine.",
-            params: &[("animation", "Animation")],
-            returns: "AnimationTrack",
-        },
-    ),
-    (
-        ClassName::Animator,
-        Function {
-            name: "GetPlayingAnimationTracks",
-            doc: "The AnimationTracks loaded on this Animator that are playing now.",
-            params: &[],
-            returns: "AnimationTrack[]",
-        },
-    ),
-    (
-        ClassName::AnimationTrack,
-        Function {
-            name: "Play",
-            doc: "Plays the clip from its start, fading in over `fadeTime` seconds (0.1 if left out) to `weight` (1), at `speed` (1). Where it and what plays under it animate the same thing, the track started last wins.",
-            params: &[
-                ("fadeTime?", "number"),
-                ("weight?", "number"),
-                ("speed?", "number"),
-            ],
-            returns: "nil",
-        },
-    ),
-    (
-        ClassName::AnimationTrack,
-        Function {
-            name: "Stop",
-            doc: "Stops it, fading out over `fadeTime` seconds (0.1 if left out). Stopped fires once it has faded out.",
-            params: &[("fadeTime?", "number")],
-            returns: "nil",
-        },
-    ),
-    (
-        ClassName::AnimationTrack,
-        Function {
-            name: "AdjustSpeed",
-            doc: "Plays it this many times as fast from now (1 is normal, 0 holds, negative plays backwards).",
-            params: &[("speed?", "number")],
-            returns: "nil",
-        },
-    ),
-    (
-        ClassName::AnimationTrack,
-        Function {
-            name: "AdjustWeight",
-            doc: "Fades how much it counts to `weight` (0 to 1) over `fadeTime` seconds (0.1 if left out).",
-            params: &[("weight?", "number"), ("fadeTime?", "number")],
-            returns: "nil",
-        },
-    ),
-    (
-        ClassName::AnimationTrack,
-        Function {
-            name: "GetMarkerReachedSignal",
-            doc: "An event that fires each time the track passes the clip's event named `name`. The handler gets the name.",
-            params: &[("name", "string")],
-            returns: "Signal",
-        },
-    ),
-    (
-        ClassName::Animation,
-        Function {
-            name: "Play",
-            doc: "Plays this Animation's clip from the start, through the Animator on the same parent. `animator:LoadAnimation(animation)` is the newer way, with fades and weights.",
-            params: &[],
-            returns: "nil",
-        },
-    ),
-    (
-        ClassName::Animation,
-        Function {
-            name: "Stop",
-            doc: "Stops playback and goes back to the start of the clip.",
-            params: &[],
-            returns: "nil",
-        },
-    ),
-    (
-        ClassName::Animation,
-        Function {
-            name: "Pause",
-            doc: "Pauses at the current time. Resume continues from there.",
-            params: &[],
-            returns: "nil",
-        },
-    ),
-    (
-        ClassName::Animation,
-        Function {
-            name: "Resume",
-            doc: "Continues after Pause.",
-            params: &[],
-            returns: "nil",
-        },
-    ),
-    (
-        ClassName::ParticleEmitter,
-        Function {
-            name: "Emit",
-            doc: "Gives off this many particles at once (up to 1000), even while Enabled is false, such as a burst of sparks when something breaks.",
-            params: &[("count", "number")],
-            returns: "nil",
-        },
-    ),
-    (
-        ClassName::Sound,
-        Function {
-            name: "Resume",
-            doc: "Carries on playing a paused sound, or plays a stopped one from the start (sets Playing to true).",
-            params: &[],
-            returns: "nil",
-        },
-    ),
-];
-
-/// Fields only some classes have, besides their properties and events.
-const CLASS_FIELDS: &[(ClassName, Field)] = &[
-    (
-        ClassName::DataModel,
-        Field {
-            name: "UserInputService",
-            ty: "UserInputService",
-            doc: "The player's keyboard (same as `game:GetService(\"UserInputService\")`).",
-        },
-    ),
-    (
-        ClassName::DataModel,
-        Field {
-            name: "RunService",
-            ty: "RunService",
-            doc: "The game's frame loop, with `Heartbeat` (same as `game:GetService(\"RunService\")`).",
-        },
-    ),
-    (
-        ClassName::Workspace,
-        Field {
-            name: "CurrentCamera",
-            ty: "Camera",
-            doc: "The camera the player sees through.",
-        },
-    ),
-    (
-        ClassName::Players,
-        Field {
-            name: "LocalPlayer",
-            ty: "Player",
-            doc: "The player on this device.",
-        },
-    ),
-    (
-        ClassName::Animator,
-        Field {
-            name: "CurrentState",
-            ty: "string",
-            doc: "The name of the state playing (read-only; use `Play` to change it). Empty until the animator first runs.",
-        },
-    ),
-    (
-        ClassName::AnimationTrack,
-        Field {
-            name: "IsPlaying",
-            ty: "boolean",
-            doc: "True from Play until Stop, or until a clip that doesn't loop ends (read-only).",
-        },
-    ),
-    (
-        ClassName::AnimationTrack,
-        Field {
-            name: "Length",
-            ty: "number",
-            doc: "The clip's length in seconds (read-only; 0 until the clip has been read, a frame after LoadAnimation).",
-        },
-    ),
-    (
-        ClassName::AnimationTrack,
-        Field {
-            name: "Looped",
-            ty: "boolean",
-            doc: "Whether it plays again from the start when it ends. Starts as the clip's own.",
-        },
-    ),
-    (
-        ClassName::AnimationTrack,
-        Field {
-            name: "Speed",
-            ty: "number",
-            doc: "How fast it plays (read-only; use AdjustSpeed).",
-        },
-    ),
-    (
-        ClassName::AnimationTrack,
-        Field {
-            name: "TimePosition",
-            ty: "number",
-            doc: "Seconds into the clip. Set it to jump there.",
-        },
-    ),
-    (
-        ClassName::AnimationTrack,
-        Field {
-            name: "WeightCurrent",
-            ty: "number",
-            doc: "How much it counts now, from 0 to 1, while fading (read-only).",
-        },
-    ),
-    (
-        ClassName::AnimationTrack,
-        Field {
-            name: "WeightTarget",
-            ty: "number",
-            doc: "The weight it's fading to (read-only; use AdjustWeight).",
-        },
-    ),
-    (
-        ClassName::AnimationTrack,
-        Field {
-            name: "Animation",
-            ty: "Animation",
-            doc: "The Animation it was loaded from (read-only).",
-        },
-    ),
-];
-
-const LIBRARIES: &[Library] = &[
-    Library {
-        global: "Instance",
-        doc: "Creates Instances.",
-        functions: &[Function {
-            name: "new",
-            doc: "Creates an Instance of this class with default properties and no parent. Set `Parent` to put it in the world.",
-            params: &[("className", "string")],
-            returns: "Instance",
-        }],
-    },
-    Library {
-        global: "Vector3",
-        doc: "Creates Vector3 values.",
-        functions: &[Function {
-            name: "new",
-            doc: "A new Vector3. Left-out components are 0.",
-            params: &[("x?", "number"), ("y?", "number"), ("z?", "number")],
-            returns: "Vector3",
-        }],
-    },
-    Library {
-        global: "Color3",
-        doc: "Creates Color3 values.",
-        functions: &[
-            Function {
-                name: "new",
-                doc: "A color from channels between 0 and 1. Left-out channels are 0.",
-                params: &[("r?", "number"), ("g?", "number"), ("b?", "number")],
-                returns: "Color3",
-            },
-            Function {
-                name: "fromRGB",
-                doc: "A color from channels between 0 and 255, as in most paint programs.",
-                params: &[("r?", "number"), ("g?", "number"), ("b?", "number")],
-                returns: "Color3",
-            },
-        ],
-    },
-    Library {
-        global: "UDim2",
-        doc: "Creates UI positions and sizes.",
-        functions: &[
-            Function {
-                name: "new",
-                doc: "A UI value from scale and pixel offset on each axis. Left-out components are 0.",
-                params: &[
-                    ("xScale?", "number"),
-                    ("xOffset?", "number"),
-                    ("yScale?", "number"),
-                    ("yOffset?", "number"),
-                ],
-                returns: "UDim2",
-            },
-            Function {
-                name: "fromScale",
-                doc: "A UI value made from scale components, with no pixel offsets.",
-                params: &[("x?", "number"), ("y?", "number")],
-                returns: "UDim2",
-            },
-            Function {
-                name: "fromOffset",
-                doc: "A UI value made from pixel offsets, with no scale components.",
-                params: &[("x?", "number"), ("y?", "number")],
-                returns: "UDim2",
-            },
-        ],
-    },
-    Library {
-        global: "task",
-        doc: "Pauses scripts and runs functions later, without stopping the game.",
-        functions: &[
-            Function {
-                name: "wait",
-                doc: "Pauses this code for `seconds` (left out: until the next frame), while the game and other scripts keep running. Returns the seconds that really passed.",
-                params: &[("seconds?", "number")],
-                returns: "number",
-            },
-            Function {
-                name: "spawn",
-                doc: "Runs `callback` right away with the given arguments, until it finishes or waits, then carries on here. An error inside it is reported without stopping this code.",
-                params: &[("callback", "function"), ("...", "any")],
-                returns: "thread",
-            },
-            Function {
-                name: "delay",
-                doc: "Runs `callback` with the given arguments after `seconds`, without pausing this code.",
-                params: &[
-                    ("seconds", "number"),
-                    ("callback", "function"),
-                    ("...", "any"),
-                ],
-                returns: "thread",
-            },
-        ],
-    },
-];
-
-const ENUM_GLOBAL_DOC: &str =
-    "Every enum, such as `Enum.Material`, `Enum.PartType` and `Enum.KeyCode`.";
-
-/// What each property means. A test checks every property in `core` is here.
-const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
-    (
-        ClassName::ScreenGui,
-        "Class",
-        "Space-separated CSS class names used to style this UI Instance.",
-    ),
-    (
-        ClassName::ScreenGui,
-        "Id",
-        "The CSS identifier used to style this UI Instance.",
-    ),
-    (
-        ClassName::ScreenGui,
-        "Enabled",
-        "If true, the UI in this ScreenGui is drawn.",
-    ),
-    (
-        ClassName::ScreenGui,
-        "ScaleMode",
-        "Fixed keeps positions and sizes as authored. Fit lays this ScreenGui out at DesignWidth by DesignHeight, then scales it uniformly so it stays proportional and inside the screen.",
-    ),
-    (
-        ClassName::ScreenGui,
-        "DesignWidth",
-        "The width, in pixels, Fit mode lays this ScreenGui out at. Ignored when ScaleMode is Fixed.",
-    ),
-    (
-        ClassName::ScreenGui,
-        "DesignHeight",
-        "The height, in pixels, Fit mode lays this ScreenGui out at. Ignored when ScaleMode is Fixed.",
-    ),
-    (
-        ClassName::Frame,
-        "Class",
-        "Space-separated CSS class names used to style this UI Instance.",
-    ),
-    (
-        ClassName::Frame,
-        "Id",
-        "The CSS identifier used to style this UI Instance.",
-    ),
-    (
-        ClassName::Frame,
-        "Position",
-        "The top-left position relative to the parent, in scale and pixel offsets.",
-    ),
-    (
-        ClassName::Frame,
-        "Size",
-        "The size relative to the parent, in scale and pixel offsets.",
-    ),
-    (
-        ClassName::Frame,
-        "BackgroundColor3",
-        "The frame's background color.",
-    ),
-    (
-        ClassName::Frame,
-        "BackgroundTransparency",
-        "The background opacity: 0 is opaque and 1 is transparent.",
-    ),
-    (
-        ClassName::Frame,
-        "Visible",
-        "If false, this frame and its children are hidden.",
-    ),
-    (
-        ClassName::TextLabel,
-        "Class",
-        "Space-separated CSS class names used to style this UI Instance.",
-    ),
-    (
-        ClassName::TextLabel,
-        "Id",
-        "The CSS identifier used to style this UI Instance.",
-    ),
-    (
-        ClassName::TextLabel,
-        "Position",
-        "The top-left position relative to the parent, in scale and pixel offsets.",
-    ),
-    (
-        ClassName::TextLabel,
-        "Size",
-        "The size relative to the parent, in scale and pixel offsets.",
-    ),
-    (
-        ClassName::TextLabel,
-        "BackgroundColor3",
-        "The label's background color.",
-    ),
-    (
-        ClassName::TextLabel,
-        "BackgroundTransparency",
-        "The background opacity: 0 is opaque and 1 is transparent.",
-    ),
-    (ClassName::TextLabel, "Text", "The text to display."),
-    (ClassName::TextLabel, "TextColor3", "The text color."),
-    (ClassName::TextLabel, "TextSize", "The text size in pixels."),
-    (
-        ClassName::TextLabel,
-        "Visible",
-        "If false, this label is hidden.",
-    ),
-    (
-        ClassName::TextButton,
-        "Class",
-        "Space-separated CSS class names used to style this UI Instance.",
-    ),
-    (
-        ClassName::TextButton,
-        "Id",
-        "The CSS identifier used to style this UI Instance.",
-    ),
-    (
-        ClassName::TextButton,
-        "Position",
-        "The top-left position relative to the parent, in scale and pixel offsets.",
-    ),
-    (
-        ClassName::TextButton,
-        "Size",
-        "The size relative to the parent, in scale and pixel offsets.",
-    ),
-    (
-        ClassName::TextButton,
-        "BackgroundColor3",
-        "The button's background color.",
-    ),
-    (
-        ClassName::TextButton,
-        "BackgroundTransparency",
-        "The background opacity: 0 is opaque and 1 is transparent.",
-    ),
-    (ClassName::TextButton, "Text", "The text to display."),
-    (ClassName::TextButton, "TextColor3", "The text color."),
-    (
-        ClassName::TextButton,
-        "TextSize",
-        "The text size in pixels.",
-    ),
-    (
-        ClassName::TextButton,
-        "Image",
-        "The project-relative path of an icon. Empty shows no picture. With Text, the icon sits beside the label.",
-    ),
-    (
-        ClassName::TextButton,
-        "ImageTransparency",
-        "The icon opacity: 0 is opaque and 1 is transparent.",
-    ),
-    (
-        ClassName::TextButton,
-        "Visible",
-        "If false, this button is hidden and cannot be activated.",
-    ),
-    (
-        ClassName::TextBox,
-        "Class",
-        "Space-separated CSS class names used to style this UI Instance.",
-    ),
-    (
-        ClassName::TextBox,
-        "Id",
-        "The CSS identifier used to style this UI Instance.",
-    ),
-    (
-        ClassName::TextBox,
-        "Position",
-        "The top-left position relative to the parent, in scale and pixel offsets.",
-    ),
-    (
-        ClassName::TextBox,
-        "Size",
-        "The size relative to the parent, in scale and pixel offsets.",
-    ),
-    (
-        ClassName::TextBox,
-        "BackgroundColor3",
-        "The box's background color.",
-    ),
-    (
-        ClassName::TextBox,
-        "BackgroundTransparency",
-        "The background opacity: 0 is opaque and 1 is transparent.",
-    ),
-    (ClassName::TextBox, "Text", "The text the player has typed."),
-    (
-        ClassName::TextBox,
-        "Placeholder",
-        "Grey text shown while Text is empty.",
-    ),
-    (ClassName::TextBox, "TextColor3", "The text color."),
-    (ClassName::TextBox, "TextSize", "The text size in pixels."),
-    (
-        ClassName::TextBox,
-        "MultiLine",
-        "If false, Enter finishes typing. If true, Enter starts a new line and clicking away finishes typing.",
-    ),
-    (
-        ClassName::TextBox,
-        "Visible",
-        "If false, this text box is hidden.",
-    ),
-    (
-        ClassName::PageLayout,
-        "Class",
-        "Space-separated CSS class names used to style this UI Instance.",
-    ),
-    (
-        ClassName::PageLayout,
-        "Id",
-        "The CSS identifier used to style this UI Instance.",
-    ),
-    (
-        ClassName::PageLayout,
-        "Position",
-        "The top-left position relative to the parent, in scale and pixel offsets.",
-    ),
-    (
-        ClassName::PageLayout,
-        "Size",
-        "The size relative to the parent, in scale and pixel offsets.",
-    ),
-    (
-        ClassName::PageLayout,
-        "BackgroundColor3",
-        "The layout's background color.",
-    ),
-    (
-        ClassName::PageLayout,
-        "BackgroundTransparency",
-        "The background opacity: 0 is opaque and 1 is transparent.",
-    ),
-    (
-        ClassName::PageLayout,
-        "Visible",
-        "If false, this layout and its pages are hidden.",
-    ),
-    (
-        ClassName::PageLayout,
-        "CurrentPage",
-        "The Name of the child Frame to show. Empty shows the first child Frame. A name that matches no Frame is rejected and the current page stays.",
-    ),
-    (
-        ClassName::Table,
-        "Class",
-        "Space-separated CSS class names used to style this UI Instance.",
-    ),
-    (
-        ClassName::Table,
-        "Id",
-        "The CSS identifier used to style this UI Instance.",
-    ),
-    (
-        ClassName::Table,
-        "Position",
-        "The top-left position relative to the parent, in scale and pixel offsets.",
-    ),
-    (
-        ClassName::Table,
-        "Size",
-        "The size relative to the parent, in scale and pixel offsets.",
-    ),
-    (
-        ClassName::Table,
-        "BackgroundColor3",
-        "The table's background color.",
-    ),
-    (
-        ClassName::Table,
-        "BackgroundTransparency",
-        "The background opacity: 0 is opaque and 1 is transparent.",
-    ),
-    (
-        ClassName::Table,
-        "Visible",
-        "If false, this table is hidden.",
-    ),
-    (
-        ClassName::Table,
-        "Columns",
-        "How many cells sit in one row. Cells are the table's children, left to right then top to bottom, each the same size.",
-    ),
-    (
-        ClassName::BillboardGui,
-        "Class",
-        "Space-separated CSS class names used to style descendants of this billboard.",
-    ),
-    (
-        ClassName::BillboardGui,
-        "Id",
-        "The CSS identifier used to style this billboard.",
-    ),
-    (
-        ClassName::BillboardGui,
-        "Enabled",
-        "If false, this billboard is not drawn.",
-    ),
-    (
-        ClassName::BillboardGui,
-        "Size",
-        "The on-screen size, in scale of the viewport plus a pixel offset.",
-    ),
-    (
-        ClassName::BillboardGui,
-        "StudsOffset",
-        "World studs added to the parent part's position. The offset is not rotated with the part.",
-    ),
-    (
-        ClassName::BillboardGui,
-        "MaxDistance",
-        "The billboard hides past this many studs from the camera. 0 shows it at any distance.",
-    ),
-    (
-        ClassName::ImageLabel,
-        "Class",
-        "Space-separated CSS class names used to style this UI Instance.",
-    ),
-    (
-        ClassName::ImageLabel,
-        "Id",
-        "The CSS identifier used to style this UI Instance.",
-    ),
-    (
-        ClassName::ImageLabel,
-        "Position",
-        "The top-left position relative to the parent, in scale and pixel offsets.",
-    ),
-    (
-        ClassName::ImageLabel,
-        "Size",
-        "The size relative to the parent, in scale and pixel offsets.",
-    ),
-    (
-        ClassName::ImageLabel,
-        "BackgroundColor3",
-        "The image label's background color.",
-    ),
-    (
-        ClassName::ImageLabel,
-        "BackgroundTransparency",
-        "The background opacity: 0 is opaque and 1 is transparent.",
-    ),
-    (
-        ClassName::ImageLabel,
-        "Image",
-        "The project-relative path of the image to display.",
-    ),
-    (
-        ClassName::ImageLabel,
-        "ImageTransparency",
-        "The image opacity: 0 is opaque and 1 is transparent.",
-    ),
-    (
-        ClassName::ImageLabel,
-        "Visible",
-        "If false, this image is hidden.",
-    ),
-    (
-        ClassName::Sound,
-        "SoundId",
-        "The audio file inside the project folder, such as \"assets/audio/chime.wav\".",
-    ),
-    (
-        ClassName::Sound,
-        "Volume",
-        "Playback volume as a non-negative amplitude; 1 is the original level and 0 is silent.",
-    ),
-    (
-        ClassName::Sound,
-        "Looped",
-        "If true, playback repeats until Stop is called or the game session stops.",
-    ),
-    (
-        ClassName::Sound,
-        "PlaybackSpeed",
-        "How fast the sound plays: 1 is normal, 2 twice as fast (and an octave higher), 0.5 half. Changes apply while it plays.",
-    ),
-    (
-        ClassName::Sound,
-        "Playing",
-        "True while the sound plays. Set it to false to pause and true to carry on. Saved as true, the sound plays as soon as the game starts, with no script needed.",
-    ),
-    (
-        ClassName::Sound,
-        "Spatial",
-        "If true, the sound is placed in the world and panned as the camera moves. If false, it plays the same in both ears.",
-    ),
-    (
-        ClassName::Sound,
-        "Position",
-        "Where a spatial sound plays from, in studs, when it is not inside a Part, MeshPart or Terrain. Inside one of those, that ancestor's Position is used instead.",
-    ),
-    (
-        ClassName::Sound,
-        "RollOffMinDistance",
-        "A spatial sound stays at full volume within this many studs of the camera. 10 by default. Not used while Spatial is false.",
-    ),
-    (
-        ClassName::Sound,
-        "RollOffMaxDistance",
-        "A spatial sound is silent from this many studs out. 150 by default. Kept at least as large as RollOffMinDistance.",
-    ),
-    (
-        ClassName::Workspace,
-        "GlobalWind",
-        "The wind everywhere, in studs a second. It carries particles from emitters with WindAffectsDrag and pushes unanchored parts with WindAffected.",
-    ),
-    (
-        ClassName::Lighting,
-        "ShadowsEnabled",
-        "If false, the sun casts no shadows. Turn this off on low-end machines.",
-    ),
-    (
-        ClassName::Lighting,
-        "ShadowDistance",
-        "How far from the camera sun shadows reach, in studs. Shorter distances give sharper shadows.",
-    ),
-    (
-        ClassName::Lighting,
-        "ShadowSoftness",
-        "How soft shadow edges are, from 0 (crisp) to 1 (very soft). Edges stay sharp where a part touches what it shades and soften further away, like real shadows.",
-    ),
-    (
-        ClassName::Lighting,
-        "SkyTopColor",
-        "The sky's color straight up.",
-    ),
-    (
-        ClassName::Lighting,
-        "SkyHorizonColor",
-        "The sky's color at the horizon.",
-    ),
-    (
-        ClassName::Lighting,
-        "GroundColor",
-        "The color of the ground below the horizon, as the sky and reflections see it.",
-    ),
-    (
-        ClassName::Lighting,
-        "EnvironmentIntensity",
-        "How strongly the sky lights and is reflected by parts. 0 turns it off.",
-    ),
-    (
-        ClassName::Lighting,
-        "PostProcessingEnabled",
-        "If false, the scene is drawn with no tone mapping or bloom.",
-    ),
-    (
-        ClassName::Lighting,
-        "Exposure",
-        "Brightens or darkens the whole image before tone mapping. 1 is neutral.",
-    ),
-    (
-        ClassName::Lighting,
-        "BloomEnabled",
-        "If false, bright parts don't glow.",
-    ),
-    (
-        ClassName::Lighting,
-        "BloomIntensity",
-        "How strong the glow around bright parts is.",
-    ),
-    (
-        ClassName::Lighting,
-        "BloomThreshold",
-        "How bright a pixel must be before it glows.",
-    ),
-    (
-        ClassName::PointLight,
-        "Enabled",
-        "If false, the light is off.",
-    ),
-    (ClassName::PointLight, "Color", "The light's color."),
-    (
-        ClassName::PointLight,
-        "Brightness",
-        "How bright the light is.",
-    ),
-    (
-        ClassName::PointLight,
-        "Range",
-        "How far the light reaches, in studs.",
-    ),
-    (
-        ClassName::SpotLight,
-        "Enabled",
-        "If false, the light is off.",
-    ),
-    (ClassName::SpotLight, "Color", "The light's color."),
-    (
-        ClassName::SpotLight,
-        "Brightness",
-        "How bright the light is.",
-    ),
-    (
-        ClassName::SpotLight,
-        "Range",
-        "How far the light reaches, in studs.",
-    ),
-    (
-        ClassName::SpotLight,
-        "Angle",
-        "The full width of the cone, in degrees.",
-    ),
-    (
-        ClassName::SpotLight,
-        "Direction",
-        "The way the beam points, relative to the parent part.",
-    ),
-    (
-        ClassName::ParticleEmitter,
-        "Enabled",
-        "If false, it stops giving off particles; those already out live on.",
-    ),
-    (
-        ClassName::Animator,
-        "StateMachine",
-        "The state machine file it plays on its parent, inside the project folder, such as \"assets/animations/hero/hero.statemachine.json\". Empty plays only the AnimationTracks loaded on it. The Animator tab makes and edits them.",
-    ),
-    (
-        ClassName::Animator,
-        "Enabled",
-        "If false, everything it animates holds still: the animator stops moving on.",
-    ),
-    (
-        ClassName::Animator,
-        "Speed",
-        "Plays everything this many times as fast (1 is normal, 0 pauses).",
-    ),
-    (
-        ClassName::Animation,
-        "Clip",
-        "The clip file inside the project folder, such as \"assets/animations/Door/Open.anim.json\".",
-    ),
-    (
-        ClassName::Animation,
-        "AutoPlay",
-        "If true, the Animator on the same parent plays it by itself when the game starts.",
-    ),
-    (
-        ClassName::Animation,
-        "Enabled",
-        "If false, playback pauses at its current time; set true to continue.",
-    ),
-    (
-        ClassName::Animation,
-        "Speed",
-        "Plays the clip this many times as fast (1 is normal, 0 pauses).",
-    ),
-    (
-        ClassName::Animation,
-        "Looped",
-        "If true, playback repeats instead of firing Completed at the end.",
-    ),
-    (
-        ClassName::ParticleEmitter,
-        "ParticleType",
-        "The built-in picture each particle shows: Circle, Spark, Smoke, Fire, Star or Magic. Texture, if set, is used instead.",
-    ),
-    (
-        ClassName::ParticleEmitter,
-        "Texture",
-        "An image file inside the project folder each particle shows instead of ParticleType, such as \"assets/particles/spark_01.png\" (Kenney's free Particle Pack works well). Its alpha is the shape; it's tinted by Color.",
-    ),
-    (
-        ClassName::ParticleEmitter,
-        "Rate",
-        "How many particles a second it gives off while Enabled.",
-    ),
-    (
-        ClassName::ParticleEmitter,
-        "Lifetime",
-        "How many seconds each particle lives (each one a little more or less).",
-    ),
-    (
-        ClassName::ParticleEmitter,
-        "Speed",
-        "How fast particles leave, in studs a second, along Direction.",
-    ),
-    (
-        ClassName::ParticleEmitter,
-        "Direction",
-        "The way particles leave, relative to the parent part (up by default).",
-    ),
-    (
-        ClassName::ParticleEmitter,
-        "SpreadAngle",
-        "How wide the cone particles leave in is, in degrees: 0 is a straight line, 360 every way.",
-    ),
-    (
-        ClassName::ParticleEmitter,
-        "Acceleration",
-        "Added to every particle's speed each second, in world studs (gravity is Vector3.new(0, -196.2, 0)).",
-    ),
-    (
-        ClassName::ParticleEmitter,
-        "Drag",
-        "How quickly particles slow down: 0 never, higher sooner.",
-    ),
-    (
-        ClassName::ParticleEmitter,
-        "WindAffectsDrag",
-        "If true, Drag slows particles toward workspace.GlobalWind instead of to a stop, so the wind carries them. Needs a Drag above 0.",
-    ),
-    (
-        ClassName::ParticleEmitter,
-        "Size",
-        "How many studs across a particle is when it's born.",
-    ),
-    (
-        ClassName::ParticleEmitter,
-        "SizeEnd",
-        "How many studs across a particle is when it dies; it grows or shrinks smoothly.",
-    ),
-    (
-        ClassName::ParticleEmitter,
-        "Color",
-        "A particle's color when it's born. It tints the picture.",
-    ),
-    (
-        ClassName::ParticleEmitter,
-        "ColorEnd",
-        "A particle's color when it dies; it fades smoothly from Color.",
-    ),
-    (
-        ClassName::ParticleEmitter,
-        "Transparency",
-        "From 0 (solid) to 1 (invisible) when a particle is born.",
-    ),
-    (
-        ClassName::ParticleEmitter,
-        "TransparencyEnd",
-        "From 0 (solid) to 1 (invisible) when a particle dies.",
-    ),
-    (
-        ClassName::ParticleEmitter,
-        "Rotation",
-        "How far each particle is turned when it's born, in degrees.",
-    ),
-    (
-        ClassName::ParticleEmitter,
-        "RotSpeed",
-        "How fast particles spin, in degrees a second.",
-    ),
-    (
-        ClassName::ParticleEmitter,
-        "LightEmission",
-        "From 0 (particles paint over what's behind them, like smoke) to 1 (they add their light, like fire and sparks).",
-    ),
-    (
-        ClassName::ParticleEmitter,
-        "Brightness",
-        "How brightly particles glow: 1 is their color as it is; higher values bloom.",
-    ),
-    (
-        ClassName::Part,
-        "Anchored",
-        "If true, the part stays where it is. If false, it falls and collides with other parts.",
-    ),
-    (
-        ClassName::Part,
-        "Shape",
-        "Block, Ball, Cylinder (along X) or Wedge.",
-    ),
-    (
-        ClassName::Part,
-        "Position",
-        "Where the part's center is, in studs. Setting it on an unanchored part teleports it and stops it moving.",
-    ),
-    (
-        ClassName::Part,
-        "Orientation",
-        "Rotation in degrees around X, Y and Z, applied Z first, then X, then Y.",
-    ),
-    (
-        ClassName::Part,
-        "Size",
-        "The part's size in studs along X, Y and Z.",
-    ),
-    (ClassName::Part, "Color", "The part's color."),
-    (
-        ClassName::Part,
-        "Material",
-        "Plastic, Metal, Glass (see-through) or Neon (glows). Setting it resets Metalness and Roughness.",
-    ),
-    (
-        ClassName::Part,
-        "Metalness",
-        "From 0 (not metal) to 1 (metal).",
-    ),
-    (
-        ClassName::Part,
-        "Roughness",
-        "From 0 (mirror-smooth) to 1 (matte).",
-    ),
-    (
-        ClassName::Part,
-        "CastShadow",
-        "If false, the part casts no sun shadow. It's still shaded by other parts' shadows.",
-    ),
-    (
-        ClassName::Part,
-        "Transparency",
-        "From 0 (as solid as its material) to 1 (invisible).",
-    ),
-    (
-        ClassName::Part,
-        "CanCollide",
-        "If false, other parts pass through it. It still fires Touched. An unanchored part that can't collide falls through the floor.",
-    ),
-    (
-        ClassName::Part,
-        "WindAffected",
-        "If true and the part isn't anchored, workspace.GlobalWind pushes it, harder for parts with bigger faces.",
-    ),
-    (
-        ClassName::Part,
-        "EmissiveColor",
-        "The color the part glows in when Emission is above 0.",
-    ),
-    (
-        ClassName::Part,
-        "Emission",
-        "How brightly the part glows in EmissiveColor: 0 is no glow, 1 as bright as a white surface in full light, higher values bloom.",
-    ),
-    (
-        ClassName::MeshPart,
-        "CastShadow",
-        "If false, the part casts no sun shadow. It's still shaded by other parts' shadows.",
-    ),
-    (
-        ClassName::MeshPart,
-        "Transparency",
-        "From 0 (as solid as its model) to 1 (invisible).",
-    ),
-    (
-        ClassName::MeshPart,
-        "CanCollide",
-        "If false, other parts pass through it. It still fires Touched.",
-    ),
-    (
-        ClassName::MeshPart,
-        "WindAffected",
-        "If true and the part isn't anchored, workspace.GlobalWind pushes it, harder for parts with bigger faces.",
-    ),
-    (
-        ClassName::MeshPart,
-        "Anchored",
-        "If true, the part stays where it is. If false, it falls and collides with other parts.",
-    ),
-    (
-        ClassName::MeshPart,
-        "MeshId",
-        "The model's glTF or FBX file, inside the project folder, such as \"assets/models/chair.glb\"; `#` after it picks objects in the file (\"assets/models/props.fbx#Bench\"). The editor's Import Model sets it.",
-    ),
-    (
-        ClassName::MeshPart,
-        "Position",
-        "Where the center of the model's box is, in studs. Setting it on an unanchored part teleports it and stops it moving.",
-    ),
-    (
-        ClassName::MeshPart,
-        "Orientation",
-        "Rotation in degrees around X, Y and Z, applied Z first, then X, then Y.",
-    ),
-    (
-        ClassName::MeshPart,
-        "Size",
-        "The size of the model's box in studs along X, Y and Z. The model stretches to fill it.",
-    ),
-    (
-        ClassName::SurfaceAppearance,
-        "MaterialName",
-        "The name of the material of the parent MeshPart's model whose maps this replaces. Import Model sets it.",
-    ),
-    (
-        ClassName::SurfaceAppearance,
-        "Color",
-        "Multiplies the material's color (and its ColorMap).",
-    ),
-    (
-        ClassName::SurfaceAppearance,
-        "ColorMap",
-        "The base color texture, a file inside the project folder such as \"assets/textures/wood.png\". Empty for none.",
-    ),
-    (
-        ClassName::SurfaceAppearance,
-        "NormalMap",
-        "The normal map's file, for bumps and grooves. Empty for none.",
-    ),
-    (
-        ClassName::SurfaceAppearance,
-        "MetalnessMap",
-        "The metalness map's file (read from MetalnessChannel). Empty for the model's own metalness.",
-    ),
-    (
-        ClassName::SurfaceAppearance,
-        "RoughnessMap",
-        "The roughness map's file (read from RoughnessChannel). Empty for the model's own roughness.",
-    ),
-    (
-        ClassName::SurfaceAppearance,
-        "EmissiveMap",
-        "The file of colors the surface glows in. Empty for the model's own glow.",
-    ),
-    (
-        ClassName::SurfaceAppearance,
-        "AmbientOcclusionMap",
-        "The ambient occlusion map's file: dark where ambient light can't reach. Empty for none.",
-    ),
-    (
-        ClassName::SurfaceAppearance,
-        "OpacityMap",
-        "The opacity map's file (read from OpacityChannel): the surface is cut out where it's below half. Empty for the color map's alpha.",
-    ),
-    (
-        ClassName::SurfaceAppearance,
-        "SpecularMap",
-        "How strongly non-metal parts shine, for older materials: mid grey is the usual. Empty for none.",
-    ),
-    (
-        ClassName::SurfaceAppearance,
-        "NormalStrength",
-        "How far the normal map tips the surface: 1 as made, 0 flat.",
-    ),
-    (
-        ClassName::SurfaceAppearance,
-        "NormalMapDirectX",
-        "True for normal maps made for DirectX, whose green points the other way.",
-    ),
-    (
-        ClassName::SurfaceAppearance,
-        "MetalnessChannel",
-        "Which channel of MetalnessMap holds metalness, for packed textures.",
-    ),
-    (
-        ClassName::SurfaceAppearance,
-        "RoughnessChannel",
-        "Which channel of RoughnessMap holds roughness, for packed textures.",
-    ),
-    (
-        ClassName::SurfaceAppearance,
-        "InvertRoughness",
-        "True if RoughnessMap is a glossiness or smoothness map: white is smooth.",
-    ),
-    (
-        ClassName::SurfaceAppearance,
-        "AmbientOcclusionChannel",
-        "Which channel of AmbientOcclusionMap holds it, for packed textures.",
-    ),
-    (
-        ClassName::SurfaceAppearance,
-        "AmbientOcclusionStrength",
-        "How much AmbientOcclusionMap darkens, from 0 to 1.",
-    ),
-    (
-        ClassName::SurfaceAppearance,
-        "OpacityChannel",
-        "Which channel of OpacityMap holds opacity.",
-    ),
-    (
-        ClassName::SurfaceAppearance,
-        "InvertOpacity",
-        "True if OpacityMap is white where the surface is see-through.",
-    ),
-    (
-        ClassName::SurfaceAppearance,
-        "EmissiveStrength",
-        "Multiplies the glow.",
-    ),
-    (
-        ClassName::Terrain,
-        "Position",
-        "The middle of the terrain's bottom: its lowest possible ground.",
-    ),
-    (
-        ClassName::Terrain,
-        "Size",
-        "Width (X), height range (Y) and length (Z) in studs. Heights are stored as parts of the height range, so changing Y stretches the hills.",
-    ),
-    (
-        ClassName::Terrain,
-        "CastShadow",
-        "Whether the terrain casts shadows.",
-    ),
-    (
-        ClassName::Terrain,
-        "CanCollide",
-        "Whether parts and characters stand on the terrain.",
-    ),
-    (
-        ClassName::Terrain,
-        "DataFolder",
-        "The project folder its heights and painted materials are saved in, such as \"assets/terrain/Terrain\". The editor picks it.",
-    ),
-    (
-        ClassName::TerrainLayer,
-        "Color",
-        "Tints the layer's color map, or is its color without one.",
-    ),
-    (
-        ClassName::TerrainLayer,
-        "ColorMap",
-        "The layer's color texture, relative to the project folder. Empty means none.",
-    ),
-    (
-        ClassName::TerrainLayer,
-        "NormalMap",
-        "The layer's normal map. Empty means none.",
-    ),
-    (
-        ClassName::TerrainLayer,
-        "RoughnessMap",
-        "The layer's roughness map. Empty means none.",
-    ),
-    (
-        ClassName::TerrainLayer,
-        "MetalnessMap",
-        "The layer's metalness map. Empty means none.",
-    ),
-    (
-        ClassName::TerrainLayer,
-        "AmbientOcclusionMap",
-        "The layer's ambient occlusion map. Empty means none.",
-    ),
-    (
-        ClassName::TerrainLayer,
-        "HeightMap",
-        "The layer's height map: light is high. Where layers meet, the higher one shows through.",
-    ),
-    (
-        ClassName::TerrainLayer,
-        "Metalness",
-        "0 to 1: how metallic the layer is, without a metalness map.",
-    ),
-    (
-        ClassName::TerrainLayer,
-        "Roughness",
-        "0 to 1: how rough the layer is, without a roughness map.",
-    ),
-    (
-        ClassName::TerrainLayer,
-        "NormalStrength",
-        "Scales the normal map's bumps.",
-    ),
-    (
-        ClassName::TerrainLayer,
-        "NormalMapDirectX",
-        "True for a DirectX-style normal map, whose green points down.",
-    ),
-    (
-        ClassName::TerrainLayer,
-        "RoughnessChannel",
-        "Which channel of RoughnessMap holds the roughness.",
-    ),
-    (
-        ClassName::TerrainLayer,
-        "InvertRoughness",
-        "Reads RoughnessMap as smoothness (1 minus the value).",
-    ),
-    (
-        ClassName::TerrainLayer,
-        "MetalnessChannel",
-        "Which channel of MetalnessMap holds the metalness.",
-    ),
-    (
-        ClassName::TerrainLayer,
-        "AmbientOcclusionChannel",
-        "Which channel of AmbientOcclusionMap holds the occlusion.",
-    ),
-    (
-        ClassName::TerrainLayer,
-        "TileSize",
-        "Studs one copy of the textures covers.",
-    ),
-    (
-        ClassName::TerrainLayer,
-        "TextureRotation",
-        "Turns the textures, in degrees.",
-    ),
-    (
-        ClassName::TerrainLayer,
-        "Triplanar",
-        "Projects the textures from the sides too, so cliffs don't stretch them.",
-    ),
-    (
-        ClassName::TerrainLayer,
-        "AntiTiling",
-        "0 to 1: mixes in a larger, turned copy of the textures so repeats show less.",
-    ),
-    (
-        ClassName::TerrainLayer,
-        "HeightBlend",
-        "0 to 1: how sharply layers meet where they have height maps.",
-    ),
-    (
-        ClassName::TerrainLayer,
-        "AutoEnabled",
-        "Whether the layer lays itself down by its height and slope rule.",
-    ),
-    (
-        ClassName::TerrainLayer,
-        "MinHeight",
-        "The rule's lowest height, in studs above the terrain's bottom.",
-    ),
-    (
-        ClassName::TerrainLayer,
-        "MaxHeight",
-        "The rule's highest height, in studs above the terrain's bottom.",
-    ),
-    (
-        ClassName::TerrainLayer,
-        "HeightFade",
-        "Studs over which the rule fades at its heights.",
-    ),
-    (
-        ClassName::TerrainLayer,
-        "MinSlope",
-        "The rule's gentlest slope, in degrees from flat.",
-    ),
-    (
-        ClassName::TerrainLayer,
-        "MaxSlope",
-        "The rule's steepest slope, in degrees from flat.",
-    ),
-    (
-        ClassName::TerrainLayer,
-        "SlopeFade",
-        "Degrees over which the rule fades at its slopes.",
-    ),
-    (
-        ClassName::TerrainLayer,
-        "RuleStrength",
-        "0 to 1: how fully the layer covers where its rule holds.",
-    ),
-    (
-        ClassName::TerrainLayer,
-        "RuleNoise",
-        "0 to 1: breaks the rule's edges up with noise.",
-    ),
-    (
-        ClassName::TerrainLayer,
-        "NoiseScale",
-        "Studs across the rule's noise patches.",
-    ),
-    (
-        ClassName::ThirdPersonController,
-        "Movement",
-        "\"Walk\" or \"Run\". Anything else moves at WalkSpeed. Set from a script or the set-property block.",
-    ),
-    (
-        ClassName::ThirdPersonController,
-        "WalkSpeed",
-        "How fast Movement \"Walk\" moves, in studs a second, on flat ground.",
-    ),
-    (
-        ClassName::ThirdPersonController,
-        "RunSpeed",
-        "How fast Movement \"Run\" moves, in studs a second, on flat ground.",
-    ),
-    (
-        ClassName::ThirdPersonController,
-        "CameraDistance",
-        "How far behind the character the camera sits during Play, in studs.",
-    ),
-    (
-        ClassName::ThirdPersonController,
-        "CameraHeight",
-        "How far above the character's feet the camera looks, in studs.",
-    ),
-];
-
-/// What each event means, including what its handler receives. A test
-/// checks every event in `core` is here.
-const EVENT_DOCS: &[(ClassName, &str, &str)] = &[
-    (
-        ClassName::Part,
-        "Touched",
-        "Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.",
-    ),
-    (
-        ClassName::MeshPart,
-        "Touched",
-        "Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.",
-    ),
-    (
-        ClassName::RemoteEvent,
-        "OnServerEvent",
-        "Fires when a LocalScript calls `FireServer`. The handler gets the Player who sent it, then the arguments: `function(player, ...) ... end`.",
-    ),
-    (
-        ClassName::RemoteEvent,
-        "OnClientEvent",
-        "Fires when a Script calls `FireClient` or `FireAllClients`. The handler gets the arguments.",
-    ),
-    (
-        ClassName::TextButton,
-        "Activated",
-        "Fires when the player clicks or taps this button. The handler gets no arguments; LocalScripts only.",
-    ),
-    (
-        ClassName::TextBox,
-        "FocusLost",
-        "Fires when the player finishes typing: Enter on a one-line box, or clicking away (or Escape) on any box. The handler gets no arguments; LocalScripts only.",
-    ),
-    (
-        ClassName::Sound,
-        "Ended",
-        "Fires when the sound plays to its end. Looped sounds, and sounds stopped with Stop, don't fire it.",
-    ),
-    (
-        ClassName::Animator,
-        "StateChanged",
-        "Fires when the animator moves to another state. The handler gets the new state's name, then the old one's: `function(state, previous) ... end`.",
-    ),
-    (
-        ClassName::Animator,
-        "AnimationEvent",
-        "Fires when a playing clip passes one of its animation events. The handler gets the event's name.",
-    ),
-    (
-        ClassName::Animation,
-        "Completed",
-        "Fires when `animation:Play()` reaches the end of a clip that doesn't loop. The handler gets no arguments.",
-    ),
-    (
-        ClassName::Animation,
-        "AnimationEvent",
-        "Fires when `animation:Play()` passes one of the clip's events. The handler gets the event's name.",
-    ),
-    (
-        ClassName::AnimationTrack,
-        "Stopped",
-        "Fires when the track has stopped: after Stop's fade, or at the end of a clip that doesn't loop.",
-    ),
-    (
-        ClassName::AnimationTrack,
-        "KeyframeReached",
-        "Fires each time the track passes one of the clip's events. The handler gets the event's name; GetMarkerReachedSignal hears one name.",
-    ),
-];
-
-/// What each class is. A `match` with no `_` case, so adding a class won't
-/// compile until it has a description here.
-fn class_doc(class: ClassName) -> &'static str {
-    match class {
-        ClassName::DataModel => "The root of the game, called `game` in scripts.",
-        ClassName::Workspace => "The service that holds the 3D world. Parts inside it are drawn.",
-        ClassName::Players => "The service with a Player for everyone in the game.",
-        ClassName::Lighting => {
-            "The service for the world's lighting. It sets sun shadows, the sky colors that metal parts reflect, and post-processing (exposure, tone mapping and bloom)."
-        }
-        ClassName::ReplicatedStorage => {
-            "The service for things Scripts and LocalScripts share, such as RemoteEvents and ModuleScripts."
-        }
-        ClassName::ServerScriptService => {
-            "The service that holds server scripts (`scripts/*.server.lua`)."
-        }
-        ClassName::StarterPlayer => {
-            "The service with what each player starts with, such as StarterPlayerScripts."
-        }
-        ClassName::StarterPlayerScripts => {
-            "Holds the LocalScripts (`scripts/*.client.lua`), which run on the player's side."
-        }
-        ClassName::Part => "A solid shape in the world.",
-        ClassName::MeshPart => {
-            "A solid 3D model imported from a glTF or FBX file, drawn with the file's own materials (or its SurfaceAppearances'). It collides as the model's convex hull."
-        }
-        ClassName::Script => "Lua code that runs on the server, from a `.server.lua` file.",
-        ClassName::LocalScript => {
-            "Lua code that runs on the player's side (input, camera), from a `.client.lua` file."
-        }
-        ClassName::ModuleScript => {
-            "Lua code that scripts load with `require`, from a `.module.lua` file. It runs once per side and returns one value."
-        }
-        ClassName::RemoteEvent => {
-            "Carries messages between Scripts and LocalScripts. Keep it in ReplicatedStorage."
-        }
-        ClassName::Player => "Someone playing the game, in Players. Made when they join.",
-        ClassName::Model => "Groups the parts of one thing, such as a car or a house.",
-        ClassName::Folder => "Groups Instances to keep the tree tidy. Has no effect on the game.",
-        ClassName::SurfaceAppearance => {
-            "Inside a MeshPart: the texture maps of one of its model's materials (MaterialName), drawn in place of the file's own. Delete it to go back to the file's."
-        }
-        ClassName::ScreenGui => "The on-screen UI root, usually inside Workspace.",
-        ClassName::Frame => "A rectangular UI element that can contain other UI elements.",
-        ClassName::TextLabel => "A UI element that displays text.",
-        ClassName::TextButton => {
-            "A clickable UI element. Text and Image can each be empty; both filled shows an icon and a label. Fires Activated when clicked. The old name TextButton still loads."
-        }
-        ClassName::ImageLabel => {
-            "A UI element that displays an image from the project. It is not clickable."
-        }
-        ClassName::TextBox => {
-            "A box the player can type in. MultiLine off (the default): Enter finishes. MultiLine on: Enter is a new line and clicking away finishes. Fires FocusLost."
-        }
-        ClassName::PageLayout => {
-            "Shows one child Frame at a time, chosen by CurrentPage (the Frame's Name). Other children, such as a title, stay visible."
-        }
-        ClassName::Table => {
-            "Lays its children out as equal cells, left to right then top to bottom. Columns is how many cells share a row."
-        }
-        ClassName::BillboardGui => {
-            "UI that floats in the world, parented to a Part or MeshPart and drawn on the screen UI overlay. Size is on-screen; StudsOffset moves it in world studs."
-        }
-        ClassName::Sound => {
-            "A sound effect or music track that scripts can play. Spatial sounds sit on a part and get quieter with distance from the camera."
-        }
-        ClassName::PointLight => {
-            "A light that shines in all directions from just above its parent part. Inserting one with no part selected also inserts an anchored lamp."
-        }
-        ClassName::SpotLight => {
-            "A light that shines in a cone from just above its parent part. Inserting one with no part selected also inserts an anchored lamp."
-        }
-        ClassName::ParticleEmitter => {
-            "Gives off particles (sparks, smoke, fire, stars...) from inside its parent part, shown in the editor and the game."
-        }
-        ClassName::Animator => {
-            "Inside a Part, MeshPart, Model, ScreenGui or UI element: plays animation on its parent while the game runs: its state machine, if it has one, and the AnimationTracks loaded with LoadAnimation."
-        }
-        ClassName::Animation => {
-            "Points at a clip (`*.anim.json`). Load it with `animator:LoadAnimation(animation)` to play it, or tick AutoPlay to play it when the game starts."
-        }
-        ClassName::AnimationTrack => {
-            "One Animation loaded on an Animator, from `animator:LoadAnimation(animation)`: play, stop and blend it over the state machine."
-        }
-        ClassName::Terrain => {
-            "A landscape: a heightfield shaped in the editor's Terrain Studio, drawn with its TerrainLayers and colliding as its ground. Position is the middle of its footprint at the bottom of its height range; Size is its width, height range and length."
-        }
-        ClassName::TerrainLayer => {
-            "Inside a Terrain: one material it's painted with (a tint, texture maps and tiling), and an optional rule that lays it down by height and slope."
-        }
-        ClassName::ThirdPersonController => {
-            "Walks and runs the character model it is parented to, kinematically, and owns the camera during Play. Movement is \"Walk\" or \"Run\". It is not a physics body: tuning its speeds does not change how other parts fall."
-        }
-    }
-}
-
-/// The Lua Language Server type for a property of this kind.
-fn lua_type(kind: ValueKind) -> String {
+/// The Luau type for a property of this kind.
+fn luau_type(kind: ValueKind) -> String {
     match kind {
         ValueKind::Bool => "boolean".to_owned(),
         ValueKind::Number => "number".to_owned(),
@@ -2098,16 +61,33 @@ fn lua_type(kind: ValueKind) -> String {
         | ValueKind::TextureChannel
         | ValueKind::ParticleType => {
             let enum_type = EnumType::of_kind(kind).expect("an enum kind");
-            let mut options = vec![format!("EnumItem.{}", enum_type.name())];
+            let mut options = vec![enum_item_class(enum_type)];
             options.extend(
                 enum_type
                     .item_names()
                     .iter()
                     .map(|name| format!("\"{name}\"")),
             );
-            options.join("|")
+            options.join(" | ")
         }
     }
+}
+
+/// `name: type` for each parameter. `("x?", "number")` becomes `x: number?`,
+/// and `("...", "any")` becomes `...: any` in a declared function, or
+/// `...any` in a function type (`in_type`), as Luau writes them.
+fn parameters(function: &Function, in_type: bool) -> Vec<String> {
+    function
+        .params
+        .iter()
+        .map(|&(name, ty)| match name.strip_suffix('?') {
+            // A union or function type needs brackets before `?`.
+            Some(name) if ty.contains(['|', '-']) => format!("{name}: ({ty})?"),
+            Some(name) => format!("{name}: {ty}?"),
+            None if name == "..." && in_type => format!("...{ty}"),
+            None => format!("{name}: {ty}"),
+        })
+        .collect()
 }
 
 /// Collects the file's text one line at a time.
@@ -2119,16 +99,33 @@ impl Writer {
         self.0.push('\n');
     }
 
-    fn doc(&mut self, text: &str) {
-        self.line(&format!("---{text}"));
+    /// A doc comment, which luau-lsp shows on hover and in autocomplete.
+    fn doc(&mut self, indent: &str, text: &str) {
+        if !text.is_empty() {
+            self.line(&format!("{indent}--- {text}"));
+        }
+    }
+
+    /// A class member: `Name: type`.
+    fn member(&mut self, name: &str, ty: &str, doc: &str) {
+        self.doc("\t", doc);
+        self.line(&format!("\t{name}: {ty}"));
     }
 
     fn field(&mut self, field: &Field) {
+        self.member(field.name, field.ty, &with_side(field.name, field.doc));
+    }
+
+    /// A method, called with `:`.
+    fn method(&mut self, method: &Function) {
+        self.doc("\t", &with_side(method.name, method.doc));
+        let mut params = vec!["self".to_owned()];
+        params.extend(parameters(method, false));
         self.line(&format!(
-            "---@field {} {} {}",
-            field.name,
-            field.ty,
-            with_side(field.name, field.doc)
+            "\tfunction {}({}): {}",
+            method.name,
+            params.join(", "),
+            method.returns
         ));
     }
 
@@ -2141,37 +138,9 @@ impl Writer {
         self.line("");
     }
 
-    /// `owner` and `separator` give `function Vector3.new(...)` or `function InstanceClass:FindFirstChild(...)`.
-    fn function(
-        &mut self,
-        owner: &str,
-        separator: char,
-        function: &Function,
-        overloads: &[String],
-    ) {
-        self.function_named(&format!("{owner}{separator}"), function, overloads);
-    }
-
-    /// A function whose full name is `prefix` and then its name: `""` for a global.
-    fn function_named(&mut self, prefix: &str, function: &Function, overloads: &[String]) {
-        self.doc(&with_side(function.name, function.doc));
-        for (name, ty) in function.params {
-            self.line(&format!("---@param {name} {ty}"));
-        }
-        self.line(&format!("---@return {}", function.returns));
-        for overload in overloads {
-            self.line(&format!("---@overload {overload}"));
-        }
-        let names: Vec<&str> = function
-            .params
-            .iter()
-            .map(|(name, _)| name.trim_end_matches('?'))
-            .collect();
-        self.line(&format!(
-            "function {prefix}{}({}) end",
-            function.name,
-            names.join(", ")
-        ));
+    /// Ends a `declare extern type` and leaves a blank line after it.
+    fn end(&mut self) {
+        self.line("end");
         self.line("");
     }
 }
@@ -2179,99 +148,83 @@ impl Writer {
 /// The text of the definitions file for the current API.
 pub fn lua_definitions() -> String {
     let mut w = Writer(String::new());
-    w.line("---@meta");
-    w.line("-- The Axcenity Engine script API, for Lua Language Server (autocomplete");
-    w.line("-- and type hints in VS Code and other editors).");
+    w.line("-- The Axcenity Engine script API, for luau-lsp (autocomplete and type");
+    w.line("-- checking in VS Code and other editors).");
     w.line(&format!(
         "-- Generated by `{REGENERATE}`. Don't edit by hand."
     ));
 
     w.heading("Values");
     for value_type in VALUE_TYPES {
-        w.doc(value_type.doc);
-        w.line(&format!("---@class {}", value_type.class));
+        w.doc("", value_type.doc);
+        w.line(&format!("declare extern type {} with", value_type.class));
         for field in value_type.fields {
             w.field(field);
         }
         for operator in value_type.operators {
-            w.line(&format!("---@operator {operator}"));
+            w.line(&format!("\tfunction {operator}"));
         }
-        if !value_type.methods.is_empty() {
-            let owner = format!("{}Class", value_type.class);
-            w.line(&format!("local {owner} = {{}}"));
-            w.line("");
-            for method in value_type.methods {
-                w.function(&owner, ':', method, &[]);
-            }
+        for method in value_type.methods {
+            w.method(method);
         }
-        w.line("");
+        w.end();
     }
 
     w.heading("Enums");
     for enum_type in EnumType::ALL {
         let name = enum_type.name();
-        w.line(&format!("---@class EnumItem.{name}: EnumItem"));
-        w.line("");
-        w.doc(&format!("The choices of `Enum.{name}`."));
-        w.line(&format!("---@class Enum.{name}"));
-        for item in enum_type.item_names() {
-            w.line(&format!("---@field {item} EnumItem.{name}"));
+        let item = enum_item_class(enum_type);
+        w.doc("", &format!("One choice of `Enum.{name}`."));
+        w.line(&format!("declare extern type {item} extends EnumItem with"));
+        w.end();
+        w.doc("", &format!("The choices of `Enum.{name}`."));
+        w.line(&format!("declare extern type {item}Items with"));
+        for choice in enum_type.item_names() {
+            w.line(&format!("\t{choice}: {item}"));
         }
-        w.line("");
+        w.end();
     }
-    w.doc(ENUM_GLOBAL_DOC);
-    w.line("---@class EnumLibrary");
+    w.doc("", ENUM_GLOBAL_DOC);
+    w.line("declare extern type EnumLibrary with");
     for enum_type in EnumType::ALL {
         let name = enum_type.name();
-        w.line(&format!("---@field {name} Enum.{name}"));
+        w.line(&format!("\t{name}: {}Items", enum_item_class(enum_type)));
     }
-    w.line("");
+    w.end();
 
     w.heading("Instances");
-    w.doc("Anything in the game tree. Every class below is a kind of Instance.");
-    w.line("---@class Instance");
+    w.doc("", SIGNAL_DOC);
+    w.line("declare extern type Signal with");
+    for method in SIGNAL_METHODS {
+        w.method(method);
+    }
+    w.end();
+    w.doc("", CONNECTION_DOC);
+    w.line("declare extern type Connection with");
+    for field in CONNECTION_FIELDS {
+        w.field(field);
+    }
+    for method in CONNECTION_METHODS {
+        w.method(method);
+    }
+    w.end();
+
+    w.doc(
+        "",
+        "Anything in the game tree. Every class below is a kind of Instance.",
+    );
+    w.line("declare extern type Instance with");
     for field in INSTANCE_FIELDS {
         w.field(field);
     }
     for (event, doc) in INSTANCE_EVENT_DOCS {
-        w.line(&format!("---@field {event} Signal {doc}"));
+        w.member(event, "Signal", doc);
     }
-    // A child could be of any class. Typed as all of them, not as plain
-    // `Instance`, so `workspace.Pad.Color = ...` isn't flagged as setting a
-    // field Instance doesn't have, and `Pad`'s Part properties autocomplete.
-    let children: Vec<&str> = ClassName::ALL
-        .into_iter()
-        .filter(|class| *class != ClassName::DataModel)
-        .map(ClassName::as_str)
-        .collect();
-    w.line(&format!(
-        "---@field [string] {} A child, found by its name.",
-        children.join("|")
-    ));
-    // A different name from the global `Instance` library, which this would hide.
-    w.line("local InstanceClass = {}");
-    w.line("");
+    w.line(CHILD_INDEXER);
     for method in INSTANCE_METHODS {
-        w.function("InstanceClass", ':', method, &[]);
+        w.method(method);
     }
-
-    w.doc(SIGNAL_DOC);
-    w.line("---@class Signal");
-    w.line("local SignalClass = {}");
-    w.line("");
-    for method in SIGNAL_METHODS {
-        w.function("SignalClass", ':', method, &[]);
-    }
-    w.doc(CONNECTION_DOC);
-    w.line("---@class Connection");
-    for field in CONNECTION_FIELDS {
-        w.field(field);
-    }
-    w.line("local ConnectionClass = {}");
-    w.line("");
-    for method in CONNECTION_METHODS {
-        w.function("ConnectionClass", ':', method, &[]);
-    }
+    w.end();
 
     // The services, as `game` holds them, so `game.Workspace` autocompletes.
     let world = World::new();
@@ -2286,72 +239,67 @@ pub fn lua_definitions() -> String {
         .unwrap_or_default();
 
     for class in ClassName::ALL {
-        w.doc(class_doc(class));
-        w.line(&format!("---@class {class}: Instance"));
+        w.doc("", class_doc(class));
+        w.line(&format!(
+            "declare extern type {class} extends Instance with"
+        ));
         if class == ClassName::DataModel {
             for &service in &services {
-                w.line(&format!(
-                    "---@field {service} {service} {}",
-                    class_doc(service)
-                ));
+                w.member(service.as_str(), service.as_str(), class_doc(service));
             }
         }
         for (name, default) in class.default_properties() {
             let doc = property_doc(class, name).unwrap_or("");
-            w.line(&format!(
-                "---@field {name} {} {doc}",
-                lua_type(default.kind())
-            ));
+            w.member(name, &luau_type(default.kind()), doc);
         }
         for (_, field) in CLASS_FIELDS.iter().filter(|(c, _)| *c == class) {
             w.field(field);
         }
         for &event in class.events() {
             let doc = event_doc(class, event).unwrap_or("");
-            w.line(&format!(
-                "---@field {event} Signal {}",
-                with_side(event, doc)
-            ));
+            w.member(event, "Signal", &with_side(event, doc));
         }
-        let methods: Vec<&Function> = CLASS_METHODS
-            .iter()
-            .filter(|(c, _)| *c == class)
-            .map(|(_, method)| method)
-            .collect();
-        if !methods.is_empty() {
-            let owner = format!("{class}Class");
-            w.line(&format!("local {owner} = {{}}"));
-            w.line("");
-            for method in methods {
-                w.function(&owner, ':', method, &[]);
-            }
+        w.line(CHILD_INDEXER);
+        for (_, method) in CLASS_METHODS.iter().filter(|(c, _)| *c == class) {
+            w.method(method);
         }
-        w.line("");
+        w.end();
     }
 
     w.heading("Globals");
     for &(name, ty, doc) in INSTANCE_GLOBALS {
-        w.doc(doc);
-        w.line(&format!("---@type {ty}"));
-        w.line(&format!("{name} = nil"));
+        w.doc("", doc);
+        w.line(&format!("declare {name}: {ty}"));
         w.line("");
     }
-    w.doc(ENUM_GLOBAL_DOC);
-    w.line("---@type EnumLibrary");
-    w.line("Enum = nil");
+    w.doc("", ENUM_GLOBAL_DOC);
+    w.line("declare Enum: EnumLibrary");
     w.line("");
     for function in GLOBAL_FUNCTIONS {
-        w.function_named("", function, &[]);
+        w.doc("", &with_side(function.name, function.doc));
+        w.line(&format!(
+            "declare function {}({}): {}",
+            function.name,
+            parameters(function, false).join(", "),
+            function.returns
+        ));
+        w.line("");
     }
 
+    // Each library is a class of function fields (called with `.`), so its
+    // functions can have doc comments, and one global holds it.
     for library in LIBRARIES {
-        w.doc(library.doc);
-        w.line(&format!("---@class {}Library", library.global));
-        w.line(&format!("{} = {{}}", library.global));
-        w.line("");
+        let class = format!("{}Library", library.global);
+        w.doc("", library.doc);
+        w.line(&format!("declare extern type {class} with"));
         for function in library.functions {
-            w.function(library.global, '.', function, &overloads(library, function));
+            let ty = function_type(library, function);
+            w.member(function.name, &ty, &with_side(function.name, function.doc));
         }
+        w.end();
+        w.doc("", library.doc);
+        w.line(&format!("declare {}: {class}", library.global));
+        w.line("");
     }
 
     // One blank line at the end, not two.
@@ -2362,17 +310,27 @@ pub fn lua_definitions() -> String {
     text
 }
 
-/// `Instance.new("Part")` returns a `Part`, which a plain `---@return` can't say.
-fn overloads(library: &Library, function: &Function) -> Vec<String> {
+/// A library function's type, such as `(x: number?) -> Vector3`.
+/// `Instance.new("Part")` returns a `Part`, so `Instance.new` is the
+/// intersection of one function per class (Luau's way to write overloads),
+/// then the plain one for any other name.
+fn function_type(library: &Library, function: &Function) -> String {
+    let plain = format!(
+        "({}) -> {}",
+        parameters(function, true).join(", "),
+        function.returns
+    );
     if library.global != "Instance" || function.name != "new" {
-        return Vec::new();
+        return plain;
     }
-    ClassName::ALL
+    let mut overloads: Vec<String> = ClassName::ALL
         .into_iter()
         // Services always exist, and Players are made when someone joins.
         .filter(|class| !class.is_service() && *class != ClassName::Player)
-        .map(|class| format!("fun(className: \"{class}\"): {class}"))
-        .collect()
+        .map(|class| format!("((className: \"{class}\") -> {class})"))
+        .collect();
+    overloads.push(format!("({plain})"));
+    overloads.join(" & ")
 }
 
 /// `doc`, saying where it works if `name` is a side-only API.

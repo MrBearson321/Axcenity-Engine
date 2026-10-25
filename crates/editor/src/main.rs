@@ -7,6 +7,7 @@
 //! Built on eframe (egui's app framework), which owns the window and the GPU
 //! device; the viewport draws with the same renderer as the player.
 
+mod ambient_cg;
 mod angular;
 mod anim_import;
 mod animation;

@@ -275,7 +275,10 @@ pub fn sections(instance: &Instance) -> Vec<Section> {
                 ClassName::SurfaceAppearance | ClassName::TerrainLayer
             ),
             "Terrain" => instance.class() == ClassName::Terrain,
-            "Tiling" | "Auto Material" => instance.class() == ClassName::TerrainLayer,
+            "Tiling" => {
+                matches!(instance.class(), ClassName::Part | ClassName::TerrainLayer)
+            }
+            "Auto Material" => instance.class() == ClassName::TerrainLayer,
             "UI" => crate::style_panel::is_styled(instance.class()),
             "Audio" => instance.class() == ClassName::Sound,
             "Shadows" | "Sky" | "Post-processing" => instance.class() == ClassName::Lighting,
@@ -906,7 +909,10 @@ mod tests {
         let instance = world.get(part).unwrap();
 
         let sections = sections(instance);
-        assert_eq!(titles(&sections), ["Appearance", "Behavior", "Part"]);
+        assert_eq!(
+            titles(&sections),
+            ["Appearance", "Behavior", "Part", "Tiling"]
+        );
         let names: Vec<&str> = sections
             .iter()
             .flat_map(|section| section.properties.iter().map(|(name, _)| *name))
@@ -928,7 +934,8 @@ mod tests {
                 "Shape",
                 "Position",
                 "Orientation",
-                "Size"
+                "Size",
+                "TileSize"
             ]
         );
         // Every property shows exactly once, with its current value.

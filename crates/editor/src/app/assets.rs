@@ -65,6 +65,7 @@ impl EditorApp {
             AssetKind::Audio => self.drop_sound(entry, spot),
             AssetKind::Image => self.drop_image(entry, spot),
             AssetKind::Texture => self.drop_texture(entry, spot),
+            AssetKind::TextureSet => self.apply_texture_set(entry, spot.part),
             AssetKind::Particle => self.drop_particle_texture(entry, spot),
             AssetKind::Animation => self.open_animation_clip(&entry.path, true),
             AssetKind::Controller => self.drop_controller(entry, spot),
@@ -553,6 +554,9 @@ impl EditorApp {
                 "animation clips and state machines come from importing an animated FBX model"
                     .to_owned(),
             ),
+            Some(AssetKind::TextureSet) => {
+                Err("texture sets are saved with Get texture in the Assets panel".to_owned())
+            }
             Some(AssetKind::Prop) | None => {
                 Err("it isn't a model, image, sound or prefab (`.prefab.json`) file".to_owned())
             }

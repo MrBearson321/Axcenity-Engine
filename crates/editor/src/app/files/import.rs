@@ -1,0 +1,521 @@
+use super::*;
+
+/// The properties of a MeshPart showing `model` from `mesh_id`: it starts
+/// at the model's size in the file. A flat model (a plane) still gets some
+/// thickness, to be seen and picked.
+pub(super) fn mesh_part_properties(
+    mesh_id: String,
+    model: &axcenity_assets::Model,
+) -> Vec<(&'static str, Value)> {
+    let [x, y, z] = model.size.map(|size| size.max(MIN_SIZE));
+    vec![
+        ("MeshId", Value::String(mesh_id)),
+        ("Size", Value::Vector3(Vector3::new(x, y, z))),
+    ]
+}
+
+/// An object's name from a model file as an Instance name.
+pub(super) fn object_name(name: &str) -> String {
+    match name.trim() {
+        "" => ClassName::MeshPart.as_str().to_owned(),
+        name => name.to_owned(),
+    }
+}
+
+impl EditorApp {
+    /// File > Import Model… and the toolbar's Import: asks for a glTF or
+    /// FBX model with the system's file picker, then imports it.
+    pub(in crate::app) fn import_model_with_dialog(&mut self) {
+        if self.project.is_none() || self.playing() || self.viewport.is_dragging() {
+            return;
+        }
+        let dialog = rfd::FileDialog::new()
+            .set_title("Import a 3D model")
+            .add_filter("3D model", &["gltf", "glb", "fbx"])
+            .add_filter("glTF model", &["gltf", "glb"])
+            .add_filter("FBX model", &["fbx"]);
+        // `None` means the dialog was cancelled.
+        if let Some(file) = dialog.pick_file() {
+            self.import_model(&file);
+        }
+    }
+
+    /// Imports the model at `file`. A file with more than one object, or
+    /// with texture maps, asks first which objects to import and shows its
+    /// materials' maps for changing ([`ImportDialog`]); any other goes
+    /// straight in as a MeshPart. A file that can't be read is reported in
+    /// Output.
+    pub(in crate::app) fn import_model(&mut self, file: &Path) {
+        if self.project.is_none() || self.playing() || self.viewport.is_dragging() {
+            return;
+        }
+        let read = axcenity_assets::list_model_objects(file).and_then(|objects| {
+            let model = axcenity_assets::load_model_file(file)?;
+            Ok((objects, model))
+        });
+        // A file's takes, if it has any. One that can't be read just has none.
+        let takes = axcenity_assets::load_takes_file(file).unwrap_or_default();
+        let model_name = file
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let (objects, model) = match read {
+            Ok(read) => read,
+            // Nothing to draw, but takes: an animation-only file.
+            Err(axcenity_assets::ImportError::Model(axcenity_assets::ModelError::NoTriangles))
+                if let Some(animation) = AnimationImport::new(None, &takes, &model_name) =>
+            {
+                self.importing = Some(ImportDialog::animation_only(file.to_owned(), animation));
+                return;
+            }
+            Err(err) => {
+                let err = chain(&err);
+                self.output
+                    .error(format!("Could not import `{}`: {err}", file.display()));
+                return;
+            }
+        };
+        let materials = surface::materials_maps(model.primitives.iter().map(|p| &p.material));
+        let animation = AnimationImport::new(model.rig.as_deref(), &takes, &model_name);
+        let dialog =
+            ImportDialog::new(file.to_owned(), objects, materials).with_animation(animation);
+        if dialog.worth_asking() {
+            self.importing = Some(dialog);
+        } else {
+            self.import_chosen(&dialog);
+        }
+    }
+
+    /// Shows the Import Model dialog while a file is waiting for it, and
+    /// imports what it says.
+    pub(in crate::app) fn import_prompt(&mut self, ctx: &egui::Context) {
+        let Some(dialog) = &mut self.importing else {
+            return;
+        };
+        match dialog.show(ctx) {
+            Some(Answer::Import) => {
+                let dialog = self.importing.take().expect("checked above");
+                if dialog.animation_only {
+                    self.import_animation_only(&dialog);
+                } else {
+                    self.import_chosen(&dialog);
+                }
+            }
+            Some(Answer::Cancel) => self.importing = None,
+            None => {}
+        }
+    }
+
+    /// Copies the dialog's model file into the project's `assets/models`
+    /// folder and inserts the objects ticked in it, as its placement says,
+    /// inside the selected Model or Folder if there is one. Each MeshPart
+    /// starts at its object's size in the file. The insert is one undo
+    /// step; the copied file stays. A model that can't be loaded is
+    /// reported in Output and not copied; problems that didn't stop it
+    /// loading (an FBX texture that isn't there) are reported after it's
+    /// imported.
+    pub(in crate::app) fn import_chosen(&mut self, dialog: &ImportDialog) {
+        let Some(project) = &self.project else {
+            return;
+        };
+        if self.playing() || self.viewport.is_dragging() {
+            return;
+        }
+        let file = &dialog.file;
+        let chosen = dialog.chosen();
+        let path = |i: usize| dialog.objects[i].path.clone();
+        let picks: Vec<Pick> = match dialog.placement {
+            Placement::Merged if dialog.all_chosen() => vec![Pick::Whole],
+            Placement::Merged => vec![Pick::Objects(chosen.iter().map(|&i| path(i)).collect())],
+            Placement::Grouped | Placement::Separate => chosen
+                .iter()
+                .map(|&i| Pick::Objects(vec![path(i)]))
+                .collect(),
+        };
+        let imported = match axcenity_assets::import_picks(&project.folder, file, &picks) {
+            Ok(imported) => imported,
+            Err(err) => {
+                let err = chain(&err);
+                self.output
+                    .error(format!("Could not import `{}`: {err}", file.display()));
+                return;
+            }
+        };
+        let (copy, _) = Pick::of_mesh_id(&imported[0].0);
+        self.output.info(format!(
+            "Imported `{}` into the project as `{copy}`.",
+            file.display()
+        ));
+        let animation = dialog
+            .animation
+            .as_ref()
+            .and_then(|animation| self.write_import_animation(animation, copy));
+        // The copy's folder in the project, which its maps' paths start from.
+        let folder = copy
+            .rsplit_once('/')
+            .map_or("", |(folder, _)| folder)
+            .to_owned();
+        let mut copied = HashMap::new();
+        let mut parts = Vec::new();
+        for (mesh_id, model) in imported {
+            let model = self.assets.insert(&mesh_id, model);
+            for warning in &model.warnings {
+                self.output
+                    .error(format!("The model `{mesh_id}` {warning}."));
+            }
+            parts.push((mesh_id, model));
+        }
+
+        let file_name = file
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().trim().to_owned())
+            .filter(|stem| !stem.is_empty())
+            .unwrap_or_else(|| ClassName::MeshPart.as_str().to_owned());
+        let near = self.selected;
+        let position = self.insert_position();
+        match dialog.placement {
+            Placement::Merged => {
+                let parent = tree::insert_parent(&self.world, near, Insertable::MeshPart);
+                let (mesh_id, model) = parts.remove(0);
+                let id = self.new_mesh_part(mesh_id, &model, position);
+                self.world.set_name(id, &file_name).expect("just made");
+                self.add_surfaces(id, &model, dialog, &folder, &mut copied);
+                self.add_animator(id, &model, animation.as_ref());
+                self.place_new(parent, vec![id], format!("Import {file_name}"));
+            }
+            Placement::Separate => {
+                let parent = tree::insert_parent(&self.world, near, Insertable::MeshPart);
+                let ids: Vec<InstanceId> = chosen
+                    .iter()
+                    .zip(parts)
+                    .map(|(&i, (mesh_id, model))| {
+                        let id = self.new_mesh_part(mesh_id, &model, position);
+                        self.world
+                            .set_name(id, object_name(&dialog.objects[i].name))
+                            .expect("just made");
+                        self.add_surfaces(id, &model, dialog, &folder, &mut copied);
+                        self.add_animator(id, &model, animation.as_ref());
+                        id
+                    })
+                    .collect();
+                self.place_new(parent, ids, format!("Import {file_name}"));
+            }
+            Placement::Grouped => {
+                let parent = tree::insert_parent(&self.world, near, Insertable::Model);
+                let root = tree::create(&mut self.world, Insertable::Model, position);
+                self.world.set_name(root, &file_name).expect("just made");
+                // The parts keep their places around the middle of them all.
+                let mut min = [f32::INFINITY; 3];
+                let mut max = [f32::NEG_INFINITY; 3];
+                for (_, model) in &parts {
+                    for axis in 0..3 {
+                        let half = model.size[axis] / 2.0;
+                        min[axis] = min[axis].min(model.center[axis] - half);
+                        max[axis] = max[axis].max(model.center[axis] + half);
+                    }
+                }
+                let middle = [0, 1, 2].map(|axis| (min[axis] + max[axis]) / 2.0);
+                let mut groups = HashMap::new();
+                for (&i, (mesh_id, model)) in chosen.iter().zip(parts) {
+                    let at = Vector3::new(
+                        position.x + model.center[0] - middle[0],
+                        position.y + model.center[1] - middle[1],
+                        position.z + model.center[2] - middle[2],
+                    );
+                    let id = self.new_mesh_part(mesh_id, &model, at);
+                    self.add_surfaces(id, &model, dialog, &folder, &mut copied);
+                    self.add_animator(id, &model, animation.as_ref());
+                    let container = self.group_of(dialog, i, root, &mut groups);
+                    let name = tree::unique_name(
+                        &self.world,
+                        container,
+                        &object_name(&dialog.objects[i].name),
+                    );
+                    self.world.set_name(id, name).expect("just made");
+                    self.world
+                        .set_parent(id, Some(container))
+                        .expect("a new part can go in a new Model");
+                }
+                self.place_new(parent, vec![root], format!("Import {file_name}"));
+            }
+        }
+    }
+
+    /// Writes the clips `animation` makes, from the model copied to
+    /// `copy` in the project, and their state machine if an Animator was
+    /// asked for. Returns the state machine's path and the clips', for the
+    /// Animator. Files aren't undo steps; a problem is reported in Output.
+    pub(super) fn write_import_animation(
+        &mut self,
+        animation: &AnimationImport,
+        copy: &str,
+    ) -> Option<(String, Vec<String>)> {
+        let project = self.project.as_ref()?.folder.clone();
+        if animation.clips.is_empty() {
+            return None;
+        }
+        let model = copy
+            .rsplit('/')
+            .next()
+            .and_then(|file| file.rsplit_once('.'))
+            .map_or(copy, |(stem, _)| stem);
+        let clips = animation.clip_files(copy);
+        match crate::anim_import::write_animation(&project, model, &clips, animation.add_animator) {
+            Ok((paths, controller)) => {
+                self.output.info(format!(
+                    "Made {} {} in `{}/{model}`{}.",
+                    paths.len(),
+                    if paths.len() == 1 { "clip" } else { "clips" },
+                    axcenity_anim::ANIMATIONS_FOLDER,
+                    controller.as_ref().map_or_else(String::new, |path| format!(
+                        " and the state machine `{path}`"
+                    ))
+                ));
+                controller.map(|controller| (controller, paths))
+            }
+            Err(err) => {
+                self.output
+                    .error(format!("Could not write the animation clips: {err}"));
+                None
+            }
+        }
+    }
+
+    /// Puts an Animator playing the state machine in the new MeshPart
+    /// `part`, with an Animation for each clip under it, if there's a state
+    /// machine (`animation`: its path and its clips') and the part's
+    /// `model` has a skeleton to move.
+    pub(super) fn add_animator(
+        &mut self,
+        part: InstanceId,
+        model: &axcenity_assets::Model,
+        animation: Option<&(String, Vec<String>)>,
+    ) {
+        let Some((controller, clips)) = animation else {
+            return;
+        };
+        if model.rig.is_none() {
+            return;
+        }
+        let id = self
+            .world
+            .create(ClassName::Animator)
+            .expect("not a service");
+        self.world
+            .set_property(id, "StateMachine", Value::String(controller.to_owned()))
+            .expect("every Animator has a StateMachine");
+        self.world
+            .set_parent(id, Some(part))
+            .expect("an Animator can go in a new MeshPart");
+        for clip in clips {
+            let animation = self
+                .world
+                .create(ClassName::Animation)
+                .expect("not a service");
+            let name = tree::unique_name(&self.world, id, axcenity_anim::files::clip_name(clip));
+            self.world.set_name(animation, name).expect("just made");
+            self.world
+                .set_property(animation, "Clip", Value::String(clip.clone()))
+                .expect("every Animation has a Clip");
+            self.world
+                .set_parent(animation, Some(id))
+                .expect("an Animation can go in an Animator");
+        }
+    }
+
+    /// Imports a file with only animation: copies it into the project and
+    /// writes the clips the dialog made from its takes.
+    pub(in crate::app) fn import_animation_only(&mut self, dialog: &ImportDialog) {
+        let Some(project) = &self.project else {
+            return;
+        };
+        let Some(animation) = &dialog.animation else {
+            return;
+        };
+        match axcenity_assets::import_animation_file(&project.folder, &dialog.file) {
+            Ok(copy) => {
+                self.output.info(format!(
+                    "Imported the animation `{}` into the project as `{copy}`.",
+                    dialog.file.display()
+                ));
+                let mut clips = animation.clone();
+                clips.add_animator = false;
+                self.write_import_animation(&clips, &copy);
+            }
+            Err(err) => {
+                let err = chain(&err);
+                self.output.error(format!(
+                    "Could not import `{}`: {err}",
+                    dialog.file.display()
+                ));
+            }
+        }
+    }
+
+    /// Puts a SurfaceAppearance in the new MeshPart `part` for each
+    /// material its `model` uses, with the maps `dialog` has for it (as
+    /// found, or as changed there). `folder` is the model's copy's folder
+    /// in the project. Files picked in the dialog are copied into its
+    /// `textures` folder, each once (`copied` remembers where to).
+    pub(super) fn add_surfaces(
+        &mut self,
+        part: InstanceId,
+        model: &axcenity_assets::Model,
+        dialog: &ImportDialog,
+        folder: &str,
+        copied: &mut HashMap<std::path::PathBuf, Option<String>>,
+    ) {
+        let Some(project) = &self.project else {
+            return;
+        };
+        let project = project.folder.clone();
+        let textures = format!("{folder}/{}", axcenity_assets::TEXTURES_FOLDER);
+        let in_project = |path: &str| match folder {
+            "" => path.to_owned(),
+            folder => format!("{folder}/{path}"),
+        };
+        for maps in surface::materials_maps(model.primitives.iter().map(|p| &p.material)) {
+            let maps = dialog
+                .materials
+                .iter()
+                .find(|changed| changed.material == maps.material)
+                .cloned()
+                .unwrap_or(maps);
+            let mut errors = Vec::new();
+            let properties = maps.properties(|file| match file {
+                MapFile::Model(path) => Some(in_project(path)),
+                MapFile::Picked(path) => copied
+                    .entry(path.clone())
+                    .or_insert_with(|| {
+                        match axcenity_assets::import_texture(&project, path, &textures) {
+                            Ok(copy) => Some(copy),
+                            Err(err) => {
+                                errors.push(format!(
+                                    "Could not use `{}`: {}",
+                                    path.display(),
+                                    chain(&err)
+                                ));
+                                None
+                            }
+                        }
+                    })
+                    .clone(),
+            });
+            for error in errors {
+                self.output.error(error);
+            }
+            let id = self
+                .world
+                .create(ClassName::SurfaceAppearance)
+                .expect("not a service");
+            for (property, value) in properties {
+                self.world
+                    .set_property(id, property, value)
+                    .expect("every SurfaceAppearance has these");
+            }
+            let wanted = match maps.material.as_str() {
+                "" => ClassName::SurfaceAppearance.as_str(),
+                name => name,
+            };
+            let name = tree::unique_name(&self.world, part, wanted);
+            self.world.set_name(id, name).expect("just made");
+            self.world
+                .set_parent(id, Some(part))
+                .expect("a SurfaceAppearance can go in a new MeshPart");
+        }
+    }
+
+    /// A new MeshPart showing `model` (loaded from `mesh_id`), centered on
+    /// `position`, with no parent yet.
+    pub(in crate::app) fn new_mesh_part(
+        &mut self,
+        mesh_id: String,
+        model: &axcenity_assets::Model,
+        position: Vector3,
+    ) -> InstanceId {
+        let id = tree::create(&mut self.world, Insertable::MeshPart, position);
+        for (property, value) in mesh_part_properties(mesh_id, model) {
+            self.world
+                .set_property(id, property, value)
+                .expect("every MeshPart has these");
+        }
+        id
+    }
+
+    /// The Model that object `i` of `dialog` goes in when importing it as
+    /// a Model: one made for the group (an object without a mesh) it's
+    /// inside, or `root` if it isn't inside one. Groups' Models are made
+    /// the first time, and remembered in `groups` by object.
+    pub(super) fn group_of(
+        &mut self,
+        dialog: &ImportDialog,
+        i: usize,
+        root: InstanceId,
+        groups: &mut HashMap<usize, InstanceId>,
+    ) -> InstanceId {
+        // An object inside one with a mesh goes next to it: parts don't
+        // hold other parts.
+        let mut parent = dialog.parent(i);
+        while let Some(p) = parent
+            && dialog.objects[p].has_mesh()
+        {
+            parent = dialog.parent(p);
+        }
+        let Some(group) = parent else {
+            return root;
+        };
+        if let Some(&model) = groups.get(&group) {
+            return model;
+        }
+        let container = self.group_of(dialog, group, root, groups);
+        let model = tree::create(
+            &mut self.world,
+            Insertable::Model,
+            Vector3::new(0.0, 0.0, 0.0),
+        );
+        let name = tree::unique_name(
+            &self.world,
+            container,
+            &object_name(&dialog.objects[group].name),
+        );
+        self.world.set_name(model, name).expect("just made");
+        self.world
+            .set_parent(model, Some(container))
+            .expect("a new Model can go in a new Model");
+        groups.insert(group, model);
+        model
+    }
+
+    /// Puts the new Instances `ids` at the end of `parent`, each with a
+    /// name none of its siblings has, as one undo step named `label`, and
+    /// selects the last of them.
+    pub(in crate::app) fn place_new(
+        &mut self,
+        parent: InstanceId,
+        ids: Vec<InstanceId>,
+        label: String,
+    ) {
+        let mut moves = Vec::new();
+        for &id in &ids {
+            let wanted = self.world.get(id).map(|i| i.name().to_string());
+            let name = tree::unique_name(&self.world, parent, &wanted.unwrap_or_default());
+            self.world.set_name(id, name).expect("just made");
+            let end = self.world.get(parent).map_or(0, |p| p.children().len());
+            let place = Place { parent, index: end };
+            if let Err(err) = history::put(&mut self.world, id, Some(place)) {
+                self.output.error(format!("Could not do that: {err}"));
+                break;
+            }
+            moves.push(Move {
+                id,
+                before: None,
+                after: Some(place),
+            });
+        }
+        let last = moves.last().map(|step| step.id);
+        self.history.record_tree(&mut self.world, label, moves);
+        if last.is_some() {
+            self.select_from_viewport(last);
+        }
+    }
+}

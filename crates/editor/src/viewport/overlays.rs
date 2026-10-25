@@ -1,0 +1,387 @@
+use super::*;
+
+/// Draws the blue box around the selected part, Studio-style: the edges of
+/// the sides facing the camera, where no other part is in front of them.
+/// Draws nothing if `selected` isn't a part.
+pub(super) fn paint_selection_box(
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    screen: &Screen,
+    world: &World,
+    selected: InstanceId,
+    eye: Vec3,
+) {
+    let Some(lines) = axcenity_scene::visible_box_edges(world, selected, eye) else {
+        return;
+    };
+    let painter = ui.painter_at(rect);
+    // A soft glow under the line keeps it readable on any background.
+    let glow = egui::Stroke::new(SELECTION_WIDTH + 3.0, SELECTION_COLOR.gamma_multiply(0.25));
+    let stroke = egui::Stroke::new(SELECTION_WIDTH, SELECTION_COLOR);
+    let lines: Vec<_> = lines
+        .into_iter()
+        .filter_map(|(a, b)| screen.line(a, b))
+        .collect();
+    for line in &lines {
+        painter.line_segment(*line, glow);
+    }
+    for line in lines {
+        painter.line_segment(line, stroke);
+    }
+}
+
+/// The light whose icon is under `pointer`, the nearest if several are.
+pub(super) fn light_at(
+    lights: &[(LightMarker, egui::Pos2)],
+    pointer: egui::Pos2,
+) -> Option<InstanceId> {
+    lights
+        .iter()
+        .filter(|(_, at)| at.distance(pointer) <= LIGHT_ICON_RADIUS + 2.0)
+        .min_by(|(_, a), (_, b)| a.distance(pointer).total_cmp(&b.distance(pointer)))
+        .map(|(marker, _)| marker.id)
+}
+
+pub(super) fn light_color(marker: &LightMarker) -> egui::Color32 {
+    let [r, g, b] = marker
+        .color
+        .map(|channel| (channel.clamp(0.0, 1.0) * 255.0) as u8);
+    egui::Color32::from_rgb(r, g, b)
+}
+
+/// Draws each light's icon (a bulb for a PointLight, a flashlight for a
+/// SpotLight) in the light's color.
+pub(super) fn paint_lights(
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    lights: &[(LightMarker, egui::Pos2)],
+    selected: Option<InstanceId>,
+    pointer: Option<egui::Pos2>,
+) {
+    let painter = ui.painter_at(rect);
+    let hovered = pointer.and_then(|pointer| light_at(lights, pointer));
+    for (marker, at) in lights {
+        // Grows a little under the mouse.
+        let grow = ui.ctx().animate_bool_with_time(
+            egui::Id::new(("light icon", marker.id)),
+            hovered == Some(marker.id),
+            0.12,
+        );
+        let radius = LIGHT_ICON_RADIUS * (1.0 + 0.15 * grow);
+        let (fill, tint) = if marker.enabled {
+            (egui::Color32::from_black_alpha(170), light_color(marker))
+        } else {
+            // Switched off: grey.
+            (
+                egui::Color32::from_black_alpha(120),
+                egui::Color32::from_gray(150),
+            )
+        };
+        painter.circle_filled(*at, radius, fill);
+        let ring = if Some(marker.id) == selected {
+            egui::Stroke::new(2.0_f32, SELECTION_COLOR)
+        } else {
+            egui::Stroke::new(1.0 + grow, tint.gamma_multiply(0.8))
+        };
+        painter.circle_stroke(*at, radius, ring);
+        let icon = if marker.spot {
+            icons::FLASHLIGHT
+        } else {
+            icons::LIGHTBULB
+        };
+        painter.text(
+            *at,
+            egui::Align2::CENTER_CENTER,
+            icon,
+            egui::FontId::new(radius * 1.15, theme::filled()),
+            tint,
+        );
+    }
+}
+
+/// A light's reach in its color: three rings for a PointLight's range,
+/// or for a SpotLight the cone it lights (see-through sides, edges and the
+/// far rim), the beam's middle as an arrow, and where that beam lands on a
+/// part, as a ring the size of the spot. `chosen` (the light or its part is
+/// selected) draws it stronger; View > Light Cones draws the others faintly.
+pub(super) fn paint_light_reach(
+    painter: &egui::Painter,
+    screen: &Screen,
+    world: &World,
+    marker: &LightMarker,
+    chosen: bool,
+) {
+    const SEGMENTS: usize = 48;
+    let strength = if chosen { 0.85 } else { 0.4 };
+    let color = light_color(marker);
+    let stroke = egui::Stroke::new(1.5_f32, color.gamma_multiply(strength));
+    let faint = egui::Stroke::new(1.0_f32, color.gamma_multiply(strength * 0.5));
+    let range = marker.range.max(0.1);
+    let circle = |center: Vec3, a: Vec3, b: Vec3, radius: f32| -> Vec<Vec3> {
+        (0..=SEGMENTS)
+            .map(|i| {
+                let turn = i as f32 / SEGMENTS as f32 * std::f32::consts::TAU;
+                center + (a * turn.cos() + b * turn.sin()) * radius
+            })
+            .collect()
+    };
+    let outline = |points: &[Vec3], stroke: egui::Stroke| {
+        for pair in points.windows(2) {
+            if let Some(line) = screen.line(pair[0], pair[1]) {
+                painter.line_segment(line, stroke);
+            }
+        }
+    };
+    let Some((direction, angle)) = marker.cone else {
+        outline(&circle(marker.position, Vec3::X, Vec3::Y, range), stroke);
+        outline(&circle(marker.position, Vec3::X, Vec3::Z, range), stroke);
+        outline(&circle(marker.position, Vec3::Y, Vec3::Z, range), stroke);
+        return;
+    };
+
+    let half = (angle.clamp(1.0, 179.0) * 0.5).to_radians();
+    let (side, up) = direction.any_orthonormal_pair();
+    let end = marker.position + direction * range * half.cos();
+    let radius = range * half.sin();
+    let rim = circle(end, side, up, radius);
+    // The sides, as thin triangles from the light to the rim. Each one is
+    // convex, which is all egui fills.
+    let fill = color.gamma_multiply(if chosen { 0.12 } else { 0.05 });
+    if let Some(apex) = screen.point(marker.position) {
+        for pair in rim.windows(2) {
+            if let (Some(a), Some(b)) = (screen.point(pair[0]), screen.point(pair[1])) {
+                painter.add(egui::Shape::convex_polygon(
+                    vec![apex, a, b],
+                    fill,
+                    egui::Stroke::NONE,
+                ));
+            }
+        }
+    }
+    outline(&rim, stroke);
+    // Halfway out, where the light is noticeably dimmer.
+    let middle = marker.position + direction * range * half.cos() * 0.5;
+    outline(&circle(middle, side, up, radius * 0.5), faint);
+    for turn in 0..8 {
+        let around = turn as f32 / 8.0 * std::f32::consts::TAU;
+        let edge = end + (side * around.cos() + up * around.sin()) * radius;
+        if let Some(line) = screen.line(marker.position, edge) {
+            painter.line_segment(line, if turn % 2 == 0 { stroke } else { faint });
+        }
+    }
+
+    // The beam's middle, out to where it first meets a part (not its own).
+    let ray = axcenity_scene::Ray {
+        origin: marker.position,
+        direction,
+    };
+    let hit = axcenity_scene::pick_hit_skipping(world, ray, &[marker.part])
+        .filter(|hit| hit.distance <= range);
+    let beam_end = ray.at(hit.map_or(range, |hit| hit.distance));
+    if let (Some(from), Some(to)) = (screen.point(marker.position), screen.point(beam_end)) {
+        let width = if chosen { 2.0_f32 } else { 1.0 };
+        painter.arrow(
+            from,
+            to - from,
+            egui::Stroke::new(width, color.gamma_multiply(strength)),
+        );
+    }
+    if let Some(hit) = hit {
+        // The spot on the surface: the cone's width at that distance, laid
+        // flat on the surface, lifted a hair so it isn't hidden in it.
+        let spot = hit.distance * half.tan();
+        let (a, b) = hit.normal.any_orthonormal_pair();
+        let lifted = beam_end + hit.normal * 0.02;
+        outline(&circle(lifted, a, b, spot), stroke);
+        if let Some(at) = screen.point(lifted) {
+            painter.circle_filled(at, 3.0, color.gamma_multiply(strength));
+        }
+    }
+}
+
+/// The brush's rim (and the inner edge of its fade, fainter) laid on the
+/// ground around `center`, and a dot in the middle.
+pub(super) fn paint_terrain_brush(
+    painter: &egui::Painter,
+    screen: &Screen,
+    world: &World,
+    brush: TerrainBrush,
+    center: Vec3,
+) {
+    let ground = world.get(brush.terrain).and_then(|instance| {
+        Some((
+            axcenity_terrain::Placement::of(instance)?,
+            world.terrain(brush.terrain)?.clone(),
+        ))
+    });
+    let on_ground = |x: f32, z: f32| {
+        let y = ground
+            .as_ref()
+            .and_then(|(placement, data)| placement.ground_y(data, x, z))
+            .unwrap_or(center.y);
+        // A little above, so the line isn't hidden in the ground.
+        Vec3::new(x, y + 0.05, z)
+    };
+    let outline = |radius: f32| -> Vec<Vec3> {
+        const SEGMENTS: usize = 72;
+        (0..=SEGMENTS)
+            .map(|i| {
+                let t = i as f32 / SEGMENTS as f32;
+                let (x, z) = if brush.square {
+                    // Round the square's edge, a quarter per side.
+                    let side = (t * 4.0).floor().min(3.0);
+                    let along = t * 4.0 - side;
+                    let s = along * 2.0 - 1.0;
+                    match side as u8 {
+                        0 => (s, -1.0),
+                        1 => (1.0, s),
+                        2 => (-s, 1.0),
+                        _ => (-1.0, -s),
+                    }
+                } else {
+                    let angle = t * std::f32::consts::TAU;
+                    (angle.cos(), angle.sin())
+                };
+                on_ground(center.x + x * radius, center.z + z * radius)
+            })
+            .collect()
+    };
+    let draw = |points: Vec<Vec3>, stroke: egui::Stroke| {
+        for pair in points.windows(2) {
+            if let Some(line) = screen.line(pair[0], pair[1]) {
+                painter.line_segment(line, stroke);
+            }
+        }
+    };
+    // A dark line under a bright one, so it reads on any ground.
+    let shadow = egui::Stroke::new(3.5_f32, egui::Color32::from_black_alpha(110));
+    draw(outline(brush.radius), shadow);
+    draw(
+        outline(brush.radius),
+        egui::Stroke::new(1.6_f32, brush.color),
+    );
+    let inner = brush.radius * (1.0 - brush.falloff.clamp(0.0, 1.0));
+    if inner > 0.05 && brush.falloff > 0.02 {
+        draw(
+            outline(inner),
+            egui::Stroke::new(1.0_f32, brush.color.gamma_multiply(0.55)),
+        );
+    }
+    if let Some(at) = screen.point(on_ground(center.x, center.z)) {
+        painter.circle_filled(at, 3.0, brush.color);
+    }
+}
+
+pub(super) fn paint_debug_overlays(
+    painter: &egui::Painter,
+    screen: &Screen,
+    world: &World,
+    assets: &Assets,
+    overlays: OverlayToggles,
+    debug_rays: &[DebugRay],
+    eye: Vec3,
+) {
+    let draw_edges = |edges: &[(Vec3, Vec3)], stroke: egui::Stroke| {
+        for &(a, b) in edges {
+            if let Some(line) = screen.line(a, b) {
+                painter.line_segment(line, stroke);
+            }
+        }
+    };
+    if overlays.colliders {
+        for outline in axcenity_physics::debug_colliders(world, assets) {
+            if outline.chunk && (v3(outline.center) - eye).length() > TERRAIN_OVERLAY_DISTANCE {
+                continue;
+            }
+            let color = if outline.can_collide {
+                COLLIDER_COLOR
+            } else {
+                SENSOR_COLOR
+            };
+            let edges: Vec<(Vec3, Vec3)> =
+                outline.edges.iter().map(|&(a, b)| (v3(a), v3(b))).collect();
+            draw_edges(&edges, egui::Stroke::new(1.0_f32, color));
+        }
+    }
+    if overlays.bounds {
+        for id in world.descendants(world.workspace()) {
+            let Some(instance) = world.get(id) else {
+                continue;
+            };
+            let Some(edges) = bounds_edges(instance) else {
+                continue;
+            };
+            draw_edges(&edges, egui::Stroke::new(1.0_f32, BOUNDS_COLOR));
+        }
+    }
+    if overlays.raycasts {
+        for ray in debug_rays {
+            let origin = v3(ray.origin);
+            let far = origin + v3(ray.direction);
+            let end = ray.hit.map(|hit| v3(hit.position)).unwrap_or(far);
+            if let Some(line) = screen.line(origin, end) {
+                painter.line_segment(line, egui::Stroke::new(2.0_f32, RAY_COLOR));
+            }
+            if let Some(hit) = ray.hit
+                && let Some(at) = screen.point(v3(hit.position))
+            {
+                painter.circle_filled(at, 4.0, RAY_HIT_COLOR);
+                painter.circle_stroke(at, 6.0, egui::Stroke::new(1.5_f32, RAY_HIT_COLOR));
+            }
+        }
+    }
+    if overlays.emitters {
+        for id in world.descendants(world.root()) {
+            let Some(instance) = world.get(id) else {
+                continue;
+            };
+            if instance.class() != ClassName::Sound
+                || instance.property("Spatial").and_then(Value::as_bool) != Some(true)
+            {
+                continue;
+            }
+            let at = v3(axcenity_audio::source_position(world, id));
+            let Some(pos) = screen.point(at) else {
+                continue;
+            };
+            painter.circle_filled(
+                pos,
+                EMITTER_ICON_RADIUS,
+                egui::Color32::from_black_alpha(160),
+            );
+            painter.circle_stroke(
+                pos,
+                EMITTER_ICON_RADIUS,
+                egui::Stroke::new(1.5_f32, EMITTER_COLOR),
+            );
+            painter.text(
+                pos,
+                egui::Align2::CENTER_CENTER,
+                icons::SPEAKER_HIGH,
+                egui::FontId::new(EMITTER_ICON_RADIUS * 1.15, theme::filled()),
+                EMITTER_COLOR,
+            );
+        }
+    }
+}
+
+pub(super) fn bounds_edges(instance: &Instance) -> Option<[(Vec3, Vec3); 12]> {
+    if let Some(pose) = Pose::of(instance) {
+        return Some(angular::box_edges(pose));
+    }
+    if instance.class() != ClassName::Terrain {
+        return None;
+    }
+    let vector = |name| instance.property(name).and_then(Value::as_vector3);
+    let position = vector("Position")?;
+    let size = vector("Size")?;
+    Some(angular::box_edges(Pose {
+        position: Vec3::new(position.x, position.y + size.y * 0.5, position.z),
+        rotation: Quat::IDENTITY,
+        size: Vec3::new(size.x, size.y, size.z),
+    }))
+}
+
+pub(super) fn v3(v: axcenity_core::Vector3) -> Vec3 {
+    Vec3::new(v.x, v.y, v.z)
+}

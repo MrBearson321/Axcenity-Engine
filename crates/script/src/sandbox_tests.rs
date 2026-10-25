@@ -145,7 +145,7 @@ fn engine_object_metatables_cannot_be_changed() {
     let output = lines(&mut runtime);
     assert_eq!(
         output.last().unwrap(),
-        "Workspace\t1.0\t1.0\tNeon",
+        "Workspace\t1\t1\tNeon",
         "{output:?}"
     );
 }
@@ -154,8 +154,8 @@ fn engine_object_metatables_cannot_be_changed() {
 fn bytecode_cannot_be_made_or_run() {
     let mut world = World::new();
     let mut runtime = ScriptRuntime::new();
-    // "\27Lua" is how compiled Lua chunks start.
-    start(&mut runtime, &mut world, "scripts/m.module.lua", "\x1bLua");
+    // Compiled Luau chunks start with their bytecode version, a low byte.
+    start(&mut runtime, &mut world, "scripts/m.module.lua", "\x06\x03");
     start(
         &mut runtime,
         &mut world,
@@ -177,7 +177,7 @@ fn bytecode_cannot_be_made_or_run() {
 fn the_real_global_table_is_out_of_reach() {
     let output = output_of(
         r#"
-        print(_G == _ENV, getmetatable(_G), rawget(_G, "io"))
+        print(_G.print == print, getmetatable(_G), rawget(_G, "io"))
         -- Errors from the engine reach scripts as plain strings, not objects
         -- with methods that could lead somewhere.
         local ok, err = pcall(Instance.new, 5)
@@ -270,6 +270,51 @@ fn os_keeps_only_the_clock_and_rejects_bad_date_formats() {
         "#,
     );
     assert_eq!(output, ["clock,date,difftime,time", "false"]);
+}
+
+#[test]
+fn bit32_and_buffer_work_and_buffers_stay_in_bounds() {
+    let output = output_of(
+        r#"
+        print(bit32.band(12, 10), bit32.bor(12, 10), bit32.bxor(12, 10), bit32.lshift(1, 4))
+        local b = buffer.create(4)
+        buffer.writeu32(b, 0, 0xDEADBEEF)
+        print(buffer.len(b), buffer.readu8(b, 0), buffer.readu32(b, 0) == 0xDEADBEEF)
+        print(buffer.tostring(buffer.fromstring("hi")))
+        print((pcall(buffer.readu32, b, 2)))
+        print((pcall(buffer.writeu8, b, -1, 0)))
+        "#,
+    );
+    assert_eq!(
+        output,
+        ["8\t14\t6\t16", "4\t239\ttrue", "hi", "false", "false"]
+    );
+}
+
+#[test]
+fn typeof_names_engine_values() {
+    let output = output_of(
+        r#"
+        local part = Instance.new("Part")
+        print(typeof(part), typeof(workspace), typeof(game))
+        print(typeof(Vector3.new()), typeof(Color3.new()), typeof(UDim2.new()), typeof(UDim2.new().X))
+        print(typeof(Enum.Material.Neon), typeof(Enum.Material), typeof(Enum))
+        print(typeof(part.Touched), typeof(part.Touched:Connect(function() end)))
+        print(typeof(game:GetService("RunService")))
+        print(typeof(1), typeof("a"), typeof(nil), typeof({}), typeof(print), typeof(buffer.create(1)))
+        "#,
+    );
+    assert_eq!(
+        output,
+        [
+            "Instance\tInstance\tInstance",
+            "Vector3\tColor3\tUDim2\tUDim",
+            "EnumItem\tEnum\tEnums",
+            "Signal\tConnection",
+            "RunService",
+            "number\tstring\tnil\ttable\tfunction\tbuffer",
+        ]
+    );
 }
 
 #[test]

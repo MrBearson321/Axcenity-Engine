@@ -7,14 +7,14 @@
 //!   `package`, most of `os`) doesn't exist inside scripts.
 //!
 //! `require` is the engine's own (it only loads ModuleScripts, see
-//! `modules`), `collectgarbage` only answers `"count"`, and `setmetatable`
-//! refuses `__gc`. Strings share one metatable in Lua, so
-//! [`lock_string_metatable`] hides it from scripts.
+//! `modules`), `collectgarbage` only answers `"count"`, `setmetatable`
+//! refuses `__gc`, and `typeof` names engine values. Strings share one
+//! metatable in Lua, so [`lock_string_metatable`] hides it from scripts.
 
 use axcenity_core::InstanceId;
 use mlua::{Function, Lua, Table, Value};
 
-use crate::{api, errors, modules, task, watchdog};
+use crate::{api, errors, modules, task, types, watchdog};
 
 /// Standard functions scripts may use as they are.
 pub const SAFE_FUNCTIONS: &[&str] = &[
@@ -37,7 +37,17 @@ pub const SAFE_FUNCTIONS: &[&str] = &[
 
 /// Standard library tables. Each script gets its own copy, so one script
 /// adding to `math` doesn't change `math` for the others.
-pub const SAFE_LIBRARIES: &[&str] = &["coroutine", "math", "string", "table", "utf8"];
+/// `bit32` and `buffer` only work on numbers and their own byte buffers
+/// (every read and write is bounds-checked), so they reach nothing outside.
+pub const SAFE_LIBRARIES: &[&str] = &[
+    "bit32",
+    "buffer",
+    "coroutine",
+    "math",
+    "string",
+    "table",
+    "utf8",
+];
 
 /// Library functions left out of those copies. `string.dump` turns functions
 /// into bytecode, which is only useful together with the missing `load`.
@@ -50,10 +60,8 @@ const SAFE_OS_FUNCTIONS: &[&str] = &["clock", "date", "difftime", "time"];
 /// What `getmetatable` gives for a string, as in Roblox.
 const LOCKED: &str = "The metatable is locked";
 
-/// Lua runs `__gc` finalizers with hooks off, so the watchdog couldn't stop
-/// one that never ends, and they run at whatever moment memory is freed.
-/// So scripts can't make them. Lua only looks for `__gc` when the metatable
-/// is set, so checking here is enough.
+/// Luau never runs `__gc` on tables, so a script that sets one gets an error
+/// saying so rather than a finalizer that silently never runs.
 const SET_METATABLE: &str = r#"
 local setmetatable, rawget, type, error = ...
 
@@ -76,6 +84,7 @@ pub struct Shared {
     task: task::TaskFunctions,
     require: Function,
     collectgarbage: Function,
+    type_of: Function,
 }
 
 impl Shared {
@@ -101,6 +110,8 @@ impl Shared {
                  is the memory in use, in kilobytes",
             )),
         })?;
+        let type_of =
+            lua.create_function(|lua, value: Value| Ok(types::typeof_name(lua, &value)))?;
         lua.set_app_data(Self {
             protected,
             coroutine,
@@ -108,6 +119,7 @@ impl Shared {
             task,
             require,
             collectgarbage,
+            type_of,
         });
         Ok(())
     }
@@ -170,6 +182,7 @@ const ENGINE_GLOBALS: &[&str] = &[
     "setmetatable",
     "require",
     "collectgarbage",
+    "typeof",
     "os",
     "_G",
 ];
@@ -202,6 +215,7 @@ pub fn environment(lua: &Lua, ids: ScriptIds) -> mlua::Result<Table> {
     env.raw_set("setmetatable", &shared.setmetatable)?;
     env.raw_set("require", &shared.require)?;
     env.raw_set("collectgarbage", &shared.collectgarbage)?;
+    env.raw_set("typeof", &shared.type_of)?;
 
     for &library in SAFE_LIBRARIES {
         let copy = safe_copy(lua, &globals.raw_get(library)?, library)?;
