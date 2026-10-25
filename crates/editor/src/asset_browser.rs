@@ -295,6 +295,8 @@ pub enum BrowserAction {
     DuplicatePrefab { path: String },
     /// Delete the prefab file at `path`.
     DeletePrefab { path: String },
+    /// Export these files (and what they need) as an asset package named `name`.
+    ExportPackage { name: String, paths: Vec<String> },
     /// A line for Output. `error` is a failure.
     Notice { error: bool, text: String },
 }
@@ -323,6 +325,9 @@ pub struct AssetBrowser {
     get_texture: Option<GetTexture>,
     /// The imported model's folder shown (by its name), if one is open.
     open_package: Option<String>,
+    /// The paths of the assets picked with a click (Ctrl or Cmd adds),
+    /// for Export Package….
+    picked: Vec<String>,
     /// The global assets' folder (see `global_assets.rs`), if there is one.
     library: Option<PathBuf>,
     /// The global assets this project hasn't got, scanned with `files`.
@@ -708,8 +713,23 @@ impl AssetBrowser {
             ItemMenu::Delete { path } => {
                 self.dialog = Some(PrefabDialog::Delete { path });
             }
+            ItemMenu::ExportPackage { name, paths } => {
+                return Some(BrowserAction::ExportPackage { name, paths });
+            }
         }
         None
+    }
+
+    /// A click on the asset at `path`: picks only it, or with `adding`
+    /// (Ctrl or Cmd held) picks or unpicks it along with the others.
+    fn pick_click(&mut self, path: &str, adding: bool) {
+        match self.picked.iter().position(|picked| picked == path) {
+            Some(at) if adding => {
+                self.picked.remove(at);
+            }
+            None if adding => self.picked.push(path.to_owned()),
+            _ => self.picked = vec![path.to_owned()],
+        }
     }
 
     /// The "Global asset" checkbox of the asset at `path`'s right-click
@@ -982,7 +1002,11 @@ impl AssetBrowser {
         );
         let painter = ui.painter();
         painter.rect_filled(rect, 6.0, palette.control_hover.gamma_multiply(hover));
-        if response.has_focus() || selected {
+        let picked = self.picked.contains(&entry.path);
+        if picked {
+            painter.rect_filled(rect, 6.0, palette.control_active);
+        }
+        if response.has_focus() || selected || picked {
             painter.rect_stroke(
                 rect,
                 6.0,
@@ -1087,10 +1111,20 @@ impl AssetBrowser {
         if entry.kind != AssetKind::Prop {
             let path = entry.path.clone();
             let name = entry.name.clone();
-            let prefab = can_edit && entry.kind == AssetKind::Prefab && self.is_local(&path);
+            let local = self.is_local(&path);
+            let prefab = can_edit && entry.kind == AssetKind::Prefab && local;
+            // The picked assets if this is one of them, or else just this.
+            let export = if picked {
+                self.picked.clone()
+            } else {
+                vec![path.clone()]
+            };
             response.context_menu(|ui| {
                 if let Some(picked) = self.global_checkbox(ui, &path) {
                     menu = Some(picked);
+                }
+                if local && let Some(chosen) = export_package_button(ui, &name, &export) {
+                    menu = Some(chosen);
                 }
                 if !prefab {
                     return;
@@ -1118,6 +1152,10 @@ impl AssetBrowser {
         }
         let pick = can_edit && foliage.is_some() && foliage_kind && response.clicked();
         let place = can_edit && !pick && response.double_clicked();
+        if response.clicked() && !pick {
+            let modifiers = ui.input(|input| input.modifiers);
+            self.pick_click(&entry.path, modifiers.command || modifiers.ctrl);
+        }
         (place, pick, menu)
     }
 
@@ -1294,6 +1332,41 @@ pub(super) enum ItemMenu {
     Delete {
         path: String,
     },
+    /// Export these files as an asset package named `name`.
+    ExportPackage {
+        name: String,
+        paths: Vec<String>,
+    },
+}
+
+/// The Export Package… item of a right-click menu, for the asset `name`
+/// or, with several `paths`, the picked assets.
+pub(super) fn export_package_button(
+    ui: &mut egui::Ui,
+    name: &str,
+    paths: &[String],
+) -> Option<ItemMenu> {
+    let label = match paths.len() {
+        1 => "Export Package…".to_owned(),
+        n => format!("Export Package… ({n} assets)"),
+    };
+    let clicked = ui
+        .button(theme::with_icon(icons::PACKAGE, &label))
+        .on_hover_text(
+            "Save it, and every file it needs, as one .axpkg file to import into another project.",
+        )
+        .clicked();
+    clicked.then(|| {
+        ui.close();
+        ItemMenu::ExportPackage {
+            name: if paths.len() == 1 {
+                name.to_owned()
+            } else {
+                "Package".to_owned()
+            },
+            paths: paths.to_vec(),
+        }
+    })
 }
 
 /// A globe at the top right of a global asset's picture.

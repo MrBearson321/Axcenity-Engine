@@ -168,10 +168,10 @@ Files identical to the project's are skipped silently and aren't counted as clas
 
 ### Acceptance criteria
 
-- [ ] Hero's state machine, exported from one project and imported into an empty one, plays the same, because its clips and FBX came with it.
-- [ ] Importing the same package twice adds nothing the second time.
-- [ ] Keep both, Replace and Skip existing each do what they say when a clip was changed in the destination project.
-- [ ] Asset validation (v2 Phase 7) reports no broken references after any of the three choices.
+- [x] Hero's state machine, exported from one project and imported into an empty one, plays the same, because its clips and FBX came with it.
+- [x] Importing the same package twice adds nothing the second time.
+- [x] Keep both, Replace and Skip existing each do what they say when a clip was changed in the destination project.
+- [x] Asset validation (v2 Phase 7) reports no broken references after any of the three choices.
 
 ---
 

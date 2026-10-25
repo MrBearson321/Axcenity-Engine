@@ -6,6 +6,7 @@ Map only. Open the one file that matches the change.
 - `world.json` and the other saved Instance data: [project/world.md](project/world.md)
 - Animation clip and state machine files: [project/animation-files.md](project/animation-files.md)
 - How asset paths are read: [project/assets.md](project/assets.md)
+- Asset packages (`.axpkg`): [project/packages.md](project/packages.md)
 - Export, version history, splash: [project/export.md](project/export.md)
 - GitHub releases and version tags: [project/releases.md](project/releases.md)
 - Installing a release: [project/install.md](project/install.md)

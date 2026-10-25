@@ -113,6 +113,8 @@ pub enum Action {
     /// Give `id` an Animator (if it has none), a new clip and an Animation
     /// playing it, and open it in the Animation tab.
     Animate(InstanceId),
+    /// Save `id` as a prefab, with every asset it uses, in an asset package.
+    ExportPackage(InstanceId),
 }
 
 /// Changes `selection` for a click. The last id is the primary one (Properties
@@ -631,6 +633,8 @@ enum RowCommand {
     Open,
     /// Animate a Part, Model or UI element (see [`Action::Animate`]).
     Animate,
+    /// Export it as a prefab in an asset package.
+    ExportPackage,
     Rename,
     Duplicate,
     Delete,
@@ -649,6 +653,7 @@ impl RowCommand {
             RowCommand::InsertScript(class) => Some(Action::InsertScript(class)),
             RowCommand::Open | RowCommand::Rename => None,
             RowCommand::Animate => Some(Action::Animate(id)),
+            RowCommand::ExportPackage => Some(Action::ExportPackage(id)),
             RowCommand::Duplicate => Some(Action::Duplicate(id)),
             RowCommand::Delete => Some(Action::Delete(id)),
         }
@@ -740,6 +745,20 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
             chosen = Some(RowCommand::Insert(remote));
         }
     });
+    if ui
+        .add_enabled(
+            tree::can_be_prefab(world, id),
+            egui::Button::new(theme::with_icon(icons::PACKAGE, "Export Package…")),
+        )
+        .on_hover_text(
+            "Save it as a prefab, with every model, texture, sound and clip it uses, in one \
+             .axpkg file to import into another project.",
+        )
+        .on_disabled_hover_text("Only parts, Models and Folders in the Workspace can be exported.")
+        .clicked()
+    {
+        chosen = Some(RowCommand::ExportPackage);
+    }
     ui.separator();
 
     let renamable = world.get(id).is_some_and(properties::can_rename);

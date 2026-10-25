@@ -24,6 +24,7 @@
 
 mod migrate;
 mod migrate_animation;
+mod package;
 mod packed;
 mod terrain_files;
 mod validate;
@@ -47,6 +48,10 @@ use axcenity_core::{ClassName, InstanceId, World};
 use serde::Deserialize;
 
 pub use migrate::PREVIOUS_FORMAT_DIR;
+pub use package::{
+    Clashes, Contents, ImportPlan, PACKAGE_EXTENSION, Package, PackageError, PackageManifest,
+    package_contents, plan_import, read_package, write_package,
+};
 pub use packed::{PackError, pack_game, unpack_game};
 pub use terrain_files::{
     TERRAIN_FOLDER, data_folder, is_safe_folder, keep_terrain_folder, load_terrains,

@@ -26,6 +26,9 @@
 //! Renaming a controller can also change Animators' `Controller` paths in the
 //! same step ([`PropertyEdit`]).
 //!
+//! Importing an asset package writes files of any kind, models and
+//! pictures too, so its step keeps each file's bytes ([`BlobChange`]).
+//!
 //! A Terrain's landscape isn't a property, so its changes are steps of their
 //! own ([`TerrainChange`]): a brush stroke keeps the chunks it changed, and a
 //! whole new landscape (generated, eroded, resized) keeps both landscapes.
@@ -120,6 +123,24 @@ pub struct TextChange {
     pub after: Option<String>,
 }
 
+/// A project file's bytes before and after a change, for files that may
+/// not be text (an imported package's models and pictures). `None` means
+/// the file is not there.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BlobChange {
+    pub path: String,
+    pub before: Option<Arc<Vec<u8>>>,
+    pub after: Option<Arc<Vec<u8>>>,
+}
+
+/// The files undo or redo changed, for the app to write: each goes from
+/// its `before` to its `after`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Restored {
+    pub texts: Vec<TextChange>,
+    pub blobs: Vec<BlobChange>,
+}
+
 /// One property changed as part of an asset step, such as an Animator's
 /// `Controller` path when that controller file is renamed.
 #[derive(Clone, Debug, PartialEq)]
@@ -180,6 +201,9 @@ enum StepKind {
         properties: Vec<PropertyEdit>,
         moves: Vec<Move>,
     },
+    /// Project files of any kind written at once, such as an imported
+    /// asset package.
+    Blobs(Vec<BlobChange>),
     /// A Terrain's landscape, and its fields changed at the same time
     /// (a new `Size` with a generated landscape).
     Terrain {
@@ -320,6 +344,21 @@ impl History {
             top.number = number;
             self.open = Some(number);
         }
+    }
+
+    /// Records project files written as bytes (created, or overwritten) as
+    /// one undo step named `label`. Does nothing if nothing changed.
+    pub fn record_blobs(&mut self, world: &mut World, label: String, blobs: Vec<BlobChange>) {
+        let blobs: Vec<_> = blobs
+            .into_iter()
+            .filter(|blob| blob.before != blob.after)
+            .collect();
+        if blobs.is_empty() {
+            return;
+        }
+        self.seal();
+        self.push(world, label, StepKind::Blobs(blobs));
+        self.seal();
     }
 
     /// Records rewritten project file text as one undo step named `label`
@@ -574,12 +613,13 @@ impl History {
     }
 
     /// Puts the last step's "before" values back. Returns `None` if there
-    /// was nothing to undo, or the stylesheets to change back, each from its
-    /// `before` text to its `after`.
-    pub fn undo(&mut self, world: &mut World) -> Option<Vec<TextChange>> {
+    /// was nothing to undo, or the files to change back, each from its
+    /// `before` to its `after`.
+    pub fn undo(&mut self, world: &mut World) -> Option<Restored> {
         self.seal();
         let mut step = self.undo.pop()?;
         let mut undone = Vec::new();
+        let mut blobs = Vec::new();
         match &mut step.kind {
             StepKind::Fields {
                 id, changes, texts, ..
@@ -634,18 +674,32 @@ impl History {
                     }
                 }
             }
+            StepKind::Blobs(changes) => {
+                blobs = changes
+                    .iter()
+                    .map(|blob| BlobChange {
+                        path: blob.path.clone(),
+                        before: blob.after.clone(),
+                        after: blob.before.clone(),
+                    })
+                    .collect();
+            }
             StepKind::World(other) => std::mem::swap(world, &mut *other.0),
         }
         self.redo.push(step);
-        Some(undone)
+        Some(Restored {
+            texts: undone,
+            blobs,
+        })
     }
 
     /// Puts the last undone step's "after" values back. Returns `None` if
-    /// there was nothing to redo, or the stylesheets to change, as [`History::undo`].
-    pub fn redo(&mut self, world: &mut World) -> Option<Vec<TextChange>> {
+    /// there was nothing to redo, or the files to change, as [`History::undo`].
+    pub fn redo(&mut self, world: &mut World) -> Option<Restored> {
         self.seal();
         let mut step = self.redo.pop()?;
         let mut redone = Vec::new();
+        let mut blobs = Vec::new();
         match &mut step.kind {
             StepKind::Fields {
                 id, changes, texts, ..
@@ -685,10 +739,14 @@ impl History {
                     }
                 }
             }
+            StepKind::Blobs(changes) => blobs = changes.clone(),
             StepKind::World(other) => std::mem::swap(world, &mut *other.0),
         }
         self.undo.push(step);
-        Some(redone)
+        Some(Restored {
+            texts: redone,
+            blobs,
+        })
     }
 
     /// Remembers that the world as it is now is what's saved. The history
@@ -824,9 +882,10 @@ mod tests {
         }
         history.seal();
 
-        assert_eq!(history.undo(&mut world), Some(text("12px", "10px")));
+        let texts = |restored: Option<Restored>| restored.map(|restored| restored.texts);
+        assert_eq!(texts(history.undo(&mut world)), Some(text("12px", "10px")));
         assert_eq!(history.undo(&mut world), None, "both frames are one step");
-        assert_eq!(history.redo(&mut world), Some(text("10px", "12px")));
+        assert_eq!(texts(history.redo(&mut world)), Some(text("10px", "12px")));
     }
 
     #[test]
@@ -871,12 +930,51 @@ mod tests {
         assert!(history.is_saved());
         assert_eq!(history.undo_label(), Some("Create Walk"));
 
-        let undone = history.undo(&mut world).unwrap();
+        let undone = history.undo(&mut world).unwrap().texts;
         assert_eq!(undone[0].path, path);
         assert_eq!(undone[0].after, None);
         assert_eq!(history.redo_label(), Some("Create Walk"));
-        let redone = history.redo(&mut world).unwrap();
+        let redone = history.redo(&mut world).unwrap().texts;
         assert_eq!(redone[0].after.as_deref(), Some("{}\n"));
+    }
+
+    #[test]
+    fn files_written_as_bytes_are_one_step_that_hands_them_back() {
+        let mut world = World::new();
+        let mut history = History::new();
+        let model = Arc::new(vec![0, 159, 146, 150]);
+        let old = Arc::new(b"old".to_vec());
+        history.record_blobs(
+            &mut world,
+            "Import noodle.axpkg".into(),
+            vec![
+                BlobChange {
+                    path: "assets/models/noodle.fbx".into(),
+                    before: None,
+                    after: Some(model.clone()),
+                },
+                BlobChange {
+                    path: "assets/textures/a.png".into(),
+                    before: Some(old.clone()),
+                    after: Some(old.clone()),
+                },
+            ],
+        );
+        assert_eq!(history.undo_label(), Some("Import noodle.axpkg"));
+        let undone = history.undo(&mut world).unwrap();
+        assert!(undone.texts.is_empty());
+        // Unchanged files aren't kept.
+        assert_eq!(
+            undone.blobs,
+            [BlobChange {
+                path: "assets/models/noodle.fbx".into(),
+                before: Some(model.clone()),
+                after: None,
+            }]
+        );
+        assert_eq!(history.undo(&mut world), None);
+        let redone = history.redo(&mut world).unwrap();
+        assert_eq!(redone.blobs[0].after, Some(model));
     }
 
     #[test]

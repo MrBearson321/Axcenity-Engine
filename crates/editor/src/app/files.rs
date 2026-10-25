@@ -1,6 +1,6 @@
 //! The editor and the project folder: saving, script files (insert, open,
-//! rename, delete), importing models, and reacting to files changed by
-//! other programs.
+//! rename, delete), importing models and asset packages, and reacting to
+//! files changed by other programs.
 //!
 //! Each script is its `.server.lua` (Script), `.client.lua` (LocalScript)
 //! or `.module.lua` (ModuleScript) file, or for a Script or LocalScript
@@ -38,11 +38,13 @@ use crate::tree::{self, Insertable};
 
 mod export;
 mod import;
+mod packages;
 mod pickers;
 mod script_files;
 mod watch;
 
 pub(super) use export::ExportTarget;
+pub(super) use import::is_package;
 
 /// An error and its causes on one line, the way `{:#}` shows an `anyhow::Error`.
 pub(super) fn chain(err: &dyn std::error::Error) -> String {
@@ -436,5 +438,7 @@ impl EditorApp {
     }
 }
 
+#[cfg(test)]
+mod package_tests;
 #[cfg(test)]
 mod tests;

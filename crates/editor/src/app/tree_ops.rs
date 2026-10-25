@@ -45,6 +45,7 @@ impl EditorApp {
                 self.move_into(id, parent);
             }
             Action::Animate(id) => self.animate(id),
+            Action::ExportPackage(id) => self.export_object_package_with_dialog(id),
         }
     }
     /// Where a new part goes: the camera's focus point, on the move grid

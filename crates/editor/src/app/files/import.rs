@@ -16,6 +16,12 @@ pub(super) fn mesh_part_properties(
     ]
 }
 
+/// True if `file` is an asset package (`.axpkg`).
+pub(in crate::app) fn is_package(file: &Path) -> bool {
+    file.extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case(project::PACKAGE_EXTENSION))
+}
+
 /// An object's name from a model file as an Instance name.
 pub(super) fn object_name(name: &str) -> String {
     match name.trim() {
@@ -38,21 +44,23 @@ impl EditorApp {
         everything.extend(axcenity_assets::TEXTURE_EXTENSIONS);
         everything.extend(axcenity_assets::AUDIO_EXTENSIONS);
         everything.push("json");
+        everything.push(project::PACKAGE_EXTENSION);
         let dialog = rfd::FileDialog::new()
             .set_title("Import")
-            .add_filter("Models, images, sounds and prefabs", &everything)
+            .add_filter("Models, images, sounds, prefabs and packages", &everything)
             .add_filter("3D model", &MODELS)
             .add_filter("Image", &axcenity_assets::TEXTURE_EXTENSIONS)
             .add_filter("Sound", &axcenity_assets::AUDIO_EXTENSIONS)
-            .add_filter("Prefab", &["json"]);
+            .add_filter("Prefab", &["json"])
+            .add_filter("Asset package", &[project::PACKAGE_EXTENSION]);
         // `None` means the dialog was cancelled.
         if let Some(files) = dialog.pick_files() {
             self.import_files(files, image_folder);
         }
     }
 
-    /// Imports each of `files` by its kind: a model through the Import
-    /// dialog (one at a time, in order), and images (into `image_folder`),
+    /// Imports each of `files` by its kind: a model or an asset package
+    /// through the Import dialog (one at a time, in order), and images (into `image_folder`),
     /// sounds and prefabs straight into the project, reported in the
     /// Console.
     pub(in crate::app) fn import_files(&mut self, files: Vec<PathBuf>, image_folder: &str) {
@@ -159,7 +167,9 @@ impl EditorApp {
         match dialog.show(ctx, render_state) {
             Some(Answer::Import) => {
                 let dialog = self.importing.take().expect("checked above");
-                if dialog.animation_only {
+                if dialog.package.is_some() {
+                    self.import_package_chosen(&dialog);
+                } else if dialog.animation_only {
                     self.import_animation_only(&dialog);
                 } else {
                     self.import_chosen(&dialog);
@@ -171,13 +181,17 @@ impl EditorApp {
         self.next_import();
     }
 
-    /// Imports the models waiting their turn, until one opens the dialog
-    /// again (the others go straight in).
+    /// Imports the models and packages waiting their turn, until one opens
+    /// the dialog again (some models go straight in).
     pub(in crate::app) fn next_import(&mut self) {
         while self.importing.is_none()
             && let Some(file) = self.import_queue.pop_front()
         {
-            self.import_model(&file);
+            if is_package(&file) {
+                self.import_package(&file);
+            } else {
+                self.import_model(&file);
+            }
         }
     }
 

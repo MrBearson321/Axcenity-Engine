@@ -5,6 +5,9 @@
 //! what importing makes beside them. Above Import and Cancel, which stay
 //! pinned at the bottom, a sentence says what Import creates and where.
 //!
+//! An asset package (`.axpkg`) opens the same dialog with one tab, Package
+//! (`package.rs`), and no preview.
+//!
 //! The ticking rules and what importing makes are plain methods, so
 //! they're easy to test; the app turns the answer into Instances.
 
@@ -23,11 +26,13 @@ use crate::theme::{self, icons};
 use crate::widgets;
 
 pub(crate) mod outcome;
+mod package;
 mod preview;
 mod tabs;
 #[cfg(test)]
 mod tests;
 
+pub use package::PackageImport;
 use preview::ImportPreview;
 
 /// How the ticked objects arrive in the world.
@@ -52,6 +57,9 @@ pub enum Tab {
     Materials,
     /// The skeleton, takes and clips to make.
     Animation,
+    /// What's in an asset package, and what to do with files the project
+    /// already has.
+    Package,
 }
 
 impl Tab {
@@ -60,6 +68,7 @@ impl Tab {
             Tab::Objects => "Objects",
             Tab::Materials => "Materials",
             Tab::Animation => "Animation",
+            Tab::Package => "Package",
         }
     }
 }
@@ -108,6 +117,9 @@ pub struct ImportDialog {
     /// True for a file with only animation in it (nothing to draw): only
     /// its clips are imported.
     pub animation_only: bool,
+    /// The asset package being imported, for a `.axpkg` file (then there's
+    /// no model).
+    pub package: Option<PackageImport>,
     /// The tab shown (the first tab if it isn't one of [`tabs`](Self::tabs)).
     pub tab: Tab,
     /// The model drawn beside the tabs; `None` without one (an
@@ -143,6 +155,7 @@ impl ImportDialog {
             materials,
             animation: None,
             animation_only: false,
+            package: None,
             tab: Tab::Objects,
             preview: None,
             previewing: 0,
@@ -157,6 +170,14 @@ impl ImportDialog {
         Self {
             animation: Some(animation),
             animation_only: true,
+            ..Self::new(file, Vec::new(), Vec::new())
+        }
+    }
+
+    /// The dialog for an asset package.
+    pub fn package(file: PathBuf, package: PackageImport) -> Self {
+        Self {
+            package: Some(package),
             ..Self::new(file, Vec::new(), Vec::new())
         }
     }
@@ -191,6 +212,9 @@ impl ImportDialog {
 
     /// The tabs this file needs, in order.
     pub fn tabs(&self) -> Vec<Tab> {
+        if self.package.is_some() {
+            return vec![Tab::Package];
+        }
         let mut tabs = Vec::new();
         if self.pick_objects {
             tabs.push(Tab::Objects);
@@ -276,6 +300,9 @@ impl ImportDialog {
 
     /// Why it can't be imported as it is, if it can't.
     pub fn problem(&self) -> Option<String> {
+        if let Some(package) = &self.package {
+            return package.problem();
+        }
         if !self.animation_only && self.pick_objects && self.chosen().is_empty() {
             return Some("Tick at least one object to import.".to_owned());
         }
@@ -318,6 +345,9 @@ impl ImportDialog {
 
     /// What the file holds, in a few words, for under the title.
     fn holds(&self) -> String {
+        if let Some(package) = &self.package {
+            return package.holds();
+        }
         let mut parts = Vec::new();
         if !self.animation_only {
             let meshes = self.objects.iter().filter(|o| o.has_mesh()).count();
@@ -368,7 +398,14 @@ impl ImportDialog {
                 let body_height =
                     (room.y - ui.min_rect().height() - FOOTER_HEIGHT - summary.size().y)
                         .clamp(80.0, BODY_HEIGHT);
-                if width >= SIDE_BY_SIDE_FROM {
+                if self.package.is_some() {
+                    // Nothing to preview: the tab has the whole width.
+                    egui::ScrollArea::vertical()
+                        .id_salt("import package")
+                        .max_height(body_height)
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| self.tab_body(ui));
+                } else if width >= SIDE_BY_SIDE_FROM {
                     self.side_by_side(ui, render_state, body_height);
                 } else {
                     self.stacked(ui, render_state, body_height);
@@ -429,7 +466,11 @@ impl ImportDialog {
             ..Default::default()
         };
         // The sentence puts paths between backticks.
-        for (i, piece) in self.creates().sentence().split('`').enumerate() {
+        let sentence = match &self.package {
+            Some(package) => package.sentence(),
+            None => self.creates().sentence(),
+        };
+        for (i, piece) in sentence.split('`').enumerate() {
             let font = if i % 2 == 1 {
                 egui::FontId::monospace(theme::type_scale::SMALL)
             } else {
@@ -570,6 +611,12 @@ impl ImportDialog {
             Tab::Materials => {
                 part_title(ui, "Texture maps");
                 tabs::materials(self, ui);
+            }
+            Tab::Package => {
+                part_title(ui, "Package");
+                if let Some(package) = &mut self.package {
+                    package.show(ui);
+                }
             }
             Tab::Animation => {
                 part_title(ui, "Animation");

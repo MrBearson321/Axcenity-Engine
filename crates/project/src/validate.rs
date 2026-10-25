@@ -19,8 +19,8 @@ use crate::world_file::parse_prefab;
 
 /// Folders at the project root that are not part of the game.
 const SKIP_ROOT_DIRS: &[&str] = &[".axcenity", ".git", "target", "node_modules"];
-const PREFABS_FOLDER: &str = "assets/prefabs";
-const PREFAB_SUFFIX: &str = ".prefab.json";
+pub(crate) const PREFABS_FOLDER: &str = "assets/prefabs";
+pub(crate) const PREFAB_SUFFIX: &str = ".prefab.json";
 
 const SURFACE_MAPS: [&str; 8] = [
     "ColorMap",
@@ -92,7 +92,7 @@ impl Report {
 }
 
 #[derive(Clone, Copy)]
-enum AssetKind {
+pub(crate) enum AssetKind {
     Model,
     Texture,
     Audio,
@@ -489,7 +489,7 @@ impl Scan {
     }
 }
 
-fn refs(class: ClassName) -> Vec<(&'static str, AssetKind)> {
+pub(crate) fn refs(class: ClassName) -> Vec<(&'static str, AssetKind)> {
     match class {
         ClassName::MeshPart => vec![("MeshId", AssetKind::Model)],
         ClassName::Sound => vec![("SoundId", AssetKind::Audio)],
@@ -510,7 +510,7 @@ fn refs(class: ClassName) -> Vec<(&'static str, AssetKind)> {
     }
 }
 
-fn string_prop(value: Option<&Value>) -> Option<&str> {
+pub(crate) fn string_prop(value: Option<&Value>) -> Option<&str> {
     match value {
         Some(Value::String(text)) => Some(text.as_str()),
         _ => None,
@@ -561,7 +561,7 @@ fn has_extension(path: &str, extensions: &[&str]) -> bool {
         })
 }
 
-fn files_under(root: &Path, relative: &str) -> Vec<String> {
+pub(crate) fn files_under(root: &Path, relative: &str) -> Vec<String> {
     let mut found = Vec::new();
     walk(root, &root.join(relative), &mut found);
     found

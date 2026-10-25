@@ -412,7 +412,7 @@ impl EditorApp {
         let roots: Vec<InstanceId> = self
             .selection_roots()
             .into_iter()
-            .filter(|&id| can_be_prefab(&self.world, id))
+            .filter(|&id| tree::can_be_prefab(&self.world, id))
             .collect();
         if roots.is_empty() {
             self.output
@@ -543,10 +543,14 @@ impl EditorApp {
     }
 
     /// Imports one file into the project (in `folder`) by its kind, for
-    /// Import…: a model through the Import dialog, the rest copied
+    /// Import…: a model or an asset package through the Import dialog, the rest copied
     /// straight into `assets` (images into `image_folder`) and reported in
     /// the Console.
     pub(in crate::app) fn import_file(&mut self, folder: &Path, file: &Path, image_folder: &str) {
+        if super::files::is_package(file) {
+            self.import_package(file);
+            return;
+        }
         let name = file.to_string_lossy().replace('\\', "/");
         let result = match asset_browser::kind_of(&name) {
             Some(AssetKind::Model) => {
@@ -643,22 +647,9 @@ fn is_part(world: &World, id: InstanceId) -> bool {
         .is_some_and(|i| matches!(i.class(), ClassName::Part | ClassName::MeshPart))
 }
 
-/// True if `id` can go in a prefab: something in the Workspace that isn't
-/// a script, a service or UI.
-fn can_be_prefab(world: &World, id: InstanceId) -> bool {
-    let Some(instance) = world.get(id) else {
-        return false;
-    };
-    let class = instance.class();
-    !class.is_service()
-        && !class.is_script()
-        && class != ClassName::ScreenGui
-        && world.is_descendant_of(id, world.workspace())
-}
-
 /// True if the selection has something [`can_be_prefab`].
 pub(super) fn any_prefab(world: &World, ids: &[InstanceId]) -> bool {
-    ids.iter().any(|&id| can_be_prefab(world, id))
+    ids.iter().any(|&id| tree::can_be_prefab(world, id))
 }
 
 /// `ids` and everything inside them.

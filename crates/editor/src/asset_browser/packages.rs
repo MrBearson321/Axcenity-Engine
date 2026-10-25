@@ -299,8 +299,18 @@ impl AssetBrowser {
             }
         ));
         let mut menu = None;
+        let local = self.is_local(&package.model.path);
+        let paths: Vec<String> = package
+            .members
+            .iter()
+            .filter(|member| self.is_local(&member.path))
+            .map(|member| member.path.clone())
+            .collect();
         response.context_menu(|ui| {
             menu = self.global_checkbox(ui, &package.model.path);
+            if local && let Some(chosen) = super::export_package_button(ui, &package.name, &paths) {
+                menu = Some(chosen);
+            }
         });
         if can_edit && response.drag_started() {
             egui::DragAndDrop::set_payload(ui.ctx(), AssetPayload(package.model.clone()));

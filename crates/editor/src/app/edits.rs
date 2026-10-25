@@ -688,16 +688,18 @@ impl EditorApp {
     /// is playing (undo would change a world that isn't on screen).
     pub(super) fn undo(&mut self) {
         if !self.viewport.is_dragging() && !self.playing() {
-            if let Some(texts) = self.history.undo(&mut self.world) {
-                self.apply_history_texts(texts);
+            if let Some(restored) = self.history.undo(&mut self.world) {
+                self.apply_history_texts(restored.texts);
+                self.write_package_files(&restored.blobs);
             }
             self.forget_selection_outside_tree();
         }
     }
     pub(super) fn redo(&mut self) {
         if !self.viewport.is_dragging() && !self.playing() {
-            if let Some(texts) = self.history.redo(&mut self.world) {
-                self.apply_history_texts(texts);
+            if let Some(restored) = self.history.redo(&mut self.world) {
+                self.apply_history_texts(restored.texts);
+                self.write_package_files(&restored.blobs);
             }
             self.forget_selection_outside_tree();
         }

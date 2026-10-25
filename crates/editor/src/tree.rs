@@ -411,6 +411,19 @@ pub fn check_move(world: &World, id: InstanceId, parent: InstanceId) -> Result<(
     Ok(())
 }
 
+/// True if `id` can go in a prefab: something in the Workspace that isn't
+/// a script, a service or UI.
+pub fn can_be_prefab(world: &World, id: InstanceId) -> bool {
+    let Some(instance) = world.get(id) else {
+        return false;
+    };
+    let class = instance.class();
+    !class.is_service()
+        && !class.is_script()
+        && class != ClassName::ScreenGui
+        && world.is_descendant_of(id, world.workspace())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
