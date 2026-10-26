@@ -1,5 +1,19 @@
 use super::*;
 
+/// Its text's size in authored pixels: CSS `font-size`, else `TextSize`.
+pub(super) fn font_size(instance: &Instance, styles: &ResolvedStyles) -> f32 {
+    css_length_property(styles, "font-size")
+        .or_else(|| {
+            instance
+                .property("TextSize")
+                .and_then(Value::as_number)
+                .map(|n| n as f32)
+        })
+        .map(finite)
+        .unwrap_or(16.0)
+        .max(1.0)
+}
+
 pub(super) fn paint_instance(
     instance: &Instance,
     rect: UiRect,
@@ -132,16 +146,7 @@ pub(super) fn paint_instance(
         } else {
             typed
         };
-        let font_size = css_length_property(styles, "font-size")
-            .or_else(|| {
-                instance
-                    .property("TextSize")
-                    .and_then(Value::as_number)
-                    .map(|n| n as f32)
-            })
-            .map(finite)
-            .unwrap_or(16.0)
-            .max(1.0);
+        let font_size = font_size(instance, styles);
         let css_text_color = css_color(styles, "color");
         let color = css_text_color
             .map(|(color, _)| color)

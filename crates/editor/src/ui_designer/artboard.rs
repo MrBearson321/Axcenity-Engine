@@ -306,8 +306,14 @@ impl UiDesigner {
                 input.pointer.latest_pos(),
             )
         });
-        let over =
-            pointer.filter(|&pointer| response.contains_pointer() && visible.contains(pointer));
+        // The box being typed in takes its own clicks: they place the
+        // caret, not select or drag what's under it.
+        let typing = self.typing_rect(&layout, visible, ppp);
+        let over = pointer.filter(|&pointer| {
+            response.contains_pointer()
+                && visible.contains(pointer)
+                && !typing.is_some_and(|rect| rect.contains(pointer))
+        });
         let grip = match (over, &handles) {
             (Some(pointer), Some(handles)) => handles.grip_at(pointer),
             _ => None,
@@ -474,7 +480,7 @@ impl UiDesigner {
                 egui::StrokeKind::Inside,
             );
         }
-        self.type_over(ui, scene, &layout, visible, view, actions);
+        self.type_over(ui, scene, &layout, visible, actions);
         selected_rect
     }
 
@@ -542,6 +548,16 @@ impl UiDesigner {
         });
     }
 
+    /// Where the box for the text being typed over goes, in points.
+    fn typing_rect(&self, layout: &UiLayout, visible: egui::Rect, ppp: f32) -> Option<egui::Rect> {
+        let element = layout.element(self.text_editing.as_ref()?.id)?;
+        let rect = egui::Rect::from_min_size(
+            visible.min + egui::vec2(element.rect.x, element.rect.y) / ppp,
+            egui::vec2(element.rect.width, element.rect.height) / ppp,
+        );
+        Some(rect.expand(2.0))
+    }
+
     /// The text being typed over, in a box over its element. Each change is
     /// an edit of its `Text`, so the whole typing is one undo step. Enter
     /// or clicking away finishes, and Escape puts the text back.
@@ -551,14 +567,15 @@ impl UiDesigner {
         scene: &DesignerScene,
         layout: &UiLayout,
         visible: egui::Rect,
-        view: &View,
         actions: &mut Vec<DesignerAction>,
     ) {
+        let ppp = ui.ctx().pixels_per_point();
+        let rect = self.typing_rect(layout, visible, ppp);
         let Some(editing) = &mut self.text_editing else {
             return;
         };
-        let ppp = ui.ctx().pixels_per_point();
-        let (Some(element), Some(instance), true) = (
+        let (Some(rect), Some(element), Some(instance), true) = (
+            rect,
             layout.element(editing.id),
             scene.world.get(editing.id),
             scene.editing,
@@ -566,16 +583,9 @@ impl UiDesigner {
             self.text_editing = None;
             return;
         };
-        let rect = egui::Rect::from_min_size(
-            visible.min + egui::vec2(element.rect.x, element.rect.y) / ppp,
-            egui::vec2(element.rect.width, element.rect.height) / ppp,
-        )
-        .expand(2.0);
-        let size = instance
-            .property("TextSize")
-            .and_then(Value::as_number)
-            .unwrap_or(16.0) as f32;
-        let font = egui::FontId::proportional((size * view.per_unit()).clamp(8.0, 72.0));
+        // The size the artboard draws it at, so typing doesn't shrink it.
+        let size = element.font_size * element.pixels_per_unit / ppp;
+        let font = egui::FontId::proportional(size.clamp(6.0, 256.0));
         let multi_line = instance.property("MultiLine").and_then(Value::as_bool) == Some(true);
         let edit = if multi_line {
             egui::TextEdit::multiline(&mut editing.text)
@@ -583,7 +593,13 @@ impl UiDesigner {
             egui::TextEdit::singleline(&mut editing.text)
         };
         let id = ui.id().with(("ui designer typing", editing.id));
-        let response = ui.put(rect, edit.id(id).font(font).desired_width(rect.width()));
+        // A child Ui, so the box doesn't move the cursor of the row the
+        // artboard sits in: `ui.put` would, and the inspector after it
+        // would be laid out over the artboard.
+        let mut over = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(
+            egui::Layout::centered_and_justified(egui::Direction::TopDown),
+        ));
+        let response = over.add(edit.id(id).font(font).desired_width(rect.width()));
         if !editing.focused {
             response.request_focus();
             editing.focused = true;

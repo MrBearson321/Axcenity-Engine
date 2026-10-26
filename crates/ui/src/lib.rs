@@ -55,6 +55,9 @@ pub struct UiElement {
     /// mode lays out at its design size and scales the result, so a drag
     /// divides screen pixels by this to get back to authored pixels.
     pub pixels_per_unit: f32,
+    /// Its text's size in authored pixels, as it's drawn: CSS `font-size`,
+    /// else `TextSize`. Times `pixels_per_unit` for screen pixels.
+    pub font_size: f32,
 }
 
 /// The UI's draw data, and each element drawn, in drawing order (so later
@@ -664,6 +667,7 @@ fn layout_children(
             text_box: instance.class() == ClassName::TextBox,
             in_flow: flow_children,
             pixels_per_unit: 1.0,
+            font_size: paint::font_size(instance, &styles),
         });
         paint_instance(
             instance,
@@ -818,6 +822,7 @@ fn layout_table(
             text_box: instance.class() == ClassName::TextBox,
             in_flow: true,
             pixels_per_unit: 1.0,
+            font_size: paint::font_size(instance, &styles),
         });
         paint_instance(
             instance,

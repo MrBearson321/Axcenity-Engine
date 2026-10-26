@@ -805,6 +805,52 @@ fn double_clicking_text_on_the_artboard_types_over_it() {
 }
 
 #[test]
+fn dragging_in_the_box_being_typed_in_selects_text_not_the_element() {
+    let folder = copy_of_example("hello-touched", "ui-designer-typing-drag");
+    let mut app = EditorApp::new(Some(&folder));
+    let menu = build_menu(&mut app);
+    let ctx = theme::test_context();
+    let mut clock = 0.0;
+    let size = egui::vec2(1100.0, 600.0);
+    run_designer(&mut app, &ctx, &mut clock, size, vec![Vec::new(); 3]);
+    let at = on_artboard(&app, menu.gui, menu.title);
+    run_designer(
+        &mut app,
+        &ctx,
+        &mut clock,
+        size,
+        vec![
+            vec![egui::Event::PointerMoved(at)],
+            vec![press(at, true)],
+            vec![press(at, false)],
+            vec![press(at, true)],
+            vec![press(at, false)],
+            Vec::new(),
+        ],
+    );
+    let undo_before = app.history.undo_label().map(str::to_owned);
+    let to = at + egui::vec2(40.0, 0.0);
+    run_designer(
+        &mut app,
+        &ctx,
+        &mut clock,
+        size,
+        vec![
+            vec![egui::Event::PointerMoved(at + egui::vec2(-20.0, 0.0))],
+            vec![press(at + egui::vec2(-20.0, 0.0), true)],
+            vec![egui::Event::PointerMoved(at)],
+            vec![egui::Event::PointerMoved(to)],
+            vec![press(to, false)],
+            vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
+            Vec::new(),
+        ],
+    );
+    assert_eq!(app.selected, Some(menu.title));
+    assert_eq!(app.history.undo_label().map(str::to_owned), undo_before);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
 fn a_guide_dragged_out_of_a_ruler_stays_until_dragged_back() {
     let folder = copy_of_example("hello-touched", "ui-designer-guides");
     let mut app = EditorApp::new(Some(&folder));

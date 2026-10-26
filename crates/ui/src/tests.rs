@@ -269,6 +269,33 @@ fn css_applies_variables_colors_dimensions_borders_and_text_styles() {
 }
 
 #[test]
+fn an_element_knows_its_text_size_from_css_or_text_size() {
+    let mut world = World::new();
+    let gui = world.create(ClassName::ScreenGui).unwrap();
+    world.set_parent(gui, Some(world.workspace())).unwrap();
+    let styled = world.create(ClassName::TextLabel).unwrap();
+    world.set_parent(styled, Some(gui)).unwrap();
+    world
+        .set_property(styled, "Class", Value::String("title".to_owned()))
+        .unwrap();
+    world
+        .set_property(styled, "TextSize", Value::Number(12.0))
+        .unwrap();
+    let plain = world.create(ClassName::TextLabel).unwrap();
+    world.set_parent(plain, Some(gui)).unwrap();
+    world
+        .set_property(plain, "TextSize", Value::Number(12.0))
+        .unwrap();
+    let (stylesheet, _) = parse_stylesheet("ui.css", ".title { font-size: 26px }");
+
+    let layout = layout_artboard(&world, gui, &[stylesheet], (800, 600), 2.0, [0.0, 0.0]);
+    let styled = layout.element(styled).unwrap();
+    assert_eq!(styled.font_size, 26.0);
+    assert_eq!(styled.pixels_per_unit, 2.0);
+    assert_eq!(layout.element(plain).unwrap().font_size, 12.0);
+}
+
+#[test]
 fn flex_containers_flow_children_with_gap_and_padding() {
     let mut world = World::new();
     let gui = world.create(ClassName::ScreenGui).unwrap();

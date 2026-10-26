@@ -1,6 +1,6 @@
 # Plan: Axcenity Engine, unified remainder of v2 and v3
 
-> Sources: `plans/axcenity-engine-v2.md` (PRD `prd/axcenity-engine-v2.md`) and `plans/axcenity-engine-v3.md` (the developer's requests of 2026-10-22 and 2026-10-23), and the developer's requests of 2026-10-25 (Phases 8a to 8d). This plan holds only what has not been built, as of 2026-10-25 (commit `a9b6638`). The phases run in order. Each phase names the v2 or v3 phase it came from. Where the text changed from the source plan, the change is marked **Changed**.
+> Sources: `plans/axcenity-engine-v2.md` (PRD `prd/axcenity-engine-v2.md`) and `plans/axcenity-engine-v3.md` (the developer's requests of 2026-10-22 and 2026-10-23), and the developer's requests of 2026-10-25 (Phases 8a to 8d, and the UI requests in Phases 9a to 9i and the additions to Phases 10 and 19, and the asset-fix and live-reload requests in Phases 22 to 26). This plan holds only what has not been built, as of 2026-10-25 (commit `a9b6638`). The phases run in order. Each phase names the v2 or v3 phase it came from. Where the text changed from the source plan, the change is marked **Changed**.
 >
 > Built and committed, but not yet ticked: v2 Phase 12 and v3 Phases 4, 6, 7 and 8. Their open criteria are under **Open checks** below. They need a hands-on check, not new work.
 
@@ -362,6 +362,231 @@ The **UI Designer** dock tab shows the selected ScreenGui on an artboard at its 
 
 ---
 
+The UI phases below (9a to 9i) come from the developer's requests of 2026-10-25. They keep the UI rules: looks are CSS (no UICorner-style objects), behaviour and data are Instance properties and events, and every designer edit goes through `EditorApp::change` or the stylesheet tabs, so it undoes and plays the same. New properties have defaults, so worlds saved before them load unchanged and `project::FORMAT_VERSION` doesn't change. Each phase updates [docs/ui.md](../docs/ui.md). Any new Lua events or properties get matching blocks and API reference entries.
+
+## Phase 9a: Moving and clearing anchors
+
+**From**: the developer's requests of 2026-10-25. Today an anchor can only be set from the 4×4 preset grid. Its diamonds on the artboard only show where it is.
+
+### What to build
+
+- **Drag the diamonds.** Each of the selected element's anchor diamonds on the artboard can be dragged anywhere in its parent, like Unity's anchor handles. Dragging moves the anchor (the `UDim2` scales of `Position` and `Size`) and rewrites the offsets so the element stays exactly where it is at the design size. A diamond snaps to the parent's corners, edge midpoints and centre, with the magenta guide. Dragging one diamond away from its pair splits the anchor, which stretches the element on that axis. Dragging it back joins them again. Alt while dragging turns snapping off. A label next to the diamond shows the anchor in percent of the parent while dragging.
+- **Clear it.** The Anchor section has a **Reset** button. Right-clicking a diamond opens **Reset anchor**. Both return the element to top-left (scale 0 on both axes, not stretched), and the element doesn't move.
+- One drag or one reset is one undo step. A flex child still has no anchor or diamonds.
+
+### Acceptance criteria
+
+- [ ] Dragging a top-left anchored element's diamonds to the parent's bottom-right corner pins it there. It doesn't move at the design size, and it stays against that corner on a wider Preview screen and in Play.
+- [ ] Dragging the two horizontal diamonds to the parent's left and right edges stretches the element across, keeping its margins.
+- [ ] Reset (the button or the right-click menu) puts the anchor back at top-left without moving the element, and undo restores the previous anchor.
+
+---
+
+## Phase 9b: Text styling
+
+**From**: the developer's requests of 2026-10-25.
+
+### What to build
+
+**CSS** (parsed, cascaded and drawn; written into the element's `#Id` rule by the inspector):
+- `font-weight` (`normal`, `bold`, and 100–900).
+- `font-style` (`normal`, `italic`).
+- `text-decoration` (`underline`, `line-through`, both).
+- `text-transform` (`uppercase`, `lowercase`, `capitalize`).
+- `-webkit-text-stroke` (width and colour), also accepted as `text-stroke`.
+- `text-shadow` (offset, blur and colour; several shadows allowed).
+- `letter-spacing` and `line-height`.
+- `vertical-align` (`top`, `middle`, `bottom`) for where the text sits in its box.
+- `white-space: nowrap` (text wraps by default).
+
+**Real fonts, faux fallback.** Bundle the Bold, Italic and Bold Italic files (SIL OFL) for the built-in families that have them. A project's own font files are grouped by the family name inside them, so `MyFont-Bold.ttf` becomes MyFont's bold. A weight or style a family doesn't have is drawn faux: thickened for bold, slanted for italic. The draw list carries the weight and style, and `render` picks the face. Built games include the variant files they use.
+
+**`TextScaled`** (a property on text elements, off by default) shrinks or grows the text to the largest size that fits its box, up to `font-size` / `TextSize`.
+
+**Designer.** A text toolbar in the inspector, under Font:
+- **B**, **I**, **U** and **S** toggles.
+- An Aa case menu.
+- Alignment buttons (left, centre and right; top, middle and bottom).
+- Size.
+- Colour.
+- **Outline** (width and colour) and **Shadow** (offset, blur and colour).
+- Letter spacing, line height, Wrap and Text Scaled.
+
+Ctrl+B, Ctrl+I and Ctrl+U toggle bold, italic and underline on the selected element, and inside the double-click text box (where they apply to rich text, Phase 9c).
+
+### Acceptance criteria
+
+- [ ] A label set to bold italic underlined with the toolbar draws with Montserrat's real Bold Italic face in the designer and in Play, and its CSS rule shows `font-weight: bold; font-style: italic; text-decoration: underline`.
+- [ ] A family with no bold file (for example Bangers) draws faux bold, and a project font with its own Bold file uses that file, in the editor and in a built game.
+- [ ] Outline, shadow, letter spacing, line height, vertical alignment, `nowrap` and `text-transform` draw the same in the designer and in Play.
+- [ ] With `TextScaled` on, a long string shrinks to fit its box and a short one grows to the set size.
+
+---
+
+## Phase 9c: Rich text
+
+**From**: the developer's requests of 2026-10-25.
+
+### What to build
+
+- **`RichText`** (a property on TextLabel, TextButton and TextBox, off by default) reads tags in `Text`. The tags use the Roblox-familiar names:
+  - `<b>`, `<i>`, `<u>` and `<s>`.
+  - `<font color="#rrggbb" size="24" face="Bebas Neue" weight="bold">`.
+  - `<stroke color="" thickness="">`.
+  - `<uc>` for uppercase.
+  - `<br/>`.
+  - `&lt;` and `&amp;` escapes.
+- An unknown or unclosed tag is drawn as plain text and warns once in Output, never a crash.
+- Text set from scripts and blocks is read the same way.
+- **Designer.** With RichText on, the double-click text box shows the styled text. Selecting part of it and pressing B, I, U, S (or Ctrl+B, Ctrl+I, Ctrl+U), or picking a colour, wraps the selection in tags. The Text field in the inspector shows the tagged source.
+
+### Acceptance criteria
+
+- [ ] `Press <b>E</b> to <font color="#ff0000">open</font>` draws one bold word and one red word on a single line, in the designer and in Play.
+- [ ] Selecting a word in the designer's text box and pressing Ctrl+B wraps it in `<b>…</b>` as one undo step.
+- [ ] A malformed string (`<b>open`) draws as plain text with one warning, and a LocalScript can set rich text at runtime.
+
+---
+
+## Phase 9d: Hover, press and disabled states
+
+**From**: the developer's requests of 2026-10-25. `:hover` and `:active` exist as CSS. They can't be edited without writing CSS, and they don't animate.
+
+### What to build
+
+**States editor.** The inspector of a button (and of any element with a `:hover` rule) has **Normal / Hover / Pressed / Disabled** tabs. Editing a value in a tab writes it into `#Id:hover`, `#Id:active` or `#Id:disabled`. The CSS rule is made if it doesn't exist. An eye toggle on the artboard shows the element in that state while editing.
+
+**Disabled.** **`Interactable`** (a property on GUI elements, default true) turns an element off. It doesn't fire `Activated`, it doesn't take hover, and it matches `:disabled`.
+
+**Transitions.** CSS `transition` (property list or `all`, duration, easing, delay) animates colours, opacity, sizes, `transform` and shadows between states instead of snapping. The easing names are CSS's (`ease`, `ease-in-out`, `linear`, `cubic-bezier(...)`) and map onto the Phase 8 easing curves.
+
+**Hover extras.**
+- CSS `transform: scale(…)` and `translate(…)`, drawn around the element's centre. They don't change layout.
+- CSS `cursor` (`pointer`, `default`, `text`, `not-allowed`) sets the OS cursor in Play and the player. A button defaults to `pointer`.
+- **`Tooltip`** (a string property on GUI elements) shows a small styled box near the pointer after a short hover. It is styleable as `Tooltip` in CSS.
+- **`HoverSound`** and **`ClickSound`** (asset paths on TextButton) play through the existing audio.
+
+**Script events.** `MouseEnter` and `MouseLeave` on GUI elements, for LocalScripts, with matching "when mouse enters / leaves" blocks. They follow the same topmost-visible hit test as `:hover`.
+
+### Acceptance criteria
+
+- [ ] A button given a darker Hover colour and a 0.95 Pressed scale in the states editor (no CSS typed) shows both in the designer's state preview and in Play, and the stylesheet has the `:hover` and `:active` rules.
+- [ ] With `transition: all 0.15s ease`, the hover colour and scale animate rather than snap.
+- [ ] A button with `Interactable = false` shows its Disabled style, takes no hover and doesn't fire `Activated`.
+- [ ] `MouseEnter` and `MouseLeave` fire once each when the pointer crosses a button, from Lua and from blocks. The tooltip, the hand cursor and the hover and click sounds work in Play.
+
+---
+
+## Phase 9e: Bevels, inner shadows and 9-slice
+
+**From**: the developer's requests of 2026-10-25.
+
+### What to build
+
+- **Inner shadow.** `box-shadow: inset …`, in any number and mixed with outer shadows. It is drawn inside the element's rounded corners.
+- **Classic borders.** `border-style: solid | inset | outset | ridge | groove`. The light and dark edges come from the border colour. Each side can have its own `border-*-width` and `border-*-color`.
+- **Bevel preset.** A **Bevel** control in the inspector, with Raised or Sunken, depth, softness and light angle. It writes the matching pair of inset shadows into the `#Id` rule. On a button it also writes the flipped (sunken) pair into `:active`, so pressing looks pushed in. Editing the preset rewrites only those shadows.
+- **9-slice.** CSS `border-image: url(path) <slices> [fill] [stretch|repeat]` on Frame, TextButton and ImageLabel. The corners stay their pixel size, and the edges and centre stretch or tile. The inspector's **Slice** editor shows the image with four lines to drag for the slice insets.
+
+### Acceptance criteria
+
+- [ ] A Raised bevel on a button draws a light top-left and a dark bottom-right edge, and flips to sunken while held, in the designer and in Play.
+- [ ] `inset`, `outset`, `ridge` and `groove` borders and inset shadows respect `border-radius`.
+- [ ] A 9-slice frame image resized from 100×100 to 600×200 keeps its corners unstretched, and the four slice lines in the editor change the CSS.
+
+---
+
+## Phase 9f: Layer order, clipping and scrolling
+
+**From**: the developer's requests of 2026-10-25.
+
+### What to build
+
+- **Order.**
+  - **`ZIndex`** (a number on GUI elements, default 1) and CSS `z-index` (which wins when set) order siblings and their subtrees. Ties keep the tree order.
+  - **`DisplayOrder`** on ScreenGui orders the layers.
+  - Hit testing and `:hover` use the same order as drawing.
+  - The designer's hierarchy and artboard right-click menu have **Bring to Front**, **Bring Forward**, **Send Backward** and **Send to Back**.
+- **Clipping.** CSS `overflow: hidden` clips an element's children to its box, including rounded corners. A clipped-away part of a child isn't hoverable or clickable.
+- **`ScrollingFrame`.** A new element in the toolbar and the designer's Elements, with:
+  - `CanvasSize` (UDim2), `CanvasPosition`, `ScrollingDirection` (X, Y or XY), `ScrollBarThickness` and `AutomaticCanvasSize` (fits the children).
+  - Mouse wheel, drag on the bar and (in Play) drag on the content. The bar is styleable as `ScrollingFrame::scrollbar` and `::thumb`.
+  - It clips always.
+  - The designer can scroll it while editing, without changing the saved `CanvasPosition`.
+
+### Acceptance criteria
+
+- [ ] Two overlapping siblings swap which is on top with Bring to Front, and the one on top gets the click, in the designer and in Play.
+- [ ] A rounded Frame with `overflow: hidden` clips an image child to its rounded corners.
+- [ ] A ScrollingFrame with twenty buttons scrolls by wheel and by bar, only the visible buttons can be clicked, and `CanvasPosition` can be read and set from Lua.
+
+---
+
+## Phase 9g: Rotation, transparency, aspect ratio and safe area
+
+**From**: the developer's requests of 2026-10-25.
+
+### What to build
+
+- **`Rotation`** (degrees, on GUI elements) rotates an element and its children around its centre in drawing and hit testing. It doesn't change layout. The designer has a rotate handle just outside the corners (Shift snaps to 15°).
+- **`TextTransparency`** on text elements, alongside the existing `BackgroundTransparency` and `ImageTransparency`. The inspector shows all three as 0–100% sliders. CSS `opacity` still multiplies the whole element.
+- **Aspect ratio.** CSS `aspect-ratio` (for example `16 / 9`) keeps an element's shape. When it's set, width drives height, and resize handles keep the ratio.
+- **Safe area.** **`ScreenInsets`** on ScreenGui is `None` or `DeviceSafeInsets`. With `DeviceSafeInsets`, the layout area is the screen minus the device's safe-area insets. The desktop player's insets are zero. The designer's phone Preview presets carry notch and home-bar insets, drawn as hatched bars, so a phone layout can be checked.
+
+### Acceptance criteria
+
+- [ ] A Frame rotated 30° from the handle draws rotated in the designer and in Play, and clicks hit its rotated shape.
+- [ ] Background, text and image transparency each change only their own part.
+- [ ] A frame with `aspect-ratio: 1` stays square when the screen size changes.
+- [ ] A top bar in a `DeviceSafeInsets` ScreenGui sits below the notch on a phone Preview and at the top on a desktop one.
+
+---
+
+## Phase 9h: Ready-made widgets
+
+**From**: the developer's requests of 2026-10-25.
+
+### What to build
+
+Four new elements, in the toolbar's UI group and the designer's Elements. Each is one Instance (its parts are drawn, not child Instances). Its parts are styleable with pseudo-elements, and its value can be read and set from Lua and blocks. Each fires `ValueChanged` when the value changes.
+
+| Element | Properties | How it's used | Styleable parts |
+|---|---|---|---|
+| **Slider** | `Value`, `MinValue`, `MaxValue`, `Step`, `Orientation` | Drag the thumb, or click the track | `::track`, `::fill`, `::thumb` |
+| **Toggle** | `Value` (bool) and `Style` (`Switch` or `Checkbox`) | Click to flip | `::track`, `::thumb`, `::check` |
+| **Dropdown** | `Options` (one per line), `Value` (the chosen option) and a placeholder | Opens a list drawn above everything else (Phase 9f). The list scrolls when long. A click outside closes it. | `::list`, `::option` |
+| **ProgressBar** | `Value`, `MinValue`, `MaxValue`, `Orientation` | Display only | `::fill` (it can use a gradient) |
+
+`Interactable` and the Phase 9d states and transitions apply to all four.
+
+### Acceptance criteria
+
+- [ ] A settings page with a volume Slider, a fullscreen Toggle, a quality Dropdown and a ProgressBar is built in the designer alone and works the same in Play.
+- [ ] Dragging the slider and changing the dropdown each fire `ValueChanged` with the new value, from Lua and from blocks, and setting `Value` from a script moves the widget without the user touching it.
+- [ ] Each widget's parts restyle through their pseudo-elements, and a world saved with them reloads unchanged.
+
+---
+
+## Phase 9i: Designer productivity
+
+**From**: the developer's requests of 2026-10-25.
+
+### What to build
+
+- **Multi-select.** On the artboard and in the hierarchy: Shift-click and Ctrl-click add to the selection, and a drag on empty artboard draws a box. Handles go around the whole selection, so moving and resizing apply to every selected element.
+- **Align and distribute.** Toolbar buttons align the selection's left, centre or right edges and its top, middle or bottom edges, or distribute it evenly horizontally or vertically. With one element selected, they align it to its parent.
+- **Copy and paste style.** **Copy style** takes the element's own `#Id` declarations. **Paste style** writes them into each selected element's `#Id` rule. **Duplicate** (Ctrl+D) copies the element, its children and its own rule, with a fresh `Id`. **Ctrl+C / Ctrl+V** copy and paste elements between ScreenGuis.
+- **Nudge.** Arrow keys move the selection 1 design pixel, and Shift+arrow moves it 10.
+- Every one of these is a single undo step.
+
+### Acceptance criteria
+
+- [ ] Box-selecting three buttons and pressing Distribute horizontally spaces them evenly, with one undo step to put them back.
+- [ ] Paste style makes a second button look like the first, and Duplicate makes an identical button with its own `Id` and rule.
+- [ ] Arrow keys nudge a selection by 1 pixel and Shift+arrow by 10, and none of these shortcuts fire while typing in a text field.
+
+---
+
 ## Phase 10: TweenService
 
 **From**: new. **Changed**: v3 Phase 14's Tween node compiles to Lua, and the engine has no Lua tween API yet.
@@ -370,9 +595,16 @@ The **UI Designer** dock tab shows the selected ScreenGui on an artboard at its 
 
 A `TweenService` service with `TweenService:Create(instance, tweenInfo, goals)` returns a `Tween` with `Play`, `Cancel`, `PlaybackState` and `Completed`. `TweenInfo.new(time, easingStyle, easingDirection, repeatCount, reverses, delayTime)` uses the easing styles from Phase 8 through the same `anim` easing functions. It tweens numbers, Vector3, Color3, UDim2 and CFrame-like properties on Parts and UI elements. Matching blocks translate to it. It runs in the player with no editor dependency.
 
+**Changed** (the developer's requests of 2026-10-25): UI tweens cover the Phase 9 additions too:
+- `Rotation`, `TextTransparency`, `ZIndex` (stepped) and `CanvasPosition`.
+- Widget `Value`s.
+
+A tween on a UI property is applied after CSS transitions, so a script's tween wins while it plays. The blocks include "slide in from left / right / top / bottom" and "fade in / out" shortcuts that make the matching tween on `Position` or the transparencies.
+
 ### Acceptance criteria
 
 - [ ] A script tweens a Part's Position and a Frame's BackgroundTransparency over one second with Quad Out, and `Completed` fires once.
+- [ ] A menu Frame slides in from off-screen with the "slide in from left" block and fades out with "fade out", in Play.
 - [ ] `Cancel` stops a tween where it is, and a second tween on the same property replaces the first.
 - [ ] The tween blocks produce the same Lua and the same motion, and the API reference lists TweenService.
 
@@ -528,9 +760,17 @@ Save files carry a version. Loading a slot from the previous version migrates it
 
 Existing menus and HUDs can be navigated with the keyboard and a game controller. **Changed**: the engine has no controller input yet. This phase adds it to the player and editor Play through one new pinned, Apache-2.0-compatible dependency. Focus moves in a documented order, the focused control is visible, and the confirm button activates it the way a click does. A mouse click still works. Text boxes take keyboard input while focused and hand focus back when finished. HUDs, clicks, text and layout scaling are unchanged for a layout that never uses focus.
 
+**Changed** (the developer's requests of 2026-10-25):
+- **Focus ring.** The focused control matches CSS `:focus`. A default focus ring is drawn when no `:focus` rule styles it.
+- **`Selectable`** (a bool) leaves an element out of navigation.
+- **`NextSelectionUp`**, **`NextSelectionDown`**, **`NextSelectionLeft`** and **`NextSelectionRight`** (element references) override the automatic order. The designer shows them as arrows on the artboard and can set them by dragging.
+- **Widgets.** The Phase 9h widgets work with focus: left and right move a slider, confirm flips a toggle and opens a dropdown, and up and down choose in its list.
+- **Scrolling.** A ScrollingFrame scrolls to keep the focused child visible.
+
 ### Acceptance criteria
 
 - [ ] The keyboard and a controller both move focus through a menu in the same order and activate the focused button.
+- [ ] A focused button shows its `:focus` style, a `NextSelectionDown` override is followed, and a focused slider moves with left and right.
 - [ ] A focused text box receives typing, and leaving it fires the same `FocusLost` that clicking away does.
 - [ ] A HUD that isn't navigated still shows, clicks and scales as it does today.
 
