@@ -51,6 +51,7 @@ mod theme;
 mod thumbnail;
 mod toast;
 mod tree;
+mod ui_designer;
 mod ui_handles;
 mod viewport;
 mod watcher;

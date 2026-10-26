@@ -84,6 +84,56 @@ fn fit_mode_scales_uniformly_and_centers_on_a_different_aspect() {
 }
 
 #[test]
+fn an_artboard_is_one_screen_gui_at_its_design_size_scaled() {
+    let mut world = World::new();
+    let mut frames = Vec::new();
+    for (mode, enabled) in [("Fixed", false), ("Fit", true)] {
+        let gui = world.create(ClassName::ScreenGui).unwrap();
+        world.set_parent(gui, Some(world.workspace())).unwrap();
+        for (name, value) in [
+            ("ScaleMode", Value::String(mode.to_owned())),
+            ("Enabled", Value::Bool(enabled)),
+            ("DesignWidth", Value::Number(400.0)),
+            ("DesignHeight", Value::Number(300.0)),
+        ] {
+            world.set_property(gui, name, value).unwrap();
+        }
+        let frame = world.create(ClassName::Frame).unwrap();
+        world.set_parent(frame, Some(gui)).unwrap();
+        world
+            .set_property(
+                frame,
+                "Position",
+                Value::UDim2(UDim2::new(0.5, -50.0, 0.0, 20.0)),
+            )
+            .unwrap();
+        frames.push((gui, frame));
+    }
+    assert_eq!(design_size(&world, frames[0].0), (400, 300));
+
+    for &(gui, frame) in &frames {
+        // At scale 1 it matches a 400×300 screen with only this layer on.
+        let artboard = layout_artboard(&world, gui, &[], 1.0, [0.0, 0.0]);
+        assert_eq!(artboard.elements.len(), 1, "only this ScreenGui");
+        assert_eq!(artboard.elements[0].rect.x, 150.0);
+        assert_eq!(artboard.elements[0].rect.y, 20.0);
+
+        let zoomed = layout_artboard(&world, gui, &[], 0.5, [10.0, -4.0]);
+        let element = zoomed.element(frame).unwrap();
+        assert_eq!(element.rect.x, 10.0 + 75.0);
+        assert_eq!(element.rect.y, -4.0 + 10.0);
+        assert!((element.pixels_per_unit - 0.5).abs() < 1e-6);
+    }
+    // The enabled Fit layer, on a 400×300 screen, draws what its artboard draws.
+    let screen = layout_ui(&world, 400, 300, &[]);
+    let artboard = layout_artboard(&world, frames[1].0, &[], 1.0, [0.0, 0.0]);
+    assert_eq!(
+        format!("{:?}", screen.draw_items),
+        format!("{:?}", artboard.draw_items)
+    );
+}
+
+#[test]
 fn changing_a_text_label_updates_the_draw_data() {
     let mut world = World::new();
     let gui = world.create(ClassName::ScreenGui).unwrap();

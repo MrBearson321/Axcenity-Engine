@@ -356,8 +356,8 @@ The **UI Designer** dock tab shows the selected ScreenGui on an artboard at its 
 
 ### Acceptance criteria
 
-- [ ] A menu with a Frame, a TextLabel and two Buttons can be built and styled in the designer alone, and it looks the same in Play.
-- [ ] Every designer edit is undoable.
+- [x] A menu with a Frame, a TextLabel and two Buttons can be built and styled in the designer alone, and it looks the same in Play.
+- [x] Every designer edit is undoable.
 
 ---
 

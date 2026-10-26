@@ -1,7 +1,9 @@
 //! Draws editor UI offscreen and saves it as a PNG, to look at in tests.
 
+use std::sync::Arc;
+
 use eframe::egui::{self, Pos2, Rect, Vec2};
-use eframe::egui_wgpu::{Renderer, ScreenDescriptor, wgpu};
+use eframe::egui_wgpu::{RenderState, Renderer, ScreenDescriptor, wgpu};
 
 /// Runs `frames` (each a list of input events and a UI function) and saves
 /// the last frame drawn at `path`. Does nothing without a GPU.
@@ -11,6 +13,17 @@ pub fn snapshot(
     frames: Vec<Vec<egui::Event>>,
     mut show: impl FnMut(&egui::Context),
 ) {
+    snapshot_rendered(path, size, frames, |ctx, _| show(ctx));
+}
+
+/// [`snapshot`], also handing `show` a GPU render state, so what draws with
+/// the game's renderer (previews, the UI Designer's artboard) draws for real.
+pub fn snapshot_rendered(
+    path: &std::path::Path,
+    size: Vec2,
+    frames: Vec<Vec<egui::Event>>,
+    mut show: impl FnMut(&egui::Context, &RenderState),
+) {
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
     let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
         eprintln!("skipped: no graphics adapter");
@@ -18,7 +31,15 @@ pub fn snapshot(
     };
     let (device, queue) = pollster::block_on(adapter.request_device(&Default::default())).unwrap();
     let ctx = crate::theme::test_context();
-    let mut renderer = Renderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, None, 1, false);
+    let renderer = Renderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, None, 1, false);
+    let render_state = RenderState {
+        adapter: adapter.clone(),
+        available_adapters: Vec::new(),
+        device: device.clone(),
+        queue: queue.clone(),
+        target_format: wgpu::TextureFormat::Rgba8Unorm,
+        renderer: Arc::new(egui::mutex::RwLock::new(renderer)),
+    };
     let mut last = None;
     for (index, events) in frames.into_iter().enumerate() {
         let input = egui::RawInput {
@@ -29,7 +50,8 @@ pub fn snapshot(
             time: Some(index as f64 * 0.5),
             ..Default::default()
         };
-        let output = ctx.run(input, |ctx| show(ctx));
+        let output = ctx.run(input, |ctx| show(ctx, &render_state));
+        let mut renderer = render_state.renderer.write();
         for (id, delta) in &output.textures_delta.set {
             renderer.update_texture(&device, &queue, *id, delta);
         }
@@ -59,6 +81,7 @@ pub fn snapshot(
     });
     let view = texture.create_view(&Default::default());
     let mut encoder = device.create_command_encoder(&Default::default());
+    let mut renderer = render_state.renderer.write();
     let commands = renderer.update_buffers(&device, &queue, &mut encoder, &jobs, &screen);
     {
         let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

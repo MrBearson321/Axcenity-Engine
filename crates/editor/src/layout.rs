@@ -33,6 +33,9 @@ pub enum Pane {
     /// tab, which becomes this one.
     #[serde(alias = "Animator")]
     Animation,
+    /// The UI Designer: a ScreenGui on an artboard at its design size
+    /// (`ui_designer.rs`).
+    UiDesigner,
     /// The Terrain Studio: sculpting, painting and generating terrains.
     Terrain,
     /// What the game costs during Play (`profiler.rs`).
@@ -47,12 +50,13 @@ pub enum Pane {
 
 impl Pane {
     /// The panels that can be closed and opened again, in menu order.
-    pub const CLOSABLE: [Pane; 8] = [
+    pub const CLOSABLE: [Pane; 9] = [
         Pane::Explorer,
         Pane::Properties,
         Pane::Console,
         Pane::Assets,
         Pane::Animation,
+        Pane::UiDesigner,
         Pane::Terrain,
         Pane::Profiler,
         Pane::AssetCheck,
@@ -66,6 +70,7 @@ impl Pane {
             Pane::Console => "Console",
             Pane::Assets => "Assets",
             Pane::Animation => "Animation",
+            Pane::UiDesigner => "UI Designer",
             Pane::Terrain => "Terrain",
             Pane::Profiler => "Profiler",
             Pane::AssetCheck => "Asset Check",
@@ -81,6 +86,7 @@ impl Pane {
             Pane::Console => icons::TERMINAL_WINDOW,
             Pane::Assets => icons::SHAPES,
             Pane::Animation => theme::AnimKind::Animator.icon(),
+            Pane::UiDesigner => icons::LAYOUT,
             Pane::Terrain => icons::MOUNTAINS,
             Pane::Profiler => icons::GAUGE,
             Pane::AssetCheck => icons::LIST,
@@ -147,7 +153,7 @@ impl Layout {
             Pane::Console => Some(Pane::Assets),
             Pane::Assets | Pane::Profiler | Pane::AssetCheck => Some(Pane::Console),
             // A tab beside the Scene, with room for a preview and a graph.
-            Pane::Animation => Some(Pane::Scene),
+            Pane::Animation | Pane::UiDesigner => Some(Pane::Scene),
             // A tab beside Properties, down the right.
             Pane::Terrain => Some(Pane::Properties),
             Pane::Script(_) => Some(Pane::Scene),
@@ -276,12 +282,12 @@ fn zero_nulls(json: &mut serde_json::Value) {
     }
 }
 
-/// Like Roblox Studio: the Scene in the middle (with the Animation tab
-/// beside it, like Unity's), the Explorer with
+/// Like Roblox Studio: the Scene in the middle (with the Animation tab and
+/// the UI Designer beside it, like Unity's), the Explorer with
 /// Properties (and the Terrain Studio as a tab beside it) under it down the
 /// right, and the Console, Assets and Profiler as tabs under the Scene.
 fn default_dock() -> DockState<Pane> {
-    let mut dock = DockState::new(vec![Pane::Scene, Pane::Animation]);
+    let mut dock = DockState::new(vec![Pane::Scene, Pane::Animation, Pane::UiDesigner]);
     dock.set_active_tab((
         egui_dock::SurfaceIndex::main(),
         NodeIndex::root(),

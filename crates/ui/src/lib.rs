@@ -274,34 +274,7 @@ fn layout_ui_with_pseudo(
         {
             continue;
         }
-        let styles = resolve_styles(world, id, stylesheets, pseudo);
-        if css_property(&styles, "display").is_some_and(|display| display == "none") {
-            continue;
-        }
-        let opacity = css_number(&styles, "opacity")
-            .unwrap_or(1.0)
-            .clamp(0.0, 1.0);
-        let fit = fit_transform(instance, width, height);
-        let bounds = fit.map_or(
-            UiRect {
-                x: 0.0,
-                y: 0.0,
-                width: width as f32,
-                height: height as f32,
-            },
-            |fit| UiRect {
-                x: 0.0,
-                y: 0.0,
-                width: fit.design_width,
-                height: fit.design_height,
-            },
-        );
-        let draws = layout.draw_items.len();
-        let elements = layout.elements.len();
-        layout_children(world, id, bounds, &mut layout, stylesheets, opacity, pseudo);
-        if let Some(fit) = fit {
-            apply_fit(&mut layout, draws, elements, fit);
-        }
+        layout_screen_gui(world, id, width, height, stylesheets, pseudo, &mut layout);
     }
     if let Some(camera) = camera {
         layout_billboards(
@@ -313,6 +286,112 @@ fn layout_ui_with_pseudo(
             stylesheets,
             pseudo,
         );
+    }
+    layout
+}
+
+/// Lays out one ScreenGui (`gui`) on a `width`×`height` screen, adding to `layout`.
+fn layout_screen_gui(
+    world: &World,
+    gui: InstanceId,
+    width: u32,
+    height: u32,
+    stylesheets: &[Stylesheet],
+    pseudo: PseudoClasses,
+    layout: &mut UiLayout,
+) {
+    let Some(instance) = world.get(gui) else {
+        return;
+    };
+    let styles = resolve_styles(world, gui, stylesheets, pseudo);
+    if css_property(&styles, "display").is_some_and(|display| display == "none") {
+        return;
+    }
+    let opacity = css_number(&styles, "opacity")
+        .unwrap_or(1.0)
+        .clamp(0.0, 1.0);
+    let fit = fit_transform(instance, width, height);
+    let bounds = fit.map_or(
+        UiRect {
+            x: 0.0,
+            y: 0.0,
+            width: width as f32,
+            height: height as f32,
+        },
+        |fit| UiRect {
+            x: 0.0,
+            y: 0.0,
+            width: fit.design_width,
+            height: fit.design_height,
+        },
+    );
+    let draws = layout.draw_items.len();
+    let elements = layout.elements.len();
+    layout_children(world, gui, bounds, layout, stylesheets, opacity, pseudo);
+    if let Some(fit) = fit {
+        apply_fit(layout, draws, elements, fit);
+    }
+}
+
+/// The design size of a ScreenGui: its `DesignWidth` × `DesignHeight`, in
+/// whole pixels and at least 1 each (1920×1080 if they're missing).
+pub fn design_size(world: &World, gui: InstanceId) -> (u32, u32) {
+    let number = |name, default: f64| {
+        world
+            .get(gui)
+            .and_then(|instance| instance.property(name))
+            .and_then(Value::as_number)
+            .unwrap_or(default)
+            .round()
+            .max(1.0) as u32
+    };
+    (
+        number("DesignWidth", 1920.0),
+        number("DesignHeight", 1080.0),
+    )
+}
+
+/// One ScreenGui as a screen its design size shows it, for the UI
+/// Designer's artboard: laid out exactly as [`layout_ui`] lays it out on a
+/// `DesignWidth`×`DesignHeight` screen, then scaled by `scale` and moved by
+/// `origin` (pixels). It's drawn even when `Enabled` is off, since it's
+/// being designed. Each element's `pixels_per_unit` is `scale` times what
+/// it would be on that screen, so a drag converts back to authored pixels.
+pub fn layout_artboard(
+    world: &World,
+    gui: InstanceId,
+    stylesheets: &[Stylesheet],
+    scale: f32,
+    origin: [f32; 2],
+) -> UiLayout {
+    let mut layout = UiLayout::default();
+    let (width, height) = design_size(world, gui);
+    layout_screen_gui(
+        world,
+        gui,
+        width,
+        height,
+        stylesheets,
+        PseudoClasses {
+            hovered: None,
+            active: None,
+            focused: None,
+        },
+        &mut layout,
+    );
+    let place = Fit {
+        scale,
+        origin_x: origin[0],
+        origin_y: origin[1],
+        design_width: width as f32,
+        design_height: height as f32,
+    };
+    for item in &mut layout.draw_items {
+        scale_draw_item(item, place);
+    }
+    for element in &mut layout.elements {
+        element.rect = scale_rect(element.rect, place);
+        element.pixels_per_unit *= scale;
     }
     layout
 }

@@ -75,6 +75,7 @@ use crate::theme::{self, Appearance, filled_icons, icons};
 use crate::thumbnail;
 use crate::toast::{self, Toasts};
 use crate::tree::{self, Insertable};
+use crate::ui_designer::{DesignerAction, DesignerScene, UiDesigner};
 use crate::ui_handles::{CssEdit, UiDragEdit, apply_css_edits};
 use crate::viewport::{
     self, DragEdit, DragKind, OverlayToggles, Viewport, ViewportOutput, ViewportScene,
@@ -237,6 +238,8 @@ pub struct EditorApp {
     asset_browser: AssetBrowser,
     /// The Animation panel's clips, open clip and preview.
     animation: AnimationStudio,
+    /// The UI Designer tab's view of a ScreenGui.
+    ui_designer: UiDesigner,
     /// The Terrain panel's tools, settings, previews and work under way.
     terrain: TerrainStudio,
     /// Where the dockable panels are. Saved between runs.
@@ -296,6 +299,7 @@ impl egui_dock::TabViewer for DockViewer<'_> {
             Pane::Console => self.app.console_pane(ui),
             Pane::Assets => self.app.assets_pane(ui),
             Pane::Animation => self.app.animation_pane(ui, self.render_state),
+            Pane::UiDesigner => self.app.ui_designer_pane(ui, self.render_state),
             Pane::Terrain => self.app.terrain_pane(ui),
             Pane::Profiler => self.app.profiler.show(ui),
             Pane::AssetCheck => self.app.asset_check_pane(ui),
@@ -518,6 +522,7 @@ impl EditorApp {
             sound_preview: None,
             asset_browser: AssetBrowser::default(),
             animation: AnimationStudio::default(),
+            ui_designer: UiDesigner::default(),
             terrain: TerrainStudio::default(),
             layout: Layout::default(),
             ribbon_tabs: RibbonTabs::default(),
@@ -971,3 +976,5 @@ mod posing_tests;
 mod state_machine_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod ui_designer_tests;

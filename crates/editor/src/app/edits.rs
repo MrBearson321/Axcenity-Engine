@@ -438,14 +438,25 @@ impl EditorApp {
             ctx.request_repaint();
         }
     }
+    /// A UI handle dragged in the viewport or the UI Designer: its new
+    /// `Position` and `Size`, and any CSS lengths it rewrote, as one undo
+    /// step for the whole drag.
     pub(super) fn apply_ui_drag(&mut self, edit: UiDragEdit) {
-        if self.playing() || self.world.get(edit.id).is_none() {
+        if self.playing() {
             return;
         }
+        let Some(name) = self.world.get(edit.id).map(|i| i.name().to_owned()) else {
+            return;
+        };
+        let before = history::snapshot(&self.world, edit.id);
         for (property, value) in edit.values {
-            self.apply(edit.id, Edit::Property(property, value));
+            if let Err(err) = set(&mut self.world, edit.id, Edit::Property(property, value)) {
+                self.output.error(format!("Could not change that: {err:#}"));
+            }
         }
+        let after = history::snapshot(&self.world, edit.id);
 
+        let mut texts = Vec::new();
         let mut edits_by_path: HashMap<String, Vec<CssEdit>> = HashMap::new();
         for css_edit in edit.css {
             edits_by_path
@@ -477,11 +488,25 @@ impl EditorApp {
                 continue;
             };
             let updated = apply_css_edits(source, edits.iter());
+            texts.push(history::TextChange {
+                path: path.clone(),
+                before: Some(source.clone()),
+                after: Some(updated.clone()),
+            });
             if let Some(tab) = self.tabs.get_mut(&path) {
                 tab.text = updated.clone();
             }
             self.refresh_stylesheet(&path, &updated);
         }
+        // One key for the whole drag, so a left-edge resize (which changes
+        // Size and Position) stays one step.
+        let (key, label) = if edit.resize {
+            (Field::Property("Size"), format!("Resize {name}"))
+        } else {
+            (Field::Property("Position"), format!("Move {name}"))
+        };
+        self.history
+            .record_with_texts(&mut self.world, edit.id, key, label, before, after, texts);
     }
     /// The text of the stylesheet at `path`: its tab's, if it's open (it may
     /// have unsaved changes), otherwise the file's.
@@ -524,6 +549,15 @@ impl EditorApp {
                 }];
                 let updated = apply_css_edits(&source, edits.iter());
                 self.set_stylesheet_text(&path, &updated);
+                self.record_style(
+                    id,
+                    history::snapshot(&self.world, id),
+                    vec![history::TextChange {
+                        path,
+                        before: Some(source),
+                        after: Some(updated),
+                    }],
+                );
             }
             StyleEdit::Open { path, line } => {
                 let source = self.stylesheet_text(&path).unwrap_or_default();
@@ -535,11 +569,16 @@ impl EditorApp {
     /// Adds `property: value` to the rule for `id`'s own `Id`, giving it an
     /// `Id` (from its name) if it has none. The rule is the first one with
     /// that selector, or a new one at the end of the first stylesheet; a
-    /// project with no stylesheet gets `ui.css`.
+    /// project with no stylesheet gets `ui.css`. The new `Id` and the
+    /// stylesheet's text are one undo step.
     pub(super) fn add_style(&mut self, id: InstanceId, property: &str, value: &str) {
         let Some(instance) = self.world.get(id) else {
             return;
         };
+        if self.project.is_none() {
+            return;
+        }
+        let before = history::snapshot(&self.world, id);
         let mut element_id = instance
             .property("Id")
             .and_then(Value::as_str)
@@ -547,17 +586,31 @@ impl EditorApp {
             .to_owned();
         if element_id.is_empty() {
             element_id = style_panel::id_from_name(instance.name());
-            self.apply(id, Edit::Property("Id", Value::String(element_id.clone())));
-            self.history.seal();
+            let edit = Edit::Property("Id", Value::String(element_id.clone()));
+            if let Err(err) = set(&mut self.world, id, edit) {
+                self.output.error(format!("Could not change that: {err:#}"));
+            }
         }
         let selector = style_panel::own_selector(&element_id);
-        let Some(project) = &self.project else {
-            return;
-        };
+        let text = self.add_style_text(&selector, property, value);
+        self.history.seal();
+        self.record_style(id, before, text.into_iter().collect());
+        self.history.seal();
+    }
+    /// Adds `property: value` to `selector`'s rule (see [`Self::add_style`])
+    /// and returns the stylesheet's text before and after. `before` is
+    /// `None` when the stylesheet had to be made.
+    fn add_style_text(
+        &mut self,
+        selector: &str,
+        property: &str,
+        value: &str,
+    ) -> Option<history::TextChange> {
+        let project = self.project.as_ref()?;
         let target = project
             .stylesheets
             .iter()
-            .find_map(|sheet| Some((sheet.path().to_owned(), sheet.rule_end(&selector)?)))
+            .find_map(|sheet| Some((sheet.path().to_owned(), sheet.rule_end(selector)?)))
             .map(|(path, end)| (path, Some(end)))
             .or_else(|| {
                 project
@@ -567,19 +620,21 @@ impl EditorApp {
             });
         match target {
             Some((path, end)) => {
-                let Some(source) = self.stylesheet_text(&path) else {
-                    return;
-                };
-                let updated =
-                    style_panel::add_declaration(&source, end, &selector, property, value);
+                let source = self.stylesheet_text(&path)?;
+                let updated = style_panel::add_declaration(&source, end, selector, property, value);
                 self.set_stylesheet_text(&path, &updated);
                 self.output.info(format!(
                     "Added `{property}: {value}` to `{selector}` in `{path}`."
                 ));
+                Some(history::TextChange {
+                    path,
+                    before: Some(source),
+                    after: Some(updated),
+                })
             }
             None => {
                 let folder = project.folder.clone();
-                let source = style_panel::add_declaration("", None, &selector, property, value);
+                let source = style_panel::add_declaration("", None, selector, property, value);
                 match axcenity_project::create_stylesheet(&folder, "ui", &source) {
                     Ok(path) => {
                         if let Some(project) = &mut self.project {
@@ -592,12 +647,58 @@ impl EditorApp {
                         self.output.info(format!(
                             "Made `{path}` for this project's UI styles, with `{selector}` in it."
                         ));
+                        Some(history::TextChange {
+                            path,
+                            before: None,
+                            after: Some(source),
+                        })
                     }
-                    Err(err) => self
-                        .output
-                        .error(format!("Could not make a stylesheet: {err}")),
+                    Err(err) => {
+                        self.output
+                            .error(format!("Could not make a stylesheet: {err}"));
+                        None
+                    }
                 }
             }
+        }
+    }
+    /// Records a change to `id`'s styles: its fields since `before` and the
+    /// stylesheets in `texts`. Changes made one after another while the
+    /// same value is being typed merge into one step.
+    fn record_style(
+        &mut self,
+        id: InstanceId,
+        before: history::Snapshot,
+        texts: Vec<history::TextChange>,
+    ) {
+        let after = history::snapshot(&self.world, id);
+        let name = self
+            .world
+            .get(id)
+            .map_or_else(String::new, |instance| instance.name().to_owned());
+        self.history.record_with_texts(
+            &mut self.world,
+            id,
+            Field::Property("Style"),
+            format!("Change style of {name}"),
+            before,
+            after,
+            texts,
+        );
+    }
+    /// Takes away the stylesheet at `path`, which undo found was made by the
+    /// step it undid: its file, its tab and its styles.
+    fn remove_stylesheet(&mut self, folder: &Path, path: &str) {
+        if let Err(err) = std::fs::remove_file(folder.join(path))
+            && err.kind() != std::io::ErrorKind::NotFound
+        {
+            self.output
+                .error(format!("Could not remove `{path}`: {err}"));
+        }
+        self.tabs.close(path);
+        if let Some(project) = &mut self.project {
+            project.stylesheet_texts.remove(path);
+            project.stylesheets.retain(|sheet| sheet.path() != path);
         }
     }
     pub(super) fn refresh_stylesheet(&mut self, path: &str, source: &str) {
@@ -687,7 +788,7 @@ impl EditorApp {
     /// Undoes the last step, unless a handle is being dragged or the game
     /// is playing (undo would change a world that isn't on screen).
     pub(super) fn undo(&mut self) {
-        if !self.viewport.is_dragging() && !self.playing() {
+        if !self.viewport.is_dragging() && !self.ui_designer.is_dragging() && !self.playing() {
             if let Some(restored) = self.history.undo(&mut self.world) {
                 self.apply_history_texts(restored.texts);
                 self.write_package_files(&restored.blobs);
@@ -696,7 +797,7 @@ impl EditorApp {
         }
     }
     pub(super) fn redo(&mut self) {
-        if !self.viewport.is_dragging() && !self.playing() {
+        if !self.viewport.is_dragging() && !self.ui_designer.is_dragging() && !self.playing() {
             if let Some(restored) = self.history.redo(&mut self.world) {
                 self.apply_history_texts(restored.texts);
                 self.write_package_files(&restored.blobs);
@@ -714,8 +815,9 @@ impl EditorApp {
         let mut files = Vec::new();
         for text in texts {
             if axcenity_project::is_stylesheet(&text.path) {
-                if let Some(updated) = text.after {
-                    self.set_stylesheet_text(&text.path, &updated);
+                match text.after {
+                    Some(updated) => self.set_stylesheet_text(&text.path, &updated),
+                    None => self.remove_stylesheet(&project, &text.path),
                 }
             } else {
                 files.push(crate::animation::store::FileDiff {

@@ -102,6 +102,100 @@ impl EditorApp {
         }
     }
 
+    /// The UI Designer tab (see `ui_designer.rs`), then what was done in it.
+    pub(in crate::app) fn ui_designer_pane(
+        &mut self,
+        ui: &mut egui::Ui,
+        render_state: Option<&RenderState>,
+    ) {
+        let scene = DesignerScene {
+            world: shown(&self.world, &self.play),
+            selected: self.selected,
+            stylesheets: self
+                .project
+                .as_ref()
+                .map_or(&[][..], |project| &project.stylesheets[..]),
+            assets: &self.assets,
+            editing: !self.playing(),
+        };
+        let actions = self.ui_designer.show(ui, &scene, render_state);
+        if !actions.is_empty() {
+            self.designer_actions(actions);
+            // Other panels may already be drawn this frame.
+            ui.ctx().request_repaint();
+        }
+    }
+
+    /// Does what was done in the UI Designer. Each edit goes through the
+    /// same paths as the Properties panel, the Explorer and the viewport's
+    /// handles, so it's an undo step and shows in the Scene View and Play.
+    pub(in crate::app) fn designer_actions(&mut self, actions: Vec<DesignerAction>) {
+        for action in actions {
+            if self.playing() && !matches!(action, DesignerAction::Select(_)) {
+                continue;
+            }
+            match action {
+                DesignerAction::Select(id) => self.select_from_viewport(id),
+                DesignerAction::DesignSize { gui, width, height } => {
+                    let Some(name) = self.world.get(gui).map(|i| i.name().to_owned()) else {
+                        continue;
+                    };
+                    self.change(
+                        gui,
+                        history::Field::Property("DesignWidth"),
+                        format!("Change design size of {name}"),
+                        vec![
+                            Edit::Property("DesignWidth", Value::Number(f64::from(width))),
+                            Edit::Property("DesignHeight", Value::Number(f64::from(height))),
+                        ],
+                    );
+                }
+                DesignerAction::UseFit(gui) => {
+                    self.apply(
+                        gui,
+                        Edit::Property("ScaleMode", Value::String("Fit".to_owned())),
+                    );
+                    self.history.seal();
+                }
+                DesignerAction::Insert { what, parent, at } => {
+                    self.designer_insert(what, parent, at);
+                }
+                DesignerAction::Drag(edit) => self.apply_ui_drag(edit),
+                DesignerAction::Edit(id, edit) => self.apply(id, edit),
+                DesignerAction::Style(id, edit) => self.apply_style(id, edit),
+                DesignerAction::NewScreenGui => self.insert(Insertable::ScreenGui, None),
+            }
+        }
+    }
+
+    /// Puts a new `what` from the designer's palette into `parent`, its top
+    /// left `at` design pixels from the parent's, and selects it. A Page
+    /// goes into the PageLayout there (made if there isn't one).
+    pub(in crate::app) fn designer_insert(
+        &mut self,
+        what: Insertable,
+        parent: InstanceId,
+        at: [f32; 2],
+    ) {
+        if what == Insertable::Page {
+            self.insert(Insertable::Page, Some(parent));
+            return;
+        }
+        let mut properties = vec![(
+            "Position",
+            Value::UDim2(axcenity_core::UDim2::new(0.0, at[0], 0.0, at[1])),
+        )];
+        // A TextLabel fills its parent by default, which a drop at a point
+        // doesn't mean.
+        if what == Insertable::TextLabel {
+            properties.push((
+                "Size",
+                Value::UDim2(axcenity_core::UDim2::new(0.0, 200.0, 0.0, 40.0)),
+            ));
+        }
+        self.insert_named(what, Some(parent), what.class().as_str(), properties);
+    }
+
     /// The Animation tab (see `animation.rs`), following the selection.
     pub(in crate::app) fn animation_pane(
         &mut self,

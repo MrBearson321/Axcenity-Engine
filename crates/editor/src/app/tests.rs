@@ -356,6 +356,7 @@ fn every_panel_fits_a_narrow_column_and_a_short_strip() {
                         Pane::Console => app.console_pane(ui),
                         Pane::Assets => app.assets_pane(ui),
                         Pane::Animation => app.animation_pane(ui, None),
+                        Pane::UiDesigner => app.ui_designer_pane(ui, None),
                         Pane::Terrain => app.terrain_pane(ui),
                         Pane::Profiler => app.profiler.show(ui),
                         Pane::AssetCheck => {
