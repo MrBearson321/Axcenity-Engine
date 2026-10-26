@@ -57,7 +57,7 @@ pub fn start(folder: Option<&Path>, capabilities: &Capabilities) -> GraphicsSett
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axcenity_render::{Quality, ShadowQuality};
+    use axcenity_render::{Quality, ShadowQuality, TextureQuality};
 
     fn temp_folder(test: &str) -> std::path::PathBuf {
         let folder =
@@ -74,6 +74,8 @@ mod tests {
             shadow_quality: Some(ShadowQuality::Low),
             shadow_distance: Some(90.0),
             post_processing: Some(false),
+            render_scale: Some(1.25),
+            texture_quality: Some(TextureQuality::Half),
         };
         save(&folder, &settings).unwrap();
         assert_eq!(load(&folder), Some(settings));

@@ -22,7 +22,9 @@ use crate::draw_list::{ChannelMap, TerrainLayers, TerrainSurface, TerrainView, T
 
 use super::gpu::mip_levels;
 use super::lighting::linear_color;
-use super::{Cached, GpuTexture, KEEP_UNDRAWN_FRAMES, TEXTURE_FORMAT, TEXTURE_SRGB_FORMAT};
+use super::{
+    Cached, Counted, GpuBytes, GpuTexture, KEEP_UNDRAWN_FRAMES, TEXTURE_FORMAT, TEXTURE_SRGB_FORMAT,
+};
 
 /// The most layers a terrain blends. Must match `layers` in terrain.wgsl.
 pub(super) const TERRAIN_LAYERS: usize = 8;
@@ -62,6 +64,8 @@ struct TerrainUniform {
 struct TerrainArrays {
     /// Kept so they live as long as the bind groups that use them.
     _textures: Vec<wgpu::Texture>,
+    /// Their size with every mip level, in the scene's texture bytes.
+    _bytes: Counted,
     albedo: wgpu::TextureView,
     normal: wgpu::TextureView,
     surface: wgpu::TextureView,
@@ -120,10 +124,18 @@ pub(super) struct TerrainPass {
     /// [`TerrainLayers::key`] it holds.
     uniforms: HashMap<u64, Cached<(u64, wgpu::Buffer)>>,
     groups: HashMap<TerrainKey, Cached<wgpu::BindGroup>>,
+    /// The scene's texture bytes, which the arrays are counted in.
+    texture_bytes: GpuBytes,
+    /// How many times the arrays are halved, by the texture quality.
+    skipped_levels: u32,
 }
 
 impl TerrainPass {
-    pub(super) fn new(device: &wgpu::Device, frame_layout: &wgpu::BindGroupLayout) -> Self {
+    pub(super) fn new(
+        device: &wgpu::Device,
+        frame_layout: &wgpu::BindGroupLayout,
+        texture_bytes: GpuBytes,
+    ) -> Self {
         let texture = |binding, dimension| wgpu::BindGroupLayoutEntry {
             binding,
             visibility: wgpu::ShaderStages::FRAGMENT,
@@ -199,6 +211,18 @@ impl TerrainPass {
             arrays: HashMap::new(),
             uniforms: HashMap::new(),
             groups: HashMap::new(),
+            texture_bytes,
+            skipped_levels: 0,
+        }
+    }
+
+    /// Halves the layer arrays `skipped_levels` times (the texture quality),
+    /// freeing those already made so they're made again at the new size.
+    pub(super) fn set_skipped_levels(&mut self, skipped_levels: u32) {
+        if skipped_levels != self.skipped_levels {
+            self.skipped_levels = skipped_levels;
+            self.arrays.clear();
+            self.groups.clear();
         }
     }
 
@@ -219,7 +243,13 @@ impl TerrainPass {
         let arrays_key = key[1];
         if let Entry::Vacant(slot) = self.arrays.entry(arrays_key) {
             slot.insert(Cached {
-                gpu: Some(create_arrays(device, queue, layers)),
+                gpu: Some(create_arrays(
+                    device,
+                    queue,
+                    layers,
+                    &self.texture_bytes,
+                    self.skipped_levels,
+                )),
                 last_drawn: frame,
             });
         } else if let Some(cached) = self.arrays.get_mut(&arrays_key) {
@@ -369,11 +399,13 @@ fn uniform(layers: &TerrainLayers) -> TerrainUniform {
 }
 
 /// The three arrays for `layers`, each slice filled from a layer's maps
-/// (or a neutral texel where it has none).
+/// (or a neutral texel where it has none), halved `skipped_levels` times.
 fn create_arrays(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     layers: &TerrainLayers,
+    bytes: &GpuBytes,
+    skipped_levels: u32,
 ) -> TerrainArrays {
     let layers: Vec<_> = layers.layers.iter().take(TERRAIN_LAYERS).collect();
     let largest = layers
@@ -396,7 +428,7 @@ fn create_arrays(
         .max()
         .unwrap_or(4);
     let max = device.limits().max_texture_dimension_2d.min(MAX_LAYER_SIZE);
-    let size = largest.clamp(4, max).next_power_of_two().min(max);
+    let size = (largest.clamp(4, max).next_power_of_two().min(max) >> skipped_levels).max(4);
     let slices = layers.len().max(1);
     let mut albedo = Vec::with_capacity(slices);
     let mut normal = Vec::with_capacity(slices);
@@ -430,11 +462,13 @@ fn create_arrays(
         normal.push([128, 128, 255, 255].repeat((size * size) as usize));
         surface.push([255, 255, 255, 128].repeat((size * size) as usize));
     }
-    let (albedo_texture, albedo) = create_array(device, queue, size, &albedo, true);
-    let (normal_texture, normal) = create_array(device, queue, size, &normal, false);
-    let (surface_texture, surface) = create_array(device, queue, size, &surface, false);
+    let (albedo_texture, albedo, albedo_bytes) = create_array(device, queue, size, &albedo, true);
+    let (normal_texture, normal, normal_bytes) = create_array(device, queue, size, &normal, false);
+    let (surface_texture, surface, surface_bytes) =
+        create_array(device, queue, size, &surface, false);
     TerrainArrays {
         _textures: vec![albedo_texture, normal_texture, surface_texture],
+        _bytes: bytes.count(albedo_bytes + normal_bytes + surface_bytes),
         albedo,
         normal,
         surface,
@@ -442,14 +476,14 @@ fn create_arrays(
 }
 
 /// An array texture of `slices` (each `size` × `size` RGBA), with mipmaps,
-/// viewed as sRGB colors or plain values.
+/// viewed as sRGB colors or plain values, and its size in bytes.
 fn create_array(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     size: u32,
     slices: &[Vec<u8>],
     srgb: bool,
-) -> (wgpu::Texture, wgpu::TextureView) {
+) -> (wgpu::Texture, wgpu::TextureView, u64) {
     let levels: Vec<_> = slices
         .iter()
         .map(|pixels| mip_levels(size, size, pixels))
@@ -500,7 +534,12 @@ fn create_array(
         dimension: Some(wgpu::TextureViewDimension::D2Array),
         ..Default::default()
     });
-    (texture, view)
+    let bytes = levels
+        .iter()
+        .flatten()
+        .map(|(_, _, pixels)| pixels.len() as u64)
+        .sum();
+    (texture, view, bytes)
 }
 
 /// `texture` scaled to `size` × `size` by blending the nearest four texels.

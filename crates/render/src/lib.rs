@@ -21,7 +21,8 @@ pub use draw_list::{
 };
 pub use fonts::{BUILT_IN_FONTS, BuiltInFont, UiFont, font_families};
 pub use graphics::{
-    Capabilities, EffectiveGraphics, GraphicsSettings, Quality, ShadowMapSize, ShadowQuality,
+    Capabilities, EffectiveGraphics, GraphicsSettings, Quality, RENDER_SCALE_RANGE, ShadowMapSize,
+    ShadowQuality, TextureQuality,
 };
 pub use renderer::{RenderStats, Renderer, TextureRenderer};
 

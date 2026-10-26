@@ -40,10 +40,10 @@ use glam::Vec3;
 #[cfg(test)]
 use gpu::mip_levels;
 use gpu::{
-    create_depth_view, create_frame_bind_group, create_instance_buffer, create_material,
-    create_pipeline, create_shadow_pipeline, create_shadow_views, create_target_texture,
-    create_texture, drawable_size, shader_module, update_custom_mesh, upload_custom_mesh,
-    upload_mesh, upload_texture,
+    create_frame_bind_group, create_instance_buffer, create_material, create_pipeline,
+    create_shadow_pipeline, create_shadow_views, create_target_texture, create_texture,
+    drawable_size, shader_module, update_custom_mesh, upload_custom_mesh, upload_mesh,
+    upload_texture,
 };
 #[cfg(test)]
 use lighting::{cascade_ends, light_raw};
@@ -99,6 +99,11 @@ pub struct RenderStats {
     pub gpu_time: Option<Duration>,
     /// False when the device can't take timestamps, so `gpu_time` stays `None`.
     pub gpu_timing: bool,
+    /// Bytes of textures on the GPU, every mip level included, counted when
+    /// uploaded and when freed.
+    pub texture_bytes: u64,
+    /// Bytes of mesh vertices and indices on the GPU, counted the same way.
+    pub mesh_bytes: u64,
 }
 
 impl Renderer {

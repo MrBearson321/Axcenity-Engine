@@ -123,9 +123,9 @@ The editor gets a **Graphics** section in its Settings window (`editor/src/app/s
 
 ### Acceptance criteria
 
-- [ ] At 50% scale the scene targets are half size in each direction, the UI text stays sharp at full size, and picking in the editor still hits the right part.
-- [ ] Half texture quality uploads a 1024² texture as 512² with its smaller mips, and the reported texture bytes drop to about a quarter (GPU test).
-- [ ] Changing either setting at run time draws the next frame correctly with no leaked targets.
+- [x] At 50% scale the scene targets are half size in each direction, the UI text stays sharp at full size, and picking in the editor still hits the right part.
+- [x] Half texture quality uploads a 1024² texture as 512² with its smaller mips, and the reported texture bytes drop to about a quarter (GPU test).
+- [x] Changing either setting at run time draws the next frame correctly with no leaked targets.
 
 ---
 

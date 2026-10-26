@@ -7,7 +7,9 @@ use super::*;
 
 use crate::theme::{Accent, Appearance, Density, Palette, ThemeChoice, type_scale};
 use crate::widgets;
-use axcenity_render::{Capabilities, GraphicsSettings, Quality, ShadowQuality};
+use axcenity_render::{
+    Capabilities, GraphicsSettings, Quality, RENDER_SCALE_RANGE, ShadowQuality, TextureQuality,
+};
 
 /// Ctrl+, (Cmd+, on macOS) opens Settings, as in most desktop apps.
 pub(super) const SETTINGS_SHORTCUT: egui::KeyboardShortcut =
@@ -537,6 +539,59 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
                     }
                 });
             ui.end_row();
+
+            ui.label("Render scale");
+            ui.horizontal(|ui| {
+                let mut custom = settings.render_scale.is_some();
+                if ui
+                    .checkbox(&mut custom, "")
+                    .on_hover_text("Off, the preset's scale is used.")
+                    .changed()
+                {
+                    settings.render_scale = custom.then(|| preset.render_scale());
+                }
+                match &mut settings.render_scale {
+                    Some(scale) => {
+                        let mut percent = (*scale * 100.0).round();
+                        let range = RENDER_SCALE_RANGE;
+                        if ui
+                            .add(
+                                egui::DragValue::new(&mut percent)
+                                    .range(range.start() * 100.0..=range.end() * 100.0)
+                                    .speed(1.0)
+                                    .suffix("%"),
+                            )
+                            .changed()
+                        {
+                            *scale = percent / 100.0;
+                        }
+                    }
+                    None => {
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "Preset ({}%)",
+                                (preset.render_scale() * 100.0).round()
+                            ))
+                            .color(palette.text_secondary),
+                        );
+                    }
+                }
+            });
+            ui.end_row();
+
+            ui.label("Texture quality");
+            let label = |quality: Option<TextureQuality>| match quality {
+                Some(quality) => quality.label().to_owned(),
+                None => format!("Preset ({})", preset.texture_quality().label()),
+            };
+            egui::ComboBox::from_id_salt("texture quality")
+                .selected_text(label(settings.texture_quality))
+                .show_ui(ui, |ui| {
+                    for choice in std::iter::once(None).chain(TextureQuality::ALL.map(Some)) {
+                        ui.selectable_value(&mut settings.texture_quality, choice, label(choice));
+                    }
+                });
+            ui.end_row();
         });
     ui.add_space(16.0);
     widgets::section_label(ui, "In use");
@@ -557,6 +612,14 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
     } else {
         "Post-processing: off"
     });
+    ui.label(format!(
+        "Scene drawn at {}% of the view's size; the UI always at 100%",
+        (effective.render_scale * 100.0).round()
+    ));
+    ui.label(format!(
+        "Textures: {} size",
+        effective.texture_quality.label().to_lowercase()
+    ));
     for note in &effective.notes {
         ui.label(egui::RichText::new(note).color(palette.warning));
     }
@@ -844,6 +907,8 @@ mod tests {
             shadow_quality: Some(ShadowQuality::Off),
             shadow_distance: Some(60.0),
             post_processing: None,
+            render_scale: Some(0.5),
+            texture_quality: Some(TextureQuality::Half),
         };
         let mut storage = MemoryStorage::default();
         eframe::App::save(&mut app, &mut storage);

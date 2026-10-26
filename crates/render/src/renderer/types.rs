@@ -1,4 +1,5 @@
 use super::*;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub(super) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// A [`TextureRenderer`]'s texture, as shown (see `create_target_texture`).
@@ -59,8 +60,10 @@ pub(super) const LIGHT_SCALE: f32 = 20.0;
 /// The scene is drawn in high dynamic range, into a texture that can hold
 /// light brighter than 1. Post-processing then brings it down to the screen.
 pub(super) const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
-/// The most blur levels bloom uses, each half the size of the one before.
-pub(super) const MAX_BLOOM_LEVELS: usize = 5;
+/// How many blur levels bloom uses at render scale 1, each half the size of
+/// the one before. Whatever the scale, the last is this many halvings of the
+/// output's size, so the glow spreads as far across the screen.
+pub(super) const BLOOM_LEVELS: u32 = 5;
 
 /// One point or spot light as the GPU reads it. Must match `Light` in shader.wgsl.
 #[repr(C)]
@@ -170,6 +173,41 @@ pub(super) const UI_BOX: f32 = 0.0;
 pub(super) const UI_SHADOW: f32 = 1.0;
 pub(super) const UI_INSET_SHADOW: f32 = 2.0;
 
+/// A running total of bytes on the GPU, shared by everything counted in it.
+/// Cloning it shares the same total.
+#[derive(Clone, Debug, Default)]
+pub(super) struct GpuBytes(Arc<AtomicU64>);
+
+impl GpuBytes {
+    /// Adds `bytes` to the total until the returned [`Counted`] is dropped.
+    pub(super) fn count(&self, bytes: u64) -> Counted {
+        self.0.fetch_add(bytes, Ordering::Relaxed);
+        Counted {
+            bytes,
+            total: self.0.clone(),
+        }
+    }
+
+    pub(super) fn total(&self) -> u64 {
+        self.0.load(Ordering::Relaxed)
+    }
+}
+
+/// Bytes counted in a [`GpuBytes`] total while this lives. It's kept with
+/// the GPU object it measures, so freeing that object takes its bytes off
+/// the total (Rust runs `Drop::drop` when a value goes away).
+#[derive(Debug)]
+pub(super) struct Counted {
+    bytes: u64,
+    total: Arc<AtomicU64>,
+}
+
+impl Drop for Counted {
+    fn drop(&mut self) {
+        self.total.fetch_sub(self.bytes, Ordering::Relaxed);
+    }
+}
+
 /// A mesh uploaded to the GPU.
 pub(super) struct GpuMesh {
     pub(super) vertices: wgpu::Buffer,
@@ -180,6 +218,8 @@ pub(super) struct GpuMesh {
     pub(super) index_format: wgpu::IndexFormat,
     /// The caller's [`MeshSource::version`] these vertices are of.
     pub(super) version: u64,
+    /// Its buffers' size, in [`ScenePipeline::mesh_bytes`].
+    pub(super) _bytes: Counted,
 }
 
 /// How a material's texture maps are read. Must match `Maps` in
@@ -209,6 +249,8 @@ pub(super) struct GpuTexture {
     pub(super) srgb: wgpu::TextureView,
     /// Gives the bytes as they are (128 is 0.5), for values.
     pub(super) linear: wgpu::TextureView,
+    /// Its size with every mip level, in [`ScenePipeline::texture_bytes`].
+    pub(super) _bytes: Counted,
 }
 
 /// A material's textures and [`MapsUniform`], bound together for the shader.
@@ -311,11 +353,20 @@ pub(super) struct PostPasses {
     pub(super) composite: wgpu::RenderPipeline,
 }
 
-/// What post-processing draws into and reads, which depends on the screen's size.
+/// What the scene draws into and post-processing reads, at the scene's
+/// size: the output's times the render scale.
 pub(super) struct PostTargets {
+    /// The scene's size in pixels, and the output's it was made for.
+    pub(super) size: (u32, u32),
+    pub(super) output: (u32, u32),
+    /// A clone of [`ScenePipeline::targets_alive`], so sets of targets still
+    /// alive can be counted.
+    pub(super) _alive: Arc<()>,
     /// Where the scene is drawn.
     pub(super) hdr_view: wgpu::TextureView,
-    /// Bloom levels from half the screen's size down, each half the one before.
+    /// The scene's depth, thrown away after the scene pass.
+    pub(super) depth_view: wgpu::TextureView,
+    /// Bloom levels from half the scene's size down, each half the one before.
     pub(super) levels: Vec<wgpu::TextureView>,
     /// Scene to the first level.
     pub(super) prefilter_group: wgpu::BindGroup,
@@ -331,15 +382,19 @@ pub(super) struct PostTargets {
 pub(super) struct ScenePipeline {
     pub(super) device: wgpu::Device,
     pub(super) queue: wgpu::Queue,
-    pub(super) depth_view: wgpu::TextureView,
     pub(super) sky_pipeline: wgpu::RenderPipeline,
     pub(super) opaque_pipeline: wgpu::RenderPipeline,
     pub(super) transparent_pipeline: wgpu::RenderPipeline,
     /// Camera-facing pictures, such as particles.
     pub(super) sprites: sprites::SpritePass,
     pub(super) post: PostPasses,
-    /// The scene's HDR texture and the bloom levels, remade at each resize.
+    /// The scene's HDR and depth textures and the bloom levels, remade
+    /// when the scene's size changes.
     pub(super) post_targets: PostTargets,
+    /// One more strong reference than there are sets of targets alive.
+    pub(super) targets_alive: Arc<()>,
+    /// The size of what's drawn into (the window or texture), in pixels.
+    pub(super) output_size: (u32, u32),
     pub(super) light_buffer: wgpu::Buffer,
     pub(super) tile_buffer: wgpu::Buffer,
     pub(super) ui_pipeline: wgpu::RenderPipeline,
@@ -401,8 +456,12 @@ pub(super) struct ScenePipeline {
     /// For items with no textures, such as every built-in shape.
     pub(super) plain_material: GpuMaterial,
     /// Callers' meshes and textures, by key, and the materials using them.
+    /// `textures` are sized by the texture quality.
     pub(super) custom_meshes: HashMap<u64, Cached<GpuMesh>>,
     pub(super) textures: HashMap<u64, Cached<GpuTexture>>,
+    /// Textures that keep their full size whatever the texture quality: UI
+    /// images, and terrain weights (which say where each layer is painted).
+    pub(super) full_textures: HashMap<u64, Cached<GpuTexture>>,
     pub(super) materials: HashMap<MaterialKey, Cached<GpuMaterial>>,
     /// Terrain chunks' pipeline, layer textures and bindings.
     pub(super) terrain: terrain::TerrainPass,
@@ -412,6 +471,9 @@ pub(super) struct ScenePipeline {
     pub(super) gpu_timer: Option<gpu_timer::GpuTimer>,
     /// Draw calls and triangles of the last frame.
     pub(super) draws: (u32, u64),
+    /// Bytes of textures and of meshes on the GPU.
+    pub(super) texture_bytes: GpuBytes,
+    pub(super) mesh_bytes: GpuBytes,
 }
 
 /// Turned UI text: glyphon only draws text upright, so each turned text is

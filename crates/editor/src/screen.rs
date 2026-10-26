@@ -89,6 +89,85 @@ mod tests {
         assert!((shown - pointer).length() < 1e-2, "{shown:?}");
     }
 
+    /// Picking goes through `Screen`, which knows only the viewport's
+    /// rectangle, so it must still match what's drawn when the scene is
+    /// drawn at half size and scaled up to the viewport.
+    #[test]
+    fn picking_hits_the_part_drawn_under_the_pointer_at_half_render_scale() {
+        use axcenity_render::{GraphicsSettings, TextureRenderer, wgpu};
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
+            return;
+        };
+        let Ok((device, queue)) = pollster::block_on(adapter.request_device(&Default::default()))
+        else {
+            return;
+        };
+        let folder =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-graphics");
+        let world = axcenity_project::load(&folder).unwrap().world;
+        let assets = axcenity_assets::Assets::new(&folder);
+        let camera = axcenity_scene::FlyCamera::looking_at(Vec3::new(12.0, 8.0, 16.0), Vec3::ZERO)
+            .to_render_camera();
+        let (width, height) = (320, 180);
+        let draw = |render_scale| {
+            let mut renderer = TextureRenderer::new(&device, &queue, width, height);
+            renderer.set_graphics(&GraphicsSettings {
+                render_scale: Some(render_scale),
+                ..GraphicsSettings::default()
+            });
+            // Models load the first time they're drawn, so draw twice.
+            for _ in 0..2 {
+                let list = axcenity_scene::build_draw_list(&world, &assets, camera);
+                renderer.render(&list).unwrap();
+            }
+            renderer.read_pixels()
+        };
+        let (full, half) = (draw(1.0), draw(0.5));
+        let difference = |at: usize| -> u64 {
+            (0..3)
+                .map(|channel| u64::from(full[at + channel].abs_diff(half[at + channel])))
+                .sum()
+        };
+
+        let rect =
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width as f32, height as f32));
+        let screen = Screen::new(camera, rect);
+        let picked = |x: i32, y: i32| {
+            let pointer = egui::pos2(x as f32 + 0.5, y as f32 + 0.5);
+            axcenity_scene::pick(&world, screen.ray(pointer))
+        };
+        let mut parts = std::collections::HashSet::new();
+        let (mut compared, mut total) = (0u64, 0u64);
+        for y in (4..height as i32 - 4).step_by(6) {
+            for x in (4..width as i32 - 4).step_by(6) {
+                let Some(part) = picked(x, y) else {
+                    continue;
+                };
+                // Only well inside a part, away from its edges.
+                let inside = [(-3, 0), (3, 0), (0, -3), (0, 3)]
+                    .iter()
+                    .all(|(dx, dy)| picked(x + dx, y + dy) == Some(part));
+                if !inside {
+                    continue;
+                }
+                parts.insert(part);
+                compared += 1;
+                total += difference((y as usize * width as usize + x as usize) * 4);
+            }
+        }
+        assert!(parts.len() >= 5, "only {} parts picked", parts.len());
+        // Where picking finds a part, both frames show that part.
+        let average = total as f64 / (compared * 3) as f64;
+        assert!(
+            average < 6.0,
+            "picked points differ by {average:.1} per channel"
+        );
+        let whole = (0..full.len()).step_by(4).map(difference).sum::<u64>() as f64
+            / (u64::from(width * height) * 3) as f64;
+        assert!(whole < 6.0, "the frames differ by {whole:.1} per channel");
+    }
+
     #[test]
     fn studs_per_point_matches_what_the_camera_shows() {
         // Looking down -Z from the origin, a point 10 studs away and

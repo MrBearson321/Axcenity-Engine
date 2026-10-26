@@ -9,7 +9,6 @@ impl ScenePipeline {
         height: u32,
         capabilities: Capabilities,
     ) -> Self {
-        let depth_view = create_depth_view(&device, width, height);
         let storage_entry = |binding| wgpu::BindGroupLayoutEntry {
             binding,
             visibility: wgpu::ShaderStages::FRAGMENT,
@@ -176,7 +175,8 @@ impl ScenePipeline {
             mipmap_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
-        let white_texture = create_texture(&device, &queue, 1, 1, &[255; 4]);
+        let (texture_bytes, mesh_bytes) = (GpuBytes::default(), GpuBytes::default());
+        let white_texture = create_texture(&device, &queue, &texture_bytes, (1, 1, &[255; 4]), 0);
         let plain_material = create_material(
             &device,
             &material_layout,
@@ -204,19 +204,29 @@ impl ScenePipeline {
             HDR_FORMAT,
             true,
         );
-        let terrain = terrain::TerrainPass::new(&device, &frame_layout);
+        let mut terrain = terrain::TerrainPass::new(&device, &frame_layout, texture_bytes.clone());
+        let settings = GraphicsSettings::default();
+        let graphics = settings.effective(&capabilities);
+        terrain.set_skipped_levels(graphics.texture_quality.skipped_levels());
         let sky_pipeline = create_sky_pipeline(&device, &frame_layout);
         let sprites = sprites::SpritePass::new(&device, &white_texture.srgb);
         let post = PostPasses::new(&device, color_format);
-        let post_targets = PostTargets::new(&device, &post, width, height);
+        let targets_alive = Arc::new(());
+        let post_targets = PostTargets::new(
+            &device,
+            &post,
+            scene_size((width, height), &graphics, &capabilities),
+            (width, height),
+            &targets_alive,
+        );
         let ui_pipeline = create_ui_pipeline(&device, color_format);
         let (ui_image_layout, ui_sampler, ui_image_pipeline, ui_sheet_pipeline) =
             create_ui_image_pipeline(&device, color_format);
         let meshes = Meshes {
-            block: upload_mesh(&device, "block", &mesh::block()),
-            sphere: upload_mesh(&device, "sphere", &mesh::sphere()),
-            cylinder: upload_mesh(&device, "cylinder", &mesh::cylinder()),
-            wedge: upload_mesh(&device, "wedge", &mesh::wedge()),
+            block: upload_mesh(&device, &mesh_bytes, "block", &mesh::block()),
+            sphere: upload_mesh(&device, &mesh_bytes, "sphere", &mesh::sphere()),
+            cylinder: upload_mesh(&device, &mesh_bytes, "cylinder", &mesh::cylinder()),
+            wedge: upload_mesh(&device, &mesh_bytes, "wedge", &mesh::wedge()),
         };
         let instance_capacity = 64;
         let instance_buffer = create_instance_buffer(&device, instance_capacity);
@@ -251,13 +261,14 @@ impl ScenePipeline {
         Self {
             device,
             queue,
-            depth_view,
             sky_pipeline,
             opaque_pipeline,
             transparent_pipeline,
             sprites,
             post,
             post_targets,
+            targets_alive,
+            output_size: (width, height),
             light_buffer,
             tile_buffer,
             ui_pipeline,
@@ -286,8 +297,8 @@ impl ScenePipeline {
             shadow_bind_group,
             shadow_map: None,
             shadow_maps_alive: Arc::new(()),
-            graphics: GraphicsSettings::default().effective(&capabilities),
-            settings: GraphicsSettings::default(),
+            graphics,
+            settings,
             capabilities,
             meshes,
             instance_buffer,
@@ -298,33 +309,63 @@ impl ScenePipeline {
             plain_material,
             custom_meshes: HashMap::new(),
             textures: HashMap::new(),
+            full_textures: HashMap::new(),
             materials: HashMap::new(),
             terrain,
             frame: 0,
             gpu_timer,
             draws: (0, 0),
+            texture_bytes,
+            mesh_bytes,
         }
     }
 
     /// Uses `settings` from the next frame, lowered to what the device can
     /// do. A shadow map of the wrong size is freed here and remade at the
-    /// right size when next drawn.
+    /// right size when next drawn. A new render scale remakes the scene's
+    /// targets, and a new texture quality frees every texture drawn in the
+    /// scene (and the materials using them), so they're uploaded again at
+    /// the new size.
     pub(super) fn set_graphics(&mut self, settings: &GraphicsSettings) {
         if *settings == self.settings {
             return;
         }
+        let old_quality = self.graphics.texture_quality;
         self.settings = settings.clone();
         self.graphics = settings.effective(&self.capabilities);
         let wanted = self.graphics.shadow_quality.map();
         if self.shadow_map.as_ref().map(|map| map.size) != wanted {
             self.shadow_map = None;
         }
+        self.fit_targets();
+        if self.graphics.texture_quality != old_quality {
+            self.materials.clear();
+            self.textures.clear();
+            self.sprites.forget(|_| false);
+            self.terrain
+                .set_skipped_levels(self.graphics.texture_quality.skipped_levels());
+        }
     }
 
     /// Call when the target changes size. Sizes are in pixels and never zero.
     pub(super) fn resize(&mut self, width: u32, height: u32) {
-        self.depth_view = create_depth_view(&self.device, width, height);
-        self.post_targets = PostTargets::new(&self.device, &self.post, width, height);
+        self.output_size = (width, height);
+        self.fit_targets();
+    }
+
+    /// Remakes the scene's targets if they weren't made for this output
+    /// size and render scale. The old ones are freed.
+    fn fit_targets(&mut self) {
+        let size = scene_size(self.output_size, &self.graphics, &self.capabilities);
+        if (self.post_targets.size, self.post_targets.output) != (size, self.output_size) {
+            self.post_targets = PostTargets::new(
+                &self.device,
+                &self.post,
+                size,
+                self.output_size,
+                &self.targets_alive,
+            );
+        }
     }
 
     /// Draws `list` into `view`, which must be the size last given to
@@ -336,7 +377,9 @@ impl ScenePipeline {
         aspect: f32,
         viewport_size: (u32, u32),
     ) -> Result<()> {
-        let planned_lights = plan_lights(list, aspect, viewport_size);
+        // Lights are planned in the scene's pixels, which the render scale
+        // makes fewer or more than the output's. UI uses the output's.
+        let planned_lights = plan_lights(list, aspect, self.post_targets.size);
         let mut frame_uniform = frame_uniform(list, aspect, &self.graphics);
         frame_uniform.lights = [
             planned_lights.lights.len() as u32,
@@ -537,7 +580,7 @@ impl ScenePipeline {
                     },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.depth_view,
+                    view: &self.post_targets.depth_view,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(1.0),
                         store: wgpu::StoreOp::Discard,
@@ -686,12 +729,20 @@ impl ScenePipeline {
         Arc::strong_count(&self.shadow_maps_alive) - 1
     }
 
+    /// How many sets of scene targets are alive: 1, unless one leaked.
+    #[cfg(test)]
+    pub(super) fn targets_alive(&self) -> usize {
+        Arc::strong_count(&self.targets_alive) - 1
+    }
+
     pub(super) fn stats(&self) -> RenderStats {
         RenderStats {
             draw_calls: self.draws.0,
             triangles: self.draws.1,
             gpu_time: self.gpu_timer.as_ref().and_then(gpu_timer::GpuTimer::last),
             gpu_timing: self.gpu_timer.is_some(),
+            texture_bytes: self.texture_bytes.total(),
+            mesh_bytes: self.mesh_bytes.total(),
         }
     }
 
@@ -883,12 +934,22 @@ impl ScenePipeline {
                         if let Some(gpu) = &mut cached.gpu
                             && gpu.version != source.version()
                         {
-                            update_custom_mesh(&self.device, &self.queue, gpu, source.as_ref());
+                            update_custom_mesh(
+                                &self.device,
+                                &self.queue,
+                                &self.mesh_bytes,
+                                gpu,
+                                source.as_ref(),
+                            );
                         }
                     }
                     Entry::Vacant(slot) => {
                         slot.insert(Cached {
-                            gpu: upload_custom_mesh(&self.device, source.as_ref()),
+                            gpu: upload_custom_mesh(
+                                &self.device,
+                                &self.mesh_bytes,
+                                source.as_ref(),
+                            ),
                             last_drawn: frame,
                         });
                     }
@@ -896,10 +957,10 @@ impl ScenePipeline {
             }
             if let Some(surface) = &item.material.terrain {
                 for weights in &surface.weights {
-                    self.note_texture(weights.as_ref(), frame);
+                    self.note_texture(weights.as_ref(), frame, true);
                 }
                 let weights = surface.weights.each_ref().map(|source| {
-                    self.textures
+                    self.full_textures
                         .get(&source.key())
                         .and_then(|cached| cached.gpu.as_ref())
                 });
@@ -915,7 +976,7 @@ impl ScenePipeline {
             }
             let sources = material_textures(item);
             for source in sources.iter().flatten() {
-                self.note_texture(source.as_ref(), frame);
+                self.note_texture(source.as_ref(), frame, false);
             }
             let key = material_key(item);
             if key == MaterialKey::default() {
@@ -947,12 +1008,12 @@ impl ScenePipeline {
             if let UiDrawItem::Image(image) = item
                 && let Some(source) = &image.texture
             {
-                self.note_texture(source.as_ref(), frame);
+                self.note_texture(source.as_ref(), frame, true);
             }
         }
         for sprite in &list.sprites {
             if let Some(source) = &sprite.texture {
-                self.note_texture(source.as_ref(), frame);
+                self.note_texture(source.as_ref(), frame, false);
             }
         }
     }
@@ -984,7 +1045,7 @@ impl ScenePipeline {
             };
             let key = source.key();
             if self
-                .textures
+                .full_textures
                 .get(&key)
                 .and_then(|cached| cached.gpu.as_ref())
                 .is_none()
@@ -994,7 +1055,7 @@ impl ScenePipeline {
             if !self.ui_image_groups.contains_key(&key) {
                 let group = {
                     let gpu = self
-                        .textures
+                        .full_textures
                         .get(&key)
                         .and_then(|cached| cached.gpu.as_ref())
                         .expect("checked just above");
@@ -1027,13 +1088,29 @@ impl ScenePipeline {
         draws
     }
 
-    /// Uploads `source` the first time, and marks it drawn this frame.
-    pub(super) fn note_texture(&mut self, source: &dyn TextureSource, frame: u64) {
-        match self.textures.entry(source.key()) {
+    /// Uploads `source` the first time, and marks it drawn this frame. A
+    /// `full` texture (a UI image or terrain weights) keeps its full size;
+    /// others are sized by the texture quality.
+    pub(super) fn note_texture(&mut self, source: &dyn TextureSource, frame: u64, full: bool) {
+        let (cache, skipped_levels) = if full {
+            (&mut self.full_textures, 0)
+        } else {
+            (
+                &mut self.textures,
+                self.graphics.texture_quality.skipped_levels(),
+            )
+        };
+        match cache.entry(source.key()) {
             Entry::Occupied(mut cached) => cached.get_mut().last_drawn = frame,
             Entry::Vacant(slot) => {
                 slot.insert(Cached {
-                    gpu: upload_texture(&self.device, &self.queue, source),
+                    gpu: upload_texture(
+                        &self.device,
+                        &self.queue,
+                        &self.texture_bytes,
+                        source,
+                        skipped_levels,
+                    ),
                     last_drawn: frame,
                 });
             }
@@ -1048,8 +1125,10 @@ impl ScenePipeline {
         self.custom_meshes
             .retain(|_, cached| recent(cached.last_drawn));
         self.textures.retain(|_, cached| recent(cached.last_drawn));
+        self.full_textures
+            .retain(|_, cached| recent(cached.last_drawn));
         self.ui_image_groups
-            .retain(|key, _| self.textures.contains_key(key));
+            .retain(|key, _| self.full_textures.contains_key(key));
         self.sprites.forget(|key| self.textures.contains_key(&key));
         self.materials.retain(|_, cached| recent(cached.last_drawn));
         self.terrain.forget(frame);
@@ -1076,6 +1155,20 @@ impl ScenePipeline {
             mapped_at_creation: false,
         });
     }
+}
+
+/// The scene's size in pixels for an `output` of that size: scaled by the
+/// render scale, at least 1, and at most what the GPU's textures can hold.
+pub(super) fn scene_size(
+    (width, height): (u32, u32),
+    graphics: &EffectiveGraphics,
+    capabilities: &Capabilities,
+) -> (u32, u32) {
+    let scaled = |pixels: u32| {
+        ((pixels as f32 * graphics.render_scale).round() as u32)
+            .clamp(1, capabilities.max_texture_size.max(1))
+    };
+    (scaled(width), scaled(height))
 }
 
 /// The glyphon bounds of one copy of `text`, `offset` pixels from it: its

@@ -83,6 +83,47 @@ impl ShadowQuality {
     }
 }
 
+/// How sharp textures on surfaces are: how many of their largest mip levels
+/// are left out at upload. UI images always keep their full size.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum TextureQuality {
+    /// A quarter of the width and height: two levels left out.
+    Quarter,
+    /// Half the width and height: one level left out.
+    Half,
+    /// As the texture was made.
+    Full,
+}
+
+impl TextureQuality {
+    pub const ALL: [TextureQuality; 3] = [
+        TextureQuality::Quarter,
+        TextureQuality::Half,
+        TextureQuality::Full,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            TextureQuality::Quarter => "Quarter",
+            TextureQuality::Half => "Half",
+            TextureQuality::Full => "Full",
+        }
+    }
+
+    /// How many of a texture's largest mip levels are left out.
+    pub fn skipped_levels(self) -> u32 {
+        match self {
+            TextureQuality::Quarter => 2,
+            TextureQuality::Half => 1,
+            TextureQuality::Full => 0,
+        }
+    }
+}
+
+/// The smallest and largest render scale: the scene is drawn at this
+/// fraction of the output's width and height.
+pub const RENDER_SCALE_RANGE: std::ops::RangeInclusive<f32> = 0.5..=2.0;
+
 /// A shadow map's size in texels per side, and its number of cascades
 /// (one layer each).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -107,6 +148,12 @@ pub struct GraphicsSettings {
     /// Off turns bloom and tone mapping off whatever the world asks for.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub post_processing: Option<bool>,
+    /// The scene's size as a fraction of the output's (0.5 to 2). The UI is
+    /// always drawn at the output's size.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub render_scale: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub texture_quality: Option<TextureQuality>,
 }
 
 impl GraphicsSettings {
@@ -157,6 +204,30 @@ impl GraphicsSettings {
         self.post_processing.unwrap_or(self.quality != Quality::Low)
     }
 
+    /// The render scale: the override, kept within [`RENDER_SCALE_RANGE`], or
+    /// the preset's. An override that isn't a number is ignored.
+    pub fn render_scale(&self) -> f32 {
+        let preset = if self.quality == Quality::Low {
+            0.75
+        } else {
+            1.0
+        };
+        self.render_scale
+            .filter(|scale| scale.is_finite())
+            .map_or(preset, |scale| {
+                scale.clamp(*RENDER_SCALE_RANGE.start(), *RENDER_SCALE_RANGE.end())
+            })
+    }
+
+    /// The texture quality: the override, or the preset's.
+    pub fn texture_quality(&self) -> TextureQuality {
+        self.texture_quality.unwrap_or(match self.quality {
+            Quality::Low => TextureQuality::Quarter,
+            Quality::Medium => TextureQuality::Half,
+            Quality::High | Quality::Ultra => TextureQuality::Full,
+        })
+    }
+
     /// The values the renderer uses: these settings, lowered where the GPU
     /// can't meet them, with a note for each one lowered. Never raises one.
     pub fn effective(&self, capabilities: &Capabilities) -> EffectiveGraphics {
@@ -188,6 +259,8 @@ impl GraphicsSettings {
             shadow_quality,
             shadow_distance: self.shadow_distance(),
             post_processing: self.post_processing(),
+            render_scale: self.render_scale(),
+            texture_quality: self.texture_quality(),
             notes,
         }
     }
@@ -241,6 +314,10 @@ pub struct EffectiveGraphics {
     /// The farthest shadows reach, in studs (a ceiling on the world's).
     pub shadow_distance: f32,
     pub post_processing: bool,
+    /// The scene's size as a fraction of the output's. A scene too big for
+    /// the GPU's textures is drawn at the largest size it can hold.
+    pub render_scale: f32,
+    pub texture_quality: TextureQuality,
     /// Why each lowered value was lowered, for showing in the settings.
     pub notes: Vec<String>,
 }
@@ -268,12 +345,31 @@ mod tests {
                 settings.shadow_quality().map(),
                 settings.shadow_distance(),
                 settings.post_processing(),
+                settings.render_scale(),
+                settings.texture_quality(),
             )
         };
-        assert_eq!(values(Quality::Low), (map(1024, 2), 75.0, false));
-        assert_eq!(values(Quality::Medium), (map(2048, 2), 100.0, true));
-        assert_eq!(values(Quality::High), (map(2048, 3), 150.0, true));
-        assert_eq!(values(Quality::Ultra), (map(4096, 4), 300.0, true));
+        use TextureQuality::{Full, Half, Quarter};
+        assert_eq!(
+            values(Quality::Low),
+            (map(1024, 2), 75.0, false, 0.75, Quarter)
+        );
+        assert_eq!(
+            values(Quality::Medium),
+            (map(2048, 2), 100.0, true, 1.0, Half)
+        );
+        assert_eq!(
+            values(Quality::High),
+            (map(2048, 3), 150.0, true, 1.0, Full)
+        );
+        assert_eq!(
+            values(Quality::Ultra),
+            (map(4096, 4), 300.0, true, 1.0, Full)
+        );
+        assert_eq!(
+            [Quarter, Half, Full].map(TextureQuality::skipped_levels),
+            [2, 1, 0]
+        );
         assert_eq!(ShadowQuality::Off.map(), None);
         assert_eq!(GraphicsSettings::default().quality, Quality::High);
     }
@@ -305,12 +401,39 @@ mod tests {
             assert_eq!(post.post_processing(), !preset.post_processing());
             assert_eq!(post.shadow_quality(), preset.shadow_quality());
             assert_eq!(post.shadow_distance(), preset.shadow_distance());
+            assert_eq!(post.render_scale(), preset.render_scale());
+
+            let scale = GraphicsSettings {
+                render_scale: Some(1.5),
+                ..preset.clone()
+            };
+            assert_eq!(scale.render_scale(), 1.5);
+            assert_eq!(scale.texture_quality(), preset.texture_quality());
+            assert_eq!(scale.shadow_quality(), preset.shadow_quality());
+
+            let textures = GraphicsSettings {
+                texture_quality: Some(TextureQuality::Half),
+                ..preset.clone()
+            };
+            assert_eq!(textures.texture_quality(), TextureQuality::Half);
+            assert_eq!(textures.render_scale(), preset.render_scale());
+            assert_eq!(textures.post_processing(), preset.post_processing());
         }
         let broken = GraphicsSettings {
             shadow_distance: Some(f32::NAN),
+            render_scale: Some(f32::NAN),
             ..GraphicsSettings::default()
         };
         assert_eq!(broken.shadow_distance(), 150.0);
+        assert_eq!(broken.render_scale(), 1.0);
+        let scale = |scale| {
+            GraphicsSettings {
+                render_scale: Some(scale),
+                ..GraphicsSettings::default()
+            }
+            .render_scale()
+        };
+        assert_eq!((scale(0.1), scale(9.0)), (0.5, 2.0), "kept within 50–200%");
     }
 
     #[test]
@@ -320,6 +443,8 @@ mod tests {
             shadow_quality: Some(ShadowQuality::Ultra),
             shadow_distance: Some(80.0),
             post_processing: Some(false),
+            render_scale: Some(0.5),
+            texture_quality: Some(TextureQuality::Quarter),
         };
         let text = serde_json::to_string(&settings).unwrap();
         assert_eq!(
@@ -413,12 +538,16 @@ mod tests {
                         shadow_quality: shadows,
                         shadow_distance: Some(60.0),
                         post_processing: post,
+                        render_scale: Some(0.5),
+                        texture_quality: Some(TextureQuality::Half),
                     };
                     for capabilities in &capabilities {
                         let effective = settings.effective(capabilities);
                         assert!(effective.shadow_quality <= settings.shadow_quality());
                         assert_eq!(effective.shadow_distance, settings.shadow_distance());
                         assert!(effective.post_processing <= settings.post_processing());
+                        assert_eq!(effective.render_scale, settings.render_scale());
+                        assert_eq!(effective.texture_quality, settings.texture_quality());
                         assert_eq!(
                             effective.notes.is_empty(),
                             effective.shadow_quality == settings.shadow_quality()

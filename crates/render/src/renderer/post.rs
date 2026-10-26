@@ -3,7 +3,10 @@
 //! The scene is drawn into an HDR target. Bloom blurs the bright parts, then
 //! the composite pass writes the window or the editor's viewport texture.
 
-use super::{HDR_FORMAT, MAX_BLOOM_LEVELS, PostPasses, PostTargets, PostUniform};
+use std::sync::Arc;
+
+use super::gpu::create_depth_view;
+use super::{BLOOM_LEVELS, HDR_FORMAT, PostPasses, PostTargets, PostUniform};
 
 impl PostPasses {
     pub(super) fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
@@ -210,9 +213,17 @@ pub(super) fn fullscreen_pass(
 }
 
 impl PostTargets {
-    /// Makes the HDR texture for a `width` × `height` screen and the bloom
-    /// levels below it, with the bind groups that connect them.
-    pub(super) fn new(device: &wgpu::Device, post: &PostPasses, width: u32, height: u32) -> Self {
+    /// Makes the HDR and depth textures for a `width` × `height` scene and
+    /// the bloom levels below it, down to [`BLOOM_LEVELS`] halvings of the
+    /// `output`'s size, with the bind groups that connect them. `alive` is
+    /// cloned in, to count the sets alive.
+    pub(super) fn new(
+        device: &wgpu::Device,
+        post: &PostPasses,
+        (width, height): (u32, u32),
+        output: (u32, u32),
+        alive: &Arc<()>,
+    ) -> Self {
         let make = |label, width: u32, height: u32| {
             device
                 .create_texture(&wgpu::TextureDescriptor {
@@ -237,7 +248,12 @@ impl PostTargets {
         let (mut level_width, mut level_height) = ((width / 2).max(1), (height / 2).max(1));
         loop {
             levels.push(make("bloom level", level_width, level_height));
-            if levels.len() == MAX_BLOOM_LEVELS || level_width == 1 || level_height == 1 {
+            let last = (output.0 >> BLOOM_LEVELS, output.1 >> BLOOM_LEVELS);
+            if level_width <= last.0
+                || level_height <= last.1
+                || level_width == 1
+                || level_height == 1
+            {
                 break;
             }
             level_width = (level_width / 2).max(1);
@@ -281,7 +297,11 @@ impl PostTargets {
             .collect();
         let composite_group = group(&post.composite_layout, &hdr_view, Some(&levels[0]));
         Self {
+            size: (width, height),
+            output,
+            _alive: alive.clone(),
             hdr_view,
+            depth_view: create_depth_view(device, width, height),
             levels,
             prefilter_group,
             downsample_groups,

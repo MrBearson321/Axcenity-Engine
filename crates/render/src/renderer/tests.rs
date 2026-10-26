@@ -1636,3 +1636,219 @@ fn post_processing_off_in_the_settings_turns_the_worlds_off() {
     };
     assert!(!post_drawn(&world_off, &EffectiveGraphics::default()).enabled);
 }
+
+fn at_scale(render_scale: f32) -> GraphicsSettings {
+    GraphicsSettings {
+        render_scale: Some(render_scale),
+        ..GraphicsSettings::default()
+    }
+}
+
+/// A lit block over a sky, with a UI panel and its label at the top left.
+fn scene_with_ui() -> DrawList {
+    let mut list = list_of(vec![big_block()]);
+    list.sky = Sky::default();
+    list.ui = vec![
+        ui_rect([4.0, 4.0], [120.0, 40.0]),
+        ui_label([8.0, 8.0], [110.0, 30.0]),
+    ];
+    list
+}
+
+#[test]
+fn half_render_scale_halves_the_scene_targets_and_keeps_ui_text_sharp() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let list = scene_with_ui();
+    let (width, height) = (160, 96);
+    let mut renderer = TextureRenderer::new(&device, &queue, width, height);
+    renderer.render(&list).unwrap();
+    assert_eq!(renderer.scene.post_targets.size, (160, 96));
+    let full = renderer.read_pixels();
+
+    renderer.set_graphics(&at_scale(0.5));
+    renderer.render(&list).unwrap();
+    assert_eq!(renderer.scene.post_targets.size, (80, 48), "half each way");
+    assert_eq!(renderer.size(), (160, 96), "the output keeps its size");
+    assert_eq!(renderer.scene.targets_alive(), 1);
+    let half = renderer.read_pixels();
+
+    // The UI is drawn at the output's size either way, so the panel and its
+    // text come out the same, pixel for pixel.
+    let panel = |pixels: &[u8]| -> Vec<u8> {
+        (4..44)
+            .flat_map(|y| (4..124).map(move |x| (y * width + x) as usize * 4))
+            .flat_map(|at| pixels[at..at + 4].to_vec())
+            .collect()
+    };
+    assert_eq!(panel(&full), panel(&half));
+    assert!(
+        panel(&full).chunks(4).any(|pixel| pixel[0] > 128),
+        "the label's text is drawn on the panel"
+    );
+    // The scene is drawn at half size and scaled up, so it's still where it was.
+    let middle = |pixels: &[u8]| -> [u8; 4] {
+        let at = ((height / 2) * width + width / 2) as usize * 4;
+        pixels[at..at + 4].try_into().unwrap()
+    };
+    let (a, b) = (middle(&full), middle(&half));
+    assert!(
+        a.iter().zip(b).all(|(a, b)| a.abs_diff(b) <= 2),
+        "{a:?} vs {b:?}"
+    );
+}
+
+/// A `size` × `size` texture in a checker of grey shades.
+struct Checker(u64, u32, Vec<u8>);
+
+impl Checker {
+    fn texture(key: u64, size: u32) -> Arc<dyn TextureSource> {
+        let pixels = (0..size * size)
+            .flat_map(|i| {
+                let shade = if (i % size + i / size).is_multiple_of(2) {
+                    60
+                } else {
+                    200
+                };
+                [shade, shade, shade, 255]
+            })
+            .collect();
+        Arc::new(Checker(key, size, pixels))
+    }
+}
+
+impl TextureSource for Checker {
+    fn key(&self) -> u64 {
+        self.0
+    }
+    fn size(&self) -> (u32, u32) {
+        (self.1, self.1)
+    }
+    fn rgba(&self) -> &[u8] {
+        &self.2
+    }
+}
+
+fn textured_block(texture: Arc<dyn TextureSource>) -> DrawItem {
+    let mut block = big_block();
+    block.material.base_color_texture = Some(texture);
+    block
+}
+
+fn with_textures(quality: crate::TextureQuality) -> GraphicsSettings {
+    GraphicsSettings {
+        texture_quality: Some(quality),
+        ..GraphicsSettings::default()
+    }
+}
+
+#[test]
+fn half_texture_quality_uploads_a_1024_texture_at_512_and_a_quarter_of_the_bytes() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let mut list = list_of(vec![textured_block(Checker::texture(7, 1024))]);
+    let mut renderer = TextureRenderer::new(&device, &queue, 32, 32);
+    let empty = renderer.stats().texture_bytes;
+    renderer.render(&list).unwrap();
+    let uploaded = |renderer: &TextureRenderer| {
+        let texture = &renderer.scene.textures[&7].gpu.as_ref().unwrap()._texture;
+        (texture.width(), texture.height(), texture.mip_level_count())
+    };
+    assert_eq!(uploaded(&renderer), (1024, 1024, 11));
+    let full = renderer.stats().texture_bytes - empty;
+    assert_eq!(
+        full,
+        (0..=10)
+            .map(|level| (1024u64 >> level).pow(2) * 4)
+            .sum::<u64>()
+    );
+
+    renderer.set_graphics(&with_textures(crate::TextureQuality::Half));
+    assert!(
+        renderer.scene.textures.is_empty(),
+        "emptied for uploading again"
+    );
+    assert!(renderer.scene.materials.is_empty());
+    assert_eq!(
+        renderer.stats().texture_bytes,
+        empty,
+        "the full copy is freed"
+    );
+    renderer.render(&list).unwrap();
+    assert_eq!(uploaded(&renderer), (512, 512, 10), "with its smaller mips");
+    let half = renderer.stats().texture_bytes - empty;
+    let ratio = half as f64 / full as f64;
+    assert!((0.24..0.26).contains(&ratio), "{half} of {full} bytes");
+
+    // UI images keep their full size.
+    list.ui.push(UiDrawItem::Image(crate::UiImage {
+        position: [0.0; 2],
+        size: [16.0, 16.0],
+        tint: [1.0; 4],
+        border_radius: 0.0,
+        path: "checker.png".to_owned(),
+        texture: Some(Checker::texture(8, 1024)),
+        slice: None,
+        clip: None,
+        rotation_degrees: 0.0,
+    }));
+    renderer.render(&list).unwrap();
+    let image = &renderer.scene.full_textures[&8]
+        .gpu
+        .as_ref()
+        .unwrap()
+        ._texture;
+    assert_eq!(image.width(), 1024);
+}
+
+#[test]
+fn changing_render_scale_and_texture_quality_at_run_time_draws_the_next_frame_right() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let mut list = scene_with_ui();
+    list.items = vec![textured_block(Checker::texture(9, 64))];
+    let (width, height) = (96, 64);
+    // A renderer that starts with `settings`, for comparing against.
+    let fresh = |settings: &GraphicsSettings| {
+        let mut renderer = TextureRenderer::new(&device, &queue, width, height);
+        renderer.set_graphics(settings);
+        renderer.render(&list).unwrap();
+        (renderer.read_pixels(), renderer.stats().texture_bytes)
+    };
+    let mut renderer = TextureRenderer::new(&device, &queue, width, height);
+    let scales = [0.5, 2.0, 1.0, 0.75, 1.5];
+    let qualities = crate::TextureQuality::ALL;
+    for step in 0..20 {
+        let settings = GraphicsSettings {
+            render_scale: Some(scales[step % scales.len()]),
+            texture_quality: Some(qualities[step % qualities.len()]),
+            ..GraphicsSettings::default()
+        };
+        renderer.set_graphics(&settings);
+        renderer.render(&list).unwrap();
+        let expected = scene::scene_size(
+            (width, height),
+            renderer.graphics(),
+            renderer.capabilities(),
+        );
+        assert_eq!(renderer.scene.post_targets.size, expected);
+        assert_eq!(renderer.scene.targets_alive(), 1, "step {step}");
+        if step % 7 == 0 {
+            let (pixels, bytes) = fresh(&settings);
+            assert_eq!(renderer.read_pixels(), pixels, "step {step}: {settings:?}");
+            assert_eq!(renderer.stats().texture_bytes, bytes, "step {step}");
+        }
+    }
+    renderer.set_graphics(&GraphicsSettings::default());
+    renderer.render(&list).unwrap();
+    let (pixels, bytes) = fresh(&GraphicsSettings::default());
+    assert_eq!(renderer.read_pixels(), pixels);
+    assert_eq!(renderer.stats().texture_bytes, bytes, "nothing leaked");
+    assert_eq!(renderer.scene.targets_alive(), 1);
+}

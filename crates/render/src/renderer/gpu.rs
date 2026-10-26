@@ -13,9 +13,9 @@ use crate::graphics::ShadowMapSize;
 use crate::mesh::{self, MeshData, Vertex};
 
 use super::{
-    DEPTH_FORMAT, GpuMaterial, GpuMesh, GpuTexture, InstanceRaw, MATERIAL_TEXTURES, MapsUniform,
-    SHADOW_CASCADES, SHADOW_MAP_SIZE, TARGET_DRAW_FORMAT, TARGET_SHOW_FORMAT, TEXTURE_FORMAT,
-    TEXTURE_SRGB_FORMAT,
+    DEPTH_FORMAT, GpuBytes, GpuMaterial, GpuMesh, GpuTexture, InstanceRaw, MATERIAL_TEXTURES,
+    MapsUniform, SHADOW_CASCADES, SHADOW_MAP_SIZE, TARGET_DRAW_FORMAT, TARGET_SHOW_FORMAT,
+    TEXTURE_FORMAT, TEXTURE_SRGB_FORMAT,
 };
 
 /// The shader for parts and models, and the shadow and sky passes: the
@@ -349,9 +349,15 @@ pub(super) fn create_instance_buffer(device: &wgpu::Device, capacity: usize) -> 
     })
 }
 
-pub(super) fn upload_mesh(device: &wgpu::Device, name: &str, mesh: &MeshData) -> GpuMesh {
+pub(super) fn upload_mesh(
+    device: &wgpu::Device,
+    bytes: &GpuBytes,
+    name: &str,
+    mesh: &MeshData,
+) -> GpuMesh {
     upload_buffers(
         device,
+        bytes,
         name,
         &mesh.vertices,
         bytemuck::cast_slice(&mesh.indices),
@@ -364,12 +370,14 @@ pub(super) fn upload_mesh(device: &wgpu::Device, name: &str, mesh: &MeshData) ->
 /// fit together, such as an index past the last corner.
 pub(super) fn upload_custom_mesh(
     device: &wgpu::Device,
+    bytes: &GpuBytes,
     source: &dyn MeshSource,
 ) -> Option<GpuMesh> {
     let vertices = custom_vertices(source)?;
     let indices = source.indices();
     let mut mesh = upload_buffers(
         device,
+        bytes,
         "mesh",
         &vertices,
         bytemuck::cast_slice(indices),
@@ -386,6 +394,7 @@ pub(super) fn upload_custom_mesh(
 pub(super) fn update_custom_mesh(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
+    bytes: &GpuBytes,
     mesh: &mut GpuMesh,
     source: &dyn MeshSource,
 ) {
@@ -393,12 +402,12 @@ pub(super) fn update_custom_mesh(
     let Some(vertices) = custom_vertices(source) else {
         return;
     };
-    let bytes: &[u8] = bytemuck::cast_slice(&vertices);
-    if bytes.len() as u64 == mesh.vertices.size()
+    let corners: &[u8] = bytemuck::cast_slice(&vertices);
+    if corners.len() as u64 == mesh.vertices.size()
         && source.indices().len() == mesh.index_count as usize
     {
-        queue.write_buffer(&mesh.vertices, 0, bytes);
-    } else if let Some(fresh) = upload_custom_mesh(device, source) {
+        queue.write_buffer(&mesh.vertices, 0, corners);
+    } else if let Some(fresh) = upload_custom_mesh(device, bytes, source) {
         *mesh = fresh;
     }
 }
@@ -437,6 +446,7 @@ fn custom_vertices(source: &dyn MeshSource) -> Option<Vec<Vertex>> {
 
 pub(super) fn upload_buffers(
     device: &wgpu::Device,
+    bytes: &GpuBytes,
     name: &str,
     vertices: &[Vertex],
     indices: &[u8],
@@ -455,6 +465,7 @@ pub(super) fn upload_buffers(
         usage: wgpu::BufferUsages::INDEX,
     });
     GpuMesh {
+        _bytes: bytes.count(vertices.size() + indices.size()),
         vertices,
         indices,
         index_count: index_count as u32,
@@ -463,12 +474,15 @@ pub(super) fn upload_buffers(
     }
 }
 
-/// Uploads a caller's texture, or `None` (with a warning) if it has no
+/// Uploads a caller's texture without its `skipped_levels` largest mip
+/// levels (see [`create_texture`]), or `None` (with a warning) if it has no
 /// pixels or the wrong number of them.
 pub(super) fn upload_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
+    bytes: &GpuBytes,
     source: &dyn TextureSource,
+    skipped_levels: u32,
 ) -> Option<GpuTexture> {
     let (width, height) = source.size();
     let rgba = source.rgba();
@@ -479,7 +493,13 @@ pub(super) fn upload_texture(
         );
         return None;
     }
-    Some(create_texture(device, queue, width, height, rgba))
+    Some(create_texture(
+        device,
+        queue,
+        bytes,
+        (width, height, rgba),
+        skipped_levels,
+    ))
 }
 
 /// Binds a material's `textures` (in [`MATERIAL_TEXTURES`] order) and
@@ -539,20 +559,27 @@ pub(super) fn create_material(
     }
 }
 
-/// Uploads RGBA pixels with a full set of mipmaps (smaller copies, so far
-/// away surfaces don't shimmer), with an sRGB and a plain view.
+/// Uploads RGBA pixels (width, height, pixels) with a full set of mipmaps
+/// (smaller copies, so far away surfaces don't shimmer), with an sRGB and a
+/// plain view. The `skipped_levels` largest are left out (the texture
+/// quality), and so are any too big for this GPU, so a huge texture still
+/// shows, just less sharp.
 pub(super) fn create_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-    width: u32,
-    height: u32,
-    rgba: &[u8],
+    bytes: &GpuBytes,
+    (width, height, rgba): (u32, u32, &[u8]),
+    skipped_levels: u32,
 ) -> GpuTexture {
     let mut levels = mip_levels(width, height, rgba);
-    // Leave out levels too big for this GPU, so a huge texture still shows,
-    // just less sharp. The last level is 1×1, so one is always left.
     let max = device.limits().max_texture_dimension_2d;
-    levels.retain(|(width, height, _)| *width <= max && *height <= max);
+    let too_big = levels
+        .iter()
+        .take_while(|(width, height, _)| *width > max || *height > max)
+        .count();
+    // The last level is 1×1, so one is always left.
+    let skipped = too_big.max(skipped_levels as usize).min(levels.len() - 1);
+    levels.drain(..skipped);
     let (width, height) = (levels[0].0, levels[0].1);
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("material texture"),
@@ -594,10 +621,15 @@ pub(super) fn create_texture(
         format: Some(TEXTURE_SRGB_FORMAT),
         ..Default::default()
     });
+    let size = levels
+        .iter()
+        .map(|(_, _, pixels)| pixels.len() as u64)
+        .sum();
     GpuTexture {
         _texture: texture,
         srgb,
         linear,
+        _bytes: bytes.count(size),
     }
 }
 

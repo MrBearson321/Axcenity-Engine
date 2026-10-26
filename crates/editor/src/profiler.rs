@@ -189,6 +189,8 @@ impl Profiler {
             render_cpu: average(|s| s.render.cpu),
             draw_calls: newest.render.stats.draw_calls,
             triangles: newest.render.stats.triangles,
+            texture_bytes: newest.render.stats.texture_bytes,
+            mesh_bytes: newest.render.stats.mesh_bytes,
             items: newest.render.items,
             lights: newest.render.lights,
             audio: average(|s| s.game.audio),
@@ -259,6 +261,8 @@ impl Profiler {
                     row(ui, "GPU", gpu_text(summary.gpu, summary.gpu_timing));
                     row(ui, "Draw calls", summary.draw_calls.to_string());
                     row(ui, "Triangles", thousands(summary.triangles));
+                    row(ui, "Textures", bytes(summary.texture_bytes as usize));
+                    row(ui, "Meshes", bytes(summary.mesh_bytes as usize));
                     row(ui, "Items", summary.items.to_string());
                     row(ui, "Lights", summary.lights.to_string());
                 });
@@ -300,6 +304,9 @@ struct Summary {
     render_cpu: Duration,
     draw_calls: u32,
     triangles: u64,
+    /// GPU bytes of textures and meshes.
+    texture_bytes: u64,
+    mesh_bytes: u64,
     items: usize,
     lights: usize,
     audio: Duration,
