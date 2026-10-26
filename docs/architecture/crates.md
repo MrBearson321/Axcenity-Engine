@@ -8,16 +8,17 @@ Which crate owns what, and what it may depend on. Read this before adding a crat
 | `assets` | the asset system: loading glTF/FBX models (with FBX skeletons, skin weights and takes), posing them, reading project files (`Assets`) and importing models | nothing engine-internal; plain data out |
 | `anim` | animation: clip and animator controller files, state machines and blending, and `Animators`, which plays every Animator and poses its MeshPart | `assets`, `core` |
 | `audio` | Kira playback for project sounds: `GameAudio` applies queued `SoundAction`s, keeps playback in line with each Sound, and spatializes emitters against the camera | `assets`, `core` |
-| `blocks` | persisted block-script data, node graphs (the UI Event Graph) and their one-way Lua translation | nothing engine-internal |
+| `blocks` | persisted block-script data, node graphs (the UI Event Graph) and their one-way Lua translation | nothing engine-internal (`core` and `script` only in tests) |
 | `render` | `wgpu` renderer | nothing engine-internal; takes a draw list |
-| `scene` | Instance tree → draw list (`build_draw_list`), the shared `FlyCamera`, viewport picking (`pick`) | `core`, `assets`, `render` |
+| `scene` | Instance tree → draw list (`build_draw_list`, including terrain chunks and UI layout), the shared `FlyCamera`, viewport picking (`pick`) | `core`, `assets`, `render`, `terrain`, `ui` |
+| `terrain` | terrain algorithms over `core::TerrainData`: brushes, generation, erosion, chunk meshes, file codecs | `core` |
 | `physics` | `rapier3d` integration | `core`, `assets` |
 | `character` | kinematic third-person walk and run; queries physics, never the reverse | `core`, `assets`, `physics` |
 | `script` | Luau (`mlua`), sandbox, scheduler, engine API, TweenService (eased by `anim`'s curves) | `anim`, `audio`, `core`, `physics`, `assets` |
 | `ui` | UI Instance layout, CSS cascade (`taffy`), transitions (eased by `anim`'s curves) and screen-space draw data | `anim`, `core`, `render` |
 | `project` | project folder load and save, including CSS and block-script sources, upgrading older projects (animation files through `anim`), and the editor's asset check | `anim`, `assets`, `blocks`, `core`, `terrain` |
 | `player` | runtime shipped with games (binary) | `anim`, `audio`, `character`, `core`, `assets`, `render`, `scene`, `physics`, `script`, `project`, `ui` |
-| `editor` | `egui` editor app (binary) | `anim`, `audio`, `blocks`, `character`, `core`, `assets`, `physics`, `project`, `render`, `scene`, `script`, `ui` |
+| `editor` | `egui` editor app (binary) | `anim`, `audio`, `blocks`, `character`, `core`, `assets`, `physics`, `project`, `render`, `scene`, `script`, `terrain`, `ui` |
 
 Block scripts are translated to Lua at project load and run through the same `ScriptRuntime` as handwritten scripts. Hosts hand queued sound actions to their `GameAudio` after script steps, and fire `Ended` for the sounds it reports finished; the player owns playback for its lifetime, while editor Play owns a separate `GameAudio` that is dropped on Stop.
 
@@ -39,6 +40,8 @@ A large module is a parent file plus a folder of the same name. The parent keeps
 | `app/files.rs` | `export`, `import` (models and animations), `pickers`, `script_files`, `watch` (files changed on disk) |
 | `app/terrain.rs` | `strokes`, `layers`, `jobs` (generate and erode), `disk` |
 | `editor/src/animation.rs` | `documents` (open, close, follow), `chrome` (show, breadcrumb, outline), `clip_ui`, `machine_ui`, `dialogs`; the clip and state-machine editors are `animation/clip_editor.rs`, `property_editor.rs` and `controller_editor.rs` (each with its own children) |
+| `animation/posing.rs` | `tree` (the drawer's bone tree and folds) |
+| `editor/src/asset_browser.rs` | `packages` (model folders), `scan` (finding asset files and their kinds), `thumbnails` |
 | `editor/src/block_editor.rs` | `painter` (drawing blocks), `palette`, `canvas` (canvas, dragging, Lua preview), `menus` |
 | `editor/src/node_graph.rs` | `draw` (nodes, pins, values), `menu` (the node menu), `variables` |
 | `editor/src/terrain_studio.rs` | `tool_settings`, `layers`, `presets` |

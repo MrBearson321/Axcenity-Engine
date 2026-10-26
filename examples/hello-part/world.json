@@ -9,48 +9,20 @@
           "Anchored": true,
           "CanCollide": true,
           "CastShadow": true,
-          "Color": [1, 1, 1],
+          "Color": [0.85, 0.25, 0.2],
           "Emission": 0,
           "EmissiveColor": [1, 1, 1],
           "Material": "Plastic",
           "Metalness": 0,
           "Orientation": [0, 0, 0],
           "Position": [0, 0, 0],
-          "Roughness": 0.5,
+          "Roughness": 0.45,
           "Shape": "Block",
           "Size": [4, 2, 3],
           "TileSize": 8,
           "Transparency": 0,
           "WindAffected": false
-        },
-        "children": [
-          {
-            "class": "SurfaceAppearance",
-            "name": "SurfaceAppearance",
-            "properties": {
-              "AmbientOcclusionChannel": "Red",
-              "AmbientOcclusionMap": "assets/textures/Ground108/Ground108_4K-JPG_AmbientOcclusion.jpg",
-              "AmbientOcclusionStrength": 1,
-              "Color": [1, 1, 1],
-              "ColorMap": "assets/textures/Ground108/Ground108_4K-JPG_Color.jpg",
-              "EmissiveMap": "",
-              "EmissiveStrength": 1,
-              "InvertOpacity": false,
-              "InvertRoughness": false,
-              "MaterialName": "",
-              "MetalnessChannel": "Red",
-              "MetalnessMap": "",
-              "NormalMap": "assets/textures/Ground108/Ground108_4K-JPG_NormalGL.jpg",
-              "NormalMapDirectX": false,
-              "NormalStrength": 1,
-              "OpacityChannel": "Alpha",
-              "OpacityMap": "",
-              "RoughnessChannel": "Red",
-              "RoughnessMap": "assets/textures/Ground108/Ground108_4K-JPG_Roughness.jpg",
-              "SpecularMap": ""
-            }
-          }
-        ]
+        }
       },
       {
         "class": "Terrain",
@@ -169,52 +141,6 @@
               "TextureRotation": 0,
               "TileSize": 10,
               "Triplanar": true
-            }
-          }
-        ]
-      },
-      {
-        "class": "Model",
-        "name": "Character",
-        "children": [
-          {
-            "class": "Part",
-            "name": "Body",
-            "properties": {
-              "Anchored": false,
-              "CanCollide": true,
-              "CastShadow": true,
-              "Color": [0.29, 0.45, 0.78],
-              "Emission": 0,
-              "EmissiveColor": [1, 1, 1],
-              "Material": "Plastic",
-              "Metalness": 0,
-              "Orientation": [0, 0, 0],
-              "Position": [-12, 2.5004878, -16],
-              "Roughness": 0.5,
-              "Shape": "Block",
-              "Size": [2, 5, 1],
-              "TileSize": 8,
-              "Transparency": 0,
-              "WindAffected": false
-            }
-          },
-          {
-            "class": "ThirdPersonController",
-            "name": "ThirdPersonController",
-            "properties": {
-              "CameraDistance": 12,
-              "CameraHeight": 4,
-              "Crouch": false,
-              "CrouchHeight": 3,
-              "CrouchSpeedScale": 0.5,
-              "Jump": false,
-              "JumpHeight": 7.2,
-              "MaxSlopeAngle": 45,
-              "MaxStepHeight": 1,
-              "Movement": "Walk",
-              "RunSpeed": 32,
-              "WalkSpeed": 16
             }
           }
         ]

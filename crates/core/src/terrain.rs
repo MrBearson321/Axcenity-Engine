@@ -240,14 +240,6 @@ pub enum FoliageSource {
 }
 
 impl FoliageSource {
-    pub fn kind_label(&self) -> &'static str {
-        match self {
-            FoliageSource::Plant(_) => "Plant",
-            FoliageSource::Prop(_) => "Prop",
-            FoliageSource::Model(_) => "Model",
-        }
-    }
-
     /// The file kind written to `foliage.json`.
     pub fn kind_key(&self) -> &'static str {
         match self {

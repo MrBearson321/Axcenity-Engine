@@ -269,10 +269,10 @@ fn maps_and_their_settings_pick_the_material_binding() {
     glossy.material.maps.roughness.as_mut().unwrap().invert = true;
     assert_ne!(material_key(&glossy), key);
     assert_eq!(maps_uniform_of(&material_key(&glossy)).invert[1], 1.0);
-    // Built-in shapes have no texture coordinates, so no maps.
+    // A SurfaceAppearance in a Part draws its maps on built-in shapes too.
     let mut block = packed.clone();
     block.shape = Shape::Block;
-    assert_eq!(material_key(&block), MaterialKey::default());
+    assert_eq!(material_key(&block), key);
 }
 
 #[test]

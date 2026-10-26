@@ -11,7 +11,9 @@ const WALK: &str = "assets/animations/noodle/Walk.anim.json";
 /// The noodle's state machine exported from a copy of hello-animation, as
 /// Export Package… in the Assets panel does, into `file`.
 fn export_noodle(file: &Path) {
-    let source = copy_of_example("hello-animation", "package-source");
+    // One source copy per package file: tests calling this run in parallel.
+    let stem = file.file_stem().unwrap().to_string_lossy();
+    let source = copy_of_example("hello-animation", &format!("package-source-{stem}"));
     let mut app = EditorApp::new(Some(&source));
     assert!(app.export_package(file, "noodle", vec![MACHINE.to_owned()], Vec::new()));
     assert!(

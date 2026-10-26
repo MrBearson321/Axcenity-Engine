@@ -227,10 +227,6 @@ impl Compiled {
         )
     }
 
-    pub fn state_count(&self) -> usize {
-        self.states.len()
-    }
-
     /// The state named `name`'s index.
     pub fn state_index(&self, name: &str) -> Option<usize> {
         self.states.iter().position(|state| state.name == name)

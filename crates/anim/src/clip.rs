@@ -177,13 +177,6 @@ impl Clip {
         self.through(phase) * self.clip.file.duration
     }
 
-    /// Where in the linked take (seconds) the clip is at `phase`, or `None`
-    /// without a link.
-    pub fn time_at(&self, phase: f64) -> Option<f64> {
-        let link = self.clip.file.link.as_ref()?;
-        Some(link_time(link, self.through(phase)))
-    }
-
     /// Moves the bones the clip animates in `pose` to where they are at
     /// `phase`: those its take moves, then its bone tracks. With root
     /// motion, the root bone stays over where it started, facing the way it

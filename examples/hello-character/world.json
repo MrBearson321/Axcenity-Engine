@@ -29,6 +29,28 @@
         "name": "Character",
         "children": [
           {
+            "class": "Part",
+            "name": "Body",
+            "properties": {
+              "Anchored": false,
+              "CanCollide": true,
+              "CastShadow": true,
+              "Color": [0.29, 0.45, 0.78],
+              "Emission": 0,
+              "EmissiveColor": [1, 1, 1],
+              "Material": "Plastic",
+              "Metalness": 0,
+              "Orientation": [0, 0, 0],
+              "Position": [0, 2.5, 0],
+              "Roughness": 0.5,
+              "Shape": "Block",
+              "Size": [2, 5, 1],
+              "TileSize": 8,
+              "Transparency": 0,
+              "WindAffected": false
+            }
+          },
+          {
             "class": "ThirdPersonController",
             "name": "ThirdPersonController",
             "properties": {
@@ -247,56 +269,6 @@
           "Transparency": 0,
           "WindAffected": false
         }
-      },
-      {
-        "class": "MeshPart",
-        "name": "Walking2",
-        "properties": {
-          "Anchored": false,
-          "CanCollide": true,
-          "CastShadow": true,
-          "MeshId": "assets/models/Walking2/Walking2.fbx",
-          "Orientation": [0, 0, 0],
-          "Position": [12, 1.8924235, 9],
-          "Size": [3.8939824, 3.784847, 0.7229666],
-          "Transparency": 0,
-          "WindAffected": false
-        },
-        "children": [
-          {
-            "class": "Animator",
-            "name": "Animator",
-            "properties": {
-              "Enabled": true,
-              "Speed": 1,
-              "StateMachine": ""
-            },
-            "children": [
-              {
-                "class": "Animation",
-                "name": "Walking2",
-                "properties": {
-                  "AutoPlay": false,
-                  "Clip": "assets/animations/Walking2/Walking2.anim.json",
-                  "Enabled": true,
-                  "Looped": false,
-                  "Speed": 1
-                }
-              },
-              {
-                "class": "Animation",
-                "name": "Walking2 2",
-                "properties": {
-                  "AutoPlay": false,
-                  "Clip": "assets/animations/Walking2/Walking2 2.anim.json",
-                  "Enabled": true,
-                  "Looped": false,
-                  "Speed": 1
-                }
-              }
-            ]
-          }
-        ]
       },
       {
         "class": "MeshPart",

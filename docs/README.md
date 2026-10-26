@@ -11,6 +11,7 @@ Source and tests win when a doc is wrong. Update the topic file you used.
 | The frame loop | [architecture/frame-loop.md](architecture/frame-loop.md) |
 | Physics | [architecture/physics.md](architecture/physics.md) |
 | Play and Stop | [architecture/play-mode.md](architecture/play-mode.md) |
+| Platforms or file access | [architecture/portability.md](architecture/portability.md) |
 | The editor window, ribbon, or theme | [editor/shell.md](editor/shell.md) |
 | Selection or Properties | [editor/selection.md](editor/selection.md) |
 | Move, scale, rotate, or undo | [editor/transforms.md](editor/transforms.md) |

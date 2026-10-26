@@ -1001,6 +1001,8 @@ mod ik_tests;
 #[cfg(test)]
 mod imported_clip_tests;
 #[cfg(test)]
+mod play_tests;
+#[cfg(test)]
 mod posing_tests;
 #[cfg(test)]
 mod state_machine_tests;
@@ -1011,4 +1013,10 @@ mod ui_designer_tests;
 #[cfg(test)]
 mod ui_graph_tests;
 #[cfg(test)]
+mod ui_layering_tests;
+#[cfg(test)]
 mod ui_selection_tests;
+#[cfg(test)]
+mod ui_text_style_tests;
+#[cfg(test)]
+mod undo_tests;
