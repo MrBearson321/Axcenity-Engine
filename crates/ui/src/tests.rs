@@ -1225,3 +1225,28 @@ fn border_image_values_read_and_write_back() {
     assert_eq!(BorderImage::parse("none"), None);
     assert_eq!(BorderImage::parse("url(a.png) 1 2 3 4 5"), None);
 }
+
+#[test]
+fn own_rules_are_an_elements_id_rule_and_its_states_and_parts_alone() {
+    let (sheet, _) = parse_stylesheet(
+        "ui.css",
+        "#play { color: red; border-radius: 4px; }\n\
+         #play:hover { color: blue; }\n\
+         #play::thumb { width: 8px; }\n\
+         #play { color: green; }\n\
+         #play .label, #play2 { color: black; }\n\
+         #player { color: white; }\n",
+    );
+    let pair = |property: &str, value: &str| (property.to_owned(), value.to_owned());
+    assert_eq!(
+        own_rules(&[sheet], "play"),
+        vec![
+            (
+                String::new(),
+                vec![pair("color", "green"), pair("border-radius", "4px")]
+            ),
+            (":hover".to_owned(), vec![pair("color", "blue")]),
+            ("::thumb".to_owned(), vec![pair("width", "8px")]),
+        ]
+    );
+}

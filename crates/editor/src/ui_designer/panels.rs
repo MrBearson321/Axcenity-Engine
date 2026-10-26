@@ -183,7 +183,10 @@ impl UiDesigner {
         widgets::section_label(ui, "Hierarchy");
         let palette = theme::palette(ui.ctx());
         let row_height = ui.spacing().interact_size.y;
-        for (id, depth) in hierarchy(scene.world, gui) {
+        let rows = hierarchy(scene.world, gui);
+        let order: Vec<InstanceId> = rows.iter().map(|&(id, _)| id).collect();
+        let chosen = self.chosen(scene, gui);
+        for (id, depth) in rows {
             let Some(instance) = scene.world.get(id) else {
                 continue;
             };
@@ -191,7 +194,7 @@ impl UiDesigner {
                 egui::vec2(ui.available_width(), row_height),
                 egui::Sense::click(),
             );
-            let selected = scene.selected == Some(id);
+            let selected = scene.selected == Some(id) || chosen.contains(&id);
             widgets::paint_hover(ui, rect, &response, selected, 4.0);
             let indent = 6.0 + depth as f32 * 12.0;
             let text = theme::with_icon(theme::class_icon(instance.class()), instance.name());
@@ -216,7 +219,14 @@ impl UiDesigner {
                 palette.text,
             );
             if response.clicked() {
-                actions.push(DesignerAction::Select(Some(id)));
+                // Shift selects the rows between, Ctrl adds or takes one away.
+                let modifiers = ui.input(|input| input.modifiers);
+                if id != gui && (modifiers.shift || modifiers.command || modifiers.ctrl) {
+                    let selection = self.extended(scene, gui, id, modifiers, Some(&order));
+                    actions.push(DesignerAction::SelectMany(selection));
+                } else {
+                    actions.push(DesignerAction::Select(Some(id)));
+                }
             }
             if response.double_clicked() && scene.editing {
                 self.start_typing(scene, id);
@@ -224,6 +234,7 @@ impl UiDesigner {
             if scene.editing && id != gui {
                 response.context_menu(|ui| {
                     super::order::menu_items(ui, scene.world, scene.stylesheets, id, actions);
+                    self.selection_menu_items(ui, scene, gui, id, actions);
                 });
             }
         }

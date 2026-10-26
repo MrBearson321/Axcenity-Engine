@@ -581,9 +581,9 @@ Four new elements, in the toolbar's UI group and the designer's Elements. Each i
 
 ### Acceptance criteria
 
-- [ ] Box-selecting three buttons and pressing Distribute horizontally spaces them evenly, with one undo step to put them back.
-- [ ] Paste style makes a second button look like the first, and Duplicate makes an identical button with its own `Id` and rule.
-- [ ] Arrow keys nudge a selection by 1 pixel and Shift+arrow by 10, and none of these shortcuts fire while typing in a text field.
+- [x] Box-selecting three buttons and pressing Distribute horizontally spaces them evenly, with one undo step to put them back.
+- [x] Paste style makes a second button look like the first, and Duplicate makes an identical button with its own `Id` and rule.
+- [x] Arrow keys nudge a selection by 1 pixel and Shift+arrow by 10, and none of these shortcuts fire while typing in a text field.
 
 ---
 

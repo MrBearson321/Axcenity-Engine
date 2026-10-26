@@ -33,6 +33,7 @@ mod settings;
 mod terrain;
 mod texture_set;
 mod tree_ops;
+mod ui_selection;
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -1004,3 +1005,5 @@ mod state_machine_tests;
 mod tests;
 #[cfg(test)]
 mod ui_designer_tests;
+#[cfg(test)]
+mod ui_selection_tests;

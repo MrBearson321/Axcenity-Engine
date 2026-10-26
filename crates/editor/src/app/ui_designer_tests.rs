@@ -15,24 +15,29 @@ use crate::ui_handles::{Grip, Handles, UiDrag};
 
 /// What the end of an editor frame does when nothing is held: the gesture
 /// ends, so the next edit is its own step.
-fn frame_ends(app: &mut EditorApp) {
+pub(super) fn frame_ends(app: &mut EditorApp) {
     app.history.seal();
     app.ui_drag_baselines.clear();
 }
 
 /// Does `action` in the designer, as one frame.
-fn act(app: &mut EditorApp, action: DesignerAction) {
+pub(super) fn act(app: &mut EditorApp, action: DesignerAction) {
     app.designer_actions(vec![action]);
     frame_ends(app);
 }
 
 /// Drops `what` from the palette into `parent`, and returns what it made.
-fn drop_in(app: &mut EditorApp, what: Insertable, parent: InstanceId, at: [f32; 2]) -> InstanceId {
+pub(super) fn drop_in(
+    app: &mut EditorApp,
+    what: Insertable,
+    parent: InstanceId,
+    at: [f32; 2],
+) -> InstanceId {
     act(app, DesignerAction::Insert { what, parent, at });
     app.selected.expect("an insert selects what it made")
 }
 
-fn add_style(app: &mut EditorApp, id: InstanceId, property: &str, value: &str) {
+pub(super) fn add_style(app: &mut EditorApp, id: InstanceId, property: &str, value: &str) {
     act(
         app,
         DesignerAction::Style(
@@ -45,7 +50,7 @@ fn add_style(app: &mut EditorApp, id: InstanceId, property: &str, value: &str) {
     );
 }
 
-fn stylesheets(app: &EditorApp) -> Vec<axcenity_ui::Stylesheet> {
+pub(super) fn stylesheets(app: &EditorApp) -> Vec<axcenity_ui::Stylesheet> {
     app.project.as_ref().unwrap().stylesheets.clone()
 }
 
@@ -78,7 +83,7 @@ fn drag(app: &mut EditorApp, gui: InstanceId, id: InstanceId, grip: Grip, by: eg
     frame_ends(app);
 }
 
-fn udim2(app: &EditorApp, id: InstanceId, name: &str) -> UDim2 {
+pub(super) fn udim2(app: &EditorApp, id: InstanceId, name: &str) -> UDim2 {
     app.world
         .get(id)
         .and_then(|instance| instance.property(name))
@@ -561,7 +566,7 @@ fn press(pos: egui::Pos2, pressed: bool) -> egui::Event {
     }
 }
 
-fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
+pub(super) fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
     egui::Event::Key {
         key,
         physical_key: None,
@@ -572,7 +577,7 @@ fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
 }
 
 /// Where the middle of `id` is on the artboard, in points.
-fn on_artboard(app: &EditorApp, gui: InstanceId, id: InstanceId) -> egui::Pos2 {
+pub(super) fn on_artboard(app: &EditorApp, gui: InstanceId, id: InstanceId) -> egui::Pos2 {
     let (board, zoom) = app.ui_designer.board().unwrap();
     let screen = axcenity_ui::design_size(&app.world, gui);
     let layout = axcenity_ui::layout_artboard(
@@ -979,7 +984,7 @@ fn the_artboard_previews_the_ui_on_another_screen() {
 }
 
 /// A press at `from`, a drag to `to` over two frames, and a let go.
-fn drag_on_artboard(from: egui::Pos2, to: egui::Pos2) -> Vec<Vec<egui::Event>> {
+pub(super) fn drag_on_artboard(from: egui::Pos2, to: egui::Pos2) -> Vec<Vec<egui::Event>> {
     vec![
         vec![egui::Event::PointerMoved(from)],
         vec![press(from, true)],
@@ -1179,7 +1184,7 @@ fn dragging_the_horizontal_diamonds_to_both_edges_stretches_an_element_across() 
 
 /// Runs one frame of the UI Designer tab, as [`run_designer`] does, and
 /// returns egui's output (with AccessKit on, so it says where each widget is).
-fn designer_frame(
+pub(super) fn designer_frame(
     app: &mut EditorApp,
     ctx: &egui::Context,
     clock: &mut f64,
@@ -1204,7 +1209,7 @@ fn designer_frame(
 }
 
 /// The middle of the widget labelled `label` in `output`, in points.
-fn widget_named(output: &egui::FullOutput, label: &str, ppp: f32) -> Option<egui::Pos2> {
+pub(super) fn widget_named(output: &egui::FullOutput, label: &str, ppp: f32) -> Option<egui::Pos2> {
     let update = output.platform_output.accesskit_update.as_ref()?;
     let (_, node) = update
         .nodes
@@ -1218,7 +1223,7 @@ fn widget_named(output: &egui::FullOutput, label: &str, ppp: f32) -> Option<egui
 }
 
 /// Clicks the widget labelled `label`, as the next frame draws it.
-fn click_named(
+pub(super) fn click_named(
     app: &mut EditorApp,
     ctx: &egui::Context,
     clock: &mut f64,
@@ -1443,6 +1448,7 @@ fn ctrl_b_i_u_toggle_the_selected_labels_text_unless_typing() {
     let scene = DesignerScene {
         world: &app.world,
         selected: Some(title),
+        selection: &[],
         stylesheets: &sheets,
         assets: &app.assets,
         editing: true,
@@ -2250,7 +2256,7 @@ fn dragging_the_slice_editors_lines_changes_the_border_image_css() {
 
 /// Where design pixel `at` of `gui` is on the artboard, in points, while
 /// it previews at its design size.
-fn artboard_point(app: &EditorApp, gui: InstanceId, [x, y]: [f32; 2]) -> egui::Pos2 {
+pub(super) fn artboard_point(app: &EditorApp, gui: InstanceId, [x, y]: [f32; 2]) -> egui::Pos2 {
     let (board, zoom) = app.ui_designer.board().unwrap();
     let (unit, origin) = {
         let (width, height) = axcenity_ui::design_size(&app.world, gui);

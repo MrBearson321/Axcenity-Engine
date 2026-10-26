@@ -231,19 +231,54 @@ impl EditorApp {
         }
         None
     }
-    /// Duplicates every selected Instance that isn't inside another one, and
-    /// selects the copies.
+    /// Duplicates every selected Instance that isn't inside another one, as
+    /// one undo step, and selects the copies. Each copy goes right after its
+    /// original. A UI element in a copy gets a fresh `Id`, with copies of
+    /// its original's own rules (`#Id`, `#Id:hover` and so on).
     pub(super) fn duplicate_selected(&mut self) {
         let ids = self.selection_roots();
         let mut copies = Vec::new();
+        let mut moves = Vec::new();
+        let mut names = Vec::new();
+        // Backwards, so each original's place is still right when its copy goes in.
         for id in ids.into_iter().rev() {
-            if let Some(copy) = self.duplicate(id) {
-                copies.push(copy);
+            let Some(name) = self.editable_name(id, "duplicate") else {
+                continue;
+            };
+            let Some(original) = history::place_of(&self.world, id) else {
+                continue;
+            };
+            let copy = self.world.duplicate(id).expect("checked it can be edited");
+            let copy_name = tree::unique_name(&self.world, original.parent, &name);
+            self.world.set_name(copy, copy_name).expect("just made");
+            let after = Place {
+                parent: original.parent,
+                index: original.index + 1,
+            };
+            if let Err(err) = history::put(&mut self.world, copy, Some(after)) {
+                self.output.error(format!("Could not do that: {err}"));
+                let _ = self.world.destroy(copy);
+                continue;
             }
+            moves.push(Move {
+                id: copy,
+                before: None,
+                after: Some(after),
+            });
+            copies.push(copy);
+            names.push(name);
         }
         if copies.is_empty() {
             return;
         }
+        let texts = self.reid_duplicates(&copies);
+        let label = match names.as_slice() {
+            [name] => format!("Duplicate {name}"),
+            _ => format!("Duplicate {} items", names.len()),
+        };
+        self.history
+            .record_files_and_tree(&mut self.world, label, texts, moves);
+        self.history.seal();
         copies.reverse();
         let primary = *copies.last().unwrap();
         self.selection = copies;

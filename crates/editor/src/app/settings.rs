@@ -378,6 +378,21 @@ fn shortcuts_page(ui: &mut egui::Ui) {
             ("Fly speed".into(), "Shift + wheel".into()),
         ],
     ));
+    let command = |key| format(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, key));
+    groups.push((
+        "UI Designer",
+        vec![
+            (
+                "Add to the selection".into(),
+                "Shift or Ctrl + click".into(),
+            ),
+            ("Select with a box".into(), "Drag on empty artboard".into()),
+            ("Nudge 1 pixel".into(), "Arrow keys".into()),
+            ("Nudge 10 pixels".into(), "Shift + arrow keys".into()),
+            ("Copy elements".into(), command(egui::Key::C)),
+            ("Paste elements".into(), command(egui::Key::V)),
+        ],
+    ));
     let palette = theme::palette(ui.ctx());
     for (title, rows) in groups {
         widgets::section_label(ui, title);

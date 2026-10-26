@@ -111,6 +111,7 @@ impl EditorApp {
         let scene = DesignerScene {
             world: shown(&self.world, &self.play),
             selected: self.selected,
+            selection: &self.selection,
             stylesheets: self
                 .project
                 .as_ref()
@@ -131,11 +132,24 @@ impl EditorApp {
     /// handles, so it's an undo step and shows in the Scene View and Play.
     pub(in crate::app) fn designer_actions(&mut self, actions: Vec<DesignerAction>) {
         for action in actions {
-            if self.playing() && !matches!(action, DesignerAction::Select(_)) {
+            if self.playing()
+                && !matches!(
+                    action,
+                    DesignerAction::Select(_) | DesignerAction::SelectMany(_)
+                )
+            {
                 continue;
             }
             match action {
                 DesignerAction::Select(id) => self.select_from_viewport(id),
+                DesignerAction::SelectMany(ids) => self.select_many(ids),
+                DesignerAction::GroupDrag { resize, edits } => self.apply_ui_drags(resize, edits),
+                DesignerAction::Arrange { label, positions } => self.arrange(label, positions),
+                DesignerAction::PasteStyle { ids, declarations } => {
+                    self.paste_style(ids, declarations)
+                }
+                DesignerAction::Duplicate => self.duplicate_selected(),
+                DesignerAction::Paste { parent, clipboard } => self.paste_ui(parent, clipboard),
                 DesignerAction::DesignSize { gui, width, height } => {
                     let Some(name) = self.world.get(gui).map(|i| i.name().to_owned()) else {
                         continue;

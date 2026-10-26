@@ -1,6 +1,7 @@
 //! The artboard: the ScreenGui on the previewed screen, its rulers and
-//! guides, the selected element's handles and distances, palette drops,
-//! and text typed over on a double-click.
+//! guides, the selected element's handles and distances (or the box
+//! around several), the selection box, palette drops, and text typed over
+//! on a double-click.
 
 use axcenity_core::{ClassName, InstanceId, Value, World};
 use axcenity_render::glam::Vec3;
@@ -10,9 +11,11 @@ use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 
 use super::anchor_handles::{AnchorDrag, AnchorHandles};
+use super::group::{GroupBox, GroupDrag};
 use super::rich_text::{self, Format};
 use super::rotate::{self, RotateDrag};
 use super::rulers::{self, RULER};
+use super::selection::{self, Marquee};
 use super::{
     DesignerAction, DesignerScene, FIT_MARGIN, Guide, MAX_ZOOM, MIN_ZOOM, PaletteItem, TextEditing,
     Toggle, UiDesigner, container_for, drop_offset, panels, reset_anchor_action, safe_insets,
@@ -152,6 +155,8 @@ impl UiDesigner {
             )
         } else {
             self.drag = None;
+            self.group_drag = None;
+            self.marquee = None;
             self.anchor_drag = None;
             self.rotate_drag = None;
             painter.text(
@@ -337,9 +342,25 @@ impl UiDesigner {
             })
             .collect();
 
+        // Several selected elements share one box of handles; their own
+        // handles, diamonds and knobs are for one at a time.
+        let chosen = self.chosen(scene, gui);
+        let roots: Vec<InstanceId> = chosen
+            .iter()
+            .copied()
+            .filter(|&id| {
+                !chosen
+                    .iter()
+                    .any(|&other| other != id && world.is_descendant_of(id, other))
+            })
+            .collect();
+        let several = roots.len() > 1;
+        let group = (several && scene.editing && self.text_editing.is_none())
+            .then(|| GroupBox::around(&layout, &roots, visible.min, ppp))
+            .flatten();
         let handles = scene
             .selected
-            .filter(|_| scene.editing && self.text_editing.is_none())
+            .filter(|_| scene.editing && self.text_editing.is_none() && !several)
             .and_then(|id| layout.element(id))
             .map(|&element| Handles::new(element, world, scene.stylesheets, visible.min, ppp));
         let (pressed, down, pointer) = ui.input(|input| {
@@ -370,6 +391,7 @@ impl UiDesigner {
         // They're over its handles, so they're grabbed first.
         let anchor_handles = scene
             .selected
+            .filter(|_| !several)
             .filter(|&id| layout.element(id).is_some_and(|element| !element.in_flow))
             .and_then(|id| {
                 let parent = world
@@ -392,6 +414,10 @@ impl UiDesigner {
                 handles.rotate_at(pointer)
             }
             _ => false,
+        };
+        let group_grip = match (over, &group) {
+            (Some(pointer), Some(group)) => group.grip_at(pointer),
+            _ => None,
         };
         let guide_under = over.and_then(|pointer| {
             self.guides(gui).iter().position(|&guide| {
@@ -420,6 +446,8 @@ impl UiDesigner {
         // selects what's there, and can drag it straight away.
         if pressed
             && self.drag.is_none()
+            && self.group_drag.is_none()
+            && self.marquee.is_none()
             && self.anchor_drag.is_none()
             && self.rotate_drag.is_none()
             && self.guide_drag.is_none()
@@ -446,17 +474,57 @@ impl UiDesigner {
                 self.drag = UiDrag::start(handles, grip, pointer, world);
             } else if let (true, Some(handles)) = (rotate_grab, &handles) {
                 self.rotate_drag = RotateDrag::start(handles, pointer, world);
+            } else if let Some(grip) = group_grip.filter(|&grip| grip != Grip::BODY) {
+                self.group_drag =
+                    GroupDrag::start(world, scene.stylesheets, &layout, &roots, grip, pointer);
             } else if let Some(index) = guide_under {
                 let vertical = self.guides(gui)[index].vertical;
                 self.guide_drag = Some((Some(index), vertical));
             } else {
+                // Shift and Ctrl add to the selection; a press inside it
+                // moves all of it; one on empty artboard starts a box.
                 let [x, y] = pixel_of(pointer);
-                let hit = layout.hit(x, y);
-                actions.push(DesignerAction::Select(Some(hit.unwrap_or(gui))));
-                if let Some(element) = hit.and_then(|id| layout.element(id)) {
-                    let handles =
-                        Handles::new(*element, world, scene.stylesheets, visible.min, ppp);
-                    self.drag = UiDrag::start(&handles, Grip::BODY, pointer, world);
+                let hit = layout.hit(x, y).filter(|&id| id != gui);
+                let modifiers = ui.input(|input| input.modifiers);
+                let adding = modifiers.shift || modifiers.command || modifiers.ctrl;
+                let in_selection = |id: InstanceId| {
+                    roots
+                        .iter()
+                        .any(|&root| root == id || world.is_descendant_of(id, root))
+                };
+                match hit {
+                    Some(id) if adding => {
+                        let selection = self.extended(scene, gui, id, modifiers, None);
+                        actions.push(DesignerAction::SelectMany(selection));
+                    }
+                    Some(id) if several && in_selection(id) => {
+                        self.group_drag = GroupDrag::start(
+                            world,
+                            scene.stylesheets,
+                            &layout,
+                            &roots,
+                            Grip::BODY,
+                            pointer,
+                        );
+                    }
+                    Some(id) => {
+                        actions.push(DesignerAction::Select(Some(id)));
+                        if let Some(element) = layout.element(id) {
+                            let handles =
+                                Handles::new(*element, world, scene.stylesheets, visible.min, ppp);
+                            self.drag = UiDrag::start(&handles, Grip::BODY, pointer, world);
+                        }
+                    }
+                    None => {
+                        if !adding {
+                            actions.push(DesignerAction::Select(Some(gui)));
+                        }
+                        self.marquee = Some(Marquee {
+                            from: pointer,
+                            base: if adding { chosen.clone() } else { Vec::new() },
+                            last: None,
+                        });
+                    }
                 }
             }
         }
@@ -483,6 +551,64 @@ impl UiDesigner {
                 if !edit.values.is_empty() || !edit.css.is_empty() {
                     actions.push(DesignerAction::Drag(edit));
                 }
+            }
+        }
+        // The box around several elements moves or resizes them all.
+        if let Some(drag) = &self.group_drag {
+            if !down || !scene.editing {
+                self.group_drag = None;
+                self.snaps.clear();
+            } else if let Some(pointer) = pointer
+                && self
+                    .drag_held
+                    .is_none_or(|from| from.distance(pointer) >= DRAG_SLOP)
+            {
+                self.drag_held = None;
+                let (edits, snaps) = drag.update(
+                    pointer,
+                    ppp,
+                    world,
+                    &layout.elements,
+                    screen_rect,
+                    &guide_lines,
+                );
+                self.snaps = snaps;
+                actions.push(DesignerAction::GroupDrag {
+                    resize: drag.grip != Grip::BODY,
+                    edits,
+                });
+            }
+        }
+        // The selection box selects what's wholly inside it, as it's dragged.
+        let mut marquee_rect = None;
+        if let Some(marquee) = &mut self.marquee {
+            match pointer.filter(|_| down && scene.editing) {
+                Some(pointer) if marquee.from.distance(pointer) >= DRAG_SLOP => {
+                    let rect = egui::Rect::from_two_pos(marquee.from, pointer);
+                    let pixels = UiRect {
+                        x: (rect.min.x - visible.min.x) * ppp,
+                        y: (rect.min.y - visible.min.y) * ppp,
+                        width: rect.width() * ppp,
+                        height: rect.height() * ppp,
+                    };
+                    let mut picked = marquee.base.clone();
+                    for id in selection::inside(world, &layout, gui, pixels) {
+                        if !picked.contains(&id) {
+                            picked.push(id);
+                        }
+                    }
+                    if marquee.last.as_ref() != Some(&picked) {
+                        marquee.last = Some(picked.clone());
+                        actions.push(if picked.is_empty() {
+                            DesignerAction::Select(Some(gui))
+                        } else {
+                            DesignerAction::SelectMany(picked)
+                        });
+                    }
+                    marquee_rect = Some(rect);
+                }
+                Some(_) => {}
+                None => self.marquee = None,
             }
         }
         // The anchor follows the pointer, and the element stays put. Alt
@@ -560,14 +686,16 @@ impl UiDesigner {
                 && let Some(pointer) = over
             {
                 let [x, y] = pixel_of(pointer);
-                self.order_target = layout.hit(x, y);
-                if let Some(id) = self.order_target {
+                self.order_target = layout.hit(x, y).filter(|&id| id != gui);
+                // A right-click inside the selection keeps it.
+                if let Some(id) = self.order_target.filter(|id| !chosen.contains(id)) {
                     actions.push(DesignerAction::Select(Some(id)));
                 }
             }
             if let Some(id) = self.order_target.filter(|_| scene.editing) {
                 let menu = response.context_menu(|ui| {
                     super::order::menu_items(ui, world, scene.stylesheets, id, actions);
+                    self.selection_menu_items(ui, scene, gui, id, actions);
                 });
                 if menu.is_none() && !response.secondary_clicked() {
                     self.order_target = None;
@@ -623,7 +751,35 @@ impl UiDesigner {
         let selected = scene
             .selected
             .and_then(|id| Some((id, *layout.element(id)?)));
-        let selected_rect = selected.map(|(_, element)| points_of(element.rect));
+        let selected_rect = match &group {
+            Some(group) => Some(group.rect),
+            None => selected.map(|(_, element)| points_of(element.rect)),
+        };
+        if let Some(group) = &group {
+            for element in roots.iter().filter_map(|&id| layout.element(id)) {
+                painter.rect_stroke(
+                    points_of(element.rect),
+                    0.0,
+                    egui::Stroke::new(1.0_f32, palette.accent),
+                    egui::StrokeKind::Middle,
+                );
+            }
+            let highlighted = self
+                .group_drag
+                .as_ref()
+                .map(|drag| drag.grip)
+                .or(group_grip);
+            group.paint(&painter, palette.accent, highlighted);
+        }
+        if let Some(rect) = marquee_rect {
+            painter.rect_filled(rect, 0.0, palette.accent.gamma_multiply(0.12));
+            painter.rect_stroke(
+                rect,
+                0.0,
+                egui::Stroke::new(1.0_f32, palette.accent),
+                egui::StrokeKind::Middle,
+            );
+        }
         if let Some((id, _)) = selected {
             let parent = world
                 .get(id)
@@ -655,7 +811,7 @@ impl UiDesigner {
                 .or(anchor_grab);
             anchor.paint(&painter, palette.accent, lit);
         }
-        if self.drag.is_some() {
+        if self.drag.is_some() || self.group_drag.is_some() {
             ui_handles::paint_guides(&self.snaps, &painter, visible.min, ppp);
         }
         if let (Some(drag), Some(anchor)) = (&self.anchor_drag, &anchor_handles) {
@@ -678,6 +834,14 @@ impl UiDesigner {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
         }
         match (&self.drag, &handles) {
+            _ if self.group_drag.is_some() || group_grip.is_some_and(|g| g != Grip::BODY) => {
+                let grip = self
+                    .group_drag
+                    .as_ref()
+                    .map_or(group_grip, |drag| Some(drag.grip));
+                ui.ctx()
+                    .set_cursor_icon(grip.expect("one of the two is set").cursor());
+            }
             (Some(drag), Some(handles)) => ui.ctx().set_cursor_icon(handles.cursor(drag.grip)),
             (None, Some(handles)) if grip.is_some_and(|g| g != Grip::BODY) => {
                 ui.ctx()

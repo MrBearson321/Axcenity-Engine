@@ -14,7 +14,12 @@
 //! `states.rs`) and the same Style (CSS) section as Properties. The
 //! selected element gets the viewport's handles, snapping and distances in
 //! pixels (`ui_handles.rs`), and also snaps to guides dragged out of the
-//! rulers. Double-click text on the artboard to type over it.
+//! rulers. Double-click text on the artboard to type over it. Several
+//! elements can be selected (Shift- and Ctrl-click, or a box dragged on
+//! empty artboard), and get one box of handles around them all
+//! (`group.rs`); the arrange bar aligns, distributes, copies and pastes
+//! styles and duplicates them, and the arrow keys nudge them
+//! (`arrange.rs`, `selection.rs`).
 //!
 //! The designer only reads the world. Everything done in it comes back as
 //! [`DesignerAction`]s, which the app applies through `EditorApp::change`,
@@ -25,19 +30,23 @@
 
 mod anchor_handles;
 mod anchors;
+pub(crate) mod arrange;
 mod artboard;
 pub(crate) mod bevel;
+mod group;
 pub(crate) mod order;
 mod panels;
 mod rich_text;
 mod rotate;
 mod rulers;
+mod selection;
 mod slice;
 mod states;
 mod text_toolbar;
 mod widget_section;
 
 pub use anchors::Pin;
+pub use arrange::UiClipboard;
 pub use states::state_selector;
 pub use text_toolbar::Toggle;
 
@@ -57,6 +66,7 @@ use crate::theme::{self, icons};
 use crate::tree::Insertable;
 use crate::ui_handles::{SnapGuide, UiDrag, UiDragEdit};
 use crate::widgets;
+use group::GroupDrag;
 
 /// Screens to design at, or preview on: name, width and height.
 pub const SCREENS: [(&str, u32, u32); 8] = [
@@ -116,6 +126,9 @@ const CLICK_INSERT_AT: [f32; 2] = [24.0, 24.0];
 pub enum DesignerAction {
     /// Selects this (or nothing).
     Select(Option<InstanceId>),
+    /// Selects these, the last one the one the inspector shows: Shift- and
+    /// Ctrl-clicks, and a box dragged on the artboard.
+    SelectMany(Vec<InstanceId>),
     /// Sets the ScreenGui's `DesignWidth` and `DesignHeight`.
     DesignSize {
         gui: InstanceId,
@@ -133,6 +146,33 @@ pub enum DesignerAction {
     },
     /// A handle dragged on the artboard.
     Drag(UiDragEdit),
+    /// The box around several elements dragged (see `group.rs`): every
+    /// element's edit this frame, and every frame of one drag makes one
+    /// undo step.
+    GroupDrag {
+        resize: bool,
+        edits: Vec<UiDragEdit>,
+    },
+    /// Align, distribute and the arrow keys: each element's new
+    /// `Position`, as one undo step named `label`.
+    Arrange {
+        label: String,
+        positions: Vec<(InstanceId, UDim2)>,
+    },
+    /// Paste style: writes `declarations` into each element's own `#Id`
+    /// rule (an element without an `Id` gets one), as one undo step.
+    PasteStyle {
+        ids: Vec<InstanceId>,
+        declarations: Vec<(String, String)>,
+    },
+    /// Duplicates the selection (as Ctrl+D does).
+    Duplicate,
+    /// Pastes copied elements into `parent`, with fresh `Id`s and copies
+    /// of their own rules, as one undo step.
+    Paste {
+        parent: InstanceId,
+        clipboard: UiClipboard,
+    },
     /// The inspector's name or text, or text typed on the artboard.
     Edit(InstanceId, Edit),
     /// The inspector's Style section.
@@ -220,6 +260,8 @@ pub struct PaletteItem(pub Insertable);
 pub struct DesignerScene<'a> {
     pub world: &'a World,
     pub selected: Option<InstanceId>,
+    /// Everything selected; `selected` is the last of it.
+    pub selection: &'a [InstanceId],
     pub stylesheets: &'a [Stylesheet],
     pub assets: &'a Assets,
     /// False during Play: the designer shows the game, but doesn't edit it.
@@ -274,6 +316,14 @@ pub struct UiDesigner {
     fit_next: bool,
     canvas: Canvas,
     drag: Option<UiDrag>,
+    /// The box around several selected elements being dragged.
+    group_drag: Option<GroupDrag>,
+    /// A box being dragged on empty artboard to select what's inside it.
+    marquee: Option<selection::Marquee>,
+    /// What Copy style took, for Paste style.
+    copied_style: Option<Vec<(String, String)>>,
+    /// What Ctrl+C copied, for Ctrl+V.
+    clipboard: Option<UiClipboard>,
     /// The anchor's diamonds being dragged.
     anchor_drag: Option<anchor_handles::AnchorDrag>,
     /// The selection being turned by a rotate knob.
@@ -336,6 +386,10 @@ impl Default for UiDesigner {
             fit_next: true,
             canvas: Canvas::default(),
             drag: None,
+            group_drag: None,
+            marquee: None,
+            copied_style: None,
+            clipboard: None,
             anchor_drag: None,
             rotate_drag: None,
             anchor_menu: false,
@@ -603,6 +657,8 @@ impl UiDesigner {
     /// True while a handle, an anchor, a guide or a scroll bar is being dragged.
     pub fn is_dragging(&self) -> bool {
         self.drag.is_some()
+            || self.group_drag.is_some()
+            || self.marquee.is_some()
             || self.anchor_drag.is_some()
             || self.rotate_drag.is_some()
             || self.guide_drag.is_some()
@@ -620,6 +676,8 @@ impl UiDesigner {
         self.follow(scene.world, scene.selected);
         let Some(gui) = self.gui else {
             self.drag = None;
+            self.group_drag = None;
+            self.marquee = None;
             self.anchor_drag = None;
             self.rotate_drag = None;
             ui.label("There's no ScreenGui to design yet.");
@@ -640,8 +698,10 @@ impl UiDesigner {
             return actions;
         };
         self.toolbar(ui, scene, gui, &mut actions);
+        self.arrange_bar(ui, scene, gui, &mut actions);
         self.notes(ui, scene, gui, &mut actions);
         self.text_shortcuts(ui.ctx(), scene, gui, &mut actions);
+        self.selection_keys(ui.ctx(), scene, gui, &mut actions);
         ui.add_space(2.0);
 
         let width = ui.available_width();

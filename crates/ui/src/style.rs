@@ -388,6 +388,45 @@ pub fn rule_declaration(
     })
 }
 
+/// The rules written for the element with `Id` `element_id` alone: `#id`
+/// itself and `#id` followed by states or parts (`#id:hover`,
+/// `#id::thumb`), in the order they're first written. Each is what follows
+/// `#id` in its selector (`""` for `#id`) and its declarations, a later one
+/// of the same property replacing an earlier one in place.
+pub fn own_rules(
+    stylesheets: &[Stylesheet],
+    element_id: &str,
+) -> Vec<(String, Vec<(String, String)>)> {
+    let own = format!("#{element_id}");
+    let mut rules: Vec<(String, Vec<(String, String)>)> = Vec::new();
+    for rule in stylesheets.iter().flat_map(|sheet| &sheet.rules) {
+        let Some(suffix) = rule.selector_text.strip_prefix(&own) else {
+            continue;
+        };
+        if !(suffix.is_empty() || suffix.starts_with(':')) || suffix.contains([' ', ',']) {
+            continue;
+        }
+        let index = match rules.iter().position(|(known, _)| known == suffix) {
+            Some(index) => index,
+            None => {
+                rules.push((suffix.to_owned(), Vec::new()));
+                rules.len() - 1
+            }
+        };
+        let declarations = &mut rules[index].1;
+        for declaration in &rule.declarations {
+            match declarations
+                .iter_mut()
+                .find(|(name, _)| *name == declaration.name)
+            {
+                Some((_, value)) => value.clone_from(&declaration.value),
+                None => declarations.push((declaration.name.clone(), declaration.value.clone())),
+            }
+        }
+    }
+    rules
+}
+
 /// Whether any stylesheet has a rule written exactly as `selector`.
 pub fn has_rule(stylesheets: &[Stylesheet], selector: &str) -> bool {
     stylesheets

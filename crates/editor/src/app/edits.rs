@@ -455,10 +455,24 @@ impl EditorApp {
             }
         }
         let after = history::snapshot(&self.world, edit.id);
-
+        let texts = self.drag_css_texts(edit.css);
+        // One key for the whole drag, so a left-edge resize (which changes
+        // Size and Position) stays one step.
+        let (key, label) = if edit.resize {
+            (Field::Property("Size"), format!("Resize {name}"))
+        } else {
+            (Field::Property("Position"), format!("Move {name}"))
+        };
+        self.history
+            .record_with_texts(&mut self.world, edit.id, key, label, before, after, texts);
+    }
+    /// Rewrites stylesheets for a UI drag's `css` edits, each against the
+    /// text the stylesheet had when the drag started (kept until it ends),
+    /// and returns their text before the drag and now.
+    pub(super) fn drag_css_texts(&mut self, css: Vec<CssEdit>) -> Vec<history::TextChange> {
         let mut texts = Vec::new();
         let mut edits_by_path: HashMap<String, Vec<CssEdit>> = HashMap::new();
-        for css_edit in edit.css {
+        for css_edit in css {
             edits_by_path
                 .entry(css_edit.path.clone())
                 .or_default()
@@ -498,15 +512,7 @@ impl EditorApp {
             }
             self.refresh_stylesheet(&path, &updated);
         }
-        // One key for the whole drag, so a left-edge resize (which changes
-        // Size and Position) stays one step.
-        let (key, label) = if edit.resize {
-            (Field::Property("Size"), format!("Resize {name}"))
-        } else {
-            (Field::Property("Position"), format!("Move {name}"))
-        };
-        self.history
-            .record_with_texts(&mut self.world, edit.id, key, label, before, after, texts);
+        texts
     }
     /// The text of the stylesheet at `path`: its tab's, if it's open (it may
     /// have unsaved changes), otherwise the file's.
@@ -616,17 +622,19 @@ impl EditorApp {
             }
         }
         let selector = format!("{}{pseudo_class}", style_panel::own_selector(&element_id));
-        let text = self.add_style_text(&selector, property, value);
+        let text = self.add_style_text(&selector, property, value, true);
         self.record_style(id, before, text.into_iter().collect());
     }
     /// Adds `property: value` to `selector`'s rule (see [`Self::add_style`])
     /// and returns the stylesheet's text before and after. `before` is
-    /// `None` when the stylesheet had to be made.
-    fn add_style_text(
+    /// `None` when the stylesheet had to be made. `report` says what was
+    /// added in Output (making a stylesheet always is).
+    pub(super) fn add_style_text(
         &mut self,
         selector: &str,
         property: &str,
         value: &str,
+        report: bool,
     ) -> Option<history::TextChange> {
         let project = self.project.as_ref()?;
         let target = project
@@ -645,9 +653,11 @@ impl EditorApp {
                 let source = self.stylesheet_text(&path)?;
                 let updated = style_panel::add_declaration(&source, end, selector, property, value);
                 self.set_stylesheet_text(&path, &updated);
-                self.output.info(format!(
-                    "Added `{property}: {value}` to `{selector}` in `{path}`."
-                ));
+                if report {
+                    self.output.info(format!(
+                        "Added `{property}: {value}` to `{selector}` in `{path}`."
+                    ));
+                }
                 Some(history::TextChange {
                     path,
                     before: Some(source),
@@ -945,7 +955,7 @@ impl EditorApp {
 }
 
 /// Makes one edit to `world`, without recording it.
-fn set(world: &mut World, id: InstanceId, edit: Edit) -> anyhow::Result<()> {
+pub(super) fn set(world: &mut World, id: InstanceId, edit: Edit) -> anyhow::Result<()> {
     let Some(instance) = world.get(id) else {
         return Ok(());
     };

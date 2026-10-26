@@ -35,11 +35,11 @@ use axcenity_ui::{CssDeclaration, Stylesheet, UiElement, UiRect, resized_css_len
 use eframe::egui;
 
 /// The side of a handle's square, in points.
-const HANDLE_SIZE: f32 = 8.0;
+pub(crate) const HANDLE_SIZE: f32 = 8.0;
 /// How far from a handle's center the mouse still grabs it, in points.
-const GRAB_DISTANCE: f32 = 7.0;
+pub(crate) const GRAB_DISTANCE: f32 = 7.0;
 /// How close an edge or center must be to another's, in points, to snap.
-const SNAP_DISTANCE: f32 = 8.0;
+pub(crate) const SNAP_DISTANCE: f32 = 8.0;
 /// How far outside a corner the rotate knob is, along the diagonal, in points.
 const ROTATE_KNOB: f32 = 12.0;
 /// The rotate knob's radius, and how far from it the mouse still grabs it.
@@ -64,7 +64,7 @@ impl Grip {
     pub const BODY: Grip = Grip { x: 0, y: 0 };
 
     /// The cursor that shows which way this grip drags.
-    fn cursor(self) -> egui::CursorIcon {
+    pub(crate) fn cursor(self) -> egui::CursorIcon {
         use egui::CursorIcon::*;
         match (self.x, self.y) {
             (0, 0) => Move,
@@ -814,7 +814,7 @@ impl UiDrag {
 /// Resizes one axis of length `length` by dragging an edge `delta` pixels.
 /// `side` is -1 for the start (left or top) edge and 1 for the end edge.
 /// Returns the new length, never below zero, and how far the start edge moved.
-fn resize(side: i8, length: f32, delta: f32) -> (f32, f32) {
+pub(crate) fn resize(side: i8, length: f32, delta: f32) -> (f32, f32) {
     if side < 0 {
         let new = (length - delta).max(0.0);
         (new, length - new)
@@ -853,7 +853,7 @@ fn snap_targets(
     targets
 }
 
-fn descends_from(world: &World, id: InstanceId, ancestor: InstanceId) -> bool {
+pub(crate) fn descends_from(world: &World, id: InstanceId, ancestor: InstanceId) -> bool {
     let mut next = world.get(id).and_then(|instance| instance.parent());
     while let Some(parent) = next {
         if parent == ancestor {
@@ -865,15 +865,15 @@ fn descends_from(world: &World, id: InstanceId, ancestor: InstanceId) -> bool {
 }
 
 /// Start, center and end of one axis.
-fn axis_lines(start: f32, length: f32) -> [f32; 3] {
+pub(crate) fn axis_lines(start: f32, length: f32) -> [f32; 3] {
     [start, start + length * 0.5, start + length]
 }
 
-fn axis_start(rect: &UiRect, along_x: bool) -> f32 {
+pub(crate) fn axis_start(rect: &UiRect, along_x: bool) -> f32 {
     if along_x { rect.x } else { rect.y }
 }
 
-fn axis_length(rect: &UiRect, along_x: bool) -> f32 {
+pub(crate) fn axis_length(rect: &UiRect, along_x: bool) -> f32 {
     if along_x { rect.width } else { rect.height }
 }
 
@@ -897,7 +897,7 @@ fn moving_edges(drag: &UiDrag, delta: f32, along_x: bool) -> Vec<f32> {
 /// The whole-pixel nudge that lands closer to the target line than staying
 /// put. Zero when the edge is already on the nearest pixel, so a guide can
 /// show without the element jumping to the other side of the line.
-fn whole_adjustment(gap: f32) -> f32 {
+pub(crate) fn whole_adjustment(gap: f32) -> f32 {
     let rounded = gap.round();
     if (gap - rounded).abs() < gap.abs() {
         rounded
@@ -933,7 +933,7 @@ fn cross_span(rect: UiRect, along_x: bool) -> (f32, f32) {
 /// A guide through `at` covering the dragged rect and every target that
 /// shares that line. `along_x` means the snapped axis is X, so the guide
 /// itself is vertical.
-fn guide_line(rect: UiRect, along_x: bool, at: f32, targets: &[UiRect]) -> SnapGuide {
+pub(crate) fn guide_line(rect: UiRect, along_x: bool, at: f32, targets: &[UiRect]) -> SnapGuide {
     let (mut from, mut to) = cross_span(rect, along_x);
     for target in targets {
         let shares_line = axis_lines(axis_start(target, along_x), axis_length(target, along_x))

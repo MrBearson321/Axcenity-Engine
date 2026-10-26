@@ -195,6 +195,8 @@ enum StepKind {
     Many {
         key: Field,
         parts: Vec<(InstanceId, Vec<Change>)>,
+        /// Stylesheets the same gesture rewrote.
+        texts: Vec<TextChange>,
     },
     /// Project files created, rewritten, renamed or deleted, plus property
     /// changes and Instances inserted that belong to the same action (such
@@ -555,16 +557,34 @@ impl History {
         label: String,
         changed: Vec<Changed>,
     ) {
+        self.record_many_with_texts(world, key, label, changed, Vec::new());
+    }
+
+    /// [`History::record_many`], for a change that also rewrote
+    /// stylesheets, such as resizing several UI elements whose CSS sets
+    /// their width.
+    pub fn record_many_with_texts(
+        &mut self,
+        world: &mut World,
+        key: Field,
+        label: String,
+        changed: Vec<Changed>,
+        texts: Vec<TextChange>,
+    ) {
         if let [only] = changed.as_slice() {
             let (id, before, after) = (only.id, only.before.clone(), only.after.clone());
-            self.record(world, id, key, label, before, after);
+            self.record_with_texts(world, id, key, label, before, after, texts);
             return;
         }
         let parts: Vec<(InstanceId, Vec<Change>)> = changed
             .into_iter()
             .map(|c| (c.id, differences(c.before, c.after)))
             .collect();
-        if parts.iter().all(|(_, changes)| changes.is_empty()) {
+        let texts: Vec<_> = texts
+            .into_iter()
+            .filter(|text| text.before != text.after)
+            .collect();
+        if parts.iter().all(|(_, changes)| changes.is_empty()) && texts.is_empty() {
             return;
         }
         let open = self.open;
@@ -572,18 +592,20 @@ impl History {
             top.len() == parts.len() && top.iter().zip(&parts).all(|(a, b)| a.0 == b.0)
         };
         let merging = self.undo.last().is_some_and(|top| {
-            matches!(&top.kind, StepKind::Many { key: top_key, parts: top_parts }
+            matches!(&top.kind, StepKind::Many { key: top_key, parts: top_parts, .. }
                 if open == Some(top.number) && *top_key == key && same_ids(top_parts))
         });
         if !merging {
-            let number = self.push(world, label, StepKind::Many { key, parts });
+            let number = self.push(world, label, StepKind::Many { key, parts, texts });
             self.open = Some(number);
             return;
         }
         let number = self.next_number();
         let top = self.undo.last_mut().expect("checked by `merging`");
         let StepKind::Many {
-            parts: top_parts, ..
+            parts: top_parts,
+            texts: top_texts,
+            ..
         } = &mut top.kind
         else {
             unreachable!("checked by `merging`");
@@ -597,7 +619,14 @@ impl History {
             }
             top_changes.retain(|change| change.before != change.after);
         }
-        if top_parts.iter().all(|(_, changes)| changes.is_empty()) {
+        for text in texts {
+            match top_texts.iter_mut().find(|old| old.path == text.path) {
+                Some(old) => old.after = text.after,
+                None => top_texts.push(text),
+            }
+        }
+        top_texts.retain(|text| text.before != text.after);
+        if top_parts.iter().all(|(_, changes)| changes.is_empty()) && top_texts.is_empty() {
             self.undo.pop();
             self.open = None;
         } else {
@@ -711,10 +740,18 @@ impl History {
                     put_back(world, step.id, step.before);
                 }
             }
-            StepKind::Many { parts, .. } => {
+            StepKind::Many { parts, texts, .. } => {
                 for (id, changes) in parts {
                     restore(world, *id, changes.iter().map(|c| (c.field, &c.before)));
                 }
+                undone = texts
+                    .iter()
+                    .map(|text| TextChange {
+                        path: text.path.clone(),
+                        before: text.after.clone(),
+                        after: text.before.clone(),
+                    })
+                    .collect();
             }
             StepKind::Files {
                 texts,
@@ -793,10 +830,11 @@ impl History {
                     put_back(world, step.id, step.after);
                 }
             }
-            StepKind::Many { parts, .. } => {
+            StepKind::Many { parts, texts, .. } => {
                 for (id, changes) in parts {
                     restore(world, *id, changes.iter().map(|c| (c.field, &c.after)));
                 }
+                redone = texts.clone();
             }
             StepKind::Files {
                 texts,
