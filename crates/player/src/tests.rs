@@ -1407,3 +1407,124 @@ fn hello_buttons_hovers_presses_and_leaves_the_locked_button_alone() {
     );
     assert_eq!(game.sounds, [click.clone(), click], "hover, then click");
 }
+
+#[test]
+fn hello_settings_widgets_change_by_pointer_fire_value_changed_and_move_from_scripts() {
+    use axcenity_ui::{Stylesheet, UiInput, UiInteraction, UiLayout};
+
+    /// The game as the player runs it: the pointer's presses go to the
+    /// UI first, then the scripts step and hear what changed.
+    struct Game {
+        world: World,
+        scripts: ScriptRuntime,
+        sheets: Vec<Stylesheet>,
+        ui: UiInteraction,
+        output: Vec<String>,
+    }
+    impl Game {
+        fn frame(&mut self, pointer: [f32; 2]) -> UiLayout {
+            self.scripts.step(&mut self.world, 1.0 / 60.0);
+            self.output
+                .extend(self.scripts.take_output().into_iter().map(|line| line.text));
+            let input = UiInput {
+                pointer: Some(pointer),
+                ..UiInput::default()
+            };
+            self.ui.layout(
+                &self.world,
+                (1280, 720),
+                &self.sheets,
+                input,
+                None,
+                1.0 / 60.0,
+            )
+        }
+        fn click(&mut self, at: [f32; 2]) {
+            self.frame(at);
+            assert!(self.ui.press(&self.world, at).apply(&mut self.world));
+            let _ = self
+                .ui
+                .release(&self.world, Some(at))
+                .apply(&mut self.world);
+            self.frame(at);
+        }
+        fn value(&self, name: &str) -> Value {
+            let id = self
+                .world
+                .find_first_descendant(self.world.workspace(), name)
+                .unwrap();
+            self.world
+                .get(id)
+                .unwrap()
+                .property(name_of(name))
+                .unwrap()
+                .clone()
+        }
+    }
+    fn name_of(name: &str) -> &'static str {
+        if name == "Status" { "Text" } else { "Value" }
+    }
+
+    let (world, scripts, folder) = start_example_in("hello-settings");
+    let css = std::fs::read_to_string(folder.join("ui.css")).unwrap();
+    let (sheet, warnings) = axcenity_ui::parse_stylesheet("ui.css", &css);
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let mut game = Game {
+        world,
+        scripts,
+        sheets: vec![sheet],
+        ui: UiInteraction::default(),
+        output: Vec::new(),
+    };
+    let first = game.frame([0.0, 0.0]);
+    assert!(first.warnings.is_empty(), "{:?}", first.warnings);
+
+    // Drag the volume from 50 to 75 (in steps of 5): ValueChanged fires in
+    // Lua, which sets Loudness, and in blocks.
+    game.frame([700.0, 232.0]);
+    game.ui
+        .press(&game.world, [700.0, 232.0])
+        .apply(&mut game.world);
+    game.ui
+        .drag(&game.world, [776.0, 240.0])
+        .apply(&mut game.world);
+    let _ = game.ui.release(&game.world, Some([776.0, 240.0]));
+    game.frame([776.0, 240.0]);
+    assert_eq!(game.value("Volume"), Value::Number(75.0));
+    assert_eq!(game.value("Status"), Value::String("Volume 75".into()));
+    assert_eq!(
+        game.value("Loudness"),
+        Value::Number(75.0),
+        "the script moved the bar"
+    );
+    assert!(
+        game.output.iter().any(|line| line == "Volume (blocks): 75"),
+        "{:?}",
+        game.output
+    );
+
+    // Flip fullscreen.
+    game.click([596.0, 288.0]);
+    assert_eq!(game.value("Fullscreen"), Value::Bool(true));
+    assert_eq!(game.value("Status"), Value::String("Fullscreen on".into()));
+
+    // Open Quality and pick High from its list.
+    game.click([670.0, 344.0]);
+    assert!(game.ui.open_dropdown().is_some());
+    game.click([670.0, 460.0]);
+    assert_eq!(game.value("Quality"), Value::String("High".into()));
+    assert_eq!(game.value("Status"), Value::String("Quality High".into()));
+    assert!(
+        game.output
+            .iter()
+            .any(|line| line == "Quality (blocks): High"),
+        "{:?}",
+        game.output
+    );
+    let errors: Vec<_> = game
+        .output
+        .iter()
+        .filter(|line| line.contains("rror"))
+        .collect();
+    assert!(errors.is_empty(), "{errors:?}");
+}

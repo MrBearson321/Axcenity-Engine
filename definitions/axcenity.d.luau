@@ -948,6 +948,170 @@ declare extern type ScrollingFrame extends Instance with
 	[string]: any
 end
 
+--- A track with a thumb: drag it, or click the track, to pick a number from MinValue to MaxValue (in Steps). Its parts are drawn, not child Instances, and styled with ::track, ::fill and ::thumb.
+declare extern type Slider extends Instance with
+	--- Space-separated CSS class names used to style this UI Instance.
+	Class: string
+	--- The CSS identifier used to style this UI Instance.
+	Id: string
+	--- The top-left position relative to the parent, in scale and pixel offsets.
+	Position: UDim2
+	--- The size relative to the parent, in scale and pixel offsets.
+	Size: UDim2
+	--- The background color behind its parts.
+	BackgroundColor3: Color3
+	--- The background opacity: 0 is opaque and 1 is transparent.
+	BackgroundTransparency: number
+	--- If false, it's hidden.
+	Visible: boolean
+	--- If false, the pointer can't change it, it takes no hover, and CSS :disabled styles it. Scripts can still set its Value.
+	Interactable: boolean
+	--- Text shown in a small box near the pointer after a short hover. Empty shows none. Style the box with a CSS Tooltip rule, such as #play Tooltip.
+	Tooltip: string
+	--- Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.
+	ZIndex: number
+	--- Degrees clockwise: it's drawn turned around its middle, and clicks hit the turned shape. Layout doesn't change, so its Position and Size are those of the upright box. 0 by default.
+	Rotation: number
+	--- The number picked, from MinValue to MaxValue. Dragging the thumb or clicking the track sets it; setting it from a script moves the thumb. Each change fires ValueChanged.
+	Value: number
+	--- The number at the track's start (its left, or its bottom when Vertical).
+	MinValue: number
+	--- The number at the track's end (its right, or its top when Vertical).
+	MaxValue: number
+	--- Dragging picks numbers this far apart, counted from MinValue. 0 picks any number.
+	Step: number
+	--- "Horizontal" (MinValue at the left) or "Vertical" (MinValue at the bottom). Style its parts with CSS: Slider::track, ::fill (the track up to the thumb) and ::thumb.
+	Orientation: string
+	--- Fires each time Value changes, from the pointer or a script, with the new Value.
+	ValueChanged: Signal
+	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
+	MouseEnter: Signal
+	--- Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.
+	MouseLeave: Signal
+	[string]: any
+end
+
+--- An on/off switch or checkbox: a click flips its Value. Its parts are drawn and styled with ::track, ::thumb and ::check, and :checked styles it while it's on.
+declare extern type Toggle extends Instance with
+	--- Space-separated CSS class names used to style this UI Instance.
+	Class: string
+	--- The CSS identifier used to style this UI Instance.
+	Id: string
+	--- The top-left position relative to the parent, in scale and pixel offsets.
+	Position: UDim2
+	--- The size relative to the parent, in scale and pixel offsets.
+	Size: UDim2
+	--- The background color behind its parts.
+	BackgroundColor3: Color3
+	--- The background opacity: 0 is opaque and 1 is transparent.
+	BackgroundTransparency: number
+	--- If false, it's hidden.
+	Visible: boolean
+	--- If false, the pointer can't change it, it takes no hover, and CSS :disabled styles it. Scripts can still set its Value.
+	Interactable: boolean
+	--- Text shown in a small box near the pointer after a short hover. Empty shows none. Style the box with a CSS Tooltip rule, such as #play Tooltip.
+	Tooltip: string
+	--- Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.
+	ZIndex: number
+	--- Degrees clockwise: it's drawn turned around its middle, and clicks hit the turned shape. Layout doesn't change, so its Position and Size are those of the upright box. 0 by default.
+	Rotation: number
+	--- On (true) or off (false). A click flips it; setting it from a script flips it too. Each change fires ValueChanged. CSS :checked styles it while it's on.
+	Value: boolean
+	--- "Switch" (a knob that slides across a track) or "Checkbox" (a box ticked while on). Style its parts with CSS: Toggle::track, ::thumb (a switch's knob) and ::check (a checkbox's tick).
+	Style: string
+	--- Fires each time Value changes, from the pointer or a script, with the new Value.
+	ValueChanged: Signal
+	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
+	MouseEnter: Signal
+	--- Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.
+	MouseLeave: Signal
+	[string]: any
+end
+
+--- A box showing its chosen Value. A click opens a list of its Options, drawn over everything else, which scrolls when long; picking one sets Value, and a click outside closes it. Style the list with ::list and each row with ::option.
+declare extern type Dropdown extends Instance with
+	--- Space-separated CSS class names used to style this UI Instance.
+	Class: string
+	--- The CSS identifier used to style this UI Instance.
+	Id: string
+	--- The top-left position relative to the parent, in scale and pixel offsets.
+	Position: UDim2
+	--- The size relative to the parent, in scale and pixel offsets.
+	Size: UDim2
+	--- The background color behind its parts.
+	BackgroundColor3: Color3
+	--- The background opacity: 0 is opaque and 1 is transparent.
+	BackgroundTransparency: number
+	--- If false, it's hidden.
+	Visible: boolean
+	--- If false, the pointer can't change it, it takes no hover, and CSS :disabled styles it. Scripts can still set its Value.
+	Interactable: boolean
+	--- Text shown in a small box near the pointer after a short hover. Empty shows none. Style the box with a CSS Tooltip rule, such as #play Tooltip.
+	Tooltip: string
+	--- Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.
+	ZIndex: number
+	--- Degrees clockwise: it's drawn turned around its middle, and clicks hit the turned shape. Layout doesn't change, so its Position and Size are those of the upright box. 0 by default.
+	Rotation: number
+	--- The choices, one per line, in the order the list shows them.
+	Options: string
+	--- The chosen option's text; empty shows the Placeholder. Picking from the list sets it, and so can a script (to any text). Each change fires ValueChanged.
+	Value: string
+	--- Shown faintly while nothing is chosen.
+	Placeholder: string
+	--- The color of the chosen option's text, unless CSS `color` sets it.
+	TextColor3: Color3
+	--- The size of its text in pixels, unless CSS `font-size` sets it.
+	TextSize: number
+	--- Fires each time Value changes, from the pointer or a script, with the new Value.
+	ValueChanged: Signal
+	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
+	MouseEnter: Signal
+	--- Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.
+	MouseLeave: Signal
+	[string]: any
+end
+
+--- A bar filled as far as Value is from MinValue to MaxValue, for health, loading and the like. Display only; style the filled part with ::fill.
+declare extern type ProgressBar extends Instance with
+	--- Space-separated CSS class names used to style this UI Instance.
+	Class: string
+	--- The CSS identifier used to style this UI Instance.
+	Id: string
+	--- The top-left position relative to the parent, in scale and pixel offsets.
+	Position: UDim2
+	--- The size relative to the parent, in scale and pixel offsets.
+	Size: UDim2
+	--- The background color behind its parts.
+	BackgroundColor3: Color3
+	--- The background opacity: 0 is opaque and 1 is transparent.
+	BackgroundTransparency: number
+	--- If false, it's hidden.
+	Visible: boolean
+	--- If false, the pointer can't change it, it takes no hover, and CSS :disabled styles it. Scripts can still set its Value.
+	Interactable: boolean
+	--- Text shown in a small box near the pointer after a short hover. Empty shows none. Style the box with a CSS Tooltip rule, such as #play Tooltip.
+	Tooltip: string
+	--- Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.
+	ZIndex: number
+	--- Degrees clockwise: it's drawn turned around its middle, and clicks hit the turned shape. Layout doesn't change, so its Position and Size are those of the upright box. 0 by default.
+	Rotation: number
+	--- How far along it is, from MinValue (empty) to MaxValue (full). Setting it fires ValueChanged.
+	Value: number
+	--- The Value at which it's empty.
+	MinValue: number
+	--- The Value at which it's full.
+	MaxValue: number
+	--- "Horizontal" (fills from the left) or "Vertical" (fills from the bottom). Style the filled part with CSS ProgressBar::fill, which can be a linear-gradient.
+	Orientation: string
+	--- Fires each time Value changes, from the pointer or a script, with the new Value.
+	ValueChanged: Signal
+	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
+	MouseEnter: Signal
+	--- Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.
+	MouseLeave: Signal
+	[string]: any
+end
+
 --- UI that floats in the world, parented to a Part or MeshPart and drawn on the screen UI overlay. Size is on-screen; StudsOffset moves it in world studs.
 declare extern type BillboardGui extends Instance with
 	--- Space-separated CSS class names used to style descendants of this billboard.
@@ -1334,7 +1498,7 @@ declare function require(module: Instance): any
 --- Creates Instances.
 declare extern type InstanceLibrary with
 	--- Creates an Instance of this class with default properties and no parent. Set `Parent` to put it in the world.
-	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: string) -> Instance)
+	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: string) -> Instance)
 end
 
 --- Creates Instances.

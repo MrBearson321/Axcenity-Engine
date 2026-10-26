@@ -379,6 +379,21 @@ impl<'a> Converter<'a> {
                     BlockKind::WhenMouseLeaves { element, body }
                 }))
             }
+            "ValueChanged" => {
+                let widget = self.target(object)?;
+                let function = self.handler(handler, 1)?;
+                let body = self.body(&function.body, Scope::default());
+                // The blocks read the new value as the widget's Value, not
+                // the handler's parameter.
+                if function
+                    .params
+                    .iter()
+                    .any(|param| code_mentions(&body, param))
+                {
+                    return None;
+                }
+                Some(Block::new(BlockKind::WhenValueChanged { widget, body }))
+            }
             "Ended" => {
                 let sound = self.target(object)?;
                 let function = self.handler(handler, 0)?;
@@ -978,6 +993,10 @@ impl<'a> Converter<'a> {
             "Volume" => BlockKind::SetVolume {
                 target: path,
                 volume: converted(),
+            },
+            "Value" => BlockKind::SetValue {
+                target: path,
+                value: converted(),
             },
             _ => BlockKind::SetProperty {
                 target: path,

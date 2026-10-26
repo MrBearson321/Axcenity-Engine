@@ -1,5 +1,5 @@
 //! Change events: `Changed`, `GetPropertyChangedSignal`, `ChildAdded` and
-//! `ChildRemoved`.
+//! `ChildRemoved`, and a widget's `ValueChanged`.
 //!
 //! The World keeps a log of every change, whoever made it: a script, physics
 //! moving a part, or the editor during Play. [`ScriptRuntime::fire_changes`]
@@ -28,6 +28,13 @@ pub fn fire(lua: &Lua, changes: &[RecordedChange]) {
                 // gets nothing, as in Roblox.
                 events::fire_change(lua, owner, Event::Named("Changed"), number, name);
                 events::fire_change(lua, owner, Event::PropertyChanged(name), number, ());
+                // A Slider, Toggle, Dropdown or ProgressBar also says what
+                // its new Value is.
+                if name == "Value"
+                    && let Some(value) = widget_value(lua, instance)
+                {
+                    events::fire_change(lua, owner, Event::Named("ValueChanged"), number, value);
+                }
             }
             Change::ChildAdded { parent, child } => {
                 fire_child_event(lua, parent, "ChildAdded", child, number);
@@ -50,6 +57,20 @@ fn fire_child_event(
         let owner = Owner::Instance(parent);
         events::fire_change(lua, owner, Event::Named(event), number, LuaInstance(child));
     }
+}
+
+/// The `Value` of a widget (see `ClassName::is_value_widget`), as Lua.
+/// The World is let go of before it's returned, so handlers can use it.
+fn widget_value(lua: &Lua, id: InstanceId) -> Option<mlua::Value> {
+    let value = {
+        let world = instance::world(lua).ok()?;
+        let widget = world.get(id)?;
+        if !widget.class().is_value_widget() {
+            return None;
+        }
+        widget.property("Value")?.clone()
+    };
+    crate::types::value_to_lua(lua, &value).ok()
 }
 
 fn exists(lua: &Lua, id: InstanceId) -> bool {

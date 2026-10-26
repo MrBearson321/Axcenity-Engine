@@ -229,6 +229,7 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::WhenClicked { .. }
         | BlockKind::WhenMouseEnters { .. }
         | BlockKind::WhenMouseLeaves { .. }
+        | BlockKind::WhenValueChanged { .. }
         | BlockKind::EveryFrame { .. }
         | BlockKind::WhenSoundEnded { .. }
         | BlockKind::Unattached { .. } => Category::Events,
@@ -251,6 +252,7 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::Hide { .. }
         | BlockKind::ShowPage { .. }
         | BlockKind::ScrollTo { .. }
+        | BlockKind::SetValue { .. }
         | BlockKind::SetProperty { .. } => Category::Looks,
         BlockKind::PlaySound { .. }
         | BlockKind::StopSound { .. }
@@ -298,6 +300,8 @@ enum Filter {
     Texts,
     PageLayouts,
     ScrollingFrames,
+    /// Sliders, Toggles, Dropdowns and ProgressBars: what has a `Value`.
+    Widgets,
     Gui,
     Animators,
     Animations,
@@ -318,6 +322,7 @@ impl Filter {
             }
             Filter::PageLayouts => class == ClassName::PageLayout,
             Filter::ScrollingFrames => class == ClassName::ScrollingFrame,
+            Filter::Widgets => class.is_value_widget(),
             Filter::Animators => class == ClassName::Animator,
             Filter::Animations => class == ClassName::Animation,
             Filter::Gui => matches!(
@@ -331,6 +336,10 @@ impl Filter {
                     | ClassName::PageLayout
                     | ClassName::Table
                     | ClassName::ScrollingFrame
+                    | ClassName::Slider
+                    | ClassName::Toggle
+                    | ClassName::Dropdown
+                    | ClassName::ProgressBar
             ),
             Filter::Any => true,
         }
@@ -345,6 +354,7 @@ impl Filter {
             Filter::Texts => "TextLabel",
             Filter::PageLayouts => "PageLayout",
             Filter::ScrollingFrames => "ScrollingFrame",
+            Filter::Widgets => "Slider",
             Filter::Gui => "Frame",
             Filter::Animators => "Model.Animator",
             Filter::Animations => "Model.Animation",
@@ -491,6 +501,11 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
         BlockKind::WhenMouseLeaves { element, .. } => vec![Row(vec![
             label("when mouse leaves"),
             Object(element, Filter::Gui),
+        ])],
+        BlockKind::WhenValueChanged { widget, .. } => vec![Row(vec![
+            label("when"),
+            Object(widget, Filter::Widgets),
+            label("value changes"),
         ])],
         BlockKind::EveryFrame { .. } => vec![Row(vec![label("every frame")])],
         BlockKind::WhenSoundEnded { sound, .. } => vec![Row(vec![
@@ -752,6 +767,22 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
             label("y"),
             Slot(y, SlotKind::Number),
         ])],
+        BlockKind::SetValue { target, value } => {
+            // A Slider's and a ProgressBar's value is a number, a Toggle's
+            // true or false, and a Dropdown's an option's text.
+            let kind = match class_of(objects, target) {
+                Some(ClassName::Slider | ClassName::ProgressBar) => SlotKind::Number,
+                Some(ClassName::Toggle) => SlotKind::Truth,
+                Some(ClassName::Dropdown) => SlotKind::Text,
+                _ => SlotKind::Any,
+            };
+            vec![Row(vec![
+                label("set value of"),
+                Object(target, Filter::Widgets),
+                label("to"),
+                Slot(value, kind),
+            ])]
+        }
         BlockKind::SetProperty {
             target,
             property,

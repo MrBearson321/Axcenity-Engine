@@ -241,6 +241,13 @@ pub enum BlockKind {
         element: String,
         body: Vec<Block>,
     },
+    /// When a Slider, Toggle, Dropdown or ProgressBar's `Value` changes
+    /// (`ValueChanged`): dragged, clicked, picked or set by a script. The
+    /// body reads the new value as the widget's `Value` property.
+    WhenValueChanged {
+        widget: String,
+        body: Vec<Block>,
+    },
     /// Runs every frame (`RunService.Heartbeat`).
     EveryFrame {
         body: Vec<Block>,
@@ -352,6 +359,12 @@ pub enum BlockKind {
         target: String,
         x: Expression,
         y: Expression,
+    },
+    /// Sets a Slider, Toggle, Dropdown or ProgressBar's `Value`, which
+    /// moves it and fires its `ValueChanged`.
+    SetValue {
+        target: String,
+        value: Expression,
     },
     SetProperty {
         target: String,
@@ -490,6 +503,7 @@ impl BlockKind {
                 | BlockKind::WhenClicked { .. }
                 | BlockKind::WhenMouseEnters { .. }
                 | BlockKind::WhenMouseLeaves { .. }
+                | BlockKind::WhenValueChanged { .. }
                 | BlockKind::EveryFrame { .. }
                 | BlockKind::WhenSoundEnded { .. }
                 | BlockKind::WhenStateChanged { .. }
@@ -519,6 +533,7 @@ impl BlockKind {
             | BlockKind::WhenClicked { body, .. }
             | BlockKind::WhenMouseEnters { body, .. }
             | BlockKind::WhenMouseLeaves { body, .. }
+            | BlockKind::WhenValueChanged { body, .. }
             | BlockKind::EveryFrame { body }
             | BlockKind::WhenSoundEnded { body, .. }
             | BlockKind::WhenStateChanged { body, .. }
@@ -545,6 +560,7 @@ impl BlockKind {
             | BlockKind::WhenClicked { body, .. }
             | BlockKind::WhenMouseEnters { body, .. }
             | BlockKind::WhenMouseLeaves { body, .. }
+            | BlockKind::WhenValueChanged { body, .. }
             | BlockKind::EveryFrame { body }
             | BlockKind::WhenSoundEnded { body, .. }
             | BlockKind::WhenStateChanged { body, .. }
@@ -581,6 +597,7 @@ impl BlockKind {
             | BlockKind::SetText { text: e, .. }
             | BlockKind::ShowPage { page: e, .. }
             | BlockKind::SetProperty { value: e, .. }
+            | BlockKind::SetValue { value: e, .. }
             | BlockKind::SetVolume { volume: e, .. }
             | BlockKind::SetAnimatorBool { value: e, .. }
             | BlockKind::SetAnimatorNumber { value: e, .. }
@@ -631,6 +648,7 @@ impl BlockKind {
             | BlockKind::SetText { text: e, .. }
             | BlockKind::ShowPage { page: e, .. }
             | BlockKind::SetProperty { value: e, .. }
+            | BlockKind::SetValue { value: e, .. }
             | BlockKind::SetVolume { volume: e, .. }
             | BlockKind::SetAnimatorBool { value: e, .. }
             | BlockKind::SetAnimatorNumber { value: e, .. }

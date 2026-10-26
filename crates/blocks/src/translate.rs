@@ -202,6 +202,10 @@ impl Writer {
                 format!("{}.MouseLeave:Connect(function()", target(element)?),
                 body,
             ),
+            BlockKind::WhenValueChanged { widget, body } => (
+                format!("{}.ValueChanged:Connect(function()", target(widget)?),
+                body,
+            ),
             BlockKind::EveryFrame { body } => (
                 "RunService.Heartbeat:Connect(function(deltaTime)".to_owned(),
                 body,
@@ -416,6 +420,10 @@ impl Writer {
                     target(t)?
                 ));
             }
+            BlockKind::SetValue { target: t, value } => {
+                let value = self.expression(value)?;
+                self.line(format!("{}.Value = {value}", target(t)?));
+            }
             BlockKind::SetProperty {
                 target: t,
                 property,
@@ -564,6 +572,7 @@ impl Writer {
             | BlockKind::WhenClicked { .. }
             | BlockKind::WhenMouseEnters { .. }
             | BlockKind::WhenMouseLeaves { .. }
+            | BlockKind::WhenValueChanged { .. }
             | BlockKind::EveryFrame { .. }
             | BlockKind::WhenSoundEnded { .. }
             | BlockKind::WhenStateChanged { .. }

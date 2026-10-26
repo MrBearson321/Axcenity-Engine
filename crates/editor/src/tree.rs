@@ -28,6 +28,10 @@ pub enum Insertable {
     Page,
     Table,
     ScrollingFrame,
+    Slider,
+    Toggle,
+    Dropdown,
+    ProgressBar,
     BillboardGui,
     Sound,
     PointLight,
@@ -52,7 +56,7 @@ impl Insertable {
     /// The classes that group other Instances.
     pub const GROUPS: [Insertable; 2] = [Insertable::Model, Insertable::Folder];
     /// UI objects, for the toolbar's UI group and the Explorer's Insert menu.
-    pub const UI: [Insertable; 11] = [
+    pub const UI: [Insertable; 15] = [
         Insertable::ScreenGui,
         Insertable::Frame,
         Insertable::TextLabel,
@@ -63,6 +67,10 @@ impl Insertable {
         Insertable::Page,
         Insertable::Table,
         Insertable::ScrollingFrame,
+        Insertable::Slider,
+        Insertable::Toggle,
+        Insertable::Dropdown,
+        Insertable::ProgressBar,
         Insertable::BillboardGui,
     ];
     pub const AUDIO: [Insertable; 1] = [Insertable::Sound];
@@ -99,6 +107,10 @@ impl Insertable {
             Insertable::Page => "Page",
             Insertable::Table => "Table",
             Insertable::ScrollingFrame => "ScrollingFrame",
+            Insertable::Slider => "Slider",
+            Insertable::Toggle => "Toggle",
+            Insertable::Dropdown => "Dropdown",
+            Insertable::ProgressBar => "ProgressBar",
             Insertable::BillboardGui => "BillboardGui",
             Insertable::Sound => "Sound",
             Insertable::PointLight => "PointLight",
@@ -128,6 +140,10 @@ impl Insertable {
             Insertable::Page => ClassName::Frame,
             Insertable::Table => ClassName::Table,
             Insertable::ScrollingFrame => ClassName::ScrollingFrame,
+            Insertable::Slider => ClassName::Slider,
+            Insertable::Toggle => ClassName::Toggle,
+            Insertable::Dropdown => ClassName::Dropdown,
+            Insertable::ProgressBar => ClassName::ProgressBar,
             Insertable::BillboardGui => ClassName::BillboardGui,
             Insertable::Sound => ClassName::Sound,
             Insertable::PointLight => ClassName::PointLight,
@@ -153,6 +169,10 @@ impl Insertable {
                 | Insertable::Page
                 | Insertable::Table
                 | Insertable::ScrollingFrame
+                | Insertable::Slider
+                | Insertable::Toggle
+                | Insertable::Dropdown
+                | Insertable::ProgressBar
         )
     }
 }

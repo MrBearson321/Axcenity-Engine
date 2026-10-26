@@ -127,6 +127,10 @@ fn is_ui(class: ClassName) -> bool {
             | ClassName::PageLayout
             | ClassName::Table
             | ClassName::ScrollingFrame
+            | ClassName::Slider
+            | ClassName::Toggle
+            | ClassName::Dropdown
+            | ClassName::ProgressBar
     )
 }
 

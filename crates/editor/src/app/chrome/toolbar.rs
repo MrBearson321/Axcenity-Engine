@@ -292,6 +292,7 @@ impl EditorApp {
                         Insertable::Page => "Page",
                         Insertable::Table => "Table",
                         Insertable::ScrollingFrame => "Scroll",
+                        Insertable::ProgressBar => "Progress",
                         Insertable::BillboardGui => "Billboard",
                         _ => what.label(),
                     };

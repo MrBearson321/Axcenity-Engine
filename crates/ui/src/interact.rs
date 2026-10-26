@@ -1,6 +1,8 @@
 //! The pointer and the UI over time: hover and press states, CSS
 //! transitions, `MouseEnter` and `MouseLeave`, tooltips, the cursor,
-//! buttons' hover and click sounds, and scrolling ScrollingFrames. Hosts
+//! buttons' hover and click sounds, scrolling ScrollingFrames, and the
+//! widgets' values (dragging a Slider, flipping a Toggle, picking from a
+//! Dropdown's list, which it draws over everything while it's open). Hosts
 //! (the player, the editor's viewport) keep one [`UiInteraction`] for a
 //! game and lay their UI out through it each frame.
 
@@ -12,6 +14,7 @@ use axcenity_render::{Camera, UiDrawItem, UiText};
 use crate::css::*;
 use crate::style::{PseudoClasses, Stylesheet, resolve_styles, resolve_tooltip_styles};
 use crate::transition::Transitions;
+use crate::widget::{self, DropdownList};
 use crate::{UiElement, UiLayout, layout_ui_with_pseudo, scroll_bars};
 
 /// How long the pointer rests on an element before its tooltip shows, in seconds.
@@ -107,31 +110,65 @@ pub struct UiInteraction {
     /// How long `hovered` has been hovered, in seconds.
     hovered_for: f64,
     events: Vec<UiEvent>,
-    /// Where each element was in the last layout, for scrolling.
+    /// Where each element was in the last layout, for scrolling and widgets.
     elements: Vec<UiElement>,
     scroll_drag: Option<ScrollDrag>,
+    /// The Toggle, Dropdown or list option the left button went down on.
+    widget_press: Option<WidgetPress>,
+    /// The Dropdown whose list is open, and how far that's scrolled in
+    /// authored pixels (`None` until it's first drawn, to show the chosen option).
+    dropdown: Option<(InstanceId, Option<f32>)>,
+    /// That list, as the last layout drew it.
+    list: Option<DropdownList>,
 }
 
-/// What the pointer did to the ScrollingFrames: [`UiInteraction::wheel`],
-/// [`UiInteraction::press`] and [`UiInteraction::drag`].
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-#[must_use = "a scroll only shows once its move is applied to the world"]
+/// A press on a widget that does something when it's let go over the same place.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum WidgetPress {
+    /// A Toggle: flips it.
+    Flip(InstanceId),
+    /// A Dropdown: opens its list.
+    Open(InstanceId),
+    /// An option in a Dropdown's open list, by its index: picks it.
+    Pick(InstanceId, usize),
+}
+
+/// What the pointer did to the ScrollingFrames and widgets:
+/// [`UiInteraction::wheel`], [`UiInteraction::press`],
+/// [`UiInteraction::drag`] and [`UiInteraction::release`].
+#[derive(Clone, Debug, Default, PartialEq)]
+#[must_use = "a scroll or a widget's new value only shows once it's applied to the world"]
 pub struct UiScrolled {
-    /// The scroll took the wheel or the press, so the host doesn't use it
-    /// for anything else: the camera doesn't zoom, and no button is pressed.
+    /// The UI took the wheel or the press, so the host doesn't use it for
+    /// anything else: the camera doesn't zoom, and no button is pressed.
     pub taken: bool,
     /// The ScrollingFrame to set `CanvasPosition` on, and what to.
     pub moved: Option<(InstanceId, Vector2)>,
+    /// The widget to set `Value` on, and what to: a Slider dragged, a
+    /// Toggle flipped or a Dropdown's option picked. Setting it fires
+    /// `ValueChanged` in scripts.
+    pub value: Option<(InstanceId, Value)>,
 }
 
 impl UiScrolled {
-    /// Sets the moved frame's `CanvasPosition` in `world`. Returns [`Self::taken`].
+    /// Sets the moved frame's `CanvasPosition` and the changed widget's
+    /// `Value` in `world`. Returns [`Self::taken`].
     pub fn apply(self, world: &mut World) -> bool {
+        // An element removed since the last layout has nothing to set.
         if let Some((id, at)) = self.moved {
-            // A frame removed since the last layout has nothing to set.
             let _ = world.set_property(id, "CanvasPosition", Value::Vector2(at));
         }
+        if let Some((id, value)) = self.value {
+            let _ = world.set_property(id, "Value", value);
+        }
         self.taken
+    }
+
+    fn taken() -> UiScrolled {
+        UiScrolled {
+            taken: true,
+            ..UiScrolled::default()
+        }
     }
 }
 
@@ -144,6 +181,8 @@ enum ScrollDrag {
         axis: usize,
         grab: f32,
     },
+    /// A Slider's thumb, which follows the pointer along its track.
+    Slider { id: InstanceId },
     /// Its content, pressed at `from` when it was scrolled to `start`.
     /// It scrolls once the pointer has moved [`SCROLL_DRAG_SLOP`].
     Content {
@@ -172,7 +211,7 @@ impl UiInteraction {
         self.transitions
             .borrow_mut()
             .advance(world, f64::from(seconds.max(0.0)));
-        let base = layout_ui_with_pseudo(
+        let mut base = layout_ui_with_pseudo(
             world,
             width,
             height,
@@ -184,9 +223,21 @@ impl UiInteraction {
             camera,
             input.on_top,
         );
-        let under = input.pointer.and_then(|[x, y]| base.hit(x, y));
-        let hovered = input.pointer.and_then(|[x, y]| base.hover_target(x, y));
-        let active = input.pressed.filter(|button| hovered == Some(*button));
+        // An open Dropdown's list covers everything under it. Where it is
+        // comes from this layout, so it's right on the frame it opens.
+        let open = (&mut self.dropdown, &mut self.list);
+        draw_list(world, screen, stylesheets, input.pointer, open, &mut base);
+        let on_list = self
+            .list
+            .as_ref()
+            .is_some_and(|list| input.pointer.is_some_and(|[x, y]| list.rect.contains(x, y)));
+        let pointer = input.pointer.filter(|_| !on_list);
+        let under = pointer.and_then(|[x, y]| base.hit(x, y));
+        let hovered = pointer.and_then(|[x, y]| base.hover_target(x, y));
+        let active = input
+            .pressed
+            .or_else(|| self.held())
+            .filter(|button| hovered == Some(*button));
         let pseudo = PseudoClasses {
             hovered,
             active,
@@ -206,6 +257,9 @@ impl UiInteraction {
         );
         layout.hovered = hovered;
         layout.active = active;
+        // Only these two fields, since `pseudo` borrows the transitions.
+        let open = (&mut self.dropdown, &mut self.list);
+        draw_list(world, screen, stylesheets, input.pointer, open, &mut layout);
 
         if hovered != self.hovered {
             if let Some(old) = self.hovered {
@@ -241,12 +295,58 @@ impl UiInteraction {
                 layout.animating = true;
             }
         }
-        layout.cursor = under.map_or(UiCursor::Default, |id| {
-            cursor(world, id, stylesheets, pseudo)
-        });
+        layout.cursor = if on_list {
+            UiCursor::Pointer
+        } else {
+            under.map_or(UiCursor::Default, |id| {
+                cursor(world, id, stylesheets, pseudo)
+            })
+        };
         layout.animating |= self.transitions.borrow().running();
         self.elements.clone_from(&layout.elements);
         layout
+    }
+
+    /// The Dropdown whose list is open, if one is.
+    pub fn open_dropdown(&self) -> Option<InstanceId> {
+        self.dropdown.map(|(id, _)| id)
+    }
+
+    fn close_list(&mut self) {
+        self.dropdown = None;
+        self.list = None;
+    }
+
+    /// The widget the left button is held on: a Slider being dragged, or
+    /// a Toggle or Dropdown pressed. It's `:active` while it's hovered.
+    fn held(&self) -> Option<InstanceId> {
+        match (self.scroll_drag, self.widget_press) {
+            (Some(ScrollDrag::Slider { id }), _) => Some(id),
+            (_, Some(WidgetPress::Flip(id) | WidgetPress::Open(id))) => Some(id),
+            _ => None,
+        }
+    }
+
+    /// The topmost element at `pointer` in the last layout.
+    fn top_at(&self, [x, y]: [f32; 2]) -> Option<&UiElement> {
+        self.elements.iter().rev().find(|e| e.contains(x, y))
+    }
+
+    /// The Slider `id`'s value with its thumb at `pointer`, when that's a change.
+    fn slide(
+        &self,
+        world: &World,
+        id: InstanceId,
+        pointer: [f32; 2],
+    ) -> Option<(InstanceId, Value)> {
+        let element = self.element(id)?;
+        let track = element.track?;
+        let instance = world.get(id)?;
+        let local = element.local(pointer);
+        let fraction = track.fraction_at(element.rect, element.pixels_per_unit, local);
+        let value = widget::slider_value_at(instance, fraction);
+        let current = instance.property("Value").and_then(Value::as_number);
+        (current != Some(value)).then_some((id, Value::Number(value)))
     }
 
     /// Takes where everything is from `layout`, for scrolling, when it
@@ -298,6 +398,14 @@ impl UiInteraction {
     /// only scrolls across takes the wheel's up and down. The wheel is
     /// taken whenever the pointer is over a ScrollingFrame.
     pub fn wheel(&mut self, world: &World, pointer: [f32; 2], delta: [f32; 2]) -> UiScrolled {
+        // Over an open Dropdown's list, the wheel scrolls the list.
+        if let Some(list) = &mut self.list
+            && list.rect.contains(pointer[0], pointer[1])
+        {
+            list.scroll = (list.scroll + delta[1] / list.per_unit).clamp(0.0, list.max_scroll);
+            self.dropdown = Some((list.id, Some(list.scroll)));
+            return UiScrolled::taken();
+        }
         let scrollers = self.scrollers_at(world, pointer);
         for element in &scrollers {
             let Some(scroll) = element.scroll else {
@@ -317,24 +425,20 @@ impl UiInteraction {
                 return UiScrolled {
                     taken: true,
                     moved: Some(moved),
+                    value: None,
                 };
             }
         }
         UiScrolled {
             taken: !scrollers.is_empty(),
-            moved: None,
+            ..UiScrolled::default()
         }
     }
 
-    /// The left button went down at `pointer`. On a ScrollingFrame's scroll
-    /// bar, that bar is dragged from now on (a press on its track first
-    /// moves the thumb there) and the press is taken: it presses no
-    /// button. On a frame's content, a drag that moves far enough scrolls
-    /// it (see [`Self::drag`]).
-    pub fn press(&mut self, world: &World, pointer: [f32; 2]) -> UiScrolled {
-        self.scroll_drag = None;
-        let scrollers = self.scrollers_at(world, pointer);
-        for element in &scrollers {
+    /// A press at `pointer` on the scroll bar of one of `scrollers` (see
+    /// [`Self::scrollers_at`]): that bar is dragged from now on.
+    fn press_bars(&mut self, scrollers: &[UiElement], pointer: [f32; 2]) -> Option<UiScrolled> {
+        for element in scrollers {
             let Some(scroll) = element.scroll else {
                 continue;
             };
@@ -358,7 +462,75 @@ impl UiInteraction {
                     axis: bar.axis,
                     grab,
                 });
-                return UiScrolled { taken: true, moved };
+                return Some(UiScrolled {
+                    taken: true,
+                    moved,
+                    value: None,
+                });
+            }
+        }
+        None
+    }
+
+    /// [`Self::press`] for scroll bars only, as the UI Designer's artboard
+    /// uses it: a press on a ScrollingFrame's bar drags it, and nothing
+    /// else is taken (widgets stay still, and content doesn't scroll).
+    pub fn press_scroll_bar(&mut self, world: &World, pointer: [f32; 2]) -> UiScrolled {
+        self.scroll_drag = None;
+        self.widget_press = None;
+        let scrollers = self.scrollers_at(world, pointer);
+        self.press_bars(&scrollers, pointer).unwrap_or_default()
+    }
+
+    /// The left button went down at `pointer`. While a Dropdown's list is
+    /// open, the press is taken: on an option, letting go there picks it
+    /// (see [`Self::release`]), and anywhere else closes the list. On a
+    /// ScrollingFrame's scroll bar, that bar is dragged from now on (a
+    /// press on its track first moves the thumb there) and the press is
+    /// taken: it presses no button. On an `Interactable` Slider, its thumb
+    /// jumps to the pointer and follows it until the button goes up; on a
+    /// Toggle or Dropdown, letting go over it flips it or opens its list.
+    /// Both are taken. On a frame's content, a drag that moves far enough
+    /// scrolls it (see [`Self::drag`]).
+    pub fn press(&mut self, world: &World, pointer: [f32; 2]) -> UiScrolled {
+        self.scroll_drag = None;
+        self.widget_press = None;
+        if let Some(list) = &self.list {
+            if list.rect.contains(pointer[0], pointer[1]) {
+                self.widget_press = list
+                    .option_at(pointer)
+                    .map(|index| WidgetPress::Pick(list.id, index));
+            } else {
+                // A click outside closes it, and does nothing else.
+                self.close_list();
+            }
+            return UiScrolled::taken();
+        }
+        let scrollers = self.scrollers_at(world, pointer);
+        if let Some(bar) = self.press_bars(&scrollers, pointer) {
+            return bar;
+        }
+        if let Some(top) = self.top_at(pointer).filter(|top| top.interactable)
+            && let Some(class) = world.get(top.id).map(|instance| instance.class())
+        {
+            let id = top.id;
+            match class {
+                ClassName::Slider => {
+                    self.scroll_drag = Some(ScrollDrag::Slider { id });
+                    return UiScrolled {
+                        value: self.slide(world, id, pointer),
+                        ..UiScrolled::taken()
+                    };
+                }
+                ClassName::Toggle => {
+                    self.widget_press = Some(WidgetPress::Flip(id));
+                    return UiScrolled::taken();
+                }
+                ClassName::Dropdown => {
+                    self.widget_press = Some(WidgetPress::Open(id));
+                    return UiScrolled::taken();
+                }
+                _ => {}
             }
         }
         if let Some(element) = scrollers
@@ -376,11 +548,16 @@ impl UiInteraction {
     }
 
     /// The pointer is at `pointer` with the left button still held:
-    /// carries on a scroll bar's drag, or the content's once it has moved
-    /// [`SCROLL_DRAG_SLOP`]. The press is taken while it's scrolling, so
-    /// the host lets go of the button it went down on (it won't fire).
-    pub fn drag(&mut self, pointer: [f32; 2]) -> UiScrolled {
+    /// carries on a scroll bar's or a Slider's drag, or the content's once
+    /// it has moved [`SCROLL_DRAG_SLOP`]. The press is taken while it's
+    /// scrolling, so the host lets go of the button it went down on (it
+    /// won't fire).
+    pub fn drag(&mut self, world: &World, pointer: [f32; 2]) -> UiScrolled {
         match self.scroll_drag {
+            Some(ScrollDrag::Slider { id }) => UiScrolled {
+                value: self.slide(world, id, pointer),
+                ..UiScrolled::taken()
+            },
             Some(ScrollDrag::Bar { id, axis, grab }) => {
                 let moved = self.element(id).copied().and_then(|element| {
                     let scroll = element.scroll?;
@@ -390,7 +567,11 @@ impl UiInteraction {
                     to[axis] = bar.position_at(&scroll, element.local(pointer)[axis] - grab);
                     self.scroll_to(id, to)
                 });
-                UiScrolled { taken: true, moved }
+                UiScrolled {
+                    taken: true,
+                    moved,
+                    value: None,
+                }
             }
             Some(ScrollDrag::Content {
                 id,
@@ -423,23 +604,77 @@ impl UiInteraction {
                 UiScrolled {
                     taken: true,
                     moved: self.scroll_to(id, to),
+                    value: None,
                 }
             }
             None => UiScrolled::default(),
         }
     }
 
-    /// The left button went up: any scroll drag ends.
-    pub fn release(&mut self) {
+    /// The left button went up with the pointer at `pointer` (`None` when
+    /// it's off the screen): any scroll or Slider drag ends. Let go over the
+    /// Toggle or Dropdown it went down on, it flips the Toggle or opens the
+    /// Dropdown's list; over the list option it went down on, it picks
+    /// that option and closes the list.
+    pub fn release(&mut self, world: &World, pointer: Option<[f32; 2]>) -> UiScrolled {
         self.scroll_drag = None;
+        let Some(press) = self.widget_press.take() else {
+            return UiScrolled::default();
+        };
+        let still_on = |id| {
+            pointer
+                .and_then(|pointer| self.top_at(pointer))
+                .is_some_and(|top| top.id == id)
+        };
+        match press {
+            WidgetPress::Flip(id) if still_on(id) => {
+                let on = world
+                    .get(id)
+                    .and_then(|toggle| toggle.property("Value"))
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                UiScrolled {
+                    value: Some((id, Value::Bool(!on))),
+                    ..UiScrolled::taken()
+                }
+            }
+            WidgetPress::Open(id) if still_on(id) => {
+                self.dropdown = Some((id, None));
+                UiScrolled::taken()
+            }
+            WidgetPress::Pick(id, index) => {
+                let picked = self.list.as_ref().and_then(|list| {
+                    (pointer.and_then(|pointer| list.option_at(pointer)) == Some(index))
+                        .then(|| list.options[index].clone())
+                });
+                let Some(option) = picked else {
+                    return UiScrolled::taken();
+                };
+                self.close_list();
+                let current = world
+                    .get(id)
+                    .and_then(|dropdown| dropdown.property("Value"))
+                    .and_then(Value::as_str);
+                UiScrolled {
+                    value: (current != Some(option.as_str()))
+                        .then_some((id, Value::String(option))),
+                    ..UiScrolled::taken()
+                }
+            }
+            _ => UiScrolled::default(),
+        }
     }
 
-    /// Whether a scroll bar is being dragged, or content dragged far
-    /// enough to scroll.
+    /// Whether a scroll bar or a Slider is being dragged, or content
+    /// dragged far enough to scroll.
     pub fn scrolling(&self) -> bool {
         matches!(
             self.scroll_drag,
-            Some(ScrollDrag::Bar { .. } | ScrollDrag::Content { moving: true, .. })
+            Some(
+                ScrollDrag::Bar { .. }
+                    | ScrollDrag::Slider { .. }
+                    | ScrollDrag::Content { moving: true, .. }
+            )
         )
     }
 
@@ -458,6 +693,41 @@ impl UiInteraction {
     /// What happened since the last call, in order.
     pub fn take_events(&mut self) -> Vec<UiEvent> {
         std::mem::take(&mut self.events)
+    }
+}
+
+/// Draws the open Dropdown's list over everything in `layout`, and
+/// remembers where it is. It closes when its Dropdown is gone, hidden,
+/// not `Interactable` or has no options.
+fn draw_list(
+    world: &World,
+    (width, height): (u32, u32),
+    stylesheets: &[Stylesheet],
+    pointer: Option<[f32; 2]>,
+    (dropdown, list): (
+        &mut Option<(InstanceId, Option<f32>)>,
+        &mut Option<DropdownList>,
+    ),
+    layout: &mut UiLayout,
+) {
+    *list = None;
+    let Some((id, scroll)) = *dropdown else {
+        return;
+    };
+    let screen = (width as f32, height as f32);
+    let drawn = layout
+        .element(id)
+        .filter(|element| element.interactable)
+        .and_then(|element| {
+            widget::dropdown_list(world, element, stylesheets, screen, scroll, pointer)
+        });
+    match drawn {
+        Some((drawn, items)) => {
+            layout.draw_items.extend(items);
+            *dropdown = Some((id, Some(drawn.scroll)));
+            *list = Some(drawn);
+        }
+        None => *dropdown = None,
     }
 }
 
@@ -500,7 +770,9 @@ fn cursor(
         Some(_) => UiCursor::Default,
         None if !interactable(instance) => UiCursor::Default,
         None => match instance.class() {
-            ClassName::TextButton => UiCursor::Pointer,
+            ClassName::TextButton | ClassName::Slider | ClassName::Toggle | ClassName::Dropdown => {
+                UiCursor::Pointer
+            }
             ClassName::TextBox => UiCursor::Text,
             _ => UiCursor::Default,
         },

@@ -42,6 +42,7 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         | BlockKind::WhenClicked { .. }
         | BlockKind::WhenMouseEnters { .. }
         | BlockKind::WhenMouseLeaves { .. }
+        | BlockKind::WhenValueChanged { .. }
         | BlockKind::EveryFrame { .. }
         | BlockKind::WhenSoundEnded { .. }
         | BlockKind::WhenStateChanged { .. }
@@ -88,9 +89,10 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         BlockKind::FadeIn { .. } => 37,
         BlockKind::FadeOut { .. } => 38,
         BlockKind::ScrollTo { .. } => 39,
+        BlockKind::SetValue { .. } => 40,
     })
 }
-const STATEMENT_COUNT: usize = 40;
+const STATEMENT_COUNT: usize = 41;
 
 /// One of each statement block, with the Lua it must produce.
 fn every_statement() -> Vec<(BlockKind, &'static str)> {
@@ -300,6 +302,13 @@ fn every_statement() -> Vec<(BlockKind, &'static str)> {
             "workspace.List.CanvasPosition = Vector2.new(0, 120)",
         ),
         (
+            BlockKind::SetValue {
+                target: "Settings.Volume".to_owned(),
+                value: number(75.0),
+            },
+            "workspace.Settings.Volume.Value = 75",
+        ),
+        (
             BlockKind::Code {
                 code: "for i = 1, 2 do\n    print(i)\nend".to_owned(),
             },
@@ -492,6 +501,13 @@ fn translation_covers_every_event_block() {
                 body: quiet(33),
             },
         ),
+        block(
+            34,
+            BlockKind::WhenValueChanged {
+                widget: "Settings.Volume".to_owned(),
+                body: quiet(35),
+            },
+        ),
     ];
     let source = translate(&script(blocks)).unwrap().source;
     for lua in [
@@ -510,11 +526,12 @@ fn translation_covers_every_event_block() {
         "    if name == \"Footstep\" then",
         "workspace.Menu.Start.MouseEnter:Connect(function()",
         "workspace.Menu.Start.MouseLeave:Connect(function()",
+        "workspace.Settings.Volume.ValueChanged:Connect(function()",
     ] {
         assert!(source.contains(lua), "missing `{lua}`:\n{source}");
     }
     // Unattached blocks don't run.
-    assert_eq!(source.matches("do return end").count(), 9, "{source}");
+    assert_eq!(source.matches("do return end").count(), 10, "{source}");
 }
 
 #[test]
@@ -961,6 +978,13 @@ fn every_block_script() -> BlockScript {
             10,
             BlockKind::WhenMouseLeaves {
                 element: "Menu.Start".to_owned(),
+                body: body(),
+            },
+        ),
+        block(
+            11,
+            BlockKind::WhenValueChanged {
+                widget: "Settings.Volume".to_owned(),
                 body: body(),
             },
         ),

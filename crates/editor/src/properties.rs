@@ -840,6 +840,27 @@ fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
             choice_control(ui, name, current, choices, |choice| choice)
                 .map(|choice| Value::String(choice.to_owned()))
         }
+        // A Slider's or ProgressBar's way, and a Toggle's look.
+        Value::String(text) if name == "Orientation" || name == "Style" => {
+            let choices: &[&'static str] = if name == "Orientation" {
+                &["Horizontal", "Vertical"]
+            } else {
+                &["Switch", "Checkbox"]
+            };
+            // What the layout makes of anything else: the first.
+            let current = choices
+                .iter()
+                .copied()
+                .find(|choice| text.eq_ignore_ascii_case(choice))
+                .unwrap_or(choices[0]);
+            choice_control(ui, name, current, choices, |choice| choice)
+                .map(|choice| Value::String(choice.to_owned()))
+        }
+        // A Dropdown's choices, one per line.
+        Value::String(mut text) if name == "Options" => ui
+            .add(egui::TextEdit::multiline(&mut text).desired_rows(3))
+            .changed()
+            .then_some(Value::String(text)),
         Value::String(mut text) if name == "MeshId" => {
             ui.add_enabled(false, egui::TextEdit::singleline(&mut text))
                 .on_disabled_hover_text(

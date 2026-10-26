@@ -15,6 +15,7 @@ mod rich;
 mod scroll;
 mod transition;
 mod turn;
+mod widget;
 
 pub use css::*;
 use interact::interactable;
@@ -26,6 +27,7 @@ use paint::*;
 pub use rich::{RichSpan, RichStroke, RichStyle, parse_rich_text, rich_text_plain};
 pub use scroll::{ScrollBar, UiScroll, scroll_bars};
 pub use turn::UiTurn;
+pub use widget::{DROPDOWN_ROWS, UiTrack};
 
 use axcenity_core::{ClassName, Color3, Instance, InstanceId, UDim2, Value, World};
 pub use axcenity_render::UiClip;
@@ -89,6 +91,8 @@ pub struct UiElement {
     /// How it's turned on screen, by its own `Rotation` and those of the
     /// elements around it. `rect` is the box before it's turned.
     pub turn: Option<UiTurn>,
+    /// A Slider's track, which the pointer picks its `Value` along.
+    pub track: Option<UiTrack>,
 }
 
 impl UiElement {
@@ -1282,7 +1286,7 @@ fn inner_clip(rect: UiRect, styles: &ResolvedStyles) -> UiClip {
 /// children. Its CSS `transform` moves and scales what it and its children
 /// draw, but not where they are for layout and clicks; its `Rotation`
 /// turns both, around its middle. A ScrollingFrame's children go on its
-/// canvas, under its bars.
+/// canvas, under its bars. A widget's parts go over its background.
 fn place_element(
     world: &World,
     id: InstanceId,
@@ -1321,6 +1325,7 @@ fn place_element(
         clip,
         scroll,
         turn: None,
+        track: None,
     });
     paint_instance(
         instance,
@@ -1331,6 +1336,11 @@ fn place_element(
         &mut out.draw_items,
         &mut out.warnings,
     );
+    if instance.class().is_value_widget() {
+        let opacity = inherited.opacity;
+        out.elements[elements].track =
+            widget::paint_widget(world, id, rect, styles, opacity, stylesheets, pseudo, out);
+    }
     for item in &mut out.draw_items[draws..] {
         set_clip(item, clip);
     }
@@ -1400,6 +1410,10 @@ fn is_widget(class: ClassName) -> bool {
             | ClassName::PageLayout
             | ClassName::Table
             | ClassName::ScrollingFrame
+            | ClassName::Slider
+            | ClassName::Toggle
+            | ClassName::Dropdown
+            | ClassName::ProgressBar
     )
 }
 
@@ -1691,3 +1705,5 @@ mod layering_tests;
 mod shape_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod widget_tests;

@@ -727,6 +727,10 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::PageLayout => icons::STACK,
         ClassName::Table => icons::TABLE,
         ClassName::ScrollingFrame => icons::SCROLL,
+        ClassName::Slider => icons::SLIDERS_HORIZONTAL,
+        ClassName::Toggle => icons::TOGGLE_RIGHT,
+        ClassName::Dropdown => icons::CARET_CIRCLE_DOWN,
+        ClassName::ProgressBar => icons::CHART_BAR_HORIZONTAL,
         ClassName::BillboardGui => icons::FLAG,
         ClassName::Sound => icons::MUSIC_NOTE,
         ClassName::PointLight => icons::LIGHTBULB,
@@ -801,6 +805,10 @@ pub fn class_color(class: ClassName, visuals: &egui::Visuals) -> Color32 {
         | ClassName::PageLayout
         | ClassName::Table
         | ClassName::ScrollingFrame
+        | ClassName::Slider
+        | ClassName::Toggle
+        | ClassName::Dropdown
+        | ClassName::ProgressBar
         | ClassName::BillboardGui => pick((125, 185, 240), (20, 105, 170)),
         ClassName::Sound => pick((226, 162, 80), (165, 100, 10)),
         ClassName::PointLight | ClassName::SpotLight => pick((232, 205, 110), (150, 115, 0)),

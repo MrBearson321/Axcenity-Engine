@@ -882,6 +882,10 @@ impl EditorApp {
                     axcenity_core::Value::Vector2(at),
                 );
             }
+            // Setting a widget's Value fires its ValueChanged in the game.
+            for (id, value) in output.widget_values {
+                let _ = play.world_mut().set_property(id, "Value", value);
+            }
         }
         if self.playing() {
             self.pending_ui_events.extend(output.ui_events);

@@ -1,0 +1,64 @@
+/* A settings page made of the ready-made widgets. Their parts are styled
+   with pseudo-elements: ::track, ::fill and ::thumb on the Slider and
+   Toggle, ::check on a checkbox, ::list and ::option on the Dropdown, and
+   ::fill on the ProgressBar. */
+
+#panel {
+    background-color: #1f2937;
+    border-radius: 16px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+#title {
+    color: #f9fafb;
+    font-size: 28px;
+    font-weight: bold;
+}
+
+.label,
+#status {
+    color: #d1d5db;
+    font-size: 18px;
+    vertical-align: middle;
+}
+
+#volume::track {
+    background-color: #374151;
+}
+
+#volume::fill {
+    background-color: #22c55e;
+}
+
+#volume:hover::thumb {
+    background-color: #dcfce7;
+}
+
+#fullscreen:checked::track {
+    background-color: #22c55e;
+}
+
+#quality {
+    background-color: #111827;
+    color: #f9fafb;
+    border: 1px solid #4b5563;
+    border-radius: 8px;
+}
+
+#quality::list {
+    background-color: #111827;
+    border-radius: 8px;
+}
+
+#quality::option {
+    color: #e5e7eb;
+}
+
+#loudness {
+    background-color: #374151;
+    border-radius: 7px;
+}
+
+#loudness::fill {
+    background-image: linear-gradient(#22c55e, #16a34a);
+}

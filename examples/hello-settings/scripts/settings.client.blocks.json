@@ -1,0 +1,66 @@
+{
+  "blocks": [
+    {
+      "id": 1,
+      "position": [
+        40,
+        40
+      ],
+      "kind": {
+        "type": "when_value_changed",
+        "widget": "Settings.Panel.Quality",
+        "body": [
+          {
+            "id": 2,
+            "kind": {
+              "type": "print",
+              "value": {
+                "type": "join",
+                "left": {
+                  "type": "text",
+                  "value": "Quality (blocks): "
+                },
+                "right": {
+                  "type": "property",
+                  "target": "Settings.Panel.Quality",
+                  "property": "Value"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "position": [
+        40,
+        180
+      ],
+      "kind": {
+        "type": "when_value_changed",
+        "widget": "Settings.Panel.Volume",
+        "body": [
+          {
+            "id": 4,
+            "kind": {
+              "type": "print",
+              "value": {
+                "type": "join",
+                "left": {
+                  "type": "text",
+                  "value": "Volume (blocks): "
+                },
+                "right": {
+                  "type": "property",
+                  "target": "Settings.Panel.Volume",
+                  "property": "Value"
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

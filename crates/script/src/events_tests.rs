@@ -331,3 +331,69 @@ fn assigning_to_a_change_event_explains_how_to_connect() {
         ]
     );
 }
+
+/// The widgets' `ValueChanged` fires with the new value however `Value`
+/// changes: from a script, or from the pointer (the host sets it between
+/// script calls).
+#[test]
+fn value_changed_fires_with_the_new_value_from_scripts_and_the_pointer() {
+    let mut world = World::new();
+    let gui = world.create(ClassName::ScreenGui).unwrap();
+    world.set_name(gui, "Settings").unwrap();
+    world.set_parent(gui, Some(world.workspace())).unwrap();
+    let mut widget = |class, name: &str| {
+        let id = world.create(class).unwrap();
+        world.set_name(id, name).unwrap();
+        world.set_parent(id, Some(gui)).unwrap();
+        id
+    };
+    let volume = widget(ClassName::Slider, "Volume");
+    let fullscreen = widget(ClassName::Toggle, "Fullscreen");
+    let quality = widget(ClassName::Dropdown, "Quality");
+    widget(ClassName::ProgressBar, "Loading");
+    let mut runtime = ScriptRuntime::new();
+    start(
+        &mut runtime,
+        &mut world,
+        "scripts/settings.client.lua",
+        r#"
+        local settings = workspace.Settings
+        for _, name in { "Volume", "Fullscreen", "Quality", "Loading" } do
+            settings[name].ValueChanged:Connect(function(value)
+                print(name, value, type(value))
+            end)
+        end
+        settings.Volume.Value = 75
+        settings.Volume.Value = 75 -- the same: not a change
+        settings.Loading.Value = 10
+        print(settings.Volume.Value, settings.Quality.Options)
+        "#,
+    );
+    assert_eq!(
+        lines(&mut runtime),
+        [
+            "75\tLow\nMedium\nHigh",
+            "Volume\t75\tnumber",
+            "Loading\t10\tnumber"
+        ]
+    );
+    // As the player does when a Toggle is clicked or an option picked.
+    world
+        .set_property(fullscreen, "Value", Value::Bool(true))
+        .unwrap();
+    world
+        .set_property(quality, "Value", Value::String("High".into()))
+        .unwrap();
+    world
+        .set_property(volume, "Value", Value::Number(30.0))
+        .unwrap();
+    runtime.step(&mut world, 1.0 / 60.0);
+    assert_eq!(
+        lines(&mut runtime),
+        [
+            "Fullscreen\ttrue\tboolean",
+            "Quality\tHigh\tstring",
+            "Volume\t30\tnumber"
+        ]
+    );
+}

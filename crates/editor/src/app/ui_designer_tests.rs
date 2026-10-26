@@ -2707,3 +2707,141 @@ fn a_top_bar_in_a_device_safe_insets_gui_sits_below_the_notch_on_a_phone_preview
     app.stop();
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+#[test]
+fn a_settings_page_built_in_the_designer_alone_works_the_same_in_play() {
+    use axcenity_ui::{UiInput, UiInteraction};
+    let folder = copy_of_example("hello-touched", "ui-designer-settings");
+    let mut app = EditorApp::new(Some(&folder));
+    let before = state(&app);
+    act(&mut app, DesignerAction::NewScreenGui);
+    let gui = app.selected.unwrap();
+    act(
+        &mut app,
+        DesignerAction::DesignSize {
+            gui,
+            width: 1280,
+            height: 720,
+        },
+    );
+    let page = drop_in(&mut app, Insertable::Frame, gui, [340.0, 160.0]);
+    add_style(&mut app, page, "width", "600px");
+    add_style(&mut app, page, "height", "400px");
+    // Each widget comes from the designer's Elements.
+    for widget in [
+        Insertable::Slider,
+        Insertable::Toggle,
+        Insertable::Dropdown,
+        Insertable::ProgressBar,
+    ] {
+        assert!(
+            crate::ui_designer::PALETTE
+                .iter()
+                .any(|(what, _)| *what == widget)
+        );
+    }
+    let volume = drop_in(&mut app, Insertable::Slider, page, [40.0, 40.0]);
+    let fullscreen = drop_in(&mut app, Insertable::Toggle, page, [40.0, 100.0]);
+    let quality = drop_in(&mut app, Insertable::Dropdown, page, [40.0, 160.0]);
+    let loading = drop_in(&mut app, Insertable::ProgressBar, page, [40.0, 240.0]);
+    add_style(&mut app, quality, "background-color", "#111827");
+    add_style(&mut app, quality, "color", "#f9fafb");
+
+    // The inspector's Widget section sets each one up.
+    let ctx = theme::test_context();
+    let mut clock = 0.0;
+    let size = egui::vec2(1100.0, 1800.0);
+    let edit = |app: &mut EditorApp, id, name, value| {
+        act(app, DesignerAction::Edit(id, Edit::Property(name, value)));
+    };
+    edit(&mut app, volume, "Step", Value::Number(10.0));
+    edit(
+        &mut app,
+        quality,
+        "Options",
+        Value::String("Low\nMedium\nHigh".into()),
+    );
+    edit(&mut app, quality, "Value", Value::String("Medium".into()));
+    edit(&mut app, loading, "Value", Value::Number(30.0));
+    act(&mut app, DesignerAction::Select(Some(fullscreen)));
+    for _ in 0..3 {
+        designer_frame(&mut app, &ctx, &mut clock, size, Vec::new());
+    }
+    click_named(&mut app, &ctx, &mut clock, size, "Checkbox");
+    let style = |app: &EditorApp, id: InstanceId, name: &str| {
+        app.world.get(id).unwrap().property(name).cloned().unwrap()
+    };
+    assert_eq!(
+        style(&app, fullscreen, "Style"),
+        Value::String("Checkbox".into())
+    );
+    act(&mut app, DesignerAction::Select(Some(loading)));
+    for _ in 0..3 {
+        designer_frame(&mut app, &ctx, &mut clock, size, Vec::new());
+    }
+    click_named(&mut app, &ctx, &mut clock, size, "Vertical");
+    assert_eq!(
+        style(&app, loading, "Orientation"),
+        Value::String("Vertical".into())
+    );
+    edit(
+        &mut app,
+        loading,
+        "Orientation",
+        Value::String("Horizontal".into()),
+    );
+
+    // Play draws exactly what the artboard does.
+    let designed = axcenity_ui::layout_artboard(
+        &app.world,
+        gui,
+        &stylesheets(&app),
+        (1280, 720),
+        1.0,
+        [0.0, 0.0],
+    );
+    app.play();
+    let sheets = stylesheets(&app);
+    let in_play = axcenity_ui::layout_ui(app.play.as_ref().unwrap().world(), 1280, 720, &sheets);
+    assert_eq!(
+        format!("{:?}", in_play.draw_items),
+        format!("{:?}", designed.draw_items)
+    );
+
+    // And it works there: drag the slider, tick the box, pick an option, as
+    // the viewport hands each new Value to the game.
+    let mut ui = UiInteraction::default();
+    let world = app.play.as_mut().unwrap().world_mut();
+    let frame = |ui: &mut UiInteraction, world: &World| {
+        ui.layout(world, (1280, 720), &sheets, UiInput::default(), None, 0.0);
+    };
+    frame(&mut ui, world);
+    // The slider is at 380, 200; its thumb's middle runs from 390 to 610.
+    ui.press(world, [390.0, 212.0]).apply(world);
+    ui.drag(world, [390.0 + 220.0 * 0.7, 212.0]).apply(world);
+    let _ = ui.release(world, Some([544.0, 212.0])).apply(world);
+    frame(&mut ui, world);
+    ui.press(world, [394.0, 274.0]).apply(world);
+    let _ = ui.release(world, Some([394.0, 274.0])).apply(world);
+    frame(&mut ui, world);
+    ui.press(world, [480.0, 338.0]).apply(world);
+    let _ = ui.release(world, Some([480.0, 338.0])).apply(world);
+    frame(&mut ui, world);
+    // The list opens below it: High is its third row.
+    let high = [480.0, 356.0 + 4.0 + 4.0 + 36.0 * 2.5];
+    ui.press(world, high).apply(world);
+    let _ = ui.release(world, Some(high)).apply(world);
+    let value = |world: &World, id: InstanceId| world.get(id).unwrap().property("Value").cloned();
+    assert_eq!(value(world, volume), Some(Value::Number(70.0)));
+    assert_eq!(value(world, fullscreen), Some(Value::Bool(true)));
+    assert_eq!(value(world, quality), Some(Value::String("High".into())));
+    app.stop();
+    assert_eq!(value(&app.world, volume), Some(Value::Number(50.0)));
+
+    // Every edit undoes.
+    while app.history.undo_label().is_some() {
+        app.undo();
+    }
+    assert_eq!(state(&app), before);
+    let _ = std::fs::remove_dir_all(&folder);
+}

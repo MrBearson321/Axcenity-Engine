@@ -95,11 +95,18 @@ pub(crate) struct PseudoClasses<'a> {
 
 /// A part of an element that isn't an Instance, styled with a CSS
 /// pseudo-element: a ScrollingFrame's bar (`::scrollbar`) and the thumb
-/// dragged along it (`::thumb`).
+/// dragged along it (`::thumb`, also a Slider's and a switch's knob), and
+/// the widgets' parts (`::track`, `::fill`, `::check`, and a Dropdown's
+/// `::list` and each `::option` in it).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PseudoElement {
     Scrollbar,
     Thumb,
+    Track,
+    Fill,
+    Check,
+    List,
+    Option,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -185,6 +192,8 @@ struct SimpleSelector {
     hovered: bool,
     active: bool,
     disabled: bool,
+    /// `:checked`: a Toggle that's on.
+    checked: bool,
     /// The type name `Tooltip`: the box a `Tooltip` property shows, which
     /// isn't an Instance. It's styled as a child of the element it's for.
     tooltip: bool,
@@ -581,9 +590,12 @@ fn simple_matches(
             !interactable,
         ),
     };
+    let checked = instance.class() == ClassName::Toggle
+        && instance.property("Value").and_then(Value::as_bool) == Some(true);
     if (selector.hovered && !hovered)
         || (selector.active && !active)
         || (selector.disabled && !disabled)
+        || (selector.checked && !checked)
     {
         return false;
     }
@@ -653,6 +665,11 @@ fn parse_selector(selector: &str) -> Option<Selector> {
                     part.element = Some(match &raw[start..cursor] {
                         "scrollbar" | "-webkit-scrollbar" => PseudoElement::Scrollbar,
                         "thumb" | "-webkit-scrollbar-thumb" => PseudoElement::Thumb,
+                        "track" => PseudoElement::Track,
+                        "fill" => PseudoElement::Fill,
+                        "check" => PseudoElement::Check,
+                        "list" => PseudoElement::List,
+                        "option" => PseudoElement::Option,
                         _ => return None,
                     });
                     specificity.2 += 1;
@@ -674,6 +691,10 @@ fn parse_selector(selector: &str) -> Option<Selector> {
                         }
                         "disabled" if start != cursor && !part.disabled => {
                             part.disabled = true;
+                            specificity.1 += 1;
+                        }
+                        "checked" if start != cursor && !part.checked => {
+                            part.checked = true;
                             specificity.1 += 1;
                         }
                         _ => return None,

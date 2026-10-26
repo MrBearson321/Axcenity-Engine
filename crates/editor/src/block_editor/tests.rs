@@ -326,8 +326,8 @@ fn blocks_drag_from_the_palette_and_snap_into_stacks() {
     // snaps into the event's stack.
     let hat_top_left = pos2(CATEGORY_WIDTH + PALETTE_WIDTH, TOOLBAR_HEIGHT) + vec2(x, y);
     // Where the palette draws it (Inter's line height sets the rows).
-    let wait_grab = pos2(110.0, 766.0);
-    let wait_palette_top_left = pos2(88.0, 746.0);
+    let wait_grab = pos2(110.0, 844.0);
+    let wait_palette_top_left = pos2(88.0, 824.0);
     let target =
         hat_top_left + vec2(0.0, CAP + ROW_HEIGHT + 10.0) + (wait_grab - wait_palette_top_left);
     run_editor(&mut script, drag_frames(wait_grab, target), "drag-wait");

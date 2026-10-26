@@ -1463,6 +1463,290 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "ScreenInsets",
         "\"None\" lays it out over the whole screen. \"DeviceSafeInsets\" keeps it inside the device's safe area, clear of a phone's notch and home bar; a desktop screen has none, so it's the whole screen there.",
     ),
+    (
+        ClassName::Slider,
+        "Class",
+        "Space-separated CSS class names used to style this UI Instance.",
+    ),
+    (
+        ClassName::Slider,
+        "Id",
+        "The CSS identifier used to style this UI Instance.",
+    ),
+    (
+        ClassName::Slider,
+        "Position",
+        "The top-left position relative to the parent, in scale and pixel offsets.",
+    ),
+    (
+        ClassName::Slider,
+        "Size",
+        "The size relative to the parent, in scale and pixel offsets.",
+    ),
+    (
+        ClassName::Slider,
+        "BackgroundColor3",
+        "The background color behind its parts.",
+    ),
+    (
+        ClassName::Slider,
+        "BackgroundTransparency",
+        "The background opacity: 0 is opaque and 1 is transparent.",
+    ),
+    (ClassName::Slider, "Visible", "If false, it's hidden."),
+    (
+        ClassName::Slider,
+        "Interactable",
+        "If false, the pointer can't change it, it takes no hover, and CSS :disabled styles it. Scripts can still set its Value.",
+    ),
+    (
+        ClassName::Slider,
+        "Tooltip",
+        "Text shown in a small box near the pointer after a short hover. Empty shows none. Style the box with a CSS Tooltip rule, such as #play Tooltip.",
+    ),
+    (
+        ClassName::Slider,
+        "ZIndex",
+        "Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.",
+    ),
+    (
+        ClassName::Slider,
+        "Rotation",
+        "Degrees clockwise: it's drawn turned around its middle, and clicks hit the turned shape. Layout doesn't change, so its Position and Size are those of the upright box. 0 by default.",
+    ),
+    (
+        ClassName::Slider,
+        "Value",
+        "The number picked, from MinValue to MaxValue. Dragging the thumb or clicking the track sets it; setting it from a script moves the thumb. Each change fires ValueChanged.",
+    ),
+    (
+        ClassName::Slider,
+        "MinValue",
+        "The number at the track's start (its left, or its bottom when Vertical).",
+    ),
+    (
+        ClassName::Slider,
+        "MaxValue",
+        "The number at the track's end (its right, or its top when Vertical).",
+    ),
+    (
+        ClassName::Slider,
+        "Step",
+        "Dragging picks numbers this far apart, counted from MinValue. 0 picks any number.",
+    ),
+    (
+        ClassName::Slider,
+        "Orientation",
+        "\"Horizontal\" (MinValue at the left) or \"Vertical\" (MinValue at the bottom). Style its parts with CSS: Slider::track, ::fill (the track up to the thumb) and ::thumb.",
+    ),
+    (
+        ClassName::Toggle,
+        "Class",
+        "Space-separated CSS class names used to style this UI Instance.",
+    ),
+    (
+        ClassName::Toggle,
+        "Id",
+        "The CSS identifier used to style this UI Instance.",
+    ),
+    (
+        ClassName::Toggle,
+        "Position",
+        "The top-left position relative to the parent, in scale and pixel offsets.",
+    ),
+    (
+        ClassName::Toggle,
+        "Size",
+        "The size relative to the parent, in scale and pixel offsets.",
+    ),
+    (
+        ClassName::Toggle,
+        "BackgroundColor3",
+        "The background color behind its parts.",
+    ),
+    (
+        ClassName::Toggle,
+        "BackgroundTransparency",
+        "The background opacity: 0 is opaque and 1 is transparent.",
+    ),
+    (ClassName::Toggle, "Visible", "If false, it's hidden."),
+    (
+        ClassName::Toggle,
+        "Interactable",
+        "If false, the pointer can't change it, it takes no hover, and CSS :disabled styles it. Scripts can still set its Value.",
+    ),
+    (
+        ClassName::Toggle,
+        "Tooltip",
+        "Text shown in a small box near the pointer after a short hover. Empty shows none. Style the box with a CSS Tooltip rule, such as #play Tooltip.",
+    ),
+    (
+        ClassName::Toggle,
+        "ZIndex",
+        "Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.",
+    ),
+    (
+        ClassName::Toggle,
+        "Rotation",
+        "Degrees clockwise: it's drawn turned around its middle, and clicks hit the turned shape. Layout doesn't change, so its Position and Size are those of the upright box. 0 by default.",
+    ),
+    (
+        ClassName::Toggle,
+        "Value",
+        "On (true) or off (false). A click flips it; setting it from a script flips it too. Each change fires ValueChanged. CSS :checked styles it while it's on.",
+    ),
+    (
+        ClassName::Toggle,
+        "Style",
+        "\"Switch\" (a knob that slides across a track) or \"Checkbox\" (a box ticked while on). Style its parts with CSS: Toggle::track, ::thumb (a switch's knob) and ::check (a checkbox's tick).",
+    ),
+    (
+        ClassName::Dropdown,
+        "Class",
+        "Space-separated CSS class names used to style this UI Instance.",
+    ),
+    (
+        ClassName::Dropdown,
+        "Id",
+        "The CSS identifier used to style this UI Instance.",
+    ),
+    (
+        ClassName::Dropdown,
+        "Position",
+        "The top-left position relative to the parent, in scale and pixel offsets.",
+    ),
+    (
+        ClassName::Dropdown,
+        "Size",
+        "The size relative to the parent, in scale and pixel offsets.",
+    ),
+    (
+        ClassName::Dropdown,
+        "BackgroundColor3",
+        "The background color behind its parts.",
+    ),
+    (
+        ClassName::Dropdown,
+        "BackgroundTransparency",
+        "The background opacity: 0 is opaque and 1 is transparent.",
+    ),
+    (ClassName::Dropdown, "Visible", "If false, it's hidden."),
+    (
+        ClassName::Dropdown,
+        "Interactable",
+        "If false, the pointer can't change it, it takes no hover, and CSS :disabled styles it. Scripts can still set its Value.",
+    ),
+    (
+        ClassName::Dropdown,
+        "Tooltip",
+        "Text shown in a small box near the pointer after a short hover. Empty shows none. Style the box with a CSS Tooltip rule, such as #play Tooltip.",
+    ),
+    (
+        ClassName::Dropdown,
+        "ZIndex",
+        "Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.",
+    ),
+    (
+        ClassName::Dropdown,
+        "Rotation",
+        "Degrees clockwise: it's drawn turned around its middle, and clicks hit the turned shape. Layout doesn't change, so its Position and Size are those of the upright box. 0 by default.",
+    ),
+    (
+        ClassName::Dropdown,
+        "Options",
+        "The choices, one per line, in the order the list shows them.",
+    ),
+    (
+        ClassName::Dropdown,
+        "Value",
+        "The chosen option's text; empty shows the Placeholder. Picking from the list sets it, and so can a script (to any text). Each change fires ValueChanged.",
+    ),
+    (
+        ClassName::Dropdown,
+        "Placeholder",
+        "Shown faintly while nothing is chosen.",
+    ),
+    (
+        ClassName::Dropdown,
+        "TextColor3",
+        "The color of the chosen option's text, unless CSS `color` sets it.",
+    ),
+    (
+        ClassName::Dropdown,
+        "TextSize",
+        "The size of its text in pixels, unless CSS `font-size` sets it.",
+    ),
+    (
+        ClassName::ProgressBar,
+        "Class",
+        "Space-separated CSS class names used to style this UI Instance.",
+    ),
+    (
+        ClassName::ProgressBar,
+        "Id",
+        "The CSS identifier used to style this UI Instance.",
+    ),
+    (
+        ClassName::ProgressBar,
+        "Position",
+        "The top-left position relative to the parent, in scale and pixel offsets.",
+    ),
+    (
+        ClassName::ProgressBar,
+        "Size",
+        "The size relative to the parent, in scale and pixel offsets.",
+    ),
+    (
+        ClassName::ProgressBar,
+        "BackgroundColor3",
+        "The background color behind its parts.",
+    ),
+    (
+        ClassName::ProgressBar,
+        "BackgroundTransparency",
+        "The background opacity: 0 is opaque and 1 is transparent.",
+    ),
+    (ClassName::ProgressBar, "Visible", "If false, it's hidden."),
+    (
+        ClassName::ProgressBar,
+        "Interactable",
+        "If false, the pointer can't change it, it takes no hover, and CSS :disabled styles it. Scripts can still set its Value.",
+    ),
+    (
+        ClassName::ProgressBar,
+        "Tooltip",
+        "Text shown in a small box near the pointer after a short hover. Empty shows none. Style the box with a CSS Tooltip rule, such as #play Tooltip.",
+    ),
+    (
+        ClassName::ProgressBar,
+        "ZIndex",
+        "Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.",
+    ),
+    (
+        ClassName::ProgressBar,
+        "Rotation",
+        "Degrees clockwise: it's drawn turned around its middle, and clicks hit the turned shape. Layout doesn't change, so its Position and Size are those of the upright box. 0 by default.",
+    ),
+    (
+        ClassName::ProgressBar,
+        "Value",
+        "How far along it is, from MinValue (empty) to MaxValue (full). Setting it fires ValueChanged.",
+    ),
+    (
+        ClassName::ProgressBar,
+        "MinValue",
+        "The Value at which it's empty.",
+    ),
+    (
+        ClassName::ProgressBar,
+        "MaxValue",
+        "The Value at which it's full.",
+    ),
+    (
+        ClassName::ProgressBar,
+        "Orientation",
+        "\"Horizontal\" (fills from the left) or \"Vertical\" (fills from the bottom). Style the filled part with CSS ProgressBar::fill, which can be a linear-gradient.",
+    ),
 ];
 
 /// What each event means, including what its handler receives. A test
@@ -1613,6 +1897,66 @@ pub(super) const EVENT_DOCS: &[(ClassName, &str, &str)] = &[
         "MouseLeave",
         "Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.",
     ),
+    (
+        ClassName::Slider,
+        "ValueChanged",
+        "Fires each time Value changes, from the pointer or a script, with the new Value.",
+    ),
+    (
+        ClassName::Slider,
+        "MouseEnter",
+        "Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.",
+    ),
+    (
+        ClassName::Slider,
+        "MouseLeave",
+        "Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.",
+    ),
+    (
+        ClassName::Toggle,
+        "ValueChanged",
+        "Fires each time Value changes, from the pointer or a script, with the new Value.",
+    ),
+    (
+        ClassName::Toggle,
+        "MouseEnter",
+        "Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.",
+    ),
+    (
+        ClassName::Toggle,
+        "MouseLeave",
+        "Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.",
+    ),
+    (
+        ClassName::Dropdown,
+        "ValueChanged",
+        "Fires each time Value changes, from the pointer or a script, with the new Value.",
+    ),
+    (
+        ClassName::Dropdown,
+        "MouseEnter",
+        "Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.",
+    ),
+    (
+        ClassName::Dropdown,
+        "MouseLeave",
+        "Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.",
+    ),
+    (
+        ClassName::ProgressBar,
+        "ValueChanged",
+        "Fires each time Value changes, from the pointer or a script, with the new Value.",
+    ),
+    (
+        ClassName::ProgressBar,
+        "MouseEnter",
+        "Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.",
+    ),
+    (
+        ClassName::ProgressBar,
+        "MouseLeave",
+        "Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.",
+    ),
 ];
 
 /// What each class is. A `match` with no `_` case, so adding a class won't
@@ -1677,6 +2021,18 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::ScrollingFrame => {
             "A Frame that scrolls: its children sit on a canvas (CanvasSize) bigger than the frame, moved by CanvasPosition with the wheel, its scroll bars or a drag. Only what's inside the frame shows and takes clicks."
+        }
+        ClassName::Slider => {
+            "A track with a thumb: drag it, or click the track, to pick a number from MinValue to MaxValue (in Steps). Its parts are drawn, not child Instances, and styled with ::track, ::fill and ::thumb."
+        }
+        ClassName::Toggle => {
+            "An on/off switch or checkbox: a click flips its Value. Its parts are drawn and styled with ::track, ::thumb and ::check, and :checked styles it while it's on."
+        }
+        ClassName::Dropdown => {
+            "A box showing its chosen Value. A click opens a list of its Options, drawn over everything else, which scrolls when long; picking one sets Value, and a click outside closes it. Style the list with ::list and each row with ::option."
+        }
+        ClassName::ProgressBar => {
+            "A bar filled as far as Value is from MinValue to MaxValue, for health, loading and the like. Display only; style the filled part with ::fill."
         }
         ClassName::BillboardGui => {
             "UI that floats in the world, parented to a Part or MeshPart and drawn on the screen UI overlay. Size is on-screen; StudsOffset moves it in world studs."

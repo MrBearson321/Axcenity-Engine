@@ -62,6 +62,10 @@ pub(super) fn palette(
                 element: first(Filter::Gui),
                 body: Vec::new(),
             }),
+            B(BlockKind::WhenValueChanged {
+                widget: first(Filter::Widgets),
+                body: Vec::new(),
+            }),
             B(BlockKind::EveryFrame { body: Vec::new() }),
             B(BlockKind::WhenSoundEnded {
                 sound: sound.clone(),
@@ -144,6 +148,10 @@ pub(super) fn palette(
                 target: first(Filter::ScrollingFrames),
                 x: number(0.0),
                 y: number(0.0),
+            }),
+            B(BlockKind::SetValue {
+                target: first(Filter::Widgets),
+                value: number(50.0),
             }),
             B(BlockKind::SetProperty {
                 target: part.clone(),

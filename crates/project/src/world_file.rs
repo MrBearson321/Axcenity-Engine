@@ -778,6 +778,61 @@ mod tests {
     }
 
     #[test]
+    fn widgets_save_and_reload_unchanged() {
+        let mut world = World::new();
+        let gui = world.create(ClassName::ScreenGui).unwrap();
+        world.set_parent(gui, Some(world.workspace())).unwrap();
+        let mut widget = |class, values: &[(&str, Value)]| {
+            let id = world.create(class).unwrap();
+            world.set_parent(id, Some(gui)).unwrap();
+            for (name, value) in values {
+                world.set_property(id, name, value.clone()).unwrap();
+            }
+        };
+        widget(
+            ClassName::Slider,
+            &[
+                ("Value", Value::Number(0.75)),
+                ("MaxValue", Value::Number(1.0)),
+                ("Step", Value::Number(0.05)),
+                ("Orientation", Value::String("Vertical".into())),
+            ],
+        );
+        widget(
+            ClassName::Toggle,
+            &[
+                ("Value", Value::Bool(true)),
+                ("Style", Value::String("Checkbox".into())),
+            ],
+        );
+        widget(
+            ClassName::Dropdown,
+            &[
+                ("Options", Value::String("Low\nHigh \"Ultra\"".into())),
+                ("Value", Value::String("Low".into())),
+            ],
+        );
+        widget(ClassName::ProgressBar, &[("Value", Value::Number(10.0))]);
+
+        let written = write_world(&world);
+        let loaded = parse_world(&written).unwrap();
+        let widgets = |world: &World| {
+            let gui = world.get(world.workspace()).unwrap().children()[0];
+            world.get(gui).unwrap().children().to_vec()
+        };
+        let (saved, reloaded) = (widgets(&world), widgets(&loaded));
+        assert_eq!(reloaded.len(), 4);
+        for (saved, reloaded) in saved.into_iter().zip(reloaded) {
+            let (saved, reloaded) = (world.get(saved).unwrap(), loaded.get(reloaded).unwrap());
+            assert_eq!(saved.class(), reloaded.class());
+            for (name, _) in saved.class().default_properties() {
+                assert_eq!(saved.property(name), reloaded.property(name), "{name}");
+            }
+        }
+        assert_eq!(write_world(&loaded), written);
+    }
+
+    #[test]
     fn a_scrolling_frame_and_layer_order_save_and_load_and_older_worlds_get_defaults() {
         let mut world = World::new();
         let gui = world.create(ClassName::ScreenGui).unwrap();

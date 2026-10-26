@@ -458,7 +458,8 @@ impl App {
             let text_box = in_window.and_then(|[x, y]| layout.hit_text_box(x, y));
             if pressed {
                 self.ui_mouse_down = true;
-                // A press on a ScrollingFrame's bar drags the bar instead.
+                // A press on a ScrollingFrame's bar drags the bar instead,
+                // and one on a widget (or an open Dropdown's list) changes it.
                 if let Some(pointer) = in_window
                     && self.ui.press(&self.world, pointer).apply(&mut self.world)
                 {
@@ -484,14 +485,19 @@ impl App {
                 }
                 self.ui_pressed_button = None;
                 self.ui_mouse_down = false;
-                self.ui.release();
+                // Let go over a Toggle flips it, over a Dropdown opens its
+                // list, and over one of its options picks it.
+                let _ = self
+                    .ui
+                    .release(&self.world, in_window)
+                    .apply(&mut self.world);
             }
         }
         // A held press scrolls a ScrollingFrame by its bar, or by its content
         // once it has moved far enough; then the button it began on won't fire.
         if self.ui_mouse_down
             && let Some(pointer) = self.pointer
-            && self.ui.drag(pointer).apply(&mut self.world)
+            && self.ui.drag(&self.world, pointer).apply(&mut self.world)
         {
             self.ui_pressed_button = None;
         }

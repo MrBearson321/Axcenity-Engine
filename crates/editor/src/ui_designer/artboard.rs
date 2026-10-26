@@ -405,12 +405,14 @@ impl UiDesigner {
         if self.scroller.scrolling() {
             match pointer.filter(|_| down) {
                 Some(pointer) => {
-                    let moved = self.scroller.drag(pixel_of(pointer)).moved;
+                    let moved = self.scroller.drag(world, pixel_of(pointer)).moved;
                     if let Some((id, to)) = moved {
                         self.scrolled.insert(id, [to.x, to.y]);
                     }
                 }
-                None => self.scroller.release(),
+                None => {
+                    let _ = self.scroller.release(world, None);
+                }
             }
         }
         // A press on a scroll bar drags it, one on the selection's handles
@@ -426,11 +428,9 @@ impl UiDesigner {
             && let Some(pointer) = over
         {
             self.drag_held = Some(pointer);
-            let bar = self.scroller.press(world, pixel_of(pointer));
-            if !bar.taken {
-                // The artboard's content drags move elements, not scroll.
-                self.scroller.release();
-            }
+            // The artboard's content drags move elements, not scroll, and
+            // widgets are selected and moved rather than used.
+            let bar = self.scroller.press_scroll_bar(world, pixel_of(pointer));
             if let Some((id, to)) = bar.moved {
                 self.scrolled.insert(id, [to.x, to.y]);
             }

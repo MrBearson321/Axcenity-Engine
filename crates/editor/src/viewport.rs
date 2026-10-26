@@ -150,6 +150,10 @@ pub struct ViewportOutput {
     /// ScrollingFrames scrolled during Play by the wheel, a bar or a drag:
     /// the `CanvasPosition` the app sets on each in the game.
     pub scrolled: Vec<(InstanceId, axcenity_core::Vector2)>,
+    /// Widgets changed during Play by the pointer (a Slider dragged, a
+    /// Toggle flipped, a Dropdown's option picked): the `Value` the app sets
+    /// on each in the game.
+    pub widget_values: Vec<(InstanceId, axcenity_core::Value)>,
     pub drag: Option<DragEdit>,
     /// A UI element being moved or resized.
     pub ui_drag: Option<UiDragEdit>,
@@ -376,6 +380,9 @@ pub struct Viewport {
     character_zoom: f32,
     /// The UI's hover and press states, transitions and tooltips over time.
     ui: axcenity_ui::UiInteraction,
+    /// The UI took the last press (a widget, a scroll bar, an open
+    /// Dropdown's list), so letting it go clicks no button or text box.
+    ui_took_press: bool,
 }
 
 /// The texture the scene is drawn into, and egui's name for it.
@@ -399,6 +406,7 @@ impl Viewport {
             character_look: (0.0, 0.0),
             character_zoom: 0.0,
             ui: axcenity_ui::UiInteraction::default(),
+            ui_took_press: false,
         }
     }
 
@@ -512,6 +520,7 @@ impl Viewport {
         // During Play, the wheel over a ScrollingFrame scrolls it (by the
         // last frame's layout) instead of moving the camera.
         let mut scrolled = Vec::new();
+        let mut widget_values = Vec::new();
         let wheel_taken = match pointer_pixels.filter(|_| tool.is_none() && response.hovered()) {
             Some(at) => {
                 let (smooth, raw) =
@@ -546,7 +555,9 @@ impl Viewport {
         let (width, height) = (pixels.x.round() as u32, pixels.y.round() as u32);
         // During Play a press on a ScrollingFrame's bar drags it, and one on
         // its content scrolls it once it has moved far enough; either way
-        // the button under it doesn't fire.
+        // the button under it doesn't fire. A press on a widget changes its
+        // value instead, and one while a Dropdown's list is open picks from
+        // it or closes it.
         let (primary_pressed, primary_down) = ui.input(|input| {
             (
                 input.pointer.primary_pressed(),
@@ -557,13 +568,16 @@ impl Viewport {
             && let Some(at) = pointer_pixels
         {
             let scroll = if primary_pressed {
-                self.ui.press(world, at)
+                let press = self.ui.press(world, at);
+                self.ui_took_press = press.taken;
+                press
             } else if primary_down {
-                self.ui.drag(at)
+                self.ui.drag(world, at)
             } else {
                 axcenity_ui::UiScrolled::default()
             };
             scrolled.extend(scroll.moved);
+            widget_values.extend(scroll.value);
         }
         let scrolling = self.ui.scrolling();
         let input = axcenity_ui::UiInput {
@@ -670,8 +684,9 @@ impl Viewport {
             None => self.clicked_part(ui, &response, &screen, world, &ui_scene, &lights),
         };
         let playing = tool.is_none() && response.clicked_by(egui::PointerButton::Primary);
+        let took_press = self.ui_took_press;
         let clicked_ui = |hit: fn(&axcenity_ui::UiLayout, f32, f32) -> Option<InstanceId>| {
-            playing.then(|| {
+            (playing && !took_press).then(|| {
                 response.interact_pointer_pos().and_then(|pointer| {
                     let position = (pointer - rect.min) * pixels_per_point;
                     hit(&ui_layout, position.x, position.y)
@@ -683,7 +698,8 @@ impl Viewport {
             .filter(|_| !scrolling)
             .filter(|&button| self.ui.activate(world, button));
         if !primary_down {
-            self.ui.release();
+            let released = self.ui.release(world, pointer_pixels);
+            widget_values.extend(released.value);
         }
         let text_box = clicked_ui(axcenity_ui::UiLayout::hit_text_box).flatten();
         let target = self.target.get_or_insert_with(|| {
@@ -849,6 +865,7 @@ impl Viewport {
             viewport_clicked: playing,
             ui_warnings: ui_layout.warnings,
             scrolled,
+            widget_values,
             drag: drag.edit,
             ui_drag: drag.ui_edit,
             drag_released: drag.released,

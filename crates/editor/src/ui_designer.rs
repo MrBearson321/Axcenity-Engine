@@ -35,6 +35,7 @@ mod rulers;
 mod slice;
 mod states;
 mod text_toolbar;
+mod widget_section;
 
 pub use anchors::Pin;
 pub use states::state_selector;
@@ -82,7 +83,7 @@ pub fn safe_insets((width, height): (u32, u32)) -> [f32; 4] {
 }
 
 /// What the palette offers, with its name there.
-pub const PALETTE: [(Insertable, &str); 9] = [
+pub const PALETTE: [(Insertable, &str); 13] = [
     (Insertable::Frame, "Frame"),
     (Insertable::TextLabel, "Text"),
     (Insertable::TextButton, "Button"),
@@ -92,6 +93,10 @@ pub const PALETTE: [(Insertable, &str); 9] = [
     (Insertable::Page, "Page"),
     (Insertable::Table, "Table"),
     (Insertable::ScrollingFrame, "Scroll"),
+    (Insertable::Slider, "Slider"),
+    (Insertable::Toggle, "Toggle"),
+    (Insertable::Dropdown, "Dropdown"),
+    (Insertable::ProgressBar, "Progress"),
 ];
 
 /// The scale modes, as the toolbar names them.

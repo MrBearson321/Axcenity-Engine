@@ -74,6 +74,16 @@ pub enum ClassName {
     /// A Frame whose children sit on a canvas bigger than it, scrolled
     /// with the wheel, its bars, or a drag. It always clips its children.
     ScrollingFrame,
+    /// A track with a thumb dragged (or the track clicked) to pick a
+    /// number between `MinValue` and `MaxValue`.
+    Slider,
+    /// An on/off switch or checkbox, flipped by a click.
+    Toggle,
+    /// A box that opens a list of `Options` to pick one from.
+    Dropdown,
+    /// A bar filled as far as `Value` is from `MinValue` to `MaxValue`.
+    /// Display only.
+    ProgressBar,
     /// UI that floats in the world, on the part it is parented to.
     BillboardGui,
     /// Plays an audio file from the project.
@@ -111,7 +121,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 39] = [
+    pub const ALL: [ClassName; 43] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -139,6 +149,10 @@ impl ClassName {
         ClassName::PageLayout,
         ClassName::Table,
         ClassName::ScrollingFrame,
+        ClassName::Slider,
+        ClassName::Toggle,
+        ClassName::Dropdown,
+        ClassName::ProgressBar,
         ClassName::BillboardGui,
         ClassName::Sound,
         ClassName::PointLight,
@@ -182,6 +196,10 @@ impl ClassName {
             ClassName::PageLayout => "PageLayout",
             ClassName::Table => "Table",
             ClassName::ScrollingFrame => "ScrollingFrame",
+            ClassName::Slider => "Slider",
+            ClassName::Toggle => "Toggle",
+            ClassName::Dropdown => "Dropdown",
+            ClassName::ProgressBar => "ProgressBar",
             ClassName::BillboardGui => "BillboardGui",
             ClassName::Sound => "Sound",
             ClassName::PointLight => "PointLight",
@@ -230,6 +248,16 @@ impl ClassName {
                 | ClassName::ServerScriptService
                 | ClassName::StarterPlayer
                 | ClassName::StarterPlayerScripts
+        )
+    }
+
+    /// Slider, Toggle, Dropdown or ProgressBar: a ready-made widget whose
+    /// parts are drawn (not child Instances) and whose `Value` fires
+    /// `ValueChanged`.
+    pub fn is_value_widget(self) -> bool {
+        matches!(
+            self,
+            ClassName::Slider | ClassName::Toggle | ClassName::Dropdown | ClassName::ProgressBar
         )
     }
 
@@ -553,6 +581,66 @@ impl ClassName {
                 // the children.
                 ("AutomaticCanvasSize", Value::String("None".to_owned())),
             ],
+            ClassName::Slider => {
+                let clear = Color3::new(0.2, 0.2, 0.2);
+                let mut properties =
+                    widget_properties(UDim2::new(0.0, 240.0, 0.0, 24.0), clear, 1.0);
+                properties.extend([
+                    // The number picked, kept between MinValue and MaxValue.
+                    ("Value", Value::Number(50.0)),
+                    ("MinValue", Value::Number(0.0)),
+                    ("MaxValue", Value::Number(100.0)),
+                    // Dragging moves it in steps this big from MinValue. 0
+                    // picks any number.
+                    ("Step", Value::Number(1.0)),
+                    // "Horizontal" (MinValue at the left) or "Vertical"
+                    // (MinValue at the bottom).
+                    ("Orientation", Value::String("Horizontal".to_owned())),
+                ]);
+                properties
+            }
+            ClassName::Toggle => {
+                let clear = Color3::new(0.2, 0.2, 0.2);
+                let mut properties =
+                    widget_properties(UDim2::new(0.0, 52.0, 0.0, 28.0), clear, 1.0);
+                properties.extend([
+                    // On or off. A click flips it.
+                    ("Value", Value::Bool(false)),
+                    // "Switch" (a sliding knob) or "Checkbox" (a box ticked when on).
+                    ("Style", Value::String("Switch".to_owned())),
+                ]);
+                properties
+            }
+            ClassName::Dropdown => {
+                let light = Color3::new(0.96, 0.96, 0.97);
+                let mut properties =
+                    widget_properties(UDim2::new(0.0, 200.0, 0.0, 36.0), light, 0.0);
+                properties.extend([
+                    // The choices, one per line.
+                    ("Options", Value::String("Low\nMedium\nHigh".to_owned())),
+                    // The chosen option's text. Empty shows the Placeholder.
+                    ("Value", Value::String(String::new())),
+                    ("Placeholder", Value::String("Choose…".to_owned())),
+                    ("TextColor3", Value::Color3(Color3::new(0.1, 0.1, 0.12))),
+                    ("TextSize", Value::Number(16.0)),
+                ]);
+                properties
+            }
+            ClassName::ProgressBar => {
+                let dark = Color3::new(0.2, 0.2, 0.2);
+                let mut properties =
+                    widget_properties(UDim2::new(0.0, 240.0, 0.0, 16.0), dark, 0.0);
+                properties.extend([
+                    // How far along it is, from MinValue (empty) to MaxValue (full).
+                    ("Value", Value::Number(50.0)),
+                    ("MinValue", Value::Number(0.0)),
+                    ("MaxValue", Value::Number(100.0)),
+                    // "Horizontal" (fills from the left) or "Vertical"
+                    // (fills from the bottom).
+                    ("Orientation", Value::String("Horizontal".to_owned())),
+                ]);
+                properties
+            }
             ClassName::BillboardGui => vec![
                 ("Class", Value::String(String::new())),
                 ("Id", Value::String(String::new())),
@@ -854,6 +942,12 @@ impl ClassName {
             | ClassName::PageLayout
             | ClassName::Table
             | ClassName::ScrollingFrame => &["MouseEnter", "MouseLeave"],
+            // `ValueChanged` fires on both sides, with the new value, whenever
+            // `Value` changes: dragged, clicked, picked or set by a script.
+            ClassName::Slider
+            | ClassName::Toggle
+            | ClassName::Dropdown
+            | ClassName::ProgressBar => &["ValueChanged", "MouseEnter", "MouseLeave"],
             ClassName::TextButton => &["Activated", "MouseEnter", "MouseLeave"],
             // `FocusLost` fires in LocalScripts when the player finishes
             // typing: Enter on one line, or a click away (and Enter, on one
@@ -861,6 +955,33 @@ impl ClassName {
             ClassName::TextBox => &["FocusLost", "MouseEnter", "MouseLeave"],
         }
     }
+}
+
+/// What every widget (Slider, Toggle, Dropdown, ProgressBar) has, as other
+/// GUI elements do, starting at `size` with `background` at `transparency`.
+fn widget_properties(
+    size: UDim2,
+    background: Color3,
+    transparency: f64,
+) -> Vec<(&'static str, Value)> {
+    vec![
+        ("Class", Value::String(String::new())),
+        ("Id", Value::String(String::new())),
+        ("Position", Value::UDim2(UDim2::default())),
+        ("Size", Value::UDim2(size)),
+        ("BackgroundColor3", Value::Color3(background)),
+        ("BackgroundTransparency", Value::Number(transparency)),
+        ("Visible", Value::Bool(true)),
+        // Off: greyed out by `:disabled`, and it can't be changed by the pointer.
+        ("Interactable", Value::Bool(true)),
+        ("Tooltip", Value::String(String::new())),
+        // Siblings are drawn lowest first (ties keep tree order), and
+        // the one on top takes the pointer. CSS `z-index` wins.
+        ("ZIndex", Value::Number(1.0)),
+        // Degrees clockwise: it's drawn and hit turned around its middle.
+        // Layout doesn't change.
+        ("Rotation", Value::Number(0.0)),
+    ]
 }
 
 /// What both character controllers have: how the character moves, jumps

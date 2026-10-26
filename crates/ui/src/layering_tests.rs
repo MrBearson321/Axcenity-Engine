@@ -343,11 +343,11 @@ fn a_scrolling_frame_scrolls_by_wheel_and_bar_and_only_its_visible_buttons_take_
     press.apply(&mut world);
     assert!(canvas_position(&world, list)[1] > 700.0);
     assert!(interaction.scrolling());
-    interaction.drag([194.0, 400.0]).apply(&mut world);
+    interaction.drag(&world, [194.0, 400.0]).apply(&mut world);
     assert_eq!(canvas_position(&world, list), [0.0, 800.0]);
-    interaction.drag([194.0, 20.0]).apply(&mut world);
+    interaction.drag(&world, [194.0, 20.0]).apply(&mut world);
     assert_eq!(canvas_position(&world, list), [0.0, 0.0]);
-    interaction.release();
+    let _ = interaction.release(&world, None);
     assert!(!interaction.scrolling());
 
     // Dragging the content scrolls once it has moved far enough.
@@ -356,12 +356,12 @@ fn a_scrolling_frame_scrolls_by_wheel_and_bar_and_only_its_visible_buttons_take_
         !interaction.press(&world, [100.0, 100.0]).taken,
         "a button may still be pressed"
     );
-    assert!(!interaction.drag([100.0, 98.0]).taken);
-    let dragged = interaction.drag([100.0, 60.0]);
+    assert!(!interaction.drag(&world, [100.0, 98.0]).taken);
+    let dragged = interaction.drag(&world, [100.0, 60.0]);
     assert!(dragged.taken, "now it scrolls, so the button won't fire");
     dragged.apply(&mut world);
     assert_eq!(canvas_position(&world, list), [0.0, 40.0]);
-    interaction.release();
+    let _ = interaction.release(&world, None);
 }
 
 #[test]

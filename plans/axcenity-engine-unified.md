@@ -561,9 +561,9 @@ Four new elements, in the toolbar's UI group and the designer's Elements. Each i
 
 ### Acceptance criteria
 
-- [ ] A settings page with a volume Slider, a fullscreen Toggle, a quality Dropdown and a ProgressBar is built in the designer alone and works the same in Play.
-- [ ] Dragging the slider and changing the dropdown each fire `ValueChanged` with the new value, from Lua and from blocks, and setting `Value` from a script moves the widget without the user touching it.
-- [ ] Each widget's parts restyle through their pseudo-elements, and a world saved with them reloads unchanged.
+- [x] A settings page with a volume Slider, a fullscreen Toggle, a quality Dropdown and a ProgressBar is built in the designer alone and works the same in Play.
+- [x] Dragging the slider and changing the dropdown each fire `ValueChanged` with the new value, from Lua and from blocks, and setting `Value` from a script moves the widget without the user touching it.
+- [x] Each widget's parts restyle through their pseudo-elements, and a world saved with them reloads unchanged.
 
 ---
 
