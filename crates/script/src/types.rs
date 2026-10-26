@@ -5,6 +5,7 @@
 //! (here mlua's `UserData`) for a type from *this* crate. So each core type
 //! is wrapped in a small struct, such as `LuaVector3(Vector3)`.
 
+use axcenity_anim::EasingDirection;
 use axcenity_core::{
     Color3, KeyCode, Material, PartType, ParticleType, TextureChannel, UDim, UDim2, Value,
     ValueKind, Vector3,
@@ -12,6 +13,7 @@ use axcenity_core::{
 use mlua::{FromLua, IntoLua, Lua, MetaMethod, UserData, UserDataFields, UserDataMethods};
 
 use crate::instance::LuaInstance;
+use crate::tween::{PlaybackState, TweenStyle};
 
 /// Lua stores numbers as `f64`, and core stores components as `f32`. A plain
 /// `as f64` turns `0.1f32` into `0.10000000149011612`, so this goes through
@@ -171,6 +173,17 @@ impl UserData for LuaUDim {
 #[derive(Clone, Copy, Debug)]
 pub struct LuaUDim2(pub UDim2);
 
+impl LuaUDim2 {
+    /// Each scale and offset of `self` and `other` put through `f`.
+    fn zip(self, other: Self, f: impl Fn(f32, f32) -> f32) -> Self {
+        let axis = |a: UDim, b: UDim| UDim::new(f(a.scale, b.scale), f(a.offset, b.offset));
+        Self(UDim2 {
+            x: axis(self.0.x, other.0.x),
+            y: axis(self.0.y, other.0.y),
+        })
+    }
+}
+
 impl UserData for LuaUDim2 {
     fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
         fields.add_field_method_get("X", |_, value| Ok(LuaUDim(value.0.x)));
@@ -178,6 +191,12 @@ impl UserData for LuaUDim2 {
     }
 
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_meta_function(MetaMethod::Add, |_, (a, b): (LuaUDim2, LuaUDim2)| {
+            Ok(a.zip(b, |a, b| a + b))
+        });
+        methods.add_meta_function(MetaMethod::Sub, |_, (a, b): (LuaUDim2, LuaUDim2)| {
+            Ok(a.zip(b, |a, b| a - b))
+        });
         methods.add_meta_method(MetaMethod::Eq, |lua, value, other: mlua::Value| {
             Ok(LuaUDim2::from_lua(other, lua).is_ok_and(|other| other.0 == value.0))
         });
@@ -195,7 +214,9 @@ impl UserData for LuaUDim2 {
 }
 
 /// The `Enum` global. `Enum.Material`, `Enum.PartType`, `Enum.KeyCode`,
-/// `Enum.TextureChannel` and `Enum.ParticleType` are its members.
+/// `Enum.TextureChannel`, `Enum.ParticleType` and the tween enums
+/// (`Enum.EasingStyle`, `Enum.EasingDirection`, `Enum.PlaybackState`) are
+/// its members.
 #[derive(Clone, Copy, Debug)]
 pub struct LuaEnum;
 
@@ -207,15 +228,21 @@ pub enum EnumType {
     KeyCode,
     TextureChannel,
     ParticleType,
+    EasingStyle,
+    EasingDirection,
+    PlaybackState,
 }
 
 impl EnumType {
-    pub const ALL: [EnumType; 5] = [
+    pub const ALL: [EnumType; 8] = [
         EnumType::Material,
         EnumType::PartType,
         EnumType::KeyCode,
         EnumType::TextureChannel,
         EnumType::ParticleType,
+        EnumType::EasingStyle,
+        EnumType::EasingDirection,
+        EnumType::PlaybackState,
     ];
 
     pub fn name(self) -> &'static str {
@@ -225,6 +252,9 @@ impl EnumType {
             EnumType::KeyCode => "KeyCode",
             EnumType::TextureChannel => "TextureChannel",
             EnumType::ParticleType => "ParticleType",
+            EnumType::EasingStyle => "EasingStyle",
+            EnumType::EasingDirection => "EasingDirection",
+            EnumType::PlaybackState => "PlaybackState",
         }
     }
 
@@ -236,6 +266,9 @@ impl EnumType {
             EnumType::KeyCode => KeyCode::ALL.iter().map(|k| k.as_str()).collect(),
             EnumType::TextureChannel => TextureChannel::ALL.iter().map(|c| c.as_str()).collect(),
             EnumType::ParticleType => ParticleType::ALL.iter().map(|t| t.as_str()).collect(),
+            EnumType::EasingStyle => TweenStyle::names(),
+            EnumType::EasingDirection => EasingDirection::ALL.iter().map(|d| d.as_str()).collect(),
+            EnumType::PlaybackState => PlaybackState::ALL.iter().map(|s| s.as_str()).collect(),
         }
     }
 
@@ -304,7 +337,10 @@ impl LuaEnumItem {
                 TextureChannel::from_name(self.name).map(Value::TextureChannel)
             }
             EnumType::ParticleType => ParticleType::from_name(self.name).map(Value::ParticleType),
-            EnumType::KeyCode => None,
+            EnumType::KeyCode
+            | EnumType::EasingStyle
+            | EnumType::EasingDirection
+            | EnumType::PlaybackState => None,
         }
     }
 }
@@ -489,6 +525,9 @@ pub fn type_name(lua: &Lua, value: &mlua::Value) -> String {
             (data.is::<crate::events::LuaSignal>(), "Signal"),
             (data.is::<crate::events::LuaConnection>(), "Connection"),
             (data.is::<crate::run_service::LuaRunService>(), "RunService"),
+            (data.is::<crate::tween::LuaTweenService>(), "TweenService"),
+            (data.is::<crate::tween::LuaTween>(), "Tween"),
+            (data.is::<crate::tween::LuaTweenInfo>(), "TweenInfo"),
         ];
         if let Some((_, name)) = others.into_iter().find(|(is, _)| *is) {
             return name.to_owned();

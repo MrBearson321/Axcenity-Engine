@@ -1107,3 +1107,78 @@ fn settled_hello_physics_parts_stop_reporting_touches() {
     }
     assert_eq!(touches, []);
 }
+
+#[test]
+fn hello_tween_raises_the_block_and_slides_the_menu_in_then_fades_it_out() {
+    use axcenity_core::UDim2;
+    use axcenity_render::UiDrawItem;
+    let (mut world, mut scripts) = start_example("hello-tween");
+    let hud = world.find_first_child(world.workspace(), "Hud").unwrap();
+    let menu = world.find_first_child(hud, "Menu").unwrap();
+    let (width, height) = (1920, 1080);
+    let menu_rect = |world: &World| {
+        axcenity_ui::layout_ui(world, width, height, &[])
+            .element(menu)
+            .map(|element| element.rect)
+    };
+    // The menu's own background, the first rectangle drawn at its place.
+    let menu_alpha = |world: &World| {
+        let layout = axcenity_ui::layout_ui(world, width, height, &[]);
+        let rect = layout.element(menu).unwrap().rect;
+        layout
+            .draw_items
+            .iter()
+            .find_map(|item| match item {
+                UiDrawItem::Rectangle(r) if r.position == [rect.x, rect.y] => Some(r.color[3]),
+                _ => None,
+            })
+            .unwrap()
+    };
+    // Plays sixty frames a second until `seconds` into the game.
+    let mut frames = 0;
+    let mut play_to = |world: &mut World, seconds: f64| {
+        while f64::from(frames) / 60.0 < seconds {
+            scripts.step(world, 1.0 / 60.0);
+            frames += 1;
+        }
+    };
+
+    // The "slide in from left" block put it off the left of the screen.
+    let start = menu_rect(&world).unwrap();
+    assert!(start.x + start.width <= 0.0, "{start:?}");
+    play_to(&mut world, 0.75);
+    assert_eq!(menu_rect(&world).unwrap().x, 60.0);
+    assert_eq!(
+        world.get(menu).unwrap().property("Position"),
+        Some(&Value::UDim2(UDim2::new(0.0, 60.0, 0.0, 60.0)))
+    );
+    assert_eq!(menu_alpha(&world), 1.0);
+    let rose_from = position_of(&world, "Block");
+
+    // Tween blocks don't wait: after "wait 3", "fade out" fades it from
+    // 3 s to 4 s, and "hide" takes it off the screen at 4 s.
+    play_to(&mut world, 3.5);
+    let fading = menu_alpha(&world);
+    assert!(0.2 < fading && fading < 0.8, "{fading}");
+    play_to(&mut world, 3.95);
+    assert!(menu_alpha(&world) < 0.05);
+    play_to(&mut world, 4.1);
+    assert!(menu_rect(&world).is_none());
+    assert_eq!(
+        world.get(menu).unwrap().property("BackgroundTransparency"),
+        Some(&Value::Number(1.0))
+    );
+
+    // The typed TweenService script raised the block, once.
+    assert_eq!(position_of(&world, "Block"), Vector3::new(0.0, 5.0, 0.0));
+    assert!(rose_from.y < 5.0);
+    let output: Vec<String> = scripts
+        .take_output()
+        .into_iter()
+        .map(|line| line.text)
+        .collect();
+    assert_eq!(
+        output,
+        ["The block finished rising:\tEnum.PlaybackState.Completed"]
+    );
+}

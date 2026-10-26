@@ -47,6 +47,8 @@ declare extern type UDim2 with
 	X: UDim
 	--- The vertical component.
 	Y: UDim
+	function __add(self, other: UDim2): UDim2
+	function __sub(self, other: UDim2): UDim2
 end
 
 --- One choice of an enum, such as `Enum.Material.Neon`.
@@ -69,6 +71,46 @@ end
 declare extern type RunService with
 	--- Fires once every frame, after physics. The handler gets the frame's length in seconds: `function(deltaTime) ... end`.
 	Heartbeat: Signal
+end
+
+--- Moves properties smoothly to goals over time, from `game:GetService("TweenService")`.
+declare extern type TweenService with
+	--- A Tween that moves each property in `goals` (a table such as `{Position = Vector3.new(0, 5, 0)}`) of `instance` from where it is to its goal, as `tweenInfo` says. Numbers, Vector3s, Color3s, UDim2s and booleans (which switch at the end) can be tweened. Call `Play` to start it.
+	function Create(self, instance: Instance, tweenInfo: TweenInfo, goals: { [string]: any }): Tween
+end
+
+--- Properties moving to goals, made by `TweenService:Create`. Each frame it sets them, so their change events fire; a newer tween on the same property of the same Instance cancels it.
+declare extern type Tween with
+	--- Where it is: Begin, Delayed, Playing, Paused, Completed or Cancelled (read-only).
+	PlaybackState: EnumPlaybackState
+	--- Fires when it reaches its goals, or is cancelled, with how it ended: `function(playbackState) ... end`.
+	Completed: Signal
+	--- The Instance it moves (read-only).
+	Instance: Instance
+	--- How it plays (read-only).
+	TweenInfo: TweenInfo
+	--- Starts it from where the properties are now (after its DelayTime), or carries on after Pause.
+	function Play(self): ()
+	--- Holds it where it is; Play carries on from there.
+	function Pause(self): ()
+	--- Stops it where it is, and fires Completed with `Enum.PlaybackState.Cancelled`. Playing it again starts over from there.
+	function Cancel(self): ()
+end
+
+--- How a tween plays, from `TweenInfo.new`. Read-only.
+declare extern type TweenInfo with
+	--- Seconds to reach the goals.
+	Time: number
+	--- The shape of the motion: Linear, or one of the clip key easings (Sine, Quad, Cubic, Back, Bounce, Elastic).
+	EasingStyle: EnumEasingStyle
+	--- Which end of the motion is eased: In (the start), Out (the end) or InOut (both).
+	EasingDirection: EnumEasingDirection
+	--- How many more times it plays after the first; -1 repeats forever.
+	RepeatCount: number
+	--- Whether each play goes back to the start after reaching the goals.
+	Reverses: boolean
+	--- Seconds to wait after Play before it starts.
+	DelayTime: number
 end
 
 --- One key going down or up, as `InputBegan` and `InputEnded` handlers get it.
@@ -210,6 +252,46 @@ declare extern type EnumParticleTypeItems with
 	Magic: EnumParticleType
 end
 
+--- One choice of `Enum.EasingStyle`.
+declare extern type EnumEasingStyle extends EnumItem with
+end
+
+--- The choices of `Enum.EasingStyle`.
+declare extern type EnumEasingStyleItems with
+	Linear: EnumEasingStyle
+	Sine: EnumEasingStyle
+	Quad: EnumEasingStyle
+	Cubic: EnumEasingStyle
+	Back: EnumEasingStyle
+	Bounce: EnumEasingStyle
+	Elastic: EnumEasingStyle
+end
+
+--- One choice of `Enum.EasingDirection`.
+declare extern type EnumEasingDirection extends EnumItem with
+end
+
+--- The choices of `Enum.EasingDirection`.
+declare extern type EnumEasingDirectionItems with
+	In: EnumEasingDirection
+	Out: EnumEasingDirection
+	InOut: EnumEasingDirection
+end
+
+--- One choice of `Enum.PlaybackState`.
+declare extern type EnumPlaybackState extends EnumItem with
+end
+
+--- The choices of `Enum.PlaybackState`.
+declare extern type EnumPlaybackStateItems with
+	Begin: EnumPlaybackState
+	Delayed: EnumPlaybackState
+	Playing: EnumPlaybackState
+	Paused: EnumPlaybackState
+	Completed: EnumPlaybackState
+	Cancelled: EnumPlaybackState
+end
+
 --- Every enum, such as `Enum.Material`, `Enum.PartType` and `Enum.KeyCode`.
 declare extern type EnumLibrary with
 	Material: EnumMaterialItems
@@ -217,6 +299,9 @@ declare extern type EnumLibrary with
 	KeyCode: EnumKeyCodeItems
 	TextureChannel: EnumTextureChannelItems
 	ParticleType: EnumParticleTypeItems
+	EasingStyle: EnumEasingStyleItems
+	EasingDirection: EnumEasingDirectionItems
+	PlaybackState: EnumPlaybackStateItems
 end
 
 -- Instances -----------------------------------------------------------------
@@ -274,8 +359,10 @@ declare extern type DataModel extends Instance with
 	UserInputService: UserInputService
 	--- The game's frame loop, with `Heartbeat` (same as `game:GetService("RunService")`).
 	RunService: RunService
+	--- Moves properties smoothly to goals (same as `game:GetService("TweenService")`).
+	TweenService: TweenService
 	[string]: any
-	--- The service with this class name, such as `"Players"`, `"RunService"` or `"UserInputService"`.
+	--- The service with this class name, such as `"Players"`, `"RunService"`, `"TweenService"` or `"UserInputService"`.
 	function GetService(self, className: string): Instance
 end
 
@@ -1112,6 +1199,15 @@ end
 
 --- Creates UI positions and sizes.
 declare UDim2: UDim2Library
+
+--- Creates TweenInfo values.
+declare extern type TweenInfoLibrary with
+	--- How a tween plays. Left out: 1 second, `Enum.EasingStyle.Quad`, `Enum.EasingDirection.Out`, no repeats, no reversing and no delay. The style and direction can also be item names, such as `"Sine"`.
+	new: (time: number?, easingStyle: EnumEasingStyle?, easingDirection: EnumEasingDirection?, repeatCount: number?, reverses: boolean?, delayTime: number?) -> TweenInfo
+end
+
+--- Creates TweenInfo values.
+declare TweenInfo: TweenInfoLibrary
 
 --- Pauses scripts and runs functions later, without stopping the game.
 declare extern type taskLibrary with

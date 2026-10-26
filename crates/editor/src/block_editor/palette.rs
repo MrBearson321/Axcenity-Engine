@@ -296,6 +296,32 @@ pub(super) fn palette(
                 }),
             ]
         }
+        Category::Tweens => {
+            let gui = first(Filter::Gui);
+            vec![
+                B(BlockKind::Tween {
+                    target: part.clone(),
+                    property: "Position".to_owned(),
+                    value: vector(0.0, 10.0, 0.0),
+                    seconds: number(1.0),
+                    style: "Quad".to_owned(),
+                    direction: "Out".to_owned(),
+                }),
+                B(BlockKind::SlideIn {
+                    target: gui.clone(),
+                    from: "Left".to_owned(),
+                    seconds: number(0.5),
+                }),
+                B(BlockKind::FadeIn {
+                    target: gui.clone(),
+                    seconds: number(0.5),
+                }),
+                B(BlockKind::FadeOut {
+                    target: gui,
+                    seconds: number(0.5),
+                }),
+            ]
+        }
         Category::More => vec![
             B(BlockKind::Print {
                 value: text("Hello!"),

@@ -1,5 +1,5 @@
 //! The engine's global names in a script: `print`, `game`, `workspace`,
-//! `script`, `Instance`, `Vector3`, `Color3` and `Enum`.
+//! `script`, `Instance`, `Vector3`, `Color3`, `UDim2`, `TweenInfo` and `Enum`.
 //!
 //! Every script gets its own copy of these tables, so a script that replaces
 //! `Vector3.new` only breaks itself.
@@ -21,6 +21,7 @@ pub fn install(lua: &Lua, env: &Table, ids: ScriptIds) -> mlua::Result<()> {
     env.raw_set("Vector3", vector3_library(lua)?)?;
     env.raw_set("Color3", color3_library(lua)?)?;
     env.raw_set("UDim2", udim2_library(lua)?)?;
+    env.raw_set("TweenInfo", crate::tween::tween_info_library(lua)?)?;
     env.raw_set("Enum", LuaEnum)?;
     Ok(())
 }

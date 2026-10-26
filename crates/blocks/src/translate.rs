@@ -40,6 +40,12 @@ pub enum TranslateError {
     InvalidEventPlacement,
     #[error("\"touching part\" only works inside a \"when touched\" block")]
     TouchingPartOutsideTouched,
+    #[error("`{value}` isn't {what}; choose from {choices}")]
+    InvalidChoice {
+        what: &'static str,
+        value: String,
+        choices: String,
+    },
 }
 
 /// Translates `script` to Lua. Unattached stacks are left out, as they
@@ -69,6 +75,9 @@ pub fn translate(script: &BlockScript) -> Result<Translation, TranslateError> {
             }
             BlockKind::EveryFrame { .. } => {
                 services.insert("RunService");
+            }
+            kind if kind.tweens() => {
+                services.insert("TweenService");
             }
             _ => {}
         }
@@ -466,6 +475,60 @@ impl Writer {
                     target(animation)?
                 ));
             }
+            BlockKind::Tween {
+                target: t,
+                property,
+                value,
+                seconds,
+                style,
+                direction,
+            } => {
+                if !valid_identifier(property) {
+                    return Err(TranslateError::InvalidProperty(property.clone()));
+                }
+                let style = choice(style, &EASING_STYLES, "an easing style")?;
+                let direction = choice(direction, &EASING_DIRECTIONS, "an easing direction")?;
+                let (object, value) = (target(t)?, self.expression(value)?);
+                let seconds = self.expression(seconds)?;
+                self.line(format!(
+                    "TweenService:Create({object}, TweenInfo.new({seconds}, \
+                     Enum.EasingStyle.{style}, Enum.EasingDirection.{direction}), \
+                     {{{property} = {value}}}):Play()"
+                ));
+            }
+            // The info first, so `seconds` can't see the `goal` local.
+            BlockKind::SlideIn {
+                target: t,
+                from,
+                seconds,
+            } => {
+                let offset = match choice(from, &SLIDE_EDGES, "an edge")? {
+                    "Left" => "goal - UDim2.fromScale(1, 0)",
+                    "Right" => "goal + UDim2.fromScale(1, 0)",
+                    "Top" => "goal - UDim2.fromScale(0, 1)",
+                    _ => "goal + UDim2.fromScale(0, 1)",
+                };
+                let (object, seconds) = (target(t)?, self.expression(seconds)?);
+                self.line("do");
+                self.indent += 1;
+                self.line(format!("local info = TweenInfo.new({seconds})"));
+                self.line(format!("local goal = {object}.Position"));
+                self.line(format!("{object}.Position = {offset}"));
+                self.line(format!(
+                    "TweenService:Create({object}, info, {{Position = goal}}):Play()"
+                ));
+                self.indent -= 1;
+                self.line("end");
+            }
+            BlockKind::FadeIn { target: t, seconds }
+            | BlockKind::FadeOut { target: t, seconds } => {
+                let transparency = u8::from(matches!(kind, BlockKind::FadeOut { .. }));
+                let (object, seconds) = (target(t)?, self.expression(seconds)?);
+                self.line(format!(
+                    "TweenService:Create({object}, TweenInfo.new({seconds}), \
+                     {{BackgroundTransparency = {transparency}}}):Play()"
+                ));
+            }
             BlockKind::SetVariable { name, value } => {
                 let value = self.expression(value)?;
                 self.line(format!("{name} = {value}"));
@@ -599,6 +662,23 @@ impl Writer {
 /// A number as Lua writes it: whole numbers without a decimal point.
 pub(super) fn number(value: f64) -> String {
     value.to_string()
+}
+
+/// `value` if it's one of `choices`, which are `what`.
+fn choice<'a>(
+    value: &str,
+    choices: &[&'a str],
+    what: &'static str,
+) -> Result<&'a str, TranslateError> {
+    choices
+        .iter()
+        .copied()
+        .find(|choice| *choice == value)
+        .ok_or_else(|| TranslateError::InvalidChoice {
+            what,
+            value: value.to_owned(),
+            choices: choices.join(", "),
+        })
 }
 
 /// `Enum.KeyCode.<name>`, for a key's name such as `Space`.

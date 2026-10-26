@@ -81,9 +81,13 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         BlockKind::ResetAnimatorTrigger { .. } => 32,
         BlockKind::PlayAnimatorState { .. } => 33,
         BlockKind::PlayAnimation { .. } => 34,
+        BlockKind::Tween { .. } => 35,
+        BlockKind::SlideIn { .. } => 36,
+        BlockKind::FadeIn { .. } => 37,
+        BlockKind::FadeOut { .. } => 38,
     })
 }
-const STATEMENT_COUNT: usize = 35;
+const STATEMENT_COUNT: usize = 39;
 
 /// One of each statement block, with the Lua it must produce.
 fn every_statement() -> Vec<(BlockKind, &'static str)> {
@@ -333,6 +337,46 @@ fn every_statement() -> Vec<(BlockKind, &'static str)> {
                 animation: "Hero.Wave".to_owned(),
             },
             "workspace.Hero.Animator:LoadAnimation(workspace.Hero.Wave):Play()",
+        ),
+        (
+            BlockKind::Tween {
+                target: pad(),
+                property: "Position".to_owned(),
+                value: Expression::Vector3 {
+                    x: 0.0,
+                    y: 5.0,
+                    z: 0.0,
+                },
+                seconds: number(1.0),
+                style: "Quad".to_owned(),
+                direction: "Out".to_owned(),
+            },
+            "TweenService:Create(workspace.Pad, TweenInfo.new(1, Enum.EasingStyle.Quad, \
+             Enum.EasingDirection.Out), {Position = Vector3.new(0, 5, 0)}):Play()",
+        ),
+        (
+            BlockKind::SlideIn {
+                target: "Hud.Menu".to_owned(),
+                from: "Left".to_owned(),
+                seconds: number(0.5),
+            },
+            "workspace.Hud.Menu.Position = goal - UDim2.fromScale(1, 0)",
+        ),
+        (
+            BlockKind::FadeIn {
+                target: "Hud.Menu".to_owned(),
+                seconds: number(0.5),
+            },
+            "TweenService:Create(workspace.Hud.Menu, TweenInfo.new(0.5), \
+             {BackgroundTransparency = 0}):Play()",
+        ),
+        (
+            BlockKind::FadeOut {
+                target: "Hud.Menu".to_owned(),
+                seconds: number(0.5),
+            },
+            "TweenService:Create(workspace.Hud.Menu, TweenInfo.new(0.5), \
+             {BackgroundTransparency = 1}):Play()",
         ),
     ]
 }

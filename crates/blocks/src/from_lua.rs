@@ -11,13 +11,13 @@ use std::collections::BTreeSet;
 
 use crate::lua::{self, Expr, ExprKind, FunctionBody, Stat, StatKind, SyntaxError};
 use crate::{
-    Block, BlockKind, BlockScript, BlockShape, Comparison, Expression, LogicOp, MathFunction,
-    MathOp, translate,
+    Block, BlockKind, BlockScript, BlockShape, Comparison, EASING_DIRECTIONS, EASING_STYLES,
+    Expression, LogicOp, MathFunction, MathOp, translate,
 };
 
 /// The services blocks get with `game:GetService`, which the translation
 /// declares at the top itself when blocks need them.
-const SERVICES: [&str; 2] = ["UserInputService", "RunService"];
+const SERVICES: [&str; 3] = ["UserInputService", "RunService", "TweenService"];
 
 /// Why some Lua couldn't become blocks.
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
@@ -53,6 +53,20 @@ pub fn from_lua(source: &str) -> Result<BlockScript, FromLuaError> {
     let script = converter.chunk(&chunk);
     translate(&script).map_err(|err| FromLuaError::Translate(err.to_string()))?;
     Ok(script)
+}
+
+/// The item name of `Enum.<enum_name>.<item>`, if it's one of `items`.
+fn enum_item(expr: &Expr, enum_name: &str, items: &[&str]) -> Option<String> {
+    let ExprKind::Field(of, item) = &expr.kind else {
+        return None;
+    };
+    let ExprKind::Field(root, name) = &of.kind else {
+        return None;
+    };
+    (name == enum_name
+        && matches!(&root.kind, ExprKind::Name(root) if root == "Enum")
+        && items.contains(&item.as_str()))
+    .then(|| item.clone())
 }
 
 fn variable_declaration(stat: &Stat) -> Option<String> {
@@ -124,6 +138,9 @@ fn used_by(script: &BlockScript) -> (BTreeSet<String>, BTreeSet<String>) {
             }
             BlockKind::EveryFrame { .. } => {
                 services.insert("RunService".to_owned());
+            }
+            kind if kind.tweens() => {
+                services.insert("TweenService".to_owned());
             }
             _ => {}
         }
@@ -596,12 +613,16 @@ impl<'a> Converter<'a> {
             StatKind::Do(body) if matches!(body.as_slice(), [Stat { kind: StatKind::Return(values), .. }] if values.is_empty()) => {
                 Some(BlockKind::StopScript)
             }
+            StatKind::Do(body) => self.slide_in(body, scope),
             StatKind::Return(values) if values.is_empty() => Some(BlockKind::StopScript),
             _ => None,
         }
     }
 
     fn call_statement(&self, call: &Expr, scope: Scope) -> Option<BlockKind> {
+        if let Some(tween) = self.tween(call, scope) {
+            return Some(tween);
+        }
         match &call.kind {
             ExprKind::Call(function, args) => {
                 if self.is_field(function, "task", "wait")
@@ -683,6 +704,163 @@ impl<'a> Converter<'a> {
             }
             _ => None,
         }
+    }
+
+    /// `TweenService:Create(object, TweenInfo.new(...), {Property = value}):Play()`:
+    /// a fade when it's `BackgroundTransparency` to 0 or 1 with the
+    /// default easing, else a tween.
+    fn tween(&self, call: &Expr, scope: Scope) -> Option<BlockKind> {
+        let (target, info, property, value) = self.tween_parts(call)?;
+        let ExprKind::Call(new, info) = &info.kind else {
+            return None;
+        };
+        if !self.is_field(new, "TweenInfo", "new") {
+            return None;
+        }
+        let (seconds, style, direction) = match info.as_slice() {
+            [seconds] => {
+                if property == "BackgroundTransparency" {
+                    let seconds = self.expression(seconds, scope);
+                    match value.kind {
+                        ExprKind::Number(Some(0.0)) => {
+                            return Some(BlockKind::FadeIn { target, seconds });
+                        }
+                        ExprKind::Number(Some(1.0)) => {
+                            return Some(BlockKind::FadeOut { target, seconds });
+                        }
+                        _ => {}
+                    }
+                }
+                // What `TweenInfo.new` leaves out.
+                (seconds, "Quad".to_owned(), "Out".to_owned())
+            }
+            [seconds, style, direction] => (
+                seconds,
+                enum_item(style, "EasingStyle", &EASING_STYLES)?,
+                enum_item(direction, "EasingDirection", &EASING_DIRECTIONS)?,
+            ),
+            _ => return None,
+        };
+        Some(BlockKind::Tween {
+            target,
+            property,
+            value: self.expression(value, scope),
+            seconds: self.expression(seconds, scope),
+            style,
+            direction,
+        })
+    }
+
+    /// The object, TweenInfo, property and value of a tween played as
+    /// it's made, with one goal.
+    fn tween_parts<'e>(&self, call: &'e Expr) -> Option<(String, &'e Expr, String, &'e Expr)> {
+        let ExprKind::Method(created, play, played) = &call.kind else {
+            return None;
+        };
+        let ExprKind::Method(service, create, args) = &created.kind else {
+            return None;
+        };
+        if play != "Play"
+            || !played.is_empty()
+            || create != "Create"
+            || !self.is_service(service, "TweenService")
+        {
+            return None;
+        }
+        let [object, info, goals] = args.as_slice() else {
+            return None;
+        };
+        let ExprKind::Table {
+            named,
+            other: false,
+        } = &goals.kind
+        else {
+            return None;
+        };
+        let [(property, value)] = named.as_slice() else {
+            return None;
+        };
+        Some((self.target(object)?, info, property.clone(), value))
+    }
+
+    /// The `do … end` that "slide in" writes.
+    fn slide_in(&self, body: &[Stat], scope: Scope) -> Option<BlockKind> {
+        let [info, goal, moved, play] = body else {
+            return None;
+        };
+        // The value of `local <wanted> = value`.
+        fn local<'s>(stat: &'s Stat, wanted: &str) -> Option<&'s Expr> {
+            match &stat.kind {
+                StatKind::Local { names, values } => match (names.as_slice(), values.as_slice()) {
+                    ([name], [value]) if name == wanted => Some(value),
+                    _ => None,
+                },
+                _ => None,
+            }
+        }
+        let is_name = |expr: &Expr, wanted: &str| matches!(&expr.kind, ExprKind::Name(name) if name == wanted);
+        let ExprKind::Call(new, info) = &local(info, "info")?.kind else {
+            return None;
+        };
+        let ([seconds], true) = (info.as_slice(), self.is_field(new, "TweenInfo", "new")) else {
+            return None;
+        };
+        let ExprKind::Field(object, position) = &local(goal, "goal")?.kind else {
+            return None;
+        };
+        let target = self.target(object).filter(|_| position == "Position")?;
+        let StatKind::Assign { targets, values } = &moved.kind else {
+            return None;
+        };
+        let ([moved_object], [offset]) = (targets.as_slice(), values.as_slice()) else {
+            return None;
+        };
+        let same_position = |expr: &Expr| {
+            matches!(&expr.kind, ExprKind::Field(inner, name)
+                if name == "Position" && self.target(inner).as_deref() == Some(target.as_str()))
+        };
+        if !same_position(moved_object) {
+            return None;
+        }
+        let ExprKind::Binary(op, from, by) = &offset.kind else {
+            return None;
+        };
+        let ExprKind::Call(from_scale, scale) = &by.kind else {
+            return None;
+        };
+        if !is_name(from, "goal") || !self.is_field(from_scale, "UDim2", "fromScale") {
+            return None;
+        }
+        let scale: Vec<Option<f64>> = scale
+            .iter()
+            .map(|arg| match arg.kind {
+                ExprKind::Number(value) => value,
+                _ => None,
+            })
+            .collect();
+        let from = match (*op, scale.as_slice()) {
+            ("-", [Some(1.0), Some(0.0)]) => "Left",
+            ("+", [Some(1.0), Some(0.0)]) => "Right",
+            ("-", [Some(0.0), Some(1.0)]) => "Top",
+            ("+", [Some(0.0), Some(1.0)]) => "Bottom",
+            _ => return None,
+        };
+        let StatKind::Call(play) = &play.kind else {
+            return None;
+        };
+        let (played, info, property, value) = self.tween_parts(play)?;
+        if played != target
+            || !is_name(info, "info")
+            || property != "Position"
+            || !is_name(value, "goal")
+        {
+            return None;
+        }
+        Some(BlockKind::SlideIn {
+            target,
+            from: from.to_owned(),
+            seconds: self.expression(seconds, scope),
+        })
     }
 
     fn assignment(&self, target: &Expr, value: &Expr, scope: Scope) -> Option<BlockKind> {

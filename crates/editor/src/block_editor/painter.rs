@@ -156,6 +156,7 @@ impl<'a> BlockPainter<'a> {
             Part::Compare(op) => self.dropdown_size(ui, op.symbol()),
             Part::Logic(op) => self.dropdown_size(ui, op.lua()),
             Part::Function(function) => self.dropdown_size(ui, function.name()),
+            Part::Choice(name, _) => self.dropdown_size(ui, name),
             Part::Code(code) => self.code_galley(ui, code).size() + vec2(self.s(12.0), self.s(8.0)),
         }
     }
@@ -742,6 +743,19 @@ impl<'a> BlockPainter<'a> {
                     galley,
                     Color32::WHITE,
                 );
+            }
+            Part::Choice(name, choices) => {
+                let choices = *choices;
+                if let Some(response) = self.dropdown(ui, rect, part_id, name) {
+                    egui::Popup::menu(&response).show(|ui| {
+                        for &choice in choices {
+                            if ui.selectable_label(**name == choice, choice).clicked() {
+                                **name = choice.to_owned();
+                                ui.close();
+                            }
+                        }
+                    });
+                }
             }
             Part::Function(function) => {
                 if let Some(response) = self.dropdown(ui, rect, part_id, function.name()) {

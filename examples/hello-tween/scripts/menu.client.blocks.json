@@ -1,0 +1,50 @@
+{
+  "blocks": [
+    {
+      "id": 1,
+      "kind": {
+        "type": "when_started",
+        "body": [
+          {
+            "id": 2,
+            "kind": {
+              "type": "slide_in",
+              "target": "Hud.Menu",
+              "from": "Left",
+              "seconds": { "type": "number", "value": 0.6 }
+            }
+          },
+          {
+            "id": 3,
+            "kind": {
+              "type": "wait",
+              "seconds": { "type": "number", "value": 3 }
+            }
+          },
+          {
+            "id": 4,
+            "kind": {
+              "type": "fade_out",
+              "target": "Hud.Menu",
+              "seconds": { "type": "number", "value": 1 }
+            }
+          },
+          {
+            "id": 5,
+            "kind": {
+              "type": "wait",
+              "seconds": { "type": "number", "value": 1 }
+            }
+          },
+          {
+            "id": 6,
+            "kind": {
+              "type": "hide",
+              "target": "Hud.Menu"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

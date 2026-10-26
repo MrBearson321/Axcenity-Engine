@@ -391,6 +391,36 @@ pub enum BlockKind {
         animation: String,
     },
 
+    // Tweens: a property moving smoothly (`TweenService`).
+    /// Moves one property of an object to `value` over `seconds`, eased by
+    /// `style` (one of [`EASING_STYLES`]) and `direction` (one of
+    /// [`EASING_DIRECTIONS`]).
+    Tween {
+        target: String,
+        property: String,
+        value: Expression,
+        seconds: Expression,
+        style: String,
+        direction: String,
+    },
+    /// Slides a UI element in to where it is from one parent's width or
+    /// height past an edge, `from` being one of [`SLIDE_EDGES`].
+    SlideIn {
+        target: String,
+        from: String,
+        seconds: Expression,
+    },
+    /// Fades a UI element's background in (`BackgroundTransparency` to 0).
+    FadeIn {
+        target: String,
+        seconds: Expression,
+    },
+    /// Fades a UI element's background out (`BackgroundTransparency` to 1).
+    FadeOut {
+        target: String,
+        seconds: Expression,
+    },
+
     // Variables.
     SetVariable {
         name: String,
@@ -415,6 +445,15 @@ pub enum BlockKind {
         code: String,
     },
 }
+
+/// `Enum.EasingStyle`'s items, which the tween block offers.
+pub const EASING_STYLES: [&str; 7] = [
+    "Linear", "Sine", "Quad", "Cubic", "Back", "Bounce", "Elastic",
+];
+/// `Enum.EasingDirection`'s items.
+pub const EASING_DIRECTIONS: [&str; 3] = ["In", "Out", "InOut"];
+/// The edges "slide in" can come from.
+pub const SLIDE_EDGES: [&str; 4] = ["Left", "Right", "Top", "Bottom"];
 
 impl BlockKind {
     pub fn shape(&self) -> BlockShape {
@@ -522,9 +561,24 @@ impl BlockKind {
             | BlockKind::SetAnimatorNumber { value: e, .. }
             | BlockKind::SetVariable { value: e, .. }
             | BlockKind::ChangeVariable { by: e, .. }
+            | BlockKind::SlideIn { seconds: e, .. }
+            | BlockKind::FadeIn { seconds: e, .. }
+            | BlockKind::FadeOut { seconds: e, .. }
             | BlockKind::Print { value: e } => vec![e],
+            BlockKind::Tween { value, seconds, .. } => vec![value, seconds],
             _ => Vec::new(),
         }
+    }
+
+    /// Tween blocks, which need `TweenService`.
+    pub fn tweens(&self) -> bool {
+        matches!(
+            self,
+            BlockKind::Tween { .. }
+                | BlockKind::SlideIn { .. }
+                | BlockKind::FadeIn { .. }
+                | BlockKind::FadeOut { .. }
+        )
     }
 
     /// Blocks nothing can go after: they never finish ("forever") or end
@@ -556,7 +610,11 @@ impl BlockKind {
             | BlockKind::SetAnimatorNumber { value: e, .. }
             | BlockKind::SetVariable { value: e, .. }
             | BlockKind::ChangeVariable { by: e, .. }
+            | BlockKind::SlideIn { seconds: e, .. }
+            | BlockKind::FadeIn { seconds: e, .. }
+            | BlockKind::FadeOut { seconds: e, .. }
             | BlockKind::Print { value: e } => vec![e],
+            BlockKind::Tween { value, seconds, .. } => vec![value, seconds],
             _ => Vec::new(),
         }
     }
@@ -887,3 +945,6 @@ pub use lua::SyntaxError;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod tween_tests;

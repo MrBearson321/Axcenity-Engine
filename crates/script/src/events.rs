@@ -32,6 +32,8 @@ pub enum Owner {
     Instance(InstanceId),
     UserInputService,
     RunService,
+    /// A Tween, by its number (see `tween`).
+    Tween(u64),
 }
 
 /// Which event of its owner.
@@ -131,11 +133,13 @@ impl Connections {
             .is_some_and(|handlers| handlers.iter().any(|handler| handler.id == id))
     }
 
-    /// Drops the handlers of Instances that no longer exist, so their
+    /// Drops the handlers of Instances that no longer exist, and of the
+    /// Tweens not in `tweens` (those no script holds any more), so their
     /// functions (and whatever those functions use) can be freed.
-    pub fn forget(&mut self, exists: impl Fn(InstanceId) -> bool) {
+    pub fn forget(&mut self, exists: impl Fn(InstanceId) -> bool, tweens: &[u64]) {
         self.handlers.retain(|(owner, _), _| match owner {
             Owner::Instance(instance) => exists(*instance),
+            Owner::Tween(tween) => tweens.contains(tween),
             Owner::UserInputService | Owner::RunService => true,
         });
     }

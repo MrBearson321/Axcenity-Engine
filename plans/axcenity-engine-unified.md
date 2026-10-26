@@ -603,10 +603,10 @@ A tween on a UI property is applied after CSS transitions, so a script's tween w
 
 ### Acceptance criteria
 
-- [ ] A script tweens a Part's Position and a Frame's BackgroundTransparency over one second with Quad Out, and `Completed` fires once.
-- [ ] A menu Frame slides in from off-screen with the "slide in from left" block and fades out with "fade out", in Play.
-- [ ] `Cancel` stops a tween where it is, and a second tween on the same property replaces the first.
-- [ ] The tween blocks produce the same Lua and the same motion, and the API reference lists TweenService.
+- [x] A script tweens a Part's Position and a Frame's BackgroundTransparency over one second with Quad Out, and `Completed` fires once.
+- [x] A menu Frame slides in from off-screen with the "slide in from left" block and fades out with "fade out", in Play.
+- [x] `Cancel` stops a tween where it is, and a second tween on the same property replaces the first.
+- [x] The tween blocks produce the same Lua and the same motion, and the API reference lists TweenService.
 
 ---
 

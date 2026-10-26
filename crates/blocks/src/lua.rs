@@ -371,7 +371,12 @@ pub(crate) enum ExprKind {
     Call(Box<Expr>, Vec<Expr>),
     Method(Box<Expr>, String, Vec<Expr>),
     Function(FunctionBody),
-    Table,
+    /// A table constructor's `name = value` fields, in order. `other` is
+    /// true when it also has fields of another kind (`[k] = v` or a list).
+    Table {
+        named: Vec<(String, Expr)>,
+        other: bool,
+    },
     Binary(&'static str, Box<Expr>, Box<Expr>),
     Unary(&'static str, Box<Expr>),
     Paren(Box<Expr>),
@@ -1099,9 +1104,9 @@ impl Parser<'_> {
             Token::Keyword("false") => ExprKind::False,
             Token::Symbol("...") => ExprKind::Vararg,
             Token::Symbol("{") => {
-                self.table()?;
+                let kind = self.table()?;
                 return Ok(Expr {
-                    kind: ExprKind::Table,
+                    kind,
                     span: start..self.end(),
                 });
             }
@@ -1122,28 +1127,32 @@ impl Parser<'_> {
         })
     }
 
-    fn table(&mut self) -> Result<(), SyntaxError> {
+    fn table(&mut self) -> Result<ExprKind, SyntaxError> {
         self.expect("{")?;
+        let (mut named, mut other) = (Vec::new(), false);
         while !self.check("}") {
             if self.accept("[") {
                 self.expression()?;
                 self.expect("]")?;
                 self.expect("=")?;
                 self.expression()?;
-            } else if matches!(self.peek(), Token::Name(_))
+                other = true;
+            } else if let Token::Name(name) = self.peek().clone()
                 && self.peek_at(1) == &Token::Symbol("=")
             {
                 self.next();
                 self.next();
-                self.expression()?;
+                named.push((name, self.expression()?));
             } else {
                 self.expression()?;
+                other = true;
             }
             if !self.accept(",") && !self.accept(";") {
                 break;
             }
         }
-        self.expect("}")
+        self.expect("}")?;
+        Ok(ExprKind::Table { named, other })
     }
 
     fn primary(&mut self) -> Result<Expr, SyntaxError> {
@@ -1214,9 +1223,9 @@ impl Parser<'_> {
                 }])
             }
             Token::Symbol("{") => {
-                self.table()?;
+                let kind = self.table()?;
                 Ok(vec![Expr {
-                    kind: ExprKind::Table,
+                    kind,
                     span: start..self.end(),
                 }])
             }

@@ -708,6 +708,7 @@ dependencies = [
 name = "axcenity-script"
 version = "0.1.0"
 dependencies = [
+ "axcenity-anim",
  "axcenity-assets",
  "axcenity-audio",
  "axcenity-core",

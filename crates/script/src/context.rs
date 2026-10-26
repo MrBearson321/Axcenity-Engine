@@ -17,7 +17,7 @@ use crate::remote::{self, Message, Outbox};
 use crate::sides::Side;
 use crate::{
     Output, OutputLine, changes, console, debugger, events, modules, push_error, sandbox,
-    scheduler, watchdog, with_world,
+    scheduler, tween, watchdog, with_world,
 };
 
 pub struct Context {
@@ -50,6 +50,7 @@ impl Context {
         lua.set_app_data(Outbox::default());
         lua.set_app_data(scheduler::Scheduler::default());
         lua.set_app_data(events::Connections::default());
+        lua.set_app_data(tween::Tweens::default());
         lua.set_app_data(modules::Modules::default());
         if side == Side::Client {
             lua.set_app_data(HeldKeys::default());
@@ -181,13 +182,22 @@ impl Context {
     }
 
     /// Frame step 2 for this side: fires the RemoteEvent messages that
-    /// arrived, then moves the clock forward and resumes due tasks.
+    /// arrived, moves tweens on, then moves the clock forward and resumes
+    /// due tasks.
     pub fn step(&self, world: &mut World, messages: Vec<Message>, seconds: f64) {
+        let tweens = self
+            .lua
+            .app_data_mut::<tween::Tweens>()
+            .map(|mut tweens| tweens.alive())
+            .unwrap_or_default();
         if let Some(mut connections) = self.lua.app_data_mut::<events::Connections>() {
-            connections.forget(|id| world.contains(id));
+            connections.forget(|id| world.contains(id), &tweens);
         }
         with_world(&self.lua, world, || {
             remote::deliver(&self.lua, messages);
+            // Before scripts resume, so a script that waited sees this
+            // frame's tweened values.
+            tween::step(&self.lua, seconds);
             scheduler::step(&self.lua, seconds);
         });
     }

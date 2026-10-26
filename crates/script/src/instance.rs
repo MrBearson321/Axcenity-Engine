@@ -14,6 +14,7 @@ use crate::client::{LocalPlayer, LuaCamera, LuaUserInputService};
 use crate::events::{Event, LuaSignal, Owner};
 use crate::run_service::LuaRunService;
 use crate::sides;
+use crate::tween::LuaTweenService;
 use crate::types::{LuaVector3, f32_to_lua, type_name, value_from_lua, value_to_lua};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -277,6 +278,7 @@ fn class_member(lua: &Lua, class: ClassName, key: &str) -> mlua::Result<Option<m
         // `game.UserInputService` works there too.
         (ClassName::DataModel, "UserInputService") => LuaUserInputService.into_lua(lua)?,
         (ClassName::DataModel, "RunService") => LuaRunService.into_lua(lua)?,
+        (ClassName::DataModel, "TweenService") => LuaTweenService.into_lua(lua)?,
         (ClassName::Workspace, "CurrentCamera") => LuaCamera.into_lua(lua)?,
         (ClassName::Players, "LocalPlayer") => lua
             .app_data_ref::<LocalPlayer>()
@@ -869,8 +871,8 @@ fn set_playing(lua: &Lua, sound: InstanceId, playing: bool) -> mlua::Result<()> 
 }
 
 /// `game:GetService(name)`: a service by its class name, such as
-/// `"Players"`, or `"UserInputService"` (LocalScripts only) or
-/// `"RunService"`, which aren't Instances.
+/// `"Players"`, or `"UserInputService"` (LocalScripts only),
+/// `"RunService"` or `"TweenService"`, which aren't Instances.
 pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
     lua.create_function(|lua, (_game, name): (mlua::Value, String)| {
         match name.as_str() {
@@ -879,6 +881,7 @@ pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
                 return LuaUserInputService.into_lua(lua);
             }
             "RunService" => return LuaRunService.into_lua(lua),
+            "TweenService" => return LuaTweenService.into_lua(lua),
             _ => {}
         }
         let world = world(lua)?;
@@ -898,7 +901,7 @@ pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
                     .iter()
                     .filter_map(|&id| world.get(id).map(|s| s.class().as_str()))
                     .collect();
-                names.extend(["RunService", "UserInputService"]);
+                names.extend(["RunService", "TweenService", "UserInputService"]);
                 Err(mlua::Error::runtime(format!(
                     "there is no service named \"{name}\"; choose from {}",
                     names.join(", ")

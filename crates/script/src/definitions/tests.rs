@@ -308,6 +308,12 @@ fn described_fields_and_methods_exist() {
         ("EnumItem", "Enum.Material.Neon"),
         ("UserInputService", "game:GetService('UserInputService')"),
         ("RunService", "game:GetService('RunService')"),
+        ("TweenService", "game:GetService('TweenService')"),
+        (
+            "Tween",
+            "game:GetService('TweenService'):Create(part, TweenInfo.new(), {})",
+        ),
+        ("TweenInfo", "TweenInfo.new()"),
         ("InputObject", "input"),
         ("Camera", "workspace.CurrentCamera"),
         (

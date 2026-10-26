@@ -1,0 +1,67 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Anchored": true,
+          "Color": [0.35, 0.37, 0.4],
+          "Position": [0, -0.5, 0],
+          "Size": [40, 1, 40]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Block",
+        "properties": {
+          "Anchored": true,
+          "Color": [1, 0.55, 0.15],
+          "Position": [0, 1, 0],
+          "Size": [2, 2, 2]
+        }
+      },
+      {
+        "class": "ScreenGui",
+        "name": "Hud",
+        "properties": {
+          "ScaleMode": "Scale"
+        },
+        "children": [
+          {
+            "class": "Frame",
+            "name": "Menu",
+            "properties": {
+              "Position": [0, 60, 0, 60],
+              "Size": [0, 460, 0, 130],
+              "BackgroundColor3": [0.1, 0.12, 0.18]
+            },
+            "children": [
+              {
+                "class": "TextLabel",
+                "name": "Title",
+                "properties": {
+                  "Text": "Hello Tween",
+                  "TextSize": 32,
+                  "Size": [1, 0, 0, 70]
+                },
+                "children": []
+              },
+              {
+                "class": "TextLabel",
+                "name": "Hint",
+                "properties": {
+                  "Text": "Slid in from the left. It fades out after 3 seconds.",
+                  "Position": [0, 0, 0, 70],
+                  "Size": [1, 0, 0, 40]
+                },
+                "children": []
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -14,7 +14,8 @@
 //!   `api`, `instance` and `types`. Events (`part.Touched:Connect`) live in
 //!   `events`, and the host fires them with methods such as
 //!   [`ScriptRuntime::fire_touched`] and [`ScriptRuntime::heartbeat`]
-//!   (`run_service`). Change events (`part.Changed`) come from the World's
+//!   (`run_service`). `TweenService` tweens move properties smoothly,
+//!   each frame step (`tween`). Change events (`part.Changed`) come from the World's
 //!   change log (`changes`). Client-only APIs (keyboard, camera) live in
 //!   `client`, and `sides` says which APIs work on which side.
 //! - [`lua_definitions`] describes that API for editors, and [`api_reference`]
@@ -44,6 +45,7 @@ mod sandbox;
 mod scheduler;
 mod sides;
 mod task;
+mod tween;
 mod types;
 mod watchdog;
 
@@ -627,3 +629,6 @@ mod watchdog_tests;
 
 #[cfg(test)]
 mod debugger_tests;
+
+#[cfg(test)]
+mod tween_tests;

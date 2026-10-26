@@ -129,7 +129,10 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
                 doc: "The vertical component.",
             },
         ],
-        operators: &[],
+        operators: &[
+            "__add(self, other: UDim2): UDim2",
+            "__sub(self, other: UDim2): UDim2",
+        ],
         methods: &[],
     },
     ValueType {
@@ -174,6 +177,107 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
             ty: "Signal",
             doc: "Fires once every frame, after physics. The handler gets the frame's length in seconds: `function(deltaTime) ... end`.",
         }],
+        operators: &[],
+        methods: &[],
+    },
+    ValueType {
+        class: "TweenService",
+        doc: "Moves properties smoothly to goals over time, from `game:GetService(\"TweenService\")`.",
+        fields: &[],
+        operators: &[],
+        methods: &[Function {
+            name: "Create",
+            doc: "A Tween that moves each property in `goals` (a table such as `{Position = Vector3.new(0, 5, 0)}`) of `instance` from where it is to its goal, as `tweenInfo` says. Numbers, Vector3s, Color3s, UDim2s and booleans (which switch at the end) can be tweened. Call `Play` to start it.",
+            params: &[
+                ("instance", "Instance"),
+                ("tweenInfo", "TweenInfo"),
+                ("goals", "{ [string]: any }"),
+            ],
+            returns: "Tween",
+        }],
+    },
+    ValueType {
+        class: "Tween",
+        doc: "Properties moving to goals, made by `TweenService:Create`. Each frame it sets them, so their change events fire; a newer tween on the same property of the same Instance cancels it.",
+        fields: &[
+            Field {
+                name: "PlaybackState",
+                ty: "EnumPlaybackState",
+                doc: "Where it is: Begin, Delayed, Playing, Paused, Completed or Cancelled (read-only).",
+            },
+            Field {
+                name: "Completed",
+                ty: "Signal",
+                doc: "Fires when it reaches its goals, or is cancelled, with how it ended: `function(playbackState) ... end`.",
+            },
+            Field {
+                name: "Instance",
+                ty: "Instance",
+                doc: "The Instance it moves (read-only).",
+            },
+            Field {
+                name: "TweenInfo",
+                ty: "TweenInfo",
+                doc: "How it plays (read-only).",
+            },
+        ],
+        operators: &[],
+        methods: &[
+            Function {
+                name: "Play",
+                doc: "Starts it from where the properties are now (after its DelayTime), or carries on after Pause.",
+                params: &[],
+                returns: "()",
+            },
+            Function {
+                name: "Pause",
+                doc: "Holds it where it is; Play carries on from there.",
+                params: &[],
+                returns: "()",
+            },
+            Function {
+                name: "Cancel",
+                doc: "Stops it where it is, and fires Completed with `Enum.PlaybackState.Cancelled`. Playing it again starts over from there.",
+                params: &[],
+                returns: "()",
+            },
+        ],
+    },
+    ValueType {
+        class: "TweenInfo",
+        doc: "How a tween plays, from `TweenInfo.new`. Read-only.",
+        fields: &[
+            Field {
+                name: "Time",
+                ty: "number",
+                doc: "Seconds to reach the goals.",
+            },
+            Field {
+                name: "EasingStyle",
+                ty: "EnumEasingStyle",
+                doc: "The shape of the motion: Linear, or one of the clip key easings (Sine, Quad, Cubic, Back, Bounce, Elastic).",
+            },
+            Field {
+                name: "EasingDirection",
+                ty: "EnumEasingDirection",
+                doc: "Which end of the motion is eased: In (the start), Out (the end) or InOut (both).",
+            },
+            Field {
+                name: "RepeatCount",
+                ty: "number",
+                doc: "How many more times it plays after the first; -1 repeats forever.",
+            },
+            Field {
+                name: "Reverses",
+                ty: "boolean",
+                doc: "Whether each play goes back to the start after reaching the goals.",
+            },
+            Field {
+                name: "DelayTime",
+                ty: "number",
+                doc: "Seconds to wait after Play before it starts.",
+            },
+        ],
         operators: &[],
         methods: &[],
     },
@@ -353,7 +457,7 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
         ClassName::DataModel,
         Function {
             name: "GetService",
-            doc: "The service with this class name, such as `\"Players\"`, `\"RunService\"` or `\"UserInputService\"`.",
+            doc: "The service with this class name, such as `\"Players\"`, `\"RunService\"`, `\"TweenService\"` or `\"UserInputService\"`.",
             params: &[("className", "string")],
             returns: "Instance",
         },
@@ -626,6 +730,14 @@ pub(super) const CLASS_FIELDS: &[(ClassName, Field)] = &[
         },
     ),
     (
+        ClassName::DataModel,
+        Field {
+            name: "TweenService",
+            ty: "TweenService",
+            doc: "Moves properties smoothly to goals (same as `game:GetService(\"TweenService\")`).",
+        },
+    ),
+    (
         ClassName::Workspace,
         Field {
             name: "CurrentCamera",
@@ -782,6 +894,23 @@ pub(super) const LIBRARIES: &[Library] = &[
                 returns: "UDim2",
             },
         ],
+    },
+    Library {
+        global: "TweenInfo",
+        doc: "Creates TweenInfo values.",
+        functions: &[Function {
+            name: "new",
+            doc: "How a tween plays. Left out: 1 second, `Enum.EasingStyle.Quad`, `Enum.EasingDirection.Out`, no repeats, no reversing and no delay. The style and direction can also be item names, such as `\"Sine\"`.",
+            params: &[
+                ("time?", "number"),
+                ("easingStyle?", "EnumEasingStyle"),
+                ("easingDirection?", "EnumEasingDirection"),
+                ("repeatCount?", "number"),
+                ("reverses?", "boolean"),
+                ("delayTime?", "number"),
+            ],
+            returns: "TweenInfo",
+        }],
     },
     Library {
         global: "task",

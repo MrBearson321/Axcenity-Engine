@@ -144,6 +144,8 @@ enum Category {
     Sensing,
     /// An Animator's parameters and states.
     Animation,
+    /// Properties moving smoothly (`TweenService`).
+    Tweens,
     More,
     /// Grey blocks of Lua that have no blocks, from a script switched from
     /// Code. Not in the palette.
@@ -151,7 +153,7 @@ enum Category {
 }
 
 impl Category {
-    const ALL: [Category; 10] = [
+    const ALL: [Category; 11] = [
         Category::Events,
         Category::Control,
         Category::Motion,
@@ -161,6 +163,7 @@ impl Category {
         Category::Variables,
         Category::Sensing,
         Category::Animation,
+        Category::Tweens,
         Category::More,
     ];
 
@@ -175,6 +178,7 @@ impl Category {
             Category::Variables => "Variables",
             Category::Sensing => "Sensing",
             Category::Animation => "Animation",
+            Category::Tweens => "Tweens",
             Category::More => "More",
             Category::Lua => "Lua",
         }
@@ -192,6 +196,7 @@ impl Category {
             Category::Variables => Color32::from_rgb(255, 140, 26),
             Category::Sensing => Color32::from_rgb(92, 177, 214),
             Category::Animation => Color32::from_rgb(64, 186, 140),
+            Category::Tweens => Color32::from_rgb(92, 112, 230),
             Category::More => Color32::from_rgb(255, 102, 128),
             Category::Lua => Color32::from_rgb(108, 117, 138),
         }
@@ -209,6 +214,7 @@ impl Category {
             Category::Variables => Color32::from_rgb(219, 110, 0),
             Category::Sensing => Color32::from_rgb(46, 142, 184),
             Category::Animation => Color32::from_rgb(36, 148, 106),
+            Category::Tweens => Color32::from_rgb(64, 82, 196),
             Category::More => Color32::from_rgb(255, 51, 85),
             Category::Lua => Color32::from_rgb(78, 86, 105),
         }
@@ -256,6 +262,10 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::ResetAnimatorTrigger { .. }
         | BlockKind::PlayAnimatorState { .. }
         | BlockKind::PlayAnimation { .. } => Category::Animation,
+        BlockKind::Tween { .. }
+        | BlockKind::SlideIn { .. }
+        | BlockKind::FadeIn { .. }
+        | BlockKind::FadeOut { .. } => Category::Tweens,
         BlockKind::SetVariable { .. } | BlockKind::ChangeVariable { .. } => Category::Variables,
         BlockKind::Print { .. } | BlockKind::Destroy { .. } => Category::More,
         BlockKind::Code { .. } | BlockKind::TopCode { .. } => Category::Lua,
@@ -400,6 +410,8 @@ enum Part<'a> {
     Compare(&'a mut Comparison),
     Logic(&'a mut LogicOp),
     Function(&'a mut MathFunction),
+    /// One of a fixed list of names, such as an easing style.
+    Choice(&'a mut String, &'static [&'static str]),
     /// Lua kept word for word, in a grey block. Switch to Code to change it.
     Code(String),
 }
@@ -558,6 +570,60 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
             Object(animation, Filter::Animations),
             label("on"),
             Object(animator, Filter::Animators),
+        ])],
+        BlockKind::Tween {
+            target,
+            property,
+            value,
+            seconds,
+            style,
+            direction,
+        } => {
+            let class = class_of(objects, target);
+            vec![
+                Row(vec![
+                    label("tween"),
+                    Property(property, class),
+                    label("of"),
+                    Object(target, Filter::Any),
+                    label("to"),
+                    Slot(value, SlotKind::Any),
+                ]),
+                Row(vec![
+                    label("over"),
+                    Slot(seconds, SlotKind::Number),
+                    label("seconds"),
+                    Part::Choice(style, &axcenity_blocks::EASING_STYLES),
+                    Part::Choice(direction, &axcenity_blocks::EASING_DIRECTIONS),
+                ]),
+            ]
+        }
+        BlockKind::SlideIn {
+            target,
+            from,
+            seconds,
+        } => vec![Row(vec![
+            label("slide"),
+            Object(target, Filter::Gui),
+            label("in from"),
+            Part::Choice(from, &axcenity_blocks::SLIDE_EDGES),
+            label("over"),
+            Slot(seconds, SlotKind::Number),
+            label("seconds"),
+        ])],
+        BlockKind::FadeIn { target, seconds } => vec![Row(vec![
+            label("fade"),
+            Object(target, Filter::Gui),
+            label("in over"),
+            Slot(seconds, SlotKind::Number),
+            label("seconds"),
+        ])],
+        BlockKind::FadeOut { target, seconds } => vec![Row(vec![
+            label("fade"),
+            Object(target, Filter::Gui),
+            label("out over"),
+            Slot(seconds, SlotKind::Number),
+            label("seconds"),
         ])],
         BlockKind::Unattached { .. } => Vec::new(),
         BlockKind::Wait { seconds } => vec![Row(vec![

@@ -175,6 +175,7 @@ const ENGINE_GLOBALS: &[&str] = &[
     "Vector3",
     "Color3",
     "UDim2",
+    "TweenInfo",
     "Enum",
     "task",
     "pcall",
