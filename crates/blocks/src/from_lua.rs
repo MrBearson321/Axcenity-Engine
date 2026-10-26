@@ -416,36 +416,22 @@ impl<'a> Converter<'a> {
             }
             "AnimationEvent" => {
                 let animator = self.target(object)?;
-                let function = self.handler(handler, 1)?;
-                let param = function.params.first()?;
-                let [
-                    Stat {
-                        kind: StatKind::If { arms, otherwise },
-                        ..
-                    },
-                ] = function.body.as_slice()
-                else {
-                    return None;
-                };
-                let ([(condition, inner)], None) = (arms.as_slice(), otherwise) else {
-                    return None;
-                };
-                let ExprKind::Binary("==", left, right) = &condition.kind else {
-                    return None;
-                };
-                let (ExprKind::Name(name), ExprKind::Str(event)) = (&left.kind, &right.kind) else {
-                    return None;
-                };
-                if name != param {
-                    return None;
-                }
-                let body = self.body(inner, Scope::default());
-                if code_mentions(&body, param) {
-                    return None;
-                }
+                let (event, body) = self.one_name_branch(handler)?;
                 Some(Block::new(BlockKind::WhenAnimationEvent {
                     animator,
-                    event: event.clone(),
+                    event,
+                    body,
+                }))
+            }
+            "PlayerSensed" => {
+                let agent = self.target(object)?;
+                let (sense, body) = self.one_name_branch(handler)?;
+                if !crate::SENSES.contains(&sense.as_str()) {
+                    return None;
+                }
+                Some(Block::new(BlockKind::WhenAgentSenses {
+                    agent,
+                    sense,
                     body,
                 }))
             }
@@ -488,6 +474,40 @@ impl<'a> Converter<'a> {
 
     /// `function(...) ... end` with at most `params` parameters. One with
     /// type annotations stays code, since an event block would lose them.
+    /// A handler of one parameter whose whole body is `if param == "name"
+    /// then ... end`, as the blocks for events that name something write
+    /// it: the name, and the branch as blocks, which mustn't use the parameter.
+    fn one_name_branch(&self, handler: &Expr) -> Option<(String, Vec<Block>)> {
+        let function = self.handler(handler, 1)?;
+        let param = function.params.first()?;
+        let [
+            Stat {
+                kind: StatKind::If { arms, otherwise },
+                ..
+            },
+        ] = function.body.as_slice()
+        else {
+            return None;
+        };
+        let ([(condition, inner)], None) = (arms.as_slice(), otherwise) else {
+            return None;
+        };
+        let ExprKind::Binary("==", left, right) = &condition.kind else {
+            return None;
+        };
+        let (ExprKind::Name(name), ExprKind::Str(value)) = (&left.kind, &right.kind) else {
+            return None;
+        };
+        if name != param {
+            return None;
+        }
+        let body = self.body(inner, Scope::default());
+        if code_mentions(&body, param) {
+            return None;
+        }
+        Some((value.clone(), body))
+    }
+
     fn handler<'e>(&self, expr: &'e Expr, params: usize) -> Option<&'e FunctionBody> {
         match &expr.kind {
             ExprKind::Function(body)

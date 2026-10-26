@@ -14,6 +14,9 @@
 //! there's none, it stops, `Status` becomes `"Blocked"` and it warns once,
 //! and it carries on when the way clears.
 //!
+//! After it moves, it looks and listens for the player character
+//! (`perception.rs`).
+//!
 //! Like a character controller, an agent is kinematic: [`Agents::keep_kinematic`]
 //! anchors its parts before physics. Its parts aren't ground, so the mesh
 //! leaves them out.
@@ -23,6 +26,7 @@ use std::collections::BTreeMap;
 use axcenity_assets::Assets;
 use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
 
+use crate::perception::{self, Player, Sensed, Senses};
 use crate::{NavMesh, NavSettings, fingerprint};
 
 /// The least game time between two builds of the mesh, so parts falling
@@ -104,14 +108,17 @@ struct Built {
 pub struct Agents {
     built: Option<Built>,
     walks: BTreeMap<InstanceId, Walk>,
+    senses: BTreeMap<InstanceId, Senses>,
     warnings: Vec<String>,
+    sensed: Vec<Sensed>,
 }
 
 impl Agents {
     /// Moves every agent in the Workspace that has a body for `seconds` of
-    /// game time. The mesh is built the first time an agent needs it, and
-    /// again after the world changes. Hosts call it after character
-    /// controllers and before scripts.
+    /// game time, then has it look and listen for the player character.
+    /// The mesh is built the first time an agent needs it, and again after
+    /// the world changes. Hosts call it after character controllers and
+    /// before scripts.
     pub fn step(&mut self, world: &mut World, assets: &Assets, seconds: f32) {
         let dt = if seconds.is_finite() && seconds > 0.0 {
             seconds
@@ -119,6 +126,7 @@ impl Agents {
             0.0
         };
         self.walks.retain(|id, _| world.contains(*id));
+        self.senses.retain(|id, _| world.contains(*id));
         let agents = agents(world);
         if agents.is_empty() {
             return;
@@ -127,12 +135,31 @@ impl Agents {
         let Some(built) = &self.built else {
             return;
         };
+        let player = Player::find(world);
         for id in agents {
+            let parts = parts_of(world, id);
+            let before = feet_of(world, &parts);
             let walk = self.walks.entry(id).or_default();
             if let Some(warning) = step_agent(world, built, id, walk, dt) {
                 self.warnings.push(warning);
             }
+            let moved = match (before, feet_of(world, &parts)) {
+                (Some(a), Some(b)) => (b.x - a.x, b.z - a.z),
+                _ => (0.0, 0.0),
+            };
+            let senses = self.senses.entry(id).or_default();
+            for sense in
+                perception::perceive(world, assets, id, &parts, senses, player.as_ref(), moved)
+            {
+                self.sensed.push(Sensed { agent: id, sense });
+            }
         }
+    }
+
+    /// The agents that started seeing or hearing the player character since
+    /// the last call. Hosts fire each one's `PlayerSensed` with the sense.
+    pub fn take_sensed(&mut self) -> Vec<Sensed> {
+        std::mem::take(&mut self.sensed)
     }
 
     /// Builds the mesh if there's none, or again once the world it was
@@ -241,6 +268,17 @@ fn parts_of(world: &World, agent: InstanceId) -> Vec<InstanceId> {
 /// Where the feet of the body `parts` make are: the middle of its box, at
 /// the bottom.
 pub fn feet_of(world: &World, parts: &[InstanceId]) -> Option<Vector3> {
+    let (min, max) = body_box(world, parts)?;
+    Some(Vector3::new(
+        (min.x + max.x) * 0.5,
+        min.y,
+        (min.z + max.z) * 0.5,
+    ))
+}
+
+/// The lowest and highest corners of the box round the body `parts` make,
+/// ignoring rotation. `None` when no part has a finite place and size.
+pub(crate) fn body_box(world: &World, parts: &[InstanceId]) -> Option<(Vector3, Vector3)> {
     let mut min = Vector3::new(f32::INFINITY, f32::INFINITY, f32::INFINITY);
     let mut max = Vector3::new(f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY);
     for &id in parts {
@@ -254,9 +292,10 @@ pub fn feet_of(world: &World, parts: &[InstanceId]) -> Option<Vector3> {
         min.y = min.y.min(position.y - size.y.abs() * 0.5);
         min.z = min.z.min(position.z - size.z.abs() * 0.5);
         max.x = max.x.max(position.x + size.x.abs() * 0.5);
+        max.y = max.y.max(position.y + size.y.abs() * 0.5);
         max.z = max.z.max(position.z + size.z.abs() * 0.5);
     }
-    crate::finite(min).then(|| Vector3::new((min.x + max.x) * 0.5, min.y, (min.z + max.z) * 0.5))
+    crate::finite(min).then_some((min, max))
 }
 
 fn vector(world: &World, id: InstanceId, name: &str) -> Option<Vector3> {

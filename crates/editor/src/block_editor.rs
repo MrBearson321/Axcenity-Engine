@@ -247,7 +247,8 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::TurnBy { .. }
         | BlockKind::SetAnchored { .. }
         | BlockKind::SetDestination { .. }
-        | BlockKind::SetVelocity { .. } => Category::Motion,
+        | BlockKind::SetVelocity { .. }
+        | BlockKind::WhenAgentSenses { .. } => Category::Motion,
         BlockKind::SetColor { .. }
         | BlockKind::SetText { .. }
         | BlockKind::Show { .. }
@@ -738,6 +739,12 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
             label("by"),
             Slot(rotation, SlotKind::Vector),
             label("degrees"),
+        ])],
+        BlockKind::WhenAgentSenses { agent, sense, .. } => vec![Row(vec![
+            label("when"),
+            Object(agent, Filter::Agents),
+            label("senses the player by"),
+            Part::Choice(sense, &axcenity_blocks::SENSES),
         ])],
         BlockKind::SetDestination { agent, position } => vec![Row(vec![
             label("walk"),

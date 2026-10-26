@@ -667,3 +667,55 @@ fn a_third_person_controller_saves_and_loads() {
     assert_eq!(saved.property("RunSpeed"), Some(&Value::Number(40.0)));
     assert_eq!(saved.property("CameraDistance"), Some(&Value::Number(12.0)));
 }
+
+#[test]
+fn a_navigation_agents_senses_save_and_load_and_an_older_agent_gets_the_defaults() {
+    let mut world = World::new();
+    let agent = world.create(ClassName::NavigationAgent).unwrap();
+    world.set_parent(agent, Some(world.workspace())).unwrap();
+    for (name, value) in [
+        ("SightRange", 45.0),
+        ("SightAngle", 75.0),
+        ("HearingRange", 0.0),
+    ] {
+        world
+            .set_property(agent, name, Value::Number(value))
+            .unwrap();
+    }
+    let reloaded = parse_world(&write_world(&world)).unwrap();
+    let id = reloaded
+        .find_first_child(reloaded.workspace(), "NavigationAgent")
+        .unwrap();
+    let saved = reloaded.get(id).unwrap();
+    assert_eq!(saved.property("SightRange"), Some(&Value::Number(45.0)));
+    assert_eq!(saved.property("SightAngle"), Some(&Value::Number(75.0)));
+    assert_eq!(saved.property("HearingRange"), Some(&Value::Number(0.0)));
+
+    // An agent saved before it had senses loads with the defaults.
+    let older = r#"{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "NavigationAgent",
+        "name": "NavigationAgent",
+        "properties": {
+          "Destination": [0, 0, 0],
+          "Status": "Idle",
+          "Velocity": [0, 0, 0],
+          "WalkSpeed": 12
+        }
+      }
+    ]
+  }
+}"#;
+    let loaded = parse_world(older).unwrap();
+    let id = loaded
+        .find_first_child(loaded.workspace(), "NavigationAgent")
+        .unwrap();
+    let agent = loaded.get(id).unwrap();
+    assert_eq!(agent.property("SightRange"), Some(&Value::Number(60.0)));
+    assert_eq!(agent.property("SightAngle"), Some(&Value::Number(120.0)));
+    assert_eq!(agent.property("HearingRange"), Some(&Value::Number(30.0)));
+    assert_eq!(agent.property("SeesPlayer"), Some(&Value::Bool(false)));
+}

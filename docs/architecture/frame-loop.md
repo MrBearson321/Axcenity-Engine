@@ -2,7 +2,7 @@
 
 The fixed order of one frame. Do not reorder it casually.
 
-1. Read input. When a `ThirdPersonController` or `FirstPersonController` in the Workspace has a body, `character` steps it here (walk or run, jump and fall, crouch, slopes and steps, and its camera: following and wheel zoom, or at the eyes) before scripts run. Only the first such controller receives the keys. Then `nav` steps every `NavigationAgent` with a body toward its `Destination`, or at its `Velocity` (`docs/architecture/navigation.md`).
+1. Read input. When a `ThirdPersonController` or `FirstPersonController` in the Workspace has a body, `character` steps it here (walk or run, jump and fall, crouch, slopes and steps, and its camera: following and wheel zoom, or at the eyes) before scripts run. Only the first such controller receives the keys. Then `nav` steps every `NavigationAgent` with a body toward its `Destination`, or at its `Velocity`, and has it look and listen for the player character; hosts fire `PlayerSensed` for the senses that just started (`docs/architecture/navigation.md`).
 2. Move tweens on (`TweenService`, setting their properties), then resume coroutines whose wait has expired, and fire queued events
 3. Hold that character's and the agents' parts kinematic (`Controllers::keep_kinematic`, `Agents::keep_kinematic`), then step physics at a fixed 60 Hz (accumulator; may run 0–N steps per frame). Other bodies keep the same gravity and friction.
 4. Fire `Touched` and collision events, then `RunService.Heartbeat`; then particles and Animators move on (Animators pose their MeshParts and fire `StateChanged`)

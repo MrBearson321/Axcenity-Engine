@@ -47,6 +47,7 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         | BlockKind::WhenSoundEnded { .. }
         | BlockKind::WhenStateChanged { .. }
         | BlockKind::WhenAnimationEvent { .. }
+        | BlockKind::WhenAgentSenses { .. }
         | BlockKind::Unattached { .. }
         | BlockKind::TopCode { .. } => return None,
         BlockKind::Wait { .. } => 0,
@@ -532,6 +533,14 @@ fn translation_covers_every_event_block() {
                 body: quiet(35),
             },
         ),
+        block(
+            36,
+            BlockKind::WhenAgentSenses {
+                agent: "Guard.NavigationAgent".to_owned(),
+                sense: "Sight".to_owned(),
+                body: quiet(37),
+            },
+        ),
     ];
     let source = translate(&script(blocks)).unwrap().source;
     for lua in [
@@ -551,11 +560,13 @@ fn translation_covers_every_event_block() {
         "workspace.Menu.Start.MouseEnter:Connect(function()",
         "workspace.Menu.Start.MouseLeave:Connect(function()",
         "workspace.Settings.Volume.ValueChanged:Connect(function()",
+        "workspace.Guard.NavigationAgent.PlayerSensed:Connect(function(sense)",
+        "    if sense == \"Sight\" then",
     ] {
         assert!(source.contains(lua), "missing `{lua}`:\n{source}");
     }
     // Unattached blocks don't run.
-    assert_eq!(source.matches("do return end").count(), 10, "{source}");
+    assert_eq!(source.matches("do return end").count(), 11, "{source}");
 }
 
 #[test]
@@ -1009,6 +1020,14 @@ fn every_block_script() -> BlockScript {
             11,
             BlockKind::WhenValueChanged {
                 widget: "Settings.Volume".to_owned(),
+                body: body(),
+            },
+        ),
+        block(
+            12,
+            BlockKind::WhenAgentSenses {
+                agent: "Guard.NavigationAgent".to_owned(),
+                sense: "Hearing".to_owned(),
                 body: body(),
             },
         ),

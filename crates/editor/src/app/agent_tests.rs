@@ -212,3 +212,59 @@ fn the_path_overlay_draws_a_line_through_each_corner_and_a_ring_at_the_end() {
         "a dot on the corner, a ring at the end"
     );
 }
+
+#[test]
+fn sight_range_set_in_properties_changes_what_the_guard_sees_in_play_and_saves() {
+    let folder = copy_of_example("hello-perception", "agent-senses");
+    let mut app = EditorApp::new(Some(&folder));
+    let workspace = app.world.workspace();
+    let guard = app.world.find_first_child(workspace, "Guard").unwrap();
+    let agent = app
+        .world
+        .find_first_child(guard, "NavigationAgent")
+        .unwrap();
+    let character = app.world.find_first_child(workspace, "Character").unwrap();
+    let body = app.world.find_first_child(character, "Body").unwrap();
+    // Out in the open, 15 studs to the side of the wall and 25 away.
+    app.apply(body, Edit::Property("Position", vector(-15.0, 2.5, 20.0)));
+    let seen = |app: &EditorApp| {
+        printed(app)
+            .iter()
+            .filter(|line| **line == "Guard: I see you!")
+            .count()
+    };
+
+    app.play();
+    play_for(&mut app, 0.5);
+    assert_eq!(seen(&app), 1, "{:?}", printed(&app));
+    let game = shown(&app.world, &app.play);
+    let sees = game.get(agent).unwrap().property("SeesPlayer").cloned();
+    assert_eq!(sees, Some(Value::Bool(true)));
+    app.stop();
+    // Stop puts the edit world back.
+    assert_eq!(property(&app, agent, "SeesPlayer"), Value::Bool(false));
+
+    // A SightRange shorter than the player is away: not seen.
+    app.apply(agent, Edit::Property("SightRange", Value::Number(20.0)));
+    app.play();
+    play_for(&mut app, 0.5);
+    assert_eq!(seen(&app), 1, "no new sighting: {:?}", printed(&app));
+    app.stop();
+
+    // It saves with the agent.
+    assert!(app.save());
+    let reopened = EditorApp::new(Some(&folder));
+    let guard = reopened
+        .world
+        .find_first_child(reopened.world.workspace(), "Guard")
+        .unwrap();
+    let agent = reopened
+        .world
+        .find_first_child(guard, "NavigationAgent")
+        .unwrap();
+    assert_eq!(
+        property(&reopened, agent, "SightRange"),
+        Value::Number(20.0)
+    );
+    let _ = std::fs::remove_dir_all(&folder);
+}

@@ -1309,6 +1309,31 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "\"Moving\" while it walks a path or moves at Velocity, \"Reached\" at its Destination, \"Unreachable\" when no path leads to its Destination, \"Blocked\" when something in the way of its path has no way round (it stops, Output says so, and it carries on once the way clears), and \"Idle\" after Velocity stopped it. Set by the game during Play; read it from a script or the property block.",
     ),
     (
+        ClassName::NavigationAgent,
+        "SightRange",
+        "How far the agent sees the player character, in studs, from its eyes near the top of its body. Parts that collide block its sight. 0 sees nothing.",
+    ),
+    (
+        ClassName::NavigationAgent,
+        "SightAngle",
+        "How wide the agent sees, in degrees across, centred on the way it faces: the way it last moved, or its body's front before it has moved. 360 sees all round; 0 sees nothing.",
+    ),
+    (
+        ClassName::NavigationAgent,
+        "HearingRange",
+        "How far the agent hears the player character, in studs, through walls. It hears a Sound playing anywhere inside the player character's model. 0 hears nothing.",
+    ),
+    (
+        ClassName::NavigationAgent,
+        "SeesPlayer",
+        "True while the agent sees the player character (the one whose controller owns the camera). Set by the game during Play; PlayerSensed fires when it turns true.",
+    ),
+    (
+        ClassName::NavigationAgent,
+        "HearsPlayer",
+        "True while the agent hears a Sound playing in the player character. Set by the game during Play; PlayerSensed fires when it turns true.",
+    ),
+    (
         ClassName::Frame,
         "ZIndex",
         "Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.",
@@ -1888,6 +1913,11 @@ pub(super) const EVENT_DOCS: &[(ClassName, &str, &str)] = &[
         "Fires when a playing clip passes one of its animation events. The handler gets the event's name.",
     ),
     (
+        ClassName::NavigationAgent,
+        "PlayerSensed",
+        "Fires when the agent starts seeing or hearing the player character. The handler gets the sense: \"Sight\" or \"Hearing\".",
+    ),
+    (
         ClassName::Animation,
         "Completed",
         "Fires when `animation:Play()` reaches the end of a clip that doesn't loop. The handler gets no arguments.",
@@ -2091,7 +2121,7 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
             "Moves the character model it is parented to just like a ThirdPersonController, with the camera at the character's eyes during Play, looking where the player looks. A character has one controller or the other."
         }
         ClassName::NavigationAgent => {
-            "Walks the Model or Part it is parented to during Play: along the navigation mesh to its Destination, round walls and gaps, or straight at its Velocity. It is not a physics body. View > Overlays > Agent Paths draws the path it is walking."
+            "Walks the Model or Part it is parented to during Play: along the navigation mesh to its Destination, round walls and gaps, or straight at its Velocity. It sees and hears the player character within its SightRange, SightAngle and HearingRange, and fires PlayerSensed. It is not a physics body. View > Overlays > Agent Paths draws the path it is walking."
         }
     }
 }

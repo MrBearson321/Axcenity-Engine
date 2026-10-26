@@ -128,6 +128,11 @@ pub(super) fn palette(
                 agent: first(Filter::Agents),
                 velocity: vector(0.0, 0.0, 0.0),
             }),
+            B(BlockKind::WhenAgentSenses {
+                agent: first(Filter::Agents),
+                sense: axcenity_blocks::SENSES[0].to_owned(),
+                body: Vec::new(),
+            }),
         ],
         Category::Looks => vec![
             B(BlockKind::SetColor {

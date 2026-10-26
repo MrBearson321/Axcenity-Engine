@@ -270,6 +270,13 @@ pub enum BlockKind {
         event: String,
         body: Vec<Block>,
     },
+    /// When a NavigationAgent starts seeing or hearing the player character
+    /// (`PlayerSensed`), `sense` being one of [`SENSES`].
+    WhenAgentSenses {
+        agent: String,
+        sense: String,
+        body: Vec<Block>,
+    },
     /// Loose blocks on the canvas, under no event. They don't run.
     Unattached {
         body: Vec<Block>,
@@ -499,6 +506,8 @@ pub const EASING_STYLES: [&str; 7] = [
 pub const EASING_DIRECTIONS: [&str; 3] = ["In", "Out", "InOut"];
 /// The edges "slide in" can come from.
 pub const SLIDE_EDGES: [&str; 4] = ["Left", "Right", "Top", "Bottom"];
+/// The senses a NavigationAgent's `PlayerSensed` names.
+pub const SENSES: [&str; 2] = ["Sight", "Hearing"];
 
 impl BlockKind {
     pub fn shape(&self) -> BlockShape {
@@ -524,6 +533,7 @@ impl BlockKind {
                 | BlockKind::WhenSoundEnded { .. }
                 | BlockKind::WhenStateChanged { .. }
                 | BlockKind::WhenAnimationEvent { .. }
+                | BlockKind::WhenAgentSenses { .. }
                 | BlockKind::Unattached { .. }
                 | BlockKind::TopCode { .. }
         )
@@ -554,6 +564,7 @@ impl BlockKind {
             | BlockKind::WhenSoundEnded { body, .. }
             | BlockKind::WhenStateChanged { body, .. }
             | BlockKind::WhenAnimationEvent { body, .. }
+            | BlockKind::WhenAgentSenses { body, .. }
             | BlockKind::Unattached { body }
             | BlockKind::Repeat { body, .. }
             | BlockKind::Forever { body }
@@ -581,6 +592,7 @@ impl BlockKind {
             | BlockKind::WhenSoundEnded { body, .. }
             | BlockKind::WhenStateChanged { body, .. }
             | BlockKind::WhenAnimationEvent { body, .. }
+            | BlockKind::WhenAgentSenses { body, .. }
             | BlockKind::Unattached { body }
             | BlockKind::Repeat { body, .. }
             | BlockKind::Forever { body }

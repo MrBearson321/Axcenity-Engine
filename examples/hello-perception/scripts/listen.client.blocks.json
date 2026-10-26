@@ -1,0 +1,21 @@
+{
+  "blocks": [
+    {
+      "id": 1,
+      "kind": {
+        "type": "when_agent_senses",
+        "agent": "Guard.NavigationAgent",
+        "sense": "Hearing",
+        "body": [
+          {
+            "id": 2,
+            "kind": {
+              "type": "print",
+              "value": { "type": "text", "value": "blocks: the Guard heard a whistle" }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

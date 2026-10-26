@@ -1,6 +1,6 @@
 # Navigation
 
-Where characters can walk, and agents that walk there. The `nav` crate builds one navigation mesh from the Workspace (unified plan Phase 12), finds paths across it, and walks `NavigationAgent`s along them during Play (Phase 13), steering round obstacles that weren't in the mesh when the path was found (Phase 14).
+Where characters can walk, and agents that walk there. The `nav` crate builds one navigation mesh from the Workspace (unified plan Phase 12), finds paths across it, and walks `NavigationAgent`s along them during Play (Phase 13), steering round obstacles that weren't in the mesh when the path was found (Phase 14). Agents see and hear the player character (Phase 15).
 
 ## What it's built from
 
@@ -50,6 +50,7 @@ A `NavigationAgent` (a class in `core`) is parented to a Model or Part, like a c
 - `WalkSpeed` (16): studs a second along the path.
 - `Velocity` (Vector3): not zero, it moves straight that way, with no path.
 - `Status`: `"Idle"`, `"Moving"`, `"Reached"`, `"Unreachable"` or `"Blocked"`, written by the game.
+- `SightRange` (60), `SightAngle` (120) and `HearingRange` (30), and `SeesPlayer` and `HearsPlayer`, written by the game: see Perception.
 
 Hosts own an `Agents` (`agents.rs`), as they own `Controllers`. `Agents::step` runs after character controllers and before scripts, and `Agents::keep_kinematic` anchors the agents' parts just before physics. The mesh is built the first time an agent needs it (never in a game without agents), and again when the fingerprint changes, at most every 0.5 s of game time. Each step, for each agent with a body:
 
@@ -71,7 +72,25 @@ A walking agent keeps its path when the mesh rebuilds, and checks it against the
 
 An agent whose feet aren't on the mesh (something landed where it stands) has nothing to steer on, and keeps to its path. Only parts are obstacles: characters and other agents aren't in the mesh, so agents walk through them.
 
-Scripts set `Destination` and `Velocity` and read `Status`; blocks have **walk *agent* to (x, y, z)** and **set velocity of *agent* to (x, y, z)** (`docs/scripting/blocks.md`). Example: `examples/hello-agent`. Tests: `crates/nav/src/agent_tests.rs`, the player's `hello_agent_walks_to_destinations_from_properties_lua_and_blocks`, and `crates/editor/src/app/agent_tests.rs`.
+### Perception
+
+After each agent's step, it looks and listens for the **player character**: the parent of the controller that receives movement and owns the camera (`character::player_character`). With no such character it senses nothing. This is `perception.rs`.
+
+- **Eyes**: the middle of the agent's body box, 90% of the way up. The player character is looked at in two places: the middle of its body box and its head (90% up). Seeing either is seeing it.
+- **Facing**: the way the agent last moved across (walking or at `Velocity`). Before it has moved in this Play, its body's front: the first part's -Z, turned by its `Orientation`'s Y. It keeps facing that way when it stops.
+- **Sight**: within `SightRange` studs of the eyes, and within `SightAngle` degrees across, centred on its facing (the angle is measured across, ignoring height; straight above or below counts as in front; 360 sees all round). Then a ray from the eyes (`physics::cast_ray_excluding`, skipping both bodies) must reach the point with no colliding part in between. Parts with `CanCollide` off don't block it; other characters and agents do.
+- **Hearing**: a `Sound` with `Playing` on anywhere inside the player character's Model or part, within `HearingRange` studs of the eyes, measured to the middle of the character's body. Walls don't block it.
+- A range of 0 senses nothing, and so does a `SightAngle` of 0.
+
+`SeesPlayer` and `HearsPlayer` are written when they change (so `Changed` fires). When one turns true, `Agents::take_sensed` returns it, and the host fires the agent's `PlayerSensed` event with `"Sight"` or `"Hearing"`. It fires again only after that sense was lost and found again. The player fires it right after the agents' step, and the editor in `Session::frame`, both before LocalScripts get the frame's input. The block **when *agent* senses the player by *Sight/Hearing*** translates to a `PlayerSensed` handler with one `if sense == ...`.
+
+Sight casts at most two rays (plus one per sensor in the way) for each agent with the player in range and in front, every frame.
+
+Example: `examples/hello-perception`. Tests: `crates/nav/src/perception_tests.rs`, the player's `hello_perception_guard_sees_and_hears_the_player_from_lua_and_blocks`, the editor's `sight_range_set_in_properties_changes_what_the_guard_sees_in_play_and_saves`, and `a_navigation_agents_senses_save_and_load_and_an_older_agent_gets_the_defaults` in `crates/project/src/world_file/tests.rs`.
+
+### Scripts and blocks
+
+Scripts set `Destination` and `Velocity` and read `Status`, `SeesPlayer` and `HearsPlayer`, and connect to `PlayerSensed`; blocks have **walk *agent* to (x, y, z)**, **set velocity of *agent* to (x, y, z)** and **when *agent* senses the player by *Sight/Hearing*** (`docs/scripting/blocks.md`). Example: `examples/hello-agent`. Tests: `crates/nav/src/agent_tests.rs`, the player's `hello_agent_walks_to_destinations_from_properties_lua_and_blocks`, and `crates/editor/src/app/agent_tests.rs`.
 
 ## In the editor
 

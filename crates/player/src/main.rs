@@ -310,6 +310,15 @@ fn apply_audio(
     }
 }
 
+/// Fires `PlayerSensed` on each agent that has just started seeing or
+/// hearing the player character, with the sense's name.
+fn fire_sensed(scripts: &mut ScriptRuntime, world: &mut World, agents: &mut Agents) {
+    for sensed in agents.take_sensed() {
+        let sense = sensed.sense.as_str().to_owned();
+        scripts.fire_instance_event(world, sensed.agent, "PlayerSensed", &[sense]);
+    }
+}
+
 /// Passes on what the UI did: `MouseEnter` and `MouseLeave` to
 /// LocalScripts, and returns the buttons' hover and click sounds to play.
 /// The frame prints what the handlers printed with the input step's output.
@@ -878,6 +887,8 @@ impl ApplicationHandler for App {
                 for warning in self.agents.take_warnings() {
                     eprintln!("warning: {warning}");
                 }
+                fire_sensed(&mut self.scripts, &mut self.world, &mut self.agents);
+                print_output(&mut self.scripts);
                 if self.characters.view(&self.world).is_none() {
                     self.camera.update(&self.keys, seconds);
                 }

@@ -237,6 +237,19 @@ impl Writer {
                 self.line("end)");
                 return Ok(());
             }
+            BlockKind::WhenAgentSenses { agent, sense, body } => {
+                self.line(format!(
+                    "{}.PlayerSensed:Connect(function(sense)",
+                    target(agent)?
+                ));
+                self.indent += 1;
+                self.line(format!("if sense == {} then", quote(sense)));
+                self.nested(body, ids)?;
+                self.line("end");
+                self.indent -= 1;
+                self.line("end)");
+                return Ok(());
+            }
             BlockKind::TopCode { code } => {
                 self.code(code);
                 return Ok(());
@@ -585,6 +598,7 @@ impl Writer {
             | BlockKind::WhenSoundEnded { .. }
             | BlockKind::WhenStateChanged { .. }
             | BlockKind::WhenAnimationEvent { .. }
+            | BlockKind::WhenAgentSenses { .. }
             | BlockKind::Unattached { .. }
             | BlockKind::TopCode { .. } => {
                 return Err(TranslateError::InvalidEventPlacement);

@@ -326,6 +326,126 @@ fn hello_agent_walks_to_destinations_from_properties_lua_and_blocks() {
 }
 
 #[test]
+fn hello_perception_guard_sees_and_hears_the_player_from_lua_and_blocks() {
+    use axcenity_core::KeyCode as K;
+
+    /// The game in the player's frame order, with the character walking
+    /// left while `left` is held.
+    struct Game {
+        world: World,
+        scripts: ScriptRuntime,
+        characters: Controllers,
+        agents: Agents,
+        physics: Physics,
+        left: bool,
+        printed: Vec<String>,
+    }
+    impl Game {
+        fn frame(&mut self, keys: &[KeyEvent]) {
+            let (world, assets, dt) = (&mut self.world, &Assets::default(), 1.0 / 60.0);
+            let motion = MoveInput {
+                left: self.left,
+                ..MoveInput::default()
+            };
+            self.characters.step(world, assets, motion, dt);
+            self.agents.step(world, assets, dt);
+            fire_sensed(&mut self.scripts, world, &mut self.agents);
+            self.scripts.input(world, keys);
+            self.scripts.step(world, f64::from(dt));
+            self.characters.keep_kinematic(world);
+            self.agents.keep_kinematic(world);
+            self.physics.step(world, f64::from(dt));
+            self.scripts.heartbeat(world, f64::from(dt));
+            for line in self.scripts.take_output() {
+                assert_eq!(line.kind, OutputKind::Print, "{}", line.text);
+                self.printed.push(line.text);
+            }
+        }
+        fn run(&mut self, seconds: f32) {
+            for _ in 0..(seconds * 60.0).round() as usize {
+                self.frame(&[]);
+            }
+        }
+        fn flag(&self, agent: InstanceId, name: &str) -> bool {
+            let value = self.world.get(agent).unwrap().property(name).cloned();
+            value == Some(Value::Bool(true))
+        }
+    }
+
+    let (world, scripts) = start_example("hello-perception");
+    let guard = world.find_first_child(world.workspace(), "Guard").unwrap();
+    let agent = world.find_first_child(guard, "NavigationAgent").unwrap();
+    let guard_body = world.find_first_child(guard, "Body").unwrap();
+    let character = world
+        .find_first_child(world.workspace(), "Character")
+        .unwrap();
+    let body = world.find_first_child(character, "Body").unwrap();
+    let mut game = Game {
+        world,
+        scripts,
+        characters: Controllers::default(),
+        agents: Agents::default(),
+        physics: Physics::new(),
+        left: false,
+        printed: Vec::new(),
+    };
+    let x = |game: &Game| axcenity_nav::feet_of(&game.world, &[body]).unwrap().x;
+
+    // Hidden behind the wall, in range and in front of the Guard.
+    game.run(0.5);
+    assert!(!game.flag(agent, "SeesPlayer"));
+    assert!(game.printed.is_empty(), "{:?}", game.printed);
+
+    // Walking left, out from behind the wall: seen, once.
+    game.left = true;
+    let mut steps = 0;
+    while !game.flag(agent, "SeesPlayer") {
+        game.frame(&[]);
+        steps += 1;
+        assert!(steps < 120, "never seen, at X = {}", x(&game));
+    }
+    let seen_at = x(&game);
+    assert!((-10.0..-5.0).contains(&seen_at), "seen at X = {seen_at}");
+    game.run(0.25);
+    game.left = false;
+    game.run(0.25);
+    assert_eq!(game.printed, vec!["Guard: I see you!"]);
+    let red = game
+        .world
+        .get(guard_body)
+        .unwrap()
+        .property("Color")
+        .cloned();
+    assert_eq!(
+        red,
+        Some(Value::Color3(axcenity_core::Color3::new(0.85, 0.25, 0.25)))
+    );
+
+    // Back behind the wall, it loses sight of you.
+    game.printed.clear();
+    let behind = Value::Vector3(Vector3::new(0.0, 2.5, 20.0));
+    game.world.set_property(body, "Position", behind).unwrap();
+    game.run(0.25);
+    assert!(!game.flag(agent, "SeesPlayer"));
+    assert_eq!(game.printed, vec!["Guard: where did you go?"]);
+
+    // F whistles: heard through the wall, from Lua and from blocks.
+    game.printed.clear();
+    game.frame(&[KeyEvent {
+        key: K::F,
+        pressed: true,
+    }]);
+    game.run(0.25);
+    assert!(game.flag(agent, "HearsPlayer"));
+    assert!(!game.flag(agent, "SeesPlayer"));
+    game.printed.sort();
+    assert_eq!(
+        game.printed,
+        vec!["Guard: I hear you!", "blocks: the Guard heard a whistle"]
+    );
+}
+
+#[test]
 fn hello_character_hovers_in_a_custom_mode_from_lua_and_blocks() {
     use axcenity_core::KeyCode as K;
     let (mut world, mut scripts) = start_example("hello-character");

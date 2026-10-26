@@ -872,6 +872,18 @@ impl ClassName {
                 // "Idle", "Moving", "Reached", "Unreachable" or "Blocked". Set by the
                 // game during Play, for scripts to read.
                 ("Status", Value::String("Idle".to_owned())),
+                // How far it sees, in studs, and how wide, in degrees across
+                // (centred on the way it faces). Colliders block sight. Zero
+                // sees nothing.
+                ("SightRange", Value::Number(60.0)),
+                ("SightAngle", Value::Number(120.0)),
+                // How far it hears a Sound playing in the player character,
+                // in studs, through walls. Zero hears nothing.
+                ("HearingRange", Value::Number(30.0)),
+                // True while it sees, or hears, the player character. Set by
+                // the game during Play, for scripts to read.
+                ("SeesPlayer", Value::Bool(false)),
+                ("HearsPlayer", Value::Bool(false)),
             ],
             ClassName::SurfaceAppearance => {
                 let map = |name| (name, Value::String(String::new()));
@@ -936,8 +948,10 @@ impl ClassName {
             | ClassName::Terrain
             | ClassName::TerrainLayer
             | ClassName::ThirdPersonController
-            | ClassName::FirstPersonController
-            | ClassName::NavigationAgent => &[],
+            | ClassName::FirstPersonController => &[],
+            // Fires with "Sight" or "Hearing" when it starts seeing or
+            // hearing the player character.
+            ClassName::NavigationAgent => &["PlayerSensed"],
             // Fires when a sound that isn't looped plays to its end.
             ClassName::Sound => &["Ended"],
             // `StateChanged` fires with the new state's name and the old

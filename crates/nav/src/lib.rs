@@ -12,13 +12,15 @@
 //!
 //! Building reads the world and never changes it. [`NavMesh::find_path`]
 //! finds a walk across it, and [`Agents`] walks NavigationAgents along those
-//! paths during Play.
+//! paths during Play, and has them see and hear the player character.
 
 mod agents;
 mod path;
+mod perception;
 
 pub use agents::{AgentStatus, Agents, agent_parts, feet_of};
 pub use path::PathError;
+pub use perception::{Sense, Sensed};
 
 use std::collections::VecDeque;
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -464,5 +466,7 @@ fn finite(v: Vector3) -> bool {
 
 #[cfg(test)]
 mod agent_tests;
+#[cfg(test)]
+mod perception_tests;
 #[cfg(test)]
 mod tests;

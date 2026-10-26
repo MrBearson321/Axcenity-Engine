@@ -1478,7 +1478,7 @@ declare extern type FirstPersonController extends Instance with
 	[string]: any
 end
 
---- Walks the Model or Part it is parented to during Play: along the navigation mesh to its Destination, round walls and gaps, or straight at its Velocity. It is not a physics body. View > Overlays > Agent Paths draws the path it is walking.
+--- Walks the Model or Part it is parented to during Play: along the navigation mesh to its Destination, round walls and gaps, or straight at its Velocity. It sees and hears the player character within its SightRange, SightAngle and HearingRange, and fires PlayerSensed. It is not a physics body. View > Overlays > Agent Paths draws the path it is walking.
 declare extern type NavigationAgent extends Instance with
 	--- Where the agent walks to, along the navigation mesh, during Play. Setting a new one finds a new path. A point off the mesh, or with no walkable route to it, leaves the agent where it is: Status becomes "Unreachable" and Output says why. The editor starts it where the agent stands. Set it from a script or the "walk to" block.
 	Destination: Vector3
@@ -1488,6 +1488,18 @@ declare extern type NavigationAgent extends Instance with
 	Velocity: Vector3
 	--- "Moving" while it walks a path or moves at Velocity, "Reached" at its Destination, "Unreachable" when no path leads to its Destination, "Blocked" when something in the way of its path has no way round (it stops, Output says so, and it carries on once the way clears), and "Idle" after Velocity stopped it. Set by the game during Play; read it from a script or the property block.
 	Status: string
+	--- How far the agent sees the player character, in studs, from its eyes near the top of its body. Parts that collide block its sight. 0 sees nothing.
+	SightRange: number
+	--- How wide the agent sees, in degrees across, centred on the way it faces: the way it last moved, or its body's front before it has moved. 360 sees all round; 0 sees nothing.
+	SightAngle: number
+	--- How far the agent hears the player character, in studs, through walls. It hears a Sound playing anywhere inside the player character's model. 0 hears nothing.
+	HearingRange: number
+	--- True while the agent sees the player character (the one whose controller owns the camera). Set by the game during Play; PlayerSensed fires when it turns true.
+	SeesPlayer: boolean
+	--- True while the agent hears a Sound playing in the player character. Set by the game during Play; PlayerSensed fires when it turns true.
+	HearsPlayer: boolean
+	--- Fires when the agent starts seeing or hearing the player character. The handler gets the sense: "Sight" or "Hearing".
+	PlayerSensed: Signal
 	[string]: any
 end
 

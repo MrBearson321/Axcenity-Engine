@@ -379,6 +379,12 @@ fn is_driver(world: &World, id: InstanceId) -> bool {
         && !parts_of(world, id).is_empty()
 }
 
+/// The player character: the Model or part whose controller receives
+/// movement and owns the camera. `None` when no controller has a body.
+pub fn player_character(world: &World) -> Option<InstanceId> {
+    world.get(active_id(world)?)?.parent()
+}
+
 /// The first controller in the Workspace whose parent is a character.
 fn active_id(world: &World) -> Option<InstanceId> {
     controllers(world)

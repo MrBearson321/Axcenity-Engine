@@ -1,0 +1,83 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Anchored": true,
+          "Color": [0.35, 0.37, 0.4],
+          "Position": [0, -0.5, 0],
+          "Size": [100, 1, 100]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Wall",
+        "properties": {
+          "Anchored": true,
+          "Color": [0.8, 0.8, 0.82],
+          "Position": [0, 4, 10],
+          "Size": [8, 8, 2]
+        }
+      },
+      {
+        "class": "Model",
+        "name": "Guard",
+        "children": [
+          {
+            "class": "Part",
+            "name": "Body",
+            "properties": {
+              "Color": [0.45, 0.45, 0.5],
+              "Orientation": [0, 180, 0],
+              "Position": [0, 2.5, 0],
+              "Size": [2, 5, 1]
+            }
+          },
+          {
+            "class": "NavigationAgent",
+            "name": "NavigationAgent",
+            "properties": {
+              "Destination": [0, 0, 0],
+              "HearingRange": 25,
+              "SightAngle": 90,
+              "SightRange": 30,
+              "WalkSpeed": 12
+            }
+          }
+        ]
+      },
+      {
+        "class": "Model",
+        "name": "Character",
+        "children": [
+          {
+            "class": "Part",
+            "name": "Body",
+            "properties": {
+              "Color": [0.29, 0.45, 0.78],
+              "Position": [0, 2.5, 20],
+              "Size": [2, 5, 1]
+            }
+          },
+          {
+            "class": "ThirdPersonController",
+            "name": "ThirdPersonController",
+            "properties": {
+              "Movement": "Walk"
+            }
+          },
+          {
+            "class": "Sound",
+            "name": "Whistle",
+            "properties": {
+              "SoundId": "assets/audio/whistle.wav"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

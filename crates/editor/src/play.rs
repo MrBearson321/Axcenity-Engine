@@ -297,6 +297,15 @@ impl Session {
             for warning in self.agents.take_warnings() {
                 output.warning(warning);
             }
+            for sensed in self.agents.take_sensed() {
+                let sense = sensed.sense.as_str().to_owned();
+                self.scripts.fire_instance_event(
+                    &mut self.world,
+                    sensed.agent,
+                    "PlayerSensed",
+                    &[sense],
+                );
+            }
             let mut clock = Instant::now();
             // The time since `clock`, which then starts again.
             let mut lap = || {

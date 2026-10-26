@@ -693,9 +693,9 @@ A navigation agent can see and hear. Sight has a range and an angle, and collide
 
 ### Acceptance criteria
 
-- [ ] An agent reports the player character walking into its view, and doesn't report one hidden behind a collider or outside the angle.
-- [ ] An agent reports the player character making a sound inside hearing range, including one behind a wall.
-- [ ] Sight range, sight angle and hearing range save with the agent and change what it notices.
+- [x] An agent reports the player character walking into its view, and doesn't report one hidden behind a collider or outside the angle.
+- [x] An agent reports the player character making a sound inside hearing range, including one behind a wall.
+- [x] Sight range, sight angle and hearing range save with the agent and change what it notices.
 
 ---
 
