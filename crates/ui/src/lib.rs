@@ -351,21 +351,22 @@ pub fn design_size(world: &World, gui: InstanceId) -> (u32, u32) {
     )
 }
 
-/// One ScreenGui as a screen its design size shows it, for the UI
+/// One ScreenGui on a `screen` (width and height in pixels), for the UI
 /// Designer's artboard: laid out exactly as [`layout_ui`] lays it out on a
-/// `DesignWidth`×`DesignHeight` screen, then scaled by `scale` and moved by
-/// `origin` (pixels). It's drawn even when `Enabled` is off, since it's
-/// being designed. Each element's `pixels_per_unit` is `scale` times what
-/// it would be on that screen, so a drag converts back to authored pixels.
+/// screen that size, then scaled by `scale` and moved by `origin` (pixels).
+/// It's drawn even when `Enabled` is off, since it's being designed. Each
+/// element's `pixels_per_unit` is `scale` times what it would be on that
+/// screen, so a drag converts back to authored pixels.
 pub fn layout_artboard(
     world: &World,
     gui: InstanceId,
     stylesheets: &[Stylesheet],
+    screen: (u32, u32),
     scale: f32,
     origin: [f32; 2],
 ) -> UiLayout {
     let mut layout = UiLayout::default();
-    let (width, height) = design_size(world, gui);
+    let (width, height) = screen;
     layout_screen_gui(
         world,
         gui,
@@ -396,6 +397,18 @@ pub fn layout_artboard(
     layout
 }
 
+/// How a `width`×`height` screen shows the ScreenGui `gui`: screen pixels
+/// per design pixel, and where design pixel (0, 0) lands on the screen.
+/// Fixed is 1 at the corner; Fit and Scale scale the design size to fit.
+pub fn screen_mapping(world: &World, gui: InstanceId, width: u32, height: u32) -> (f32, [f32; 2]) {
+    world
+        .get(gui)
+        .and_then(|instance| fit_transform(instance, width, height))
+        .map_or((1.0, [0.0, 0.0]), |fit| {
+            (fit.scale, [fit.origin_x, fit.origin_y])
+        })
+}
+
 /// How a ScreenGui in Fit mode maps its design rectangle onto the viewport:
 /// uniform scale, centered, so the design stays proportional and inside the screen.
 #[derive(Clone, Copy)]
@@ -407,10 +420,16 @@ struct Fit {
     design_height: f32,
 }
 
-/// `Some` when this ScreenGui's `ScaleMode` is `Fit`.
+/// `Some` when this ScreenGui's `ScaleMode` is `Fit` or `Scale`.
+///
+/// Both scale the design size evenly by as much as fits the screen. Fit
+/// lays out on the design rectangle and centres it, leaving empty bars on
+/// another aspect ratio. Scale lays out on the whole screen, measured in
+/// design pixels, so what's placed against an edge stays against it.
 fn fit_transform(instance: &Instance, width: u32, height: u32) -> Option<Fit> {
     let mode = instance.property("ScaleMode").and_then(Value::as_str)?;
-    if !mode.eq_ignore_ascii_case("Fit") {
+    let whole_screen = mode.eq_ignore_ascii_case("Scale");
+    if !whole_screen && !mode.eq_ignore_ascii_case("Fit") {
         return None;
     }
     let design_width = instance
@@ -426,6 +445,15 @@ fn fit_transform(instance: &Instance, width: u32, height: u32) -> Option<Fit> {
     let scale = (width as f32 / design_width).min(height as f32 / design_height);
     if !scale.is_finite() || scale <= 0.0 {
         return None;
+    }
+    if whole_screen {
+        return Some(Fit {
+            scale,
+            origin_x: 0.0,
+            origin_y: 0.0,
+            design_width: width as f32 / scale,
+            design_height: height as f32 / scale,
+        });
     }
     Some(Fit {
         scale,
@@ -887,6 +915,7 @@ fn font_family_name(family: &str) -> String {
     match name.to_ascii_lowercase().as_str() {
         "monospace" | "jetbrains mono" | "jetbrainsmono" => "JetBrains Mono".to_owned(),
         "sans-serif" | "montserrat" | "" => "Montserrat".to_owned(),
+        "serif" => "Lora".to_owned(),
         _ => name.to_owned(),
     }
 }

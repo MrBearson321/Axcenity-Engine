@@ -259,6 +259,14 @@ pub fn build_draw_list_posed(
         items,
         sprites: Vec::new(),
         ui: Vec::new(),
+        fonts: assets
+            .fonts()
+            .iter()
+            .map(|file| axcenity_render::UiFont {
+                path: file.path.clone(),
+                data: file.data.clone(),
+            })
+            .collect(),
     }
 }
 

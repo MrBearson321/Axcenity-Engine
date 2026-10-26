@@ -243,6 +243,9 @@ pub fn create(world: &mut World, what: Insertable, position: Vector3) -> Instanc
             ("Position", Value::Vector3(position)),
         ],
         Insertable::MeshPart => vec![("Position", Value::Vector3(position))],
+        // Scales with the screen, laid out over all of it, so a UI made at
+        // one size looks the same at any other.
+        Insertable::ScreenGui => vec![("ScaleMode", Value::String("Scale".to_owned()))],
         _ => Vec::new(),
     };
     for (name, value) in properties {

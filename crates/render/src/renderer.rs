@@ -7,8 +7,8 @@
 //! `terrain.rs` draws terrain chunks with their blended layers.
 //! `gpu_timer.rs` measures the GPU's time per frame, for the editor's profiler.
 
-use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::time::Duration;
 

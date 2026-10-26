@@ -28,6 +28,9 @@ pub struct DrawList {
     pub sprites: Vec<Sprite>,
     /// Screen-space UI, drawn after the 3D scene.
     pub ui: Vec<UiDrawItem>,
+    /// The project's own fonts, which UI text can name besides the built-in
+    /// ones. Each is loaded the first time it's seen.
+    pub fonts: Vec<crate::UiFont>,
 }
 
 /// A picture in the 3D scene that always faces the camera, such as one

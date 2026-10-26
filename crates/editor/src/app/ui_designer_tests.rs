@@ -1,13 +1,16 @@
 //! The UI Designer, driven the way the tab drives the app: a menu built and
-//! styled there looks the same in Play, and every edit made there undoes.
+//! styled there looks the same in Play on any screen, every edit made there
+//! undoes, anchors, fonts, typing on the artboard and ruler guides.
 
 use std::fmt::Write as _;
 
 use axcenity_core::UDim2;
+use axcenity_render::glam::Vec3;
 use axcenity_ui::UiRect;
 
 use super::tests::copy_of_example;
 use super::*;
+use crate::ui_designer::Pin;
 use crate::ui_handles::{Grip, Handles, UiDrag};
 
 /// What the end of an editor frame does when nothing is held: the gesture
@@ -50,8 +53,9 @@ fn stylesheets(app: &EditorApp) -> Vec<axcenity_ui::Stylesheet> {
 /// frames of one gesture, as the artboard does at 100% zoom.
 fn drag(app: &mut EditorApp, gui: InstanceId, id: InstanceId, grip: Grip, by: egui::Vec2) {
     let sheets = stylesheets(app);
-    let layout = axcenity_ui::layout_artboard(&app.world, gui, &sheets, 1.0, [0.0, 0.0]);
     let (width, height) = axcenity_ui::design_size(&app.world, gui);
+    let layout =
+        axcenity_ui::layout_artboard(&app.world, gui, &sheets, (width, height), 1.0, [0.0, 0.0]);
     let screen = UiRect {
         x: 0.0,
         y: 0.0,
@@ -121,7 +125,11 @@ fn build_menu(app: &mut EditorApp) -> Menu {
             height: 720,
         },
     );
-    act(app, DesignerAction::UseFit(gui));
+    assert_eq!(
+        app.world.get(gui).unwrap().property("ScaleMode"),
+        Some(&Value::String("Scale".into())),
+        "a new ScreenGui scales with the screen"
+    );
     let frame = drop_in(app, Insertable::Frame, gui, [440.0, 160.0]);
     act(
         app,
@@ -213,8 +221,17 @@ fn a_menu_built_and_styled_in_the_designer_alone_looks_the_same_in_play() {
     }
 
     // What the artboard draws at 100%: a 1280×720 screen.
-    let designed =
-        axcenity_ui::layout_artboard(&app.world, menu.gui, &stylesheets(&app), 1.0, [0.0, 0.0]);
+    let artboard_on = |app: &EditorApp, screen: (u32, u32)| {
+        axcenity_ui::layout_artboard(
+            &app.world,
+            menu.gui,
+            &stylesheets(app),
+            screen,
+            1.0,
+            [0.0, 0.0],
+        )
+    };
+    let designed = artboard_on(&app, (1280, 720));
     // A frame, a title, and two buttons with their text.
     assert_eq!(designed.draw_items.len(), 6, "{:?}", designed.draw_items);
 
@@ -229,7 +246,7 @@ fn a_menu_built_and_styled_in_the_designer_alone_looks_the_same_in_play() {
     app.stop();
 
     // The player, reading the saved project: the same at the design size,
-    // and scaled up evenly on a bigger screen (the ScreenGui is in Fit).
+    // and on other screens the same as the designer previews them.
     let project = axcenity_project::load(&folder).unwrap();
     let sheets: Vec<_> = project
         .stylesheets
@@ -241,13 +258,14 @@ fn a_menu_built_and_styled_in_the_designer_alone_looks_the_same_in_play() {
         format!("{:?}", player.draw_items),
         format!("{:?}", designed.draw_items)
     );
-    let big = axcenity_ui::layout_ui(&project.world, 1920, 1080, &sheets);
-    let scaled =
-        axcenity_ui::layout_artboard(&app.world, menu.gui, &stylesheets(&app), 1.5, [0.0, 0.0]);
-    assert_eq!(
-        format!("{:?}", big.draw_items),
-        format!("{:?}", scaled.draw_items)
-    );
+    for (width, height) in [(1920, 1080), (3440, 1440), (390, 844)] {
+        let player = axcenity_ui::layout_ui(&project.world, width, height, &sheets);
+        assert_eq!(
+            format!("{:?}", player.draw_items),
+            format!("{:?}", artboard_on(&app, (width, height)).draw_items),
+            "on {width}×{height}"
+        );
+    }
     let _ = std::fs::remove_dir_all(&folder);
 }
 
@@ -286,7 +304,9 @@ fn every_designer_edit_undoes_and_redoes() {
             },
         )
     });
-    step(&mut app, &|app| act(app, DesignerAction::UseFit(gui)));
+    step(&mut app, &|app| {
+        act(app, DesignerAction::ScaleMode(gui, "Fit"))
+    });
     step(&mut app, &|app| {
         drop_in(app, Insertable::Frame, gui, [10.0, 10.0]);
     });
@@ -458,6 +478,7 @@ fn the_designer_fits_any_shape_and_its_artboard_drags_an_element() {
         &app.world,
         menu.gui,
         &stylesheets(&app),
+        (1280, 720),
         zoom * ctx.pixels_per_point(),
         [0.0, 0.0],
     );
@@ -502,5 +523,411 @@ fn the_designer_fits_any_shape_and_its_artboard_drags_an_element() {
     app.undo();
     assert_eq!(udim2(&app, menu.quit, "Position"), before);
     assert_eq!(app.history.undo_label().map(str::to_owned), undo_label);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+/// Runs `frames` of the UI Designer tab at `size`, a twentieth of a second
+/// apart on `clock`, ending each frame as the editor does.
+fn run_designer(
+    app: &mut EditorApp,
+    ctx: &egui::Context,
+    clock: &mut f64,
+    size: egui::Vec2,
+    frames: Vec<Vec<egui::Event>>,
+) {
+    for events in frames {
+        *clock += 0.05;
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+            events,
+            time: Some(*clock),
+            ..Default::default()
+        };
+        let _ = ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| app.ui_designer_pane(ui, None));
+        });
+        if !ctx.is_using_pointer() && !ctx.wants_keyboard_input() {
+            frame_ends(app);
+        }
+    }
+}
+
+fn press(pos: egui::Pos2, pressed: bool) -> egui::Event {
+    egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    }
+}
+
+fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
+    egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers,
+    }
+}
+
+/// Where the middle of `id` is on the artboard, in points.
+fn on_artboard(app: &EditorApp, gui: InstanceId, id: InstanceId) -> egui::Pos2 {
+    let (board, zoom) = app.ui_designer.board().unwrap();
+    let screen = axcenity_ui::design_size(&app.world, gui);
+    let layout = axcenity_ui::layout_artboard(
+        &app.world,
+        gui,
+        &stylesheets(app),
+        screen,
+        zoom,
+        [board.min.x, board.min.y],
+    );
+    let rect = layout.element(id).unwrap().rect;
+    egui::pos2(rect.x + rect.width * 0.5, rect.y + rect.height * 0.5)
+}
+
+#[test]
+fn anchored_elements_keep_their_place_on_every_screen() {
+    let folder = copy_of_example("hello-touched", "ui-designer-anchors");
+    let mut app = EditorApp::new(Some(&folder));
+    act(&mut app, DesignerAction::NewScreenGui);
+    let gui = app.selected.unwrap();
+    act(
+        &mut app,
+        DesignerAction::DesignSize {
+            gui,
+            width: 1280,
+            height: 720,
+        },
+    );
+    // A minimap 20 from the top right, a button centred 22 off the bottom,
+    // and a health bar stretched along the top with 20 at each side.
+    let minimap = drop_in(&mut app, Insertable::Frame, gui, [1060.0, 20.0]);
+    let menu = drop_in(&mut app, Insertable::TextButton, gui, [560.0, 650.0]);
+    let health = drop_in(&mut app, Insertable::Frame, gui, [20.0, 20.0]);
+    act(
+        &mut app,
+        DesignerAction::Edit(
+            health,
+            Edit::Property("Size", Value::UDim2(UDim2::new(0.0, 1240.0, 0.0, 16.0))),
+        ),
+    );
+    let before = state(&app);
+    let sheets = stylesheets(&app);
+    for (id, x, y) in [
+        (minimap, Pin::End, Pin::Start),
+        (menu, Pin::Center, Pin::End),
+        (health, Pin::Stretch, Pin::Start),
+    ] {
+        let action = crate::ui_designer::anchor_action(&app.world, &sheets, gui, id, x, y)
+            .expect("on the artboard");
+        act(&mut app, action);
+    }
+    // Nothing moved at the design size.
+    let at_design = axcenity_ui::layout_ui(&app.world, 1280, 720, &sheets);
+    let rect = |layout: &axcenity_ui::UiLayout, id| layout.element(id).unwrap().rect;
+    assert_eq!(rect(&at_design, minimap).x, 1060.0);
+    assert_eq!(rect(&at_design, menu).y, 650.0);
+    assert_eq!(rect(&at_design, health).width, 1240.0);
+
+    // On an ultrawide screen twice as tall, everything is twice the size
+    // and keeps its distance from its own edges.
+    let wide = axcenity_ui::layout_ui(&app.world, 3440, 1440, &sheets);
+    let map = rect(&wide, minimap);
+    assert_eq!(map.x + map.width, 3440.0 - 40.0);
+    assert_eq!(map.y, 40.0);
+    assert_eq!(map.width, 400.0);
+    let button = rect(&wide, menu);
+    assert_eq!(button.x + button.width * 0.5, 3440.0 * 0.5);
+    assert_eq!(button.y + button.height, 1440.0 - 44.0);
+    let bar = rect(&wide, health);
+    assert_eq!((bar.x, bar.x + bar.width), (40.0, 3440.0 - 40.0));
+
+    // A phone held upright: scaled down to fit its width, still pinned.
+    let phone = axcenity_ui::layout_ui(&app.world, 390, 844, &sheets);
+    let map = rect(&phone, minimap);
+    let scale = 390.0 / 1280.0;
+    assert!((390.0 - (map.x + map.width) - 20.0 * scale).abs() < 0.01);
+
+    // Each anchor was one undo step.
+    for _ in 0..3 {
+        assert!(app.history.undo_label().unwrap().starts_with("Anchor"));
+        app.undo();
+    }
+    assert_eq!(state(&app), before);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn fonts_are_picked_from_the_built_in_set_and_the_project() {
+    let folder = copy_of_example("hello-touched", "ui-designer-fonts");
+    let mut app = EditorApp::new(Some(&folder));
+    act(&mut app, DesignerAction::NewScreenGui);
+    let gui = app.selected.unwrap();
+    let title = drop_in(&mut app, Insertable::TextLabel, gui, [10.0, 10.0]);
+    act(
+        &mut app,
+        DesignerAction::Edit(title, Edit::Name("Title".into())),
+    );
+    let before = state(&app);
+    let font_of = |app: &EditorApp| {
+        let layout = axcenity_ui::layout_ui(&app.world, 1920, 1080, &stylesheets(app));
+        layout
+            .draw_items
+            .iter()
+            .find_map(|item| match item {
+                axcenity_render::UiDrawItem::Text(text) => Some(text.font_family.clone()),
+                _ => None,
+            })
+            .unwrap()
+    };
+    assert_eq!(font_of(&app), "Montserrat");
+
+    let pick = |app: &mut EditorApp, family: &str| {
+        act(
+            app,
+            DesignerAction::Font {
+                id: title,
+                family: family.into(),
+            },
+        );
+    };
+    pick(&mut app, "Bebas Neue");
+    assert_eq!(font_of(&app), "Bebas Neue");
+    let css = app.stylesheet_text("ui.css").unwrap();
+    assert!(css.contains("#Title"), "{css}");
+    assert!(css.contains("font-family: \"Bebas Neue\""), "{css}");
+    // Picking again changes that declaration, instead of adding another.
+    pick(&mut app, "Press Start 2P");
+    assert_eq!(font_of(&app), "Press Start 2P");
+    let css = app.stylesheet_text("ui.css").unwrap();
+    assert_eq!(css.matches("font-family").count(), 1, "{css}");
+
+    // A font file anywhere in the project is listed by its family, and
+    // goes to the renderer in the draw list.
+    let fonts = folder.join("assets/fonts");
+    std::fs::create_dir_all(&fonts).unwrap();
+    std::fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/fonts/Lobster-Regular.ttf"),
+        fonts.join("Fancy.ttf"),
+    )
+    .unwrap();
+    app.assets.forget_fonts();
+    let files = app.assets.fonts();
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].path, "assets/fonts/Fancy.ttf");
+    assert_eq!(axcenity_render::font_families(&files[0].data), ["Lobster"]);
+    let camera = axcenity_render::Camera {
+        position: Vec3::new(0.0, 5.0, 10.0),
+        look_at: Vec3::ZERO,
+        fov_y_degrees: 70.0,
+    };
+    let list = axcenity_scene::build_draw_list(&app.world, &app.assets, camera);
+    assert_eq!(list.fonts.len(), 1);
+    assert_eq!(list.fonts[0].path, "assets/fonts/Fancy.ttf");
+    pick(&mut app, "Lobster");
+    assert_eq!(font_of(&app), "Lobster");
+
+    // Each pick undoes on its own; the first one also takes away ui.css.
+    for _ in 0..3 {
+        app.undo();
+    }
+    assert_eq!(state(&app), before);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn double_clicking_text_on_the_artboard_types_over_it() {
+    let folder = copy_of_example("hello-touched", "ui-designer-typing");
+    let mut app = EditorApp::new(Some(&folder));
+    let menu = build_menu(&mut app);
+    let ctx = theme::test_context();
+    let mut clock = 0.0;
+    let size = egui::vec2(1100.0, 600.0);
+    run_designer(&mut app, &ctx, &mut clock, size, vec![Vec::new(); 3]);
+    let at = on_artboard(&app, menu.gui, menu.title);
+    let double_click = vec![
+        vec![egui::Event::PointerMoved(at)],
+        vec![press(at, true)],
+        vec![press(at, false)],
+        vec![press(at, true)],
+        vec![press(at, false)],
+        Vec::new(),
+    ];
+    let undo_before = app.history.undo_label().map(str::to_owned);
+    run_designer(&mut app, &ctx, &mut clock, size, double_click.clone());
+    run_designer(
+        &mut app,
+        &ctx,
+        &mut clock,
+        size,
+        vec![
+            vec![key(egui::Key::A, egui::Modifiers::COMMAND)],
+            vec![egui::Event::Text("Start Game".into())],
+            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+            Vec::new(),
+        ],
+    );
+    let text = |app: &EditorApp| {
+        app.world
+            .get(menu.title)
+            .unwrap()
+            .property("Text")
+            .and_then(Value::as_str)
+            .unwrap()
+            .to_owned()
+    };
+    assert_eq!(text(&app), "Start Game");
+    // All the typing was one step.
+    assert_eq!(app.history.undo_label(), Some("Change Text of Title"));
+    app.undo();
+    assert_eq!(text(&app), "Main Menu");
+    assert_eq!(app.history.undo_label().map(str::to_owned), undo_before);
+    app.redo();
+
+    // Escape puts the text back, and leaves no step behind.
+    run_designer(&mut app, &ctx, &mut clock, size, double_click);
+    run_designer(
+        &mut app,
+        &ctx,
+        &mut clock,
+        size,
+        vec![
+            vec![egui::Event::Text("zzz".into())],
+            vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
+            Vec::new(),
+        ],
+    );
+    assert_eq!(text(&app), "Start Game");
+    assert_eq!(app.history.undo_label(), Some("Change Text of Title"));
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn a_guide_dragged_out_of_a_ruler_stays_until_dragged_back() {
+    let folder = copy_of_example("hello-touched", "ui-designer-guides");
+    let mut app = EditorApp::new(Some(&folder));
+    let menu = build_menu(&mut app);
+    let ctx = theme::test_context();
+    let mut clock = 0.0;
+    let size = egui::vec2(1100.0, 600.0);
+    run_designer(&mut app, &ctx, &mut clock, size, vec![Vec::new(); 3]);
+    let canvas = app.ui_designer.canvas().unwrap();
+    let (board, zoom) = app.ui_designer.board().unwrap();
+    let undo_before = app.history.undo_label().map(str::to_owned);
+
+    // Down from the top ruler to design y 300.
+    let ruler = egui::pos2(canvas.center().x, canvas.top() - 9.0);
+    let target = egui::pos2(canvas.center().x, board.top() + 300.0 * zoom);
+    let drag = |from: egui::Pos2, to: egui::Pos2| {
+        vec![
+            vec![egui::Event::PointerMoved(from)],
+            vec![press(from, true)],
+            vec![egui::Event::PointerMoved(from + (to - from) * 0.5)],
+            vec![egui::Event::PointerMoved(to)],
+            vec![press(to, false)],
+            Vec::new(),
+        ]
+    };
+    run_designer(&mut app, &ctx, &mut clock, size, drag(ruler, target));
+    assert_eq!(
+        app.ui_designer.guides(menu.gui),
+        [crate::ui_designer::Guide {
+            vertical: false,
+            at: 300.0
+        }]
+    );
+    // Guides belong to the designer, not the project: no undo step.
+    assert_eq!(app.history.undo_label().map(str::to_owned), undo_before);
+
+    // Moved, then dragged back onto the ruler, which takes it away.
+    let lower = egui::pos2(target.x + 40.0, board.top() + 320.0 * zoom);
+    run_designer(&mut app, &ctx, &mut clock, size, drag(target, lower));
+    assert_eq!(app.ui_designer.guides(menu.gui)[0].at, 320.0);
+    run_designer(&mut app, &ctx, &mut clock, size, drag(lower, ruler));
+    assert!(app.ui_designer.guides(menu.gui).is_empty());
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn the_artboard_previews_the_ui_on_another_screen() {
+    let snapshots = std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from);
+    let folder = copy_of_example("hello-touched", "ui-designer-preview");
+    let mut app = EditorApp::new(Some(&folder));
+    let menu = build_menu(&mut app);
+    let sheets = stylesheets(&app);
+    let action = crate::ui_designer::anchor_action(
+        &app.world,
+        &sheets,
+        menu.gui,
+        menu.frame,
+        Pin::Center,
+        Pin::Center,
+    )
+    .unwrap();
+    act(&mut app, action);
+    act(&mut app, DesignerAction::Select(Some(menu.play)));
+    app.ui_designer.add_guide(
+        menu.gui,
+        crate::ui_designer::Guide {
+            vertical: true,
+            at: 640.0,
+        },
+    );
+    app.ui_designer.preview_at(Some((3440, 1440)));
+
+    let size = egui::vec2(1100.0, 600.0);
+    let ctx = theme::test_context();
+    let mut clock = 0.0;
+    run_designer(&mut app, &ctx, &mut clock, size, vec![Vec::new(); 3]);
+    let (board, _) = app.ui_designer.board().unwrap();
+    assert!(
+        (board.width() / board.height() - 3440.0 / 1440.0).abs() < 0.01,
+        "the artboard is the previewed screen's shape: {board:?}"
+    );
+    // Pinned to the centre, the menu keeps its distance from the middle of
+    // the wide screen, in design pixels.
+    let design = axcenity_ui::layout_ui(&app.world, 1280, 720, &sheets);
+    let at_design = design.element(menu.frame).unwrap().rect;
+    let off_centre = at_design.x + at_design.width * 0.5 - 640.0;
+    let (board, zoom) = app.ui_designer.board().unwrap();
+    let layout = axcenity_ui::layout_artboard(
+        &app.world,
+        menu.gui,
+        &sheets,
+        (3440, 1440),
+        zoom,
+        [board.min.x, board.min.y],
+    );
+    let middle = layout.element(menu.frame).unwrap().rect;
+    // 1440 tall is twice 720: two screen pixels per design pixel.
+    let points_per_unit = zoom * 2.0;
+    let off_centre_here = (middle.x + middle.width * 0.5 - board.center().x) / points_per_unit;
+    assert!(
+        (off_centre_here - off_centre).abs() < 0.5,
+        "{off_centre_here} vs {off_centre}"
+    );
+
+    if let Some(folder) = &snapshots {
+        app.ui_designer = UiDesigner::default();
+        app.ui_designer.add_guide(
+            menu.gui,
+            crate::ui_designer::Guide {
+                vertical: true,
+                at: 640.0,
+            },
+        );
+        app.ui_designer.preview_at(Some((3440, 1440)));
+        crate::snapshot::snapshot_rendered(
+            &folder.join("ui-designer-ultrawide.png"),
+            size,
+            vec![Vec::new(); 3],
+            |ctx, render_state| {
+                egui::CentralPanel::default()
+                    .show(ctx, |ui| app.ui_designer_pane(ui, Some(render_state)));
+            },
+        );
+    }
     let _ = std::fs::remove_dir_all(&folder);
 }

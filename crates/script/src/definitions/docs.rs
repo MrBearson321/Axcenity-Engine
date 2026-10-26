@@ -20,17 +20,17 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     (
         ClassName::ScreenGui,
         "ScaleMode",
-        "Fixed keeps positions and sizes as authored. Fit lays this ScreenGui out at DesignWidth by DesignHeight, then scales it uniformly so it stays proportional and inside the screen.",
+        "Fixed keeps positions and sizes as authored. Fit lays this ScreenGui out at DesignWidth by DesignHeight, then scales it uniformly so it stays proportional and inside the screen. Scale scales it the same way but lays it out over the whole screen, so elements anchored to an edge stay there.",
     ),
     (
         ClassName::ScreenGui,
         "DesignWidth",
-        "The width, in pixels, Fit mode lays this ScreenGui out at. Ignored when ScaleMode is Fixed.",
+        "The width, in pixels, this ScreenGui is designed at: Fit and Scale scale it from this size. Ignored when ScaleMode is Fixed.",
     ),
     (
         ClassName::ScreenGui,
         "DesignHeight",
-        "The height, in pixels, Fit mode lays this ScreenGui out at. Ignored when ScaleMode is Fixed.",
+        "The height, in pixels, this ScreenGui is designed at: Fit and Scale scale it from this size. Ignored when ScaleMode is Fixed.",
     ),
     (
         ClassName::Frame,

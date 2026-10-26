@@ -1,44 +1,61 @@
-//! The UI Designer tab: one ScreenGui on an artboard at its design size
-//! (`DesignWidth` × `DesignHeight`), like a design tool's frame, with zoom
-//! and pan. Presets set the design size to common screens, or type your own.
+//! The UI Designer tab: one ScreenGui on an artboard, like a design tool's
+//! frame, with zoom, pan and rulers.
+//!
+//! The ScreenGui is designed at `DesignWidth` × `DesignHeight`, and the
+//! artboard previews it on any screen: the design size, or a preset such
+//! as an ultrawide monitor or a phone. A ScreenGui in Scale mode (the
+//! default for new ones) is scaled evenly to each screen and laid out over
+//! all of it, so with its elements pinned to the right edges and corners
+//! (the anchor picker) it looks the same everywhere.
 //!
 //! Around the artboard are a palette of UI elements to drag onto it, the
-//! ScreenGui's hierarchy, and an inspector with the element's name and
-//! text and the same Style (CSS) section as Properties. The selected
-//! element gets the viewport's handles, with the same snapping
-//! (`ui_handles.rs`).
+//! ScreenGui's hierarchy, and an inspector with the element's name, text,
+//! anchor and font, and the same Style (CSS) section as Properties. The
+//! selected element gets the viewport's handles, snapping and distances in
+//! pixels (`ui_handles.rs`), and also snaps to guides dragged out of the
+//! rulers. Double-click text on the artboard to type over it.
 //!
 //! The designer only reads the world. Everything done in it comes back as
 //! [`DesignerAction`]s, which the app applies through `EditorApp::change`,
 //! the tree edits and the stylesheet tabs, so each is an undo step and the
-//! Scene View and Play show the same UI.
-//!
-//! The artboard is laid out with `axcenity_ui::layout_artboard`: exactly
-//! what a screen of the design size shows in Play, scaled by the zoom.
+//! Scene View and Play show the same UI. The artboard is laid out with
+//! `axcenity_ui::layout_artboard`: exactly what a screen of that size shows
+//! in Play, scaled by the zoom.
+
+mod anchors;
+mod artboard;
+mod panels;
+mod rulers;
+
+pub use anchors::Pin;
+
+use std::collections::HashMap;
 
 use axcenity_assets::Assets;
-use axcenity_core::{ClassName, InstanceId, Value, World};
-use axcenity_render::glam::Vec3;
-use axcenity_render::{Camera, UiDrawItem, UiRectangle};
-use axcenity_ui::{Stylesheet, UiLayout, UiRect};
+use axcenity_core::{ClassName, InstanceId, UDim2, Value, World};
+use axcenity_ui::{Stylesheet, UiLayout};
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 
 use crate::animation::preview::Canvas;
 use crate::properties::Edit;
 use crate::responsive;
-use crate::style_panel::{self, StyleEdit};
+use crate::style_panel::StyleEdit;
 use crate::theme::{self, icons};
 use crate::tree::Insertable;
-use crate::ui_handles::{self, Grip, Handles, SnapGuide, UiDrag, UiDragEdit};
+use crate::ui_handles::{SnapGuide, UiDrag, UiDragEdit};
 use crate::widgets;
 
-/// Design sizes to pick from: name, width and height.
-pub const PRESETS: [(&str, u32, u32); 4] = [
+/// Screens to design at, or preview on: name, width and height.
+pub const SCREENS: [(&str, u32, u32); 8] = [
     ("Desktop 1920 × 1080", 1920, 1080),
     ("Desktop 1280 × 720", 1280, 720),
-    ("Phone portrait 390 × 844", 390, 844),
+    ("Desktop 2560 × 1440", 2560, 1440),
+    ("Ultrawide 3440 × 1440", 3440, 1440),
+    ("Old monitor 1024 × 768", 1024, 768),
+    ("Tablet 1366 × 1024", 1366, 1024),
     ("Phone landscape 844 × 390", 844, 390),
+    ("Phone portrait 390 × 844", 390, 844),
 ];
 
 /// What the palette offers, with its name there.
@@ -53,17 +70,15 @@ pub const PALETTE: [(Insertable, &str); 8] = [
     (Insertable::Table, "Table"),
 ];
 
+/// The scale modes, as the toolbar names them.
+pub const SCALE_MODES: [&str; 3] = ["Fixed", "Fit", "Scale"];
+
 const MIN_ZOOM: f32 = 0.05;
 const MAX_ZOOM: f32 = 8.0;
 /// The space left around the artboard when it's fitted into view, in points.
 const FIT_MARGIN: f32 = 24.0;
 /// Below this width the artboard goes on top and the panels under it.
 const STACK_BELOW: f32 = 640.0;
-/// The artboard's colour behind the UI (sRGB): a mid grey, so dark and
-/// light UIs both stand out. In Play the 3D world is behind it.
-const BACKDROP: [f32; 4] = [0.30, 0.32, 0.36, 1.0];
-/// The narrowest a palette cell gets, in points.
-const PALETTE_CELL: f32 = 88.0;
 /// Where a palette item clicked (not dragged) goes in its parent, in design pixels.
 const CLICK_INSERT_AT: [f32; 2] = [24.0, 24.0];
 
@@ -78,8 +93,8 @@ pub enum DesignerAction {
         width: u32,
         height: u32,
     },
-    /// Sets the ScreenGui's `ScaleMode` to `Fit`.
-    UseFit(InstanceId),
+    /// Sets the ScreenGui's `ScaleMode` (one of [`SCALE_MODES`]).
+    ScaleMode(InstanceId, &'static str),
     /// Puts a new `what` into `parent`, its top left `at` design pixels
     /// from the parent's.
     Insert {
@@ -89,10 +104,18 @@ pub enum DesignerAction {
     },
     /// A handle dragged on the artboard.
     Drag(UiDragEdit),
-    /// The inspector's name or text.
+    /// The inspector's name or text, or text typed on the artboard.
     Edit(InstanceId, Edit),
     /// The inspector's Style section.
     Style(InstanceId, StyleEdit),
+    /// Pins an element: its new `Position` and `Size` (see `anchors.rs`).
+    Anchor {
+        id: InstanceId,
+        position: UDim2,
+        size: UDim2,
+    },
+    /// Sets the element's CSS `font-family`.
+    Font { id: InstanceId, family: String },
     /// Makes a ScreenGui, when there's none to design.
     NewScreenGui,
 }
@@ -111,17 +134,39 @@ pub struct DesignerScene<'a> {
     pub editing: bool,
 }
 
+/// A guide dragged out of a ruler: a line elements snap to, in design
+/// pixels from the ScreenGui's top left. Kept per ScreenGui while the
+/// editor runs.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Guide {
+    /// True for an up-and-down line (from the left ruler), at an x.
+    pub vertical: bool,
+    pub at: f32,
+}
+
+/// Text being typed over on the artboard.
+struct TextEditing {
+    id: InstanceId,
+    /// What it said before, for Escape.
+    original: String,
+    text: String,
+    /// Focus is asked for on the first frame only.
+    focused: bool,
+}
+
 /// The designer's view and the drag under way. Kept while the editor runs.
 pub struct UiDesigner {
     /// The ScreenGui on the artboard.
     gui: Option<InstanceId>,
     /// The selection last followed, so a change is followed once.
     followed: Option<InstanceId>,
-    /// Points per design pixel.
+    /// The screen previewed, or `None` for the design size.
+    preview: Option<(u32, u32)>,
+    /// Points per screen pixel.
     pub zoom: f32,
     /// The artboard's top left, from the canvas's top left, in points.
     pan: egui::Vec2,
-    /// What was fitted into view last: the ScreenGui and its design size.
+    /// What was fitted into view last: the ScreenGui and the screen size.
     /// Another one (or a new size) is fitted again.
     fitted: Option<(InstanceId, (u32, u32))>,
     /// The canvas size it was fitted into. While the view hasn't been
@@ -135,9 +180,23 @@ pub struct UiDesigner {
     fit_next: bool,
     canvas: Canvas,
     drag: Option<UiDrag>,
-    guides: Vec<SnapGuide>,
+    /// Where the pointer went down for the drag, until it has moved: a
+    /// click that doesn't move changes nothing (not even a snap).
+    drag_held: Option<egui::Pos2>,
+    /// The lines the drag under way snapped to.
+    snaps: Vec<SnapGuide>,
+    /// Ruler guides, by ScreenGui.
+    guides: HashMap<InstanceId, Vec<Guide>>,
+    /// A guide being dragged: which one (`None` for a new one) and its
+    /// direction.
+    guide_drag: Option<(Option<usize>, bool)>,
+    text_editing: Option<TextEditing>,
+    /// The project's font families, and the font list they were read from.
+    project_fonts: Option<(usize, Vec<String>)>,
     /// Where the artboard was drawn last, in points.
     board: Option<egui::Rect>,
+    /// The canvas inside the rulers, as drawn last.
+    canvas_rect: Option<egui::Rect>,
     /// Nothing but sky, for the renderer's 3D part (the artboard covers it).
     empty: World,
 }
@@ -147,6 +206,7 @@ impl Default for UiDesigner {
         Self {
             gui: None,
             followed: None,
+            preview: None,
             zoom: 0.5,
             pan: egui::vec2(FIT_MARGIN, FIT_MARGIN),
             fitted: None,
@@ -156,8 +216,14 @@ impl Default for UiDesigner {
             fit_next: true,
             canvas: Canvas::default(),
             drag: None,
-            guides: Vec::new(),
+            drag_held: None,
+            snaps: Vec::new(),
+            guides: HashMap::new(),
+            guide_drag: None,
+            text_editing: None,
+            project_fonts: None,
             board: None,
+            canvas_rect: None,
             empty: World::new(),
         }
     }
@@ -220,18 +286,21 @@ pub fn container_for(world: &World, gui: InstanceId, id: Option<InstanceId>) -> 
 }
 
 /// Where a drop at `pixel` (artboard layout pixels) lands in `parent`, in
-/// design pixels from its top left. The ScreenGui's own corner is the
-/// artboard's `origin`.
+/// design pixels from its top left. `gui_corner` and `gui_per_unit` are
+/// where the ScreenGui's own corner is and its layout pixels per design
+/// pixel, for a drop straight into it.
 pub fn drop_offset(
     layout: &UiLayout,
     parent: InstanceId,
     pixel: [f32; 2],
-    origin: [f32; 2],
-    scale: f32,
+    gui_corner: [f32; 2],
+    gui_per_unit: f32,
 ) -> [f32; 2] {
-    let (corner, per_unit) = layout.element(parent).map_or((origin, scale), |element| {
-        ([element.rect.x, element.rect.y], element.pixels_per_unit)
-    });
+    let (corner, per_unit) = layout
+        .element(parent)
+        .map_or((gui_corner, gui_per_unit), |element| {
+            ([element.rect.x, element.rect.y], element.pixels_per_unit)
+        });
     let per_unit = per_unit.max(1e-4);
     [
         ((pixel[0] - corner[0]) / per_unit).round(),
@@ -255,6 +324,41 @@ fn hierarchy(world: &World, gui: InstanceId) -> Vec<(InstanceId, usize)> {
     rows
 }
 
+/// Pins `id` across by `x` and down by `y` where it is now (see
+/// `anchors.rs`), as the anchor picker does. `None` when it isn't on the
+/// artboard or a flex layout places it.
+pub fn anchor_action(
+    world: &World,
+    stylesheets: &[Stylesheet],
+    gui: InstanceId,
+    id: InstanceId,
+    x: Pin,
+    y: Pin,
+) -> Option<DesignerAction> {
+    let instance = world.get(id)?;
+    let position = instance.property("Position").and_then(Value::as_udim2)?;
+    let size = instance.property("Size").and_then(Value::as_udim2)?;
+    let (placement, in_flow) = panels::placement(world, stylesheets, gui, id)?;
+    if in_flow {
+        return None;
+    }
+    let (position, size) = anchors::pin(placement, position, size, Some(x), Some(y));
+    Some(DesignerAction::Anchor { id, position, size })
+}
+
+/// The ScreenGui's `ScaleMode`, as one of [`SCALE_MODES`].
+fn scale_mode(world: &World, gui: InstanceId) -> &'static str {
+    let mode = world
+        .get(gui)
+        .and_then(|instance| instance.property("ScaleMode"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    SCALE_MODES
+        .into_iter()
+        .find(|known| mode.eq_ignore_ascii_case(known))
+        .unwrap_or("Fixed")
+}
+
 impl UiDesigner {
     /// The ScreenGui on the artboard.
     #[cfg(test)]
@@ -262,10 +366,39 @@ impl UiDesigner {
         self.gui
     }
 
+    /// The canvas inside the rulers, as drawn last, in points.
+    #[cfg(test)]
+    pub fn canvas(&self) -> Option<egui::Rect> {
+        self.canvas_rect
+    }
+
     /// Where the artboard was drawn last, in points, and the zoom.
     #[cfg(test)]
     pub fn board(&self) -> Option<(egui::Rect, f32)> {
         Some((self.board?, self.zoom))
+    }
+
+    /// Previews the ScreenGui on a `width`×`height` screen (`None` for its
+    /// design size).
+    #[cfg(test)]
+    pub fn preview_at(&mut self, screen: Option<(u32, u32)>) {
+        self.preview = screen;
+    }
+
+    /// The ruler guides on `gui`.
+    pub fn guides(&self, gui: InstanceId) -> &[Guide] {
+        self.guides.get(&gui).map_or(&[], Vec::as_slice)
+    }
+
+    /// Adds a ruler guide to `gui`.
+    pub fn add_guide(&mut self, gui: InstanceId, guide: Guide) {
+        self.guides.entry(gui).or_default().push(guide);
+    }
+
+    /// The screen the artboard shows `gui` on.
+    fn screen(&self, world: &World, gui: InstanceId) -> (u32, u32) {
+        self.preview
+            .unwrap_or_else(|| axcenity_ui::design_size(world, gui))
     }
 
     /// Shows the ScreenGui the selection is in, when the selection changes,
@@ -288,9 +421,9 @@ impl UiDesigner {
         self.fit_next = true;
     }
 
-    /// True while a handle is being dragged.
+    /// True while a handle or a guide is being dragged.
     pub fn is_dragging(&self) -> bool {
-        self.drag.is_some()
+        self.drag.is_some() || self.guide_drag.is_some()
     }
 
     /// Draws the designer and returns what was done in it.
@@ -377,7 +510,8 @@ impl UiDesigner {
         actions
     }
 
-    /// The ScreenGui picker, the design size and the zoom.
+    /// The ScreenGui picker, its scale mode and design size, the screen to
+    /// preview on, and the zoom.
     fn toolbar(
         &mut self,
         ui: &mut egui::Ui,
@@ -405,36 +539,19 @@ impl UiDesigner {
                     });
             }
             ui.add_enabled_ui(scene.editing, |ui| {
-                let preset = PRESETS
-                    .iter()
-                    .find(|(_, w, h)| (*w, *h) == (width, height))
-                    .map_or("Custom", |(name, _, _)| name);
-                responsive::room_for(ui, 180.0);
-                egui::ComboBox::from_id_salt("ui designer size")
-                    .width(170.0)
-                    .selected_text(preset)
-                    .show_ui(ui, |ui| {
-                        for &(name, w, h) in &PRESETS {
-                            if ui
-                                .selectable_label((w, h) == (width, height), name)
-                                .clicked()
-                            {
-                                actions.push(DesignerAction::DesignSize {
-                                    gui,
-                                    width: w,
-                                    height: h,
-                                });
-                            }
-                        }
-                    })
-                    .response
-                    .on_hover_text("The screen size this UI is designed at");
-                // Custom sizes: type or drag either number.
+                responsive::room_for(ui, 170.0);
+                let mut mode = scale_mode(world, gui);
+                let options = SCALE_MODES.map(|mode| (mode, None, mode));
+                if widgets::segmented(ui, &mut mode, &options) {
+                    actions.push(DesignerAction::ScaleMode(gui, mode));
+                }
+                // The design size: typed, dragged or picked.
+                responsive::room_for(ui, 190.0);
+                ui.label("Design");
                 let (mut w, mut h) = (width, height);
-                responsive::room_for(ui, 150.0);
                 let changed_w = ui
                     .add(egui::DragValue::new(&mut w).range(1..=8192).speed(2.0))
-                    .on_hover_text("Design width, in pixels")
+                    .on_hover_text("Design width, in pixels: the size this UI is laid out at")
                     .changed();
                 ui.label("×");
                 let changed_h = ui
@@ -448,7 +565,25 @@ impl UiDesigner {
                         height: h,
                     });
                 }
+                ui.menu_button(icons::CARET_DOWN, |ui| {
+                    for &(name, w, h) in &SCREENS {
+                        if ui
+                            .selectable_label((w, h) == (width, height), name)
+                            .clicked()
+                        {
+                            actions.push(DesignerAction::DesignSize {
+                                gui,
+                                width: w,
+                                height: h,
+                            });
+                            ui.close();
+                        }
+                    }
+                })
+                .response
+                .on_hover_text("Design at a common screen size");
             });
+            self.preview_picker(ui, (width, height));
             responsive::room_for(ui, 130.0);
             if widgets::icon_button(ui, icons::MAGNIFYING_GLASS_MINUS, "Zoom out", false).clicked()
             {
@@ -466,6 +601,65 @@ impl UiDesigner {
         });
     }
 
+    /// The screen the artboard previews on: the design size, a preset, or
+    /// a custom size.
+    fn preview_picker(&mut self, ui: &mut egui::Ui, design: (u32, u32)) {
+        responsive::room_for(ui, 200.0);
+        ui.label("Preview");
+        let shown = self.preview.unwrap_or(design);
+        let name = if self.preview.is_none() {
+            "Design size".to_owned()
+        } else {
+            SCREENS
+                .iter()
+                .find(|(_, w, h)| (*w, *h) == shown)
+                .map_or_else(|| "Custom".to_owned(), |(name, _, _)| (*name).to_owned())
+        };
+        egui::ComboBox::from_id_salt("ui designer preview")
+            .width(150.0)
+            .selected_text(name)
+            .show_ui(ui, |ui| {
+                if ui
+                    .selectable_label(self.preview.is_none(), "Design size")
+                    .clicked()
+                {
+                    self.preview = None;
+                }
+                for &(name, w, h) in &SCREENS {
+                    if ui
+                        .selectable_label(self.preview == Some((w, h)), name)
+                        .clicked()
+                    {
+                        self.preview = Some((w, h));
+                    }
+                }
+                if ui
+                    .selectable_label(false, "Custom…")
+                    .on_hover_text("Type the screen size beside this")
+                    .clicked()
+                {
+                    self.preview = Some(shown);
+                }
+            })
+            .response
+            .on_hover_text(
+                "The screen to preview this UI on. It looks as it will in Play on that screen.",
+            );
+        if let Some((mut w, mut h)) = self.preview {
+            let changed = ui
+                .add(egui::DragValue::new(&mut w).range(1..=8192).speed(2.0))
+                .changed()
+                | {
+                    ui.label("×");
+                    ui.add(egui::DragValue::new(&mut h).range(1..=8192).speed(2.0))
+                        .changed()
+                };
+            if changed {
+                self.preview = Some((w, h));
+            }
+        }
+    }
+
     /// What will differ in Play: a hidden layer, or one that doesn't scale.
     fn notes(
         &mut self,
@@ -480,498 +674,26 @@ impl UiDesigner {
         if instance.property("Enabled").and_then(Value::as_bool) == Some(false) {
             ui.weak("Enabled is off: this ScreenGui is hidden in Play.");
         }
-        let fixed = instance
-            .property("ScaleMode")
-            .and_then(Value::as_str)
-            .is_none_or(|mode| !mode.eq_ignore_ascii_case("Fit"));
-        if fixed {
-            ui.horizontal_wrapped(|ui| {
-                ui.weak(
-                    "Fixed: Play lays this out at the window's size. Fit scales this \
-                     design to fit any window.",
-                );
-                if ui
-                    .add_enabled(scene.editing, egui::Button::new("Use Fit"))
-                    .clicked()
-                {
-                    actions.push(DesignerAction::UseFit(gui));
-                }
-            });
-        }
-    }
-
-    /// The artboard in `rect`: the ScreenGui drawn at its design size, the
-    /// selected element's handles, and drops from the palette.
-    fn artboard(
-        &mut self,
-        ui: &mut egui::Ui,
-        rect: egui::Rect,
-        scene: &DesignerScene,
-        gui: InstanceId,
-        render_state: Option<&RenderState>,
-        actions: &mut Vec<DesignerAction>,
-    ) {
-        let world = scene.world;
-        let palette = theme::palette(ui.ctx());
-        let ppp = ui.ctx().pixels_per_point();
-        let design = axcenity_ui::design_size(world, gui);
-        let response = ui.interact(
-            rect,
-            ui.id().with("ui designer artboard"),
-            egui::Sense::click_and_drag(),
-        );
-
-        // Fitted when it's new, resized or asked for, and when the canvas
-        // changes size if it hasn't been moved by hand.
-        let resized = (rect.size() - self.fitted_room).length() > 0.5;
-        if self.fit_next || self.fitted != Some((gui, design)) || (resized && !self.moved) {
-            self.fit_next = false;
-            self.moved = false;
-            self.fitted = Some((gui, design));
-            self.fitted_room = rect.size();
-            let room =
-                (rect.size() - egui::Vec2::splat(FIT_MARGIN * 2.0)).max(egui::vec2(1.0, 1.0));
-            self.zoom = (room.x / design.0 as f32)
-                .min(room.y / design.1 as f32)
-                .clamp(MIN_ZOOM, MAX_ZOOM);
-            let size = egui::vec2(design.0 as f32, design.1 as f32) * self.zoom;
-            self.pan = (rect.size() - size) * 0.5;
-        }
-        // Right- or middle-drag and the wheel pan; Ctrl + wheel zooms.
-        let mut pan = egui::Vec2::ZERO;
-        let mut zoom_at = self.zoom_by.take().map(|by| (by, rect.center()));
-        if response.dragged_by(egui::PointerButton::Secondary)
-            || response.dragged_by(egui::PointerButton::Middle)
-        {
-            pan += response.drag_delta();
-        }
-        if response.hovered() {
-            let (scroll, zoom, pointer) =
-                ui.input(|i| (i.smooth_scroll_delta, i.zoom_delta(), i.pointer.hover_pos()));
-            pan += scroll;
-            if zoom != 1.0
-                && let Some(pointer) = pointer
+        let note = match scale_mode(scene.world, gui) {
+            "Fixed" => {
+                "Fixed: Play lays this out at the window's size, unscaled, so it's smaller on \
+                 big screens. Scale makes it look the same on every screen."
+            }
+            "Fit" => {
+                "Fit: screens of another shape get empty bars at the sides. Scale fills them, \
+                 keeping anchored elements against their edges."
+            }
+            _ => return,
+        };
+        ui.horizontal_wrapped(|ui| {
+            ui.weak(note);
+            if ui
+                .add_enabled(scene.editing, egui::Button::new("Use Scale"))
+                .clicked()
             {
-                zoom_at = Some((zoom, pointer));
-            }
-        }
-        if pan != egui::Vec2::ZERO {
-            self.pan += pan;
-            self.moved = true;
-        }
-        if let Some((by, at)) = zoom_at {
-            let old = self.zoom;
-            self.zoom = (self.zoom * by).clamp(MIN_ZOOM, MAX_ZOOM);
-            let from_corner = at - rect.min - self.pan;
-            self.pan = at - rect.min - from_corner * (self.zoom / old);
-            self.moved = true;
-        }
-
-        let board = egui::Rect::from_min_size(
-            rect.min + self.pan,
-            egui::vec2(design.0 as f32, design.1 as f32) * self.zoom,
-        );
-        let visible = board.intersect(rect);
-        self.board = Some(board);
-        let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, 0.0, palette.inset);
-        if !visible.is_positive() {
-            self.drag = None;
-            painter.text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
-                "The artboard is out of view: Fit brings it back.",
-                egui::FontId::proportional(theme::type_scale::SMALL),
-                palette.text_weak,
-            );
-            return;
-        }
-        // Laid out in the pixels of a texture the size of `visible`.
-        let scale = self.zoom * ppp;
-        let origin = (board.min - visible.min) * ppp;
-        let layout = axcenity_ui::layout_artboard(
-            world,
-            gui,
-            scene.stylesheets,
-            scale,
-            [origin.x, origin.y],
-        );
-        let screen = UiRect {
-            x: origin.x,
-            y: origin.y,
-            width: design.0 as f32 * scale,
-            height: design.1 as f32 * scale,
-        };
-        let pixel_of = |pointer: egui::Pos2| {
-            let at = (pointer - visible.min) * ppp;
-            [at.x, at.y]
-        };
-
-        let handles = scene
-            .selected
-            .filter(|_| scene.editing)
-            .and_then(|id| layout.element(id))
-            .map(|&element| Handles::new(element, world, scene.stylesheets, visible.min, ppp));
-        let (pressed, down, pointer) = ui.input(|input| {
-            (
-                input.pointer.primary_pressed(),
-                input.pointer.primary_down(),
-                input.pointer.latest_pos(),
-            )
-        });
-        let over =
-            pointer.filter(|&pointer| response.contains_pointer() && visible.contains(pointer));
-        let grip = match (over, &handles) {
-            (Some(pointer), Some(handles)) => handles.grip_at(pointer),
-            _ => None,
-        };
-
-        // A press on the selection's handles drags them. A press anywhere
-        // else selects what's there, and can drag it straight away.
-        if pressed
-            && self.drag.is_none()
-            && scene.editing
-            && let Some(pointer) = over
-        {
-            if let (Some(grip), Some(handles)) = (grip, &handles) {
-                self.drag = UiDrag::start(handles, grip, pointer, world);
-            } else {
-                let [x, y] = pixel_of(pointer);
-                let hit = layout.hit(x, y);
-                actions.push(DesignerAction::Select(Some(hit.unwrap_or(gui))));
-                if let Some(element) = hit.and_then(|id| layout.element(id)) {
-                    let handles =
-                        Handles::new(*element, world, scene.stylesheets, visible.min, ppp);
-                    self.drag = UiDrag::start(&handles, Grip::BODY, pointer, world);
-                }
-            }
-        }
-        if let Some(drag) = &self.drag {
-            if !down || !scene.editing {
-                self.drag = None;
-                self.guides.clear();
-            } else if let Some(pointer) = pointer {
-                let edit = drag.update(pointer, ppp, world, &layout.elements, screen);
-                self.guides = edit.guides.clone();
-                // An unmoved click selects without a step.
-                if !edit.values.is_empty() || !edit.css.is_empty() {
-                    actions.push(DesignerAction::Drag(edit));
-                }
-            }
-        }
-        if scene.editing
-            && let Some(item) = response.dnd_release_payload::<PaletteItem>()
-            && let Some(pointer) = over
-        {
-            let pixel = pixel_of(pointer);
-            let parent = container_for(world, gui, layout.hit(pixel[0], pixel[1]));
-            let at = drop_offset(&layout, parent, pixel, [origin.x, origin.y], scale);
-            actions.push(DesignerAction::Insert {
-                what: item.0,
-                parent,
-                at,
-            });
-        }
-
-        // Drawn: the backdrop, then the UI, by the game's renderer when
-        // there is one.
-        let backdrop = UiDrawItem::Rectangle(UiRectangle {
-            position: [origin.x, origin.y],
-            size: [screen.width, screen.height],
-            color: BACKDROP,
-            color_end: BACKDROP,
-            border_color: [0.0; 4],
-            border_width: 0.0,
-            border_radius: 0.0,
-        });
-        match render_state {
-            Some(render_state) => {
-                let camera = Camera {
-                    position: Vec3::new(0.0, 5.0, 10.0),
-                    look_at: Vec3::ZERO,
-                    fov_y_degrees: 70.0,
-                };
-                let mut list = axcenity_scene::build_draw_list(&self.empty, scene.assets, camera);
-                list.ui = std::iter::once(backdrop)
-                    .chain(layout.draw_items.iter().cloned())
-                    .collect();
-                axcenity_scene::attach_ui_textures(&mut list.ui, scene.assets);
-                self.canvas.paint(ui, visible, render_state, &list);
-            }
-            None => sketch(
-                &painter,
-                visible.min,
-                ppp,
-                std::iter::once(&backdrop).chain(&layout.draw_items),
-            ),
-        }
-        painter.rect_stroke(
-            board,
-            0.0,
-            egui::Stroke::new(1.0_f32, palette.border_strong),
-            egui::StrokeKind::Outside,
-        );
-        painter.text(
-            board.left_top() + egui::vec2(0.0, -4.0),
-            egui::Align2::LEFT_BOTTOM,
-            format!("{} × {}", design.0, design.1),
-            egui::FontId::proportional(theme::type_scale::CAPTION),
-            palette.text_weak,
-        );
-        let painter = ui.painter_at(visible);
-        if let Some(handles) = &handles {
-            let highlighted = self.drag.as_ref().map(|drag| drag.grip).or(grip);
-            handles.paint(&painter, palette.accent, highlighted);
-        }
-        if self.drag.is_some() {
-            ui_handles::paint_guides(&self.guides, &painter, visible.min, ppp);
-        }
-        match (&self.drag, &handles) {
-            (Some(drag), Some(handles)) => ui.ctx().set_cursor_icon(handles.cursor(drag.grip)),
-            (None, Some(handles)) if grip.is_some_and(|g| g != Grip::BODY) => {
-                ui.ctx()
-                    .set_cursor_icon(handles.cursor(grip.expect("checked")));
-            }
-            _ => {}
-        }
-        if response.dnd_hover_payload::<PaletteItem>().is_some() {
-            painter.rect_stroke(
-                visible,
-                0.0,
-                egui::Stroke::new(2.0_f32, palette.accent),
-                egui::StrokeKind::Inside,
-            );
-        }
-    }
-
-    /// Elements to drag onto the artboard. A click puts one in the
-    /// selected container instead.
-    fn palette(
-        &mut self,
-        ui: &mut egui::Ui,
-        scene: &DesignerScene,
-        gui: InstanceId,
-        actions: &mut Vec<DesignerAction>,
-    ) {
-        widgets::section_label(ui, "Elements");
-        let palette = theme::palette(ui.ctx());
-        // As many equal cells to a row as fit.
-        let gap = 4.0;
-        let width = ui.available_width();
-        let columns = ((width + gap) / (PALETTE_CELL + gap)).floor().max(1.0) as usize;
-        let cell = egui::vec2(
-            ((width - gap * (columns - 1) as f32) / columns as f32).max(1.0),
-            ui.spacing().interact_size.y + 4.0,
-        );
-        let sense = if scene.editing {
-            egui::Sense::click_and_drag()
-        } else {
-            egui::Sense::hover()
-        };
-        for row in PALETTE.chunks(columns) {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = gap;
-                for &(what, name) in row {
-                    let (rect, response) = ui.allocate_exact_size(cell, sense);
-                    widgets::paint_hover(ui, rect, &response, false, 6.0);
-                    ui.painter().rect_stroke(
-                        rect,
-                        6.0,
-                        egui::Stroke::new(1.0_f32, palette.border),
-                        egui::StrokeKind::Inside,
-                    );
-                    let text = theme::with_icon(theme::class_icon(what.class()), name);
-                    let color = if scene.editing {
-                        palette.text
-                    } else {
-                        palette.text_muted
-                    };
-                    let galley = widgets::elided(
-                        ui,
-                        text.clone(),
-                        egui::FontId::proportional(theme::type_scale::BODY),
-                        color,
-                        (rect.width() - 12.0).max(1.0),
-                        1,
-                    );
-                    ui.painter().galley(
-                        egui::pos2(rect.left() + 6.0, rect.center().y - galley.size().y * 0.5),
-                        galley,
-                        color,
-                    );
-                    response.dnd_set_drag_payload(PaletteItem(what));
-                    if response.dragged()
-                        && let Some(pointer) = ui.ctx().pointer_latest_pos()
-                    {
-                        // What's being carried, under the pointer.
-                        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-                        let layer = egui::LayerId::new(egui::Order::Tooltip, response.id);
-                        ui.ctx().layer_painter(layer).text(
-                            pointer + egui::vec2(12.0, 8.0),
-                            egui::Align2::LEFT_TOP,
-                            text,
-                            egui::FontId::proportional(theme::type_scale::BODY),
-                            palette.accent_text,
-                        );
-                    }
-                    if response.clicked() {
-                        let parent = container_for(scene.world, gui, scene.selected);
-                        actions.push(DesignerAction::Insert {
-                            what,
-                            parent,
-                            at: CLICK_INSERT_AT,
-                        });
-                    }
-                    response.on_hover_text(format!(
-                        "Drag a {name} onto the artboard, or click to add one to the selected frame"
-                    ));
-                }
-            });
-        }
-    }
-
-    /// The ScreenGui and everything in it. A click selects.
-    fn hierarchy(
-        &mut self,
-        ui: &mut egui::Ui,
-        scene: &DesignerScene,
-        gui: InstanceId,
-        actions: &mut Vec<DesignerAction>,
-    ) {
-        widgets::section_label(ui, "Hierarchy");
-        let palette = theme::palette(ui.ctx());
-        let row_height = ui.spacing().interact_size.y;
-        for (id, depth) in hierarchy(scene.world, gui) {
-            let Some(instance) = scene.world.get(id) else {
-                continue;
-            };
-            let (rect, response) = ui.allocate_exact_size(
-                egui::vec2(ui.available_width(), row_height),
-                egui::Sense::click(),
-            );
-            let selected = scene.selected == Some(id);
-            widgets::paint_hover(ui, rect, &response, selected, 4.0);
-            let indent = 6.0 + depth as f32 * 12.0;
-            let text = theme::with_icon(theme::class_icon(instance.class()), instance.name());
-            let galley = widgets::elided(
-                ui,
-                text,
-                egui::FontId::proportional(theme::type_scale::BODY),
-                if selected {
-                    palette.text_strong
-                } else {
-                    palette.text
-                },
-                (rect.width() - indent - 4.0).max(1.0),
-                1,
-            );
-            ui.painter().galley(
-                egui::pos2(
-                    rect.left() + indent,
-                    rect.center().y - galley.size().y * 0.5,
-                ),
-                galley,
-                palette.text,
-            );
-            if response.clicked() {
-                actions.push(DesignerAction::Select(Some(id)));
-            }
-        }
-    }
-
-    /// The selected element's name and text, and its Style (CSS).
-    fn inspector(
-        &mut self,
-        ui: &mut egui::Ui,
-        scene: &DesignerScene,
-        gui: InstanceId,
-        actions: &mut Vec<DesignerAction>,
-    ) {
-        let world = scene.world;
-        let id = scene
-            .selected
-            .filter(|&id| id == gui || world.is_descendant_of(id, gui))
-            .unwrap_or(gui);
-        let Some(instance) = world.get(id) else {
-            return;
-        };
-        widgets::section_label(ui, instance.class().as_str());
-        ui.add_enabled_ui(scene.editing, |ui| {
-            responsive::form(ui, "ui designer inspector", |ui| {
-                ui.label("Name");
-                let mut name = instance.name().to_owned();
-                if ui
-                    .add(egui::TextEdit::singleline(&mut name).desired_width(f32::INFINITY))
-                    .changed()
-                {
-                    actions.push(DesignerAction::Edit(id, Edit::Name(name)));
-                }
-                ui.end_row();
-                if let Some(text) = instance.property("Text").and_then(Value::as_str) {
-                    ui.label("Text");
-                    let mut text = text.to_owned();
-                    if ui
-                        .add(egui::TextEdit::singleline(&mut text).desired_width(f32::INFINITY))
-                        .changed()
-                    {
-                        actions.push(DesignerAction::Edit(
-                            id,
-                            Edit::Property("Text", Value::String(text)),
-                        ));
-                    }
-                    ui.end_row();
-                }
-            });
-            if scene.editing
-                && let Some(edit) = style_panel::show(ui, world, Some(id), scene.stylesheets)
-            {
-                actions.push(DesignerAction::Style(id, edit));
+                actions.push(DesignerAction::ScaleMode(gui, "Scale"));
             }
         });
-    }
-}
-
-/// A rough drawing of UI draw items with egui's painter, for when there's
-/// no GPU renderer (drawing tests). `origin` is where pixel 0, 0 is.
-fn sketch<'a>(
-    painter: &egui::Painter,
-    origin: egui::Pos2,
-    pixels_per_point: f32,
-    items: impl Iterator<Item = &'a UiDrawItem>,
-) {
-    // UI colours are sRGB, 0 to 1.
-    let color = |c: [f32; 4]| {
-        let [r, g, b, a] = c.map(|channel| (channel.clamp(0.0, 1.0) * 255.0).round() as u8);
-        egui::Color32::from_rgba_unmultiplied(r, g, b, a)
-    };
-    let rect = |position: [f32; 2], size: [f32; 2]| {
-        egui::Rect::from_min_size(
-            origin + egui::vec2(position[0], position[1]) / pixels_per_point,
-            egui::vec2(size[0], size[1]) / pixels_per_point,
-        )
-    };
-    for item in items {
-        match item {
-            UiDrawItem::Rectangle(r) => {
-                painter.rect_filled(
-                    rect(r.position, r.size),
-                    r.border_radius / pixels_per_point,
-                    color(r.color),
-                );
-            }
-            UiDrawItem::Image(image) => {
-                painter.rect_filled(rect(image.position, image.size), 0.0, color(image.tint));
-            }
-            UiDrawItem::Text(text) => {
-                painter.text(
-                    rect(text.position, text.size).left_top(),
-                    egui::Align2::LEFT_TOP,
-                    &text.text,
-                    egui::FontId::proportional((text.font_size / pixels_per_point).max(1.0)),
-                    color(text.color),
-                );
-            }
-        }
     }
 }
 
@@ -1036,7 +758,7 @@ mod tests {
         assert_eq!(container_for(&world, gui, None), gui);
 
         // At half size, 10 pixels in from the artboard's corner.
-        let layout = axcenity_ui::layout_artboard(&world, gui, &[], 0.5, [10.0, 10.0]);
+        let layout = axcenity_ui::layout_artboard(&world, gui, &[], (400, 300), 0.5, [10.0, 10.0]);
         let element = layout.element(frame).unwrap();
         assert_eq!([element.rect.x, element.rect.y], [30.0, 25.0]);
         // 20 pixels into the frame on screen is 40 design pixels.
@@ -1057,5 +779,15 @@ mod tests {
             hierarchy(&world, gui),
             vec![(gui, 0), (frame, 1), (label, 2)]
         );
+    }
+
+    #[test]
+    fn the_scale_mode_is_read_as_the_toolbar_names_it() {
+        let (mut world, gui, ..) = menu();
+        assert_eq!(scale_mode(&world, gui), "Fixed");
+        world
+            .set_property(gui, "ScaleMode", Value::String("scale".into()))
+            .unwrap();
+        assert_eq!(scale_mode(&world, gui), "Scale");
     }
 }

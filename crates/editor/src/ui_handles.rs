@@ -439,6 +439,21 @@ impl UiDrag {
         elements: &[UiElement],
         viewport: UiRect,
     ) -> UiDragEdit {
+        self.update_with_guides(pointer, pixels_per_point, world, elements, viewport, &[])
+    }
+
+    /// [`update`](Self::update), also snapping to `guides`: lines across
+    /// the screen, each a rectangle with no width (a vertical line) or no
+    /// height (a horizontal one), in the same pixels.
+    pub fn update_with_guides(
+        &self,
+        pointer: egui::Pos2,
+        pixels_per_point: f32,
+        world: &World,
+        elements: &[UiElement],
+        viewport: UiRect,
+        guides: &[UiRect],
+    ) -> UiDragEdit {
         let pointer_delta = (pointer - self.start_pointer) * pixels_per_point;
         let mut delta = egui::vec2(pointer_delta.x.round(), pointer_delta.y.round());
         // Flex layout ignores Position, so snapping its edges would draw a
@@ -446,7 +461,14 @@ impl UiDrag {
         let guides = if self.in_flow {
             Vec::new()
         } else {
-            self.snap(&mut delta, world, elements, viewport, pixels_per_point)
+            self.snap(
+                &mut delta,
+                world,
+                elements,
+                viewport,
+                guides,
+                pixels_per_point,
+            )
         };
         // Fit mode shows a scaled copy. Offsets and CSS pixels stay in the
         // design size, so the snapped screen movement is converted back.
@@ -545,9 +567,11 @@ impl UiDrag {
         world: &World,
         elements: &[UiElement],
         viewport: UiRect,
+        guides: &[UiRect],
         pixels_per_point: f32,
     ) -> Vec<SnapGuide> {
-        let targets = snap_targets(world, self.id, elements, viewport);
+        let mut targets = snap_targets(world, self.id, elements, viewport);
+        targets.extend_from_slice(guides);
         let threshold = SNAP_DISTANCE * pixels_per_point;
         let x = self.axis_snap(delta.x, true, &targets, threshold);
         let y = self.axis_snap(delta.y, false, &targets, threshold);
@@ -1091,6 +1115,37 @@ mod tests {
         assert_eq!(edit.guides.len(), 1);
         assert_eq!(edit.guides[0].at, 300.0);
         assert!(!edit.guides[0].horizontal);
+    }
+
+    #[test]
+    fn a_drag_snaps_to_a_ruler_guide() {
+        // A's left edge is 100. A guide at x=130 is in reach after a 26px
+        // drag (126), and pulls it the rest of the way.
+        let (world, layout) = screen_with(&[("A", 100.0, 50.0, 200.0, 80.0)]);
+        let id = layout.elements[0].id;
+        let element = *layout.element(id).unwrap();
+        let handles = Handles::new(element, &world, &[], egui::Pos2::ZERO, 1.0);
+        let start = handles.rect.center();
+        let drag = UiDrag::start(&handles, Grip::BODY, start, &world).unwrap();
+        let guide = UiRect {
+            x: 130.0,
+            y: 0.0,
+            width: 0.0,
+            height: 600.0,
+        };
+        let pointer = start + egui::vec2(26.0, 0.0);
+        let edit =
+            drag.update_with_guides(pointer, 1.0, &world, &layout.elements, viewport(), &[guide]);
+        assert_eq!(
+            udim2(&edit, "Position"),
+            Some(UDim2::new(0.0, 130.0, 0.0, 50.0))
+        );
+        assert_eq!(edit.guides[0].at, 130.0);
+        let unguided = drag.update(pointer, 1.0, &world, &layout.elements, viewport());
+        assert_eq!(
+            udim2(&unguided, "Position"),
+            Some(UDim2::new(0.0, 126.0, 0.0, 50.0))
+        );
     }
 
     #[test]

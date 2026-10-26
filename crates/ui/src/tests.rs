@@ -113,12 +113,12 @@ fn an_artboard_is_one_screen_gui_at_its_design_size_scaled() {
 
     for &(gui, frame) in &frames {
         // At scale 1 it matches a 400×300 screen with only this layer on.
-        let artboard = layout_artboard(&world, gui, &[], 1.0, [0.0, 0.0]);
+        let artboard = layout_artboard(&world, gui, &[], (400, 300), 1.0, [0.0, 0.0]);
         assert_eq!(artboard.elements.len(), 1, "only this ScreenGui");
         assert_eq!(artboard.elements[0].rect.x, 150.0);
         assert_eq!(artboard.elements[0].rect.y, 20.0);
 
-        let zoomed = layout_artboard(&world, gui, &[], 0.5, [10.0, -4.0]);
+        let zoomed = layout_artboard(&world, gui, &[], (400, 300), 0.5, [10.0, -4.0]);
         let element = zoomed.element(frame).unwrap();
         assert_eq!(element.rect.x, 10.0 + 75.0);
         assert_eq!(element.rect.y, -4.0 + 10.0);
@@ -126,7 +126,7 @@ fn an_artboard_is_one_screen_gui_at_its_design_size_scaled() {
     }
     // The enabled Fit layer, on a 400×300 screen, draws what its artboard draws.
     let screen = layout_ui(&world, 400, 300, &[]);
-    let artboard = layout_artboard(&world, frames[1].0, &[], 1.0, [0.0, 0.0]);
+    let artboard = layout_artboard(&world, frames[1].0, &[], (400, 300), 1.0, [0.0, 0.0]);
     assert_eq!(
         format!("{:?}", screen.draw_items),
         format!("{:?}", artboard.draw_items)
@@ -423,4 +423,63 @@ fn css_lengths_are_resized_in_their_own_units() {
         resized_css_length("10px", 10.0, -5.0),
         Some("0px".to_owned())
     );
+}
+
+#[test]
+fn scale_mode_scales_evenly_and_keeps_edges_on_the_screen() {
+    let mut world = World::new();
+    let gui = world.create(ClassName::ScreenGui).unwrap();
+    world.set_parent(gui, Some(world.workspace())).unwrap();
+    for (name, value) in [
+        ("ScaleMode", Value::String("Scale".to_owned())),
+        ("DesignWidth", Value::Number(1280.0)),
+        ("DesignHeight", Value::Number(720.0)),
+    ] {
+        world.set_property(gui, name, value).unwrap();
+    }
+    // 100×40 pinned 20 pixels in from the bottom right corner.
+    let corner = world.create(ClassName::Frame).unwrap();
+    world.set_parent(corner, Some(gui)).unwrap();
+    world
+        .set_property(
+            corner,
+            "Position",
+            Value::UDim2(UDim2::new(1.0, -120.0, 1.0, -60.0)),
+        )
+        .unwrap();
+    world
+        .set_property(
+            corner,
+            "Size",
+            Value::UDim2(UDim2::new(0.0, 100.0, 0.0, 40.0)),
+        )
+        .unwrap();
+
+    // At the design size it's exactly as authored.
+    let rect = layout_ui(&world, 1280, 720, &[])
+        .element(corner)
+        .unwrap()
+        .rect;
+    assert_eq!([rect.x, rect.y, rect.width], [1160.0, 660.0, 100.0]);
+
+    // Twice the size: twice as big, still 40 pixels from the corner.
+    let rect = layout_ui(&world, 2560, 1440, &[])
+        .element(corner)
+        .unwrap()
+        .rect;
+    assert_eq!([rect.x, rect.y, rect.width], [2320.0, 1320.0, 200.0]);
+
+    // An ultrawide screen: scaled by the height, and the corner element
+    // follows the real right edge instead of a centred 16:9 box.
+    let layout = layout_ui(&world, 3440, 1440, &[]);
+    let element = layout.element(corner).unwrap();
+    assert_eq!(element.pixels_per_unit, 2.0);
+    assert_eq!(element.rect.x + element.rect.width, 3440.0 - 40.0);
+    assert_eq!(screen_mapping(&world, gui, 3440, 1440), (2.0, [0.0, 0.0]));
+
+    // The artboard previews any screen the way Play shows it.
+    let artboard = layout_artboard(&world, gui, &[], (3440, 1440), 0.25, [5.0, 5.0]);
+    let small = artboard.element(corner).unwrap().rect;
+    assert_eq!(small.x, 5.0 + element.rect.x * 0.25);
+    assert_eq!(small.width, element.rect.width * 0.25);
 }

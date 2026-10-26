@@ -218,11 +218,14 @@ fn include_runtime_file(root: &Path, path: &Path) -> bool {
     if matches!(first.to_str(), Some("scripts" | "assets")) {
         return true;
     }
+    // Stylesheets and fonts can be anywhere: UI text finds a font by its
+    // family, wherever its file is.
     relative == Path::new(crate::MANIFEST_FILE)
         || relative == Path::new(crate::WORLD_FILE)
-        || relative
-            .extension()
-            .is_some_and(|extension| extension == "css")
+        || relative.extension().is_some_and(|extension| {
+            let extension = extension.to_ascii_lowercase();
+            extension == "css" || extension == "ttf" || extension == "otf"
+        })
 }
 
 fn block_lua_path(path: &str) -> Option<String> {
@@ -301,6 +304,8 @@ mod tests {
         fs::write(source.join("scripts/start.server.lua"), "print('hello')").unwrap();
         fs::write(source.join("assets/audio/chime.wav"), [1, 2, 3]).unwrap();
         fs::write(source.join("ui.css"), "Frame { opacity: 1 }").unwrap();
+        fs::create_dir_all(source.join("ui")).unwrap();
+        fs::write(source.join("ui/Title.ttf"), [4, 5]).unwrap();
         fs::write(source.join(".luarc.json"), "{}").unwrap();
         let blocks = BlockScript {
             blocks: vec![Block::new(BlockKind::WhenStarted {
@@ -338,6 +343,7 @@ mod tests {
             fs::read_to_string(output.join("ui.css")).unwrap(),
             "Frame { opacity: 1 }"
         );
+        assert_eq!(fs::read(output.join("ui/Title.ttf")).unwrap(), [4, 5]);
         fs::remove_dir_all(source).unwrap();
         fs::remove_dir_all(output).unwrap();
     }

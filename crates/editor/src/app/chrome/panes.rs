@@ -150,13 +150,29 @@ impl EditorApp {
                         ],
                     );
                 }
-                DesignerAction::UseFit(gui) => {
+                DesignerAction::ScaleMode(gui, mode) => {
                     self.apply(
                         gui,
-                        Edit::Property("ScaleMode", Value::String("Fit".to_owned())),
+                        Edit::Property("ScaleMode", Value::String(mode.to_owned())),
                     );
                     self.history.seal();
                 }
+                DesignerAction::Anchor { id, position, size } => {
+                    let Some(name) = self.world.get(id).map(|i| i.name().to_owned()) else {
+                        continue;
+                    };
+                    self.change(
+                        id,
+                        history::Field::Property("Position"),
+                        format!("Anchor {name}"),
+                        vec![
+                            Edit::Property("Position", Value::UDim2(position)),
+                            Edit::Property("Size", Value::UDim2(size)),
+                        ],
+                    );
+                    self.history.seal();
+                }
+                DesignerAction::Font { id, family } => self.set_font(id, &family),
                 DesignerAction::Insert { what, parent, at } => {
                     self.designer_insert(what, parent, at);
                 }
@@ -166,6 +182,42 @@ impl EditorApp {
                 DesignerAction::NewScreenGui => self.insert(Insertable::ScreenGui, None),
             }
         }
+    }
+
+    /// Draws `id`'s text in `family`: its own `#Id` rule's `font-family`
+    /// is changed in place, or added to that rule (which wins over class
+    /// rules) when it has none. One undo step.
+    pub(in crate::app) fn set_font(&mut self, id: InstanceId, family: &str) {
+        // CSS needs a family name with spaces in quotes.
+        let value = if family.contains(' ') {
+            format!("\"{family}\"")
+        } else {
+            family.to_owned()
+        };
+        let own = self
+            .world
+            .get(id)
+            .and_then(|instance| instance.property("Id"))
+            .and_then(Value::as_str)
+            .filter(|element_id| !element_id.is_empty())
+            .map(style_panel::own_selector);
+        let applied = self.project.as_ref().and_then(|project| {
+            axcenity_ui::applied_declaration(&self.world, id, &project.stylesheets, "font-family")
+        });
+        let edit = match applied {
+            Some(declaration) if Some(&declaration.selector) == own.as_ref() => StyleEdit::Set {
+                path: declaration.path,
+                span: declaration.span,
+                value,
+            },
+            _ => StyleEdit::Add {
+                property: "font-family".to_owned(),
+                value,
+            },
+        };
+        self.history.seal();
+        self.apply_style(id, edit);
+        self.history.seal();
     }
 
     /// Puts a new `what` from the designer's palette into `parent`, its top

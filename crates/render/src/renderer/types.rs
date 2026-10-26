@@ -319,6 +319,8 @@ pub(super) struct ScenePipeline {
     pub(super) ui_buffer: wgpu::Buffer,
     pub(super) ui_capacity: usize,
     pub(super) font_system: FontSystem,
+    /// The paths of the project fonts loaded into `font_system`.
+    pub(super) loaded_fonts: HashSet<String>,
     pub(super) swash_cache: SwashCache,
     pub(super) text_viewport: TextViewport,
     pub(super) text_atlas: TextAtlas,

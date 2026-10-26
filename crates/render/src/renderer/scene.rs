@@ -222,12 +222,9 @@ impl ScenePipeline {
         });
 
         let mut font_system = FontSystem::new();
-        font_system.db_mut().load_font_data(
-            include_bytes!("../../../../assets/fonts/Montserrat-Regular.ttf").to_vec(),
-        );
-        font_system.db_mut().load_font_data(
-            include_bytes!("../../../../assets/fonts/JetBrainsMono-Regular.ttf").to_vec(),
-        );
+        for data in crate::fonts::built_in_data() {
+            font_system.db_mut().load_font_data(data.to_vec());
+        }
         let swash_cache = SwashCache::new();
         let glyph_cache = GlyphCache::new(&device);
         let text_viewport = TextViewport::new(&device, &glyph_cache);
@@ -260,6 +257,7 @@ impl ScenePipeline {
             ui_buffer,
             ui_capacity,
             font_system,
+            loaded_fonts: HashSet::new(),
             swash_cache,
             text_viewport,
             text_atlas,
@@ -354,6 +352,13 @@ impl ScenePipeline {
                 .write_buffer(&self.ui_buffer, 0, bytemuck::cast_slice(&ui_vertices));
         }
 
+        for font in &list.fonts {
+            if self.loaded_fonts.insert(font.path.clone()) {
+                self.font_system
+                    .db_mut()
+                    .load_font_data(font.data.as_ref().clone());
+            }
+        }
         let text_buffers = self.prepare_ui_text(&list.ui, viewport_size)?;
         let sprite_draws = {
             let textures = &self.textures;

@@ -7,6 +7,7 @@
 //! on a GPU device someone else set up (the editor's viewport).
 
 mod draw_list;
+mod fonts;
 mod mesh;
 mod renderer;
 
@@ -16,6 +17,7 @@ pub use draw_list::{
     TerrainLayers, TerrainSurface, TerrainView, TextAlign, TextureMaps, TextureSource, UiDrawItem,
     UiImage, UiRectangle, UiText,
 };
+pub use fonts::{BUILT_IN_FONTS, BuiltInFont, UiFont, font_families};
 pub use renderer::{RenderStats, Renderer, TextureRenderer};
 
 /// Re-exported so callers build transforms with the same `glam` version.

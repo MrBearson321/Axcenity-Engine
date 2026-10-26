@@ -471,11 +471,13 @@ pub fn show(
                     && instance
                         .property("ScaleMode")
                         .and_then(Value::as_str)
-                        .is_some_and(|mode| mode.eq_ignore_ascii_case("Fit"))
+                        .is_some_and(|mode| !mode.eq_ignore_ascii_case("Fixed"))
                 {
                     ui.weak(
-                        "Fit lays this ScreenGui out at DesignWidth × DesignHeight, then scales \
-                         it uniformly so it stays proportional and inside the screen.",
+                        "Fit and Scale scale this ScreenGui evenly from DesignWidth × \
+                         DesignHeight to the screen. Fit keeps the design's shape, with empty \
+                         bars on other screens; Scale fills the whole screen, so things placed \
+                         against an edge stay there.",
                     );
                 }
                 more(ui);
@@ -754,12 +756,11 @@ fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
         // Shown but not typed into: each half-typed path would be loaded
         // (and fail). Importing a model sets it.
         Value::String(text) if name == "ScaleMode" => {
-            let current = if text.eq_ignore_ascii_case("Fit") {
-                "Fit"
-            } else {
-                "Fixed"
-            };
-            choice_control(ui, name, current, &["Fixed", "Fit"], |mode| mode)
+            let current = ["Fit", "Scale"]
+                .into_iter()
+                .find(|mode| text.eq_ignore_ascii_case(mode))
+                .unwrap_or("Fixed");
+            choice_control(ui, name, current, &["Fixed", "Fit", "Scale"], |mode| mode)
                 .map(|mode| Value::String(mode.to_owned()))
         }
         Value::String(mut text) if name == "MeshId" => {

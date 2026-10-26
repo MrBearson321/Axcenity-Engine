@@ -76,6 +76,7 @@ fn list_of(items: Vec<DrawItem>) -> DrawList {
             ..PostProcessing::default()
         },
         ui: Vec::new(),
+        fonts: Vec::new(),
     }
 }
 

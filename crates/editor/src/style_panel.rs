@@ -471,7 +471,23 @@ fn value_choices(property: &str) -> &'static [&'static str] {
         ],
         "align-items" => &["flex-start", "center", "flex-end", "stretch"],
         "text-align" => &["left", "center", "right"],
-        "font-family" => &["Montserrat", "sans-serif", "JetBrains Mono", "monospace"],
+        "font-family" => &[
+            "Montserrat",
+            "Inter",
+            "Roboto",
+            "Poppins",
+            "Nunito",
+            "Oswald",
+            "\"Bebas Neue\"",
+            "Bangers",
+            "Lobster",
+            "\"Press Start 2P\"",
+            "Lora",
+            "\"JetBrains Mono\"",
+            "sans-serif",
+            "serif",
+            "monospace",
+        ],
         "background-color" | "color" | "border-color" => {
             &["#ffffff", "#000000", "#3478f6", "transparent"]
         }

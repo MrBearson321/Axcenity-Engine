@@ -14,6 +14,7 @@
 //! Every file is read from inside the project folder ([`safe_path`]), so a
 //! world file or script can't make the engine read anything else.
 
+mod fonts;
 mod import;
 mod model;
 mod texture_set;
@@ -23,6 +24,7 @@ use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
+pub use fonts::{FontFile, is_font_file};
 pub use import::{
     AUDIO_EXTENSIONS, ImportError, MODELS_FOLDER, PROJECT_AUDIO_FOLDER, PROJECT_TEXTURES_FOLDER,
     TEXTURE_EXTENSIONS, TEXTURES_FOLDER, import_animation_file, import_audio, import_model,
@@ -91,6 +93,8 @@ struct Shared {
     loading: HashSet<String>,
     /// Worker threads running.
     workers: usize,
+    /// The project's font files, read the first time they're asked for.
+    fonts: Option<Arc<Vec<FontFile>>>,
     /// Textures asked for since none were loading, for [`TextureProgress`].
     batch: usize,
 }
@@ -299,6 +303,30 @@ impl Assets {
     /// each, for the Output panel or the terminal.
     pub fn take_errors(&self) -> Vec<String> {
         std::mem::take(&mut self.lock().errors)
+    }
+
+    /// The project's font files (`.ttf` and `.otf` anywhere in it), read
+    /// the first time they're asked for. Empty with no project.
+    pub fn fonts(&self) -> Arc<Vec<FontFile>> {
+        let mut shared = self.lock();
+        if let Some(fonts) = &shared.fonts {
+            return fonts.clone();
+        }
+        let fonts = Arc::new(
+            shared
+                .folder
+                .as_deref()
+                .map(fonts::read_fonts)
+                .unwrap_or_default(),
+        );
+        shared.fonts = Some(fonts.clone());
+        fonts
+    }
+
+    /// Reads the project's fonts again next time, after one was added,
+    /// changed or removed.
+    pub fn forget_fonts(&self) {
+        self.lock().fonts = None;
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Shared> {

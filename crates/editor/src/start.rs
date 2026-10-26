@@ -717,8 +717,10 @@ pub fn about(ctx: &egui::Context, brand: &Brand) -> bool {
                 ui.add_space(12.0);
                 ui.label(
                     RichText::new(
-                        "Fonts: Inter, Montserrat and JetBrains Mono (SIL Open Font License \
-                         1.1). Icons: Phosphor (MIT). Built with egui, wgpu, Rapier and Lua.",
+                        "Fonts: Inter, Montserrat, JetBrains Mono, Roboto, Poppins, Nunito, \
+                         Oswald, Bebas Neue, Bangers, Lobster, Press Start 2P and Lora (SIL \
+                         Open Font License 1.1). Icons: Phosphor (MIT). Built with egui, wgpu, \
+                         Rapier and Lua.",
                     )
                     .size(type_scale::SMALL)
                     .color(palette.text_weak),
