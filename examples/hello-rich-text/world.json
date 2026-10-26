@@ -1,0 +1,155 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Anchored": true,
+          "Color": [
+            0.35,
+            0.37,
+            0.4
+          ],
+          "Position": [
+            0,
+            -0.5,
+            0
+          ],
+          "Size": [
+            40,
+            1,
+            40
+          ]
+        }
+      },
+      {
+        "class": "ScreenGui",
+        "name": "Hud",
+        "properties": {
+          "ScaleMode": "Scale",
+          "DesignWidth": 1280,
+          "DesignHeight": 720
+        },
+        "children": [
+          {
+            "class": "TextLabel",
+            "name": "Prompt",
+            "properties": {
+              "Text": "Press <b>E</b> to <font color=\"#ff0000\">open</font>",
+              "RichText": true,
+              "TextSize": 32,
+              "Position": [
+                0,
+                40,
+                0,
+                40
+              ],
+              "Size": [
+                0,
+                900,
+                0,
+                64
+              ],
+              "BackgroundTransparency": 1
+            },
+            "children": []
+          },
+          {
+            "class": "TextLabel",
+            "name": "Fancy",
+            "properties": {
+              "Text": "<i>Italic</i>, <u>underlined</u>, <s>struck</s>, <uc>shouted</uc>,<br/><font face=\"Bangers\" size=\"40\" color=\"#ffd166\"><stroke color=\"#000000\" thickness=\"2\">outlined</stroke></font> and 1 &lt; 2 &amp;&amp; 3 &gt; 2",
+              "RichText": true,
+              "TextSize": 28,
+              "Position": [
+                0,
+                40,
+                0,
+                110
+              ],
+              "Size": [
+                0,
+                900,
+                0,
+                130
+              ],
+              "BackgroundTransparency": 1
+            },
+            "children": []
+          },
+          {
+            "class": "TextLabel",
+            "name": "Status",
+            "properties": {
+              "Text": "Waiting for the LocalScript\u2026",
+              "RichText": true,
+              "TextSize": 28,
+              "Position": [
+                0,
+                40,
+                0,
+                260
+              ],
+              "Size": [
+                0,
+                900,
+                0,
+                56
+              ],
+              "BackgroundTransparency": 1
+            },
+            "children": []
+          },
+          {
+            "class": "TextLabel",
+            "name": "Hint",
+            "properties": {
+              "Text": "Waiting for the blocks\u2026",
+              "RichText": true,
+              "TextSize": 28,
+              "Position": [
+                0,
+                40,
+                0,
+                330
+              ],
+              "Size": [
+                0,
+                900,
+                0,
+                56
+              ],
+              "BackgroundTransparency": 1
+            },
+            "children": []
+          },
+          {
+            "class": "TextLabel",
+            "name": "Broken",
+            "properties": {
+              "Text": "<b>open",
+              "RichText": true,
+              "TextSize": 28,
+              "Position": [
+                0,
+                40,
+                0,
+                400
+              ],
+              "Size": [
+                0,
+                900,
+                0,
+                56
+              ],
+              "BackgroundTransparency": 1
+            },
+            "children": []
+          }
+        ]
+      }
+    ]
+  }
+}

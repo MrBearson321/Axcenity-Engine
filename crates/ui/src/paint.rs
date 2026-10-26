@@ -21,6 +21,7 @@ pub(super) fn paint_instance(
     opacity: f32,
     focused: bool,
     out: &mut Vec<UiDrawItem>,
+    warnings: &mut Vec<String>,
 ) {
     let css_background = css_color(styles, "background-color");
     let color = css_background
@@ -150,20 +151,23 @@ pub(super) fn paint_instance(
             out.push(UiDrawItem::Text(UiText {
                 position: [rect.x + 4.0, rect.y + 4.0],
                 size: [(rect.width - 8.0).max(0.0), (rect.height - 8.0).max(0.0)],
-                ..styled_text(instance, styles, opacity, placeholder, text)
+                ..styled_text(instance, styles, opacity, placeholder, text, warnings)
             }));
         }
     }
 }
 
 /// `text` as `instance` draws it, with its styles, but not yet placed.
-/// `placeholder` text is drawn faint.
+/// `placeholder` text is drawn faint. With `RichText` on, its tags are read
+/// into spans; tags that can't be read are drawn as they are, with a line
+/// in `warnings`.
 pub(super) fn styled_text(
     instance: &Instance,
     styles: &ResolvedStyles,
     opacity: f32,
     placeholder: bool,
     text: &str,
+    warnings: &mut Vec<String>,
 ) -> UiText {
     let font_size = font_size(instance, styles);
     let css_text_color = css_color(styles, "color");
@@ -190,18 +194,34 @@ pub(super) fn styled_text(
         _ => VerticalAlign::Top,
     };
     let decoration = css_keyword(styles, "text-decoration").unwrap_or_default();
-    let text = match css_keyword(styles, "text-transform").as_deref() {
+    let transform = css_keyword(styles, "text-transform");
+    let rich = !placeholder && instance.property("RichText").and_then(Value::as_bool) == Some(true);
+    let spans = if rich {
+        parse_rich_text(text)
+            .map_err(|problem| {
+                warnings.push(format!(
+                    "\"{}\" has rich text that can't be read ({problem}), so it's drawn as plain text.",
+                    instance.name()
+                ));
+            })
+            .ok()
+    } else {
+        None
+    };
+    let mut word_start = true;
+    let mut transformed = |text: &str, uppercase: bool| match transform.as_deref() {
+        _ if uppercase => text.to_uppercase(),
         Some("uppercase") => text.to_uppercase(),
         Some("lowercase") => text.to_lowercase(),
-        Some("capitalize") => capitalize(text),
+        Some("capitalize") => capitalize(text, &mut word_start),
         _ => text.to_owned(),
     };
     let alpha =
         opacity * css_text_color.map_or(1.0, |(_, a)| a) * if placeholder { 0.45 } else { 1.0 };
-    UiText {
+    let mut styled = UiText {
         position: [0.0; 2],
         size: [0.0; 2],
-        text,
+        text: String::new(),
         font_size,
         color: [color.r, color.g, color.b, alpha],
         font_family,
@@ -223,20 +243,71 @@ pub(super) fn styled_text(
             Some("nowrap" | "pre")
         ),
         scaled: instance.property("TextScaled").and_then(Value::as_bool) == Some(true),
+        spans: Vec::new(),
+    };
+    match spans {
+        Some(spans) => {
+            styled.spans = spans
+                .into_iter()
+                .map(|span| {
+                    let text = transformed(&span.text, span.style.uppercase);
+                    rich_span(&styled, text, &span.style, opacity)
+                })
+                .collect();
+            styled.text = styled.spans.iter().map(|span| span.text.as_str()).collect();
+        }
+        None => styled.text = transformed(text, false),
+    }
+    styled
+}
+
+/// A rich text span in `base`'s style, changed by its tags.
+fn rich_span(base: &UiText, text: String, style: &RichStyle, opacity: f32) -> TextSpan {
+    let color = match (style.color, style.opacity) {
+        (Some((color, alpha)), _) => [color.r, color.g, color.b, alpha * opacity],
+        (None, Some(fade)) => {
+            let [r, g, b, a] = base.color;
+            [r, g, b, a * fade]
+        }
+        (None, None) => base.color,
+    };
+    TextSpan {
+        text,
+        font_family: style
+            .face
+            .as_deref()
+            .map_or_else(|| base.font_family.clone(), font_family_name),
+        font_size: style.size.unwrap_or(base.font_size),
+        weight: style.weight.unwrap_or(base.weight),
+        italic: base.italic || style.italic,
+        underline: base.underline || style.underline,
+        line_through: base.line_through || style.strikethrough,
+        color,
+        stroke: style.stroke.map_or(base.stroke, |stroke| {
+            Some(TextStroke {
+                width: stroke.thickness,
+                color: [
+                    stroke.color.r,
+                    stroke.color.g,
+                    stroke.color.b,
+                    stroke.opacity * opacity,
+                ],
+            })
+        }),
     }
 }
 
 /// Each word's first letter in upper case (CSS `text-transform: capitalize`).
-fn capitalize(text: &str) -> String {
+/// `word_start` carries on from one span to the next.
+fn capitalize(text: &str, word_start: &mut bool) -> String {
     let mut out = String::with_capacity(text.len());
-    let mut word_start = true;
     for ch in text.chars() {
-        if word_start {
+        if *word_start {
             out.extend(ch.to_uppercase());
         } else {
             out.push(ch);
         }
-        word_start = ch.is_whitespace();
+        *word_start = ch.is_whitespace();
     }
     out
 }

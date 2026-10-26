@@ -1182,3 +1182,72 @@ fn hello_tween_raises_the_block_and_slides_the_menu_in_then_fades_it_out() {
         ["The block finished rising:\tEnum.PlaybackState.Completed"]
     );
 }
+
+#[test]
+fn hello_rich_text_styles_tags_from_the_world_lua_and_blocks() {
+    use axcenity_render::{UiDrawItem, UiText};
+    let (mut world, mut scripts) = start_example("hello-rich-text");
+    let hud = world.find_first_child(world.workspace(), "Hud").unwrap();
+    let text_of = |world: &World, name: &str| -> UiText {
+        let layout = axcenity_ui::layout_ui(world, 1280, 720, &[]);
+        let rect = layout
+            .element(world.find_first_child(hud, name).unwrap())
+            .unwrap()
+            .rect;
+        layout
+            .draw_items
+            .into_iter()
+            .find_map(|item| match item {
+                UiDrawItem::Text(text) if text.position == [rect.x + 4.0, rect.y + 4.0] => {
+                    Some(text)
+                }
+                _ => None,
+            })
+            .unwrap()
+    };
+    let spans = |text: &UiText| -> Vec<String> {
+        text.spans.iter().map(|span| span.text.clone()).collect()
+    };
+
+    let prompt = text_of(&world, "Prompt");
+    assert_eq!(prompt.text, "Press E to open");
+    assert_eq!(spans(&prompt), ["Press ", "E", " to ", "open"]);
+    assert_eq!(prompt.spans[1].weight, 700);
+    assert_eq!(prompt.spans[3].color, [1.0, 0.0, 0.0, 1.0]);
+
+    // A malformed string is drawn as it's written, with one warning.
+    let broken = text_of(&world, "Broken");
+    assert_eq!(broken.text, "<b>open");
+    assert!(broken.spans.is_empty());
+    let warnings = axcenity_ui::layout_ui(&world, 1280, 720, &[]).warnings;
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(warnings[0].contains("\"Broken\""), "{warnings:?}");
+
+    // After a second, a LocalScript and a block script set rich text.
+    for _ in 0..70 {
+        scripts.step(&mut world, 1.0 / 60.0);
+    }
+    let status = text_of(&world, "Status");
+    assert_eq!(status.text, "The door is open");
+    assert_eq!(spans(&status), ["The door is ", "open"]);
+    assert_eq!(status.spans[1].weight, 700);
+    assert_eq!(
+        status.spans[1].color,
+        [
+            0x55 as f32 / 255.0,
+            0xdd as f32 / 255.0,
+            0x55 as f32 / 255.0,
+            1.0
+        ]
+    );
+    let hint = text_of(&world, "Hint");
+    assert_eq!(hint.text, "Set by blocks, in italics too");
+    assert_eq!(hint.spans[1].weight, 700);
+    assert!(hint.spans[3].italic);
+    let errors: Vec<String> = scripts
+        .take_output()
+        .into_iter()
+        .map(|line| line.text)
+        .collect();
+    assert!(errors.is_empty(), "{errors:?}");
+}

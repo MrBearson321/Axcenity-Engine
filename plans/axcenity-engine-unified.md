@@ -442,9 +442,9 @@ Ctrl+B, Ctrl+I and Ctrl+U toggle bold, italic and underline on the selected elem
 
 ### Acceptance criteria
 
-- [ ] `Press <b>E</b> to <font color="#ff0000">open</font>` draws one bold word and one red word on a single line, in the designer and in Play.
-- [ ] Selecting a word in the designer's text box and pressing Ctrl+B wraps it in `<b>…</b>` as one undo step.
-- [ ] A malformed string (`<b>open`) draws as plain text with one warning, and a LocalScript can set rich text at runtime.
+- [x] `Press <b>E</b> to <font color="#ff0000">open</font>` draws one bold word and one red word on a single line, in the designer and in Play.
+- [x] Selecting a word in the designer's text box and pressing Ctrl+B wraps it in `<b>…</b>` as one undo step.
+- [x] A malformed string (`<b>open`) draws as plain text with one warning, and a LocalScript can set rich text at runtime.
 
 ---
 

@@ -26,6 +26,7 @@ mod anchor_handles;
 mod anchors;
 mod artboard;
 mod panels;
+mod rich_text;
 mod rulers;
 mod text_toolbar;
 
@@ -170,6 +171,8 @@ struct TextEditing {
     text: String,
     /// Focus is asked for on the first frame only.
     focused: bool,
+    /// The characters selected in the box, as last seen.
+    selection: Option<std::ops::Range<usize>>,
 }
 
 /// The designer's view and the drag under way. Kept while the editor runs.
@@ -568,11 +571,7 @@ impl UiDesigner {
         let Some(style) = axcenity_ui::text_style(scene.world, id, scene.stylesheets) else {
             return;
         };
-        for (key, toggle) in [
-            (egui::Key::B, Toggle::Bold),
-            (egui::Key::I, Toggle::Italic),
-            (egui::Key::U, Toggle::Underline),
-        ] {
+        for (key, toggle) in rich_text::SHORTCUTS {
             let shortcut = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, key);
             if ctx.input_mut(|input| input.consume_shortcut(&shortcut)) {
                 actions.push(toggle.action(id, &style));

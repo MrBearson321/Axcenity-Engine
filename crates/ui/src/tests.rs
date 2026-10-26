@@ -652,3 +652,98 @@ fn text_style_properties_are_supported_and_text_stroke_has_both_names() {
     let items = build_ui_draw_data(&world, 800, 600, &[stylesheet]);
     assert_eq!(first_text(&items).weight, 400);
 }
+
+/// A label in a ScreenGui designed at 800×600 in Scale, with `RichText` on
+/// and `text`.
+fn rich_label(text: &str) -> (World, InstanceId, InstanceId) {
+    let mut world = World::new();
+    let gui = world.create(ClassName::ScreenGui).unwrap();
+    world.set_parent(gui, Some(world.workspace())).unwrap();
+    for (name, value) in [
+        ("ScaleMode", Value::String("Scale".into())),
+        ("DesignWidth", Value::Number(800.0)),
+        ("DesignHeight", Value::Number(600.0)),
+    ] {
+        world.set_property(gui, name, value).unwrap();
+    }
+    let label = world.create(ClassName::TextLabel).unwrap();
+    world.set_parent(label, Some(gui)).unwrap();
+    world.set_name(label, "Prompt").unwrap();
+    world
+        .set_property(label, "RichText", Value::Bool(true))
+        .unwrap();
+    world
+        .set_property(label, "Text", Value::String(text.into()))
+        .unwrap();
+    (world, gui, label)
+}
+
+#[test]
+fn rich_text_tags_become_styled_spans_in_play_and_on_the_artboard() {
+    let (mut world, gui, label) =
+        rich_label(r##"Press <b>E</b> to <font color="#ff0000">open</font>"##);
+    let (stylesheet, _) = parse_stylesheet(
+        "ui.css",
+        "TextLabel { color: #ffffff; font-size: 20px; text-transform: capitalize }",
+    );
+    let sheets = [stylesheet];
+    let play = layout_ui(&world, 800, 600, &sheets);
+    assert!(play.warnings.is_empty(), "{:?}", play.warnings);
+    let text = first_text(&play.draw_items);
+    // Capitalized across the spans: the tags don't start new words.
+    assert_eq!(text.text, "Press E To Open");
+    let spans: Vec<&str> = text.spans.iter().map(|span| span.text.as_str()).collect();
+    assert_eq!(spans, ["Press ", "E", " To ", "Open"]);
+    assert_eq!(text.spans[1].weight, 700);
+    assert_eq!(text.spans[0].weight, 400);
+    assert_eq!(text.spans[3].color, [1.0, 0.0, 0.0, 1.0]);
+    assert_eq!(text.spans[2].color, [1.0, 1.0, 1.0, 1.0]);
+    assert!(text.spans.iter().all(|span| span.font_size == 20.0));
+    let board = layout_artboard(&world, gui, &sheets, (800, 600), 1.0, [0.0, 0.0]);
+    assert_eq!(text, first_text(&board.draw_items));
+
+    // On a screen twice the size, the spans' sizes and outlines double too.
+    world
+        .set_property(
+            label,
+            "Text",
+            Value::String(
+                "<font size=\"30\" face=\"Bebas Neue\"><stroke thickness=\"2\">Big</stroke></font>"
+                    .into(),
+            ),
+        )
+        .unwrap();
+    let big = layout_ui(&world, 1600, 1200, &sheets);
+    let span = &first_text(&big.draw_items).spans[0];
+    assert_eq!(span.font_size, 60.0);
+    assert_eq!(span.font_family, "Bebas Neue");
+    assert_eq!(span.stroke.unwrap().width, 4.0);
+
+    // With RichText off, the tags are just text.
+    world
+        .set_property(label, "RichText", Value::Bool(false))
+        .unwrap();
+    world
+        .set_property(label, "Text", Value::String("<b>E</b>".into()))
+        .unwrap();
+    let plain = layout_ui(&world, 800, 600, &[]);
+    let text = first_text(&plain.draw_items);
+    assert_eq!(text.text, "<b>E</b>");
+    assert!(text.spans.is_empty());
+}
+
+#[test]
+fn malformed_rich_text_draws_as_plain_text_with_a_warning() {
+    let (world, _, _) = rich_label("<b>open");
+    let layout = layout_ui(&world, 800, 600, &[]);
+    let text = first_text(&layout.draw_items);
+    assert_eq!(text.text, "<b>open");
+    assert!(text.spans.is_empty());
+    assert_eq!(text.weight, 400);
+    assert_eq!(layout.warnings.len(), 1, "{:?}", layout.warnings);
+    let warning = &layout.warnings[0];
+    assert!(warning.contains("\"Prompt\""), "{warning}");
+    assert!(warning.contains("<b> is never closed"), "{warning}");
+    // The same line each frame, which hosts show once.
+    assert_eq!(layout_ui(&world, 800, 600, &[]).warnings, layout.warnings);
+}

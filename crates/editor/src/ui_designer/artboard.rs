@@ -2,7 +2,7 @@
 //! guides, the selected element's handles and distances, palette drops,
 //! and text typed over on a double-click.
 
-use axcenity_core::{ClassName, InstanceId, Value};
+use axcenity_core::{ClassName, InstanceId, Value, World};
 use axcenity_render::glam::Vec3;
 use axcenity_render::{Camera, UiDrawItem, UiRectangle};
 use axcenity_ui::{UiLayout, UiRect};
@@ -10,14 +10,16 @@ use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 
 use super::anchor_handles::{AnchorDrag, AnchorHandles};
+use super::rich_text::{self, Format};
 use super::rulers::{self, RULER};
 use super::{
     DesignerAction, DesignerScene, FIT_MARGIN, Guide, MAX_ZOOM, MIN_ZOOM, PaletteItem, TextEditing,
-    UiDesigner, container_for, drop_offset, panels, reset_anchor_action, scale_mode,
+    Toggle, UiDesigner, container_for, drop_offset, panels, reset_anchor_action, scale_mode,
 };
 use crate::properties::Edit;
-use crate::theme;
+use crate::theme::{self, icons};
 use crate::ui_handles::{self, Grip, Handles, UiDrag};
+use crate::widgets;
 
 /// The artboard's colour behind the UI (sRGB): a mid grey, so dark and
 /// light UIs both stand out. In Play the 3D world is behind it.
@@ -26,6 +28,9 @@ const BACKDROP: [f32; 4] = [0.30, 0.32, 0.36, 1.0];
 const DRAG_SLOP: f32 = 3.0;
 /// How close the pointer must be to a guide to grab it, in points.
 const GUIDE_GRAB: f32 = 4.0;
+/// The bar of formats over rich text being typed, in points.
+const FORMAT_BAR_WIDTH: f32 = 300.0;
+const FORMAT_BAR_HEIGHT: f32 = 28.0;
 /// Guide lines, in a cyan that reads apart from the magenta snap lines.
 pub(super) const GUIDE_COLOR: egui::Color32 = egui::Color32::from_rgb(64, 200, 230);
 
@@ -310,10 +315,14 @@ impl UiDesigner {
         // The box being typed in takes its own clicks: they place the
         // caret, not select or drag what's under it.
         let typing = self.typing_rect(&layout, visible, ppp);
+        let bar = self.format_bar_rect(world, typing, visible);
         let over = pointer.filter(|&pointer| {
             response.contains_pointer()
                 && visible.contains(pointer)
-                && !typing.is_some_and(|rect| rect.contains(pointer))
+                && ![typing, bar]
+                    .iter()
+                    .flatten()
+                    .any(|rect| rect.contains(pointer))
         });
         // The selected element's anchor diamonds (a flex child has none).
         // They're over its handles, so they're grabbed first.
@@ -621,6 +630,7 @@ impl UiDesigner {
             original: text.clone(),
             text,
             focused: false,
+            selection: None,
         });
     }
 
@@ -634,9 +644,38 @@ impl UiDesigner {
         Some(rect.expand(2.0))
     }
 
+    /// Where the bar of formats goes while rich text is typed over: just
+    /// above the box, or under it when there's no room above.
+    fn format_bar_rect(
+        &self,
+        world: &World,
+        typing: Option<egui::Rect>,
+        visible: egui::Rect,
+    ) -> Option<egui::Rect> {
+        let editing = self.text_editing.as_ref()?;
+        let rich = world
+            .get(editing.id)?
+            .property("RichText")
+            .and_then(Value::as_bool);
+        let typing = typing.filter(|_| rich == Some(true))?;
+        let size = egui::vec2(FORMAT_BAR_WIDTH, FORMAT_BAR_HEIGHT);
+        let above = typing.left_top() - egui::vec2(0.0, size.y + 4.0);
+        let at = if above.y >= visible.top() {
+            above
+        } else {
+            typing.left_bottom() + egui::vec2(0.0, 4.0)
+        };
+        Some(egui::Rect::from_min_size(at, size))
+    }
+
     /// The text being typed over, in a box over its element. Each change is
     /// an edit of its `Text`, so the whole typing is one undo step. Enter
     /// or clicking away finishes, and Escape puts the text back.
+    ///
+    /// With `RichText` on, the box shows the tags' styles, and Ctrl+B,
+    /// Ctrl+I, Ctrl+U or the bar over the box wraps the selection in tags.
+    /// With nothing selected (or `RichText` off), Ctrl+B, Ctrl+I and Ctrl+U
+    /// change the whole element's style, as they do outside the box.
     fn type_over(
         &mut self,
         ui: &mut egui::Ui,
@@ -647,6 +686,7 @@ impl UiDesigner {
     ) {
         let ppp = ui.ctx().pixels_per_point();
         let rect = self.typing_rect(layout, visible, ppp);
+        let bar = self.format_bar_rect(scene.world, rect, visible);
         let Some(editing) = &mut self.text_editing else {
             return;
         };
@@ -660,27 +700,111 @@ impl UiDesigner {
             return;
         };
         // The size the artboard draws it at, so typing doesn't shrink it.
-        let size = element.font_size * element.pixels_per_unit / ppp;
-        let font = egui::FontId::proportional(size.clamp(6.0, 256.0));
+        let size = (element.font_size * element.pixels_per_unit / ppp).clamp(6.0, 256.0);
+        let font = egui::FontId::proportional(size);
         let multi_line = instance.property("MultiLine").and_then(Value::as_bool) == Some(true);
-        let edit = if multi_line {
+        let rich = bar.is_some();
+        let id = ui.id().with(("ui designer typing", editing.id));
+
+        // Taken before the box sees them: it has its own Ctrl+U.
+        let mut format = None;
+        for (key, toggle) in rich_text::SHORTCUTS {
+            let shortcut = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, key);
+            if ui.input_mut(|input| input.consume_shortcut(&shortcut)) {
+                format = Some(Format::Toggle(toggle));
+            }
+        }
+        let pressed_on_bar = bar.is_some_and(|bar| {
+            ui.input(|input| {
+                input.pointer.any_pressed()
+                    && input
+                        .pointer
+                        .interact_pos()
+                        .is_some_and(|at| bar.contains(at))
+            })
+        });
+
+        let base_size = element.font_size;
+        let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap_width: f32| {
+            // A one-line box scrolls sideways instead of wrapping.
+            let wrap_width = if multi_line {
+                wrap_width
+            } else {
+                f32::INFINITY
+            };
+            let job =
+                rich_text::layout_job(text.as_str(), size, base_size, ui.visuals(), wrap_width);
+            ui.fonts(|fonts| fonts.layout_job(job))
+        };
+        let mut edit = if multi_line {
             egui::TextEdit::multiline(&mut editing.text)
         } else {
             egui::TextEdit::singleline(&mut editing.text)
         };
-        let id = ui.id().with(("ui designer typing", editing.id));
+        if rich {
+            edit = edit.layouter(&mut layouter);
+        }
         // A child Ui, so the box doesn't move the cursor of the row the
         // artboard sits in: `ui.put` would, and the inspector after it
         // would be laid out over the artboard.
         let mut over = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(
             egui::Layout::centered_and_justified(egui::Direction::TopDown),
         ));
-        let response = over.add(edit.id(id).font(font).desired_width(rect.width()));
+        let output = edit
+            .id(id)
+            .font(font)
+            .desired_width(rect.width())
+            .show(&mut over);
+        let response = output.response;
         if !editing.focused {
             response.request_focus();
             editing.focused = true;
         }
-        if response.changed() {
+        if let Some(range) = output.cursor_range {
+            let [start, end] = range.sorted_cursors();
+            editing.selection = Some(start.index..end.index);
+        }
+        if let Some(bar) = bar
+            && let Some(picked) = format_bar(ui, bar)
+        {
+            format = Some(picked);
+        }
+
+        let mut refocus = pressed_on_bar;
+        if let Some(format) = format {
+            refocus = true;
+            let wrapped = editing
+                .selection
+                .clone()
+                .filter(|selection| rich && !selection.is_empty())
+                .and_then(|selection| rich_text::apply(&editing.text, selection, format));
+            match (wrapped, format) {
+                (Some((text, selected)), _) => {
+                    editing.text = text;
+                    actions.push(DesignerAction::Edit(
+                        editing.id,
+                        Edit::Property("Text", Value::String(editing.text.clone())),
+                    ));
+                    let mut state = output.state;
+                    state
+                        .cursor
+                        .set_char_range(Some(egui::text::CCursorRange::two(
+                            egui::text::CCursor::new(selected.start),
+                            egui::text::CCursor::new(selected.end),
+                        )));
+                    state.store(ui.ctx(), id);
+                    editing.selection = Some(selected);
+                }
+                (None, Format::Toggle(toggle)) => {
+                    if let Some(style) =
+                        axcenity_ui::text_style(scene.world, editing.id, scene.stylesheets)
+                    {
+                        actions.push(toggle.action(editing.id, &style));
+                    }
+                }
+                (None, Format::Color(_)) => {}
+            }
+        } else if response.changed() {
             actions.push(DesignerAction::Edit(
                 editing.id,
                 Edit::Property("Text", Value::String(editing.text.clone())),
@@ -693,6 +817,9 @@ impl UiDesigner {
                 Edit::Property("Text", Value::String(editing.original.clone())),
             ));
             self.text_editing = None;
+        } else if refocus {
+            // The bar was used: typing carries on.
+            response.request_focus();
         } else if response.lost_focus() {
             self.text_editing = None;
         }
@@ -744,6 +871,55 @@ impl UiDesigner {
             _ => {}
         }
     }
+}
+
+/// The bar over rich text being typed: B, I, U and S, then colours. Returns
+/// the one clicked.
+fn format_bar(ui: &mut egui::Ui, rect: egui::Rect) -> Option<Format> {
+    let mut picked = None;
+    let mut bar = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(rect)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    egui::Frame::popup(bar.style())
+        .inner_margin(egui::Margin::symmetric(4, 2))
+        .show(&mut bar, |ui| {
+            ui.spacing_mut().item_spacing.x = 3.0;
+            for (toggle, icon, tip) in [
+                (Toggle::Bold, icons::TEXT_B, "Bold: <b> (Ctrl+B)"),
+                (Toggle::Italic, icons::TEXT_ITALIC, "Italic: <i> (Ctrl+I)"),
+                (
+                    Toggle::Underline,
+                    icons::TEXT_UNDERLINE,
+                    "Underline: <u> (Ctrl+U)",
+                ),
+                (
+                    Toggle::Strikethrough,
+                    icons::TEXT_STRIKETHROUGH,
+                    "Strikethrough: <s>",
+                ),
+            ] {
+                if widgets::icon_button(ui, icon, tip, false).clicked() {
+                    picked = Some(Format::Toggle(toggle));
+                }
+            }
+            ui.separator();
+            for color @ [r, g, b] in rich_text::SWATCHES {
+                let swatch = egui::Button::new("")
+                    .fill(egui::Color32::from_rgb(r, g, b))
+                    .min_size(egui::vec2(16.0, 16.0));
+                let hint = format!("Colour: <font color=\"#{r:02x}{g:02x}{b:02x}\">");
+                let response = ui.add(swatch);
+                response.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &hint)
+                });
+                if response.on_hover_text(&hint).clicked() {
+                    picked = Some(Format::Color(color));
+                }
+            }
+        });
+    picked
 }
 
 /// A guide line across the canvas.

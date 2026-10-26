@@ -645,6 +645,8 @@ declare extern type TextLabel extends Instance with
 	TextSize: number
 	--- If true, the text is drawn at the largest size up to TextSize (or CSS font-size) that fits its box.
 	TextScaled: boolean
+	--- If true, tags in Text style parts of it: <b>, <i>, <u>, <s>, <font color size face weight>, <stroke color thickness>, <uc> and <br/>. Write &lt; and &amp; for < and &.
+	RichText: boolean
 	--- If false, this label is hidden.
 	Visible: boolean
 	[string]: any
@@ -672,6 +674,8 @@ declare extern type TextButton extends Instance with
 	TextSize: number
 	--- If true, the text is drawn at the largest size up to TextSize (or CSS font-size) that fits its box.
 	TextScaled: boolean
+	--- If true, tags in Text style parts of it: <b>, <i>, <u>, <s>, <font color size face weight>, <stroke color thickness>, <uc> and <br/>. Write &lt; and &amp; for < and &.
+	RichText: boolean
 	--- The project-relative path of an icon. Empty shows no picture. With Text, the icon sits beside the label.
 	Image: string
 	--- The icon opacity: 0 is opaque and 1 is transparent.
@@ -730,6 +734,8 @@ declare extern type TextBox extends Instance with
 	TextSize: number
 	--- If true, the text is drawn at the largest size up to TextSize (or CSS font-size) that fits its box.
 	TextScaled: boolean
+	--- If true, tags in Text style parts of it: <b>, <i>, <u>, <s>, <font color size face weight>, <stroke color thickness>, <uc> and <br/>. Write &lt; and &amp; for < and &.
+	RichText: boolean
 	--- If false, Enter finishes typing. If true, Enter starts a new line and clicking away finishes typing.
 	MultiLine: boolean
 	--- If false, this text box is hidden.

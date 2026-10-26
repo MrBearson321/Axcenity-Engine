@@ -1,0 +1,27 @@
+{
+  "blocks": [
+    {
+      "id": 1,
+      "kind": {
+        "type": "when_started",
+        "body": [
+          {
+            "id": 2,
+            "kind": {
+              "type": "wait",
+              "seconds": { "type": "number", "value": 1 }
+            }
+          },
+          {
+            "id": 3,
+            "kind": {
+              "type": "set_text",
+              "target": "Hud.Hint",
+              "text": { "type": "text", "value": "Set by <b>blocks</b>, in <i>italics</i> too" }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

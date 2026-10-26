@@ -122,6 +122,27 @@ pub struct UiText {
     /// `TextScaled`: drawn at the largest size up to `font_size` that fits
     /// the box.
     pub scaled: bool,
+    /// Rich text: the pieces of `text` in their own styles, in order, which
+    /// together say `text`. Empty draws `text` in the fields above.
+    pub spans: Vec<TextSpan>,
+}
+
+/// A piece of rich text (`RichText`) and the style its tags give it.
+/// Alignment, spacing, line height, wrapping and shadows stay the whole
+/// text's.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextSpan {
+    pub text: String,
+    pub font_family: String,
+    /// In pixels, like [`UiText::font_size`]. `TextScaled` text scales it
+    /// with the rest.
+    pub font_size: f32,
+    pub weight: u16,
+    pub italic: bool,
+    pub underline: bool,
+    pub line_through: bool,
+    pub color: [f32; 4],
+    pub stroke: Option<TextStroke>,
 }
 
 impl Default for UiText {
@@ -145,6 +166,7 @@ impl Default for UiText {
             line_height: None,
             wrap: true,
             scaled: false,
+            spans: Vec::new(),
         }
     }
 }

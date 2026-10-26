@@ -9,15 +9,17 @@ mod style;
 
 mod css;
 mod paint;
+mod rich;
 
 pub use css::*;
 use paint::*;
+pub use rich::{RichSpan, RichStroke, RichStyle, parse_rich_text, rich_text_plain};
 
 use axcenity_core::{ClassName, Color3, Instance, InstanceId, UDim2, Value, World};
 use axcenity_render::glam::Vec3;
 use axcenity_render::glam::camera::rh;
 use axcenity_render::{
-    Camera, TextAlign, TextShadow, TextStroke, UiDrawItem, UiImage, UiRectangle, UiText,
+    Camera, TextAlign, TextShadow, TextSpan, TextStroke, UiDrawItem, UiImage, UiRectangle, UiText,
     VerticalAlign,
 };
 use taffy::prelude::*;
@@ -198,7 +200,14 @@ pub fn text_style(world: &World, id: InstanceId, stylesheets: &[Stylesheet]) -> 
     let instance = world.get(id)?;
     let text = instance.property("Text").and_then(Value::as_str)?;
     let styles = resolve_styles(world, id, stylesheets, PseudoClasses::default());
-    Some(styled_text(instance, &styles, 1.0, false, text))
+    Some(styled_text(
+        instance,
+        &styles,
+        1.0,
+        false,
+        text,
+        &mut Vec::new(),
+    ))
 }
 
 /// [`build_ui_draw_data`], also saying where each element went, for picking
@@ -527,6 +536,12 @@ fn scale_draw_item(item: &mut UiDrawItem, fit: Fit) {
             if let Some(stroke) = &mut text.stroke {
                 stroke.width *= fit.scale;
             }
+            for span in &mut text.spans {
+                span.font_size *= fit.scale;
+                if let Some(stroke) = &mut span.stroke {
+                    stroke.width *= fit.scale;
+                }
+            }
             for shadow in &mut text.shadows {
                 shadow.offset = shadow.offset.map(|d| d * fit.scale);
                 shadow.blur *= fit.scale;
@@ -700,6 +715,7 @@ fn layout_children(
             opacity,
             pseudo.focused == Some(id),
             &mut out.draw_items,
+            &mut out.warnings,
         );
         layout_children(world, id, rect, out, stylesheets, opacity, pseudo);
     }
@@ -855,6 +871,7 @@ fn layout_table(
             opacity,
             pseudo.focused == Some(id),
             &mut out.draw_items,
+            &mut out.warnings,
         );
         layout_children(world, id, rect, out, stylesheets, opacity, pseudo);
     }

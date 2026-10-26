@@ -107,6 +107,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     ),
     (
         ClassName::TextLabel,
+        "RichText",
+        "If true, tags in Text style parts of it: <b>, <i>, <u>, <s>, <font color size face weight>, <stroke color thickness>, <uc> and <br/>. Write &lt; and &amp; for < and &.",
+    ),
+    (
+        ClassName::TextLabel,
         "Visible",
         "If false, this label is hidden.",
     ),
@@ -151,6 +156,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::TextButton,
         "TextScaled",
         "If true, the text is drawn at the largest size up to TextSize (or CSS font-size) that fits its box.",
+    ),
+    (
+        ClassName::TextButton,
+        "RichText",
+        "If true, tags in Text style parts of it: <b>, <i>, <u>, <s>, <font color size face weight>, <stroke color thickness>, <uc> and <br/>. Write &lt; and &amp; for < and &.",
     ),
     (
         ClassName::TextButton,
@@ -209,6 +219,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::TextBox,
         "TextScaled",
         "If true, the text is drawn at the largest size up to TextSize (or CSS font-size) that fits its box.",
+    ),
+    (
+        ClassName::TextBox,
+        "RichText",
+        "If true, tags in Text style parts of it: <b>, <i>, <u>, <s>, <font color size face weight>, <stroke color thickness>, <uc> and <br/>. Write &lt; and &amp; for < and &.",
     ),
     (
         ClassName::TextBox,

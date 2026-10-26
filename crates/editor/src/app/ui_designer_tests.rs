@@ -1506,3 +1506,157 @@ fn ctrl_b_i_u_toggle_the_selected_labels_text_unless_typing() {
     );
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+#[test]
+fn selected_text_in_the_typing_box_is_wrapped_in_rich_text_tags() {
+    let folder = copy_of_example("hello-touched", "ui-designer-rich-text");
+    let mut app = EditorApp::new(Some(&folder));
+    let menu = build_menu(&mut app);
+    act(
+        &mut app,
+        DesignerAction::Edit(menu.title, Edit::Property("RichText", Value::Bool(true))),
+    );
+    let ctx = theme::test_context();
+    let mut clock = 0.0;
+    let size = egui::vec2(1100.0, 600.0);
+    run_designer(&mut app, &ctx, &mut clock, size, vec![Vec::new(); 3]);
+    let at = on_artboard(&app, menu.gui, menu.title);
+    let double_click = vec![
+        vec![egui::Event::PointerMoved(at)],
+        vec![press(at, true)],
+        vec![press(at, false)],
+        vec![press(at, true)],
+        vec![press(at, false)],
+        Vec::new(),
+    ];
+    let text = |app: &EditorApp| {
+        app.world
+            .get(menu.title)
+            .unwrap()
+            .property("Text")
+            .and_then(Value::as_str)
+            .unwrap()
+            .to_owned()
+    };
+    // "Main" selected: Home, then Shift+Right four times.
+    let select_main: Vec<Vec<egui::Event>> =
+        std::iter::once(vec![key(egui::Key::Home, egui::Modifiers::NONE)])
+            .chain((0..4).map(|_| vec![key(egui::Key::ArrowRight, egui::Modifiers::SHIFT)]))
+            .collect();
+    let undo_before = app.history.undo_label().map(str::to_owned);
+    run_designer(&mut app, &ctx, &mut clock, size, double_click.clone());
+    run_designer(&mut app, &ctx, &mut clock, size, select_main.clone());
+    run_designer(
+        &mut app,
+        &ctx,
+        &mut clock,
+        size,
+        vec![vec![key(egui::Key::B, egui::Modifiers::COMMAND)]],
+    );
+    // Still typing, with the tags round the word.
+    assert_eq!(text(&app), "<b>Main</b> Menu");
+    run_designer(
+        &mut app,
+        &ctx,
+        &mut clock,
+        size,
+        vec![
+            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+            Vec::new(),
+        ],
+    );
+    assert_eq!(text(&app), "<b>Main</b> Menu");
+    // It draws one bold word, and the element's own style didn't change.
+    let layout = axcenity_ui::layout_ui(&app.world, 1280, 720, &stylesheets(&app));
+    let drawn = layout
+        .draw_items
+        .iter()
+        .find_map(|item| match item {
+            axcenity_render::UiDrawItem::Text(text) if text.text == "Main Menu" => Some(text),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(drawn.spans[0].text, "Main");
+    assert_eq!(drawn.spans[0].weight, 700);
+    assert_eq!(drawn.spans[1].weight, 400);
+    // One undo step puts it back.
+    assert_eq!(app.history.undo_label(), Some("Change Text of Title"));
+    app.undo();
+    assert_eq!(text(&app), "Main Menu");
+    assert_eq!(app.history.undo_label().map(str::to_owned), undo_before);
+    app.redo();
+
+    // The bar over the box: a colour on "Menu", and typing carries on.
+    run_designer(&mut app, &ctx, &mut clock, size, double_click.clone());
+    run_designer(
+        &mut app,
+        &ctx,
+        &mut clock,
+        size,
+        vec![
+            vec![key(egui::Key::End, egui::Modifiers::NONE)],
+            vec![key(egui::Key::ArrowLeft, egui::Modifiers::SHIFT)],
+            vec![key(egui::Key::ArrowLeft, egui::Modifiers::SHIFT)],
+            vec![key(egui::Key::ArrowLeft, egui::Modifiers::SHIFT)],
+            vec![key(egui::Key::ArrowLeft, egui::Modifiers::SHIFT)],
+        ],
+    );
+    let output = designer_frame(&mut app, &ctx, &mut clock, size, Vec::new());
+    let red = widget_named(
+        &output,
+        "Colour: <font color=\"#ef476f\">",
+        ctx.pixels_per_point(),
+    )
+    .expect("the bar is over the box");
+    assert!(red.y < at.y, "the bar is above the box");
+    for events in [
+        vec![egui::Event::PointerMoved(red)],
+        vec![press(red, true)],
+        vec![press(red, false)],
+        Vec::new(),
+    ] {
+        designer_frame(&mut app, &ctx, &mut clock, size, events);
+    }
+    assert_eq!(
+        text(&app),
+        "<b>Main</b> <font color=\"#ef476f\">Menu</font>"
+    );
+    run_designer(
+        &mut app,
+        &ctx,
+        &mut clock,
+        size,
+        vec![
+            vec![key(egui::Key::End, egui::Modifiers::NONE)],
+            vec![egui::Event::Text("!".into())],
+            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+            Vec::new(),
+        ],
+    );
+    assert_eq!(
+        text(&app),
+        "<b>Main</b> <font color=\"#ef476f\">Menu</font>!"
+    );
+
+    // The box being typed in shows the tags' styles, with the bar over it.
+    if let Some(snapshots) = std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from) {
+        app.ui_designer = UiDesigner::default();
+        let frames = std::iter::repeat_n(Vec::new(), 3)
+            // Snapshot frames are half a second apart: both clicks in one.
+            .chain([vec![egui::Event::PointerMoved(at)]])
+            .chain([double_click.concat()])
+            .chain(select_main)
+            .chain([Vec::new()])
+            .collect();
+        crate::snapshot::snapshot_rendered(
+            &snapshots.join("ui-designer-rich-text.png"),
+            size,
+            frames,
+            |ctx, render_state| {
+                egui::CentralPanel::default()
+                    .show(ctx, |ui| app.ui_designer_pane(ui, Some(render_state)));
+            },
+        );
+    }
+    let _ = std::fs::remove_dir_all(&folder);
+}
