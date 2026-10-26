@@ -194,7 +194,7 @@ impl EditorApp {
             let Some(relative) = axcenity_assets::safe_path(&blob.path) else {
                 continue;
             };
-            let disk = folder.join(relative);
+            let disk = folder.join(&relative);
             let result = match &blob.after {
                 Some(bytes) => disk
                     .parent()
@@ -202,7 +202,7 @@ impl EditorApp {
                     .and_then(|()| fs::write(&disk, bytes.as_slice())),
                 None => match fs::remove_file(&disk) {
                     Err(err) if err.kind() == ErrorKind::NotFound => Ok(()),
-                    other => other,
+                    other => other.map(|()| remove_empty_folders(&folder, &relative)),
                 },
             };
             if let Err(err) = result {
@@ -213,6 +213,21 @@ impl EditorApp {
             written += 1;
         }
         self.asset_browser.refresh();
+        self.animation.refresh();
         written
+    }
+}
+
+/// Removes the folders around the removed file `relative` (in `project`)
+/// that are empty now, up to but not including the top two levels
+/// (`assets/models`), so undoing an import leaves no empty folders behind.
+fn remove_empty_folders(project: &Path, relative: &Path) {
+    let mut folder = relative.parent();
+    while let Some(at) = folder.filter(|at| at.components().count() > 2) {
+        // Fails, and stops, on a folder that still has something in it.
+        if fs::remove_dir(project.join(at)).is_err() {
+            break;
+        }
+        folder = at.parent();
     }
 }

@@ -17,7 +17,8 @@ from pathlib import Path
 PLAN = Path("plans/axcenity-engine-unified.md")
 PRD = Path("prd/axcenity-engine-v2.md")
 
-PHASE_HEADING = re.compile(r"^## Phase (\d+): (.+)$")
+# A phase is numbered, with a letter for one added between others ("8a").
+PHASE_HEADING = re.compile(r"^## Phase (\d+[a-z]?): (.+)$")
 # The PRD a plan cites in its header, such as "(PRD `prd/axcenity-engine-v2.md`)".
 PRD_REFERENCE = re.compile(r"`(prd/[^`]+\.md)`")
 # Stories are listed as "**User stories**: 60, 58" or "**From**: v2 Phase 13 (stories 16, 20)".
@@ -32,7 +33,8 @@ def read(path):
 
 
 def phases():
-    """(number, title, lines of the section) for each phase, in order."""
+    """(number, title, lines of the section) for each phase, in order. The
+    number is text, as a phase like "8a" has a letter."""
     found = []
     current = None
     for line in read(PLAN):
@@ -43,7 +45,7 @@ def phases():
                 found.append(current)
                 current = None
         if match:
-            current = (int(match.group(1)), match.group(2), [line])
+            current = (match.group(1), match.group(2), [line])
         elif current:
             current[2].append(line)
     if current:
@@ -72,7 +74,7 @@ def status():
     for number, title, lines in all_phases:
         ticked, total = counts(lines)
         marker = "  <- next" if upcoming and number == upcoming[0] else ""
-        print(f"Phase {number:>2}: {ticked}/{total}  {title}{marker}")
+        print(f"Phase {number:>3}: {ticked}/{total}  {title}{marker}")
     if not upcoming:
         print("Every phase is complete.")
 
@@ -95,18 +97,19 @@ def show(which):
         if not phase:
             sys.exit("Every phase is complete.")
     else:
-        matches = [p for p in all_phases if str(p[0]) == which]
+        matches = [p for p in all_phases if p[0] == which]
         if not matches:
             sys.exit(f"No phase {which}. Run `status` to list them.")
         phase = matches[0]
 
-    number, _, lines = phase
+    _, _, lines = phase
     print("\n".join(lines).rstrip())
 
-    previous = [p for p in all_phases if p[0] == number - 1]
-    if previous:
-        ticked, total = counts(previous[0][2])
-        print(f"\n(Previous phase {number - 1}: {ticked}/{total} criteria ticked)")
+    at = all_phases.index(phase)
+    if at > 0:
+        previous, _, previous_lines = all_phases[at - 1]
+        ticked, total = counts(previous_lines)
+        print(f"\n(Previous phase {previous}: {ticked}/{total} criteria ticked)")
 
     for line in lines:
         match = STORIES.search(line)

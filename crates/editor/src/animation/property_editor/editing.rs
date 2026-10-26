@@ -4,6 +4,9 @@ impl PropertyDoc {
     /// Keys every value at the playhead, making the tracks it needs, and
     /// selects those keys.
     pub fn key_values(&mut self, values: &[EvaluatedProperty]) {
+        if self.read_only {
+            return;
+        }
         let time = self.snapped(self.playhead);
         let mut keyed = BTreeSet::new();
         for value in values {
@@ -56,6 +59,9 @@ impl PropertyDoc {
     }
 
     pub fn delete_selected(&mut self) {
+        if self.read_only {
+            return;
+        }
         for (track_id, key_id) in std::mem::take(&mut self.selected) {
             if let Some(track) = self.file.tracks.iter_mut().find(|t| t.id == track_id) {
                 track.keys.retain(|k| k.id != key_id);
@@ -64,6 +70,9 @@ impl PropertyDoc {
     }
 
     pub fn delete_track(&mut self, id: &str) {
+        if self.read_only {
+            return;
+        }
         self.file.tracks.retain(|t| t.id != id);
         self.selected.retain(|(track, _)| track != id);
         if self.selected_track.as_deref() == Some(id) {
@@ -104,6 +113,9 @@ impl PropertyDoc {
     /// Pastes the copied keys at the playhead, on the tracks they came
     /// from, replacing keys at the same times; then selects them.
     pub fn paste(&mut self) {
+        if self.read_only {
+            return;
+        }
         let mut pasted = BTreeSet::new();
         for (track_id, offset, key) in self.clipboard.clone() {
             let time = self.snapped(self.playhead + offset);

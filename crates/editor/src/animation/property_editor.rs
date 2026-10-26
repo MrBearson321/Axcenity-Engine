@@ -25,6 +25,7 @@ use axcenity_core::InstanceId;
 use eframe::egui;
 
 use super::object_preview::{Focus, ObjectPreview};
+use super::posing::Folds;
 use crate::theme::{self, icons};
 
 /// The dope sheet's row height and ruler height, in points.
@@ -90,6 +91,11 @@ pub struct PropertyDoc {
     /// Tracks picked in the Curves view's list.
     pub curve_picked: BTreeSet<String>,
     curve_gesture: Option<curves::CurveGesture>,
+    /// Keys can be selected and looked at, but not moved, added, pasted
+    /// or deleted (an imported clip's motion).
+    pub read_only: bool,
+    /// Where the dope sheet last drew.
+    pub sheet: egui::Rect,
 }
 
 impl PropertyDoc {
@@ -115,7 +121,38 @@ impl PropertyDoc {
             curve_view: CurveView::default(),
             curve_picked: BTreeSet::new(),
             curve_gesture: None,
+            read_only: false,
+            sheet: egui::Rect::NOTHING,
         }
+    }
+
+    /// `file`'s keys to look at and select, but not change.
+    pub fn read_only(path: String, file: ClipFile) -> Self {
+        Self {
+            read_only: true,
+            ..Self::open(path, file)
+        }
+    }
+
+    /// Shows `file` in place of the keys shown now, keeping the selection
+    /// of keys it still has.
+    pub fn show_file(&mut self, file: ClipFile) {
+        let has = |(track, key): &KeyRef| {
+            file.tracks
+                .iter()
+                .any(|t| &t.id == track && t.keys.iter().any(|k| &k.id == key))
+        };
+        self.selected.retain(has);
+        if self
+            .selected_track
+            .as_ref()
+            .is_none_or(|id| !file.tracks.iter().any(|t| &t.id == id))
+        {
+            self.selected_track = file.tracks.first().map(|t| t.id.clone());
+        }
+        self.written = file.clone();
+        self.opened = file.clone();
+        self.file = file;
     }
 
     pub fn unwritten(&self) -> bool {
@@ -222,6 +259,9 @@ impl PropertyDoc {
     /// Something was moved in the preview: with `record`, it's keyed at the
     /// playhead; otherwise it shows until the playhead moves.
     pub fn edit(&mut self, edits: Vec<EvaluatedProperty>, record: bool) {
+        if self.read_only {
+            return;
+        }
         self.playing = false;
         if record {
             self.key_values(&edits);

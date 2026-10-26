@@ -15,6 +15,8 @@ use axcenity_anim::{
 use axcenity_assets::{Assets, BoneTransform, Model, Rig, Take};
 use eframe::egui;
 
+use super::posing::Folds;
+use super::property_editor::PropertyDoc;
 use super::timeline::Timeline;
 use crate::theme::icons;
 
@@ -142,6 +144,12 @@ pub struct ClipDoc {
     /// the playhead they were turned at (moving it drops them).
     pending: Vec<(String, Vec<f32>)>,
     pending_at: f64,
+    /// The take's motion as the keys Convert to keys would make, shown
+    /// read-only under the timeline.
+    imported: PropertyDoc,
+    /// The preview model and the clip those keys were worked out for, and
+    /// the keys or why there aren't any.
+    imported_for: Option<(Option<String>, LinkedClip, Result<ClipFile, String>)>,
 }
 
 /// The preview model's skeleton at the playhead.
@@ -165,6 +173,8 @@ impl ClipDoc {
             .takes(&file.source)
             .ok_or_else(|| format!("its model file `{}` can't be read", file.source));
         let mut doc = Self {
+            imported: PropertyDoc::read_only(path.clone(), ClipFile::new(file.length())),
+            imported_for: None,
             path,
             written: file.clone(),
             opened: file.clone(),
@@ -427,10 +437,8 @@ impl ClipDoc {
         });
     }
 
-    /// Convert to keys: the clip with its take baked into bone keys on the
-    /// preview model's skeleton, and no link (see
-    /// [`axcenity_anim::convert_to_keys`]).
-    pub fn converted(&self, assets: &Assets) -> Result<ClipFile, String> {
+    /// The preview model, if it can be loaded and has a skeleton.
+    fn rigged_preview(&self, assets: &Assets) -> Result<Arc<Model>, String> {
         let mesh_id = self
             .preview_model
             .as_deref()
@@ -438,12 +446,113 @@ impl ClipDoc {
         let model = assets
             .model(mesh_id)
             .ok_or_else(|| format!("`{mesh_id}` can't be loaded"))?;
-        let rig = model
-            .rig
-            .as_deref()
-            .ok_or_else(|| format!("`{mesh_id}` has no skeleton"))?;
-        let takes = self.takes.clone()?;
-        axcenity_anim::convert_to_keys(&self.file.to_file(), takes, rig)
+        if model.rig.is_none() {
+            return Err(format!("`{mesh_id}` has no skeleton"));
+        }
+        Ok(model)
+    }
+
+    /// Convert to keys: the clip with its take baked into bone keys on the
+    /// preview model's skeleton, and no link (see
+    /// [`axcenity_anim::convert_to_keys`]).
+    pub fn converted(&self, assets: &Assets) -> Result<ClipFile, String> {
+        let model = self.rigged_preview(assets)?;
+        let rig = model.rig.as_deref().expect("a rigged preview");
+        axcenity_anim::convert_to_keys(&self.file.to_file(), self.takes.clone()?, rig)
+    }
+
+    /// The keys Convert to keys would make for the bones the take moves,
+    /// without the clip's own tracks: the imported motion as keys.
+    pub fn take_keys(&self, assets: &Assets) -> Result<ClipFile, String> {
+        let model = self.rigged_preview(assets)?;
+        let rig = model.rig.as_deref().expect("a rigged preview");
+        let mut file =
+            axcenity_anim::convert_to_keys(&self.file.to_file(), self.takes.clone()?, rig)?;
+        let locked = self.locked(rig);
+        let paths = bone_paths(rig);
+        file.tracks.retain(|track| {
+            track.property == PropertyName::Bone
+                && find_bone(rig, &paths, &track.target).is_some_and(|bone| locked[bone])
+        });
+        Ok(file)
+    }
+
+    /// The read-only view of the take's keys, worked out again when the
+    /// clip or the preview model changed. Whatever was done to its keys is
+    /// put back.
+    fn imported_view(&mut self, assets: &Assets) -> Result<&mut PropertyDoc, String> {
+        let stale = self
+            .imported_for
+            .as_ref()
+            .is_none_or(|(model, file, _)| *model != self.preview_model || *file != self.file);
+        if stale {
+            let keys = self.take_keys(assets);
+            if let Ok(file) = &keys {
+                self.imported.show_file(file.clone());
+            }
+            self.imported_for = Some((self.preview_model.clone(), self.file.clone(), keys));
+        }
+        let (_, _, keys) = self.imported_for.as_ref().expect("just worked out");
+        let file = keys.as_ref().map_err(Clone::clone)?;
+        if self.imported.file != *file {
+            self.imported.file = file.clone();
+        }
+        Ok(&mut self.imported)
+    }
+
+    /// The imported keys as shown under the timeline, for tests.
+    #[cfg(test)]
+    pub fn imported_keys(&mut self, assets: &Assets) -> Result<&mut PropertyDoc, String> {
+        self.imported_view(assets)
+    }
+
+    /// Shows the imported keys as curves (or the dope sheet), for tests.
+    #[cfg(test)]
+    pub fn show_imported_curves(&mut self, on: bool) {
+        self.imported.show_curves = on;
+    }
+
+    /// Under the timeline: the take's motion as the keys Convert to keys
+    /// would make, one row per bone it moves, in the dope sheet or Curves.
+    /// They can be selected but not changed. Returns true if Convert to
+    /// keys was pressed.
+    pub fn imported(&mut self, ui: &mut egui::Ui, assets: &Assets) -> bool {
+        let mut convert = false;
+        ui.horizontal_wrapped(|ui| {
+            ui.weak(format!(
+                "{} Imported motion: Convert to keys to edit it",
+                icons::LOCK
+            ));
+            if ui
+                .button(format!("{} Convert to keys", icons::KEY))
+                .on_hover_text(
+                    "Bake the take into bone keys you can edit, and unlink the clip (one undo step)",
+                )
+                .clicked()
+            {
+                convert = true;
+            }
+        });
+        let fps = f64::from(self.frame_rate()) * self.file.speed.abs().max(1e-3);
+        let playhead = self.playhead;
+        let moved = match self.imported_view(assets) {
+            Ok(view) => {
+                view.fps = fps;
+                view.playing = false;
+                view.playhead = playhead;
+                view.keys(ui, None);
+                (view.playhead != playhead).then_some(view.playhead)
+            }
+            Err(problem) => {
+                ui.weak(format!("Its keys can't be shown: {problem}"));
+                None
+            }
+        };
+        if let Some(at) = moved {
+            self.playhead = at;
+            self.playing = false;
+        }
+        convert
     }
 
     /// Whether root motion found a bone to move the model by.
@@ -506,14 +615,20 @@ impl ClipDoc {
         }
     }
 
-    /// The bones of the preview model's skeleton as a tree: those the take
-    /// moves locked (🔒), the rest selectable to pose, with their key
-    /// counts (right-click one to remove its keys).
-    pub fn bones(&mut self, ui: &mut egui::Ui, assets: &Assets, selected: &mut Option<usize>) {
-        let Some(model) = self
+    /// The bones of the preview model's skeleton as a tree that folds
+    /// (`folds`): those the take moves locked (🔒), the rest selectable to
+    /// pose, with their key counts (right-click one to remove its keys).
+    pub fn bones(
+        &mut self,
+        ui: &mut egui::Ui,
+        assets: &Assets,
+        selected: &mut Option<usize>,
+        folds: &mut Folds,
+    ) {
+        let Some((mesh_id, model)) = self
             .preview_model
-            .as_deref()
-            .and_then(|id| assets.model(id))
+            .clone()
+            .and_then(|id| Some((id.clone(), assets.model(&id)?)))
         else {
             ui.weak("No model to show the bones of.");
             return;
@@ -524,23 +639,31 @@ impl ClipDoc {
         };
         let locked = self.locked(rig);
         let keys = self.bone_keys(rig);
-        let rows = super::posing::bone_rows(rig);
-        let moved = rows.iter().filter(|(bone, _)| locked[*bone]).count();
-        ui.weak(format!(
-            "{} bones, {moved} moved by the take {}",
-            rows.len(),
-            icons::LOCK
-        ));
+        let named = super::posing::bone_rows(rig);
+        let moved = named.iter().filter(|(bone, _)| locked[*bone]).count();
+        ui.horizontal_wrapped(|ui| {
+            ui.weak(format!(
+                "{} bones, {moved} moved by the take {}",
+                named.len(),
+                icons::LOCK
+            ));
+            folds.buttons(ui, &mesh_id, rig);
+        });
         let mut remove = None;
-        for (bone, depth) in rows {
-            let row = super::posing::bone_row(
+        let mut toggle = None;
+        for tree_row in folds.rows(&mesh_id, rig, &keys) {
+            let bone = tree_row.bone;
+            let (row, toggled) = super::posing::bone_row(
                 ui,
                 &rig.bones[bone].name,
-                depth,
+                &tree_row,
                 *selected == Some(bone),
                 locked[bone],
                 keys[bone],
             );
+            if toggled {
+                toggle = Some(bone);
+            }
             if row.clicked() {
                 *selected = Some(bone);
             }
@@ -555,6 +678,9 @@ impl ClipDoc {
                     }
                 });
             }
+        }
+        if let Some(bone) = toggle {
+            folds.toggle(&mesh_id, rig, bone);
         }
         if let Some(bone) = remove {
             self.remove_bone_keys(rig, bone);

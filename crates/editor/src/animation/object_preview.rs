@@ -323,6 +323,14 @@ impl ObjectPreview {
         self.rig().map(bone_paths).unwrap_or_default()
     }
 
+    /// The root's `MeshId`, if it's a MeshPart.
+    pub fn mesh_id(&self) -> Option<String> {
+        let root = self.pristine.get(self.root?)?;
+        root.property("MeshId")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    }
+
     /// The root's rig, when it has bones.
     pub fn rig(&self) -> Option<&axcenity_assets::Rig> {
         self.skeleton.as_ref()?.0.rig.as_deref()

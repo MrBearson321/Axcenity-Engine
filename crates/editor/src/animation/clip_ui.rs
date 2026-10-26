@@ -70,7 +70,7 @@ impl AnimationStudio {
         }
 
         let mut rename = false;
-        let property = matches!(self.clip.doc, Some(Clip::Property(_)));
+        let mut convert = false;
         let mut events = Vec::new();
         if stacked {
             egui::CentralPanel::default().show_inside(ui, |ui| {
@@ -93,7 +93,7 @@ impl AnimationStudio {
                             .icon(widgets::chevron)
                             .show(ui, |ui| events.extend(self.clip_drawer(ui, assets)));
                         ui.separator();
-                        self.clip_timeline(ui);
+                        convert |= self.clip_timeline(ui, assets);
                         ui.separator();
                         egui::CollapsingHeader::new(format!("{} Settings", icons::SLIDERS))
                             .id_salt("clip inspector stacked")
@@ -103,21 +103,17 @@ impl AnimationStudio {
                     });
             });
         } else {
-            // The dope sheet grows with its tracks, so it can be resized;
-            // the timeline is one strip.
-            let bottom = if property {
-                egui::TopBottomPanel::bottom("clip dope sheet")
-                    .resizable(true)
-                    .default_height(170.0)
-                    .min_height(80.0)
-            } else {
-                egui::TopBottomPanel::bottom("clip timeline").resizable(false)
-            };
-            bottom.show_inside(ui, |ui| {
-                egui::ScrollArea::vertical()
-                    .id_salt("clip timeline scroll")
-                    .show(ui, |ui| self.clip_timeline(ui))
-            });
+            // The dope sheet (a linked clip's under its timeline) grows
+            // with its tracks, so it can be resized.
+            egui::TopBottomPanel::bottom("clip dope sheet")
+                .resizable(true)
+                .default_height(280.0)
+                .min_height(80.0)
+                .show_inside(ui, |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("clip timeline scroll")
+                        .show(ui, |ui| convert |= self.clip_timeline(ui, assets))
+                });
             if !self.clip.hide_inspector {
                 let room = ui.available_width();
                 egui::SidePanel::right("clip inspector")
@@ -155,6 +151,16 @@ impl AnimationStudio {
                     output,
                 ));
             });
+        }
+        if convert && let Some(path) = self.clip_path() {
+            self.act(
+                Pick::ConvertToKeys(path),
+                project,
+                assets,
+                world,
+                output,
+                actions,
+            );
         }
         if rename && let Some(path) = self.clip_path() {
             self.dialog = Some(Dialog::Rename {
@@ -333,19 +339,26 @@ impl AnimationStudio {
     ) -> Option<PreviewEvent> {
         match &mut self.clip.doc {
             Some(Clip::Take(doc)) => {
-                doc.bones(ui, assets, &mut self.clip.bones.selected);
+                doc.bones(
+                    ui,
+                    assets,
+                    &mut self.clip.bones.selected,
+                    &mut self.clip.folds,
+                );
                 None
             }
-            Some(Clip::Property(doc)) => match doc.objects(ui, &self.clip.objects)? {
-                Drawn::Object(id) => {
-                    self.clip.objects.select_bone(None);
-                    Some(PreviewEvent::Select(Some(id)))
+            Some(Clip::Property(doc)) => {
+                match doc.objects(ui, &self.clip.objects, &mut self.clip.folds)? {
+                    Drawn::Object(id) => {
+                        self.clip.objects.select_bone(None);
+                        Some(PreviewEvent::Select(Some(id)))
+                    }
+                    Drawn::Bone(bone) => {
+                        self.clip.objects.select_bone(Some(bone));
+                        Some(PreviewEvent::Select(self.clip.objects.root()))
+                    }
                 }
-                Drawn::Bone(bone) => {
-                    self.clip.objects.select_bone(Some(bone));
-                    Some(PreviewEvent::Select(self.clip.objects.root()))
-                }
-            },
+            }
             None => None,
         }
     }
@@ -436,10 +449,16 @@ impl AnimationStudio {
         }
     }
 
-    /// The take clip's timeline, or the property clip's dope sheet.
-    pub(super) fn clip_timeline(&mut self, ui: &mut egui::Ui) {
+    /// The take clip's timeline with its imported keys under it, or the
+    /// property clip's dope sheet. Returns true if Convert to keys was
+    /// pressed.
+    pub(super) fn clip_timeline(&mut self, ui: &mut egui::Ui, assets: &Assets) -> bool {
         match &mut self.clip.doc {
-            Some(Clip::Take(doc)) => doc.timeline(ui),
+            Some(Clip::Take(doc)) => {
+                doc.timeline(ui);
+                ui.add_space(4.0);
+                doc.imported(ui, assets)
+            }
             Some(Clip::Property(doc)) => {
                 let focus = self.clip.objects.focus();
                 if doc.keys(ui, focus.as_ref())
@@ -447,8 +466,9 @@ impl AnimationStudio {
                 {
                     doc.key_focus(focus);
                 }
+                false
             }
-            None => {}
+            None => false,
         }
     }
 

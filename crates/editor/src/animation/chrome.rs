@@ -60,8 +60,11 @@ impl AnimationStudio {
         }
 
         let narrow = ui.available_width() < OUTLINE_BELOW;
+        let used = self.used_files(project, world);
         let (mut go, pick, new) = egui::TopBottomPanel::top("animation breadcrumb")
-            .show_inside(ui, |ui| self.breadcrumb(ui, subject.as_ref(), narrow))
+            .show_inside(ui, |ui| {
+                self.breadcrumb(ui, subject.as_ref(), narrow, &used)
+            })
             .inner;
         if !narrow && let Some(subject) = &subject {
             let room = ui.available_width();
@@ -172,14 +175,16 @@ impl AnimationStudio {
         actions
     }
 
-    /// The breadcrumb, then the library picker and New. When `narrow`, the
-    /// first crumb drops down the outline. Returns where a crumb or the
-    /// outline went, what was picked, and what New was asked to make.
+    /// The breadcrumb, then the library picker (marking files not in
+    /// `used`) and New. When `narrow`, the first crumb drops down the
+    /// outline. Returns where a crumb or the outline went, what was picked,
+    /// and what New was asked to make.
     pub(super) fn breadcrumb(
         &mut self,
         ui: &mut egui::Ui,
         subject: Option<&Subject>,
         narrow: bool,
+        used: &HashSet<String>,
     ) -> (Option<Go>, Option<Pick>, Option<New>) {
         let crumbs = self.crumbs(subject);
         let mut go = None;
@@ -244,7 +249,7 @@ impl AnimationStudio {
             };
             let mut paths = self.files.controllers.clone();
             paths.extend(self.files.clips.iter().cloned());
-            let pick = picker(ui, &mut self.search, &paths, open.as_deref());
+            let pick = picker(ui, &mut self.search, &paths, open.as_deref(), used);
             ui.menu_button(format!("{} New", icons::PLUS), |ui| {
                 let visuals = ui.visuals().clone();
                 let item =
@@ -281,9 +286,10 @@ impl AnimationStudio {
         (go, pick, new)
     }
 
-    /// The outline of what the followed object's Animator has. Returns
+    /// The outline of what the followed object's Animator has: its State
+    /// Machine's states and its Animations, each of which folds. Returns
     /// where a click went.
-    pub(super) fn outline(&self, ui: &mut egui::Ui, subject: &Subject) -> Option<Go> {
+    pub(super) fn outline(&mut self, ui: &mut egui::Ui, subject: &Subject) -> Option<Go> {
         let mut go = None;
         let visuals = ui.visuals().clone();
         let row = |ui: &mut egui::Ui, kind: AnimKind, text: &str, selected: bool| {
@@ -316,18 +322,27 @@ impl AnimationStudio {
         if !subject.state_machine.is_empty() {
             let open = self.view == View::StateMachine
                 && self.controller_path().as_deref() == Some(subject.state_machine.as_str());
-            if row(
-                ui,
-                AnimKind::StateMachine,
-                AnimKind::StateMachine.label(),
-                open,
-            )
-            .on_hover_text(&subject.state_machine)
-            .clicked()
-            {
-                go = Some(Go::StateMachine);
-            }
+            ui.horizontal(|ui| {
+                if posing::fold_toggle(ui, Some(self.outline_folds.states)) {
+                    self.outline_folds.states = !self.outline_folds.states;
+                }
+                if row(
+                    ui,
+                    AnimKind::StateMachine,
+                    AnimKind::StateMachine.label(),
+                    open,
+                )
+                .on_hover_text(&subject.state_machine)
+                .clicked()
+                {
+                    go = Some(Go::StateMachine);
+                }
+            });
+            let folded = self.outline_folds.states;
             ui.indent("outline states", |ui| {
+                if folded {
+                    return;
+                }
                 for (state, clips) in self.states_of(&subject.state_machine) {
                     let first = clips.first().cloned();
                     let open = showing_clip
@@ -351,8 +366,18 @@ impl AnimationStudio {
             });
         }
         ui.add_space(4.0);
-        ui.weak("Animations");
-        for animation in &subject.animations {
+        ui.horizontal(|ui| {
+            if posing::fold_toggle(ui, Some(self.outline_folds.animations)) {
+                self.outline_folds.animations = !self.outline_folds.animations;
+            }
+            ui.weak("Animations");
+        });
+        let shown = if self.outline_folds.animations {
+            &[][..]
+        } else {
+            &subject.animations[..]
+        };
+        for animation in shown {
             let open = showing_clip
                 && !animation.clip.is_empty()
                 && clip.as_deref() == Some(animation.clip.as_str())

@@ -1,6 +1,6 @@
 # Plan: Axcenity Engine, unified remainder of v2 and v3
 
-> Sources: `plans/axcenity-engine-v2.md` (PRD `prd/axcenity-engine-v2.md`) and `plans/axcenity-engine-v3.md` (the developer's requests of 2026-10-22 and 2026-10-23). This plan holds only what has not been built, as of 2026-10-25 (commit `a9b6638`). The phases run in order. Each phase names the v2 or v3 phase it came from. Where the text changed from the source plan, the change is marked **Changed**.
+> Sources: `plans/axcenity-engine-v2.md` (PRD `prd/axcenity-engine-v2.md`) and `plans/axcenity-engine-v3.md` (the developer's requests of 2026-10-22 and 2026-10-23), and the developer's requests of 2026-10-25 (Phases 8a to 8d). This plan holds only what has not been built, as of 2026-10-25 (commit `a9b6638`). The phases run in order. Each phase names the v2 or v3 phase it came from. Where the text changed from the source plan, the change is marked **Changed**.
 >
 > Built and committed, but not yet ticked: v2 Phase 12 and v3 Phases 4, 6, 7 and 8. Their open criteria are under **Open checks** below. They need a hands-on check, not new work.
 
@@ -216,6 +216,115 @@ New easings and tangents are optional fields, so existing clips read unchanged a
 - [x] Changing a key's easing changes the motion in the preview and in Play.
 - [x] Bezier tangents dragged in the curve editor are saved and reloaded.
 - [x] A clip saved before this phase opens and plays the same.
+
+---
+
+## Phase 8a: Imported clips you can see, tidier trees, no leftover imports
+
+**From**: the developer's requests of 2026-10-25
+
+### What to build
+
+**An imported clip's keys.** A linked clip (one imported from a take) shows **Dope sheet · Curves** under its timeline, as a keyed clip does. They show the take's motion over the clip's range, one row per bone the take moves. They are read-only and are worked out with `anim::convert_to_keys` on a copy, so they are exactly the keys Convert to keys would make. A note over them says "Imported motion: Convert to keys to edit it", with the button beside it. Selecting a key or a curve works, but nothing can be dragged or deleted.
+
+**Folding.** In the drawer's bone tree, a bone with bones under it has a ▸/▾ to fold them. Collapse all and Expand all are in the drawer's header. A tree opens with its first three levels showing. A folded bone shows a dot when a bone under it has keys. Folds are kept per model while the editor runs. The outline's **State Machine** and **Animations** fold the same way.
+
+**Leftover imports.** Undoing an import removes the files it copied and wrote: the model, its textures, its clips and its state machine. Redo puts them back. This uses `History::record_blobs`, as packages do. **Changed**: before this phase, undo left the copied files in the project. Open ▾ marks a clip or state machine that nothing in the scene uses as **not used**, and its ⋯ menu still deletes it.
+
+### Acceptance criteria
+
+- [x] An imported FBX clip shows its bones' keys in the dope sheet and their curves in Curves, and they can't be changed until Convert to keys.
+- [x] A Mixamo rig's bone tree folds and unfolds, and Collapse all leaves only the root showing.
+- [x] Importing an animated FBX and then undoing leaves no files from it in the project, and redo brings the MeshPart and its files back.
+- [x] The keys and curves shown match `anim::convert_to_keys` for the same take and clip range, including when the clip starts or ends partway through the take.
+- [x] Imported keys and curves can be selected, but never moved, deleted or otherwise changed. Convert to keys makes editable keys without changing the clip's motion.
+- [x] Undo removes only the files that import made, and keeps files and assets that were already there. Redo brings back the same assets and references, with no duplicates.
+- [x] Folding and unfolding works on nested bones, and each tree stays folded as it was when you switch between models and clips during a session.
+- [x] Open ▾ marks a clip or state machine as **not used** when nothing in the scene uses it, and the mark updates when something starts or stops using it.
+
+---
+
+## Phase 8b: Easier posing and smooth keys
+
+**From**: the developer's requests of 2026-10-25
+
+### What to build
+
+**Steady rotation.** Dragging a rotate ring turns the bone by how far the mouse moves along the ring on screen: a steady number of degrees per point. A ring seen nearly edge-on no longer spins. Today the turn comes from where the mouse ray meets the ring's plane. Hold Shift while dragging for fine turns (a quarter of the speed). The Scene View's rotate tool gets the same drag.
+
+**Snapping controls.** Above the preview, beside Move and Rotate, there are two snap settings. Turn snap is Off, 1°, 5°, 15° or 45°, and starts at 5°. Move snap is Off, 0.01, 0.05, 0.1 or 0.5 studs, and starts at 0.05. Holding Ctrl during a drag flips snapping for that drag. The settings are kept while the editor runs.
+
+**World and Local axes.** A toggle sets whether the gizmo turns around the world's axes or the bone's own.
+
+**Smooth keys.** New keys use the **New keys** easing picked in the dope sheet's toolbar. That applies to keys from Record, K, posing and Add track. The choices are Smooth (Ease InOut, Sine), Linear and Constant, and Smooth is the default. **Changed**: new keys were always Linear, so motion between two poses started and stopped with a jerk. Right-clicking selected keys has **Easing ▸**, which sets the easing of all of them at once. Existing clips don't change.
+
+### Acceptance criteria
+
+- [ ] A drag of the same length on screen turns a bone by the same angle, whether its ring faces the camera or is nearly edge-on.
+- [ ] With turn snap at 15°, a bone only turns in 15° steps. With it Off, or with Ctrl held, it turns freely.
+- [ ] Two keys made by posing play with ease-in and ease-out in the preview and in Play. Changing their easing to Linear makes the motion linear.
+
+---
+
+## Phase 8c: Moving joints and inverse kinematics
+
+**From**: the developer's requests of 2026-10-25
+
+### What to build
+
+**Move with IK.** The Move tool works on every bone, not only roots. Moving a joint that isn't a root turns the bones above it so that the joint reaches where it's dragged. No bone gets longer or shorter. The chain is the joint's parent and grandparent by default (forearm and upper arm for a hand). A **Chain** setting (1 to 4 bones) sets how many bones turn. The joint is dragged on a plane facing the camera, or along a gizmo axis. A limb keeps bending the way it bent: a knee stays forward and an elbow stays back.
+
+**Pins.** Right-click a joint and choose **Pin** to keep it where it is in the world. When the root or another chain moves, a pinned joint's own chain turns to keep it in place. So moving the hips down with both feet pinned bends the knees. Pins are shown as a pin icon, are kept per clip while the editor runs, and aren't saved in the clip.
+
+**Keys.** With Record on, a move keys every bone it turned, at the playhead. **K** does the same. The keys are ordinary `Bone` rotation keys, so they play everywhere bone keys play and need nothing at runtime.
+
+**Solver.** The solver is in the `anim` crate (`anim/src/ik.rs`) and is plain math with its own tests. It solves two-bone chains exactly, with the current bend as the pole. Longer chains use FABRIK and then turn each bone back toward its old twist. If the target can't be reached, the chain points straight at it.
+
+IK that runs during Play (feet on slopes, look-at) is not in this phase.
+
+### Acceptance criteria
+
+- [ ] Dragging a hand moves it to the mouse with the arm's two bones turning, and every bone keeps its length.
+- [ ] With both feet pinned, moving the hips down bends the knees forward and the feet stay where they were.
+- [ ] A pose made with IK and keyed with Record plays the same in the preview and in Play.
+
+---
+
+## Phase 8d: Blueprint-style state machines
+
+**From**: the developer's requests of 2026-10-25. **Changed**: the decision that "Animator state machines are not node graphs" still holds for the file and the runtime. This phase changes only how the graph is drawn and edited. It stays states and transitions, in the same file format.
+
+### What to build
+
+**Nodes and wires.** The state machine graph looks and works like the script Graph view (`block_editor/graph.rs`):
+- Each state is a node with its name, what it plays (a clip, or "blend tree · Speed") and a progress bar while previewing.
+- Each node has an input pin on the left and an output pin on the right.
+- An **Entry** node is wired to the default state. Rewiring Entry changes the default state.
+- **Any State** is a node with only an output pin.
+- Drag from an output pin to a node to make a transition. Dropping on empty space opens a menu: a new state playing one of the project's clips (searchable), or an empty state.
+- Drop a clip from Open ▾ or the Assets panel onto the graph to make a state that plays it.
+- Right-click → Make Transition still works.
+
+**Conditions on the wire.** Each wire has a label that says when it happens, in words: "Speed > 0.1", "Jump", "when Walk finishes" or "always". Clicking the label opens an editor right there:
+- **When…** rows: a parameter (or **New parameter…**, typed inline), a test that fits the parameter's type, and a value.
+- **+ condition**.
+- **Wait for the clip to finish** (exit time).
+- **Blend** (Instant, Smooth or Slow).
+- **Delete transition**.
+
+The inspector keeps the full settings.
+
+**Parameters panel.** The graph's left side lists the parameters as chips with type icons, with **+** to add one. Drag a chip onto a wire to add a condition on it.
+
+**Explained.** A state machine with no transitions shows a three-step guide in the graph: add states, wire them, and say when on the wire. The inspector's headers say what each part is. For example: "Transition: when all of these are true, blend from Walk to Run."
+
+**File.** The format is unchanged. Entry's position is saved in a new optional `entry_position` field, so older files read the same.
+
+### Acceptance criteria
+
+- [ ] A transition made by dragging from Idle's output pin to Walk, with "Speed > 0.1" set on its wire label, plays in the live preview when the Speed slider passes 0.1, and in Play.
+- [ ] Rewiring Entry to another state makes that state the default.
+- [ ] A state machine saved before this phase opens with the same states, transitions and positions.
 
 ---
 

@@ -34,8 +34,14 @@ impl PropertyDoc {
     }
 
     /// The drawer: the copy's objects as a tree, each with its tracks, and
-    /// under a skinned root its bones. Returns what was clicked.
-    pub fn objects(&mut self, ui: &mut egui::Ui, preview: &ObjectPreview) -> Option<Drawn> {
+    /// under a skinned root its bones, which fold (`folds`). Returns what
+    /// was clicked.
+    pub fn objects(
+        &mut self,
+        ui: &mut egui::Ui,
+        preview: &ObjectPreview,
+        folds: &mut Folds,
+    ) -> Option<Drawn> {
         let Some(root) = preview.root() else {
             ui.weak("Select a Part, Model or ScreenGui in the Explorer.");
             return None;
@@ -67,39 +73,60 @@ impl PropertyDoc {
             if id == root
                 && let Some(rig) = preview.rig()
             {
+                let model = preview.mesh_id().unwrap_or_default();
                 let paths = axcenity_anim::bone_paths(rig);
-                for (bone, bone_depth) in super::super::posing::bone_rows(rig) {
-                    let tracks: Vec<&PropertyTrack> = self
-                        .file
+                let tracks_of = |bone: usize| -> Vec<&PropertyTrack> {
+                    self.file
                         .tracks
                         .iter()
                         .filter(|t| t.property == PropertyName::Bone)
                         .filter(|t| axcenity_anim::find_bone(rig, &paths, &t.target) == Some(bone))
-                        .collect();
+                        .collect()
+                };
+                let keys: Vec<usize> = (0..rig.bones.len())
+                    .map(|bone| {
+                        let tracks = tracks_of(bone);
+                        // Folded away, they're still this copy's.
+                        shown.extend(tracks.iter().map(|t| t.id.clone()));
+                        tracks.iter().map(|t| t.keys.len()).sum()
+                    })
+                    .collect();
+                ui.horizontal(|ui| {
+                    ui.add_space(depth as f32 * 12.0 + 12.0);
+                    ui.weak(format!("{} Bones", icons::BONE));
+                    folds.buttons(ui, &model, rig);
+                });
+                let mut toggle = None;
+                for row in folds.rows(&model, rig, &keys) {
+                    let bone = row.bone;
                     ui.horizontal(|ui| {
                         ui.add_space(depth as f32 * 12.0 + 12.0);
-                        let keys = tracks.iter().map(|t| t.keys.len()).sum();
-                        let row = super::super::posing::bone_row(
+                        let (button, toggled) = super::super::posing::bone_row(
                             ui,
                             &rig.bones[bone].name,
-                            bone_depth,
+                            &row,
                             preview.bones.selected == Some(bone),
                             false,
-                            keys,
+                            keys[bone],
                         );
-                        if row.clicked() {
+                        if button.clicked() {
                             picked = Some(Drawn::Bone(bone));
                         }
+                        if toggled {
+                            toggle = Some(bone);
+                        }
                     });
-                    for track in tracks {
-                        shown.insert(track.id.clone());
+                    for track in tracks_of(bone) {
                         ui.horizontal(|ui| {
                             ui.add_space(
-                                depth as f32 * 12.0 + 12.0 + bone_depth as f32 * 8.0 + 18.0,
+                                depth as f32 * 12.0 + 12.0 + row.depth as f32 * 8.0 + 34.0,
                             );
                             self.track_label(ui, track, &mut delete);
                         });
                     }
+                }
+                if let Some(bone) = toggle {
+                    folds.toggle(&model, rig, bone);
                 }
             }
             for track in self.file.tracks.iter().filter(|t| t.target == target) {
@@ -180,6 +207,9 @@ impl PropertyDoc {
                     .clicked()
             {
                 self.frame_all();
+            }
+            if self.read_only {
+                return;
             }
             let addable: Vec<&EvaluatedProperty> = focus
                 .map(|focus| {
@@ -262,6 +292,9 @@ impl PropertyDoc {
     /// Delete, K, Ctrl+C, Ctrl+X and Ctrl+V, while the mouse is over the
     /// Animation tab. Returns true if K (Key selected) was pressed.
     pub fn shortcuts(&mut self, ui: &egui::Ui) -> bool {
+        if self.read_only {
+            return false;
+        }
         let (delete, key, copy, cut, paste) = ui.input(|input| {
             let command = input.modifiers.command;
             let plain = input.modifiers.is_none();
@@ -493,6 +526,7 @@ impl PropertyDoc {
             egui::vec2(ui.available_width(), height),
             egui::Sense::click_and_drag(),
         );
+        self.sheet = rect;
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 0.0, palette.inset);
 
@@ -636,7 +670,8 @@ impl PropertyDoc {
                     .iter()
                     .find(|(key, _)| *key == hit)
                     .map_or(0.0, |(_, time)| *time);
-                Some(Gesture::Keys {
+                // Read-only keys are selected, not moved.
+                (!self.read_only).then_some(Gesture::Keys {
                     from: t_of(origin.x),
                     anchor,
                     start,

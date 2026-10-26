@@ -208,11 +208,86 @@ fn importing_a_model_copies_it_and_inserts_a_mesh_part_in_one_undo_step() {
         Some(&Value::String(mesh_id.to_owned()))
     );
 
-    // One undo takes it out again (the copied file stays).
+    // One undo takes it out again, with the file it copied; redo puts
+    // both back.
     app.undo();
     let workspace = app.world.workspace();
     assert!(app.world.find_first_child(workspace, "pyramid").is_none());
+    assert!(!folder.join(mesh_id).exists());
+    app.redo();
+    assert!(app.world.find_first_child(workspace, "pyramid").is_some());
     assert!(folder.join(mesh_id).is_file());
+    let _ = fs::remove_dir_all(&folder);
+}
+
+/// Every file under `folder` with its bytes.
+fn files_and_bytes(folder: &Path) -> std::collections::BTreeMap<String, Vec<u8>> {
+    files_under(folder)
+        .into_iter()
+        .map(|path| {
+            let bytes = fs::read(folder.join(&path)).unwrap();
+            (path, bytes)
+        })
+        .collect()
+}
+
+#[test]
+fn undoing_an_animated_fbx_import_removes_only_its_files_and_redo_brings_them_back() {
+    // hello-part already has a Walking model, clip and state machine, so
+    // the import's copies are Walking2.
+    let folder = copy_of_example("hello-part", "undo-import");
+    let mut app = EditorApp::new(Some(&folder));
+    let before = files_and_bytes(&folder);
+    assert!(before.contains_key("assets/models/Walking/Walking.fbx"));
+    app.import_model(
+        &super::super::tests::example("hello-events").join("assets/models/Walking/Walking.fbx"),
+    );
+    let dialog = app.importing.take().expect("an animated file asks first");
+    app.import_chosen(&dialog);
+    let walker = app.selected.expect("the new MeshPart is selected");
+    assert_eq!(app.history.undo_label(), Some("Import Walking"));
+    let after = files_and_bytes(&folder);
+    let made: Vec<&String> = after
+        .keys()
+        .filter(|path| !before.contains_key(*path))
+        .collect();
+    let has = |test: &dyn Fn(&str) -> bool| made.iter().any(|path| test(path));
+    assert!(
+        has(&|p| p == "assets/models/Walking2/Walking2.fbx"),
+        "{made:?}"
+    );
+    assert!(has(&|p| p.starts_with("assets/models/Walking2/textures/")));
+    assert!(has(
+        &|p| p.starts_with("assets/animations/Walking2/") && p.ends_with(".anim.json")
+    ));
+    assert!(has(&|p| p.ends_with(".statemachine.json")));
+    for (path, bytes) in &before {
+        assert_eq!(after.get(path), Some(bytes), "{path} is as it was");
+    }
+
+    // Undo leaves the project as it was: no files or folders from it, and
+    // what was there already is untouched.
+    app.undo();
+    assert_eq!(files_and_bytes(&folder), before);
+    assert!(!folder.join("assets/models/Walking2").exists());
+    assert!(!folder.join("assets/animations/Walking2").exists());
+    assert!(app.world.get(walker).unwrap().parent().is_none());
+
+    // Redo brings back the same files and the MeshPart that uses them,
+    // with no second copies.
+    app.redo();
+    assert_eq!(files_and_bytes(&folder), after);
+    assert!(app.world.get(walker).unwrap().parent().is_some());
+    let subject = crate::animation::Subject::of(&app.world, walker).unwrap();
+    assert_eq!(
+        subject.mesh_id.as_deref(),
+        Some("assets/models/Walking2/Walking2.fbx")
+    );
+    assert!(folder.join(&subject.state_machine).is_file());
+    for animation in &subject.animations {
+        assert!(folder.join(&animation.clip).is_file(), "{}", animation.clip);
+    }
+    assert!(!folder.join("assets/models/Walking3").exists());
     let _ = fs::remove_dir_all(&folder);
 }
 
@@ -645,10 +720,10 @@ fn chosen_objects_can_import_as_separate_parts_or_one_merged_part() {
 
     import_without_small(&mut app, &file, Placement::Merged);
     let merged = app.world.find_first_child(workspace, "props").unwrap();
-    // The second import's copy: the first is still in the project.
+    // Undo took the first import's copy away, so this one has its name.
     assert_eq!(
         mesh_id(&app, merged),
-        "assets/models/props2/props2.gltf#Pyramid,Street/Big"
+        "assets/models/props/props.gltf#Pyramid,Street/Big"
     );
     // From the Pyramid's left edge (-2) to the Big one's right (12).
     assert_eq!(

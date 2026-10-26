@@ -1,6 +1,52 @@
+use std::collections::BTreeSet;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use super::*;
+use crate::history::BlobChange;
+
+/// Every file under the project's `assets` folder, where imports copy and
+/// write files, as paths in the project with `/`.
+pub(super) fn asset_files(project: &Path) -> BTreeSet<String> {
+    let mut found = BTreeSet::new();
+    let mut folders = vec![project.join("assets")];
+    while let Some(at) = folders.pop() {
+        let Ok(entries) = fs::read_dir(&at) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                folders.push(path);
+            } else if let Ok(inside) = path.strip_prefix(project) {
+                let parts: Vec<String> = inside
+                    .components()
+                    .map(|part| part.as_os_str().to_string_lossy().into_owned())
+                    .collect();
+                found.insert(parts.join("/"));
+            }
+        }
+    }
+    found
+}
+
+/// The files under the project's `assets` folder that aren't in `before`
+/// (from [`asset_files`]), as made by an import, with their bytes so redo
+/// can put them back. An import only makes new files (every copy and clip
+/// gets a free name), so files that were there stay out of its step.
+pub(super) fn files_made_since(project: &Path, before: &BTreeSet<String>) -> Vec<BlobChange> {
+    asset_files(project)
+        .difference(before)
+        .filter_map(|path| {
+            let bytes = fs::read(project.join(path)).ok()?;
+            Some(BlobChange {
+                path: path.clone(),
+                before: None,
+                after: Some(Arc::new(bytes)),
+            })
+        })
+        .collect()
+}
 
 /// The properties of a MeshPart showing `model` from `mesh_id`: it starts
 /// at the model's size in the file. A flat model (a plane) still gets some
@@ -198,8 +244,9 @@ impl EditorApp {
     /// Copies the dialog's model file into the project's `assets/models`
     /// folder and inserts the objects ticked in it, as its placement says,
     /// inside the selected Model or Folder if there is one. Each MeshPart
-    /// starts at its object's size in the file. The insert is one undo
-    /// step; the copied file stays. A model that can't be loaded is
+    /// starts at its object's size in the file. The insert and the files
+    /// it copied and wrote (the model, textures, clips and state machine)
+    /// are one undo step. A model that can't be loaded is
     /// reported in Output and not copied; problems that didn't stop it
     /// loading (an FBX texture that isn't there) are reported after it's
     /// imported.
@@ -210,6 +257,7 @@ impl EditorApp {
         if self.playing() || self.viewport.is_dragging() {
             return;
         }
+        let before = asset_files(&project.folder);
         let file = &dialog.file;
         let chosen = dialog.chosen();
         let path = |i: usize| dialog.objects[i].path.clone();
@@ -270,7 +318,7 @@ impl EditorApp {
                 self.world.set_name(id, &file_name).expect("just made");
                 self.add_surfaces(id, &model, dialog, &folder, &mut copied);
                 self.add_animator(id, &model, animation.as_ref());
-                self.place_new(parent, vec![id], format!("Import {file_name}"));
+                self.place_imported(parent, vec![id], format!("Import {file_name}"), &before);
             }
             Placement::Separate => {
                 let parent = tree::insert_parent(&self.world, near, Insertable::MeshPart);
@@ -287,7 +335,7 @@ impl EditorApp {
                         id
                     })
                     .collect();
-                self.place_new(parent, ids, format!("Import {file_name}"));
+                self.place_imported(parent, ids, format!("Import {file_name}"), &before);
             }
             Placement::Grouped => {
                 let parent = tree::insert_parent(&self.world, near, Insertable::Model);
@@ -325,7 +373,7 @@ impl EditorApp {
                         .set_parent(id, Some(container))
                         .expect("a new part can go in a new Model");
                 }
-                self.place_new(parent, vec![root], format!("Import {file_name}"));
+                self.place_imported(parent, vec![root], format!("Import {file_name}"), &before);
             }
         }
     }
@@ -333,7 +381,8 @@ impl EditorApp {
     /// Writes the clips `animation` makes, from the model copied to
     /// `copy` in the project, and their state machine if an Animator was
     /// asked for. Returns the state machine's path and the clips', for the
-    /// Animator. Files aren't undo steps; a problem is reported in Output.
+    /// Animator. The import's undo step holds the files; a problem is
+    /// reported in Output.
     pub(super) fn write_import_animation(
         &mut self,
         animation: &AnimationImport,
@@ -413,15 +462,16 @@ impl EditorApp {
     }
 
     /// Imports a file with only animation: copies it into the project and
-    /// writes the clips the dialog made from its takes.
+    /// writes the clips the dialog made from its takes, as one undo step.
     pub(in crate::app) fn import_animation_only(&mut self, dialog: &ImportDialog) {
-        let Some(project) = &self.project else {
+        let Some(folder) = self.project.as_ref().map(|p| p.folder.clone()) else {
             return;
         };
         let Some(animation) = &dialog.animation else {
             return;
         };
-        match axcenity_assets::import_animation_file(&project.folder, &dialog.file) {
+        let before = asset_files(&folder);
+        match axcenity_assets::import_animation_file(&folder, &dialog.file) {
             Ok(copy) => {
                 self.output.info(format!(
                     "Imported the animation `{}` into the project as `{copy}`.",
@@ -430,6 +480,15 @@ impl EditorApp {
                 let mut clips = animation.clone();
                 clips.add_animator = false;
                 self.write_import_animation(&clips, &copy);
+                let name = dialog
+                    .file
+                    .file_stem()
+                    .map(|stem| stem.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let made = files_made_since(&folder, &before);
+                self.history
+                    .record_blobs(&mut self.world, format!("Import {name}"), made);
+                self.animation.refresh();
             }
             Err(err) => {
                 let err = chain(&err);
@@ -575,6 +634,24 @@ impl EditorApp {
         model
     }
 
+    /// [`place_new`](Self::place_new) for an import: the files it made
+    /// since `before` (from [`asset_files`]) go in the same undo step.
+    fn place_imported(
+        &mut self,
+        parent: InstanceId,
+        ids: Vec<InstanceId>,
+        label: String,
+        before: &BTreeSet<String>,
+    ) {
+        let made = self
+            .project
+            .as_ref()
+            .map(|project| files_made_since(&project.folder, before))
+            .unwrap_or_default();
+        self.place_new_with_files(parent, ids, label, made);
+        self.animation.refresh();
+    }
+
     /// Puts the new Instances `ids` at the end of `parent`, each with a
     /// name none of its siblings has, as one undo step named `label`, and
     /// selects the last of them.
@@ -583,6 +660,18 @@ impl EditorApp {
         parent: InstanceId,
         ids: Vec<InstanceId>,
         label: String,
+    ) {
+        self.place_new_with_files(parent, ids, label, Vec::new());
+    }
+
+    /// [`place_new`](Self::place_new), with files already written (`blobs`)
+    /// in the same undo step.
+    fn place_new_with_files(
+        &mut self,
+        parent: InstanceId,
+        ids: Vec<InstanceId>,
+        label: String,
+        blobs: Vec<BlobChange>,
     ) {
         let mut moves = Vec::new();
         for &id in &ids {
@@ -602,7 +691,12 @@ impl EditorApp {
             });
         }
         let last = moves.last().map(|step| step.id);
-        self.history.record_tree(&mut self.world, label, moves);
+        if blobs.is_empty() {
+            self.history.record_tree(&mut self.world, label, moves);
+        } else {
+            self.history
+                .record_blobs_and_tree(&mut self.world, label, blobs, moves);
+        }
         if last.is_some() {
             self.select_from_viewport(last);
         }

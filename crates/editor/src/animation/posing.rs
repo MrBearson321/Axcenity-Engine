@@ -7,6 +7,8 @@
 //! [`Skeleton::moved`] turn what it did back into the bone's own transform,
 //! relative to its parent bone, which is what a `Bone` key stores.
 
+use std::collections::{HashMap, HashSet};
+
 use axcenity_assets::{BoneTransform, Rig};
 use axcenity_core::{InstanceId, World};
 use axcenity_render::glam::{Mat4, Quat, Vec3};
@@ -442,19 +444,175 @@ pub fn bone_rows(rig: &Rig) -> Vec<(usize, usize)> {
     rows
 }
 
-/// One bone in the drawer: indented by `depth`, with 🔒 if `locked`, and
-/// `keys` (its key count) if it has any. Clicking an unlocked bone selects
-/// it. Returns the row's response.
+/// How many levels of a bone tree show when it's first seen.
+const OPEN_LEVELS: usize = 3;
+/// The width of a bone row's ▸/▾, so leaves line up with branches.
+const FOLD_WIDTH: f32 = 16.0;
+
+/// Which bones are folded in each model's bone tree (by `MeshId`), kept
+/// while the editor runs. A tree first opens with [`OPEN_LEVELS`] levels
+/// showing.
+#[derive(Default)]
+pub struct Folds {
+    models: HashMap<String, HashSet<usize>>,
+}
+
+/// One shown row of a bone tree.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TreeRow {
+    pub bone: usize,
+    pub depth: usize,
+    /// For a bone with bones under it, whether they're folded away.
+    pub folded: Option<bool>,
+    /// It's folded and a bone under it has keys.
+    pub hidden_keys: bool,
+}
+
+/// The nearest named bone above each bone of `rig`.
+fn named_parents(rig: &Rig) -> Vec<Option<usize>> {
+    rig.bones
+        .iter()
+        .map(|bone| {
+            let mut above = bone.parent;
+            while let Some(parent) = above {
+                if !rig.bones[parent].name.is_empty() {
+                    return Some(parent);
+                }
+                above = rig.bones[parent].parent;
+            }
+            None
+        })
+        .collect()
+}
+
+/// The named bones of `rig` that have named bones under them.
+fn branches(rig: &Rig) -> HashSet<usize> {
+    let parents = named_parents(rig);
+    bone_rows(rig)
+        .into_iter()
+        .filter_map(|(bone, _)| parents[bone])
+        .collect()
+}
+
+impl Folds {
+    /// `model`'s folded bones, starting with everything below
+    /// [`OPEN_LEVELS`] folded.
+    fn folded(&mut self, model: &str, rig: &Rig) -> &mut HashSet<usize> {
+        self.models.entry(model.to_owned()).or_insert_with(|| {
+            let branches = branches(rig);
+            bone_rows(rig)
+                .into_iter()
+                .filter(|(bone, depth)| *depth + 1 >= OPEN_LEVELS && branches.contains(bone))
+                .map(|(bone, _)| bone)
+                .collect()
+        })
+    }
+
+    /// The rows of `model`'s tree that show, parents first. `keys` is each
+    /// bone's key count, for the dot on a folded bone.
+    pub fn rows(&mut self, model: &str, rig: &Rig, keys: &[usize]) -> Vec<TreeRow> {
+        let folded = self.folded(model, rig).clone();
+        let parents = named_parents(rig);
+        let rows = bone_rows(rig);
+        let branches = branches(rig);
+        // Keys at or under each bone, children before parents.
+        let mut under = vec![0; rig.bones.len()];
+        for &(bone, _) in rows.iter().rev() {
+            under[bone] += keys.get(bone).copied().unwrap_or(0);
+            if let Some(parent) = parents[bone] {
+                under[parent] += under[bone];
+            }
+        }
+        let mut hidden = vec![false; rig.bones.len()];
+        let mut shown = Vec::new();
+        for (bone, depth) in rows {
+            hidden[bone] = parents[bone].is_some_and(|p| hidden[p] || folded.contains(&p));
+            if hidden[bone] {
+                continue;
+            }
+            let fold = branches.contains(&bone).then(|| folded.contains(&bone));
+            let own = keys.get(bone).copied().unwrap_or(0);
+            shown.push(TreeRow {
+                bone,
+                depth,
+                folded: fold,
+                hidden_keys: fold == Some(true) && under[bone] > own,
+            });
+        }
+        shown
+    }
+
+    /// Folds or unfolds `bone` in `model`'s tree.
+    pub fn toggle(&mut self, model: &str, rig: &Rig, bone: usize) {
+        let folded = self.folded(model, rig);
+        if !folded.remove(&bone) {
+            folded.insert(bone);
+        }
+    }
+
+    /// Folds every bone, leaving only the roots showing.
+    pub fn collapse_all(&mut self, model: &str, rig: &Rig) {
+        *self.folded(model, rig) = branches(rig);
+    }
+
+    pub fn expand_all(&mut self, model: &str, rig: &Rig) {
+        self.folded(model, rig).clear();
+    }
+
+    /// Collapse all and Expand all, for the drawer's header.
+    pub fn buttons(&mut self, ui: &mut egui::Ui, model: &str, rig: &Rig) {
+        if ui
+            .small_button(icons::ARROWS_IN_LINE_VERTICAL)
+            .on_hover_text("Collapse all")
+            .clicked()
+        {
+            self.collapse_all(model, rig);
+        }
+        if ui
+            .small_button(icons::ARROWS_OUT_LINE_VERTICAL)
+            .on_hover_text("Expand all")
+            .clicked()
+        {
+            self.expand_all(model, rig);
+        }
+    }
+}
+
+/// A ▸ (folded) or ▾ (open) that flips `folded` when clicked, or the room
+/// for one when there's nothing to fold (`None`). Returns true if clicked.
+pub fn fold_toggle(ui: &mut egui::Ui, folded: Option<bool>) -> bool {
+    let Some(folded) = folded else {
+        ui.add_space(FOLD_WIDTH);
+        return false;
+    };
+    let icon = if folded {
+        icons::CARET_RIGHT
+    } else {
+        icons::CARET_DOWN
+    };
+    ui.add_sized(
+        [FOLD_WIDTH, ui.spacing().interact_size.y],
+        egui::Button::new(icon).frame(false),
+    )
+    .on_hover_text(if folded { "Unfold" } else { "Fold" })
+    .clicked()
+}
+
+/// One bone in the drawer: indented by its depth, with ▸/▾ if it has bones
+/// under it, 🔒 if `locked`, `keys` (its key count) if it has any, and a
+/// dot when it's folded over keys. Clicking an unlocked bone selects it.
+/// Returns the row's response, and whether its ▸/▾ was clicked.
 pub fn bone_row(
     ui: &mut egui::Ui,
     name: &str,
-    depth: usize,
+    row: &TreeRow,
     selected: bool,
     locked: bool,
     keys: usize,
-) -> egui::Response {
+) -> (egui::Response, bool) {
     ui.horizontal(|ui| {
-        ui.add_space((depth as f32 * 8.0).min(64.0));
+        ui.add_space((row.depth as f32 * 8.0).min(64.0));
+        let toggled = fold_toggle(ui, row.folded);
         let mut text = if locked {
             format!("{} {name}", icons::LOCK)
         } else {
@@ -463,14 +621,20 @@ pub fn bone_row(
         if keys > 0 {
             text.push_str(&format!("  {} {keys}", icons::KEY));
         }
-        let row = ui.add_enabled(!locked, egui::Button::selectable(selected, text).truncate());
-        if locked {
-            row.on_disabled_hover_text(format!(
+        if row.hidden_keys {
+            text.push_str("  •");
+        }
+        let button = ui.add_enabled(!locked, egui::Button::selectable(selected, text).truncate());
+        let button = if locked {
+            button.on_disabled_hover_text(format!(
                 "{name} is moved by the take, so it can't be keyed. Convert to keys (⋯) to edit it."
             ))
+        } else if row.hidden_keys {
+            button.on_hover_text(format!("{name}: a bone folded under it has keys"))
         } else {
-            row.on_hover_text(format!("{name}: select it to turn it in the preview"))
-        }
+            button.on_hover_text(format!("{name}: select it to turn it in the preview"))
+        };
+        (button, toggled)
     })
     .inner
 }
@@ -562,5 +726,79 @@ mod tests {
             .map(|(bone, depth)| (rig.bones[bone].name.as_str(), depth))
             .collect();
         assert_eq!(rows, [("Root", 0), ("Mid", 1), ("Top", 2), ("Hat", 3)]);
+    }
+
+    /// The names of the shown rows of `model`'s tree.
+    fn shown(folds: &mut Folds, model: &str, rig: &Rig, keys: &[usize]) -> Vec<String> {
+        folds
+            .rows(model, rig, keys)
+            .into_iter()
+            .map(|row| rig.bones[row.bone].name.clone())
+            .collect()
+    }
+
+    #[test]
+    fn a_mixamo_rigs_bone_tree_folds_unfolds_and_collapses_to_its_root() {
+        let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-events");
+        let walking = "assets/models/Walking/Walking.fbx";
+        let model = Assets::new(example).model(walking).unwrap();
+        let rig = model.rig.as_deref().unwrap();
+        let all = bone_rows(rig);
+        assert!(all.len() > 40, "a Mixamo rig has many bones");
+        let no_keys = vec![0; rig.bones.len()];
+        let mut folds = Folds::default();
+
+        // It opens with three levels showing: Hips, Spine, LeftUpLeg… but
+        // not what's under them.
+        let rows = folds.rows(walking, rig, &no_keys);
+        assert!(rows.iter().all(|row| row.depth < OPEN_LEVELS));
+        assert!(rows.len() < all.len());
+        let spine = rig.bone("mixamorig:Spine").unwrap();
+        let spine1 = rig.bone("mixamorig:Spine1").unwrap();
+        let spine2 = rig.bone("mixamorig:Spine2").unwrap();
+        let row_of = |rows: &[TreeRow], bone| rows.iter().find(|row| row.bone == bone).cloned();
+        assert_eq!(row_of(&rows, spine).unwrap().folded, Some(false));
+        assert_eq!(row_of(&rows, spine1).unwrap().folded, Some(true));
+        assert!(row_of(&rows, spine2).is_none());
+
+        // Unfolding Spine1 shows Spine2 (folded, as it's below the third
+        // level); folding Spine hides both.
+        folds.toggle(walking, rig, spine1);
+        let rows = folds.rows(walking, rig, &no_keys);
+        assert_eq!(row_of(&rows, spine2).unwrap().folded, Some(true));
+        folds.toggle(walking, rig, spine);
+        let rows = folds.rows(walking, rig, &no_keys);
+        assert!(row_of(&rows, spine1).is_none() && row_of(&rows, spine2).is_none());
+        // A folded bone shows a dot when a bone under it has keys.
+        let mut keys = no_keys.clone();
+        keys[rig.bone("mixamorig:Head").unwrap()] = 3;
+        assert!(
+            row_of(&folds.rows(walking, rig, &keys), spine)
+                .unwrap()
+                .hidden_keys
+        );
+        // Unfolding Spine again brings Spine1 back as it was: unfolded.
+        folds.toggle(walking, rig, spine);
+        let rows = folds.rows(walking, rig, &no_keys);
+        assert_eq!(row_of(&rows, spine1).unwrap().folded, Some(false));
+
+        // Collapse all leaves only the root; Expand all shows every bone.
+        folds.collapse_all(walking, rig);
+        assert_eq!(
+            shown(&mut folds, walking, rig, &no_keys),
+            ["mixamorig:Hips"]
+        );
+        folds.expand_all(walking, rig);
+        assert_eq!(folds.rows(walking, rig, &no_keys).len(), all.len());
+
+        // Each model keeps its own folds.
+        let noodle = noodle();
+        let noodle_rig = noodle.rig.as_deref().unwrap();
+        folds.collapse_all("assets/models/noodle.fbx", noodle_rig);
+        assert_eq!(folds.rows(walking, rig, &no_keys).len(), all.len());
+        assert_eq!(
+            shown(&mut folds, "assets/models/noodle.fbx", noodle_rig, &[0; 8]),
+            ["Root"]
+        );
     }
 }

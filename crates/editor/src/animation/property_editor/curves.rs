@@ -388,13 +388,17 @@ impl PropertyDoc {
                             }
                             self.selected.insert(key.clone());
                         }
-                        self.find_key(&key).map(|k| CurveGesture::Key {
-                            number,
-                            from: view.at(origin),
-                            start: (k.time, k.value.get(number).copied().unwrap_or(0.0)),
-                            key,
-                        })
+                        self.find_key(&key)
+                            // Read-only keys are selected, not moved.
+                            .filter(|_| !self.read_only)
+                            .map(|k| CurveGesture::Key {
+                                number,
+                                from: view.at(origin),
+                                start: (k.time, k.value.get(number).copied().unwrap_or(0.0)),
+                                key,
+                            })
                     }
+                    Some(Grab::Handle { .. }) if self.read_only => None,
                     Some(Grab::Handle {
                         key,
                         handle,

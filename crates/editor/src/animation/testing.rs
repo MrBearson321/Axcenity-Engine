@@ -8,6 +8,15 @@ use axcenity_render::glam::Quat;
 use super::*;
 
 impl AnimationStudio {
+    /// Shows the open clip's keys as curves (or the dope sheet).
+    pub fn show_curves(&mut self, on: bool) {
+        match &mut self.clip.doc {
+            Some(Clip::Property(doc)) => doc.show_curves = on,
+            Some(Clip::Take(doc)) => doc.show_imported_curves(on),
+            None => {}
+        }
+    }
+
     /// Gets the open clip's preview ready, as drawing the tab does: a
     /// property clip's copy of the followed object posed at the playhead,
     /// or a take clip's model.
@@ -159,6 +168,80 @@ impl AnimationStudio {
             .and_then(|id| assets.model(id))
             .and_then(|model| model.rig.as_deref().map(bone_paths))
             .unwrap_or_default()
+    }
+
+    /// The open linked clip's imported keys, as shown under its timeline.
+    pub fn imported_view(&mut self, assets: &Assets) -> &mut PropertyDoc {
+        let Some(Clip::Take(doc)) = &mut self.clip.doc else {
+            panic!("no linked clip is open");
+        };
+        doc.imported_keys(assets).expect("its keys can be shown")
+    }
+
+    /// Sets where the open linked clip starts and ends in its take, in
+    /// seconds, as dragging its ends on the timeline does.
+    pub fn set_clip_range(&mut self, start: f64, end: f64) {
+        let Some(Clip::Take(doc)) = &mut self.clip.doc else {
+            panic!("no linked clip is open");
+        };
+        doc.file.start = start;
+        doc.file.end = end;
+    }
+
+    /// The open linked clip as it would be saved.
+    pub fn open_clip_file(&self) -> axcenity_anim::ClipFile {
+        let Some(Clip::Take(doc)) = &self.clip.doc else {
+            panic!("no linked clip is open");
+        };
+        doc.file.to_file()
+    }
+
+    /// The names of the bones the drawer shows for the open linked clip's
+    /// preview model, as folded now.
+    pub fn shown_bones(&mut self, assets: &Assets) -> Vec<String> {
+        let (mesh_id, model) = self.preview_rig(assets);
+        let rig = model.rig.as_deref().expect("a rig");
+        let keys = vec![0; rig.bones.len()];
+        self.clip
+            .folds
+            .rows(&mesh_id, rig, &keys)
+            .into_iter()
+            .map(|row| rig.bones[row.bone].name.clone())
+            .collect()
+    }
+
+    /// Presses Collapse all or Expand all over the drawer's bones.
+    pub fn fold_all_bones(&mut self, assets: &Assets, fold: bool) {
+        let (mesh_id, model) = self.preview_rig(assets);
+        let rig = model.rig.as_deref().expect("a rig");
+        if fold {
+            self.clip.folds.collapse_all(&mesh_id, rig);
+        } else {
+            self.clip.folds.expand_all(&mesh_id, rig);
+        }
+    }
+
+    fn preview_rig(&self, assets: &Assets) -> (String, std::sync::Arc<axcenity_assets::Model>) {
+        let Some(Clip::Take(doc)) = &self.clip.doc else {
+            panic!("no linked clip is open");
+        };
+        let mesh_id = doc.preview_model.clone().expect("a preview model");
+        let model = assets.model(&mesh_id).expect("the preview model");
+        (mesh_id, model)
+    }
+
+    /// The clips and state machines Open ▾ marks **not used**, looking at
+    /// the project's files again.
+    pub fn unused_files(&mut self, project: &Path, world: &World) -> Vec<String> {
+        self.rescan(project);
+        let used = self.used_files(project, world);
+        self.files
+            .controllers
+            .iter()
+            .chain(&self.files.clips)
+            .filter(|path| !used.contains(*path))
+            .cloned()
+            .collect()
     }
 
     /// Picks Convert to keys in the open clip's ⋯ menu.

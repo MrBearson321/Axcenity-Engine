@@ -229,6 +229,79 @@ fn run_curves(doc: &mut PropertyDoc, frames: Vec<Vec<egui::Event>>) {
     }
 }
 
+/// Where the dope sheet drew the key at `time` on its first row.
+fn sheet_key(doc: &PropertyDoc, time: f64) -> egui::Pos2 {
+    let rect = doc.sheet;
+    let label_w = (rect.width() * 0.3).clamp(70.0, 160.0);
+    let (left, right) = (rect.left() + label_w + 6.0, rect.right() - 8.0);
+    let x = left + (time / doc.file.duration) as f32 * (right - left);
+    egui::pos2(x, rect.top() + RULER + ROW / 2.0)
+}
+
+/// A key press with no modifiers, then letting go.
+fn press(key: egui::Key) -> Vec<Vec<egui::Event>> {
+    let event = |pressed| egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed,
+        repeat: false,
+        modifiers: Default::default(),
+    };
+    vec![vec![event(true)], vec![event(false)]]
+}
+
+#[test]
+fn read_only_keys_can_be_selected_but_never_moved_deleted_or_changed() {
+    let mut doc = rising();
+    doc.read_only = true;
+    doc.selected.clear();
+    let track = doc.file.tracks[0].id.clone();
+    let last = (track.clone(), doc.file.tracks[0].keys[1].id.clone());
+    doc.file.tracks[0].keys[0].interp = Interp::Bezier;
+    let shown_bezier = doc.file.clone();
+
+    // In the dope sheet, dragging the last key selects it and leaves it be.
+    run_curves(&mut doc, vec![Vec::new(), Vec::new()]);
+    assert!(doc.sheet.width() > 100.0, "the dope sheet is drawn");
+    let at = sheet_key(&doc, 1.0);
+    run_curves(&mut doc, drag(at, at - egui::vec2(200.0, 0.0)));
+    assert_eq!(doc.selected, BTreeSet::from([last.clone()]));
+    assert_eq!(doc.file, shown_bezier, "nothing moved in the dope sheet");
+
+    // In Curves, dragging the key or its Bezier handles moves nothing.
+    doc.show_curves = true;
+    run_curves(&mut doc, vec![Vec::new(), Vec::new()]);
+    let key = doc.curve_view.screen(1.0, 10.0);
+    run_curves(&mut doc, drag(key, key - egui::vec2(120.0, -60.0)));
+    assert_eq!(doc.file, shown_bezier, "nothing moved in Curves");
+    assert!(doc.selected.contains(&last));
+    let handle = doc.curve_view.screen(0.58, 10.0);
+    run_curves(&mut doc, drag(handle, handle - egui::vec2(80.0, 40.0)));
+    assert_eq!(doc.file, shown_bezier, "the handles stay");
+
+    // Delete, cut, paste, keying and preview moves change nothing either.
+    doc.show_curves = false;
+    run_curves(&mut doc, press(egui::Key::Delete));
+    let ctx = theme::test_context();
+    let _ = ctx.run(Default::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            assert!(!doc.shortcuts(ui));
+        });
+    });
+    doc.copy();
+    doc.playhead = 0.5;
+    doc.paste();
+    doc.delete_selected();
+    doc.delete_track(&track);
+    doc.key_values(&[value(".", PropertyName::Position, &[1.0, 2.0, 3.0])]);
+    doc.edit(
+        vec![value(".", PropertyName::Position, &[4.0, 5.0, 6.0])],
+        true,
+    );
+    assert_eq!(doc.file, shown_bezier);
+    assert!(doc.selected.contains(&last), "still selected");
+}
+
 #[test]
 fn bezier_handles_dragged_in_the_curves_view_are_saved_and_reloaded() {
     let mut doc = rising();

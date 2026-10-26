@@ -37,7 +37,7 @@ pub mod store;
 mod testing;
 mod timeline;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -383,6 +383,9 @@ struct ClipView {
     bones: Poser,
     /// A property clip's preview: a copy of what it animates.
     objects: ObjectPreview,
+    /// Which bones are folded in each model's bone tree, kept while the
+    /// editor runs.
+    folds: posing::Folds,
     /// Where the clip was last drawn, and in which pass, so its keys (K,
     /// Delete, Ctrl+C) work while the mouse is over it.
     drawn: Option<(egui::Rect, u64)>,
@@ -426,6 +429,15 @@ pub struct AnimationStudio {
     /// [`RESCAN`].
     names: HashMap<String, Vec<(NameKind, String)>>,
     names_read: Option<Instant>,
+    outline_folds: OutlineFolds,
+}
+
+/// Which of the outline's sections are folded.
+#[derive(Default)]
+struct OutlineFolds {
+    /// The State Machine's states.
+    states: bool,
+    animations: bool,
 }
 
 /// A question the studio is asking.
@@ -592,17 +604,7 @@ impl AnimationStudio {
     /// state machine's states, and each clip's badge.
     fn read_outline(&mut self, project: &Path, subject: &Subject) {
         let path = &subject.state_machine;
-        if !path.is_empty() && !self.machines.contains_key(path) {
-            let states = store::read_controller(project, path)
-                .map(|file| {
-                    file.states
-                        .iter()
-                        .map(|state| (state.name.clone(), motion_clips(&state.motion)))
-                        .collect()
-                })
-                .unwrap_or_default();
-            self.machines.insert(path.clone(), states);
-        }
+        self.read_machine(project, path);
         let clips: Vec<String> = self
             .states_of(path)
             .into_iter()
@@ -615,6 +617,60 @@ impl AnimationStudio {
                 store::read_any_clip(project, clip).map_or(Badge::Missing, |file| Badge::of(&file))
             });
         }
+    }
+
+    /// Reads the states of the state machine at `path`, with their clips,
+    /// if they aren't read yet.
+    fn read_machine(&mut self, project: &Path, path: &str) {
+        if !path.is_empty() && !self.machines.contains_key(path) {
+            let states = store::read_controller(project, path)
+                .map(|file| {
+                    file.states
+                        .iter()
+                        .map(|state| (state.name.clone(), motion_clips(&state.motion)))
+                        .collect()
+                })
+                .unwrap_or_default();
+            self.machines.insert(path.to_owned(), states);
+        }
+    }
+
+    /// The clips and state machines something in the scene uses: each
+    /// Animator's state machine and the clips it plays, and each
+    /// Animation's clip. Open ▾ marks the rest **not used**.
+    fn used_files(&mut self, project: &Path, world: &World) -> HashSet<String> {
+        let mut used = HashSet::new();
+        let mut machines = Vec::new();
+        for id in world.descendants(world.root()) {
+            let Some(instance) = world.get(id) else {
+                continue;
+            };
+            let property = match instance.class() {
+                ClassName::Animator => "StateMachine",
+                ClassName::Animation => "Clip",
+                _ => continue,
+            };
+            let Some(path) = instance
+                .property(property)
+                .and_then(Value::as_str)
+                .filter(|path| !path.is_empty())
+            else {
+                continue;
+            };
+            if instance.class() == ClassName::Animator {
+                machines.push(path.to_owned());
+            }
+            used.insert(path.to_owned());
+        }
+        for machine in machines {
+            self.read_machine(project, &machine);
+            used.extend(
+                self.states_of(&machine)
+                    .into_iter()
+                    .flat_map(|(_, clips)| clips),
+            );
+        }
+        used
     }
 
     /// The badge of the clip at `path`: the open clip's as it is now, or as
@@ -809,13 +865,15 @@ impl AnimationStudio {
 }
 
 /// The Open button, which drops down a searchable list of `paths` (state
-/// machines and clips, grouped by folder), each with its kind's icon.
-/// Clicking one opens it; its ⋯ menu renames, duplicates or deletes it.
+/// machines and clips, grouped by folder), each with its kind's icon, and
+/// **not used** on those not in `used`. Clicking one opens it; its ⋯ menu
+/// renames, duplicates or deletes it.
 fn picker(
     ui: &mut egui::Ui,
     search: &mut String,
     paths: &[String],
     open: Option<&str>,
+    used: &HashSet<String>,
 ) -> Option<Pick> {
     let button = ui
         .button(format!("{} Open {}", icons::FOLDER_OPEN, icons::CARET_DOWN))
@@ -874,6 +932,11 @@ fn picker(
                                     .on_hover_text(path.as_str());
                                 if row.clicked() {
                                     pick = Some(Pick::Open(path.clone()));
+                                }
+                                if !used.contains(path) {
+                                    ui.weak("not used").on_hover_text(
+                                        "Nothing in the scene uses it: no Animator or Animation, and no state machine an Animator plays. ⋯ deletes it.",
+                                    );
                                 }
                                 ui.menu_button(icons::DOTS_THREE, |ui| {
                                     asset_menu(ui, path, &mut pick)
@@ -1031,4 +1094,85 @@ fn empty_state(ui: &mut egui::Ui, animatable: Option<&(InstanceId, String)>) -> 
     }
     ui.weak("Or open a clip or state machine with Open above.");
     go
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every piece of text drawn in `shapes`.
+    fn texts(shapes: &[egui::epaint::ClippedShape]) -> Vec<String> {
+        fn walk(shape: &egui::Shape, found: &mut Vec<String>) {
+            match shape {
+                egui::Shape::Text(text) => found.push(text.galley.text().to_owned()),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, found)),
+                _ => {}
+            }
+        }
+        let mut found = Vec::new();
+        for clipped in shapes {
+            walk(&clipped.shape, &mut found);
+        }
+        found
+    }
+
+    /// Clicks Open and returns the text drawn with its list showing.
+    fn open_picker(paths: &[String], used: &HashSet<String>) -> Vec<String> {
+        let ctx = theme::test_context();
+        let mut search = String::new();
+        // Where the Open button is drawn: a `Cell`, which the drawing
+        // closure can set while it's read outside.
+        let button = std::cell::Cell::new(egui::Rect::NOTHING);
+        let mut drawn = Vec::new();
+        let at = |events| egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(600.0, 500.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        let mut frame = |events: Vec<egui::Event>| {
+            ctx.run(at(events), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    button.set(ui.cursor());
+                    picker(ui, &mut search, paths, None, used);
+                });
+            })
+        };
+        frame(Vec::new());
+        let on = button.get().min + egui::vec2(20.0, 10.0);
+        let press = |pressed| egui::Event::PointerButton {
+            pos: on,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        for events in [
+            vec![egui::Event::PointerMoved(on)],
+            vec![press(true)],
+            vec![press(false)],
+            Vec::new(),
+        ] {
+            drawn = texts(&frame(events).shapes);
+        }
+        drawn
+    }
+
+    #[test]
+    fn open_shows_not_used_beside_what_nothing_uses() {
+        let paths: Vec<String> = ["Walk", "Spare"]
+            .map(|name| format!("assets/animations/noodle/{name}.anim.json"))
+            .to_vec();
+        let shown = open_picker(&paths, &HashSet::from([paths[0].clone()]));
+        assert!(shown.iter().any(|text| text.contains("Spare")), "{shown:?}");
+        let marks = |shown: &[String]| shown.iter().filter(|text| *text == "not used").count();
+        assert_eq!(marks(&shown), 1, "{shown:?}");
+        // Once nothing uses Walk either, both are marked.
+        assert_eq!(marks(&open_picker(&paths, &HashSet::new())), 2);
+        assert_eq!(
+            marks(&open_picker(&paths, &paths.iter().cloned().collect())),
+            0
+        );
+    }
 }

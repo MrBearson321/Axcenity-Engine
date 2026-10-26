@@ -28,6 +28,8 @@
 //!
 //! Importing an asset package writes files of any kind, models and
 //! pictures too, so its step keeps each file's bytes ([`BlobChange`]).
+//! Importing a model does too, along with the Instances it inserts, so
+//! undoing it removes the files it copied and wrote.
 //!
 //! A Terrain's landscape isn't a property, so its changes are steps of their
 //! own ([`TerrainChange`]): a brush stroke keeps the chunks it changed, and a
@@ -202,8 +204,12 @@ enum StepKind {
         moves: Vec<Move>,
     },
     /// Project files of any kind written at once, such as an imported
-    /// asset package.
-    Blobs(Vec<BlobChange>),
+    /// asset package, and Instances inserted with them (an imported
+    /// model's MeshPart).
+    Blobs {
+        blobs: Vec<BlobChange>,
+        moves: Vec<Move>,
+    },
     /// A Terrain's landscape, and its fields changed at the same time
     /// (a new `Size` with a generated landscape).
     Terrain {
@@ -349,15 +355,32 @@ impl History {
     /// Records project files written as bytes (created, or overwritten) as
     /// one undo step named `label`. Does nothing if nothing changed.
     pub fn record_blobs(&mut self, world: &mut World, label: String, blobs: Vec<BlobChange>) {
+        self.record_blobs_and_tree(world, label, blobs, Vec::new());
+    }
+
+    /// Records project files written as bytes and Instances inserted or
+    /// moved in the tree (both already done) as one undo step named
+    /// `label`, such as importing a model. Does nothing if nothing changed.
+    pub fn record_blobs_and_tree(
+        &mut self,
+        world: &mut World,
+        label: String,
+        blobs: Vec<BlobChange>,
+        moves: Vec<Move>,
+    ) {
         let blobs: Vec<_> = blobs
             .into_iter()
             .filter(|blob| blob.before != blob.after)
             .collect();
-        if blobs.is_empty() {
+        let moves: Vec<_> = moves
+            .into_iter()
+            .filter(|step| step.before != step.after)
+            .collect();
+        if blobs.is_empty() && moves.is_empty() {
             return;
         }
         self.seal();
-        self.push(world, label, StepKind::Blobs(blobs));
+        self.push(world, label, StepKind::Blobs { blobs, moves });
         self.seal();
     }
 
@@ -583,7 +606,10 @@ impl History {
         // An undone insert left its Instance out of the tree. With the step
         // gone, nothing can bring it back, so destroy it.
         for step in self.redo.drain(..) {
-            if let StepKind::Tree(moves) | StepKind::Files { moves, .. } = step.kind {
+            if let StepKind::Tree(moves)
+            | StepKind::Files { moves, .. }
+            | StepKind::Blobs { moves, .. } = step.kind
+            {
                 for made in moves.iter().filter(|step| step.before.is_none()) {
                     let _ = world.destroy(made.id);
                 }
@@ -674,7 +700,13 @@ impl History {
                     }
                 }
             }
-            StepKind::Blobs(changes) => {
+            StepKind::Blobs {
+                blobs: changes,
+                moves,
+            } => {
+                for step in moves.iter().rev() {
+                    put_back(world, step.id, step.before);
+                }
                 blobs = changes
                     .iter()
                     .map(|blob| BlobChange {
@@ -739,7 +771,15 @@ impl History {
                     }
                 }
             }
-            StepKind::Blobs(changes) => blobs = changes.clone(),
+            StepKind::Blobs {
+                blobs: changes,
+                moves,
+            } => {
+                for step in moves.iter() {
+                    put_back(world, step.id, step.after);
+                }
+                blobs = changes.clone();
+            }
             StepKind::World(other) => std::mem::swap(world, &mut *other.0),
         }
         self.undo.push(step);
