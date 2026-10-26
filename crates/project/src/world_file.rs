@@ -830,6 +830,59 @@ mod tests {
     }
 
     #[test]
+    fn rotation_text_transparency_and_screen_insets_save_and_older_worlds_get_defaults() {
+        let mut world = World::new();
+        let gui = world.create(ClassName::ScreenGui).unwrap();
+        world.set_parent(gui, Some(world.workspace())).unwrap();
+        world
+            .set_property(
+                gui,
+                "ScreenInsets",
+                Value::String("DeviceSafeInsets".into()),
+            )
+            .unwrap();
+        let label = world.create(ClassName::TextLabel).unwrap();
+        world.set_parent(label, Some(gui)).unwrap();
+        world
+            .set_property(label, "Rotation", Value::Number(30.0))
+            .unwrap();
+        world
+            .set_property(label, "TextTransparency", Value::Number(0.25))
+            .unwrap();
+        let written = write_world(&world);
+        let loaded = parse_world(&written).unwrap();
+        let label = loaded
+            .find_first_descendant(loaded.workspace(), "TextLabel")
+            .unwrap();
+        let label = loaded.get(label).unwrap();
+        assert_eq!(label.property("Rotation"), Some(&Value::Number(30.0)));
+        assert_eq!(
+            label.property("TextTransparency"),
+            Some(&Value::Number(0.25))
+        );
+        assert_eq!(write_world(&loaded), written);
+
+        let old = parse_world(
+            r#"{ "format_version": 1, "workspace": { "children": [
+                { "class": "ScreenGui", "name": "Hud", "properties": { "Enabled": true },
+                  "children": [ { "class": "TextLabel", "name": "Title" } ] } ] } }"#,
+        )
+        .unwrap();
+        let title = old.find_first_descendant(old.workspace(), "Title").unwrap();
+        let hud = old.find_first_descendant(old.workspace(), "Hud").unwrap();
+        let title = old.get(title).unwrap();
+        assert_eq!(title.property("Rotation"), Some(&Value::Number(0.0)));
+        assert_eq!(
+            title.property("TextTransparency"),
+            Some(&Value::Number(0.0))
+        );
+        assert_eq!(
+            old.get(hud).unwrap().property("ScreenInsets"),
+            Some(&Value::String("None".into()))
+        );
+    }
+
+    #[test]
     fn ui_instances_and_udim2_properties_save_and_load() {
         let mut world = World::new();
         let gui = world.create(ClassName::ScreenGui).unwrap();

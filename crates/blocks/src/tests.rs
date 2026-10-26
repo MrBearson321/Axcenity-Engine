@@ -1341,3 +1341,56 @@ fn the_graph_view_is_saved_only_once_used_and_never_changes_the_lua() {
     reserve_block_ids(&shown);
     assert!(Block::new(BlockKind::StopScript).id > 7);
 }
+
+#[test]
+fn set_property_blocks_turn_a_frame_and_fade_a_labels_text() {
+    let mut world = World::new();
+    let gui = world.create(ClassName::ScreenGui).unwrap();
+    world.set_name(gui, "Hud").unwrap();
+    world.set_parent(gui, Some(world.workspace())).unwrap();
+    let panel = world.create(ClassName::Frame).unwrap();
+    world.set_name(panel, "Panel").unwrap();
+    world.set_parent(panel, Some(gui)).unwrap();
+    let title = world.create(ClassName::TextLabel).unwrap();
+    world.set_name(title, "Title").unwrap();
+    world.set_parent(title, Some(panel)).unwrap();
+
+    let set = |id, target: &str, property: &str, value: f64| {
+        block(
+            id,
+            BlockKind::SetProperty {
+                target: target.to_owned(),
+                property: property.to_owned(),
+                value: number(value),
+            },
+        )
+    };
+    let blocks = vec![block(
+        1,
+        BlockKind::WhenStarted {
+            body: vec![
+                set(2, "Hud.Panel", "Rotation", 30.0),
+                set(3, "Hud.Panel.Title", "TextTransparency", 0.5),
+            ],
+        },
+    )];
+    let source = translate(&script(blocks)).unwrap().source;
+    assert!(
+        source.contains("workspace.Hud.Panel.Rotation = 30"),
+        "{source}"
+    );
+    assert!(
+        source.contains("workspace.Hud.Panel.Title.TextTransparency = 0.5"),
+        "{source}"
+    );
+
+    let lua = world.create(ClassName::LocalScript).unwrap();
+    world.set_name(lua, "Look").unwrap();
+    world.set_parent(lua, Some(gui)).unwrap();
+    let mut runtime = ScriptRuntime::new();
+    runtime.start_script(&mut world, lua, "scripts/Look.client.blocks.json", &source);
+    runtime.step(&mut world, 0.1);
+    let number = |id, name| world.get(id).unwrap().property(name).unwrap().clone();
+    assert_eq!(number(panel, "Rotation"), Value::Number(30.0));
+    assert_eq!(number(title, "TextTransparency"), Value::Number(0.5));
+}

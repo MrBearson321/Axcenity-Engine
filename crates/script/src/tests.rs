@@ -326,6 +326,35 @@ fn a_script_reads_and_sets_a_scrolling_frames_canvas_position() {
 }
 
 #[test]
+fn a_script_turns_a_frame_fades_its_text_and_keeps_a_gui_in_the_safe_area() {
+    let mut world = World::new();
+    let output = output_of(
+        &mut world,
+        r#"
+        local gui = Instance.new("ScreenGui")
+        gui.Parent = workspace
+        print(gui.ScreenInsets)
+        gui.ScreenInsets = "DeviceSafeInsets"
+        local panel = Instance.new("Frame")
+        panel.Name = "Panel"
+        panel.Parent = gui
+        local title = Instance.new("TextLabel")
+        title.Name = "Title"
+        title.Parent = panel
+        print(panel.Rotation, title.TextTransparency)
+        panel.Rotation = 30
+        title.TextTransparency = 0.5
+        print(panel.Rotation, title.TextTransparency, gui.ScreenInsets)
+        "#,
+    );
+    assert_eq!(output, ["None", "0\t0", "30\t0.5\tDeviceSafeInsets"]);
+    let panel = world
+        .find_first_descendant(world.workspace(), "Panel")
+        .unwrap();
+    assert_eq!(property(&world, panel, "Rotation"), Value::Number(30.0));
+}
+
+#[test]
 fn dangerous_functions_are_unavailable() {
     let mut world = World::new();
     let output = output_of(

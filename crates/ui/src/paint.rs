@@ -88,6 +88,7 @@ pub(super) fn paint_instance(
                 repeat: border_image.repeat,
             }),
             clip: None,
+            rotation_degrees: 0.0,
         }));
     }
 
@@ -118,6 +119,7 @@ pub(super) fn paint_instance(
                 texture: None,
                 slice: None,
                 clip: None,
+                rotation_degrees: 0.0,
             }));
         }
     }
@@ -139,11 +141,20 @@ pub(super) fn paint_instance(
         } else {
             typed
         };
-        if !text.is_empty() && rect.width > 0.0 && rect.height > 0.0 {
+        // `TextTransparency` fades the letters, their outline and shadows,
+        // and nothing else.
+        let text_opacity = opacity
+            * (1.0
+                - instance
+                    .property("TextTransparency")
+                    .and_then(Value::as_number)
+                    .map(|n| finite(n as f32).clamp(0.0, 1.0))
+                    .unwrap_or(0.0));
+        if !text.is_empty() && rect.width > 0.0 && rect.height > 0.0 && text_opacity > 0.0 {
             out.push(UiDrawItem::Text(UiText {
                 position: [rect.x + 4.0, rect.y + 4.0],
                 size: [(rect.width - 8.0).max(0.0), (rect.height - 8.0).max(0.0)],
-                ..styled_text(instance, styles, opacity, placeholder, text, warnings)
+                ..styled_text(instance, styles, text_opacity, placeholder, text, warnings)
             }));
         }
     }
@@ -375,6 +386,7 @@ pub(super) fn styled_text(
         scaled: instance.property("TextScaled").and_then(Value::as_bool) == Some(true),
         spans: Vec::new(),
         clip: None,
+        rotation_degrees: 0.0,
     };
     match spans {
         Some(spans) => {

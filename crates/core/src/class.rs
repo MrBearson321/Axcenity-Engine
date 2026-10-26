@@ -353,6 +353,9 @@ impl ClassName {
                 ("DesignHeight", Value::Number(1080.0)),
                 // Enabled ScreenGuis are drawn lowest first; ties keep tree order.
                 ("DisplayOrder", Value::Number(0.0)),
+                // "None", or "DeviceSafeInsets" to keep inside a phone's notch
+                // and home bar (a desktop screen has none).
+                ("ScreenInsets", Value::String("None".to_owned())),
             ],
             ClassName::Frame => vec![
                 ("Class", Value::String(String::new())),
@@ -370,6 +373,9 @@ impl ClassName {
                 // Siblings are drawn lowest first (ties keep tree order), and
                 // the one on top takes the pointer. CSS `z-index` wins.
                 ("ZIndex", Value::Number(1.0)),
+                // Degrees clockwise: it and its children are drawn and hit
+                // turned around its middle. Layout doesn't change.
+                ("Rotation", Value::Number(0.0)),
             ],
             ClassName::TextLabel => vec![
                 ("Class", Value::String(String::new())),
@@ -384,6 +390,8 @@ impl ClassName {
                 ("Text", Value::String("Label".to_owned())),
                 ("TextColor3", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
                 ("TextSize", Value::Number(16.0)),
+                // 0 is solid text, 1 invisible. Only the text fades.
+                ("TextTransparency", Value::Number(0.0)),
                 // On: drawn at the largest size up to TextSize that fits.
                 ("TextScaled", Value::Bool(false)),
                 // On: tags in Text such as <b> and <font color="#f00"> style it.
@@ -394,6 +402,9 @@ impl ClassName {
                 // Siblings are drawn lowest first (ties keep tree order), and
                 // the one on top takes the pointer. CSS `z-index` wins.
                 ("ZIndex", Value::Number(1.0)),
+                // Degrees clockwise: it and its children are drawn and hit
+                // turned around its middle. Layout doesn't change.
+                ("Rotation", Value::Number(0.0)),
             ],
             ClassName::TextButton => vec![
                 ("Class", Value::String(String::new())),
@@ -408,6 +419,8 @@ impl ClassName {
                 ("Text", Value::String("Button".to_owned())),
                 ("TextColor3", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
                 ("TextSize", Value::Number(16.0)),
+                // 0 is solid text, 1 invisible. Only the text fades.
+                ("TextTransparency", Value::Number(0.0)),
                 // On: drawn at the largest size up to TextSize that fits.
                 ("TextScaled", Value::Bool(false)),
                 // On: tags in Text such as <b> and <font color="#f00"> style it.
@@ -424,6 +437,9 @@ impl ClassName {
                 // Siblings are drawn lowest first (ties keep tree order), and
                 // the one on top takes the pointer. CSS `z-index` wins.
                 ("ZIndex", Value::Number(1.0)),
+                // Degrees clockwise: it and its children are drawn and hit
+                // turned around its middle. Layout doesn't change.
+                ("Rotation", Value::Number(0.0)),
                 // Sound files (paths in the project) played when the pointer
                 // comes onto it and when it's clicked. Empty plays nothing.
                 ("HoverSound", Value::String(String::new())),
@@ -443,6 +459,8 @@ impl ClassName {
                 ("Placeholder", Value::String("Type here".to_owned())),
                 ("TextColor3", Value::Color3(Color3::new(0.1, 0.1, 0.12))),
                 ("TextSize", Value::Number(16.0)),
+                // 0 is solid text, 1 invisible. Only the text fades.
+                ("TextTransparency", Value::Number(0.0)),
                 // On: drawn at the largest size up to TextSize that fits.
                 ("TextScaled", Value::Bool(false)),
                 // On: tags in Text such as <b> and <font color="#f00"> style it.
@@ -456,6 +474,9 @@ impl ClassName {
                 // Siblings are drawn lowest first (ties keep tree order), and
                 // the one on top takes the pointer. CSS `z-index` wins.
                 ("ZIndex", Value::Number(1.0)),
+                // Degrees clockwise: it and its children are drawn and hit
+                // turned around its middle. Layout doesn't change.
+                ("Rotation", Value::Number(0.0)),
             ],
             ClassName::PageLayout => vec![
                 ("Class", Value::String(String::new())),
@@ -473,6 +494,9 @@ impl ClassName {
                 // Siblings are drawn lowest first (ties keep tree order), and
                 // the one on top takes the pointer. CSS `z-index` wins.
                 ("ZIndex", Value::Number(1.0)),
+                // Degrees clockwise: it and its children are drawn and hit
+                // turned around its middle. Layout doesn't change.
+                ("Rotation", Value::Number(0.0)),
                 // Empty shows the first child Frame. Any other value is that
                 // Frame's name.
                 ("CurrentPage", Value::String(String::new())),
@@ -493,6 +517,9 @@ impl ClassName {
                 // Siblings are drawn lowest first (ties keep tree order), and
                 // the one on top takes the pointer. CSS `z-index` wins.
                 ("ZIndex", Value::Number(1.0)),
+                // Degrees clockwise: it and its children are drawn and hit
+                // turned around its middle. Layout doesn't change.
+                ("Rotation", Value::Number(0.0)),
                 // How many cells sit in one row.
                 ("Columns", Value::Number(2.0)),
             ],
@@ -510,6 +537,9 @@ impl ClassName {
                 ("Interactable", Value::Bool(true)),
                 ("Tooltip", Value::String(String::new())),
                 ("ZIndex", Value::Number(1.0)),
+                // Degrees clockwise: it and its children are drawn and hit
+                // turned around its middle. Layout doesn't change.
+                ("Rotation", Value::Number(0.0)),
                 // The area its children are laid out on: scale of the frame's
                 // own size plus pixels. Never smaller than the frame.
                 ("CanvasSize", Value::UDim2(UDim2::new(0.0, 0.0, 2.0, 0.0))),
@@ -552,6 +582,9 @@ impl ClassName {
                 // Siblings are drawn lowest first (ties keep tree order), and
                 // the one on top takes the pointer. CSS `z-index` wins.
                 ("ZIndex", Value::Number(1.0)),
+                // Degrees clockwise: it and its children are drawn and hit
+                // turned around its middle. Layout doesn't change.
+                ("Rotation", Value::Number(0.0)),
             ],
             ClassName::Animator => vec![
                 // The state machine it plays, relative to the project folder,

@@ -30,6 +30,7 @@ pub(crate) mod bevel;
 pub(crate) mod order;
 mod panels;
 mod rich_text;
+mod rotate;
 mod rulers;
 mod slice;
 mod states;
@@ -67,6 +68,18 @@ pub const SCREENS: [(&str, u32, u32); 8] = [
     ("Phone landscape 844 × 390", 844, 390),
     ("Phone portrait 390 × 844", 390, 844),
 ];
+
+/// The unsafe edges of the phone screens in [`SCREENS`] (a notch or
+/// camera, and the home bar), in pixels: top, right, bottom, left. A
+/// ScreenGui with `ScreenInsets` set to `DeviceSafeInsets` keeps inside
+/// them, and the artboard hatches them. Other screens have none.
+pub fn safe_insets((width, height): (u32, u32)) -> [f32; 4] {
+    match (width, height) {
+        (390, 844) => [47.0, 0.0, 34.0, 0.0],
+        (844, 390) => [0.0, 47.0, 21.0, 47.0],
+        _ => [0.0; 4],
+    }
+}
 
 /// What the palette offers, with its name there.
 pub const PALETTE: [(Insertable, &str); 9] = [
@@ -258,6 +271,8 @@ pub struct UiDesigner {
     drag: Option<UiDrag>,
     /// The anchor's diamonds being dragged.
     anchor_drag: Option<anchor_handles::AnchorDrag>,
+    /// The selection being turned by a rotate knob.
+    rotate_drag: Option<rotate::RotateDrag>,
     /// The diamonds' right-click menu is open.
     anchor_menu: bool,
     /// Where the pointer went down for the drag, until it has moved: a
@@ -317,6 +332,7 @@ impl Default for UiDesigner {
             canvas: Canvas::default(),
             drag: None,
             anchor_drag: None,
+            rotate_drag: None,
             anchor_menu: false,
             drag_held: None,
             snaps: Vec::new(),
@@ -583,6 +599,7 @@ impl UiDesigner {
     pub fn is_dragging(&self) -> bool {
         self.drag.is_some()
             || self.anchor_drag.is_some()
+            || self.rotate_drag.is_some()
             || self.guide_drag.is_some()
             || self.scroller.scrolling()
     }
@@ -599,6 +616,7 @@ impl UiDesigner {
         let Some(gui) = self.gui else {
             self.drag = None;
             self.anchor_drag = None;
+            self.rotate_drag = None;
             ui.label("There's no ScreenGui to design yet.");
             if ui
                 .add_enabled(

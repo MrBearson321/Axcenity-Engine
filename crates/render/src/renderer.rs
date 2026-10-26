@@ -12,7 +12,9 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::time::Duration;
 
-use crate::draw_list::{DrawList, Shape, TextureSource, UiDrawItem, UiRectangle, UiText};
+use crate::draw_list::{
+    DrawList, Shape, TextureSource, UiDrawItem, UiRectangle, UiText, is_turned,
+};
 use crate::mesh::{self};
 use anyhow::{Context, Result};
 use bytemuck::{Pod, Zeroable};
@@ -52,9 +54,11 @@ use lighting::{
 use std::sync::Arc;
 
 mod scene;
+mod turned_text;
 mod types;
 
 use text::TextLine;
+use turned_text::{SHEET_KEY, ShapedText};
 use types::*;
 use ui_pass::{
     UiLayer, create_sky_pipeline, create_ui_image_pipeline, create_ui_pipeline, glyph_color,

@@ -149,8 +149,9 @@ pub(super) struct UiVertex {
     /// The box it's cut to, in screen pixels (left, top, width, height):
     /// [`NO_CLIP`] when it isn't cut.
     pub(super) clip: [f32; 4],
-    /// That box's corner radius, in pixels.
-    pub(super) clip_radius: f32,
+    /// That box's corner radius, in pixels, and how far it's turned
+    /// clockwise around its middle, in radians.
+    pub(super) clip_shape: [f32; 2],
 }
 
 /// A clip box so big nothing on screen is outside it.
@@ -336,6 +337,9 @@ pub(super) struct ScenePipeline {
     pub(super) tile_buffer: wgpu::Buffer,
     pub(super) ui_pipeline: wgpu::RenderPipeline,
     pub(super) ui_image_pipeline: wgpu::RenderPipeline,
+    /// Draws turned text from [`TurnedText`]'s sheet, whose colours are
+    /// premultiplied by their alpha.
+    pub(super) ui_sheet_pipeline: wgpu::RenderPipeline,
     pub(super) ui_image_layout: wgpu::BindGroupLayout,
     pub(super) ui_sampler: wgpu::Sampler,
     /// One bind group per UI image texture. Dropped with the texture.
@@ -354,6 +358,10 @@ pub(super) struct ScenePipeline {
     /// One per UI layer with text (see `ui_pass::ui_layers`), made as
     /// they're first needed and kept.
     pub(super) text_renderers: Vec<GlyphTextRenderer>,
+    /// Turned text, drawn upright into a sheet first.
+    pub(super) turned_text: TurnedText,
+    /// The format of what's drawn into, which the sheet shares.
+    pub(super) color_format: wgpu::TextureFormat,
     pub(super) frame_buffer: wgpu::Buffer,
     /// The frame bindings with an empty shadow map, for when shadows are off.
     pub(super) frame_bind_group: wgpu::BindGroup,
@@ -389,4 +397,15 @@ pub(super) struct ScenePipeline {
     pub(super) gpu_timer: Option<gpu_timer::GpuTimer>,
     /// Draw calls and triangles of the last frame.
     pub(super) draws: (u32, u64),
+}
+
+/// Turned UI text: glyphon only draws text upright, so each turned text is
+/// drawn upright into its own place on a sheet, which is then drawn as a
+/// turned picture where the text goes.
+pub(super) struct TurnedText {
+    pub(super) renderer: GlyphTextRenderer,
+    pub(super) viewport: TextViewport,
+    /// The sheet, its view's bind group, and its size. Made when first
+    /// needed and grown, never shrunk.
+    pub(super) sheet: Option<(wgpu::Texture, wgpu::BindGroup, (u32, u32))>,
 }

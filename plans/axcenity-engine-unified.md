@@ -535,10 +535,10 @@ Ctrl+B, Ctrl+I and Ctrl+U toggle bold, italic and underline on the selected elem
 
 ### Acceptance criteria
 
-- [ ] A Frame rotated 30° from the handle draws rotated in the designer and in Play, and clicks hit its rotated shape.
-- [ ] Background, text and image transparency each change only their own part.
-- [ ] A frame with `aspect-ratio: 1` stays square when the screen size changes.
-- [ ] A top bar in a `DeviceSafeInsets` ScreenGui sits below the notch on a phone Preview and at the top on a desktop one.
+- [x] A Frame rotated 30° from the handle draws rotated in the designer and in Play, and clicks hit its rotated shape.
+- [x] Background, text and image transparency each change only their own part.
+- [x] A frame with `aspect-ratio: 1` stays square when the screen size changes.
+- [x] A top bar in a `DeviceSafeInsets` ScreenGui sits below the notch on a phone Preview and at the top on a desktop one.
 
 ---
 

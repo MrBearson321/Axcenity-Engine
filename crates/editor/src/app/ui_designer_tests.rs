@@ -2403,3 +2403,307 @@ fn the_wheel_scrolls_a_scrolling_frame_on_the_artboard_without_changing_its_canv
     assert_eq!(app.selected, Some(low));
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+/// Runs `frames` of the designer as [`run_designer`] does, with `modifiers`
+/// held throughout.
+fn run_designer_holding(
+    app: &mut EditorApp,
+    ctx: &egui::Context,
+    clock: &mut f64,
+    size: egui::Vec2,
+    frames: Vec<Vec<egui::Event>>,
+    modifiers: egui::Modifiers,
+) {
+    for events in frames {
+        *clock += 0.05;
+        let events = events
+            .into_iter()
+            .map(|event| match event {
+                egui::Event::PointerButton {
+                    pos,
+                    button,
+                    pressed,
+                    ..
+                } => egui::Event::PointerButton {
+                    pos,
+                    button,
+                    pressed,
+                    modifiers,
+                },
+                other => other,
+            })
+            .collect();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+            events,
+            modifiers,
+            time: Some(*clock),
+            ..Default::default()
+        };
+        let _ = ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| app.ui_designer_pane(ui, None));
+        });
+        if !ctx.is_using_pointer() && !ctx.wants_keyboard_input() {
+            frame_ends(app);
+        }
+    }
+}
+
+#[test]
+fn a_frame_turned_with_the_rotate_knob_draws_turned_and_clicks_hit_its_turned_shape() {
+    let folder = copy_of_example("hello-touched", "ui-designer-rotate");
+    let mut app = EditorApp::new(Some(&folder));
+    act(&mut app, DesignerAction::NewScreenGui);
+    let gui = app.selected.unwrap();
+    let frame = drop_in(&mut app, Insertable::Frame, gui, [300.0, 200.0]);
+    let ctx = theme::test_context();
+    let mut clock = 0.0;
+    let size = egui::vec2(1200.0, 800.0);
+    run_designer(&mut app, &ctx, &mut clock, size, vec![Vec::new(); 3]);
+    let undo_before = app.history.undo_label().map(str::to_owned);
+
+    // Grab the knob just outside its top right corner and swing it 33°
+    // around its middle with Shift held: it snaps to 30°.
+    let rect = rect_on_artboard(&app, gui, frame);
+    let centre = rect.center();
+    let knob = rect.right_top() + egui::vec2(12.0, -12.0) / std::f32::consts::SQRT_2;
+    let swing = |degrees: f32| {
+        let [x, y] = axcenity_render::turn_point([knob.x, knob.y], [centre.x, centre.y], degrees);
+        egui::pos2(x, y)
+    };
+    let frames = vec![
+        vec![egui::Event::PointerMoved(knob)],
+        vec![press(knob, true)],
+        vec![egui::Event::PointerMoved(swing(15.0))],
+        vec![egui::Event::PointerMoved(swing(33.0))],
+        vec![press(swing(33.0), false)],
+        Vec::new(),
+    ];
+    run_designer_holding(
+        &mut app,
+        &ctx,
+        &mut clock,
+        size,
+        frames,
+        egui::Modifiers::SHIFT,
+    );
+    let rotation = |app: &EditorApp| {
+        app.world
+            .get(frame)
+            .unwrap()
+            .property("Rotation")
+            .and_then(Value::as_number)
+    };
+    assert_eq!(rotation(&app), Some(30.0));
+    assert_eq!(app.selected, Some(frame), "turning keeps the selection");
+    // The whole drag is one undo step.
+    assert_eq!(app.history.undo_label(), Some("Change Rotation of Frame"));
+
+    // The artboard draws it turned, and a click where only the turned
+    // frame is selects it.
+    let sheets = stylesheets(&app);
+    let (board, zoom) = app.ui_designer.board().unwrap();
+    let screen = axcenity_ui::design_size(&app.world, gui);
+    let layout = axcenity_ui::layout_artboard(
+        &app.world,
+        gui,
+        &sheets,
+        screen,
+        zoom,
+        [board.min.x, board.min.y],
+    );
+    let element = *layout.element(frame).unwrap();
+    assert!((element.degrees() - 30.0).abs() < 1e-3);
+    assert!(layout.draw_items.iter().any(|item| matches!(
+        item,
+        axcenity_render::UiDrawItem::Rectangle(r) if r.rotation_degrees == 30.0
+    )));
+    // Its bottom right corner, turned 30° down past the upright box.
+    let inside = element.on_screen([
+        element.rect.x + element.rect.width - 2.0,
+        element.rect.y + element.rect.height - 2.0,
+    ]);
+    let inside = egui::pos2(inside[0], inside[1]);
+    assert!(inside.y > rect.bottom(), "{inside:?} {rect:?}");
+    act(&mut app, DesignerAction::Select(Some(gui)));
+    for events in [
+        vec![egui::Event::PointerMoved(inside)],
+        vec![press(inside, true)],
+        vec![press(inside, false)],
+        Vec::new(),
+    ] {
+        designer_frame(&mut app, &ctx, &mut clock, size, events);
+    }
+    assert_eq!(app.selected, Some(frame));
+    assert_eq!(rotation(&app), Some(30.0), "a click doesn't turn it");
+    if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from) {
+        let label = drop_in(&mut app, Insertable::TextLabel, frame, [10.0, 10.0]);
+        act(
+            &mut app,
+            DesignerAction::Edit(
+                label,
+                Edit::Property("Text", Value::String("Turned 30°".into())),
+            ),
+        );
+        act(&mut app, DesignerAction::Select(Some(frame)));
+        // A small design size, so the artboard is zoomed in on it.
+        act(
+            &mut app,
+            DesignerAction::DesignSize {
+                gui,
+                width: 640,
+                height: 400,
+            },
+        );
+        crate::snapshot::snapshot_rendered(
+            &folder.join("ui-designer-rotated.png"),
+            size,
+            vec![Vec::new(); 3],
+            |ctx, render_state| {
+                egui::CentralPanel::default()
+                    .show(ctx, |ui| app.ui_designer_pane(ui, Some(render_state)));
+            },
+        );
+        app.undo();
+        app.undo();
+        app.undo();
+        act(&mut app, DesignerAction::Select(Some(frame)));
+        run_designer(&mut app, &ctx, &mut clock, size, vec![Vec::new(); 2]);
+    }
+
+    // Without Shift it follows the pointer freely.
+    let handles_knob = {
+        let handles = Handles::new(element, &app.world, &sheets, egui::Pos2::ZERO, 1.0);
+        handles.on_screen(rect.right_top() + egui::vec2(12.0, -12.0) / std::f32::consts::SQRT_2)
+    };
+    let free = |degrees: f32| {
+        let [x, y] = axcenity_render::turn_point(
+            [handles_knob.x, handles_knob.y],
+            [centre.x, centre.y],
+            degrees,
+        );
+        egui::pos2(x, y)
+    };
+    let frames = vec![
+        vec![egui::Event::PointerMoved(handles_knob)],
+        vec![press(handles_knob, true)],
+        vec![egui::Event::PointerMoved(free(4.0))],
+        vec![egui::Event::PointerMoved(free(7.0))],
+        vec![press(free(7.0), false)],
+        Vec::new(),
+    ];
+    run_designer(&mut app, &ctx, &mut clock, size, frames);
+    let free_turn = rotation(&app).unwrap();
+    assert!((free_turn - 37.0).abs() < 0.3, "{free_turn}");
+    app.undo();
+    assert_eq!(rotation(&app), Some(30.0));
+
+    // In Play it's drawn turned and takes clicks by its turned shape.
+    app.play();
+    let world = app.play.as_ref().expect("playing").world();
+    let (width, height) = axcenity_ui::design_size(world, gui);
+    let played = axcenity_ui::layout_ui(world, width, height, &sheets);
+    let in_play = *played.element(frame).unwrap();
+    assert!((in_play.degrees() - 30.0).abs() < 1e-3);
+    let corner = in_play.on_screen([
+        in_play.rect.x + in_play.rect.width - 2.0,
+        in_play.rect.y + in_play.rect.height - 2.0,
+    ]);
+    assert!(corner[1] > in_play.rect.y + in_play.rect.height);
+    assert_eq!(played.hit(corner[0], corner[1]), Some(frame));
+    let upright_corner = [
+        in_play.rect.x + in_play.rect.width - 2.0,
+        in_play.rect.y + 2.0,
+    ];
+    assert_ne!(
+        played.hit(upright_corner[0], upright_corner[1]),
+        Some(frame)
+    );
+    app.stop();
+
+    app.undo();
+    assert_eq!(rotation(&app), Some(0.0));
+    assert_eq!(app.history.undo_label().map(str::to_owned), undo_before);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn a_top_bar_in_a_device_safe_insets_gui_sits_below_the_notch_on_a_phone_preview() {
+    let folder = copy_of_example("hello-touched", "ui-designer-safe-area");
+    let mut app = EditorApp::new(Some(&folder));
+    act(&mut app, DesignerAction::NewScreenGui);
+    let gui = app.selected.unwrap();
+    // Designed for a phone, in Scale.
+    act(
+        &mut app,
+        DesignerAction::DesignSize {
+            gui,
+            width: 390,
+            height: 844,
+        },
+    );
+    let bar = drop_in(&mut app, Insertable::Frame, gui, [0.0, 0.0]);
+    act(
+        &mut app,
+        DesignerAction::Edit(
+            bar,
+            Edit::Property("Size", Value::UDim2(UDim2::new(1.0, 0.0, 0.0, 60.0))),
+        ),
+    );
+    act(
+        &mut app,
+        DesignerAction::Edit(
+            gui,
+            Edit::Property("ScreenInsets", Value::String("DeviceSafeInsets".into())),
+        ),
+    );
+    let ctx = theme::test_context();
+    let mut clock = 0.0;
+    let size = egui::vec2(1200.0, 900.0);
+    // What a click at (x, y) on the previewed screen, in its pixels, selects.
+    let click = |app: &mut EditorApp, clock: &mut f64, [x, y]: [f32; 2]| {
+        act(app, DesignerAction::Select(None));
+        let (board, zoom) = app.ui_designer.board().unwrap();
+        let at = board.min + egui::vec2(x, y) * zoom;
+        for events in [
+            vec![egui::Event::PointerMoved(at)],
+            vec![press(at, true)],
+            vec![press(at, false)],
+            Vec::new(),
+        ] {
+            designer_frame(app, &ctx, clock, size, events);
+        }
+        app.selected
+    };
+
+    // On a phone in portrait, the top 47 pixels are the notch: the bar
+    // starts under it.
+    app.ui_designer.preview_at(Some((390, 844)));
+    run_designer(&mut app, &ctx, &mut clock, size, vec![Vec::new(); 3]);
+    assert_ne!(click(&mut app, &mut clock, [195.0, 20.0]), Some(bar));
+    assert_eq!(click(&mut app, &mut clock, [195.0, 47.0 + 20.0]), Some(bar));
+    assert_eq!(crate::ui_designer::safe_insets((390, 844))[0], 47.0);
+    if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from) {
+        crate::snapshot::snapshot_rendered(
+            &folder.join("ui-designer-safe-area.png"),
+            size,
+            vec![Vec::new(); 3],
+            |ctx, render_state| {
+                egui::CentralPanel::default()
+                    .show(ctx, |ui| app.ui_designer_pane(ui, Some(render_state)));
+            },
+        );
+    }
+
+    // On a desktop screen there's no notch: the bar is at the top.
+    app.ui_designer.preview_at(Some((1280, 720)));
+    run_designer(&mut app, &ctx, &mut clock, size, vec![Vec::new(); 3]);
+    assert_eq!(click(&mut app, &mut clock, [640.0, 20.0]), Some(bar));
+    // And in Play, on the desktop player's screen.
+    app.play();
+    let world = app.play.as_ref().expect("playing").world();
+    let played = axcenity_ui::layout_ui(world, 1280, 720, &stylesheets(&app));
+    assert_eq!(played.element(bar).unwrap().rect.y, 0.0);
+    app.stop();
+    let _ = std::fs::remove_dir_all(&folder);
+}

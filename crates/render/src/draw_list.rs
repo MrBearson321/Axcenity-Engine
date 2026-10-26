@@ -82,28 +82,109 @@ pub struct UiRectangle {
     /// Only the part inside this is drawn (CSS `overflow: hidden` on an
     /// element around it).
     pub clip: Option<UiClip>,
+    /// How far it's turned, in degrees clockwise, around the middle of
+    /// its box (`position` and `size` are the box before it's turned). A
+    /// shadow turns with it, around the same point.
+    pub rotation_degrees: f32,
 }
 
 /// The rounded box a UI item is cut to: what's outside it isn't drawn.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct UiClip {
-    /// Its top left corner, in pixels.
+    /// Its top left corner, in pixels, before it's turned.
     pub position: [f32; 2],
     pub size: [f32; 2],
     /// How round its corners are, in pixels. Text is cut to the box's
     /// square corners.
     pub radius: f32,
+    /// How far the box is turned, in degrees clockwise around its middle
+    /// (inside a turned element). Text is cut to the box around it.
+    pub rotation_degrees: f32,
+}
+
+/// `point` turned `degrees` clockwise on screen (y down) around `centre`.
+pub fn turn_point(point: [f32; 2], centre: [f32; 2], degrees: f32) -> [f32; 2] {
+    let (sin, cos) = degrees.to_radians().sin_cos();
+    let [dx, dy] = [point[0] - centre[0], point[1] - centre[1]];
+    [
+        centre[0] + dx * cos - dy * sin,
+        centre[1] + dx * sin + dy * cos,
+    ]
+}
+
+/// Whether a turn of `degrees` turns anything: not a whole number of turns.
+pub fn is_turned(degrees: f32) -> bool {
+    let turn = degrees.rem_euclid(360.0);
+    degrees.is_finite() && turn > 0.01 && turn < 359.99
+}
+
+/// The upright box (left, top, right, bottom) around `[x, y, w, h]`
+/// turned `degrees` around its middle.
+pub fn turned_bounds([x, y, w, h]: [f32; 4], degrees: f32) -> [f32; 4] {
+    if !is_turned(degrees) {
+        return [x, y, x + w, y + h];
+    }
+    let centre = [x + w * 0.5, y + h * 0.5];
+    let corners = [[x, y], [x + w, y], [x, y + h], [x + w, y + h]]
+        .map(|corner| turn_point(corner, centre, degrees));
+    let mut bounds = [
+        f32::INFINITY,
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+        f32::NEG_INFINITY,
+    ];
+    for [cx, cy] in corners {
+        bounds = [
+            bounds[0].min(cx),
+            bounds[1].min(cy),
+            bounds[2].max(cx),
+            bounds[3].max(cy),
+        ];
+    }
+    bounds
 }
 
 impl UiClip {
     /// The part of `self` that's also inside `other`, rounded as the
     /// smaller of the two (the inner one, when one is inside the other).
+    /// Two boxes turned differently can't be cut to one box: the smaller
+    /// of the two is kept.
     pub fn intersect(self, other: UiClip) -> UiClip {
+        let area = |clip: UiClip| clip.size[0] * clip.size[1];
+        if (self.rotation_degrees - other.rotation_degrees).abs() > 0.01 {
+            return if area(self) <= area(other) {
+                self
+            } else {
+                other
+            };
+        }
+        if is_turned(self.rotation_degrees) {
+            // Cut in the turned boxes' own frame: unturn both around the
+            // same point, cut, and turn the result back.
+            let pivot = self.centre();
+            let upright = |clip: UiClip| {
+                let centre = turn_point(clip.centre(), pivot, -clip.rotation_degrees);
+                UiClip {
+                    position: [
+                        centre[0] - clip.size[0] * 0.5,
+                        centre[1] - clip.size[1] * 0.5,
+                    ],
+                    rotation_degrees: 0.0,
+                    ..clip
+                }
+            };
+            let cut = upright(self).intersect(upright(other));
+            let centre = turn_point(cut.centre(), pivot, self.rotation_degrees);
+            return UiClip {
+                position: [centre[0] - cut.size[0] * 0.5, centre[1] - cut.size[1] * 0.5],
+                rotation_degrees: self.rotation_degrees,
+                ..cut
+            };
+        }
         let left = self.position[0].max(other.position[0]);
         let top = self.position[1].max(other.position[1]);
         let right = (self.position[0] + self.size[0]).min(other.position[0] + other.size[0]);
         let bottom = (self.position[1] + self.size[1]).min(other.position[1] + other.size[1]);
-        let area = |clip: UiClip| clip.size[0] * clip.size[1];
         let radius = if area(self) <= area(other) {
             self.radius
         } else {
@@ -113,11 +194,21 @@ impl UiClip {
             position: [left, top],
             size: [(right - left).max(0.0), (bottom - top).max(0.0)],
             radius,
+            rotation_degrees: 0.0,
         }
+    }
+
+    /// The middle of its box.
+    pub fn centre(&self) -> [f32; 2] {
+        [
+            self.position[0] + self.size[0] * 0.5,
+            self.position[1] + self.size[1] * 0.5,
+        ]
     }
 
     /// Whether a point is inside it, rounded corners and all.
     pub fn contains(&self, x: f32, y: f32) -> bool {
+        let [x, y] = turn_point([x, y], self.centre(), -self.rotation_degrees);
         let [w, h] = self.size;
         let half = [w * 0.5, h * 0.5];
         let radius = self.radius.clamp(0.0, half[0].min(half[1]));
@@ -165,6 +256,8 @@ pub struct UiImage {
     pub slice: Option<UiSlice>,
     /// Only the part inside this is drawn.
     pub clip: Option<UiClip>,
+    /// How far it's turned, in degrees clockwise around its middle.
+    pub rotation_degrees: f32,
 }
 
 /// How a [`UiImage`] is cut into nine pieces: the corners keep their size,
@@ -224,6 +317,9 @@ pub struct UiText {
     pub spans: Vec<TextSpan>,
     /// Only the part inside this box is drawn (its corners are square for text).
     pub clip: Option<UiClip>,
+    /// How far it's turned, in degrees clockwise around the middle of its
+    /// box. Turned text is drawn upright off screen, then turned.
+    pub rotation_degrees: f32,
 }
 
 /// A piece of rich text (`RichText`) and the style its tags give it.
@@ -267,6 +363,7 @@ impl Default for UiText {
             scaled: false,
             spans: Vec::new(),
             clip: None,
+            rotation_degrees: 0.0,
         }
     }
 }

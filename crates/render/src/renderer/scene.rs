@@ -203,7 +203,7 @@ impl ScenePipeline {
         let post = PostPasses::new(&device, color_format);
         let post_targets = PostTargets::new(&device, &post, width, height);
         let ui_pipeline = create_ui_pipeline(&device, color_format);
-        let (ui_image_layout, ui_sampler, ui_image_pipeline) =
+        let (ui_image_layout, ui_sampler, ui_image_pipeline, ui_sheet_pipeline) =
             create_ui_image_pipeline(&device, color_format);
         let meshes = Meshes {
             block: upload_mesh(&device, "block", &mesh::block()),
@@ -228,7 +228,17 @@ impl ScenePipeline {
         let swash_cache = SwashCache::new();
         let glyph_cache = GlyphCache::new(&device);
         let text_viewport = TextViewport::new(&device, &glyph_cache);
-        let text_atlas = TextAtlas::new(&device, &queue, &glyph_cache, color_format);
+        let mut text_atlas = TextAtlas::new(&device, &queue, &glyph_cache, color_format);
+        let turned_text = TurnedText {
+            renderer: GlyphTextRenderer::new(
+                &mut text_atlas,
+                &device,
+                wgpu::MultisampleState::default(),
+                None,
+            ),
+            viewport: TextViewport::new(&device, &glyph_cache),
+            sheet: None,
+        };
         let gpu_timer = gpu_timer::GpuTimer::new(&device, &queue);
 
         Self {
@@ -245,6 +255,7 @@ impl ScenePipeline {
             tile_buffer,
             ui_pipeline,
             ui_image_pipeline,
+            ui_sheet_pipeline,
             ui_image_layout,
             ui_sampler,
             ui_image_groups: HashMap::new(),
@@ -257,6 +268,8 @@ impl ScenePipeline {
             text_viewport,
             text_atlas,
             text_renderers: Vec::new(),
+            turned_text,
+            color_format,
             frame_buffer,
             frame_bind_group,
             frame_layout,
@@ -351,7 +364,10 @@ impl ScenePipeline {
         let layer_ranges = ui_layers(&list.ui);
         let (text_buffers, text_lines, layers_with_text) =
             self.prepare_ui_text(&list.ui, &layer_ranges, viewport_size)?;
-        let mut ui_vertices = Vec::new();
+        let turned = self.prepare_turned_text(&list.ui, viewport_size)?;
+        // The sheet's underlines go first in the buffer.
+        let mut ui_vertices = turned.lines.clone();
+        let sheet_lines = 0..ui_vertices.len() as u32;
         let mut ui_draws = Vec::with_capacity(layer_ranges.len());
         for (index, range) in layer_ranges.iter().enumerate() {
             let start = ui_vertices.len() as u32;
@@ -362,8 +378,13 @@ impl ScenePipeline {
                 viewport_size,
             ));
             let rectangles = start..ui_vertices.len() as u32;
-            let images =
-                self.ui_image_draws(&list.ui[range.clone()], viewport_size, &mut ui_vertices);
+            let images = self.ui_image_draws(
+                &list.ui,
+                range.clone(),
+                &turned.quads,
+                viewport_size,
+                &mut ui_vertices,
+            );
             ui_draws.push(UiLayer {
                 rectangles,
                 images,
@@ -538,6 +559,35 @@ impl ScenePipeline {
             list.post.enabled && list.post.bloom_enabled && list.post.bloom_intensity > 0.0,
         );
 
+        if turned.drawn
+            && let Some((sheet, _, _)) = &self.turned_text.sheet
+        {
+            let sheet_view = sheet.create_view(&wgpu::TextureViewDescriptor::default());
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("turned UI text"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &sheet_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                ..Default::default()
+            });
+            if !sheet_lines.is_empty() {
+                pass.set_pipeline(&self.ui_pipeline);
+                pass.set_vertex_buffer(0, self.ui_buffer.slice(..));
+                pass.draw(sheet_lines.clone(), 0..1);
+            }
+            self.turned_text
+                .renderer
+                .render(&self.text_atlas, &self.turned_text.viewport, &mut pass)
+                .context("could not render turned UI text")?;
+        }
+        let _ = &turned.buffers;
+
         if !ui_vertices.is_empty() || !text_buffers.is_empty() {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("UI overlay"),
@@ -559,12 +609,20 @@ impl ScenePipeline {
                     pass.draw(layer.rectangles.clone(), 0..1);
                 }
                 if !layer.images.is_empty() {
-                    pass.set_pipeline(&self.ui_image_pipeline);
                     pass.set_vertex_buffer(0, self.ui_buffer.slice(..));
                     for (key, start, count) in &layer.images {
-                        let Some(group) = self.ui_image_groups.get(key) else {
-                            continue;
+                        let (pipeline, group) = if *key == SHEET_KEY {
+                            let Some((_, group, _)) = &self.turned_text.sheet else {
+                                continue;
+                            };
+                            (&self.ui_sheet_pipeline, group)
+                        } else {
+                            let Some(group) = self.ui_image_groups.get(key) else {
+                                continue;
+                            };
+                            (&self.ui_image_pipeline, group)
                         };
+                        pass.set_pipeline(pipeline);
                         pass.set_bind_group(0, group, &[]);
                         pass.draw(*start..*start + *count, 0..1);
                     }
@@ -627,8 +685,9 @@ impl ScenePipeline {
             .iter()
             .enumerate()
             .filter_map(|(index, item)| match item {
-                UiDrawItem::Text(text) => Some((index, text)),
-                UiDrawItem::Rectangle(_) | UiDrawItem::Image(_) => None,
+                // Turned text is drawn from the sheet instead.
+                UiDrawItem::Text(text) if !is_turned(text.rotation_degrees) => Some((index, text)),
+                UiDrawItem::Text(_) | UiDrawItem::Rectangle(_) | UiDrawItem::Image(_) => None,
             })
             .collect();
         if self.fitted_sizes.len() > 4096 {
@@ -640,65 +699,21 @@ impl ScenePipeline {
         let mut placed = Vec::new();
         let mut lines = Vec::new();
         for &(index, item) in &text_items {
-            let styled = text::Styled::new(self.font_system.db(), item);
-            let font_size = if item.scaled {
-                let runs: Vec<_> = styled
-                    .runs
-                    .iter()
-                    .map(|run| (&run.text, &run.font_family, run.font_size))
-                    .collect();
-                let key = format!(
-                    "{:?}{:?}{:?}{:?}",
-                    styled.faces,
-                    runs,
-                    item.size,
-                    (
-                        &item.font_family,
-                        item.font_size,
-                        item.letter_spacing,
-                        item.line_height,
-                        item.wrap,
-                    )
-                );
-                match self.fitted_sizes.get(&key) {
-                    Some(size) => *size,
-                    None => {
-                        let size = text::fitted_size(&mut self.font_system, &styled);
-                        self.fitted_sizes.insert(key, size);
-                        size
-                    }
-                }
-            } else {
-                item.font_size.max(1.0)
-            };
-            let (layers, passes) = text::passes(&styled, font_size);
-            let first = buffers.len();
-            for paint in &layers {
-                buffers.push(text::shape(
-                    &mut self.font_system,
-                    &styled,
-                    font_size,
-                    paint,
-                ));
-            }
-            let top = item.position[1] + text::vertical_offset(item, &buffers[first]);
-            lines.extend(
-                text::decorations(&styled, &buffers[first], font_size, [item.position[0], top])
-                    .into_iter()
-                    .map(|line| {
-                        (
-                            index,
-                            UiRectangle {
-                                clip: item.clip,
-                                ..line
-                            },
-                        )
-                    }),
-            );
+            let shaped = self.shape_ui_text(item, &mut buffers);
+            lines.extend(shaped.lines.into_iter().map(|line| {
+                (
+                    index,
+                    UiRectangle {
+                        clip: item.clip,
+                        ..line
+                    },
+                )
+            }));
             placed.extend(
-                passes
+                shaped
+                    .passes
                     .into_iter()
-                    .map(|pass| (index, item, top, first + pass.layer, pass)),
+                    .map(|pass| (index, item, shaped.top, shaped.first + pass.layer, pass)),
             );
         }
 
@@ -722,22 +737,14 @@ impl ScenePipeline {
             }
             let areas = in_layer.into_iter().map(|&(_, text, top, buffer, pass)| {
                 let [dx, dy] = pass.offset;
-                let mut bounds = TextBounds {
-                    left: (text.position[0] + dx).floor() as i32,
-                    top: (text.position[1] + dy).floor() as i32,
-                    right: (text.position[0] + dx + text.size[0].max(0.0)).ceil() as i32,
-                    bottom: (text.position[1] + dy + text.size[1].max(0.0)).ceil() as i32,
-                };
+                let mut bounds = text_bounds(text, pass.offset);
                 // Cut to the clip too, which doesn't move with a shadow.
                 if let Some(clip) = text.clip {
-                    bounds.left = bounds.left.max(clip.position[0].floor() as i32);
-                    bounds.top = bounds.top.max(clip.position[1].floor() as i32);
-                    bounds.right = bounds
-                        .right
-                        .min((clip.position[0] + clip.size[0].max(0.0)).ceil() as i32);
-                    bounds.bottom = bounds
-                        .bottom
-                        .min((clip.position[1] + clip.size[1].max(0.0)).ceil() as i32);
+                    let [left, upper, right, lower] = super::ui_pass::clip_bounds(clip);
+                    bounds.left = bounds.left.max(left.floor() as i32);
+                    bounds.top = bounds.top.max(upper.floor() as i32);
+                    bounds.right = bounds.right.min(right.ceil() as i32);
+                    bounds.bottom = bounds.bottom.min(lower.ceil() as i32);
                     bounds.right = bounds.right.max(bounds.left);
                     bounds.bottom = bounds.bottom.max(bounds.top);
                 }
@@ -767,6 +774,60 @@ impl ScenePipeline {
                 .context("could not prepare UI text")?;
         }
         Ok((buffers, lines, with_text))
+    }
+
+    /// Shapes one UI text into `buffers`, one buffer per paint (see
+    /// `text::passes`), and works out its copies and decorations.
+    pub(super) fn shape_ui_text(&mut self, item: &UiText, buffers: &mut Vec<Buffer>) -> ShapedText {
+        let styled = text::Styled::new(self.font_system.db(), item);
+        let font_size = if item.scaled {
+            let runs: Vec<_> = styled
+                .runs
+                .iter()
+                .map(|run| (&run.text, &run.font_family, run.font_size))
+                .collect();
+            let key = format!(
+                "{:?}{:?}{:?}{:?}",
+                styled.faces,
+                runs,
+                item.size,
+                (
+                    &item.font_family,
+                    item.font_size,
+                    item.letter_spacing,
+                    item.line_height,
+                    item.wrap,
+                )
+            );
+            match self.fitted_sizes.get(&key) {
+                Some(size) => *size,
+                None => {
+                    let size = text::fitted_size(&mut self.font_system, &styled);
+                    self.fitted_sizes.insert(key, size);
+                    size
+                }
+            }
+        } else {
+            item.font_size.max(1.0)
+        };
+        let (layers, passes) = text::passes(&styled, font_size);
+        let first = buffers.len();
+        for paint in &layers {
+            buffers.push(text::shape(
+                &mut self.font_system,
+                &styled,
+                font_size,
+                paint,
+            ));
+        }
+        let top = item.position[1] + text::vertical_offset(item, &buffers[first]);
+        let lines = text::decorations(&styled, &buffers[first], font_size, [item.position[0], top]);
+        ShapedText {
+            first,
+            top,
+            passes,
+            lines,
+        }
     }
 
     /// Uploads the callers' meshes and textures in `list` that aren't on
@@ -857,16 +918,26 @@ impl ScenePipeline {
         }
     }
 
-    /// Appends one quad per UI image and remembers which texture it uses.
+    /// Appends the quads of the UI images in `ui[range]`, and of its turned
+    /// text (`turned`, by index in `ui`), and remembers which texture each
+    /// uses: [`SHEET_KEY`] for turned text.
     pub(super) fn ui_image_draws(
         &mut self,
         ui: &[UiDrawItem],
+        range: Range<usize>,
+        turned: &HashMap<usize, Vec<UiVertex>>,
         viewport: (u32, u32),
         vertices: &mut Vec<UiVertex>,
     ) -> Vec<(u64, u32, u32)> {
         let mut draws = Vec::new();
-        for item in ui {
-            let UiDrawItem::Image(image) = item else {
+        for index in range {
+            if let Some(quad) = turned.get(&index) {
+                let start = vertices.len() as u32;
+                vertices.extend_from_slice(quad);
+                draws.push((SHEET_KEY, start, quad.len() as u32));
+                continue;
+            }
+            let UiDrawItem::Image(image) = &ui[index] else {
                 continue;
             };
             let Some(source) = &image.texture else {
@@ -965,5 +1036,16 @@ impl ScenePipeline {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+    }
+}
+
+/// The glyphon bounds of one copy of `text`, `offset` pixels from it: its
+/// box, moved with the copy so a shadow is cut where its letters are.
+pub(super) fn text_bounds(text: &UiText, [dx, dy]: [f32; 2]) -> TextBounds {
+    TextBounds {
+        left: (text.position[0] + dx).floor() as i32,
+        top: (text.position[1] + dy).floor() as i32,
+        right: (text.position[0] + dx + text.size[0].max(0.0)).ceil() as i32,
+        bottom: (text.position[1] + dy + text.size[1].max(0.0)).ceil() as i32,
     }
 }

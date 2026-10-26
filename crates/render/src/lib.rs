@@ -16,7 +16,7 @@ pub use draw_list::{
     MeshSource, NormalMap, PostProcessing, Shadows, Shape, Sky, Sprite, Sun, TerrainLayer,
     TerrainLayers, TerrainSurface, TerrainView, TextAlign, TextShadow, TextSpan, TextStroke,
     TextureMaps, TextureSource, UiBorderSide, UiClip, UiDrawItem, UiImage, UiRectangle, UiShadow,
-    UiSlice, UiText, VerticalAlign,
+    UiSlice, UiText, VerticalAlign, is_turned, turn_point, turned_bounds,
 };
 pub use fonts::{BUILT_IN_FONTS, BuiltInFont, UiFont, font_families};
 pub use renderer::{RenderStats, Renderer, TextureRenderer};

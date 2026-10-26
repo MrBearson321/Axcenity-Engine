@@ -338,12 +338,14 @@ impl UiInteraction {
             let Some(scroll) = element.scroll else {
                 continue;
             };
+            // The bars are where the frame is laid out, before it's turned.
+            let local = element.local(pointer);
             for bar in scroll_bars(element.rect, &scroll, element.pixels_per_unit) {
-                if !bar.track.contains(pointer[0], pointer[1]) {
+                if !bar.track.contains(local[0], local[1]) {
                     continue;
                 }
-                let along = pointer[bar.axis];
-                let (grab, moved) = if bar.thumb.contains(pointer[0], pointer[1]) {
+                let along = local[bar.axis];
+                let (grab, moved) = if bar.thumb.contains(local[0], local[1]) {
                     (along - bar.thumb_start(), None)
                 } else {
                     let grab = bar.thumb_length() * 0.5;
@@ -385,7 +387,7 @@ impl UiInteraction {
                     let bars = scroll_bars(element.rect, &scroll, element.pixels_per_unit);
                     let bar = bars.iter().find(|bar| bar.axis == axis)?;
                     let mut to = scroll.position;
-                    to[axis] = bar.position_at(&scroll, pointer[axis] - grab);
+                    to[axis] = bar.position_at(&scroll, element.local(pointer)[axis] - grab);
                     self.scroll_to(id, to)
                 });
                 UiScrolled { taken: true, moved }
@@ -396,7 +398,11 @@ impl UiInteraction {
                 start,
                 moving,
             }) => {
-                let moved = [pointer[0] - from[0], pointer[1] - from[1]];
+                // Measured along the frame's own axes, in case it's turned.
+                let (here, there) = self.element(id).map_or((pointer, from), |element| {
+                    (element.local(pointer), element.local(from))
+                });
+                let moved = [here[0] - there[0], here[1] - there[1]];
                 let moving = moving || moved[0].hypot(moved[1]) >= SCROLL_DRAG_SLOP;
                 self.scroll_drag = Some(ScrollDrag::Content {
                     id,

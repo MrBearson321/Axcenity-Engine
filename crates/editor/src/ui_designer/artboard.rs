@@ -11,10 +11,11 @@ use eframe::egui_wgpu::RenderState;
 
 use super::anchor_handles::{AnchorDrag, AnchorHandles};
 use super::rich_text::{self, Format};
+use super::rotate::{self, RotateDrag};
 use super::rulers::{self, RULER};
 use super::{
     DesignerAction, DesignerScene, FIT_MARGIN, Guide, MAX_ZOOM, MIN_ZOOM, PaletteItem, TextEditing,
-    Toggle, UiDesigner, container_for, drop_offset, panels, reset_anchor_action, scale_mode,
+    Toggle, UiDesigner, container_for, drop_offset, panels, reset_anchor_action, safe_insets,
 };
 use crate::properties::Edit;
 use crate::theme::{self, icons};
@@ -116,13 +117,10 @@ impl UiDesigner {
         );
         self.place_view(ui, canvas, &response, (world, gui), screen);
 
-        let (unit, unit_origin) = axcenity_ui::screen_mapping(world, gui, screen.0, screen.1);
-        let design = axcenity_ui::design_size(world, gui);
-        let area = if scale_mode(world, gui) == "Fit" {
-            egui::vec2(design.0 as f32, design.1 as f32)
-        } else {
-            egui::vec2(screen.0 as f32, screen.1 as f32) / unit
-        };
+        // A phone's notch and home bar are left out with `DeviceSafeInsets`.
+        let (unit, unit_origin, area) =
+            axcenity_ui::safe_screen_mapping(world, gui, screen.0, screen.1, safe_insets(screen));
+        let area = egui::vec2(area[0], area[1]);
         let board = egui::Rect::from_min_size(
             canvas.min + self.pan,
             egui::vec2(screen.0 as f32, screen.1 as f32) * self.zoom,
@@ -155,6 +153,7 @@ impl UiDesigner {
         } else {
             self.drag = None;
             self.anchor_drag = None;
+            self.rotate_drag = None;
             painter.text(
                 canvas.center(),
                 egui::Align2::CENTER_CENTER,
@@ -293,6 +292,7 @@ impl UiDesigner {
                 origin: [origin.x, origin.y],
                 shown,
                 scrolled: Some(&self.scrolled),
+                safe_insets: safe_insets(screen),
             },
         );
         self.scroller.remember(&layout);
@@ -386,6 +386,13 @@ impl UiDesigner {
             (Some(pointer), Some(handles)) if anchor_grab.is_none() => handles.grip_at(pointer),
             _ => None,
         };
+        // Just outside a corner, a knob turns it.
+        let rotate_grab = match (over, &handles) {
+            (Some(pointer), Some(handles)) if anchor_grab.is_none() && grip.is_none() => {
+                handles.rotate_at(pointer)
+            }
+            _ => false,
+        };
         let guide_under = over.and_then(|pointer| {
             self.guides(gui).iter().position(|&guide| {
                 let at = view.guide_at(guide);
@@ -412,6 +419,7 @@ impl UiDesigner {
         if pressed
             && self.drag.is_none()
             && self.anchor_drag.is_none()
+            && self.rotate_drag.is_none()
             && self.guide_drag.is_none()
             && !self.scroller.scrolling()
             && scene.editing
@@ -436,6 +444,8 @@ impl UiDesigner {
                 }
             } else if let (Some(grip), Some(handles)) = (grip, &handles) {
                 self.drag = UiDrag::start(handles, grip, pointer, world);
+            } else if let (true, Some(handles)) = (rotate_grab, &handles) {
+                self.rotate_drag = RotateDrag::start(handles, pointer, world);
             } else if let Some(index) = guide_under {
                 let vertical = self.guides(gui)[index].vertical;
                 self.guide_drag = Some((Some(index), vertical));
@@ -493,6 +503,33 @@ impl UiDesigner {
                     position,
                     size,
                 });
+            }
+        }
+        // The rotate knob turns the selection around its middle. Shift
+        // snaps it to 15° steps.
+        let mut turning = None;
+        if let Some(drag) = &mut self.rotate_drag {
+            if !down || !scene.editing {
+                self.rotate_drag = None;
+            } else if let Some(pointer) = pointer
+                && self
+                    .drag_held
+                    .is_none_or(|from| from.distance(pointer) >= DRAG_SLOP)
+            {
+                self.drag_held = None;
+                let snap = ui.input(|input| input.modifiers.shift);
+                let rotation = drag.update(pointer, snap);
+                turning = Some((pointer, rotation));
+                let now = world
+                    .get(drag.id)
+                    .and_then(|instance| instance.property("Rotation"))
+                    .and_then(Value::as_number);
+                if now != Some(rotation) {
+                    actions.push(DesignerAction::Edit(
+                        drag.id,
+                        Edit::Property("Rotation", Value::Number(rotation)),
+                    ));
+                }
             }
         }
         // Right-click on a diamond: Reset anchor.
@@ -568,6 +605,7 @@ impl UiDesigner {
         }
 
         self.paint_ui(ui, visible, screen_rect, &layout, scene, render_state);
+        paint_unsafe_edges(&ui.painter_at(visible), view.board, screen, self.zoom);
         let painter = ui.painter_at(view.canvas);
         painter.rect_stroke(
             view.board,
@@ -595,6 +633,11 @@ impl UiDesigner {
             if let Some(handles) = &handles {
                 let highlighted = self.drag.as_ref().map(|drag| drag.grip).or(grip);
                 handles.paint(&painter, palette.accent, highlighted);
+                handles.paint_rotate_knobs(
+                    &painter,
+                    palette.accent,
+                    rotate_grab || self.rotate_drag.is_some(),
+                );
                 // Its size and distances, in design pixels, while it's being
                 // dragged or pointed at: on a small artboard they'd cover it.
                 let pointed_at =
@@ -620,9 +663,18 @@ impl UiDesigner {
             ui_handles::paint_guides(&drag.snaps, &painter, egui::Pos2::ZERO, 1.0);
             drag.paint_label(ui, &painter, anchor.parent);
         }
-        if self.anchor_drag.is_some() {
+        if let Some((pointer, rotation)) = turning {
+            let text = rotate::label(rotation);
+            let at = pointer + egui::vec2(14.0, 14.0);
+            let galley =
+                painter.layout_no_wrap(text, egui::FontId::monospace(11.0), egui::Color32::WHITE);
+            let back = egui::Rect::from_min_size(at, galley.size()).expand(3.0);
+            painter.rect_filled(back, 3.0, egui::Color32::from_black_alpha(180));
+            painter.galley(at, galley, egui::Color32::WHITE);
+        }
+        if self.anchor_drag.is_some() || self.rotate_drag.is_some() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-        } else if anchor_grab.is_some() {
+        } else if anchor_grab.is_some() || (rotate_grab && self.drag.is_none()) {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
         }
         match (&self.drag, &handles) {
@@ -1031,6 +1083,46 @@ fn format_bar(ui: &mut egui::Ui, rect: egui::Rect) -> Option<Format> {
             }
         });
     picked
+}
+
+/// Hatched bars over the previewed screen's unsafe edges (a phone's notch
+/// and home bar, [`safe_insets`]), which `DeviceSafeInsets` keeps clear of.
+/// `board` is the screen in points, at `zoom` points per screen pixel.
+fn paint_unsafe_edges(painter: &egui::Painter, board: egui::Rect, screen: (u32, u32), zoom: f32) {
+    let [top, right, bottom, left] = safe_insets(screen).map(|inset| inset * zoom);
+    let bars = [
+        egui::Rect::from_min_max(board.min, egui::pos2(board.max.x, board.min.y + top)),
+        egui::Rect::from_min_max(egui::pos2(board.max.x - right, board.min.y), board.max),
+        egui::Rect::from_min_max(egui::pos2(board.min.x, board.max.y - bottom), board.max),
+        egui::Rect::from_min_max(board.min, egui::pos2(board.min.x + left, board.max.y)),
+    ];
+    let stroke = egui::Stroke::new(
+        1.0_f32,
+        egui::Color32::from_rgba_unmultiplied(255, 190, 60, 150),
+    );
+    for bar in bars
+        .into_iter()
+        .filter(|bar| bar.width() > 0.5 && bar.height() > 0.5)
+    {
+        painter.rect_filled(
+            bar,
+            0.0,
+            egui::Color32::from_rgba_unmultiplied(255, 170, 0, 36),
+        );
+        // Lines from bottom left to top right, every 8 points.
+        let lines = painter.with_clip_rect(bar.intersect(painter.clip_rect()));
+        let mut at = bar.left() - bar.height();
+        while at < bar.right() {
+            lines.line_segment(
+                [
+                    egui::pos2(at, bar.bottom()),
+                    egui::pos2(at + bar.height(), bar.top()),
+                ],
+                stroke,
+            );
+            at += 8.0;
+        }
+    }
 }
 
 /// A guide line across the canvas.

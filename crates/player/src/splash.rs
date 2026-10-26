@@ -297,6 +297,7 @@ pub fn overlay(
             texture: Some(texture),
             slice: None,
             clip: None,
+            rotation_degrees: 0.0,
         }));
     } else {
         items.push(UiDrawItem::Text(UiText {

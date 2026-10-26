@@ -11,6 +11,7 @@ use crate::transition::Transitions;
 pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "-webkit-text-stroke",
     "align-items",
+    "aspect-ratio",
     "background-color",
     "background-image",
     "border",

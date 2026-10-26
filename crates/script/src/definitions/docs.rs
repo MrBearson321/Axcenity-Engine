@@ -1403,6 +1403,66 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "AutomaticCanvasSize",
         "\"None\", \"X\", \"Y\" or \"XY\": the canvas grows that way to fit the children, past CanvasSize.",
     ),
+    (
+        ClassName::Frame,
+        "Rotation",
+        "Degrees clockwise: it and everything in it are drawn turned around its middle, and clicks hit the turned shape. Layout doesn't change, so its Position and Size are those of the upright box. 0 by default.",
+    ),
+    (
+        ClassName::TextLabel,
+        "Rotation",
+        "Degrees clockwise: it and everything in it are drawn turned around its middle, and clicks hit the turned shape. Layout doesn't change, so its Position and Size are those of the upright box. 0 by default.",
+    ),
+    (
+        ClassName::TextButton,
+        "Rotation",
+        "Degrees clockwise: it and everything in it are drawn turned around its middle, and clicks hit the turned shape. Layout doesn't change, so its Position and Size are those of the upright box. 0 by default.",
+    ),
+    (
+        ClassName::ImageLabel,
+        "Rotation",
+        "Degrees clockwise: it and everything in it are drawn turned around its middle, and clicks hit the turned shape. Layout doesn't change, so its Position and Size are those of the upright box. 0 by default.",
+    ),
+    (
+        ClassName::TextBox,
+        "Rotation",
+        "Degrees clockwise: it and everything in it are drawn turned around its middle, and clicks hit the turned shape. Layout doesn't change, so its Position and Size are those of the upright box. 0 by default.",
+    ),
+    (
+        ClassName::PageLayout,
+        "Rotation",
+        "Degrees clockwise: it and everything in it are drawn turned around its middle, and clicks hit the turned shape. Layout doesn't change, so its Position and Size are those of the upright box. 0 by default.",
+    ),
+    (
+        ClassName::Table,
+        "Rotation",
+        "Degrees clockwise: it and everything in it are drawn turned around its middle, and clicks hit the turned shape. Layout doesn't change, so its Position and Size are those of the upright box. 0 by default.",
+    ),
+    (
+        ClassName::ScrollingFrame,
+        "Rotation",
+        "Degrees clockwise: it and everything in it are drawn turned around its middle, and clicks hit the turned shape. Layout doesn't change, so its Position and Size are those of the upright box. 0 by default.",
+    ),
+    (
+        ClassName::TextLabel,
+        "TextTransparency",
+        "How see-through its text is, from 0 (solid) to 1 (invisible); its outline and shadows fade with it. The background and picture keep their own transparency, and CSS opacity still fades the whole element.",
+    ),
+    (
+        ClassName::TextButton,
+        "TextTransparency",
+        "How see-through its text is, from 0 (solid) to 1 (invisible); its outline and shadows fade with it. The background and picture keep their own transparency, and CSS opacity still fades the whole element.",
+    ),
+    (
+        ClassName::TextBox,
+        "TextTransparency",
+        "How see-through its text is, from 0 (solid) to 1 (invisible); its outline and shadows fade with it. The background and picture keep their own transparency, and CSS opacity still fades the whole element.",
+    ),
+    (
+        ClassName::ScreenGui,
+        "ScreenInsets",
+        "\"None\" lays it out over the whole screen. \"DeviceSafeInsets\" keeps it inside the device's safe area, clear of a phone's notch and home bar; a desktop screen has none, so it's the whole screen there.",
+    ),
 ];
 
 /// What each event means, including what its handler receives. A test

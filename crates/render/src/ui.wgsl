@@ -12,7 +12,8 @@ struct VertexOut {
     @location(9) border_left: vec4<f32>,
     @location(10) shadow: vec4<f32>,
     @location(11) clip: vec4<f32>,
-    @location(12) clip_radius: f32,
+    // The clip's corner radius, and its turn clockwise in radians.
+    @location(12) clip_shape: vec2<f32>,
 }
 
 @group(0) @binding(0) var ui_texture: texture_2d<f32>;
@@ -38,7 +39,7 @@ fn vs_main(
     @location(10) border_left: vec4<f32>,
     @location(11) shadow: vec4<f32>,
     @location(12) clip: vec4<f32>,
-    @location(13) clip_radius: f32,
+    @location(13) clip_shape: vec2<f32>,
 ) -> VertexOut {
     var output: VertexOut;
     output.position = vec4<f32>(position, 0.0, 1.0);
@@ -54,7 +55,7 @@ fn vs_main(
     output.border_left = border_left;
     output.shadow = shadow;
     output.clip = clip;
-    output.clip_radius = clip_radius;
+    output.clip_shape = clip_shape;
     return output;
 }
 
@@ -102,11 +103,19 @@ fn shadow_cover(distance: f32, blur: f32) -> f32 {
 }
 
 // Whether this pixel is outside the rounded box the quad is cut to (CSS
-// `overflow: hidden` around it). `position` is in framebuffer pixels.
+// `overflow: hidden` around it), which may be turned around its middle.
+// `position` is in framebuffer pixels.
 fn clipped(input: VertexOut) -> bool {
     let half_size = input.clip.zw * 0.5;
-    let pixel = input.position.xy;
-    return box_distance(pixel, input.clip.xy + half_size, half_size, input.clip_radius) > 0.0;
+    let from_centre = input.position.xy - (input.clip.xy + half_size);
+    // Turned back by the clip's turn, into its own frame.
+    let c = cos(input.clip_shape.y);
+    let s = sin(input.clip_shape.y);
+    let local = vec2<f32>(
+        c * from_centre.x + s * from_centre.y,
+        -s * from_centre.x + c * from_centre.y,
+    );
+    return box_distance(local, vec2<f32>(0.0), half_size, input.clip_shape.x) > 0.0;
 }
 
 @fragment
@@ -175,4 +184,18 @@ fn fs_image(input: VertexOut) -> @location(0) vec4<f32> {
         discard;
     }
     return textureSample(ui_texture, ui_sampler, input.uv) * input.color;
+}
+
+// Turned text, from a sheet it was drawn into upright: its colours are
+// premultiplied by their alpha, so they're divided back out.
+@fragment
+fn fs_sheet(input: VertexOut) -> @location(0) vec4<f32> {
+    if clipped(input) {
+        discard;
+    }
+    let texel = textureSample(ui_texture, ui_sampler, input.uv);
+    if texel.a <= 0.0 {
+        discard;
+    }
+    return vec4<f32>(texel.rgb / texel.a, texel.a) * input.color;
 }

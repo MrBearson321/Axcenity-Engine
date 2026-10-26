@@ -138,11 +138,13 @@ const GROUPS: [(&str, &[&str]); 19] = [
             "ClickSound",
             "Position",
             "Size",
+            "Rotation",
             "BackgroundColor3",
             "BackgroundTransparency",
             "Text",
             "Placeholder",
             "TextColor3",
+            "TextTransparency",
             "TextSize",
             "TextScaled",
             "RichText",
@@ -154,6 +156,7 @@ const GROUPS: [(&str, &[&str]); 19] = [
             "StudsOffset",
             "MaxDistance",
             "ScaleMode",
+            "ScreenInsets",
             "DesignWidth",
             "DesignHeight",
             "ZIndex",
@@ -728,6 +731,28 @@ fn sound_control(ui: &mut egui::Ui, path: &str) -> Option<Edit> {
     edit
 }
 
+/// Whether `name` is one of a UI element's transparencies, each from 0
+/// (solid) to 1 (invisible).
+fn is_ui_transparency(name: &str) -> bool {
+    matches!(
+        name,
+        "BackgroundTransparency" | "TextTransparency" | "ImageTransparency"
+    )
+}
+
+/// A transparency from 0 to 1 as a 0–100% slider. Returns the new value.
+pub fn transparency_slider(ui: &mut egui::Ui, value: f64) -> Option<f64> {
+    let mut percent = (value * 100.0).clamp(0.0, 100.0);
+    ui.add(
+        egui::Slider::new(&mut percent, 0.0..=100.0)
+            .suffix("%")
+            .max_decimals(0)
+            .clamping(egui::SliderClamping::Always),
+    )
+    .changed()
+    .then_some((percent / 100.0).clamp(0.0, 1.0))
+}
+
 /// Draws the control for a property's value and returns its new value if
 /// the user changed it this frame.
 fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
@@ -741,15 +766,27 @@ fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
             .add(egui::Slider::new(&mut number, 0.0..=1.0).clamping(egui::SliderClamping::Edits))
             .changed()
             .then_some(Value::Number(number)),
+        // A UI element's three see-through parts, as percentages.
+        Value::Number(number) if is_ui_transparency(name) => {
+            transparency_slider(ui, number).map(Value::Number)
+        }
+        // A UI element's or a particle's turn, in degrees clockwise.
+        Value::Number(mut number) if name == "Rotation" => ui
+            .add(
+                egui::DragValue::new(&mut number)
+                    .speed(1.0)
+                    .suffix("°")
+                    .max_decimals(1),
+            )
+            .changed()
+            .then_some(Value::Number(number)),
         Value::Number(mut number) => {
             let mut drag = egui::DragValue::new(&mut number).max_decimals(MAX_DECIMALS);
             drag = match name {
                 // These only make sense from 0 to 1.
-                "Metalness"
-                | "Roughness"
-                | "AmbientOcclusionStrength"
-                | "BackgroundTransparency"
-                | "Volume" => drag.speed(0.01).range(0.0..=1.0),
+                "Metalness" | "Roughness" | "AmbientOcclusionStrength" | "Volume" => {
+                    drag.speed(0.01).range(0.0..=1.0)
+                }
                 "PlaybackSpeed" => drag.speed(0.01).range(0.01..=20.0),
                 "RollOffMinDistance" | "RollOffMaxDistance" => {
                     drag.speed(1.0).range(0.0..=100_000.0)
@@ -768,6 +805,17 @@ fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
         }
         // Shown but not typed into: each half-typed path would be loaded
         // (and fail). Importing a model sets it.
+        Value::String(text) if name == "ScreenInsets" => {
+            let current = if text.eq_ignore_ascii_case("DeviceSafeInsets") {
+                "DeviceSafeInsets"
+            } else {
+                "None"
+            };
+            choice_control(ui, name, current, &["None", "DeviceSafeInsets"], |insets| {
+                insets
+            })
+            .map(|insets| Value::String(insets.to_owned()))
+        }
         Value::String(text) if name == "ScaleMode" => {
             let current = ["Fit", "Scale"]
                 .into_iter()

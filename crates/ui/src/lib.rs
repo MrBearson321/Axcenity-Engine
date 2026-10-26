@@ -14,6 +14,7 @@ mod paint;
 mod rich;
 mod scroll;
 mod transition;
+mod turn;
 
 pub use css::*;
 use interact::interactable;
@@ -24,6 +25,7 @@ pub use loading::LoadingGui;
 use paint::*;
 pub use rich::{RichSpan, RichStroke, RichStyle, parse_rich_text, rich_text_plain};
 pub use scroll::{ScrollBar, UiScroll, scroll_bars};
+pub use turn::UiTurn;
 
 use axcenity_core::{ClassName, Color3, Instance, InstanceId, UDim2, Value, World};
 pub use axcenity_render::UiClip;
@@ -84,12 +86,32 @@ pub struct UiElement {
     pub clip: Option<UiClip>,
     /// A ScrollingFrame's canvas and how far it's scrolled.
     pub scroll: Option<UiScroll>,
+    /// How it's turned on screen, by its own `Rotation` and those of the
+    /// elements around it. `rect` is the box before it's turned.
+    pub turn: Option<UiTurn>,
 }
 
 impl UiElement {
-    /// Whether a point is on the element: in its box and not cut off by a clip.
+    /// Whether a point is on the element: in its turned box and not cut
+    /// off by a clip.
     pub fn contains(&self, x: f32, y: f32) -> bool {
-        self.rect.contains(x, y) && self.clip.is_none_or(|clip| clip.contains(x, y))
+        let [lx, ly] = self.local([x, y]);
+        self.rect.contains(lx, ly) && self.clip.is_none_or(|clip| clip.contains(x, y))
+    }
+
+    /// A point on the screen in the element's upright layout, where `rect` is.
+    pub fn local(&self, point: [f32; 2]) -> [f32; 2] {
+        self.turn.map_or(point, |turn| turn.invert(point))
+    }
+
+    /// Where a point of its upright layout is drawn on the screen.
+    pub fn on_screen(&self, point: [f32; 2]) -> [f32; 2] {
+        self.turn.map_or(point, |turn| turn.apply(point))
+    }
+
+    /// How far it's turned on screen, in degrees clockwise.
+    pub fn degrees(&self) -> f32 {
+        self.turn.map_or(0.0, |turn| turn.degrees)
     }
 }
 
@@ -379,8 +401,11 @@ pub(crate) fn layout_ui_with_pseudo(
         .collect();
     // A stable sort, so equal orders stay in tree order.
     guis.sort_by(|a, b| a.0.total_cmp(&b.0));
+    // The desktop player's screen has no unsafe edges.
+    let insets = [0.0; 4];
     for (_, id) in guis {
-        layout_screen_gui(world, id, width, height, stylesheets, pseudo, &mut layout);
+        let screen = (width, height, insets);
+        layout_screen_gui(world, id, screen, stylesheets, pseudo, &mut layout);
     }
     if let Some(camera) = camera {
         layout_billboards(
@@ -396,7 +421,8 @@ pub(crate) fn layout_ui_with_pseudo(
     if let Some(id) = on_top
         && enabled_screen_gui(world, id)
     {
-        layout_screen_gui(world, id, width, height, stylesheets, pseudo, &mut layout);
+        let screen = (width, height, insets);
+        layout_screen_gui(world, id, screen, stylesheets, pseudo, &mut layout);
     }
     layout
 }
@@ -421,12 +447,16 @@ fn enabled_screen_gui(world: &World, id: InstanceId) -> bool {
     })
 }
 
-/// Lays out one ScreenGui (`gui`) on a `width`×`height` screen, adding to `layout`.
+/// A screen's edges a device covers or rounds off (a phone's notch and
+/// home bar), in pixels: top, right, bottom, left.
+pub type SafeInsets = [f32; 4];
+
+/// Lays out one ScreenGui (`gui`) on a `width`×`height` screen with
+/// `insets`, adding to `layout`.
 fn layout_screen_gui(
     world: &World,
     gui: InstanceId,
-    width: u32,
-    height: u32,
+    (width, height, insets): (u32, u32, SafeInsets),
     stylesheets: &[Stylesheet],
     pseudo: PseudoClasses<'_>,
     layout: &mut UiLayout,
@@ -441,21 +471,7 @@ fn layout_screen_gui(
     let opacity = css_number(&styles, "opacity")
         .unwrap_or(1.0)
         .clamp(0.0, 1.0);
-    let fit = fit_transform(instance, width, height);
-    let bounds = fit.map_or(
-        UiRect {
-            x: 0.0,
-            y: 0.0,
-            width: width as f32,
-            height: height as f32,
-        },
-        |fit| UiRect {
-            x: 0.0,
-            y: 0.0,
-            width: fit.design_width,
-            height: fit.design_height,
-        },
-    );
+    let (fit, bounds) = gui_area(instance, width, height, insets);
     let draws = layout.draw_items.len();
     let elements = layout.elements.len();
     let inherited = Inherited {
@@ -466,6 +482,66 @@ fn layout_screen_gui(
     if let Some(fit) = fit {
         apply_fit(layout, draws, elements, fit);
     }
+}
+
+/// Whether a ScreenGui keeps out of the device's unsafe edges: its
+/// `ScreenInsets` is `DeviceSafeInsets`.
+fn uses_safe_insets(instance: &Instance) -> bool {
+    instance
+        .property("ScreenInsets")
+        .and_then(Value::as_str)
+        .is_some_and(|insets| insets.eq_ignore_ascii_case("DeviceSafeInsets"))
+}
+
+/// Where a ScreenGui is laid out on a `width`×`height` screen with
+/// `insets`: the area its children are laid out in, and how that's scaled
+/// and moved onto the screen (`None` for as it is). With `DeviceSafeInsets`
+/// the screen is what's inside the insets.
+fn gui_area(
+    instance: &Instance,
+    width: u32,
+    height: u32,
+    insets: SafeInsets,
+) -> (Option<Fit>, UiRect) {
+    let [top, right, bottom, left] = if uses_safe_insets(instance) {
+        insets.map(|inset| {
+            if inset.is_finite() {
+                inset.max(0.0)
+            } else {
+                0.0
+            }
+        })
+    } else {
+        [0.0; 4]
+    };
+    let safe_width = (width as f32 - left - right).max(1.0);
+    let safe_height = (height as f32 - top - bottom).max(1.0);
+    let (width, height) = (safe_width.round() as u32, safe_height.round() as u32);
+    let fit = match fit_transform(instance, width, height) {
+        Some(fit) => Some(Fit {
+            origin_x: fit.origin_x + left,
+            origin_y: fit.origin_y + top,
+            ..fit
+        }),
+        None if left != 0.0 || top != 0.0 => Some(Fit {
+            scale: 1.0,
+            origin_x: left,
+            origin_y: top,
+            design_width: width as f32,
+            design_height: height as f32,
+        }),
+        None => None,
+    };
+    let (area_width, area_height) = fit.map_or((width as f32, height as f32), |fit| {
+        (fit.design_width, fit.design_height)
+    });
+    let bounds = UiRect {
+        x: 0.0,
+        y: 0.0,
+        width: area_width,
+        height: area_height,
+    };
+    (fit, bounds)
 }
 
 /// The design size of a ScreenGui: its `DesignWidth` × `DesignHeight`, in
@@ -520,6 +596,7 @@ pub fn layout_artboard_in_state(
         origin,
         shown,
         scrolled: None,
+        safe_insets: [0.0; 4],
     };
     layout_artboard_view(world, gui, stylesheets, view)
 }
@@ -539,6 +616,9 @@ pub struct ArtboardView<'a> {
     /// ScrollingFrames shown scrolled this far instead of to their own
     /// `CanvasPosition`, so the designer can scroll them without changing it.
     pub scrolled: Option<&'a HashMap<InstanceId, [f32; 2]>>,
+    /// The previewed device's unsafe edges, in screen pixels: a ScreenGui
+    /// with `DeviceSafeInsets` keeps inside them.
+    pub safe_insets: SafeInsets,
 }
 
 /// One ScreenGui on the artboard, as `view` says.
@@ -554,14 +634,14 @@ pub fn layout_artboard_view(
         origin,
         shown,
         scrolled,
+        safe_insets,
     } = view;
     let mut layout = UiLayout::default();
     let (width, height) = screen;
     layout_screen_gui(
         world,
         gui,
-        width,
-        height,
+        (width, height, safe_insets),
         stylesheets,
         PseudoClasses {
             forced: shown,
@@ -581,8 +661,7 @@ pub fn layout_artboard_view(
         scale_draw_item(item, place);
     }
     for element in &mut layout.elements {
-        element.rect = scale_rect(element.rect, place);
-        element.clip = element.clip.map(|clip| scale_clip(clip, place));
+        scale_element(element, place);
         element.pixels_per_unit *= scale;
     }
     layout
@@ -592,12 +671,28 @@ pub fn layout_artboard_view(
 /// per design pixel, and where design pixel (0, 0) lands on the screen.
 /// Fixed is 1 at the corner; Fit and Scale scale the design size to fit.
 pub fn screen_mapping(world: &World, gui: InstanceId, width: u32, height: u32) -> (f32, [f32; 2]) {
-    world
-        .get(gui)
-        .and_then(|instance| fit_transform(instance, width, height))
-        .map_or((1.0, [0.0, 0.0]), |fit| {
-            (fit.scale, [fit.origin_x, fit.origin_y])
-        })
+    let (scale, origin, _) = safe_screen_mapping(world, gui, width, height, [0.0; 4]);
+    (scale, origin)
+}
+
+/// [`screen_mapping`] on a screen with unsafe edges (`insets`), which a
+/// ScreenGui with `DeviceSafeInsets` keeps inside, and the size of the
+/// area it's laid out in, in design pixels.
+pub fn safe_screen_mapping(
+    world: &World,
+    gui: InstanceId,
+    width: u32,
+    height: u32,
+    insets: SafeInsets,
+) -> (f32, [f32; 2], [f32; 2]) {
+    let Some(instance) = world.get(gui) else {
+        return (1.0, [0.0, 0.0], [width as f32, height as f32]);
+    };
+    let (fit, area) = gui_area(instance, width, height, insets);
+    let (scale, origin) = fit.map_or((1.0, [0.0, 0.0]), |fit| {
+        (fit.scale, [fit.origin_x, fit.origin_y])
+    });
+    (scale, origin, [area.width, area.height])
 }
 
 /// How a ScreenGui in Fit mode maps its design rectangle onto the viewport:
@@ -661,10 +756,18 @@ fn apply_fit(layout: &mut UiLayout, draws: usize, elements: usize, fit: Fit) {
         scale_draw_item(item, fit);
     }
     for element in &mut layout.elements[elements..] {
-        element.rect = scale_rect(element.rect, fit);
-        element.clip = element.clip.map(|clip| scale_clip(clip, fit));
+        scale_element(element, fit);
         element.pixels_per_unit = fit.scale;
     }
+}
+
+/// An element's box, clip and turn, scaled and moved by `fit`.
+fn scale_element(element: &mut UiElement, fit: Fit) {
+    element.rect = scale_rect(element.rect, fit);
+    element.clip = element.clip.map(|clip| scale_clip(clip, fit));
+    element.turn = element
+        .turn
+        .map(|turn| turn.scaled(fit.scale, [fit.origin_x, fit.origin_y]));
 }
 
 fn scale_clip(clip: UiClip, fit: Fit) -> UiClip {
@@ -681,6 +784,7 @@ fn scale_clip(clip: UiClip, fit: Fit) -> UiClip {
         position: [rect.x, rect.y],
         size: [rect.width, rect.height],
         radius: clip.radius * fit.scale,
+        rotation_degrees: clip.rotation_degrees,
     }
 }
 
@@ -993,11 +1097,17 @@ pub(crate) fn layout_children(
                         bottom: LengthPercentageAuto::Auto,
                     }
                 },
+                // With `aspect-ratio`, the width decides the height.
+                aspect_ratio: css_aspect_ratio(styles),
                 size: Size {
                     width: css_dimension(styles, "width")
                         .unwrap_or_else(|| udim_length(size.x, container.width)),
-                    height: css_dimension(styles, "height")
-                        .unwrap_or_else(|| udim_length(size.y, container.height)),
+                    height: if css_aspect_ratio(styles).is_some() {
+                        Dimension::Auto
+                    } else {
+                        css_dimension(styles, "height")
+                            .unwrap_or_else(|| udim_length(size.y, container.height))
+                    },
                 },
                 flex_grow: css_number(styles, "flex-grow").unwrap_or(0.0).max(0.0),
                 margin: css_margin(styles),
@@ -1078,6 +1188,36 @@ fn z_order(world: &World, children: &[InstanceId], styles: &[ResolvedStyles]) ->
     order
 }
 
+/// CSS `aspect-ratio`: width over height, as `16 / 9`, `1.5` or `auto 4 / 3`
+/// (`auto` alone, or nothing sensible, is `None`).
+pub(crate) fn css_aspect_ratio(styles: &ResolvedStyles) -> Option<f32> {
+    let value = css_property(styles, "aspect-ratio")?;
+    let ratio = value
+        .split_whitespace()
+        .filter(|word| !word.eq_ignore_ascii_case("auto"))
+        .collect::<String>();
+    let number = |text: &str| {
+        text.trim()
+            .parse::<f32>()
+            .ok()
+            .filter(|n| n.is_finite() && *n > 0.0)
+    };
+    match ratio.split_once('/') {
+        Some((width, height)) => Some(number(width)? / number(height)?),
+        None => number(&ratio),
+    }
+}
+
+/// `id`'s CSS `aspect-ratio` (width over height), if it keeps one.
+pub fn aspect_ratio_of(world: &World, id: InstanceId, stylesheets: &[Stylesheet]) -> Option<f32> {
+    css_aspect_ratio(&resolve_styles(
+        world,
+        id,
+        stylesheets,
+        PseudoClasses::default(),
+    ))
+}
+
 /// An element's place among its siblings: CSS `z-index` when it's set to
 /// a number, else its `ZIndex` (1 by default).
 pub fn z_index_of(world: &World, id: InstanceId, stylesheets: &[Stylesheet]) -> f64 {
@@ -1134,13 +1274,15 @@ fn inner_clip(rect: UiRect, styles: &ResolvedStyles) -> UiClip {
             (rect.height - top - bottom).max(0.0),
         ],
         radius: (radius - widest).max(0.0),
+        rotation_degrees: 0.0,
     }
 }
 
 /// Records and paints one element laid out at `placed`, then its
 /// children. Its CSS `transform` moves and scales what it and its children
-/// draw, but not where they are for layout and clicks. A ScrollingFrame's
-/// children go on its canvas, under its bars.
+/// draw, but not where they are for layout and clicks; its `Rotation`
+/// turns both, around its middle. A ScrollingFrame's children go on its
+/// canvas, under its bars.
 fn place_element(
     world: &World,
     id: InstanceId,
@@ -1159,6 +1301,12 @@ fn place_element(
         in_flow,
     } = placed;
     let draws = out.draw_items.len();
+    let elements = out.elements.len();
+    let rotation = turn::rotation(instance);
+    // A turned element's subtree is cut to the clip around it only once
+    // it's turned, so that clip isn't turned with it.
+    let outer_clip = inherited.clip;
+    let clip = if rotation.is_some() { None } else { outer_clip };
     let scroll = (instance.class() == ClassName::ScrollingFrame)
         .then(|| scroll::measure(world, id, instance, styles, rect, stylesheets, pseudo));
     out.elements.push(UiElement {
@@ -1170,8 +1318,9 @@ fn place_element(
         pixels_per_unit: 1.0,
         font_size: paint::font_size(instance, styles),
         interactable: interactable(instance),
-        clip: inherited.clip,
+        clip,
         scroll,
+        turn: None,
     });
     paint_instance(
         instance,
@@ -1183,15 +1332,15 @@ fn place_element(
         &mut out.warnings,
     );
     for item in &mut out.draw_items[draws..] {
-        set_clip(item, inherited.clip);
+        set_clip(item, clip);
     }
     let children = Inherited {
         opacity: inherited.opacity,
         clip: if clips_children(instance, styles) {
             let own = inner_clip(rect, styles);
-            Some(inherited.clip.map_or(own, |outer| own.intersect(outer)))
+            Some(clip.map_or(own, |outer| own.intersect(outer)))
         } else {
-            inherited.clip
+            clip
         },
     };
     let canvas = scroll.map_or(rect, |scroll| scroll.canvas_rect(rect));
@@ -1211,6 +1360,24 @@ fn place_element(
     if let Some(transform) = css_transform(styles, rect) {
         for item in &mut out.draw_items[draws..] {
             transform_draw_item(item, transform);
+        }
+    }
+    if let Some(degrees) = rotation {
+        let turn = UiTurn::around(
+            degrees,
+            [rect.x + rect.width * 0.5, rect.y + rect.height * 0.5],
+        );
+        for item in &mut out.draw_items[draws..] {
+            turn::turn_draw_item(item, turn);
+            set_clip(item, outer_clip);
+        }
+        for element in &mut out.elements[elements..] {
+            element.turn = Some(element.turn.map_or(turn, |inner| inner.then(turn)));
+            element.clip = element
+                .clip
+                .map(|clip| turn::turn_clip(clip, turn))
+                .map(|clip| outer_clip.map_or(clip, |outer| clip.intersect(outer)))
+                .or(outer_clip);
         }
     }
 }
@@ -1520,5 +1687,7 @@ fn finite(value: f32) -> f32 {
 
 #[cfg(test)]
 mod layering_tests;
+#[cfg(test)]
+mod shape_tests;
 #[cfg(test)]
 mod tests;

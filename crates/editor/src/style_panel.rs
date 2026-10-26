@@ -496,6 +496,7 @@ fn value_choices(property: &str) -> &'static [&'static str] {
         "line-height" => &["normal", "1.2", "1.5", "24px"],
         "vertical-align" => &["top", "middle", "bottom"],
         "white-space" => &["normal", "nowrap"],
+        "aspect-ratio" => &["1", "16 / 9", "4 / 3", "auto"],
         "border-style" => &["solid", "inset", "outset", "ridge", "groove", "none"],
         "box-shadow" => &[
             "0 2px 6px rgba(0, 0, 0, 0.4)",
@@ -559,6 +560,7 @@ fn example_value(property: &str) -> &'static str {
         "line-height" => "1.5",
         "vertical-align" => "middle",
         "white-space" => "nowrap",
+        "aspect-ratio" => "16 / 9",
         _ => "value",
     }
 }

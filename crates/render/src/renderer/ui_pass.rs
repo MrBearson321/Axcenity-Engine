@@ -9,7 +9,8 @@ use std::ops::Range;
 use glyphon::Color as GlyphColor;
 
 use crate::draw_list::{
-    UiBorderSide, UiClip, UiDrawItem, UiImage, UiRectangle, UiShadow, UiSlice, UiText,
+    UiBorderSide, UiClip, UiDrawItem, UiImage, UiRectangle, UiShadow, UiSlice, UiText, is_turned,
+    turn_point, turned_bounds,
 };
 
 use super::{DEPTH_FORMAT, HDR_FORMAT, NO_CLIP, UI_BOX, UI_INSET_SHADOW, UI_SHADOW, UiVertex};
@@ -56,27 +57,57 @@ pub(super) fn ui_layers(items: &[UiDrawItem]) -> Vec<Range<usize>> {
 }
 
 /// Where a kind of item comes in a layer (rectangles 0, images 1, text 2),
-/// and the box it can draw in: left, top, right, bottom.
-fn kind_and_bounds(item: &UiDrawItem) -> (u8, [f32; 4]) {
-    let (kind, [x, y], [w, h], margin) = match item {
+/// and the box it can draw in: left, top, right, bottom. Turned text is
+/// drawn as a picture (see [`TurnedText`](super::TurnedText)), so it comes
+/// with the images.
+pub(super) fn kind_and_bounds(item: &UiDrawItem) -> (u8, [f32; 4]) {
+    let (kind, [x, y], [w, h], margin, turn) = match item {
         UiDrawItem::Rectangle(rectangle) => (
             0,
             rectangle.position,
             rectangle.size,
             shadow_spill(rectangle),
+            rectangle.rotation_degrees,
         ),
-        UiDrawItem::Image(image) => (1, image.position, image.size, 0.0),
-        UiDrawItem::Text(text) => (2, text.position, text.size, text_spill(text)),
+        UiDrawItem::Image(image) => (1, image.position, image.size, 0.0, image.rotation_degrees),
+        UiDrawItem::Text(text) => (
+            if is_turned(text.rotation_degrees) {
+                1
+            } else {
+                2
+            },
+            text.position,
+            text.size,
+            text_spill(text),
+            text.rotation_degrees,
+        ),
     };
-    let mut bounds = [x - margin, y - margin, x + w + margin, y + h + margin];
+    let mut bounds = turned_bounds(
+        [x - margin, y - margin, w + margin * 2.0, h + margin * 2.0],
+        turn,
+    );
     // Nothing is drawn outside its clip.
     if let Some(clip) = item_clip(item) {
-        bounds[0] = bounds[0].max(clip.position[0]);
-        bounds[1] = bounds[1].max(clip.position[1]);
-        bounds[2] = bounds[2].min(clip.position[0] + clip.size[0]);
-        bounds[3] = bounds[3].min(clip.position[1] + clip.size[1]);
+        let [left, top, right, bottom] = clip_bounds(clip);
+        bounds[0] = bounds[0].max(left);
+        bounds[1] = bounds[1].max(top);
+        bounds[2] = bounds[2].min(right);
+        bounds[3] = bounds[3].min(bottom);
     }
     (kind, bounds)
+}
+
+/// The upright box (left, top, right, bottom) around a clip, turned or not.
+pub(super) fn clip_bounds(clip: UiClip) -> [f32; 4] {
+    turned_bounds(
+        [
+            clip.position[0],
+            clip.position[1],
+            clip.size[0],
+            clip.size[1],
+        ],
+        clip.rotation_degrees,
+    )
 }
 
 /// The box an item is cut to, if it's cut.
@@ -88,8 +119,9 @@ pub(super) fn item_clip(item: &UiDrawItem) -> Option<UiClip> {
     }
 }
 
-/// A clip as the shader reads it: its box and its radius.
-fn clip_numbers(clip: Option<UiClip>) -> ([f32; 4], f32) {
+/// A clip as the shader reads it: its box, and its radius and turn (in
+/// radians).
+fn clip_numbers(clip: Option<UiClip>) -> ([f32; 4], [f32; 2]) {
     match clip {
         Some(clip)
             if clip
@@ -97,7 +129,8 @@ fn clip_numbers(clip: Option<UiClip>) -> ([f32; 4], f32) {
                 .iter()
                 .chain(&clip.size)
                 .all(|n| n.is_finite())
-                && clip.radius.is_finite() =>
+                && clip.radius.is_finite()
+                && clip.rotation_degrees.is_finite() =>
         {
             (
                 [
@@ -106,17 +139,32 @@ fn clip_numbers(clip: Option<UiClip>) -> ([f32; 4], f32) {
                     clip.size[0],
                     clip.size[1],
                 ],
-                clip.radius.max(0.0),
+                [clip.radius.max(0.0), clip.rotation_degrees.to_radians()],
             )
         }
-        Some(_) => ([0.0; 4], 0.0),
-        None => (NO_CLIP, 0.0),
+        Some(_) => ([0.0; 4], [0.0; 2]),
+        None => (NO_CLIP, [0.0; 2]),
     }
+}
+
+/// Turns `[px, py]` (screen pixels) `degrees` around `pivot`, then puts it
+/// in clip space for a `width` × `height` target.
+fn screen_point(
+    [px, py]: [f32; 2],
+    (pivot, degrees): ([f32; 2], f32),
+    (width, height): (f32, f32),
+) -> [f32; 2] {
+    let [px, py] = if is_turned(degrees) {
+        turn_point([px, py], pivot, degrees)
+    } else {
+        [px, py]
+    };
+    [px / width * 2.0 - 1.0, 1.0 - py / height * 2.0]
 }
 
 /// How far a text's outlines and shadows can reach past its box. Each copy
 /// is cut to the box moved with it.
-fn text_spill(text: &UiText) -> f32 {
+pub(super) fn text_spill(text: &UiText) -> f32 {
     let stroke = text
         .spans
         .iter()
@@ -176,6 +224,20 @@ pub(super) fn ui_vertices(
     vertices
 }
 
+/// The quads of `rectangles`, in order, on a `width` × `height` target.
+pub(super) fn rectangle_vertices(
+    rectangles: &[UiRectangle],
+    (width, height): (u32, u32),
+) -> Vec<UiVertex> {
+    let mut vertices = Vec::new();
+    if width > 0 && height > 0 {
+        for rectangle in rectangles {
+            push_rectangle(rectangle, (width as f32, height as f32), &mut vertices);
+        }
+    }
+    vertices
+}
+
 fn push_rectangle(
     rectangle: &UiRectangle,
     (width, height): (f32, f32),
@@ -192,8 +254,11 @@ fn push_rectangle(
         border_sides,
         shadow,
         clip,
+        rotation_degrees,
     } = *rectangle;
-    let (clip, clip_radius) = clip_numbers(clip);
+    // A shadow turns around its element's middle, not its own.
+    let turn = ([x + w * 0.5, y + h * 0.5], rotation_degrees);
+    let (clip, clip_shape) = clip_numbers(clip);
     if clip[2] <= 0.0 || clip[3] <= 0.0 {
         return;
     }
@@ -222,6 +287,7 @@ fn push_rectangle(
         shadow.offset[1],
         shadow.blur,
         shadow.spread,
+        rotation_degrees,
     ];
     if !numbers
         .into_iter()
@@ -266,7 +332,7 @@ fn push_rectangle(
     if w <= 0.0 || h <= 0.0 {
         return;
     }
-    let point = |px: f32, py: f32| [px / width * 2.0 - 1.0, 1.0 - py / height * 2.0];
+    let point = |px: f32, py: f32| screen_point([px, py], turn, (width, height));
     let top_left = point(x, y);
     let top_right = point(x + w, y);
     let bottom_left = point(x, y + h);
@@ -307,7 +373,7 @@ fn push_rectangle(
                 shadow.spread,
             ],
             clip,
-            clip_radius,
+            clip_shape,
         });
     }
 }
@@ -321,9 +387,20 @@ pub(super) fn image_quad(image: &UiImage, (width, height): (u32, u32)) -> Vec<Ui
     let [x, y] = image.position;
     let [w, h] = image.size;
     let [r, g, b, alpha] = image.tint;
-    if ![x, y, w, h, r, g, b, alpha, image.border_radius]
-        .into_iter()
-        .all(f32::is_finite)
+    if ![
+        x,
+        y,
+        w,
+        h,
+        r,
+        g,
+        b,
+        alpha,
+        image.border_radius,
+        image.rotation_degrees,
+    ]
+    .into_iter()
+    .all(f32::is_finite)
         || w <= 0.0
         || h <= 0.0
         || alpha <= 0.0
@@ -349,25 +426,62 @@ pub(super) fn image_quad(image: &UiImage, (width, height): (u32, u32)) -> Vec<Ui
     if clip.0[2] <= 0.0 || clip.0[3] <= 0.0 {
         return Vec::new();
     }
+    // Every piece turns around the whole picture's middle.
+    let turn = ([x + w * 0.5, y + h * 0.5], image.rotation_degrees);
     let mut vertices = Vec::with_capacity(pieces.len() * 6);
     for (rect, uv) in pieces {
-        push_image_piece(rect, uv, (color, radius, clip), screen, &mut vertices);
+        push_image_piece(rect, uv, (color, radius, clip), turn, screen, &mut vertices);
     }
     vertices
 }
 
-/// One textured quad: `[x, y, w, h]` on screen showing `[u0, v0, u1, v1]`.
+/// The quad of turned `text`, drawn from where it was put on the sheet:
+/// `slot` (left, top, width, height in the sheet's pixels), which holds
+/// the text's box grown by `margin` on every side.
+pub(super) fn turned_text_quad(
+    text: &UiText,
+    slot: [f32; 4],
+    margin: f32,
+    (sheet_width, sheet_height): (u32, u32),
+    (width, height): (u32, u32),
+) -> Vec<UiVertex> {
+    let [x, y] = text.position;
+    let [w, h] = text.size;
+    if width == 0 || height == 0 || sheet_width == 0 || sheet_height == 0 {
+        return Vec::new();
+    }
+    let clip = clip_numbers(text.clip);
+    if clip.0[2] <= 0.0 || clip.0[3] <= 0.0 {
+        return Vec::new();
+    }
+    let [sx, sy, sw, sh] = slot;
+    let (tw, th) = (sheet_width as f32, sheet_height as f32);
+    let mut vertices = Vec::with_capacity(6);
+    push_image_piece(
+        [x - margin, y - margin, sw, sh],
+        [sx / tw, sy / th, (sx + sw) / tw, (sy + sh) / th],
+        ([1.0; 4], 0.0, clip),
+        ([x + w * 0.5, y + h * 0.5], text.rotation_degrees),
+        (width as f32, height as f32),
+        &mut vertices,
+    );
+    vertices
+}
+
+/// One textured quad: `[x, y, w, h]` on screen showing `[u0, v0, u1, v1]`,
+/// turned `turn.1` degrees around `turn.0`.
 fn push_image_piece(
     [x, y, w, h]: [f32; 4],
     [u0, v0, u1, v1]: [f32; 4],
-    (color, radius, (clip, clip_radius)): ([f32; 4], f32, ([f32; 4], f32)),
+    (color, radius, (clip, clip_shape)): ([f32; 4], f32, ([f32; 4], [f32; 2])),
+    turn: ([f32; 2], f32),
     (width, height): (f32, f32),
     vertices: &mut Vec<UiVertex>,
 ) {
     if w <= 0.0 || h <= 0.0 {
         return;
     }
-    let point = |px: f32, py: f32| [px / width * 2.0 - 1.0, 1.0 - py / height * 2.0];
+    let point = |px: f32, py: f32| screen_point([px, py], turn, (width, height));
     for (position, uv) in [
         (point(x, y), [u0, v0]),
         (point(x, y + h), [u0, v1]),
@@ -390,7 +504,7 @@ fn push_image_piece(
             border_left: [0.0; 4],
             shadow: [0.0; 4],
             clip,
-            clip_radius,
+            clip_shape,
         });
     }
 }
@@ -531,7 +645,7 @@ const UI_VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 14] = wgpu::vertex_attr_arra
     0 => Float32x2, 1 => Float32x4, 2 => Float32x2,
     3 => Float32x2, 4 => Float32x4, 5 => Float32x2, 6 => Float32x4,
     7 => Float32x4, 8 => Float32x4, 9 => Float32x4, 10 => Float32x4, 11 => Float32x4,
-    12 => Float32x4, 13 => Float32
+    12 => Float32x4, 13 => Float32x2
 ];
 
 pub(super) fn create_ui_pipeline(
@@ -577,11 +691,17 @@ pub(super) fn create_ui_pipeline(
 }
 
 /// A second UI pipeline that samples one texture. Rounded corners match
-/// [`create_ui_pipeline`]; the tint is the vertex color.
+/// [`create_ui_pipeline`]; the tint is the vertex color. Also returns a
+/// third, the same but for the turned-text sheet (`fs_sheet`).
 pub(super) fn create_ui_image_pipeline(
     device: &wgpu::Device,
     color_format: wgpu::TextureFormat,
-) -> (wgpu::BindGroupLayout, wgpu::Sampler, wgpu::RenderPipeline) {
+) -> (
+    wgpu::BindGroupLayout,
+    wgpu::Sampler,
+    wgpu::RenderPipeline,
+    wgpu::RenderPipeline,
+) {
     let bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("UI image"),
         entries: &[
@@ -618,37 +738,41 @@ pub(super) fn create_ui_image_pipeline(
         bind_group_layouts: &[&bind_layout],
         push_constant_ranges: &[],
     });
-    let vertex_layout = wgpu::VertexBufferLayout {
-        array_stride: size_of::<UiVertex>() as u64,
-        step_mode: wgpu::VertexStepMode::Vertex,
-        attributes: &UI_VERTEX_ATTRIBUTES,
+    let pipeline = |entry_point: &str| {
+        let vertex_layout = wgpu::VertexBufferLayout {
+            array_stride: size_of::<UiVertex>() as u64,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &UI_VERTEX_ATTRIBUTES,
+        };
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("UI image"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[vertex_layout],
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some(entry_point),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: color_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview: None,
+            cache: None,
+        })
     };
-    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("UI image"),
-        layout: Some(&layout),
-        vertex: wgpu::VertexState {
-            module: &shader,
-            entry_point: Some("vs_main"),
-            compilation_options: Default::default(),
-            buffers: &[vertex_layout],
-        },
-        primitive: wgpu::PrimitiveState::default(),
-        depth_stencil: None,
-        multisample: Default::default(),
-        fragment: Some(wgpu::FragmentState {
-            module: &shader,
-            entry_point: Some("fs_image"),
-            compilation_options: Default::default(),
-            targets: &[Some(wgpu::ColorTargetState {
-                format: color_format,
-                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
-        }),
-        multiview: None,
-        cache: None,
-    });
-    (bind_layout, sampler, pipeline)
+    let image = pipeline("fs_image");
+    let sheet = pipeline("fs_sheet");
+    (bind_layout, sampler, image, sheet)
 }
 
 /// Draws the sky as a full-screen triangle at the far plane, before any item.

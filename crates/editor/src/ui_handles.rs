@@ -18,6 +18,13 @@
 //! are not snap targets. Flex children are not snapped either: the layout
 //! places them, and a guide would promise a position they can't take.
 //!
+//! A turned element (`Rotation`, its own or a parent's) has its outline
+//! and handles turned with it, and a drag is measured along its own axes.
+//! It doesn't snap: the lines it would line up with aren't straight to it.
+//! Just outside each corner, a round knob turns it ([`Handles::rotate_at`]).
+//! An element whose CSS keeps an `aspect-ratio` has its height worked out
+//! from its width, so any handle resizes its width and the height follows.
+//!
 //! Everything here works in egui points, except the element rectangles
 //! from `axcenity_ui`, which are in the viewport texture's physical pixels.
 
@@ -33,6 +40,11 @@ const HANDLE_SIZE: f32 = 8.0;
 const GRAB_DISTANCE: f32 = 7.0;
 /// How close an edge or center must be to another's, in points, to snap.
 const SNAP_DISTANCE: f32 = 8.0;
+/// How far outside a corner the rotate knob is, along the diagonal, in points.
+const ROTATE_KNOB: f32 = 12.0;
+/// The rotate knob's radius, and how far from it the mouse still grabs it.
+const ROTATE_KNOB_RADIUS: f32 = 3.5;
+const ROTATE_REACH: f32 = 9.0;
 /// How far a guide line runs past the elements it joins, in points.
 const GUIDE_PAD: f32 = 4.0;
 /// Studio draws alignment guides in magenta, so they read apart from the
@@ -136,6 +148,11 @@ pub struct Handles {
     pub height: Axis,
     /// Screen pixels per authored pixel. See [`UiElement::pixels_per_unit`].
     pixels_per_unit: f32,
+    /// Its CSS `aspect-ratio` (width over height), which its width decides.
+    ratio: Option<f32>,
+    /// Where the layout's pixel 0, 0 is, in points, and pixels per point.
+    origin: egui::Pos2,
+    pixels_per_point: f32,
 }
 
 impl Handles {
@@ -163,10 +180,55 @@ impl Handles {
             width: Axis::of(world, element.id, stylesheets, "width"),
             height: Axis::of(world, element.id, stylesheets, "height"),
             pixels_per_unit: element.pixels_per_unit,
+            ratio: axcenity_ui::aspect_ratio_of(world, element.id, stylesheets),
+            origin,
+            pixels_per_point: pixels_per_point.max(1e-4),
         }
     }
 
-    /// The eight handles and where their centers are.
+    /// Where a point of the upright element (in points, where `rect` is)
+    /// is drawn: turned with the element.
+    pub fn on_screen(&self, point: egui::Pos2) -> egui::Pos2 {
+        let pixel = (point - self.origin) * self.pixels_per_point;
+        let [x, y] = self.element.on_screen([pixel.x, pixel.y]);
+        self.origin + egui::vec2(x, y) / self.pixels_per_point
+    }
+
+    /// A point on screen, in points, in the upright element's frame.
+    pub fn upright(&self, point: egui::Pos2) -> egui::Pos2 {
+        let pixel = (point - self.origin) * self.pixels_per_point;
+        let [x, y] = self.element.local([pixel.x, pixel.y]);
+        self.origin + egui::vec2(x, y) / self.pixels_per_point
+    }
+
+    /// The element's middle on screen, in points: what it turns around.
+    pub fn centre(&self) -> egui::Pos2 {
+        self.on_screen(self.rect.center())
+    }
+
+    /// The rotate knobs, just outside each corner, upright (where `rect` is).
+    fn rotate_knobs(&self) -> [egui::Pos2; 4] {
+        let r = self.rect;
+        let out = ROTATE_KNOB / std::f32::consts::SQRT_2;
+        [
+            r.left_top() + egui::vec2(-out, -out),
+            r.right_top() + egui::vec2(out, -out),
+            r.left_bottom() + egui::vec2(-out, out),
+            r.right_bottom() + egui::vec2(out, out),
+        ]
+    }
+
+    /// Whether `pointer` is on a rotate knob, outside a corner.
+    pub fn rotate_at(&self, pointer: egui::Pos2) -> bool {
+        let upright = self.upright(pointer);
+        !self.rect.contains(upright)
+            && self
+                .rotate_knobs()
+                .iter()
+                .any(|knob| knob.distance(upright) <= ROTATE_REACH)
+    }
+
+    /// The eight handles and where their centers are, upright.
     fn handles(&self) -> impl Iterator<Item = (Grip, egui::Pos2)> + '_ {
         let (left, right) = (self.rect.left(), self.rect.right());
         let (top, bottom) = (self.rect.top(), self.rect.bottom());
@@ -192,6 +254,8 @@ impl Handles {
     /// The grip under `pointer`: the nearest handle in reach, or else the
     /// body if the pointer is over the element.
     pub fn grip_at(&self, pointer: egui::Pos2) -> Option<Grip> {
+        // Turning keeps distances, so the upright frame measures the same.
+        let pointer = self.upright(pointer);
         let nearest = self
             .handles()
             .map(|(grip, at)| (grip, at.distance(pointer)))
@@ -201,10 +265,14 @@ impl Handles {
         nearest.or_else(|| self.rect.contains(pointer).then_some(Grip::BODY))
     }
 
-    /// Whether dragging `grip` would change anything.
+    /// Whether dragging `grip` would change anything. With an aspect
+    /// ratio, every handle resizes the width.
     pub fn can_drag(&self, grip: Grip) -> bool {
         if grip == Grip::BODY {
             return !self.element.in_flow;
+        }
+        if self.ratio.is_some() {
+            return !self.width.locked();
         }
         (grip.x != 0 && !self.width.locked()) || (grip.y != 0 && !self.height.locked())
     }
@@ -221,13 +289,21 @@ impl Handles {
     /// Draws the outline and handles, `highlighted` one brighter. A handle
     /// that can't resize anything is hollow.
     pub fn paint(&self, painter: &egui::Painter, color: egui::Color32, highlighted: Option<Grip>) {
-        painter.rect_stroke(
-            self.rect,
-            0.0,
+        let r = self.rect;
+        let corners = [
+            r.left_top(),
+            r.right_top(),
+            r.right_bottom(),
+            r.left_bottom(),
+        ]
+        .map(|corner| self.on_screen(corner))
+        .to_vec();
+        painter.add(egui::Shape::closed_line(
+            corners,
             egui::Stroke::new(1.5_f32, color),
-            egui::StrokeKind::Middle,
-        );
+        ));
         for (grip, at) in self.handles() {
+            let at = self.on_screen(at);
             let square = egui::Rect::from_center_size(at, egui::vec2(HANDLE_SIZE, HANDLE_SIZE));
             let fill = if highlighted == Some(grip) {
                 egui::Color32::WHITE
@@ -245,6 +321,16 @@ impl Handles {
                 egui::Stroke::new(1.0_f32, fill),
                 egui::StrokeKind::Middle,
             );
+        }
+    }
+
+    /// Draws the rotate knobs outside the corners, `lit` brighter.
+    pub fn paint_rotate_knobs(&self, painter: &egui::Painter, color: egui::Color32, lit: bool) {
+        let fill = if lit { egui::Color32::WHITE } else { color };
+        for knob in self.rotate_knobs() {
+            let at = self.on_screen(knob);
+            painter.circle_filled(at, ROTATE_KNOB_RADIUS, egui::Color32::from_black_alpha(140));
+            painter.circle_stroke(at, ROTATE_KNOB_RADIUS, egui::Stroke::new(1.2_f32, fill));
         }
     }
 
@@ -397,6 +483,12 @@ pub struct UiDrag {
     height: Axis,
     /// Screen pixels per authored pixel. Property offsets are in authored pixels.
     pixels_per_unit: f32,
+    /// Its CSS `aspect-ratio`: a resize changes the width, and the height follows.
+    ratio: Option<f32>,
+    /// How far it's turned on screen, and how far its parent is (which
+    /// its `Position` is measured in), in degrees.
+    degrees: f32,
+    parent_degrees: f32,
 }
 
 impl UiDrag {
@@ -413,6 +505,12 @@ impl UiDrag {
         }
         let instance = world.get(handles.element.id)?;
         let udim2 = |name| instance.property(name).and_then(Value::as_udim2);
+        let degrees = handles.element.degrees();
+        let own = instance
+            .property("Rotation")
+            .and_then(Value::as_number)
+            .filter(|n| n.is_finite())
+            .unwrap_or(0.0) as f32;
         Some(UiDrag {
             id: handles.element.id,
             grip,
@@ -424,6 +522,9 @@ impl UiDrag {
             width: handles.width.clone(),
             height: handles.height.clone(),
             pixels_per_unit: handles.pixels_per_unit.max(1e-4),
+            ratio: handles.ratio,
+            degrees,
+            parent_degrees: degrees - own,
         })
     }
 
@@ -455,10 +556,20 @@ impl UiDrag {
         guides: &[UiRect],
     ) -> UiDragEdit {
         let pointer_delta = (pointer - self.start_pointer) * pixels_per_point;
-        let mut delta = egui::vec2(pointer_delta.x.round(), pointer_delta.y.round());
+        // A move is along the parent's axes and a resize along the
+        // element's own, turned as they are on screen.
+        let turned = if self.grip == Grip::BODY {
+            self.parent_degrees
+        } else {
+            self.degrees
+        };
+        let [dx, dy] =
+            axcenity_render::turn_point([pointer_delta.x, pointer_delta.y], [0.0, 0.0], -turned);
+        let mut delta = egui::vec2(dx.round(), dy.round());
         // Flex layout ignores Position, so snapping its edges would draw a
-        // guide the element can't actually land on.
-        let guides = if self.in_flow {
+        // guide the element can't actually land on. Turned edges don't
+        // line up with straight ones.
+        let guides = if self.in_flow || axcenity_render::is_turned(self.degrees) {
             Vec::new()
         } else {
             self.snap(
@@ -498,6 +609,50 @@ impl UiDrag {
         }
 
         let (mut moved, mut resized) = (false, false);
+        if let Some(ratio) = self.ratio {
+            // The width decides the height: a side handle sizes it by its
+            // width, a top or bottom one by the height it asks for.
+            let (length, shift) = if self.grip.x != 0 {
+                resize(self.grip.x, start_width, design.x)
+            } else {
+                let (height, _) = resize(self.grip.y, start_height, design.y);
+                (height * ratio, 0.0)
+            };
+            let rise = if self.grip.y < 0 {
+                start_height - length / ratio
+            } else {
+                0.0
+            };
+            match &self.width {
+                Axis::Size => {
+                    size.x.offset += length - start_width;
+                    values.push(("Size", Value::UDim2(size)));
+                }
+                Axis::Css(declaration) => {
+                    if let Some(value) = resized_css_length(&declaration.value, start_width, length)
+                    {
+                        css.push(CssEdit {
+                            path: declaration.path.clone(),
+                            span: declaration.span.clone(),
+                            value,
+                        });
+                    }
+                }
+                Axis::Locked(_) => {}
+            }
+            if !self.in_flow && (shift != 0.0 || rise != 0.0) {
+                position.x.offset += shift;
+                position.y.offset += rise.round();
+                values.push(("Position", Value::UDim2(position)));
+            }
+            return UiDragEdit {
+                id: self.id,
+                resize: true,
+                values,
+                css,
+                guides,
+            };
+        }
         // `&mut size.x` and `&mut size.y` borrow different fields, so both
         // can be held at once.
         let axes = [
@@ -908,6 +1063,85 @@ mod tests {
             .iter()
             .find(|(property, _)| *property == name)
             .and_then(|(_, value)| value.as_udim2())
+    }
+
+    #[test]
+    fn with_an_aspect_ratio_every_handle_resizes_the_width_and_the_height_follows() {
+        // 200 wide at 2:1 is 100 tall, whatever Size says.
+        let (world, _, handles, layout) = frame(".hud { aspect-ratio: 2 }");
+        assert_eq!(handles.rect.height(), 100.0);
+        let size = |grip: Grip, from: egui::Pos2, by: egui::Vec2| {
+            let drag = UiDrag::start(&handles, grip, from, &world).unwrap();
+            let edit = moved(&drag, from + by, 1.0, &world, &layout);
+            (udim2(&edit, "Size"), udim2(&edit, "Position"))
+        };
+        // The bottom handle asks for 110 tall: 220 wide.
+        let (bottom, _) = size(
+            Grip { x: 0, y: 1 },
+            egui::pos2(200.0, 150.0),
+            egui::vec2(0.0, 10.0),
+        );
+        assert_eq!(bottom.unwrap().x.offset, 220.0);
+        let (right, _) = size(
+            Grip { x: 1, y: 0 },
+            egui::pos2(300.0, 100.0),
+            egui::vec2(20.0, 0.0),
+        );
+        assert_eq!(right.unwrap().x.offset, 220.0);
+        // The top left corner keeps the bottom right where it is.
+        let (corner, position) = size(
+            Grip { x: -1, y: -1 },
+            egui::pos2(100.0, 50.0),
+            egui::vec2(-20.0, -3.0),
+        );
+        assert_eq!(corner.unwrap().x.offset, 220.0);
+        let position = position.unwrap();
+        assert_eq!((position.x.offset, position.y.offset), (80.0, 40.0));
+    }
+
+    #[test]
+    fn a_turned_elements_handles_turn_with_it_and_drag_along_its_own_axes() {
+        let mut world = World::new();
+        let gui = world.create(ClassName::ScreenGui).unwrap();
+        world.set_parent(gui, Some(world.workspace())).unwrap();
+        let frame = world.create(ClassName::Frame).unwrap();
+        world.set_parent(frame, Some(gui)).unwrap();
+        world
+            .set_property(
+                frame,
+                "Position",
+                Value::UDim2(UDim2::new(0.0, 100.0, 0.0, 50.0)),
+            )
+            .unwrap();
+        world
+            .set_property(
+                frame,
+                "Size",
+                Value::UDim2(UDim2::new(0.0, 200.0, 0.0, 100.0)),
+            )
+            .unwrap();
+        world
+            .set_property(frame, "Rotation", Value::Number(90.0))
+            .unwrap();
+        let layout = axcenity_ui::layout_ui(&world, 800, 600, &[]);
+        let element = *layout.element(frame).unwrap();
+        let handles = Handles::new(element, &world, &[], egui::Pos2::ZERO, 1.0);
+        // Turned a quarter around (200, 100), its right edge faces down.
+        let right = Grip { x: 1, y: 0 };
+        assert_eq!(handles.grip_at(egui::pos2(200.0, 200.0)), Some(right));
+        assert_eq!(handles.grip_at(egui::pos2(300.0, 100.0)), None);
+        assert!(handles.centre().distance(egui::pos2(200.0, 100.0)) < 1e-3);
+        // Dragging it down makes it wider.
+        let drag = UiDrag::start(&handles, right, egui::pos2(200.0, 200.0), &world).unwrap();
+        let edit = moved(&drag, egui::pos2(200.0, 230.0), 1.0, &world, &layout);
+        assert_eq!(udim2(&edit, "Size").unwrap().x.offset, 230.0);
+        // Its knobs are just outside its turned corners.
+        let corner = handles.on_screen(handles.rect.right_bottom());
+        assert!(
+            handles.rotate_at(corner + egui::vec2(-8.0, 8.0)),
+            "{corner:?}"
+        );
+        assert!(!handles.rotate_at(egui::pos2(200.0, 100.0)));
     }
 
     #[test]

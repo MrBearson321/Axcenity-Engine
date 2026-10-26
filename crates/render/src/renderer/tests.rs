@@ -1064,6 +1064,7 @@ fn a_nine_slice_frame_draws_its_corners_unstretched_on_the_gpu() {
                 repeat: false,
             }),
             clip: None,
+            rotation_degrees: 0.0,
         })
     };
     let red = [255, 0, 0, 255];
@@ -1225,6 +1226,7 @@ fn a_clip_cuts_images_and_rectangles_to_its_rounded_box_on_the_gpu() {
         position: [8.0, 8.0],
         size: [48.0, 48.0],
         radius: 16.0,
+        ..Default::default()
     });
     // A picture bigger than its clip, and a green bar reaching past it.
     let picture = UiDrawItem::Image(crate::UiImage {
@@ -1236,6 +1238,7 @@ fn a_clip_cuts_images_and_rectangles_to_its_rounded_box_on_the_gpu() {
         texture: Some(red),
         slice: None,
         clip,
+        rotation_degrees: 0.0,
     });
     let bar = UiDrawItem::Rectangle(UiRectangle {
         position: [0.0, 40.0],
@@ -1261,11 +1264,13 @@ fn a_clip_intersects_with_the_one_around_it_and_knows_its_rounded_corners() {
         position: [0.0, 0.0],
         size: [100.0, 100.0],
         radius: 20.0,
+        ..Default::default()
     };
     let inner = crate::UiClip {
         position: [50.0, -10.0],
         size: [100.0, 40.0],
         radius: 4.0,
+        ..Default::default()
     };
     let both = inner.intersect(outer);
     assert_eq!(both.position, [50.0, 0.0]);
@@ -1278,4 +1283,102 @@ fn a_clip_intersects_with_the_one_around_it_and_knows_its_rounded_corners() {
     );
     assert!(outer.contains(20.0, 1.0));
     assert!(!outer.contains(101.0, 50.0));
+}
+
+#[test]
+fn a_turned_rectangle_draws_turned_around_its_middle_on_the_gpu() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let white = [1.0, 1.0, 1.0, 1.0];
+    let square = |rotation_degrees: f32| {
+        UiDrawItem::Rectangle(UiRectangle {
+            position: [30.0, 30.0],
+            size: [40.0, 40.0],
+            color: white,
+            color_end: white,
+            rotation_degrees,
+            ..UiRectangle::default()
+        })
+    };
+    let black = [0, 0, 0, 255];
+    let upright = ui_pixels(&device, &queue, vec![square(0.0)], (100, 100));
+    assert_ne!(upright(33, 33), black, "inside the upright corner");
+    assert_eq!(upright(50, 25), black, "above the upright square");
+    // Turned 45°, it's a diamond: its corner is gone and its point
+    // reaches above where the square's top edge was.
+    let turned = ui_pixels(&device, &queue, vec![square(45.0)], (100, 100));
+    assert_eq!(turned(33, 33), black, "the corner turned away");
+    assert_ne!(turned(50, 25), black, "the diamond's top point");
+    assert_ne!(turned(50, 50), black, "its middle stays put");
+    // Its upright bounds are what overlap is worked out from.
+    let (_, bounds) = kind_and_bounds_of(&square(45.0));
+    assert!(
+        (bounds[1] - (50.0 - 800f32.sqrt())).abs() < 0.01,
+        "{bounds:?}"
+    );
+}
+
+fn kind_and_bounds_of(item: &UiDrawItem) -> (u8, [f32; 4]) {
+    super::ui_pass::kind_and_bounds(item)
+}
+
+#[test]
+fn turned_text_is_drawn_turned_from_its_sheet_on_the_gpu() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let label = |rotation_degrees: f32| {
+        UiDrawItem::Text(UiText {
+            position: [10.0, 42.0],
+            size: [80.0, 16.0],
+            text: "HHHHHHHH".to_owned(),
+            font_size: 14.0,
+            color: [1.0, 1.0, 1.0, 1.0],
+            rotation_degrees,
+            ..UiText::default()
+        })
+    };
+    // How many lit pixels there are in a box (left, top, right, bottom).
+    let lit = |pixel: &dyn Fn(u32, u32) -> [u8; 4], [left, top, right, bottom]: [u32; 4]| {
+        (left..right)
+            .flat_map(|x| (top..bottom).map(move |y| (x, y)))
+            .filter(|&(x, y)| pixel(x, y)[0] > 128)
+            .count()
+    };
+    let across = [12, 40, 40, 60];
+    let down = [40, 12, 60, 40];
+    let upright = ui_pixels(&device, &queue, vec![label(0.0)], (100, 100));
+    assert!(lit(&upright, across) > 20, "upright text runs across");
+    assert_eq!(lit(&upright, down), 0, "and not down");
+    let turned = ui_pixels(&device, &queue, vec![label(90.0)], (100, 100));
+    assert!(lit(&turned, down) > 20, "turned a quarter, it runs down");
+    assert_eq!(lit(&turned, across), 0, "and not across");
+    // A turned text is drawn with the pictures, so it orders as one.
+    assert_eq!(kind_and_bounds_of(&label(90.0)).0, 1);
+}
+
+#[test]
+fn a_turned_clip_cuts_in_its_own_frame_and_intersects_with_one_turned_the_same() {
+    let clip = crate::UiClip {
+        position: [0.0, 40.0],
+        size: [100.0, 20.0],
+        radius: 0.0,
+        rotation_degrees: 90.0,
+    };
+    // Turned a quarter around (50, 50), the bar runs down the middle.
+    assert!(clip.contains(50.0, 5.0));
+    assert!(!clip.contains(5.0, 50.0));
+    // The top half of that bar: 50 long, its middle at (50, 25).
+    let inner = crate::UiClip {
+        position: [25.0, 15.0],
+        size: [50.0, 20.0],
+        ..clip
+    };
+    let both = clip.intersect(inner);
+    assert_eq!(both.rotation_degrees, 90.0);
+    assert!(both.contains(50.0, 20.0), "{both:?}");
+    assert!(!both.contains(50.0, 90.0), "{both:?}");
 }

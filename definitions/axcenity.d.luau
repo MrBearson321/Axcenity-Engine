@@ -625,6 +625,8 @@ declare extern type ScreenGui extends Instance with
 	DesignHeight: number
 	--- Where this ScreenGui is drawn among the others: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree.
 	DisplayOrder: number
+	--- "None" lays it out over the whole screen. "DeviceSafeInsets" keeps it inside the device's safe area, clear of a phone's notch and home bar; a desktop screen has none, so it's the whole screen there.
+	ScreenInsets: string
 	[string]: any
 end
 
@@ -650,6 +652,8 @@ declare extern type Frame extends Instance with
 	Tooltip: string
 	--- Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.
 	ZIndex: number
+	--- Degrees clockwise: it and everything in it are drawn turned around its middle, and clicks hit the turned shape. Layout doesn't change, so its Position and Size are those of the upright box. 0 by default.
+	Rotation: number
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
 	MouseEnter: Signal
 	--- Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.
@@ -677,6 +681,8 @@ declare extern type TextLabel extends Instance with
 	TextColor3: Color3
 	--- The text size in pixels.
 	TextSize: number
+	--- How see-through its text is, from 0 (solid) to 1 (invisible); its outline and shadows fade with it. The background and picture keep their own transparency, and CSS opacity still fades the whole element.
+	TextTransparency: number
 	--- If true, the text is drawn at the largest size up to TextSize (or CSS font-size) that fits its box.
 	TextScaled: boolean
 	--- If true, tags in Text style parts of it: <b>, <i>, <u>, <s>, <font color size face weight>, <stroke color thickness>, <uc> and <br/>. Write &lt; and &amp; for < and &.
@@ -689,6 +695,8 @@ declare extern type TextLabel extends Instance with
 	Tooltip: string
 	--- Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.
 	ZIndex: number
+	--- Degrees clockwise: it and everything in it are drawn turned around its middle, and clicks hit the turned shape. Layout doesn't change, so its Position and Size are those of the upright box. 0 by default.
+	Rotation: number
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
 	MouseEnter: Signal
 	--- Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.
@@ -716,6 +724,8 @@ declare extern type TextButton extends Instance with
 	TextColor3: Color3
 	--- The text size in pixels.
 	TextSize: number
+	--- How see-through its text is, from 0 (solid) to 1 (invisible); its outline and shadows fade with it. The background and picture keep their own transparency, and CSS opacity still fades the whole element.
+	TextTransparency: number
 	--- If true, the text is drawn at the largest size up to TextSize (or CSS font-size) that fits its box.
 	TextScaled: boolean
 	--- If true, tags in Text style parts of it: <b>, <i>, <u>, <s>, <font color size face weight>, <stroke color thickness>, <uc> and <br/>. Write &lt; and &amp; for < and &.
@@ -732,6 +742,8 @@ declare extern type TextButton extends Instance with
 	Tooltip: string
 	--- Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.
 	ZIndex: number
+	--- Degrees clockwise: it and everything in it are drawn turned around its middle, and clicks hit the turned shape. Layout doesn't change, so its Position and Size are those of the upright box. 0 by default.
+	Rotation: number
 	--- A sound file (a path in the project) played once when the pointer comes onto the button. Empty plays nothing.
 	HoverSound: string
 	--- A sound file (a path in the project) played once when the button is clicked. Empty plays nothing.
@@ -771,6 +783,8 @@ declare extern type ImageLabel extends Instance with
 	Tooltip: string
 	--- Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.
 	ZIndex: number
+	--- Degrees clockwise: it and everything in it are drawn turned around its middle, and clicks hit the turned shape. Layout doesn't change, so its Position and Size are those of the upright box. 0 by default.
+	Rotation: number
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
 	MouseEnter: Signal
 	--- Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.
@@ -800,6 +814,8 @@ declare extern type TextBox extends Instance with
 	TextColor3: Color3
 	--- The text size in pixels.
 	TextSize: number
+	--- How see-through its text is, from 0 (solid) to 1 (invisible); its outline and shadows fade with it. The background and picture keep their own transparency, and CSS opacity still fades the whole element.
+	TextTransparency: number
 	--- If true, the text is drawn at the largest size up to TextSize (or CSS font-size) that fits its box.
 	TextScaled: boolean
 	--- If true, tags in Text style parts of it: <b>, <i>, <u>, <s>, <font color size face weight>, <stroke color thickness>, <uc> and <br/>. Write &lt; and &amp; for < and &.
@@ -814,6 +830,8 @@ declare extern type TextBox extends Instance with
 	Tooltip: string
 	--- Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.
 	ZIndex: number
+	--- Degrees clockwise: it and everything in it are drawn turned around its middle, and clicks hit the turned shape. Layout doesn't change, so its Position and Size are those of the upright box. 0 by default.
+	Rotation: number
 	--- Fires when the player finishes typing: Enter on a one-line box, or clicking away (or Escape) on any box. The handler gets no arguments; LocalScripts only.
 	FocusLost: Signal
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
@@ -845,6 +863,8 @@ declare extern type PageLayout extends Instance with
 	Tooltip: string
 	--- Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.
 	ZIndex: number
+	--- Degrees clockwise: it and everything in it are drawn turned around its middle, and clicks hit the turned shape. Layout doesn't change, so its Position and Size are those of the upright box. 0 by default.
+	Rotation: number
 	--- The Name of the child Frame to show. Empty shows the first child Frame. A name that matches no Frame is rejected and the current page stays.
 	CurrentPage: string
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
@@ -876,6 +896,8 @@ declare extern type Table extends Instance with
 	Tooltip: string
 	--- Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.
 	ZIndex: number
+	--- Degrees clockwise: it and everything in it are drawn turned around its middle, and clicks hit the turned shape. Layout doesn't change, so its Position and Size are those of the upright box. 0 by default.
+	Rotation: number
 	--- How many cells sit in one row. Cells are the table's children, left to right then top to bottom, each the same size.
 	Columns: number
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
@@ -907,6 +929,8 @@ declare extern type ScrollingFrame extends Instance with
 	Tooltip: string
 	--- Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.
 	ZIndex: number
+	--- Degrees clockwise: it and everything in it are drawn turned around its middle, and clicks hit the turned shape. Layout doesn't change, so its Position and Size are those of the upright box. 0 by default.
+	Rotation: number
 	--- The area the children are laid out on: scale of the frame's own size plus pixels. It's never smaller than the frame. The default, 2 scale down, is twice as tall as the frame.
 	CanvasSize: UDim2
 	--- How far the canvas is scrolled, in pixels from its top left: `Vector2.new(0, 120)` is 120 pixels down. Kept between 0 and as far as the canvas goes. The wheel, the scroll bars and dragging the content set it.

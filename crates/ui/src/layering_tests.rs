@@ -187,6 +187,7 @@ fn overflow_hidden_clips_children_to_the_rounded_box_and_where_they_take_the_poi
         position: [0.0, 0.0],
         size: [100.0, 100.0],
         radius: 20.0,
+        rotation_degrees: 0.0,
     };
     let picture = layout
         .draw_items
@@ -215,6 +216,7 @@ fn overflow_hidden_clips_children_to_the_rounded_box_and_where_they_take_the_poi
             position: [4.0, 4.0],
             size: [92.0, 92.0],
             radius: 16.0,
+            rotation_degrees: 0.0,
         })
     );
 
@@ -227,6 +229,7 @@ fn overflow_hidden_clips_children_to_the_rounded_box_and_where_they_take_the_poi
             position: [10.0, 10.0],
             size: [50.0, 50.0],
             radius: 10.0,
+            rotation_degrees: 0.0,
         })
     );
 }
@@ -450,6 +453,7 @@ fn the_designer_shows_a_frame_scrolled_without_changing_its_canvas_position() {
             origin: [0.0, 0.0],
             shown: None,
             scrolled: Some(&scrolled),
+            safe_insets: [0.0; 4],
         },
     );
     assert_eq!(

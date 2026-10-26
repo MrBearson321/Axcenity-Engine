@@ -301,6 +301,7 @@ impl UiDesigner {
                 if super::slice::sliceable(instance.class()) {
                     self.slice_editor(ui, scene, id, actions);
                 }
+                look_section(ui, scene, id, actions);
                 anchor_picker(ui, scene, gui, id, actions);
             }
             if scene.editing
@@ -340,6 +341,72 @@ impl UiDesigner {
             .unwrap_or_default();
         (built_in, project)
     }
+}
+
+/// The selected element's turn and how see-through each of its parts is:
+/// `Rotation` (degrees; the artboard's corner knobs turn it too) and its
+/// background, text and image transparencies as 0–100% sliders.
+fn look_section(
+    ui: &mut egui::Ui,
+    scene: &DesignerScene,
+    id: InstanceId,
+    actions: &mut Vec<DesignerAction>,
+) {
+    let Some(instance) = scene.world.get(id) else {
+        return;
+    };
+    let number = |name| instance.property(name).and_then(Value::as_number);
+    ui.add_space(4.0);
+    widgets::section_label(ui, "Look");
+    responsive::form(ui, "ui designer look", |ui| {
+        if let Some(mut degrees) = number("Rotation") {
+            ui.label("Rotation");
+            if ui
+                .add(
+                    egui::DragValue::new(&mut degrees)
+                        .speed(1.0)
+                        .suffix("°")
+                        .max_decimals(1),
+                )
+                .on_hover_text(
+                    "Turns it and what's in it around its middle, clockwise. \
+                     Or drag a knob just outside its corners (Shift snaps to 15°).",
+                )
+                .changed()
+            {
+                actions.push(DesignerAction::Edit(
+                    id,
+                    Edit::Property("Rotation", Value::Number(degrees)),
+                ));
+            }
+            ui.end_row();
+        }
+        for (name, label, tip) in [
+            (
+                "BackgroundTransparency",
+                "Background",
+                "How see-through the background is",
+            ),
+            ("TextTransparency", "Text", "How see-through the text is"),
+            (
+                "ImageTransparency",
+                "Image",
+                "How see-through the picture is",
+            ),
+        ] {
+            let Some(value) = number(name) else {
+                continue;
+            };
+            ui.label(label).on_hover_text(tip);
+            if let Some(value) = crate::properties::transparency_slider(ui, value) {
+                actions.push(DesignerAction::Edit(
+                    id,
+                    Edit::Property(name, Value::Number(value)),
+                ));
+            }
+            ui.end_row();
+        }
+    });
 }
 
 /// A list of fonts, the built-in ones then the project's. Returns the
