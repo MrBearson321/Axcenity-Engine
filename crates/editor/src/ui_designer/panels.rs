@@ -7,10 +7,10 @@ use axcenity_core::{InstanceId, Value, World};
 use axcenity_ui::Stylesheet;
 use eframe::egui;
 
-use super::anchors::{Pin, Placement};
+use super::anchors::{Pin, Placement, anchor_of};
 use super::{
     CLICK_INSERT_AT, DesignerAction, DesignerScene, PALETTE, PaletteItem, UiDesigner,
-    anchor_action, container_for, hierarchy,
+    anchor_action, container_for, hierarchy, reset_anchor_action,
 };
 use crate::properties::Edit;
 use crate::responsive;
@@ -431,10 +431,36 @@ fn anchor_picker(
                 y.name(false),
                 x.name(true)
             ),
-            _ => "Not pinned: its Position and Size use scales of their own.".to_owned(),
+            _ => {
+                let [x, y] = [anchor_of(position.x, size.x), anchor_of(position.y, size.y)];
+                format!(
+                    "Anchored at {} across and {} down: it keeps its distance from there.",
+                    percent_range(x),
+                    percent_range(y)
+                )
+            }
         };
         ui.add(egui::Label::new(egui::RichText::new(said).weak()).wrap());
     });
+    if ui
+        .button("Reset")
+        .on_hover_text(
+            "Anchor it to the top left, not stretched, without moving it.              Or drag the diamonds on the artboard to anchor it anywhere.",
+        )
+        .clicked()
+        && let Some(action) = reset_anchor_action(world, scene.stylesheets, gui, id)
+    {
+        actions.push(action);
+    }
+}
+
+/// An anchor on one axis in words: `40%`, or `30% to 70%` when stretched.
+fn percent_range([min, max]: [f32; 2]) -> String {
+    if min == max {
+        format!("{:.0}%", min * 100.0)
+    } else {
+        format!("{:.0}% to {:.0}%", min * 100.0, max * 100.0)
+    }
 }
 
 /// A cell's picture: the parent as a box, and where the element is pinned

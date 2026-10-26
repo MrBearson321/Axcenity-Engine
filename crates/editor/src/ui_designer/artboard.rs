@@ -2,18 +2,18 @@
 //! guides, the selected element's handles and distances, palette drops,
 //! and text typed over on a double-click.
 
-use axcenity_core::{ClassName, InstanceId, UDim2, Value};
+use axcenity_core::{ClassName, InstanceId, Value};
 use axcenity_render::glam::Vec3;
 use axcenity_render::{Camera, UiDrawItem, UiRectangle};
 use axcenity_ui::{UiLayout, UiRect};
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 
-use super::anchors::Pin;
+use super::anchor_handles::{AnchorDrag, AnchorHandles};
 use super::rulers::{self, RULER};
 use super::{
     DesignerAction, DesignerScene, FIT_MARGIN, Guide, MAX_ZOOM, MIN_ZOOM, PaletteItem, TextEditing,
-    UiDesigner, container_for, drop_offset, scale_mode,
+    UiDesigner, container_for, drop_offset, panels, reset_anchor_action, scale_mode,
 };
 use crate::properties::Edit;
 use crate::theme;
@@ -147,6 +147,7 @@ impl UiDesigner {
             )
         } else {
             self.drag = None;
+            self.anchor_drag = None;
             painter.text(
                 canvas.center(),
                 egui::Align2::CENTER_CENTER,
@@ -314,8 +315,24 @@ impl UiDesigner {
                 && visible.contains(pointer)
                 && !typing.is_some_and(|rect| rect.contains(pointer))
         });
+        // The selected element's anchor diamonds (a flex child has none).
+        // They're over its handles, so they're grabbed first.
+        let anchor_handles = scene
+            .selected
+            .filter(|&id| layout.element(id).is_some_and(|element| !element.in_flow))
+            .and_then(|id| {
+                let parent = world
+                    .get(id)?
+                    .parent()
+                    .and_then(|parent| layout.element(parent))
+                    .map_or_else(|| view.area_rect(), |parent| points_of(parent.rect));
+                AnchorHandles::new(world, id, parent)
+            });
+        let anchor_grab = over
+            .filter(|_| scene.editing && self.text_editing.is_none())
+            .and_then(|pointer| anchor_handles.as_ref()?.grab_at(pointer));
         let grip = match (over, &handles) {
-            (Some(pointer), Some(handles)) => handles.grip_at(pointer),
+            (Some(pointer), Some(handles)) if anchor_grab.is_none() => handles.grip_at(pointer),
             _ => None,
         };
         let guide_under = over.and_then(|pointer| {
@@ -331,12 +348,19 @@ impl UiDesigner {
         // drag it straight away.
         if pressed
             && self.drag.is_none()
+            && self.anchor_drag.is_none()
             && self.guide_drag.is_none()
             && scene.editing
             && let Some(pointer) = over
         {
             self.drag_held = Some(pointer);
-            if let (Some(grip), Some(handles)) = (grip, &handles) {
+            if let (Some(grab), Some(anchor)) = (anchor_grab, &anchor_handles) {
+                if let Some((placement, _)) =
+                    panels::placement(world, scene.stylesheets, gui, anchor.id)
+                {
+                    self.anchor_drag = Some(AnchorDrag::start(anchor, grab, pointer, placement));
+                }
+            } else if let (Some(grip), Some(handles)) = (grip, &handles) {
                 self.drag = UiDrag::start(handles, grip, pointer, world);
             } else if let Some(index) = guide_under {
                 let vertical = self.guides(gui)[index].vertical;
@@ -376,6 +400,49 @@ impl UiDesigner {
                     actions.push(DesignerAction::Drag(edit));
                 }
             }
+        }
+        // The anchor follows the pointer, and the element stays put. Alt
+        // turns snapping off.
+        if let Some(drag) = &mut self.anchor_drag {
+            if !down || !scene.editing {
+                self.anchor_drag = None;
+            } else if let (Some(pointer), Some(anchor)) = (pointer, &anchor_handles)
+                && self
+                    .drag_held
+                    .is_none_or(|from| from.distance(pointer) >= DRAG_SLOP)
+            {
+                self.drag_held = None;
+                let snap = !ui.input(|input| input.modifiers.alt);
+                let (position, size) = drag.update(pointer, anchor.parent, snap);
+                actions.push(DesignerAction::MoveAnchor {
+                    id: drag.id,
+                    position,
+                    size,
+                });
+            }
+        }
+        // Right-click on a diamond: Reset anchor.
+        if let Some(anchor) = &anchor_handles
+            && ((anchor_grab.is_some() && self.anchor_drag.is_none()) || self.anchor_menu)
+        {
+            let menu = response.context_menu(|ui| {
+                if ui
+                    .button("Reset anchor")
+                    .on_hover_text("Anchor it to the top left, not stretched, without moving it")
+                    .clicked()
+                {
+                    actions.extend(reset_anchor_action(
+                        world,
+                        scene.stylesheets,
+                        gui,
+                        anchor.id,
+                    ));
+                    ui.close();
+                }
+            });
+            self.anchor_menu = menu.is_some();
+        } else {
+            self.anchor_menu = false;
         }
         if scene.editing
             && response.double_clicked()
@@ -426,7 +493,7 @@ impl UiDesigner {
             .selected
             .and_then(|id| Some((id, *layout.element(id)?)));
         let selected_rect = selected.map(|(_, element)| points_of(element.rect));
-        if let Some((id, element)) = selected {
+        if let Some((id, _)) = selected {
             let parent = world
                 .get(id)
                 .and_then(|instance| instance.parent())
@@ -443,18 +510,27 @@ impl UiDesigner {
                     handles.paint_measures(&painter, view.board, parent, 1.0 / view.per_unit());
                 }
             }
-            if !element.in_flow {
-                paint_anchor(
-                    &painter,
-                    world,
-                    id,
-                    parent.unwrap_or_else(|| view.area_rect()),
-                    palette.accent,
-                );
-            }
+        }
+        if let Some(anchor) = &anchor_handles {
+            let lit = self
+                .anchor_drag
+                .as_ref()
+                .map(|drag| drag.grab)
+                .or(anchor_grab);
+            anchor.paint(&painter, palette.accent, lit);
         }
         if self.drag.is_some() {
             ui_handles::paint_guides(&self.snaps, &painter, visible.min, ppp);
+        }
+        if let (Some(drag), Some(anchor)) = (&self.anchor_drag, &anchor_handles) {
+            // Its snap lines are in points.
+            ui_handles::paint_guides(&drag.snaps, &painter, egui::Pos2::ZERO, 1.0);
+            drag.paint_label(ui, &painter, anchor.parent);
+        }
+        if self.anchor_drag.is_some() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        } else if anchor_grab.is_some() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
         }
         match (&self.drag, &handles) {
             (Some(drag), Some(handles)) => ui.ctx().set_cursor_icon(handles.cursor(drag.grip)),
@@ -462,7 +538,7 @@ impl UiDesigner {
                 ui.ctx()
                     .set_cursor_icon(handles.cursor(grip.expect("checked")));
             }
-            (None, _) if guide_under.is_some() && grip.is_none() => {
+            (None, _) if guide_under.is_some() && grip.is_none() && anchor_grab.is_none() => {
                 let vertical = self.guides(gui)[guide_under.expect("checked")].vertical;
                 ui.ctx().set_cursor_icon(if vertical {
                     egui::CursorIcon::ResizeHorizontal
@@ -686,53 +762,6 @@ fn paint_guide(painter: &egui::Painter, view: &View, guide: Guide) {
         )
     };
     painter.line_segment([a, b], egui::Stroke::new(1.0_f32, GUIDE_COLOR));
-}
-
-/// Where `id` is anchored in `parent` (in points): a small diamond at each
-/// point it's pinned to.
-fn paint_anchor(
-    painter: &egui::Painter,
-    world: &axcenity_core::World,
-    id: InstanceId,
-    parent: egui::Rect,
-    color: egui::Color32,
-) {
-    let Some(instance) = world.get(id) else {
-        return;
-    };
-    let udim2 = |name| instance.property(name).and_then(Value::as_udim2);
-    let (Some(position), Some(size)) = (udim2("Position"), udim2("Size")) else {
-        return;
-    };
-    let UDim2 { x, y } = position;
-    let points = |pin: Option<Pin>, start: f32, end: f32| -> Vec<f32> {
-        match pin {
-            Some(Pin::Start) => vec![start],
-            Some(Pin::Center) => vec![(start + end) * 0.5],
-            Some(Pin::End) => vec![end],
-            Some(Pin::Stretch) => vec![start, end],
-            None => Vec::new(),
-        }
-    };
-    let xs = points(Pin::of(x, size.x), parent.left(), parent.right());
-    let ys = points(Pin::of(y, size.y), parent.top(), parent.bottom());
-    for &px in &xs {
-        for &py in &ys {
-            let at = egui::pos2(px, py);
-            let r = 4.0;
-            let diamond = vec![
-                at + egui::vec2(0.0, -r),
-                at + egui::vec2(r, 0.0),
-                at + egui::vec2(0.0, r),
-                at + egui::vec2(-r, 0.0),
-            ];
-            painter.add(egui::Shape::convex_polygon(
-                diamond,
-                color,
-                egui::Stroke::new(1.0_f32, egui::Color32::from_black_alpha(160)),
-            ));
-        }
-    }
 }
 
 /// A rough drawing of UI draw items with egui's painter, for when there's

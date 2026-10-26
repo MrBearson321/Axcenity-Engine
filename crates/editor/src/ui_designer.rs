@@ -22,6 +22,7 @@
 //! `axcenity_ui::layout_artboard`: exactly what a screen of that size shows
 //! in Play, scaled by the zoom.
 
+mod anchor_handles;
 mod anchors;
 mod artboard;
 mod panels;
@@ -114,6 +115,13 @@ pub enum DesignerAction {
         position: UDim2,
         size: UDim2,
     },
+    /// Like [`Anchor`](Self::Anchor), from dragging the anchor's diamonds:
+    /// every frame of one drag makes one undo step.
+    MoveAnchor {
+        id: InstanceId,
+        position: UDim2,
+        size: UDim2,
+    },
     /// Sets the element's CSS `font-family`.
     Font { id: InstanceId, family: String },
     /// Makes a ScreenGui, when there's none to design.
@@ -180,6 +188,10 @@ pub struct UiDesigner {
     fit_next: bool,
     canvas: Canvas,
     drag: Option<UiDrag>,
+    /// The anchor's diamonds being dragged.
+    anchor_drag: Option<anchor_handles::AnchorDrag>,
+    /// The diamonds' right-click menu is open.
+    anchor_menu: bool,
     /// Where the pointer went down for the drag, until it has moved: a
     /// click that doesn't move changes nothing (not even a snap).
     drag_held: Option<egui::Pos2>,
@@ -216,6 +228,8 @@ impl Default for UiDesigner {
             fit_next: true,
             canvas: Canvas::default(),
             drag: None,
+            anchor_drag: None,
+            anchor_menu: false,
             drag_held: None,
             snaps: Vec::new(),
             guides: HashMap::new(),
@@ -346,6 +360,17 @@ pub fn anchor_action(
     Some(DesignerAction::Anchor { id, position, size })
 }
 
+/// Anchors `id` back at its parent's top left, not stretched, where it is
+/// now: the Anchor section's Reset and the diamonds' Reset anchor.
+pub fn reset_anchor_action(
+    world: &World,
+    stylesheets: &[Stylesheet],
+    gui: InstanceId,
+    id: InstanceId,
+) -> Option<DesignerAction> {
+    anchor_action(world, stylesheets, gui, id, Pin::Start, Pin::Start)
+}
+
 /// The ScreenGui's `ScaleMode`, as one of [`SCALE_MODES`].
 fn scale_mode(world: &World, gui: InstanceId) -> &'static str {
     let mode = world
@@ -421,9 +446,9 @@ impl UiDesigner {
         self.fit_next = true;
     }
 
-    /// True while a handle or a guide is being dragged.
+    /// True while a handle, an anchor or a guide is being dragged.
     pub fn is_dragging(&self) -> bool {
-        self.drag.is_some() || self.guide_drag.is_some()
+        self.drag.is_some() || self.anchor_drag.is_some() || self.guide_drag.is_some()
     }
 
     /// Draws the designer and returns what was done in it.
@@ -437,6 +462,7 @@ impl UiDesigner {
         self.follow(scene.world, scene.selected);
         let Some(gui) = self.gui else {
             self.drag = None;
+            self.anchor_drag = None;
             ui.label("There's no ScreenGui to design yet.");
             if ui
                 .add_enabled(

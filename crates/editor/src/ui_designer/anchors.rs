@@ -63,15 +63,68 @@ fn tidy(value: f32) -> f32 {
 /// staying where it is: `start` and `length` are where it is in its
 /// parent, and `parent` the parent's length, all in design pixels.
 pub fn pin_axis(pin: Pin, start: f32, length: f32, parent: f32) -> (UDim, UDim) {
-    let fixed = UDim::new(0.0, tidy(length));
-    match pin {
-        Pin::Start => (UDim::new(0.0, tidy(start)), fixed),
-        Pin::Center => (UDim::new(0.5, tidy(start - parent * 0.5)), fixed),
-        Pin::End => (UDim::new(1.0, tidy(start - parent)), fixed),
-        Pin::Stretch => (
-            UDim::new(0.0, tidy(start)),
-            UDim::new(1.0, tidy(length - parent)),
-        ),
+    let anchor = match pin {
+        Pin::Start => [0.0, 0.0],
+        Pin::Center => [0.5, 0.5],
+        Pin::End => [1.0, 1.0],
+        Pin::Stretch => [0.0, 1.0],
+    };
+    anchor_axis(anchor, start, length, parent)
+}
+
+/// Where an element is anchored on one axis, as fractions of its parent:
+/// where its start and its end are pinned (Unity's anchor min and max).
+/// Equal for a pinned element; apart for one that stretches.
+pub fn anchor_of(position: UDim, size: UDim) -> [f32; 2] {
+    [position.scale, position.scale + size.scale]
+}
+
+/// `Position` and `Size` on one axis anchored at `anchor` (see
+/// [`anchor_of`]), with the element staying where it is. As
+/// [`pin_axis`], in design pixels.
+pub fn anchor_axis(anchor: [f32; 2], start: f32, length: f32, parent: f32) -> (UDim, UDim) {
+    let [min, max] = anchor.map(tidy);
+    let stretch = tidy(max - min);
+    (
+        UDim::new(min, tidy(start - min * parent)),
+        UDim::new(stretch, tidy(length - stretch * parent)),
+    )
+}
+
+/// Which ends of an axis's anchor a drag moves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ends {
+    Min,
+    Max,
+    /// Both together: a joined anchor moved as one.
+    Both,
+}
+
+/// `anchor` with `ends` moved to `to` (kept within the parent). An end
+/// dragged past the other pushes it along, so the start never passes the
+/// end.
+pub fn move_ends(anchor: [f32; 2], ends: Ends, to: f32) -> [f32; 2] {
+    let to = to.clamp(0.0, 1.0);
+    let [min, max] = anchor;
+    match ends {
+        Ends::Min => [to, max.max(to)],
+        Ends::Max => [min.min(to), to],
+        Ends::Both => [to, to],
+    }
+}
+
+/// Where a dragged anchor end at `value` settles: on the nearest of
+/// `targets` within `within`, else at a whole percent. Returns it, and
+/// the target it snapped to.
+pub fn snap_anchor(value: f32, targets: &[f32], within: f32) -> (f32, Option<f32>) {
+    let nearest = targets
+        .iter()
+        .copied()
+        .filter(|target| (target - value).abs() <= within)
+        .min_by(|a, b| (a - value).abs().total_cmp(&(b - value).abs()));
+    match nearest {
+        Some(target) => (target, Some(target)),
+        None => (tidy(value), None),
     }
 }
 
@@ -152,6 +205,40 @@ mod tests {
         assert_eq!(at(Pin::End), (wider - 300.0 - 100.0, 100.0));
         assert_eq!(at(Pin::Center), (wider * 0.5 + 100.0, 100.0));
         assert_eq!(at(Pin::Stretch), (600.0, wider - 600.0 - 300.0));
+    }
+
+    #[test]
+    fn any_anchor_keeps_the_element_in_place_and_reads_back() {
+        let near = |a: f32, b: f32| (a - b).abs() < 0.01;
+        for anchor in [[0.0, 0.0], [0.25, 0.25], [0.3, 0.7], [1.0, 1.0], [0.0, 1.0]] {
+            let (position, size) = anchor_axis(anchor, 600.0, 100.0, 1000.0);
+            let (start, length) = place(position, size, 1000.0);
+            assert!(near(start, 600.0) && near(length, 100.0), "{anchor:?}");
+            let [min, max] = anchor_of(position, size);
+            assert!(near(min, anchor[0]) && near(max, anchor[1]), "{anchor:?}");
+        }
+        // Stretched from 30% to 70%: on a parent twice as long it keeps
+        // its distances from those points, so it grows with the parent.
+        let (position, size) = anchor_axis([0.3, 0.7], 250.0, 500.0, 1000.0);
+        let (start, length) = place(position, size, 2000.0);
+        assert!(
+            near(start, 550.0) && near(length, 900.0),
+            "{start}, {length}"
+        );
+    }
+
+    #[test]
+    fn a_dragged_end_pushes_the_other_and_snaps_to_its_targets() {
+        assert_eq!(move_ends([0.0, 0.0], Ends::Max, 1.0), [0.0, 1.0]);
+        assert_eq!(move_ends([0.2, 0.4], Ends::Min, 0.9), [0.9, 0.9]);
+        assert_eq!(move_ends([0.6, 0.8], Ends::Max, 0.1), [0.1, 0.1]);
+        assert_eq!(move_ends([0.0, 0.0], Ends::Both, 1.4), [1.0, 1.0]);
+
+        let targets = [0.0, 0.5, 1.0];
+        assert_eq!(snap_anchor(0.97, &targets, 0.05), (1.0, Some(1.0)));
+        assert_eq!(snap_anchor(0.52, &targets, 0.05), (0.5, Some(0.5)));
+        assert_eq!(snap_anchor(0.333, &targets, 0.05), (0.33, None));
+        assert_eq!(snap_anchor(0.97, &targets, 0.0), (0.97, None));
     }
 
     #[test]

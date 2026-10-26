@@ -158,19 +158,12 @@ impl EditorApp {
                     self.history.seal();
                 }
                 DesignerAction::Anchor { id, position, size } => {
-                    let Some(name) = self.world.get(id).map(|i| i.name().to_owned()) else {
-                        continue;
-                    };
-                    self.change(
-                        id,
-                        history::Field::Property("Position"),
-                        format!("Anchor {name}"),
-                        vec![
-                            Edit::Property("Position", Value::UDim2(position)),
-                            Edit::Property("Size", Value::UDim2(size)),
-                        ],
-                    );
+                    self.anchor(id, position, size);
                     self.history.seal();
+                }
+                // Sealed when the drag ends, as handle drags are.
+                DesignerAction::MoveAnchor { id, position, size } => {
+                    self.anchor(id, position, size);
                 }
                 DesignerAction::Font { id, family } => self.set_font(id, &family),
                 DesignerAction::Insert { what, parent, at } => {
@@ -182,6 +175,27 @@ impl EditorApp {
                 DesignerAction::NewScreenGui => self.insert(Insertable::ScreenGui, None),
             }
         }
+    }
+
+    /// Sets `id`'s `Position` and `Size` together, as an anchor change.
+    fn anchor(
+        &mut self,
+        id: InstanceId,
+        position: axcenity_core::UDim2,
+        size: axcenity_core::UDim2,
+    ) {
+        let Some(name) = self.world.get(id).map(|i| i.name().to_owned()) else {
+            return;
+        };
+        self.change(
+            id,
+            history::Field::Property("Position"),
+            format!("Anchor {name}"),
+            vec![
+                Edit::Property("Position", Value::UDim2(position)),
+                Edit::Property("Size", Value::UDim2(size)),
+            ],
+        );
     }
 
     /// Draws `id`'s text in `family`: its own `#Id` rule's `font-family`

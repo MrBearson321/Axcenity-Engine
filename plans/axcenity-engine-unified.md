@@ -376,9 +376,9 @@ The UI phases below (9a to 9i) come from the developer's requests of 2026-10-25.
 
 ### Acceptance criteria
 
-- [ ] Dragging a top-left anchored element's diamonds to the parent's bottom-right corner pins it there. It doesn't move at the design size, and it stays against that corner on a wider Preview screen and in Play.
-- [ ] Dragging the two horizontal diamonds to the parent's left and right edges stretches the element across, keeping its margins.
-- [ ] Reset (the button or the right-click menu) puts the anchor back at top-left without moving the element, and undo restores the previous anchor.
+- [x] Dragging a top-left anchored element's diamonds to the parent's bottom-right corner pins it there. It doesn't move at the design size, and it stays against that corner on a wider Preview screen and in Play.
+- [x] Dragging the two horizontal diamonds to the parent's left and right edges stretches the element across, keeping its margins.
+- [x] Reset (the button or the right-click menu) puts the anchor back at top-left without moving the element, and undo restores the previous anchor.
 
 ---
 

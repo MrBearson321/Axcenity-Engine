@@ -977,3 +977,340 @@ fn the_artboard_previews_the_ui_on_another_screen() {
     }
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+/// A press at `from`, a drag to `to` over two frames, and a let go.
+fn drag_on_artboard(from: egui::Pos2, to: egui::Pos2) -> Vec<Vec<egui::Event>> {
+    vec![
+        vec![egui::Event::PointerMoved(from)],
+        vec![press(from, true)],
+        vec![egui::Event::PointerMoved(from + (to - from) * 0.5)],
+        vec![egui::Event::PointerMoved(to)],
+        vec![press(to, false)],
+        Vec::new(),
+    ]
+}
+
+/// Where `id` is on the artboard, in points.
+fn rect_on_artboard(app: &EditorApp, gui: InstanceId, id: InstanceId) -> egui::Rect {
+    let (board, zoom) = app.ui_designer.board().unwrap();
+    let screen = axcenity_ui::design_size(&app.world, gui);
+    let layout = axcenity_ui::layout_artboard(
+        &app.world,
+        gui,
+        &stylesheets(app),
+        screen,
+        zoom,
+        [board.min.x, board.min.y],
+    );
+    let rect = layout.element(id).unwrap().rect;
+    egui::Rect::from_min_size(
+        egui::pos2(rect.x, rect.y),
+        egui::vec2(rect.width, rect.height),
+    )
+}
+
+/// Where `id` is laid out on a `width`×`height` screen, as the player does.
+fn rect_in_game(app: &EditorApp, id: InstanceId, width: u32, height: u32) -> UiRect {
+    let layout = axcenity_ui::layout_ui(&app.world, width, height, &stylesheets(app));
+    layout.element(id).unwrap().rect
+}
+
+fn near(a: f32, b: f32) -> bool {
+    (a - b).abs() < 0.05
+}
+
+#[test]
+fn dragging_the_anchor_to_the_bottom_right_corner_pins_an_element_there() {
+    let folder = copy_of_example("hello-touched", "ui-designer-anchor-corner");
+    let mut app = EditorApp::new(Some(&folder));
+    let menu = build_menu(&mut app);
+    act(&mut app, DesignerAction::Select(Some(menu.frame)));
+    let ctx = theme::test_context();
+    let mut clock = 0.0;
+    let size = egui::vec2(1100.0, 600.0);
+    run_designer(&mut app, &ctx, &mut clock, size, vec![Vec::new(); 3]);
+    let before = rect_in_game(&app, menu.frame, 1280, 720);
+    let position_before = udim2(&app, menu.frame, "Position");
+    let undo_before = app.history.undo_label().map(str::to_owned);
+
+    // Anchored top left, its four diamonds meet at the screen's corner.
+    // Grabbed there, they all go to the bottom right, snapping onto it.
+    let (board, _) = app.ui_designer.board().unwrap();
+    let frames = drag_on_artboard(board.min, board.max - egui::vec2(2.0, 2.0));
+    run_designer(&mut app, &ctx, &mut clock, size, frames);
+    let (position, size_now) = (
+        udim2(&app, menu.frame, "Position"),
+        udim2(&app, menu.frame, "Size"),
+    );
+    assert_eq!((position.x.scale, position.y.scale), (1.0, 1.0));
+    assert_eq!((size_now.x.scale, size_now.y.scale), (0.0, 0.0));
+
+    // It didn't move at the design size.
+    let after = rect_in_game(&app, menu.frame, 1280, 720);
+    assert!(
+        near(after.x, before.x) && near(after.y, before.y),
+        "{after:?}"
+    );
+    let right = 1280.0 - (before.x + before.width);
+    let bottom = 720.0 - (before.y + before.height);
+
+    // On a wider Preview screen twice as tall it's twice the size, and
+    // keeps (twice) its distance from the bottom right corner.
+    let wide = |rect: UiRect| {
+        (
+            3440.0 - (rect.x + rect.width),
+            1440.0 - (rect.y + rect.height),
+        )
+    };
+    app.ui_designer.preview_at(Some((3440, 1440)));
+    run_designer(&mut app, &ctx, &mut clock, size, vec![Vec::new(); 2]);
+    let preview = axcenity_ui::layout_artboard(
+        &app.world,
+        menu.gui,
+        &stylesheets(&app),
+        (3440, 1440),
+        1.0,
+        [0.0, 0.0],
+    );
+    let (r, b) = wide(preview.element(menu.frame).unwrap().rect);
+    assert!(near(r, right * 2.0) && near(b, bottom * 2.0), "{r}, {b}");
+    // And in Play, the same.
+    app.play();
+    let session = app.play.as_ref().expect("playing");
+    let in_play = axcenity_ui::layout_ui(session.world(), 3440, 1440, &stylesheets(&app));
+    let (r, b) = wide(in_play.element(menu.frame).unwrap().rect);
+    assert!(near(r, right * 2.0) && near(b, bottom * 2.0), "{r}, {b}");
+    app.stop();
+
+    // The whole drag is one undo step.
+    assert_eq!(app.history.undo_label(), Some("Anchor MainMenu"));
+    app.undo();
+    assert_eq!(udim2(&app, menu.frame, "Position"), position_before);
+    assert_eq!(app.history.undo_label().map(str::to_owned), undo_before);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn dragging_the_horizontal_diamonds_to_both_edges_stretches_an_element_across() {
+    let folder = copy_of_example("hello-touched", "ui-designer-anchor-stretch");
+    let mut app = EditorApp::new(Some(&folder));
+    let menu = build_menu(&mut app);
+    act(&mut app, DesignerAction::Select(Some(menu.title)));
+    let ctx = theme::test_context();
+    let mut clock = 0.0;
+    let size = egui::vec2(1100.0, 600.0);
+    run_designer(&mut app, &ctx, &mut clock, size, vec![Vec::new(); 3]);
+    let frame = rect_in_game(&app, menu.frame, 1280, 720);
+    let title = rect_in_game(&app, menu.title, 1280, 720);
+    let margins = |frame: UiRect, title: UiRect| {
+        (
+            title.x - frame.x,
+            (frame.x + frame.width) - (title.x + title.width),
+        )
+    };
+    let (left, right) = margins(frame, title);
+
+    // The title's anchor is the frame's top left: both horizontal diamonds
+    // are there. The left one stays; the right one (up and to the right of
+    // the point) is dragged to the frame's right edge.
+    let parent = rect_on_artboard(&app, menu.gui, menu.frame);
+    let grab = parent.min + egui::vec2(6.0, -6.0);
+    let frames = drag_on_artboard(grab, grab + egui::vec2(parent.width() - 2.0, 0.0));
+    run_designer(&mut app, &ctx, &mut clock, size, frames);
+    let (position, size_now) = (
+        udim2(&app, menu.title, "Position"),
+        udim2(&app, menu.title, "Size"),
+    );
+    assert_eq!((position.x.scale, size_now.x.scale), (0.0, 1.0));
+    assert_eq!((position.y.scale, size_now.y.scale), (0.0, 0.0));
+    let now = rect_in_game(&app, menu.title, 1280, 720);
+    assert!(
+        near(now.x, title.x) && near(now.width, title.width),
+        "{now:?}"
+    );
+
+    // Widening the frame widens the title, keeping both margins.
+    let sheets = stylesheets(&app);
+    let width = axcenity_ui::applied_declarations(&app.world, menu.frame, &sheets)
+        .into_iter()
+        .find(|declaration| declaration.property == "width")
+        .unwrap();
+    act(
+        &mut app,
+        DesignerAction::Style(
+            menu.frame,
+            StyleEdit::Set {
+                path: width.path,
+                span: width.span,
+                value: "600px".into(),
+            },
+        ),
+    );
+    let frame = rect_in_game(&app, menu.frame, 1280, 720);
+    assert_eq!(frame.width, 600.0);
+    let (l, r) = margins(frame, rect_in_game(&app, menu.title, 1280, 720));
+    assert!(
+        near(l, left) && near(r, right),
+        "{l}, {r} vs {left}, {right}"
+    );
+
+    if let Some(snapshots) = std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from) {
+        // Partway through dragging the right diamonds back to the middle:
+        // the snap line and the percent label.
+        run_designer(&mut app, &ctx, &mut clock, size, vec![Vec::new(); 2]);
+        let parent = rect_on_artboard(&app, menu.gui, menu.frame);
+        let grab = egui::pos2(parent.right(), parent.top()) + egui::vec2(6.0, -6.0);
+        let to = grab - egui::vec2(parent.width() * 0.5 - 2.0, 0.0);
+        app.ui_designer = UiDesigner::default();
+        let mut frames = vec![Vec::new(); 3];
+        frames.extend(drag_on_artboard(grab, to).into_iter().take(4));
+        crate::snapshot::snapshot_rendered(
+            &snapshots.join("ui-designer-anchor-drag.png"),
+            size,
+            frames,
+            |ctx, render_state| {
+                egui::CentralPanel::default()
+                    .show(ctx, |ui| app.ui_designer_pane(ui, Some(render_state)));
+            },
+        );
+    }
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+/// Runs one frame of the UI Designer tab, as [`run_designer`] does, and
+/// returns egui's output (with AccessKit on, so it says where each widget is).
+fn designer_frame(
+    app: &mut EditorApp,
+    ctx: &egui::Context,
+    clock: &mut f64,
+    size: egui::Vec2,
+    events: Vec<egui::Event>,
+) -> egui::FullOutput {
+    *clock += 0.05;
+    ctx.enable_accesskit();
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+        events,
+        time: Some(*clock),
+        ..Default::default()
+    };
+    let output = ctx.run(input, |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| app.ui_designer_pane(ui, None));
+    });
+    if !ctx.is_using_pointer() && !ctx.wants_keyboard_input() {
+        frame_ends(app);
+    }
+    output
+}
+
+/// The middle of the widget labelled `label` in `output`, in points.
+fn widget_named(output: &egui::FullOutput, label: &str, ppp: f32) -> Option<egui::Pos2> {
+    let update = output.platform_output.accesskit_update.as_ref()?;
+    let (_, node) = update
+        .nodes
+        .iter()
+        .find(|(_, node)| node.label() == Some(label))?;
+    let bounds = node.bounds()?;
+    Some(egui::pos2(
+        ((bounds.x0 + bounds.x1) * 0.5) as f32 / ppp,
+        ((bounds.y0 + bounds.y1) * 0.5) as f32 / ppp,
+    ))
+}
+
+/// Clicks the widget labelled `label`, as the next frame draws it.
+fn click_named(
+    app: &mut EditorApp,
+    ctx: &egui::Context,
+    clock: &mut f64,
+    size: egui::Vec2,
+    label: &str,
+) {
+    let output = designer_frame(app, ctx, clock, size, Vec::new());
+    let at = widget_named(&output, label, ctx.pixels_per_point())
+        .unwrap_or_else(|| panic!("{label} is drawn"));
+    for events in [
+        vec![egui::Event::PointerMoved(at)],
+        vec![press(at, true)],
+        vec![press(at, false)],
+        Vec::new(),
+    ] {
+        designer_frame(app, ctx, clock, size, events);
+    }
+}
+
+#[test]
+fn reset_anchors_an_element_at_the_top_left_without_moving_it() {
+    let folder = copy_of_example("hello-touched", "ui-designer-anchor-reset");
+    let mut app = EditorApp::new(Some(&folder));
+    let menu = build_menu(&mut app);
+    let ctx = theme::test_context();
+    let mut clock = 0.0;
+    let size = egui::vec2(1100.0, 600.0);
+    let sheets = stylesheets(&app);
+    let centre = crate::ui_designer::anchor_action(
+        &app.world,
+        &sheets,
+        menu.gui,
+        menu.frame,
+        Pin::Center,
+        Pin::Center,
+    )
+    .unwrap();
+    act(&mut app, centre);
+    act(&mut app, DesignerAction::Select(Some(menu.frame)));
+    let centred = udim2(&app, menu.frame, "Position");
+    assert_eq!((centred.x.scale, centred.y.scale), (0.5, 0.5));
+    let placed = rect_in_game(&app, menu.frame, 1280, 720);
+    let reset = |app: &EditorApp| {
+        let (position, size) = (
+            udim2(app, menu.frame, "Position"),
+            udim2(app, menu.frame, "Size"),
+        );
+        let now = rect_in_game(app, menu.frame, 1280, 720);
+        assert_eq!(
+            [
+                position.x.scale,
+                position.y.scale,
+                size.x.scale,
+                size.y.scale
+            ],
+            [0.0; 4]
+        );
+        assert!(near(now.x, placed.x) && near(now.y, placed.y), "{now:?}");
+    };
+
+    // The Anchor section's Reset button.
+    for _ in 0..3 {
+        designer_frame(&mut app, &ctx, &mut clock, size, Vec::new());
+    }
+    click_named(&mut app, &ctx, &mut clock, size, "Reset");
+    reset(&app);
+    assert_eq!(app.history.undo_label(), Some("Anchor MainMenu"));
+    app.undo();
+    assert_eq!(udim2(&app, menu.frame, "Position"), centred);
+
+    // Right-click on the diamonds, which meet at the screen's middle, and
+    // Reset anchor.
+    let (board, _) = app.ui_designer.board().unwrap();
+    let diamond = board.center() + egui::vec2(6.0, 6.0);
+    let secondary = |pressed| egui::Event::PointerButton {
+        pos: diamond,
+        button: egui::PointerButton::Secondary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    for events in [
+        vec![egui::Event::PointerMoved(diamond)],
+        vec![secondary(true)],
+        vec![secondary(false)],
+        Vec::new(),
+    ] {
+        designer_frame(&mut app, &ctx, &mut clock, size, events);
+    }
+    click_named(&mut app, &ctx, &mut clock, size, "Reset anchor");
+    reset(&app);
+    assert_eq!(app.history.undo_label(), Some("Anchor MainMenu"));
+    app.undo();
+    assert_eq!(udim2(&app, menu.frame, "Position"), centred);
+    let _ = std::fs::remove_dir_all(&folder);
+}
