@@ -179,7 +179,7 @@ impl EditorApp {
     }
 
     /// Puts each file of `blobs` at its `after` (removing it for `None`),
-    /// for importing a package and its undo and redo. Stops at the first
+    /// for importing a package, deleting assets, and their undo and redo. Stops at the first
     /// that can't be written, saying so in the Console. Returns how many
     /// were written.
     pub(in crate::app) fn write_package_files(&mut self, blobs: &[BlobChange]) -> usize {

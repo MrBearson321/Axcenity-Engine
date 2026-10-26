@@ -87,7 +87,7 @@ impl EditorApp {
             Some(BrowserAction::SavePrefab) => self.save_prefab(),
             Some(BrowserAction::RenamePrefab { path, name }) => self.rename_prefab(&path, &name),
             Some(BrowserAction::DuplicatePrefab { path }) => self.duplicate_prefab(&path),
-            Some(BrowserAction::DeletePrefab { path }) => self.delete_prefab(&path),
+            Some(BrowserAction::DeleteAssets { name, files }) => self.delete_assets(&name, &files),
             Some(BrowserAction::ExportPackage { name, paths }) => {
                 self.export_package_with_dialog(&name, paths)
             }

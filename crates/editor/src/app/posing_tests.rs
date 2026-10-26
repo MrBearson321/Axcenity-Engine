@@ -346,6 +346,62 @@ pub(super) fn plays_as_previewed(app: &mut EditorApp, noodle: InstanceId, what: 
 }
 
 #[test]
+fn a_bones_first_turn_after_the_start_also_keys_it_at_rest_at_0_so_it_moves() {
+    let folder = copy_of_example("hello-animation", "start-key");
+    let mut app = EditorApp::new(Some(&folder));
+    let noodle = part(&app, "Noodle");
+    let rig = app.assets.model(NOODLE).unwrap().rig.clone().unwrap();
+    let rest = rig.rest_pose();
+    let top = rig.bone("Top").unwrap();
+
+    // Animate opens a keyed clip with Record on: turn Top at 0.5 s only.
+    app.animate(noodle);
+    {
+        let (studio, assets, world) = (&mut app.animation, &app.assets, &app.world);
+        studio.pick_bone(assets, world, "Top");
+        studio.set_playhead(0.5);
+        studio
+            .turn_bone(assets, world, Quat::from_rotation_z(FRAC_PI_3))
+            .unwrap();
+    }
+    let tracks = app.animation.open_tracks();
+    let [track] = tracks.as_slice() else {
+        panic!("one track: {tracks:?}");
+    };
+    let times: Vec<f64> = track.keys.iter().map(|key| key.time).collect();
+    assert_eq!(times, [0.0, 0.5]);
+    assert_eq!(
+        track.keys[0].value,
+        axcenity_anim::bone_numbers(&rest[top]),
+        "it starts at rest"
+    );
+
+    // So it turns from rest on the way, in the preview and in Play.
+    app.animation.set_playhead(0.25);
+    let quarter = app.animation.preview_bones(&app.assets, &app.world);
+    let turned = turn_of(&quarter, &rest, top);
+    assert!(turned > 0.1 && turned < FRAC_PI_3 - 0.1, "{turned}");
+    let _ = app.animation.write_all(&folder, &mut app.output);
+    plays_as_previewed(&mut app, noodle, "a turn from rest");
+
+    // Keying it again later adds only that key.
+    {
+        let (studio, assets, world) = (&mut app.animation, &app.assets, &app.world);
+        studio.set_playhead(1.0);
+        studio
+            .turn_bone(assets, world, Quat::from_rotation_z(-FRAC_PI_3))
+            .unwrap();
+    }
+    let times: Vec<f64> = app.animation.open_tracks()[0]
+        .keys
+        .iter()
+        .map(|key| key.time)
+        .collect();
+    assert_eq!(times, [0.0, 0.5, 1.0]);
+    let _ = fs::remove_dir_all(&folder);
+}
+
+#[test]
 fn smooth_linear_and_constant_keys_made_by_posing_play_the_same_in_the_preview_and_in_play() {
     let folder = copy_of_example("hello-animation", "eased-wave");
     let mut app = EditorApp::new(Some(&folder));
@@ -446,9 +502,14 @@ fn a_linked_clips_own_bone_keys_use_new_keys_which_stays_picked_from_clip_to_cli
         .iter()
         .map(|k| (k.interp, k.easing))
         .collect();
+    // The first key, at 0.5 s, also keyed Top at rest at 0, alike.
     assert_eq!(
         kinds,
-        [NewKeys::Constant.easing(), NewKeys::Linear.easing()]
+        [
+            NewKeys::Constant.easing(),
+            NewKeys::Constant.easing(),
+            NewKeys::Linear.easing()
+        ]
     );
     // Another clip opens with the same New keys.
     let _ = app.animation.write_all(&folder, &mut app.output);

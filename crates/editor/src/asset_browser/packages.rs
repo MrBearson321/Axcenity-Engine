@@ -311,6 +311,16 @@ impl AssetBrowser {
             if local && let Some(chosen) = super::export_package_button(ui, &package.name, &paths) {
                 menu = Some(chosen);
             }
+            if !can_edit || !local {
+                return;
+            }
+            ui.separator();
+            // The model's own files are the whole folder: its folder in
+            // `assets/models` and its clips in `assets/animations`.
+            let model = [package.model.path.clone()];
+            if let Some(chosen) = super::delete_button(ui, &package.name, &model) {
+                menu = Some(chosen);
+            }
         });
         if can_edit && response.drag_started() {
             egui::DragAndDrop::set_payload(ui.ctx(), AssetPayload(package.model.clone()));

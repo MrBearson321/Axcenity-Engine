@@ -19,13 +19,16 @@
 
 use std::collections::BTreeSet;
 use std::path::Path;
+use std::sync::Arc;
 
 use axcenity_anim::{
     ClipFile, Easing, EasingDirection, EasingStyle, EvaluatedProperty, Interp, PropertyClip,
-    PropertyKeyframe, PropertyName, PropertyTrack, bone_from_numbers, find_bone, target_path,
+    PropertyKeyframe, PropertyName, PropertyTrack, bone_from_numbers, bone_numbers, bone_paths,
+    find_bone, target_path,
 };
 use axcenity_assets::{BoneTransform, Rig};
 use axcenity_core::InstanceId;
+use axcenity_render::glam::{EulerRot, Quat};
 use eframe::egui;
 
 use super::object_preview::{Focus, ObjectPreview};
@@ -148,6 +151,9 @@ pub struct PropertyDoc {
     /// Keys can be selected and looked at, but not moved, added, pasted
     /// or deleted (an imported clip's motion).
     pub read_only: bool,
+    /// The preview copy's skeleton, if it's a skinned MeshPart: a bone's
+    /// first key after 0 gets a key at 0 where it rests.
+    pub rig: Option<Arc<Rig>>,
     /// Where the dope sheet last drew.
     pub sheet: egui::Rect,
     /// The easing keys made from now on get.
@@ -178,6 +184,7 @@ impl PropertyDoc {
             curve_picked: BTreeSet::new(),
             curve_gesture: None,
             read_only: false,
+            rig: None,
             sheet: egui::Rect::NOTHING,
             new_keys: NewKeys::default(),
         }
@@ -350,13 +357,10 @@ fn nice_step(duration: f64, width: f32) -> f64 {
         .unwrap_or(duration)
 }
 
-/// What each number of a key is called in the inspector.
+/// What each of a key's [`shown_numbers`] is called in the inspector.
 fn value_labels(property: PropertyName, width: usize) -> &'static [&'static str] {
     match (property, width) {
-        (PropertyName::Bone, _) => &[
-            "Move X", "Move Y", "Move Z", "Turn X", "Turn Y", "Turn Z", "Turn W", "Scale X",
-            "Scale Y", "Scale Z",
-        ],
+        (PropertyName::Bone, _) => &["Turn X", "Turn Y", "Turn Z", "Move X", "Move Y", "Move Z"],
         (_, 4) => &["X scale", "X offset", "Y scale", "Y offset"],
         (_, 1) => &["Value"],
         (PropertyName::Color | PropertyName::BackgroundColor3 | PropertyName::TextColor3, _) => {
@@ -364,6 +368,50 @@ fn value_labels(property: PropertyName, width: usize) -> &'static [&'static str]
         }
         _ => &["X", "Y", "Z"],
     }
+}
+
+/// The numbers a key of `property` is shown and edited as. A bone's 10
+/// (where it is, its turn as a quaternion, and its scale) show as its turn
+/// in degrees (X, Y and Z, in Orientation's order), then where it is; its
+/// quaternion and scale can't be edited on their own. Anything else's show
+/// as they are.
+fn shown_numbers(property: PropertyName, value: &[f32]) -> Vec<f32> {
+    match (property, value) {
+        (PropertyName::Bone, [tx, ty, tz, qx, qy, qz, qw, ..]) => {
+            let turn = Quat::from_xyzw(*qx, *qy, *qz, *qw).normalize();
+            let (y, x, z) = turn.to_euler(EulerRot::YXZ);
+            vec![
+                x.to_degrees(),
+                y.to_degrees(),
+                z.to_degrees(),
+                *tx,
+                *ty,
+                *tz,
+            ]
+        }
+        _ => value.to_vec(),
+    }
+}
+
+/// Sets the `number`th of `value`'s [`shown_numbers`] to `shown`.
+fn set_shown_number(property: PropertyName, value: &mut [f32], number: usize, shown: f32) {
+    if property != PropertyName::Bone || value.len() != 10 {
+        if let Some(n) = value.get_mut(number) {
+            *n = shown;
+        }
+        return;
+    }
+    if number >= 3 {
+        if let Some(n) = value.get_mut(number - 3) {
+            *n = shown;
+        }
+        return;
+    }
+    let mut angles = shown_numbers(property, value);
+    angles[number] = shown;
+    let [x, y, z] = [angles[0], angles[1], angles[2]].map(f32::to_radians);
+    let turn = Quat::from_euler(EulerRot::YXZ, y, x, z);
+    value[3..7].copy_from_slice(&[turn.x, turn.y, turn.z, turn.w]);
 }
 
 /// What the inspector calls an interpolation.
@@ -385,7 +433,7 @@ mod curves;
 mod dope_sheet;
 mod editing;
 pub use curves::CurveView;
-pub(super) use editing::set_key;
+pub(super) use editing::{rest_numbers, set_key};
 
 #[cfg(test)]
 mod tests;

@@ -1,0 +1,84 @@
+{
+  "format_version": 2,
+  "parameters": [
+    {
+      "type": "Bool",
+      "name": "IsGrounded",
+      "default": false
+    },
+    {
+      "type": "Number",
+      "name": "Speed",
+      "default": 0.0
+    },
+    {
+      "type": "Trigger",
+      "name": "Jump"
+    }
+  ],
+  "default_state": "Walking",
+  "states": [
+    {
+      "name": "Walking",
+      "motion": {
+        "clip": "assets/animations/Walking/Walking.anim.json"
+      },
+      "speed": 1.0,
+      "position": [
+        20.0,
+        6.0
+      ]
+    },
+    {
+      "name": "Blend Tree",
+      "motion": {
+        "blend_tree": {
+          "parameter": "Speed",
+          "children": [
+            {
+              "clip": "",
+              "threshold": 0.0
+            }
+          ]
+        }
+      },
+      "speed": 1.0,
+      "position": [
+        284.3817,
+        18.257376
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "from": "Any State",
+      "to": "Walking",
+      "conditions": [
+        {
+          "parameter": "IsGrounded",
+          "test": "IsTrue",
+          "value": 0.0
+        }
+      ],
+      "blend": 0.25,
+      "exit_time": null,
+      "interruptible": false,
+      "priority": 0
+    },
+    {
+      "from": "Walking",
+      "to": "Blend Tree",
+      "conditions": [
+        {
+          "parameter": "IsGrounded",
+          "test": "IsTrue",
+          "value": 0.0
+        }
+      ],
+      "blend": 0.0,
+      "exit_time": null,
+      "interruptible": false,
+      "priority": 0
+    }
+  ]
+}

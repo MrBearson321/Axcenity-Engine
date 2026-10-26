@@ -29,7 +29,8 @@
 //! Importing an asset package writes files of any kind, models and
 //! pictures too, so its step keeps each file's bytes ([`BlobChange`]).
 //! Importing a model does too, along with the Instances it inserts, so
-//! undoing it removes the files it copied and wrote.
+//! undoing it removes the files it copied and wrote. Deleting assets from
+//! the Assets panel keeps the deleted files' bytes the same way.
 //!
 //! A Terrain's landscape isn't a property, so its changes are steps of their
 //! own ([`TerrainChange`]): a brush stroke keeps the chunks it changed, and a

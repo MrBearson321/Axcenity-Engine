@@ -145,8 +145,10 @@ fn record_and_k_key_only_the_bones_a_moved_joint_turned() {
         studio.key_picked(assets, world).unwrap();
     }
     assert_eq!(keyed_bones(&app), ["Root/Mid", "Root/Mid/Top"]);
+    // Each bone's first key after 0 also keys it at rest at 0.
     for track in app.animation.open_tracks() {
-        assert_eq!(track.keys.len(), 1, "{}", track.target);
+        let times: Vec<f64> = track.keys.iter().map(|k| k.time).collect();
+        assert_eq!(times, [0.0, 0.5], "{}", track.target);
     }
     // A chain of 1 turns only Top, so Record keys only Top.
     app.animation.set_record(true);
@@ -163,7 +165,7 @@ fn record_and_k_key_only_the_bones_a_moved_joint_turned() {
             .find(|t| t.target == target)
             .map_or(0, |t| t.keys.len())
     };
-    assert_eq!((keys_of("Root/Mid"), keys_of("Root/Mid/Top")), (1, 2));
+    assert_eq!((keys_of("Root/Mid"), keys_of("Root/Mid/Top")), (2, 3));
 
     // In a linked clip, Mid is the take's, so the chain stops below it:
     // only Top turns and is keyed.

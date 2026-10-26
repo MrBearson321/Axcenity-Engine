@@ -1,0 +1,60 @@
+{
+  "format_version": 2,
+  "parameters": [],
+  "default_state": "Fast Run",
+  "states": [
+    {
+      "name": "Fast Run",
+      "motion": {
+        "clip": "assets/animations/Fast Run/Fast Run.anim.json"
+      },
+      "speed": 1.0,
+      "position": [
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "name": "Walking",
+      "motion": {
+        "clip": "assets/animations/Walking/Walking.anim.json"
+      },
+      "speed": 1.0,
+      "position": [
+        435.22662,
+        5.723481
+      ]
+    },
+    {
+      "name": "Walking 2",
+      "motion": {
+        "clip": "assets/animations/Walking/Walking.anim.json"
+      },
+      "speed": 1.0,
+      "position": [
+        730.58636,
+        10.447003
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "from": "Fast Run",
+      "to": "Walking",
+      "conditions": [],
+      "blend": 0.25,
+      "exit_time": 1.0,
+      "interruptible": false,
+      "priority": 0
+    },
+    {
+      "from": "Walking",
+      "to": "Walking 2",
+      "conditions": [],
+      "blend": 0.75,
+      "exit_time": 1.0,
+      "interruptible": false,
+      "priority": 0
+    }
+  ]
+}

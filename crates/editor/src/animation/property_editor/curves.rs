@@ -6,6 +6,10 @@
 //! gap is selected. Drag empty space (or with the middle button anywhere)
 //! to pan. The wheel zooms around the mouse: Shift zooms time only, Ctrl
 //! values only. Frame all (F) fits the clip and its curves.
+//!
+//! A bone's track shows its turn as X, Y and Z angles in degrees (and
+//! where it is, for a bone whose keys move it), never its raw quaternion
+//! or scale, so dragging a curve only turns the bone.
 
 use axcenity_anim::{DEFAULT_BEZIER, sample_track};
 
@@ -165,13 +169,15 @@ impl PropertyDoc {
             for track in clip.file.tracks.iter().filter(|t| shown.contains(&t.id)) {
                 for step in 0..=200 {
                     let time = duration * f64::from(step) / 200.0;
-                    for n in sample_track(track, time).unwrap_or_default() {
+                    let sampled = sample_track(track, time).unwrap_or_default();
+                    for n in curve_numbers(track, &sampled) {
                         low = low.min(n);
                         high = high.max(n);
                     }
                 }
                 for (index, key) in track.keys.iter().enumerate() {
-                    for n in &key.value {
+                    let shown = curve_numbers(track, &key.value);
+                    for n in &shown {
                         low = low.min(*n);
                         high = high.max(*n);
                     }
@@ -180,7 +186,7 @@ impl PropertyDoc {
                         && let Some(next) = track.keys.get(index + 1)
                     {
                         let [_, y1, _, y2] = key.bezier.unwrap_or(DEFAULT_BEZIER);
-                        for (a, b) in key.value.iter().zip(&next.value) {
+                        for (a, b) in shown.iter().zip(&curve_numbers(track, &next.value)) {
                             for y in [y1, y2] {
                                 let n = a + y * (b - a);
                                 low = low.min(n);
@@ -394,7 +400,7 @@ impl PropertyDoc {
                             .map(|k| CurveGesture::Key {
                                 number,
                                 from: view.at(origin),
-                                start: (k.time, k.value.get(number).copied().unwrap_or(0.0)),
+                                start: (k.time, self.shown_number(&key, number)),
                                 key,
                             })
                     }
@@ -433,11 +439,10 @@ impl PropertyDoc {
                 }) => {
                     let (t, v) = view.at(pos);
                     let time = self.snapped(start.0 + t - from.0);
-                    if let Some(k) = self.find_key_mut(&key) {
+                    let property = self.track_of(&key).map(|t| t.property);
+                    if let (Some(k), Some(property)) = (self.find_key_mut(&key), property) {
                         k.time = time;
-                        if let Some(n) = k.value.get_mut(number) {
-                            *n = start.1 + v - from.1;
-                        }
+                        set_shown_number(property, &mut k.value, number, start.1 + v - from.1);
                     }
                 }
                 Some(CurveGesture::Handle {
@@ -531,7 +536,10 @@ impl PropertyDoc {
         grabs: &mut Vec<(Grab, egui::Pos2)>,
         palette: &theme::Palette,
     ) {
-        let width = track.keys.first().map_or(0, |k| k.value.len());
+        let width = track
+            .keys
+            .first()
+            .map_or(0, |k| curve_numbers(track, &k.value).len());
         // Sample every two points, and on each key so corners are sharp.
         let samples = (view.rect.width() / 2.0).max(2.0) as usize;
         let mut times: Vec<f64> = (0..=samples)
@@ -541,15 +549,29 @@ impl PropertyDoc {
         times.sort_by(f64::total_cmp);
         let values: Vec<Vec<f32>> = times
             .iter()
-            .map(|t| sample_track(track, *t).unwrap_or_default())
+            .map(|t| curve_numbers(track, &sample_track(track, *t).unwrap_or_default()))
+            .collect();
+        let shown: Vec<Vec<f32>> = track
+            .keys
+            .iter()
+            .map(|k| curve_numbers(track, &k.value))
             .collect();
         for number in 0..width {
             let color = COLORS[number % COLORS.len()];
-            let line: Vec<egui::Pos2> = times
-                .iter()
-                .zip(&values)
-                .filter_map(|(t, v)| v.get(number).map(|v| view.screen(*t, *v)))
-                .collect();
+            // An angle wrapping round from 180 to -180 degrees starts a new
+            // line.
+            let wraps = track.property == PropertyName::Bone && number < 3;
+            let mut line: Vec<egui::Pos2> = Vec::new();
+            let mut last: Option<f32> = None;
+            for (t, v) in times.iter().zip(&values) {
+                let Some(&v) = v.get(number) else { continue };
+                if wraps && last.is_some_and(|last| (v - last).abs() > 180.0) {
+                    let done = std::mem::take(&mut line);
+                    painter.add(egui::Shape::line(done, egui::Stroke::new(1.5_f32, color)));
+                }
+                line.push(view.screen(*t, v));
+                last = Some(v);
+            }
             painter.add(egui::Shape::line(line, egui::Stroke::new(1.5_f32, color)));
         }
         for (index, key) in track.keys.iter().enumerate() {
@@ -563,7 +585,7 @@ impl PropertyDoc {
                 let [x1, y1, x2, y2] = key.bezier.unwrap_or(DEFAULT_BEZIER);
                 let span = next.time - key.time;
                 for number in 0..width {
-                    let (a, b) = (key.value[number], next.value[number]);
+                    let (a, b) = (shown[index][number], shown[index + 1][number]);
                     if (b - a).abs() < 1e-6 {
                         continue;
                     }
@@ -587,7 +609,10 @@ impl PropertyDoc {
                 }
             }
             for number in 0..width {
-                let center = view.screen(key.time, key.value[number]);
+                let Some(&value) = shown[index].get(number) else {
+                    continue;
+                };
+                let center = view.screen(key.time, value);
                 let (fill, r) = if selected {
                     (palette.accent, 5.5)
                 } else {
@@ -612,6 +637,21 @@ impl PropertyDoc {
                     center,
                 ));
             }
+        }
+    }
+
+    fn track_of(&self, (track, _): &KeyRef) -> Option<&PropertyTrack> {
+        self.file.tracks.iter().find(|t| &t.id == track)
+    }
+
+    /// The `number`th of the numbers the view shows for `key`.
+    fn shown_number(&self, key: &KeyRef, number: usize) -> f32 {
+        match (self.track_of(key), self.find_key(key)) {
+            (Some(track), Some(k)) => curve_numbers(track, &k.value)
+                .get(number)
+                .copied()
+                .unwrap_or(0.0),
+            _ => 0.0,
         }
     }
 
@@ -641,9 +681,36 @@ impl PropertyDoc {
         let (a, b) = (keys[index], keys.get(index + 1)?);
         Some((
             (a.time, b.time),
-            (*a.value.get(number)?, *b.value.get(number)?),
+            (
+                *curve_numbers(track, &a.value).get(number)?,
+                *curve_numbers(track, &b.value).get(number)?,
+            ),
         ))
     }
+}
+
+/// A key's numbers as the view draws them: its [`shown_numbers`], leaving
+/// out where a bone is unless its keys move it.
+fn curve_numbers(track: &PropertyTrack, value: &[f32]) -> Vec<f32> {
+    let mut shown = shown_numbers(track.property, value);
+    if track.property == PropertyName::Bone && !bone_moves(track) {
+        shown.truncate(3);
+    }
+    shown
+}
+
+/// Whether a bone track's keys put the bone in more than one place.
+fn bone_moves(track: &PropertyTrack) -> bool {
+    let Some(first) = track.keys.first() else {
+        return false;
+    };
+    track.keys.iter().any(|key| {
+        key.value
+            .iter()
+            .zip(&first.value)
+            .take(3)
+            .any(|(a, b)| (a - b).abs() > 1e-4)
+    })
 }
 
 /// A step of 1, 2 or 5 times a power of ten near `rough`.

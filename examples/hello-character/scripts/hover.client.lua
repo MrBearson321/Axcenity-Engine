@@ -1,10 +1,12 @@
+local UserInputService = game:GetService("UserInputService")
+
 -- A LocalScript: H hovers. "Hover" is a custom movement mode, so the
 -- ThirdPersonController stops walking, jumping, crouching and falling, and
 -- this script moves the character instead. H again clears the mode, and the
 -- character walks or runs as it did before. 6 and 7 do the same from blocks.
 
 local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
+
 local controller = workspace.Character.ThirdPersonController
 local body = workspace.Character.Body
 

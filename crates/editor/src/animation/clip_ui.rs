@@ -186,7 +186,9 @@ impl AnimationStudio {
         let posed = doc
             .evaluated()
             .map(|evaluated| self.clip.objects.pose(&evaluated));
-        let skeleton = self.clip.objects.rigged(assets).map(|model| {
+        let rigged = self.clip.objects.rigged(assets);
+        doc.rig = rigged.as_ref().and_then(|model| model.rig.clone());
+        let skeleton = rigged.map(|model| {
             let pose = doc.bone_pose(model.rig.as_deref().expect("rigged"));
             (model, pose)
         });

@@ -5,9 +5,11 @@
 //!
 //! Every placement is one undo step. A model, prefab or prop is moved as a
 //! whole so its bounding box rests on the surface it's dropped on. Saving,
-//! renaming, duplicating and deleting a prefab is one undo step too.
+//! renaming and duplicating a prefab is one undo step too, and so is
+//! deleting any asset.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
 use axcenity_project as project;
@@ -18,7 +20,7 @@ use crate::asset_browser::{
     self, AssetEntry, AssetKind, PREFAB_SUFFIX, PREFABS_FOLDER, display_name, prefab_file_stem,
 };
 use crate::gizmo::Pose;
-use crate::history::Field;
+use crate::history::{BlobChange, Field};
 use crate::layout::Pane;
 use crate::properties::Edit;
 use crate::tree::{self, Insertable};
@@ -516,26 +518,45 @@ impl EditorApp {
         );
     }
 
-    /// Deletes the prefab file at `path`. Undo writes its contents back.
-    pub(super) fn delete_prefab(&mut self, path: &str) {
+    /// Deletes `files` (paths from the project folder), the own files of
+    /// the assets called `name`, as one undo step. The step keeps each
+    /// file's bytes, so undo puts models and pictures back too. Folders
+    /// left empty go.
+    pub(super) fn delete_assets(&mut self, name: &str, files: &[String]) {
         let Some(folder) = self.project.as_ref().map(|p| p.folder.clone()) else {
             return;
         };
-        let Some(text) = std::fs::read_to_string(folder.join(path)).ok() else {
-            self.output
-                .error(format!("Could not delete `{path}`: the file isn't there"));
-            return;
-        };
-        if let Err(err) = std::fs::remove_file(folder.join(path)) {
-            self.output
-                .error(format!("Could not delete `{path}`: {err}"));
+        if self.playing() {
             return;
         }
-        self.output.info(format!("Deleted the prefab `{path}`."));
-        self.record_prefab(
-            format!("Delete {}", display_name(path)),
-            vec![prefab_diff(path, Some(text), None)],
-        );
+        let mut blobs = Vec::new();
+        for path in files {
+            match std::fs::read(folder.join(path)) {
+                Ok(bytes) => blobs.push(BlobChange {
+                    path: path.clone(),
+                    before: Some(Arc::new(bytes)),
+                    after: None,
+                }),
+                Err(err) => {
+                    self.output
+                        .error(format!("Could not delete {name}: `{path}`: {err}"));
+                    return;
+                }
+            }
+        }
+        let deleted = self.write_package_files(&blobs);
+        if deleted == 0 {
+            return;
+        }
+        let what = if deleted == 1 {
+            format!("`{}`", files[0])
+        } else {
+            format!("{deleted} files")
+        };
+        self.output.info(format!("Deleted {name} ({what})."));
+        let blobs = blobs.into_iter().take(deleted).collect();
+        self.history
+            .record_blobs(&mut self.world, format!("Delete {name}"), blobs);
     }
 
     fn record_prefab(&mut self, label: String, files: Vec<crate::animation::store::FileDiff>) {
@@ -796,6 +817,76 @@ mod tests {
                 .any(|line| line.text.contains("Copied the global asset ding")),
             "said in Output"
         );
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn deleting_a_model_folder_removes_its_files_and_undo_puts_them_back() {
+        let temp =
+            std::env::temp_dir().join(format!("axcenity-delete-assets-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp);
+        std::fs::create_dir_all(&temp).unwrap();
+        let folder = project::create_project(&temp, "Deletes").unwrap();
+        let skin = [0_u8, 159, 146, 150];
+        for (file, bytes) in [
+            ("assets/models/Walker/Walker.fbx", &b"model"[..]),
+            ("assets/models/Walker/skin.png", &skin[..]),
+            ("assets/animations/Walker/Walk.anim.json", &b"{}"[..]),
+            ("assets/audio/ding.wav", &b"sound"[..]),
+        ] {
+            let path = folder.join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, bytes).unwrap();
+        }
+        let mut app = EditorApp::new(Some(&folder));
+        let model = "assets/models/Walker/Walker.fbx".to_owned();
+        let files = app.asset_browser.files_to_delete(&[model]);
+        assert_eq!(
+            files,
+            [
+                "assets/animations/Walker/Walk.anim.json",
+                "assets/models/Walker/Walker.fbx",
+                "assets/models/Walker/skin.png",
+            ],
+            "the folder and its clips"
+        );
+
+        app.delete_assets("Walker", &files);
+        assert_eq!(app.history.undo_label(), Some("Delete Walker"));
+        assert!(
+            !folder.join("assets/models/Walker").exists(),
+            "empty folders go"
+        );
+        assert!(!folder.join("assets/animations/Walker").exists());
+        assert!(
+            folder.join("assets/models").is_dir(),
+            "the kind's folder stays"
+        );
+        assert!(
+            folder.join("assets/audio/ding.wav").is_file(),
+            "others stay"
+        );
+        assert!(
+            !app.asset_browser
+                .entries()
+                .iter()
+                .any(|entry| entry.path.starts_with("assets/models/Walker")),
+            "gone from the panel"
+        );
+
+        app.undo();
+        assert_eq!(
+            std::fs::read(folder.join("assets/models/Walker/skin.png")).unwrap(),
+            skin,
+            "the bytes come back"
+        );
+        assert!(
+            folder
+                .join("assets/animations/Walker/Walk.anim.json")
+                .is_file()
+        );
+        app.redo();
+        assert!(!folder.join("assets/models/Walker/Walker.fbx").exists());
         let _ = std::fs::remove_dir_all(&temp);
     }
 

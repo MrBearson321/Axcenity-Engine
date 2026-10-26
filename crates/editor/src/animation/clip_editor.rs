@@ -16,7 +16,7 @@ use axcenity_assets::{Assets, BoneTransform, Model, Rig, Take};
 use eframe::egui;
 
 use super::posing::Folds;
-use super::property_editor::{NewKeys, PropertyDoc};
+use super::property_editor::{NewKeys, PropertyDoc, rest_numbers, set_key};
 use super::timeline::Timeline;
 use crate::theme::icons;
 
@@ -371,7 +371,7 @@ impl ClipDoc {
         let numbers = bone_numbers(transform);
         self.pending.retain(|(p, _)| *p != path);
         if record {
-            self.key_bone(path, numbers);
+            self.key_bone(rig, path, numbers);
         } else {
             self.pending_at = self.playhead;
             self.pending.push((path, numbers));
@@ -403,16 +403,17 @@ impl ClipDoc {
         if self.playing || self.playhead != self.pending_at {
             self.pending.clear();
         }
+        let posing = self.pose(assets)?;
+        let rig = posing.rig();
         if !self.pending.is_empty() {
             for (path, numbers) in std::mem::take(&mut self.pending) {
-                self.key_bone(path, numbers);
+                self.key_bone(rig, path, numbers);
             }
             return Ok(());
         }
-        let posing = self.pose(assets)?;
-        let path = self.unlocked_path(posing.rig(), bone)?;
+        let path = self.unlocked_path(rig, bone)?;
         let transform = posing.pose.get(bone).ok_or("there's no such bone")?;
-        self.key_bone(path, bone_numbers(transform));
+        self.key_bone(rig, path, bone_numbers(transform));
         Ok(())
     }
 
@@ -432,14 +433,23 @@ impl ClipDoc {
             .ok_or_else(|| "that bone has no name to key it by".to_owned())
     }
 
-    fn key_bone(&mut self, path: String, numbers: Vec<f32>) {
+    /// Keys the bone at `path` at the playhead. Its first key after 0
+    /// also keys it at 0 where it rests in `rig` (the take doesn't move it).
+    fn key_bone(&mut self, rig: &Rig, path: String, numbers: Vec<f32>) {
+        let start = rest_numbers(rig, &path);
         let value = EvaluatedProperty {
             target: path,
             property: PropertyName::Bone,
             value: numbers,
         };
         let time = self.key_time();
-        super::property_editor::set_key(&mut self.file.rest.tracks, &value, time, self.new_keys);
+        set_key(
+            &mut self.file.rest.tracks,
+            &value,
+            time,
+            self.new_keys,
+            start,
+        );
     }
 
     /// How many keys each bone of `rig` has on the clip's own tracks.

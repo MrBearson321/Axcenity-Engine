@@ -18,7 +18,7 @@
 //! the app places it where it's let go over the viewport. Double-clicking a
 //! tile places it at the camera's focus point.
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -293,23 +293,29 @@ pub enum BrowserAction {
     RenamePrefab { path: String, name: String },
     /// Copy the prefab file at `path`.
     DuplicatePrefab { path: String },
-    /// Delete the prefab file at `path`.
-    DeletePrefab { path: String },
+    /// Delete these project files (assets' own files, already confirmed),
+    /// as one undo step named after `name`.
+    DeleteAssets { name: String, files: Vec<String> },
     /// Export these files (and what they need) as an asset package named `name`.
     ExportPackage { name: String, paths: Vec<String> },
     /// A line for Output. `error` is a failure.
     Notice { error: bool, text: String },
 }
 
-/// A prefab question the panel is asking.
-enum PrefabDialog {
+/// A question the panel is asking about an asset.
+enum AssetDialog {
+    /// Rename the prefab at `path`.
     Rename {
         path: String,
         name: String,
         error: Option<String>,
     },
+    /// Delete `files`, the own files of the assets called `name`. `global`
+    /// when one of them is a global asset, whose library copy stays.
     Delete {
-        path: String,
+        name: String,
+        files: Vec<String>,
+        global: bool,
     },
 }
 
@@ -321,7 +327,7 @@ pub struct AssetBrowser {
     files: Vec<AssetEntry>,
     scanned_at: Option<Instant>,
     thumbnails: Thumbnails,
-    dialog: Option<PrefabDialog>,
+    dialog: Option<AssetDialog>,
     get_texture: Option<GetTexture>,
     /// The imported model's folder shown (by its name), if one is open.
     open_package: Option<String>,
@@ -681,7 +687,7 @@ impl AssetBrowser {
                     }
                 }
             });
-        if let Some(done) = self.prefab_dialog(ui.ctx()) {
+        if let Some(done) = self.asset_dialog(ui.ctx()) {
             action = Some(done);
         }
         if let Some(done) = self.texture_dialog(ui.ctx()) {
@@ -701,7 +707,7 @@ impl AssetBrowser {
                 return Some(BrowserAction::Notice { error, text });
             }
             ItemMenu::Rename { path, name } => {
-                self.dialog = Some(PrefabDialog::Rename {
+                self.dialog = Some(AssetDialog::Rename {
                     path,
                     name,
                     error: None,
@@ -710,14 +716,39 @@ impl AssetBrowser {
             ItemMenu::Duplicate { path } => {
                 return Some(BrowserAction::DuplicatePrefab { path });
             }
-            ItemMenu::Delete { path } => {
-                self.dialog = Some(PrefabDialog::Delete { path });
+            ItemMenu::Delete { name, paths } => {
+                let files = self.files_to_delete(&paths);
+                if files.is_empty() {
+                    return Some(BrowserAction::Notice {
+                        error: true,
+                        text: format!("Could not delete {name}: its files aren't there."),
+                    });
+                }
+                self.dialog = Some(AssetDialog::Delete {
+                    name,
+                    global: paths.iter().any(|path| self.is_global(path)),
+                    files,
+                });
             }
             ItemMenu::ExportPackage { name, paths } => {
                 return Some(BrowserAction::ExportPackage { name, paths });
             }
         }
         None
+    }
+
+    /// The project files deleting the assets at `paths` removes: each one's
+    /// own files (see `global_assets::own_files`: a model's folder and its
+    /// clips, a texture set's folder, or the one file), sorted.
+    pub fn files_to_delete(&self, paths: &[String]) -> Vec<String> {
+        let Some(folder) = &self.folder else {
+            return Vec::new();
+        };
+        let files: BTreeSet<String> = paths
+            .iter()
+            .flat_map(|path| global_assets::own_files(folder, path))
+            .collect();
+        files.into_iter().collect()
     }
 
     /// A click on the asset at `path`: picks only it, or with `adding`
@@ -859,16 +890,17 @@ impl AssetBrowser {
         action
     }
 
-    /// The rename and delete questions for a prefab tile.
-    fn prefab_dialog(&mut self, ctx: &egui::Context) -> Option<BrowserAction> {
+    /// The rename question for a prefab tile, and the delete question for
+    /// any project asset.
+    fn asset_dialog(&mut self, ctx: &egui::Context) -> Option<BrowserAction> {
         let folder = self.folder.clone();
         let dialog = self.dialog.as_mut()?;
         let mut action = None;
         let mut close = false;
-        let modal = egui::Modal::new(egui::Id::new("prefab dialog")).show(ctx, |ui| {
+        let modal = egui::Modal::new(egui::Id::new("asset dialog")).show(ctx, |ui| {
             ui.set_width(360.0);
             match dialog {
-                PrefabDialog::Rename { path, name, error } => {
+                AssetDialog::Rename { path, name, error } => {
                     ui.heading("Rename prefab");
                     let response = ui.text_edit_singleline(name);
                     if let Some(problem) = error {
@@ -894,12 +926,50 @@ impl AssetBrowser {
                         }
                     });
                 }
-                PrefabDialog::Delete { path } => {
-                    ui.heading("Delete?");
-                    ui.label(format!("This deletes `{path}`. Undo puts it back."));
+                AssetDialog::Delete {
+                    name,
+                    files,
+                    global,
+                } => {
+                    ui.heading(format!("Delete {name}?"));
+                    match files.as_slice() {
+                        [only] => {
+                            ui.label(format!("This deletes `{only}` from the project."));
+                        }
+                        files => {
+                            ui.label(format!(
+                                "This deletes {} files from the project:",
+                                files.len()
+                            ));
+                            egui::ScrollArea::vertical()
+                                .max_height(120.0)
+                                .show(ui, |ui| {
+                                    for file in files {
+                                        ui.label(
+                                            egui::RichText::new(file)
+                                                .size(theme::type_scale::SMALL)
+                                                .color(ui.visuals().weak_text_color()),
+                                        );
+                                    }
+                                });
+                        }
+                    }
+                    ui.label(
+                        "Anything that uses it shows it as missing (File > Check Assets lists \
+                         those). Undo puts the files back.",
+                    );
+                    if *global {
+                        ui.label(
+                            "The global copy stays. Untick Global asset to take it out of \
+                             every project.",
+                        );
+                    }
                     ui.horizontal(|ui| {
                         if ui.button(format!("{} Delete", icons::TRASH)).clicked() {
-                            action = Some(BrowserAction::DeletePrefab { path: path.clone() });
+                            action = Some(BrowserAction::DeleteAssets {
+                                name: name.clone(),
+                                files: files.clone(),
+                            });
                             close = true;
                         }
                         if ui.button("Cancel").clicked() {
@@ -914,6 +984,9 @@ impl AssetBrowser {
         }
         if close {
             self.dialog = None;
+        }
+        if matches!(action, Some(BrowserAction::DeleteAssets { .. })) {
+            self.picked.clear();
         }
         action
     }
@@ -1112,13 +1185,20 @@ impl AssetBrowser {
             let path = entry.path.clone();
             let name = entry.name.clone();
             let local = self.is_local(&path);
-            let prefab = can_edit && entry.kind == AssetKind::Prefab && local;
+            let prefab = entry.kind == AssetKind::Prefab;
             // The picked assets if this is one of them, or else just this.
             let export = if picked {
                 self.picked.clone()
             } else {
                 vec![path.clone()]
             };
+            // Only the project's own files: built-in props and global
+            // assets it hasn't got have none to delete.
+            let deletable: Vec<String> = export
+                .iter()
+                .filter(|path| self.is_local(path))
+                .cloned()
+                .collect();
             response.context_menu(|ui| {
                 if let Some(picked) = self.global_checkbox(ui, &path) {
                     menu = Some(picked);
@@ -1126,27 +1206,28 @@ impl AssetBrowser {
                 if local && let Some(chosen) = export_package_button(ui, &name, &export) {
                     menu = Some(chosen);
                 }
-                if !prefab {
+                if !can_edit || !local {
                     return;
                 }
                 ui.separator();
-                if ui
-                    .button(format!("{} Rename", icons::PENCIL_SIMPLE))
-                    .clicked()
-                {
-                    menu = Some(ItemMenu::Rename {
-                        path: path.clone(),
-                        name: name.clone(),
-                    });
-                    ui.close();
+                if prefab {
+                    if ui
+                        .button(format!("{} Rename", icons::PENCIL_SIMPLE))
+                        .clicked()
+                    {
+                        menu = Some(ItemMenu::Rename {
+                            path: path.clone(),
+                            name: name.clone(),
+                        });
+                        ui.close();
+                    }
+                    if ui.button(format!("{} Duplicate", icons::COPY)).clicked() {
+                        menu = Some(ItemMenu::Duplicate { path: path.clone() });
+                        ui.close();
+                    }
                 }
-                if ui.button(format!("{} Duplicate", icons::COPY)).clicked() {
-                    menu = Some(ItemMenu::Duplicate { path: path.clone() });
-                    ui.close();
-                }
-                if ui.button(format!("{} Delete", icons::TRASH)).clicked() {
-                    menu = Some(ItemMenu::Delete { path: path.clone() });
-                    ui.close();
+                if let Some(chosen) = delete_button(ui, &name, &deletable) {
+                    menu = Some(chosen);
                 }
             });
         }
@@ -1329,8 +1410,10 @@ pub(super) enum ItemMenu {
     Duplicate {
         path: String,
     },
+    /// Delete the assets at `paths` (called `name`), once confirmed.
     Delete {
-        path: String,
+        name: String,
+        paths: Vec<String>,
     },
     /// Export these files as an asset package named `name`.
     ExportPackage {
@@ -1363,6 +1446,31 @@ pub(super) fn export_package_button(
                 name.to_owned()
             } else {
                 "Package".to_owned()
+            },
+            paths: paths.to_vec(),
+        }
+    })
+}
+
+/// The Delete… item of a right-click menu, for the asset `name` or, with
+/// several `paths`, the picked assets. It asks before deleting.
+pub(super) fn delete_button(ui: &mut egui::Ui, name: &str, paths: &[String]) -> Option<ItemMenu> {
+    let label = match paths.len() {
+        0 => return None,
+        1 => "Delete…".to_owned(),
+        n => format!("Delete… ({n} assets)"),
+    };
+    let clicked = ui
+        .button(theme::with_icon(icons::TRASH, &label))
+        .on_hover_text("Delete its files from the project. Undo puts them back.")
+        .clicked();
+    clicked.then(|| {
+        ui.close();
+        ItemMenu::Delete {
+            name: if paths.len() == 1 {
+                name.to_owned()
+            } else {
+                format!("{} assets", paths.len())
             },
             paths: paths.to_vec(),
         }

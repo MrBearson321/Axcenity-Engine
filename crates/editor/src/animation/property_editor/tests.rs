@@ -526,3 +526,71 @@ fn easing_sets_every_selected_key_and_leaves_the_rest_and_saved_clips_be() {
     assert_eq!(door.file, ClipFile::from_json(&text).unwrap());
     assert!(!door.unwritten(), "nothing to write");
 }
+
+#[test]
+fn a_bone_key_shows_and_edits_as_its_turn_in_degrees_and_where_it_is() {
+    let turn = Quat::from_euler(EulerRot::YXZ, 0.3, 0.2, 0.1);
+    let mut numbers = vec![
+        1.0, 55.0, 2.0, turn.x, turn.y, turn.z, turn.w, 1.0, 1.0, 1.0,
+    ];
+    let shown = shown_numbers(PropertyName::Bone, &numbers);
+    let expected = [0.2_f32, 0.3, 0.1].map(f32::to_degrees);
+    for (got, want) in shown.iter().zip(expected) {
+        assert!((got - want).abs() < 1e-3, "{shown:?}");
+    }
+    assert_eq!(shown[3..], [1.0, 55.0, 2.0]);
+
+    // Setting Turn Y turns only about Y, and keeps the quaternion whole,
+    // the scale and where it is.
+    set_shown_number(PropertyName::Bone, &mut numbers, 1, 40.0);
+    let shown = shown_numbers(PropertyName::Bone, &numbers);
+    assert!((shown[1] - 40.0).abs() < 1e-3, "{shown:?}");
+    assert!((shown[0] - expected[0]).abs() < 1e-3, "{shown:?}");
+    assert!((shown[2] - expected[2]).abs() < 1e-3, "{shown:?}");
+    let length = Quat::from_slice(&numbers[3..7]).length();
+    assert!((length - 1.0).abs() < 1e-5, "{length}");
+    assert_eq!(numbers[7..], [1.0, 1.0, 1.0]);
+    set_shown_number(PropertyName::Bone, &mut numbers, 4, 50.0);
+    assert_eq!(numbers[..3], [1.0, 50.0, 2.0]);
+}
+
+#[test]
+fn dragging_a_bone_curve_only_turns_the_bone() {
+    let mut doc = doc();
+    doc.file.duration = 1.0;
+    let still = |turn: Quat| {
+        vec![
+            0.0, 55.0, 0.0, turn.x, turn.y, turn.z, turn.w, 1.0, 1.0, 1.0,
+        ]
+    };
+    for (time, turn) in [
+        (0.0, Quat::IDENTITY),
+        (1.0, Quat::from_rotation_z(40_f32.to_radians())),
+    ] {
+        doc.playhead = time;
+        doc.key_values(&[value("Root/Arm", PropertyName::Bone, &still(turn))]);
+    }
+    doc.selected.clear();
+    doc.show_curves = true;
+    run_curves(&mut doc, vec![Vec::new(), Vec::new()]);
+    assert!(doc.curve_view.rect.width() > 100.0, "the curves are drawn");
+    let (low, high) = doc.curve_view.value;
+    assert!(
+        low < 0.0 && high > 40.0 && high < 60.0,
+        "framed in degrees: {low}..{high}"
+    );
+
+    // Drag the last key's Turn Z from 40° down to 20°.
+    let from = doc.curve_view.screen(1.0, 40.0);
+    let to = doc.curve_view.screen(1.0, 20.0);
+    run_curves(&mut doc, drag(from, to));
+    let key = &doc.file.tracks[0].keys[1];
+    assert_eq!(key.time, 1.0);
+    let shown = shown_numbers(PropertyName::Bone, &key.value);
+    assert!((shown[2] - 20.0).abs() < 1.0, "{shown:?}");
+    assert!(shown[0].abs() < 1e-3 && shown[1].abs() < 1e-3, "{shown:?}");
+    let length = Quat::from_slice(&key.value[3..7]).length();
+    assert!((length - 1.0).abs() < 1e-5, "{length}");
+    assert_eq!(key.value[..3], [0.0, 55.0, 0.0], "it stays where it was");
+    assert_eq!(key.value[7..], [1.0, 1.0, 1.0], "and its size");
+}

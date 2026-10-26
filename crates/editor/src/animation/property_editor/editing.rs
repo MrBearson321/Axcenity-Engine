@@ -10,7 +10,13 @@ impl PropertyDoc {
         let time = self.snapped(self.playhead);
         let mut keyed = BTreeSet::new();
         for value in values {
-            let Some(key) = set_key(&mut self.file.tracks, value, time, self.new_keys) else {
+            // A bone's first key after 0 starts from its rest pose.
+            let start = (value.property == PropertyName::Bone)
+                .then_some(self.rig.as_deref())
+                .flatten()
+                .and_then(|rig| rest_numbers(rig, &value.target));
+            let Some(key) = set_key(&mut self.file.tracks, value, time, self.new_keys, start)
+            else {
                 continue;
             };
             self.pending
@@ -247,11 +253,21 @@ impl PropertyDoc {
 /// time (which keeps its easing). A new key eases as `new_keys` says.
 /// Returns the track's and key's ids, or `None` if the value doesn't fit
 /// the track (a UDim2 key can't go on a Vector3 track, or the reverse).
+/// Where the bone `target` names rests in `rig`, as a `Bone` key's numbers.
+pub(in crate::animation) fn rest_numbers(rig: &Rig, target: &str) -> Option<Vec<f32>> {
+    let bone = find_bone(rig, &bone_paths(rig), target)?;
+    Some(bone_numbers(&rig.bones.get(bone)?.rest))
+}
+
+/// Keys `value` at `time`, making its track if needed. With `start`, a
+/// track's first key after 0 also gets a key at 0 with `start`'s numbers
+/// (where it was before), so the move plays from there.
 pub(in crate::animation) fn set_key(
     tracks: &mut Vec<PropertyTrack>,
     value: &EvaluatedProperty,
     time: f64,
     new_keys: NewKeys,
+    start: Option<Vec<f32>>,
 ) -> Option<KeyRef> {
     let index = match tracks
         .iter()
@@ -279,6 +295,20 @@ pub(in crate::animation) fn set_key(
         .is_some_and(|key| key.value.len() != value.value.len())
     {
         return None;
+    }
+    if track.keys.is_empty()
+        && time > 1e-6
+        && let Some(start) = start.filter(|start| start.len() == value.value.len())
+    {
+        let (interp, easing) = new_keys.easing();
+        track.keys.push(PropertyKeyframe {
+            id: free_id("k", std::iter::empty()),
+            time: 0.0,
+            value: start,
+            interp,
+            easing,
+            bezier: None,
+        });
     }
     let id = match track.keys.iter_mut().find(|k| (k.time - time).abs() < 1e-6) {
         Some(key) => {

@@ -380,7 +380,11 @@ impl PropertyDoc {
                 ui.add(egui::DragValue::new(&mut key.time).speed(0.01).suffix(" s"));
                 key.time = key.time.clamp(0.0, duration);
                 ui.end_row();
-                for (i, label) in value_labels(property, key.value.len()).iter().enumerate() {
+                let shown = shown_numbers(property, &key.value);
+                for (i, label) in value_labels(property, shown.len()).iter().enumerate() {
+                    let Some(mut number) = shown.get(i).copied() else {
+                        break;
+                    };
                     ui.label(*label);
                     let unit = matches!(
                         property,
@@ -391,11 +395,15 @@ impl PropertyDoc {
                             | PropertyName::BackgroundTransparency
                             | PropertyName::ImageTransparency
                     );
-                    let mut drag = egui::DragValue::new(&mut key.value[i]).speed(0.1);
+                    let mut drag = egui::DragValue::new(&mut number).speed(0.1);
                     if unit {
                         drag = drag.speed(0.01).range(0.0..=1.0);
+                    } else if property == PropertyName::Bone && i < 3 {
+                        drag = drag.speed(0.5).suffix("°");
                     }
-                    ui.add(drag);
+                    if ui.add(drag).changed() {
+                        set_shown_number(property, &mut key.value, i, number);
+                    }
                     ui.end_row();
                 }
                 ui.label("Interpolation");

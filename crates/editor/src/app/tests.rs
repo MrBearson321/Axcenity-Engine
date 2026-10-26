@@ -1162,7 +1162,7 @@ fn clip_controller_and_prefab_edits_undo_as_one_step_and_survive_saving() {
         std::fs::read_to_string(folder.join(copy)).unwrap(),
         prefab_text
     );
-    app.delete_prefab(copy);
+    app.delete_assets("Pad copy", &[copy.to_owned()]);
     assert!(!folder.join(copy).exists());
     assert_eq!(app.history.undo_label(), Some("Delete Pad copy"));
     assert!(app.save());

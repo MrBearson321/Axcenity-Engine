@@ -1,0 +1,29 @@
+{
+  "blocks": [
+    {
+      "id": 62111,
+      "kind": {
+        "type": "top_code",
+        "code": "-- A LocalScript: it runs on the player's side, so it can read the keyboard.\n-- Hold Shift to run; let go to walk again. The ThirdPersonController moves\n-- the character at RunSpeed or WalkSpeed, whichever Movement names. Shift\n-- leaves a custom mode, such as Hover (hover.client.lua), alone.\n\nlocal UserInputService = game:GetService(\"UserInputService\")\nlocal controller = workspace.Character.ThirdPersonController\n\nlocal function isShift(input)\n    local shift = input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift\n    return shift and controller.Movement ~= \"Hover\"\nend\n\nUserInputService.InputBegan:Connect(function(input)\n    if isShift(input) then\n        controller.Movement = \"Run\"\n    end\nend)\n\nUserInputService.InputEnded:Connect(function(input)\n    if isShift(input) then\n        controller.Movement = \"Walk\"\n    end\nend)\n\n-- J jumps from Lua. Space jumps too, without a script.\n-- K crouches or stands from Lua. Holding C crouches too, without a script.\nUserInputService.InputBegan:Connect(function(input)\n    if input.KeyCode == Enum.KeyCode.J then\n        controller.Jump = true\n    elseif input.KeyCode == Enum.KeyCode.K then\n        controller.Crouch = not controller.Crouch\n    end\nend)"
+      }
+    },
+    {
+      "id": 62112,
+      "kind": {
+        "type": "when_started",
+        "body": [
+          {
+            "id": 62110,
+            "kind": {
+              "type": "print",
+              "value": {
+                "type": "text",
+                "value": "WASD to walk, hold Shift to run, Space to jump, C to crouch, H to hover, right-drag to turn the camera."
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
