@@ -266,6 +266,11 @@ pub struct EditorApp {
     overlays: OverlayToggles,
     /// The navigation mesh the overlay draws, while it's on.
     nav_mesh: Option<nav_overlay::NavCache>,
+    /// This computer's graphics settings (Settings > Graphics), for the
+    /// viewport and Play. Saved between runs, never in a project.
+    graphics: axcenity_render::GraphicsSettings,
+    /// What the GPU can do, read on the first frame that has one.
+    capabilities: Option<axcenity_render::Capabilities>,
 }
 
 /// Ribbon buttons that act on the whole app, noted while the ribbon is
@@ -398,6 +403,8 @@ const OVERLAY_EMITTERS_KEY: &str = "overlay emitters";
 const OVERLAY_NAV_MESH_KEY: &str = "overlay nav mesh";
 const OVERLAY_AGENT_PATHS_KEY: &str = "overlay agent paths";
 const CONSOLE_HISTORY_KEY: &str = "console history";
+/// The graphics settings, as JSON.
+const GRAPHICS_KEY: &str = "graphics";
 /// eframe's own key for the window's size and position. eframe still reads
 /// it at startup with `persist_window` off, so `save` blanks it.
 const WINDOW_KEY: &str = "window";
@@ -552,6 +559,8 @@ impl EditorApp {
             light_cones: false,
             overlays: OverlayToggles::default(),
             nav_mesh: None,
+            graphics: axcenity_render::GraphicsSettings::default(),
+            capabilities: None,
         };
         if let Some(folder) = folder {
             app.open(folder);
@@ -605,6 +614,12 @@ impl EditorApp {
                 storage.get_string(OVERLAY_AGENT_PATHS_KEY).as_deref() == Some("on");
             if let Some(text) = storage.get_string(CONSOLE_HISTORY_KEY) {
                 self.console.load_history(&text);
+            }
+            if let Some(settings) = storage
+                .get_string(GRAPHICS_KEY)
+                .and_then(|text| serde_json::from_str(&text).ok())
+            {
+                self.graphics = settings;
             }
         }
         theme::apply(ctx, &self.appearance);
@@ -685,6 +700,9 @@ impl eframe::App for EditorApp {
             flag(self.overlays.agent_paths).to_owned(),
         );
         storage.set_string(CONSOLE_HISTORY_KEY, self.console.history_text());
+        if let Ok(text) = serde_json::to_string(&self.graphics) {
+            storage.set_string(GRAPHICS_KEY, text);
+        }
         storage.set_string(RECENT_KEY, recent.join("\n"));
         // An empty value doesn't parse, so the next start uses the default size.
         storage.set_string(WINDOW_KEY, String::new());
@@ -705,6 +723,14 @@ impl EditorApp {
         }
         if self.brand.is_none() {
             self.brand = Some(Brand::load(ctx));
+        }
+        if self.capabilities.is_none()
+            && let Some(render_state) = render_state
+        {
+            self.capabilities = Some(axcenity_render::Capabilities::read(
+                &render_state.device,
+                Some(&render_state.adapter.get_info()),
+            ));
         }
         // While a project loads, only the header and the loading screen.
         if self.follow_loading(ctx) {

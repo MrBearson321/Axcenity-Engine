@@ -8,6 +8,7 @@
 
 mod draw_list;
 mod fonts;
+mod graphics;
 mod mesh;
 mod renderer;
 
@@ -19,6 +20,9 @@ pub use draw_list::{
     UiSlice, UiText, VerticalAlign, is_turned, turn_point, turned_bounds,
 };
 pub use fonts::{BUILT_IN_FONTS, BuiltInFont, UiFont, font_families};
+pub use graphics::{
+    Capabilities, EffectiveGraphics, GraphicsSettings, Quality, ShadowMapSize, ShadowQuality,
+};
 pub use renderer::{RenderStats, Renderer, TextureRenderer};
 
 /// Re-exported so callers build transforms with the same `glam` version.

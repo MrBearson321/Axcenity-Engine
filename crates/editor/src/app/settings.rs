@@ -1,12 +1,13 @@
 //! The Settings window (File > Settings…, the start screen's sidebar, or
 //! Ctrl+, / Cmd+,): appearance, typography and density, the editor layout,
-//! the keyboard shortcuts, and accessibility. Changes apply at once and are
-//! saved between runs with the other settings.
+//! this computer's graphics, the keyboard shortcuts, and accessibility.
+//! Changes apply at once and are saved between runs with the other settings.
 
 use super::*;
 
 use crate::theme::{Accent, Appearance, Density, Palette, ThemeChoice, type_scale};
 use crate::widgets;
+use axcenity_render::{Capabilities, GraphicsSettings, Quality, ShadowQuality};
 
 /// Ctrl+, (Cmd+, on macOS) opens Settings, as in most desktop apps.
 pub(super) const SETTINGS_SHORTCUT: egui::KeyboardShortcut =
@@ -19,15 +20,17 @@ pub(super) enum SettingsPage {
     Appearance,
     Typography,
     Layout,
+    Graphics,
     Shortcuts,
     Accessibility,
 }
 
 impl SettingsPage {
-    const ALL: [SettingsPage; 5] = [
+    const ALL: [SettingsPage; 6] = [
         SettingsPage::Appearance,
         SettingsPage::Typography,
         SettingsPage::Layout,
+        SettingsPage::Graphics,
         SettingsPage::Shortcuts,
         SettingsPage::Accessibility,
     ];
@@ -37,6 +40,7 @@ impl SettingsPage {
             SettingsPage::Appearance => "Appearance",
             SettingsPage::Typography => "Text & density",
             SettingsPage::Layout => "Editor layout",
+            SettingsPage::Graphics => "Graphics",
             SettingsPage::Shortcuts => "Shortcuts",
             SettingsPage::Accessibility => "Accessibility",
         }
@@ -47,6 +51,7 @@ impl SettingsPage {
             SettingsPage::Appearance => icons::PALETTE,
             SettingsPage::Typography => icons::TEXT_AA,
             SettingsPage::Layout => icons::LAYOUT,
+            SettingsPage::Graphics => icons::MONITOR,
             SettingsPage::Shortcuts => icons::KEYBOARD,
             SettingsPage::Accessibility => icons::EYE,
         }
@@ -122,6 +127,10 @@ impl EditorApp {
                                 SettingsPage::Appearance => appearance_page(ui, &mut appearance),
                                 SettingsPage::Typography => typography_page(ui, &mut appearance),
                                 SettingsPage::Layout => self.layout_page(ui),
+                                SettingsPage::Graphics => {
+                                    let capabilities = self.capabilities.unwrap_or_default();
+                                    graphics_page(ui, &mut self.graphics, &capabilities);
+                                }
                                 SettingsPage::Shortcuts => shortcuts_page(ui),
                                 SettingsPage::Accessibility => {
                                     accessibility_page(ui, &mut appearance);
@@ -439,6 +448,127 @@ fn keycap(ui: &mut egui::Ui, keys: &str) {
         });
 }
 
+/// This computer's graphics settings: a preset, its overrides, and what's
+/// in use once the GPU's limits are applied, with why anything was lowered.
+fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilities: &Capabilities) {
+    page_title(
+        ui,
+        "Graphics",
+        "This computer's quality, for the viewport and Play. Not saved in projects.",
+    );
+    let palette = theme::palette(ui.ctx());
+    widgets::section_label(ui, "Quality");
+    widgets::segmented(
+        ui,
+        &mut settings.quality,
+        &Quality::ALL.map(|quality| (quality, None, quality.label())),
+    );
+    let preset = GraphicsSettings::preset(settings.quality);
+    ui.add_space(16.0);
+    widgets::section_label(ui, "Overrides");
+    egui::Grid::new("graphics overrides")
+        .num_columns(2)
+        .spacing([12.0, 8.0])
+        .show(ui, |ui| {
+            ui.label("Shadow quality");
+            let label = |quality: Option<ShadowQuality>| match quality {
+                Some(quality) => quality.label().to_owned(),
+                None => format!("Preset ({})", preset.shadow_quality().label()),
+            };
+            egui::ComboBox::from_id_salt("shadow quality")
+                .selected_text(label(settings.shadow_quality))
+                .show_ui(ui, |ui| {
+                    for choice in std::iter::once(None).chain(ShadowQuality::ALL.map(Some)) {
+                        ui.selectable_value(&mut settings.shadow_quality, choice, label(choice));
+                    }
+                });
+            ui.end_row();
+
+            ui.label("Shadow distance");
+            ui.horizontal(|ui| {
+                let mut limited = settings.shadow_distance.is_some();
+                if ui
+                    .checkbox(&mut limited, "")
+                    .on_hover_text("Off, the preset's distance is used.")
+                    .changed()
+                {
+                    settings.shadow_distance = limited.then(|| preset.shadow_distance());
+                }
+                match &mut settings.shadow_distance {
+                    Some(distance) => {
+                        ui.add(
+                            egui::DragValue::new(distance)
+                                .range(0.0..=5000.0)
+                                .speed(1.0)
+                                .suffix(" studs"),
+                        );
+                    }
+                    None => {
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "Preset ({} studs)",
+                                preset.shadow_distance()
+                            ))
+                            .color(palette.text_secondary),
+                        );
+                    }
+                }
+            });
+            ui.end_row();
+
+            ui.label("Post-processing");
+            let label = |on: Option<bool>| match on {
+                Some(true) => "On".to_owned(),
+                Some(false) => "Off".to_owned(),
+                None => format!(
+                    "Preset ({})",
+                    if preset.post_processing() {
+                        "On"
+                    } else {
+                        "Off"
+                    }
+                ),
+            };
+            egui::ComboBox::from_id_salt("post-processing")
+                .selected_text(label(settings.post_processing))
+                .show_ui(ui, |ui| {
+                    for choice in [None, Some(true), Some(false)] {
+                        ui.selectable_value(&mut settings.post_processing, choice, label(choice));
+                    }
+                });
+            ui.end_row();
+        });
+    ui.add_space(16.0);
+    widgets::section_label(ui, "In use");
+    let effective = settings.effective(capabilities);
+    let shadows = match effective.shadow_quality.map() {
+        Some(map) => format!(
+            "Shadows: {}, a {}² map with {} cascades, up to {} studs",
+            effective.shadow_quality.label(),
+            map.size,
+            map.cascades,
+            effective.shadow_distance
+        ),
+        None => "Shadows: off".to_owned(),
+    };
+    ui.label(shadows);
+    ui.label(if effective.post_processing {
+        "Post-processing: on (bloom and tone mapping)"
+    } else {
+        "Post-processing: off"
+    });
+    for note in &effective.notes {
+        ui.label(egui::RichText::new(note).color(palette.warning));
+    }
+    ui.label(
+        egui::RichText::new(
+            "A world's Lighting can ask for less (ShadowsEnabled, ShadowDistance, \
+             PostProcessingEnabled), never more.",
+        )
+        .color(palette.text_secondary),
+    );
+}
+
 fn accessibility_page(ui: &mut egui::Ui, appearance: &mut Appearance) {
     page_title(
         ui,
@@ -658,12 +788,16 @@ mod tests {
                 app.settings_window(ctx);
             };
             match &snapshots {
-                Some(folder) if page == SettingsPage::Appearance => crate::snapshot::snapshot(
-                    &folder.join("settings-appearance.png"),
-                    egui::vec2(900.0, 640.0),
-                    vec![Vec::new(); 3],
-                    &mut draw,
-                ),
+                Some(folder)
+                    if matches!(page, SettingsPage::Appearance | SettingsPage::Graphics) =>
+                {
+                    crate::snapshot::snapshot(
+                        &folder.join(format!("settings-{}.png", page.label().to_lowercase())),
+                        egui::vec2(900.0, 640.0),
+                        vec![Vec::new(); 3],
+                        &mut draw,
+                    )
+                }
                 _ => {
                     let _ = ctx.run(Default::default(), &mut draw);
                 }
@@ -685,5 +819,64 @@ mod tests {
             theme::palette(&ctx).accent,
             Palette::new(false, Accent::Orange).accent
         );
+    }
+
+    /// eframe's saved settings, in memory.
+    #[derive(Default)]
+    struct MemoryStorage(std::collections::HashMap<String, String>);
+
+    impl eframe::Storage for MemoryStorage {
+        fn get_string(&self, key: &str) -> Option<String> {
+            self.0.get(key).cloned()
+        }
+        fn set_string(&mut self, key: &str, value: String) {
+            self.0.insert(key.to_owned(), value);
+        }
+        fn flush(&mut self) {}
+    }
+
+    #[test]
+    fn graphics_settings_survive_a_restart() {
+        let ctx = theme::test_context();
+        let mut app = EditorApp::new(None);
+        app.graphics = GraphicsSettings {
+            quality: Quality::Medium,
+            shadow_quality: Some(ShadowQuality::Off),
+            shadow_distance: Some(60.0),
+            post_processing: None,
+        };
+        let mut storage = MemoryStorage::default();
+        eframe::App::save(&mut app, &mut storage);
+
+        let mut restarted = EditorApp::new(None);
+        assert_eq!(restarted.graphics, GraphicsSettings::default());
+        restarted.load_settings(&ctx, Some(&storage));
+        assert_eq!(restarted.graphics, app.graphics);
+    }
+
+    #[test]
+    fn changing_the_graphics_setting_changes_the_viewport_at_once() {
+        let mut app = EditorApp::new(Some(&super::super::tests::example("hello-graphics")));
+        let mut frame = 0;
+        let mut seen = Vec::new();
+        crate::snapshot::snapshot_rendered(
+            &std::env::temp_dir().join(format!("axcenity-graphics-{}.png", std::process::id())),
+            egui::vec2(320.0, 200.0),
+            vec![Vec::new(); 2],
+            |ctx, render_state| {
+                if frame == 1 {
+                    app.graphics.shadow_quality = Some(ShadowQuality::Off);
+                }
+                frame += 1;
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    app.scene_pane(ui, Some(render_state));
+                });
+                seen.push(app.viewport.graphics().map(|used| used.shadow_quality));
+            },
+        );
+        if seen.is_empty() {
+            return; // No GPU.
+        }
+        assert_eq!(seen, [Some(ShadowQuality::High), Some(ShadowQuality::Off)]);
     }
 }

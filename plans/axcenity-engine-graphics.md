@@ -106,12 +106,12 @@ The editor gets a **Graphics** section in its Settings window (`editor/src/app/s
 
 ### Acceptance criteria
 
-- [ ] Each preset gives the documented values, an override replaces only its own value, and a `graphics.json` round trip keeps them (unit tests).
-- [ ] `effective` lowers a setting the capabilities can't meet, notes why, and never raises one (unit tests).
-- [ ] With shadows Off in the settings, a world with `ShadowsEnabled` on draws no shadow and allocates no shadow map. With Low, the map is 1024² with 2 cascades. A shadow distance ceiling below the world's value cuts shadows at the ceiling (GPU tests).
-- [ ] Switching shadow quality 50 times leaves one shadow map alive (a resource count test).
-- [ ] `hello-graphics` at High still matches its reference.
-- [ ] Changing the editor setting changes the viewport at once and survives a restart.
+- [x] Each preset gives the documented values, an override replaces only its own value, and a `graphics.json` round trip keeps them (unit tests).
+- [x] `effective` lowers a setting the capabilities can't meet, notes why, and never raises one (unit tests).
+- [x] With shadows Off in the settings, a world with `ShadowsEnabled` on draws no shadow and allocates no shadow map. With Low, the map is 1024² with 2 cascades. A shadow distance ceiling below the world's value cuts shadows at the ceiling (GPU tests).
+- [x] Switching shadow quality 50 times leaves one shadow map alive (a resource count test).
+- [x] `hello-graphics` at High still matches its reference.
+- [x] Changing the editor setting changes the viewport at once and survives a restart.
 
 ---
 

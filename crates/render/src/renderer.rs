@@ -15,6 +15,7 @@ use std::time::Duration;
 use crate::draw_list::{
     DrawList, Shape, TextureSource, UiDrawItem, UiRectangle, UiText, is_turned,
 };
+use crate::graphics::{Capabilities, EffectiveGraphics, GraphicsSettings, ShadowMapSize};
 use crate::mesh::{self};
 use anyhow::{Context, Result};
 use bytemuck::{Pod, Zeroable};
@@ -48,9 +49,8 @@ use gpu::{
 use lighting::{cascade_ends, light_raw};
 use lighting::{
     frame_uniform, linear_color, maps_uniform_of, material_key, material_textures, plan_draws,
-    plan_lights, post_uniform, view_projection,
+    plan_lights, post_drawn, post_uniform, shadows_drawn, view_projection,
 };
-#[cfg(test)]
 use std::sync::Arc;
 
 mod scene;
@@ -147,11 +147,12 @@ impl Renderer {
             ),
         }
         surface.configure(&device, &config);
+        let capabilities = Capabilities::read(&device, Some(&adapter.get_info()));
 
         Ok(Self {
             surface,
             minimized: false,
-            scene: ScenePipeline::new(device, queue, config.format, width, height),
+            scene: ScenePipeline::new(device, queue, config.format, width, height, capabilities),
             config,
         })
     }
@@ -167,6 +168,21 @@ impl Renderer {
         self.config.height = height;
         self.surface.configure(&self.scene.device, &self.config);
         self.scene.resize(width, height);
+    }
+
+    /// What the GPU can do, which the graphics settings are lowered to fit.
+    pub fn capabilities(&self) -> &Capabilities {
+        &self.scene.capabilities
+    }
+
+    /// Uses `settings` from the next frame (see [`GraphicsSettings::effective`]).
+    pub fn set_graphics(&mut self, settings: &GraphicsSettings) {
+        self.scene.set_graphics(settings);
+    }
+
+    /// The graphics values in use, and why any were lowered.
+    pub fn graphics(&self) -> &EffectiveGraphics {
+        &self.scene.graphics
     }
 
     /// Draws one frame. `before_present` runs just before the frame is shown;
@@ -216,6 +232,7 @@ impl TextureRenderer {
             TARGET_DRAW_FORMAT,
             width,
             height,
+            Capabilities::read(device, None),
         );
         let (texture, draw_view, view) = create_target_texture(device, width, height);
         Self {
@@ -268,6 +285,21 @@ impl TextureRenderer {
     /// What the last frame drawn cost, for the editor's profiler.
     pub fn stats(&self) -> RenderStats {
         self.scene.stats()
+    }
+
+    /// What the GPU can do, which the graphics settings are lowered to fit.
+    pub fn capabilities(&self) -> &Capabilities {
+        &self.scene.capabilities
+    }
+
+    /// Uses `settings` from the next frame (see [`GraphicsSettings::effective`]).
+    pub fn set_graphics(&mut self, settings: &GraphicsSettings) {
+        self.scene.set_graphics(settings);
+    }
+
+    /// The graphics values in use, and why any were lowered.
+    pub fn graphics(&self) -> &EffectiveGraphics {
+        &self.scene.graphics
     }
 
     /// Reads the texture back to the CPU as rows of RGBA bytes. Slow: for

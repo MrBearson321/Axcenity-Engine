@@ -9,11 +9,13 @@ use std::borrow::Cow;
 use wgpu::util::DeviceExt;
 
 use crate::draw_list::{MeshSource, TextureSource};
+use crate::graphics::ShadowMapSize;
 use crate::mesh::{self, MeshData, Vertex};
 
 use super::{
     DEPTH_FORMAT, GpuMaterial, GpuMesh, GpuTexture, InstanceRaw, MATERIAL_TEXTURES, MapsUniform,
-    SHADOW_CASCADES, TARGET_DRAW_FORMAT, TARGET_SHOW_FORMAT, TEXTURE_FORMAT, TEXTURE_SRGB_FORMAT,
+    SHADOW_CASCADES, SHADOW_MAP_SIZE, TARGET_DRAW_FORMAT, TARGET_SHOW_FORMAT, TEXTURE_FORMAT,
+    TEXTURE_SRGB_FORMAT,
 };
 
 /// The shader for parts and models, and the shadow and sky passes: the
@@ -146,14 +148,16 @@ pub(super) fn create_pipeline(
 /// whole array for reading, and one view per layer for drawing.
 pub(super) fn create_shadow_views(
     device: &wgpu::Device,
-    size: u32,
+    ShadowMapSize { size, cascades }: ShadowMapSize,
 ) -> (wgpu::TextureView, Vec<wgpu::TextureView>) {
+    // The shader holds at most `SHADOW_CASCADES` cascades.
+    debug_assert!(size <= SHADOW_MAP_SIZE && cascades as usize <= SHADOW_CASCADES);
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("shadow map"),
         size: wgpu::Extent3d {
             width: size,
             height: size,
-            depth_or_array_layers: SHADOW_CASCADES as u32,
+            depth_or_array_layers: cascades,
         },
         mip_level_count: 1,
         sample_count: 1,
@@ -167,7 +171,7 @@ pub(super) fn create_shadow_views(
         dimension: Some(wgpu::TextureViewDimension::D2Array),
         ..Default::default()
     });
-    let layers = (0..SHADOW_CASCADES as u32)
+    let layers = (0..cascades)
         .map(|layer| {
             texture.create_view(&wgpu::TextureViewDescriptor {
                 label: Some("shadow cascade"),

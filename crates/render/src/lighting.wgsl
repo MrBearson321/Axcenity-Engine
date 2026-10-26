@@ -16,7 +16,7 @@ struct Frame {
     ambient: vec4<f32>,
     // Turns world space to the sun's view of each shadow cascade (one layer
     // of the shadow map each, nearest the camera first).
-    cascades: array<mat4x4<f32>, 3>,
+    cascades: array<mat4x4<f32>, 4>,
     // The world size of one shadow map texel in each cascade.
     cascade_texels: vec4<f32>,
     // How many studs a cascade's depth range (0 to 1) covers.

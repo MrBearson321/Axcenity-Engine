@@ -3,6 +3,7 @@ use crate::draw_list::{
     AmbientLight, Camera, Channel, Cone, DrawItem, Light, Material, NormalMap, PostProcessing,
     Shadows, Sky, Sun,
 };
+use crate::graphics::ShadowQuality;
 use glam::Mat4;
 
 #[test]
@@ -480,9 +481,11 @@ fn parts_shadow_others_unless_they_dont_cast_shadows() {
 
 #[test]
 fn cascades_end_further_out_each_time_and_the_last_at_the_distance() {
-    let ends = cascade_ends(150.0);
+    let ends = cascade_ends(150.0, 3);
     assert!(ends[0] > 1.0 && ends[0] < ends[1] && ends[1] < ends[2]);
-    assert!((ends[SHADOW_CASCADES - 1] - 150.0).abs() < 1e-3);
+    assert!((ends[2] - 150.0).abs() < 1e-3);
+    let two = cascade_ends(150.0, 2);
+    assert!(two[0] < two[1] && (two[1] - 150.0).abs() < 1e-3);
     // The nearest cascade is small, so it's the sharpest.
     assert!(ends[0] < 25.0, "{ends:?}");
 }
@@ -1456,4 +1459,180 @@ fn a_turned_clip_cuts_in_its_own_frame_and_intersects_with_one_turned_the_same()
     assert_eq!(both.rotation_degrees, 90.0);
     assert!(both.contains(50.0, 20.0), "{both:?}");
     assert!(!both.contains(50.0, 90.0), "{both:?}");
+}
+
+/// A wall facing the camera, lit from the front right, with a small block
+/// whose shadow falls on the middle of the wall, about 10 studs away.
+fn shadowed_wall() -> DrawList {
+    let block = |size: Vec3, position: Vec3| DrawItem {
+        transform: Mat4::from_scale_rotation_translation(size, glam::Quat::IDENTITY, position),
+        ..big_block()
+    };
+    let wall = block(Vec3::new(30.0, 30.0, 1.0), Vec3::new(0.0, 0.0, -10.0));
+    let blocker = block(Vec3::splat(2.0), Vec3::new(4.0, 0.0, -6.0));
+    let mut list = list_of(vec![wall, blocker]);
+    list.sun.direction = Vec3::new(1.0, 0.0, 1.0);
+    list.shadows.softness = 0.0;
+    list
+}
+
+fn middle_of(renderer: &mut TextureRenderer, list: &DrawList) -> [u8; 4] {
+    renderer.render(list).unwrap();
+    let (width, height) = renderer.size();
+    let pixels = renderer.read_pixels();
+    let middle = ((height / 2) * width + width / 2) as usize * 4;
+    pixels[middle..][..4].try_into().unwrap()
+}
+
+fn with_shadows(quality: ShadowQuality) -> GraphicsSettings {
+    GraphicsSettings {
+        shadow_quality: Some(quality),
+        ..GraphicsSettings::default()
+    }
+}
+
+#[test]
+fn shadows_off_in_the_settings_draw_none_and_allocate_no_map() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let mut list = shadowed_wall();
+    assert!(list.shadows.enabled, "the world asks for shadows");
+    let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+    let shaded = middle_of(&mut renderer, &list);
+    assert_eq!(renderer.scene.shadow_maps_alive(), 1);
+
+    renderer.set_graphics(&with_shadows(ShadowQuality::Off));
+    let off = middle_of(&mut renderer, &list);
+    assert!(renderer.scene.shadow_map.is_none());
+    assert_eq!(renderer.scene.shadow_maps_alive(), 0);
+
+    list.items[1].casts_shadow = false;
+    let lit = middle_of(&mut renderer, &list);
+    assert!(lit[0] > shaded[0] + 40, "{shaded:?} vs {lit:?}");
+    assert_eq!(off, lit, "no shadow is drawn");
+}
+
+#[test]
+fn low_shadows_use_a_1024_map_with_two_cascades() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let mut list = shadowed_wall();
+    let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+    let map = |renderer: &TextureRenderer| {
+        let map = renderer.scene.shadow_map.as_ref().unwrap();
+        (map.size, map.layers.len())
+    };
+    middle_of(&mut renderer, &list);
+    let high = ShadowMapSize {
+        size: 2048,
+        cascades: 3,
+    };
+    assert_eq!(map(&renderer), (high, 3), "High is today's map");
+
+    renderer.set_graphics(&with_shadows(ShadowQuality::Low));
+    let shaded = middle_of(&mut renderer, &list);
+    let low = ShadowMapSize {
+        size: 1024,
+        cascades: 2,
+    };
+    assert_eq!(map(&renderer), (low, 2));
+    list.items[1].casts_shadow = false;
+    let lit = middle_of(&mut renderer, &list);
+    assert!(
+        lit[0] > shaded[0] + 40,
+        "Low still shadows: {shaded:?} vs {lit:?}"
+    );
+}
+
+#[test]
+fn a_shadow_distance_ceiling_below_the_worlds_cuts_shadows_there() {
+    let world = Shadows {
+        distance: 150.0,
+        ..Shadows::default()
+    };
+    let ceiling = |distance| {
+        GraphicsSettings {
+            shadow_distance: Some(distance),
+            ..GraphicsSettings::default()
+        }
+        .effective(&Capabilities::default())
+    };
+    let drawn = |graphics| shadows_drawn(world, &graphics).map(|(shadows, _)| shadows.distance);
+    assert_eq!(drawn(ceiling(5.0)), Some(5.0));
+    assert_eq!(
+        drawn(ceiling(500.0)),
+        Some(150.0),
+        "the ceiling never raises it"
+    );
+    assert_eq!(drawn(ceiling(0.0)), None);
+    let world_off = Shadows {
+        enabled: false,
+        ..world
+    };
+    assert!(shadows_drawn(world_off, &ceiling(500.0)).is_none());
+
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let mut list = shadowed_wall();
+    let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+    let shaded = middle_of(&mut renderer, &list);
+    renderer.set_graphics(&GraphicsSettings {
+        shadow_distance: Some(5.0),
+        ..GraphicsSettings::default()
+    });
+    let cut = middle_of(&mut renderer, &list);
+    list.items[1].casts_shadow = false;
+    let lit = middle_of(&mut renderer, &list);
+    assert!(lit[0] > shaded[0] + 40, "{shaded:?} vs {lit:?}");
+    assert_eq!(cut, lit, "the wall is past the ceiling, so unshadowed");
+}
+
+#[test]
+fn switching_shadow_quality_fifty_times_leaves_one_shadow_map() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let list = shadowed_wall();
+    let mut renderer = TextureRenderer::new(&device, &queue, 32, 32);
+    let qualities = [
+        ShadowQuality::Low,
+        ShadowQuality::Medium,
+        ShadowQuality::High,
+        ShadowQuality::Off,
+        ShadowQuality::Ultra,
+    ];
+    for quality in qualities.iter().cycle().take(50) {
+        renderer.set_graphics(&with_shadows(*quality));
+        renderer.render(&list).unwrap();
+        let expected = usize::from(*quality != ShadowQuality::Off);
+        assert_eq!(renderer.scene.shadow_maps_alive(), expected, "{quality:?}");
+        let size = renderer.scene.shadow_map.as_ref().map(|map| map.size);
+        assert_eq!(size, quality.map());
+    }
+    device.poll(wgpu::PollType::Wait).unwrap();
+    assert_eq!(renderer.scene.shadow_maps_alive(), 1);
+}
+
+#[test]
+fn post_processing_off_in_the_settings_turns_the_worlds_off() {
+    let world = PostProcessing::default();
+    let off = GraphicsSettings {
+        post_processing: Some(false),
+        ..GraphicsSettings::default()
+    }
+    .effective(&Capabilities::default());
+    assert!(!post_drawn(&world, &off).enabled);
+    assert!(post_drawn(&world, &EffectiveGraphics::default()).enabled);
+    let world_off = PostProcessing {
+        enabled: false,
+        ..world
+    };
+    assert!(!post_drawn(&world_off, &EffectiveGraphics::default()).enabled);
 }

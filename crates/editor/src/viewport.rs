@@ -260,6 +260,8 @@ pub struct ViewportScene<'a> {
     /// The third-person follow camera during Play, when a controller owns it.
     /// The fly camera is not moved, so Stop shows it where it was.
     pub character_view: Option<axcenity_character::CharacterCamera>,
+    /// This computer's graphics settings (Settings > Graphics).
+    pub graphics: &'a axcenity_render::GraphicsSettings,
 }
 
 /// Which visual-debug overlays the viewport draws. Off in the player.
@@ -411,6 +413,14 @@ struct Target {
 }
 
 impl Viewport {
+    /// The graphics values the viewport draws with, once it has drawn.
+    #[cfg(test)]
+    pub fn graphics(&self) -> Option<&axcenity_render::EffectiveGraphics> {
+        self.target
+            .as_ref()
+            .map(|target| target.renderer.graphics())
+    }
+
     pub fn new() -> Self {
         Self {
             camera: start_camera(),
@@ -526,6 +536,7 @@ impl Viewport {
             poses,
             terrain_brush,
             character_view,
+            graphics,
         } = scene;
         // A brush takes the left button: no handles, dragging or picking.
         let brush = terrain_brush.filter(|_| tool.is_some());
@@ -736,6 +747,8 @@ impl Viewport {
                 texture_id,
             }
         });
+        // Does nothing unless the settings changed.
+        target.renderer.set_graphics(graphics);
         if target.renderer.size() != (width.max(1), height.max(1)) {
             target.renderer.resize(width, height);
             // The resize made a new texture, so point egui's name at it.

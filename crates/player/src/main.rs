@@ -7,6 +7,7 @@
 //! for parts that started touching, then draw the Workspace. The character's
 //! camera follows it; otherwise a fly camera looks around.
 
+mod graphics;
 mod icon;
 mod splash;
 
@@ -141,7 +142,8 @@ fn main() -> Result<()> {
     let mut scripts = ScriptRuntime::new();
     scripts.set_assets(assets.clone());
     // Saves go in the player's data for this game, never the game's folder.
-    scripts.set_save_folder(axcenity_save::game_folder(&project.manifest.name));
+    let data_folder = axcenity_save::game_folder(&project.manifest.name);
+    scripts.set_save_folder(data_folder.clone());
     // Animators start in their default states (with their parameters at
     // their defaults) before any script runs, so scripts can read them.
     let mut animators = Animators::new();
@@ -181,6 +183,7 @@ fn main() -> Result<()> {
         assets,
         window: None,
         renderer: None,
+        data_folder,
         error: None,
         camera,
         keys: MoveKeys::default(),
@@ -387,6 +390,9 @@ struct App {
     assets: Assets,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
+    /// The player's data for this game (saves and `graphics.json`), if
+    /// there's a place for it.
+    data_folder: Option<PathBuf>,
     error: Option<anyhow::Error>,
     camera: FlyCamera,
     keys: MoveKeys,
@@ -742,7 +748,15 @@ impl ApplicationHandler for App {
         // GPU setup is `async`; `pollster::block_on` simply waits for it to finish.
         let size = window.inner_size();
         match pollster::block_on(Renderer::new(window.clone(), size.width, size.height)) {
-            Ok(renderer) => self.renderer = Some(renderer),
+            Ok(mut renderer) => {
+                let settings =
+                    graphics::start(self.data_folder.as_deref(), renderer.capabilities());
+                renderer.set_graphics(&settings);
+                for note in &renderer.graphics().notes {
+                    log::info!("graphics: {note}");
+                }
+                self.renderer = Some(renderer);
+            }
             Err(err) => return self.fail(event_loop, err),
         }
 

@@ -85,11 +85,13 @@ pub(super) struct PostUniform {
     pub(super) flags: [f32; 4],
 }
 
-/// The size of each shadow cascade, in texels per side.
-pub(super) const SHADOW_MAP_SIZE: u32 = 2048;
-/// How many shadow maps cover the view, each further out and coarser than
-/// the one before. Must match the size of `cascades` in shader.wgsl.
-pub(super) const SHADOW_CASCADES: usize = 3;
+/// The largest shadow cascade, in texels per side (Ultra's). The graphics
+/// settings pick the size in use (see [`crate::ShadowQuality`]).
+pub(super) const SHADOW_MAP_SIZE: u32 = 4096;
+/// The most shadow cascades that cover the view, each further out and
+/// coarser than the one before. The graphics settings pick how many are in
+/// use. Must match the size of `cascades` in shader.wgsl.
+pub(super) const SHADOW_CASCADES: usize = 4;
 /// How the cascades' far ends are spread between even steps (0) and steps
 /// that grow by the same factor each time (1). Mostly the second, so the
 /// nearest cascade is small and sharp.
@@ -105,6 +107,11 @@ pub(super) const CASCADE_UNIFORM_STRIDE: u64 = 256;
 /// The depth texture the sun's view is drawn into, one layer per cascade,
 /// with the frame bindings that read it.
 pub(super) struct ShadowMap {
+    /// Its size and cascade count, from the effective graphics settings.
+    pub(super) size: ShadowMapSize,
+    /// A clone of [`ScenePipeline::shadow_maps_alive`], so maps still
+    /// alive can be counted.
+    pub(super) _alive: Arc<()>,
     /// One view per cascade, to draw into.
     pub(super) layers: Vec<wgpu::TextureView>,
     /// The frame bindings with this map in place of the empty one.
@@ -373,8 +380,16 @@ pub(super) struct ScenePipeline {
     /// Gives the shadow pass one cascade's matrix (it can't also bind the
     /// shadow map it's drawing into).
     pub(super) shadow_bind_group: wgpu::BindGroup,
-    /// Made when shadows are first turned on, and freed when turned off.
+    /// Made when shadows are first turned on, and freed when turned off or
+    /// when the graphics settings change its size.
     pub(super) shadow_map: Option<ShadowMap>,
+    /// One more strong reference than there are shadow maps alive.
+    pub(super) shadow_maps_alive: Arc<()>,
+    /// What the device can do, read once.
+    pub(super) capabilities: Capabilities,
+    /// The graphics settings last asked for, and what's used of them.
+    pub(super) settings: GraphicsSettings,
+    pub(super) graphics: EffectiveGraphics,
     pub(super) meshes: Meshes,
     pub(super) instance_buffer: wgpu::Buffer,
     /// How many instances fit in `instance_buffer` before it must grow.

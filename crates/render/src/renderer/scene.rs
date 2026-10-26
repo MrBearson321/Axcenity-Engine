@@ -7,6 +7,7 @@ impl ScenePipeline {
         color_format: wgpu::TextureFormat,
         width: u32,
         height: u32,
+        capabilities: Capabilities,
     ) -> Self {
         let depth_view = create_depth_view(&device, width, height);
         let storage_entry = |binding| wgpu::BindGroupLayoutEntry {
@@ -77,7 +78,13 @@ impl ScenePipeline {
             compare: Some(wgpu::CompareFunction::LessEqual),
             ..Default::default()
         });
-        let (empty_shadow_view, _) = create_shadow_views(&device, 1);
+        let (empty_shadow_view, _) = create_shadow_views(
+            &device,
+            ShadowMapSize {
+                size: 1,
+                cascades: 1,
+            },
+        );
         // The bind group keeps the stand-in 1×1 map alive while shadows are off.
         let frame_bind_group = create_frame_bind_group(
             &device,
@@ -278,6 +285,10 @@ impl ScenePipeline {
             cascade_buffer,
             shadow_bind_group,
             shadow_map: None,
+            shadow_maps_alive: Arc::new(()),
+            graphics: GraphicsSettings::default().effective(&capabilities),
+            settings: GraphicsSettings::default(),
+            capabilities,
             meshes,
             instance_buffer,
             instance_capacity,
@@ -292,6 +303,21 @@ impl ScenePipeline {
             frame: 0,
             gpu_timer,
             draws: (0, 0),
+        }
+    }
+
+    /// Uses `settings` from the next frame, lowered to what the device can
+    /// do. A shadow map of the wrong size is freed here and remade at the
+    /// right size when next drawn.
+    pub(super) fn set_graphics(&mut self, settings: &GraphicsSettings) {
+        if *settings == self.settings {
+            return;
+        }
+        self.settings = settings.clone();
+        self.graphics = settings.effective(&self.capabilities);
+        let wanted = self.graphics.shadow_quality.map();
+        if self.shadow_map.as_ref().map(|map| map.size) != wanted {
+            self.shadow_map = None;
         }
     }
 
@@ -311,7 +337,7 @@ impl ScenePipeline {
         viewport_size: (u32, u32),
     ) -> Result<()> {
         let planned_lights = plan_lights(list, aspect, viewport_size);
-        let mut frame_uniform = frame_uniform(list, aspect);
+        let mut frame_uniform = frame_uniform(list, aspect, &self.graphics);
         frame_uniform.lights = [
             planned_lights.lights.len() as u32,
             planned_lights.tile_size,
@@ -339,10 +365,11 @@ impl ScenePipeline {
                 bytemuck::cast_slice(&planned_lights.tiles),
             );
         }
+        let post = post_drawn(&list.post, &self.graphics);
         self.queue.write_buffer(
             &self.post.settings,
             0,
-            bytemuck::bytes_of(&post_uniform(&list.post)),
+            bytemuck::bytes_of(&post_uniform(&post)),
         );
 
         self.frame += 1;
@@ -412,10 +439,16 @@ impl ScenePipeline {
             )
         };
 
-        // Shadow maps cost memory, so one exists only while shadows are on.
-        let shadows_on = list.shadows.enabled;
-        if shadows_on && self.shadow_map.is_none() {
-            let (view, layers) = create_shadow_views(&self.device, SHADOW_MAP_SIZE);
+        // Shadow maps cost memory, so one exists only while shadows are on,
+        // at the size the graphics settings give.
+        let map_size = shadows_drawn(list.shadows, &self.graphics).map(|(_, size)| size);
+        if self.shadow_map.as_ref().map(|map| map.size) != map_size {
+            self.shadow_map = None;
+        }
+        if let Some(size) = map_size
+            && self.shadow_map.is_none()
+        {
+            let (view, layers) = create_shadow_views(&self.device, size);
             let frame_bind_group = create_frame_bind_group(
                 &self.device,
                 &self.frame_layout,
@@ -424,11 +457,11 @@ impl ScenePipeline {
                 &self.shadow_sampler,
             );
             self.shadow_map = Some(ShadowMap {
+                size,
+                _alive: self.shadow_maps_alive.clone(),
                 layers,
                 frame_bind_group,
             });
-        } else if !shadows_on {
-            self.shadow_map = None;
         }
 
         let mut encoder = self
@@ -556,7 +589,7 @@ impl ScenePipeline {
             &mut encoder,
             &self.post_targets,
             view,
-            list.post.enabled && list.post.bloom_enabled && list.post.bloom_intensity > 0.0,
+            post.enabled && post.bloom_enabled && post.bloom_intensity > 0.0,
         );
 
         if turned.drawn
@@ -645,6 +678,12 @@ impl ScenePipeline {
         self.draws = draws;
         self.forget_undrawn();
         Ok(())
+    }
+
+    /// How many shadow maps are alive: 0 or 1, unless one leaked.
+    #[cfg(test)]
+    pub(super) fn shadow_maps_alive(&self) -> usize {
+        Arc::strong_count(&self.shadow_maps_alive) - 1
     }
 
     pub(super) fn stats(&self) -> RenderStats {

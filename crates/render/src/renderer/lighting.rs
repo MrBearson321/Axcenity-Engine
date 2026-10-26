@@ -8,13 +8,15 @@ use std::sync::Arc;
 use glam::camera::rh;
 use glam::{Mat3, Mat4, Vec2, Vec3};
 
-use crate::draw_list::{ChannelMap, DrawItem, DrawList, Light, PostProcessing, TextureSource};
+use crate::draw_list::{
+    ChannelMap, DrawItem, DrawList, Light, PostProcessing, Shadows, TextureSource,
+};
+use crate::graphics::{EffectiveGraphics, ShadowMapSize};
 
 use super::{
     Batch, CASCADE_SPLIT_BLEND, FAR_PLANE, FrameUniform, InstanceRaw, LIGHT_SCALE, LIGHTS_PER_TILE,
     LightRaw, MATERIAL_TEXTURES, MAX_LIGHTS, MAX_SUN_SIZE, MAX_TILES, MIN_TILE_SIZE, MapsUniform,
     MaterialKey, MeshKey, NEAR_PLANE, PostUniform, SHADOW_CASCADES, SHADOW_CASTER_RANGE,
-    SHADOW_MAP_SIZE,
 };
 
 pub(super) fn view_projection(list: &DrawList, aspect: f32) -> Mat4 {
@@ -30,13 +32,43 @@ pub(super) fn view_projection(list: &DrawList, aspect: f32) -> Mat4 {
     projection * view
 }
 
-pub(super) fn frame_uniform(list: &DrawList, aspect: f32) -> FrameUniform {
+/// The sun's shadows as drawn: the world's request, within the graphics
+/// settings' ceiling. Shadows draw only if both allow them, at the smaller
+/// distance, with the settings' map. `None` when they're off.
+pub(super) fn shadows_drawn(
+    world: Shadows,
+    graphics: &EffectiveGraphics,
+) -> Option<(Shadows, ShadowMapSize)> {
+    let map = graphics.shadow_quality.map()?;
+    let usable = world.enabled && world.distance.is_finite() && world.distance > 0.0;
+    let distance = world.distance.min(graphics.shadow_distance);
+    (usable && distance > 0.0).then_some((Shadows { distance, ..world }, map))
+}
+
+/// The world's post-processing, turned off if the graphics settings don't allow it.
+pub(super) fn post_drawn(world: &PostProcessing, graphics: &EffectiveGraphics) -> PostProcessing {
+    PostProcessing {
+        enabled: world.enabled && graphics.post_processing,
+        ..*world
+    }
+}
+
+pub(super) fn frame_uniform(
+    list: &DrawList,
+    aspect: f32,
+    graphics: &EffectiveGraphics,
+) -> FrameUniform {
     let camera = &list.camera;
     let view_proj = view_projection(list, aspect);
     let sun_direction = list.sun.direction.normalize_or(Vec3::Y);
     let sun_radiance = linear_color(list.sun.color) * list.sun.intensity;
     let ambient = linear_color(list.ambient.color) * list.ambient.intensity;
-    let shadows = shadow_setup(list, sun_direction, aspect);
+    let shadows = shadow_setup(
+        list,
+        shadows_drawn(list.shadows, graphics),
+        sun_direction,
+        aspect,
+    );
     let sky = &list.sky;
     let environment = if sky.environment_intensity.is_finite() {
         sky.environment_intensity.max(0.0)
@@ -245,14 +277,16 @@ pub(super) struct ShadowSetup {
     settings: [f32; 4],
 }
 
-/// Where each shadow cascade ends, in studs from the camera along the view.
-/// The ends are spread so each cascade reaches a few times further than
-/// the one before (see [`CASCADE_SPLIT_BLEND`]), and the last ends at `distance`.
-pub(super) fn cascade_ends(distance: f32) -> [f32; SHADOW_CASCADES] {
+/// Where each of `count` shadow cascades ends, in studs from the camera
+/// along the view. The ends are spread so each cascade reaches a few times
+/// further than the one before (see [`CASCADE_SPLIT_BLEND`]), and the last
+/// ends at `distance`. Entries past `count` are `distance` too.
+pub(super) fn cascade_ends(distance: f32, count: usize) -> [f32; SHADOW_CASCADES] {
     // From 1 stud, not the near plane, or the first cascade would be tiny.
     let near = 1.0_f32.min(distance * 0.5);
+    let count = count.clamp(1, SHADOW_CASCADES);
     std::array::from_fn(|index| {
-        let fraction = (index + 1) as f32 / SHADOW_CASCADES as f32;
+        let fraction = ((index + 1) as f32 / count as f32).min(1.0);
         let even = near + (distance - near) * fraction;
         let growing = near * (distance / near).powf(fraction);
         even + (growing - even) * CASCADE_SPLIT_BLEND
@@ -264,18 +298,24 @@ pub(super) fn cascade_ends(distance: f32) -> [f32; SHADOW_CASCADES] {
 /// shadows get the most texels per stud and are the sharpest. The area of
 /// each is a sphere around its slice, so turning the camera doesn't change
 /// the map's scale, and its position is snapped to whole texels so shadow
-/// edges don't shimmer as the camera moves.
-pub(super) fn shadow_setup(list: &DrawList, sun_direction: Vec3, aspect: f32) -> ShadowSetup {
-    let settings = list.shadows;
+/// edges don't shimmer as the camera moves. `drawn` is the shadows as
+/// drawn and their map (see [`shadows_drawn`]), or `None` when they're off.
+pub(super) fn shadow_setup(
+    list: &DrawList,
+    drawn: Option<(Shadows, ShadowMapSize)>,
+    sun_direction: Vec3,
+    aspect: f32,
+) -> ShadowSetup {
     let mut setup = ShadowSetup {
         cascades: [Mat4::IDENTITY; SHADOW_CASCADES],
         texels: [1.0; 4],
         depths: [1.0; 4],
         settings: [0.0; 4],
     };
-    if !settings.enabled || !settings.distance.is_finite() || settings.distance <= 0.0 {
+    let Some((settings, map)) = drawn else {
         return setup;
-    }
+    };
+    let cascades = map.cascades as usize;
     let camera = &list.camera;
     let forward = (camera.look_at - camera.position).normalize_or(Vec3::NEG_Z);
     let distance = settings.distance.clamp(NEAR_PLANE * 4.0, FAR_PLANE);
@@ -293,7 +333,8 @@ pub(super) fn shadow_setup(list: &DrawList, sun_direction: Vec3, aspect: f32) ->
     let up = right.cross(-toward_sun);
 
     let mut slice_near = NEAR_PLANE;
-    for (index, far) in cascade_ends(distance).into_iter().enumerate() {
+    let ends = cascade_ends(distance, cascades);
+    for (index, far) in ends.into_iter().take(cascades).enumerate() {
         // The smallest sphere around the slice of the view between
         // `slice_near` and `far`, centered on the view direction `center` away.
         let center = (0.5 * (far + slice_near) * (1.0 + k2)).min(far);
@@ -301,7 +342,7 @@ pub(super) fn shadow_setup(list: &DrawList, sun_direction: Vec3, aspect: f32) ->
         let sphere_center = camera.position + forward * center;
         slice_near = far;
 
-        let texel = 2.0 * radius / SHADOW_MAP_SIZE as f32;
+        let texel = 2.0 * radius / map.size as f32;
         let snap = |distance: f32| (distance / texel).round() * texel;
         let snapped_center = right * snap(sphere_center.dot(right))
             + up * snap(sphere_center.dot(up))
@@ -325,7 +366,7 @@ pub(super) fn shadow_setup(list: &DrawList, sun_direction: Vec3, aspect: f32) ->
     setup.settings = [
         1.0,
         softness * MAX_SUN_SIZE,
-        SHADOW_CASCADES as f32,
+        cascades as f32,
         settings.distance,
     ];
     setup

@@ -677,6 +677,7 @@ dependencies = [
  "log",
  "png",
  "pollster",
+ "serde_json",
  "winit",
 ]
 
@@ -705,6 +706,8 @@ dependencies = [
  "glyphon",
  "log",
  "pollster",
+ "serde",
+ "serde_json",
  "wgpu",
 ]
 
