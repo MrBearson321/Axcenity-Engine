@@ -1,6 +1,8 @@
 //! One pass over an open project that lists missing files, invalid
 //! references, import failures, and broken dependencies. The editor shows
-//! the list; this module does not write or delete anything.
+//! the list; this module does not write or delete anything. Each finding
+//! says where its reference is written ([`Site`]), so `asset_fix.rs` can
+//! work out a fix.
 
 use std::collections::HashMap;
 use std::fs;
@@ -57,6 +59,16 @@ pub enum FindingKind {
 }
 
 impl FindingKind {
+    /// A name that never changes, for the ignored list in `.axcenity`.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::MissingFile => "missing-file",
+            Self::InvalidReference => "invalid-reference",
+            Self::ImportFailure => "import-failure",
+            Self::BrokenDependency => "broken-dependency",
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::MissingFile => "Missing file",
@@ -76,6 +88,37 @@ pub struct Finding {
     /// The path the owner names, or the file that failed to load.
     pub path: String,
     pub message: String,
+    /// Where the reference is written.
+    pub site: Site,
+    /// The kind of file the reference should name, or `None` for a file
+    /// that fails on its own.
+    pub wants: Option<AssetKind>,
+}
+
+/// Where a finding's reference is written, so a fix can change it.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum Site {
+    /// A property of an Instance in the open world.
+    Instance {
+        id: InstanceId,
+        property: &'static str,
+    },
+    /// A property of an Instance in a prefab file. `place` is the child
+    /// index at each level, from the file's top-level instances down.
+    Prefab {
+        file: String,
+        place: Vec<usize>,
+        property: &'static str,
+    },
+    /// The model a linked clip's take comes from.
+    ClipSource { file: String },
+    /// A clip of one state in a state machine.
+    StateClip { file: String, state: String },
+    /// A texture a model file names, by the name the model gives it. The
+    /// model looks for it next to itself and in `textures` there.
+    ModelTexture { model: String, texture: String },
+    /// A file that can't be loaded on its own.
+    File { file: String },
 }
 
 /// Everything the scan found. Empty means the project has none of those
@@ -91,8 +134,9 @@ impl Report {
     }
 }
 
-#[derive(Clone, Copy)]
-pub(crate) enum AssetKind {
+/// The kind of file a reference names.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum AssetKind {
     Model,
     Texture,
     Audio,
@@ -102,7 +146,7 @@ pub(crate) enum AssetKind {
 }
 
 impl AssetKind {
-    fn expected(self) -> &'static str {
+    pub fn expected(self) -> &'static str {
         match self {
             Self::Model => "a .gltf, .glb or .fbx file",
             Self::Texture => "a PNG, JPEG, TGA or BMP file",
@@ -113,7 +157,7 @@ impl AssetKind {
         }
     }
 
-    fn matches(self, path: &str) -> bool {
+    pub fn matches(self, path: &str) -> bool {
         match self {
             Self::Model => ModelFormat::of(Path::new(path)).is_some(),
             Self::Texture => has_extension(path, &TEXTURE_EXTENSIONS),
@@ -156,18 +200,32 @@ struct Scan {
 }
 
 impl Scan {
-    fn world(&mut self, world: &World, prefab: Option<&str>) {
+    /// `prefab` is the prefab file `world` was read from, with its
+    /// top-level instances, or `None` for the open world.
+    fn world(&mut self, world: &World, prefab: Option<(&str, &[InstanceId])>) {
         for id in world.descendants(world.root()) {
             let Some(instance) = world.get(id) else {
                 continue;
             };
-            let owner = owner_name(world, id, prefab);
-            let from_asset = prefab.is_some();
+            let owner = owner_name(world, id, prefab.map(|(file, _)| file));
             for (property, kind) in refs(instance.class()) {
                 let Some(path) = string_prop(instance.property(property)) else {
                     continue;
                 };
-                self.reference(&owner, property, path, kind, from_asset);
+                let site = match prefab {
+                    None => Site::Instance { id, property },
+                    Some((file, roots)) => match prefab_place(world, roots, id) {
+                        Some(place) => Site::Prefab {
+                            file: file.to_owned(),
+                            place,
+                            property,
+                        },
+                        None => Site::File {
+                            file: file.to_owned(),
+                        },
+                    },
+                };
+                self.reference(&owner, property, path, kind, site);
             }
         }
     }
@@ -183,9 +241,8 @@ impl Scan {
             let text = match fs::read_to_string(&disk) {
                 Ok(text) => text,
                 Err(err) => {
-                    self.push(
+                    self.push_file(
                         FindingKind::ImportFailure,
-                        path.clone(),
                         path,
                         format!("could not read the prefab: {err}"),
                     );
@@ -195,10 +252,9 @@ impl Scan {
             let mut world = World::new();
             let workspace = world.workspace();
             match parse_prefab(&text, &mut world, workspace) {
-                Ok(_) => self.world(&world, Some(&path)),
-                Err(err) => self.push(
+                Ok(roots) => self.world(&world, Some((&path, &roots))),
+                Err(err) => self.push_file(
                     FindingKind::ImportFailure,
-                    path.clone(),
                     path,
                     format!("could not load the prefab: {err}"),
                 ),
@@ -217,9 +273,8 @@ impl Scan {
             let text = match fs::read_to_string(&disk) {
                 Ok(text) => text,
                 Err(err) => {
-                    self.push(
+                    self.push_file(
                         FindingKind::ImportFailure,
-                        path.clone(),
                         path,
                         format!("could not read the clip: {err}"),
                     );
@@ -229,9 +284,8 @@ impl Scan {
             let clip = match ClipFile::from_json(&text) {
                 Ok(clip) => clip,
                 Err(err) => {
-                    self.push(
+                    self.push_file(
                         FindingKind::ImportFailure,
-                        path.clone(),
                         path,
                         format!("could not load the clip: {err}"),
                     );
@@ -241,7 +295,8 @@ impl Scan {
             let Some(link) = clip.link else {
                 continue;
             };
-            self.reference(&path, "source", &link.source, AssetKind::Model, true);
+            let site = Site::ClipSource { file: path.clone() };
+            self.reference(&path, "source", &link.source, AssetKind::Model, site);
             if let Some(file) = safe_path(&link.source) {
                 let file = file.to_string_lossy().replace('\\', "/");
                 if self.folder.join(&file).is_file() {
@@ -262,9 +317,8 @@ impl Scan {
             let text = match fs::read_to_string(&disk) {
                 Ok(text) => text,
                 Err(err) => {
-                    self.push(
+                    self.push_file(
                         FindingKind::ImportFailure,
-                        path.clone(),
                         path,
                         format!("could not read the state machine: {err}"),
                     );
@@ -274,9 +328,8 @@ impl Scan {
             let machine = match StateMachineFile::from_json(&text) {
                 Ok(machine) => machine,
                 Err(err) => {
-                    self.push(
+                    self.push_file(
                         FindingKind::ImportFailure,
-                        path.clone(),
                         path,
                         format!("could not load the state machine: {err}"),
                     );
@@ -289,7 +342,11 @@ impl Scan {
                         Motion::Clip(_) => "clip",
                         Motion::BlendTree(_) => "blend tree",
                     };
-                    self.reference(&path, property, clip, AssetKind::Clip, true);
+                    let site = Site::StateClip {
+                        file: path.clone(),
+                        state: state.name.clone(),
+                    };
+                    self.reference(&path, property, clip, AssetKind::Clip, site);
                 }
             }
         }
@@ -308,17 +365,20 @@ impl Scan {
             match self.model_file(&path) {
                 Ok(warnings) => {
                     for warning in warnings {
+                        let site =
+                            warning_site(&path, &warning, || Site::File { file: path.clone() });
                         self.push(
                             FindingKind::MissingFile,
                             path.clone(),
                             path.clone(),
                             format!("the model {warning}"),
+                            site,
+                            Some(AssetKind::Texture),
                         );
                     }
                 }
-                Err(err) => self.push(
+                Err(err) => self.push_file(
                     FindingKind::ImportFailure,
-                    path.clone(),
                     path,
                     format!("could not load the model: {err}"),
                 ),
@@ -326,17 +386,11 @@ impl Scan {
         }
     }
 
-    fn reference(
-        &mut self,
-        owner: &str,
-        property: &str,
-        path: &str,
-        kind: AssetKind,
-        from_asset: bool,
-    ) {
+    fn reference(&mut self, owner: &str, property: &str, path: &str, kind: AssetKind, site: Site) {
         if path.is_empty() {
             return;
         }
+        let from_asset = !matches!(site, Site::Instance { .. });
         let (file, pick) = match kind {
             AssetKind::Model => Pick::of_mesh_id(path),
             _ => (path, Pick::Whole),
@@ -347,6 +401,8 @@ impl Scan {
                 owner.to_owned(),
                 path.to_owned(),
                 format!("`{property}` `{path}` is not a path inside the project"),
+                site,
+                Some(kind),
             );
             return;
         };
@@ -356,6 +412,8 @@ impl Scan {
                 owner.to_owned(),
                 path.to_owned(),
                 format!("`{property}` must name {}, not `{file}`", kind.expected()),
+                site,
+                Some(kind),
             );
             return;
         }
@@ -375,11 +433,13 @@ impl Scan {
                 owner.to_owned(),
                 path.to_owned(),
                 format!("`{property}` names `{path}`, which isn't there"),
+                site,
+                Some(kind),
             );
             return;
         }
         match kind {
-            AssetKind::Model => self.model_ref(owner, property, path, file, &pick),
+            AssetKind::Model => self.model_ref(owner, property, path, file, &pick, site),
             AssetKind::Texture => {
                 if self.loader.texture(path).is_none() {
                     let _ = self.loader.take_errors();
@@ -388,6 +448,8 @@ impl Scan {
                         owner.to_owned(),
                         path.to_owned(),
                         format!("could not load the texture `{path}`"),
+                        site,
+                        Some(kind),
                     );
                 }
             }
@@ -398,6 +460,8 @@ impl Scan {
                         owner.to_owned(),
                         path.to_owned(),
                         format!("`{property}` names `{path}`, which could not be loaded: {err}"),
+                        site.clone(),
+                        Some(kind),
                     );
                 }
             }
@@ -408,6 +472,8 @@ impl Scan {
                         owner.to_owned(),
                         path.to_owned(),
                         format!("`{property}` names `{path}`, which could not be loaded: {err}"),
+                        site.clone(),
+                        Some(kind),
                     );
                 }
             }
@@ -415,15 +481,26 @@ impl Scan {
         }
     }
 
-    fn model_ref(&mut self, owner: &str, property: &str, mesh_id: &str, file: &str, pick: &Pick) {
+    fn model_ref(
+        &mut self,
+        owner: &str,
+        property: &str,
+        mesh_id: &str,
+        file: &str,
+        pick: &Pick,
+        site: Site,
+    ) {
         match load_model_pick(&self.folder, file, pick) {
             Ok(warnings) => {
                 for warning in warnings {
+                    let texture_site = warning_site(file, &warning, || site.clone());
                     self.push(
                         FindingKind::MissingFile,
                         owner.to_owned(),
                         mesh_id.to_owned(),
                         format!("the model `{mesh_id}` {warning}"),
+                        texture_site,
+                        Some(AssetKind::Texture),
                     );
                 }
             }
@@ -432,12 +509,16 @@ impl Scan {
                 owner.to_owned(),
                 mesh_id.to_owned(),
                 format!("`{property}` has no object `{object}` in `{file}`"),
+                site,
+                Some(AssetKind::Model),
             ),
             Err(err) => self.push(
                 FindingKind::ImportFailure,
                 owner.to_owned(),
                 mesh_id.to_owned(),
                 format!("could not load the model `{file}`: {}", causes(&err)),
+                site,
+                Some(AssetKind::Model),
             ),
         }
     }
@@ -463,6 +544,10 @@ impl Scan {
                 owner.to_owned(),
                 source.to_owned(),
                 format!("the clip's take `{take}` isn't in `{file}`"),
+                Site::ClipSource {
+                    file: owner.to_owned(),
+                },
+                Some(AssetKind::Model),
             );
         }
     }
@@ -479,13 +564,29 @@ impl Scan {
         result
     }
 
-    fn push(&mut self, kind: FindingKind, owner: String, path: String, message: String) {
+    fn push(
+        &mut self,
+        kind: FindingKind,
+        owner: String,
+        path: String,
+        message: String,
+        site: Site,
+        wants: Option<AssetKind>,
+    ) {
         self.findings.push(Finding {
             kind,
             owner,
             path,
             message,
+            site,
+            wants,
         });
+    }
+
+    /// A file that fails on its own: it's the owner, the path and the site.
+    fn push_file(&mut self, kind: FindingKind, path: String, message: String) {
+        let site = Site::File { file: path.clone() };
+        self.push(kind, path.clone(), path, message, site, None);
     }
 }
 
@@ -514,6 +615,46 @@ pub(crate) fn string_prop(value: Option<&Value>) -> Option<&str> {
     match value {
         Some(Value::String(text)) => Some(text.as_str()),
         _ => None,
+    }
+}
+
+/// Where `id` is in a prefab read into `world`: its index among `roots`,
+/// then among its parent's children at each level down.
+fn prefab_place(world: &World, roots: &[InstanceId], id: InstanceId) -> Option<Vec<usize>> {
+    let mut place = Vec::new();
+    let mut current = id;
+    loop {
+        if let Some(index) = roots.iter().position(|&root| root == current) {
+            place.push(index);
+            place.reverse();
+            return Some(place);
+        }
+        let parent = world.get(current)?.parent()?;
+        let index = world
+            .get(parent)?
+            .children()
+            .iter()
+            .position(|&child| child == current)?;
+        place.push(index);
+        current = parent;
+    }
+}
+
+/// The texture a model's warning says it's drawn without, such as `wood.png`
+/// in "is drawn without its texture `wood.png`: …".
+fn missing_texture(warning: &str) -> Option<&str> {
+    let rest = warning.strip_prefix("is drawn without its texture `")?;
+    rest.split('`').next().filter(|name| !name.is_empty())
+}
+
+/// The site of a model's warning: the texture it names, or `otherwise`.
+fn warning_site(model: &str, warning: &str, otherwise: impl FnOnce() -> Site) -> Site {
+    match missing_texture(warning) {
+        Some(texture) => Site::ModelTexture {
+            model: model.to_owned(),
+            texture: texture.to_owned(),
+        },
+        None => otherwise(),
     }
 }
 
@@ -559,6 +700,14 @@ fn has_extension(path: &str, extensions: &[&str]) -> bool {
                 .iter()
                 .any(|wanted| extension.eq_ignore_ascii_case(wanted))
         })
+}
+
+/// Every file in the project, as project paths, skipping hidden folders
+/// and the ones that aren't part of the game.
+pub(crate) fn project_files(root: &Path) -> Vec<String> {
+    let mut found = Vec::new();
+    walk(root, root, &mut found);
+    found
 }
 
 pub(crate) fn files_under(root: &Path, relative: &str) -> Vec<String> {

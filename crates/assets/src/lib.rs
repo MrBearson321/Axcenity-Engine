@@ -29,6 +29,7 @@ pub use import::{
     AUDIO_EXTENSIONS, ImportError, MODELS_FOLDER, PROJECT_AUDIO_FOLDER, PROJECT_TEXTURES_FOLDER,
     TEXTURE_EXTENSIONS, TEXTURES_FOLDER, import_animation_file, import_audio, import_model,
     import_picks, import_texture, list_model_objects, load_model_file, load_takes_file,
+    safe_file_name, unique_file_name,
 };
 pub use model::{
     AlphaMode, Blend, Bone, BoneTransform, Channel, ChannelTexture, Image, Joint, Keys, MapSlot,
@@ -297,6 +298,28 @@ impl Assets {
             .models
             .insert(mesh_id.to_owned(), Some(model.clone()));
         model
+    }
+
+    /// Forgets `path` (a model file, with or without a `#` pick, or a
+    /// texture), so it's read again the next time it's asked for, after
+    /// the file was changed. The errors it gave are reported again too.
+    pub fn forget(&self, path: &str) {
+        let file = path.split('#').next().unwrap_or(path);
+        let mut shared = self.lock();
+        shared
+            .models
+            .retain(|mesh_id, _| mesh_id.split('#').next() != Some(file));
+        shared.textures.remove(file);
+        shared.takes.remove(file);
+    }
+
+    /// Forgets every model, texture and take that couldn't be loaded, so
+    /// each is tried again, after files were added or fixed.
+    pub fn forget_failures(&self) {
+        let mut shared = self.lock();
+        shared.models.retain(|_, model| model.is_some());
+        shared.textures.retain(|_, texture| texture.is_some());
+        shared.takes.retain(|_, takes| takes.is_some());
     }
 
     /// Removes and returns the loading errors since the last call, one line

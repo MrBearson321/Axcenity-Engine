@@ -422,50 +422,6 @@ impl EditorApp {
         self.layout.open(Pane::Animation);
     }
 
-    /// The Asset Check panel: scan results, and a button to run the scan.
-    pub(in crate::app) fn asset_check_pane(&mut self, ui: &mut egui::Ui) {
-        match self.asset_check.show(ui, self.project.is_some()) {
-            crate::asset_check::CheckAction::Run => self.run_asset_check(),
-            crate::asset_check::CheckAction::Select(owner) => self.select_finding_owner(&owner),
-            crate::asset_check::CheckAction::None => {}
-        }
-    }
-
-    /// File > Check Assets, the Test ribbon, and the panel's button.
-    pub(in crate::app) fn run_asset_check(&mut self) {
-        let Some(project) = &self.project else {
-            self.output.error("Open a project first.");
-            return;
-        };
-        let report = axcenity_project::check_assets(&project.folder, &self.world);
-        let count = report.findings.len();
-        if report.is_ok() {
-            self.output.info(
-                "No missing files, invalid references, import failures, or broken dependencies.",
-            );
-            self.toasts.success("No asset problems");
-        } else {
-            let noun = if count == 1 { "problem" } else { "problems" };
-            self.output.info(format!(
-                "Asset check found {count} {noun}. See the Asset Check panel."
-            ));
-            self.toasts.error(format!("{count} {noun}"));
-        }
-        self.asset_check.set(report);
-        self.layout.open(Pane::AssetCheck);
-    }
-
-    pub(super) fn select_finding_owner(&mut self, owner: &str) {
-        let world = shown(&self.world, &self.play);
-        let found = world
-            .descendants(world.root())
-            .into_iter()
-            .find(|&id| world.full_name(id).as_deref() == Some(owner));
-        if let Some(id) = found {
-            self.select_from_viewport(Some(id));
-        }
-    }
-
     /// Gives `part`'s Animator (making one if `animator` is `None`) the
     /// controller at `path`, as one undo step.
     pub(in crate::app) fn set_controller(

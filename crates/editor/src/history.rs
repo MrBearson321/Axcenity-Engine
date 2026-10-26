@@ -206,10 +206,12 @@ enum StepKind {
     },
     /// Project files of any kind written at once, such as an imported
     /// asset package, and Instances inserted with them (an imported
-    /// model's MeshPart).
+    /// model's MeshPart), or properties changed with them (an Asset Check
+    /// fix that copies a file in and points parts at it).
     Blobs {
         blobs: Vec<BlobChange>,
         moves: Vec<Move>,
+        properties: Vec<PropertyEdit>,
     },
     /// A Terrain's landscape, and its fields changed at the same time
     /// (a new `Size` with a generated landscape).
@@ -381,7 +383,49 @@ impl History {
             return;
         }
         self.seal();
-        self.push(world, label, StepKind::Blobs { blobs, moves });
+        self.push(
+            world,
+            label,
+            StepKind::Blobs {
+                blobs,
+                moves,
+                properties: Vec::new(),
+            },
+        );
+        self.seal();
+    }
+
+    /// Records project files written as bytes and property changes made
+    /// with them (both already done) as one undo step named `label`, such
+    /// as an Asset Check fix. Does nothing if nothing changed.
+    pub fn record_blobs_and_properties(
+        &mut self,
+        world: &mut World,
+        label: String,
+        blobs: Vec<BlobChange>,
+        properties: Vec<PropertyEdit>,
+    ) {
+        let blobs: Vec<_> = blobs
+            .into_iter()
+            .filter(|blob| blob.before != blob.after)
+            .collect();
+        let properties: Vec<_> = properties
+            .into_iter()
+            .filter(|edit| edit.before != edit.after)
+            .collect();
+        if blobs.is_empty() && properties.is_empty() {
+            return;
+        }
+        self.seal();
+        self.push(
+            world,
+            label,
+            StepKind::Blobs {
+                blobs,
+                moves: Vec::new(),
+                properties,
+            },
+        );
         self.seal();
     }
 
@@ -704,7 +748,11 @@ impl History {
             StepKind::Blobs {
                 blobs: changes,
                 moves,
+                properties,
             } => {
+                for edit in properties {
+                    restore(world, edit.id, std::iter::once((edit.field, &edit.before)));
+                }
                 for step in moves.iter().rev() {
                     put_back(world, step.id, step.before);
                 }
@@ -775,9 +823,13 @@ impl History {
             StepKind::Blobs {
                 blobs: changes,
                 moves,
+                properties,
             } => {
                 for step in moves.iter() {
                     put_back(world, step.id, step.after);
+                }
+                for edit in properties {
+                    restore(world, edit.id, std::iter::once((edit.field, &edit.after)));
                 }
                 blobs = changes.clone();
             }

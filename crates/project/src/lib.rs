@@ -21,7 +21,9 @@
 //! writes Terrains' heightfields. `packed.rs` packs a game folder.
 //! `versions.rs` keeps the copies made on save. `validate.rs` is the
 //! editor's asset check ([`check_assets`]); it does not write the project.
+//! `asset_fix.rs` works out fixes for what it finds ([`plan_fix`]).
 
+mod asset_fix;
 mod migrate;
 mod migrate_animation;
 mod package;
@@ -57,7 +59,11 @@ pub use terrain_files::{
     TERRAIN_FOLDER, data_folder, is_safe_folder, keep_terrain_folder, load_terrains,
     new_terrain_folder, save_terrain, terrain_folder_path,
 };
-pub use validate::{Finding, FindingKind, Report, check_assets};
+pub use asset_fix::{
+    FileWrite, Fix, FixPlan, IGNORED_FILE, Ignored, PropertyFix, files_of_kind, list_project_files,
+    plan_fix, read_ignored, suggestion, write_ignored,
+};
+pub use validate::{AssetKind, Finding, FindingKind, Report, Site, check_assets};
 pub use versions::{Version, list_versions, record_version, restore_version};
 pub use world_file::{WorldError, parse_prefab, parse_world, write_prefab, write_world};
 

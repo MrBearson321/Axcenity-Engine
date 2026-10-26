@@ -20,7 +20,9 @@
 //! - `commands.rs` — the Console panel and what typed commands do
 //! - `files.rs` — save, scripts, import, and files changed outside the editor
 //! - `assets.rs` — Assets panel drops, prefabs, and imported files
+//! - `asset_fixes.rs` — the Asset Check scan and its fixes
 
+mod asset_fixes;
 mod assets;
 mod chrome;
 mod commands;
@@ -966,6 +968,8 @@ impl EditorApp {
     }
 }
 
+#[cfg(test)]
+mod asset_fix_tests;
 #[cfg(test)]
 mod ik_tests;
 #[cfg(test)]

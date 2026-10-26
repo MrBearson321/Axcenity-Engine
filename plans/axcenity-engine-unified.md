@@ -18,6 +18,7 @@ v1, v2 and v3 rules still hold. These are the ones the remaining phases depend o
 - **Project files**: new optional files (`*.uigraph.json`, `*.axpkg`, the string table, behavior-tree assets) don't bump `project::FORMAT_VERSION`. A changed shape of an existing file does, with a migration that keeps a copy of the previous files.
 - **Scripting**: one Lua runtime. Any creator-facing Lua added in a phase has matching blocks. Output keeps `script:line` errors.
 - **Dependencies**: **Changed**: `.axpkg` needs no new dependency. `zip` is already pinned in the workspace and used to read and write archives (`editor/src/ambient_cg.rs`). Controller (gamepad) input in Phase 19 needs one new pinned dependency, with its licence checked as Apache-2.0-compatible.
+- **Live reload** (Phases 23 to 26): watching files, reloading scripts during Play, rebuilding and hot-patching are for development only. Exported games never watch or patch anything, and the player only watches with `--watch`. Engine rebuild and hot-patching are editor features, behind a dev-only `hot-patch` feature where they need a dependency, so `player` gains no new dependency. A file that fails to reload keeps the last good version.
 - **Platforms**: Windows, macOS and Linux.
 
 ---
@@ -564,3 +565,130 @@ Game UI settings, separate from the editor's appearance settings, control text s
 - [ ] Raising text scale, turning on higher contrast and turning on reduced motion each change the game UI and leave the 3D world as it was.
 - [ ] Those settings persist in a save slot and restore on load, and they don't change the editor's theme.
 - [ ] A script can read each control's accessible name, and keyboard focus still moves in the Phase 19 order.
+
+---
+
+# Milestone 8: Asset fixes and live reload
+
+## Phase 22: Fixing asset problems
+
+**From**: the developer's request of 2026-10-25. Built ahead of the phase order, at the developer's request.
+
+### What to build
+
+**Fixes on each finding.** Each row of the Asset Check panel offers the fixes that suit its finding, and the developer picks one:
+- **Use `<path>`**: shown when the project has a file of the right kind with the same name somewhere else, because it was moved or renamed in another folder. When there are several, the nearest wins: the one with the most folders in common.
+- **Locate…**: pick a file. A file inside the project is used where it is. One outside is copied in first, to the folder Import uses for its kind. For a model's missing texture, the picked image is copied next to the model as `textures/<name>`, where the model looks for it.
+- **Replace…**: a menu of the project's files of the right kind.
+- **Clear**: empties the reference. This works for an Instance's property, a prefab's property and a state's clip. For a linked clip whose model is gone, Clear unlinks the clip.
+- **Delete file**: for a file that can't be loaded (a damaged model, prefab, clip or state machine).
+- **Ignore**: hides the finding. Ignored findings are saved in `.axcenity/asset-check.json`. **Show ignored** lists them again, each with Unignore.
+
+**Apply to all like this.** When other findings have the same kind and path ("4 more like this"), a checkbox on the row applies the chosen fix to all of them.
+
+**One step.** Each fix is one undo step. That step covers the world's properties, the prefab, clip and state machine files it rewrote, and the files it copied or deleted. The check then runs again. Fixes are off during Play. Running the check alone still writes nothing.
+
+### Acceptance criteria
+
+- [x] A MeshPart naming a model that was moved offers Use `<new path>`. Choosing it with Apply to all fixes every part naming that path in one undo step, and undo puts them all back.
+- [ ] Locate… with a file outside the project copies it in and points the reference at the copy. Locating a model's missing texture copies it next to the model, and the finding is gone.
+- [x] A missing clip in a state machine and a missing clip in a prefab can each be replaced or cleared. The files are rewritten, and undo restores their text.
+- [x] Clear, Delete file and Ignore each do what they say. Ignored findings stay hidden after reopening the project, and Unignore shows them again.
+- [x] Running the check alone still writes no files.
+
+---
+
+## Phase 23: Live asset reload
+
+**From**: the developer's request of 2026-10-25.
+
+### What to build
+
+**Assets reload in place.** The editor's file watcher also watches `assets/`: models, textures, texture sets, sounds, fonts, clips, state machines and prefabs. A changed file is read again and swapped in, in edit mode and during Play, without reopening the project or stopping the game:
+- MeshParts redraw with the new model and keep their own properties.
+- Textures are uploaded again.
+- A Sound uses the new file the next time it plays.
+- Animators using a changed clip or state machine pick it up and stay in the state they were in, matched by name.
+- The Assets panel updates.
+
+A file that now fails to load keeps the last good version on screen and is reported once.
+
+**The player.** `axcenity-player --watch` does the same for development. Without the flag, and in exported games, nothing is watched.
+
+### Acceptance criteria
+
+- [ ] Writing a new version of a model over its file updates every MeshPart that uses it within a second, in edit mode and during Play, and the game keeps running.
+- [ ] Overwriting a texture updates the SurfaceAppearances, ImageLabels and terrain layers that use it.
+- [ ] Editing a clip file changes a playing Animator's motion without restarting the game, and it stays in the same state.
+- [ ] Saving a broken model over a good one keeps the good one on screen and reports the problem once.
+- [ ] `axcenity-player --watch` reloads the same way. Without the flag, and in exported games, nothing is watched.
+
+---
+
+## Phase 24: Live scripts and keeping Play edits
+
+**From**: the developer's request of 2026-10-25.
+
+### What to build
+
+**Scripts reload during Play.** When a Script, LocalScript or ModuleScript file changes during Play, from a tab's Save or from another editor, it is re-run in place:
+- Its connections are disconnected and its waiting and spawned threads are dropped.
+- The new text runs against the live game world. A changed ModuleScript re-runs the scripts that required it.
+- Every other script, and the world's state, carries on.
+- A file with a syntax error keeps the old version running and reports the error with its line.
+- Output says "Reloaded Door.server.lua".
+
+Script tabs no longer say changes wait for the next Play.
+
+**Keeping Play edits.** Values edited in Properties during Play still edit the live game. Each edited value now has a **Keep** pin, and an object's right-click menu has **Keep changes to <name>**. At Stop, the kept values are applied to the edit world as one undo step. Values that weren't kept are discarded as before.
+
+### Acceptance criteria
+
+- [ ] Changing a printed message in a running script during Play prints the new text from then on without Stop, and a part that another script moves keeps moving.
+- [ ] After a reload, the script's old `Touched` connection no longer fires and its old `wait` loop stops.
+- [ ] Saving a syntax error keeps the old version running and shows the error with its line.
+- [ ] A kept Play edit is in the edit world after Stop as one undo step. Values that weren't kept are discarded.
+
+---
+
+## Phase 25: Rebuilding and relaunching the engine
+
+**From**: the developer's request of 2026-10-25. This is the fallback for any engine edit that Phase 26 can't patch.
+
+### What to build
+
+**Rebuild on change.** A debug editor run from the source tree knows its workspace, and Settings > Engine has **Rebuild when engine code changes**. When it's on, the editor watches `crates/**` (`.rs`, `Cargo.toml`, shaders) and runs `cargo build -p axcenity-editor` in the background. That build uses the same profile, but its own target folder, so the running program isn't locked on Windows. A bottom-right note shows progress. Compiler errors go to Output with clickable `file:line` links, and the running editor is left as it was.
+
+**Relaunch with the session.** When a build succeeds, a toast offers **Relaunch**. A setting makes it automatic. Relaunching writes a handoff file to the editor's data folder, never the project, holding:
+- the open project and its unsaved world
+- unsaved script tabs
+- the layout, the camera and the selection
+- during Play, the game world as it is and the Play camera
+
+The new process reads the handoff and deletes it. It opens the project with those edits still unsaved, and resumes Play from the saved game world. Scripts start again against that world. The undo history starts fresh, and Output says so.
+
+### Acceptance criteria
+
+- [ ] Changing an editor panel's label in Rust rebuilds in the background. After Relaunch, the new label shows with the same project, camera, selection and unsaved edits.
+- [ ] Relaunching during Play continues Play in the new process, with positions and properties as they were.
+- [ ] A compile error leaves the running editor untouched and lists the errors in Output with clickable locations.
+- [ ] Release builds and the player have none of this.
+
+---
+
+## Phase 26: Hot-patching engine code
+
+**From**: the developer's request of 2026-10-25.
+
+### What to build
+
+**Patch without restarting.** A change to the body of a function in the engine is patched into the running editor, with no relaunch, using `subsecond`. It's pinned in the workspace with its MIT OR Apache-2.0 licence checked, and only the editor's dev `hot-patch` feature uses it. The editor's frame and the session's frame steps are called through `subsecond::call`, so the next frame runs the new code. Play keeps running across a patch. The README says how to start the editor for hot-patching with the `dx` CLI. Started normally, the editor uses Phase 25 alone.
+
+**Fallback.** Some changes can't be patched: a struct's fields, a new dependency, or a changed signature across the patch boundary. Those fall back to Phase 25's rebuild and relaunch. Output says which one happened.
+
+### Acceptance criteria
+
+- [ ] During Play, changing the body of a physics or character step function changes behaviour at the next frame, with no relaunch, and the game keeps running.
+- [ ] Changing a struct's fields falls back to rebuild and relaunch, and Output says so.
+- [ ] Without the `hot-patch` feature the editor builds without `subsecond`, and the player never depends on it.
+- [ ] The workspace still builds on Windows, macOS and Linux. On a platform where patching isn't supported, the fallback is used.

@@ -246,7 +246,7 @@ fn file_name(file: &Path) -> String {
 /// The last part of `path` (with `/` or `\` between folders) as a file
 /// name that works on every OS: letters, digits, spaces, `-`, `_` and `.`
 /// kept, anything else `_`. `None` if nothing is left but dots and spaces.
-pub(crate) fn safe_file_name(path: &str) -> Option<String> {
+pub fn safe_file_name(path: &str) -> Option<String> {
     let name = path.rsplit(['/', '\\']).next().unwrap_or_default();
     let name: String = name
         .chars()
@@ -264,7 +264,7 @@ pub(crate) fn safe_file_name(path: &str) -> Option<String> {
 
 /// `name`, or `name` with 2, 3… before its extension, the first that
 /// `taken` says isn't.
-pub(crate) fn unique_file_name(name: &str, taken: impl Fn(&str) -> bool) -> String {
+pub fn unique_file_name(name: &str, taken: impl Fn(&str) -> bool) -> String {
     let (stem, extension) = match name.rsplit_once('.') {
         Some((stem, extension)) => (stem, format!(".{extension}")),
         None => (name, String::new()),
