@@ -10,7 +10,10 @@
 //!   part's own axis), and the opposite face stays where it is, or with
 //!   Both directions both faces move.
 //! - **Rotate**: a ring around each axis. Dragging along one turns the
-//!   parts around it, through the pivot (see [`RotatePivot`]).
+//!   parts around it, through the pivot (see [`RotatePivot`]). The turn is
+//!   how far the mouse moves along the ring on screen, at a steady
+//!   [`TURN_PER_POINT`], so a ring seen nearly edge-on turns as steadily as
+//!   one facing the camera. Holding Shift turns at a quarter of the speed.
 //!
 //! With snapping on, moves and size changes go in steps of `Snap::move_step`
 //! studs and turns in steps of `Snap::rotate_step` degrees, counted from
@@ -18,7 +21,7 @@
 //!
 //! The handles keep the same size on screen however far away the part is.
 //! Everything here is plain math on rays and points, so tests can drive a
-//! drag without a window; `viewport.rs` feeds it the mouse.
+//! drag without a window; `viewport.rs` feeds it the mouse as a [`Pointer`].
 
 use axcenity_core::{Instance, InstanceId, Value, Vector3};
 use axcenity_render::glam::{Quat, Vec3};
@@ -45,9 +48,15 @@ const BALL_RADIUS: f32 = 6.0;
 const LINE_WIDTH: f32 = 3.0;
 /// The handle under the mouse, or being dragged.
 const HIGHLIGHT: egui::Color32 = egui::Color32::from_rgb(255, 215, 0);
-/// Rays this close to parallel with a handle's line (or a ring's flat side)
-/// can't say where along it the mouse is.
+/// Rays this close to parallel with a handle's line can't say where along
+/// it the mouse is.
 const PARALLEL: f32 = 1e-3;
+/// How far (radians) a ring turns for each point the mouse moves along it:
+/// one ring radius of travel turns one radian, so on a ring facing the
+/// camera the mouse keeps up with the ring.
+pub const TURN_PER_POINT: f32 = 1.0 / HANDLE_POINTS;
+/// Holding Shift turns at this much of the speed.
+pub const FINE_TURN: f32 = 0.25;
 
 /// The tool picked in the toolbar. Select only selects; Move, Resize
 /// (`Scale`) and Rotate also show handles on the selection, and the others
@@ -182,6 +191,16 @@ impl Snap {
     pub const MIN_MOVE_STEP: f32 = MIN_SIZE;
     pub const MIN_ROTATE_STEP: f32 = 0.1;
 
+    /// Snapping turned the other way for both moves and turns, as holding
+    /// Ctrl does while posing; the steps stay as they are.
+    pub fn flipped(self) -> Self {
+        Self {
+            move_on: !self.move_on,
+            rotate_on: !self.rotate_on,
+            ..self
+        }
+    }
+
     /// `distance` rounded to the move step, if move snapping is on.
     pub fn studs(&self, distance: f32) -> f32 {
         snap(distance, self.move_on, self.move_step)
@@ -315,6 +334,14 @@ pub struct Shape {
     pub handle: Handle,
     lines: Vec<[egui::Pos2; 2]>,
     end: End,
+}
+
+impl Shape {
+    /// The pieces of line the handle is drawn with.
+    #[cfg(test)]
+    pub fn lines(&self) -> &[[egui::Pos2; 2]] {
+        &self.lines
+    }
 }
 
 /// What's drawn at the end of a handle's line.
@@ -553,23 +580,57 @@ pub struct Drag {
     parts: Vec<(InstanceId, Pose)>,
     modes: Modes,
     /// Move and Scale: how far along the handle's line the mouse grabbed it.
-    /// Rotate: the angle around the ring where the mouse grabbed it.
     grabbed: f32,
-    /// Rotate only: the angle the mouse was at last frame, and how far it has
-    /// turned in all (which can go past a whole turn).
-    last_angle: f32,
+    /// Rotate only: the way on screen (one point long) the ring turns
+    /// forward where it was grabbed, where the mouse was last frame, and
+    /// how far it has turned in all, in radians (which can go past a whole
+    /// turn).
+    spin: egui::Vec2,
+    last_at: egui::Pos2,
     turned: f32,
+}
+
+/// The mouse during a drag: the ray it points along, where it is in the
+/// viewport, and whether Shift is held for fine turns.
+#[derive(Clone, Copy, Debug)]
+pub struct Pointer {
+    pub ray: Ray,
+    pub at: egui::Pos2,
+    pub fine: bool,
+}
+
+impl Pointer {
+    pub fn on(screen: &Screen, at: egui::Pos2, fine: bool) -> Self {
+        Self {
+            ray: screen.ray(at),
+            at,
+            fine,
+        }
+    }
+}
+
+/// Move and Resize drags only need the ray.
+#[cfg(test)]
+impl From<Ray> for Pointer {
+    fn from(ray: Ray) -> Self {
+        Self {
+            ray,
+            at: egui::Pos2::ZERO,
+            fine: false,
+        }
+    }
 }
 
 /// New property values for each part a drag changes.
 pub type PartValues = Vec<(InstanceId, Vec<(&'static str, Value)>)>;
 
 impl Drag {
-    /// Starts dragging `handle` of one `part` (at `start`) where `ray`
-    /// points, with world axes. `None` if the ray runs alongside the handle
-    /// and can't grab it.
+    /// Starts dragging the Move or Resize `handle` of one `part` (at
+    /// `start`) where `ray` points, with world axes. `None` if the ray runs
+    /// alongside the handle and can't grab it.
     #[cfg(test)]
     pub fn start(handle: Handle, part: InstanceId, start: Pose, ray: Ray) -> Option<Drag> {
+        assert!(!matches!(handle, Handle::Rotate(_)), "rings use `turn`");
         // Resize handles follow the part's own axes; the others the world's.
         let frame = match handle {
             Handle::Scale(..) => start,
@@ -578,17 +639,65 @@ impl Drag {
                 ..start
             },
         };
-        Self::start_many(handle, frame, vec![(part, start)], Modes::default(), ray)
+        Self::begin(
+            handle,
+            frame,
+            vec![(part, start)],
+            Modes::default(),
+            ray,
+            None,
+        )
+    }
+
+    /// Starts dragging the Rotate `handle` of one `part` (at `start`),
+    /// grabbed at `at` in `screen`, with world axes.
+    #[cfg(test)]
+    pub fn turn(
+        handle: Handle,
+        part: InstanceId,
+        start: Pose,
+        screen: &Screen,
+        at: egui::Pos2,
+    ) -> Option<Drag> {
+        let frame = Pose {
+            rotation: Quat::IDENTITY,
+            ..start
+        };
+        Self::start_many(
+            handle,
+            frame,
+            vec![(part, start)],
+            Modes::default(),
+            screen,
+            at,
+        )
     }
 
     /// Starts dragging `handle`, placed at `frame`, for every one of
-    /// `parts` (the last is the one the handles are on).
+    /// `parts` (the last is the one the handles are on), grabbed at `at`
+    /// in `screen`.
     pub fn start_many(
         handle: Handle,
         frame: Pose,
         parts: Vec<(InstanceId, Pose)>,
         modes: Modes,
+        screen: &Screen,
+        at: egui::Pos2,
+    ) -> Option<Drag> {
+        let spin = match handle {
+            Handle::Rotate(axis) => Some((ring_spin(frame, axis, screen, at), at)),
+            _ => None,
+        };
+        Self::begin(handle, frame, parts, modes, screen.ray(at), spin)
+    }
+
+    fn begin(
+        handle: Handle,
+        frame: Pose,
+        parts: Vec<(InstanceId, Pose)>,
+        modes: Modes,
         ray: Ray,
+        spin: Option<(egui::Vec2, egui::Pos2)>,
     ) -> Option<Drag> {
         parts.last()?;
         let grabbed = match handle {
@@ -596,34 +705,47 @@ impl Drag {
                 let (origin, direction) = handle_line(handle, frame);
                 along_line(origin, direction, ray)?
             }
-            Handle::Rotate(axis) => ring_angle(frame, axis, ray)?,
+            Handle::Rotate(_) => 0.0,
         };
+        let (spin, last_at) = spin.unwrap_or((egui::Vec2::ZERO, egui::Pos2::ZERO));
         Some(Drag {
             handle,
             frame,
             parts,
             modes,
             grabbed,
-            last_angle: grabbed,
+            spin,
+            last_at,
             turned: 0.0,
         })
     }
 
-    /// The new property values of the part the handles are on, for the
-    /// mouse now pointing along `ray`, or `None` if this ray can't tell.
+    /// A ring drag's forward way on screen, one point long.
     #[cfg(test)]
-    pub fn update(&mut self, ray: Ray, snap: &Snap) -> Option<Vec<(&'static str, Value)>> {
+    pub fn spin(&self) -> egui::Vec2 {
+        self.spin
+    }
+
+    /// The new property values of the part the handles are on, for the
+    /// mouse now at `pointer`, or `None` if it can't tell.
+    #[cfg(test)]
+    pub fn update(
+        &mut self,
+        pointer: impl Into<Pointer>,
+        snap: &Snap,
+    ) -> Option<Vec<(&'static str, Value)>> {
         let part = self.parts.last()?.0;
-        self.update_all(ray, snap)?
+        self.update_all(pointer.into(), snap)?
             .into_iter()
             .find(|(id, _)| *id == part)
             .map(|(_, values)| values)
     }
 
-    /// The new property values of every part, for the mouse now pointing
-    /// along `ray`, or `None` if this ray can't tell (it runs alongside the
-    /// handle).
-    pub fn update_all(&mut self, ray: Ray, snap: &Snap) -> Option<PartValues> {
+    /// The new property values of every part, for the mouse now at
+    /// `pointer`, or `None` if it can't tell (its ray runs alongside a Move
+    /// or Resize handle).
+    pub fn update_all(&mut self, pointer: Pointer, snap: &Snap) -> Option<PartValues> {
+        let ray = pointer.ray;
         let frame = self.frame;
         let modes = self.modes;
         match self.handle {
@@ -674,9 +796,11 @@ impl Drag {
                 )
             }
             Handle::Rotate(axis) => {
-                let angle = ring_angle(frame, axis, ray)?;
-                self.turned += shortest_turn(angle - self.last_angle);
-                self.last_angle = angle;
+                // Only this frame's move counts at this frame's speed, so
+                // pressing or letting go of Shift never makes the part jump.
+                let speed = if pointer.fine { FINE_TURN } else { 1.0 };
+                self.turned += (pointer.at - self.last_at).dot(self.spin) * TURN_PER_POINT * speed;
+                self.last_at = pointer.at;
                 let radians = snap.degrees(self.turned.to_degrees()).to_radians();
                 let world_axis = frame.rotation * axis.vector();
                 Some(
@@ -736,32 +860,61 @@ fn along_line(origin: Vec3, direction: Vec3, ray: Ray) -> Option<f32> {
     t.is_finite().then_some(t)
 }
 
-/// The angle (in radians) around the ring for `axis` through `center` where
-/// `ray` meets the ring's flat side. `None` if it doesn't meet it in front
-/// of the camera.
-fn ring_angle(frame: Pose, axis: Axis, ray: Ray) -> Option<f32> {
-    let center = frame.position;
-    let normal = frame.rotation * axis.vector();
-    let facing = ray.direction.dot(normal);
-    if facing.abs() < PARALLEL {
-        return None;
-    }
-    let distance = (center - ray.origin).dot(normal) / facing;
-    if distance <= 0.0 {
-        return None;
-    }
-    let offset = ray.at(distance) - center;
+/// Where the ring around `axis` of the handles at `frame` is drawn in
+/// `screen`, `angle` (radians) around from its first direction.
+#[cfg(test)]
+pub fn ring_point(screen: &Screen, frame: Pose, axis: Axis, angle: f32) -> egui::Pos2 {
+    let length = screen.studs_per_point(frame.position) * HANDLE_POINTS;
     let (across, up) = axis.ring_directions();
     let (across, up) = (frame.rotation * across, frame.rotation * up);
-    Some(offset.dot(up).atan2(offset.dot(across)))
+    let point = frame.position + (across * angle.cos() + up * angle.sin()) * length;
+    screen.point(point).expect("in front of the camera")
 }
 
-/// An angle change in radians brought between -half a turn and half a turn,
-/// so crossing the point where the angle wraps from +180° to -180° counts
-/// as a small turn, not nearly a whole one.
-fn shortest_turn(angle: f32) -> f32 {
-    use std::f32::consts::{PI, TAU};
-    (angle + PI).rem_euclid(TAU) - PI
+/// The way on screen (one point long) that the ring for `axis` around
+/// `frame` turns forward at the point of it nearest `at`: along the ring
+/// as drawn. Where the ring runs straight at the camera there, it's the
+/// way around the ring's middle instead.
+fn ring_spin(frame: Pose, axis: Axis, screen: &Screen, at: egui::Pos2) -> egui::Vec2 {
+    let center = frame.position;
+    let length = screen.studs_per_point(center) * HANDLE_POINTS;
+    let (across, up) = axis.ring_directions();
+    let (across, up) = (frame.rotation * across, frame.rotation * up);
+    let point = |angle: f32| center + (across * angle.cos() + up * angle.sin()) * length;
+    let nearest = (0..RING_PIECES * 4)
+        .map(|i| i as f32 / (RING_PIECES * 4) as f32 * std::f32::consts::TAU)
+        .filter_map(|angle| Some((angle, screen.point(point(angle))?.distance(at))))
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(angle, _)| angle);
+    if let Some(angle) = nearest {
+        let ahead = (up * angle.cos() - across * angle.sin()) * length * 0.01;
+        let here = point(angle);
+        if let (Some(a), Some(b)) = (screen.point(here), screen.point(here + ahead)) {
+            let along = b - a;
+            if along.length() > 0.05 {
+                return along.normalized();
+            }
+        }
+    }
+    // Around the middle: anticlockwise on screen when the axis points at
+    // the camera (egui's Y runs down).
+    let Some(middle) = screen.point(center) else {
+        return egui::Vec2::X;
+    };
+    let out = at - middle;
+    if out.length() < 1e-3 {
+        return egui::Vec2::X;
+    }
+    let toward_camera = -screen
+        .ray(middle)
+        .direction
+        .dot(frame.rotation * axis.vector());
+    let anticlockwise = egui::vec2(out.y, -out.x).normalized();
+    if toward_camera >= 0.0 {
+        anticlockwise
+    } else {
+        -anticlockwise
+    }
 }
 
 #[cfg(test)]
@@ -870,25 +1023,144 @@ mod tests {
         assert_eq!(vector(&values, "Size").x, MIN_SIZE);
     }
 
+    /// Looking straight down -Z at `at` from 20 studs away, in a 1280×720
+    /// viewport (nudged `off` along X, to see a ring nearly edge-on).
+    fn screen_along_z(at: Vec3, off: f32) -> Screen {
+        let camera = Camera {
+            position: at + Vec3::new(off, 0.0, 20.0),
+            look_at: at,
+            fov_y_degrees: 50.0,
+        };
+        Screen::new(
+            camera,
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0)),
+        )
+    }
+
+    /// How many points along a ring turn it `degrees`.
+    fn points_for(degrees: f32) -> f32 {
+        degrees.to_radians() / TURN_PER_POINT
+    }
+
+    /// Moves the mouse of a ring `drag` from `from` by `points` the way the
+    /// ring turns forward there, in `steps`, and returns the last values.
+    fn turn_along(
+        drag: &mut Drag,
+        screen: &Screen,
+        from: egui::Pos2,
+        points: f32,
+        snap: &Snap,
+    ) -> Vec<(&'static str, Value)> {
+        let spin = drag.spin;
+        let mut values = None;
+        for step in 1..=8 {
+            let at = from + spin * points * step as f32 / 8.0;
+            values = drag.update(Pointer::on(screen, at, false), snap);
+        }
+        values.unwrap()
+    }
+
     #[test]
     fn rotate_ring_turns_the_part_around_its_axis() {
         let start = pose(Vec3::ZERO, Vec3::ONE);
+        let screen = screen_along_z(Vec3::ZERO, 0.0);
         // Looking straight down the Z axis at the Z ring: grab it on the
-        // right (+X), then drag up to the top (+Y), a quarter turn.
+        // right (+X); its forward way there is up the screen.
         let handle = Handle::Rotate(Axis::Z);
-        let mut drag = Drag::start(handle, some_part(), start, ray_through(3.0, 0.0)).unwrap();
-        let values = drag.update(ray_through(0.0, 3.0), &NO_SNAP).unwrap();
+        let grab = ring_point(&screen, start, Axis::Z, 0.0);
+        let mut drag = Drag::turn(handle, some_part(), start, &screen, grab).unwrap();
+        assert!(drag.spin.y < -0.99, "{:?}", drag.spin);
+        let values = turn_along(&mut drag, &screen, grab, points_for(90.0), &NO_SNAP);
         assert_near(vector(&values, "Orientation"), Vec3::new(0.0, 0.0, 90.0));
 
-        // Carrying on around past the left side keeps counting, rather than
-        // jumping back when the angle wraps from +180° to -180°.
-        drag.update(ray_through(-3.0, 0.1), &NO_SNAP).unwrap();
-        let values = drag.update(ray_through(-3.0, -0.1), &NO_SNAP).unwrap();
+        // Carrying on past half a turn keeps counting.
+        let values = turn_along(&mut drag, &screen, grab, points_for(181.91), &NO_SNAP);
         let turned = drag.turned.to_degrees();
         assert!((turned - 181.91).abs() < 0.01, "{turned}");
         // 181.91° is the same as -178.09°, which is how Orientation says it.
         let z = vector(&values, "Orientation").z;
         assert!((z + 178.09).abs() < 0.01, "{z}");
+    }
+
+    #[test]
+    fn the_grabbed_point_of_a_ring_follows_the_mouse() {
+        let start = pose(Vec3::new(1.0, 0.5, 0.0), Vec3::ONE);
+        let screen = screen_along_z(start.position, 0.0);
+        let grab = ring_point(&screen, start, Axis::Z, 0.7);
+        let handle = Handle::Rotate(Axis::Z);
+        let mut drag = Drag::turn(handle, some_part(), start, &screen, grab).unwrap();
+        // A few points along the ring: the ring's point turned that far is
+        // under the mouse.
+        let values = turn_along(&mut drag, &screen, grab, 6.0, &NO_SNAP);
+        let turned = vector(&values, "Orientation").z.to_radians();
+        let under = ring_point(&screen, start, Axis::Z, 0.7 + turned);
+        let mouse = grab + drag.spin * 6.0;
+        assert!(under.distance(mouse) < 0.5, "{under:?} vs {mouse:?}");
+    }
+
+    #[test]
+    fn a_drag_as_long_turns_as_far_whether_a_ring_faces_the_camera_or_is_edge_on() {
+        let start = pose(Vec3::ZERO, Vec3::ONE);
+        let turned_by = |screen: &Screen, axis: Axis| {
+            // Grab the ring where it's drawn, and drag 50 points along the
+            // line it's drawn with there.
+            let shape = shapes(Tool::Rotate, start, screen)
+                .into_iter()
+                .find(|shape| shape.handle == Handle::Rotate(axis))
+                .unwrap();
+            let [a, b] = shape
+                .lines
+                .iter()
+                .copied()
+                .max_by(|x, y| (x[1] - x[0]).length().total_cmp(&(y[1] - y[0]).length()))
+                .unwrap();
+            let grab = a.lerp(b, 0.5);
+            let along = (b - a).normalized();
+            let mut drag =
+                Drag::turn(Handle::Rotate(axis), some_part(), start, screen, grab).unwrap();
+            for step in 1..=10 {
+                let at = grab + along * 5.0 * step as f32;
+                drag.update(Pointer::on(screen, at, false), &NO_SNAP)
+                    .unwrap();
+            }
+            drag.turned.abs().to_degrees()
+        };
+        let facing = turned_by(&screen_along_z(Vec3::ZERO, 0.0), Axis::Z);
+        let expected = (50.0 * TURN_PER_POINT).to_degrees();
+        assert!((facing - expected).abs() < 0.05, "{facing} vs {expected}");
+        // The X ring seen from along Z is a line; nudged, a thin ellipse.
+        for off in [0.0, 0.3, 2.0] {
+            let edge_on = turned_by(&screen_along_z(Vec3::ZERO, off), Axis::X);
+            assert!(
+                (edge_on - facing).abs() < 0.05,
+                "nudged {off}: {edge_on} vs {facing}"
+            );
+        }
+    }
+
+    #[test]
+    fn shift_turns_a_quarter_as_fast_and_letting_go_does_not_jump() {
+        let start = pose(Vec3::ZERO, Vec3::ONE);
+        let screen = screen_along_z(Vec3::ZERO, 0.0);
+        let grab = ring_point(&screen, start, Axis::Z, 0.0);
+        let handle = Handle::Rotate(Axis::Z);
+        let mut drag = Drag::turn(handle, some_part(), start, &screen, grab).unwrap();
+        let up = drag.spin;
+        let z_at = |drag: &mut Drag, points: f32, fine: bool| {
+            let values = drag
+                .update(Pointer::on(&screen, grab + up * points, fine), &NO_SNAP)
+                .unwrap();
+            vector(&values, "Orientation").z
+        };
+        let step = points_for(20.0);
+        let normal = z_at(&mut drag, step, false);
+        assert!((normal - 20.0).abs() < 1e-3, "{normal}");
+        let fine = z_at(&mut drag, step * 2.0, true);
+        assert!((fine - 25.0).abs() < 1e-3, "a quarter as far: {fine}");
+        let let_go = z_at(&mut drag, step * 2.0, false);
+        assert!((let_go - fine).abs() < 1e-4, "no jump: {let_go}");
+        let after = z_at(&mut drag, step * 3.0, false);
+        assert!((after - 45.0).abs() < 1e-3, "full speed again: {after}");
     }
 
     #[test]
@@ -899,17 +1171,23 @@ mod tests {
             rotation: Quat::from_rotation_y(30f32.to_radians()),
             size: Vec3::ONE,
         };
-        let from_above = |x: f32, z: f32| Ray {
-            origin: Vec3::new(x, 50.0, z),
-            direction: Vec3::NEG_Y,
+        let camera = Camera {
+            position: Vec3::new(0.0, 20.0, 6.0),
+            look_at: Vec3::ZERO,
+            fov_y_degrees: 50.0,
+        };
+        let screen = Screen::new(
+            camera,
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0)),
+        );
+        let frame = Pose {
+            rotation: Quat::IDENTITY,
+            ..start
         };
         let handle = Handle::Rotate(Axis::Y);
-        // Around Y, turning goes from +Z toward +X.
-        let mut drag = Drag::start(handle, some_part(), start, from_above(0.0, 3.0)).unwrap();
-        let (sin, cos) = 15f32.to_radians().sin_cos();
-        let values = drag
-            .update(from_above(3.0 * sin, 3.0 * cos), &Snap::default())
-            .unwrap();
+        let grab = ring_point(&screen, frame, Axis::Y, 0.0);
+        let mut drag = Drag::turn(handle, some_part(), start, &screen, grab).unwrap();
+        let values = turn_along(&mut drag, &screen, grab, points_for(15.0), &Snap::default());
         assert_eq!(vector(&values, "Orientation"), Vec3::new(0.0, 45.0, 0.0));
     }
 
@@ -927,13 +1205,31 @@ mod tests {
         assert_near(vector(&free, "Position"), Vec3::new(2.0, 0.0, 0.0));
 
         let handle = Handle::Rotate(Axis::Z);
-        let mut drag = Drag::start(handle, some_part(), start, ray_through(3.3, 0.0)).unwrap();
+        let screen = screen_along_z(start.position, 0.0);
+        let grab = ring_point(&screen, start, Axis::Z, 0.0);
+        let mut drag = Drag::turn(handle, some_part(), start, &screen, grab).unwrap();
         // About 20° around: snaps to 15°.
-        let (sin, cos) = 20f32.to_radians().sin_cos();
-        let values = drag
-            .update(ray_through(0.3 + 3.0 * cos, 3.0 * sin), &Snap::default())
-            .unwrap();
+        let values = turn_along(&mut drag, &screen, grab, points_for(20.0), &Snap::default());
         assert_eq!(vector(&values, "Orientation"), Vec3::new(0.0, 0.0, 15.0));
+        let free = turn_along(&mut drag, &screen, grab, points_for(20.0), &NO_SNAP);
+        assert_near(vector(&free, "Orientation"), Vec3::new(0.0, 0.0, 20.0));
+        // Flipped (Ctrl), on is off and off is on, with the same steps.
+        let flipped = turn_along(
+            &mut drag,
+            &screen,
+            grab,
+            points_for(20.0),
+            &Snap::default().flipped(),
+        );
+        assert_near(vector(&flipped, "Orientation"), Vec3::new(0.0, 0.0, 20.0));
+        let flipped = turn_along(
+            &mut drag,
+            &screen,
+            grab,
+            points_for(20.0),
+            &NO_SNAP.flipped(),
+        );
+        assert_eq!(vector(&flipped, "Orientation"), Vec3::new(0.0, 0.0, 15.0));
     }
 
     #[test]
@@ -955,11 +1251,10 @@ mod tests {
         assert_near(vector(&values, "Size"), Vec3::new(4.5, 1.0, 2.0));
 
         let handle = Handle::Rotate(Axis::Z);
-        let mut drag = Drag::start(handle, some_part(), start, ray_through(3.0, 0.0)).unwrap();
-        let (sin, cos) = 30f32.to_radians().sin_cos();
-        let values = drag
-            .update(ray_through(3.0 * cos, 3.0 * sin), &quarter)
-            .unwrap();
+        let screen = screen_along_z(start.position, 0.0);
+        let grab = ring_point(&screen, start, Axis::Z, 0.0);
+        let mut drag = Drag::turn(handle, some_part(), start, &screen, grab).unwrap();
+        let values = turn_along(&mut drag, &screen, grab, points_for(30.0), &quarter);
         assert_eq!(vector(&values, "Orientation"), Vec3::new(0.0, 0.0, 45.0));
     }
 
@@ -1089,15 +1384,18 @@ mod tests {
         let poses: Vec<Pose> = parts.iter().map(|(_, pose)| *pose).collect();
         let frame = handle_frame(Tool::Move, Modes::default(), &poses).unwrap();
         assert_near(frame.position, Vec3::ZERO);
-        let mut drag = Drag::start_many(
+        let mut drag = Drag::begin(
             Handle::Move(Axis::Y),
             frame,
             parts.clone(),
             Modes::default(),
             ray_through(0.5, 0.0),
+            None,
         )
         .unwrap();
-        let values = drag.update_all(ray_through(0.5, 3.0), &NO_SNAP).unwrap();
+        let values = drag
+            .update_all(ray_through(0.5, 3.0).into(), &NO_SNAP)
+            .unwrap();
         assert_near(
             value_of(&values, parts[0].0, "Position"),
             Vec3::new(-2.0, 3.0, 0.0),
@@ -1120,15 +1418,18 @@ mod tests {
         let poses: Vec<Pose> = parts.iter().map(|(_, pose)| *pose).collect();
         let frame = handle_frame(Tool::Move, modes, &poses).unwrap();
         // The handles are the last part's: its X arrow points up.
-        let mut drag = Drag::start_many(
+        let mut drag = Drag::begin(
             Handle::Move(Axis::X),
             frame,
             parts.clone(),
             modes,
             ray_through(2.0, 0.5),
+            None,
         )
         .unwrap();
-        let values = drag.update_all(ray_through(2.0, 2.5), &NO_SNAP).unwrap();
+        let values = drag
+            .update_all(ray_through(2.0, 2.5).into(), &NO_SNAP)
+            .unwrap();
         assert_near(
             value_of(&values, parts[0].0, "Position"),
             Vec3::new(0.0, 0.0, 0.0),
@@ -1143,15 +1444,18 @@ mod tests {
             axes: MoveAxes::Last,
             ..Modes::default()
         };
-        let mut drag = Drag::start_many(
+        let mut drag = Drag::begin(
             Handle::Move(Axis::X),
             frame,
             parts.clone(),
             modes,
             ray_through(2.0, 0.5),
+            None,
         )
         .unwrap();
-        let values = drag.update_all(ray_through(2.0, 2.5), &NO_SNAP).unwrap();
+        let values = drag
+            .update_all(ray_through(2.0, 2.5).into(), &NO_SNAP)
+            .unwrap();
         assert_near(
             value_of(&values, parts[0].0, "Position"),
             Vec3::new(-2.0, 2.0, 0.0),
@@ -1166,15 +1470,18 @@ mod tests {
             ..Modes::default()
         };
         let frame = parts[1].1;
-        let mut drag = Drag::start_many(
+        let mut drag = Drag::begin(
             Handle::Scale(Axis::Y, Side::Plus),
             frame,
             parts.clone(),
             modes,
             ray_through(2.0, 1.0),
+            None,
         )
         .unwrap();
-        let values = drag.update_all(ray_through(2.0, 2.0), &NO_SNAP).unwrap();
+        let values = drag
+            .update_all(ray_through(2.0, 2.0).into(), &NO_SNAP)
+            .unwrap();
         for (id, start) in &parts {
             assert_near(value_of(&values, *id, "Size"), Vec3::new(1.0, 3.0, 1.0));
             assert_near(value_of(&values, *id, "Position"), start.position);
@@ -1187,15 +1494,19 @@ mod tests {
         let poses: Vec<Pose> = parts.iter().map(|(_, pose)| *pose).collect();
         let frame = handle_frame(Tool::Rotate, Modes::default(), &poses).unwrap();
         let turn = |modes: Modes, frame: Pose| {
+            let screen = screen_along_z(frame.position, 0.0);
+            let grab = ring_point(&screen, frame, Axis::Z, 0.0);
             let mut drag = Drag::start_many(
                 Handle::Rotate(Axis::Z),
                 frame,
                 parts.clone(),
                 modes,
-                ray_through(frame.position.x + 3.0, 0.0),
+                &screen,
+                grab,
             )
             .unwrap();
-            drag.update_all(ray_through(frame.position.x, 3.0), &NO_SNAP)
+            let at = grab + drag.spin * points_for(90.0);
+            drag.update_all(Pointer::on(&screen, at, false), &NO_SNAP)
                 .unwrap()
         };
         // A quarter turn around the middle: the parts swing round to ±Y.

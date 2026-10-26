@@ -5,9 +5,46 @@ use axcenity_anim::{PropertyTrack, bone_paths};
 use axcenity_assets::BoneTransform;
 use axcenity_render::glam::Quat;
 
+use super::property_editor::NewKeys;
 use super::*;
 
 impl AnimationStudio {
+    /// Picks New keys in the open clip's toolbar.
+    pub fn set_new_keys(&mut self, choice: NewKeys) {
+        self.clip.new_keys = choice;
+        match &mut self.clip.doc {
+            Some(Clip::Property(doc)) => doc.new_keys = choice,
+            Some(Clip::Take(doc)) => doc.new_keys = choice,
+            None => {}
+        }
+    }
+
+    /// The New keys easing the open clip makes keys with.
+    pub fn new_keys(&self) -> NewKeys {
+        match &self.clip.doc {
+            Some(Clip::Property(doc)) => doc.new_keys,
+            Some(Clip::Take(doc)) => doc.new_keys,
+            None => self.clip.new_keys,
+        }
+    }
+
+    /// Selects every key of the open keyed clip's track on `target`, then
+    /// picks Easing ▸ `choice` from their right-click menu.
+    pub fn ease_keys_of(&mut self, target: &str, choice: NewKeys) {
+        let Some(Clip::Property(doc)) = &mut self.clip.doc else {
+            panic!("no keyed clip is open");
+        };
+        doc.selected = doc
+            .file
+            .tracks
+            .iter()
+            .filter(|t| t.target == target)
+            .flat_map(|t| t.keys.iter().map(|k| (t.id.clone(), k.id.clone())))
+            .collect();
+        let (interp, easing) = choice.easing();
+        doc.ease_selected(interp, easing);
+    }
+
     /// Shows the open clip's keys as curves (or the dope sheet).
     pub fn show_curves(&mut self, on: bool) {
         match &mut self.clip.doc {

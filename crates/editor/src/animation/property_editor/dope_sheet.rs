@@ -248,6 +248,7 @@ impl PropertyDoc {
             {
                 key = true;
             }
+            self.new_keys.picker(ui);
             let any = !self.selected.is_empty();
             if ui
                 .add_enabled(any, egui::Button::new(icons::COPY))
@@ -650,9 +651,20 @@ impl PropertyDoc {
             );
         }
 
-        // Interaction.
+        // Interaction. Right-clicking a key not selected selects it alone,
+        // for the menu.
         let (modifiers, origin) = ui.input(|i| (i.modifiers, i.pointer.press_origin()));
         let add = modifiers.shift || modifiers.command;
+        if response.secondary_clicked()
+            && let Some(pos) = response.interact_pointer_pos()
+            && let Some(hit) = key_at(&self.file.tracks, pos)
+            && !self.selected.contains(&hit)
+        {
+            self.selected = BTreeSet::from([hit]);
+        }
+        if !self.read_only && !self.selected.is_empty() {
+            response.context_menu(|ui| self.easing_menu(ui));
+        }
         if response.drag_started()
             && let Some(origin) = origin
         {

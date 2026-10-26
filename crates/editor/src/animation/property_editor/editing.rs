@@ -10,7 +10,7 @@ impl PropertyDoc {
         let time = self.snapped(self.playhead);
         let mut keyed = BTreeSet::new();
         for value in values {
-            let Some(key) = set_key(&mut self.file.tracks, value, time) else {
+            let Some(key) = set_key(&mut self.file.tracks, value, time, self.new_keys) else {
                 continue;
             };
             self.pending
@@ -56,6 +56,61 @@ impl PropertyDoc {
             })
             .collect();
         self.key_values(&values);
+    }
+
+    /// Gives every selected key `interp` (and `easing`, for an eased one).
+    /// A Bezier key keeps its handles.
+    pub fn ease_selected(&mut self, interp: Interp, easing: Option<Easing>) {
+        if self.read_only {
+            return;
+        }
+        for track in &mut self.file.tracks {
+            for key in &mut track.keys {
+                if !self.selected.contains(&(track.id.clone(), key.id.clone())) {
+                    continue;
+                }
+                key.interp = interp;
+                key.easing = easing.filter(|_| interp == Interp::Ease);
+                if interp != Interp::Bezier {
+                    key.bezier = None;
+                }
+            }
+        }
+    }
+
+    /// Easing ▸, for the selected keys' right-click menu: Smooth, Linear
+    /// and Constant, then each eased style and Bezier.
+    pub(super) fn easing_menu(&mut self, ui: &mut egui::Ui) {
+        let count = self.selected.len();
+        ui.menu_button(format!("{} Easing", icons::WAVE_SINE), |ui| {
+            ui.weak(if count == 1 {
+                "For the selected key".to_owned()
+            } else {
+                format!("For the {count} selected keys")
+            });
+            for choice in NewKeys::ALL {
+                if ui.button(choice.label()).clicked() {
+                    let (interp, easing) = choice.easing();
+                    self.ease_selected(interp, easing);
+                    ui.close();
+                }
+            }
+            ui.separator();
+            for direction in EasingDirection::ALL {
+                ui.menu_button(format!("Ease {}", direction.as_str()), |ui| {
+                    for style in EasingStyle::ALL {
+                        if ui.button(style.as_str()).clicked() {
+                            self.ease_selected(Interp::Ease, Some(Easing::new(style, direction)));
+                            ui.close();
+                        }
+                    }
+                });
+            }
+            if ui.button("Bezier").clicked() {
+                self.ease_selected(Interp::Bezier, None);
+                ui.close();
+            }
+        });
     }
 
     pub fn delete_selected(&mut self) {
@@ -169,13 +224,15 @@ impl PropertyDoc {
 }
 
 /// Keys `value` at `time` in `tracks`, making its track if there's none
-/// (`bone1`, `position1`…), or replacing a key already at that time.
+/// (`bone1`, `position1`…), or replacing the value of a key already at that
+/// time (which keeps its easing). A new key eases as `new_keys` says.
 /// Returns the track's and key's ids, or `None` if the value doesn't fit
 /// the track (a UDim2 key can't go on a Vector3 track, or the reverse).
 pub(in crate::animation) fn set_key(
     tracks: &mut Vec<PropertyTrack>,
     value: &EvaluatedProperty,
     time: f64,
+    new_keys: NewKeys,
 ) -> Option<KeyRef> {
     let index = match tracks
         .iter()
@@ -211,12 +268,13 @@ pub(in crate::animation) fn set_key(
         }
         None => {
             let id = free_id("k", track.keys.iter().map(|k| k.id.as_str()));
+            let (interp, easing) = new_keys.easing();
             track.keys.push(PropertyKeyframe {
                 id: id.clone(),
                 time,
                 value: value.value.clone(),
-                interp: Interp::Linear,
-                easing: None,
+                interp,
+                easing,
                 bezier: None,
             });
             track.keys.sort_by(|a, b| a.time.total_cmp(&b.time));

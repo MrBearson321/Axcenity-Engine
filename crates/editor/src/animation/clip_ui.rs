@@ -392,7 +392,9 @@ impl AnimationStudio {
                 if let Some(posing) = &posing
                     && self.clip.bones.selected.is_some()
                 {
-                    responsive::toolbar(ui, |ui| self.clip.bones.tools(ui, posing.rig()));
+                    responsive::toolbar(ui, |ui| {
+                        self.clip.bones.tools(ui, posing.rig(), &mut self.clip.pose)
+                    });
                 }
                 let height = (height - (ui.cursor().top() - top))
                     .min(ui.available_height())
@@ -403,6 +405,7 @@ impl AnimationStudio {
                     .map(std::sync::Arc::new);
                 let bones = posing.as_ref().map(|posing| preview::Bones {
                     poser: &mut self.clip.bones,
+                    settings: &self.clip.pose,
                     rig: posing.rig(),
                     pose: &posing.pose,
                     locked: &posing.locked,
@@ -422,9 +425,10 @@ impl AnimationStudio {
             }
             Some(Clip::Property(_)) => {
                 let objects = &mut self.clip.objects;
+                let settings = &mut self.clip.pose;
                 let top = ui.cursor().top();
                 responsive::toolbar(ui, |ui| {
-                    objects.tools(ui);
+                    objects.tools(ui, settings);
                     if let Some(problem) = problem {
                         ui.colored_label(ui.visuals().error_fg_color, problem);
                     }
@@ -443,7 +447,7 @@ impl AnimationStudio {
                 });
                 let used = ui.cursor().top() - top;
                 let height = (height - used).min(ui.available_height()).max(80.0);
-                objects.show_ui(ui, render_state, assets, stylesheets, height)
+                objects.show_ui(ui, render_state, assets, stylesheets, height, settings)
             }
             None => None,
         }
@@ -457,7 +461,9 @@ impl AnimationStudio {
             Some(Clip::Take(doc)) => {
                 doc.timeline(ui);
                 ui.add_space(4.0);
-                doc.imported(ui, assets)
+                let convert = doc.imported(ui, assets);
+                self.clip.new_keys = doc.new_keys;
+                convert
             }
             Some(Clip::Property(doc)) => {
                 let focus = self.clip.objects.focus();
@@ -466,6 +472,7 @@ impl AnimationStudio {
                 {
                     doc.key_focus(focus);
                 }
+                self.clip.new_keys = doc.new_keys;
                 false
             }
             None => false,

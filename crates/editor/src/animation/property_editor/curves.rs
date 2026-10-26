@@ -465,6 +465,16 @@ impl PropertyDoc {
             self.tidy();
         }
 
+        if response.secondary_clicked()
+            && let Some(pos) = response.interact_pointer_pos()
+            && let Some(Grab::Key { key, .. }) = grab_at(pos)
+            && !self.selected.contains(&key)
+        {
+            self.selected = BTreeSet::from([key]);
+        }
+        if !self.read_only && !self.selected.is_empty() {
+            response.context_menu(|ui| self.easing_menu(ui));
+        }
         if response.clicked()
             && let Some(pos) = response.interact_pointer_pos()
         {

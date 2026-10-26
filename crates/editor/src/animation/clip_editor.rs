@@ -16,7 +16,7 @@ use axcenity_assets::{Assets, BoneTransform, Model, Rig, Take};
 use eframe::egui;
 
 use super::posing::Folds;
-use super::property_editor::PropertyDoc;
+use super::property_editor::{NewKeys, PropertyDoc};
 use super::timeline::Timeline;
 use crate::theme::icons;
 
@@ -150,6 +150,8 @@ pub struct ClipDoc {
     /// The preview model and the clip those keys were worked out for, and
     /// the keys or why there aren't any.
     imported_for: Option<(Option<String>, LinkedClip, Result<ClipFile, String>)>,
+    /// The easing bone keys made from now on get.
+    pub new_keys: NewKeys,
 }
 
 /// The preview model's skeleton at the playhead.
@@ -187,6 +189,7 @@ impl ClipDoc {
             new_event: "Footstep".to_owned(),
             pending: Vec::new(),
             pending_at: 0.0,
+            new_keys: NewKeys::default(),
         };
         doc.preview_model = doc.default_preview_model(assets, models);
         doc
@@ -409,7 +412,7 @@ impl ClipDoc {
             value: numbers,
         };
         let time = self.key_time();
-        super::property_editor::set_key(&mut self.file.rest.tracks, &value, time);
+        super::property_editor::set_key(&mut self.file.rest.tracks, &value, time, self.new_keys);
     }
 
     /// How many keys each bone of `rig` has on the clip's own tracks.
@@ -532,6 +535,8 @@ impl ClipDoc {
             {
                 convert = true;
             }
+            // For the bones the take doesn't move, which can be keyed.
+            self.new_keys.picker(ui);
         });
         let fps = f64::from(self.frame_rate()) * self.file.speed.abs().max(1e-3);
         let playhead = self.playhead;

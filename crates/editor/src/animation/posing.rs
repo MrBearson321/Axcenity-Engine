@@ -6,6 +6,10 @@
 //! gizmo works in the world, as it does on parts; [`Skeleton::turned`] and
 //! [`Skeleton::moved`] turn what it did back into the bone's own transform,
 //! relative to its parent bone, which is what a `Bone` key stores.
+//!
+//! [`PoseSettings`] are the snap steps and axes above the preview, kept
+//! while the editor runs. Holding Ctrl (Cmd on macOS) during a drag flips
+//! snapping for as long as it's held; Shift turns finely.
 
 use std::collections::{HashMap, HashSet};
 
@@ -14,7 +18,7 @@ use axcenity_core::{InstanceId, World};
 use axcenity_render::glam::{Mat4, Quat, Vec3};
 use eframe::egui;
 
-use crate::gizmo::{self, Drag, Handle, Modes, Snap, Tool};
+use crate::gizmo::{self, Drag, Handle, Modes, MoveAxes, Pointer, RotatePivot, Snap, Tool};
 use crate::screen::Screen;
 use crate::theme::{self, icons};
 
@@ -22,8 +26,126 @@ use crate::theme::{self, icons};
 const PICK: f32 = 9.0;
 /// A joint's radius, in points.
 const JOINT: f32 = 4.0;
-/// Bones turn in steps of this many degrees.
-const TURN_STEP: f32 = 5.0;
+/// The Turn snap steps, in degrees, and the Move snap steps, in studs.
+pub const TURN_STEPS: [f32; 4] = [1.0, 5.0, 15.0, 45.0];
+pub const MOVE_STEPS: [f32; 4] = [0.01, 0.05, 0.1, 0.5];
+
+/// Which axes the gizmo turns and moves a bone along.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Axes {
+    /// The world's.
+    #[default]
+    World,
+    /// The bone's own.
+    Local,
+}
+
+/// The snap steps and axes posing uses, set above the preview. Off keeps
+/// its step, which holding Ctrl snaps to.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PoseSettings {
+    pub snap: Snap,
+    pub axes: Axes,
+}
+
+impl Default for PoseSettings {
+    /// Turns in 5° steps and moves in 0.05-stud steps, on the world's axes.
+    fn default() -> Self {
+        Self {
+            snap: Snap {
+                move_on: true,
+                move_step: 0.05,
+                rotate_on: true,
+                rotate_step: 5.0,
+            },
+            axes: Axes::World,
+        }
+    }
+}
+
+impl PoseSettings {
+    /// The gizmo's tool options for these axes.
+    fn modes(&self) -> Modes {
+        match self.axes {
+            Axes::World => Modes::default(),
+            Axes::Local => Modes {
+                axes: MoveAxes::Local,
+                pivot: RotatePivot::Local,
+                ..Modes::default()
+            },
+        }
+    }
+
+    /// Turn snap, Move snap and World/Local, for the toolbar.
+    pub fn controls(&mut self, ui: &mut egui::Ui) {
+        let snap = &mut self.snap;
+        snap_picker(
+            ui,
+            "turn snap",
+            icons::ARROW_CLOCKWISE,
+            "Turn snap: bones turn in steps of this. Hold Ctrl to flip it while dragging.",
+            (&mut snap.rotate_on, &mut snap.rotate_step),
+            &TURN_STEPS,
+            |step| format!("{step}°"),
+        );
+        snap_picker(
+            ui,
+            "move snap",
+            icons::ARROWS_OUT_CARDINAL,
+            "Move snap: the root moves in steps of this. Hold Ctrl to flip it while dragging.",
+            (&mut snap.move_on, &mut snap.move_step),
+            &MOVE_STEPS,
+            |step| format!("{step} studs"),
+        );
+        let (text, hover) = match self.axes {
+            Axes::World => (
+                format!("{} World", icons::GLOBE),
+                "The gizmo follows the world's axes. Click for the bone's own.",
+            ),
+            Axes::Local => (
+                format!("{} Local", icons::CUBE),
+                "The gizmo follows the bone's own axes. Click for the world's.",
+            ),
+        };
+        if ui.button(text).on_hover_text(hover).clicked() {
+            self.axes = match self.axes {
+                Axes::World => Axes::Local,
+                Axes::Local => Axes::World,
+            };
+        }
+    }
+}
+
+/// A snap setting's menu: Off, then each of `steps`. Off keeps the step.
+fn snap_picker(
+    ui: &mut egui::Ui,
+    id: &str,
+    icon: &str,
+    hover: &str,
+    (on, step): (&mut bool, &mut f32),
+    steps: &[f32],
+    name: fn(f32) -> String,
+) {
+    let shown = if *on { name(*step) } else { "Off".to_owned() };
+    egui::ComboBox::from_id_salt(id)
+        .selected_text(format!("{icon} {shown}"))
+        .show_ui(ui, |ui| {
+            if ui.selectable_label(!*on, "Off").clicked() {
+                *on = false;
+            }
+            for &choice in steps {
+                if ui
+                    .selectable_label(*on && *step == choice, name(choice))
+                    .clicked()
+                {
+                    *on = true;
+                    *step = choice;
+                }
+            }
+        })
+        .response
+        .on_hover_text(hover);
+}
 
 /// A rig posed on a MeshPart in a preview's world.
 pub struct Skeleton<'a> {
@@ -197,8 +319,9 @@ impl Poser {
         }
     }
 
-    /// The Rotate and Move buttons (Move only with a root selected).
-    pub fn tools(&mut self, ui: &mut egui::Ui, rig: &Rig) {
+    /// The Rotate and Move buttons (Move only with a root selected), then
+    /// the snap steps and axes.
+    pub fn tools(&mut self, ui: &mut egui::Ui, rig: &Rig, settings: &mut PoseSettings) {
         let Some(bone) = self.selected else {
             return;
         };
@@ -224,38 +347,51 @@ impl Poser {
         {
             self.tool = Tool::Move;
         }
+        settings.controls(ui);
+    }
+
+    /// The selected bone, where its gizmo starts, the tool it shows and
+    /// where its handles go with `settings`' axes, unless nothing posable
+    /// is selected.
+    fn gizmo_frame(
+        &self,
+        skeleton: &Skeleton,
+        settings: &PoseSettings,
+    ) -> Option<(usize, gizmo::Pose, Tool, gizmo::Pose)> {
+        let bone = self.selected.filter(|&bone| !skeleton.locked(bone))?;
+        let pose = skeleton.gizmo_pose(bone)?;
+        let tool = self.tool_for(skeleton, bone);
+        let frame = gizmo::handle_frame(tool, settings.modes(), &[pose])?;
+        Some((bone, pose, tool, frame))
     }
 
     /// Picks joints and drags the selected bone's gizmo, in a preview drawn
-    /// in `response`'s rectangle through `screen`.
+    /// in `response`'s rectangle through `screen`, snapping and turning on
+    /// the axes `settings` say.
     pub fn interact(
         &mut self,
         ui: &egui::Ui,
         response: &egui::Response,
         screen: &Screen,
         skeleton: &Skeleton,
+        settings: &PoseSettings,
     ) -> Interaction {
         let mut out = Interaction::default();
         if self.selected.is_some_and(|bone| !skeleton.posable(bone)) {
             self.selected = None;
         }
-        let gizmo = self
-            .selected
-            .filter(|&bone| !skeleton.locked(bone))
-            .and_then(|bone| Some((bone, skeleton.gizmo_pose(bone)?)));
-        let tool = gizmo.map(|(bone, _)| self.tool_for(skeleton, bone));
-        let frame = gizmo
-            .zip(tool)
-            .and_then(|((_, pose), tool)| gizmo::handle_frame(tool, Modes::default(), &[pose]));
-        out.shapes = frame
-            .zip(tool)
-            .map_or_else(Vec::new, |(frame, tool)| gizmo::shapes(tool, frame, screen));
+        let gizmo = self.gizmo_frame(skeleton, settings);
+        out.shapes = gizmo.map_or_else(Vec::new, |(_, _, tool, frame)| {
+            gizmo::shapes(tool, frame, screen)
+        });
 
-        let (pressed, down, pointer) = ui.input(|input| {
+        let (pressed, down, pointer, flip, fine) = ui.input(|input| {
             (
                 input.pointer.primary_pressed(),
                 input.pointer.primary_down(),
                 input.pointer.latest_pos(),
+                input.modifiers.command,
+                input.modifiers.shift,
             )
         });
         let over = pointer.filter(|_| response.contains_pointer());
@@ -280,15 +416,16 @@ impl Poser {
             });
 
         if pressed
-            && let (Some(handle), Some(pointer), Some(frame), Some((bone, start))) =
-                (handle, pointer, frame, gizmo)
+            && let (Some(handle), Some(pointer), Some((bone, start, _, frame))) =
+                (handle, pointer, gizmo)
         {
             self.drag = Drag::start_many(
                 handle,
                 frame,
                 vec![(skeleton.part, start)],
-                Modes::default(),
-                screen.ray(pointer),
+                settings.modes(),
+                screen,
+                pointer,
             )
             .map(|drag| (bone, drag, start));
         }
@@ -301,13 +438,15 @@ impl Poser {
             if !down {
                 self.drag = None;
             } else if let Some(pointer) = pointer {
-                let snap = Snap {
-                    move_on: false,
-                    rotate_step: TURN_STEP,
-                    ..Snap::default()
+                // Ctrl flips snapping only while it's held: the drag works
+                // its pose out from where it started each frame.
+                let snap = if flip {
+                    settings.snap.flipped()
+                } else {
+                    settings.snap
                 };
                 out.event = drag
-                    .update_all(screen.ray(pointer), &snap)
+                    .update_all(Pointer::on(screen, pointer, fine), &snap)
                     .and_then(|parts| parts.into_iter().next())
                     .and_then(|(_, values)| posed_by(skeleton, *bone, *start, &values))
                     .map(|transform| BoneEvent::Pose(*bone, transform));
@@ -646,6 +785,7 @@ mod tests {
 
     use axcenity_assets::{Assets, Model};
     use axcenity_core::{ClassName, Value, Vector3};
+    use axcenity_render::Camera;
 
     use super::*;
 
@@ -715,6 +855,400 @@ mod tests {
             .unwrap()
             .joints();
         assert!(moved[root].abs_diff_eq(skeleton.joints()[root] + by, 1e-3));
+    }
+
+    /// A camera `back` model heights in front of `joint` (and `off` to the
+    /// side and up).
+    fn camera_at(model: &Model, joint: Vec3, off: Vec3) -> Camera {
+        let height = model.size.iter().copied().fold(0.0, f32::max) * 2.0;
+        Camera {
+            position: joint + (Vec3::Z * 3.0 + off) * height,
+            look_at: joint,
+            fov_y_degrees: 50.0,
+        }
+    }
+
+    /// One frame of a preview filling a 640×480 window, seen through
+    /// `camera`: what posing found, and the screen it drew through.
+    #[allow(clippy::too_many_arguments)] // Each is a different input to the frame.
+    fn frame(
+        ctx: &egui::Context,
+        camera: Camera,
+        poser: &mut Poser,
+        skeleton: &Skeleton,
+        settings: &PoseSettings,
+        events: Vec<egui::Event>,
+        modifiers: egui::Modifiers,
+    ) -> (Interaction, Screen) {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(640.0, 480.0),
+            )),
+            events,
+            modifiers,
+            ..Default::default()
+        };
+        let mut out = None;
+        let _ = ctx.run(input, |ctx| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ctx, |ui| {
+                    let size = ui.available_size();
+                    let (rect, response) =
+                        ui.allocate_exact_size(size, egui::Sense::click_and_drag());
+                    let screen = Screen::new(camera, rect);
+                    let done = poser.interact(ui, &response, &screen, skeleton, settings);
+                    out = Some((done, screen));
+                });
+        });
+        out.expect("drawn")
+    }
+
+    /// Grabs the selected bone's `handle` and moves the mouse each of
+    /// `moves` points from where it grabbed, forward along the handle as
+    /// drawn there, with those keys held, then lets go.
+    /// Returns the bone's transform after each move.
+    fn drag_handle(
+        camera: Camera,
+        poser: &mut Poser,
+        skeleton: &Skeleton,
+        settings: &PoseSettings,
+        handle: Handle,
+        moves: &[(f32, egui::Modifiers)],
+    ) -> Vec<BoneTransform> {
+        let ctx = theme::test_context();
+        let none = egui::Modifiers::NONE;
+        let away = vec![egui::Event::PointerMoved(egui::pos2(2.0, 2.0))];
+        let (done, _) = frame(&ctx, camera, poser, skeleton, settings, away, none);
+        let shape = done
+            .shapes
+            .iter()
+            .find(|shape| shape.handle == handle)
+            .expect("the handle shows");
+        let lines = shape.lines();
+        let [a, b] = lines[lines.len() / 2];
+        let grab = a.lerp(b, 0.5);
+        let forward = (b - a).normalized();
+        let at = |pos| vec![egui::Event::PointerMoved(pos)];
+        frame(&ctx, camera, poser, skeleton, settings, at(grab), none);
+        let press = |pressed| egui::Event::PointerButton {
+            pos: grab,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: none,
+        };
+        frame(
+            &ctx,
+            camera,
+            poser,
+            skeleton,
+            settings,
+            vec![press(true)],
+            none,
+        );
+        assert!(poser.drag.is_some(), "{handle:?} was grabbed");
+        let mut posed = Vec::new();
+        for &(by, modifiers) in moves {
+            let (done, _) = frame(
+                &ctx,
+                camera,
+                poser,
+                skeleton,
+                settings,
+                at(grab + forward * by),
+                modifiers,
+            );
+            match done.event {
+                Some(BoneEvent::Pose(_, transform)) => posed.push(transform),
+                other => panic!("the bone wasn't posed: {other:?}"),
+            }
+        }
+        frame(
+            &ctx,
+            camera,
+            poser,
+            skeleton,
+            settings,
+            vec![press(false)],
+            none,
+        );
+        posed
+    }
+
+    const CTRL: egui::Modifiers = egui::Modifiers::COMMAND;
+    const NONE: egui::Modifiers = egui::Modifiers::NONE;
+
+    /// How far `bone`'s joint is moved in the world with `transform`.
+    fn joint_moved(skeleton: &Skeleton, bone: usize, transform: BoneTransform) -> Vec3 {
+        let mut pose = skeleton.pose.to_vec();
+        pose[bone] = transform;
+        let moved = Skeleton {
+            pose: &pose,
+            ..*skeleton
+        }
+        .joints();
+        moved[bone] - skeleton.joints()[bone]
+    }
+
+    /// How many `step`s `distance` is, and how far that is from whole.
+    fn steps(distance: f32, step: f32) -> (f32, f32) {
+        let steps = distance / step;
+        (steps, (steps - steps.round()).abs())
+    }
+
+    #[test]
+    fn move_snap_moves_the_root_in_steps_and_ctrl_lets_it_go_free_while_held() {
+        let model = noodle();
+        let rig = model.rig.as_ref().unwrap();
+        let mut world = World::new();
+        let part = part(&mut world, &model);
+        let pose = rig.rest_pose();
+        let skeleton = Skeleton::on(&world, part, rig, &pose, &[]).unwrap();
+        let root = rig.bone("Root").unwrap();
+        let camera = camera_at(&model, skeleton.joints()[root], Vec3::new(0.3, 0.4, 0.0));
+        let mut poser = Poser {
+            selected: Some(root),
+            tool: Tool::Move,
+            ..Poser::default()
+        };
+        let settings = PoseSettings::default();
+        assert_eq!(settings.snap.move_step, 0.05, "it starts at 0.05 studs");
+        let posed = drag_handle(
+            camera,
+            &mut poser,
+            &skeleton,
+            &settings,
+            Handle::Move(gizmo::Axis::X),
+            &[(23.0, NONE), (61.0, NONE), (61.0, CTRL), (61.0, NONE)],
+        );
+        let moved: Vec<Vec3> = posed
+            .into_iter()
+            .map(|transform| joint_moved(&skeleton, root, transform))
+            .collect();
+        for (i, by) in moved.iter().enumerate() {
+            assert!(by.y.abs() < 1e-4 && by.z.abs() < 1e-4, "only along X: {by}");
+            assert!(by.x > 0.0, "move {i} goes right: {by}");
+        }
+        let (count, off) = steps(moved[0].x, 0.05);
+        assert!(
+            off < 1e-2 && count >= 1.0,
+            "a whole number of steps: {count}"
+        );
+        assert!(steps(moved[1].x, 0.05).1 < 1e-2);
+        // Ctrl: free, off the steps; letting go snaps back to the step.
+        let (_, free_off) = steps(moved[2].x, 0.05);
+        assert!(free_off > 0.02, "free with Ctrl: {}", moved[2].x);
+        assert!((moved[3].x - moved[1].x).abs() < 1e-4, "snapped again");
+        assert!((moved[3].x - (moved[2].x / 0.05).round() * 0.05).abs() < 1e-4);
+    }
+
+    #[test]
+    fn ctrl_flips_snapping_for_turns_and_moves_whether_it_is_off_or_on() {
+        let model = noodle();
+        let rig = model.rig.as_ref().unwrap();
+        let mut world = World::new();
+        let part = part(&mut world, &model);
+        let pose = rig.rest_pose();
+        let skeleton = Skeleton::on(&world, part, rig, &pose, &[]).unwrap();
+        let top = rig.bone("Top").unwrap();
+        let root = rig.bone("Root").unwrap();
+        let joints = skeleton.joints();
+        let camera = camera_at(&model, joints[top], Vec3::ZERO);
+        // How far each drag turns Top with its Z ring (facing the camera),
+        // in degrees, with and without Ctrl.
+        let turns = |settings: &PoseSettings| -> Vec<f32> {
+            let mut poser = Poser {
+                selected: Some(top),
+                ..Poser::default()
+            };
+            let along = 50.0;
+            drag_handle(
+                camera,
+                &mut poser,
+                &skeleton,
+                settings,
+                Handle::Rotate(gizmo::Axis::Z),
+                &[(along, NONE), (along, CTRL), (along, NONE)],
+            )
+            .into_iter()
+            .map(|t| t.rotation.angle_between(pose[top].rotation).to_degrees())
+            .collect()
+        };
+        let mut fifteen = PoseSettings::default();
+        fifteen.snap.rotate_step = 15.0;
+        let snapped = turns(&fifteen);
+        assert!(
+            steps(snapped[0], 15.0).1 < 1e-2 && snapped[0] > 1.0,
+            "{snapped:?}"
+        );
+        assert!(
+            steps(snapped[1], 15.0).1 > 0.05,
+            "Ctrl turns freely: {snapped:?}"
+        );
+        assert_eq!(snapped[0], snapped[2], "letting go snaps again");
+
+        let mut off = fifteen;
+        off.snap.rotate_on = false;
+        let free = turns(&off);
+        assert!(steps(free[0], 15.0).1 > 0.05, "Off turns freely: {free:?}");
+        assert!((free[0] - snapped[1]).abs() < 1e-2, "as freely as Ctrl did");
+        assert!(
+            (free[1] - snapped[0]).abs() < 1e-2,
+            "Ctrl snaps to the step Off kept"
+        );
+        assert!((free[2] - free[0]).abs() < 1e-3);
+
+        // Moves too: Off with Ctrl moves in the kept 0.05-stud steps.
+        let mut poser = Poser {
+            selected: Some(root),
+            tool: Tool::Move,
+            ..Poser::default()
+        };
+        let mut no_move_snap = PoseSettings::default();
+        no_move_snap.snap.move_on = false;
+        let camera = camera_at(&model, joints[root], Vec3::new(0.3, 0.4, 0.0));
+        let right = 61.0;
+        let moved: Vec<f32> = drag_handle(
+            camera,
+            &mut poser,
+            &skeleton,
+            &no_move_snap,
+            Handle::Move(gizmo::Axis::X),
+            &[(right, NONE), (right, CTRL)],
+        )
+        .into_iter()
+        .map(|t| joint_moved(&skeleton, root, t).x)
+        .collect();
+        assert!(steps(moved[0], 0.05).1 > 0.02, "free when Off: {moved:?}");
+        assert!(
+            steps(moved[1], 0.05).1 < 1e-2,
+            "stepped with Ctrl: {moved:?}"
+        );
+    }
+
+    #[test]
+    fn world_and_local_turn_the_gizmo_without_moving_the_bone() {
+        let model = noodle();
+        let rig = model.rig.as_ref().unwrap();
+        let mut world = World::new();
+        let part = part(&mut world, &model);
+        let pose = rig.rest_pose();
+        let skeleton = Skeleton::on(&world, part, rig, &pose, &[]).unwrap();
+        let top = rig.bone("Top").unwrap();
+        let camera = camera_at(&model, skeleton.joints()[top], Vec3::new(0.8, 0.6, 0.0));
+        let mut poser = Poser {
+            selected: Some(top),
+            ..Poser::default()
+        };
+        let mut settings = PoseSettings::default();
+        settings.snap.rotate_on = false;
+        let bone_turn = skeleton.gizmo_pose(top).unwrap().rotation;
+        assert!(
+            bone_turn.angle_between(Quat::IDENTITY) > 0.1,
+            "Top is turned in the world"
+        );
+
+        // Switching moves only the gizmo: same place, the bone's own turn,
+        // and nothing is posed.
+        let (_, _, _, world_frame) = poser.gizmo_frame(&skeleton, &settings).unwrap();
+        settings.axes = Axes::Local;
+        let (_, _, _, local_frame) = poser.gizmo_frame(&skeleton, &settings).unwrap();
+        assert!(world_frame.position.abs_diff_eq(local_frame.position, 1e-5));
+        assert!(world_frame.rotation.angle_between(Quat::IDENTITY) < 1e-5);
+        assert!(local_frame.rotation.angle_between(bone_turn) < 1e-5);
+        let ctx = theme::test_context();
+        for axes in [Axes::World, Axes::Local, Axes::World] {
+            settings.axes = axes;
+            let still = vec![egui::Event::PointerMoved(egui::pos2(2.0, 2.0))];
+            let (done, _) = frame(&ctx, camera, &mut poser, &skeleton, &settings, still, NONE);
+            assert_eq!(done.event, None, "switching to {axes:?} poses nothing");
+        }
+
+        // Dragging the X ring turns Top around the world's X, or its own.
+        let turn_axis = |settings: &PoseSettings, poser: &mut Poser| {
+            let posed = drag_handle(
+                camera,
+                poser,
+                &skeleton,
+                settings,
+                Handle::Rotate(gizmo::Axis::X),
+                &[(30.0, NONE)],
+            );
+            let mut after = pose.clone();
+            after[top] = posed[0];
+            let turned = Skeleton {
+                pose: &after,
+                ..skeleton
+            }
+            .gizmo_pose(top)
+            .unwrap()
+            .rotation;
+            let (axis, angle) = (turned * bone_turn.inverse()).to_axis_angle();
+            assert!(angle > 0.05, "it turned");
+            // Turning around the joint leaves the joint where it was.
+            let joint = Skeleton {
+                pose: &after,
+                ..skeleton
+            }
+            .joints()[top];
+            assert!(joint.abs_diff_eq(skeleton.joints()[top], 1e-4));
+            axis
+        };
+        settings.axes = Axes::World;
+        let around = turn_axis(&settings, &mut poser);
+        assert!(around.dot(Vec3::X).abs() > 0.999, "the world's X: {around}");
+        settings.axes = Axes::Local;
+        let around = turn_axis(&settings, &mut poser);
+        let own_x = bone_turn * Vec3::X;
+        assert!(
+            around.dot(own_x).abs() > 0.999,
+            "Top's own X: {around} vs {own_x}"
+        );
+    }
+
+    #[test]
+    fn shift_turns_a_bone_a_quarter_as_fast_and_letting_go_does_not_jump() {
+        let model = noodle();
+        let rig = model.rig.as_ref().unwrap();
+        let mut world = World::new();
+        let part = part(&mut world, &model);
+        let pose = rig.rest_pose();
+        let skeleton = Skeleton::on(&world, part, rig, &pose, &[]).unwrap();
+        let top = rig.bone("Top").unwrap();
+        let camera = camera_at(&model, skeleton.joints()[top], Vec3::ZERO);
+        let mut poser = Poser {
+            selected: Some(top),
+            ..Poser::default()
+        };
+        let mut settings = PoseSettings::default();
+        settings.snap.rotate_on = false;
+        let shift = egui::Modifiers::SHIFT;
+        let angles: Vec<f32> = drag_handle(
+            camera,
+            &mut poser,
+            &skeleton,
+            &settings,
+            Handle::Rotate(gizmo::Axis::Z),
+            &[(40.0, NONE), (80.0, shift), (80.0, NONE), (120.0, NONE)],
+        )
+        .into_iter()
+        .map(|t| t.rotation.angle_between(pose[top].rotation))
+        .collect();
+        let normal = angles[0];
+        assert!(
+            (normal - 40.0 * gizmo::TURN_PER_POINT).abs() < 1e-3,
+            "{angles:?}"
+        );
+        assert!(
+            (angles[1] - normal * 1.25).abs() < 1e-3,
+            "a quarter: {angles:?}"
+        );
+        assert!((angles[2] - angles[1]).abs() < 1e-4, "no jump: {angles:?}");
+        assert!(
+            (angles[3] - normal * 2.25).abs() < 1e-3,
+            "full speed: {angles:?}"
+        );
     }
 
     #[test]

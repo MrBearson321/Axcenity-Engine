@@ -260,9 +260,17 @@ New easings and tangents are optional fields, so existing clips read unchanged a
 
 ### Acceptance criteria
 
-- [ ] A drag of the same length on screen turns a bone by the same angle, whether its ring faces the camera or is nearly edge-on.
-- [ ] With turn snap at 15°, a bone only turns in 15° steps. With it Off, or with Ctrl held, it turns freely.
-- [ ] Two keys made by posing play with ease-in and ease-out in the preview and in Play. Changing their easing to Linear makes the motion linear.
+- [x] A drag of the same length on screen turns a bone by the same angle, whether its ring faces the camera or is nearly edge-on.
+- [x] With turn snap at 15°, a bone only turns in 15° steps. With it Off, or with Ctrl held, it turns freely.
+- [x] Two keys made by posing play with ease-in and ease-out in the preview and in Play. Changing their easing to Linear makes the motion linear.
+- [x] Move snapping: With move snap set to 0.05 studs, dragging moves the bone in 0.05-stud increments. Ctrl temporarily disables snapping, and releasing it restores the configured behavior.
+- [x] Snap override: Ctrl reverses the current snapping state for both Move and Rotate, regardless of whether snapping is configured Off or to a specific increment.
+- [x] World/Local axes: Switching between World and Local changes the gizmo's orientation and rotation behavior without unexpectedly moving or rotating the selected bone.
+- [x] Shift precision: Holding Shift reduces rotation sensitivity to one-quarter of normal; releasing it restores normal sensitivity without a jump in rotation.
+- [x] New-key easing: Record, K, posing, and Add track all use the selected New keys easing setting. Changing the setting affects newly created keys only.
+- [x] Existing-key easing: Applying Easing to selected keys updates all selected keys, while unselected keys and existing clips remain unchanged.
+- [x] Consistent playback: Smooth, Linear, and Constant easing behave identically in the editor preview and Play mode.
+- [x] Undo/redo: Changing key easing and creating keys with the selected easing can be undone and redone without losing the original values or easing.
 
 ---
 

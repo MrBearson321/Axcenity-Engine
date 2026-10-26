@@ -26,9 +26,9 @@ use axcenity_ui::{Stylesheet, UiLayout, UiRect};
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 
-use super::posing::{BoneEvent, Poser, Skeleton};
+use super::posing::{BoneEvent, PoseSettings, Poser, Skeleton};
 use super::preview::{Canvas, add_floor};
-use crate::gizmo::{self, Drag, Handle, Modes, Pose, Snap, Tool};
+use crate::gizmo::{self, Drag, Handle, Modes, Pointer, Pose, Snap, Tool};
 use crate::screen::Screen;
 use crate::theme::{self, icons};
 use crate::ui_handles::{Grip, Handles, UiDrag};
@@ -440,8 +440,9 @@ impl ObjectPreview {
         Some((id, Pose::of(instance)?))
     }
 
-    /// The Move / Rotate / Resize buttons, shown above a 3D preview.
-    pub fn tools(&mut self, ui: &mut egui::Ui) {
+    /// The Move / Rotate / Resize buttons, shown above a 3D preview, or
+    /// with a bone selected its tools and `settings`.
+    pub fn tools(&mut self, ui: &mut egui::Ui, settings: &mut PoseSettings) {
         if self.flat || self.root.is_none() {
             return;
         }
@@ -449,7 +450,7 @@ impl ObjectPreview {
             && let Some((model, _)) = &self.skeleton
             && let Some(rig) = model.rig.as_deref()
         {
-            self.bones.tools(ui, rig);
+            self.bones.tools(ui, rig, settings);
             return;
         }
         for (tool, icon) in [
@@ -464,7 +465,7 @@ impl ObjectPreview {
     }
 
     /// Draws the posed copy `height` points tall, and handles clicks and
-    /// drags on it.
+    /// drags on it (posing bones as `settings` say).
     pub fn show_ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -472,6 +473,7 @@ impl ObjectPreview {
         assets: &Assets,
         stylesheets: &[Stylesheet],
         height: f32,
+        settings: &PoseSettings,
     ) -> Option<PreviewEvent> {
         let size = egui::vec2(ui.available_width(), height.max(80.0));
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
@@ -497,7 +499,7 @@ impl ObjectPreview {
         if self.flat {
             self.show_flat(ui, rect, &response, render_state, assets, stylesheets)
         } else {
-            self.show_3d(ui, rect, &response, render_state, assets)
+            self.show_3d(ui, rect, &response, render_state, assets, settings)
         }
     }
 
@@ -508,6 +510,7 @@ impl ObjectPreview {
         response: &egui::Response,
         render_state: &RenderState,
         assets: &Assets,
+        settings: &PoseSettings,
     ) -> Option<PreviewEvent> {
         let screen = Screen::new(self.camera(), rect);
         let tool = self.tool;
@@ -524,17 +527,18 @@ impl ObjectPreview {
             .filter(|_| !(model && tool == Tool::Scale))
             .and_then(|(_, pose)| gizmo::handle_frame(tool, modes, &[pose]));
         let shapes = frame.map_or_else(Vec::new, |frame| gizmo::shapes(tool, frame, &screen));
-        let (pressed, down, pointer) = ui.input(|input| {
+        let (pressed, down, pointer, fine) = ui.input(|input| {
             (
                 input.pointer.primary_pressed(),
                 input.pointer.primary_down(),
                 input.pointer.latest_pos(),
+                input.modifiers.shift,
             )
         });
         let mut bones = std::mem::take(&mut self.bones);
         let posing = self
             .skeleton()
-            .map(|skeleton| bones.interact(ui, response, &screen, &skeleton));
+            .map(|skeleton| bones.interact(ui, response, &screen, &skeleton, settings));
         let captured = posing.as_ref().is_some_and(|done| done.captured);
         let hovered = match pointer {
             Some(pointer) if response.contains_pointer() && self.drag.is_none() && !captured => {
@@ -546,7 +550,7 @@ impl ObjectPreview {
             && let (Some(handle), Some(pointer), Some(frame), Some(part)) =
                 (hovered, pointer, frame, pose)
         {
-            self.drag = Drag::start_many(handle, frame, vec![part], modes, screen.ray(pointer))
+            self.drag = Drag::start_many(handle, frame, vec![part], modes, &screen, pointer)
                 .map(Dragging::Handle);
         }
 
@@ -559,7 +563,8 @@ impl ObjectPreview {
             if !down {
                 self.drag = None;
             } else if let Some(pointer) = pointer
-                && let Some(parts) = drag.update_all(screen.ray(pointer), &Snap::default())
+                && let Some(parts) =
+                    drag.update_all(Pointer::on(&screen, pointer, fine), &Snap::default())
             {
                 event = self.edits(parts.into_iter().flat_map(|(id, values)| {
                     values

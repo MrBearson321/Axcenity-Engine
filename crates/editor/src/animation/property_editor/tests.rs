@@ -356,3 +356,173 @@ fn bezier_handles_dragged_in_the_curves_view_are_saved_and_reloaded() {
     assert_eq!(y_at(&mut reopened, 0.8), y_at(&mut doc, 0.8));
     std::fs::remove_dir_all(folder).unwrap();
 }
+
+/// The interpolation and easing of each key of the track on `target`.
+fn easings(doc: &PropertyDoc, target: &str) -> Vec<(Interp, Option<Easing>)> {
+    doc.file
+        .tracks
+        .iter()
+        .find(|t| t.target == target)
+        .map(|t| t.keys.iter().map(|k| (k.interp, k.easing)).collect())
+        .unwrap_or_default()
+}
+
+#[test]
+fn record_k_and_add_track_make_keys_with_the_new_keys_easing_and_only_new_keys_change() {
+    let mut doc = doc();
+    assert_eq!(doc.new_keys, NewKeys::Smooth, "Smooth to start with");
+    let smooth = NewKeys::Smooth.easing();
+    assert_eq!(
+        smooth,
+        (
+            Interp::Ease,
+            Some(Easing::new(EasingStyle::Sine, EasingDirection::InOut))
+        )
+    );
+    // Record: a move in the preview.
+    doc.edit(
+        vec![value("Hinge", PropertyName::Orientation, &[0.0, 0.0, 0.0])],
+        true,
+    );
+    // K: Key selected.
+    doc.playhead = 0.5;
+    let focus = Focus {
+        target: "Hinge".into(),
+        name: "Hinge".into(),
+        values: vec![
+            value("Hinge", PropertyName::Orientation, &[0.0, 45.0, 0.0]),
+            value("Hinge", PropertyName::Transparency, &[0.0]),
+        ],
+        transform: vec![PropertyName::Orientation],
+    };
+    doc.key_focus(&focus);
+    // Add track: what its menu does with the property picked.
+    doc.key_values(&[value("Hinge", PropertyName::Transparency, &[0.2])]);
+    assert_eq!(easings(&doc, "Hinge").len(), 2);
+    for track in &doc.file.tracks {
+        for key in &track.keys {
+            assert_eq!((key.interp, key.easing), smooth, "{}", track.id);
+        }
+    }
+
+    // Constant from now on: new keys are Constant; the Smooth ones stay,
+    // even when a key at the same time gets a new value.
+    doc.new_keys = NewKeys::Constant;
+    doc.playhead = 0.5;
+    doc.edit(
+        vec![value("Hinge", PropertyName::Orientation, &[0.0, 60.0, 0.0])],
+        true,
+    );
+    doc.playhead = 1.0;
+    doc.edit(
+        vec![value("Hinge", PropertyName::Orientation, &[0.0, 90.0, 0.0])],
+        true,
+    );
+    let orientation = doc
+        .file
+        .tracks
+        .iter()
+        .find(|t| t.property == PropertyName::Orientation)
+        .unwrap();
+    assert_eq!(orientation.keys[1].value, [0.0, 60.0, 0.0], "re-keyed");
+    let kinds: Vec<Interp> = orientation.keys.iter().map(|k| k.interp).collect();
+    assert_eq!(kinds, [Interp::Ease, Interp::Ease, Interp::Step]);
+    doc.new_keys = NewKeys::Linear;
+    doc.playhead = 1.5;
+    doc.key_values(&[value("Hinge", PropertyName::Orientation, &[0.0, 0.0, 0.0])]);
+    let orientation = doc
+        .file
+        .tracks
+        .iter()
+        .find(|t| t.property == PropertyName::Orientation);
+    let last = orientation.unwrap().keys.last().unwrap();
+    assert_eq!((last.interp, last.easing), (Interp::Linear, None));
+}
+
+#[test]
+fn easing_sets_every_selected_key_and_leaves_the_rest_and_saved_clips_be() {
+    let mut doc = rising();
+    doc.key_values(&[value("Lid", PropertyName::Transparency, &[1.0])]);
+    doc.playhead = 0.0;
+    doc.key_values(&[value("Lid", PropertyName::Transparency, &[0.0])]);
+    let before = doc.file.clone();
+    let rise = doc.file.tracks[0].id.clone();
+    let lid = doc.file.tracks[1].id.clone();
+    // Both of the rise's keys and the lid's first.
+    doc.selected = BTreeSet::from([
+        (rise.clone(), doc.file.tracks[0].keys[0].id.clone()),
+        (rise.clone(), doc.file.tracks[0].keys[1].id.clone()),
+        (lid.clone(), doc.file.tracks[1].keys[0].id.clone()),
+    ]);
+    doc.ease_selected(Interp::Linear, None);
+    assert_eq!(easings(&doc, ".").len(), 2);
+    assert!(
+        easings(&doc, ".")
+            .iter()
+            .all(|e| *e == (Interp::Linear, None))
+    );
+    let lid_keys = easings(&doc, "Lid");
+    assert_eq!(lid_keys[0], (Interp::Linear, None));
+    assert_eq!(lid_keys[1], NewKeys::Smooth.easing(), "not selected: kept");
+    // Times and values stay.
+    for (track, was) in doc.file.tracks.iter().zip(&before.tracks) {
+        for (key, was) in track.keys.iter().zip(&was.keys) {
+            assert_eq!((key.time, &key.value), (was.time, &was.value));
+        }
+    }
+    let back = Easing::new(EasingStyle::Back, EasingDirection::Out);
+    doc.ease_selected(Interp::Ease, Some(back));
+    assert!(
+        easings(&doc, ".")
+            .iter()
+            .all(|e| *e == (Interp::Ease, Some(back)))
+    );
+
+    // Right-clicking a key that isn't selected selects it alone, for the
+    // menu; one that is keeps the selection.
+    run_curves(&mut doc, vec![Vec::new(), Vec::new()]);
+    let right_click = |at: egui::Pos2| {
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        vec![
+            vec![egui::Event::PointerMoved(at)],
+            vec![button(true)],
+            vec![button(false)],
+            Vec::new(),
+        ]
+    };
+    let three = doc.selected.clone();
+    let selected_key = sheet_key(&doc, 1.0);
+    run_curves(&mut doc, right_click(selected_key));
+    assert_eq!(doc.selected, three, "a selected key keeps the selection");
+    let lid_last = (lid.clone(), doc.file.tracks[1].keys[1].id.clone());
+    let at = sheet_key(&doc, 1.0) + egui::vec2(0.0, ROW);
+    run_curves(&mut doc, right_click(at));
+    assert_eq!(doc.selected, BTreeSet::from([lid_last]));
+
+    // A clip saved before opens with its keys as they were, and isn't
+    // written again.
+    let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/hello-door/assets/animations/Door/Door.anim.json");
+    let text = std::fs::read_to_string(example).unwrap();
+    let saved = ClipFile::from_json(&text).unwrap();
+    let mut door = PropertyDoc::open("assets/animations/Door/Door.anim.json".into(), saved);
+    assert!(!door.unwritten());
+    assert!(
+        door.file.tracks[0]
+            .keys
+            .iter()
+            .all(|k| (k.interp, k.easing) == (Interp::Linear, None))
+    );
+    let mid = {
+        door.playhead = 0.75;
+        door.evaluated().unwrap()[0].value[1]
+    };
+    assert!((mid - 5.0).abs() < 1e-4, "still linear: {mid}");
+    assert_eq!(door.file, ClipFile::from_json(&text).unwrap());
+    assert!(!door.unwritten(), "nothing to write");
+}

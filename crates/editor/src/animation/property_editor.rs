@@ -9,6 +9,10 @@
 //! times land on whole frames. The Curves view (`curves.rs`) shows the
 //! same keys as curves, with Bezier handles.
 //!
+//! New keys get the toolbar's **New keys** easing ([`NewKeys`], Smooth to
+//! start with); keying over a key keeps its easing. Right-clicking selected
+//! keys has **Easing ▸**, which sets all of theirs.
+//!
 //! On a skinned MeshPart the clip's `Bone` tracks pose its skeleton:
 //! turning a bone in the preview is a `Bone` edit like any other, and
 //! [`PropertyDoc::bone_pose`] gives the pose at the playhead.
@@ -36,6 +40,56 @@ const GRAB: f32 = 7.0;
 
 /// A key, by its track's id and its own.
 type KeyRef = (String, String);
+
+/// The easing new keys get from Record, K, posing and Add track.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum NewKeys {
+    /// Ease InOut, Sine: starts and stops gently.
+    #[default]
+    Smooth,
+    Linear,
+    Constant,
+}
+
+impl NewKeys {
+    pub const ALL: [NewKeys; 3] = [NewKeys::Smooth, NewKeys::Linear, NewKeys::Constant];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            NewKeys::Smooth => "Smooth",
+            NewKeys::Linear => "Linear",
+            NewKeys::Constant => "Constant",
+        }
+    }
+
+    /// The interpolation and easing a key gets.
+    pub fn easing(self) -> (Interp, Option<Easing>) {
+        match self {
+            NewKeys::Smooth => (
+                Interp::Ease,
+                Some(Easing::new(EasingStyle::Sine, EasingDirection::InOut)),
+            ),
+            NewKeys::Linear => (Interp::Linear, None),
+            NewKeys::Constant => (Interp::Step, None),
+        }
+    }
+
+    /// The New keys menu, for a toolbar.
+    pub fn picker(&mut self, ui: &mut egui::Ui) {
+        egui::ComboBox::from_id_salt("new keys easing")
+            .selected_text(format!("New keys: {}", self.label()))
+            .show_ui(ui, |ui| {
+                for choice in Self::ALL {
+                    ui.selectable_value(self, choice, choice.label());
+                }
+            })
+            .response
+            .on_hover_text(
+                "How keys you make from now on move to the next: Smooth eases in and out. \
+                 Keys already made keep theirs.",
+            );
+    }
+}
 
 /// What a drag in the dope sheet is doing.
 enum Gesture {
@@ -96,6 +150,8 @@ pub struct PropertyDoc {
     pub read_only: bool,
     /// Where the dope sheet last drew.
     pub sheet: egui::Rect,
+    /// The easing keys made from now on get.
+    pub new_keys: NewKeys,
 }
 
 impl PropertyDoc {
@@ -123,6 +179,7 @@ impl PropertyDoc {
             curve_gesture: None,
             read_only: false,
             sheet: egui::Rect::NOTHING,
+            new_keys: NewKeys::default(),
         }
     }
 

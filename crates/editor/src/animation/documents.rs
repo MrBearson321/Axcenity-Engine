@@ -104,16 +104,16 @@ impl AnimationStudio {
         self.clip.bones.selected = None;
         // A linked clip opens on its take; a keyed one in the property editor.
         self.clip.doc = match store::read_any_clip(project, path) {
-            Ok(file) if file.link.is_some() => Some(Clip::Take(Box::new(ClipDoc::open(
-                path.to_owned(),
-                file,
-                assets,
-                &self.files.models,
-            )))),
-            Ok(file) => Some(Clip::Property(Box::new(PropertyDoc::open(
-                path.to_owned(),
-                file,
-            )))),
+            Ok(file) if file.link.is_some() => {
+                let mut doc = ClipDoc::open(path.to_owned(), file, assets, &self.files.models);
+                doc.new_keys = self.clip.new_keys;
+                Some(Clip::Take(Box::new(doc)))
+            }
+            Ok(file) => {
+                let mut doc = PropertyDoc::open(path.to_owned(), file);
+                doc.new_keys = self.clip.new_keys;
+                Some(Clip::Property(Box::new(doc)))
+            }
             Err(err) => {
                 output.error(format!("Could not open the clip `{path}`: {err}"));
                 None

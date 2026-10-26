@@ -37,6 +37,9 @@ pub mod store;
 mod testing;
 mod timeline;
 
+#[cfg(test)]
+pub use property_editor::NewKeys;
+
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -381,6 +384,11 @@ struct ClipView {
     record: bool,
     /// A take clip's bones in its preview: the selected one and its gizmo.
     bones: Poser,
+    /// How both previews' gizmos snap and which axes they use, kept while
+    /// the editor runs.
+    pose: posing::PoseSettings,
+    /// The New keys easing, kept from clip to clip while the editor runs.
+    new_keys: property_editor::NewKeys,
     /// A property clip's preview: a copy of what it animates.
     objects: ObjectPreview,
     /// Which bones are folded in each model's bone tree, kept while the

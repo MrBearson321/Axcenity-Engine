@@ -918,6 +918,38 @@ fn drag(app: &mut EditorApp, id: InstanceId, handle: Handle, rays: &[Ray]) {
     app.history.seal();
 }
 
+/// Turns `id` `degrees` around the world's Z with its Rotate ring, as the
+/// viewport does, seen from in front: one edit per frame as the mouse moves
+/// along the ring, then the mouse is let go.
+fn turn_around_z(app: &mut EditorApp, id: InstanceId, degrees: f32) {
+    let pose = Pose::of(app.world.get(id).unwrap()).unwrap();
+    let camera = axcenity_render::Camera {
+        position: pose.position + Vec3::Z * 20.0,
+        look_at: pose.position,
+        fov_y_degrees: 50.0,
+    };
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0));
+    let screen = crate::screen::Screen::new(camera, rect);
+    let frame = Pose {
+        rotation: axcenity_render::glam::Quat::IDENTITY,
+        ..pose
+    };
+    let grab = crate::gizmo::ring_point(&screen, frame, Axis::Z, 0.0);
+    let handle = Handle::Rotate(Axis::Z);
+    let mut drag = Drag::turn(handle, id, pose, &screen, grab).unwrap();
+    let points = degrees.to_radians() / crate::gizmo::TURN_PER_POINT;
+    for step in 1..=3 {
+        let at = grab + drag.spin() * points * step as f32 / 3.0;
+        let pointer = crate::gizmo::Pointer::on(&screen, at, false);
+        let values = drag.update(pointer, &app.snap).unwrap();
+        app.apply_drag(DragEdit {
+            kind: DragKind::of(handle),
+            parts: vec![(id, values)],
+        });
+    }
+    app.history.seal();
+}
+
 /// Rays from in front of the scene, straight down -Z, through (x, y).
 fn rays_along_z(points: &[(f32, f32)]) -> Vec<Ray> {
     points
@@ -955,13 +987,7 @@ fn each_gizmo_drag_is_one_undo_step() {
     assert_eq!(property(&app, pad, "Size"), vector(8.0, 2.5, 8.0));
     assert_eq!(app.history.undo_label(), Some("Resize Pad"));
     // Turn it a quarter around Z, in steps.
-    let around = [(8.0, 1.25), (7.0, 3.0), (5.0, 4.25)];
-    drag(
-        &mut app,
-        pad,
-        Handle::Rotate(Axis::Z),
-        &rays_along_z(&around),
-    );
+    turn_around_z(&mut app, pad, 90.0);
     let orientation = property(&app, pad, "Orientation").as_vector3().unwrap();
     let actual_rotation = axcenity_scene::rotation_from_orientation(orientation);
     let initial_orientation = start.2.as_vector3().unwrap();

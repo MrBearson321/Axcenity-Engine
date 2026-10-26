@@ -124,13 +124,14 @@ impl Viewport {
             Some(frame) => gizmo::shapes(tool, frame, screen),
             None => Vec::new(),
         };
-        let (pressed, down, pointer, press_origin, alt) = ui.input(|input| {
+        let (pressed, down, pointer, press_origin, alt, shift) = ui.input(|input| {
             (
                 input.pointer.primary_pressed(),
                 input.pointer.primary_down(),
                 input.pointer.latest_pos(),
                 input.pointer.press_origin(),
                 input.modifiers.alt,
+                input.modifiers.shift,
             )
         });
         let over = response.contains_pointer() && self.drag.is_none();
@@ -160,7 +161,7 @@ impl Viewport {
             && !alt
             && let (Some(handle), Some(pointer), Some(frame)) = (hovered, pointer, frame)
         {
-            self.drag = Drag::start_many(handle, frame, parts.clone(), modes, screen.ray(pointer))
+            self.drag = Drag::start_many(handle, frame, parts.clone(), modes, screen, pointer)
                 .map(Dragging::Handle);
         }
         // A UI element or part's body only once the mouse has moved far
@@ -236,10 +237,14 @@ impl Viewport {
             } else if let Some(pointer) = pointer {
                 let ray = screen.ray(pointer);
                 input.edit = match dragging {
-                    Dragging::Handle(drag) => drag.update_all(ray, &snap).map(|parts| DragEdit {
-                        kind: DragKind::of(drag.handle),
-                        parts,
-                    }),
+                    Dragging::Handle(drag) => {
+                        // Shift turns a ring finely.
+                        let at = gizmo::Pointer::on(screen, pointer, shift);
+                        drag.update_all(at, &snap).map(|parts| DragEdit {
+                            kind: DragKind::of(drag.handle),
+                            parts,
+                        })
+                    }
                     Dragging::Body(place, others) => {
                         place.update(world, ray, &snap).map(|position| {
                             let start = place.start;

@@ -12,7 +12,7 @@ use axcenity_scene::Poses;
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 
-use super::posing::{BoneEvent, Poser, Skeleton};
+use super::posing::{BoneEvent, PoseSettings, Poser, Skeleton};
 use crate::screen::Screen;
 
 /// Floor tiles along each side.
@@ -128,6 +128,7 @@ pub fn add_floor(world: &mut World, center: Vec3, top: f32, tile: f32) {
 /// The model's skeleton as the preview shows it, to pose it.
 pub struct Bones<'a> {
     pub poser: &'a mut Poser,
+    pub settings: &'a PoseSettings,
     pub rig: &'a Rig,
     pub pose: &'a [BoneTransform],
     /// One per bone: moved by the take, so it can't be keyed.
@@ -278,7 +279,11 @@ impl Preview {
         };
         let interaction = match (&mut bones, &skeleton) {
             (Some(bones), Some(skeleton)) => {
-                Some(bones.poser.interact(ui, &response, &screen, skeleton))
+                Some(
+                    bones
+                        .poser
+                        .interact(ui, &response, &screen, skeleton, bones.settings),
+                )
             }
             _ => None,
         };
