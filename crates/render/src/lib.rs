@@ -14,8 +14,8 @@ mod renderer;
 pub use draw_list::{
     AmbientLight, Camera, Channel, ChannelMap, Cone, DrawItem, DrawList, Light, Material,
     MeshSource, NormalMap, PostProcessing, Shadows, Shape, Sky, Sprite, Sun, TerrainLayer,
-    TerrainLayers, TerrainSurface, TerrainView, TextAlign, TextureMaps, TextureSource, UiDrawItem,
-    UiImage, UiRectangle, UiText,
+    TerrainLayers, TerrainSurface, TerrainView, TextAlign, TextShadow, TextStroke, TextureMaps,
+    TextureSource, UiDrawItem, UiImage, UiRectangle, UiText, VerticalAlign,
 };
 pub use fonts::{BUILT_IN_FONTS, BuiltInFont, UiFont, font_families};
 pub use renderer::{RenderStats, Renderer, TextureRenderer};

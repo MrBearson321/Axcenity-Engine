@@ -146,41 +146,97 @@ pub(super) fn paint_instance(
         } else {
             typed
         };
-        let font_size = font_size(instance, styles);
-        let css_text_color = css_color(styles, "color");
-        let color = css_text_color
-            .map(|(color, _)| color)
-            .unwrap_or_else(|| color_property(instance, "TextColor3"));
-        let font_family = css_property(styles, "font-family")
-            .map(|family| font_family_name(&family))
-            .unwrap_or_else(|| "Montserrat".to_owned());
-        // Buttons center their text, as in Roblox; labels start at the left.
-        let button = instance.class() == ClassName::TextButton;
-        let align = match css_property(styles, "text-align").as_deref().map(str::trim) {
-            Some("center") => TextAlign::Center,
-            Some("right" | "end") => TextAlign::Right,
-            Some(_) => TextAlign::Left,
-            None if button => TextAlign::Center,
-            None => TextAlign::Left,
-        };
         if !text.is_empty() && rect.width > 0.0 && rect.height > 0.0 {
             out.push(UiDrawItem::Text(UiText {
                 position: [rect.x + 4.0, rect.y + 4.0],
                 size: [(rect.width - 8.0).max(0.0), (rect.height - 8.0).max(0.0)],
-                text: text.to_owned(),
-                font_size,
-                color: [
-                    color.r,
-                    color.g,
-                    color.b,
-                    opacity
-                        * css_text_color.map_or(1.0, |(_, a)| a)
-                        * if placeholder { 0.45 } else { 1.0 },
-                ],
-                font_family,
-                align,
-                center_vertically: button,
+                ..styled_text(instance, styles, opacity, placeholder, text)
             }));
         }
     }
+}
+
+/// `text` as `instance` draws it, with its styles, but not yet placed.
+/// `placeholder` text is drawn faint.
+pub(super) fn styled_text(
+    instance: &Instance,
+    styles: &ResolvedStyles,
+    opacity: f32,
+    placeholder: bool,
+    text: &str,
+) -> UiText {
+    let font_size = font_size(instance, styles);
+    let css_text_color = css_color(styles, "color");
+    let color = css_text_color
+        .map(|(color, _)| color)
+        .unwrap_or_else(|| color_property(instance, "TextColor3"));
+    let font_family = css_property(styles, "font-family")
+        .map(|family| font_family_name(&family))
+        .unwrap_or_else(|| "Montserrat".to_owned());
+    // Buttons center their text, as in Roblox; labels start at the left.
+    let button = instance.class() == ClassName::TextButton;
+    let align = match css_property(styles, "text-align").as_deref().map(str::trim) {
+        Some("center") => TextAlign::Center,
+        Some("right" | "end") => TextAlign::Right,
+        Some(_) => TextAlign::Left,
+        None if button => TextAlign::Center,
+        None => TextAlign::Left,
+    };
+    let vertical_align = match css_keyword(styles, "vertical-align").as_deref() {
+        Some("top") => VerticalAlign::Top,
+        Some("middle") => VerticalAlign::Middle,
+        Some("bottom") => VerticalAlign::Bottom,
+        _ if button => VerticalAlign::Middle,
+        _ => VerticalAlign::Top,
+    };
+    let decoration = css_keyword(styles, "text-decoration").unwrap_or_default();
+    let text = match css_keyword(styles, "text-transform").as_deref() {
+        Some("uppercase") => text.to_uppercase(),
+        Some("lowercase") => text.to_lowercase(),
+        Some("capitalize") => capitalize(text),
+        _ => text.to_owned(),
+    };
+    let alpha =
+        opacity * css_text_color.map_or(1.0, |(_, a)| a) * if placeholder { 0.45 } else { 1.0 };
+    UiText {
+        position: [0.0; 2],
+        size: [0.0; 2],
+        text,
+        font_size,
+        color: [color.r, color.g, color.b, alpha],
+        font_family,
+        align,
+        vertical_align,
+        weight: css_font_weight(styles),
+        italic: matches!(
+            css_keyword(styles, "font-style").as_deref(),
+            Some("italic" | "oblique")
+        ),
+        underline: decoration.contains("underline"),
+        line_through: decoration.contains("line-through"),
+        stroke: css_text_stroke(styles, opacity),
+        shadows: css_text_shadows(styles, opacity),
+        letter_spacing: css_letter_spacing(styles, font_size),
+        line_height: css_line_height(styles, font_size),
+        wrap: !matches!(
+            css_keyword(styles, "white-space").as_deref(),
+            Some("nowrap" | "pre")
+        ),
+        scaled: instance.property("TextScaled").and_then(Value::as_bool) == Some(true),
+    }
+}
+
+/// Each word's first letter in upper case (CSS `text-transform: capitalize`).
+fn capitalize(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut word_start = true;
+    for ch in text.chars() {
+        if word_start {
+            out.extend(ch.to_uppercase());
+        } else {
+            out.push(ch);
+        }
+        word_start = ch.is_whitespace();
+    }
+    out
 }

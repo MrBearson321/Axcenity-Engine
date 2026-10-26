@@ -37,7 +37,7 @@ fn ui_rectangles_keep_rounded_border_data_and_allow_border_only_shapes() {
         color_end: [0.0, 0.0, 0.0, 0.0],
     });
 
-    let vertices = ui_vertices(&[item], (200, 100));
+    let vertices = ui_vertices(&[item], &[], (200, 100));
     assert_eq!(vertices.len(), 6);
     assert_eq!(vertices[0].size, [100.0, 50.0]);
     assert_eq!(vertices[0].border, [25.0, 3.0]);

@@ -1,5 +1,6 @@
 //! The designer's side panels: the palette of elements, the hierarchy, and
-//! the inspector (name, text, anchor, font and the Style section).
+//! the inspector (name, text, font, the text toolbar, anchor and the Style
+//! section).
 
 use std::sync::Arc;
 
@@ -8,6 +9,7 @@ use axcenity_ui::Stylesheet;
 use eframe::egui;
 
 use super::anchors::{Pin, Placement, anchor_of};
+use super::text_toolbar;
 use super::{
     CLICK_INSERT_AT, DesignerAction, DesignerScene, PALETTE, PaletteItem, UiDesigner,
     anchor_action, container_for, hierarchy, reset_anchor_action,
@@ -282,6 +284,9 @@ impl UiDesigner {
                     ui.end_row();
                 }
             });
+            if has_text {
+                text_toolbar::text_toolbar(ui, scene, id, actions);
+            }
             if id != gui {
                 anchor_picker(ui, scene, gui, id, actions);
             }

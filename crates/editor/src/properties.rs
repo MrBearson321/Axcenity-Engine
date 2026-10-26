@@ -140,6 +140,7 @@ const GROUPS: [(&str, &[&str]); 19] = [
             "Placeholder",
             "TextColor3",
             "TextSize",
+            "TextScaled",
             "MultiLine",
             "Image",
             "ImageTransparency",

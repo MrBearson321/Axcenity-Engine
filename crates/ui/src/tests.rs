@@ -510,3 +510,145 @@ fn scale_mode_scales_evenly_and_keeps_edges_on_the_screen() {
     assert_eq!(small.x, 5.0 + element.rect.x * 0.25);
     assert_eq!(small.width, element.rect.width * 0.25);
 }
+
+/// The text drawn for the first text element in `items`.
+fn first_text(items: &[UiDrawItem]) -> &UiText {
+    items
+        .iter()
+        .find_map(|item| match item {
+            UiDrawItem::Text(text) => Some(text),
+            _ => None,
+        })
+        .expect("some text is drawn")
+}
+
+#[test]
+fn text_styles_are_parsed_into_the_text_drawn() {
+    let mut world = World::new();
+    let gui = world.create(ClassName::ScreenGui).unwrap();
+    world.set_parent(gui, Some(world.workspace())).unwrap();
+    let label = world.create(ClassName::TextLabel).unwrap();
+    world.set_parent(label, Some(gui)).unwrap();
+    world
+        .set_property(label, "Id", Value::String("Title".to_owned()))
+        .unwrap();
+    world
+        .set_property(label, "Text", Value::String("play now".to_owned()))
+        .unwrap();
+    let (stylesheet, warnings) = parse_stylesheet(
+        "ui.css",
+        "#Title { font-size: 20px; font-weight: bold; font-style: italic; \
+         text-decoration: underline line-through; text-transform: capitalize; \
+         -webkit-text-stroke: 2px #ff0000; \
+         text-shadow: 1px 2px #000, 3px 4px 5px rgba(0, 0, 255, 0.5); \
+         letter-spacing: 0.1em; line-height: 1.5; vertical-align: bottom; white-space: nowrap }",
+    );
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let items = build_ui_draw_data(&world, 800, 600, &[stylesheet]);
+    let text = first_text(&items);
+    assert_eq!(text.text, "Play Now");
+    assert_eq!(text.weight, 700);
+    assert!(text.italic && text.underline && text.line_through);
+    assert_eq!(
+        text.stroke,
+        Some(TextStroke {
+            width: 2.0,
+            color: [1.0, 0.0, 0.0, 1.0],
+        })
+    );
+    assert_eq!(text.shadows.len(), 2);
+    assert_eq!(text.shadows[0].offset, [1.0, 2.0]);
+    assert_eq!(text.shadows[0].blur, 0.0);
+    assert_eq!(text.shadows[1].offset, [3.0, 4.0]);
+    assert_eq!(text.shadows[1].blur, 5.0);
+    assert_eq!(text.shadows[1].color, [0.0, 0.0, 1.0, 0.5]);
+    assert!((text.letter_spacing - 2.0).abs() < 1e-5);
+    assert_eq!(text.line_height, Some(30.0));
+    assert_eq!(text.vertical_align, VerticalAlign::Bottom);
+    assert!(!text.wrap && !text.scaled);
+
+    // Unstyled: normal, upright, wrapping text at the top of a label and
+    // in the middle of a button.
+    let plain = build_ui_draw_data(&world, 800, 600, &[]);
+    let text = first_text(&plain);
+    assert_eq!((text.weight, text.italic, text.wrap), (400, false, true));
+    assert_eq!(text.text, "play now");
+    assert_eq!(text.vertical_align, VerticalAlign::Top);
+    assert!(text.stroke.is_none() && text.shadows.is_empty());
+    let button = world.create(ClassName::TextButton).unwrap();
+    world.set_parent(button, Some(gui)).unwrap();
+    world.destroy(label).unwrap();
+    let items = build_ui_draw_data(&world, 800, 600, &[]);
+    assert_eq!(first_text(&items).vertical_align, VerticalAlign::Middle);
+}
+
+#[test]
+fn text_styles_and_text_scaled_draw_the_same_on_the_artboard_and_in_play() {
+    let mut world = World::new();
+    let gui = world.create(ClassName::ScreenGui).unwrap();
+    world.set_parent(gui, Some(world.workspace())).unwrap();
+    for (name, value) in [
+        ("ScaleMode", Value::String("Scale".into())),
+        ("DesignWidth", Value::Number(800.0)),
+        ("DesignHeight", Value::Number(600.0)),
+    ] {
+        world.set_property(gui, name, value).unwrap();
+    }
+    let label = world.create(ClassName::TextLabel).unwrap();
+    world.set_parent(label, Some(gui)).unwrap();
+    world
+        .set_property(label, "Class", Value::String("fancy".to_owned()))
+        .unwrap();
+    world
+        .set_property(label, "TextScaled", Value::Bool(true))
+        .unwrap();
+    let (stylesheet, _) = parse_stylesheet(
+        "ui.css",
+        ".fancy { -webkit-text-stroke: 2px black; text-shadow: 2px 2px 4px #000; \
+         letter-spacing: 3px; line-height: 24px; vertical-align: middle; \
+         white-space: nowrap; text-transform: uppercase }",
+    );
+    let sheets = [stylesheet];
+    let play = layout_ui(&world, 800, 600, &sheets);
+    let board = layout_artboard(&world, gui, &sheets, (800, 600), 1.0, [0.0, 0.0]);
+    let in_play = first_text(&play.draw_items);
+    assert_eq!(in_play, first_text(&board.draw_items));
+    assert!(in_play.scaled);
+    assert_eq!(in_play.text, "LABEL");
+
+    // On a screen twice the design size, every length doubles.
+    let big = layout_ui(&world, 1600, 1200, &sheets);
+    let doubled = first_text(&big.draw_items);
+    assert_eq!(doubled.font_size, in_play.font_size * 2.0);
+    assert_eq!(doubled.letter_spacing, 6.0);
+    assert_eq!(doubled.line_height, Some(48.0));
+    assert_eq!(doubled.stroke.unwrap().width, 4.0);
+    assert_eq!(doubled.shadows[0].offset, [4.0, 4.0]);
+    assert_eq!(doubled.shadows[0].blur, 8.0);
+}
+
+#[test]
+fn text_style_properties_are_supported_and_text_stroke_has_both_names() {
+    let (stylesheet, warnings) = parse_stylesheet(
+        "ui.css",
+        "#A { text-stroke: 1px white; font-weight: 300 } #B { font-weight: nonsense }",
+    );
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let mut world = World::new();
+    let gui = world.create(ClassName::ScreenGui).unwrap();
+    world.set_parent(gui, Some(world.workspace())).unwrap();
+    let a = world.create(ClassName::TextLabel).unwrap();
+    world.set_parent(a, Some(gui)).unwrap();
+    world
+        .set_property(a, "Id", Value::String("A".to_owned()))
+        .unwrap();
+    let items = build_ui_draw_data(&world, 800, 600, std::slice::from_ref(&stylesheet));
+    let text = first_text(&items);
+    assert_eq!(text.stroke.unwrap().width, 1.0);
+    assert_eq!(text.weight, 300);
+    world
+        .set_property(a, "Id", Value::String("B".to_owned()))
+        .unwrap();
+    let items = build_ui_draw_data(&world, 800, 600, &[stylesheet]);
+    assert_eq!(first_text(&items).weight, 400);
+}

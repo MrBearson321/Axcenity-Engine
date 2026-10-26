@@ -27,8 +27,10 @@ mod anchors;
 mod artboard;
 mod panels;
 mod rulers;
+mod text_toolbar;
 
 pub use anchors::Pin;
+pub use text_toolbar::Toggle;
 
 use std::collections::HashMap;
 
@@ -124,6 +126,14 @@ pub enum DesignerAction {
     },
     /// Sets the element's CSS `font-family`.
     Font { id: InstanceId, family: String },
+    /// Sets one CSS property in the element's own `#Id` rule, from the text
+    /// toolbar. Every frame of one `dragging` change makes one undo step.
+    TextStyle {
+        id: InstanceId,
+        property: &'static str,
+        value: String,
+        dragging: bool,
+    },
     /// Makes a ScreenGui, when there's none to design.
     NewScreenGui,
 }
@@ -482,6 +492,7 @@ impl UiDesigner {
         };
         self.toolbar(ui, scene, gui, &mut actions);
         self.notes(ui, scene, gui, &mut actions);
+        self.text_shortcuts(ui.ctx(), scene, gui, &mut actions);
         ui.add_space(2.0);
 
         let width = ui.available_width();
@@ -534,6 +545,39 @@ impl UiDesigner {
             });
         });
         actions
+    }
+
+    /// Ctrl+B, Ctrl+I and Ctrl+U toggle bold, italic and underline on the
+    /// selected text element, unless something is being typed in.
+    fn text_shortcuts(
+        &self,
+        ctx: &egui::Context,
+        scene: &DesignerScene,
+        gui: InstanceId,
+        actions: &mut Vec<DesignerAction>,
+    ) {
+        if !scene.editing || self.text_editing.is_some() || ctx.wants_keyboard_input() {
+            return;
+        }
+        let Some(id) = scene
+            .selected
+            .filter(|&id| scene.world.is_descendant_of(id, gui))
+        else {
+            return;
+        };
+        let Some(style) = axcenity_ui::text_style(scene.world, id, scene.stylesheets) else {
+            return;
+        };
+        for (key, toggle) in [
+            (egui::Key::B, Toggle::Bold),
+            (egui::Key::I, Toggle::Italic),
+            (egui::Key::U, Toggle::Underline),
+        ] {
+            let shortcut = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, key);
+            if ctx.input_mut(|input| input.consume_shortcut(&shortcut)) {
+                actions.push(toggle.action(id, &style));
+            }
+        }
     }
 
     /// The ScreenGui picker, its scale mode and design size, the screen to

@@ -258,6 +258,7 @@ impl ScenePipeline {
             ui_capacity,
             font_system,
             loaded_fonts: HashSet::new(),
+            fitted_sizes: HashMap::new(),
             swash_cache,
             text_viewport,
             text_atlas,
@@ -343,7 +344,18 @@ impl ScenePipeline {
         self.ensure_instance_capacity(instances.len());
         self.queue
             .write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&instances));
-        let mut ui_vertices = ui_vertices(&list.ui, viewport_size);
+        for font in &list.fonts {
+            if self.loaded_fonts.insert(font.path.clone()) {
+                self.font_system
+                    .db_mut()
+                    .load_font_data(font.data.as_ref().clone());
+                // A new face can change what fits.
+                self.fitted_sizes.clear();
+            }
+        }
+        let (text_buffers, text_lines) = self.prepare_ui_text(&list.ui, viewport_size)?;
+
+        let mut ui_vertices = ui_vertices(&list.ui, &text_lines, viewport_size);
         let rect_count = ui_vertices.len() as u32;
         let image_draws = self.ui_image_draws(&list.ui, viewport_size, &mut ui_vertices);
         self.ensure_ui_capacity(ui_vertices.len());
@@ -351,15 +363,6 @@ impl ScenePipeline {
             self.queue
                 .write_buffer(&self.ui_buffer, 0, bytemuck::cast_slice(&ui_vertices));
         }
-
-        for font in &list.fonts {
-            if self.loaded_fonts.insert(font.path.clone()) {
-                self.font_system
-                    .db_mut()
-                    .load_font_data(font.data.as_ref().clone());
-            }
-        }
-        let text_buffers = self.prepare_ui_text(&list.ui, viewport_size)?;
         let sprite_draws = {
             let textures = &self.textures;
             self.sprites.prepare(
@@ -592,72 +595,98 @@ impl ScenePipeline {
         }
     }
 
+    /// Shapes and uploads the UI text in `ui`, with its shadows, outline
+    /// and faux bold. Returns the shaped text, which must live until it's
+    /// drawn, and its underlines and line-throughs, by the index of the
+    /// text in `ui`.
     pub(super) fn prepare_ui_text(
         &mut self,
         ui: &[UiDrawItem],
         (width, height): (u32, u32),
-    ) -> Result<Vec<Buffer>> {
+    ) -> Result<(Vec<Buffer>, Vec<TextLine>)> {
         self.text_viewport
             .update(&self.queue, Resolution { width, height });
 
-        let text_items: Vec<&UiText> = ui
+        let text_items: Vec<(usize, &UiText)> = ui
             .iter()
-            .filter_map(|item| match item {
-                UiDrawItem::Text(text) => Some(text),
+            .enumerate()
+            .filter_map(|(index, item)| match item {
+                UiDrawItem::Text(text) => Some((index, text)),
                 UiDrawItem::Rectangle(_) | UiDrawItem::Image(_) => None,
             })
             .collect();
+        if self.fitted_sizes.len() > 4096 {
+            self.fitted_sizes.clear();
+        }
         let mut buffers = Vec::with_capacity(text_items.len());
-        for text in &text_items {
-            let font_size = text.font_size.max(1.0);
-            let mut buffer = Buffer::new(
-                &mut self.font_system,
-                Metrics::new(font_size, font_size * 1.2),
+        let mut placed = Vec::with_capacity(text_items.len());
+        let mut lines = Vec::new();
+        for &(index, item) in &text_items {
+            let face = text::pick_face(
+                self.font_system.db(),
+                &item.font_family,
+                item.weight,
+                item.italic,
             );
-            buffer.set_size(
-                &mut self.font_system,
-                Some(text.size[0].max(0.0)),
-                Some(text.size[1].max(0.0)),
-            );
-            buffer.set_text(
-                &mut self.font_system,
-                &text.text,
-                &Attrs::new().family(Family::Name(&text.font_family)),
-                Shaping::Advanced,
-            );
-            let align = match text.align {
-                TextAlign::Left => None,
-                TextAlign::Center => Some(glyphon::cosmic_text::Align::Center),
-                TextAlign::Right => Some(glyphon::cosmic_text::Align::Right),
+            let font_size = if item.scaled {
+                let key = format!(
+                    "{face:?}{:?}{:?}{:?}",
+                    item.text,
+                    item.size,
+                    (
+                        &item.font_family,
+                        item.font_size,
+                        item.letter_spacing,
+                        item.line_height,
+                        item.wrap,
+                    )
+                );
+                match self.fitted_sizes.get(&key) {
+                    Some(size) => *size,
+                    None => {
+                        let size = text::fitted_size(&mut self.font_system, item, face);
+                        self.fitted_sizes.insert(key, size);
+                        size
+                    }
+                }
+            } else {
+                item.font_size.max(1.0)
             };
-            for line in &mut buffer.lines {
-                line.set_align(align);
-            }
-            buffer.shape_until_scroll(&mut self.font_system, false);
+            let buffer = text::shape(&mut self.font_system, item, face, font_size);
+            let top = item.position[1] + text::vertical_offset(item, &buffer);
+            lines.extend(
+                text::decorations(item, &buffer, font_size, [item.position[0], top])
+                    .into_iter()
+                    .map(|line| (index, line)),
+            );
+            placed.push((item, top, text::passes(item, font_size, face.fake_bold)));
             buffers.push(buffer);
         }
 
         if !buffers.is_empty() {
-            let areas: Vec<_> = text_items
-                .iter()
-                .zip(&buffers)
-                .map(|(text, buffer)| TextArea {
-                    buffer,
-                    left: text.position[0],
-                    top: text.position[1] + vertical_offset(text, buffer),
-                    scale: 1.0,
-                    // Where the text may show, in screen pixels (not
-                    // relative to the text's position).
-                    bounds: TextBounds {
-                        left: text.position[0].floor() as i32,
-                        top: text.position[1].floor() as i32,
-                        right: (text.position[0] + text.size[0].max(0.0)).ceil() as i32,
-                        bottom: (text.position[1] + text.size[1].max(0.0)).ceil() as i32,
-                    },
-                    default_color: glyph_color(text.color),
-                    custom_glyphs: &[],
-                })
-                .collect();
+            let mut areas = Vec::new();
+            for ((text, top, passes), buffer) in placed.iter().zip(&buffers) {
+                for pass in passes {
+                    let [dx, dy] = pass.offset;
+                    areas.push(TextArea {
+                        buffer,
+                        left: text.position[0] + dx,
+                        top: top + dy,
+                        scale: 1.0,
+                        // Where it may show, in screen pixels (not relative
+                        // to the text's position): its box, moved with the
+                        // copy so a shadow is cut where its letters are.
+                        bounds: TextBounds {
+                            left: (text.position[0] + dx).floor() as i32,
+                            top: (text.position[1] + dy).floor() as i32,
+                            right: (text.position[0] + dx + text.size[0].max(0.0)).ceil() as i32,
+                            bottom: (text.position[1] + dy + text.size[1].max(0.0)).ceil() as i32,
+                        },
+                        default_color: glyph_color(pass.color),
+                        custom_glyphs: &[],
+                    });
+                }
+            }
             self.text_renderer
                 .prepare(
                     &self.device,
@@ -670,7 +699,7 @@ impl ScenePipeline {
                 )
                 .context("could not prepare UI text")?;
         }
-        Ok(buffers)
+        Ok((buffers, lines))
     }
 
     /// Uploads the callers' meshes and textures in `list` that aren't on

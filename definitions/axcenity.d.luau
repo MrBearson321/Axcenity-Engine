@@ -643,6 +643,8 @@ declare extern type TextLabel extends Instance with
 	TextColor3: Color3
 	--- The text size in pixels.
 	TextSize: number
+	--- If true, the text is drawn at the largest size up to TextSize (or CSS font-size) that fits its box.
+	TextScaled: boolean
 	--- If false, this label is hidden.
 	Visible: boolean
 	[string]: any
@@ -668,6 +670,8 @@ declare extern type TextButton extends Instance with
 	TextColor3: Color3
 	--- The text size in pixels.
 	TextSize: number
+	--- If true, the text is drawn at the largest size up to TextSize (or CSS font-size) that fits its box.
+	TextScaled: boolean
 	--- The project-relative path of an icon. Empty shows no picture. With Text, the icon sits beside the label.
 	Image: string
 	--- The icon opacity: 0 is opaque and 1 is transparent.
@@ -724,6 +728,8 @@ declare extern type TextBox extends Instance with
 	TextColor3: Color3
 	--- The text size in pixels.
 	TextSize: number
+	--- If true, the text is drawn at the largest size up to TextSize (or CSS font-size) that fits its box.
+	TextScaled: boolean
 	--- If false, Enter finishes typing. If true, Enter starts a new line and clicking away finishes typing.
 	MultiLine: boolean
 	--- If false, this text box is hidden.

@@ -5,6 +5,7 @@ use axcenity_core::{ClassName, InstanceId, Value, World};
 
 /// The CSS properties UI elements understand. Others are warned about.
 pub const SUPPORTED_PROPERTIES: &[&str] = &[
+    "-webkit-text-stroke",
     "align-items",
     "background-color",
     "background-image",
@@ -19,9 +20,13 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "flex-grow",
     "font-family",
     "font-size",
+    "font-style",
+    "font-weight",
     "gap",
     "height",
     "justify-content",
+    "letter-spacing",
+    "line-height",
     "margin",
     "margin-bottom",
     "margin-left",
@@ -34,6 +39,12 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "padding-right",
     "padding-top",
     "text-align",
+    "text-decoration",
+    "text-shadow",
+    "text-stroke",
+    "text-transform",
+    "vertical-align",
+    "white-space",
     "width",
 ];
 

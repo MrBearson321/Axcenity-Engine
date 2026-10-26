@@ -416,10 +416,10 @@ Ctrl+B, Ctrl+I and Ctrl+U toggle bold, italic and underline on the selected elem
 
 ### Acceptance criteria
 
-- [ ] A label set to bold italic underlined with the toolbar draws with Montserrat's real Bold Italic face in the designer and in Play, and its CSS rule shows `font-weight: bold; font-style: italic; text-decoration: underline`.
-- [ ] A family with no bold file (for example Bangers) draws faux bold, and a project font with its own Bold file uses that file, in the editor and in a built game.
-- [ ] Outline, shadow, letter spacing, line height, vertical alignment, `nowrap` and `text-transform` draw the same in the designer and in Play.
-- [ ] With `TextScaled` on, a long string shrinks to fit its box and a short one grows to the set size.
+- [x] A label set to bold italic underlined with the toolbar draws with Montserrat's real Bold Italic face in the designer and in Play, and its CSS rule shows `font-weight: bold; font-style: italic; text-decoration: underline`.
+- [x] A family with no bold file (for example Bangers) draws faux bold, and a project font with its own Bold file uses that file, in the editor and in a built game.
+- [x] Outline, shadow, letter spacing, line height, vertical alignment, `nowrap` and `text-transform` draw the same in the designer and in Play.
+- [x] With `TextScaled` on, a long string shrinks to fit its box and a short one grows to the set size.
 
 ---
 

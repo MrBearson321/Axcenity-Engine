@@ -166,6 +166,12 @@ impl EditorApp {
                     self.anchor(id, position, size);
                 }
                 DesignerAction::Font { id, family } => self.set_font(id, &family),
+                DesignerAction::TextStyle {
+                    id,
+                    property,
+                    value,
+                    dragging,
+                } => self.set_own_style(id, property, &value, dragging),
                 DesignerAction::Insert { what, parent, at } => {
                     self.designer_insert(what, parent, at);
                 }
@@ -198,9 +204,7 @@ impl EditorApp {
         );
     }
 
-    /// Draws `id`'s text in `family`: its own `#Id` rule's `font-family`
-    /// is changed in place, or added to that rule (which wins over class
-    /// rules) when it has none. One undo step.
+    /// Draws `id`'s text in `family` (CSS `font-family`), as one undo step.
     pub(in crate::app) fn set_font(&mut self, id: InstanceId, family: &str) {
         // CSS needs a family name with spaces in quotes.
         let value = if family.contains(' ') {
@@ -208,6 +212,20 @@ impl EditorApp {
         } else {
             family.to_owned()
         };
+        self.set_own_style(id, "font-family", &value, false);
+    }
+
+    /// Sets `property` to `value` for `id`: its own `#Id` rule's declaration
+    /// is changed in place, or added to that rule (which wins over class
+    /// rules) when it has none. One undo step, or, while `dragging`, part of
+    /// the step the drag is making.
+    pub(in crate::app) fn set_own_style(
+        &mut self,
+        id: InstanceId,
+        property: &str,
+        value: &str,
+        dragging: bool,
+    ) {
         let own = self
             .world
             .get(id)
@@ -216,22 +234,26 @@ impl EditorApp {
             .filter(|element_id| !element_id.is_empty())
             .map(style_panel::own_selector);
         let applied = self.project.as_ref().and_then(|project| {
-            axcenity_ui::applied_declaration(&self.world, id, &project.stylesheets, "font-family")
+            axcenity_ui::applied_declaration(&self.world, id, &project.stylesheets, property)
         });
         let edit = match applied {
             Some(declaration) if Some(&declaration.selector) == own.as_ref() => StyleEdit::Set {
                 path: declaration.path,
                 span: declaration.span,
-                value,
+                value: value.to_owned(),
             },
             _ => StyleEdit::Add {
-                property: "font-family".to_owned(),
-                value,
+                property: property.to_owned(),
+                value: value.to_owned(),
             },
         };
-        self.history.seal();
+        if !dragging {
+            self.history.seal();
+        }
         self.apply_style(id, edit);
-        self.history.seal();
+        if !dragging {
+            self.history.seal();
+        }
     }
 
     /// Puts a new `what` from the designer's palette into `parent`, its top

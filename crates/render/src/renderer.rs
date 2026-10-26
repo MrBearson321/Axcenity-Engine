@@ -12,14 +12,13 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::time::Duration;
 
-use crate::draw_list::{DrawList, Shape, TextAlign, TextureSource, UiDrawItem, UiText};
+use crate::draw_list::{DrawList, Shape, TextureSource, UiDrawItem, UiText};
 use crate::mesh::{self};
 use anyhow::{Context, Result};
 use bytemuck::{Pod, Zeroable};
 use glyphon::{
-    Attrs, Buffer, Cache as GlyphCache, Family, FontSystem, Metrics, Resolution, Shaping,
-    SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer as GlyphTextRenderer,
-    Viewport as TextViewport,
+    Buffer, Cache as GlyphCache, FontSystem, Resolution, SwashCache, TextArea, TextAtlas,
+    TextBounds, TextRenderer as GlyphTextRenderer, Viewport as TextViewport,
 };
 
 mod gpu;
@@ -28,6 +27,7 @@ mod lighting;
 mod post;
 mod sprites;
 mod terrain;
+pub(crate) mod text;
 mod ui_pass;
 
 #[cfg(test)]
@@ -54,10 +54,11 @@ use std::sync::Arc;
 mod scene;
 mod types;
 
+use text::TextLine;
 use types::*;
 use ui_pass::{
     create_sky_pipeline, create_ui_image_pipeline, create_ui_pipeline, glyph_color, image_quad,
-    ui_vertices, vertical_offset,
+    ui_vertices,
 };
 
 /// Draws a scene into a window. The player uses this.

@@ -321,6 +321,9 @@ pub(super) struct ScenePipeline {
     pub(super) font_system: FontSystem,
     /// The paths of the project fonts loaded into `font_system`.
     pub(super) loaded_fonts: HashSet<String>,
+    /// The size each `TextScaled` text was fitted at, by everything that
+    /// changes it, so it isn't worked out again every frame.
+    pub(super) fitted_sizes: HashMap<String, f32>,
     pub(super) swash_cache: SwashCache,
     pub(super) text_viewport: TextViewport,
     pub(super) text_atlas: TextAtlas,

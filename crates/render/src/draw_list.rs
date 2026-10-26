@@ -87,18 +87,93 @@ pub struct UiImage {
     pub texture: Option<Arc<dyn TextureSource>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct UiText {
     pub position: [f32; 2],
     pub size: [f32; 2],
+    /// What it says, already in the case CSS `text-transform` asks for.
     pub text: String,
     pub font_size: f32,
     pub font_family: String,
     pub color: [f32; 4],
     /// Where each line goes across the box.
     pub align: TextAlign,
-    /// True to center the text up and down in its box; false puts it at the top.
-    pub center_vertically: bool,
+    /// Where the lines sit up and down in the box (CSS `vertical-align`).
+    pub vertical_align: VerticalAlign,
+    /// CSS `font-weight`, 100 to 900: 400 is normal and 700 bold. The
+    /// renderer picks the family's nearest face, and thickens it when the
+    /// family has nothing bold enough.
+    pub weight: u16,
+    /// CSS `font-style: italic`. Slanted when the family has no italic face.
+    pub italic: bool,
+    pub underline: bool,
+    pub line_through: bool,
+    /// An outline around each letter (CSS `-webkit-text-stroke`).
+    pub stroke: Option<TextStroke>,
+    /// Copies drawn behind the text, first one on top (CSS `text-shadow`).
+    pub shadows: Vec<TextShadow>,
+    /// Extra room after each letter, in pixels (CSS `letter-spacing`).
+    pub letter_spacing: f32,
+    /// From one line to the next, in pixels (CSS `line-height`). `None` is
+    /// 1.2 times the font size.
+    pub line_height: Option<f32>,
+    /// False keeps each line on one line (CSS `white-space: nowrap`).
+    pub wrap: bool,
+    /// `TextScaled`: drawn at the largest size up to `font_size` that fits
+    /// the box.
+    pub scaled: bool,
+}
+
+impl Default for UiText {
+    fn default() -> Self {
+        Self {
+            position: [0.0; 2],
+            size: [0.0; 2],
+            text: String::new(),
+            font_size: 16.0,
+            font_family: "Montserrat".to_owned(),
+            color: [1.0; 4],
+            align: TextAlign::Left,
+            vertical_align: VerticalAlign::Top,
+            weight: 400,
+            italic: false,
+            underline: false,
+            line_through: false,
+            stroke: None,
+            shadows: Vec::new(),
+            letter_spacing: 0.0,
+            line_height: None,
+            wrap: true,
+            scaled: false,
+        }
+    }
+}
+
+/// Where lines of UI text sit up and down in their box (CSS `vertical-align`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum VerticalAlign {
+    #[default]
+    Top,
+    Middle,
+    Bottom,
+}
+
+/// An outline around UI text's letters.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TextStroke {
+    /// In pixels.
+    pub width: f32,
+    pub color: [f32; 4],
+}
+
+/// A copy of UI text drawn behind it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TextShadow {
+    /// Right and down, in pixels.
+    pub offset: [f32; 2],
+    /// How soft it is, in pixels. 0 is sharp.
+    pub blur: f32,
+    pub color: [f32; 4],
 }
 
 /// Where lines of UI text go across their box (CSS `text-align`).

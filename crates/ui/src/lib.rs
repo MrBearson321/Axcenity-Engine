@@ -16,7 +16,10 @@ use paint::*;
 use axcenity_core::{ClassName, Color3, Instance, InstanceId, UDim2, Value, World};
 use axcenity_render::glam::Vec3;
 use axcenity_render::glam::camera::rh;
-use axcenity_render::{Camera, TextAlign, UiDrawItem, UiImage, UiRectangle, UiText};
+use axcenity_render::{
+    Camera, TextAlign, TextShadow, TextStroke, UiDrawItem, UiImage, UiRectangle, UiText,
+    VerticalAlign,
+};
 use taffy::prelude::*;
 
 pub use style::{
@@ -186,6 +189,16 @@ pub fn build_ui_draw_data(
     stylesheets: &[Stylesheet],
 ) -> Vec<UiDrawItem> {
     layout_ui(world, width, height, stylesheets).draw_items
+}
+
+/// How `id`'s text is styled, as it's drawn at its authored size, but not
+/// placed: what the UI Designer's text toolbar shows. `None` for an element
+/// without text.
+pub fn text_style(world: &World, id: InstanceId, stylesheets: &[Stylesheet]) -> Option<UiText> {
+    let instance = world.get(id)?;
+    let text = instance.property("Text").and_then(Value::as_str)?;
+    let styles = resolve_styles(world, id, stylesheets, PseudoClasses::default());
+    Some(styled_text(instance, &styles, 1.0, false, text))
 }
 
 /// [`build_ui_draw_data`], also saying where each element went, for picking
@@ -507,6 +520,17 @@ fn scale_draw_item(item: &mut UiDrawItem, fit: Fit) {
         UiDrawItem::Text(text) => {
             place(&mut text.position, &mut text.size);
             text.font_size *= fit.scale;
+            text.letter_spacing *= fit.scale;
+            if let Some(height) = &mut text.line_height {
+                *height *= fit.scale;
+            }
+            if let Some(stroke) = &mut text.stroke {
+                stroke.width *= fit.scale;
+            }
+            for shadow in &mut text.shadows {
+                shadow.offset = shadow.offset.map(|d| d * fit.scale);
+                shadow.blur *= fit.scale;
+            }
         }
     }
 }

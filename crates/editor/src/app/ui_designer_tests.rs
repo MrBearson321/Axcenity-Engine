@@ -1314,3 +1314,195 @@ fn reset_anchors_an_element_at_the_top_left_without_moving_it() {
     assert_eq!(udim2(&app, menu.frame, "Position"), centred);
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+#[test]
+fn the_text_toolbar_writes_bold_italic_underline_into_the_elements_own_rule() {
+    let folder = copy_of_example("hello-touched", "ui-designer-text-toolbar");
+    let mut app = EditorApp::new(Some(&folder));
+    act(&mut app, DesignerAction::NewScreenGui);
+    let gui = app.selected.unwrap();
+    let title = drop_in(&mut app, Insertable::TextLabel, gui, [10.0, 10.0]);
+    act(
+        &mut app,
+        DesignerAction::Edit(title, Edit::Name("Title".into())),
+    );
+    let before = state(&app);
+    let style =
+        |app: &EditorApp| axcenity_ui::text_style(&app.world, title, &stylesheets(app)).unwrap();
+    let toggle = |app: &mut EditorApp, toggle: crate::ui_designer::Toggle| {
+        let action = toggle.action(title, &style(app));
+        act(app, action);
+    };
+    use crate::ui_designer::Toggle;
+    toggle(&mut app, Toggle::Bold);
+    toggle(&mut app, Toggle::Italic);
+    toggle(&mut app, Toggle::Underline);
+
+    let css = app.stylesheet_text("ui.css").unwrap().replace("\r\n", "\n");
+    assert!(
+        css.contains(
+            "#Title {\n  font-weight: bold;\n  font-style: italic;\n  text-decoration: underline;\n}"
+        ),
+        "{css}"
+    );
+    // Drawn bold, italic and underlined in Montserrat, the same on the
+    // artboard as in Play.
+    let sheets = stylesheets(&app);
+    let drawn = |items: &[axcenity_render::UiDrawItem]| {
+        items
+            .iter()
+            .find_map(|item| match item {
+                axcenity_render::UiDrawItem::Text(text) => Some(text.clone()),
+                _ => None,
+            })
+            .unwrap()
+    };
+    let (width, height) = axcenity_ui::design_size(&app.world, gui);
+    let play = drawn(&axcenity_ui::layout_ui(&app.world, width, height, &sheets).draw_items);
+    let board = drawn(
+        &axcenity_ui::layout_artboard(&app.world, gui, &sheets, (width, height), 1.0, [0.0, 0.0])
+            .draw_items,
+    );
+    assert_eq!(play, board);
+    assert_eq!(
+        (
+            play.font_family.as_str(),
+            play.weight,
+            play.italic,
+            play.underline
+        ),
+        ("Montserrat", 700, true, true)
+    );
+
+    // Toggling again changes the declaration instead of adding another,
+    // and strikethrough keeps the underline.
+    toggle(&mut app, Toggle::Bold);
+    toggle(&mut app, Toggle::Strikethrough);
+    let css = app.stylesheet_text("ui.css").unwrap();
+    assert_eq!(css.matches("font-weight").count(), 1, "{css}");
+    assert!(css.contains("font-weight: normal"), "{css}");
+    assert!(
+        css.contains("text-decoration: underline line-through"),
+        "{css}"
+    );
+
+    // Other controls: a value dragged over several frames, Wrap, and Text
+    // Scaled (a property, not CSS).
+    act(
+        &mut app,
+        DesignerAction::TextStyle {
+            id: title,
+            property: "letter-spacing",
+            value: "1px".into(),
+            dragging: false,
+        },
+    );
+    for spacing in ["2px", "3px", "4px"] {
+        app.designer_actions(vec![DesignerAction::TextStyle {
+            id: title,
+            property: "letter-spacing",
+            value: spacing.into(),
+            dragging: true,
+        }]);
+    }
+    frame_ends(&mut app);
+    assert_eq!(style(&app).letter_spacing, 4.0);
+    act(
+        &mut app,
+        DesignerAction::TextStyle {
+            id: title,
+            property: "white-space",
+            value: "nowrap".into(),
+            dragging: false,
+        },
+    );
+    act(
+        &mut app,
+        DesignerAction::Edit(title, Edit::Property("TextScaled", Value::Bool(true))),
+    );
+    let now = style(&app);
+    assert!(!now.wrap && now.scaled);
+
+    // Every edit is an undo step; the drag is one. The first one also takes
+    // away ui.css.
+    for _ in 0..9 {
+        app.undo();
+    }
+    assert_eq!(state(&app), before);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn ctrl_b_i_u_toggle_the_selected_labels_text_unless_typing() {
+    let folder = copy_of_example("hello-touched", "ui-designer-text-shortcuts");
+    let mut app = EditorApp::new(Some(&folder));
+    act(&mut app, DesignerAction::NewScreenGui);
+    let gui = app.selected.unwrap();
+    let title = drop_in(&mut app, Insertable::TextLabel, gui, [10.0, 10.0]);
+    let sheets = stylesheets(&app);
+    let scene = DesignerScene {
+        world: &app.world,
+        selected: Some(title),
+        stylesheets: &sheets,
+        assets: &app.assets,
+        editing: true,
+    };
+    let press = |key: egui::Key| egui::RawInput {
+        modifiers: egui::Modifiers::COMMAND,
+        events: vec![egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::COMMAND,
+        }],
+        ..Default::default()
+    };
+    let ctx = crate::theme::test_context();
+    let mut designer = crate::ui_designer::UiDesigner::default();
+    let mut actions = Vec::new();
+    for key in [egui::Key::B, egui::Key::I, egui::Key::U] {
+        let _ = ctx.run(press(key), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                actions.extend(designer.show(ui, &scene, None));
+            });
+        });
+    }
+    let toggles: Vec<_> = actions
+        .iter()
+        .filter_map(|action| match action {
+            DesignerAction::TextStyle {
+                property, value, ..
+            } => Some((*property, value.as_str())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        toggles,
+        [
+            ("font-weight", "bold"),
+            ("font-style", "italic"),
+            ("text-decoration", "underline"),
+        ]
+    );
+
+    // While a text box has focus, the keys are the text box's.
+    let mut typed = Vec::new();
+    let mut text = String::new();
+    for key in [egui::Key::B, egui::Key::I, egui::Key::U] {
+        let _ = ctx.run(press(key), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let field = ui.text_edit_singleline(&mut text);
+                field.request_focus();
+                typed.extend(designer.show(ui, &scene, None));
+            });
+        });
+    }
+    assert!(
+        !typed
+            .iter()
+            .any(|action| matches!(action, DesignerAction::TextStyle { .. })),
+        "{typed:?}"
+    );
+    let _ = std::fs::remove_dir_all(&folder);
+}

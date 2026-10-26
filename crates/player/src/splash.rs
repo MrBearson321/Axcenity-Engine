@@ -11,7 +11,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Context;
-use axcenity_render::{TextAlign, TextureSource, UiDrawItem, UiImage, UiRectangle, UiText};
+use axcenity_render::{
+    TextAlign, TextureSource, UiDrawItem, UiImage, UiRectangle, UiText, VerticalAlign,
+};
 
 const WORDMARK_PNG: &[u8] = include_bytes!("../../../assets/branding/wordmark-white.png");
 
@@ -267,7 +269,8 @@ pub fn overlay(
             font_family: "Montserrat".to_owned(),
             color: rgba(WHITE, a),
             align: TextAlign::Center,
-            center_vertically: true,
+            vertical_align: VerticalAlign::Middle,
+            ..UiText::default()
         }));
     }
 
@@ -316,7 +319,8 @@ pub fn overlay(
         font_family: "Montserrat".to_owned(),
         color: rgba([0.72, 0.72, 0.74], a),
         align: TextAlign::Center,
-        center_vertically: true,
+        vertical_align: VerticalAlign::Middle,
+        ..UiText::default()
     }));
     items
 }

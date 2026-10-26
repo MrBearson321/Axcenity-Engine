@@ -102,6 +102,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     (ClassName::TextLabel, "TextSize", "The text size in pixels."),
     (
         ClassName::TextLabel,
+        "TextScaled",
+        "If true, the text is drawn at the largest size up to TextSize (or CSS font-size) that fits its box.",
+    ),
+    (
+        ClassName::TextLabel,
         "Visible",
         "If false, this label is hidden.",
     ),
@@ -141,6 +146,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::TextButton,
         "TextSize",
         "The text size in pixels.",
+    ),
+    (
+        ClassName::TextButton,
+        "TextScaled",
+        "If true, the text is drawn at the largest size up to TextSize (or CSS font-size) that fits its box.",
     ),
     (
         ClassName::TextButton,
@@ -195,6 +205,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     ),
     (ClassName::TextBox, "TextColor3", "The text color."),
     (ClassName::TextBox, "TextSize", "The text size in pixels."),
+    (
+        ClassName::TextBox,
+        "TextScaled",
+        "If true, the text is drawn at the largest size up to TextSize (or CSS font-size) that fits its box.",
+    ),
     (
         ClassName::TextBox,
         "MultiLine",

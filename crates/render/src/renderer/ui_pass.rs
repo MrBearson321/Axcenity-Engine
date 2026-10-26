@@ -4,33 +4,54 @@
 //! inside `ScenePipeline`; this module builds the quads and the pipelines
 //! (`ui.wgsl`, and the sky entry of `shader.wgsl`, after `lighting.wgsl`).
 
-use glyphon::{Buffer, Color as GlyphColor};
+use glyphon::Color as GlyphColor;
 
-use crate::draw_list::{UiDrawItem, UiImage, UiRectangle, UiText};
+use crate::draw_list::{UiDrawItem, UiImage, UiRectangle};
 
 use super::{DEPTH_FORMAT, HDR_FORMAT, UiVertex};
 
 use super::lighting::linear_color;
 
-pub(super) fn ui_vertices(items: &[UiDrawItem], (width, height): (u32, u32)) -> Vec<UiVertex> {
+/// The quads of the rectangles in `items`, in order. `lines` are text
+/// decorations (underline and line-through), each drawn after the item at
+/// its index; they're sorted by it.
+pub(super) fn ui_vertices(
+    items: &[UiDrawItem],
+    lines: &[(usize, UiRectangle)],
+    (width, height): (u32, u32),
+) -> Vec<UiVertex> {
     if width == 0 || height == 0 {
         return Vec::new();
     }
-    let (width, height) = (width as f32, height as f32);
+    let size = (width as f32, height as f32);
     let mut vertices = Vec::new();
-    for item in items {
-        let UiDrawItem::Rectangle(UiRectangle {
-            position: [x, y],
-            size: [w, h],
-            color: [r, g, b, alpha],
-            color_end: [er, eg, eb, ea],
-            border_color: [br, bg, bb, ba],
-            border_width,
-            border_radius,
-        }) = item
-        else {
-            continue;
-        };
+    let mut lines = lines.iter().peekable();
+    for (index, item) in items.iter().enumerate() {
+        if let UiDrawItem::Rectangle(rectangle) = item {
+            push_rectangle(rectangle, size, &mut vertices);
+        }
+        while let Some((_, line)) = lines.next_if(|(at, _)| *at <= index) {
+            push_rectangle(line, size, &mut vertices);
+        }
+    }
+    vertices
+}
+
+fn push_rectangle(
+    rectangle: &UiRectangle,
+    (width, height): (f32, f32),
+    vertices: &mut Vec<UiVertex>,
+) {
+    let UiRectangle {
+        position: [x, y],
+        size: [w, h],
+        color: [r, g, b, alpha],
+        color_end: [er, eg, eb, ea],
+        border_color: [br, bg, bb, ba],
+        border_width,
+        border_radius,
+    } = rectangle;
+    {
         if ![
             x,
             y,
@@ -57,7 +78,7 @@ pub(super) fn ui_vertices(items: &[UiDrawItem], (width, height): (u32, u32)) -> 
             || *h <= 0.0
             || (*alpha <= 0.0 && *ea <= 0.0 && (*ba <= 0.0 || *border_width <= 0.0))
         {
-            continue;
+            return;
         }
         let point = |px: f32, py: f32| [px / width * 2.0 - 1.0, 1.0 - py / height * 2.0];
         let top_left = point(*x, *y);
@@ -97,7 +118,6 @@ pub(super) fn ui_vertices(items: &[UiDrawItem], (width, height): (u32, u32)) -> 
             });
         }
     }
-    vertices
 }
 
 pub(super) fn image_quad(image: &UiImage, (width, height): (u32, u32)) -> Vec<UiVertex> {
@@ -316,14 +336,4 @@ pub(super) fn create_sky_pipeline(
         multiview: None,
         cache: None,
     })
-}
-
-/// How far down to move text so it's centered up and down in its box, if
-/// it asks to be: half the room its lines leave.
-pub(super) fn vertical_offset(text: &UiText, buffer: &Buffer) -> f32 {
-    if !text.center_vertically {
-        return 0.0;
-    }
-    let lines: f32 = buffer.layout_runs().map(|run| run.line_height).sum();
-    ((text.size[1] - lines) * 0.5).max(0.0)
 }

@@ -86,6 +86,29 @@ const fn font(family: &'static str, kind: &'static str, data: &'static [u8]) -> 
     BuiltInFont { family, kind, data }
 }
 
+/// The bold, italic and bold italic faces of the built-in families that
+/// have them (SIL OFL, from the same projects). Each joins its family by the
+/// name inside it. The `-Variable` italics are drawn at their regular
+/// weight, so their bold is thickened, as Roboto, Nunito, Oswald and Lora's
+/// upright bold is.
+const VARIANTS: [&[u8]; 15] = [
+    include_bytes!("../../../assets/fonts/Montserrat-Bold.ttf"),
+    include_bytes!("../../../assets/fonts/Montserrat-Italic.ttf"),
+    include_bytes!("../../../assets/fonts/Montserrat-BoldItalic.ttf"),
+    include_bytes!("../../../assets/fonts/Inter-Bold.ttf"),
+    include_bytes!("../../../assets/fonts/Inter-Italic.ttf"),
+    include_bytes!("../../../assets/fonts/Inter-BoldItalic.ttf"),
+    include_bytes!("../../../assets/fonts/Poppins-Bold.ttf"),
+    include_bytes!("../../../assets/fonts/Poppins-Italic.ttf"),
+    include_bytes!("../../../assets/fonts/Poppins-BoldItalic.ttf"),
+    include_bytes!("../../../assets/fonts/JetBrainsMono-Bold.ttf"),
+    include_bytes!("../../../assets/fonts/JetBrainsMono-Italic.ttf"),
+    include_bytes!("../../../assets/fonts/JetBrainsMono-BoldItalic.ttf"),
+    include_bytes!("../../../assets/fonts/Roboto-Italic-Variable.ttf"),
+    include_bytes!("../../../assets/fonts/Nunito-Italic-Variable.ttf"),
+    include_bytes!("../../../assets/fonts/Lora-Italic-Variable.ttf"),
+];
+
 /// A font file from the project, for UI text.
 #[derive(Clone, Debug)]
 pub struct UiFont {
@@ -94,9 +117,23 @@ pub struct UiFont {
     pub data: Arc<Vec<u8>>,
 }
 
-/// Every built-in font's data, for loading into the text system.
+/// Every built-in face's data, regular and variants, for loading into the
+/// text system.
 pub(crate) fn built_in_data() -> impl Iterator<Item = &'static [u8]> {
-    BUILT_IN_FONTS.iter().map(|font| font.data)
+    BUILT_IN_FONTS
+        .iter()
+        .map(|font| font.data)
+        .chain(VARIANTS.iter().copied())
+}
+
+/// A font database with only the built-in faces, without the system's.
+#[cfg(test)]
+pub(crate) fn built_in_database() -> fontdb::Database {
+    let mut db = fontdb::Database::new();
+    for data in built_in_data() {
+        db.load_font_data(data.to_vec());
+    }
+    db
 }
 
 /// The family names in a font file (usually one), as CSS names them. Empty
@@ -130,5 +167,17 @@ mod tests {
             );
         }
         assert!(font_families(b"not a font").is_empty());
+    }
+
+    #[test]
+    fn every_variant_joins_a_built_in_family() {
+        for data in VARIANTS {
+            let families = font_families(data);
+            assert_eq!(families.len(), 1, "{families:?}");
+            assert!(
+                BUILT_IN_FONTS.iter().any(|font| font.family == families[0]),
+                "{families:?}"
+            );
+        }
     }
 }

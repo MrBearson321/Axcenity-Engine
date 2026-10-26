@@ -378,3 +378,112 @@ pub(super) fn split_css_args(value: &str) -> Vec<&str> {
     parts.push(&value[start..]);
     parts
 }
+
+/// A keyword value, trimmed and in lower case, such as `bold`.
+pub(super) fn css_keyword(styles: &ResolvedStyles, name: &str) -> Option<String> {
+    css_property(styles, name).map(|value| value.trim().to_ascii_lowercase())
+}
+
+/// `font-weight`: `normal` is 400, `bold` 700, or a number from 1 to 1000.
+pub(super) fn css_font_weight(styles: &ResolvedStyles) -> u16 {
+    match css_keyword(styles, "font-weight").as_deref() {
+        Some("bold" | "bolder") => 700,
+        Some("lighter") => 300,
+        Some(number) => number
+            .parse::<f32>()
+            .ok()
+            .filter(|weight| weight.is_finite())
+            .map_or(400, |weight| weight.clamp(1.0, 1000.0) as u16),
+        None => 400,
+    }
+}
+
+/// A length for text, in pixels: `px`, `em` (of `font_size`) or a bare `0`.
+fn text_length(value: &str, font_size: f32) -> Option<f32> {
+    let value = value.trim();
+    let number = |text: &str| text.trim().parse::<f32>().ok().filter(|n| n.is_finite());
+    if let Some(pixels) = value.strip_suffix("px") {
+        number(pixels)
+    } else if let Some(ems) = value.strip_suffix("rem") {
+        number(ems).map(|ems| ems * 16.0)
+    } else if let Some(ems) = value.strip_suffix("em") {
+        number(ems).map(|ems| ems * font_size)
+    } else {
+        number(value).filter(|n| *n == 0.0)
+    }
+}
+
+/// `letter-spacing` in pixels. `normal` is 0.
+pub(super) fn css_letter_spacing(styles: &ResolvedStyles, font_size: f32) -> f32 {
+    css_property(styles, "letter-spacing")
+        .and_then(|value| text_length(&value, font_size))
+        .unwrap_or(0.0)
+}
+
+/// `line-height` in pixels: a length, a percentage, or a bare number times
+/// the font size. `normal` is `None`, which the renderer draws at 1.2.
+pub(super) fn css_line_height(styles: &ResolvedStyles, font_size: f32) -> Option<f32> {
+    let value = css_keyword(styles, "line-height")?;
+    let height = if let Some(percent) = value.strip_suffix('%') {
+        percent
+            .trim()
+            .parse::<f32>()
+            .ok()
+            .map(|p| p / 100.0 * font_size)
+    } else if let Ok(times) = value.parse::<f32>() {
+        Some(times * font_size)
+    } else {
+        text_length(&value, font_size)
+    };
+    height.filter(|height| height.is_finite() && *height > 0.0)
+}
+
+/// `-webkit-text-stroke` (or `text-stroke`): a width and a colour, such as
+/// `2px #000`. The colour defaults to black.
+pub(super) fn css_text_stroke(styles: &ResolvedStyles, opacity: f32) -> Option<TextStroke> {
+    let value = css_property(styles, "-webkit-text-stroke")
+        .or_else(|| css_property(styles, "text-stroke"))?;
+    let value = value.trim();
+    let (width, color) = value.split_once(char::is_whitespace).unwrap_or((value, ""));
+    let width = text_length(width, 16.0)?;
+    let (color, alpha) = parse_color(color.trim()).unwrap_or((Color3::new(0.0, 0.0, 0.0), 1.0));
+    (width > 0.0).then_some(TextStroke {
+        width,
+        color: [color.r, color.g, color.b, alpha * opacity],
+    })
+}
+
+/// `text-shadow`: shadows separated by commas, each `<x> <y> [<blur>]
+/// <color>` in pixels (the colour may come first instead). `none` is none.
+pub(super) fn css_text_shadows(styles: &ResolvedStyles, opacity: f32) -> Vec<TextShadow> {
+    let Some(value) = css_property(styles, "text-shadow") else {
+        return Vec::new();
+    };
+    split_css_args(&value)
+        .into_iter()
+        .filter_map(|shadow| {
+            let shadow = shadow.trim();
+            if shadow.is_empty() || shadow.eq_ignore_ascii_case("none") {
+                return None;
+            }
+            let (lengths, (color, alpha)) = split_shadow_color(shadow).or_else(|| {
+                let (color, lengths) = shadow.split_once(char::is_whitespace)?;
+                Some((lengths.trim(), parse_color(color)?))
+            })?;
+            let numbers: Vec<f32> = lengths
+                .split_whitespace()
+                .map(|length| text_length(length, 16.0))
+                .collect::<Option<_>>()?;
+            let (x, y, blur) = match numbers.as_slice() {
+                [x, y] => (*x, *y, 0.0),
+                [x, y, blur] => (*x, *y, blur.max(0.0)),
+                _ => return None,
+            };
+            Some(TextShadow {
+                offset: [x, y],
+                blur,
+                color: [color.r, color.g, color.b, alpha * opacity],
+            })
+        })
+        .collect()
+}

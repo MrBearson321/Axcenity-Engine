@@ -372,6 +372,8 @@ impl ClassName {
                 ("Text", Value::String("Label".to_owned())),
                 ("TextColor3", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
                 ("TextSize", Value::Number(16.0)),
+                // On: drawn at the largest size up to TextSize that fits.
+                ("TextScaled", Value::Bool(false)),
                 ("Visible", Value::Bool(true)),
             ],
             ClassName::TextButton => vec![
@@ -387,6 +389,8 @@ impl ClassName {
                 ("Text", Value::String("Button".to_owned())),
                 ("TextColor3", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
                 ("TextSize", Value::Number(16.0)),
+                // On: drawn at the largest size up to TextSize that fits.
+                ("TextScaled", Value::Bool(false)),
                 // Empty shows no picture. A path is relative to the project.
                 ("Image", Value::String(String::new())),
                 ("ImageTransparency", Value::Number(0.0)),
@@ -406,6 +410,8 @@ impl ClassName {
                 ("Placeholder", Value::String("Type here".to_owned())),
                 ("TextColor3", Value::Color3(Color3::new(0.1, 0.1, 0.12))),
                 ("TextSize", Value::Number(16.0)),
+                // On: drawn at the largest size up to TextSize that fits.
+                ("TextScaled", Value::Bool(false)),
                 // Off: one line, and Enter finishes typing. On: Enter starts
                 // a new line, and clicking away finishes typing.
                 ("MultiLine", Value::Bool(false)),
