@@ -38,7 +38,11 @@ mod testing;
 mod timeline;
 
 #[cfg(test)]
+pub use graph::{Node, words::when_words};
+#[cfg(test)]
 pub use property_editor::NewKeys;
+#[cfg(test)]
+pub use testing::{click_frames, drag_frames};
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -938,6 +942,19 @@ fn picker(
                                         (kind.rich_icon(&visuals), format!("  {name}")),
                                     ))
                                     .on_hover_text(path.as_str());
+                                // A clip can be dragged onto the state
+                                // machine graph, as from the Assets panel.
+                                if kind == AnimKind::Clip {
+                                    row.interact(egui::Sense::drag()).dnd_set_drag_payload(
+                                        crate::asset_browser::AssetPayload(
+                                            crate::asset_browser::AssetEntry {
+                                                kind: crate::asset_browser::AssetKind::Animation,
+                                                path: path.clone(),
+                                                name: name.to_owned(),
+                                            },
+                                        ),
+                                    );
+                                }
                                 if row.clicked() {
                                     pick = Some(Pick::Open(path.clone()));
                                 }

@@ -1,30 +1,63 @@
-//! The state machine graph: a controller's states as boxes and its
-//! transitions as arrows, like Unity's Animator window.
+//! The state machine graph, drawn like the script Graph view
+//! (`block_editor/graph.rs`): each state is a node with an input pin on the
+//! left and an output pin on the right, and each transition is a wire from
+//! one's output to the other's input, with a label that says when it
+//! happens. The file is still states and transitions; only the drawing is
+//! a node graph.
 //!
-//! - Drag a state to move it; drag the background (or the middle button)
-//!   to pan; the wheel zooms around the mouse.
-//! - Click a state or an arrow to select it; click the background to select
-//!   the controller itself.
-//! - Right-click a state: Make Transition (then click where it goes), Set
-//!   as Default State, Rename, Delete. Right-click the background to add a
-//!   state, empty or playing a clip.
+//! - **Entry** is wired to the default state: wiring it to another state
+//!   makes that one the default. **Any State** has only an output pin.
+//! - Drag from an output pin to a node to make a transition; let go on
+//!   empty space for a menu that makes a new state there, wired to it.
+//! - Click a wire's label to edit it right there (the controller editor
+//!   draws that editor: `controller_editor/wire_editor.rs`).
+//! - Drop a clip (from Open ▾ or the Assets panel) to make a state playing
+//!   it, and a parameter chip ([`parameters_panel`]) on a wire to test it.
+//! - Drag a node to move it; drag the background (or the middle button) to
+//!   pan; the wheel zooms around the mouse. Right-click a state for Make
+//!   Transition, Set as Default State, Rename and Delete, and the
+//!   background to add a state.
 //!
 //! It only reports what was done ([`GraphEvent`]); the controller editor
 //! changes the file.
+//!
+//! Where to change behavior:
+//! - `draw.rs` — how nodes, pins, wires and labels look
+//! - `words.rs` — what labels and headers say
+//! - this file — geometry and the pointer
 
-use axcenity_anim::{ANY_STATE, Motion, StateMachineFile};
+use axcenity_anim::files::ParameterDef;
+use axcenity_anim::{ANY_STATE, StateMachineFile};
 use eframe::egui::{self, Color32, Pos2, Rect, Stroke, Vec2};
+
+use crate::asset_browser::{AssetKind, AssetPayload};
+use crate::theme::icons;
+
+mod draw;
+pub mod words;
+
+use draw::*;
 
 /// Where the Any State node is drawn until it's moved.
 pub const ANY_STATE_POSITION: [f32; 2] = [-220.0, 120.0];
-/// A state's box, at zoom 1.
-const NODE: Vec2 = Vec2::new(150.0, 46.0);
+/// Where the Entry node is drawn until it's moved.
+pub const ENTRY_POSITION: [f32; 2] = [-220.0, 0.0];
+/// A state's node, at zoom 1.
+const STATE: Vec2 = Vec2::new(170.0, 52.0);
+/// Entry's and Any State's nodes, which are only a title.
+const SMALL: Vec2 = Vec2::new(120.0, 30.0);
+/// From a node's edge to the middle of its pin.
+const PIN_INSET: f32 = 10.0;
+/// How near a wire a click selects it, and a chip lands on it.
+const WIRE_REACH: f32 = 10.0;
+const DROP_REACH: f32 = 28.0;
 
-/// A box in the graph.
+/// A node in the graph.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Node {
     State(usize),
     Any,
+    Entry,
 }
 
 /// What's selected in the graph.
@@ -37,15 +70,87 @@ pub enum Selected {
     Transition(usize),
 }
 
-/// How the graph is panned and zoomed, kept between frames.
+/// The kinds of parameter the panel's + adds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ParameterKind {
+    Bool,
+    Number,
+    Trigger,
+}
+
+impl ParameterKind {
+    pub const ALL: [ParameterKind; 3] = [Self::Bool, Self::Number, Self::Trigger];
+
+    pub fn of(def: &ParameterDef) -> Self {
+        match def {
+            ParameterDef::Bool { .. } => Self::Bool,
+            ParameterDef::Number { .. } => Self::Number,
+            ParameterDef::Trigger { .. } => Self::Trigger,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Bool => "Bool",
+            Self::Number => "Number",
+            Self::Trigger => "Trigger",
+        }
+    }
+
+    pub fn icon(self) -> &'static str {
+        match self {
+            Self::Bool => icons::TOGGLE_RIGHT,
+            Self::Number => icons::HASH,
+            Self::Trigger => icons::LIGHTNING,
+        }
+    }
+
+    /// As in the script Graph view: Bools red, Numbers green.
+    pub fn color(self) -> Color32 {
+        match self {
+            Self::Bool => Color32::from_rgb(196, 64, 64),
+            Self::Number => Color32::from_rgb(92, 178, 92),
+            Self::Trigger => Color32::from_rgb(226, 178, 58),
+        }
+    }
+}
+
+/// A parameter chip being dragged, by its parameter's name.
+#[derive(Clone, Debug)]
+pub struct ParameterChip(pub String);
+
+/// The menu a wire let go on empty space opens.
+#[derive(Clone, Debug)]
+struct DropMenu {
+    from: Node,
+    at: [f32; 2],
+    screen: Pos2,
+    search: String,
+    fresh: bool,
+}
+
+/// How the graph is panned and zoomed, and what's in progress, kept
+/// between frames.
 #[derive(Clone, Debug)]
 pub struct GraphView {
     pub offset: Vec2,
     pub zoom: f32,
-    /// A transition being made: from here to the mouse, until a state is clicked.
+    /// A transition being made from the right-click menu: from here to the
+    /// mouse, until a state is clicked.
     pub linking: Option<Node>,
+    /// A wire being dragged from this node's output pin.
+    wiring: Option<Node>,
+    drop_menu: Option<DropMenu>,
     /// Where the background was right-clicked, for Add State.
     menu_at: Option<[f32; 2]>,
+    /// The transition whose label editor is open.
+    pub editing: Option<usize>,
+    /// Where each transition's label was drawn last, on screen.
+    pub labels: Vec<(usize, Rect)>,
+    /// Where the graph was drawn last, on screen.
+    pub rect: Rect,
+    /// Where each parameter chip was drawn last, on screen.
+    pub chips: Vec<(String, Rect)>,
 }
 
 impl Default for GraphView {
@@ -54,7 +159,13 @@ impl Default for GraphView {
             offset: Vec2::new(300.0, 140.0),
             zoom: 1.0,
             linking: None,
+            wiring: None,
+            drop_menu: None,
             menu_at: None,
+            editing: None,
+            labels: Vec::new(),
+            rect: Rect::NOTHING,
+            chips: Vec::new(),
         }
     }
 }
@@ -70,12 +181,16 @@ pub enum GraphEvent {
     SetDefault(usize),
     Rename(usize),
     Delete(Selected),
-    /// Add a state here, playing this clip (or nothing).
-    AddState([f32; 2], Option<String>),
+    /// Add a state here, playing this clip (or nothing), wired from this
+    /// node if one is given.
+    AddState([f32; 2], Option<String>, Option<Node>),
     /// Add a state here playing a blend tree.
     AddBlendTree([f32; 2]),
     /// A state was double-clicked, to open its clip.
     Open(usize),
+    /// A parameter chip was dropped on this transition's wire.
+    AddCondition(usize, String),
+    AddParameter(ParameterKind),
 }
 
 /// The state playing in the preview, to show in the graph.
@@ -91,6 +206,7 @@ fn node_position(file: &StateMachineFile, node: Node) -> [f32; 2] {
     match node {
         Node::State(index) => file.states.get(index).map_or([0.0; 2], |s| s.position),
         Node::Any => file.any_state_position.unwrap_or(ANY_STATE_POSITION),
+        Node::Entry => file.entry_position.unwrap_or(ENTRY_POSITION),
     }
 }
 
@@ -105,6 +221,41 @@ pub fn from_node(file: &StateMachineFile, from: &str) -> Option<Node> {
         .map(Node::State)
 }
 
+/// The state Entry is wired to: the default state, or the first.
+fn entry_target(file: &StateMachineFile) -> Option<usize> {
+    file.states
+        .iter()
+        .position(|s| s.name == file.default_state)
+        .or((!file.states.is_empty()).then_some(0))
+}
+
+/// How far transition `index`'s wire bows up or down, in graph units, so
+/// a pair going both ways, or two wires between the same states, don't
+/// sit on top of each other.
+fn bow(file: &StateMachineFile, index: usize, from: [f32; 2], to: [f32; 2]) -> f32 {
+    let transition = &file.transitions[index];
+    let lane = file.transitions[..index]
+        .iter()
+        .filter(|other| other.from == transition.from && other.to == transition.to)
+        .count() as f32;
+    let reverse = file
+        .transitions
+        .iter()
+        .any(|other| other.from == transition.to && other.to == transition.from);
+    let side = if reverse {
+        if transition.from < transition.to {
+            -1.0
+        } else {
+            1.0
+        }
+    } else if to[0] < from[0] || lane > 0.0 {
+        1.0
+    } else {
+        0.0
+    };
+    side * (34.0 + 26.0 * lane)
+}
+
 impl GraphView {
     fn to_screen(&self, rect: Rect, position: [f32; 2]) -> Pos2 {
         rect.min + self.offset + Vec2::new(position[0], position[1]) * self.zoom
@@ -115,12 +266,53 @@ impl GraphView {
         [local.x, local.y]
     }
 
-    fn node_rect(&self, rect: Rect, file: &StateMachineFile, node: Node) -> Rect {
+    /// Where `node` is on screen, in a graph drawn in `rect`.
+    pub fn node_rect(&self, rect: Rect, file: &StateMachineFile, node: Node) -> Rect {
         let size = match node {
-            Node::State(_) => NODE,
-            Node::Any => Vec2::new(110.0, 36.0),
+            Node::State(_) => STATE,
+            Node::Any | Node::Entry => SMALL,
         } * self.zoom;
         Rect::from_center_size(self.to_screen(rect, node_position(file, node)), size)
+    }
+
+    /// Where `node`'s output pin (or input pin) is on screen.
+    pub fn pin(&self, rect: Rect, file: &StateMachineFile, node: Node, output: bool) -> Pos2 {
+        let node_rect = self.node_rect(rect, file, node);
+        let inset = PIN_INSET * self.zoom;
+        let y = match node {
+            Node::State(_) => state_pin_y(node_rect, self.zoom),
+            Node::Any | Node::Entry => node_rect.center().y,
+        };
+        if output {
+            Pos2::new(node_rect.right() - inset, y)
+        } else {
+            Pos2::new(node_rect.left() + inset, y)
+        }
+    }
+
+    /// Transition `index`'s wire, as a cubic Bezier's four points.
+    fn wire(&self, rect: Rect, file: &StateMachineFile, index: usize) -> Option<[Pos2; 4]> {
+        let transition = &file.transitions[index];
+        let from = from_node(file, &transition.from)?;
+        let to = file.states.iter().position(|s| s.name == transition.to)?;
+        let start = self.pin(rect, file, from, true);
+        let end = self.pin(rect, file, Node::State(to), false);
+        let bend = bow(
+            file,
+            index,
+            node_position(file, from),
+            node_position(file, Node::State(to)),
+        ) * self.zoom;
+        Some(wire_points(start, end, bend, self.zoom))
+    }
+
+    /// The state whose node is under `point`.
+    fn state_at(&self, rect: Rect, file: &StateMachineFile, point: Pos2) -> Option<usize> {
+        (0..file.states.len()).rev().find(|&index| {
+            self.node_rect(rect, file, Node::State(index))
+                .expand(6.0 * self.zoom)
+                .contains(point)
+        })
     }
 
     /// Draws the graph filling `ui`'s space, and returns what was done.
@@ -135,9 +327,12 @@ impl GraphView {
         let mut events = Vec::new();
         let size = ui.available_size();
         let (rect, canvas) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
+        self.rect = rect;
         let visuals = ui.visuals().clone();
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 0.0, visuals.extreme_bg_color);
+        let z = self.zoom;
+        let pointer = ui.input(|input| input.pointer.latest_pos());
 
         // Pan and zoom.
         if canvas.dragged_by(egui::PointerButton::Primary)
@@ -156,106 +351,91 @@ impl GraphView {
                 self.offset += pointer - after;
             }
         }
+        draw_grid(&painter, rect, self.offset, z, &visuals);
 
-        // A grid, so panning reads as movement.
-        let step = 40.0 * self.zoom;
-        let grid = visuals.weak_text_color().gamma_multiply(0.15);
-        let mut x = rect.left() + (self.offset.x.rem_euclid(step));
-        while x < rect.right() {
-            painter.line_segment(
-                [Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())],
-                Stroke::new(1.0_f32, grid),
-            );
-            x += step;
-        }
-        let mut y = rect.top() + (self.offset.y.rem_euclid(step));
-        while y < rect.bottom() {
-            painter.line_segment(
-                [Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)],
-                Stroke::new(1.0_f32, grid),
-            );
-            y += step;
+        // Something dragged over the graph: a parameter chip (onto the
+        // nearest wire) or a clip (to make a state).
+        let over = ui.rect_contains_pointer(rect);
+        let released = ui.input(|input| input.pointer.any_released());
+        let chip = over
+            .then(|| egui::DragAndDrop::payload::<ParameterChip>(ui.ctx()))
+            .flatten();
+        let clip = over
+            .then(|| egui::DragAndDrop::payload::<AssetPayload>(ui.ctx()))
+            .flatten()
+            .filter(|payload| payload.0.kind == AssetKind::Animation);
+
+        // Until there's a transition, how to make one, under everything.
+        if file.transitions.is_empty() && clip.is_none() {
+            draw_guide(&painter, rect, file);
         }
 
-        // Transitions, under the states.
-        let accent = visuals.selection.bg_fill;
-        let mut segments = Vec::new();
-        for (index, transition) in file.transitions.iter().enumerate() {
-            let (Some(from), Some(to)) = (
-                from_node(file, &transition.from),
-                file.states.iter().position(|s| s.name == transition.to),
-            ) else {
-                continue;
-            };
-            let a = self.node_rect(rect, file, from).center();
-            let b = self.node_rect(rect, file, Node::State(to)).center();
-            let direction = (b - a).normalized();
-            if !direction.is_finite() {
-                continue;
+        // Wires, under the nodes.
+        let mut curves = Vec::new();
+        for index in 0..file.transitions.len() {
+            if let Some(points) = self.wire(rect, file, index) {
+                curves.push((index, points, sample_wire(points)));
             }
-            // Two-way pairs sit side by side.
-            let back = file
-                .transitions
-                .iter()
-                .any(|other| other.to == transition.from && other.from == transition.to);
-            let side = if back {
-                Vec2::new(-direction.y, direction.x) * 7.0 * self.zoom
-            } else {
-                Vec2::ZERO
-            };
-            let (a, b) = (a + side, b + side);
-            let active = live.fade.is_some_and(|(_, t, _)| t == Some(index));
-            let color = if selected == Selected::Transition(index) {
-                accent
+        }
+        let chip_target = chip.as_ref().and(pointer).and_then(|pointer| {
+            nearest_wire(&curves, pointer).filter(|&(_, distance)| distance < DROP_REACH * z)
+        });
+        for (index, points, samples) in &curves {
+            let transition = &file.transitions[*index];
+            let active = live.fade.is_some_and(|(_, t, _)| t == Some(*index));
+            let chosen = selected == Selected::Transition(*index)
+                || chip_target.is_some_and(|(target, _)| target == *index);
+            let color = if chosen {
+                SELECTED
             } else if active {
-                Color32::from_rgb(90, 210, 120)
+                LIVE
             } else {
-                visuals.text_color().gamma_multiply(0.7)
+                WIRE
             };
-            let width: f32 = if selected == Selected::Transition(index) {
-                3.0
-            } else {
-                2.0
-            };
-            if transition.generated {
-                painter.extend(egui::Shape::dashed_line(
-                    &[a, b],
-                    Stroke::new(width, color),
-                    8.0,
-                    5.0,
-                ));
-            } else {
-                painter.line_segment([a, b], Stroke::new(width, color));
-            }
-            let middle = a + (b - a) * 0.5;
-            let normal = Vec2::new(-direction.y, direction.x);
-            let head = 7.0 * self.zoom.max(0.6);
-            painter.add(egui::Shape::convex_polygon(
-                vec![
-                    middle + direction * head,
-                    middle - direction * head + normal * head * 0.8,
-                    middle - direction * head - normal * head * 0.8,
-                ],
+            let width = if chosen { 3.0 } else { 2.0 } * z.max(0.7);
+            draw_wire(
+                &painter,
+                *points,
+                samples,
                 color,
-                Stroke::NONE,
-            ));
-            segments.push((index, a, b));
+                width,
+                transition.generated,
+            );
+        }
+        if let Some(to) = entry_target(file) {
+            let start = self.pin(rect, file, Node::Entry, true);
+            let end = self.pin(rect, file, Node::State(to), false);
+            let points = wire_points(start, end, 0.0, z);
+            draw_wire(
+                &painter,
+                points,
+                &sample_wire(points),
+                ENTRY_WIRE,
+                2.0 * z.max(0.7),
+                false,
+            );
         }
 
-        // The transition being made follows the mouse.
-        if let Some(from) = self.linking
-            && let Some(pointer) = ui.input(|input| input.pointer.hover_pos())
-        {
-            let a = self.node_rect(rect, file, from).center();
-            painter.line_segment([a, pointer], Stroke::new(2.0_f32, accent));
-            if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
-                self.linking = None;
-            }
+        // A wire being made follows the mouse.
+        if let (Some(from), Some(pointer)) = (self.wiring.or(self.linking), pointer) {
+            let start = self.pin(rect, file, from, true);
+            let points = wire_points(start, pointer, 0.0, z);
+            draw_wire(
+                &painter,
+                points,
+                &sample_wire(points),
+                SELECTED,
+                2.0 * z.max(0.7),
+                false,
+            );
+        }
+        if self.linking.is_some() && ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+            self.linking = None;
         }
 
-        // States, and the Any State.
+        // The nodes: states, the Any State and Entry.
         let mut nodes: Vec<Node> = (0..file.states.len()).map(Node::State).collect();
-        nodes.push(Node::Any);
+        nodes.extend([Node::Any, Node::Entry]);
         let mut hit_node = false;
         for node in nodes {
             let node_rect = self.node_rect(rect, file, node);
@@ -264,86 +444,45 @@ impl GraphView {
             if response.hovered() {
                 hit_node = true;
             }
-            let (fill, title, subtitle) = match node {
+            let playing = match (node, live.state) {
+                (Node::State(index), Some((state, progress))) if index == state => Some(progress),
+                _ => None,
+            };
+            let wired_out = match node {
+                Node::Entry => entry_target(file).is_some(),
+                Node::Any => file.transitions.iter().any(|t| t.from == ANY_STATE),
+                Node::State(index) => file
+                    .transitions
+                    .iter()
+                    .any(|t| t.from == file.states[index].name),
+            };
+            let wired_in = match node {
                 Node::State(index) => {
-                    let state = &file.states[index];
-                    let default = file.default_state == state.name
-                        || (file.state(&file.default_state).is_none() && index == 0);
-                    let fill = if default {
-                        Color32::from_rgb(196, 118, 40)
-                    } else {
-                        Color32::from_rgb(70, 82, 104)
-                    };
-                    let subtitle = match &state.motion {
-                        Motion::Clip(path) if path.is_empty() => "(no clip)".to_owned(),
-                        Motion::Clip(path) => axcenity_anim::files::clip_name(path).to_owned(),
-                        Motion::BlendTree(tree) => format!(
-                            "blend tree · {} · {} clips",
-                            tree.parameter,
-                            tree.children.len()
-                        ),
-                    };
-                    (fill, state.name.clone(), subtitle)
+                    let name = &file.states[index].name;
+                    entry_target(file) == Some(index)
+                        || file.transitions.iter().any(|t| &t.to == name)
                 }
-                Node::Any => (
-                    Color32::from_rgb(40, 140, 150),
-                    ANY_STATE.to_owned(),
-                    String::new(),
-                ),
+                _ => false,
             };
-            let rounding = 6.0 * self.zoom;
-            painter.rect_filled(node_rect, rounding, fill);
-            let is_selected = selected == Selected::Node(node);
-            let playing = matches!(node, Node::State(i) if live.state.is_some_and(|(s, _)| s == i));
-            let outline = if is_selected {
-                Stroke::new(2.5_f32, accent)
-            } else if playing {
-                Stroke::new(2.5_f32, Color32::from_rgb(90, 210, 120))
-            } else if response.hovered() {
-                Stroke::new(1.5_f32, Color32::WHITE.gamma_multiply(0.6))
-            } else {
-                Stroke::new(1.0_f32, Color32::BLACK.gamma_multiply(0.5))
-            };
-            painter.rect_stroke(node_rect, rounding, outline, egui::StrokeKind::Outside);
-            let font = egui::FontId::proportional(13.0 * self.zoom.clamp(0.7, 1.5));
-            let small = egui::FontId::proportional(10.5 * self.zoom.clamp(0.7, 1.5));
-            let title_at = if subtitle.is_empty() {
-                node_rect.center()
-            } else {
-                node_rect.center() - Vec2::new(0.0, 7.0 * self.zoom)
-            };
-            painter.text(
-                title_at,
-                egui::Align2::CENTER_CENTER,
-                &title,
-                font,
-                Color32::WHITE,
+            draw_node(
+                &painter,
+                NodeLook {
+                    node,
+                    file,
+                    rect: node_rect,
+                    zoom: z,
+                    selected: selected == Selected::Node(node),
+                    hovered: response.hovered(),
+                    playing,
+                    wired_in,
+                    wired_out,
+                },
             );
-            if !subtitle.is_empty() {
-                painter.text(
-                    node_rect.center() + Vec2::new(0.0, 9.0 * self.zoom),
-                    egui::Align2::CENTER_CENTER,
-                    subtitle,
-                    small,
-                    Color32::WHITE.gamma_multiply(0.75),
-                );
-            }
-            if let (Node::State(index), Some((state, progress))) = (node, live.state)
-                && index == state
-            {
-                let bar = Rect::from_min_size(
-                    node_rect.left_bottom() - Vec2::new(0.0, 4.0 * self.zoom),
-                    Vec2::new(
-                        node_rect.width() * progress.clamp(0.0, 1.0),
-                        4.0 * self.zoom,
-                    ),
-                );
-                painter.rect_filled(bar, 0.0, Color32::from_rgb(90, 210, 120));
-            }
 
             // Clicks, drags and the right-click menu.
             if response.clicked() {
                 match (self.linking.take(), node) {
+                    (Some(Node::Entry), Node::State(to)) => events.push(GraphEvent::SetDefault(to)),
                     (Some(from), Node::State(to)) if from != node => {
                         events.push(GraphEvent::Link(from, to));
                     }
@@ -356,49 +495,128 @@ impl GraphView {
             {
                 events.push(GraphEvent::Open(index));
             }
-            if response.drag_started() {
+            if response.drag_started_by(egui::PointerButton::Primary) {
                 events.push(GraphEvent::Select(Selected::Node(node)));
             }
-            if response.dragged() {
+            if response.dragged_by(egui::PointerButton::Primary) {
                 let [x, y] = node_position(file, node);
-                let delta = response.drag_delta() / self.zoom;
+                let delta = response.drag_delta() / z;
                 events.push(GraphEvent::Move(node, [x + delta.x, y + delta.y]));
             }
-            response.context_menu(|ui| {
-                if ui.button("Make Transition").clicked() {
-                    self.linking = Some(node);
-                    ui.close();
+            if node != Node::Entry {
+                response.context_menu(|ui| {
+                    if ui.button("Make Transition").clicked() {
+                        self.linking = Some(node);
+                        ui.close();
+                    }
+                    if let Node::State(index) = node {
+                        if ui.button("Set as Default State").clicked() {
+                            events.push(GraphEvent::SetDefault(index));
+                            ui.close();
+                        }
+                        if ui.button("Rename").clicked() {
+                            events.push(GraphEvent::Rename(index));
+                            ui.close();
+                        }
+                        if ui.button("Delete").clicked() {
+                            events.push(GraphEvent::Delete(Selected::Node(node)));
+                            ui.close();
+                        }
+                    }
+                });
+            }
+
+            // The output pin: drag from it to make a wire.
+            let pin_at = self.pin(rect, file, node, true);
+            let pin = ui
+                .interact(
+                    Rect::from_center_size(pin_at, Vec2::splat(18.0 * z.max(0.7))),
+                    id.with("output pin"),
+                    egui::Sense::drag(),
+                )
+                .on_hover_cursor(egui::CursorIcon::Crosshair)
+                .on_hover_text(match node {
+                    Node::Entry => "Drag to the state the Animator starts in",
+                    _ => "Drag to another state to make a transition",
+                });
+            if pin.drag_started() {
+                self.wiring = Some(node);
+                self.linking = None;
+            }
+            if pin.drag_stopped()
+                && let Some(from) = self.wiring.take()
+                && let Some(pointer) = pointer
+            {
+                match self.state_at(rect, file, pointer) {
+                    Some(to) if Node::State(to) == from => {}
+                    Some(to) if from == Node::Entry => events.push(GraphEvent::SetDefault(to)),
+                    Some(to) => events.push(GraphEvent::Link(from, to)),
+                    None if rect.contains(pointer) => {
+                        self.drop_menu = Some(DropMenu {
+                            from,
+                            at: self.to_graph(rect, pointer),
+                            screen: pointer,
+                            search: String::new(),
+                            fresh: true,
+                        });
+                    }
+                    None => {}
                 }
-                if let Node::State(index) = node {
-                    if ui.button("Set as Default State").clicked() {
-                        events.push(GraphEvent::SetDefault(index));
-                        ui.close();
-                    }
-                    if ui.button("Rename").clicked() {
-                        events.push(GraphEvent::Rename(index));
-                        ui.close();
-                    }
-                    if ui.button("Delete").clicked() {
-                        events.push(GraphEvent::Delete(Selected::Node(node)));
-                        ui.close();
-                    }
-                }
-            });
+            }
         }
 
-        // A click on the background: an arrow under it, or nothing.
+        // The labels, over everything: click one to edit its transition.
+        self.labels.clear();
+        let mut hit_label = false;
+        for (index, points, _) in &curves {
+            let transition = &file.transitions[*index];
+            let label_rect = draw_label(
+                &painter,
+                bezier_at(*points, 0.5),
+                transition,
+                z,
+                selected == Selected::Transition(*index) || self.editing == Some(*index),
+            );
+            self.labels.push((*index, label_rect));
+            let response = ui
+                .interact(
+                    label_rect,
+                    ui.id().with(("wire label", *index)),
+                    egui::Sense::click(),
+                )
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .on_hover_text("Click to say when it happens");
+            if response.hovered() {
+                hit_label = true;
+            }
+            if response.clicked() {
+                events.push(GraphEvent::Select(Selected::Transition(*index)));
+                self.editing = if self.editing == Some(*index) {
+                    None
+                } else {
+                    Some(*index)
+                };
+            }
+        }
+        if self
+            .editing
+            .is_some_and(|index| index >= file.transitions.len())
+        {
+            self.editing = None;
+        }
+
+        // A click on the background: a wire under it, or nothing.
         // (Clicking the background while making a transition cancels it.)
-        if canvas.clicked() && !hit_node && self.linking.take().is_none() {
-            let pointer = canvas.interact_pointer_pos().unwrap_or_default();
-            let near = segments
-                .iter()
-                .map(|&(index, a, b)| (index, distance_to_segment(pointer, a, b)))
-                .filter(|&(_, distance)| distance < 7.0)
-                .min_by(|x, y| x.1.total_cmp(&y.1));
+        if canvas.clicked() && !hit_node && !hit_label && self.linking.take().is_none() {
+            let near = canvas
+                .interact_pointer_pos()
+                .and_then(|pointer| nearest_wire(&curves, pointer))
+                .filter(|&(_, distance)| distance < WIRE_REACH * z.max(0.7));
             events.push(GraphEvent::Select(match near {
                 Some((index, _)) => Selected::Transition(index),
                 None => Selected::Controller,
             }));
+            self.editing = None;
         }
         if canvas.secondary_clicked() {
             self.menu_at = canvas
@@ -408,7 +626,7 @@ impl GraphView {
         canvas.context_menu(|ui| {
             let at = self.menu_at.unwrap_or([0.0, 0.0]);
             if ui.button("Add Empty State").clicked() {
-                events.push(GraphEvent::AddState(at, None));
+                events.push(GraphEvent::AddState(at, None, None));
                 ui.close();
             }
             if ui
@@ -420,62 +638,220 @@ impl GraphView {
                 ui.close();
             }
             ui.menu_button("Add State with Clip", |ui| {
-                if clips.is_empty() {
-                    ui.weak("No clips in the project yet.");
+                if let Some(clip) = clip_list(ui, clips, "") {
+                    events.push(GraphEvent::AddState(at, Some(clip), None));
+                    ui.close();
                 }
-                egui::ScrollArea::vertical()
-                    .max_height(300.0)
-                    .show(ui, |ui| {
-                        for clip in clips {
-                            let label = format!(
-                                "{}  ({})",
-                                axcenity_anim::files::clip_name(clip),
-                                super::store::group_of(clip)
-                            );
-                            if ui.button(label).clicked() {
-                                events.push(GraphEvent::AddState(at, Some(clip.clone())));
-                                ui.close();
-                            }
-                        }
-                    });
             });
         });
+
+        // Drops.
+        if let Some((index, _)) = chip_target
+            && released
+            && let Some(chip) = egui::DragAndDrop::take_payload::<ParameterChip>(ui.ctx())
+        {
+            events.push(GraphEvent::AddCondition(index, chip.0.clone()));
+        }
+        if let Some(payload) = &clip {
+            painter.rect_stroke(
+                rect.shrink(1.0),
+                0.0,
+                Stroke::new(2.0_f32, SELECTED),
+                egui::StrokeKind::Inside,
+            );
+            hint(
+                &painter,
+                rect,
+                &format!("Drop to add a state playing {}", payload.0.name),
+            );
+            if released
+                && let Some(pointer) = pointer
+                && egui::DragAndDrop::take_payload::<AssetPayload>(ui.ctx()).is_some()
+            {
+                events.push(GraphEvent::AddState(
+                    self.to_graph(rect, pointer),
+                    Some(payload.0.path.clone()),
+                    None,
+                ));
+            }
+        }
 
         // The Delete key removes the selection while the mouse is over the graph.
         let typing = ui.ctx().memory(|memory| memory.focused().is_some());
         if canvas.hovered() && !typing && ui.input(|input| input.key_pressed(egui::Key::Delete)) {
             events.push(GraphEvent::Delete(selected));
         }
-        if file.states.is_empty() {
-            painter.text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
-                "Right-click to add a state",
-                egui::FontId::proportional(14.0),
-                visuals.weak_text_color(),
-            );
+        if clip.is_some() {
+            // Its own hint is up.
         } else if self.linking.is_some() {
-            painter.text(
-                rect.left_top() + Vec2::new(10.0, 10.0),
-                egui::Align2::LEFT_TOP,
+            hint(
+                &painter,
+                rect,
                 "Click the state the transition goes to (Escape cancels)",
-                egui::FontId::proportional(12.0),
-                accent,
             );
+        } else if chip.is_some() {
+            hint(&painter, rect, "Drop it on a wire to test it there");
         }
+        self.show_drop_menu(ui, clips, &mut events);
         events
     }
+
+    /// The menu a wire let go on empty space opens: a new state there,
+    /// playing one of the project's clips (searchable) or nothing, wired
+    /// from where the wire came from.
+    fn show_drop_menu(&mut self, ui: &egui::Ui, clips: &[String], events: &mut Vec<GraphEvent>) {
+        let Some(menu) = &mut self.drop_menu else {
+            return;
+        };
+        let mut close = false;
+        let area = egui::Area::new(ui.id().with("new state menu"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(menu.screen)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.set_width(220.0);
+                    ui.strong("New state, wired from here");
+                    let field = ui.add(
+                        egui::TextEdit::singleline(&mut menu.search)
+                            .hint_text(format!("{} Search clips", icons::MAGNIFYING_GLASS))
+                            .desired_width(f32::INFINITY),
+                    );
+                    if menu.fresh {
+                        field.request_focus();
+                    }
+                    let enter =
+                        field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+                    let mut chosen = None;
+                    if ui.button(format!("{} Empty state", icons::PLUS)).clicked() {
+                        chosen = Some(None);
+                    }
+                    ui.separator();
+                    let needle = menu.search.trim().to_lowercase();
+                    if let Some(clip) = clip_list(ui, clips, &needle) {
+                        chosen = Some(Some(clip));
+                    }
+                    if enter {
+                        chosen = Some(matching(clips, &needle).first().map(|c| (*c).clone()));
+                    }
+                    if let Some(clip) = chosen {
+                        events.push(GraphEvent::AddState(menu.at, clip, Some(menu.from)));
+                        close = true;
+                    }
+                });
+            });
+        let clicked_outside = !menu.fresh
+            && ui.input(|input| {
+                input.pointer.any_click()
+                    && input
+                        .pointer
+                        .interact_pos()
+                        .is_some_and(|pointer| !area.response.rect.contains(pointer))
+            });
+        menu.fresh = false;
+        if close || clicked_outside || ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+            self.drop_menu = None;
+        }
+    }
+
+    /// Whether the new-state menu is open (for tests).
+    #[cfg(test)]
+    pub fn drop_menu_open(&self) -> bool {
+        self.drop_menu.is_some()
+    }
+}
+
+/// The clips whose names have `needle` in them.
+fn matching<'a>(clips: &'a [String], needle: &str) -> Vec<&'a String> {
+    clips
+        .iter()
+        .filter(|clip| {
+            needle.is_empty()
+                || axcenity_anim::files::clip_name(clip)
+                    .to_lowercase()
+                    .contains(needle)
+        })
+        .collect()
+}
+
+/// The project's clips matching `needle` as buttons. Returns the one clicked.
+fn clip_list(ui: &mut egui::Ui, clips: &[String], needle: &str) -> Option<String> {
+    let found = matching(clips, needle);
+    if clips.is_empty() {
+        ui.weak("No clips in the project yet.");
+    } else if found.is_empty() {
+        ui.weak("Nothing matches.");
+    }
+    let mut chosen = None;
+    egui::ScrollArea::vertical()
+        .max_height(240.0)
+        .show(ui, |ui| {
+            for clip in found {
+                let label = format!(
+                    "{}  ({})",
+                    axcenity_anim::files::clip_name(clip),
+                    super::store::group_of(clip)
+                );
+                if ui.button(label).clicked() {
+                    chosen = Some(clip.clone());
+                }
+            }
+        });
+    chosen
+}
+
+/// The parameters as chips with type icons, each of which can be dragged
+/// onto a wire, and + to add one. Returns what was asked for, and puts
+/// where each chip was drawn in `chips`.
+pub fn parameters_panel(
+    ui: &mut egui::Ui,
+    parameters: &[ParameterDef],
+    chips: &mut Vec<(String, Rect)>,
+) -> Vec<GraphEvent> {
+    let mut events = Vec::new();
+    chips.clear();
+    ui.horizontal(|ui| {
+        ui.strong("Parameters");
+        ui.menu_button(icons::PLUS, |ui| {
+            for kind in ParameterKind::ALL {
+                if ui
+                    .button(format!("{} {}", kind.icon(), kind.label()))
+                    .clicked()
+                {
+                    events.push(GraphEvent::AddParameter(kind));
+                    ui.close();
+                }
+            }
+        })
+        .response
+        .on_hover_text("Add a parameter: a value the game sets, which wires test");
+    });
+    if parameters.is_empty() {
+        ui.weak("None yet. + adds one.");
+        return events;
+    }
+    ui.horizontal_wrapped(|ui| {
+        for def in parameters {
+            let kind = ParameterKind::of(def);
+            let id = ui.id().with(("parameter chip", def.name()));
+            let response = ui
+                .dnd_drag_source(id, ParameterChip(def.name().to_owned()), |ui| {
+                    draw_chip(ui, kind, def.name());
+                })
+                .response;
+            chips.push((def.name().to_owned(), response.rect));
+            response.on_hover_text(format!(
+                "{}: drag it onto a wire to test it there",
+                kind.label()
+            ));
+        }
+    });
+    events
 }
 
 fn node_id(node: Node) -> i64 {
     match node {
         Node::State(index) => index as i64,
         Node::Any => -1,
+        Node::Entry => -2,
     }
-}
-
-fn distance_to_segment(point: Pos2, a: Pos2, b: Pos2) -> f32 {
-    let ab = b - a;
-    let t = ((point - a).dot(ab) / ab.length_sq().max(1e-6)).clamp(0.0, 1.0);
-    (a + ab * t).distance(point)
 }

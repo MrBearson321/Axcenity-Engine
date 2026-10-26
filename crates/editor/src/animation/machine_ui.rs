@@ -140,31 +140,13 @@ impl AnimationStudio {
     /// first).
     pub(super) fn controller_graph(&mut self, ui: &mut egui::Ui) -> Option<Go> {
         let controller = self.machine.doc.as_mut()?;
-        let live = controller.live();
-        let selected = controller.selected;
-        let clips = &self.files.clips;
         let size = ui.available_size();
-        let mut events = ui
-            .allocate_ui(size, |ui| {
-                controller
-                    .view
-                    .show(ui, &controller.file, selected, live, clips)
-            })
-            .inner;
-        let mut go = None;
-        events.retain(|event| {
-            let graph::GraphEvent::Open(index) = event else {
-                return true;
-            };
-            if let Some(state) = controller.file.states.get(*index)
-                && let Some(clip) = motion_clips(&state.motion).into_iter().next()
-            {
-                go = Some(Go::State(state.name.clone(), clip));
-            }
-            false
-        });
-        controller.apply(events);
-        go
+        let open = ui
+            .allocate_ui(size, |ui| controller.graph_ui(ui, &self.files.clips))
+            .inner?;
+        let state = controller.file.states.get(open)?;
+        let clip = motion_clips(&state.motion).into_iter().next()?;
+        Some(Go::State(state.name.clone(), clip))
     }
 
     /// The live preview beside its parameters, or above them when narrow.

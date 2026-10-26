@@ -18,7 +18,7 @@ use axcenity_assets::{Assets, Posed};
 use axcenity_core::Parameter;
 use eframe::egui;
 
-use super::graph::{GraphEvent, GraphView, Live, Node, Selected, from_node};
+use super::graph::{GraphEvent, GraphView, Live, Node, ParameterKind, Selected, from_node};
 use crate::theme::icons;
 
 /// Blend presets: Instant, Smooth and Slow, in seconds.
@@ -42,6 +42,8 @@ pub struct ControllerDoc {
     /// Each clip's pass length in seconds (0 if it can't be read), for
     /// Return settings given in seconds.
     clip_lengths: std::collections::HashMap<String, f64>,
+    /// A parameter being named in a wire's label editor.
+    new_parameter: Option<wire_editor::NewParameter>,
 }
 
 /// The state machine running in the preview.
@@ -59,6 +61,7 @@ struct PreviewRun {
 fn behaviour(file: &StateMachineFile) -> StateMachineFile {
     let mut file = file.clone();
     file.any_state_position = None;
+    file.entry_position = None;
     for state in &mut file.states {
         state.position = [0.0, 0.0];
     }
@@ -79,6 +82,7 @@ impl ControllerDoc {
             playing: true,
             scrub: 1.0,
             clip_lengths: std::collections::HashMap::new(),
+            new_parameter: None,
         }
     }
 
@@ -151,15 +155,14 @@ impl ControllerDoc {
                         }
                     }
                     Node::Any => self.file.any_state_position = Some(position),
+                    Node::Entry => self.file.entry_position = Some(position),
                 },
+                GraphEvent::Link(Node::Entry, to) => {
+                    self.file.default_state = self.file.states[to].name.clone();
+                }
                 GraphEvent::Link(from, to) => {
-                    let from = match from {
-                        Node::State(index) => self.file.states[index].name.clone(),
-                        Node::Any => ANY_STATE.to_owned(),
-                    };
-                    let to = self.file.states[to].name.clone();
-                    self.file.transitions.push(TransitionDef::new(&from, &to));
-                    self.selected = Selected::Transition(self.file.transitions.len() - 1);
+                    let index = self.link(from, to);
+                    self.selected = Selected::Transition(index);
                 }
                 GraphEvent::SetDefault(index) => {
                     self.file.default_state = self.file.states[index].name.clone();
@@ -187,12 +190,12 @@ impl ControllerDoc {
                 }
                 // The Animation tab opens the state's clip.
                 GraphEvent::Open(_) => {}
-                GraphEvent::AddState(at, clip) => {
+                GraphEvent::AddState(at, clip, from) => {
                     let wanted = clip
                         .as_deref()
                         .map_or("New State", axcenity_anim::files::clip_name);
                     let name = self.free_state_name(wanted);
-                    if self.file.states.is_empty() {
+                    if self.file.states.is_empty() || from == Some(Node::Entry) {
                         self.file.default_state = name.clone();
                     }
                     self.file.states.push(StateDef::new(
@@ -200,10 +203,97 @@ impl ControllerDoc {
                         Motion::Clip(clip.unwrap_or_default()),
                         at,
                     ));
-                    self.selected = Selected::Node(Node::State(self.file.states.len() - 1));
+                    let index = self.file.states.len() - 1;
+                    if let Some(from) = from.filter(|from| *from != Node::Entry) {
+                        self.link(from, index);
+                    }
+                    self.selected = Selected::Node(Node::State(index));
+                }
+                GraphEvent::AddCondition(transition, parameter) => {
+                    self.add_condition(transition, &parameter);
+                    self.selected = Selected::Transition(transition);
+                }
+                GraphEvent::AddParameter(kind) => {
+                    self.add_parameter(kind);
                 }
             }
         }
+    }
+
+    /// A new transition from `from` to state `to`, put before the ones
+    /// Return settings make (which stay last), so the index stays right.
+    /// Returns its index.
+    fn link(&mut self, from: Node, to: usize) -> usize {
+        let from = match from {
+            Node::State(index) => self.file.states[index].name.clone(),
+            Node::Any | Node::Entry => ANY_STATE.to_owned(),
+        };
+        let to = self.file.states[to].name.clone();
+        let index = self
+            .file
+            .transitions
+            .iter()
+            .position(|t| t.generated)
+            .unwrap_or(self.file.transitions.len());
+        self.file
+            .transitions
+            .insert(index, TransitionDef::new(&from, &to));
+        index
+    }
+
+    /// Adds a parameter of `kind` with a usual name (IsGrounded, Speed or
+    /// Jump, numbered if taken). Returns its name.
+    pub fn add_parameter(&mut self, kind: ParameterKind) -> String {
+        let name = self.free_parameter_name(match kind {
+            ParameterKind::Bool => "IsGrounded",
+            ParameterKind::Number => "Speed",
+            ParameterKind::Trigger => "Jump",
+        });
+        self.file.parameters.push(parameter_def(kind, name.clone()));
+        name
+    }
+
+    /// Adds a parameter of `kind` called `name`, as typed.
+    pub fn new_parameter(&mut self, kind: ParameterKind, name: &str) -> Result<String, String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("A parameter needs a name.".to_owned());
+        }
+        if self.file.parameters.iter().any(|def| def.name() == name) {
+            return Err(format!("There's already a parameter called `{name}`."));
+        }
+        self.file
+            .parameters
+            .push(parameter_def(kind, name.to_owned()));
+        Ok(name.to_owned())
+    }
+
+    /// Adds a condition on `parameter` to transition `index`, with the test
+    /// that fits its type: a Bool is true, a Trigger is set, a Number is
+    /// more than 0.1.
+    pub fn add_condition(&mut self, index: usize, parameter: &str) {
+        let kind = self
+            .file
+            .parameters
+            .iter()
+            .find(|def| def.name() == parameter)
+            .map(ParameterKind::of);
+        let Some(transition) = self.file.transitions.get_mut(index) else {
+            return;
+        };
+        if transition.generated {
+            return;
+        }
+        let (test, value) = match kind {
+            Some(ParameterKind::Number) => (Test::Greater, 0.1),
+            Some(ParameterKind::Trigger) => (Test::Triggered, 0.0),
+            _ => (Test::IsTrue, 0.0),
+        };
+        transition.conditions.push(Condition {
+            parameter: parameter.to_owned(),
+            test,
+            value,
+        });
     }
 
     /// The first Number parameter's name, adding `Speed` if there's none.
@@ -318,8 +408,20 @@ impl ControllerDoc {
 
 mod inspector;
 mod live;
+mod wire_editor;
 
 use inspector::*;
+
+fn parameter_def(kind: ParameterKind, name: String) -> ParameterDef {
+    match kind {
+        ParameterKind::Bool => ParameterDef::Bool {
+            name,
+            default: false,
+        },
+        ParameterKind::Number => ParameterDef::Number { name, default: 0.0 },
+        ParameterKind::Trigger => ParameterDef::Trigger { name },
+    }
+}
 
 #[cfg(test)]
 mod tests;

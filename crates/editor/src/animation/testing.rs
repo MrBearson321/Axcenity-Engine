@@ -17,7 +17,50 @@ fn changes_of(posed: &Posed, posing: Posing) -> Vec<(usize, BoneTransform)> {
     bones.into_iter().map(|b| (b, posed.pose[b])).collect()
 }
 
+/// Frames that drag the mouse with the left button from `from` to `to`.
+pub fn drag_frames(from: egui::Pos2, to: egui::Pos2) -> Vec<Vec<egui::Event>> {
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Default::default(),
+    };
+    let mut frames = vec![
+        vec![egui::Event::PointerMoved(from)],
+        vec![button(from, true)],
+    ];
+    for step in 1..=5 {
+        frames.push(vec![egui::Event::PointerMoved(
+            from.lerp(to, step as f32 / 5.0),
+        )]);
+    }
+    frames.push(vec![button(to, false)]);
+    frames.push(Vec::new());
+    frames
+}
+
+/// Frames that click the left button at `at`.
+pub fn click_frames(at: egui::Pos2) -> Vec<Vec<egui::Event>> {
+    let button = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Default::default(),
+    };
+    vec![
+        vec![egui::Event::PointerMoved(at)],
+        vec![button(true)],
+        vec![button(false)],
+        Vec::new(),
+    ]
+}
+
 impl AnimationStudio {
+    /// The open state machine.
+    pub fn machine_doc(&mut self) -> &mut ControllerDoc {
+        self.machine.doc.as_mut().expect("a state machine is open")
+    }
+
     /// Picks New keys in the open clip's toolbar.
     pub fn set_new_keys(&mut self, choice: NewKeys) {
         self.clip.new_keys = choice;

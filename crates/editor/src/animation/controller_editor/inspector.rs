@@ -1,4 +1,5 @@
 use super::*;
+use crate::animation::graph::words;
 
 /// A combo box picking one of the project's `clips` (or none) for `current`.
 pub(super) fn clip_picker(
@@ -148,8 +149,14 @@ impl ControllerDoc {
             }
             Selected::Node(Node::Any) => {
                 ui.heading(ANY_STATE);
-                ui.label("Transitions from the Any State can happen whatever state is playing (but never to the state already playing). Use them for things that can happen at any time, such as Jump or TakeDamage.");
-                ui.weak("Right-click it in the graph and pick Make Transition.");
+                ui.label("Any State: its wires can happen whatever state is playing (but never to the state already playing). Use them for things that can happen at any time, such as Jump or TakeDamage.");
+                ui.weak("Drag from its pin to a state to wire it.");
+            }
+            Selected::Node(Node::Entry) => {
+                ui.heading("Entry");
+                ui.label("Entry: where the Animator starts. It's wired to the default state; drag from its pin to another state to start there instead.");
+                ui.add_space(4.0);
+                self.default_state_picker(ui);
             }
             _ => self.controller_inspector(ui),
         }
@@ -160,21 +167,12 @@ impl ControllerDoc {
             axcenity_anim::files::clip_name(&self.path).trim_end_matches(".statemachine.json"),
         );
         ui.weak(&self.path);
+        ui.label("State machine: it starts at the state Entry is wired to, and follows a wire when what its label says is true.");
         ui.add_space(4.0);
-        ui.horizontal_wrapped(|ui| {
-            ui.label("Default state");
-            let names: Vec<String> = self.file.states.iter().map(|s| s.name.clone()).collect();
-            egui::ComboBox::from_id_salt("default state")
-                .selected_text(&self.file.default_state)
-                .show_ui(ui, |ui| {
-                    for name in names {
-                        ui.selectable_value(&mut self.file.default_state, name.clone(), name);
-                    }
-                });
-        });
-        ui.weak("The state it starts in (orange in the graph): usually Idle.");
+        self.default_state_picker(ui);
         ui.separator();
         ui.strong("Parameters");
+        ui.label("Parameters: values the game sets, from scripts or blocks, which the wires test.");
         ui.weak("Bool: stays true or false (IsGrounded). Trigger: a one-time request, used up by its transition (Jump). Number: changes gradually (Speed).");
         let mut remove = None;
         let mut renamed = None;
@@ -234,21 +232,12 @@ impl ControllerDoc {
             self.file.parameters.remove(index);
         }
         ui.horizontal_wrapped(|ui| {
-            for kind in ["Bool", "Number", "Trigger"] {
-                if ui.button(format!("{} {kind}", icons::PLUS)).clicked() {
-                    let name = self.free_parameter_name(match kind {
-                        "Bool" => "IsGrounded",
-                        "Number" => "Speed",
-                        _ => "Jump",
-                    });
-                    self.file.parameters.push(match kind {
-                        "Bool" => ParameterDef::Bool {
-                            name,
-                            default: false,
-                        },
-                        "Number" => ParameterDef::Number { name, default: 0.0 },
-                        _ => ParameterDef::Trigger { name },
-                    });
+            for kind in ParameterKind::ALL {
+                if ui
+                    .button(format!("{} {}", icons::PLUS, kind.label()))
+                    .clicked()
+                {
+                    self.add_parameter(kind);
                 }
             }
         });
@@ -264,7 +253,23 @@ impl ControllerDoc {
             );
         }
         ui.separator();
-        ui.weak("Right-click the graph to add states; right-click a state to make a transition.");
+        ui.weak("Right-click the graph (or drop a clip on it) to add states; drag from a state's right pin to another to wire them.");
+    }
+
+    /// The default state, which Entry is wired to.
+    fn default_state_picker(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Default state");
+            let names: Vec<String> = self.file.states.iter().map(|s| s.name.clone()).collect();
+            egui::ComboBox::from_id_salt("default state")
+                .selected_text(&self.file.default_state)
+                .show_ui(ui, |ui| {
+                    for name in names {
+                        ui.selectable_value(&mut self.file.default_state, name.clone(), name);
+                    }
+                });
+        });
+        ui.weak("The state it starts in (Entry is wired to it, and it's orange): usually Idle.");
     }
 
     pub(super) fn free_parameter_name(&self, wanted: &str) -> String {
@@ -319,6 +324,7 @@ impl ControllerDoc {
                 });
             }
         }
+        ui.label(words::state_header(&self.file, &name));
         let is_default = self.file.default_state == name;
         if is_default {
             ui.weak("The default state: the animator starts here.");
@@ -407,7 +413,7 @@ impl ControllerDoc {
             })
             .collect();
         if outgoing.is_empty() {
-            ui.weak("None yet. Right-click the state in the graph and pick Make Transition.");
+            ui.weak("None yet. Drag from its right pin to another state.");
         }
         for (index, label, _) in outgoing {
             if ui.selectable_label(false, label).clicked() {
@@ -596,6 +602,7 @@ impl ControllerDoc {
         let parameters = self.file.parameters.clone();
         let transition = &mut self.file.transitions[index];
         ui.heading(format!("{} → {}", transition.from, transition.to));
+        ui.label(words::transition_header(transition));
         if transition.generated {
             ui.label("Made by its state's Return setting, so it can't be changed here.");
             let from = transition.from.clone();
@@ -615,7 +622,7 @@ impl ControllerDoc {
         }
         ui.add_space(4.0);
         ui.strong("Conditions");
-        ui.weak("All must hold for the transition to happen.");
+        ui.weak("All must hold for the transition to happen. Its wire's label says them in words.");
         let mut remove = None;
         egui::Grid::new("conditions")
             .num_columns(4)
@@ -636,18 +643,9 @@ impl ControllerDoc {
                         });
                     let kind = parameters
                         .iter()
-                        .find(|def| def.name() == condition.parameter);
-                    let tests: &[(Test, &str)] = match kind {
-                        Some(ParameterDef::Bool { .. }) => {
-                            &[(Test::IsTrue, "is true"), (Test::IsFalse, "is false")]
-                        }
-                        Some(ParameterDef::Trigger { .. }) => &[(Test::Triggered, "is set")],
-                        Some(ParameterDef::Number { .. }) => &[
-                            (Test::Greater, "is more than"),
-                            (Test::Less, "is less than"),
-                        ],
-                        None => &[],
-                    };
+                        .find(|def| def.name() == condition.parameter)
+                        .map(ParameterKind::of);
+                    let tests = super::wire_editor::tests_for(kind);
                     if let Some(&(first, _)) = tests.first()
                         && !tests.iter().any(|(test, _)| *test == condition.test)
                     {
@@ -685,17 +683,9 @@ impl ControllerDoc {
             .button(format!("{} Add condition", icons::PLUS))
             .clicked()
         {
-            let def = &parameters[0];
-            transition.conditions.push(Condition {
-                parameter: def.name().to_owned(),
-                test: match def {
-                    ParameterDef::Bool { .. } => Test::IsTrue,
-                    ParameterDef::Number { .. } => Test::Greater,
-                    ParameterDef::Trigger { .. } => Test::Triggered,
-                },
-                value: 0.0,
-            });
+            self.add_condition(index, parameters[0].name());
         }
+        let transition = &mut self.file.transitions[index];
 
         ui.separator();
         ui.strong("Blend");

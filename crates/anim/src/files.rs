@@ -441,6 +441,9 @@ pub struct StateMachineFile {
     /// Where the editor's graph draws the Any State node, once it's moved.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub any_state_position: Option<[f32; 2]>,
+    /// Where the editor's graph draws the Entry node, once it's moved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry_position: Option<[f32; 2]>,
 }
 
 impl Default for StateMachineFile {
@@ -452,6 +455,7 @@ impl Default for StateMachineFile {
             states: Vec::new(),
             transitions: Vec::new(),
             any_state_position: None,
+            entry_position: None,
         }
     }
 }
@@ -923,6 +927,7 @@ mod tests {
                 generated: false,
             }],
             any_state_position: Some([-200.0, 40.0]),
+            entry_position: Some([-260.0, -40.0]),
         }
     }
 
@@ -932,6 +937,17 @@ mod tests {
         let text = controller.to_json();
         let read = StateMachineFile::from_json(&text).unwrap();
         assert_eq!(read, controller);
+        assert_eq!(read.to_json(), text);
+    }
+
+    #[test]
+    fn a_state_machine_without_an_entry_position_reads_and_writes_the_same() {
+        let mut older = sample_controller();
+        older.entry_position = None;
+        let text = older.to_json();
+        assert!(!text.contains("entry_position"), "{text}");
+        let read = StateMachineFile::from_json(&text).unwrap();
+        assert_eq!(read, older);
         assert_eq!(read.to_json(), text);
     }
 

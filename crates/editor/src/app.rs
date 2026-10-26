@@ -968,4 +968,6 @@ mod imported_clip_tests;
 #[cfg(test)]
 mod posing_tests;
 #[cfg(test)]
+mod state_machine_tests;
+#[cfg(test)]
 mod tests;

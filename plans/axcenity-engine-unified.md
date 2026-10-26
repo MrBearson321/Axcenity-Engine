@@ -338,9 +338,9 @@ The inspector keeps the full settings.
 
 ### Acceptance criteria
 
-- [ ] A transition made by dragging from Idle's output pin to Walk, with "Speed > 0.1" set on its wire label, plays in the live preview when the Speed slider passes 0.1, and in Play.
-- [ ] Rewiring Entry to another state makes that state the default.
-- [ ] A state machine saved before this phase opens with the same states, transitions and positions.
+- [x] A transition made by dragging from Idle's output pin to Walk, with "Speed > 0.1" set on its wire label, plays in the live preview when the Speed slider passes 0.1, and in Play.
+- [x] Rewiring Entry to another state makes that state the default.
+- [x] A state machine saved before this phase opens with the same states, transitions and positions.
 
 ---
 

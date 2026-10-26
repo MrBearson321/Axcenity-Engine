@@ -135,6 +135,14 @@ impl ControllerDoc {
         }
     }
 
+    /// Sets a parameter of the running preview, as its control would.
+    #[cfg(test)]
+    pub fn set_live_parameter(&mut self, name: &str, value: Parameter) {
+        if let Some(run) = &mut self.preview {
+            run.parameters.insert(name.to_owned(), value);
+        }
+    }
+
     /// Starts the preview again from the default state with the default
     /// parameters.
     pub fn restart(&mut self) {
