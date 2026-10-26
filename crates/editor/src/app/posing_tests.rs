@@ -287,7 +287,7 @@ fn a_linked_clips_take_bones_are_locked_until_convert_to_keys_which_looks_the_sa
 
 /// Writes the open clip and records the edit as one undo step, as the
 /// editor does each frame.
-fn record_clip_edit(app: &mut EditorApp, folder: &std::path::Path) {
+pub(super) fn record_clip_edit(app: &mut EditorApp, folder: &std::path::Path) {
     for action in app.animation.write_all(folder, &mut app.output) {
         if let StudioAction::RecordFile {
             path,
@@ -312,7 +312,7 @@ fn record_clip_edit(app: &mut EditorApp, folder: &std::path::Path) {
 /// Plays the noodle's first Animation on its own (no state machine) and
 /// checks, twice, that the game draws it as the preview does at the
 /// Animation's time then.
-fn plays_as_previewed(app: &mut EditorApp, noodle: InstanceId, what: &str) {
+pub(super) fn plays_as_previewed(app: &mut EditorApp, noodle: InstanceId, what: &str) {
     let model = app.assets.model(NOODLE).unwrap();
     let animator = crate::animation::animator_of(&app.world, noodle).unwrap();
     let animation = crate::animation::Subject::of(&app.world, noodle)

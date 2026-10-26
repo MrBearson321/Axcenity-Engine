@@ -1,12 +1,21 @@
 //! Posing in tests: what the Animation tab does when a bone is picked,
 //! turned or keyed in the preview, without drawing it.
 
+use std::collections::BTreeSet;
+
 use axcenity_anim::{PropertyTrack, bone_paths};
 use axcenity_assets::BoneTransform;
-use axcenity_render::glam::Quat;
+use axcenity_render::glam::{Quat, Vec3};
 
+use super::posing::{Posed, Posing, Skeleton};
 use super::property_editor::NewKeys;
 use super::*;
+
+/// The bones a drag doing `posing` sends, with their transforms.
+fn changes_of(posed: &Posed, posing: Posing) -> Vec<(usize, BoneTransform)> {
+    let bones: BTreeSet<usize> = posed.sent(posing);
+    bones.into_iter().map(|b| (b, posed.pose[b])).collect()
+}
 
 impl AnimationStudio {
     /// Picks New keys in the open clip's toolbar.
@@ -58,6 +67,7 @@ impl AnimationStudio {
     /// property clip's copy of the followed object posed at the playhead,
     /// or a take clip's model.
     fn ready_preview(&mut self, assets: &Assets, world: &World) {
+        self.follow_pins();
         match &self.clip.doc {
             Some(Clip::Property(_)) => {
                 if let Some(object) = self.subject {
@@ -99,29 +109,132 @@ impl AnimationStudio {
     /// Turns the picked bone by `turn` (around the world's axes) with its
     /// gizmo. A take clip says why it can't, for a locked bone.
     pub fn turn_bone(&mut self, assets: &Assets, world: &World, turn: Quat) -> Result<(), String> {
+        self.pose_picked(assets, world, |skeleton, bone| {
+            Posing::Set(bone, skeleton.turned(bone, turn).expect("the bone"))
+        })
+        .map(|_| ())
+    }
+
+    /// Moves the picked bone's joint `by` (in the world) with its Move
+    /// gizmo: a root moves, and any other joint is reached by turning the
+    /// bones above it. Returns the pinned joints that slipped, by name.
+    pub fn move_joint(
+        &mut self,
+        assets: &Assets,
+        world: &World,
+        by: Vec3,
+    ) -> Result<Vec<String>, String> {
+        self.pose_picked(assets, world, |skeleton, bone| {
+            Posing::Reach(bone, skeleton.joints()[bone] + by)
+        })
+    }
+
+    /// Poses the picked bone as `posing` says (from the preview's skeleton)
+    /// the way a gizmo drag does: holding the open clip's pins, and sending
+    /// every bone it changed. Returns the pinned joints that slipped.
+    fn pose_picked(
+        &mut self,
+        assets: &Assets,
+        world: &World,
+        posing: impl FnOnce(&Skeleton, usize) -> Posing,
+    ) -> Result<Vec<String>, String> {
         self.ready_preview(assets, world);
-        match &mut self.clip.doc {
+        let settings = self.clip.pose;
+        let (changes, slipped, rig) = match &mut self.clip.doc {
             Some(Clip::Property(_)) => {
-                let bone = self.clip.objects.bones.selected.expect("a picked bone");
+                let mut poser = std::mem::take(&mut self.clip.objects.bones);
+                let bone = poser.selected.expect("a picked bone");
                 let skeleton = self.clip.objects.skeleton().expect("a skinned copy");
-                let turned = skeleton.turned(bone, turn).expect("the bone");
-                let edit = self.clip.objects.bone_edit(bone, &turned);
-                self.preview_events(edit.into_iter().collect());
-                Ok(())
+                let posing = posing(&skeleton, bone);
+                let posed = poser.pose(&skeleton, posing, &settings);
+                let rig = skeleton.rig.clone();
+                self.clip.objects.bones = poser;
+                (changes_of(&posed, posing), posed.slipped, rig)
             }
             Some(Clip::Take(doc)) => {
                 let bone = self.clip.bones.selected.expect("a picked bone");
-                let posing = doc.pose(assets)?;
+                let pose = doc.pose(assets)?;
                 let skeleton = self
                     .clip
                     .preview
-                    .skeleton(posing.rig(), &posing.pose, &posing.locked)
+                    .skeleton(pose.rig(), &pose.pose, &pose.locked)
                     .expect("the preview shows the model");
-                let turned = skeleton.turned(bone, turn).expect("the bone");
-                doc.pose_bone(posing.rig(), bone, &turned, self.clip.record)
+                let posing = posing(&skeleton, bone);
+                let posed = self.clip.bones.pose(&skeleton, posing, &settings);
+                let changes = changes_of(&posed, posing);
+                doc.pose_bones(pose.rig(), &changes, self.clip.record)?;
+                (Vec::new(), posed.slipped, pose.rig().clone())
+            }
+            None => panic!("no clip is open"),
+        };
+        if !changes.is_empty() {
+            let edit = self.clip.objects.bone_edits(&changes);
+            self.preview_events(edit.into_iter().collect());
+        }
+        Ok(slipped
+            .into_iter()
+            .map(|bone| rig.bones[bone].name.clone())
+            .collect())
+    }
+
+    /// Picks Pin (or Unpin) on the picked bone's joint.
+    pub fn pin_picked(&mut self, assets: &Assets, world: &World, pin: bool) {
+        self.ready_preview(assets, world);
+        match &mut self.clip.doc {
+            Some(Clip::Property(_)) => {
+                let mut poser = std::mem::take(&mut self.clip.objects.bones);
+                let bone = poser.selected.expect("a picked bone");
+                let skeleton = self.clip.objects.skeleton().expect("a skinned copy");
+                if pin {
+                    poser.pin(&skeleton, bone);
+                } else {
+                    poser.unpin(bone);
+                }
+                self.clip.objects.bones = poser;
+            }
+            Some(Clip::Take(doc)) => {
+                let bone = self.clip.bones.selected.expect("a picked bone");
+                let pose = doc.pose(assets).expect("a pose");
+                let skeleton = self
+                    .clip
+                    .preview
+                    .skeleton(pose.rig(), &pose.pose, &pose.locked)
+                    .expect("the preview shows the model");
+                if pin {
+                    self.clip.bones.pin(&skeleton, bone);
+                } else {
+                    self.clip.bones.unpin(bone);
+                }
             }
             None => panic!("no clip is open"),
         }
+    }
+
+    /// The open clip's pinned joints, by name.
+    pub fn pinned_bones(&mut self, assets: &Assets, world: &World) -> Vec<String> {
+        self.ready_preview(assets, world);
+        let (poser, rig) = match &self.clip.doc {
+            Some(Clip::Property(_)) => (&self.clip.objects.bones, self.clip.objects.rig().cloned()),
+            Some(Clip::Take(doc)) => (
+                &self.clip.bones,
+                doc.preview_model
+                    .as_deref()
+                    .and_then(|id| assets.model(id))
+                    .and_then(|model| model.rig.as_deref().cloned()),
+            ),
+            None => return Vec::new(),
+        };
+        let rig = rig.expect("a rig");
+        poser
+            .pins()
+            .keys()
+            .map(|&bone| rig.bones[bone].name.clone())
+            .collect()
+    }
+
+    /// Picks how many bones a moved joint turns.
+    pub fn set_chain(&mut self, length: usize) {
+        self.clip.pose.chain = length;
     }
 
     /// Presses K over the tab: keys the picked bone where it is.

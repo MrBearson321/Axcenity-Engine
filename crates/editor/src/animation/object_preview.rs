@@ -40,6 +40,8 @@ pub enum PreviewEvent {
     Select(Option<InstanceId>),
     /// A handle was dragged: the new values, by target path from the root.
     Edit(Vec<EvaluatedProperty>),
+    /// Something to say in Output: pinned joints a drag couldn't hold.
+    Warn(String),
 }
 
 /// The selected object, as the dope sheet and Key selected need it.
@@ -588,9 +590,8 @@ impl ObjectPreview {
                 self.selected = self.root;
                 event = Some(PreviewEvent::Select(self.root));
             }
-            Some(BoneEvent::Pose(bone, transform)) => {
-                event = self.bone_edit(bone, &transform);
-            }
+            Some(BoneEvent::Pose(bones)) => event = self.bone_edits(&bones),
+            Some(BoneEvent::Warn(message)) => event = Some(PreviewEvent::Warn(message)),
             None => {}
         }
         if response.clicked()
@@ -756,14 +757,20 @@ impl ObjectPreview {
         event
     }
 
-    /// A bone turned or moved in the preview, as an edit of its `Bone`.
-    pub(super) fn bone_edit(&self, bone: usize, transform: &BoneTransform) -> Option<PreviewEvent> {
-        let path = self.bone_paths().get(bone)?.clone();
-        Some(PreviewEvent::Edit(vec![EvaluatedProperty {
-            target: path,
-            property: PropertyName::Bone,
-            value: bone_numbers(transform),
-        }]))
+    /// Bones turned or moved in the preview, as edits of their `Bone`s.
+    pub(super) fn bone_edits(&self, bones: &[(usize, BoneTransform)]) -> Option<PreviewEvent> {
+        let paths = self.bone_paths();
+        let edits: Vec<EvaluatedProperty> = bones
+            .iter()
+            .filter_map(|(bone, transform)| {
+                Some(EvaluatedProperty {
+                    target: paths.get(*bone)?.clone(),
+                    property: PropertyName::Bone,
+                    value: bone_numbers(transform),
+                })
+            })
+            .collect();
+        (!edits.is_empty()).then_some(PreviewEvent::Edit(edits))
     }
 
     /// Whether `id` is the root or inside it (not the floor).

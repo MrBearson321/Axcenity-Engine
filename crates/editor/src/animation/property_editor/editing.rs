@@ -25,8 +25,27 @@ impl PropertyDoc {
 
     /// Key selected (K): keys the selected object's tracks, its pending
     /// moves, and where it is (Position and Orientation, or a UI element's
-    /// Position and Size).
+    /// Position and Size). With a bone selected, it keys the bones the
+    /// last move turned and hasn't keyed instead (every bone a joint moved
+    /// with IK turned), if there are any.
     pub fn key_focus(&mut self, focus: &Focus) {
+        if self.playing || self.playhead != self.pending_at {
+            self.pending.clear();
+        }
+        let bone = focus
+            .values
+            .iter()
+            .any(|v| v.property == PropertyName::Bone);
+        let turned: Vec<EvaluatedProperty> = self
+            .pending
+            .iter()
+            .filter(|p| p.property == PropertyName::Bone)
+            .cloned()
+            .collect();
+        if bone && !turned.is_empty() {
+            self.key_values(&turned);
+            return;
+        }
         let mut properties: Vec<PropertyName> = focus.transform.clone();
         let more = self
             .file

@@ -1,5 +1,5 @@
 //! Posing a skinned model in the Animation tab's previews: its bones as
-//! joints you can pick, the gizmo that turns a bone (or moves the root),
+//! joints you can pick, the gizmo that turns a bone or moves a joint, pins,
 //! and the bone tree in the drawer.
 //!
 //! A [`Skeleton`] is a rig posed on a MeshPart in a preview's world. The
@@ -7,12 +7,21 @@
 //! [`Skeleton::moved`] turn what it did back into the bone's own transform,
 //! relative to its parent bone, which is what a `Bone` key stores.
 //!
-//! [`PoseSettings`] are the snap steps and axes above the preview, kept
-//! while the editor runs. Holding Ctrl (Cmd on macOS) during a drag flips
-//! snapping for as long as it's held; Shift turns finely.
+//! Moving a joint that isn't a root turns the bones above it so it gets
+//! there (`axcenity_anim::ik`), [`PoseSettings::chain`] of them. A pinned
+//! joint stays where it was pinned: after any pose, its own chain turns to
+//! put it back ([`Skeleton::pose_with`]). Pins are kept per clip while the
+//! editor runs, in the rig's file space, and never saved.
+//!
+//! [`PoseSettings`] are the snap steps, axes and chain above the preview,
+//! kept while the editor runs. Holding Ctrl (Cmd on macOS) during a drag
+//! flips snapping for as long as it's held; Shift turns finely. Dragging
+//! the selected joint itself (with Move) moves it on a plane facing the
+//! camera.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
+use axcenity_anim::ik;
 use axcenity_assets::{BoneTransform, Rig};
 use axcenity_core::{InstanceId, World};
 use axcenity_render::glam::{Mat4, Quat, Vec3};
@@ -29,6 +38,12 @@ const JOINT: f32 = 4.0;
 /// The Turn snap steps, in degrees, and the Move snap steps, in studs.
 pub const TURN_STEPS: [f32; 4] = [1.0, 5.0, 15.0, 45.0];
 pub const MOVE_STEPS: [f32; 4] = [0.01, 0.05, 0.1, 0.5];
+/// How many bones above a moved joint can turn.
+pub const CHAIN_LENGTHS: [usize; 4] = [1, 2, 3, 4];
+
+/// Pinned joints, by bone, where they're pinned in the rig's file space.
+pub type Pins = BTreeMap<usize, Vec3>;
+static NO_PINS: Pins = BTreeMap::new();
 
 /// Which axes the gizmo turns and moves a bone along.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -40,16 +55,19 @@ pub enum Axes {
     Local,
 }
 
-/// The snap steps and axes posing uses, set above the preview. Off keeps
-/// its step, which holding Ctrl snaps to.
+/// The snap steps, axes and chain posing uses, set above the preview. Off
+/// keeps its step, which holding Ctrl snaps to.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PoseSettings {
     pub snap: Snap,
     pub axes: Axes,
+    /// How many bones above a moved joint turn to move it (1 to 4).
+    pub chain: usize,
 }
 
 impl Default for PoseSettings {
-    /// Turns in 5° steps and moves in 0.05-stud steps, on the world's axes.
+    /// Turns in 5° steps and moves in 0.05-stud steps, on the world's axes,
+    /// turning a moved joint's parent and grandparent.
     fn default() -> Self {
         Self {
             snap: Snap {
@@ -59,6 +77,7 @@ impl Default for PoseSettings {
                 rotate_step: 5.0,
             },
             axes: Axes::World,
+            chain: 2,
         }
     }
 }
@@ -92,7 +111,7 @@ impl PoseSettings {
             ui,
             "move snap",
             icons::ARROWS_OUT_CARDINAL,
-            "Move snap: the root moves in steps of this. Hold Ctrl to flip it while dragging.",
+            "Move snap: joints move in steps of this. Hold Ctrl to flip it while dragging.",
             (&mut snap.move_on, &mut snap.move_step),
             &MOVE_STEPS,
             |step| format!("{step} studs"),
@@ -145,6 +164,77 @@ fn snap_picker(
         })
         .response
         .on_hover_text(hover);
+}
+
+/// The Chain menu: how many bones above a moved joint turn.
+fn chain_picker(ui: &mut egui::Ui, chain: &mut usize) {
+    egui::ComboBox::from_id_salt("ik chain")
+        .selected_text(format!("{} Chain {chain}", icons::LINK))
+        .show_ui(ui, |ui| {
+            for length in CHAIN_LENGTHS {
+                let name = match length {
+                    1 => "1 bone".to_owned(),
+                    n => format!("{n} bones"),
+                };
+                ui.selectable_value(chain, length, name);
+            }
+        })
+        .response
+        .on_hover_text(
+            "Chain: how many bones above a moved joint turn to get it there. 2 turns a hand's forearm and upper arm.",
+        );
+}
+
+/// How a bone was posed by hand.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Posing {
+    /// Turned (or, a root, moved) to this.
+    Set(usize, BoneTransform),
+    /// Its joint moved to this point in the world: a root moves there, and
+    /// any other joint is reached by turning the bones above it.
+    Reach(usize, Vec3),
+}
+
+impl Posing {
+    /// The bone posed by hand.
+    pub fn bone(&self) -> usize {
+        match *self {
+            Posing::Set(bone, _) | Posing::Reach(bone, _) => bone,
+        }
+    }
+}
+
+/// A skeleton after [`Skeleton::pose_with`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct Posed {
+    pub pose: Vec<BoneTransform>,
+    /// The bones it changed, in bone order.
+    pub changed: Vec<usize>,
+    /// Pinned joints that couldn't be put back where they were pinned.
+    pub slipped: Vec<usize>,
+}
+
+impl Posed {
+    /// The bones to send (and so key) for `posing`: those it changed, and
+    /// a bone turned by hand even when it's turned back to where it was.
+    /// A joint moved with IK isn't itself turned, so it isn't sent.
+    pub fn sent(&self, posing: Posing) -> BTreeSet<usize> {
+        let mut bones: BTreeSet<usize> = self.changed.iter().copied().collect();
+        if let Posing::Set(bone, _) = posing {
+            bones.insert(bone);
+        }
+        bones
+    }
+}
+
+/// Whether two transforms of a bone differ by more than rounding.
+fn differs(a: &BoneTransform, b: &BoneTransform) -> bool {
+    let turn = (a.rotation - b.rotation)
+        .length()
+        .min((a.rotation + b.rotation).length());
+    turn > 1e-5
+        || !a.translation.abs_diff_eq(b.translation, 1e-6)
+        || !a.scale.abs_diff_eq(b.scale, 1e-6)
 }
 
 /// A rig posed on a MeshPart in a preview's world.
@@ -208,14 +298,76 @@ impl<'a> Skeleton<'a> {
         self.place * self.rig.fit * parent
     }
 
+    /// From the rig's file space (where pins are kept) into the world.
+    pub fn to_world(&self) -> Mat4 {
+        self.place * self.rig.fit
+    }
+
     /// Where each bone's joint is in the world.
     pub fn joints(&self) -> Vec<Vec3> {
-        let to_world = self.place * self.rig.fit;
-        self.rig
-            .world(self.pose)
-            .iter()
-            .map(|bone| to_world.transform_point3(bone.w_axis.truncate()))
+        let to_world = self.to_world();
+        self.file_joints()
+            .into_iter()
+            .map(|joint| to_world.transform_point3(joint))
             .collect()
+    }
+
+    /// Where each bone's joint is in the rig's file space.
+    pub fn file_joints(&self) -> Vec<Vec3> {
+        ik::joint_positions(self.rig, self.pose)
+    }
+
+    /// The pose after `posing`, then with every other pinned joint in
+    /// `pins` put back where it was pinned by turning up to `chain` bones
+    /// above it. A moved joint's chain, and a pin's, never turns a bone
+    /// above another pinned joint, a locked bone, or the bone posed by
+    /// hand, so the result is always the same and a pin only slips (and is
+    /// reported) when what may turn can't reach it.
+    pub fn pose_with(&self, posing: Posing, chain: usize, pins: &Pins) -> Posed {
+        let mut pose = self.pose.to_vec();
+        // Bones a short pose leaves out rest.
+        let resting = self.rig.bones.get(pose.len()..).unwrap_or_default();
+        pose.extend(resting.iter().map(|bone| bone.rest));
+        let mut goals = Vec::new();
+        let bone = match posing {
+            Posing::Set(bone, transform) => {
+                if let Some(slot) = pose.get_mut(bone) {
+                    *slot = transform;
+                }
+                bone
+            }
+            Posing::Reach(bone, at) if self.is_root(bone) => {
+                let by = self.joints().get(bone).map(|&joint| at - joint);
+                if let Some(moved) = by.and_then(|by| self.moved(bone, by)) {
+                    pose[bone] = moved;
+                }
+                bone
+            }
+            Posing::Reach(bone, at) => {
+                let target = self.to_world().inverse().transform_point3(at);
+                goals.push(ik::Goal {
+                    joint: bone,
+                    target,
+                });
+                bone
+            }
+        };
+        goals.extend(
+            pins.iter()
+                .filter(|(pinned, _)| **pinned != bone)
+                .map(|(&joint, &target)| ik::Goal { joint, target }),
+        );
+        let missed = ik::solve(self.rig, &mut pose, &goals, chain, |turning| {
+            turning != bone && self.posable(turning) && !self.locked(turning)
+        });
+        let changed = (0..pose.len())
+            .filter(|&b| self.pose.get(b).is_none_or(|was| differs(&pose[b], was)))
+            .collect();
+        Posed {
+            pose,
+            changed,
+            slipped: missed.into_iter().filter(|&joint| joint != bone).collect(),
+        }
     }
 
     /// Where the gizmo goes on `bone`: its joint, turned as the bone is.
@@ -274,8 +426,23 @@ fn is_root(rig: &Rig, bone: usize) -> bool {
 pub enum BoneEvent {
     /// A joint was clicked.
     Select(usize),
-    /// The selected bone was turned or moved to this.
-    Pose(usize, BoneTransform),
+    /// Bones were posed to these: the one dragged, and the ones turned to
+    /// move its joint or to keep pinned joints in place.
+    Pose(Vec<(usize, BoneTransform)>),
+    /// A drag ended with pinned joints it couldn't keep in place.
+    Warn(String),
+}
+
+/// What a pose that let these pinned joints of `rig` slip says.
+pub fn slipped_message(rig: &Rig, slipped: &[usize]) -> String {
+    let names: Vec<&str> = slipped
+        .iter()
+        .filter_map(|&bone| rig.bones.get(bone).map(|b| b.name.as_str()))
+        .collect();
+    format!(
+        "Pinned {} couldn't stay in place: the bones allowed to turn can't reach. Try a longer Chain, or unpin it.",
+        names.join(", ")
+    )
 }
 
 /// What [`Poser::interact`] found.
@@ -290,13 +457,45 @@ pub struct Interaction {
     hovered: Option<usize>,
 }
 
-/// The selected bone, the tool that poses it, and its drag.
+/// How a drag holds on.
+enum Grip {
+    /// By a gizmo handle, which was at this pose.
+    Handle(Drag, gizmo::Pose),
+    /// By the joint itself, which was at `joint`, on a plane facing the
+    /// camera through it with this `normal`, grabbed at `grab`.
+    Free {
+        joint: Vec3,
+        grab: Vec3,
+        normal: Vec3,
+    },
+}
+
+/// A bone being dragged.
+struct Dragging {
+    bone: usize,
+    grip: Grip,
+    /// The bones as they were when the drag started. Each frame poses from
+    /// these, so a drag never adds up on itself.
+    pose: Vec<BoneTransform>,
+    /// Every bone the drag has changed, so one it turns back is sent too.
+    touched: BTreeSet<usize>,
+    /// Pinned joints the drag can't keep in place, as of the last frame.
+    slipped: Vec<usize>,
+}
+
+/// The selected bone, the tool that poses it, its drag, and each clip's
+/// pins.
 pub struct Poser {
     pub selected: Option<usize>,
-    /// Rotate, or Move for a root.
+    /// Rotate, or Move.
     pub tool: Tool,
-    /// The bone being dragged, the drag, and where its gizmo was then.
-    drag: Option<(usize, Drag, gizmo::Pose)>,
+    drag: Option<Dragging>,
+    /// Each clip's pinned joints, by the clip's path.
+    pins: HashMap<String, Pins>,
+    /// The clip being posed, whose pins are held and shown.
+    clip: String,
+    /// The joint whose right-click menu is open.
+    menu: Option<usize>,
 }
 
 impl Default for Poser {
@@ -305,22 +504,66 @@ impl Default for Poser {
             selected: None,
             tool: Tool::Rotate,
             drag: None,
+            pins: HashMap::new(),
+            clip: String::new(),
+            menu: None,
         }
     }
 }
 
 impl Poser {
-    /// The tool the selected bone's gizmo shows: Move only for a root.
-    fn tool_for(&self, skeleton: &Skeleton, bone: usize) -> Tool {
-        if self.tool == Tool::Move && skeleton.is_root(bone) {
-            Tool::Move
-        } else {
-            Tool::Rotate
+    /// Poses the clip at `path` from now on, with its own pins.
+    pub fn for_clip(&mut self, path: &str) {
+        if self.clip != path {
+            self.clip = path.to_owned();
+            self.drag = None;
+            self.menu = None;
         }
     }
 
-    /// The Rotate and Move buttons (Move only with a root selected), then
-    /// the snap steps and axes.
+    /// The pinned joints of the clip being posed.
+    pub fn pins(&self) -> &Pins {
+        self.pins.get(&self.clip).unwrap_or(&NO_PINS)
+    }
+
+    /// Pins `bone`'s joint where it is in `skeleton`.
+    pub fn pin(&mut self, skeleton: &Skeleton, bone: usize) {
+        if let Some(&at) = skeleton.file_joints().get(bone) {
+            self.pins
+                .entry(self.clip.clone())
+                .or_default()
+                .insert(bone, at);
+        }
+    }
+
+    pub fn unpin(&mut self, bone: usize) {
+        if let Some(pins) = self.pins.get_mut(&self.clip) {
+            pins.remove(&bone);
+        }
+    }
+
+    /// `posing` done to `skeleton` with `settings`' chain, holding the
+    /// clip's pins. A pinned joint posed by hand is pinned where it goes.
+    pub fn pose(&mut self, skeleton: &Skeleton, posing: Posing, settings: &PoseSettings) -> Posed {
+        let posed = skeleton.pose_with(posing, settings.chain, self.pins());
+        self.repin(skeleton.rig, posing.bone(), &posed.pose);
+        posed
+    }
+
+    /// Moves `bone`'s pin, if it has one, to where it is in `pose`.
+    fn repin(&mut self, rig: &Rig, bone: usize, pose: &[BoneTransform]) {
+        if let Some(pin) = self
+            .pins
+            .get_mut(&self.clip)
+            .and_then(|pins| pins.get_mut(&bone))
+            && let Some(&at) = ik::joint_positions(rig, pose).get(bone)
+        {
+            *pin = at;
+        }
+    }
+
+    /// The Rotate and Move buttons, how many bones a moved joint turns (for
+    /// a joint that isn't a root), then the snap steps and axes.
     pub fn tools(&mut self, ui: &mut egui::Ui, rig: &Rig, settings: &mut PoseSettings) {
         let Some(bone) = self.selected else {
             return;
@@ -330,22 +573,29 @@ impl Poser {
             ui,
             icons::ARROW_CLOCKWISE,
             "Turn the bone",
-            self.tool == Tool::Rotate || !root,
+            self.tool == Tool::Rotate,
         )
         .clicked()
         {
             self.tool = Tool::Rotate;
         }
-        if root
-            && crate::widgets::icon_button(
-                ui,
-                icons::ARROWS_OUT_CARDINAL,
-                "Move the root",
-                self.tool == Tool::Move,
-            )
-            .clicked()
+        let hover = if root {
+            "Move the root"
+        } else {
+            "Move the joint: the bones above it turn to get it there. Drag an arrow, or the joint itself."
+        };
+        if crate::widgets::icon_button(
+            ui,
+            icons::ARROWS_OUT_CARDINAL,
+            hover,
+            self.tool == Tool::Move,
+        )
+        .clicked()
         {
             self.tool = Tool::Move;
+        }
+        if self.tool == Tool::Move && !root {
+            chain_picker(ui, &mut settings.chain);
         }
         settings.controls(ui);
     }
@@ -360,7 +610,7 @@ impl Poser {
     ) -> Option<(usize, gizmo::Pose, Tool, gizmo::Pose)> {
         let bone = self.selected.filter(|&bone| !skeleton.locked(bone))?;
         let pose = skeleton.gizmo_pose(bone)?;
-        let tool = self.tool_for(skeleton, bone);
+        let tool = self.tool;
         let frame = gizmo::handle_frame(tool, settings.modes(), &[pose])?;
         Some((bone, pose, tool, frame))
     }
@@ -395,11 +645,23 @@ impl Poser {
             )
         });
         let over = pointer.filter(|_| response.contains_pointer());
+        let joints = skeleton.joints();
+        // With Move, the middle of the gizmo is the joint itself, which
+        // drags freely rather than along an arrow.
+        let on_joint = |pointer: egui::Pos2| {
+            self.tool == Tool::Move
+                && gizmo.is_some_and(|(bone, ..)| {
+                    screen
+                        .point(joints[bone])
+                        .is_some_and(|at| at.distance(pointer) <= JOINT + 2.0)
+                })
+        };
         let handle = match over {
-            Some(pointer) if self.drag.is_none() => gizmo::hovered(&out.shapes, pointer),
+            Some(pointer) if self.drag.is_none() && !on_joint(pointer) => {
+                gizmo::hovered(&out.shapes, pointer)
+            }
             _ => None,
         };
-        let joints = skeleton.joints();
         out.hovered = over
             .filter(|_| handle.is_none() && self.drag.is_none())
             .and_then(|pointer| {
@@ -415,11 +677,8 @@ impl Poser {
                     .map(|(bone, _)| bone)
             });
 
-        if pressed
-            && let (Some(handle), Some(pointer), Some((bone, start, _, frame))) =
-                (handle, pointer, gizmo)
-        {
-            self.drag = Drag::start_many(
+        let grip = match (pressed, handle, pointer, gizmo) {
+            (true, Some(handle), Some(pointer), Some((bone, start, _, frame))) => Drag::start_many(
                 handle,
                 frame,
                 vec![(skeleton.part, start)],
@@ -427,16 +686,49 @@ impl Poser {
                 screen,
                 pointer,
             )
-            .map(|drag| (bone, drag, start));
+            .map(|drag| (bone, Grip::Handle(drag, start))),
+            // With Move, the selected joint itself can be dragged.
+            (true, None, Some(pointer), Some((bone, ..)))
+                if self.tool == Tool::Move && out.hovered == Some(bone) =>
+            {
+                let joint = joints[bone];
+                let normal = screen.ray(pointer).direction;
+                on_plane(screen.ray(pointer), joint, normal).map(|grab| {
+                    (
+                        bone,
+                        Grip::Free {
+                            joint,
+                            grab,
+                            normal,
+                        },
+                    )
+                })
+            }
+            _ => None,
+        };
+        if let Some((bone, grip)) = grip {
+            self.drag = Some(Dragging {
+                bone,
+                grip,
+                pose: skeleton.pose.to_vec(),
+                touched: BTreeSet::new(),
+                slipped: Vec::new(),
+            });
         }
-        out.highlighted = self
-            .drag
-            .as_ref()
-            .map(|(_, drag, _)| drag.handle)
-            .or(handle);
-        if let Some((bone, drag, start)) = &mut self.drag {
+        out.highlighted = match &self.drag {
+            Some(Dragging {
+                grip: Grip::Handle(drag, _),
+                ..
+            }) => Some(drag.handle),
+            _ => handle,
+        };
+        // Out of `self` while it poses, which may move a pin.
+        if let Some(mut dragging) = self.drag.take() {
             if !down {
-                self.drag = None;
+                if !dragging.slipped.is_empty() {
+                    let message = slipped_message(skeleton.rig, &dragging.slipped);
+                    out.event = Some(BoneEvent::Warn(message));
+                }
             } else if let Some(pointer) = pointer {
                 // Ctrl flips snapping only while it's held: the drag works
                 // its pose out from where it started each frame.
@@ -445,11 +737,40 @@ impl Poser {
                 } else {
                     settings.snap
                 };
-                out.event = drag
-                    .update_all(Pointer::on(screen, pointer, fine), &snap)
-                    .and_then(|parts| parts.into_iter().next())
-                    .and_then(|(_, values)| posed_by(skeleton, *bone, *start, &values))
-                    .map(|transform| BoneEvent::Pose(*bone, transform));
+                let bone = dragging.bone;
+                let start = Skeleton {
+                    pose: &dragging.pose,
+                    ..*skeleton
+                };
+                let posing = match &mut dragging.grip {
+                    Grip::Handle(drag, at) => drag
+                        .update_all(Pointer::on(screen, pointer, fine), &snap)
+                        .and_then(|parts| parts.into_iter().next())
+                        .and_then(|(_, values)| posing_by(&start, bone, *at, &values)),
+                    Grip::Free {
+                        joint,
+                        grab,
+                        normal,
+                    } => on_plane(screen.ray(pointer), *grab, *normal)
+                        .map(|hit| Posing::Reach(bone, *joint + snapped(hit - *grab, &snap))),
+                };
+                if let Some(posing) = posing {
+                    let posed = self.pose(&start, posing, settings);
+                    dragging.touched.extend(posed.sent(posing));
+                    dragging.slipped = posed.slipped;
+                    if !dragging.touched.is_empty() {
+                        out.event = Some(BoneEvent::Pose(
+                            dragging
+                                .touched
+                                .iter()
+                                .map(|&b| (b, posed.pose[b]))
+                                .collect(),
+                        ));
+                    }
+                }
+                self.drag = Some(dragging);
+            } else {
+                self.drag = Some(dragging);
             }
         }
         if response.clicked()
@@ -457,6 +778,41 @@ impl Poser {
         {
             self.selected = Some(bone);
             out.event = Some(BoneEvent::Select(bone));
+        }
+        // Right-click a joint to pin or unpin it.
+        if response.secondary_clicked() {
+            self.menu = out.hovered;
+        }
+        if let Some(bone) = self.menu {
+            let pinned = self.pins().contains_key(&bone);
+            let name = skeleton.rig.bones[bone].name.clone();
+            let mut toggle = false;
+            let open = response.context_menu(|ui| {
+                ui.label(egui::RichText::new(&name).strong());
+                let (text, hover) = if pinned {
+                    (
+                        format!("{} Unpin", icons::PUSH_PIN_SLASH),
+                        "Let the joint move with the bones above it again",
+                    )
+                } else {
+                    (
+                        format!("{} Pin", icons::PUSH_PIN),
+                        "Keep the joint where it is in the world: when other bones move, the bones above it turn to hold it there",
+                    )
+                };
+                if ui.button(text).on_hover_text(hover).clicked() {
+                    toggle = true;
+                    ui.close();
+                }
+            });
+            match (toggle, pinned) {
+                (true, true) => self.unpin(bone),
+                (true, false) => self.pin(skeleton, bone),
+                _ => {}
+            }
+            if open.is_none() {
+                self.menu = None;
+            }
         }
         out.captured = handle.is_some() || self.drag.is_some() || out.hovered.is_some();
         if out.captured {
@@ -468,6 +824,8 @@ impl Poser {
             let name = &skeleton.rig.bones[bone].name;
             let text = if skeleton.locked(bone) {
                 format!("{} {name} (moved by the take)", icons::LOCK)
+            } else if self.pins().contains_key(&bone) {
+                format!("{} {name} (pinned)", icons::PUSH_PIN)
             } else {
                 name.clone()
             };
@@ -529,18 +887,32 @@ impl Poser {
                 egui::Stroke::new(1.0_f32, egui::Color32::from_black_alpha(180)),
             );
         }
+        // A pin where each pinned joint is held.
+        let to_world = skeleton.to_world();
+        for &at in self.pins().values() {
+            if let Some(at) = screen.point(to_world.transform_point3(at)) {
+                painter.text(
+                    at + egui::vec2(0.0, -JOINT - 1.0),
+                    egui::Align2::CENTER_BOTTOM,
+                    icons::PUSH_PIN,
+                    egui::FontId::proportional(14.0),
+                    palette.warning,
+                );
+            }
+        }
         gizmo::paint(painter, &interaction.shapes, interaction.highlighted);
     }
 }
 
-/// The bone's transform after a gizmo drag from `start` gave the handle
-/// these `values` (a turned Orientation, or a moved Position).
-fn posed_by(
+/// How a gizmo drag from `start` that gave the handle these `values` poses
+/// the bone: a turned Orientation turns it, and a moved Position takes its
+/// joint there.
+fn posing_by(
     skeleton: &Skeleton,
     bone: usize,
     start: gizmo::Pose,
     values: &[(&'static str, axcenity_core::Value)],
-) -> Option<BoneTransform> {
+) -> Option<Posing> {
     let vector = |name| {
         values
             .iter()
@@ -549,11 +921,34 @@ fn posed_by(
     };
     if let Some(orientation) = vector("Orientation") {
         let rotation = axcenity_scene::rotation_from_orientation(orientation);
-        return skeleton.turned(bone, rotation * start.rotation.inverse());
+        let turned = skeleton.turned(bone, rotation * start.rotation.inverse())?;
+        return Some(Posing::Set(bone, turned));
     }
     let position = vector("Position")?;
-    let by = Vec3::new(position.x, position.y, position.z) - start.position;
-    skeleton.moved(bone, by)
+    Some(Posing::Reach(
+        bone,
+        Vec3::new(position.x, position.y, position.z),
+    ))
+}
+
+/// Where `ray` meets the plane through `point` facing along `normal`, if
+/// it does in front of the camera.
+fn on_plane(ray: axcenity_scene::Ray, point: Vec3, normal: Vec3) -> Option<Vec3> {
+    let facing = ray.direction.dot(normal);
+    if facing.abs() < 1e-6 {
+        return None;
+    }
+    let along = (point - ray.origin).dot(normal) / facing;
+    (along > 0.0).then(|| ray.origin + ray.direction * along)
+}
+
+/// `by` in whole Move snap steps, when it's on.
+fn snapped(by: Vec3, snap: &Snap) -> Vec3 {
+    if snap.move_on && snap.move_step > 0.0 {
+        (by / snap.move_step).round() * snap.move_step
+    } else {
+        by
+    }
 }
 
 /// The rig's named bones in order, parents first, each with its depth
@@ -959,8 +1354,15 @@ mod tests {
                 at(grab + forward * by),
                 modifiers,
             );
+            let selected = poser.selected.expect("a bone is selected");
             match done.event {
-                Some(BoneEvent::Pose(_, transform)) => posed.push(transform),
+                Some(BoneEvent::Pose(bones)) => posed.push(
+                    bones
+                        .into_iter()
+                        .find(|(bone, _)| *bone == selected)
+                        .expect("the dragged bone is posed")
+                        .1,
+                ),
                 other => panic!("the bone wasn't posed: {other:?}"),
             }
         }
@@ -1334,5 +1736,271 @@ mod tests {
             shown(&mut folds, "assets/models/noodle.fbx", noodle_rig, &[0; 8]),
             ["Root"]
         );
+    }
+
+    fn mixamo() -> Arc<Model> {
+        let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-events");
+        Assets::new(example)
+            .model("assets/models/Walking/Walking.fbx")
+            .unwrap()
+    }
+
+    /// How far each named bone's joint is from its named parent's, in the
+    /// rig's file space.
+    fn bone_lengths(rig: &Rig, pose: &[BoneTransform]) -> Vec<f32> {
+        let joints = ik::joint_positions(rig, pose);
+        named_parents(rig)
+            .iter()
+            .enumerate()
+            .map(|(bone, parent)| parent.map_or(0.0, |p| joints[p].distance(joints[bone])))
+            .collect()
+    }
+
+    fn assert_lengths_kept(rig: &Rig, before: &[BoneTransform], after: &[BoneTransform]) {
+        let (before, after) = (bone_lengths(rig, before), bone_lengths(rig, after));
+        for (bone, (a, b)) in before.iter().zip(&after).enumerate() {
+            assert!(
+                (a - b).abs() <= a * 1e-4 + 1e-5,
+                "{}: {a} became {b}",
+                rig.bones[bone].name
+            );
+        }
+    }
+
+    /// `pose` with `bones` posed.
+    fn with(pose: &[BoneTransform], bones: &[(usize, BoneTransform)]) -> Vec<BoneTransform> {
+        let mut pose = pose.to_vec();
+        for (bone, transform) in bones {
+            pose[*bone] = *transform;
+        }
+        pose
+    }
+
+    #[test]
+    fn dragging_a_hand_moves_it_to_the_mouse_turning_the_arms_two_bones() {
+        let model = mixamo();
+        let rig = model.rig.as_ref().unwrap();
+        let mut world = World::new();
+        let part = part(&mut world, &model);
+        let bone = |name: &str| rig.bone(&format!("mixamorig:{name}")).unwrap();
+        let (hand, forearm, arm) = (bone("LeftHand"), bone("LeftForeArm"), bone("LeftArm"));
+        // The rest pose's arm is straight, so the hand can only go further
+        // off; bend the elbow first.
+        let mut pose = rig.rest_pose();
+        pose[forearm].rotation *= Quat::from_rotation_z(1.0);
+        let skeleton = Skeleton::on(&world, part, rig, &pose, &[]).unwrap();
+        let joint = skeleton.joints()[hand];
+        let camera = camera_at(&model, joint, Vec3::new(0.3, 0.2, 0.0));
+        let mut poser = Poser {
+            selected: Some(hand),
+            tool: Tool::Move,
+            ..Poser::default()
+        };
+        let mut settings = PoseSettings::default();
+        settings.snap.move_on = false;
+        assert_eq!(
+            settings.chain, 2,
+            "the parent and grandparent to start with"
+        );
+
+        // Grab the hand's joint itself and drag it up and to the side.
+        let ctx = theme::test_context();
+        let (_, screen) = frame(&ctx, camera, &mut poser, &skeleton, &settings, vec![], NONE);
+        let grab = screen.point(joint).unwrap();
+        let at = |pos| vec![egui::Event::PointerMoved(pos)];
+        let press = |pressed| egui::Event::PointerButton {
+            pos: grab,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: NONE,
+        };
+        frame(
+            &ctx,
+            camera,
+            &mut poser,
+            &skeleton,
+            &settings,
+            at(grab),
+            NONE,
+        );
+        frame(
+            &ctx,
+            camera,
+            &mut poser,
+            &skeleton,
+            &settings,
+            vec![press(true)],
+            NONE,
+        );
+        assert!(
+            matches!(
+                poser.drag,
+                Some(Dragging {
+                    grip: Grip::Free { .. },
+                    ..
+                })
+            ),
+            "the joint itself was grabbed"
+        );
+        // Toward the shoulder, and a little across, so the hand can get
+        // there.
+        let joints = skeleton.joints();
+        let shoulder = screen.point(joints[arm]).unwrap();
+        let inward = (shoulder - grab).normalized();
+        let to = grab + inward * 14.0 + egui::vec2(-inward.y, inward.x) * 6.0;
+        let target = on_plane(screen.ray(to), joint, screen.ray(grab).direction).unwrap();
+        let reach = joints[arm].distance(joints[forearm]) + joints[forearm].distance(joint);
+        assert!(joints[arm].distance(target) < reach * 0.98, "in reach");
+        let (done, screen) = frame(&ctx, camera, &mut poser, &skeleton, &settings, at(to), NONE);
+        let Some(BoneEvent::Pose(bones)) = done.event else {
+            panic!("nothing was posed: {:?}", done.event);
+        };
+        let after = with(&pose, &bones);
+        let moved = Skeleton {
+            pose: &after,
+            ..skeleton
+        };
+        let shown = screen.point(moved.joints()[hand]).unwrap();
+        assert!(
+            shown.distance(to) < 0.5,
+            "the hand is under the mouse: {shown:?} vs {to:?}"
+        );
+        let turned: Vec<usize> = bones
+            .iter()
+            .filter(|(b, t)| differs(t, &pose[*b]))
+            .map(|(b, _)| *b)
+            .collect();
+        let mut expected = vec![arm, forearm];
+        expected.sort();
+        assert_eq!(
+            turned, expected,
+            "the forearm and upper arm turned, nothing else"
+        );
+        assert_lengths_kept(rig, &pose, &after);
+        frame(
+            &ctx,
+            camera,
+            &mut poser,
+            &skeleton,
+            &settings,
+            vec![press(false)],
+            NONE,
+        );
+        assert!(poser.drag.is_none());
+    }
+
+    #[test]
+    fn chain_one_to_four_turns_that_many_bones_above_the_hand() {
+        let model = mixamo();
+        let rig = model.rig.as_ref().unwrap();
+        let mut world = World::new();
+        let part = part(&mut world, &model);
+        let pose = rig.rest_pose();
+        let skeleton = Skeleton::on(&world, part, rig, &pose, &[]).unwrap();
+        let bone = |name: &str| rig.bone(&format!("mixamorig:{name}")).unwrap();
+        let hand = bone("LeftHand");
+        let above = ["LeftForeArm", "LeftArm", "LeftShoulder", "Spine2"].map(bone);
+        let target = skeleton.joints()[hand] + Vec3::new(0.1, 0.15, 0.1) * model.size[1];
+        for chain in CHAIN_LENGTHS {
+            let posed = skeleton.pose_with(Posing::Reach(hand, target), chain, &Pins::new());
+            let mut expected = above[..chain].to_vec();
+            expected.sort();
+            assert_eq!(posed.changed, expected, "a chain of {chain}");
+            assert_lengths_kept(rig, &pose, &posed.pose);
+        }
+    }
+
+    #[test]
+    fn with_both_feet_pinned_moving_the_hips_down_bends_the_knees_forward_and_the_feet_stay() {
+        let model = mixamo();
+        let rig = model.rig.as_ref().unwrap();
+        let mut world = World::new();
+        let part = part(&mut world, &model);
+        let pose = rig.rest_pose();
+        let skeleton = Skeleton::on(&world, part, rig, &pose, &[]).unwrap();
+        let bone = |name: &str| rig.bone(&format!("mixamorig:{name}")).unwrap();
+        let hips = bone("Hips");
+        let legs = [
+            (bone("LeftUpLeg"), bone("LeftLeg"), bone("LeftFoot")),
+            (bone("RightUpLeg"), bone("RightLeg"), bone("RightFoot")),
+        ];
+        let mut poser = Poser {
+            selected: Some(hips),
+            tool: Tool::Move,
+            ..Poser::default()
+        };
+        poser.for_clip("assets/animations/Walking/Crouch.anim.json");
+        for (_, _, foot) in legs {
+            poser.pin(&skeleton, foot);
+        }
+        let joints = skeleton.joints();
+        let leg = joints[legs[0].0].distance(joints[legs[0].2]);
+        let forward = skeleton.to_world().transform_vector3(Vec3::Z).normalize();
+        // How far forward the knee sits off the line from hip to foot.
+        let knee_out = |joints: &[Vec3], (hip, knee, foot): (usize, usize, usize)| {
+            let line = (joints[foot] - joints[hip]).normalize();
+            let off = joints[knee] - joints[hip];
+            (off - line * off.dot(line)).dot(forward)
+        };
+        let settings = PoseSettings::default();
+        let down = Posing::Reach(hips, joints[hips] - Vec3::Y * leg * 0.15);
+        let posed = poser.pose(&skeleton, down, &settings);
+        assert_eq!(posed.slipped, Vec::<usize>::new());
+        let after = Skeleton {
+            pose: &posed.pose,
+            ..skeleton
+        }
+        .joints();
+        assert!(after[hips].abs_diff_eq(joints[hips] - Vec3::Y * leg * 0.15, 1e-4));
+        for leg_bones in legs {
+            let (_, _, foot) = leg_bones;
+            assert!(
+                after[foot].distance(joints[foot]) < leg * 1e-3,
+                "{} stays: {} moved",
+                rig.bones[foot].name,
+                after[foot].distance(joints[foot])
+            );
+            let (was, now) = (knee_out(&joints, leg_bones), knee_out(&after, leg_bones));
+            assert!(
+                now > was && now > leg * 0.05,
+                "the knee bends forward: {was} to {now}"
+            );
+        }
+        assert_lengths_kept(rig, &pose, &posed.pose);
+        // The answer is the same every time, and the pins stay put.
+        assert_eq!(poser.pose(&skeleton, down, &settings), posed);
+        let pins: Vec<usize> = poser.pins().keys().copied().collect();
+        assert_eq!(pins, [legs[0].2, legs[1].2]);
+
+        // Lifting the hips out of the legs' reach can't keep the feet: it
+        // says so rather than moving them quietly.
+        let up = Posing::Reach(hips, joints[hips] + Vec3::Y * leg * 2.0);
+        let posed = poser.pose(&skeleton, up, &settings);
+        assert_eq!(posed.slipped, [legs[0].2, legs[1].2]);
+        let message = slipped_message(rig, &posed.slipped);
+        assert!(message.contains("mixamorig:LeftFoot") && message.contains("mixamorig:RightFoot"));
+    }
+
+    #[test]
+    fn pins_belong_to_one_clip() {
+        let model = noodle();
+        let rig = model.rig.as_ref().unwrap();
+        let mut world = World::new();
+        let part = part(&mut world, &model);
+        let pose = rig.rest_pose();
+        let skeleton = Skeleton::on(&world, part, rig, &pose, &[]).unwrap();
+        let (hat, top) = (rig.bone("Hat").unwrap(), rig.bone("Top").unwrap());
+        let mut poser = Poser::default();
+        poser.for_clip("Wave.anim.json");
+        poser.pin(&skeleton, hat);
+        poser.for_clip("Bow.anim.json");
+        assert!(poser.pins().is_empty(), "another clip has none");
+        poser.pin(&skeleton, top);
+        poser.for_clip("Wave.anim.json");
+        assert_eq!(poser.pins().keys().copied().collect::<Vec<_>>(), [hat]);
+        poser.unpin(hat);
+        assert!(poser.pins().is_empty());
+        poser.for_clip("Bow.anim.json");
+        assert_eq!(poser.pins().keys().copied().collect::<Vec<_>>(), [top]);
     }
 }

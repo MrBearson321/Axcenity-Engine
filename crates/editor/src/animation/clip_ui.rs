@@ -194,6 +194,13 @@ impl AnimationStudio {
         posed
     }
 
+    /// Both previews hold and show the open clip's pins.
+    pub(super) fn follow_pins(&mut self) {
+        let path = self.clip_path().unwrap_or_default();
+        self.clip.bones.for_clip(&path);
+        self.clip.objects.bones.for_clip(&path);
+    }
+
     /// What was done in a property clip's preview: a pick selects there; a
     /// move is keyed with Record on, or shown until the playhead moves.
     pub(super) fn preview_events(&mut self, events: Vec<PreviewEvent>) {
@@ -212,6 +219,8 @@ impl AnimationStudio {
                         }
                     }
                     PreviewEvent::Edit(edits) => doc.edit(edits, self.clip.record),
+                    // Said in Output where the preview is drawn.
+                    PreviewEvent::Warn(_) => {}
                 }
             }
         }
@@ -378,6 +387,7 @@ impl AnimationStudio {
         height: f32,
         output: &mut Output,
     ) -> Option<PreviewEvent> {
+        self.follow_pins();
         match &mut self.clip.doc {
             Some(Clip::Take(doc)) => {
                 show_model(&mut self.clip.preview, doc.preview_model.as_deref(), assets);
@@ -414,12 +424,15 @@ impl AnimationStudio {
                     self.clip
                         .preview
                         .show_posing(ui, render_state, assets, posed, height, bones);
-                if let (Some(posing::BoneEvent::Pose(bone, transform)), Some(posing)) =
-                    (event, &posing)
-                    && let Err(problem) =
-                        doc.pose_bone(posing.rig(), bone, &transform, self.clip.record)
-                {
-                    output.warning(problem);
+                match (event, &posing) {
+                    (Some(posing::BoneEvent::Pose(bones)), Some(posing)) => {
+                        if let Err(problem) = doc.pose_bones(posing.rig(), &bones, self.clip.record)
+                        {
+                            output.warning(problem);
+                        }
+                    }
+                    (Some(posing::BoneEvent::Warn(message)), _) => output.warning(message),
+                    _ => {}
                 }
                 None
             }
@@ -447,7 +460,13 @@ impl AnimationStudio {
                 });
                 let used = ui.cursor().top() - top;
                 let height = (height - used).min(ui.available_height()).max(80.0);
-                objects.show_ui(ui, render_state, assets, stylesheets, height, settings)
+                match objects.show_ui(ui, render_state, assets, stylesheets, height, settings) {
+                    Some(PreviewEvent::Warn(message)) => {
+                        output.warning(message);
+                        None
+                    }
+                    event => event,
+                }
             }
             None => None,
         }

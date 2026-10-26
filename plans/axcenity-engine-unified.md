@@ -292,9 +292,17 @@ IK that runs during Play (feet on slopes, look-at) is not in this phase.
 
 ### Acceptance criteria
 
-- [ ] Dragging a hand moves it to the mouse with the arm's two bones turning, and every bone keeps its length.
-- [ ] With both feet pinned, moving the hips down bends the knees forward and the feet stay where they were.
-- [ ] A pose made with IK and keyed with Record plays the same in the preview and in Play.
+- [x] Dragging a hand moves it to the mouse with the arm's two bones turning, and every bone keeps its length.
+- [x] With both feet pinned, moving the hips down bends the knees forward and the feet stay where they were.
+- [x] A pose made with IK and keyed with Record plays the same in the preview and in Play.
+- [x] Unreachable targets: When the target is beyond the chain's reach, the chain extends toward it without stretching bones or producing invalid transforms.
+- [x] Bend stability: Moving a joint repeatedly doesn't cause elbows or knees to flip unexpectedly. The solver preserves the existing bend direction unless the pose makes that impossible.
+- [x] Chain length: Chain settings from 1–4 affect the correct ancestors, and all affected bones retain their original lengths.
+- [x] Pin lifecycle: Pins persist when switching between clips during the editor session, but are isolated per clip and disappear when the editor session ends.
+- [x] Pin conflicts: When multiple pins or overlapping IK chains constrain the same bones, the solver has a deterministic result and never silently moves a pinned joint.
+- [x] Keying scope: Record and K key only bones whose rotations changed during the IK operation. Unaffected bones receive no redundant keys.
+- [x] Solver robustness: Zero-length bones, targets at the joint position, and nearly straight chains don't produce NaNs, crashes, or sudden extreme rotations.
+- [x] Undo/redo: Undoing an IK pose restores the previous transforms and keys; redoing it restores the same pose.
 
 ---
 

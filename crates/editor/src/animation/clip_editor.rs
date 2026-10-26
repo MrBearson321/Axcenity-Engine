@@ -379,12 +379,39 @@ impl ClipDoc {
         Ok(())
     }
 
-    /// Key selected (K): keys `bone` where it is in the preview now.
+    /// Bones of `rig` posed in the preview together (a joint moved with IK
+    /// turns several), each as [`pose_bone`](Self::pose_bone) does.
+    pub fn pose_bones(
+        &mut self,
+        rig: &Rig,
+        bones: &[(usize, BoneTransform)],
+        record: bool,
+    ) -> Result<(), String> {
+        let mut problem = Ok(());
+        for (bone, transform) in bones {
+            if let Err(why) = self.pose_bone(rig, *bone, transform, record) {
+                problem = problem.and(Err(why));
+            }
+        }
+        problem
+    }
+
+    /// Key selected (K): keys the bones the last move turned and hasn't
+    /// keyed (every bone a joint moved with IK turned), or else `bone`
+    /// where it is in the preview now.
     pub fn key_selected(&mut self, assets: &Assets, bone: usize) -> Result<(), String> {
+        if self.playing || self.playhead != self.pending_at {
+            self.pending.clear();
+        }
+        if !self.pending.is_empty() {
+            for (path, numbers) in std::mem::take(&mut self.pending) {
+                self.key_bone(path, numbers);
+            }
+            return Ok(());
+        }
         let posing = self.pose(assets)?;
         let path = self.unlocked_path(posing.rig(), bone)?;
         let transform = posing.pose.get(bone).ok_or("there's no such bone")?;
-        self.pending.retain(|(p, _)| *p != path);
         self.key_bone(path, bone_numbers(transform));
         Ok(())
     }

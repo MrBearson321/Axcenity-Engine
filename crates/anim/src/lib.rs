@@ -7,6 +7,8 @@
 //!   its linked take and bone tracks.
 //! - [`convert_to_keys`] and the other bone helpers: how a bone track
 //!   names its bone and stores its transform, and baking a take into keys.
+//! - [`ik`]: turning the bones above a joint so it reaches a point
+//!   (Move with IK and pins in the Animation tab), keeping bone lengths.
 //! - [`ease`] and [`cubic_bezier`]: how an eased or Bezier key moves to the
 //!   next one, shared with tweens.
 //! - [`Compiled`] and [`Machine`]: a state machine made ready to run, and
@@ -24,6 +26,7 @@ mod clip;
 mod controller;
 mod easing;
 pub mod files;
+pub mod ik;
 mod property_clip;
 
 pub use animators::{AnimatorEvent, Animators, Poses, load_clip};

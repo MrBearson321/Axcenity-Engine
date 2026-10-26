@@ -339,7 +339,7 @@ impl Preview {
         }
         if response.hovered() {
             let hint = if skeleton.is_some() {
-                "Click a joint to pose it · drag to turn · scroll to zoom"
+                "Click a joint to pose it · right-click it to pin · drag to turn · scroll to zoom"
             } else {
                 "Drag to turn · scroll to zoom"
             };

@@ -962,6 +962,8 @@ impl EditorApp {
 }
 
 #[cfg(test)]
+mod ik_tests;
+#[cfg(test)]
 mod imported_clip_tests;
 #[cfg(test)]
 mod posing_tests;
