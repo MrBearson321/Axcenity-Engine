@@ -453,6 +453,13 @@ impl ScriptRuntime {
         self.client.take_camera_move()
     }
 
+    /// True once after a LocalScript calls
+    /// `ReplicatedFirst:RemoveDefaultLoadingScreen()`: the game says it's
+    /// ready for the loading screen to go.
+    pub fn take_loading_screen_removed(&mut self) -> bool {
+        self.client.take_loading_screen_removed()
+    }
+
     /// How long a script may run without pausing before the watchdog stops
     /// it with an error. [`WATCHDOG_LIMIT`] (3 seconds) unless changed;
     /// tests use a shorter one.

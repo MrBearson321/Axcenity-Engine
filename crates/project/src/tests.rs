@@ -52,6 +52,26 @@ fn splash_defaults_on_and_can_be_changed_in_the_manifest() {
 }
 
 #[test]
+fn the_loading_screen_defaults_to_the_splash_and_keeps_a_chosen_screen_gui() {
+    let folder = project_with_scripts("loading-screen-setting", &[]);
+    assert_eq!(
+        load(&folder).unwrap().manifest.loading_screen,
+        LoadingScreen::default()
+    );
+
+    let chosen = LoadingScreen {
+        screen_gui: "Loading".to_owned(),
+        min_seconds: 1.5,
+        wait_for_script: true,
+    };
+    set_loading_screen(&folder, &chosen).unwrap();
+    let manifest = load(&folder).unwrap().manifest;
+    assert_eq!(manifest.loading_screen, chosen);
+    assert!(manifest.show_splash, "other settings are kept");
+    fs::remove_dir_all(folder).unwrap();
+}
+
+#[test]
 fn project_without_a_scripts_folder_has_no_scripts() {
     let folder = project_with_scripts("no-scripts", &[]);
     let project = load(&folder).unwrap();

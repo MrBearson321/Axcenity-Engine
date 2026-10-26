@@ -4,19 +4,99 @@
 //! inside `ScenePipeline`; this module builds the quads and the pipelines
 //! (`ui.wgsl`, and the sky entry of `shader.wgsl`, after `lighting.wgsl`).
 
+use std::ops::Range;
+
 use glyphon::Color as GlyphColor;
 
-use crate::draw_list::{UiDrawItem, UiImage, UiRectangle};
+use crate::draw_list::{UiDrawItem, UiImage, UiRectangle, UiText};
 
 use super::{DEPTH_FORMAT, HDR_FORMAT, UiVertex};
 
 use super::lighting::linear_color;
 
-/// The quads of the rectangles in `items`, in order. `lines` are text
-/// decorations (underline and line-through), each drawn after the item at
-/// its index; they're sorted by it.
+/// One layer of UI, as drawn: its rectangles (a range of the UI vertex
+/// buffer), then its images (texture key, first vertex, vertex count), then
+/// its text, if it has any.
+pub(super) struct UiLayer {
+    pub rectangles: Range<u32>,
+    pub images: Vec<(u64, u32, u32)>,
+    pub text: bool,
+}
+
+/// Splits `items` into layers drawn one after another. A layer draws its
+/// rectangles, then its images, then its text, so a layer ends before an
+/// item that would otherwise go under something earlier that it overlaps:
+/// a Frame over a TextLabel, or a loading screen over the game's UI.
+/// Items that don't overlap share a layer whatever their order.
+pub(super) fn ui_layers(items: &[UiDrawItem]) -> Vec<Range<usize>> {
+    let mut layers = Vec::new();
+    let mut start = 0;
+    // The images and text in this layer: their kind and box.
+    let mut above: Vec<(u8, [f32; 4])> = Vec::new();
+    for (index, item) in items.iter().enumerate() {
+        let (kind, bounds) = kind_and_bounds(item);
+        if above
+            .iter()
+            .any(|&(earlier, other)| earlier > kind && overlaps(other, bounds))
+        {
+            layers.push(start..index);
+            start = index;
+            above.clear();
+        }
+        if kind > 0 {
+            above.push((kind, bounds));
+        }
+    }
+    if start < items.len() {
+        layers.push(start..items.len());
+    }
+    layers
+}
+
+/// Where a kind of item comes in a layer (rectangles 0, images 1, text 2),
+/// and the box it can draw in: left, top, right, bottom.
+fn kind_and_bounds(item: &UiDrawItem) -> (u8, [f32; 4]) {
+    let (kind, [x, y], [w, h], margin) = match item {
+        UiDrawItem::Rectangle(rectangle) => (0, rectangle.position, rectangle.size, 0.0),
+        UiDrawItem::Image(image) => (1, image.position, image.size, 0.0),
+        UiDrawItem::Text(text) => (2, text.position, text.size, text_spill(text)),
+    };
+    (
+        kind,
+        [x - margin, y - margin, x + w + margin, y + h + margin],
+    )
+}
+
+/// How far a text's outlines and shadows can reach past its box. Each copy
+/// is cut to the box moved with it.
+fn text_spill(text: &UiText) -> f32 {
+    let stroke = text
+        .spans
+        .iter()
+        .filter_map(|span| span.stroke)
+        .chain(text.stroke)
+        .map(|stroke| stroke.width)
+        .fold(0.0, f32::max);
+    let shadow = text
+        .shadows
+        .iter()
+        .map(|shadow| shadow.offset[0].abs().max(shadow.offset[1].abs()) + shadow.blur)
+        .fold(0.0, f32::max);
+    // Faux bold and italics draw a pixel or two outside the box's letters.
+    stroke + shadow + 2.0
+}
+
+fn overlaps(a: [f32; 4], b: [f32; 4]) -> bool {
+    // NaN compares false, so a broken box never splits a layer.
+    a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3]
+}
+
+/// The quads of the rectangles in `items[range]`, in order. `lines` are
+/// text decorations (underline and line-through), each drawn after the item
+/// at its index in `items`; they're sorted by it.
 pub(super) fn ui_vertices(
     items: &[UiDrawItem],
+    range: Range<usize>,
     lines: &[(usize, UiRectangle)],
     (width, height): (u32, u32),
 ) -> Vec<UiVertex> {
@@ -25,9 +105,9 @@ pub(super) fn ui_vertices(
     }
     let size = (width as f32, height as f32);
     let mut vertices = Vec::new();
-    let mut lines = lines.iter().peekable();
-    for (index, item) in items.iter().enumerate() {
-        if let UiDrawItem::Rectangle(rectangle) = item {
+    let mut lines = lines.iter().filter(|(at, _)| range.contains(at)).peekable();
+    for index in range.clone() {
+        if let UiDrawItem::Rectangle(rectangle) = &items[index] {
             push_rectangle(rectangle, size, &mut vertices);
         }
         while let Some((_, line)) = lines.next_if(|(at, _)| *at <= index) {

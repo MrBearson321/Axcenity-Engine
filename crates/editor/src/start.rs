@@ -181,6 +181,9 @@ enum Dialog {
         name: String,
         description: String,
         show_splash: bool,
+        /// The ScreenGui the project uses as its loading screen, in place of
+        /// the splash; empty for none.
+        loading_gui: String,
         error: Option<String>,
     },
     Delete {
@@ -649,13 +652,19 @@ impl StartScreen {
     }
 
     fn open_settings(&mut self, link: ProjectLink) {
-        let show_splash = axcenity_project::read_manifest(&link.folder)
+        let manifest = axcenity_project::read_manifest(&link.folder);
+        let show_splash = manifest
+            .as_ref()
             .is_none_or(|manifest| manifest.show_splash);
+        let loading_gui = manifest
+            .map(|manifest| manifest.loading_screen.screen_gui)
+            .unwrap_or_default();
         self.dialog = Some(Dialog::Settings {
             folder: link.folder,
             name: link.name,
             description: link.description,
             show_splash,
+            loading_gui,
             error: None,
         });
     }

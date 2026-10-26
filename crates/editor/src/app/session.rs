@@ -136,6 +136,7 @@ impl EditorApp {
 
         let scripts = project.scripts.len();
         let show_splash = project.manifest.show_splash;
+        let loading_screen = project.manifest.loading_screen.clone();
         self.output.info(format!(
             "Opened \"{}\" from `{}`: {} objects, {scripts} {}. Press Play (F5) \
              to run it.",
@@ -225,6 +226,7 @@ impl EditorApp {
         self.project = Some(OpenProject {
             name: project.manifest.name,
             show_splash,
+            loading_screen,
             watcher: Watcher::start(project.folder.clone()),
             folder: project.folder,
             stylesheets,
@@ -362,6 +364,7 @@ impl EditorApp {
                 position,
                 orientation,
             },
+            &project.loading_screen,
         ) {
             Ok(session) => {
                 self.play = Some(session);

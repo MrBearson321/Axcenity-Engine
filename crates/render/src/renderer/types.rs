@@ -327,7 +327,9 @@ pub(super) struct ScenePipeline {
     pub(super) swash_cache: SwashCache,
     pub(super) text_viewport: TextViewport,
     pub(super) text_atlas: TextAtlas,
-    pub(super) text_renderer: GlyphTextRenderer,
+    /// One per UI layer with text (see `ui_pass::ui_layers`), made as
+    /// they're first needed and kept.
+    pub(super) text_renderers: Vec<GlyphTextRenderer>,
     pub(super) frame_buffer: wgpu::Buffer,
     /// The frame bindings with an empty shadow map, for when shadows are off.
     pub(super) frame_bind_group: wgpu::BindGroup,

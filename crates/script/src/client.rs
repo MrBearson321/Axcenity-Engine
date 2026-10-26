@@ -1,6 +1,7 @@
 //! What only LocalScripts can reach, because it belongs to the player's
 //! device: the keyboard (`UserInputService`), the camera
-//! (`workspace.CurrentCamera`) and `Players.LocalPlayer`.
+//! (`workspace.CurrentCamera`), `Players.LocalPlayer` and the loading
+//! screen (`ReplicatedFirst:RemoveDefaultLoadingScreen`).
 //!
 //! The host feeds key presses in with `ScriptRuntime::input`, and keeps
 //! the camera in step with `set_camera` / `take_camera_move`. Everything
@@ -78,6 +79,30 @@ pub fn fire_input(lua: &Lua, events: &[KeyEvent]) {
             event,
             (LuaInputObject { key }, false),
         );
+    }
+}
+
+/// Set when a LocalScript calls `RemoveDefaultLoadingScreen`, until the
+/// host takes it with `ScriptRuntime::take_loading_screen_removed`.
+#[derive(Default)]
+pub struct LoadingScreenRemoved(pub bool);
+
+/// `game:GetService("ReplicatedFirst")`. Its `RemoveDefaultLoadingScreen`
+/// says the game is ready, and the host takes the loading screen down once
+/// its minimum time is up.
+#[derive(Clone, Copy)]
+pub struct LuaReplicatedFirst;
+
+impl UserData for LuaReplicatedFirst {
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_method("RemoveDefaultLoadingScreen", |lua, _, ()| {
+            crate::sides::check(lua, "RemoveDefaultLoadingScreen")?;
+            if let Some(mut removed) = lua.app_data_mut::<LoadingScreenRemoved>() {
+                removed.0 = true;
+            }
+            Ok(())
+        });
+        methods.add_meta_method(MetaMethod::ToString, |_, _, ()| Ok("ReplicatedFirst"));
     }
 }
 

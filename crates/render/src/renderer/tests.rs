@@ -37,11 +37,73 @@ fn ui_rectangles_keep_rounded_border_data_and_allow_border_only_shapes() {
         color_end: [0.0, 0.0, 0.0, 0.0],
     });
 
-    let vertices = ui_vertices(&[item], &[], (200, 100));
+    let vertices = ui_vertices(&[item], 0..1, &[], (200, 100));
     assert_eq!(vertices.len(), 6);
     assert_eq!(vertices[0].size, [100.0, 50.0]);
     assert_eq!(vertices[0].border, [25.0, 3.0]);
     assert_eq!(vertices[0].border_color[3], 1.0);
+}
+
+fn ui_rect(position: [f32; 2], size: [f32; 2]) -> UiDrawItem {
+    UiDrawItem::Rectangle(UiRectangle {
+        position,
+        size,
+        color: [0.0, 0.0, 0.0, 1.0],
+        border_color: [0.0; 4],
+        border_width: 0.0,
+        border_radius: 0.0,
+        color_end: [0.0, 0.0, 0.0, 1.0],
+    })
+}
+
+fn ui_label(position: [f32; 2], size: [f32; 2]) -> UiDrawItem {
+    UiDrawItem::Text(UiText {
+        position,
+        size,
+        text: "Score".to_owned(),
+        ..UiText::default()
+    })
+}
+
+#[test]
+fn ui_that_does_not_overlap_is_one_layer() {
+    let items = [
+        ui_rect([0.0, 0.0], [100.0, 40.0]),
+        ui_label([0.0, 0.0], [100.0, 40.0]),
+        ui_rect([300.0, 300.0], [100.0, 40.0]),
+        ui_label([300.0, 300.0], [100.0, 40.0]),
+    ];
+    assert_eq!(ui_layers(&items), vec![0..4]);
+}
+
+#[test]
+fn a_rectangle_over_earlier_text_starts_a_layer() {
+    // A HUD label, then a full-screen loading screen with its own caption.
+    let items = [
+        ui_rect([10.0, 10.0], [200.0, 40.0]),
+        ui_label([10.0, 10.0], [200.0, 40.0]),
+        ui_rect([0.0, 0.0], [1280.0, 720.0]),
+        ui_label([500.0, 400.0], [280.0, 30.0]),
+    ];
+    assert_eq!(ui_layers(&items), vec![0..2, 2..4]);
+    assert!(ui_layers(&[]).is_empty());
+}
+
+#[test]
+fn text_shadows_count_toward_overlap() {
+    let mut label = UiText {
+        position: [0.0, 0.0],
+        size: [100.0, 20.0],
+        ..UiText::default()
+    };
+    label.shadows.push(crate::draw_list::TextShadow {
+        offset: [0.0, 12.0],
+        blur: 0.0,
+        color: [0.0, 0.0, 0.0, 1.0],
+    });
+    // Just under the box, but the shadow reaches it.
+    let items = [UiDrawItem::Text(label), ui_rect([0.0, 26.0], [100.0, 10.0])];
+    assert_eq!(ui_layers(&items), vec![0..1, 1..2]);
 }
 
 /// A list seen from the origin.

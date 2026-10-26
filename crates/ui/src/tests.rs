@@ -185,9 +185,11 @@ fn buttons_draw_text_track_pointer_states_and_ignore_hidden_hit_targets() {
         640,
         480,
         std::slice::from_ref(&sheet),
-        Some([20.0, 20.0]),
-        None,
-        None,
+        UiInput {
+            pointer: Some([20.0, 20.0]),
+            pressed: None,
+            ..UiInput::default()
+        },
         None,
     );
     assert_eq!(hovered.hovered, Some(button));
@@ -201,9 +203,11 @@ fn buttons_draw_text_track_pointer_states_and_ignore_hidden_hit_targets() {
         640,
         480,
         &[sheet],
-        Some([20.0, 20.0]),
-        Some(button),
-        None,
+        UiInput {
+            pointer: Some([20.0, 20.0]),
+            pressed: Some(button),
+            ..UiInput::default()
+        },
         None,
     );
     assert_eq!(active.active, Some(button));
@@ -220,9 +224,11 @@ fn buttons_draw_text_track_pointer_states_and_ignore_hidden_hit_targets() {
         640,
         480,
         &[],
-        Some([20.0, 20.0]),
-        Some(button),
-        None,
+        UiInput {
+            pointer: Some([20.0, 20.0]),
+            pressed: Some(button),
+            ..UiInput::default()
+        },
         None,
     );
     assert_eq!(hidden.hit_button(20.0, 20.0), None);
@@ -780,11 +786,13 @@ const OVER: UiInput = UiInput {
     pointer: Some([80.0, 24.0]),
     pressed: None,
     focused: None,
+    on_top: None,
 };
 const AWAY: UiInput = UiInput {
     pointer: Some([500.0, 400.0]),
     pressed: None,
     focused: None,
+    on_top: None,
 };
 
 #[test]
@@ -1006,4 +1014,32 @@ fn a_tooltip_shows_after_a_short_hover_in_its_tooltip_style() {
     assert_eq!(box_.color, [1.0, 0.0, 0.0, 1.0]);
     let away = ui.layout(&world, (640, 480), &sheets, AWAY, None, 0.016);
     assert_eq!(texts(&away).len(), 1, "gone when the pointer leaves");
+}
+
+#[test]
+fn the_on_top_screen_gui_is_laid_out_last_and_takes_the_pointer_first() {
+    let (mut world, button, sheets) = play_button("#play { background-color: #808080 }");
+    // A full-screen loading screen, earlier in the tree than the button.
+    let loading = world.create(ClassName::ScreenGui).unwrap();
+    world.set_parent_at(loading, world.workspace(), 0).unwrap();
+    let cover = world.create(ClassName::Frame).unwrap();
+    world.set_parent(cover, Some(loading)).unwrap();
+    world
+        .set_property(cover, "Size", Value::UDim2(UDim2::new(1.0, 0.0, 1.0, 0.0)))
+        .unwrap();
+
+    let mut ui = UiInteraction::default();
+    let normal = ui.layout(&world, (800, 600), &sheets, OVER, None, 0.0);
+    assert_eq!(normal.hit(80.0, 24.0), Some(button));
+
+    let input = UiInput {
+        on_top: Some(loading),
+        ..OVER
+    };
+    let covered = ui.layout(&world, (800, 600), &sheets, input, None, 0.0);
+    assert_eq!(covered.hit(80.0, 24.0), Some(cover));
+    assert_eq!(
+        covered.elements.last().map(|element| element.id),
+        Some(cover)
+    );
 }

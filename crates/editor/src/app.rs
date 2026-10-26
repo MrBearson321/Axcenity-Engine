@@ -440,6 +440,8 @@ struct Keys {
 struct OpenProject {
     name: String,
     show_splash: bool,
+    /// How built games' loading screen goes (File > Build Game).
+    loading_screen: axcenity_project::LoadingScreen,
     folder: PathBuf,
     stylesheets: Vec<axcenity_ui::Stylesheet>,
     /// Each stylesheet's text as last read or written, by path, to tell the

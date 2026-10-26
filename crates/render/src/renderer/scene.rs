@@ -228,13 +228,7 @@ impl ScenePipeline {
         let swash_cache = SwashCache::new();
         let glyph_cache = GlyphCache::new(&device);
         let text_viewport = TextViewport::new(&device, &glyph_cache);
-        let mut text_atlas = TextAtlas::new(&device, &queue, &glyph_cache, color_format);
-        let text_renderer = GlyphTextRenderer::new(
-            &mut text_atlas,
-            &device,
-            wgpu::MultisampleState::default(),
-            None,
-        );
+        let text_atlas = TextAtlas::new(&device, &queue, &glyph_cache, color_format);
         let gpu_timer = gpu_timer::GpuTimer::new(&device, &queue);
 
         Self {
@@ -262,7 +256,7 @@ impl ScenePipeline {
             swash_cache,
             text_viewport,
             text_atlas,
-            text_renderer,
+            text_renderers: Vec::new(),
             frame_buffer,
             frame_bind_group,
             frame_layout,
@@ -353,11 +347,29 @@ impl ScenePipeline {
                 self.fitted_sizes.clear();
             }
         }
-        let (text_buffers, text_lines) = self.prepare_ui_text(&list.ui, viewport_size)?;
-
-        let mut ui_vertices = ui_vertices(&list.ui, &text_lines, viewport_size);
-        let rect_count = ui_vertices.len() as u32;
-        let image_draws = self.ui_image_draws(&list.ui, viewport_size, &mut ui_vertices);
+        // UI is drawn in its list's order, layer by layer (see `ui_layers`).
+        let layer_ranges = ui_layers(&list.ui);
+        let (text_buffers, text_lines, layers_with_text) =
+            self.prepare_ui_text(&list.ui, &layer_ranges, viewport_size)?;
+        let mut ui_vertices = Vec::new();
+        let mut ui_draws = Vec::with_capacity(layer_ranges.len());
+        for (index, range) in layer_ranges.iter().enumerate() {
+            let start = ui_vertices.len() as u32;
+            ui_vertices.extend(super::ui_vertices(
+                &list.ui,
+                range.clone(),
+                &text_lines,
+                viewport_size,
+            ));
+            let rectangles = start..ui_vertices.len() as u32;
+            let images =
+                self.ui_image_draws(&list.ui[range.clone()], viewport_size, &mut ui_vertices);
+            ui_draws.push(UiLayer {
+                rectangles,
+                images,
+                text: layers_with_text[index],
+            });
+        }
         self.ensure_ui_capacity(ui_vertices.len());
         if !ui_vertices.is_empty() {
             self.queue
@@ -540,26 +552,28 @@ impl ScenePipeline {
                 depth_stencil_attachment: None,
                 ..Default::default()
             });
-            if rect_count > 0 {
-                pass.set_pipeline(&self.ui_pipeline);
-                pass.set_vertex_buffer(0, self.ui_buffer.slice(..));
-                pass.draw(0..rect_count, 0..1);
-            }
-            if !image_draws.is_empty() {
-                pass.set_pipeline(&self.ui_image_pipeline);
-                pass.set_vertex_buffer(0, self.ui_buffer.slice(..));
-                for (key, start, count) in &image_draws {
-                    let Some(group) = self.ui_image_groups.get(key) else {
-                        continue;
-                    };
-                    pass.set_bind_group(0, group, &[]);
-                    pass.draw(*start..*start + *count, 0..1);
+            for (index, layer) in ui_draws.iter().enumerate() {
+                if !layer.rectangles.is_empty() {
+                    pass.set_pipeline(&self.ui_pipeline);
+                    pass.set_vertex_buffer(0, self.ui_buffer.slice(..));
+                    pass.draw(layer.rectangles.clone(), 0..1);
                 }
-            }
-            if !text_buffers.is_empty() {
-                self.text_renderer
-                    .render(&self.text_atlas, &self.text_viewport, &mut pass)
-                    .context("could not render UI text")?;
+                if !layer.images.is_empty() {
+                    pass.set_pipeline(&self.ui_image_pipeline);
+                    pass.set_vertex_buffer(0, self.ui_buffer.slice(..));
+                    for (key, start, count) in &layer.images {
+                        let Some(group) = self.ui_image_groups.get(key) else {
+                            continue;
+                        };
+                        pass.set_bind_group(0, group, &[]);
+                        pass.draw(*start..*start + *count, 0..1);
+                    }
+                }
+                if layer.text {
+                    self.text_renderers[index]
+                        .render(&self.text_atlas, &self.text_viewport, &mut pass)
+                        .context("could not render UI text")?;
+                }
             }
         }
 
@@ -596,14 +610,16 @@ impl ScenePipeline {
     }
 
     /// Shapes and uploads the UI text in `ui`, with its rich text runs,
-    /// shadows, outlines and faux bold. Returns the shaped text, which must live until it's
-    /// drawn, and its underlines and line-throughs, by the index of the
-    /// text in `ui`.
+    /// shadows, outlines and faux bold, into one text renderer per layer.
+    /// Returns the shaped text, which must live until it's drawn, its
+    /// underlines and line-throughs by the index of the text in `ui`, and
+    /// which `layers` have text.
     pub(super) fn prepare_ui_text(
         &mut self,
         ui: &[UiDrawItem],
+        layers: &[Range<usize>],
         (width, height): (u32, u32),
-    ) -> Result<(Vec<Buffer>, Vec<TextLine>)> {
+    ) -> Result<(Vec<Buffer>, Vec<TextLine>, Vec<bool>)> {
         self.text_viewport
             .update(&self.queue, Resolution { width, height });
 
@@ -674,12 +690,29 @@ impl ScenePipeline {
             placed.extend(
                 passes
                     .into_iter()
-                    .map(|pass| (item, top, first + pass.layer, pass)),
+                    .map(|pass| (index, item, top, first + pass.layer, pass)),
             );
         }
 
-        if !buffers.is_empty() {
-            let areas = placed.iter().map(|&(text, top, buffer, pass)| {
+        let mut with_text = vec![false; layers.len()];
+        for (layer, range) in layers.iter().enumerate() {
+            let in_layer: Vec<_> = placed
+                .iter()
+                .filter(|(index, ..)| range.contains(index))
+                .collect();
+            if in_layer.is_empty() {
+                continue;
+            }
+            with_text[layer] = true;
+            while self.text_renderers.len() <= layer {
+                self.text_renderers.push(GlyphTextRenderer::new(
+                    &mut self.text_atlas,
+                    &self.device,
+                    wgpu::MultisampleState::default(),
+                    None,
+                ));
+            }
+            let areas = in_layer.into_iter().map(|&(_, text, top, buffer, pass)| {
                 let [dx, dy] = pass.offset;
                 TextArea {
                     buffer: &buffers[buffer],
@@ -699,7 +732,7 @@ impl ScenePipeline {
                     custom_glyphs: &[],
                 }
             });
-            self.text_renderer
+            self.text_renderers[layer]
                 .prepare(
                     &self.device,
                     &self.queue,
@@ -711,7 +744,7 @@ impl ScenePipeline {
                 )
                 .context("could not prepare UI text")?;
         }
-        Ok((buffers, lines))
+        Ok((buffers, lines, with_text))
     }
 
     /// Uploads the callers' meshes and textures in `list` that aren't on

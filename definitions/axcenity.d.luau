@@ -73,6 +73,12 @@ declare extern type RunService with
 	Heartbeat: Signal
 end
 
+--- What loads first on the player's side, from `game:GetService("ReplicatedFirst")`.
+declare extern type ReplicatedFirst with
+	--- Says the game is ready: the loading screen goes once it has been up for its minimum time. Only waited for when the project's loading screen is set to wait for a script. LocalScripts only. LocalScripts only.
+	function RemoveDefaultLoadingScreen(self): ()
+end
+
 --- Moves properties smoothly to goals over time, from `game:GetService("TweenService")`.
 declare extern type TweenService with
 	--- A Tween that moves each property in `goals` (a table such as `{Position = Vector3.new(0, 5, 0)}`) of `instance` from where it is to its goal, as `tweenInfo` says. Numbers, Vector3s, Color3s, UDim2s and booleans (which switch at the end) can be tweened. Call `Play` to start it.
@@ -361,8 +367,10 @@ declare extern type DataModel extends Instance with
 	RunService: RunService
 	--- Moves properties smoothly to goals (same as `game:GetService("TweenService")`).
 	TweenService: TweenService
+	--- What loads first on the player's side, with `RemoveDefaultLoadingScreen` (same as `game:GetService("ReplicatedFirst")`).
+	ReplicatedFirst: ReplicatedFirst
 	[string]: any
-	--- The service with this class name, such as `"Players"`, `"RunService"`, `"TweenService"` or `"UserInputService"`.
+	--- The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"TweenService"` or `"UserInputService"`.
 	function GetService(self, className: string): Instance
 end
 

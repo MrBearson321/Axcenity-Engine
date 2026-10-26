@@ -12,7 +12,7 @@ use axcenity_render::{Camera, UiDrawItem, UiRectangle, UiText};
 use crate::css::*;
 use crate::style::{PseudoClasses, Stylesheet, resolve_styles, resolve_tooltip_styles};
 use crate::transition::Transitions;
-use crate::{UiLayout, layout_ui_viewed, layout_ui_with_pseudo};
+use crate::{UiLayout, layout_ui_with_pseudo};
 
 /// How long the pointer rests on an element before its tooltip shows, in seconds.
 pub const TOOLTIP_DELAY: f64 = 0.5;
@@ -90,6 +90,9 @@ pub struct UiInput {
     pub pressed: Option<InstanceId>,
     /// The TextBox being typed in.
     pub focused: Option<InstanceId>,
+    /// A ScreenGui laid out after all the other UI, BillboardGuis too, so it
+    /// covers them and takes the pointer first: the game's loading screen.
+    pub on_top: Option<InstanceId>,
 }
 
 /// The UI's state from one frame to the next. See the module documentation.
@@ -120,7 +123,18 @@ impl UiInteraction {
         self.transitions
             .borrow_mut()
             .advance(world, f64::from(seconds.max(0.0)));
-        let base = layout_ui_viewed(world, width, height, stylesheets, input.focused, camera);
+        let base = layout_ui_with_pseudo(
+            world,
+            width,
+            height,
+            stylesheets,
+            PseudoClasses {
+                focused: input.focused,
+                ..PseudoClasses::default()
+            },
+            camera,
+            input.on_top,
+        );
         let under = input.pointer.and_then(|[x, y]| base.hit(x, y));
         let hovered = input.pointer.and_then(|[x, y]| base.hover_target(x, y));
         let active = input.pressed.filter(|button| hovered == Some(*button));
@@ -131,7 +145,15 @@ impl UiInteraction {
             forced: None,
             transitions: Some(&self.transitions),
         };
-        let mut layout = layout_ui_with_pseudo(world, width, height, stylesheets, pseudo, camera);
+        let mut layout = layout_ui_with_pseudo(
+            world,
+            width,
+            height,
+            stylesheets,
+            pseudo,
+            camera,
+            input.on_top,
+        );
         layout.hovered = hovered;
         layout.active = active;
 

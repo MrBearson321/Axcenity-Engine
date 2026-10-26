@@ -1,0 +1,9 @@
+{
+  "name": "Hello Loading",
+  "format_version": 3,
+  "loading_screen": {
+    "screen_gui": "Loading",
+    "min_seconds": 2.0,
+    "wait_for_script": true
+  }
+}

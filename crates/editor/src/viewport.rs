@@ -226,6 +226,8 @@ pub struct ViewportScene<'a> {
     pub stylesheets: &'a [Stylesheet],
     /// The TextBox being typed in during Play, so it gets a focus ring.
     pub focused_text: Option<InstanceId>,
+    /// The game's loading screen during Play, drawn over the other UI.
+    pub loading_screen: Option<InstanceId>,
     /// Show every light's reach, not just the selected ones' (View > Light Cones).
     pub light_cones: bool,
     /// Editor-only visual-debug overlays (View > Overlays).
@@ -485,6 +487,7 @@ impl Viewport {
             emits,
             stylesheets,
             focused_text,
+            loading_screen,
             light_cones,
             overlays,
             debug_rays,
@@ -514,12 +517,21 @@ impl Viewport {
             .filter(|_| response.contains_pointer())
             .map(|pointer| (pointer - rect.min) * pixels_per_point)
             .map(|position| [position.x, position.y]);
-        let base_layout = axcenity_ui::layout_ui_viewed(
+        let input = axcenity_ui::UiInput {
+            pointer: pointer_pixels,
+            pressed: None,
+            focused: focused_text,
+            on_top: loading_screen,
+        };
+        let base_layout = axcenity_ui::layout_ui_interactive(
             world,
             width,
             height,
             stylesheets,
-            focused_text,
+            axcenity_ui::UiInput {
+                pointer: None,
+                ..input
+            },
             Some(&camera),
         );
         let held_button = ui
@@ -532,9 +544,8 @@ impl Viewport {
             (width, height),
             stylesheets,
             axcenity_ui::UiInput {
-                pointer: pointer_pixels,
                 pressed: held_button,
-                focused: focused_text,
+                ..input
             },
             Some(&camera),
             seconds,

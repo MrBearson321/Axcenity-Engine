@@ -47,8 +47,12 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use axcenity_core::{ClassName, InstanceId, World};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
+pub use asset_fix::{
+    FileWrite, Fix, FixPlan, IGNORED_FILE, Ignored, PropertyFix, files_of_kind, list_project_files,
+    plan_fix, read_ignored, suggestion, write_ignored,
+};
 pub use migrate::PREVIOUS_FORMAT_DIR;
 pub use package::{
     Clashes, Contents, ImportPlan, PACKAGE_EXTENSION, Package, PackageError, PackageManifest,
@@ -58,10 +62,6 @@ pub use packed::{PackError, pack_game, unpack_game};
 pub use terrain_files::{
     TERRAIN_FOLDER, data_folder, is_safe_folder, keep_terrain_folder, load_terrains,
     new_terrain_folder, save_terrain, terrain_folder_path,
-};
-pub use asset_fix::{
-    FileWrite, Fix, FixPlan, IGNORED_FILE, Ignored, PropertyFix, files_of_kind, list_project_files,
-    plan_fix, read_ignored, suggestion, write_ignored,
 };
 pub use validate::{AssetKind, Finding, FindingKind, Report, Site, check_assets};
 pub use versions::{Version, list_versions, record_version, restore_version};
@@ -100,10 +100,38 @@ pub struct Manifest {
     pub show_splash: bool,
     #[serde(default)]
     pub description: String,
+    #[serde(default)]
+    pub loading_screen: LoadingScreen,
 }
 
 fn default_show_splash() -> bool {
     true
+}
+
+/// How the player's loading screen goes (`loading_screen` in the manifest).
+/// With no `screen_gui`, it's the Axcenity splash when `show_splash` is on,
+/// or nothing.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct LoadingScreen {
+    /// The `Name` of a ScreenGui in the Workspace, shown over all the other
+    /// UI in place of the splash. Empty for none.
+    pub screen_gui: String,
+    /// How long that ScreenGui stays up at least, in seconds.
+    pub min_seconds: f32,
+    /// Also wait for a LocalScript to call
+    /// `ReplicatedFirst:RemoveDefaultLoadingScreen()`.
+    pub wait_for_script: bool,
+}
+
+impl Default for LoadingScreen {
+    fn default() -> Self {
+        Self {
+            screen_gui: String::new(),
+            min_seconds: 3.0,
+            wait_for_script: false,
+        }
+    }
 }
 
 /// The picture of the project the editor saves for its project list.
@@ -160,6 +188,12 @@ pub struct Project {
 /// Stores whether exported players show the brief engine splash screen.
 pub fn set_show_splash(folder: &Path, show: bool) -> Result<(), SaveError> {
     update_manifest(folder, "show_splash", serde_json::Value::Bool(show))
+}
+
+/// Stores how the player's loading screen goes.
+pub fn set_loading_screen(folder: &Path, loading: &LoadingScreen) -> Result<(), SaveError> {
+    let value = serde_json::to_value(loading).expect("the loading screen settings are plain data");
+    update_manifest(folder, "loading_screen", value)
 }
 
 /// Sets one key of the manifest, keeping the rest of the file as it was.
@@ -331,6 +365,7 @@ pub fn load_with_progress(
                 format_version: FORMAT_VERSION,
                 show_splash: default_show_splash(),
                 description: String::new(),
+                loading_screen: LoadingScreen::default(),
             }
         }
     };

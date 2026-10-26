@@ -4,7 +4,9 @@
 //! The bar is timed, not a measure of remaining load. The clock starts on the
 //! first drawn frame and only counts drawn frames (a slow one counts as at
 //! most [`MAX_STEP`]), so loading can't use the splash up before it's seen.
-//! Click or a key skips to the fade-out.
+//! Click or a key skips to the fade-out. A game that waits for a script
+//! ([`Splash::hold`]) keeps the full bar up until it says it's ready
+//! ([`Splash::release`]); only then can it fade or be skipped.
 
 use std::f32::consts::TAU;
 use std::sync::Arc;
@@ -56,8 +58,12 @@ impl TextureSource for PackedTexture {
 
 /// Owns the splash clock and the wordmark texture.
 pub struct Splash {
-    /// Seconds of splash shown so far.
+    /// Seconds of splash shown so far, stopped at the full bar while held.
     elapsed: f32,
+    /// Seconds shown, held or not: the rings and dots keep moving.
+    motion: f32,
+    /// Waiting for a script before the fade.
+    held: bool,
     /// When the last frame was drawn; none until the first.
     last_frame: Option<Instant>,
     skipped_at: Option<f32>,
@@ -70,6 +76,8 @@ impl Splash {
         match load_wordmark() {
             Ok((texture, texture_size)) => Self {
                 elapsed: 0.0,
+                motion: 0.0,
+                held: false,
                 last_frame: None,
                 skipped_at: None,
                 texture: Some(texture),
@@ -79,6 +87,8 @@ impl Splash {
                 log::warn!("no splash wordmark: {err:#}");
                 Self {
                     elapsed: 0.0,
+                    motion: 0.0,
+                    held: false,
                     last_frame: None,
                     skipped_at: None,
                     texture: None,
@@ -93,14 +103,34 @@ impl Splash {
     pub fn tick(&mut self) {
         let now = Instant::now();
         if let Some(last) = self.last_frame {
-            self.elapsed += (now - last).as_secs_f32().min(MAX_STEP);
+            let step = (now - last).as_secs_f32().min(MAX_STEP);
+            self.motion += step;
+            self.elapsed += step;
+            if self.held {
+                self.elapsed = self.elapsed.min(BAR_END);
+            }
         }
         self.last_frame = Some(now);
     }
 
-    /// Jump to the fade-out, if the splash is still covering the game.
+    /// Stay on the full bar until [`Self::release`].
+    pub fn hold(&mut self) {
+        self.held = true;
+    }
+
+    /// The game is ready: the splash may fade once its bar is full.
+    pub fn release(&mut self) {
+        self.held = false;
+    }
+
+    /// Jump to the fade-out, if the splash is still covering the game and
+    /// isn't waiting for a script.
     pub fn skip(&mut self) {
-        if self.last_frame.is_some() && self.skipped_at.is_none() && self.elapsed < BAR_END {
+        if !self.held
+            && self.last_frame.is_some()
+            && self.skipped_at.is_none()
+            && self.elapsed < BAR_END
+        {
             self.skipped_at = Some(self.elapsed);
         }
     }
@@ -117,6 +147,7 @@ impl Splash {
         };
         overlay(
             t,
+            self.motion,
             [width, height],
             self.texture.clone(),
             self.texture_size,
@@ -174,9 +205,11 @@ fn rgba(rgb: [f32; 3], a: f32) -> [f32; 4] {
     [rgb[0], rgb[1], rgb[2], a]
 }
 
-/// The overlay at time `t` (seconds from start, after skip mapping).
+/// The overlay at time `t` (seconds from start, after skip mapping). The
+/// rings and dots move with `motion`, which goes on while the bar is held.
 pub fn overlay(
     t: f32,
+    motion: f32,
     size: [f32; 2],
     texture: Option<Arc<dyn TextureSource>>,
     texture_size: [f32; 2],
@@ -220,7 +253,7 @@ pub fn overlay(
 
     // Rings start just outside the wordmark's corners and fade as they grow.
     for (phase, scale) in [(0.0, 1.0), (0.45, 1.12)] {
-        let pulse = ((t * 0.85 + phase).fract()).clamp(0.0, 1.0);
+        let pulse = ((motion * 0.85 + phase).fract()).clamp(0.0, 1.0);
         let radius = (logo_w * 0.6 + pulse * logo_w * 0.3) * scale;
         let ring_a = (1.0 - pulse) * 0.18 * a;
         items.push(UiDrawItem::Rectangle(UiRectangle {
@@ -235,11 +268,11 @@ pub fn overlay(
     }
 
     for i in 0..6 {
-        let angle = t * 0.55 + i as f32 * TAU / 6.0;
-        let orbit = logo_w * 0.64 + (t * 1.7 + i as f32).sin() * 8.0;
+        let angle = motion * 0.55 + i as f32 * TAU / 6.0;
+        let orbit = logo_w * 0.64 + (motion * 1.7 + i as f32).sin() * 8.0;
         let x = cx + angle.cos() * orbit;
         let y = cy + angle.sin() * orbit * 0.42 + rise;
-        let r = 2.0 + (t * 2.0 + i as f32).sin().abs() * 1.2;
+        let r = 2.0 + (motion * 2.0 + i as f32).sin().abs() * 1.2;
         items.push(UiDrawItem::Rectangle(UiRectangle {
             position: [x - r, y - r],
             size: [r * 2.0, r * 2.0],
@@ -343,6 +376,7 @@ mod tests {
         assert!(
             overlay(
                 DURATION,
+                DURATION,
                 [1280.0, 720.0],
                 None,
                 [1000.0, 500.0],
@@ -350,12 +384,23 @@ mod tests {
             )
             .is_empty()
         );
-        assert!(overlay(DURATION + 1.0, [1280.0, 720.0], None, [1000.0, 500.0], "x").is_empty());
+        assert!(
+            overlay(
+                DURATION + 1.0,
+                DURATION + 1.0,
+                [1280.0, 720.0],
+                None,
+                [1000.0, 500.0],
+                "x"
+            )
+            .is_empty()
+        );
     }
 
     #[test]
     fn the_bar_grows_while_the_splash_runs() {
         let early = overlay(
+            0.4,
             0.4,
             [1280.0, 720.0],
             None,
@@ -364,12 +409,14 @@ mod tests {
         );
         let mid = overlay(
             1.6,
+            1.6,
             [1280.0, 720.0],
             None,
             [1000.0, 500.0],
             "Made with Axcenity",
         );
         let late = overlay(
+            2.7,
             2.7,
             [1280.0, 720.0],
             None,
@@ -398,12 +445,32 @@ mod tests {
 
     #[test]
     fn the_first_frame_already_hides_the_game() {
-        let items = overlay(0.0, [1280.0, 720.0], None, [1000.0, 300.0], "x");
+        let items = overlay(0.0, 0.0, [1280.0, 720.0], None, [1000.0, 300.0], "x");
         let Some(UiDrawItem::Rectangle(backdrop)) = items.first() else {
             panic!("the backdrop comes first");
         };
         assert_eq!(backdrop.size, [1280.0, 720.0]);
         assert_eq!(backdrop.color[3], 1.0);
+    }
+
+    #[test]
+    fn a_held_splash_waits_on_the_full_bar_until_released() {
+        let mut splash = Splash::new();
+        splash.hold();
+        splash.tick();
+        splash.elapsed = BAR_END;
+        splash.last_frame = Some(Instant::now() - std::time::Duration::from_secs(1));
+        splash.tick();
+        assert_eq!(splash.elapsed, BAR_END);
+        assert!(splash.motion > 0.0, "the rings keep moving");
+        splash.skip();
+        assert!(
+            splash.covers(),
+            "a click doesn't skip a game that isn't ready"
+        );
+        splash.release();
+        splash.skip();
+        assert!(splash.visual_t().expect("fading") >= BAR_END);
     }
 
     #[test]

@@ -1864,6 +1864,7 @@ fn the_states_editor_writes_hover_and_pressed_rules_that_show_in_its_preview_and
         pointer: Some([180.0, 124.0]),
         pressed: None,
         focused: None,
+        on_top: None,
     };
     let held = UiInput {
         pressed: Some(play),

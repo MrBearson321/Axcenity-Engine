@@ -268,6 +268,42 @@ impl EditorApp {
         }
     }
 
+    /// Stores how built games' loading screen goes, and says so.
+    pub(super) fn set_loading_screen(&mut self, loading: project::LoadingScreen) {
+        let Some(folder) = self.project.as_ref().map(|project| project.folder.clone()) else {
+            return;
+        };
+        match project::set_loading_screen(&folder, &loading) {
+            Ok(()) => {
+                let said = if loading.screen_gui.is_empty() {
+                    None
+                } else {
+                    Some(format!(
+                        "Built games (and Play) will show the ScreenGui \"{}\" as their loading \
+                         screen for at least {:.1}s{}.",
+                        loading.screen_gui,
+                        loading.min_seconds,
+                        if loading.wait_for_script {
+                            ", until a LocalScript calls \
+                             ReplicatedFirst:RemoveDefaultLoadingScreen()"
+                        } else {
+                            ""
+                        }
+                    ))
+                };
+                if let Some(project) = &mut self.project {
+                    project.loading_screen = loading;
+                }
+                if let Some(said) = said {
+                    self.output.info(said);
+                }
+            }
+            Err(err) => self.output.error(format!(
+                "Could not update the loading screen setting: {err}"
+            )),
+        }
+    }
+
     /// Saves just the script tab for `path`, as asked when closing it.
     pub(super) fn save_tab(&mut self, path: &str) -> bool {
         let saved = self.write_tab(path);

@@ -320,6 +320,7 @@ impl StartScreen {
                         name,
                         description,
                         show_splash,
+                        loading_gui,
                         error,
                     } => {
                         dialog_title(
@@ -339,6 +340,15 @@ impl StartScreen {
                         );
                         ui.add_space(10.0);
                         ui.checkbox(show_splash, "Show the Axcenity splash in built games");
+                        if !loading_gui.is_empty() {
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "Built games show the ScreenGui \"{loading_gui}\" as their \
+                                     loading screen instead (File > Build Game in the editor)."
+                                ))
+                                .color(palette.text_weak),
+                            );
+                        }
                         error_line(ui, &palette, error.as_deref());
                         let (save, cancel) = dialog_buttons(
                             ui,

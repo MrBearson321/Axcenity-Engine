@@ -4,6 +4,8 @@ What Play and Stop do in the editor, including audio during Play.
 
 Play runs in-process on a **deep copy** of the edit world, and Stop drops the copy. Before Play: autosave. During Play: the Lua watchdog stops a script that runs 3 seconds without pausing (the editor freezes that long, then the error appears in Output and the game carries on; see `docs/scripting/execution.md`), and Rust panics are caught at the Play boundary and reported to the Output panel.
 
+A project's own loading screen (a ScreenGui chosen in File > Build Game) shows during Play as in the built game: `Session::start` takes the project's `LoadingScreen`, and the viewport draws `Session::loading_screen` over the other UI. The Axcenity splash is not shown in Play.
+
 ### Decided in Phase 12
 
 - **Controls**: **▶ Play** and **■ Stop** at the left of the toolbar, only one enabled at a time, and **F5** / **Shift+F5** as in Studio (chosen by the developer). A green "Playing" label shows at the end of the toolbar.

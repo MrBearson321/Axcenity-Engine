@@ -28,7 +28,7 @@ use axcenity_render::Renderer;
 use axcenity_render::glam::Vec3;
 use axcenity_scene::{FlyCamera, MoveKeys, UiFrame};
 use axcenity_script::{CameraState, KeyEvent, OutputKind, ScriptRuntime};
-use axcenity_ui::{UiCursor, UiEvent, UiInput, UiInteraction};
+use axcenity_ui::{LoadingGui, UiCursor, UiEvent, UiInput, UiInteraction};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{
@@ -103,6 +103,7 @@ fn main() -> Result<()> {
     }
     log::info!("loaded project \"{}\"", project.manifest.name);
     let show_splash = project.manifest.show_splash;
+    let loading = project.manifest.loading_screen.clone();
     // A damaged file only takes itself out: say which, and run the rest.
     for problem in project.problems {
         eprintln!("error: {:#}", anyhow::Error::new(problem));
@@ -116,6 +117,25 @@ fn main() -> Result<()> {
         }
     }
     let mut world = project.world;
+    // The game's own loading screen is up before any script runs, so
+    // scripts see it enabled; it takes the splash's place.
+    let loading_gui = LoadingGui::start(
+        &mut world,
+        &loading.screen_gui,
+        loading.min_seconds,
+        loading.wait_for_script,
+    );
+    if !loading.screen_gui.is_empty() && loading_gui.is_none() {
+        eprintln!(
+            "warning: the loading screen \"{}\" is not a ScreenGui in the Workspace",
+            loading.screen_gui
+        );
+    }
+    let show_splash = show_splash && loading_gui.is_none();
+    let mut splash = splash::Splash::new();
+    if loading.wait_for_script {
+        splash.hold();
+    }
     let assets = Assets::new(&project.folder);
     let mut scripts = ScriptRuntime::new();
     scripts.set_assets(assets.clone());
@@ -143,7 +163,8 @@ fn main() -> Result<()> {
     let mut app = App {
         title: format!("{} - Axcenity Player", project.manifest.name),
         show_splash,
-        splash: splash::Splash::new(),
+        splash,
+        loading_gui,
         world,
         stylesheets,
         scripts,
@@ -322,6 +343,8 @@ struct App {
     title: String,
     show_splash: bool,
     splash: splash::Splash,
+    /// The game's own loading screen, when the project names one.
+    loading_gui: Option<LoadingGui>,
     world: World,
     stylesheets: Vec<axcenity_ui::Stylesheet>,
     /// Runs the scripts, and keeps the ones paused by `task.wait`.
@@ -419,9 +442,12 @@ impl App {
                 size.0,
                 size.1,
                 &self.stylesheets,
-                self.pointer,
-                self.ui_pressed_button,
-                self.text_focus,
+                UiInput {
+                    pointer: self.pointer,
+                    pressed: self.ui_pressed_button,
+                    focused: self.text_focus,
+                    on_top: self.loading_gui.as_ref().and_then(LoadingGui::on_top),
+                },
                 Some(&camera),
             );
             self.note_ui_warnings(&layout.warnings);
@@ -861,6 +887,16 @@ impl ApplicationHandler for App {
                     eprintln!("error: {error}");
                 }
 
+                // The loading screen goes once its time is up and, when the
+                // game waits for one, a LocalScript has said it's ready.
+                let ready = self.scripts.take_loading_screen_removed();
+                if ready {
+                    self.splash.release();
+                }
+                if let Some(loading) = &mut self.loading_gui {
+                    loading.advance(&mut self.world, seconds, ready);
+                }
+
                 // 5. Lay out ScreenGuis at this window's current pixel size.
                 let ui_size = (size.width, size.height);
 
@@ -890,6 +926,7 @@ impl ApplicationHandler for App {
                                 pointer: self.pointer,
                                 pressed: self.ui_pressed_button,
                                 focused: self.text_focus,
+                                on_top: self.loading_gui.as_ref().and_then(LoadingGui::on_top),
                             },
                             seconds,
                         },

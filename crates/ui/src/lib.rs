@@ -9,6 +9,7 @@ mod style;
 
 mod css;
 mod interact;
+mod loading;
 mod paint;
 mod rich;
 mod transition;
@@ -16,6 +17,7 @@ mod transition;
 pub use css::*;
 use interact::interactable;
 pub use interact::{TOOLTIP_DELAY, UiCursor, UiEvent, UiInput, UiInteraction, UiState};
+pub use loading::LoadingGui;
 use paint::*;
 pub use rich::{RichSpan, RichStroke, RichStyle, parse_rich_text, rich_text_plain};
 
@@ -288,25 +290,36 @@ pub fn layout_ui_viewed(
             ..PseudoClasses::default()
         },
         camera,
+        None,
     )
 }
 
 /// Lays out UI with CSS pointer states. The active element is the button held
-/// from the mouse-down event; it only gets `:active` while still hovered.
-#[allow(clippy::too_many_arguments)] // Each is a different input to layout.
+/// from the mouse-down event (`input.pressed`); it only gets `:active` while
+/// still hovered.
 pub fn layout_ui_interactive(
     world: &World,
     width: u32,
     height: u32,
     stylesheets: &[Stylesheet],
-    pointer: Option<[f32; 2]>,
-    pressed_button: Option<InstanceId>,
-    focused: Option<InstanceId>,
+    input: UiInput,
     camera: Option<&Camera>,
 ) -> UiLayout {
-    let base = layout_ui_viewed(world, width, height, stylesheets, focused, camera);
-    let hovered = pointer.and_then(|[x, y]| base.hover_target(x, y));
-    let active = pressed_button.filter(|button| hovered == Some(*button));
+    let focused = input.focused;
+    let base = layout_ui_with_pseudo(
+        world,
+        width,
+        height,
+        stylesheets,
+        PseudoClasses {
+            focused,
+            ..PseudoClasses::default()
+        },
+        camera,
+        input.on_top,
+    );
+    let hovered = input.pointer.and_then(|[x, y]| base.hover_target(x, y));
+    let active = input.pressed.filter(|button| hovered == Some(*button));
     let mut layout = layout_ui_with_pseudo(
         world,
         width,
@@ -319,12 +332,15 @@ pub fn layout_ui_interactive(
             ..PseudoClasses::default()
         },
         camera,
+        input.on_top,
     );
     layout.hovered = hovered;
     layout.active = active;
     layout
 }
 
+/// Lays out the enabled ScreenGuis in tree order, then the BillboardGuis,
+/// then `on_top` (see [`UiInput::on_top`]).
 pub(crate) fn layout_ui_with_pseudo(
     world: &World,
     width: u32,
@@ -332,6 +348,7 @@ pub(crate) fn layout_ui_with_pseudo(
     stylesheets: &[Stylesheet],
     pseudo: PseudoClasses<'_>,
     camera: Option<&Camera>,
+    on_top: Option<InstanceId>,
 ) -> UiLayout {
     let mut layout = UiLayout::default();
     if width == 0 || height == 0 {
@@ -340,15 +357,7 @@ pub(crate) fn layout_ui_with_pseudo(
 
     let workspace = world.workspace();
     for id in world.descendants(workspace) {
-        let Some(instance) = world.get(id) else {
-            continue;
-        };
-        if instance.class() != ClassName::ScreenGui
-            || !instance
-                .property("Enabled")
-                .and_then(Value::as_bool)
-                .expect("every ScreenGui has an Enabled property")
-        {
+        if Some(id) == on_top || !enabled_screen_gui(world, id) {
             continue;
         }
         layout_screen_gui(world, id, width, height, stylesheets, pseudo, &mut layout);
@@ -364,7 +373,22 @@ pub(crate) fn layout_ui_with_pseudo(
             pseudo,
         );
     }
+    if let Some(id) = on_top
+        && enabled_screen_gui(world, id)
+    {
+        layout_screen_gui(world, id, width, height, stylesheets, pseudo, &mut layout);
+    }
     layout
+}
+
+fn enabled_screen_gui(world: &World, id: InstanceId) -> bool {
+    world.get(id).is_some_and(|instance| {
+        instance.class() == ClassName::ScreenGui
+            && instance
+                .property("Enabled")
+                .and_then(Value::as_bool)
+                .expect("every ScreenGui has an Enabled property")
+    })
 }
 
 /// Lays out one ScreenGui (`gui`) on a `width`×`height` screen, adding to `layout`.

@@ -113,6 +113,12 @@ pub const SIDE_ONLY_APIS: &[SideOnlyApi] = &[
         instead: "use OnServerEvent to receive what LocalScripts send",
     },
     SideOnlyApi {
+        name: "RemoveDefaultLoadingScreen",
+        side: Side::Client,
+        because: "the loading screen is on the player's screen",
+        instead: "send a RemoteEvent to the player with FireClient, and call it from a LocalScript that listens",
+    },
+    SideOnlyApi {
         name: "FireClient",
         side: Side::Server,
         because: "it sends a message from the server to a player",

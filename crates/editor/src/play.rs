@@ -20,8 +20,9 @@ use axcenity_audio::{GameAudio, SoundAction};
 use axcenity_character::{CharacterCamera, Controllers, MoveInput};
 use axcenity_core::{InstanceId, KeyCode, World};
 use axcenity_physics::Physics;
-use axcenity_project::ScriptFile;
+use axcenity_project::{LoadingScreen, ScriptFile};
 use axcenity_script::{Breakpoints, CameraState, KeyEvent, OutputKind, Pause, ScriptRuntime};
+use axcenity_ui::LoadingGui;
 use eframe::egui;
 
 use crate::output::Output;
@@ -47,6 +48,8 @@ pub struct Session {
     audio: GameAudio,
     /// Buttons' hover and click sounds, played with the next frame's audio.
     ui_sounds: Vec<SoundAction>,
+    /// The project's own loading screen, as the built game shows it.
+    loading_gui: Option<LoadingGui>,
     /// Set by Debug > Panic during Play, to check that a crash is caught.
     panic_next_frame: bool,
     /// What the last frame's steps took, for the Profiler; `None` when it
@@ -60,7 +63,8 @@ impl Session {
     /// the player does. Script output and errors go to `output`. MeshParts
     /// collide as their models from `assets`. Unlike the player, scripts
     /// stop at `breakpoints`; one in a script's first run pauses here, and
-    /// the scripts after it start on Continue.
+    /// the scripts after it start on Continue. The project's own `loading`
+    /// screen shows as in the built game; the Axcenity splash doesn't.
     pub fn start(
         edit_world: &World,
         scripts: &[ScriptFile],
@@ -68,6 +72,7 @@ impl Session {
         output: &mut Output,
         assets: Assets,
         camera: CameraState,
+        loading: &LoadingScreen,
     ) -> Result<Session, Crash> {
         let mut session = Session {
             world: edit_world.clone(),
@@ -78,9 +83,24 @@ impl Session {
             assets,
             audio: GameAudio::default(),
             ui_sounds: Vec::new(),
+            loading_gui: None,
             panic_next_frame: false,
             cost: None,
         };
+        // Up before any script runs, as in the player.
+        session.loading_gui = LoadingGui::start(
+            &mut session.world,
+            &loading.screen_gui,
+            loading.min_seconds,
+            loading.wait_for_script,
+        );
+        if !loading.screen_gui.is_empty() && session.loading_gui.is_none() {
+            output.warning(format!(
+                "The loading screen \"{}\" is not a ScreenGui in the Workspace, so built games \
+                 show the Axcenity splash (or nothing) instead. Pick another in File > Build Game.",
+                loading.screen_gui
+            ));
+        }
         session.scripts.set_assets(session.assets.clone());
         session.scripts.enable_debugger();
         session.scripts.set_breakpoints(breakpoints);
@@ -103,6 +123,11 @@ impl Session {
             session.apply_audio(camera, output);
         })?;
         Ok(session)
+    }
+
+    /// The loading screen's ScreenGui while it covers the game.
+    pub fn loading_screen(&self) -> Option<InstanceId> {
+        self.loading_gui.as_ref().and_then(LoadingGui::on_top)
     }
 
     /// The world as the game has it now, for the panels and the viewport.
@@ -303,6 +328,10 @@ impl Session {
                 self.scripts.heartbeat(&mut self.world, seconds);
             }
             self.forward_output(output);
+            let ready = self.scripts.take_loading_screen_removed();
+            if let Some(loading) = &mut self.loading_gui {
+                loading.advance(&mut self.world, seconds as f32, ready);
+            }
             moved = self.scripts.take_camera_move();
             cost.scripts += lap();
             if self.scripts.pause().is_some() {
@@ -615,6 +644,70 @@ mod tests {
     }
 
     #[test]
+    fn the_projects_loading_screen_covers_play_until_a_local_script_is_ready() {
+        let mut world = World::new();
+        let gui = world.create(ClassName::ScreenGui).unwrap();
+        world.set_name(gui, "Loading").unwrap();
+        world
+            .set_property(gui, "Enabled", axcenity_core::Value::Bool(false))
+            .unwrap();
+        world.set_parent(gui, Some(world.workspace())).unwrap();
+        let ready = world.create(ClassName::LocalScript).unwrap();
+        let scripts = [ScriptFile {
+            instance: ready,
+            path: "scripts/ready.client.lua".to_owned(),
+            source: "task.wait(1)\ngame:GetService('ReplicatedFirst'):RemoveDefaultLoadingScreen()"
+                .to_owned(),
+        }];
+        let loading = LoadingScreen {
+            screen_gui: "Loading".to_owned(),
+            min_seconds: 0.25,
+            wait_for_script: true,
+        };
+        let mut output = Output::default();
+        let mut session = Session::start(
+            &world,
+            &scripts,
+            &Breakpoints::new(),
+            &mut output,
+            Assets::default(),
+            CameraState::default(),
+            &loading,
+        )
+        .unwrap();
+        let enabled = |session: &Session| {
+            session.world().get(gui).unwrap().property("Enabled")
+                == Some(&axcenity_core::Value::Bool(true))
+        };
+        assert_eq!(session.loading_screen(), Some(gui));
+        assert!(enabled(&session), "shown though it's saved disabled");
+        let mut frame = |session: &mut Session| {
+            session
+                .frame(
+                    1.0 / 60.0,
+                    &[],
+                    MoveInput::default(),
+                    CameraState::default(),
+                    &mut output,
+                )
+                .unwrap();
+        };
+        for _ in 0..30 {
+            frame(&mut session);
+        }
+        assert_eq!(
+            session.loading_screen(),
+            Some(gui),
+            "the script isn't ready"
+        );
+        for _ in 0..40 {
+            frame(&mut session);
+        }
+        assert_eq!(session.loading_screen(), None);
+        assert!(!enabled(&session));
+    }
+
+    #[test]
     fn scripts_change_only_the_copy() {
         let mut world = World::new();
         let scripts = [script(
@@ -629,6 +722,7 @@ mod tests {
             &mut output,
             Assets::default(),
             CameraState::default(),
+            &LoadingScreen::default(),
         )
         .unwrap();
 
@@ -650,6 +744,7 @@ mod tests {
             &mut output,
             Assets::default(),
             CameraState::default(),
+            &LoadingScreen::default(),
         )
         .unwrap();
         for _ in 0..90 {
@@ -678,6 +773,7 @@ mod tests {
             &mut output,
             Assets::default(),
             CameraState::default(),
+            &LoadingScreen::default(),
         )
         .unwrap();
         let camera = CameraState::default();
@@ -719,6 +815,7 @@ end",
             &mut output,
             Assets::default(),
             CameraState::default(),
+            &LoadingScreen::default(),
         )
         .unwrap();
         let camera = CameraState::default();
@@ -790,6 +887,7 @@ end",
             &mut output,
             Assets::default(),
             CameraState::default(),
+            &LoadingScreen::default(),
         )
         .unwrap();
         assert!(session.cost().is_none(), "no frame has run yet");
@@ -880,6 +978,7 @@ end",
             &mut output,
             Assets::default(),
             CameraState::default(),
+            &LoadingScreen::default(),
         )
         .unwrap();
         let space = KeyEvent {

@@ -10,7 +10,7 @@ use mlua::{
     UserDataMethods,
 };
 
-use crate::client::{LocalPlayer, LuaCamera, LuaUserInputService};
+use crate::client::{LocalPlayer, LuaCamera, LuaReplicatedFirst, LuaUserInputService};
 use crate::events::{Event, LuaSignal, Owner};
 use crate::run_service::LuaRunService;
 use crate::sides;
@@ -279,6 +279,7 @@ fn class_member(lua: &Lua, class: ClassName, key: &str) -> mlua::Result<Option<m
         (ClassName::DataModel, "UserInputService") => LuaUserInputService.into_lua(lua)?,
         (ClassName::DataModel, "RunService") => LuaRunService.into_lua(lua)?,
         (ClassName::DataModel, "TweenService") => LuaTweenService.into_lua(lua)?,
+        (ClassName::DataModel, "ReplicatedFirst") => LuaReplicatedFirst.into_lua(lua)?,
         (ClassName::Workspace, "CurrentCamera") => LuaCamera.into_lua(lua)?,
         (ClassName::Players, "LocalPlayer") => lua
             .app_data_ref::<LocalPlayer>()
@@ -872,7 +873,8 @@ fn set_playing(lua: &Lua, sound: InstanceId, playing: bool) -> mlua::Result<()> 
 
 /// `game:GetService(name)`: a service by its class name, such as
 /// `"Players"`, or `"UserInputService"` (LocalScripts only),
-/// `"RunService"` or `"TweenService"`, which aren't Instances.
+/// `"RunService"`, `"TweenService"` or `"ReplicatedFirst"`, which aren't
+/// Instances.
 pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
     lua.create_function(|lua, (_game, name): (mlua::Value, String)| {
         match name.as_str() {
@@ -882,6 +884,7 @@ pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
             }
             "RunService" => return LuaRunService.into_lua(lua),
             "TweenService" => return LuaTweenService.into_lua(lua),
+            "ReplicatedFirst" => return LuaReplicatedFirst.into_lua(lua),
             _ => {}
         }
         let world = world(lua)?;
@@ -901,7 +904,12 @@ pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
                     .iter()
                     .filter_map(|&id| world.get(id).map(|s| s.class().as_str()))
                     .collect();
-                names.extend(["RunService", "TweenService", "UserInputService"]);
+                names.extend([
+                    "ReplicatedFirst",
+                    "RunService",
+                    "TweenService",
+                    "UserInputService",
+                ]);
                 Err(mlua::Error::runtime(format!(
                     "there is no service named \"{name}\"; choose from {}",
                     names.join(", ")

@@ -10,7 +10,9 @@ use axcenity_core::{InstanceId, RecordedChange, World};
 use mlua::chunk::ChunkMode;
 use mlua::{Lua, LuaOptions, StdLib, Thread};
 
-use crate::client::{self, Camera, CameraState, HeldKeys, KeyEvent, LocalPlayer};
+use crate::client::{
+    self, Camera, CameraState, HeldKeys, KeyEvent, LoadingScreenRemoved, LocalPlayer,
+};
 use crate::errors::error_message;
 use crate::instance::{self, ClassMethods};
 use crate::remote::{self, Message, Outbox};
@@ -55,6 +57,7 @@ impl Context {
         if side == Side::Client {
             lua.set_app_data(HeldKeys::default());
             lua.set_app_data(Camera::default());
+            lua.set_app_data(LoadingScreenRemoved::default());
         }
         sandbox::Shared::install(&lua)
             .expect("creating the shared script functions only fails when out of memory");
@@ -295,6 +298,12 @@ impl Context {
     pub fn take_camera_move(&self) -> Option<CameraState> {
         let mut camera = self.lua.app_data_mut::<Camera>()?;
         std::mem::take(&mut camera.moved).then_some(camera.state)
+    }
+
+    pub fn take_loading_screen_removed(&self) -> bool {
+        self.lua
+            .app_data_mut::<LoadingScreenRemoved>()
+            .is_some_and(|mut removed| std::mem::take(&mut removed.0))
     }
 
     pub fn take_output(&self) -> Vec<OutputLine> {

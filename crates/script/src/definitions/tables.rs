@@ -181,6 +181,18 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
         methods: &[],
     },
     ValueType {
+        class: "ReplicatedFirst",
+        doc: "What loads first on the player's side, from `game:GetService(\"ReplicatedFirst\")`.",
+        fields: &[],
+        operators: &[],
+        methods: &[Function {
+            name: "RemoveDefaultLoadingScreen",
+            doc: "Says the game is ready: the loading screen goes once it has been up for its minimum time. Only waited for when the project's loading screen is set to wait for a script. LocalScripts only.",
+            params: &[],
+            returns: "()",
+        }],
+    },
+    ValueType {
         class: "TweenService",
         doc: "Moves properties smoothly to goals over time, from `game:GetService(\"TweenService\")`.",
         fields: &[],
@@ -457,7 +469,7 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
         ClassName::DataModel,
         Function {
             name: "GetService",
-            doc: "The service with this class name, such as `\"Players\"`, `\"RunService\"`, `\"TweenService\"` or `\"UserInputService\"`.",
+            doc: "The service with this class name, such as `\"Players\"`, `\"ReplicatedFirst\"`, `\"RunService\"`, `\"TweenService\"` or `\"UserInputService\"`.",
             params: &[("className", "string")],
             returns: "Instance",
         },
@@ -735,6 +747,14 @@ pub(super) const CLASS_FIELDS: &[(ClassName, Field)] = &[
             name: "TweenService",
             ty: "TweenService",
             doc: "Moves properties smoothly to goals (same as `game:GetService(\"TweenService\")`).",
+        },
+    ),
+    (
+        ClassName::DataModel,
+        Field {
+            name: "ReplicatedFirst",
+            ty: "ReplicatedFirst",
+            doc: "What loads first on the player's side, with `RemoveDefaultLoadingScreen` (same as `game:GetService(\"ReplicatedFirst\")`).",
         },
     ),
     (

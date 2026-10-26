@@ -450,19 +450,112 @@ impl EditorApp {
                 });
             }
             ui.separator();
-            let mut show_splash = self
-                .project
-                .as_ref()
-                .is_some_and(|project| project.show_splash);
+            self.loading_screen_menu(ui);
+        });
+    }
+
+    /// The Build Game menu's loading screen: the Axcenity splash, none, or
+    /// one of the Workspace's ScreenGuis, for how long and whether it waits
+    /// for a script.
+    fn loading_screen_menu(&mut self, ui: &mut egui::Ui) {
+        let Some(project) = &self.project else {
+            ui.weak("Loading screen: open a project first.");
+            return;
+        };
+        let (show_splash, mut loading) = (project.show_splash, project.loading_screen.clone());
+        ui.label("Loading screen");
+        #[derive(PartialEq)]
+        enum Choice {
+            Splash,
+            Nothing,
+            Gui(String),
+        }
+        let current = match loading.screen_gui.as_str() {
+            "" if show_splash => Choice::Splash,
+            "" => Choice::Nothing,
+            name => Choice::Gui(name.to_owned()),
+        };
+        let mut choices = vec![
+            (Choice::Splash, "Axcenity splash".to_owned()),
+            (Choice::Nothing, "None".to_owned()),
+        ];
+        let workspace = self.world.workspace();
+        for id in self.world.descendants(workspace) {
+            if let Some(gui) = self.world.get(id)
+                && gui.class() == ClassName::ScreenGui
+                && !choices
+                    .iter()
+                    .any(|(choice, _)| *choice == Choice::Gui(gui.name().to_owned()))
+            {
+                choices.push((Choice::Gui(gui.name().to_owned()), gui.name().to_owned()));
+            }
+        }
+        // A saved name with no ScreenGui left: still shown, so it can be changed.
+        if let Choice::Gui(name) = &current
+            && !choices.iter().any(|(choice, _)| choice == &current)
+        {
+            choices.push((Choice::Gui(name.clone()), format!("{name} (missing)")));
+        }
+        let mut picked = None;
+        for (choice, label) in choices {
+            if ui.radio(choice == current, label).clicked() && choice != current {
+                picked = Some(choice);
+            }
+        }
+        let none_shown = picked.as_ref().unwrap_or(&current) == &Choice::Nothing;
+        match picked {
+            Some(Choice::Splash) => {
+                loading.screen_gui.clear();
+                self.set_loading_screen(loading.clone());
+                self.set_show_splash(true);
+            }
+            Some(Choice::Nothing) => {
+                loading.screen_gui.clear();
+                self.set_loading_screen(loading.clone());
+                self.set_show_splash(false);
+            }
+            Some(Choice::Gui(name)) => {
+                loading.screen_gui = name;
+                self.set_loading_screen(loading.clone());
+            }
+            None => {}
+        }
+        if !loading.screen_gui.is_empty() {
+            let mut seconds = loading.min_seconds;
+            let response = ui
+                .horizontal(|ui| {
+                    ui.label("Show for at least");
+                    ui.add(
+                        egui::DragValue::new(&mut seconds)
+                            .range(0.0..=60.0)
+                            .speed(0.1)
+                            .fixed_decimals(1)
+                            .suffix(" s"),
+                    )
+                })
+                .inner;
+            // Saved when a drag ends or a typed value is in, not every frame.
+            loading.min_seconds = seconds;
+            if let Some(project) = &mut self.project {
+                project.loading_screen.min_seconds = seconds;
+            }
+            if response.drag_stopped() || (response.changed() && !response.dragged()) {
+                self.set_loading_screen(loading.clone());
+            }
+        }
+        if !none_shown {
+            let mut wait = loading.wait_for_script;
             if ui
-                .add_enabled(
-                    self.project.is_some(),
-                    egui::Checkbox::new(&mut show_splash, "Show splash in built games"),
+                .checkbox(&mut wait, "Wait for a script")
+                .on_hover_text(
+                    "Stays up until a LocalScript calls \
+                     game:GetService(\"ReplicatedFirst\"):RemoveDefaultLoadingScreen()",
                 )
                 .changed()
             {
-                self.set_show_splash(show_splash);
+                loading.wait_for_script = wait;
+                self.set_loading_screen(loading);
             }
-        });
+        }
     }
 }

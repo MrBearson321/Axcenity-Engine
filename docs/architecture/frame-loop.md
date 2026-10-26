@@ -6,7 +6,7 @@ The fixed order of one frame. Do not reorder it casually.
 2. Move tweens on (`TweenService`, setting their properties), then resume coroutines whose wait has expired, and fire queued events
 3. Hold that character's parts kinematic (`Controllers::keep_kinematic`), then step physics at a fixed 60 Hz (accumulator; may run 0–N steps per frame). Other bodies keep the same gravity and friction.
 4. Fire `Touched` and collision events, then `RunService.Heartbeat`; then particles and Animators move on (Animators pose their MeshParts and fire `StateChanged`)
-5. Update UI layout (`taffy`) and shape text
+5. Move the loading screen on (a LocalScript's `RemoveDefaultLoadingScreen`, then `LoadingGui::advance`, which may turn its ScreenGui off), then update UI layout (`taffy`) and shape text
 6. Build the draw list and render
 
 The player runs these in `WindowEvent::RedrawRequested` (`crates/player/src/main.rs`), with a comment per step. The editor runs steps 1-4 only during Play (`Session::frame` in `crates/editor/src/play.rs`); its viewport lays out UI at step 5 using its current pixel size, then builds and draws step 6. Visual-debug overlays (colliders, raycasts, bounds, emitters) are painted in the editor viewport after the scene texture; they do not change this order, and the player never draws them.

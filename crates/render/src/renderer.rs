@@ -57,8 +57,8 @@ mod types;
 use text::TextLine;
 use types::*;
 use ui_pass::{
-    create_sky_pipeline, create_ui_image_pipeline, create_ui_pipeline, glyph_color, image_quad,
-    ui_vertices,
+    UiLayer, create_sky_pipeline, create_ui_image_pipeline, create_ui_pipeline, glyph_color,
+    image_quad, ui_layers, ui_vertices,
 };
 
 /// Draws a scene into a window. The player uses this.

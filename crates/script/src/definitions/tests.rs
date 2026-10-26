@@ -309,6 +309,7 @@ fn described_fields_and_methods_exist() {
         ("UserInputService", "game:GetService('UserInputService')"),
         ("RunService", "game:GetService('RunService')"),
         ("TweenService", "game:GetService('TweenService')"),
+        ("ReplicatedFirst", "game:GetService('ReplicatedFirst')"),
         (
             "Tween",
             "game:GetService('TweenService'):Create(part, TweenInfo.new(), {})",

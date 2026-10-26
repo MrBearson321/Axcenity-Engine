@@ -590,6 +590,7 @@ impl EditorApp {
                             emits: &emits,
                             stylesheets,
                             focused_text: self.focused_text,
+                            loading_screen: self.play.as_ref().and_then(Session::loading_screen),
                             light_cones: self.light_cones,
                             overlays: self.overlays,
                             debug_rays: &debug_rays,

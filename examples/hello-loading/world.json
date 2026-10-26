@@ -1,0 +1,99 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "ScreenGui",
+        "name": "Loading",
+        "properties": {
+          "Enabled": false
+        },
+        "children": [
+          {
+            "class": "Frame",
+            "name": "Backdrop",
+            "properties": {
+              "Id": "backdrop",
+              "Size": [1, 0, 1, 0]
+            },
+            "children": [
+              {
+                "class": "TextLabel",
+                "name": "Title",
+                "properties": {
+                  "Id": "loading-title",
+                  "Text": "Hello Loading",
+                  "Position": [0.5, -200, 0.5, -60],
+                  "Size": [0, 400, 0, 48]
+                },
+                "children": []
+              },
+              {
+                "class": "Frame",
+                "name": "Track",
+                "properties": {
+                  "Id": "track",
+                  "Position": [0.5, -160, 0.5, 10],
+                  "Size": [0, 320, 0, 8]
+                },
+                "children": [
+                  {
+                    "class": "Frame",
+                    "name": "Fill",
+                    "properties": {
+                      "Id": "fill",
+                      "Size": [0, 0, 1, 0]
+                    },
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "class": "TextLabel",
+                "name": "Status",
+                "properties": {
+                  "Id": "loading-status",
+                  "Text": "Getting ready...",
+                  "Position": [0.5, -200, 0.5, 30],
+                  "Size": [0, 400, 0, 24]
+                },
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "class": "ScreenGui",
+        "name": "Hud",
+        "properties": {
+          "Enabled": true
+        },
+        "children": [
+          {
+            "class": "TextLabel",
+            "name": "Score",
+            "properties": {
+              "Id": "score",
+              "Text": "Score: 0",
+              "Position": [0, 24, 0, 24],
+              "Size": [0, 220, 0, 44]
+            },
+            "children": []
+          },
+          {
+            "class": "TextLabel",
+            "name": "Banner",
+            "properties": {
+              "Id": "banner",
+              "Text": "The HUD is drawn under the loading screen",
+              "Position": [0.5, -260, 0.5, -24],
+              "Size": [0, 520, 0, 48]
+            },
+            "children": []
+          }
+        ]
+      }
+    ]
+  }
+}
