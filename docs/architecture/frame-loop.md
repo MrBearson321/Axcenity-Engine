@@ -9,7 +9,7 @@ The fixed order of one frame. Do not reorder it casually.
 5. Move the loading screen on (a LocalScript's `RemoveDefaultLoadingScreen`, then `LoadingGui::advance`, which may turn its ScreenGui off), then update UI layout (`taffy`) and shape text
 6. Build the draw list and render
 
-The player runs these in `WindowEvent::RedrawRequested` (`crates/player/src/main.rs`), with a comment per step. The editor runs steps 1-4 only during Play (`Session::frame` in `crates/editor/src/play.rs`); its viewport lays out UI at step 5 using its current pixel size, then builds and draws step 6. Visual-debug overlays (colliders, raycasts, bounds, emitters) are painted in the editor viewport after the scene texture; they do not change this order, and the player never draws them.
+The player runs these in `WindowEvent::RedrawRequested` (`crates/player/src/main.rs`), with a comment per step. The editor runs steps 1-4 only during Play (`Session::frame` in `crates/editor/src/play.rs`); its viewport lays out UI at step 5 using its current pixel size, then builds and draws step 6. Visual-debug overlays (colliders, raycasts, bounds, emitters, the navigation mesh) are painted in the editor viewport after the scene texture; they do not change this order, and the player never draws them.
 
 Since Phase 16, change events (`Changed`, `ChildAdded`, ...) for whatever changed fire at every step that runs scripts, before and after it, so physics' changes fire at the start of step 4 (see `docs/scripting/execution.md`).
 

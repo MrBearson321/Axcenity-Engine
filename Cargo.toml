@@ -18,6 +18,7 @@ axcenity-audio = { path = "crates/audio" }
 axcenity-blocks = { path = "crates/blocks" }
 axcenity-character = { path = "crates/character" }
 axcenity-core = { path = "crates/core" }
+axcenity-nav = { path = "crates/nav" }
 axcenity-physics = { path = "crates/physics" }
 axcenity-project = { path = "crates/project" }
 axcenity-render = { path = "crates/render" }
@@ -110,4 +111,9 @@ all = { level = "warn", priority = -1 }
 opt-level = 3
 
 [profile.dev.package.axcenity-render]
+opt-level = 3
+
+# Building the navigation mesh walks every column of the world: 0.3 s for a
+# 512-stud terrain unoptimized, 50 ms optimized.
+[profile.dev.package.axcenity-nav]
 opt-level = 3

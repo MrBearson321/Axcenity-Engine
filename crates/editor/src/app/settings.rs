@@ -189,6 +189,11 @@ impl EditorApp {
             theme::with_icon(icons::SPEAKER_HIGH, "Show audio emitters"),
         )
         .on_hover_text("Where each spatial Sound is heard from.");
+        ui.checkbox(
+            &mut self.overlays.nav_mesh,
+            theme::with_icon(icons::FOOTPRINTS, "Show navigation mesh"),
+        )
+        .on_hover_text("Where characters can walk, coloured by connected ground.");
         ui.add_space(16.0);
         widgets::section_label(ui, "Ribbon");
         ui.label(

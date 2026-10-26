@@ -14,11 +14,12 @@ Which crate owns what, and what it may depend on. Read this before adding a crat
 | `terrain` | terrain algorithms over `core::TerrainData`: brushes, generation, erosion, chunk meshes, file codecs | `core` |
 | `physics` | `rapier3d` integration | `core`, `assets` |
 | `character` | kinematic third-person walk and run; queries physics, never the reverse | `core`, `assets`, `physics` |
+| `nav` | the navigation mesh, built from `physics::solids`; neither `physics` nor `character` may depend on it | `core`, `assets`, `physics`, `character` |
 | `script` | Luau (`mlua`), sandbox, scheduler, engine API, TweenService (eased by `anim`'s curves) | `anim`, `audio`, `core`, `physics`, `assets` |
 | `ui` | UI Instance layout, CSS cascade (`taffy`), transitions (eased by `anim`'s curves) and screen-space draw data | `anim`, `core`, `render` |
 | `project` | project folder load and save, including CSS and block-script sources, upgrading older projects (animation files through `anim`), and the editor's asset check | `anim`, `assets`, `blocks`, `core`, `terrain` |
 | `player` | runtime shipped with games (binary) | `anim`, `audio`, `character`, `core`, `assets`, `render`, `scene`, `physics`, `script`, `project`, `ui` |
-| `editor` | `egui` editor app (binary) | `anim`, `audio`, `blocks`, `character`, `core`, `assets`, `physics`, `project`, `render`, `scene`, `script`, `terrain`, `ui` |
+| `editor` | `egui` editor app (binary) | `anim`, `audio`, `blocks`, `character`, `core`, `assets`, `nav`, `physics`, `project`, `render`, `scene`, `script`, `terrain`, `ui` |
 
 Block scripts are translated to Lua at project load and run through the same `ScriptRuntime` as handwritten scripts. Hosts hand queued sound actions to their `GameAudio` after script steps, and fire `Ended` for the sounds it reports finished; the player owns playback for its lifetime, while editor Play owns a separate `GameAudio` that is dropped on Stop.
 

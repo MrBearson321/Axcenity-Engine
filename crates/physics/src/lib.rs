@@ -27,7 +27,9 @@
 mod query;
 mod shapes;
 
-pub use query::{ColliderOutline, RayHit, cast_ray, cast_ray_excluding, debug_colliders};
+pub use query::{
+    ColliderOutline, Column, RayHit, Solid, cast_ray, cast_ray_excluding, debug_colliders, solids,
+};
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 

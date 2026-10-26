@@ -668,6 +668,7 @@ impl EditorApp {
         render_state: Option<&RenderState>,
     ) -> ViewportOutput {
         let ctx = ui.ctx().clone();
+        self.refresh_nav_mesh(&ctx);
         let world = shown(&self.world, &self.play);
         let stylesheets = self
             .project
@@ -707,6 +708,7 @@ impl EditorApp {
                             light_cones: self.light_cones,
                             overlays: self.overlays,
                             debug_rays: &debug_rays,
+                            nav_mesh: self.nav_mesh.as_ref().map(|cache| &cache.mesh),
                             poses: self.play.as_ref().map(Session::poses),
                             terrain_brush,
                             character_view: self.play.as_ref().and_then(Session::character_camera),

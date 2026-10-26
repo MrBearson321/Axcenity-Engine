@@ -440,6 +440,13 @@ impl EditorApp {
                     "Emitters",
                     "Mark where each spatial Sound is heard from.",
                 );
+                overlay_button(
+                    ui,
+                    &mut self.overlays.nav_mesh,
+                    icons::FOOTPRINTS,
+                    "Nav Mesh",
+                    "Show where characters can walk. Each colour is ground that connects; it rebuilds after you move parts or sculpt terrain.",
+                );
             }),
         }
     }

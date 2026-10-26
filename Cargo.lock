@@ -609,6 +609,7 @@ dependencies = [
  "axcenity-blocks",
  "axcenity-character",
  "axcenity-core",
+ "axcenity-nav",
  "axcenity-physics",
  "axcenity-project",
  "axcenity-render",
@@ -630,6 +631,16 @@ dependencies = [
  "serde_json",
  "ureq",
  "zip",
+]
+
+[[package]]
+name = "axcenity-nav"
+version = "0.1.0"
+dependencies = [
+ "axcenity-assets",
+ "axcenity-character",
+ "axcenity-core",
+ "axcenity-physics",
 ]
 
 [[package]]

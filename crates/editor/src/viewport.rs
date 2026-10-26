@@ -93,6 +93,10 @@ const RAY_HIT_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 90, 90);
 /// Spatial sound sources.
 const EMITTER_COLOR: egui::Color32 = egui::Color32::from_rgb(90, 200, 255);
 const EMITTER_ICON_RADIUS: f32 = 11.0;
+/// Navigation mesh cells are filled this close to the camera; its edges
+/// are drawn out to the terrain overlay distance.
+const NAV_FILL_DISTANCE: f32 = 80.0;
+const NAV_EDGE_COLOR: egui::Color32 = egui::Color32::from_rgb(40, 230, 210);
 
 /// A left click in the viewport, with the UI element or part under the
 /// mouse (`None` for empty space, which clears the selection). Starting to
@@ -241,6 +245,8 @@ pub struct ViewportScene<'a> {
     pub overlays: OverlayToggles,
     /// Recent `workspace:Raycast` calls during Play, for the raycast overlay.
     pub debug_rays: &'a [DebugRay],
+    /// The navigation mesh, for its overlay.
+    pub nav_mesh: Option<&'a axcenity_nav::NavMesh>,
     /// Animated MeshParts' poses during Play; `None` draws every model still.
     pub poses: Option<&'a axcenity_scene::Poses>,
     /// A Terrain Studio brush, which takes the left button while it's on.
@@ -257,11 +263,12 @@ pub struct OverlayToggles {
     pub raycasts: bool,
     pub bounds: bool,
     pub emitters: bool,
+    pub nav_mesh: bool,
 }
 
 impl OverlayToggles {
     pub fn any(self) -> bool {
-        self.colliders || self.raycasts || self.bounds || self.emitters
+        self.colliders || self.raycasts || self.bounds || self.emitters || self.nav_mesh
     }
 }
 
@@ -502,6 +509,7 @@ impl Viewport {
             light_cones,
             overlays,
             debug_rays,
+            nav_mesh,
             poses,
             terrain_brush,
             character_view,
@@ -796,6 +804,11 @@ impl Viewport {
                 debug_rays,
                 eye,
             );
+        }
+        if overlays.nav_mesh
+            && let Some(mesh) = nav_mesh
+        {
+            paint_nav_mesh(&ui.painter_at(rect), &screen, mesh, eye);
         }
         let painter = ui.painter_at(rect);
         for &pose in preview {

@@ -175,6 +175,102 @@ pub fn debug_colliders(world: &World, assets: &Assets) -> Vec<ColliderOutline> {
     outlines
 }
 
+/// One solid collider, for seeing the world from above (the navigation
+/// mesh). Sensors (`CanCollide` off) and visual foliage are not solids.
+pub struct Solid {
+    pub instance: InstanceId,
+    /// The corners of the box around the collider, in world space.
+    pub min: Vector3,
+    pub max: Vector3,
+    collider: rapier3d::prelude::Collider,
+    /// A Terrain's ground: solid all the way down from its surface.
+    open_below: bool,
+}
+
+/// Where a vertical line passes through a [`Solid`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Column {
+    /// Where the line enters from below: `f32::NEG_INFINITY` under terrain.
+    pub bottom: f32,
+    /// Where it leaves at the top.
+    pub top: f32,
+    /// Which way the surface faces at the top.
+    pub normal: Vector3,
+}
+
+impl Solid {
+    /// The part of the vertical line at (`x`, `z`) inside this solid, or
+    /// `None` if the line misses it. Every Part, MeshPart and foliage
+    /// collider is convex, so a line passes through it once.
+    pub fn column(&self, x: f32, z: f32) -> Option<Column> {
+        let reach = self.max.y - self.min.y + 2.0;
+        let cast = |from: f32, dir: f32| {
+            let ray = Ray::new(Vec3::new(x, from, z), Vec3::new(0.0, dir, 0.0));
+            self.collider.shape().cast_ray_and_get_normal(
+                self.collider.position(),
+                &ray,
+                reach,
+                true,
+            )
+        };
+        let from_top = self.max.y + 1.0;
+        let top = cast(from_top, -1.0)?;
+        let bottom = if self.open_below {
+            f32::NEG_INFINITY
+        } else {
+            let from_bottom = self.min.y - 1.0;
+            cast(from_bottom, 1.0).map_or(self.min.y, |hit| from_bottom + hit.time_of_impact)
+        };
+        Some(Column {
+            bottom,
+            top: from_top - top.time_of_impact,
+            normal: to_vector3(top.normal),
+        })
+    }
+}
+
+/// Every solid collider in the Workspace: Parts and MeshParts with
+/// `CanCollide` on, Terrains and their colliding foliage, except the parts
+/// in `skip`. Does not create a physics world or change the tree.
+pub fn solids(world: &World, assets: &Assets, skip: &[InstanceId]) -> Vec<Solid> {
+    let mut solids = Vec::new();
+    let mut add = |instance, collider: rapier3d::prelude::Collider, open_below| {
+        let aabb = collider.compute_aabb();
+        solids.push(Solid {
+            instance,
+            min: to_vector3(aabb.mins),
+            max: to_vector3(aabb.maxs),
+            collider,
+            open_below,
+        });
+    };
+    for id in world.descendants(world.workspace()) {
+        if skip.contains(&id) {
+            continue;
+        }
+        let Some(state) = PartState::read(world, id, assets) else {
+            continue;
+        };
+        let pose = state.pose();
+        if state.can_collide {
+            let mut collider = shapes::collider(&state.shape, to_vec3(state.size));
+            collider.set_position(pose);
+            add(id, collider, matches!(state.shape, Form::Terrain(_)));
+        }
+        if let Form::Terrain(terrain) = &state.shape {
+            // Colliding foliage is solid even when the ground isn't.
+            for (local, form, form_size) in
+                shapes::foliage_forms(&terrain.data, to_vec3(state.size), assets)
+            {
+                let mut collider = shapes::collider(&form, form_size);
+                collider.set_position(pose * local);
+                add(id, collider, false);
+            }
+        }
+    }
+    solids
+}
+
 fn transform(pose: Pose, local: Vec3) -> Vector3 {
     to_vector3(pose * local)
 }

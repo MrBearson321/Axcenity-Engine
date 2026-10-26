@@ -644,9 +644,9 @@ A new `nav` crate. The world builds one navigation mesh from collidable parts, t
 
 ### Acceptance criteria
 
-- [ ] A floor of parts and a terrain surface both make a walkable mesh, and a gap or a steep drop isn't walkable.
-- [ ] A non-colliding part and visual foliage add no walkable surface.
-- [ ] Moving a floor part or sculpting terrain, then rebuilding, changes the mesh to match.
+- [x] A floor of parts and a terrain surface both make a walkable mesh, and a gap or a steep drop isn't walkable.
+- [x] A non-colliding part and visual foliage add no walkable surface.
+- [x] Moving a floor part or sculpting terrain, then rebuilding, changes the mesh to match.
 
 ---
 

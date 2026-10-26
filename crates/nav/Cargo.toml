@@ -1,0 +1,16 @@
+[package]
+name = "axcenity-nav"
+description = "Navigation mesh built from the world's solid colliders. Physics and character must not depend on this crate."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+axcenity-assets.workspace = true
+axcenity-character.workspace = true
+axcenity-core.workspace = true
+axcenity-physics.workspace = true
+
+[lints]
+workspace = true

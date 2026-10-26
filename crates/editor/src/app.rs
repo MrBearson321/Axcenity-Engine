@@ -28,6 +28,7 @@ mod chrome;
 mod commands;
 mod edits;
 mod files;
+mod nav_overlay;
 mod session;
 mod settings;
 mod terrain;
@@ -256,9 +257,11 @@ pub struct EditorApp {
     /// View > Light Cones: show every light's reach in the viewport, not
     /// just the selected one's. Saved between runs.
     light_cones: bool,
-    /// View overlay toggles (colliders, raycasts, bounds, emitters). Saved
-    /// between runs. The player never draws them.
+    /// View overlay toggles (colliders, raycasts, bounds, emitters, the
+    /// navigation mesh). Saved between runs. The player never draws them.
     overlays: OverlayToggles,
+    /// The navigation mesh the overlay draws, while it's on.
+    nav_mesh: Option<nav_overlay::NavCache>,
 }
 
 /// Ribbon buttons that act on the whole app, noted while the ribbon is
@@ -387,6 +390,7 @@ const OVERLAY_COLLIDERS_KEY: &str = "overlay colliders";
 const OVERLAY_RAYCASTS_KEY: &str = "overlay raycasts";
 const OVERLAY_BOUNDS_KEY: &str = "overlay bounds";
 const OVERLAY_EMITTERS_KEY: &str = "overlay emitters";
+const OVERLAY_NAV_MESH_KEY: &str = "overlay nav mesh";
 const CONSOLE_HISTORY_KEY: &str = "console history";
 /// eframe's own key for the window's size and position. eframe still reads
 /// it at startup with `persist_window` off, so `save` blanks it.
@@ -540,6 +544,7 @@ impl EditorApp {
             ribbon_tabs: RibbonTabs::default(),
             light_cones: false,
             overlays: OverlayToggles::default(),
+            nav_mesh: None,
         };
         if let Some(folder) = folder {
             app.open(folder);
@@ -587,6 +592,8 @@ impl EditorApp {
             self.overlays.bounds = storage.get_string(OVERLAY_BOUNDS_KEY).as_deref() == Some("on");
             self.overlays.emitters =
                 storage.get_string(OVERLAY_EMITTERS_KEY).as_deref() == Some("on");
+            self.overlays.nav_mesh =
+                storage.get_string(OVERLAY_NAV_MESH_KEY).as_deref() == Some("on");
             if let Some(text) = storage.get_string(CONSOLE_HISTORY_KEY) {
                 self.console.load_history(&text);
             }
@@ -659,6 +666,10 @@ impl eframe::App for EditorApp {
         storage.set_string(
             OVERLAY_EMITTERS_KEY,
             flag(self.overlays.emitters).to_owned(),
+        );
+        storage.set_string(
+            OVERLAY_NAV_MESH_KEY,
+            flag(self.overlays.nav_mesh).to_owned(),
         );
         storage.set_string(CONSOLE_HISTORY_KEY, self.console.history_text());
         storage.set_string(RECENT_KEY, recent.join("\n"));

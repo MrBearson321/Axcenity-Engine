@@ -352,6 +352,13 @@ impl EditorApp {
                     "Emitters",
                     "Where each spatial Sound is heard from.",
                 );
+                overlay_menu_item(
+                    ui,
+                    &mut self.overlays.nav_mesh,
+                    icons::FOOTPRINTS,
+                    "Nav Mesh",
+                    "Where characters can walk, coloured by connected ground.",
+                );
                 ui.separator();
                 if ui
                     .button(theme::with_icon(icons::STAR, "New Ribbon Tab…"))

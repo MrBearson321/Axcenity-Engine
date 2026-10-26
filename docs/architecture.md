@@ -8,6 +8,7 @@ Map only. Open the one file that matches the change.
 - Instances and generational IDs: [architecture/data-model.md](architecture/data-model.md)
 - Frame order: [architecture/frame-loop.md](architecture/frame-loop.md)
 - Physics: [architecture/physics.md](architecture/physics.md)
+- Navigation mesh: [architecture/navigation.md](architecture/navigation.md)
 - Play mode: [architecture/play-mode.md](architecture/play-mode.md)
 - Platforms and file access: [architecture/portability.md](architecture/portability.md)
 

@@ -365,6 +365,53 @@ pub(super) fn paint_debug_overlays(
     }
 }
 
+/// Fills the navigation mesh's cells near the camera, one colour per
+/// connected region, so ground that can't be reached from elsewhere stands
+/// out, and draws the walkable area's edges.
+pub(super) fn paint_nav_mesh(
+    painter: &egui::Painter,
+    screen: &Screen,
+    mesh: &axcenity_nav::NavMesh,
+    eye: Vec3,
+) {
+    // Raised a little so the overlay reads on top of the ground it marks.
+    let lift = Vec3::new(0.0, 0.05, 0.0);
+    let near = |point: Vec3, distance: f32| (point - eye).length() <= distance;
+    for (index, cell) in mesh.cells().iter().enumerate() {
+        let corners = mesh.corners(index).map(|corner| v3(corner) + lift);
+        let centre = (corners[0] + corners[2]) * 0.5;
+        if !near(centre, NAV_FILL_DISTANCE) {
+            continue;
+        }
+        // Inset so the cells read as a grid.
+        let inset = corners.map(|corner| corner + (centre - corner) * 0.08);
+        let points: Option<Vec<egui::Pos2>> = inset.iter().map(|&c| screen.point(c)).collect();
+        if let Some(points) = points {
+            painter.add(egui::Shape::convex_polygon(
+                points,
+                nav_region_color(cell.region).gamma_multiply(0.35),
+                egui::Stroke::NONE,
+            ));
+        }
+    }
+    for (a, b) in mesh.outline() {
+        let (a, b) = (v3(a) + lift, v3(b) + lift);
+        if !near((a + b) * 0.5, TERRAIN_OVERLAY_DISTANCE) {
+            continue;
+        }
+        if let Some(line) = screen.line(a, b) {
+            painter.line_segment(line, egui::Stroke::new(1.5_f32, NAV_EDGE_COLOR));
+        }
+    }
+}
+
+/// A distinct hue for each region: the golden angle keeps neighbouring
+/// numbers far apart on the colour wheel.
+fn nav_region_color(region: u32) -> egui::Color32 {
+    let hue = (0.45 + region as f32 * 0.618_034).fract();
+    egui::ecolor::Hsva::new(hue, 0.65, 0.95, 1.0).into()
+}
+
 pub(super) fn bounds_edges(instance: &Instance) -> Option<[(Vec3, Vec3); 12]> {
     if let Some(pose) = Pose::of(instance) {
         return Some(angular::box_edges(pose));

@@ -351,6 +351,15 @@ impl Controllers {
     }
 }
 
+/// Every part a controller in the Workspace moves. They are characters,
+/// not ground, so the navigation mesh leaves them out.
+pub fn character_parts(world: &World) -> Vec<InstanceId> {
+    controllers(world)
+        .into_iter()
+        .flat_map(|id| parts_of(world, id))
+        .collect()
+}
+
 fn controllers(world: &World) -> Vec<InstanceId> {
     world
         .descendants(world.workspace())
