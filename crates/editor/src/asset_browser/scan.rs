@@ -17,6 +17,9 @@ pub fn kind_of(path: &str) -> Option<AssetKind> {
     if lower.ends_with(axcenity_assets::TEXTURE_SET_SUFFIX) {
         return Some(AssetKind::TextureSet);
     }
+    if lower.ends_with(axcenity_assets::MATERIAL_SUFFIX) {
+        return Some(AssetKind::Material);
+    }
     if lower.ends_with(axcenity_anim::CLIP_EXTENSION) {
         return Some(AssetKind::Animation);
     }
@@ -51,6 +54,7 @@ pub fn display_name(path: &str) -> String {
     for suffix in [
         PREFAB_SUFFIX,
         axcenity_assets::TEXTURE_SET_SUFFIX,
+        axcenity_assets::MATERIAL_SUFFIX,
         axcenity_anim::CLIP_EXTENSION,
         axcenity_anim::STATE_MACHINE_EXTENSION,
         BEHAVIOR_TREE_SUFFIX,

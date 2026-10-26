@@ -452,7 +452,11 @@ fn top_layer(world: &World, terrain: InstanceId) -> Option<InstanceId> {
         })
 }
 
-fn property_changes(id: InstanceId, before: Snapshot, after: Snapshot) -> Vec<PropertyEdit> {
+pub(super) fn property_changes(
+    id: InstanceId,
+    before: Snapshot,
+    after: Snapshot,
+) -> Vec<PropertyEdit> {
     after
         .into_iter()
         .filter_map(|(field, after_value)| {

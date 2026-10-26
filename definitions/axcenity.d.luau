@@ -511,6 +511,8 @@ declare extern type Part extends Instance with
 	Color: Color3
 	--- Plastic, Metal, Glass (see-through) or Neon (glows). Setting it resets Metalness and Roughness.
 	Material: EnumMaterial | "Plastic" | "Metal" | "Glass" | "Neon"
+	--- A material file in the project, such as "assets/materials/brick.material.json", drawn in place of Material, Metalness, Roughness and Emission; Color tints it and Transparency fades it. A SurfaceAppearance inside the part wins over it. Empty for none.
+	MaterialVariant: string
 	--- From 0 (not metal) to 1 (metal).
 	Metalness: number
 	--- From 0 (mirror-smooth) to 1 (matte).
@@ -540,6 +542,8 @@ declare extern type MeshPart extends Instance with
 	Anchored: boolean
 	--- The model's glTF or FBX file, inside the project folder, such as "assets/models/chair.glb"; `#` after it picks objects in the file ("assets/models/props.fbx#Bench"). The editor's Import Model sets it.
 	MeshId: string
+	--- A material file in the project, such as "assets/materials/brick.material.json", drawn in place of every material of the model, except one a SurfaceAppearance replaces. Empty for none.
+	MaterialVariant: string
 	--- Where the center of the model's box is, in studs. Setting it on an unanchored part teleports it and stops it moving.
 	Position: Vector3
 	--- Rotation in degrees around X, Y and Z, applied Z first, then X, then Y.

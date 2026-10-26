@@ -59,6 +59,7 @@ const GROUPS: [(&str, &[&str]); 19] = [
         &[
             "Color",
             "Material",
+            "MaterialVariant",
             "Metalness",
             "Roughness",
             "Transparency",
@@ -1100,6 +1101,7 @@ mod tests {
             [
                 "Color",
                 "Material",
+                "MaterialVariant",
                 "Metalness",
                 "Roughness",
                 "Transparency",

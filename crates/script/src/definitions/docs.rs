@@ -805,6 +805,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     ),
     (
         ClassName::Part,
+        "MaterialVariant",
+        "A material file in the project, such as \"assets/materials/brick.material.json\", drawn in place of Material, Metalness, Roughness and Emission; Color tints it and Transparency fades it. A SurfaceAppearance inside the part wins over it. Empty for none.",
+    ),
+    (
+        ClassName::Part,
         "Metalness",
         "From 0 (not metal) to 1 (metal).",
     ),
@@ -877,6 +882,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::MeshPart,
         "MeshId",
         "The model's glTF or FBX file, inside the project folder, such as \"assets/models/chair.glb\"; `#` after it picks objects in the file (\"assets/models/props.fbx#Bench\"). The editor's Import Model sets it.",
+    ),
+    (
+        ClassName::MeshPart,
+        "MaterialVariant",
+        "A material file in the project, such as \"assets/materials/brick.material.json\", drawn in place of every material of the model, except one a SurfaceAppearance replaces. Empty for none.",
     ),
     (
         ClassName::MeshPart,

@@ -89,7 +89,7 @@ fn a_property_changed_signal_fires_only_for_its_property_with_no_arguments() {
     assert!(
         output[2].ends_with(
             "Speed is not a property of Part; choose from Name, Parent, Anchored, CanCollide, \
-             CastShadow, Color, Emission, EmissiveColor, Material, Metalness, Orientation, \
+             CastShadow, Color, Emission, EmissiveColor, Material, MaterialVariant, Metalness, Orientation, \
              Position, Roughness, Shape, Size, TileSize, Transparency, WindAffected"
         ),
         "{}",

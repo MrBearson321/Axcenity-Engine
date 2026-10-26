@@ -743,6 +743,10 @@ impl ClassName {
                     ("Size", Value::Vector3(Vector3::new(4.0, 1.0, 2.0))),
                     ("Color", Value::Color3(Color3::new(0.64, 0.64, 0.64))),
                     ("Material", Value::Material(material)),
+                    // A material file in the project, such as
+                    // "assets/materials/brick.material.json", drawn in place
+                    // of Material (Color still tints it). Empty for none.
+                    ("MaterialVariant", Value::String(String::new())),
                     ("Metalness", Value::Number(preset.metalness)),
                     ("Roughness", Value::Number(preset.roughness)),
                     // Off, the part casts no sun shadow (it's still shaded).
@@ -768,6 +772,9 @@ impl ClassName {
                 // The model's file, relative to the project folder, such as
                 // "assets/models/chair.glb". Empty means no model yet.
                 ("MeshId", Value::String(String::new())),
+                // A material file drawn in place of the model's materials.
+                // Empty for none.
+                ("MaterialVariant", Value::String(String::new())),
                 ("Position", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
                 ("Orientation", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
                 // The model is stretched so its bounding box is this size.

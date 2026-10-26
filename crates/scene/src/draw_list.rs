@@ -17,6 +17,7 @@ use axcenity_render::{
 };
 use axcenity_ui::{Stylesheet, UiInput, UiInteraction, UiLayout};
 
+use crate::material;
 use crate::orientation::rotation_from_orientation;
 use crate::terrain::TerrainCache;
 
@@ -32,7 +33,7 @@ const AMBIENT: AmbientLight = AmbientLight {
 };
 /// How much brighter than its color a glowing part is drawn when bloom is
 /// on, so it goes past the bloom threshold and glows.
-const GLOW_BOOST: f32 = 2.5;
+pub(crate) const GLOW_BOOST: f32 = 2.5;
 
 /// Animated MeshParts' posed models, by MeshPart (the host's animators make
 /// them). A MeshPart in here is drawn posed; the rest are drawn still.
@@ -435,7 +436,9 @@ fn casts_shadow(instance: &Instance) -> bool {
 
 /// The draw item for a Part, or `None` for any other class. `glow` is how
 /// much brighter than its color a glowing part is drawn. A SurfaceAppearance
-/// inside the part replaces its flat color with that appearance's maps.
+/// inside the part replaces its flat color with that appearance's maps;
+/// without one, a `MaterialVariant` replaces its Material (and its
+/// Metalness, Roughness and Emission), tinted by its Color.
 fn part_draw_item(
     world: &World,
     instance: &Instance,
@@ -449,8 +452,63 @@ fn part_draw_item(
         .property("Material")
         .and_then(Value::as_material)?
         .preset();
+    let appearance = instance.children().iter().find_map(|&id| {
+        let child = world.get(id)?;
+        (child.class() == ClassName::SurfaceAppearance).then_some(child)
+    });
+    let variant = match appearance {
+        Some(_) => None,
+        None => material::variant_of(instance, assets),
+    };
 
     let color = [color.r, color.g, color.b];
+    let material = match (appearance, variant) {
+        (None, Some(standard)) => {
+            let mut material = material::variant_material(&standard, assets);
+            material.base_color = std::array::from_fn(|i| material.base_color[i] * color[i]);
+            material.opacity *= visibility(instance);
+            material
+        }
+        (appearance, _) => preset_material(instance, appearance, assets, preset, color, glow)?,
+    };
+    if material.opacity <= 0.0 {
+        return None;
+    }
+    let uv_tile = if has_texture_maps(&material) {
+        let tile = number("TileSize").unwrap_or(8.0);
+        if tile.is_finite() && tile > 0.0 {
+            tile as f32
+        } else {
+            0.0
+        }
+    } else {
+        0.0
+    };
+    Some(DrawItem {
+        shape: match shape {
+            PartType::Block => Shape::Block,
+            PartType::Ball => Shape::Sphere,
+            PartType::Cylinder => Shape::Cylinder,
+            PartType::Wedge => Shape::Wedge,
+        },
+        transform,
+        material,
+        uv_tile,
+        casts_shadow: casts_shadow(instance),
+    })
+}
+
+/// A Part's material from its Material preset and properties, with
+/// `appearance`'s maps over it. `None` when it's invisible.
+fn preset_material(
+    instance: &Instance,
+    appearance: Option<&Instance>,
+    assets: &Assets,
+    preset: axcenity_core::MaterialPreset,
+    color: [f32; 3],
+    glow: f32,
+) -> Option<Material> {
+    let number = |name| instance.property(name).and_then(Value::as_number);
     let opacity = preset.opacity * visibility(instance);
     if opacity <= 0.0 {
         return None;
@@ -480,35 +538,10 @@ fn part_draw_item(
         opacity,
         ..Material::default()
     };
-    let appearance = instance.children().iter().find_map(|&id| {
-        let child = world.get(id)?;
-        (child.class() == ClassName::SurfaceAppearance).then_some(child)
-    });
     if let Some(appearance) = appearance {
         overlay_appearance(&mut material, appearance, assets);
     }
-    let uv_tile = if has_texture_maps(&material) {
-        let tile = number("TileSize").unwrap_or(8.0);
-        if tile.is_finite() && tile > 0.0 {
-            tile as f32
-        } else {
-            0.0
-        }
-    } else {
-        0.0
-    };
-    Some(DrawItem {
-        shape: match shape {
-            PartType::Block => Shape::Block,
-            PartType::Ball => Shape::Sphere,
-            PartType::Cylinder => Shape::Cylinder,
-            PartType::Wedge => Shape::Wedge,
-        },
-        transform,
-        material,
-        uv_tile,
-        casts_shadow: casts_shadow(instance),
-    })
+    Some(material)
 }
 
 /// True when `material` samples a texture, so a built-in shape should
@@ -618,8 +651,8 @@ fn place_maps(material: &mut Material, appearance: &Instance) {
 }
 
 /// A MeshPart's draw items, one per part of its model, each with the
-/// model's own material, or with the maps of the SurfaceAppearance inside
-/// it for that material. Until it has a model (no `MeshId` yet, or one
+/// model's own material, or its `MaterialVariant` in place of them all, or
+/// with the maps of the SurfaceAppearance inside it for that material. Until it has a model (no `MeshId` yet, or one
 /// that can't be loaded), it's drawn as a plain grey box, so it can still
 /// be seen and picked. With `posed` (the MeshPart's ID and a pose of its
 /// model), the model is drawn in that pose.
@@ -658,6 +691,7 @@ fn mesh_part_draw_items(
         .filter_map(|&id| world.get(id))
         .filter(|child| child.class() == ClassName::SurfaceAppearance)
         .collect();
+    let variant = material::variant_of(instance, assets);
     // A pose of another model (the MeshId just changed) isn't used.
     let posed = posed.filter(|(_, posed)| {
         posed.model_key == model.key() && posed.primitives.len() == model.primitives.len()
@@ -667,9 +701,10 @@ fn mesh_part_draw_items(
             appearance.property("MaterialName").and_then(Value::as_str)
                 == Some(primitive.material.name.as_str())
         });
-        let material = match appearance {
-            Some(appearance) => surface_material(&primitive.material, appearance, assets),
-            None => model_material(&primitive.material),
+        let material = match (appearance, &variant) {
+            (Some(appearance), _) => surface_material(&primitive.material, appearance, assets),
+            (None, Some(standard)) => material::variant_material(standard, assets),
+            (None, None) => model_material(&primitive.material),
         };
         let shape: Arc<dyn MeshSource> = match posed {
             Some((part, posed)) => Arc::new(PosedMesh {
@@ -837,7 +872,7 @@ fn model_material(material: &ModelMaterial) -> Material {
 }
 
 /// A model's image, handed to the renderer without copying it.
-fn texture(image: &Arc<Image>) -> Arc<dyn TextureSource> {
+pub(crate) fn texture(image: &Arc<Image>) -> Arc<dyn TextureSource> {
     Arc::new(ImageTexture(image.clone()))
 }
 

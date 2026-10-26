@@ -180,10 +180,10 @@ A `*.material.json` file holds one standard material: color, metalness, roughnes
 
 ### Acceptance criteria
 
-- [ ] A material file round-trips through save and load. An instance takes its base's values except the ones it overrides. A cycle or missing base is reported once and falls back to the default material (unit tests in `assets`).
-- [ ] Two parts using two instances of one base draw with their own overrides, and changing the base file changes both (GPU or draw-list test).
-- [ ] A world with `MaterialVariant` set saves, reloads and exports with its material files, and runs the same in the player.
-- [ ] Worlds with no material files load and draw as before.
+- [x] A material file round-trips through save and load. An instance takes its base's values except the ones it overrides. A cycle or missing base is reported once and falls back to the default material (unit tests in `assets`).
+- [x] Two parts using two instances of one base draw with their own overrides, and changing the base file changes both (GPU or draw-list test).
+- [x] A world with `MaterialVariant` set saves, reloads and exports with its material files, and runs the same in the player.
+- [x] Worlds with no material files load and draw as before.
 
 ---
 

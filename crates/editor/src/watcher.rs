@@ -1,8 +1,8 @@
 //! Noticing changes made to the project's files by other programs, such as
 //! a script edited in VS Code.
 //!
-//! A background thread looks at the world file and every script file twice
-//! a second, and compares each file's size and modification time with the
+//! A background thread looks at the world file, every script file,
+//! stylesheet and material file twice a second, and compares each file's size and modification time with the
 //! last look. It works the same on every OS and needs no extra library.
 //! When something changed, it sends the changed paths to the editor and
 //! wakes it up, so an idle editor stays idle otherwise.
@@ -30,22 +30,44 @@ type Stamp = (Option<SystemTime>, u64);
 /// `world.json` or `scripts/pad.server.lua`). Files that aren't there are left out.
 pub type Stamps = BTreeMap<String, Stamp>;
 
-/// The stamps of the world file, every script file and every stylesheet in
-/// `folder` now.
+/// The stamps of the world file, every script file, every stylesheet and
+/// every material file in `folder` now.
 pub fn stamps(folder: &Path) -> Stamps {
     // Folders that can't be read just look empty; the editor reports
     // problems when it reads the files themselves.
     let mut ignored = Vec::new();
     let scripts = axcenity_project::find_scripts(folder, &mut ignored);
     let stylesheets = axcenity_project::find_stylesheets(folder, &mut ignored);
+    let mut materials = Vec::new();
+    find_materials(&folder.join("assets"), "assets", &mut materials);
     std::iter::once(axcenity_project::WORLD_FILE.to_string())
         .chain(scripts)
         .chain(stylesheets)
+        .chain(materials)
         .filter_map(|path| {
             let metadata = std::fs::metadata(folder.join(&path)).ok()?;
             Some((path, (metadata.modified().ok(), metadata.len())))
         })
         .collect()
+}
+
+/// Adds the material files in `directory` and its folders to `found`, by
+/// their project paths (`path` is `directory`'s).
+fn find_materials(directory: &Path, path: &str, found: &mut Vec<String>) {
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let inner = format!("{path}/{name}");
+        match entry.file_type() {
+            Ok(kind) if kind.is_dir() => find_materials(&entry.path(), &inner, found),
+            Ok(kind) if kind.is_file() && axcenity_assets::is_material_file(&name) => {
+                found.push(inner)
+            }
+            _ => {}
+        }
+    }
 }
 
 /// The paths that are new, gone, or have a different stamp in `new`, sorted.
@@ -165,12 +187,20 @@ mod tests {
         std::fs::remove_file(folder.join("scripts/b.server.lua")).unwrap();
         std::fs::write(folder.join("scripts/c.server.lua"), "c").unwrap();
         std::fs::write(folder.join("scripts/notes.txt"), "not watched").unwrap();
+        std::fs::create_dir_all(folder.join("assets/materials/stone")).unwrap();
+        std::fs::write(
+            folder.join("assets/materials/stone/rock.material.json"),
+            "{}",
+        )
+        .unwrap();
+        std::fs::write(folder.join("assets/materials/notes.json"), "{}").unwrap();
         let after = stamps(&folder);
         let _ = std::fs::remove_dir_all(&folder);
 
         assert_eq!(
             changed(&before, &after),
             [
+                "assets/materials/stone/rock.material.json",
                 "scripts/a.server.lua",
                 "scripts/b.server.lua",
                 "scripts/c.server.lua"

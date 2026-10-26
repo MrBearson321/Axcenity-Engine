@@ -1306,6 +1306,112 @@ fn a_surface_appearances_tiling_repeats_its_map_and_its_offset_shifts_it() {
     assert_eq!(seen(&world), "BR");
 }
 
+/// A Part whose `MaterialVariant` is an instance of a base material file
+/// (the base has `stripes.png`; the instance repeats it twice as often)
+/// saves, reloads and exports with both files, and the exported game
+/// draws it the same as the project.
+#[test]
+fn a_material_variant_saves_reloads_and_exports_with_its_material_files() {
+    use axcenity_assets::{MapFile, MaterialFile, MaterialMaps, write_material_file};
+    use axcenity_core::ClassName;
+    let Some((device, queue)) = test_gpu() else {
+        return;
+    };
+    let folder = stripes_project("material-export");
+    fs::create_dir_all(folder.join("assets/textures")).unwrap();
+    fs::rename(
+        folder.join("stripes.png"),
+        folder.join("assets/textures/stripes.png"),
+    )
+    .unwrap();
+    fs::write(
+        folder.join("axcenity.json"),
+        format!(
+            r#"{{"name":"Materials","format_version":{}}}"#,
+            axcenity_project::FORMAT_VERSION
+        ),
+    )
+    .unwrap();
+    let base = "assets/materials/stripes.material.json";
+    let twice = "assets/materials/stripes-twice.material.json";
+    write_material_file(
+        &folder.join(base),
+        &MaterialFile {
+            roughness: Some(1.0),
+            maps: MaterialMaps {
+                color: Some(MapFile::of("assets/textures/stripes.png")),
+                ..MaterialMaps::default()
+            },
+            ..MaterialFile::default()
+        },
+    )
+    .unwrap();
+    write_material_file(
+        &folder.join(twice),
+        &MaterialFile {
+            base: Some(base.into()),
+            tiling: Some([2.0, 1.0]),
+            ..MaterialFile::default()
+        },
+    )
+    .unwrap();
+
+    let mut world = World::new();
+    let part = world.create(ClassName::Part).unwrap();
+    world.set_parent(part, Some(world.workspace())).unwrap();
+    for (name, value) in [
+        ("Size", Value::Vector3(Vector3::new(8.0, 8.0, 1.0))),
+        (
+            "Color",
+            Value::Color3(axcenity_core::Color3::new(1.0, 1.0, 1.0)),
+        ),
+        ("MaterialVariant", Value::String(twice.into())),
+    ] {
+        world.set_property(part, name, value).unwrap();
+    }
+    axcenity_project::save_world(&folder, &world).unwrap();
+
+    let mut renderer = axcenity_render::TextureRenderer::new(&device, &queue, 64, 64);
+    let eye = Vec3::new(0.0, 0.0, 10.0);
+    let mut drawn = |folder: &Path| {
+        let project = axcenity_project::load(folder).unwrap();
+        assert!(project.problems.is_empty(), "{:?}", project.problems);
+        let variant = project
+            .world
+            .descendants(project.world.workspace())
+            .into_iter()
+            .find_map(|id| {
+                let instance = project.world.get(id)?;
+                instance
+                    .property("MaterialVariant")?
+                    .as_str()
+                    .map(str::to_owned)
+            });
+        assert_eq!(variant.as_deref(), Some(twice));
+        let assets = Assets::new(folder);
+        let runs = stripes_seen(&mut renderer, &project.world, &assets, eye).0;
+        (runs, renderer.read_pixels())
+    };
+    let (runs, pixels) = drawn(&folder);
+    assert_eq!(runs, "RBRB");
+
+    let exported = folder.with_extension("exported");
+    let _ = fs::remove_dir_all(&exported);
+    let packed = axcenity_project::pack_game(&folder).unwrap();
+    axcenity_project::unpack_game(&packed, &exported).unwrap();
+    for file in [base, twice, "assets/textures/stripes.png"] {
+        assert!(exported.join(file).is_file(), "{file} is exported");
+    }
+    let (exported_runs, exported_pixels) = drawn(&exported);
+    assert_eq!(exported_runs, "RBRB");
+    assert!(
+        exported_pixels == pixels,
+        "the exported game draws the same frame"
+    );
+    let _ = fs::remove_dir_all(&folder);
+    let _ = fs::remove_dir_all(&exported);
+}
+
 fn start_example(name: &str) -> (World, ScriptRuntime) {
     let (world, scripts, _) = start_example_in(name);
     (world, scripts)

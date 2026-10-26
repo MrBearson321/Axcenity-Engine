@@ -29,6 +29,7 @@ mod chrome;
 mod commands;
 mod edits;
 mod files;
+mod material_files;
 mod nav_overlay;
 mod session;
 mod settings;

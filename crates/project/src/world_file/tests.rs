@@ -523,6 +523,7 @@ fn written_world_has_the_hand_written_layout() {
             format!("{indent}    \"Emission\": 0,"),
             format!("{indent}    \"EmissiveColor\": [1, 1, 1],"),
             format!("{indent}    \"Material\": \"{material}\","),
+            format!("{indent}    \"MaterialVariant\": \"\","),
             format!("{indent}    \"Metalness\": 0,"),
             format!("{indent}    \"Orientation\": [0, 0, 0],"),
             format!("{indent}    \"Position\": {position},"),

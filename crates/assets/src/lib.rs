@@ -3,6 +3,8 @@
 //! - [`Assets`] loads each model a MeshPart names the first time
 //!   something asks for it, and keeps it. The player and the editor make one
 //!   per project and share it (it's a cheap handle) with `physics` and `scene`.
+//! - [`Assets::material`] reads a `*.material.json` file a part's
+//!   `MaterialVariant` names, with its base files ([`MaterialFile`]).
 //! - [`load_model`] reads a `.gltf`, `.glb` or `.fbx` file into a [`Model`]: plain
 //!   triangles, materials and textures, fitted into the 1×1×1 cube that every
 //!   part's mesh fills.
@@ -16,6 +18,7 @@
 
 mod fonts;
 mod import;
+mod material;
 mod model;
 mod texture_set;
 
@@ -30,6 +33,11 @@ pub use import::{
     TEXTURE_EXTENSIONS, TEXTURES_FOLDER, import_animation_file, import_audio, import_model,
     import_picks, import_texture, list_model_objects, load_model_file, load_takes_file,
     safe_file_name, unique_file_name,
+};
+pub use material::{
+    MATERIAL_SUFFIX, MATERIALS_FOLDER, MapFile, MapSettings, MaterialFile, MaterialFileError,
+    MaterialMaps, StandardMaps, StandardMaterial, is_material_file, material_json, parse_material,
+    read_material_file, write_material_file,
 };
 pub use model::{
     AlphaMode, Blend, Bone, BoneTransform, Channel, ChannelTexture, Image, Joint, Keys, MapSlot,
@@ -82,6 +90,9 @@ struct Shared {
     models: HashMap<String, Option<Arc<Model>>>,
     /// Every texture file asked for so far, by its path, the same way.
     textures: HashMap<String, Option<Arc<Image>>>,
+    /// Every material file asked for so far, by its path, put together
+    /// with its bases. `None` means it couldn't be read.
+    materials: HashMap<String, Option<material::Resolved>>,
     /// The takes of every model file asked for so far, by its path.
     takes: HashMap<String, Option<Arc<Vec<Take>>>>,
     /// Loading errors not yet collected by [`Assets::take_errors`].
@@ -168,6 +179,27 @@ impl Assets {
             return None;
         }
         store_texture(&mut shared, path, read_texture(&folder, path))
+    }
+
+    /// The material file at `path` (a part's `MaterialVariant`, such as
+    /// `assets/materials/brick.material.json`), put together with its
+    /// bases, the first time. `None` if `path` is empty or the file can't be
+    /// read; the reason goes to [`take_errors`](Self::take_errors), once. A
+    /// base that can't be read, or that leads around in a cycle, is
+    /// reported once too, and the default material stands in for it.
+    pub fn material(&self, path: &str) -> Option<Arc<StandardMaterial>> {
+        if path.is_empty() {
+            return None;
+        }
+        let mut shared = self.lock();
+        if let Some(material) = shared.materials.get(path) {
+            return material.as_ref().map(|resolved| resolved.material.clone());
+        }
+        let folder = shared.folder.clone()?;
+        let resolved = material::resolve(&folder, path, &mut shared.errors);
+        let material = resolved.as_ref().map(|resolved| resolved.material.clone());
+        shared.materials.insert(path.to_owned(), resolved);
+        material
     }
 
     /// From now on, [`texture`](Self::texture) doesn't wait for a file it
@@ -300,9 +332,10 @@ impl Assets {
         model
     }
 
-    /// Forgets `path` (a model file, with or without a `#` pick, or a
-    /// texture), so it's read again the next time it's asked for, after
-    /// the file was changed. The errors it gave are reported again too.
+    /// Forgets `path` (a model file, with or without a `#` pick, a
+    /// texture, or a material file, and every material built on it), so
+    /// it's read again the next time it's asked for, after the file was
+    /// changed. The errors it gave are reported again too.
     pub fn forget(&self, path: &str) {
         let file = path.split('#').next().unwrap_or(path);
         let mut shared = self.lock();
@@ -311,15 +344,26 @@ impl Assets {
             .retain(|mesh_id, _| mesh_id.split('#').next() != Some(file));
         shared.textures.remove(file);
         shared.takes.remove(file);
+        shared.materials.retain(|_, material| {
+            material
+                .as_ref()
+                .is_some_and(|resolved| !resolved.files.iter().any(|used| used == file))
+        });
+        // One that couldn't be read has no files to look at.
+        shared.materials.remove(file);
     }
 
-    /// Forgets every model, texture and take that couldn't be loaded, so
-    /// each is tried again, after files were added or fixed.
+    /// Forgets every model, texture, take and material that couldn't be
+    /// loaded (or whose base couldn't), so each is tried again, after files
+    /// were added or fixed.
     pub fn forget_failures(&self) {
         let mut shared = self.lock();
         shared.models.retain(|_, model| model.is_some());
         shared.textures.retain(|_, texture| texture.is_some());
         shared.takes.retain(|_, takes| takes.is_some());
+        shared
+            .materials
+            .retain(|_, material| material.as_ref().is_some_and(|resolved| !resolved.broken));
     }
 
     /// Removes and returns the loading errors since the last call, one line

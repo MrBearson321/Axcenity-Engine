@@ -1,5 +1,5 @@
-//! The files the first drawing of a world reads: MeshParts' models and the
-//! maps of SurfaceAppearances and TerrainLayers. A host can load them ahead
+//! The files the first drawing of a world reads: MeshParts' models, the
+//! maps of SurfaceAppearances and TerrainLayers, and parts' material files. A host can load them ahead
 //! of time (such as on a loading screen) and say which one it's on.
 
 use std::collections::HashSet;
@@ -28,12 +28,14 @@ pub enum AssetFile {
     Model(String),
     /// A map's texture file.
     Texture(String),
+    /// A part's `MaterialVariant`: the file, its bases and their maps.
+    Material(String),
 }
 
 impl AssetFile {
     pub fn path(&self) -> &str {
         match self {
-            Self::Model(path) | Self::Texture(path) => path,
+            Self::Model(path) | Self::Texture(path) | Self::Material(path) => path,
         }
     }
 
@@ -46,6 +48,13 @@ impl AssetFile {
             }
             Self::Texture(path) => {
                 assets.texture(path);
+            }
+            Self::Material(path) => {
+                if let Some(material) = assets.material(path) {
+                    for map in material.maps.paths() {
+                        assets.texture(map);
+                    }
+                }
             }
         }
     }
@@ -74,6 +83,14 @@ pub fn asset_files(world: &World) -> Vec<AssetFile> {
             ClassName::MeshPart => {
                 if let Some(mesh_id) = text("MeshId") {
                     add(AssetFile::Model(mesh_id));
+                }
+                if let Some(path) = text("MaterialVariant") {
+                    add(AssetFile::Material(path));
+                }
+            }
+            ClassName::Part => {
+                if let Some(path) = text("MaterialVariant") {
+                    add(AssetFile::Material(path));
                 }
             }
             ClassName::SurfaceAppearance | ClassName::TerrainLayer => {
@@ -118,6 +135,15 @@ mod tests {
                 .unwrap();
             world.set_parent(look, Some(part)).unwrap();
         }
+        let block = world.create(ClassName::Part).unwrap();
+        world
+            .set_property(
+                block,
+                "MaterialVariant",
+                Value::String("materials/brick.material.json".into()),
+            )
+            .unwrap();
+        world.set_parent(block, Some(workspace)).unwrap();
         // Not drawn, so not read.
         let stored = world.create(ClassName::MeshPart).unwrap();
         world
@@ -132,6 +158,7 @@ mod tests {
             [
                 AssetFile::Model("models/chair.glb".into()),
                 AssetFile::Texture("wood.png".into()),
+                AssetFile::Material("materials/brick.material.json".into()),
             ]
         );
     }

@@ -24,6 +24,10 @@ impl EditorApp {
                 self.world_file_changed();
             } else if project::is_stylesheet(path) {
                 self.stylesheet_file_changed(path);
+            } else if axcenity_assets::is_material_file(path) {
+                // Parts using it, or a material built on it, draw it anew.
+                self.assets.forget(path);
+                self.asset_browser.refresh();
             } else {
                 self.script_file_changed(path);
             }

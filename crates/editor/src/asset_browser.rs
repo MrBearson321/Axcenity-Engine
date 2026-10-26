@@ -70,6 +70,8 @@ pub enum AssetKind {
     Texture,
     /// A texture set (`*.texture.json`) and the maps beside it.
     TextureSet,
+    /// A material file (`*.material.json`).
+    Material,
     Audio,
     Particle,
     /// An animation clip (`*.anim.json`).
@@ -88,6 +90,7 @@ impl AssetKind {
             AssetKind::Prefab => icons::PACKAGE,
             AssetKind::Image => icons::IMAGE,
             AssetKind::Texture | AssetKind::TextureSet => icons::IMAGE_SQUARE,
+            AssetKind::Material => icons::SPHERE,
             AssetKind::Audio => icons::WAVEFORM,
             AssetKind::Particle => icons::SPARKLE,
             AssetKind::Animation => theme::AnimKind::Clip.icon(),
@@ -102,7 +105,7 @@ impl AssetKind {
             AssetKind::Prop | AssetKind::Model | AssetKind::Prefab => {
                 theme::class_color(ClassName::Part, visuals)
             }
-            AssetKind::Image | AssetKind::Texture | AssetKind::TextureSet => {
+            AssetKind::Image | AssetKind::Texture | AssetKind::TextureSet | AssetKind::Material => {
                 theme::class_color(ClassName::SurfaceAppearance, visuals)
             }
             AssetKind::Audio => theme::class_color(ClassName::Sound, visuals),
@@ -122,6 +125,7 @@ impl AssetKind {
             AssetKind::Image => "Image",
             AssetKind::Texture => "Texture",
             AssetKind::TextureSet => "Texture set",
+            AssetKind::Material => "Material",
             AssetKind::Audio => "Sound",
             AssetKind::Particle => "Particle",
             AssetKind::Animation => "Clip",
@@ -146,6 +150,9 @@ impl AssetKind {
             AssetKind::TextureSet => {
                 "Drag onto a part, MeshPart, or terrain (or a layer in the Terrain Studio) to \
                  fill its maps, or double-click to fill the selection."
+            }
+            AssetKind::Material => {
+                "Drag onto a part or MeshPart to draw it in this material (its MaterialVariant),                  or double-click to use it on the selection."
             }
             AssetKind::Audio => {
                 "Drag onto a part to put a Sound in it, or anywhere else for one in the Workspace."
@@ -266,7 +273,10 @@ impl Category {
             Category::Models => kind == AssetKind::Model,
             Category::Prefabs => kind == AssetKind::Prefab,
             Category::Images => kind == AssetKind::Image,
-            Category::Textures => matches!(kind, AssetKind::Texture | AssetKind::TextureSet),
+            Category::Textures => matches!(
+                kind,
+                AssetKind::Texture | AssetKind::TextureSet | AssetKind::Material
+            ),
             Category::Audio => kind == AssetKind::Audio,
             Category::Particles => kind == AssetKind::Particle,
             Category::Animations => {

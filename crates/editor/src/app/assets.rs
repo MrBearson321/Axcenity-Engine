@@ -100,6 +100,7 @@ impl EditorApp {
             AssetKind::Image => self.drop_image(entry, spot),
             AssetKind::Texture => self.drop_texture(entry, spot),
             AssetKind::TextureSet => self.apply_texture_set(entry, spot.part),
+            AssetKind::Material => self.apply_material(entry, spot.part),
             AssetKind::Particle => self.drop_particle_texture(entry, spot),
             AssetKind::Animation => self.open_animation_clip(&entry.path, true),
             AssetKind::Controller => self.drop_controller(entry, spot),
@@ -599,6 +600,10 @@ impl EditorApp {
             Some(AssetKind::TextureSet) => {
                 Err("texture sets are saved with Get texture in the Assets panel".to_owned())
             }
+            Some(AssetKind::Material) => Err(
+                "material files name textures in their own project, so they're made with Save                  as Material on a part's Explorer row"
+                    .to_owned(),
+            ),
             Some(AssetKind::Prop) | None => {
                 Err("it isn't a model, image, sound or prefab (`.prefab.json`) file".to_owned())
             }

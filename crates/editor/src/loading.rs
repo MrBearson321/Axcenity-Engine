@@ -194,6 +194,7 @@ impl Job {
             let kind = match file {
                 AssetFile::Model(_) => "model",
                 AssetFile::Texture(_) => "texture",
+                AssetFile::Material(_) => "material",
             };
             let at = index as f32 / files.len() as f32;
             self.report(

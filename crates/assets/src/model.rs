@@ -278,8 +278,9 @@ impl ChannelTexture {
     }
 }
 
-/// A color channel of an image.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// A color channel of an image. Saved by its name (`"Red"`) in material
+/// files.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Channel {
     #[default]
     Red,

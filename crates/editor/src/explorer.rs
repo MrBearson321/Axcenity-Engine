@@ -115,6 +115,8 @@ pub enum Action {
     Animate(InstanceId),
     /// Save `id` as a prefab, with every asset it uses, in an asset package.
     ExportPackage(InstanceId),
+    /// Save the Part `id`'s look as a material file.
+    SaveMaterial(InstanceId),
 }
 
 /// Changes `selection` for a click. The last id is the primary one (Properties
@@ -635,6 +637,8 @@ enum RowCommand {
     Animate,
     /// Export it as a prefab in an asset package.
     ExportPackage,
+    /// Save a Part's look as a material file.
+    SaveMaterial,
     Rename,
     Duplicate,
     Delete,
@@ -654,6 +658,7 @@ impl RowCommand {
             RowCommand::Open | RowCommand::Rename => None,
             RowCommand::Animate => Some(Action::Animate(id)),
             RowCommand::ExportPackage => Some(Action::ExportPackage(id)),
+            RowCommand::SaveMaterial => Some(Action::SaveMaterial(id)),
             RowCommand::Duplicate => Some(Action::Duplicate(id)),
             RowCommand::Delete => Some(Action::Delete(id)),
         }
@@ -760,6 +765,19 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
         .clicked()
     {
         chosen = Some(RowCommand::ExportPackage);
+    }
+    let is_part = world
+        .get(id)
+        .is_some_and(|instance| instance.class() == ClassName::Part);
+    if is_part
+        && ui
+            .button(theme::with_icon(icons::SPHERE, "Save as Material"))
+            .on_hover_text(
+                "Save its color, material and SurfaceAppearance as a material file in                  assets/materials, to drag onto other parts.",
+            )
+            .clicked()
+    {
+        chosen = Some(RowCommand::SaveMaterial);
     }
     ui.separator();
 
