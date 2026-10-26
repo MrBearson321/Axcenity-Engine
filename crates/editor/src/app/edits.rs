@@ -52,6 +52,7 @@ impl EditorApp {
     pub(super) fn unsaved(&self) -> bool {
         !self.history.is_saved()
             || self.tabs.any_unsaved()
+            || self.ui_graphs_unsaved()
             || self.project.as_ref().is_some_and(|project| {
                 project
                     .block_scripts
@@ -820,6 +821,10 @@ impl EditorApp {
     /// Undoes the last step, unless a handle is being dragged or the game
     /// is playing (undo would change a world that isn't on screen).
     pub(super) fn undo(&mut self) {
+        // Over the Event Graph, Ctrl+Z undoes in the graph.
+        if self.ui_designer.graph_has_pointer() && !self.playing() && self.undo_graph() {
+            return;
+        }
         if !self.viewport.is_dragging() && !self.ui_designer.is_dragging() && !self.playing() {
             if let Some(restored) = self.history.undo(&mut self.world) {
                 self.apply_history_texts(restored.texts);
@@ -829,6 +834,9 @@ impl EditorApp {
         }
     }
     pub(super) fn redo(&mut self) {
+        if self.ui_designer.graph_has_pointer() && !self.playing() && self.redo_graph() {
+            return;
+        }
         if !self.viewport.is_dragging() && !self.ui_designer.is_dragging() && !self.playing() {
             if let Some(restored) = self.history.redo(&mut self.world) {
                 self.apply_history_texts(restored.texts);

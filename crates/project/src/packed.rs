@@ -215,7 +215,12 @@ fn include_runtime_file(root: &Path, path: &Path) -> bool {
     let Some(Component::Normal(first)) = components.first() else {
         return false;
     };
-    if matches!(first.to_str(), Some("scripts" | "assets")) {
+    // UI Event Graphs stay graphs: loading compiles each to the
+    // LocalScript under its ScreenGui, as it does for a project folder.
+    if matches!(
+        first.to_str(),
+        Some("scripts" | "assets" | axcenity_blocks::ui_graph::UI_GRAPHS_FOLDER)
+    ) {
         return true;
     }
     // Stylesheets and fonts can be anywhere: UI text finds a font by its

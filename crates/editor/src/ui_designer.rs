@@ -33,6 +33,7 @@ mod anchors;
 pub(crate) mod arrange;
 mod artboard;
 pub(crate) mod bevel;
+mod event_graph;
 mod group;
 pub(crate) mod order;
 mod panels;
@@ -47,6 +48,7 @@ mod widget_section;
 
 pub use anchors::Pin;
 pub use arrange::UiClipboard;
+pub use event_graph::{DesignerTab, GraphPane, LivePreview};
 pub use states::state_selector;
 pub use text_toolbar::Toggle;
 
@@ -59,6 +61,7 @@ use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 
 use crate::animation::preview::Canvas;
+use crate::node_graph::GraphView;
 use crate::properties::Edit;
 use crate::responsive;
 use crate::style_panel::StyleEdit;
@@ -224,6 +227,11 @@ pub enum DesignerAction {
     Restack(Vec<(InstanceId, f64)>),
     /// Makes a ScreenGui, when there's none to design.
     NewScreenGui,
+    /// An edit of the shown ScreenGui's Event Graph finished: the graph as
+    /// it was before, for undo.
+    GraphStep(axcenity_blocks::node_graph::NodeGraph),
+    /// What the Live Preview printed (true for an error), for Output.
+    PreviewOutput(Vec<(bool, String)>),
 }
 
 /// The action that sets `property` for `id` in `state`: in its own `#Id`
@@ -369,6 +377,24 @@ pub struct UiDesigner {
     canvas_rect: Option<egui::Rect>,
     /// Nothing but sky, for the renderer's 3D part (the artboard covers it).
     empty: World,
+    /// Design or Event Graph.
+    tab: DesignerTab,
+    /// Each ScreenGui's Event Graph view: where it looks, what's selected.
+    graph_views: HashMap<InstanceId, GraphView>,
+    /// The Event Graph had the pointer last frame.
+    graph_hovered: bool,
+    /// The Event Graph's Lua shows beside it.
+    show_lua: bool,
+    /// The Event Graph running on a copy of the world.
+    live: Option<LivePreview>,
+    /// The artboard is showing the Live Preview: clicks fire buttons.
+    previewing: bool,
+    /// Buttons clicked on the Live Preview's artboard this frame.
+    preview_clicks: Vec<InstanceId>,
+    /// What the pointer is over on the Live Preview's artboard.
+    preview_hover: Option<InstanceId>,
+    /// Start the Live Preview on the next frame, as its button does.
+    live_wanted: bool,
 }
 
 impl Default for UiDesigner {
@@ -411,6 +437,15 @@ impl Default for UiDesigner {
             order_target: None,
             canvas_rect: None,
             empty: World::new(),
+            tab: DesignerTab::Design,
+            graph_views: HashMap::new(),
+            graph_hovered: false,
+            show_lua: false,
+            live: None,
+            previewing: false,
+            preview_clicks: Vec::new(),
+            preview_hover: None,
+            live_wanted: false,
         }
     }
 }
@@ -666,11 +701,25 @@ impl UiDesigner {
     }
 
     /// Draws the designer and returns what was done in it.
+    #[cfg(test)]
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
         scene: &DesignerScene,
         render_state: Option<&RenderState>,
+    ) -> Vec<DesignerAction> {
+        self.show_with_graph(ui, scene, render_state, None)
+    }
+
+    /// [`Self::show`], with the shown ScreenGui's Event Graph (see
+    /// `event_graph.rs`), which the Event Graph tab edits in place and the
+    /// Live Preview runs.
+    pub fn show_with_graph(
+        &mut self,
+        ui: &mut egui::Ui,
+        scene: &DesignerScene,
+        render_state: Option<&RenderState>,
+        graph: Option<GraphPane>,
     ) -> Vec<DesignerAction> {
         let mut actions = Vec::new();
         self.follow(scene.world, scene.selected);
@@ -680,6 +729,7 @@ impl UiDesigner {
             self.marquee = None;
             self.anchor_drag = None;
             self.rotate_drag = None;
+            self.live = None;
             ui.label("There's no ScreenGui to design yet.");
             if ui
                 .add_enabled(
@@ -697,7 +747,23 @@ impl UiDesigner {
             }
             return actions;
         };
-        self.toolbar(ui, scene, gui, &mut actions);
+        self.toolbar(ui, scene, gui, graph.as_ref(), &mut actions);
+        self.run_live(ui, scene, gui, graph.as_ref(), &mut actions);
+        if self.tab == DesignerTab::EventGraph {
+            self.event_graph(ui, scene, gui, graph, &mut actions);
+            return actions;
+        }
+        self.graph_hovered = false;
+        if self.live.is_some() {
+            ui.weak(
+                "Live Preview: click the buttons to try the Event Graph. It runs on a copy \
+                 of the world, so nothing it does is kept.",
+            );
+            let size = ui.available_size().max(egui::vec2(80.0, 80.0));
+            let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+            self.live_artboard(ui, rect, scene, gui, render_state);
+            return actions;
+        }
         self.arrange_bar(ui, scene, gui, &mut actions);
         self.notes(ui, scene, gui, &mut actions);
         self.text_shortcuts(ui.ctx(), scene, gui, &mut actions);
@@ -796,11 +862,13 @@ impl UiDesigner {
         ui: &mut egui::Ui,
         scene: &DesignerScene,
         gui: InstanceId,
+        graph: Option<&GraphPane>,
         actions: &mut Vec<DesignerAction>,
     ) {
         let world = scene.world;
         let (width, height) = axcenity_ui::design_size(world, gui);
         responsive::toolbar(ui, |ui| {
+            self.tabs(ui, scene, gui, graph, actions);
             let guis = screen_guis(world);
             if guis.len() > 1 {
                 responsive::room_for(ui, 130.0);
@@ -817,6 +885,13 @@ impl UiDesigner {
                         }
                     });
             }
+            // The rest is about the artboard.
+            if self.tab == DesignerTab::EventGraph {
+                return;
+            }
+            // The scale mode and design size wrap inside their own group,
+            // so it starts a row unless it fits whole.
+            responsive::room_for(ui, 380.0);
             ui.add_enabled_ui(scene.editing, |ui| {
                 responsive::room_for(ui, 170.0);
                 let mut mode = scale_mode(world, gui);

@@ -1,0 +1,88 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "ScreenGui",
+        "name": "Menu",
+        "properties": {
+          "ScaleMode": "Scale",
+          "DesignWidth": 1280,
+          "DesignHeight": 720
+        },
+        "children": [
+          {
+            "class": "PageLayout",
+            "name": "Pages",
+            "properties": {
+              "Position": [0, 340, 0, 120],
+              "Size": [0, 600, 0, 480]
+            },
+            "children": [
+              {
+                "class": "Frame",
+                "name": "Home",
+                "properties": {
+                  "Id": "home",
+                  "Size": [1, 0, 1, 0]
+                },
+                "children": [
+                  {
+                    "class": "TextLabel",
+                    "name": "Title",
+                    "properties": {
+                      "Text": "Hello UI Graph",
+                      "Position": [0, 40, 0, 40],
+                      "Size": [0, 520, 0, 64],
+                      "BackgroundTransparency": 1
+                    }
+                  },
+                  {
+                    "class": "TextButton",
+                    "name": "SettingsButton",
+                    "properties": {
+                      "Id": "settings-button",
+                      "Text": "Settings",
+                      "Position": [0, 200, 0, 300],
+                      "Size": [0, 200, 0, 56]
+                    }
+                  }
+                ]
+              },
+              {
+                "class": "Frame",
+                "name": "Settings",
+                "properties": {
+                  "Id": "settings",
+                  "Size": [1, 0, 1, 0]
+                },
+                "children": [
+                  {
+                    "class": "TextLabel",
+                    "name": "Title",
+                    "properties": {
+                      "Text": "Settings",
+                      "Position": [0, 40, 0, 40],
+                      "Size": [0, 520, 0, 64],
+                      "BackgroundTransparency": 1
+                    }
+                  },
+                  {
+                    "class": "TextButton",
+                    "name": "Back",
+                    "properties": {
+                      "Id": "back",
+                      "Text": "Back",
+                      "Position": [0, 200, 0, 300],
+                      "Size": [0, 200, 0, 56]
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

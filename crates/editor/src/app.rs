@@ -33,6 +33,7 @@ mod settings;
 mod terrain;
 mod texture_set;
 mod tree_ops;
+mod ui_graphs;
 mod ui_selection;
 
 use std::collections::{HashMap, VecDeque};
@@ -78,7 +79,7 @@ use crate::theme::{self, Appearance, filled_icons, icons};
 use crate::thumbnail;
 use crate::toast::{self, Toasts};
 use crate::tree::{self, Insertable};
-use crate::ui_designer::{DesignerAction, DesignerScene, UiDesigner};
+use crate::ui_designer::{DesignerAction, DesignerScene, GraphPane, UiDesigner};
 use crate::ui_handles::{CssEdit, UiDragEdit, apply_css_edits};
 use crate::viewport::{
     self, DragEdit, DragKind, OverlayToggles, Viewport, ViewportOutput, ViewportScene,
@@ -452,6 +453,8 @@ struct OpenProject {
     /// read or written. Play reads their files again, for the newest code.
     scripts: Vec<ScriptFile>,
     block_scripts: Vec<BlockDocument>,
+    /// Each ScreenGui's UI Event Graph, as edited (see `app/ui_graphs.rs`).
+    ui_graphs: Vec<ui_graphs::UiGraphDocument>,
     /// Blocks switched to Code, by the code file's path, with the code they
     /// became: switched back with that code unchanged, they come back as
     /// they were (loose blocks and where each stack was).
@@ -1005,5 +1008,7 @@ mod state_machine_tests;
 mod tests;
 #[cfg(test)]
 mod ui_designer_tests;
+#[cfg(test)]
+mod ui_graph_tests;
 #[cfg(test)]
 mod ui_selection_tests;

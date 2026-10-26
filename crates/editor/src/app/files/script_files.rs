@@ -3,7 +3,7 @@ use crate::scripts::ScriptView;
 
 impl EditorApp {
     /// The path of the file of the Script `id`.
-    pub(super) fn script_path(&self, id: InstanceId) -> Option<String> {
+    pub(in crate::app) fn script_path(&self, id: InstanceId) -> Option<String> {
         let project = self.project.as_ref()?;
         let script = project
             .scripts
@@ -93,6 +93,11 @@ impl EditorApp {
     /// Opens the script at `path` in a tab (or shows its tab), with the
     /// cursor on `line` if there is one.
     pub(in crate::app) fn open_script(&mut self, path: &str, line: Option<usize>) {
+        // A graph's LocalScript is shown as its graph: its Lua can't be edited.
+        if axcenity_blocks::ui_graph::is_ui_graph(path) {
+            self.open_ui_graph(path);
+            return;
+        }
         let known = self
             .project
             .as_ref()

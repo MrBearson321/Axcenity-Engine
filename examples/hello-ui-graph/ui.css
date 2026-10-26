@@ -1,0 +1,19 @@
+/* The menu's look. What its buttons do is in ui/Menu.uigraph.json, the
+   UI Designer's Event Graph. */
+
+#home, #settings {
+    background-color: #1f2937;
+    border-radius: 16px;
+}
+
+#home TextLabel, #settings TextLabel {
+    color: #f9fafb;
+    font-size: 40px;
+}
+
+#settings-button, #back {
+    background-color: #3b82f6;
+    color: #ffffff;
+    font-size: 22px;
+    border-radius: 10px;
+}

@@ -607,9 +607,42 @@ fn panic_message(payload: &(dyn Any + Send)) -> String {
 /// The newest text of each script in the project in `folder`, read again
 /// from disk so Play runs what was last saved in the code editor. A script
 /// that can't be read is left out, with the reason in `output`.
-pub fn read_scripts(folder: &Path, scripts: &[ScriptFile], output: &mut Output) -> Vec<ScriptFile> {
+pub fn read_scripts(
+    folder: &Path,
+    scripts: &[ScriptFile],
+    world: &World,
+    output: &mut Output,
+) -> Vec<ScriptFile> {
     let mut fresh = Vec::new();
     for script in scripts {
+        // A UI Event Graph compiles against the world as it is now; one
+        // with problems doesn't run.
+        if axcenity_blocks::ui_graph::is_ui_graph(&script.path) {
+            let compiled = axcenity_project::read_ui_graph(folder, &script.path)
+                .map_err(|err| format!("{:#}", anyhow::Error::new(err)))
+                .and_then(|graph| {
+                    axcenity_project::compile_graph_for(world, &script.path, &graph).map_err(
+                        |errors| {
+                            let problems: Vec<String> =
+                                errors.iter().map(ToString::to_string).collect();
+                            format!(
+                                "its Event Graph has problems, shown on its nodes in the UI \
+                                 Designer: {}",
+                                problems.join("; ")
+                            )
+                        },
+                    )
+                });
+            match compiled {
+                Ok(source) => fresh.push(ScriptFile {
+                    instance: script.instance,
+                    path: script.path.clone(),
+                    source,
+                }),
+                Err(why) => output.error(format!("{} won't run: {why}", script.path)),
+            }
+            continue;
+        }
         match axcenity_project::read_script(folder, &script.path) {
             Ok(source) => fresh.push(ScriptFile {
                 instance: script.instance,

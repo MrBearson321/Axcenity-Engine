@@ -626,9 +626,9 @@ Each ScreenGui has one graph saved as `<ScreenGui>.uigraph.json`. It compiles to
 
 ### Acceptance criteria
 
-- [ ] "Button Activated → Show Page Settings" works in Live Preview and in Play.
-- [ ] A bad graph (for example, an unconnected required pin) shows errors on its nodes, not Lua errors.
-- [ ] The generated LocalScript is ordinary Lua that the player runs without the editor.
+- [x] "Button Activated → Show Page Settings" works in Live Preview and in Play.
+- [x] A bad graph (for example, an unconnected required pin) shows errors on its nodes, not Lua errors.
+- [x] The generated LocalScript is ordinary Lua that the player runs without the editor.
 
 ---
 

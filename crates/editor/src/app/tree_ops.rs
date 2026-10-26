@@ -18,6 +18,13 @@ impl EditorApp {
                 .get(id)
                 .is_some_and(|instance| instance.class().is_script())
         };
+        // A graph's LocalScript changes only with its graph.
+        if let Action::Rename(id, _) | Action::Delete(id) | Action::Duplicate(id) = &action
+            && let Some(gui) = self.graph_script_gui(*id)
+        {
+            self.explain_graph_script(gui);
+            return;
+        }
         match action {
             Action::Insert { what, near } => self.insert(what, near),
             Action::InsertScript(class) => self.insert_script(class),

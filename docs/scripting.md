@@ -18,3 +18,4 @@ Map only. Luau and block scripts (shown as blocks or as a graph) share one runti
 - Server, client, input, camera: [scripting/client-server.md](scripting/client-server.md)
 - Blocks and the Lua each becomes: [scripting/blocks.md](scripting/blocks.md)
 - The Graph view (Blueprint-style nodes and wires for block scripts): [scripting/graphs.md](scripting/graphs.md)
+- UI Event Graphs (a ScreenGui's nodes compiled to its LocalScript, the generic graph editor, Live Preview): [scripting/ui-graphs.md](scripting/ui-graphs.md)

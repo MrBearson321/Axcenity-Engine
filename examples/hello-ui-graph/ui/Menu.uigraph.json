@@ -1,0 +1,69 @@
+{
+  "format_version": 1,
+  "nodes": [
+    {
+      "id": 1,
+      "kind": "button_activated",
+      "position": [40.0, 40.0],
+      "values": {
+        "Button": "Pages/Home/SettingsButton"
+      }
+    },
+    {
+      "id": 2,
+      "kind": "show_page",
+      "position": [320.0, 40.0],
+      "values": {
+        "Page": "Settings",
+        "Pages": "Pages"
+      }
+    },
+    {
+      "id": 3,
+      "kind": "button_activated",
+      "position": [40.0, 220.0],
+      "values": {
+        "Button": "Pages/Settings/Back"
+      }
+    },
+    {
+      "id": 4,
+      "kind": "show_page",
+      "position": [320.0, 220.0],
+      "values": {
+        "Page": "Home",
+        "Pages": "Pages"
+      }
+    },
+    {
+      "id": 5,
+      "kind": "print",
+      "position": [600.0, 220.0],
+      "values": {
+        "Value": "Back on the home page"
+      }
+    }
+  ],
+  "wires": [
+    {
+      "from": { "node": 1, "pin": "" },
+      "to": { "node": 2, "pin": "" }
+    },
+    {
+      "from": { "node": 3, "pin": "" },
+      "to": { "node": 4, "pin": "" }
+    },
+    {
+      "from": { "node": 4, "pin": "" },
+      "to": { "node": 5, "pin": "" }
+    }
+  ],
+  "comments": [
+    {
+      "id": 6,
+      "text": "Settings and Back switch pages",
+      "position": [20.0, 0.0],
+      "size": [860.0, 380.0]
+    }
+  ]
+}

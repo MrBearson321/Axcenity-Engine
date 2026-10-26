@@ -9,6 +9,7 @@
 //!   world.json      the Instances in the world
 //!   scripts/        `*.server.lua`, `*.client.lua` and `*.module.lua`
 //!                   files, in subfolders if you like
+//!   ui/             `<ScreenGui>.uigraph.json` UI Event Graphs
 //!   *.css           project stylesheets, also found in subfolders
 //! ```
 //!
@@ -36,10 +37,12 @@ mod world_file;
 mod scripts;
 mod stylesheets;
 mod templates;
+mod ui_graphs;
 
 pub use scripts::*;
 pub use stylesheets::*;
 pub use templates::*;
+pub use ui_graphs::*;
 
 use axcenity_blocks::{Block, BlockKind, BlockScript, reserve_block_ids, translate};
 use std::fs;
@@ -164,6 +167,9 @@ pub struct Project {
     pub scripts: Vec<ScriptFile>,
     /// Parsed block documents corresponding to generated entries in `scripts`.
     pub block_scripts: Vec<BlockScriptFile>,
+    /// The UI Event Graphs (`ui/*.uigraph.json`). Each that compiles has a
+    /// LocalScript under its ScreenGui, at the end of `scripts`.
+    pub ui_graphs: Vec<UiGraphFile>,
     /// CSS files, in stable path order, ready for the UI crate to parse.
     pub stylesheets: Vec<StylesheetFile>,
     /// The files that couldn't be loaded. Each was left out, and the rest
@@ -285,6 +291,8 @@ pub enum LoadError {
     },
     #[error("`{}` is not a valid block script: {message}", path.display())]
     BlockScript { path: PathBuf, message: String },
+    #[error("the UI Event Graph `{}` doesn't run: {message}", path.display())]
+    UiGraph { path: PathBuf, message: String },
     #[error("the terrain in `{}` couldn't be loaded, so it's flat: {message}", path.display())]
     Terrain { path: PathBuf, message: String },
 }
@@ -396,7 +404,8 @@ pub fn load_with_progress(
     };
     let damaged_terrains =
         terrain_files::load_terrains_reporting(folder, &mut world, &mut problems, progress);
-    let (scripts, block_scripts) = load_scripts(folder, &mut world, &mut problems, progress);
+    let (mut scripts, block_scripts) = load_scripts(folder, &mut world, &mut problems, progress);
+    let ui_graphs = load_ui_graphs(folder, &mut world, &mut scripts, &mut problems);
     progress(LoadStep::Stylesheets);
     let stylesheets = load_stylesheets(folder, &mut problems);
 
@@ -406,6 +415,7 @@ pub fn load_with_progress(
         world,
         scripts,
         block_scripts,
+        ui_graphs,
         stylesheets,
         problems,
         world_loaded,

@@ -18,7 +18,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde::{Deserialize, Deserializer, Serialize};
 use thiserror::Error;
 
+pub mod node_graph;
 mod translate;
+pub mod ui_graph;
 
 pub use translate::*;
 
@@ -993,3 +995,5 @@ mod tests;
 
 #[cfg(test)]
 mod tween_tests;
+#[cfg(test)]
+mod ui_graph_tests;

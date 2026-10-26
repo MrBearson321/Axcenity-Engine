@@ -1528,3 +1528,62 @@ fn hello_settings_widgets_change_by_pointer_fire_value_changed_and_move_from_scr
         .collect();
     assert!(errors.is_empty(), "{errors:?}");
 }
+
+#[test]
+fn hello_ui_graph_runs_its_event_graph_as_an_ordinary_local_script() {
+    let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-ui-graph");
+    let project = axcenity_project::load(&folder).unwrap();
+    let problems: Vec<String> = project.problems.iter().map(ToString::to_string).collect();
+    assert!(problems.is_empty(), "{problems:?}");
+    let mut world = project.world;
+    let menu = world.find_first_child(world.workspace(), "Menu").unwrap();
+
+    // The graph became a LocalScript under its ScreenGui, of plain Lua.
+    let script = world.find_first_child(menu, "EventGraph").unwrap();
+    assert_eq!(
+        world.get(script).unwrap().class(),
+        axcenity_core::ClassName::LocalScript
+    );
+    let file = project
+        .scripts
+        .iter()
+        .find(|file| file.instance == script)
+        .unwrap();
+    assert_eq!(file.path, "ui/Menu.uigraph.json");
+    assert!(
+        file.source
+            .contains("gui.Pages.Home.SettingsButton.Activated:Connect(function()\n    gui.Pages.CurrentPage = \"Settings\"\nend)"),
+        "{}",
+        file.source
+    );
+
+    let mut scripts = ScriptRuntime::new();
+    start_scripts(&mut scripts, &mut world, &project.scripts);
+    let pages = world.find_first_child(menu, "Pages").unwrap();
+    let home = world.find_first_child(pages, "Home").unwrap();
+    let settings = world.find_first_child(home, "SettingsButton").unwrap();
+    let page = |world: &World| {
+        world
+            .get(pages)
+            .unwrap()
+            .property("CurrentPage")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
+    assert_eq!(page(&world), "");
+
+    // Button Activated → Show Page Settings.
+    scripts.activate_ui_button(&mut world, settings);
+    assert_eq!(page(&world), "Settings");
+    let settings_page = world.find_first_child(pages, "Settings").unwrap();
+    let back = world.find_first_child(settings_page, "Back").unwrap();
+    scripts.activate_ui_button(&mut world, back);
+    assert_eq!(page(&world), "Home");
+    let output: Vec<String> = scripts
+        .take_output()
+        .into_iter()
+        .map(|line| line.text)
+        .collect();
+    assert_eq!(output, ["Back on the home page"]);
+}

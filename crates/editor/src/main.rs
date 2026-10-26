@@ -28,6 +28,7 @@ mod import_dialog;
 mod layout;
 mod loading;
 mod lua_syntax;
+mod node_graph;
 mod output;
 mod placing;
 mod play;

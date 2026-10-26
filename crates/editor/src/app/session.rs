@@ -223,6 +223,7 @@ impl EditorApp {
                 highlighted: None,
             })
             .collect();
+        let ui_graphs = ui_graphs::documents(&project.world, project.ui_graphs);
         self.project = Some(OpenProject {
             name: project.manifest.name,
             show_splash,
@@ -233,6 +234,7 @@ impl EditorApp {
             stylesheet_texts,
             scripts: project.scripts,
             block_scripts,
+            ui_graphs,
             remembered_blocks: HashMap::new(),
             world_text,
             keep_world_file: !project.world_loaded,
@@ -352,7 +354,12 @@ impl EditorApp {
         ));
         // `project` borrows `self.project` and `output` borrows `self.output`:
         // different fields, so Rust allows both borrows at once.
-        let scripts = play::read_scripts(&project.folder, &project.scripts, &mut self.output);
+        let scripts = play::read_scripts(
+            &project.folder,
+            &project.scripts,
+            &self.world,
+            &mut self.output,
+        );
         let (position, orientation) = self.viewport.camera_view();
         match Session::start(
             &self.world,

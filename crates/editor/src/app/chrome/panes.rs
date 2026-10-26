@@ -108,18 +108,37 @@ impl EditorApp {
         ui: &mut egui::Ui,
         render_state: Option<&RenderState>,
     ) {
+        // The shown ScreenGui's Event Graph, lent to the designer.
+        self.ui_designer
+            .follow(shown(&self.world, &self.play), self.selected);
+        let gui = self.ui_designer.current_gui();
+        let document = gui.and_then(|gui| self.graph_document(gui));
+        let path = gui
+            .and_then(|gui| self.world.get(gui))
+            .map(|gui| axcenity_blocks::ui_graph::ui_graph_path(gui.name()))
+            .unwrap_or_default();
+        let editing = !self.playing();
+        let (stylesheets, graph) = match self.project.as_mut() {
+            Some(project) => {
+                let graph = document.map(|index| GraphPane {
+                    graph: &mut project.ui_graphs[index].graph,
+                    path: &path,
+                });
+                (&project.stylesheets[..], graph)
+            }
+            None => (&[][..], None),
+        };
         let scene = DesignerScene {
             world: shown(&self.world, &self.play),
             selected: self.selected,
             selection: &self.selection,
-            stylesheets: self
-                .project
-                .as_ref()
-                .map_or(&[][..], |project| &project.stylesheets[..]),
+            stylesheets,
             assets: &self.assets,
-            editing: !self.playing(),
+            editing,
         };
-        let actions = self.ui_designer.show(ui, &scene, render_state);
+        let actions = self
+            .ui_designer
+            .show_with_graph(ui, &scene, render_state, graph);
         if !actions.is_empty() {
             self.designer_actions(actions);
             // Other panels may already be drawn this frame.
@@ -132,6 +151,24 @@ impl EditorApp {
     /// handles, so it's an undo step and shows in the Scene View and Play.
     pub(in crate::app) fn designer_actions(&mut self, actions: Vec<DesignerAction>) {
         for action in actions {
+            match action {
+                DesignerAction::GraphStep(before) => {
+                    self.graph_step(before);
+                    continue;
+                }
+                DesignerAction::PreviewOutput(lines) => {
+                    for (error, line) in lines {
+                        let line = format!("Live Preview: {line}");
+                        if error {
+                            self.output.error(line);
+                        } else {
+                            self.output.info(line);
+                        }
+                    }
+                    continue;
+                }
+                _ => {}
+            }
             if self.playing()
                 && !matches!(
                     action,
@@ -225,6 +262,8 @@ impl EditorApp {
                 }
                 DesignerAction::Restack(changes) => self.restack(changes),
                 DesignerAction::NewScreenGui => self.insert(Insertable::ScreenGui, None),
+                // Handled above.
+                DesignerAction::GraphStep(_) | DesignerAction::PreviewOutput(_) => {}
             }
         }
     }

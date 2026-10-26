@@ -427,6 +427,21 @@ impl UiDesigner {
             })
         });
 
+        // The Live Preview: the pointer hovers and clicks buttons, which
+        // fire their events there.
+        if self.previewing {
+            let pointed = over.map(pixel_of);
+            self.preview_hover = pointed.and_then(|[x, y]| layout.hover_target(x, y));
+            let button = pointed.and_then(|[x, y]| layout.hit_button(x, y));
+            if button.is_some() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+            if response.clicked()
+                && let Some(button) = button
+            {
+                self.preview_clicks.push(button);
+            }
+        }
         // A ScrollingFrame's bar being dragged scrolls it on the artboard.
         if self.scroller.scrolling() {
             match pointer.filter(|_| down) {

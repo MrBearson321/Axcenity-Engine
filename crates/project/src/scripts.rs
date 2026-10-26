@@ -140,9 +140,12 @@ pub(super) fn find_script_files(
 }
 
 /// The class of the script in the file at `path`: LocalScript for a
-/// `.client.lua` file, ModuleScript for a `.module.lua` file, otherwise Script.
+/// `.client.lua` file (or a UI Event Graph), ModuleScript for a `.module.lua` file, otherwise Script.
 pub fn script_class(path: &str) -> ClassName {
-    if path.ends_with(CLIENT_SCRIPT_SUFFIX) || path.ends_with(CLIENT_BLOCK_SCRIPT_SUFFIX) {
+    if path.ends_with(CLIENT_SCRIPT_SUFFIX)
+        || path.ends_with(CLIENT_BLOCK_SCRIPT_SUFFIX)
+        || axcenity_blocks::ui_graph::is_ui_graph(path)
+    {
         ClassName::LocalScript
     } else if path.ends_with(MODULE_SCRIPT_SUFFIX) {
         ClassName::ModuleScript
