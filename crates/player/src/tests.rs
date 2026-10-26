@@ -1020,6 +1020,59 @@ fn every_example_renders() {
 }
 
 /// The example project in `examples/<name>`, with its scripts started.
+/// A script that sets `Lighting.ToneMapping` changes the frame drawn after it.
+#[test]
+fn a_script_setting_filmic_tone_mapping_changes_the_next_frame() {
+    use axcenity_render::{TextureRenderer, ToneMapping, wgpu};
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+    let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
+        return;
+    };
+    let Ok((device, queue)) = pollster::block_on(adapter.request_device(&Default::default()))
+    else {
+        return;
+    };
+    let (mut world, mut scripts, folder) = start_example_in("hello-graphics");
+    let (mut physics, mut clock) = (Physics::new(), 0);
+    run_until(&mut world, &mut scripts, &mut physics, &mut clock, 0.5);
+    let assets = Assets::new(&folder);
+    let camera = FlyCamera::looking_at(START_CAMERA_POSITION, Vec3::ZERO);
+    let (width, height) = (160, 90);
+    let mut renderer = TextureRenderer::new(&device, &queue, width, height);
+    let mut frame = |world: &World| {
+        let list = axcenity_scene::build_draw_list(world, &assets, camera.to_render_camera());
+        // Models load the first time they're drawn, so draw twice.
+        renderer.render(&list).unwrap();
+        renderer.render(&list).unwrap();
+        (list.post.tone_mapping, renderer.read_pixels())
+    };
+    let (before, classic) = frame(&world);
+    assert_eq!(before, ToneMapping::Classic);
+
+    let script = world.create(axcenity_core::ClassName::Script).unwrap();
+    world
+        .set_parent(script, Some(world.server_script_service()))
+        .unwrap();
+    scripts.start_script(
+        &mut world,
+        script,
+        "scripts/look.server.lua",
+        "game.Lighting.ToneMapping = Enum.ToneMapping.Filmic",
+    );
+    run_until(&mut world, &mut scripts, &mut physics, &mut clock, 0.55);
+    let (after, filmic) = frame(&world);
+    assert_eq!(after, ToneMapping::Filmic);
+    let changed = classic
+        .chunks(4)
+        .zip(filmic.chunks(4))
+        .filter(|(a, b)| a[..3] != b[..3])
+        .count();
+    assert!(
+        changed > classic.len() / 4 / 2,
+        "only {changed} pixels changed"
+    );
+}
+
 fn start_example(name: &str) -> (World, ScriptRuntime) {
     let (world, scripts, _) = start_example_in(name);
     (world, scripts)

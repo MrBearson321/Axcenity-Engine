@@ -171,6 +171,9 @@ pub(super) fn palette(
                 property: "Size".to_owned(),
                 value: vector(4.0, 1.0, 2.0),
             }),
+            B(BlockKind::SetToneMapping {
+                curve: "Neutral".to_owned(),
+            }),
         ],
         Category::Sound => vec![
             B(BlockKind::PlaySound {

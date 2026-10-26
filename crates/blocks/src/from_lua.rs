@@ -12,16 +12,17 @@ use std::collections::BTreeSet;
 use crate::lua::{self, Expr, ExprKind, FunctionBody, Stat, StatKind, SyntaxError};
 use crate::{
     Block, BlockKind, BlockScript, BlockShape, Comparison, EASING_DIRECTIONS, EASING_STYLES,
-    Expression, LogicOp, MathFunction, MathOp, translate,
+    Expression, LogicOp, MathFunction, MathOp, TONE_MAPPINGS, translate,
 };
 
 /// The services blocks get with `game:GetService`, which the translation
 /// declares at the top itself when blocks need them.
-const SERVICES: [&str; 4] = [
+const SERVICES: [&str; 5] = [
     "UserInputService",
     "RunService",
     "TweenService",
     "SaveService",
+    "Lighting",
 ];
 
 /// Why some Lua couldn't become blocks.
@@ -149,6 +150,9 @@ fn used_by(script: &BlockScript) -> (BTreeSet<String>, BTreeSet<String>) {
             }
             kind if kind.saves() => {
                 services.insert("SaveService".to_owned());
+            }
+            BlockKind::SetToneMapping { .. } => {
+                services.insert("Lighting".to_owned());
             }
             _ => {}
         }
@@ -965,6 +969,12 @@ impl<'a> Converter<'a> {
         let ExprKind::Field(object, property) = &target.kind else {
             return None;
         };
+        // Lighting.ToneMapping = Enum.ToneMapping.Neutral
+        if property == "ToneMapping" && self.is_service(object, "Lighting") {
+            return Some(BlockKind::SetToneMapping {
+                curve: enum_item(value, "ToneMapping", &TONE_MAPPINGS)?,
+            });
+        }
         let path = self.target(object)?;
         let same_property = |expr: &Expr| {
             matches!(&expr.kind, ExprKind::Field(inner, name)

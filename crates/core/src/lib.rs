@@ -18,7 +18,9 @@ pub use animation::{
 };
 pub use arena::{Arena, Id};
 pub use class::{ClassName, INSTANCE_EVENTS};
-pub use enums::{KeyCode, Material, MaterialPreset, PartType, ParticleType, TextureChannel};
+pub use enums::{
+    KeyCode, Material, MaterialPreset, PartType, ParticleType, TextureChannel, ToneMapping,
+};
 pub use terrain::{
     CHUNK_CELLS, DEFAULT_TERRAIN_HEIGHT, DEFAULT_TERRAIN_SAMPLES, FoliageInstance, FoliagePlant,
     FoliageProp, FoliageSource, MAX_FOLIAGE_INSTANCES, MAX_TERRAIN_LAYERS, MAX_TERRAIN_SAMPLES,

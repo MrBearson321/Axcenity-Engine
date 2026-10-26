@@ -10,6 +10,8 @@ use std::sync::Arc;
 
 use glam::{Mat4, Vec3};
 
+use crate::ToneMapping;
+
 #[derive(Clone, Debug)]
 pub struct DrawList {
     /// The sky behind the scene, which also lights and is reflected by it.
@@ -487,6 +489,8 @@ pub struct PostProcessing {
     pub enabled: bool,
     /// Multiplies the scene's brightness before tone mapping.
     pub exposure: f32,
+    /// The curve that brings bright light down to what a screen can show.
+    pub tone_mapping: ToneMapping,
     pub bloom_enabled: bool,
     /// How much of the bloom is added to the scene.
     pub bloom_intensity: f32,
@@ -499,6 +503,7 @@ impl Default for PostProcessing {
         Self {
             enabled: true,
             exposure: 1.0,
+            tone_mapping: ToneMapping::Classic,
             bloom_enabled: true,
             bloom_intensity: 0.35,
             bloom_threshold: 1.0,

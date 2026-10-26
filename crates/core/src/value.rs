@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use crate::enums::{Material, PartType, ParticleType, TextureChannel};
+use crate::enums::{Material, PartType, ParticleType, TextureChannel, ToneMapping};
 
 /// A position, size or direction in studs. Y is up.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -88,6 +88,7 @@ pub enum Value {
     Material(Material),
     TextureChannel(TextureChannel),
     ParticleType(ParticleType),
+    ToneMapping(ToneMapping),
 }
 
 /// The type of a [`Value`], without the data. Used to check assignments.
@@ -104,6 +105,7 @@ pub enum ValueKind {
     Material,
     TextureChannel,
     ParticleType,
+    ToneMapping,
 }
 
 impl Value {
@@ -120,6 +122,7 @@ impl Value {
             Value::Material(_) => ValueKind::Material,
             Value::TextureChannel(_) => ValueKind::TextureChannel,
             Value::ParticleType(_) => ValueKind::ParticleType,
+            Value::ToneMapping(_) => ValueKind::ToneMapping,
         }
     }
 
@@ -193,6 +196,13 @@ impl Value {
         }
     }
 
+    pub fn as_tone_mapping(&self) -> Option<ToneMapping> {
+        match self {
+            Value::ToneMapping(t) => Some(*t),
+            _ => None,
+        }
+    }
+
     pub fn as_bool(&self) -> Option<bool> {
         match self {
             Value::Bool(b) => Some(*b),
@@ -215,6 +225,7 @@ impl fmt::Display for ValueKind {
             ValueKind::Material => "Material",
             ValueKind::TextureChannel => "TextureChannel",
             ValueKind::ParticleType => "ParticleType",
+            ValueKind::ToneMapping => "ToneMapping",
         };
         f.write_str(name)
     }

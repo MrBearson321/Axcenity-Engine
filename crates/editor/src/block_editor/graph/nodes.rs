@@ -106,6 +106,7 @@ pub(super) fn block_names(kind: &BlockKind) -> (&'static str, &'static [&'static
         BlockKind::LoadSlot { .. } => ("Load Slot", &["Slot"]),
         BlockKind::SetCheckpoint { .. } => ("Set Checkpoint", &["Checkpoint"]),
         BlockKind::RestoreCheckpoint => ("Restore Checkpoint", &[]),
+        BlockKind::SetToneMapping { .. } => ("Set Tone Mapping", &["Tone Mapping"]),
         BlockKind::Code { .. } => ("Lua", &["Code"]),
     }
 }

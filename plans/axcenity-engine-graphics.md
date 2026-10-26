@@ -152,9 +152,9 @@ A Lighting property `ToneMapping` (`Enum.ToneMapping`): `Classic` (today's knee,
 
 ### Acceptance criteria
 
-- [ ] Each curve maps 0 to 0, rises steadily, and never goes above 1. Neutral keeps a mid-grey within 2 levels (unit tests on a CPU copy of each curve, checked against the shader on a GPU test).
-- [ ] A world saved before this phase opens with Classic and matches its reference. A new world gets Neutral.
-- [ ] `game.Lighting.ToneMapping = Enum.ToneMapping.Filmic` from a script changes the next frame.
+- [x] Each curve maps 0 to 0, rises steadily, and never goes above 1. Neutral keeps a mid-grey within 2 levels (unit tests on a CPU copy of each curve, checked against the shader on a GPU test).
+- [x] A world saved before this phase opens with Classic and matches its reference. A new world gets Neutral.
+- [x] `game.Lighting.ToneMapping = Enum.ToneMapping.Filmic` from a script changes the next frame.
 
 ---
 

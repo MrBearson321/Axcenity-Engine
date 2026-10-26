@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use crate::enums::{Material, PartType, ParticleType, TextureChannel};
+use crate::enums::{Material, PartType, ParticleType, TextureChannel, ToneMapping};
 use crate::value::{Color3, UDim2, Value, Vector2, Vector3};
 
 /// Events every Instance has, whatever its class. `Changed` fires with the
@@ -322,6 +322,9 @@ impl ClassName {
                 // Tone mapping and bloom.
                 ("PostProcessingEnabled", Value::Bool(true)),
                 ("Exposure", Value::Number(1.0)),
+                // Classic for worlds saved without it; the editor's templates
+                // set Neutral.
+                ("ToneMapping", Value::ToneMapping(ToneMapping::Classic)),
                 ("BloomEnabled", Value::Bool(true)),
                 ("BloomIntensity", Value::Number(0.35)),
                 ("BloomThreshold", Value::Number(1.0)),

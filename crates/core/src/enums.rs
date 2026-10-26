@@ -190,6 +190,41 @@ impl ParticleType {
     }
 }
 
+/// How Lighting turns the scene's high dynamic range light, where brightness
+/// can go past 1, into colors a screen can show (`Lighting.ToneMapping`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ToneMapping {
+    /// Colors up to 0.6 pass unchanged and brighter ones roll off toward
+    /// white, each channel on its own. The default, so worlds saved before
+    /// tone mapping could be chosen look as they did.
+    Classic,
+    /// Keeps base colors close to their sRGB values and rolls highlights
+    /// off without shifting their hue (Khronos PBR Neutral). New worlds use it.
+    Neutral,
+    /// A fitted ACES curve: more contrast, for a cinematic look.
+    Filmic,
+}
+
+impl ToneMapping {
+    pub const ALL: [ToneMapping; 3] = [
+        ToneMapping::Classic,
+        ToneMapping::Neutral,
+        ToneMapping::Filmic,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ToneMapping::Classic => "Classic",
+            ToneMapping::Neutral => "Neutral",
+            ToneMapping::Filmic => "Filmic",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|item| item.as_str() == name)
+    }
+}
+
 /// A key on the keyboard, for `UserInputService` in LocalScripts. Keys are
 /// named by their place on a US keyboard, so `W` is the key above `S` on
 /// every layout. Names follow Roblox's (`Return`, `LeftShift`, `Zero`).
@@ -377,6 +412,9 @@ mod tests {
             assert_eq!(Material::from_name(item.as_str()), Some(item));
         }
         assert_eq!(Material::from_name("neon"), None);
+        for item in ToneMapping::ALL {
+            assert_eq!(ToneMapping::from_name(item.as_str()), Some(item));
+        }
         for item in KeyCode::ALL {
             assert_eq!(KeyCode::from_name(item.as_str()), Some(item));
         }

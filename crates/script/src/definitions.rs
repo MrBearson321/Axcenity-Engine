@@ -62,7 +62,8 @@ fn luau_type(kind: ValueKind) -> String {
         ValueKind::Material
         | ValueKind::PartType
         | ValueKind::TextureChannel
-        | ValueKind::ParticleType => {
+        | ValueKind::ParticleType
+        | ValueKind::ToneMapping => {
             let enum_type = EnumType::of_kind(kind).expect("an enum kind");
             let mut options = vec![enum_item_class(enum_type)];
             options.extend(

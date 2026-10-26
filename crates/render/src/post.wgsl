@@ -4,7 +4,8 @@
 struct Post {
     // x: bloom threshold, y: bloom intensity, z: exposure.
     values: vec4<f32>,
-    // x: 1 if bloom is on, y: 1 if tone mapping is on.
+    // x: 1 if bloom is on, y: 1 if tone mapping is on, z: the curve (0
+    // Classic, 1 Neutral, 2 Filmic).
     flags: vec4<f32>,
 }
 
@@ -68,14 +69,65 @@ fn fs_upsample(in: VertexOut) -> @location(0) vec4<f32> {
     return vec4<f32>((taps[0] + taps[1] + taps[2] + taps[3]) * 0.25, 1.0);
 }
 
-// Light up to the knee passes unchanged, so ordinary scenes look as they
-// would without tone mapping. Above it brightness rolls off toward 1
-// instead of clipping.
-fn tone_map(color: vec3<f32>) -> vec3<f32> {
+// The tone mapping curves. Each must match its copy in tone_mapping.rs.
+
+// Classic: light up to the knee passes unchanged, so ordinary scenes look
+// as they would without tone mapping. Above it each channel rolls off
+// toward 1 instead of clipping.
+fn tone_map_classic(color: vec3<f32>) -> vec3<f32> {
     let knee = 0.6;
     let over = max(color - knee, vec3<f32>(0.0));
     let rolled = knee + (1.0 - knee) * (1.0 - exp(-over / (1.0 - knee)));
     return select(rolled, color, color <= vec3<f32>(knee));
+}
+
+// Khronos PBR Neutral: takes off the 4% a non-metal reflects, so lit colors
+// come out as picked, then compresses highlights without changing hue.
+fn tone_map_neutral(input: vec3<f32>) -> vec3<f32> {
+    let start = 0.8 - 0.04;
+    let lowest = min(input.r, min(input.g, input.b));
+    var offset = 0.04;
+    if lowest < 0.08 {
+        offset = lowest - 6.25 * lowest * lowest;
+    }
+    let color = input - offset;
+    let peak = max(color.r, max(color.g, color.b));
+    if peak < start {
+        return color;
+    }
+    let d = 1.0 - start;
+    let new_peak = 1.0 - d * d / (peak + d - start);
+    let blend = 1.0 - 1.0 / (0.15 * (peak - new_peak) + 1.0);
+    return mix(color * (new_peak / peak), vec3<f32>(new_peak), blend);
+}
+
+// Filmic: Stephen Hill's ACES fit, after scaling light up by 1 / 0.6 so a
+// mid-grey stays about as bright. WGSL matrices are built from columns, so
+// these are the rows of the usual matrices, transposed.
+fn tone_map_filmic(color: vec3<f32>) -> vec3<f32> {
+    let aces_input = mat3x3<f32>(
+        vec3<f32>(0.59719, 0.07600, 0.02840),
+        vec3<f32>(0.35458, 0.90834, 0.13383),
+        vec3<f32>(0.04823, 0.01566, 0.83777),
+    );
+    let aces_output = mat3x3<f32>(
+        vec3<f32>(1.60475, -0.10208, -0.00327),
+        vec3<f32>(-0.53108, 1.10813, -0.07276),
+        vec3<f32>(-0.07367, -0.00605, 1.07602),
+    );
+    let v = aces_input * (color / 0.6);
+    let fitted = (v * (v + 0.0245786) - 0.000090537) / (v * (0.983729 * v + 0.432951) + 0.238081);
+    return aces_output * fitted;
+}
+
+fn tone_map(color: vec3<f32>) -> vec3<f32> {
+    if post.flags.z > 1.5 {
+        return tone_map_filmic(color);
+    }
+    if post.flags.z > 0.5 {
+        return tone_map_neutral(color);
+    }
+    return tone_map_classic(color);
 }
 
 @fragment

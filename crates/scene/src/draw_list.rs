@@ -76,10 +76,25 @@ fn lighting_settings(world: &World) -> LightingSettings {
     sky.environment_intensity = number_of("EnvironmentIntensity", sky.environment_intensity);
     post.enabled = bool_of("PostProcessingEnabled", post.enabled);
     post.exposure = number_of("Exposure", post.exposure);
+    if let Some(curve) = lighting
+        .property("ToneMapping")
+        .and_then(Value::as_tone_mapping)
+    {
+        post.tone_mapping = tone_mapping(curve);
+    }
     post.bloom_enabled = bool_of("BloomEnabled", post.bloom_enabled);
     post.bloom_intensity = number_of("BloomIntensity", post.bloom_intensity);
     post.bloom_threshold = number_of("BloomThreshold", post.bloom_threshold);
     settings
+}
+
+fn tone_mapping(curve: axcenity_core::ToneMapping) -> axcenity_render::ToneMapping {
+    use axcenity_core::ToneMapping as Curve;
+    match curve {
+        Curve::Classic => axcenity_render::ToneMapping::Classic,
+        Curve::Neutral => axcenity_render::ToneMapping::Neutral,
+        Curve::Filmic => axcenity_render::ToneMapping::Filmic,
+    }
 }
 
 /// The light a PointLight or SpotLight gives off from the middle of its

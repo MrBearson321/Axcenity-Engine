@@ -97,9 +97,10 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         BlockKind::LoadSlot { .. } => 44,
         BlockKind::SetCheckpoint { .. } => 45,
         BlockKind::RestoreCheckpoint => 46,
+        BlockKind::SetToneMapping { .. } => 47,
     })
 }
-const STATEMENT_COUNT: usize = 47;
+const STATEMENT_COUNT: usize = 48;
 
 /// One of each statement block, with the Lua it must produce.
 fn every_statement() -> Vec<(BlockKind, &'static str)> {
@@ -354,6 +355,12 @@ fn every_statement() -> Vec<(BlockKind, &'static str)> {
         (
             BlockKind::RestoreCheckpoint,
             "SaveService:RestoreCheckpoint()",
+        ),
+        (
+            BlockKind::SetToneMapping {
+                curve: "Filmic".to_owned(),
+            },
+            "Lighting.ToneMapping = Enum.ToneMapping.Filmic",
         ),
         (
             BlockKind::Code {
@@ -806,6 +813,64 @@ fn translated_blocks_run_in_the_scheduler_like_typed_lua() {
         .map(|line| (line.kind, line.text))
         .collect();
     assert_eq!(output, [(OutputKind::Print, "moves: 3".to_owned())]);
+}
+
+#[test]
+fn the_tone_mapping_block_sets_lighting_and_comes_back_from_lua() {
+    assert_eq!(
+        crate::TONE_MAPPINGS,
+        axcenity_core::ToneMapping::ALL.map(|curve| curve.as_str())
+    );
+    let blocks = script(vec![block(
+        1,
+        BlockKind::WhenStarted {
+            body: vec![block(
+                2,
+                BlockKind::SetToneMapping {
+                    curve: "Neutral".to_owned(),
+                },
+            )],
+        },
+    )]);
+    let source = translate(&blocks).unwrap().source;
+    assert!(
+        source.starts_with("local Lighting = game:GetService(\"Lighting\")"),
+        "{source}"
+    );
+
+    let mut world = World::new();
+    let lua = world.create(ClassName::Script).unwrap();
+    world
+        .set_parent(lua, Some(world.server_script_service()))
+        .unwrap();
+    let mut runtime = ScriptRuntime::new();
+    runtime.start_script(&mut world, lua, "scripts/Look.server.blocks.json", &source);
+    runtime.step(&mut world, 0.1);
+    assert_eq!(
+        world.get(world.lighting()).unwrap().property("ToneMapping"),
+        Some(&Value::ToneMapping(axcenity_core::ToneMapping::Neutral))
+    );
+
+    let back = crate::from_lua(&source).unwrap();
+    assert_eq!(translate(&back).unwrap().source, source);
+    let mut kinds = Vec::new();
+    back.for_each_block(&mut |b| kinds.push(b.kind.clone()));
+    assert!(kinds.contains(&BlockKind::SetToneMapping {
+        curve: "Neutral".to_owned()
+    }));
+
+    let wrong = script(vec![block(
+        1,
+        BlockKind::WhenStarted {
+            body: vec![block(
+                2,
+                BlockKind::SetToneMapping {
+                    curve: "Bright".to_owned(),
+                },
+            )],
+        },
+    )]);
+    assert!(translate(&wrong).is_err());
 }
 
 #[test]

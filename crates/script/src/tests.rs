@@ -1325,6 +1325,35 @@ fn emitters_emit_bursts_and_take_particle_types() {
 }
 
 #[test]
+fn lighting_tone_mapping_takes_enum_items_and_names() {
+    let mut world = World::new();
+    let mut runtime = ScriptRuntime::new();
+    run(
+        &mut runtime,
+        &mut world,
+        "scripts/look.server.lua",
+        "local Lighting = game:GetService(\"Lighting\")
+         print(Lighting.ToneMapping == Enum.ToneMapping.Classic)
+         game.Lighting.ToneMapping = Enum.ToneMapping.Filmic
+         print(Lighting.ToneMapping == Enum.ToneMapping.Filmic)
+         Lighting.ToneMapping = \"Neutral\"
+         print(Lighting.ToneMapping.Name)
+         print(pcall(function() Lighting.ToneMapping = \"Bright\" end))",
+    );
+    let output = lines(&mut runtime);
+    assert_eq!(output[..3], ["true", "true", "Neutral"]);
+    assert!(
+        output[3].starts_with("false") && output[3].contains("Classic, Neutral, Filmic"),
+        "{}",
+        output[3]
+    );
+    assert_eq!(
+        property(&world, world.lighting(), "ToneMapping"),
+        Value::ToneMapping(axcenity_core::ToneMapping::Neutral)
+    );
+}
+
+#[test]
 fn animator_parameters_are_set_and_read_by_kind() {
     let mut world = World::new();
     let animator = world.create(ClassName::Animator).unwrap();

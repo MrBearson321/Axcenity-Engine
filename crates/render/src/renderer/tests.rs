@@ -1,4 +1,5 @@
 use super::*;
+use crate::ToneMapping;
 use crate::draw_list::{
     AmbientLight, Camera, Channel, Cone, DrawItem, Light, Material, NormalMap, PostProcessing,
     Shadows, Sky, Sun,
@@ -2117,4 +2118,133 @@ fn switching_anti_aliasing_frees_the_targets_it_no_longer_uses() {
     device.poll(wgpu::PollType::Wait).unwrap();
     assert_eq!(renderer.scene.anti_aliasing_targets_alive(), (0, 0));
     assert_eq!(renderer.scene.targets_alive(), 1);
+}
+
+/// A glowing block filling the middle of the view, lit by nothing else, so
+/// the light reaching tone mapping is its emissive color times exposure.
+fn glowing_block(color: [f32; 3], post: PostProcessing) -> DrawList {
+    let mut block = big_block();
+    block.material = Material {
+        base_color: [0.0; 3],
+        emissive: color,
+        ..Material::default()
+    };
+    let mut list = list_of(vec![block]);
+    list.sun.intensity = 0.0;
+    list.post = post;
+    list
+}
+
+/// What an sRGB target stores for linear `light` from 0 to 1.
+fn srgb_byte(light: f32) -> u8 {
+    let c = if light <= 0.0031308 {
+        light * 12.92
+    } else {
+        1.055 * light.powf(1.0 / 2.4) - 0.055
+    };
+    (c * 255.0).round() as u8
+}
+
+#[test]
+fn the_shaders_tone_mapping_curves_match_their_cpu_copies() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+    for curve in [
+        ToneMapping::Classic,
+        ToneMapping::Neutral,
+        ToneMapping::Filmic,
+    ] {
+        for color in [[1.0; 3], [1.0, 0.5, 0.2], [0.2, 0.6, 1.0]] {
+            for exposure in [0.05, 0.3, 1.0, 2.5, 8.0] {
+                let post = PostProcessing {
+                    exposure,
+                    tone_mapping: curve,
+                    bloom_enabled: false,
+                    ..PostProcessing::default()
+                };
+                let pixel = middle_of(&mut renderer, &glowing_block(color, post));
+                let light = (lighting::linear_color(color) * exposure).to_array();
+                let expected = curve.apply(light).map(srgb_byte);
+                for channel in 0..3 {
+                    assert!(
+                        pixel[channel].abs_diff(expected[channel]) <= 2,
+                        "{curve:?} of {color:?} × {exposure}: GPU {pixel:?}, CPU {expected:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn with_post_processing_off_every_curve_is_a_plain_clamp() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+    for curve in [
+        ToneMapping::Classic,
+        ToneMapping::Neutral,
+        ToneMapping::Filmic,
+    ] {
+        let post = PostProcessing {
+            enabled: false,
+            exposure: 3.0,
+            tone_mapping: curve,
+            ..PostProcessing::default()
+        };
+        let pixel = middle_of(&mut renderer, &glowing_block([1.0, 0.5, 0.2], post));
+        let expected = [255, 128, 51];
+        for channel in 0..3 {
+            assert!(
+                pixel[channel].abs_diff(expected[channel]) <= 1,
+                "{curve:?}: {pixel:?}"
+            );
+        }
+    }
+}
+
+/// A plastic part reflects its color plus a few percent of white light,
+/// which Neutral takes back off: under flat white light, a lit grey Plastic
+/// part (roughness 0.5) comes out closer to its picked sRGB color than with
+/// a plain clamp. It reflects a little under the 4% Neutral expects, so
+/// mid-grey lands within 3 levels rather than exactly on it.
+#[test]
+fn neutral_tone_mapping_brings_a_lit_grey_part_back_toward_its_color() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+    for grey in [0.25, 0.5, 0.75] {
+        let mut card = big_block();
+        card.material = Material {
+            base_color: [grey; 3],
+            roughness: 0.5,
+            ..Material::default()
+        };
+        let mut list = list_of(vec![card]);
+        list.sun.intensity = 0.0;
+        list.ambient.intensity = 1.0;
+        list.post = PostProcessing {
+            tone_mapping: ToneMapping::Neutral,
+            bloom_enabled: false,
+            ..PostProcessing::default()
+        };
+        let neutral = middle_of(&mut renderer, &list)[0];
+        list.post.enabled = false;
+        let clamped = middle_of(&mut renderer, &list)[0];
+        let picked = (grey * 255.0).round() as u8;
+        assert!(
+            neutral.abs_diff(picked) < clamped.abs_diff(picked),
+            "grey {picked}: Neutral {neutral}, clamped {clamped}"
+        );
+        if grey >= 0.5 {
+            assert!(neutral.abs_diff(picked) <= 3, "grey {picked}: {neutral}");
+        }
+    }
 }

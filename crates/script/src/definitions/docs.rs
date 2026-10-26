@@ -567,6 +567,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     ),
     (
         ClassName::Lighting,
+        "ToneMapping",
+        "The curve that turns bright light into colors a screen can show. Classic (worlds made before it existed) keeps colors under 0.6 as they are and flattens brighter ones; Neutral (new worlds) keeps colors close to how they were picked and rolls highlights off without changing their hue; Filmic adds contrast for a cinematic look.",
+    ),
+    (
+        ClassName::Lighting,
         "BloomEnabled",
         "If false, bright parts don't glow.",
     ),

@@ -15,8 +15,8 @@
 use std::collections::{BTreeMap, HashMap};
 
 use axcenity_core::{
-    ClassName, Color3, InstanceId, Material, PartType, ParticleType, TextureChannel, UDim2, Value,
-    Vector2, Vector3, World,
+    ClassName, Color3, InstanceId, Material, PartType, ParticleType, TextureChannel, ToneMapping,
+    UDim2, Value, Vector2, Vector3, World,
 };
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -93,6 +93,7 @@ fn to_json(value: &Value) -> serde_json::Value {
         Value::Material(m) => json!({ "Material": m.as_str() }),
         Value::TextureChannel(c) => json!({ "TextureChannel": c.as_str() }),
         Value::ParticleType(t) => json!({ "ParticleType": t.as_str() }),
+        Value::ToneMapping(t) => json!({ "ToneMapping": t.as_str() }),
     }
 }
 
@@ -116,6 +117,7 @@ fn from_json(json: &serde_json::Value) -> Option<Value> {
                 "Material" => Material::from_name(name()?).map(Value::Material),
                 "TextureChannel" => TextureChannel::from_name(name()?).map(Value::TextureChannel),
                 "ParticleType" => ParticleType::from_name(name()?).map(Value::ParticleType),
+                "ToneMapping" => ToneMapping::from_name(name()?).map(Value::ToneMapping),
                 _ => None,
             }
         }

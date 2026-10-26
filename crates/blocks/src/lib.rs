@@ -414,6 +414,12 @@ pub enum BlockKind {
     /// player character standing on it.
     RestoreCheckpoint,
 
+    // Lighting: the world's look.
+    /// Sets `Lighting.ToneMapping` to one of [`TONE_MAPPINGS`].
+    SetToneMapping {
+        curve: String,
+    },
+
     // Sound.
     PlaySound {
         target: String,
@@ -525,6 +531,8 @@ pub const EASING_STYLES: [&str; 7] = [
 pub const EASING_DIRECTIONS: [&str; 3] = ["In", "Out", "InOut"];
 /// The edges "slide in" can come from.
 pub const SLIDE_EDGES: [&str; 4] = ["Left", "Right", "Top", "Bottom"];
+/// `Enum.ToneMapping`'s items, which the tone mapping block offers.
+pub const TONE_MAPPINGS: [&str; 3] = ["Classic", "Neutral", "Filmic"];
 /// The senses a NavigationAgent's `PlayerSensed` names.
 pub const SENSES: [&str; 2] = ["Sight", "Hearing"];
 

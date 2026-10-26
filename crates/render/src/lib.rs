@@ -11,6 +11,7 @@ mod fonts;
 mod graphics;
 mod mesh;
 mod renderer;
+mod tone_mapping;
 
 pub use draw_list::{
     AmbientLight, Camera, Channel, ChannelMap, Cone, DrawItem, DrawList, Light, Material,
@@ -25,6 +26,7 @@ pub use graphics::{
     ShadowMapSize, ShadowQuality, TextureQuality,
 };
 pub use renderer::{RenderStats, Renderer, TextureRenderer};
+pub use tone_mapping::ToneMapping;
 
 /// Re-exported so callers build transforms with the same `glam` version.
 pub use glam;

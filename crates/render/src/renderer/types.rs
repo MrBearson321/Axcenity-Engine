@@ -87,7 +87,8 @@ pub(super) struct LightRaw {
 pub(super) struct PostUniform {
     /// Bloom threshold, bloom intensity and exposure.
     pub(super) values: [f32; 4],
-    /// 1 if bloom is on, 1 if tone mapping is on.
+    /// 1 if bloom is on, 1 if tone mapping is on, and which curve
+    /// ([`crate::ToneMapping`]).
     pub(super) flags: [f32; 4],
 }
 

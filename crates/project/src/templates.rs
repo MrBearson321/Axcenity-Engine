@@ -37,11 +37,24 @@ impl Template {
     pub(super) fn world(self) -> &'static str {
         match self {
             Template::Baseplate => BASEPLATE_WORLD,
-            Template::Empty => "{\n  \"format_version\": 1,\n  \"workspace\": {}\n}\n",
+            Template::Empty => EMPTY_WORLD,
             Template::Starter => STARTER_WORLD,
         }
     }
 }
+
+// New worlds use Neutral tone mapping; a world saved without it is Classic.
+
+pub(super) const EMPTY_WORLD: &str = r#"{
+  "format_version": 1,
+  "workspace": {},
+  "lighting": {
+    "properties": {
+      "ToneMapping": "Neutral"
+    }
+  }
+}
+"#;
 
 pub(super) const BASEPLATE_WORLD: &str = r#"{
   "format_version": 1,
@@ -58,6 +71,11 @@ pub(super) const BASEPLATE_WORLD: &str = r#"{
         }
       }
     ]
+  },
+  "lighting": {
+    "properties": {
+      "ToneMapping": "Neutral"
+    }
   }
 }
 "#;
@@ -133,7 +151,8 @@ pub(super) const STARTER_WORLD: &str = r#"{
   },
   "lighting": {
     "properties": {
-      "ShadowSoftness": 0.35
+      "ShadowSoftness": 0.35,
+      "ToneMapping": "Neutral"
     }
   }
 }

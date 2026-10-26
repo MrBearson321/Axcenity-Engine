@@ -256,7 +256,8 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::ShowPage { .. }
         | BlockKind::ScrollTo { .. }
         | BlockKind::SetValue { .. }
-        | BlockKind::SetProperty { .. } => Category::Looks,
+        | BlockKind::SetProperty { .. }
+        | BlockKind::SetToneMapping { .. } => Category::Looks,
         BlockKind::PlaySound { .. }
         | BlockKind::StopSound { .. }
         | BlockKind::PauseSound { .. }
@@ -890,6 +891,10 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
             Object(checkpoint, Filter::Checkpoints),
         ])],
         BlockKind::RestoreCheckpoint => vec![Row(vec![label("go back to checkpoint")])],
+        BlockKind::SetToneMapping { curve } => vec![Row(vec![
+            label("set tone mapping to"),
+            Part::Choice(curve, &axcenity_blocks::TONE_MAPPINGS),
+        ])],
         BlockKind::Code { code } | BlockKind::TopCode { code } => {
             vec![Row(vec![label("Lua"), Part::Code(shown_code(code))])]
         }

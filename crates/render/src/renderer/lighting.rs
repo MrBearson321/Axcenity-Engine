@@ -263,7 +263,7 @@ pub(super) fn post_uniform(post: &PostProcessing) -> PostUniform {
         flags: [
             flag(post.enabled && post.bloom_enabled),
             flag(post.enabled),
-            0.0,
+            post.tone_mapping.index(),
             0.0,
         ],
     }

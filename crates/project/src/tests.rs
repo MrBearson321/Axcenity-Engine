@@ -1,5 +1,5 @@
 use super::*;
-use axcenity_core::{ClassName, Material, PartType, Value};
+use axcenity_core::{ClassName, Material, PartType, ToneMapping, Value, World};
 
 fn examples_folder() -> PathBuf {
     // CARGO_MANIFEST_DIR is this crate's folder: crates/project.
@@ -238,6 +238,11 @@ fn every_template_makes_a_project_that_loads_cleanly() {
             project.problems
         );
         assert!(project.world_loaded, "{template:?}");
+        assert_eq!(
+            tone_mapping(&project.world),
+            ToneMapping::Neutral,
+            "{template:?}"
+        );
         let parts = project.world.descendants(project.world.workspace()).len();
         match template {
             Template::Empty => assert_eq!(parts, 0),
@@ -250,6 +255,36 @@ fn every_template_makes_a_project_that_loads_cleanly() {
             }
         }
     }
+    fs::remove_dir_all(parent).unwrap();
+}
+
+fn tone_mapping(world: &World) -> ToneMapping {
+    world
+        .get(world.lighting())
+        .and_then(|lighting| lighting.property("ToneMapping"))
+        .and_then(Value::as_tone_mapping)
+        .unwrap()
+}
+
+/// Worlds saved before tone mapping could be chosen have no `ToneMapping`,
+/// and keep the Classic curve they were made with, through a save too.
+#[test]
+fn a_world_saved_without_tone_mapping_opens_with_classic() {
+    let parent = temp_folder("classic-tone-mapping");
+    let folder = create_project(&parent, "Old").unwrap();
+    fs::write(
+        folder.join(WORLD_FILE),
+        r#"{"format_version": 1, "lighting": {"properties": {"Exposure": 1.5}}}"#,
+    )
+    .unwrap();
+    let project = load(&folder).unwrap();
+    assert!(project.problems.is_empty(), "{:?}", project.problems);
+    assert_eq!(tone_mapping(&project.world), ToneMapping::Classic);
+    save_world(&folder, &project.world).unwrap();
+    assert_eq!(
+        tone_mapping(&load(&folder).unwrap().world),
+        ToneMapping::Classic
+    );
     fs::remove_dir_all(parent).unwrap();
 }
 

@@ -296,6 +296,17 @@ declare extern type EnumParticleTypeItems with
 	Magic: EnumParticleType
 end
 
+--- One choice of `Enum.ToneMapping`.
+declare extern type EnumToneMapping extends EnumItem with
+end
+
+--- The choices of `Enum.ToneMapping`.
+declare extern type EnumToneMappingItems with
+	Classic: EnumToneMapping
+	Neutral: EnumToneMapping
+	Filmic: EnumToneMapping
+end
+
 --- One choice of `Enum.EasingStyle`.
 declare extern type EnumEasingStyle extends EnumItem with
 end
@@ -343,6 +354,7 @@ declare extern type EnumLibrary with
 	KeyCode: EnumKeyCodeItems
 	TextureChannel: EnumTextureChannelItems
 	ParticleType: EnumParticleTypeItems
+	ToneMapping: EnumToneMappingItems
 	EasingStyle: EnumEasingStyleItems
 	EasingDirection: EnumEasingDirectionItems
 	PlaybackState: EnumPlaybackStateItems
@@ -452,6 +464,8 @@ declare extern type Lighting extends Instance with
 	PostProcessingEnabled: boolean
 	--- Brightens or darkens the whole image before tone mapping. 1 is neutral.
 	Exposure: number
+	--- The curve that turns bright light into colors a screen can show. Classic (worlds made before it existed) keeps colors under 0.6 as they are and flattens brighter ones; Neutral (new worlds) keeps colors close to how they were picked and rolls highlights off without changing their hue; Filmic adds contrast for a cinematic look.
+	ToneMapping: EnumToneMapping | "Classic" | "Neutral" | "Filmic"
 	--- If false, bright parts don't glow.
 	BloomEnabled: boolean
 	--- How strong the glow around bright parts is.

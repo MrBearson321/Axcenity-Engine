@@ -7,7 +7,7 @@
 
 use axcenity_core::{
     ClassName, Color3, Instance, InstanceId, Material, PartType, ParticleType, TextureChannel,
-    Value, World,
+    ToneMapping, Value, World,
 };
 use eframe::egui;
 
@@ -215,6 +215,7 @@ const GROUPS: [(&str, &[&str]); 19] = [
         &[
             "PostProcessingEnabled",
             "Exposure",
+            "ToneMapping",
             "BloomEnabled",
             "BloomIntensity",
             "BloomThreshold",
@@ -1002,6 +1003,10 @@ fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
         Value::TextureChannel(channel) => {
             choice_control(ui, name, channel, &TextureChannel::ALL, |c| c.as_str())
                 .map(Value::TextureChannel)
+        }
+        Value::ToneMapping(curve) => {
+            choice_control(ui, name, curve, &ToneMapping::ALL, |c| c.as_str())
+                .map(Value::ToneMapping)
         }
     }
 }
