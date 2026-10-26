@@ -49,6 +49,10 @@ pub enum SoundAction {
     },
     /// Stops, so the next play starts from the beginning.
     Stop(InstanceId),
+    /// Plays a sound file once, at its own volume and not from anywhere in
+    /// the world, belonging to no Sound: a button's `HoverSound` or
+    /// `ClickSound`. Nothing stops it; it plays to its end.
+    PlayOnce { sound_id: String },
 }
 
 #[derive(Debug, Error)]
@@ -130,10 +134,12 @@ impl GameAudio {
         listener: Listener,
     ) -> AudioUpdate {
         let mut update = AudioUpdate::default();
-        let wants_sound = actions
-            .iter()
-            .any(|action| matches!(action, SoundAction::Play { .. }))
-            || sounds(world).any(|(_, sound)| SoundProperties::of(sound).playing);
+        let wants_sound = actions.iter().any(|action| {
+            matches!(
+                action,
+                SoundAction::Play { .. } | SoundAction::PlayOnce { .. }
+            )
+        }) || sounds(world).any(|(_, sound)| SoundProperties::of(sound).playing);
         if self.engine.is_none() && wants_sound && !self.failed {
             match AudioEngine::new() {
                 Ok(engine) => self.engine = Some(engine),
@@ -382,6 +388,17 @@ impl AudioEngine {
                 self.stop(instance);
                 Ok(())
             }
+            SoundAction::PlayOnce { sound_id } => {
+                let data = self.sound_data(&sound_id, assets)?;
+                // Dropping the handle leaves the sound playing to its end.
+                self.manager
+                    .play(data)
+                    .map(drop)
+                    .map_err(|err| AudioError::Play {
+                        sound_id,
+                        message: err.to_string(),
+                    })
+            }
             SoundAction::Play {
                 instance,
                 sound_id,
@@ -559,21 +576,8 @@ impl AudioEngine {
             });
         }
 
-        let data = if let Some(data) = self.decoded.get(&sound_id) {
-            data.clone()
-        } else {
-            let bytes = assets
-                .read_file(&sound_id)
-                .map_err(|message| AudioError::Asset {
-                    sound_id: sound_id.clone(),
-                    message,
-                })?;
-            let data = decode_sound(&sound_id, bytes)?;
-            self.decoded.insert(sound_id.clone(), data.clone());
-            data
-        };
-
-        let data = data
+        let data = self
+            .sound_data(&sound_id, assets)?
             .volume(decibels(settings.volume))
             .playback_rate(settings.speed)
             .loop_region(loop_region(settings.looped));
@@ -610,6 +614,32 @@ impl AudioEngine {
             );
         }
         Ok(())
+    }
+
+    /// The decoded file `sound_id`, read and decoded the first time it's played.
+    fn sound_data(
+        &mut self,
+        sound_id: &str,
+        assets: &Assets,
+    ) -> Result<StaticSoundData, AudioError> {
+        if let Some(data) = self.decoded.get(sound_id) {
+            return Ok(data.clone());
+        }
+        if sound_id.is_empty() {
+            return Err(AudioError::Asset {
+                sound_id: String::new(),
+                message: "SoundId is empty".to_owned(),
+            });
+        }
+        let bytes = assets
+            .read_file(sound_id)
+            .map_err(|message| AudioError::Asset {
+                sound_id: sound_id.to_owned(),
+                message,
+            })?;
+        let data = decode_sound(sound_id, bytes)?;
+        self.decoded.insert(sound_id.to_owned(), data.clone());
+        Ok(data)
     }
 
     /// A track that pans and attenuates one Sound. One voice is enough;

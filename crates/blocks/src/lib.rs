@@ -231,6 +231,16 @@ pub enum BlockKind {
         button: String,
         body: Vec<Block>,
     },
+    /// When the pointer comes onto a UI element (`MouseEnter`). Client only.
+    WhenMouseEnters {
+        element: String,
+        body: Vec<Block>,
+    },
+    /// When the pointer goes off a UI element (`MouseLeave`). Client only.
+    WhenMouseLeaves {
+        element: String,
+        body: Vec<Block>,
+    },
     /// Runs every frame (`RunService.Heartbeat`).
     EveryFrame {
         body: Vec<Block>,
@@ -472,6 +482,8 @@ impl BlockKind {
                 | BlockKind::WhenTouched { .. }
                 | BlockKind::WhenKeyPressed { .. }
                 | BlockKind::WhenClicked { .. }
+                | BlockKind::WhenMouseEnters { .. }
+                | BlockKind::WhenMouseLeaves { .. }
                 | BlockKind::EveryFrame { .. }
                 | BlockKind::WhenSoundEnded { .. }
                 | BlockKind::WhenStateChanged { .. }
@@ -485,7 +497,10 @@ impl BlockKind {
     pub fn client_only(&self) -> bool {
         matches!(
             self,
-            BlockKind::WhenKeyPressed { .. } | BlockKind::WhenClicked { .. }
+            BlockKind::WhenKeyPressed { .. }
+                | BlockKind::WhenClicked { .. }
+                | BlockKind::WhenMouseEnters { .. }
+                | BlockKind::WhenMouseLeaves { .. }
         )
     }
 
@@ -496,6 +511,8 @@ impl BlockKind {
             | BlockKind::WhenTouched { body, .. }
             | BlockKind::WhenKeyPressed { body, .. }
             | BlockKind::WhenClicked { body, .. }
+            | BlockKind::WhenMouseEnters { body, .. }
+            | BlockKind::WhenMouseLeaves { body, .. }
             | BlockKind::EveryFrame { body }
             | BlockKind::WhenSoundEnded { body, .. }
             | BlockKind::WhenStateChanged { body, .. }
@@ -520,6 +537,8 @@ impl BlockKind {
             | BlockKind::WhenTouched { body, .. }
             | BlockKind::WhenKeyPressed { body, .. }
             | BlockKind::WhenClicked { body, .. }
+            | BlockKind::WhenMouseEnters { body, .. }
+            | BlockKind::WhenMouseLeaves { body, .. }
             | BlockKind::EveryFrame { body }
             | BlockKind::WhenSoundEnded { body, .. }
             | BlockKind::WhenStateChanged { body, .. }

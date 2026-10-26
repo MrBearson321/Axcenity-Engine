@@ -8,10 +8,14 @@
 mod style;
 
 mod css;
+mod interact;
 mod paint;
 mod rich;
+mod transition;
 
 pub use css::*;
+use interact::interactable;
+pub use interact::{TOOLTIP_DELAY, UiCursor, UiEvent, UiInput, UiInteraction, UiState};
 use paint::*;
 pub use rich::{RichSpan, RichStroke, RichStyle, parse_rich_text, rich_text_plain};
 
@@ -26,7 +30,7 @@ use taffy::prelude::*;
 
 pub use style::{
     CssDeclaration, SUPPORTED_PROPERTIES, StyleWarning, Stylesheet, applied_declaration,
-    applied_declarations, parse_stylesheet,
+    applied_declarations, has_rule, parse_stylesheet, rule_declaration,
 };
 use style::{PseudoClasses, ResolvedStyles, resolve_styles, resolve_variables};
 
@@ -63,6 +67,9 @@ pub struct UiElement {
     /// Its text's size in authored pixels, as it's drawn: CSS `font-size`,
     /// else `TextSize`. Times `pixels_per_unit` for screen pixels.
     pub font_size: f32,
+    /// False when its `Interactable` is off: it takes no hover, clicks or
+    /// typing, and what's under it doesn't either.
+    pub interactable: bool,
 }
 
 /// The UI's draw data, and each element drawn, in drawing order (so later
@@ -73,6 +80,12 @@ pub struct UiLayout {
     pub elements: Vec<UiElement>,
     pub hovered: Option<InstanceId>,
     pub active: Option<InstanceId>,
+    /// The mouse cursor to show for what's under the pointer (CSS `cursor`).
+    /// Only [`UiInteraction::layout`] sets it.
+    pub cursor: UiCursor,
+    /// True while a CSS transition runs or a tooltip is due, so a host that
+    /// only draws on input should draw again.
+    pub animating: bool,
     /// Problems found while laying out, such as a PageLayout page name that
     /// matches no Frame. The same text can repeat every frame; callers
     /// should show each distinct line once.
@@ -93,22 +106,30 @@ impl UiLayout {
         self.elements.iter().find(|element| element.id == id)
     }
 
-    /// The topmost visible button at a point in physical pixels.
-    pub fn hit_button(&self, x: f32, y: f32) -> Option<InstanceId> {
-        self.elements
-            .iter()
-            .rev()
-            .find(|element| element.rect.contains(x, y))
-            .and_then(|element| element.button.then_some(element.id))
+    /// The topmost element at a point that takes the pointer: what `:hover`
+    /// and `MouseEnter` follow. `None` when the topmost is `Interactable` off.
+    pub fn hover_target(&self, x: f32, y: f32) -> Option<InstanceId> {
+        self.top_element(x, y)
+            .and_then(|element| element.interactable.then_some(element.id))
     }
 
-    /// The topmost visible text box at a point in physical pixels.
+    /// The topmost visible, interactable button at a point in physical pixels.
+    pub fn hit_button(&self, x: f32, y: f32) -> Option<InstanceId> {
+        self.top_element(x, y)
+            .and_then(|element| (element.button && element.interactable).then_some(element.id))
+    }
+
+    /// The topmost visible, interactable text box at a point in physical pixels.
     pub fn hit_text_box(&self, x: f32, y: f32) -> Option<InstanceId> {
+        self.top_element(x, y)
+            .and_then(|element| (element.text_box && element.interactable).then_some(element.id))
+    }
+
+    fn top_element(&self, x: f32, y: f32) -> Option<&UiElement> {
         self.elements
             .iter()
             .rev()
             .find(|element| element.rect.contains(x, y))
-            .and_then(|element| element.text_box.then_some(element.id))
     }
 }
 
@@ -197,9 +218,40 @@ pub fn build_ui_draw_data(
 /// placed: what the UI Designer's text toolbar shows. `None` for an element
 /// without text.
 pub fn text_style(world: &World, id: InstanceId, stylesheets: &[Stylesheet]) -> Option<UiText> {
+    text_style_in_state(world, id, stylesheets, UiState::Normal)
+}
+
+/// The value `property` has for `id` in `state`, with `var()`s filled in,
+/// whichever rule it comes from: what the states editor shows. `None` when
+/// no CSS sets it.
+pub fn style_value_in_state(
+    world: &World,
+    id: InstanceId,
+    stylesheets: &[Stylesheet],
+    state: UiState,
+    property: &str,
+) -> Option<String> {
+    let pseudo = PseudoClasses {
+        forced: Some((id, state)),
+        ..PseudoClasses::default()
+    };
+    css_property(&resolve_styles(world, id, stylesheets, pseudo), property)
+}
+
+/// [`text_style`] with `id` in `state`, for the states editor's tabs.
+pub fn text_style_in_state(
+    world: &World,
+    id: InstanceId,
+    stylesheets: &[Stylesheet],
+    state: UiState,
+) -> Option<UiText> {
     let instance = world.get(id)?;
     let text = instance.property("Text").and_then(Value::as_str)?;
-    let styles = resolve_styles(world, id, stylesheets, PseudoClasses::default());
+    let pseudo = PseudoClasses {
+        forced: Some((id, state)),
+        ..PseudoClasses::default()
+    };
+    let styles = resolve_styles(world, id, stylesheets, pseudo);
     Some(styled_text(
         instance,
         &styles,
@@ -232,9 +284,8 @@ pub fn layout_ui_viewed(
         height,
         stylesheets,
         PseudoClasses {
-            hovered: None,
-            active: None,
             focused,
+            ..PseudoClasses::default()
         },
         camera,
     )
@@ -254,7 +305,7 @@ pub fn layout_ui_interactive(
     camera: Option<&Camera>,
 ) -> UiLayout {
     let base = layout_ui_viewed(world, width, height, stylesheets, focused, camera);
-    let hovered = pointer.and_then(|[x, y]| base.hit(x, y));
+    let hovered = pointer.and_then(|[x, y]| base.hover_target(x, y));
     let active = pressed_button.filter(|button| hovered == Some(*button));
     let mut layout = layout_ui_with_pseudo(
         world,
@@ -265,6 +316,7 @@ pub fn layout_ui_interactive(
             hovered,
             active,
             focused,
+            ..PseudoClasses::default()
         },
         camera,
     );
@@ -273,12 +325,12 @@ pub fn layout_ui_interactive(
     layout
 }
 
-fn layout_ui_with_pseudo(
+pub(crate) fn layout_ui_with_pseudo(
     world: &World,
     width: u32,
     height: u32,
     stylesheets: &[Stylesheet],
-    pseudo: PseudoClasses,
+    pseudo: PseudoClasses<'_>,
     camera: Option<&Camera>,
 ) -> UiLayout {
     let mut layout = UiLayout::default();
@@ -322,7 +374,7 @@ fn layout_screen_gui(
     width: u32,
     height: u32,
     stylesheets: &[Stylesheet],
-    pseudo: PseudoClasses,
+    pseudo: PseudoClasses<'_>,
     layout: &mut UiLayout,
 ) {
     let Some(instance) = world.get(gui) else {
@@ -390,6 +442,20 @@ pub fn layout_artboard(
     scale: f32,
     origin: [f32; 2],
 ) -> UiLayout {
+    layout_artboard_in_state(world, gui, stylesheets, screen, scale, origin, None)
+}
+
+/// [`layout_artboard`], with one element shown in a state (hovered,
+/// pressed or disabled) as the states editor's preview does.
+pub fn layout_artboard_in_state(
+    world: &World,
+    gui: InstanceId,
+    stylesheets: &[Stylesheet],
+    screen: (u32, u32),
+    scale: f32,
+    origin: [f32; 2],
+    shown: Option<(InstanceId, UiState)>,
+) -> UiLayout {
     let mut layout = UiLayout::default();
     let (width, height) = screen;
     layout_screen_gui(
@@ -399,9 +465,8 @@ pub fn layout_artboard(
         height,
         stylesheets,
         PseudoClasses {
-            hovered: None,
-            active: None,
-            focused: None,
+            forced: shown,
+            ..PseudoClasses::default()
         },
         &mut layout,
     );
@@ -510,41 +575,160 @@ fn scale_rect(rect: UiRect, fit: Fit) -> UiRect {
 }
 
 fn scale_draw_item(item: &mut UiDrawItem, fit: Fit) {
+    transform_draw_item(
+        item,
+        Affine {
+            scale: [fit.scale, fit.scale],
+            offset: [fit.origin_x, fit.origin_y],
+        },
+    );
+}
+
+/// A 2D scale then move: a point `p` goes to `p * scale + offset`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Affine {
+    scale: [f32; 2],
+    offset: [f32; 2],
+}
+
+impl Affine {
+    const IDENTITY: Affine = Affine {
+        scale: [1.0, 1.0],
+        offset: [0.0, 0.0],
+    };
+
+    /// `other` first, then `self`.
+    fn after(self, other: Affine) -> Affine {
+        Affine {
+            scale: [
+                self.scale[0] * other.scale[0],
+                self.scale[1] * other.scale[1],
+            ],
+            offset: [
+                self.scale[0] * other.offset[0] + self.offset[0],
+                self.scale[1] * other.offset[1] + self.offset[1],
+            ],
+        }
+    }
+
+    fn moved(x: f32, y: f32) -> Affine {
+        Affine {
+            scale: [1.0, 1.0],
+            offset: [x, y],
+        }
+    }
+}
+
+/// CSS `transform` on an element at `rect`, around its centre: `scale`,
+/// `scaleX`, `scaleY`, `translate`, `translateX` and `translateY` (px, or %
+/// of the element's own size), applied right to left as in CSS. `None` for
+/// `none`, nothing it knows, or no change. Scales are taken as positive.
+fn css_transform(styles: &ResolvedStyles, rect: UiRect) -> Option<Affine> {
+    let value = css_property(styles, "transform")?;
+    let mut transform = Affine::IDENTITY;
+    let mut rest = value.trim();
+    while let Some(open) = rest.find('(') {
+        let name = rest[..open].trim().to_ascii_lowercase();
+        let close = open + rest[open..].find(')')?;
+        let arguments: Vec<&str> = rest[open + 1..close].split(',').map(str::trim).collect();
+        rest = &rest[close + 1..];
+        let number = |text: &str| {
+            text.parse::<f32>()
+                .ok()
+                .filter(|n| n.is_finite())
+                .map(f32::abs)
+        };
+        let length = |text: &str, along: f32| {
+            let pixels = if let Some(percent) = text.strip_suffix('%') {
+                percent
+                    .trim()
+                    .parse::<f32>()
+                    .ok()
+                    .map(|p| p / 100.0 * along)
+            } else {
+                text.strip_suffix("px")
+                    .unwrap_or(text)
+                    .trim()
+                    .parse::<f32>()
+                    .ok()
+            };
+            pixels.filter(|n| n.is_finite())
+        };
+        let step = match (name.as_str(), arguments.as_slice()) {
+            ("scale", [s]) => Affine {
+                scale: [number(s)?; 2],
+                offset: [0.0, 0.0],
+            },
+            ("scale", [x, y]) => Affine {
+                scale: [number(x)?, number(y)?],
+                offset: [0.0, 0.0],
+            },
+            ("scalex", [x]) => Affine {
+                scale: [number(x)?, 1.0],
+                offset: [0.0, 0.0],
+            },
+            ("scaley", [y]) => Affine {
+                scale: [1.0, number(y)?],
+                offset: [0.0, 0.0],
+            },
+            ("translate", [x]) => Affine::moved(length(x, rect.width)?, 0.0),
+            ("translate", [x, y]) => Affine::moved(length(x, rect.width)?, length(y, rect.height)?),
+            ("translatex", [x]) => Affine::moved(length(x, rect.width)?, 0.0),
+            ("translatey", [y]) => Affine::moved(0.0, length(y, rect.height)?),
+            _ => return None,
+        };
+        transform = transform.after(step);
+    }
+    if transform == Affine::IDENTITY {
+        return None;
+    }
+    let centre = [rect.x + rect.width * 0.5, rect.y + rect.height * 0.5];
+    Some(
+        Affine::moved(centre[0], centre[1])
+            .after(transform)
+            .after(Affine::moved(-centre[0], -centre[1])),
+    )
+}
+
+fn transform_draw_item(item: &mut UiDrawItem, affine: Affine) {
+    let [sx, sy] = affine.scale;
+    // Lengths that aren't along one axis (corners, borders, font sizes).
+    let uniform = (sx.abs() * sy.abs()).sqrt();
     let place = |position: &mut [f32; 2], size: &mut [f32; 2]| {
-        position[0] = fit.origin_x + position[0] * fit.scale;
-        position[1] = fit.origin_y + position[1] * fit.scale;
-        size[0] *= fit.scale;
-        size[1] *= fit.scale;
+        position[0] = affine.offset[0] + position[0] * sx;
+        position[1] = affine.offset[1] + position[1] * sy;
+        size[0] *= sx;
+        size[1] *= sy;
     };
     match item {
         UiDrawItem::Rectangle(rectangle) => {
             place(&mut rectangle.position, &mut rectangle.size);
-            rectangle.border_width *= fit.scale;
-            rectangle.border_radius *= fit.scale;
+            rectangle.border_width *= uniform;
+            rectangle.border_radius *= uniform;
         }
         UiDrawItem::Image(image) => {
             place(&mut image.position, &mut image.size);
-            image.border_radius *= fit.scale;
+            image.border_radius *= uniform;
         }
         UiDrawItem::Text(text) => {
             place(&mut text.position, &mut text.size);
-            text.font_size *= fit.scale;
-            text.letter_spacing *= fit.scale;
+            text.font_size *= uniform;
+            text.letter_spacing *= uniform;
             if let Some(height) = &mut text.line_height {
-                *height *= fit.scale;
+                *height *= uniform;
             }
             if let Some(stroke) = &mut text.stroke {
-                stroke.width *= fit.scale;
+                stroke.width *= uniform;
             }
             for span in &mut text.spans {
-                span.font_size *= fit.scale;
+                span.font_size *= uniform;
                 if let Some(stroke) = &mut span.stroke {
-                    stroke.width *= fit.scale;
+                    stroke.width *= uniform;
                 }
             }
             for shadow in &mut text.shadows {
-                shadow.offset = shadow.offset.map(|d| d * fit.scale);
-                shadow.blur *= fit.scale;
+                shadow.offset = [shadow.offset[0] * sx, shadow.offset[1] * sy];
+                shadow.blur *= uniform;
             }
         }
     }
@@ -563,7 +747,7 @@ fn layout_children(
     out: &mut UiLayout,
     stylesheets: &[Stylesheet],
     inherited_opacity: f32,
-    pseudo: PseudoClasses,
+    pseudo: PseudoClasses<'_>,
 ) {
     let Some(parent_instance) = world.get(parent) else {
         return;
@@ -698,26 +882,68 @@ fn layout_children(
             width: layout.size.width.max(0.0),
             height: layout.size.height.max(0.0),
         };
-
-        out.elements.push(UiElement {
-            id,
+        let placed = Placed {
             rect,
-            button: instance.class() == ClassName::TextButton,
-            text_box: instance.class() == ClassName::TextBox,
-            in_flow: flow_children,
-            pixels_per_unit: 1.0,
-            font_size: paint::font_size(instance, &styles),
-        });
-        paint_instance(
-            instance,
-            rect,
-            &styles,
             opacity,
-            pseudo.focused == Some(id),
-            &mut out.draw_items,
-            &mut out.warnings,
-        );
-        layout_children(world, id, rect, out, stylesheets, opacity, pseudo);
+            in_flow: flow_children,
+        };
+        place_element(world, id, &styles, placed, out, stylesheets, pseudo);
+    }
+}
+
+/// Where layout put an element, and how see-through its ancestors make it.
+#[derive(Clone, Copy)]
+struct Placed {
+    rect: UiRect,
+    opacity: f32,
+    in_flow: bool,
+}
+
+/// Records and paints one element laid out at `placed`, then its
+/// children. Its CSS `transform` moves and scales what it and its children
+/// draw, but not where they are for layout and clicks.
+fn place_element(
+    world: &World,
+    id: InstanceId,
+    styles: &ResolvedStyles,
+    placed: Placed,
+    out: &mut UiLayout,
+    stylesheets: &[Stylesheet],
+    pseudo: PseudoClasses<'_>,
+) {
+    let Some(instance) = world.get(id) else {
+        return;
+    };
+    let Placed {
+        rect,
+        opacity,
+        in_flow,
+    } = placed;
+    let draws = out.draw_items.len();
+    out.elements.push(UiElement {
+        id,
+        rect,
+        button: instance.class() == ClassName::TextButton,
+        text_box: instance.class() == ClassName::TextBox,
+        in_flow,
+        pixels_per_unit: 1.0,
+        font_size: paint::font_size(instance, styles),
+        interactable: interactable(instance),
+    });
+    paint_instance(
+        instance,
+        rect,
+        styles,
+        opacity,
+        pseudo.focused == Some(id),
+        &mut out.draw_items,
+        &mut out.warnings,
+    );
+    layout_children(world, id, rect, out, stylesheets, opacity, pseudo);
+    if let Some(transform) = css_transform(styles, rect) {
+        for item in &mut out.draw_items[draws..] {
+            transform_draw_item(item, transform);
+        }
     }
 }
 
@@ -809,7 +1035,7 @@ fn layout_table(
     out: &mut UiLayout,
     stylesheets: &[Stylesheet],
     inherited_opacity: f32,
-    pseudo: PseudoClasses,
+    pseudo: PseudoClasses<'_>,
 ) {
     let shown: Vec<InstanceId> = children
         .iter()
@@ -839,9 +1065,6 @@ fn layout_table(
         ((bounds.width - gap * (columns.saturating_sub(1) as f32)) / columns as f32).max(0.0);
     let cell_h = ((bounds.height - gap * (rows.saturating_sub(1) as f32)) / rows as f32).max(0.0);
     for (index, id) in shown.into_iter().enumerate() {
-        let Some(instance) = world.get(id) else {
-            continue;
-        };
         let styles = resolve_styles(world, id, stylesheets, pseudo);
         let opacity = inherited_opacity
             * css_number(&styles, "opacity")
@@ -855,25 +1078,12 @@ fn layout_table(
             width: cell_w,
             height: cell_h,
         };
-        out.elements.push(UiElement {
-            id,
+        let placed = Placed {
             rect,
-            button: instance.class() == ClassName::TextButton,
-            text_box: instance.class() == ClassName::TextBox,
-            in_flow: true,
-            pixels_per_unit: 1.0,
-            font_size: paint::font_size(instance, &styles),
-        });
-        paint_instance(
-            instance,
-            rect,
-            &styles,
             opacity,
-            pseudo.focused == Some(id),
-            &mut out.draw_items,
-            &mut out.warnings,
-        );
-        layout_children(world, id, rect, out, stylesheets, opacity, pseudo);
+            in_flow: true,
+        };
+        place_element(world, id, &styles, placed, out, stylesheets, pseudo);
     }
 }
 
@@ -884,7 +1094,7 @@ fn layout_billboards(
     height: u32,
     out: &mut UiLayout,
     stylesheets: &[Stylesheet],
-    pseudo: PseudoClasses,
+    pseudo: PseudoClasses<'_>,
 ) {
     if width == 0 || height == 0 {
         return;

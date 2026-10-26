@@ -1660,3 +1660,278 @@ fn selected_text_in_the_typing_box_is_wrapped_in_rich_text_tags() {
     }
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+/// The text of the rule written exactly as `selector` in `css`, between its braces.
+fn rule_text<'a>(css: &'a str, selector: &str) -> &'a str {
+    let start = css
+        .find(&format!("{selector} {{"))
+        .unwrap_or_else(|| panic!("{selector} in:\n{css}"));
+    let open = start + css[start..].find('{').unwrap() + 1;
+    let close = open + css[open..].find('}').unwrap();
+    &css[open..close]
+}
+
+#[test]
+fn the_states_editor_writes_hover_and_pressed_rules_that_show_in_its_preview_and_in_play() {
+    use crate::ui_designer::state_style_action;
+    use axcenity_render::UiDrawItem;
+    use axcenity_ui::{UiInput, UiInteraction, UiState};
+    let folder = copy_of_example("hello-touched", "ui-designer-states");
+    let mut app = EditorApp::new(Some(&folder));
+    act(&mut app, DesignerAction::NewScreenGui);
+    let gui = app.selected.unwrap();
+    act(
+        &mut app,
+        DesignerAction::DesignSize {
+            gui,
+            width: 1280,
+            height: 720,
+        },
+    );
+    let play = drop_in(&mut app, Insertable::TextButton, gui, [100.0, 100.0]);
+    act(
+        &mut app,
+        DesignerAction::Edit(play, Edit::Name("Play".into())),
+    );
+    // The Normal tab's Background.
+    act(
+        &mut app,
+        state_style_action(
+            play,
+            UiState::Normal,
+            "background-color",
+            "#3a86ff".into(),
+            false,
+        ),
+    );
+    let before = state(&app);
+
+    // The tabs, as clicked: Hover shows the eye on the artboard, which
+    // shows the button hovered until it's clicked off.
+    let ctx = theme::test_context();
+    let mut clock = 0.0;
+    let size = egui::vec2(1100.0, 700.0);
+    for _ in 0..3 {
+        designer_frame(&mut app, &ctx, &mut clock, size, Vec::new());
+    }
+    click_named(&mut app, &ctx, &mut clock, size, "Hover");
+    let output = designer_frame(&mut app, &ctx, &mut clock, size, Vec::new());
+    let ppp = ctx.pixels_per_point();
+    assert!(
+        widget_named(
+            &output,
+            &format!("{} Showing Hover", theme::icons::EYE),
+            ppp
+        )
+        .is_some(),
+        "the eye shows the state on the artboard"
+    );
+    click_named(
+        &mut app,
+        &ctx,
+        &mut clock,
+        size,
+        &format!("{} Showing Hover", theme::icons::EYE),
+    );
+    let output = designer_frame(&mut app, &ctx, &mut clock, size, Vec::new());
+    assert!(
+        widget_named(
+            &output,
+            &format!("{} Show Hover", theme::icons::EYE_SLASH),
+            ppp
+        )
+        .is_some()
+    );
+
+    // A darker Hover background and a 0.95 Pressed scale, from the states
+    // editor's controls (no CSS typed): each a rule of its own, one step each.
+    act(
+        &mut app,
+        state_style_action(
+            play,
+            UiState::Hover,
+            "background-color",
+            "#1d4ed8".into(),
+            false,
+        ),
+    );
+    act(
+        &mut app,
+        state_style_action(
+            play,
+            UiState::Pressed,
+            "transform",
+            "scale(0.95)".into(),
+            false,
+        ),
+    );
+    // Its Transition, in #Play.
+    act(
+        &mut app,
+        state_style_action(
+            play,
+            UiState::Normal,
+            "transition",
+            "all 0.15s ease".into(),
+            false,
+        ),
+    );
+    let css = app.stylesheet_text("ui.css").unwrap().replace("\r\n", "\n");
+    assert_eq!(
+        rule_text(&css, "#Play:hover").trim(),
+        "background-color: #1d4ed8;"
+    );
+    assert_eq!(
+        rule_text(&css, "#Play:active").trim(),
+        "transform: scale(0.95);"
+    );
+    assert!(
+        rule_text(&css, "#Play").contains("transition: all 0.15s ease"),
+        "{css}"
+    );
+    // Changing the Hover colour again changes it in place.
+    act(
+        &mut app,
+        state_style_action(
+            play,
+            UiState::Hover,
+            "background-color",
+            "#1e40af".into(),
+            false,
+        ),
+    );
+    let css = app.stylesheet_text("ui.css").unwrap().replace("\r\n", "\n");
+    assert_eq!(
+        rule_text(&css, "#Play:hover").trim(),
+        "background-color: #1e40af;"
+    );
+
+    // The states editor's preview on the artboard.
+    let sheets = stylesheets(&app);
+    let background = |items: &[UiDrawItem]| {
+        items
+            .iter()
+            .find_map(|item| match item {
+                UiDrawItem::Rectangle(rectangle) => Some(*rectangle),
+                _ => None,
+            })
+            .unwrap()
+    };
+    let shown = |state| {
+        axcenity_ui::layout_artboard_in_state(
+            &app.world,
+            gui,
+            &sheets,
+            (1280, 720),
+            1.0,
+            [0.0, 0.0],
+            Some((play, state)),
+        )
+        .draw_items
+    };
+    let hover_blue = [
+        0x1e as f32 / 255.0,
+        0x40 as f32 / 255.0,
+        0xaf as f32 / 255.0,
+    ];
+    assert_eq!(background(&shown(UiState::Hover)).color[..3], hover_blue);
+    let pressed = background(&shown(UiState::Pressed));
+    assert_eq!(pressed.color[..3], hover_blue);
+    assert!((pressed.size[0] - 160.0 * 0.95).abs() < 1e-3);
+
+    // The designer with the Hover tab picked and its eye on, to look at.
+    if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from) {
+        act(&mut app, DesignerAction::Select(Some(play)));
+        app.ui_designer = UiDesigner::default();
+        app.ui_designer.show_in_state(UiState::Hover, true);
+        crate::snapshot::snapshot_rendered(
+            &folder.join("ui-designer-states.png"),
+            egui::vec2(1100.0, 1000.0),
+            vec![Vec::new(); 3],
+            |ctx, render_state| {
+                egui::CentralPanel::default()
+                    .show(ctx, |ui| app.ui_designer_pane(ui, Some(render_state)));
+            },
+        );
+    }
+
+    // In Play, the pointer over it and then holding it shows the same,
+    // after the transition.
+    app.play();
+    let session = app.play.as_ref().expect("playing");
+    let mut ui = UiInteraction::default();
+    let over = UiInput {
+        pointer: Some([180.0, 124.0]),
+        pressed: None,
+        focused: None,
+    };
+    let held = UiInput {
+        pressed: Some(play),
+        ..over
+    };
+    let mut frame = |input, seconds| {
+        background(
+            &ui.layout(session.world(), (1280, 720), &sheets, input, None, seconds)
+                .draw_items,
+        )
+    };
+    frame(UiInput::default(), 0.0);
+    frame(over, 0.0);
+    assert_eq!(frame(over, 0.3).color[..3], hover_blue);
+    frame(held, 0.0);
+    assert!((frame(held, 0.3).size[0] - 152.0).abs() < 1e-3);
+    app.stop();
+
+    // Every edit undoes, as one step each.
+    for _ in 0..4 {
+        app.undo();
+    }
+    assert_eq!(state(&app), before);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn mouse_enter_leave_and_a_disabled_button_reach_the_game_in_play() {
+    use axcenity_ui::UiEvent;
+    let folder = copy_of_example("hello-buttons", "ui-designer-hover-play");
+    let mut app = EditorApp::new(Some(&folder));
+    app.play();
+    let world = app.play.as_ref().expect("playing").world();
+    let menu = world.find_first_child(world.workspace(), "Menu").unwrap();
+    let play = world.find_first_child(menu, "Play").unwrap();
+    let locked = world.find_first_child(menu, "Locked").unwrap();
+    let status = world.find_first_child(menu, "Status").unwrap();
+    let status_text = |app: &EditorApp| {
+        app.play
+            .as_ref()
+            .unwrap()
+            .world()
+            .get(status)
+            .and_then(|instance| instance.property("Text"))
+            .and_then(Value::as_str)
+            .unwrap()
+            .to_owned()
+    };
+
+    // What the viewport hands on when the pointer goes onto Play.
+    app.pending_ui_events = vec![
+        UiEvent::MouseEnter(play),
+        UiEvent::PlaySound("assets/audio/click.wav".into()),
+    ];
+    app.play_frame(1.0 / 60.0, &[], None, None);
+    assert_eq!(status_text(&app), "Ready?");
+    assert!(
+        super::tests::printed(&app).contains(&"The pointer is on Play (blocks)"),
+        "{:?}",
+        super::tests::printed(&app)
+    );
+    // A click on Locked never reaches it: Interactable is off.
+    app.play_frame(1.0 / 60.0, &[], Some(locked), None);
+    assert_eq!(status_text(&app), "Ready?");
+    app.pending_ui_events = vec![UiEvent::MouseLeave(play)];
+    app.play_frame(1.0 / 60.0, &[], None, None);
+    assert_eq!(status_text(&app), "Point at Play");
+    assert!(super::tests::printed(&app).contains(&"The pointer left Play (blocks)"));
+    app.stop();
+    let _ = std::fs::remove_dir_all(&folder);
+}

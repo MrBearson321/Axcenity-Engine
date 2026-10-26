@@ -16,7 +16,7 @@ use std::time::Instant;
 
 use axcenity_anim::Animators;
 use axcenity_assets::Assets;
-use axcenity_audio::GameAudio;
+use axcenity_audio::{GameAudio, SoundAction};
 use axcenity_character::{CharacterCamera, Controllers, MoveInput};
 use axcenity_core::{InstanceId, KeyCode, World};
 use axcenity_physics::Physics;
@@ -45,6 +45,8 @@ pub struct Session {
     assets: Assets,
     /// Dropped at Stop, which silences every sound.
     audio: GameAudio,
+    /// Buttons' hover and click sounds, played with the next frame's audio.
+    ui_sounds: Vec<SoundAction>,
     /// Set by Debug > Panic during Play, to check that a crash is caught.
     panic_next_frame: bool,
     /// What the last frame's steps took, for the Profiler; `None` when it
@@ -75,6 +77,7 @@ impl Session {
             animators: Animators::new(),
             assets,
             audio: GameAudio::default(),
+            ui_sounds: Vec::new(),
             panic_next_frame: false,
             cost: None,
         };
@@ -146,6 +149,34 @@ impl Session {
         guard(|| {
             self.scripts.activate_ui_button(&mut self.world, button);
             self.forward_output(output);
+        })
+    }
+
+    /// Passes on what the viewport's UI did, inside the guarded Play
+    /// session: `MouseEnter` and `MouseLeave` to LocalScripts, and buttons'
+    /// sounds to the next frame's audio.
+    pub fn ui_events(
+        &mut self,
+        events: Vec<axcenity_ui::UiEvent>,
+        output: &mut Output,
+    ) -> Result<(), Crash> {
+        guard(|| {
+            for event in events {
+                match event {
+                    axcenity_ui::UiEvent::MouseEnter(id) => {
+                        self.scripts
+                            .fire_ui_event(&mut self.world, id, "MouseEnter");
+                    }
+                    axcenity_ui::UiEvent::MouseLeave(id) => {
+                        self.scripts
+                            .fire_ui_event(&mut self.world, id, "MouseLeave");
+                    }
+                    axcenity_ui::UiEvent::PlaySound(sound_id) => {
+                        self.ui_sounds.push(SoundAction::PlayOnce { sound_id });
+                    }
+                }
+                self.forward_output(output);
+            }
         })
     }
 
@@ -362,7 +393,8 @@ impl Session {
     }
 
     fn apply_audio(&mut self, camera: CameraState, output: &mut Output) {
-        let actions = self.scripts.take_sound_actions();
+        let mut actions = self.scripts.take_sound_actions();
+        actions.append(&mut self.ui_sounds);
         let listener = axcenity_audio::Listener::from_view(camera.position, camera.orientation);
         let update = self
             .audio

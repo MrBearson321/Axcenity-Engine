@@ -14,7 +14,7 @@ Which crate owns what, and what it may depend on. Read this before adding a crat
 | `physics` | `rapier3d` integration | `core`, `assets` |
 | `character` | kinematic third-person walk and run; queries physics, never the reverse | `core`, `assets`, `physics` |
 | `script` | Luau (`mlua`), sandbox, scheduler, engine API, TweenService (eased by `anim`'s curves) | `anim`, `audio`, `core`, `physics`, `assets` |
-| `ui` | UI Instance layout, CSS cascade (`taffy`) and screen-space draw data | `core`, `render` |
+| `ui` | UI Instance layout, CSS cascade (`taffy`), transitions (eased by `anim`'s curves) and screen-space draw data | `anim`, `core`, `render` |
 | `project` | project folder load and save, including CSS and block-script sources, upgrading older projects (animation files through `anim`), and the editor's asset check | `anim`, `assets`, `blocks`, `core`, `terrain` |
 | `player` | runtime shipped with games (binary) | `anim`, `audio`, `character`, `core`, `assets`, `render`, `scene`, `physics`, `script`, `project`, `ui` |
 | `editor` | `egui` editor app (binary) | `anim`, `audio`, `blocks`, `character`, `core`, `assets`, `physics`, `project`, `render`, `scene`, `script`, `ui` |

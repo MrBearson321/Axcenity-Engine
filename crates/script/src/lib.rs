@@ -327,14 +327,24 @@ impl ScriptRuntime {
         }
     }
 
-    /// Delivers a button activation only to LocalScripts.
+    /// Delivers a button activation only to LocalScripts. A button whose
+    /// `Interactable` is off doesn't fire.
     pub fn activate_ui_button(&mut self, world: &mut World, button: InstanceId) {
+        let fires = world.get(button).is_some_and(|instance| {
+            instance.class() == ClassName::TextButton
+                && instance.property("Interactable").and_then(Value::as_bool) != Some(false)
+        });
+        if fires {
+            self.fire_ui_event(world, button, "Activated");
+        }
+    }
+
+    /// Fires `event` of a UI element (such as `MouseEnter`) only in
+    /// LocalScripts. An element that's gone is skipped.
+    pub fn fire_ui_event(&mut self, world: &mut World, element: InstanceId, event: &'static str) {
         self.fire_changes(world);
-        if world
-            .get(button)
-            .is_some_and(|instance| instance.class() == ClassName::TextButton)
-        {
-            self.client.fire_instance_event(world, button, "Activated");
+        if world.contains(element) {
+            self.client.fire_instance_event(world, element, event);
             self.collect(Side::Client);
             self.fire_changes(world);
         }

@@ -572,6 +572,17 @@ impl EditorApp {
     /// project with no stylesheet gets `ui.css`. The new `Id` and the
     /// stylesheet's text are one undo step.
     pub(super) fn add_style(&mut self, id: InstanceId, property: &str, value: &str) {
+        self.add_style_to(id, "", property, value);
+    }
+    /// [`Self::add_style`], into the rule for `#Id` followed by
+    /// `pseudo_class` (such as `:hover`, for a state's rule).
+    pub(super) fn add_style_to(
+        &mut self,
+        id: InstanceId,
+        pseudo_class: &str,
+        property: &str,
+        value: &str,
+    ) {
         let Some(instance) = self.world.get(id) else {
             return;
         };
@@ -591,7 +602,7 @@ impl EditorApp {
                 self.output.error(format!("Could not change that: {err:#}"));
             }
         }
-        let selector = style_panel::own_selector(&element_id);
+        let selector = format!("{}{pseudo_class}", style_panel::own_selector(&element_id));
         let text = self.add_style_text(&selector, property, value);
         self.history.seal();
         self.record_style(id, before, text.into_iter().collect());

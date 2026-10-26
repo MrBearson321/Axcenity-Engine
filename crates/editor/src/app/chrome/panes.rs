@@ -172,6 +172,13 @@ impl EditorApp {
                     value,
                     dragging,
                 } => self.set_own_style(id, property, &value, dragging),
+                DesignerAction::StateStyle {
+                    id,
+                    state,
+                    property,
+                    value,
+                    dragging,
+                } => self.set_state_style(id, state, property, &value, dragging),
                 DesignerAction::Insert { what, parent, at } => {
                     self.designer_insert(what, parent, at);
                 }
@@ -251,6 +258,51 @@ impl EditorApp {
             self.history.seal();
         }
         self.apply_style(id, edit);
+        if !dragging {
+            self.history.seal();
+        }
+    }
+
+    /// Sets `property` to `value` in `id`'s own rule for `state` (such as
+    /// `#play:hover`): changed in place when that rule has it, else added to
+    /// the rule, which is made if there isn't one. Normal is `#play` itself
+    /// ([`Self::set_own_style`]). One undo step, or part of a drag's.
+    pub(in crate::app) fn set_state_style(
+        &mut self,
+        id: InstanceId,
+        state: axcenity_ui::UiState,
+        property: &str,
+        value: &str,
+        dragging: bool,
+    ) {
+        if state == axcenity_ui::UiState::Normal {
+            return self.set_own_style(id, property, value, dragging);
+        }
+        let own = self
+            .world
+            .get(id)
+            .and_then(|instance| instance.property("Id"))
+            .and_then(Value::as_str)
+            .filter(|element_id| !element_id.is_empty())
+            .map(|element_id| crate::ui_designer::state_selector(element_id, state));
+        let existing = own.and_then(|selector| {
+            let project = self.project.as_ref()?;
+            axcenity_ui::rule_declaration(&project.stylesheets, &selector, property)
+        });
+        if !dragging {
+            self.history.seal();
+        }
+        match existing {
+            Some(declaration) => self.apply_style(
+                id,
+                StyleEdit::Set {
+                    path: declaration.path,
+                    span: declaration.span,
+                    value: value.to_owned(),
+                },
+            ),
+            None => self.add_style_to(id, state.pseudo_class(), property, value),
+        }
         if !dragging {
             self.history.seal();
         }

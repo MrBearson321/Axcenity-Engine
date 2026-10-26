@@ -1,0 +1,44 @@
+/* Hover, pressed and disabled states. The UI Designer's states editor
+   (Normal / Hover / Pressed / Disabled) writes rules like these. */
+
+#play {
+    background-color: #3b82f6;
+    color: #ffffff;
+    font-size: 22px;
+    border-radius: 10px;
+    transition: all 0.15s ease;
+}
+
+#play:hover {
+    background-color: #1d4ed8;
+}
+
+#play:active {
+    transform: scale(0.95);
+}
+
+/* The box `Tooltip` shows, for Play only. */
+#play Tooltip {
+    background-color: #111827;
+    color: #f9fafb;
+    border-radius: 6px;
+}
+
+#locked {
+    background-color: #3b82f6;
+    color: #ffffff;
+    font-size: 22px;
+    border-radius: 10px;
+}
+
+#locked:disabled {
+    background-color: #4b5563;
+    color: #9ca3af;
+    cursor: not-allowed;
+}
+
+#status {
+    color: #e5e7eb;
+    font-size: 20px;
+    text-align: center;
+}

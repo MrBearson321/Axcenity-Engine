@@ -194,6 +194,14 @@ impl Writer {
                 format!("{}.Activated:Connect(function()", target(button)?),
                 body,
             ),
+            BlockKind::WhenMouseEnters { element, body } => (
+                format!("{}.MouseEnter:Connect(function()", target(element)?),
+                body,
+            ),
+            BlockKind::WhenMouseLeaves { element, body } => (
+                format!("{}.MouseLeave:Connect(function()", target(element)?),
+                body,
+            ),
             BlockKind::EveryFrame { body } => (
                 "RunService.Heartbeat:Connect(function(deltaTime)".to_owned(),
                 body,
@@ -547,6 +555,8 @@ impl Writer {
             | BlockKind::WhenTouched { .. }
             | BlockKind::WhenKeyPressed { .. }
             | BlockKind::WhenClicked { .. }
+            | BlockKind::WhenMouseEnters { .. }
+            | BlockKind::WhenMouseLeaves { .. }
             | BlockKind::EveryFrame { .. }
             | BlockKind::WhenSoundEnded { .. }
             | BlockKind::WhenStateChanged { .. }

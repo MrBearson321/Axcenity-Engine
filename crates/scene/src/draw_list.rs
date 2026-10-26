@@ -15,7 +15,7 @@ use axcenity_render::{
     AmbientLight, Camera, Channel, ChannelMap, Cone, DrawItem, DrawList, Light, Material,
     MeshSource, NormalMap, PostProcessing, Shadows, Shape, Sky, Sun, TextureMaps, TextureSource,
 };
-use axcenity_ui::{Stylesheet, UiLayout, layout_ui_interactive};
+use axcenity_ui::{Stylesheet, UiInput, UiInteraction, UiLayout};
 
 use crate::orientation::rotation_from_orientation;
 use crate::terrain::TerrainCache;
@@ -284,17 +284,28 @@ pub fn build_draw_list_with_ui(
         camera,
         viewport_size,
         stylesheets,
-        None,
-        None,
-        None,
+        UiFrame {
+            interaction: &mut UiInteraction::default(),
+            input: UiInput::default(),
+            seconds: 0.0,
+        },
         &Poses::new(),
         &mut TerrainCache::new(),
     )
     .0
 }
 
-/// Builds a scene and interactive UI layout for the given physical-pixel
-/// pointer position and button currently held, with `poses` drawn posed.
+/// One frame of the UI: the host's [`UiInteraction`], the pointer and
+/// keyboard this frame, and how long the frame was, in seconds.
+pub struct UiFrame<'a> {
+    pub interaction: &'a mut UiInteraction,
+    pub input: UiInput,
+    pub seconds: f32,
+}
+
+/// Builds a scene and interactive UI layout for the pointer, held button
+/// and focused text box in `ui`, with `poses` drawn posed. The UI's
+/// transitions move on by `ui.seconds`.
 #[allow(clippy::too_many_arguments)] // Each is a different input to the frame.
 pub fn build_draw_list_with_ui_interaction(
     world: &World,
@@ -302,22 +313,18 @@ pub fn build_draw_list_with_ui_interaction(
     camera: Camera,
     viewport_size: (u32, u32),
     stylesheets: &[Stylesheet],
-    pointer: Option<[f32; 2]>,
-    pressed_button: Option<InstanceId>,
-    focused: Option<InstanceId>,
+    ui: UiFrame<'_>,
     poses: &Poses,
     terrain: &mut TerrainCache,
 ) -> (DrawList, UiLayout) {
     let mut list = build_draw_list_posed(world, assets, camera, poses, terrain);
-    let layout = layout_ui_interactive(
+    let layout = ui.interaction.layout(
         world,
-        viewport_size.0,
-        viewport_size.1,
+        viewport_size,
         stylesheets,
-        pointer,
-        pressed_button,
-        focused,
+        ui.input,
         Some(&camera),
+        ui.seconds,
     );
     list.ui = layout.draw_items.clone();
     attach_ui_textures(&mut list.ui, assets);

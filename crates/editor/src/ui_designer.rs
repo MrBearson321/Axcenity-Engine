@@ -10,7 +10,8 @@
 //!
 //! Around the artboard are a palette of UI elements to drag onto it, the
 //! ScreenGui's hierarchy, and an inspector with the element's name, text,
-//! anchor and font, and the same Style (CSS) section as Properties. The
+//! anchor and font, the states editor (Normal, Hover, Pressed and Disabled,
+//! `states.rs`) and the same Style (CSS) section as Properties. The
 //! selected element gets the viewport's handles, snapping and distances in
 //! pixels (`ui_handles.rs`), and also snaps to guides dragged out of the
 //! rulers. Double-click text on the artboard to type over it.
@@ -28,16 +29,18 @@ mod artboard;
 mod panels;
 mod rich_text;
 mod rulers;
+mod states;
 mod text_toolbar;
 
 pub use anchors::Pin;
+pub use states::state_selector;
 pub use text_toolbar::Toggle;
 
 use std::collections::HashMap;
 
 use axcenity_assets::Assets;
 use axcenity_core::{ClassName, InstanceId, UDim2, Value, World};
-use axcenity_ui::{Stylesheet, UiLayout};
+use axcenity_ui::{Stylesheet, UiLayout, UiState};
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 
@@ -135,8 +138,44 @@ pub enum DesignerAction {
         value: String,
         dragging: bool,
     },
+    /// Like [`TextStyle`](Self::TextStyle), in the rule for one of the
+    /// element's states (`#Id:hover`, `#Id:active` or `#Id:disabled`),
+    /// from the states editor or the text toolbar in a state's tab.
+    StateStyle {
+        id: InstanceId,
+        state: UiState,
+        property: &'static str,
+        value: String,
+        dragging: bool,
+    },
     /// Makes a ScreenGui, when there's none to design.
     NewScreenGui,
+}
+
+/// The action that sets `property` for `id` in `state`: in its own `#Id`
+/// rule for Normal, else in that state's rule.
+pub fn state_style_action(
+    id: InstanceId,
+    state: UiState,
+    property: &'static str,
+    value: String,
+    dragging: bool,
+) -> DesignerAction {
+    match state {
+        UiState::Normal => DesignerAction::TextStyle {
+            id,
+            property,
+            value,
+            dragging,
+        },
+        _ => DesignerAction::StateStyle {
+            id,
+            state,
+            property,
+            value,
+            dragging,
+        },
+    }
 }
 
 /// What's dragged out of the palette.
@@ -218,6 +257,10 @@ pub struct UiDesigner {
     text_editing: Option<TextEditing>,
     /// The project's font families, and the font list they were read from.
     project_fonts: Option<(usize, Vec<String>)>,
+    /// The states editor's tab: which state the inspector edits.
+    state: UiState,
+    /// The eye: the selected element is shown in `state` on the artboard.
+    show_state: bool,
     /// Where the artboard was drawn last, in points.
     board: Option<egui::Rect>,
     /// The canvas inside the rulers, as drawn last.
@@ -249,6 +292,8 @@ impl Default for UiDesigner {
             guide_drag: None,
             text_editing: None,
             project_fonts: None,
+            state: UiState::Normal,
+            show_state: true,
             board: None,
             canvas_rect: None,
             empty: World::new(),
@@ -423,6 +468,31 @@ impl UiDesigner {
         self.preview = screen;
     }
 
+    /// Picks the states editor's tab and its eye, as clicking them does.
+    #[cfg(test)]
+    pub fn show_in_state(&mut self, state: UiState, show: bool) {
+        self.state = state;
+        self.show_state = show;
+    }
+
+    /// The state the inspector edits `id` in: the states editor's tab, or
+    /// Normal for an element without states.
+    fn state_for(&self, scene: &DesignerScene, id: InstanceId) -> UiState {
+        if states::has_states(scene.world, id, scene.stylesheets) {
+            self.state
+        } else {
+            UiState::Normal
+        }
+    }
+
+    /// The selected element and the state the eye shows it in on the
+    /// artboard, when that isn't Normal.
+    fn shown_state(&self, scene: &DesignerScene) -> Option<(InstanceId, UiState)> {
+        let id = scene.selected?;
+        let state = self.state_for(scene, id);
+        (self.show_state && state != UiState::Normal).then_some((id, state))
+    }
+
     /// The ruler guides on `gui`.
     pub fn guides(&self, gui: InstanceId) -> &[Guide] {
         self.guides.get(&gui).map_or(&[], Vec::as_slice)
@@ -568,13 +638,17 @@ impl UiDesigner {
         else {
             return;
         };
-        let Some(style) = axcenity_ui::text_style(scene.world, id, scene.stylesheets) else {
+        let state = self.state_for(scene, id);
+        let Some(style) =
+            axcenity_ui::text_style_in_state(scene.world, id, scene.stylesheets, state)
+        else {
             return;
         };
         for (key, toggle) in rich_text::SHORTCUTS {
             let shortcut = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, key);
             if ctx.input_mut(|input| input.consume_shortcut(&shortcut)) {
-                actions.push(toggle.action(id, &style));
+                let (property, value) = toggle.flipped(&style);
+                actions.push(state_style_action(id, state, property, value, false));
             }
         }
     }

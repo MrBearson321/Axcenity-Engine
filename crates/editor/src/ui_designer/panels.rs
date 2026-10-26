@@ -284,8 +284,12 @@ impl UiDesigner {
                     ui.end_row();
                 }
             });
+            let state = self.state_for(scene, id);
             if has_text {
-                text_toolbar::text_toolbar(ui, scene, id, actions);
+                text_toolbar::text_toolbar(ui, scene, id, state, actions);
+            }
+            if super::states::has_states(world, id, scene.stylesheets) {
+                self.states_editor(ui, scene, id, actions);
             }
             if id != gui {
                 anchor_picker(ui, scene, gui, id, actions);

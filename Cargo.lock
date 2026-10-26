@@ -733,6 +733,7 @@ dependencies = [
 name = "axcenity-ui"
 version = "0.1.0"
 dependencies = [
+ "axcenity-anim",
  "axcenity-core",
  "axcenity-render",
  "taffy",

@@ -1,0 +1,50 @@
+{
+  "blocks": [
+    {
+      "id": 1,
+      "position": [
+        40,
+        40
+      ],
+      "kind": {
+        "type": "when_mouse_enters",
+        "element": "Menu.Play",
+        "body": [
+          {
+            "id": 2,
+            "kind": {
+              "type": "print",
+              "value": {
+                "type": "text",
+                "value": "The pointer is on Play (blocks)"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "position": [
+        40,
+        160
+      ],
+      "kind": {
+        "type": "when_mouse_leaves",
+        "element": "Menu.Play",
+        "body": [
+          {
+            "id": 4,
+            "kind": {
+              "type": "print",
+              "value": {
+                "type": "text",
+                "value": "The pointer left Play (blocks)"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

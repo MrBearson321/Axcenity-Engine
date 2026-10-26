@@ -41,6 +41,8 @@ pub(super) fn block_names(kind: &BlockKind) -> (&'static str, &'static [&'static
         BlockKind::WhenTouched { .. } => ("When Touched", &["Part"]),
         BlockKind::WhenKeyPressed { .. } => ("When Key Pressed", &["Key"]),
         BlockKind::WhenClicked { .. } => ("When Clicked", &["Button"]),
+        BlockKind::WhenMouseEnters { .. } => ("When Mouse Enters", &["Element"]),
+        BlockKind::WhenMouseLeaves { .. } => ("When Mouse Leaves", &["Element"]),
         BlockKind::EveryFrame { .. } => ("Every Frame", &[]),
         BlockKind::WhenSoundEnded { .. } => ("When Sound Ends", &["Sound"]),
         BlockKind::WhenStateChanged { .. } => ("When State Changes", &["Animator"]),

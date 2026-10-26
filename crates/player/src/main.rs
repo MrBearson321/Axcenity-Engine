@@ -19,15 +19,16 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, bail};
 use axcenity_anim::Animators;
 use axcenity_assets::Assets;
-use axcenity_audio::GameAudio;
+use axcenity_audio::{GameAudio, SoundAction};
 use axcenity_character::{Controllers, MoveInput};
 use axcenity_core::{InstanceId, World};
 use axcenity_physics::Physics;
 use axcenity_project::ScriptFile;
 use axcenity_render::Renderer;
 use axcenity_render::glam::Vec3;
-use axcenity_scene::{FlyCamera, MoveKeys};
+use axcenity_scene::{FlyCamera, MoveKeys, UiFrame};
 use axcenity_script::{CameraState, KeyEvent, OutputKind, ScriptRuntime};
+use axcenity_ui::{UiCursor, UiEvent, UiInput, UiInteraction};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{
@@ -35,7 +36,7 @@ use winit::event::{
 };
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
-use winit::window::{CursorGrabMode, Window, WindowId};
+use winit::window::{CursorGrabMode, CursorIcon, Window, WindowId};
 
 const DEFAULT_WINDOW_SIZE: LogicalSize<f64> = LogicalSize::new(1280.0, 720.0);
 const START_CAMERA_POSITION: Vec3 = Vec3::new(12.0, 8.0, 16.0);
@@ -131,6 +132,7 @@ fn main() -> Result<()> {
         &assets,
         &mut audio,
         listener_of(&camera),
+        Vec::new(),
     );
     // Models load the first time a MeshPart needs one; physics and drawing
     // share them.
@@ -169,6 +171,9 @@ fn main() -> Result<()> {
         ui_mouse_events: Vec::new(),
         ui_mouse_down: false,
         ui_pressed_button: None,
+        ui: UiInteraction::default(),
+        ui_sounds: Vec::new(),
+        cursor: UiCursor::Default,
         last_frame: None,
     };
     event_loop.run_app(&mut app)?;
@@ -260,20 +265,54 @@ fn listener_of_state(camera: CameraState) -> axcenity_audio::Listener {
     axcenity_audio::Listener::from_view(camera.position, camera.orientation)
 }
 
+/// Plays what scripts asked for, then `extra` (buttons' sounds), and fires
+/// `Ended` for sounds that finished.
 fn apply_audio(
     scripts: &mut ScriptRuntime,
     world: &mut World,
     assets: &Assets,
     audio: &mut GameAudio,
     listener: axcenity_audio::Listener,
+    extra: Vec<SoundAction>,
 ) {
-    let update = audio.update(scripts.take_sound_actions(), world, assets, listener);
+    let mut actions = scripts.take_sound_actions();
+    actions.extend(extra);
+    let update = audio.update(actions, world, assets, listener);
     for err in update.errors {
         log::error!("audio: {err}");
     }
     if !update.ended.is_empty() {
         scripts.fire_sounds_ended(world, &update.ended);
         print_output(scripts);
+    }
+}
+
+/// Passes on what the UI did: `MouseEnter` and `MouseLeave` to
+/// LocalScripts, and returns the buttons' hover and click sounds to play.
+/// The frame prints what the handlers printed with the input step's output.
+fn fire_ui_events(
+    scripts: &mut ScriptRuntime,
+    world: &mut World,
+    events: Vec<UiEvent>,
+) -> Vec<SoundAction> {
+    let mut sounds = Vec::new();
+    for event in events {
+        match event {
+            UiEvent::MouseEnter(id) => scripts.fire_ui_event(world, id, "MouseEnter"),
+            UiEvent::MouseLeave(id) => scripts.fire_ui_event(world, id, "MouseLeave"),
+            UiEvent::PlaySound(sound_id) => sounds.push(SoundAction::PlayOnce { sound_id }),
+        }
+    }
+    sounds
+}
+
+/// The OS cursor for one the UI asks for (CSS `cursor`).
+fn cursor_icon(cursor: UiCursor) -> CursorIcon {
+    match cursor {
+        UiCursor::Default => CursorIcon::Default,
+        UiCursor::Pointer => CursorIcon::Pointer,
+        UiCursor::Text => CursorIcon::Text,
+        UiCursor::NotAllowed => CursorIcon::NotAllowed,
     }
 }
 
@@ -330,6 +369,12 @@ struct App {
     ui_mouse_events: Vec<bool>,
     ui_mouse_down: bool,
     ui_pressed_button: Option<InstanceId>,
+    /// Hover and press states, CSS transitions and tooltips over time.
+    ui: UiInteraction,
+    /// Buttons' hover and click sounds, played with the frame's audio.
+    ui_sounds: Vec<SoundAction>,
+    /// The cursor last shown, so it's only set when it changes.
+    cursor: UiCursor,
     /// When the previous frame was drawn, to measure how much time passed.
     last_frame: Option<Instant>,
 }
@@ -399,6 +444,7 @@ impl App {
             } else {
                 if let Some(button) = self.ui_pressed_button
                     && self.ui_pressed_button == hit
+                    && self.ui.activate(&self.world, button)
                 {
                     self.scripts.activate_ui_button(&mut self.world, button);
                     print_output(&mut self.scripts);
@@ -669,6 +715,7 @@ impl ApplicationHandler for App {
             WindowEvent::CursorMoved { position, .. } => {
                 self.pointer = Some([position.x as f32, position.y as f32]);
             }
+            WindowEvent::CursorLeft { .. } => self.pointer = None,
             WindowEvent::KeyboardInput { event, .. } => {
                 if self.text_focus.is_some() {
                     self.type_text(&event);
@@ -726,6 +773,11 @@ impl ApplicationHandler for App {
                     .expect("checked at the start of the event")
                     .inner_size();
                 self.process_ui_mouse_events((size.width, size.height));
+                // What the UI did last frame and this click: MouseEnter,
+                // MouseLeave and buttons' sounds.
+                let events = self.ui.take_events();
+                let sounds = fire_ui_events(&mut self.scripts, &mut self.world, events);
+                self.ui_sounds.extend(sounds);
 
                 // 1. Input. A character controller moves first and owns
                 //    the camera. Otherwise the fly camera moves, and
@@ -787,6 +839,7 @@ impl ApplicationHandler for App {
                     &self.assets,
                     &mut self.audio,
                     heard,
+                    std::mem::take(&mut self.ui_sounds),
                 );
                 // Particles move on, after scripts and physics moved their parts.
                 for (emitter, count) in self.scripts.take_particle_emits() {
@@ -831,13 +884,25 @@ impl ApplicationHandler for App {
                         render_camera,
                         ui_size,
                         &self.stylesheets,
-                        self.pointer,
-                        self.ui_pressed_button,
-                        self.text_focus,
+                        UiFrame {
+                            interaction: &mut self.ui,
+                            input: UiInput {
+                                pointer: self.pointer,
+                                pressed: self.ui_pressed_button,
+                                focused: self.text_focus,
+                            },
+                            seconds,
+                        },
                         self.animators.poses(),
                         &mut self.terrain,
                     );
                 self.note_ui_warnings(&ui_layout.warnings);
+                if ui_layout.cursor != self.cursor
+                    && let Some(window) = &self.window
+                {
+                    self.cursor = ui_layout.cursor;
+                    window.set_cursor(cursor_icon(self.cursor));
+                }
                 draw_list.sprites = self.particles.sprites(&self.world, &self.assets);
                 if self.show_splash {
                     // The first drawn frame starts the splash clock.

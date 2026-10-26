@@ -1251,3 +1251,158 @@ fn hello_rich_text_styles_tags_from_the_world_lua_and_blocks() {
         .collect();
     assert!(errors.is_empty(), "{errors:?}");
 }
+
+#[test]
+fn hello_buttons_hovers_presses_and_leaves_the_locked_button_alone() {
+    use axcenity_render::{UiDrawItem, UiRectangle};
+    use axcenity_ui::{Stylesheet, UiCursor, UiInput, UiInteraction, UiLayout};
+
+    /// The game as the player runs it: each frame passes on last frame's
+    /// UI events first, then lays the UI out.
+    struct Game {
+        world: World,
+        scripts: ScriptRuntime,
+        sheets: Vec<Stylesheet>,
+        ui: UiInteraction,
+        sounds: Vec<SoundAction>,
+        output: Vec<String>,
+    }
+    impl Game {
+        fn frame(
+            &mut self,
+            pointer: [f32; 2],
+            pressed: Option<InstanceId>,
+            seconds: f32,
+        ) -> UiLayout {
+            let events = self.ui.take_events();
+            let sounds = fire_ui_events(&mut self.scripts, &mut self.world, events);
+            self.sounds.extend(sounds);
+            self.output
+                .extend(self.scripts.take_output().into_iter().map(|line| line.text));
+            let input = UiInput {
+                pointer: Some(pointer),
+                pressed,
+                focused: None,
+            };
+            self.ui
+                .layout(&self.world, (1280, 720), &self.sheets, input, None, seconds)
+        }
+
+        fn status(&self) -> String {
+            let menu = self
+                .world
+                .find_first_child(self.world.workspace(), "Menu")
+                .unwrap();
+            let status = self.world.find_first_child(menu, "Status").unwrap();
+            self.world
+                .get(status)
+                .unwrap()
+                .property("Text")
+                .and_then(Value::as_str)
+                .unwrap()
+                .to_owned()
+        }
+    }
+    /// The rectangle drawn centred on `id`: its background.
+    fn background(layout: &UiLayout, id: InstanceId) -> UiRectangle {
+        let rect = layout.element(id).unwrap().rect;
+        let centre = [rect.x + rect.width * 0.5, rect.y + rect.height * 0.5];
+        layout
+            .draw_items
+            .iter()
+            .find_map(|item| match item {
+                UiDrawItem::Rectangle(r)
+                    if (0..2).all(|axis| {
+                        (r.position[axis] + r.size[axis] * 0.5 - centre[axis]).abs() < 0.5
+                    }) =>
+                {
+                    Some(*r)
+                }
+                _ => None,
+            })
+            .unwrap()
+    }
+    let rgb = |hex: u32| {
+        [
+            (hex >> 16) as f32 / 255.0,
+            ((hex >> 8) & 0xff) as f32 / 255.0,
+            (hex & 0xff) as f32 / 255.0,
+        ]
+    };
+
+    let (world, scripts, folder) = start_example_in("hello-buttons");
+    let css = std::fs::read_to_string(folder.join("ui.css")).unwrap();
+    let (sheet, warnings) = axcenity_ui::parse_stylesheet("ui.css", &css);
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let menu = world.find_first_child(world.workspace(), "Menu").unwrap();
+    let play = world.find_first_child(menu, "Play").unwrap();
+    let locked = world.find_first_child(menu, "Locked").unwrap();
+    let mut game = Game {
+        world,
+        scripts,
+        sheets: vec![sheet],
+        ui: UiInteraction::default(),
+        sounds: Vec::new(),
+        output: Vec::new(),
+    };
+    let (over_play, over_locked, away) = ([640.0, 328.0], [640.0, 404.0], [100.0, 100.0]);
+
+    let idle = game.frame(away, None, 1.0 / 60.0);
+    assert_eq!(background(&idle, play).color[..3], rgb(0x3b82f6));
+
+    // The pointer comes onto Play: the hover colour eases in over 0.15 s,
+    // and MouseEnter fires once in Lua and in blocks, with the hover sound.
+    game.frame(over_play, None, 0.0);
+    let between = background(&game.frame(over_play, None, 0.05), play).color;
+    let hovered = game.frame(over_play, None, 0.2);
+    assert_eq!(background(&hovered, play).color[..3], rgb(0x1d4ed8));
+    assert!(
+        between[2] < rgb(0x3b82f6)[2] && between[2] > rgb(0x1d4ed8)[2],
+        "half way between: {between:?}"
+    );
+    assert_eq!(hovered.cursor, UiCursor::Pointer);
+    game.frame(over_play, None, 1.0 / 60.0);
+    assert_eq!(game.status(), "Ready?");
+    assert_eq!(game.output, ["The pointer is on Play (blocks)"]);
+    let click = SoundAction::PlayOnce {
+        sound_id: "assets/audio/click.wav".into(),
+    };
+    assert_eq!(game.sounds, std::slice::from_ref(&click));
+    // After a short rest, the tooltip.
+    let resting = game.frame(over_play, None, 0.6);
+    assert!(
+        resting
+            .draw_items
+            .iter()
+            .any(|item| matches!(item, UiDrawItem::Text(text) if text.text == "Start the game"))
+    );
+
+    // Held, it shrinks to 0.95 around its centre; let go, it activates
+    // with its click sound.
+    game.frame(over_play, Some(play), 0.0);
+    let held = game.frame(over_play, Some(play), 0.2);
+    assert!((background(&held, play).size[0] - 190.0).abs() < 0.01);
+    assert!(game.ui.activate(&game.world, play));
+    game.scripts.activate_ui_button(&mut game.world, play);
+    assert_eq!(game.status(), "Playing!");
+
+    // Locked is disabled: its :disabled style, no hover and no Activated.
+    let on_locked = game.frame(over_locked, None, 0.016);
+    assert_eq!(on_locked.hovered, None);
+    assert_eq!(on_locked.cursor, UiCursor::NotAllowed);
+    assert_eq!(background(&on_locked, locked).color[..3], rgb(0x4b5563));
+    assert_eq!(on_locked.hit_button(640.0, 404.0), None);
+    assert!(!game.ui.activate(&game.world, locked));
+    game.scripts.activate_ui_button(&mut game.world, locked);
+    game.frame(away, None, 0.016);
+    // Going onto Locked left Play: MouseLeave, once.
+    assert_eq!(game.status(), "Point at Play");
+    assert_eq!(
+        game.output,
+        [
+            "The pointer is on Play (blocks)",
+            "The pointer left Play (blocks)"
+        ]
+    );
+    assert_eq!(game.sounds, [click.clone(), click], "hover, then click");
+}

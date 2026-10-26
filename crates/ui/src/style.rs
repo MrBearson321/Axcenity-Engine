@@ -1,7 +1,11 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ops::Range;
 
 use axcenity_core::{ClassName, InstanceId, Value, World};
+
+use crate::interact::UiState;
+use crate::transition::Transitions;
 
 /// The CSS properties UI elements understand. Others are warned about.
 pub const SUPPORTED_PROPERTIES: &[&str] = &[
@@ -15,6 +19,7 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "border-radius",
     "border-width",
     "color",
+    "cursor",
     "display",
     "flex-direction",
     "flex-grow",
@@ -43,6 +48,8 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "text-shadow",
     "text-stroke",
     "text-transform",
+    "transform",
+    "transition",
     "vertical-align",
     "white-space",
     "width",
@@ -50,11 +57,20 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
 
 type Specificity = (u32, u32, u32);
 
+/// What the cascade needs besides the tree: the pointer's states, and the
+/// running CSS transitions. The `'a` is how long the transitions are
+/// borrowed for; the struct is `Copy`, so it's passed by value everywhere.
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct PseudoClasses {
+pub(crate) struct PseudoClasses<'a> {
     pub(crate) hovered: Option<InstanceId>,
     pub(crate) active: Option<InstanceId>,
     pub(crate) focused: Option<InstanceId>,
+    /// An element shown in a state whatever the pointer does, for the UI
+    /// Designer's state preview.
+    pub(crate) forced: Option<(InstanceId, UiState)>,
+    /// Eases each element's styles toward their new values. `RefCell`
+    /// lets the shared borrow update them as styles are resolved.
+    pub(crate) transitions: Option<&'a RefCell<Transitions>>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -139,6 +155,10 @@ struct SimpleSelector {
     classes: Vec<String>,
     hovered: bool,
     active: bool,
+    disabled: bool,
+    /// The type name `Tooltip`: the box a `Tooltip` property shows, which
+    /// isn't an Instance. It's styled as a child of the element it's for.
+    tooltip: bool,
 }
 
 /// Parses the supported stylesheet subset. Unsupported declarations are
@@ -209,7 +229,7 @@ pub(crate) fn resolve_styles(
     world: &World,
     id: InstanceId,
     stylesheets: &[Stylesheet],
-    pseudo: PseudoClasses,
+    pseudo: PseudoClasses<'_>,
 ) -> ResolvedStyles {
     let mut ancestors = Vec::new();
     let mut current = Some(id);
@@ -234,7 +254,73 @@ pub(crate) fn resolve_styles(
             }
         }
     }
+    if let Some(transitions) = pseudo.transitions {
+        transitions.borrow_mut().apply(world, id, &mut resolved);
+    }
     resolved
+}
+
+/// The styles of the tooltip `owner` shows: rules whose last part is
+/// `Tooltip`, with the rest matching `owner` or its ancestors (so
+/// `#play Tooltip` styles only the Play button's), and the custom
+/// properties `owner` inherits.
+pub(crate) fn resolve_tooltip_styles(
+    world: &World,
+    owner: InstanceId,
+    stylesheets: &[Stylesheet],
+) -> ResolvedStyles {
+    let mut resolved = resolve_styles(world, owner, stylesheets, PseudoClasses::default());
+    resolved.values.clear();
+    let winners = winning_declarations(stylesheets, |selector| {
+        tooltip_selector_matches(world, owner, selector)
+    });
+    for (name, winner) in winners {
+        let target = if name.starts_with("--") {
+            &mut resolved.variables
+        } else {
+            &mut resolved.values
+        };
+        target.insert(name.to_owned(), winner.declaration.value.clone());
+    }
+    resolved
+}
+
+/// The declaration of `property` in the last rule written exactly as
+/// `selector` (such as `#play:hover`), whether or not it wins the cascade.
+pub fn rule_declaration(
+    stylesheets: &[Stylesheet],
+    selector: &str,
+    property: &str,
+) -> Option<CssDeclaration> {
+    stylesheets.iter().rev().find_map(|stylesheet| {
+        stylesheet
+            .rules
+            .iter()
+            .rev()
+            .filter(|rule| rule.selector_text == selector)
+            .find_map(|rule| {
+                let declaration = rule
+                    .declarations
+                    .iter()
+                    .rev()
+                    .find(|declaration| declaration.name == property)?;
+                Some(CssDeclaration {
+                    property: declaration.name.clone(),
+                    value: declaration.value.clone(),
+                    path: stylesheet.path.clone(),
+                    selector: rule.selector_text.clone(),
+                    span: declaration.span.clone(),
+                    line: declaration.line,
+                })
+            })
+    })
+}
+
+/// Whether any stylesheet has a rule written exactly as `selector`.
+pub fn has_rule(stylesheets: &[Stylesheet], selector: &str) -> bool {
+    stylesheets
+        .iter()
+        .any(|stylesheet| stylesheet.rule_end(selector).is_some())
 }
 
 /// The declarations that apply to `id`, with where each is written, sorted
@@ -287,7 +373,18 @@ fn matching_declarations<'a>(
     world: &World,
     id: InstanceId,
     stylesheets: &'a [Stylesheet],
-    pseudo: PseudoClasses,
+    pseudo: PseudoClasses<'_>,
+) -> HashMap<&'a str, Winner<'a>> {
+    winning_declarations(stylesheets, |selector| {
+        selector_matches(world, id, selector, pseudo)
+    })
+}
+
+/// The winning declaration of each property among the rules whose
+/// selector `matches`.
+fn winning_declarations<'a>(
+    stylesheets: &'a [Stylesheet],
+    matches: impl Fn(&Selector) -> bool,
 ) -> HashMap<&'a str, Winner<'a>> {
     let mut winners: HashMap<&str, Winner> = HashMap::new();
     let mut order = 0;
@@ -295,7 +392,7 @@ fn matching_declarations<'a>(
         for rule in &stylesheet.rules {
             for declaration in &rule.declarations {
                 for selector in &rule.selectors {
-                    if !selector_matches(world, id, selector, pseudo) {
+                    if !matches(selector) {
                         continue;
                     }
                     let replace = winners.get(declaration.name.as_str()).is_none_or(|old| {
@@ -325,7 +422,7 @@ fn selector_matches(
     world: &World,
     id: InstanceId,
     selector: &Selector,
-    pseudo: PseudoClasses,
+    pseudo: PseudoClasses<'_>,
 ) -> bool {
     let Some(last) = selector.parts.last() else {
         return false;
@@ -333,21 +430,46 @@ fn selector_matches(
     if !simple_matches(world, id, last, pseudo) {
         return false;
     }
+    let ancestor = world.get(id).and_then(|instance| instance.parent());
+    ancestors_match(
+        world,
+        ancestor,
+        &selector.parts[..selector.parts.len() - 1],
+        pseudo,
+    )
+}
 
-    let mut ancestor = world.get(id).and_then(|instance| instance.parent());
-    for part in selector.parts[..selector.parts.len() - 1].iter().rev() {
-        let mut found = None;
-        while let Some(candidate) = ancestor {
+/// Whether a selector ending in `Tooltip` styles the tooltip of `owner`:
+/// the parts before it match `owner` or the elements around it.
+fn tooltip_selector_matches(world: &World, owner: InstanceId, selector: &Selector) -> bool {
+    let Some(last) = selector.parts.last() else {
+        return false;
+    };
+    if !last.tooltip || last.id.is_some() || !last.classes.is_empty() {
+        return false;
+    }
+    let parts = &selector.parts[..selector.parts.len() - 1];
+    ancestors_match(world, Some(owner), parts, PseudoClasses::default())
+}
+
+/// Whether `parts`, a descendant selector's leading parts, each match an
+/// element from `ancestor` up, in order, nearest last.
+fn ancestors_match(
+    world: &World,
+    mut ancestor: Option<InstanceId>,
+    parts: &[SimpleSelector],
+    pseudo: PseudoClasses<'_>,
+) -> bool {
+    for part in parts.iter().rev() {
+        loop {
+            let Some(candidate) = ancestor else {
+                return false;
+            };
+            ancestor = world.get(candidate).and_then(|instance| instance.parent());
             if simple_matches(world, candidate, part, pseudo) {
-                found = world.get(candidate).and_then(|instance| instance.parent());
                 break;
             }
-            ancestor = world.get(candidate).and_then(|instance| instance.parent());
         }
-        let Some(next_ancestor) = found else {
-            return false;
-        };
-        ancestor = Some(next_ancestor);
     }
     true
 }
@@ -356,19 +478,38 @@ fn simple_matches(
     world: &World,
     id: InstanceId,
     selector: &SimpleSelector,
-    pseudo: PseudoClasses,
+    pseudo: PseudoClasses<'_>,
 ) -> bool {
     let Some(instance) = world.get(id) else {
         return false;
     };
-    if selector
-        .class
-        .is_some_and(|class| class != instance.class())
+    if selector.tooltip
+        || selector
+            .class
+            .is_some_and(|class| class != instance.class())
     {
         return false;
     }
-    if (selector.hovered && pseudo.hovered != Some(id))
-        || (selector.active && pseudo.active != Some(id))
+    let interactable = instance.property("Interactable").and_then(Value::as_bool) != Some(false);
+    let forced = pseudo
+        .forced
+        .filter(|(forced, _)| *forced == id)
+        .map(|(_, state)| state);
+    // A pressed button is hovered too, as in CSS.
+    let (hovered, active, disabled) = match forced {
+        Some(UiState::Normal) => (false, false, !interactable),
+        Some(UiState::Hover) => (true, false, false),
+        Some(UiState::Pressed) => (true, true, false),
+        Some(UiState::Disabled) => (false, false, true),
+        None => (
+            pseudo.hovered == Some(id),
+            pseudo.active == Some(id),
+            !interactable,
+        ),
+    };
+    if (selector.hovered && !hovered)
+        || (selector.active && !active)
+        || (selector.disabled && !disabled)
     {
         return false;
     }
@@ -440,6 +581,10 @@ fn parse_selector(selector: &str) -> Option<Selector> {
                             part.active = true;
                             specificity.1 += 1;
                         }
+                        "disabled" if start != cursor && !part.disabled => {
+                            part.disabled = true;
+                            specificity.1 += 1;
+                        }
                         _ => return None,
                     }
                 }
@@ -454,7 +599,13 @@ fn parse_selector(selector: &str) -> Option<Selector> {
                         return None;
                     }
                     let name = &raw[start..cursor];
-                    if name != "*" {
+                    if name == "Tooltip" {
+                        if part.tooltip || part.class.is_some() {
+                            return None;
+                        }
+                        part.tooltip = true;
+                        specificity.2 += 1;
+                    } else if name != "*" {
                         let class = ClassName::from_name(name)?;
                         if part.class.replace(class).is_some() {
                             return None;
@@ -732,8 +883,7 @@ mod tests {
                 std::slice::from_ref(&sheet),
                 PseudoClasses {
                     hovered: Some(button),
-                    active: None,
-                    focused: None,
+                    ..PseudoClasses::default()
                 },
             )
             .values["opacity"],
@@ -747,7 +897,7 @@ mod tests {
                 PseudoClasses {
                     hovered: Some(button),
                     active: Some(button),
-                    focused: None,
+                    ..PseudoClasses::default()
                 },
             )
             .values["opacity"],

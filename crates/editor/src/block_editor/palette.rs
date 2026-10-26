@@ -54,6 +54,14 @@ pub(super) fn palette(
                 button: first(Filter::Buttons),
                 body: Vec::new(),
             }),
+            B(BlockKind::WhenMouseEnters {
+                element: first(Filter::Gui),
+                body: Vec::new(),
+            }),
+            B(BlockKind::WhenMouseLeaves {
+                element: first(Filter::Gui),
+                body: Vec::new(),
+            }),
             B(BlockKind::EveryFrame { body: Vec::new() }),
             B(BlockKind::WhenSoundEnded {
                 sound: sound.clone(),

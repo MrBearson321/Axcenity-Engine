@@ -31,6 +31,8 @@ const GUIDE_GRAB: f32 = 4.0;
 /// The bar of formats over rich text being typed, in points.
 const FORMAT_BAR_WIDTH: f32 = 300.0;
 const FORMAT_BAR_HEIGHT: f32 = 28.0;
+/// The states editor's eye, over the artboard's top left corner, in points.
+const EYE_SIZE: egui::Vec2 = egui::vec2(160.0, 24.0);
 /// Guide lines, in a cyan that reads apart from the magenta snap lines.
 pub(super) const GUIDE_COLOR: egui::Color32 = egui::Color32::from_rgb(64, 200, 230);
 
@@ -252,13 +254,15 @@ impl UiDesigner {
         // Laid out in the pixels of a texture the size of `visible`.
         let scale = self.zoom * ppp;
         let origin = (view.board.min - visible.min) * ppp;
-        let layout = axcenity_ui::layout_artboard(
+        let shown = self.shown_state(scene);
+        let layout = axcenity_ui::layout_artboard_in_state(
             world,
             gui,
             scene.stylesheets,
             screen,
             scale,
             [origin.x, origin.y],
+            shown,
         );
         let screen_rect = UiRect {
             x: origin.x,
@@ -316,10 +320,15 @@ impl UiDesigner {
         // caret, not select or drag what's under it.
         let typing = self.typing_rect(&layout, visible, ppp);
         let bar = self.format_bar_rect(world, typing, visible);
+        // The states editor's eye, while a state other than Normal is picked.
+        let eye = scene
+            .selected
+            .filter(|&id| self.state_for(scene, id) != axcenity_ui::UiState::Normal)
+            .map(|_| egui::Rect::from_min_size(visible.min + egui::vec2(8.0, 8.0), EYE_SIZE));
         let over = pointer.filter(|&pointer| {
             response.contains_pointer()
                 && visible.contains(pointer)
-                && ![typing, bar]
+                && ![typing, bar, eye]
                     .iter()
                     .flatten()
                     .any(|rect| rect.contains(pointer))
@@ -566,6 +575,32 @@ impl UiDesigner {
             );
         }
         self.type_over(ui, scene, &layout, visible, actions);
+        if let Some(rect) = eye {
+            let state = self.state.name();
+            let (icon, text, tip) = if self.show_state {
+                (
+                    icons::EYE,
+                    format!("Showing {state}"),
+                    "The selection is shown in this state. Click to show it as it is.",
+                )
+            } else {
+                (
+                    icons::EYE_SLASH,
+                    format!("Show {state}"),
+                    "Show the selection in this state",
+                )
+            };
+            let button = egui::Button::new(format!("{icon} {text}")).selected(self.show_state);
+            // A child, so the row the artboard is in doesn't move on past it.
+            let mut over_board = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+            if over_board
+                .add_sized(rect.size(), button)
+                .on_hover_text(tip)
+                .clicked()
+            {
+                self.show_state = !self.show_state;
+            }
+        }
         selected_rect
     }
 

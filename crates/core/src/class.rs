@@ -358,6 +358,8 @@ impl ClassName {
                 ),
                 ("BackgroundTransparency", Value::Number(0.0)),
                 ("Visible", Value::Bool(true)),
+                ("Interactable", Value::Bool(true)),
+                ("Tooltip", Value::String(String::new())),
             ],
             ClassName::TextLabel => vec![
                 ("Class", Value::String(String::new())),
@@ -377,6 +379,8 @@ impl ClassName {
                 // On: tags in Text such as <b> and <font color="#f00"> style it.
                 ("RichText", Value::Bool(false)),
                 ("Visible", Value::Bool(true)),
+                ("Interactable", Value::Bool(true)),
+                ("Tooltip", Value::String(String::new())),
             ],
             ClassName::TextButton => vec![
                 ("Class", Value::String(String::new())),
@@ -399,6 +403,15 @@ impl ClassName {
                 ("Image", Value::String(String::new())),
                 ("ImageTransparency", Value::Number(0.0)),
                 ("Visible", Value::Bool(true)),
+                // Off: greyed out by `:disabled`, takes no hover and doesn't
+                // fire `Activated`.
+                ("Interactable", Value::Bool(true)),
+                // Shown in a small box near the pointer after a short hover.
+                ("Tooltip", Value::String(String::new())),
+                // Sound files (paths in the project) played when the pointer
+                // comes onto it and when it's clicked. Empty plays nothing.
+                ("HoverSound", Value::String(String::new())),
+                ("ClickSound", Value::String(String::new())),
             ],
             ClassName::TextBox => vec![
                 ("Class", Value::String(String::new())),
@@ -422,6 +435,8 @@ impl ClassName {
                 // a new line, and clicking away finishes typing.
                 ("MultiLine", Value::Bool(false)),
                 ("Visible", Value::Bool(true)),
+                ("Interactable", Value::Bool(true)),
+                ("Tooltip", Value::String(String::new())),
             ],
             ClassName::PageLayout => vec![
                 ("Class", Value::String(String::new())),
@@ -434,6 +449,8 @@ impl ClassName {
                 ),
                 ("BackgroundTransparency", Value::Number(1.0)),
                 ("Visible", Value::Bool(true)),
+                ("Interactable", Value::Bool(true)),
+                ("Tooltip", Value::String(String::new())),
                 // Empty shows the first child Frame. Any other value is that
                 // Frame's name.
                 ("CurrentPage", Value::String(String::new())),
@@ -449,6 +466,8 @@ impl ClassName {
                 ),
                 ("BackgroundTransparency", Value::Number(0.0)),
                 ("Visible", Value::Bool(true)),
+                ("Interactable", Value::Bool(true)),
+                ("Tooltip", Value::String(String::new())),
                 // How many cells sit in one row.
                 ("Columns", Value::Number(2.0)),
             ],
@@ -476,6 +495,8 @@ impl ClassName {
                 ("Image", Value::String(String::new())),
                 ("ImageTransparency", Value::Number(0.0)),
                 ("Visible", Value::Bool(true)),
+                ("Interactable", Value::Bool(true)),
+                ("Tooltip", Value::String(String::new())),
             ],
             ClassName::Animator => vec![
                 // The state machine it plays, relative to the project folder,
@@ -712,11 +733,6 @@ impl ClassName {
             | ClassName::Folder
             | ClassName::SurfaceAppearance
             | ClassName::ScreenGui
-            | ClassName::Frame
-            | ClassName::TextLabel
-            | ClassName::ImageLabel
-            | ClassName::PageLayout
-            | ClassName::Table
             | ClassName::BillboardGui
             | ClassName::PointLight
             | ClassName::SpotLight
@@ -742,10 +758,18 @@ impl ClassName {
             // `OnServerEvent` fires in Scripts for each `FireServer`, and
             // `OnClientEvent` in LocalScripts for each `FireClient`.
             ClassName::RemoteEvent => &["OnServerEvent", "OnClientEvent"],
-            ClassName::TextButton => &["Activated"],
-            // Fires in LocalScripts when the player finishes typing: Enter
-            // on one line, or a click away (and Enter, on one line only).
-            ClassName::TextBox => &["FocusLost"],
+            // `MouseEnter` and `MouseLeave` fire in LocalScripts when the
+            // pointer comes onto or goes off the element, as `:hover` does.
+            ClassName::Frame
+            | ClassName::TextLabel
+            | ClassName::ImageLabel
+            | ClassName::PageLayout
+            | ClassName::Table => &["MouseEnter", "MouseLeave"],
+            ClassName::TextButton => &["Activated", "MouseEnter", "MouseLeave"],
+            // `FocusLost` fires in LocalScripts when the player finishes
+            // typing: Enter on one line, or a click away (and Enter, on one
+            // line only).
+            ClassName::TextBox => &["FocusLost", "MouseEnter", "MouseLeave"],
         }
     }
 }

@@ -138,6 +138,9 @@ pub struct ViewportOutput {
     pub clicked: Option<Clicked>,
     /// A UI button clicked during Play, delivered to LocalScripts next frame.
     pub activated: Option<InstanceId>,
+    /// `MouseEnter`, `MouseLeave` and buttons' sounds from this frame's UI.
+    /// The app passes them to the game during Play, and drops them otherwise.
+    pub ui_events: Vec<axcenity_ui::UiEvent>,
     /// A TextBox clicked during Play. The app gives it keyboard focus.
     pub text_box: Option<InstanceId>,
     /// The viewport was clicked during Play, including a click on empty space.
@@ -366,6 +369,8 @@ pub struct Viewport {
     /// Mouse wheel notches, toward the screen positive, saved for the next
     /// character step: a third-person camera zooms by them.
     character_zoom: f32,
+    /// The UI's hover and press states, transitions and tooltips over time.
+    ui: axcenity_ui::UiInteraction,
 }
 
 /// The texture the scene is drawn into, and egui's name for it.
@@ -388,6 +393,7 @@ impl Viewport {
             terrain: TerrainCache::new(),
             character_look: (0.0, 0.0),
             character_zoom: 0.0,
+            ui: axcenity_ui::UiInteraction::default(),
         }
     }
 
@@ -406,6 +412,12 @@ impl Viewport {
     /// Takes every particle away, for a new world (Play, Stop, another project).
     pub fn clear_particles(&mut self) {
         self.particles.clear();
+    }
+
+    /// Forgets the UI's hover, transitions and tooltip, as Play starts or
+    /// stops: the edit world and the game's are different worlds.
+    pub fn clear_ui(&mut self) {
+        self.ui = axcenity_ui::UiInteraction::default();
     }
 
     /// Puts the camera back where it starts, for a newly opened project.
@@ -514,16 +526,32 @@ impl Viewport {
             .input(|input| input.pointer.primary_down())
             .then(|| pointer_pixels.and_then(|[x, y]| base_layout.hit_button(x, y)))
             .flatten();
-        let ui_layout = axcenity_ui::layout_ui_interactive(
+        let seconds = ui.input(|input| input.unstable_dt).min(MAX_FRAME_SECONDS);
+        let ui_layout = self.ui.layout(
             world,
-            width,
-            height,
+            (width, height),
             stylesheets,
-            pointer_pixels,
-            held_button,
-            focused_text,
+            axcenity_ui::UiInput {
+                pointer: pointer_pixels,
+                pressed: held_button,
+                focused: focused_text,
+            },
             Some(&camera),
+            seconds,
         );
+        // Transitions and tooltips move on without input.
+        if ui_layout.animating {
+            ui.ctx().request_repaint();
+        }
+        // During Play, the UI's cursor (CSS `cursor`): a hand on buttons.
+        if tool.is_none() && response.hovered() && !self.looking {
+            ui.ctx().set_cursor_icon(match ui_layout.cursor {
+                axcenity_ui::UiCursor::Default => egui::CursorIcon::Default,
+                axcenity_ui::UiCursor::Pointer => egui::CursorIcon::PointingHand,
+                axcenity_ui::UiCursor::Text => egui::CursorIcon::Text,
+                axcenity_ui::UiCursor::NotAllowed => egui::CursorIcon::NotAllowed,
+            });
+        }
         let handles = selected
             .and_then(|id| ui_layout.element(id))
             .map(|&element| Handles::new(element, world, stylesheets, rect.min, pixels_per_point));
@@ -591,7 +619,9 @@ impl Viewport {
                 })
             })
         };
-        let activated = clicked_ui(axcenity_ui::UiLayout::hit_button).flatten();
+        let activated = clicked_ui(axcenity_ui::UiLayout::hit_button)
+            .flatten()
+            .filter(|&button| self.ui.activate(world, button));
         let text_box = clicked_ui(axcenity_ui::UiLayout::hit_text_box).flatten();
         let target = self.target.get_or_insert_with(|| {
             let renderer =
@@ -623,7 +653,6 @@ impl Viewport {
         for &(emitter, count) in emits {
             self.particles.emit(world, emitter, count);
         }
-        let seconds = ui.input(|input| input.unstable_dt).min(MAX_FRAME_SECONDS);
         self.particles.update(world, seconds);
         // Particles keep moving without input, so keep drawing frames.
         if self.particles.is_active(world) {
@@ -752,6 +781,7 @@ impl Viewport {
         ViewportOutput {
             clicked,
             activated,
+            ui_events: self.ui.take_events(),
             text_box,
             viewport_clicked: playing,
             ui_warnings: ui_layout.warnings,

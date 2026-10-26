@@ -180,6 +180,9 @@ pub struct EditorApp {
     play: Option<Session>,
     /// A button clicked in the viewport, delivered on the next Play frame.
     pending_ui_activation: Option<InstanceId>,
+    /// `MouseEnter`, `MouseLeave` and buttons' sounds from the viewport,
+    /// for the next Play frame.
+    pending_ui_events: Vec<axcenity_ui::UiEvent>,
     /// A TextBox the player is typing in during Play.
     focused_text: Option<InstanceId>,
     pending_focus_lost: Option<InstanceId>,
@@ -495,6 +498,7 @@ impl EditorApp {
             shown_title: String::new(),
             play: None,
             pending_ui_activation: None,
+            pending_ui_events: Vec::new(),
             focused_text: None,
             pending_focus_lost: None,
             ui_warnings: Vec::new(),
@@ -867,6 +871,9 @@ impl EditorApp {
         }
         if output.activated.is_some() {
             self.pending_ui_activation = output.activated;
+        }
+        if self.playing() {
+            self.pending_ui_events.extend(output.ui_events);
         }
         if self.playing() {
             if output.text_box.is_some() {

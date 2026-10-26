@@ -470,9 +470,9 @@ Ctrl+B, Ctrl+I and Ctrl+U toggle bold, italic and underline on the selected elem
 
 ### Acceptance criteria
 
-- [ ] A button given a darker Hover colour and a 0.95 Pressed scale in the states editor (no CSS typed) shows both in the designer's state preview and in Play, and the stylesheet has the `:hover` and `:active` rules.
-- [ ] With `transition: all 0.15s ease`, the hover colour and scale animate rather than snap.
-- [ ] A button with `Interactable = false` shows its Disabled style, takes no hover and doesn't fire `Activated`.
+- [x] A button given a darker Hover colour and a 0.95 Pressed scale in the states editor (no CSS typed) shows both in the designer's state preview and in Play, and the stylesheet has the `:hover` and `:active` rules.
+- [x] With `transition: all 0.15s ease`, the hover colour and scale animate rather than snap.
+- [x] A button with `Interactable = false` shows its Disabled style, takes no hover and doesn't fire `Activated`.
 - [ ] `MouseEnter` and `MouseLeave` fire once each when the pointer crosses a button, from Lua and from blocks. The tooltip, the hand cursor and the hover and click sounds work in Play.
 
 ---

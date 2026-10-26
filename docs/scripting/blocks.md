@@ -16,6 +16,7 @@ How each block becomes Lua. One-way: blocks translate to Lua, and there is one r
 | | when *part* is touched | `part.Touched:Connect(function(otherPart) … end)` |
 | | when *key* key pressed (client) | `UserInputService.InputBegan:Connect(function(input) if input.KeyCode == Enum.KeyCode.Key then … end end)` |
 | | when *button* is clicked (client) | `button.Activated:Connect(function() … end)` |
+| | when mouse enters *element*, when mouse leaves *element* (client) | `element.MouseEnter:Connect(function() … end)`, `element.MouseLeave:Connect(function() … end)` |
 | | every frame | `RunService.Heartbeat:Connect(function(deltaTime) … end)` |
 | | when *sound* ends | `sound.Ended:Connect(function() … end)` |
 | Control | wait, wait until | `task.wait(n)`; `while not (c) do task.wait() end` |

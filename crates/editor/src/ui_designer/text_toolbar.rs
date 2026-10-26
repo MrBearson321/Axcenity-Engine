@@ -9,7 +9,9 @@ use axcenity_core::{InstanceId, Value};
 use axcenity_render::{TextAlign, TextShadow, UiText, VerticalAlign};
 use eframe::egui;
 
-use super::{DesignerAction, DesignerScene};
+use axcenity_ui::UiState;
+
+use super::{DesignerAction, DesignerScene, state_style_action};
 use crate::properties::Edit;
 use crate::responsive;
 use crate::theme::icons;
@@ -115,28 +117,29 @@ pub fn css_shadows(shadows: &[TextShadow]) -> String {
         .join(", ")
 }
 
-/// The toolbar for `id`'s text. Nothing for an element without text.
+/// The toolbar for `id`'s text in `state` (the states editor's tab): it
+/// shows and writes that state's rule. Nothing for an element without text.
 pub(super) fn text_toolbar(
     ui: &mut egui::Ui,
     scene: &DesignerScene,
     id: InstanceId,
+    state: UiState,
     actions: &mut Vec<DesignerAction>,
 ) {
     let world = scene.world;
-    let Some(style) = axcenity_ui::text_style(world, id, scene.stylesheets) else {
+    let Some(style) = axcenity_ui::text_style_in_state(world, id, scene.stylesheets, state) else {
         return;
     };
     let mut scaled_to = None;
     let mut set = |property: &'static str, value: String, dragging: bool| {
-        actions.push(DesignerAction::TextStyle {
-            id,
-            property,
-            value,
-            dragging,
-        });
+        actions.push(state_style_action(id, state, property, value, dragging));
     };
     ui.add_space(4.0);
-    widgets::section_label(ui, "Text");
+    if state == UiState::Normal {
+        widgets::section_label(ui, "Text");
+    } else {
+        widgets::section_label(ui, &format!("Text · {}", state.name()));
+    }
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
         for (toggle, icon, tip) in [

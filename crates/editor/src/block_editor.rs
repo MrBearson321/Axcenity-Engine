@@ -227,6 +227,8 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::WhenTouched { .. }
         | BlockKind::WhenKeyPressed { .. }
         | BlockKind::WhenClicked { .. }
+        | BlockKind::WhenMouseEnters { .. }
+        | BlockKind::WhenMouseLeaves { .. }
         | BlockKind::EveryFrame { .. }
         | BlockKind::WhenSoundEnded { .. }
         | BlockKind::Unattached { .. } => Category::Events,
@@ -476,6 +478,14 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
             label("when"),
             Object(button, Filter::Buttons),
             label("is clicked"),
+        ])],
+        BlockKind::WhenMouseEnters { element, .. } => vec![Row(vec![
+            label("when mouse enters"),
+            Object(element, Filter::Gui),
+        ])],
+        BlockKind::WhenMouseLeaves { element, .. } => vec![Row(vec![
+            label("when mouse leaves"),
+            Object(element, Filter::Gui),
         ])],
         BlockKind::EveryFrame { .. } => vec![Row(vec![label("every frame")])],
         BlockKind::WhenSoundEnded { sound, .. } => vec![Row(vec![

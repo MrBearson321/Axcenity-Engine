@@ -747,3 +747,263 @@ fn malformed_rich_text_draws_as_plain_text_with_a_warning() {
     // The same line each frame, which hosts show once.
     assert_eq!(layout_ui(&world, 800, 600, &[]).warnings, layout.warnings);
 }
+
+/// A ScreenGui with a 160×48 TextButton `#play` at the top left, and a
+/// stylesheet for it.
+fn play_button(css: &str) -> (World, InstanceId, Vec<Stylesheet>) {
+    let mut world = World::new();
+    let gui = world.create(ClassName::ScreenGui).unwrap();
+    world.set_parent(gui, Some(world.workspace())).unwrap();
+    let button = world.create(ClassName::TextButton).unwrap();
+    world.set_parent(button, Some(gui)).unwrap();
+    world
+        .set_property(button, "Id", Value::String("play".into()))
+        .unwrap();
+    let (sheet, warnings) = parse_stylesheet("ui.css", css);
+    assert!(warnings.is_empty(), "{warnings:?}");
+    (world, button, vec![sheet])
+}
+
+/// The first rectangle drawn: the button's background.
+fn background(layout: &UiLayout) -> UiRectangle {
+    layout
+        .draw_items
+        .iter()
+        .find_map(|item| match item {
+            UiDrawItem::Rectangle(rectangle) => Some(*rectangle),
+            _ => None,
+        })
+        .expect("the button has a background")
+}
+
+const OVER: UiInput = UiInput {
+    pointer: Some([80.0, 24.0]),
+    pressed: None,
+    focused: None,
+};
+const AWAY: UiInput = UiInput {
+    pointer: Some([500.0, 400.0]),
+    pressed: None,
+    focused: None,
+};
+
+#[test]
+fn a_disabled_button_shows_its_disabled_style_and_takes_no_hover_or_click() {
+    let (mut world, button, sheets) = play_button(
+        "#play { background-color: #808080 } #play:hover { background-color: #00ff00 } \
+         #play:disabled { background-color: #ff0000; cursor: not-allowed }",
+    );
+    world
+        .set_property(button, "Interactable", Value::Bool(false))
+        .unwrap();
+    let mut ui = UiInteraction::default();
+    let layout = ui.layout(&world, (640, 480), &sheets, OVER, None, 0.016);
+    assert_eq!(background(&layout).color, [1.0, 0.0, 0.0, 1.0]);
+    assert_eq!(layout.hovered, None);
+    assert_eq!(layout.hit_button(80.0, 24.0), None);
+    assert_eq!(layout.cursor, UiCursor::NotAllowed);
+    assert!(ui.take_events().is_empty(), "no MouseEnter");
+    assert!(!ui.activate(&world, button), "no Activated");
+
+    world
+        .set_property(button, "Interactable", Value::Bool(true))
+        .unwrap();
+    let layout = ui.layout(&world, (640, 480), &sheets, OVER, None, 0.016);
+    assert_eq!(background(&layout).color, [0.0, 1.0, 0.0, 1.0]);
+    assert_eq!(layout.hit_button(80.0, 24.0), Some(button));
+    assert_eq!(
+        layout.cursor,
+        UiCursor::Pointer,
+        "a button's hand by default"
+    );
+    assert!(ui.activate(&world, button));
+}
+
+#[test]
+fn the_designer_shows_an_element_in_a_state_whatever_the_pointer_does() {
+    let (world, button, sheets) = play_button(
+        "#play { background-color: #808080 } #play:hover { background-color: #00ff00 } \
+         #play:active { transform: scale(0.5) } #play:disabled { background-color: #ff0000 }",
+    );
+    let gui = world.get(button).unwrap().parent().unwrap();
+    let shown = |state| {
+        layout_artboard_in_state(
+            &world,
+            gui,
+            &sheets,
+            (640, 480),
+            1.0,
+            [0.0, 0.0],
+            Some((button, state)),
+        )
+    };
+    let rgb = |layout: &UiLayout| background(layout).color;
+    assert_eq!(rgb(&shown(UiState::Normal))[..3], [128.0 / 255.0; 3]);
+    assert_eq!(rgb(&shown(UiState::Hover)), [0.0, 1.0, 0.0, 1.0]);
+    let pressed = shown(UiState::Pressed);
+    assert_eq!(rgb(&pressed), [0.0, 1.0, 0.0, 1.0], ":hover still applies");
+    assert_eq!(background(&pressed).size, [80.0, 24.0]);
+    assert_eq!(
+        background(&pressed).position,
+        [40.0, 12.0],
+        "around its centre"
+    );
+    assert_eq!(rgb(&shown(UiState::Disabled)), [1.0, 0.0, 0.0, 1.0]);
+}
+
+#[test]
+fn a_transform_scales_and_moves_the_drawing_but_not_the_layout() {
+    let (world, button, sheets) =
+        play_button("#play { transform: translate(10px, 50%) scale(0.5, 2) }");
+    let layout = layout_ui(&world, 640, 480, &sheets);
+    let rectangle = background(&layout);
+    // Centre (80, 24); scaled to 80×96 around it, then moved 10 across and
+    // half its 48 down.
+    assert_eq!(rectangle.size, [80.0, 96.0]);
+    assert_eq!(rectangle.position, [50.0, 0.0]);
+    let text = first_text(&layout.draw_items);
+    assert_eq!(text.size[0], (160.0 - 8.0) * 0.5);
+    let element = layout.element(button).unwrap();
+    assert_eq!(
+        (element.rect.width, element.rect.height),
+        (160.0, 48.0),
+        "clicks and handles use the laid-out box"
+    );
+}
+
+#[test]
+fn a_transition_eases_the_hover_colour_and_scale_instead_of_snapping() {
+    let (world, _, sheets) = play_button(
+        "#play { background-color: #000000; transition: all 0.2s linear } \
+         #play:hover { background-color: #ffffff; transform: scale(0.9) }",
+    );
+    let mut ui = UiInteraction::default();
+    let start = ui.layout(&world, (640, 480), &sheets, AWAY, None, 0.016);
+    assert_eq!(background(&start).color, [0.0, 0.0, 0.0, 1.0]);
+    assert!(!start.animating);
+
+    // The pointer comes on: nothing has moved yet.
+    let entered = ui.layout(&world, (640, 480), &sheets, OVER, None, 0.0);
+    assert_eq!(background(&entered).color, [0.0, 0.0, 0.0, 1.0]);
+    assert!(entered.animating);
+    // Half way.
+    let half = ui.layout(&world, (640, 480), &sheets, OVER, None, 0.1);
+    let color = background(&half).color;
+    assert!((color[0] - 0.5).abs() < 0.01, "{color:?}");
+    assert!((background(&half).size[0] - 160.0 * 0.95).abs() < 0.1);
+    // Done.
+    let done = ui.layout(&world, (640, 480), &sheets, OVER, None, 0.15);
+    assert_eq!(background(&done).color, [1.0, 1.0, 1.0, 1.0]);
+    assert!((background(&done).size[0] - 144.0).abs() < 1e-3);
+    assert!(!done.animating);
+
+    // Leaving eases back from where it is.
+    let leaving = ui.layout(&world, (640, 480), &sheets, AWAY, None, 0.05);
+    assert_eq!(background(&leaving).color, [1.0, 1.0, 1.0, 1.0]);
+    let back = ui.layout(&world, (640, 480), &sheets, AWAY, None, 0.05);
+    assert!((background(&back).color[0] - 0.75).abs() < 0.01);
+
+    // Without `transition`, a hover snaps.
+    let (world, _, sheets) = play_button(
+        "#play { background-color: #000000 } #play:hover { background-color: #ffffff }",
+    );
+    let mut ui = UiInteraction::default();
+    ui.layout(&world, (640, 480), &sheets, AWAY, None, 0.016);
+    let snapped = ui.layout(&world, (640, 480), &sheets, OVER, None, 0.0);
+    assert_eq!(background(&snapped).color, [1.0, 1.0, 1.0, 1.0]);
+}
+
+#[test]
+fn a_transition_from_an_element_colour_blends_with_its_background_property() {
+    let (world, _, sheets) = play_button(
+        "#play { transition: background-color 1s linear } #play:hover { background-color: #ffffff }",
+    );
+    let mut ui = UiInteraction::default();
+    ui.layout(&world, (640, 480), &sheets, AWAY, None, 0.0);
+    ui.layout(&world, (640, 480), &sheets, OVER, None, 0.0);
+    let half = ui.layout(&world, (640, 480), &sheets, OVER, None, 0.5);
+    // BackgroundColor3 is 0.2 grey.
+    let color = background(&half).color;
+    assert!((color[0] - 0.6).abs() < 0.01, "{color:?}");
+}
+
+#[test]
+fn mouse_enter_and_leave_fire_once_each_with_the_button_sounds() {
+    let (mut world, button, sheets) = play_button("");
+    world
+        .set_property(
+            button,
+            "HoverSound",
+            Value::String("sounds/tick.wav".into()),
+        )
+        .unwrap();
+    world
+        .set_property(
+            button,
+            "ClickSound",
+            Value::String("sounds/click.wav".into()),
+        )
+        .unwrap();
+    let mut ui = UiInteraction::default();
+    ui.layout(&world, (640, 480), &sheets, AWAY, None, 0.016);
+    assert!(ui.take_events().is_empty());
+    for _ in 0..3 {
+        ui.layout(&world, (640, 480), &sheets, OVER, None, 0.016);
+    }
+    assert_eq!(
+        ui.take_events(),
+        [
+            UiEvent::MouseEnter(button),
+            UiEvent::PlaySound("sounds/tick.wav".into())
+        ]
+    );
+    assert!(ui.activate(&world, button));
+    assert_eq!(
+        ui.take_events(),
+        [UiEvent::PlaySound("sounds/click.wav".into())]
+    );
+    ui.layout(&world, (640, 480), &sheets, AWAY, None, 0.016);
+    ui.layout(&world, (640, 480), &sheets, UiInput::default(), None, 0.016);
+    assert_eq!(ui.take_events(), [UiEvent::MouseLeave(button)]);
+}
+
+#[test]
+fn a_tooltip_shows_after_a_short_hover_in_its_tooltip_style() {
+    let (mut world, button, sheets) =
+        play_button("#play Tooltip { background-color: #ff0000; color: #00ff00; font-size: 20px }");
+    world
+        .set_property(button, "Tooltip", Value::String("Start the game".into()))
+        .unwrap();
+    let mut ui = UiInteraction::default();
+    let texts = |layout: &UiLayout| -> Vec<UiText> {
+        layout
+            .draw_items
+            .iter()
+            .filter_map(|item| match item {
+                UiDrawItem::Text(text) => Some(text.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let soon = ui.layout(&world, (640, 480), &sheets, OVER, None, 0.016);
+    assert_eq!(texts(&soon).len(), 1, "only the button's text");
+    assert!(soon.animating, "waiting for the tooltip");
+    let later = ui.layout(&world, (640, 480), &sheets, OVER, None, 0.6);
+    let shown = texts(&later);
+    let tip = shown
+        .iter()
+        .find(|text| text.text == "Start the game")
+        .expect("the tooltip is drawn");
+    assert_eq!(tip.font_size, 20.0);
+    assert_eq!(tip.color, [0.0, 1.0, 0.0, 1.0]);
+    assert!(
+        tip.position[0] > 80.0 && tip.position[1] > 24.0,
+        "below right of the pointer"
+    );
+    let UiDrawItem::Rectangle(box_) = later.draw_items[later.draw_items.len() - 2] else {
+        panic!("the tooltip's box is under its text");
+    };
+    assert_eq!(box_.color, [1.0, 0.0, 0.0, 1.0]);
+    let away = ui.layout(&world, (640, 480), &sheets, AWAY, None, 0.016);
+    assert_eq!(texts(&away).len(), 1, "gone when the pointer leaves");
+}

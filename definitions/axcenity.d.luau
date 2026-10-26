@@ -620,6 +620,14 @@ declare extern type Frame extends Instance with
 	BackgroundTransparency: number
 	--- If false, this frame and its children are hidden.
 	Visible: boolean
+	--- If false, it takes no hover or clicks (a button doesn't fire Activated, a text box can't be typed in) and CSS :disabled styles it.
+	Interactable: boolean
+	--- Text shown in a small box near the pointer after a short hover. Empty shows none. Style the box with a CSS Tooltip rule, such as #play Tooltip.
+	Tooltip: string
+	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
+	MouseEnter: Signal
+	--- Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.
+	MouseLeave: Signal
 	[string]: any
 end
 
@@ -649,6 +657,14 @@ declare extern type TextLabel extends Instance with
 	RichText: boolean
 	--- If false, this label is hidden.
 	Visible: boolean
+	--- If false, it takes no hover or clicks (a button doesn't fire Activated, a text box can't be typed in) and CSS :disabled styles it.
+	Interactable: boolean
+	--- Text shown in a small box near the pointer after a short hover. Empty shows none. Style the box with a CSS Tooltip rule, such as #play Tooltip.
+	Tooltip: string
+	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
+	MouseEnter: Signal
+	--- Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.
+	MouseLeave: Signal
 	[string]: any
 end
 
@@ -682,8 +698,20 @@ declare extern type TextButton extends Instance with
 	ImageTransparency: number
 	--- If false, this button is hidden and cannot be activated.
 	Visible: boolean
+	--- If false, it takes no hover or clicks (a button doesn't fire Activated, a text box can't be typed in) and CSS :disabled styles it.
+	Interactable: boolean
+	--- Text shown in a small box near the pointer after a short hover. Empty shows none. Style the box with a CSS Tooltip rule, such as #play Tooltip.
+	Tooltip: string
+	--- A sound file (a path in the project) played once when the pointer comes onto the button. Empty plays nothing.
+	HoverSound: string
+	--- A sound file (a path in the project) played once when the button is clicked. Empty plays nothing.
+	ClickSound: string
 	--- Fires when the player clicks or taps this button. The handler gets no arguments; LocalScripts only.
 	Activated: Signal
+	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
+	MouseEnter: Signal
+	--- Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.
+	MouseLeave: Signal
 	[string]: any
 end
 
@@ -707,6 +735,14 @@ declare extern type ImageLabel extends Instance with
 	ImageTransparency: number
 	--- If false, this image is hidden.
 	Visible: boolean
+	--- If false, it takes no hover or clicks (a button doesn't fire Activated, a text box can't be typed in) and CSS :disabled styles it.
+	Interactable: boolean
+	--- Text shown in a small box near the pointer after a short hover. Empty shows none. Style the box with a CSS Tooltip rule, such as #play Tooltip.
+	Tooltip: string
+	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
+	MouseEnter: Signal
+	--- Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.
+	MouseLeave: Signal
 	[string]: any
 end
 
@@ -740,8 +776,16 @@ declare extern type TextBox extends Instance with
 	MultiLine: boolean
 	--- If false, this text box is hidden.
 	Visible: boolean
+	--- If false, it takes no hover or clicks (a button doesn't fire Activated, a text box can't be typed in) and CSS :disabled styles it.
+	Interactable: boolean
+	--- Text shown in a small box near the pointer after a short hover. Empty shows none. Style the box with a CSS Tooltip rule, such as #play Tooltip.
+	Tooltip: string
 	--- Fires when the player finishes typing: Enter on a one-line box, or clicking away (or Escape) on any box. The handler gets no arguments; LocalScripts only.
 	FocusLost: Signal
+	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
+	MouseEnter: Signal
+	--- Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.
+	MouseLeave: Signal
 	[string]: any
 end
 
@@ -761,8 +805,16 @@ declare extern type PageLayout extends Instance with
 	BackgroundTransparency: number
 	--- If false, this layout and its pages are hidden.
 	Visible: boolean
+	--- If false, it takes no hover or clicks (a button doesn't fire Activated, a text box can't be typed in) and CSS :disabled styles it.
+	Interactable: boolean
+	--- Text shown in a small box near the pointer after a short hover. Empty shows none. Style the box with a CSS Tooltip rule, such as #play Tooltip.
+	Tooltip: string
 	--- The Name of the child Frame to show. Empty shows the first child Frame. A name that matches no Frame is rejected and the current page stays.
 	CurrentPage: string
+	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
+	MouseEnter: Signal
+	--- Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.
+	MouseLeave: Signal
 	[string]: any
 end
 
@@ -782,8 +834,16 @@ declare extern type Table extends Instance with
 	BackgroundTransparency: number
 	--- If false, this table is hidden.
 	Visible: boolean
+	--- If false, it takes no hover or clicks (a button doesn't fire Activated, a text box can't be typed in) and CSS :disabled styles it.
+	Interactable: boolean
+	--- Text shown in a small box near the pointer after a short hover. Empty shows none. Style the box with a CSS Tooltip rule, such as #play Tooltip.
+	Tooltip: string
 	--- How many cells sit in one row. Cells are the table's children, left to right then top to bottom, each the same size.
 	Columns: number
+	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
+	MouseEnter: Signal
+	--- Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.
+	MouseLeave: Signal
 	[string]: any
 end
 

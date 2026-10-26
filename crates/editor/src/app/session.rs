@@ -192,6 +192,7 @@ impl EditorApp {
         self.thumbnail = None;
         self.thumbnail_wanted = None;
         self.pending_ui_activation = None;
+        self.pending_ui_events.clear();
         self.focused_text = None;
         self.pending_focus_lost = None;
         self.assets = assets;
@@ -365,8 +366,10 @@ impl EditorApp {
             Ok(session) => {
                 self.play = Some(session);
                 self.viewport.clear_particles();
+                self.viewport.clear_ui();
                 self.pending_emits.clear();
                 self.pending_ui_activation = None;
+                self.pending_ui_events.clear();
                 self.focused_text = None;
                 self.pending_focus_lost = None;
                 self.last_frame = None;
@@ -444,6 +447,7 @@ impl EditorApp {
         self.tabs.paused = None;
         if self.play.take().is_some() {
             self.viewport.clear_particles();
+            self.viewport.clear_ui();
             self.pending_emits.clear();
             self.output
                 .info("Stopped. The world is back as it was before Play.");
@@ -465,6 +469,13 @@ impl EditorApp {
         let Some(session) = &mut self.play else {
             return;
         };
+        let events = std::mem::take(&mut self.pending_ui_events);
+        if !events.is_empty()
+            && let Err(crash) = session.ui_events(events, &mut self.output)
+        {
+            self.crashed(crash);
+            return;
+        }
         if let Some(button) = activation
             && let Err(crash) = session.activate_ui_button(button, &mut self.output)
         {
@@ -668,6 +679,7 @@ impl EditorApp {
         self.project = None;
         self.play = None;
         self.pending_ui_activation = None;
+        self.pending_ui_events.clear();
         self.focused_text = None;
         self.pending_focus_lost = None;
         self.thumbnail = None;

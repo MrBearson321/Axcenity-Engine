@@ -369,6 +369,16 @@ impl<'a> Converter<'a> {
                 let body = self.body(&function.body, Scope::default());
                 Some(Block::new(BlockKind::WhenClicked { button, body }))
             }
+            "MouseEnter" | "MouseLeave" => {
+                let element = self.target(object)?;
+                let function = self.handler(handler, 0)?;
+                let body = self.body(&function.body, Scope::default());
+                Some(Block::new(if event == "MouseEnter" {
+                    BlockKind::WhenMouseEnters { element, body }
+                } else {
+                    BlockKind::WhenMouseLeaves { element, body }
+                }))
+            }
             "Ended" => {
                 let sound = self.target(object)?;
                 let function = self.handler(handler, 0)?;

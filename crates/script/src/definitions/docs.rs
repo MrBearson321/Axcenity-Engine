@@ -316,6 +316,86 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "How many cells sit in one row. Cells are the table's children, left to right then top to bottom, each the same size.",
     ),
     (
+        ClassName::Frame,
+        "Interactable",
+        "If false, it takes no hover or clicks (a button doesn't fire Activated, a text box can't be typed in) and CSS :disabled styles it.",
+    ),
+    (
+        ClassName::Frame,
+        "Tooltip",
+        "Text shown in a small box near the pointer after a short hover. Empty shows none. Style the box with a CSS Tooltip rule, such as #play Tooltip.",
+    ),
+    (
+        ClassName::TextLabel,
+        "Interactable",
+        "If false, it takes no hover or clicks (a button doesn't fire Activated, a text box can't be typed in) and CSS :disabled styles it.",
+    ),
+    (
+        ClassName::TextLabel,
+        "Tooltip",
+        "Text shown in a small box near the pointer after a short hover. Empty shows none. Style the box with a CSS Tooltip rule, such as #play Tooltip.",
+    ),
+    (
+        ClassName::TextButton,
+        "Interactable",
+        "If false, it takes no hover or clicks (a button doesn't fire Activated, a text box can't be typed in) and CSS :disabled styles it.",
+    ),
+    (
+        ClassName::TextButton,
+        "Tooltip",
+        "Text shown in a small box near the pointer after a short hover. Empty shows none. Style the box with a CSS Tooltip rule, such as #play Tooltip.",
+    ),
+    (
+        ClassName::ImageLabel,
+        "Interactable",
+        "If false, it takes no hover or clicks (a button doesn't fire Activated, a text box can't be typed in) and CSS :disabled styles it.",
+    ),
+    (
+        ClassName::ImageLabel,
+        "Tooltip",
+        "Text shown in a small box near the pointer after a short hover. Empty shows none. Style the box with a CSS Tooltip rule, such as #play Tooltip.",
+    ),
+    (
+        ClassName::TextBox,
+        "Interactable",
+        "If false, it takes no hover or clicks (a button doesn't fire Activated, a text box can't be typed in) and CSS :disabled styles it.",
+    ),
+    (
+        ClassName::TextBox,
+        "Tooltip",
+        "Text shown in a small box near the pointer after a short hover. Empty shows none. Style the box with a CSS Tooltip rule, such as #play Tooltip.",
+    ),
+    (
+        ClassName::PageLayout,
+        "Interactable",
+        "If false, it takes no hover or clicks (a button doesn't fire Activated, a text box can't be typed in) and CSS :disabled styles it.",
+    ),
+    (
+        ClassName::PageLayout,
+        "Tooltip",
+        "Text shown in a small box near the pointer after a short hover. Empty shows none. Style the box with a CSS Tooltip rule, such as #play Tooltip.",
+    ),
+    (
+        ClassName::Table,
+        "Interactable",
+        "If false, it takes no hover or clicks (a button doesn't fire Activated, a text box can't be typed in) and CSS :disabled styles it.",
+    ),
+    (
+        ClassName::Table,
+        "Tooltip",
+        "Text shown in a small box near the pointer after a short hover. Empty shows none. Style the box with a CSS Tooltip rule, such as #play Tooltip.",
+    ),
+    (
+        ClassName::TextButton,
+        "HoverSound",
+        "A sound file (a path in the project) played once when the pointer comes onto the button. Empty plays nothing.",
+    ),
+    (
+        ClassName::TextButton,
+        "ClickSound",
+        "A sound file (a path in the project) played once when the button is clicked. Empty plays nothing.",
+    ),
+    (
         ClassName::BillboardGui,
         "Class",
         "Space-separated CSS class names used to style descendants of this billboard.",
@@ -1242,6 +1322,76 @@ pub(super) const EVENT_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::TextBox,
         "FocusLost",
         "Fires when the player finishes typing: Enter on a one-line box, or clicking away (or Escape) on any box. The handler gets no arguments; LocalScripts only.",
+    ),
+    (
+        ClassName::Frame,
+        "MouseEnter",
+        "Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.",
+    ),
+    (
+        ClassName::Frame,
+        "MouseLeave",
+        "Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.",
+    ),
+    (
+        ClassName::TextLabel,
+        "MouseEnter",
+        "Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.",
+    ),
+    (
+        ClassName::TextLabel,
+        "MouseLeave",
+        "Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.",
+    ),
+    (
+        ClassName::TextButton,
+        "MouseEnter",
+        "Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.",
+    ),
+    (
+        ClassName::TextButton,
+        "MouseLeave",
+        "Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.",
+    ),
+    (
+        ClassName::ImageLabel,
+        "MouseEnter",
+        "Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.",
+    ),
+    (
+        ClassName::ImageLabel,
+        "MouseLeave",
+        "Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.",
+    ),
+    (
+        ClassName::TextBox,
+        "MouseEnter",
+        "Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.",
+    ),
+    (
+        ClassName::TextBox,
+        "MouseLeave",
+        "Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.",
+    ),
+    (
+        ClassName::PageLayout,
+        "MouseEnter",
+        "Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.",
+    ),
+    (
+        ClassName::PageLayout,
+        "MouseLeave",
+        "Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.",
+    ),
+    (
+        ClassName::Table,
+        "MouseEnter",
+        "Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.",
+    ),
+    (
+        ClassName::Table,
+        "MouseLeave",
+        "Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.",
     ),
     (
         ClassName::Sound,

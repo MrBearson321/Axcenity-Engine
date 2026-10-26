@@ -40,6 +40,8 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         | BlockKind::WhenTouched { .. }
         | BlockKind::WhenKeyPressed { .. }
         | BlockKind::WhenClicked { .. }
+        | BlockKind::WhenMouseEnters { .. }
+        | BlockKind::WhenMouseLeaves { .. }
         | BlockKind::EveryFrame { .. }
         | BlockKind::WhenSoundEnded { .. }
         | BlockKind::WhenStateChanged { .. }
@@ -467,6 +469,20 @@ fn translation_covers_every_event_block() {
                 body: quiet(19),
             },
         ),
+        block(
+            30,
+            BlockKind::WhenMouseEnters {
+                element: "Menu.Start".to_owned(),
+                body: quiet(31),
+            },
+        ),
+        block(
+            32,
+            BlockKind::WhenMouseLeaves {
+                element: "Menu.Start".to_owned(),
+                body: quiet(33),
+            },
+        ),
     ];
     let source = translate(&script(blocks)).unwrap().source;
     for lua in [
@@ -483,11 +499,13 @@ fn translation_covers_every_event_block() {
         "workspace.Hero.Animator.StateChanged:Connect(function(state, previous)",
         "workspace.Hero.Animator.AnimationEvent:Connect(function(name)",
         "    if name == \"Footstep\" then",
+        "workspace.Menu.Start.MouseEnter:Connect(function()",
+        "workspace.Menu.Start.MouseLeave:Connect(function()",
     ] {
         assert!(source.contains(lua), "missing `{lua}`:\n{source}");
     }
     // Unattached blocks don't run.
-    assert_eq!(source.matches("do return end").count(), 7, "{source}");
+    assert_eq!(source.matches("do return end").count(), 9, "{source}");
 }
 
 #[test]
@@ -920,6 +938,20 @@ fn every_block_script() -> BlockScript {
             BlockKind::WhenAnimationEvent {
                 animator: animator(),
                 event: "Footstep".to_owned(),
+                body: body(),
+            },
+        ),
+        block(
+            9,
+            BlockKind::WhenMouseEnters {
+                element: "Menu.Start".to_owned(),
+                body: body(),
+            },
+        ),
+        block(
+            10,
+            BlockKind::WhenMouseLeaves {
+                element: "Menu.Start".to_owned(),
                 body: body(),
             },
         ),
