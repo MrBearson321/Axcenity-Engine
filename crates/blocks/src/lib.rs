@@ -396,6 +396,24 @@ pub enum BlockKind {
         velocity: Expression,
     },
 
+    // Saving: `SaveService`.
+    /// Writes save slot `slot`: player data, world state, the active
+    /// checkpoint and settings.
+    SaveSlot {
+        slot: Expression,
+    },
+    /// Puts the game back as save slot `slot` was saved.
+    LoadSlot {
+        slot: Expression,
+    },
+    /// Makes a Checkpoint the active one, capturing the game there.
+    SetCheckpoint {
+        checkpoint: String,
+    },
+    /// Returns to the active checkpoint: what was captured there, with the
+    /// player character standing on it.
+    RestoreCheckpoint,
+
     // Sound.
     PlaySound {
         target: String,
@@ -629,6 +647,8 @@ impl BlockKind {
             | BlockKind::SetValue { value: e, .. }
             | BlockKind::SetDestination { position: e, .. }
             | BlockKind::SetVelocity { velocity: e, .. }
+            | BlockKind::SaveSlot { slot: e }
+            | BlockKind::LoadSlot { slot: e }
             | BlockKind::SetVolume { volume: e, .. }
             | BlockKind::SetAnimatorBool { value: e, .. }
             | BlockKind::SetAnimatorNumber { value: e, .. }
@@ -652,6 +672,17 @@ impl BlockKind {
                 | BlockKind::SlideIn { .. }
                 | BlockKind::FadeIn { .. }
                 | BlockKind::FadeOut { .. }
+        )
+    }
+
+    /// Save and checkpoint blocks, which need `SaveService`.
+    pub fn saves(&self) -> bool {
+        matches!(
+            self,
+            BlockKind::SaveSlot { .. }
+                | BlockKind::LoadSlot { .. }
+                | BlockKind::SetCheckpoint { .. }
+                | BlockKind::RestoreCheckpoint
         )
     }
 
@@ -682,6 +713,8 @@ impl BlockKind {
             | BlockKind::SetValue { value: e, .. }
             | BlockKind::SetDestination { position: e, .. }
             | BlockKind::SetVelocity { velocity: e, .. }
+            | BlockKind::SaveSlot { slot: e }
+            | BlockKind::LoadSlot { slot: e }
             | BlockKind::SetVolume { volume: e, .. }
             | BlockKind::SetAnimatorBool { value: e, .. }
             | BlockKind::SetAnimatorNumber { value: e, .. }

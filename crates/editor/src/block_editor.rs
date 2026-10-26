@@ -275,7 +275,12 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::FadeIn { .. }
         | BlockKind::FadeOut { .. } => Category::Tweens,
         BlockKind::SetVariable { .. } | BlockKind::ChangeVariable { .. } => Category::Variables,
-        BlockKind::Print { .. } | BlockKind::Destroy { .. } => Category::More,
+        BlockKind::Print { .. }
+        | BlockKind::Destroy { .. }
+        | BlockKind::SaveSlot { .. }
+        | BlockKind::LoadSlot { .. }
+        | BlockKind::SetCheckpoint { .. }
+        | BlockKind::RestoreCheckpoint => Category::More,
         BlockKind::Code { .. } | BlockKind::TopCode { .. } => Category::Lua,
     }
 }
@@ -310,6 +315,7 @@ enum Filter {
     Animations,
     /// NavigationAgents.
     Agents,
+    Checkpoints,
     Any,
 }
 
@@ -331,6 +337,7 @@ impl Filter {
             Filter::Animators => class == ClassName::Animator,
             Filter::Animations => class == ClassName::Animation,
             Filter::Agents => class == ClassName::NavigationAgent,
+            Filter::Checkpoints => class == ClassName::Checkpoint,
             Filter::Gui => matches!(
                 class,
                 ClassName::ScreenGui
@@ -365,6 +372,7 @@ impl Filter {
             Filter::Animators => "Model.Animator",
             Filter::Animations => "Model.Animation",
             Filter::Agents => "Model.NavigationAgent",
+            Filter::Checkpoints => "Checkpoint",
         }
     }
 }
@@ -869,6 +877,19 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
         BlockKind::Destroy { target } => {
             vec![Row(vec![label("destroy"), Object(target, Filter::Any)])]
         }
+        BlockKind::SaveSlot { slot } => vec![Row(vec![
+            label("save game to slot"),
+            Slot(slot, SlotKind::Number),
+        ])],
+        BlockKind::LoadSlot { slot } => vec![Row(vec![
+            label("load game from slot"),
+            Slot(slot, SlotKind::Number),
+        ])],
+        BlockKind::SetCheckpoint { checkpoint } => vec![Row(vec![
+            label("set checkpoint to"),
+            Object(checkpoint, Filter::Checkpoints),
+        ])],
+        BlockKind::RestoreCheckpoint => vec![Row(vec![label("go back to checkpoint")])],
         BlockKind::Code { code } | BlockKind::TopCode { code } => {
             vec![Row(vec![label("Lua"), Part::Code(shown_code(code))])]
         }

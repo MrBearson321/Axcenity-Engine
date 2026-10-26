@@ -120,6 +120,16 @@ impl EditorApp {
             self.insert_agent(near.or(self.selected));
             return;
         }
+        if what == Insertable::Checkpoint {
+            let at = tree::top_of(&self.world, near.or(self.selected)).unwrap_or_default();
+            self.insert_named(
+                what,
+                near,
+                what.class().as_str(),
+                vec![("Position", Value::Vector3(at))],
+            );
+            return;
+        }
         if what == Insertable::ParticleEmitter
             && !tree::light_has_part_parent(&self.world, near.or(self.selected))
         {

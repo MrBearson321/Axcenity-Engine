@@ -12,6 +12,7 @@ Source and tests win when a doc is wrong. Update the topic file you used.
 | Physics | [architecture/physics.md](architecture/physics.md) |
 | The navigation mesh, agents, or behavior trees | [architecture/navigation.md](architecture/navigation.md) |
 | Play and Stop | [architecture/play-mode.md](architecture/play-mode.md) |
+| Save slots, checkpoints, `SaveService` | [architecture/saves.md](architecture/saves.md) |
 | Platforms or file access | [architecture/portability.md](architecture/portability.md) |
 | The editor window, ribbon, or theme | [editor/shell.md](editor/shell.md) |
 | Selection or Properties | [editor/selection.md](editor/selection.md) |

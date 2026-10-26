@@ -11,7 +11,7 @@
 use std::any::Any;
 use std::collections::BTreeSet;
 use std::panic::{self, AssertUnwindSafe};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use axcenity_anim::Animators;
@@ -68,6 +68,9 @@ impl Session {
     /// stop at `breakpoints`; one in a script's first run pauses here, and
     /// the scripts after it start on Continue. The project's own `loading`
     /// screen shows as in the built game; the Axcenity splash doesn't.
+    /// `SaveService` writes its slots in `save_folder` (the player's data for
+    /// the game, as in the built game), never the project.
+    #[allow(clippy::too_many_arguments)]
     pub fn start(
         edit_world: &World,
         scripts: &[ScriptFile],
@@ -76,6 +79,7 @@ impl Session {
         assets: Assets,
         camera: CameraState,
         loading: &LoadingScreen,
+        save_folder: Option<PathBuf>,
     ) -> Result<Session, Crash> {
         let mut session = Session {
             world: edit_world.clone(),
@@ -106,6 +110,7 @@ impl Session {
             ));
         }
         session.scripts.set_assets(session.assets.clone());
+        session.scripts.set_save_folder(save_folder);
         session.scripts.enable_debugger();
         session.scripts.set_breakpoints(breakpoints);
         guard(|| {

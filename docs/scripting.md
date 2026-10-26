@@ -12,6 +12,7 @@ Map only. Luau and block scripts (shown as blocks or as a graph) share one runti
 - Third-person walk and run: [scripting/api-character.md](scripting/api-character.md)
 - NavigationAgent (Destination, Velocity, Status, sight and hearing, PlayerSensed): [architecture/navigation.md](architecture/navigation.md)
 - TweenService, TweenInfo and Tweens: [scripting/api-tween.md](scripting/api-tween.md)
+- SaveService, save slots and Checkpoints: [architecture/saves.md](architecture/saves.md)
 - Error text: [scripting/errors.md](scripting/errors.md)
 - Sandbox: [scripting/sandbox.md](scripting/sandbox.md)
 - `require`: [scripting/modules.md](scripting/modules.md)

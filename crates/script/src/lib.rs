@@ -15,7 +15,8 @@
 //!   `events`, and the host fires them with methods such as
 //!   [`ScriptRuntime::fire_touched`] and [`ScriptRuntime::heartbeat`]
 //!   (`run_service`). `TweenService` tweens move properties smoothly,
-//!   each frame step (`tween`). Change events (`part.Changed`) come from the World's
+//!   each frame step (`tween`). `SaveService` writes and loads save slots
+//!   and checkpoints (`save`, over the `save` crate). Change events (`part.Changed`) come from the World's
 //!   change log (`changes`). Client-only APIs (keyboard, camera) live in
 //!   `client`, and `sides` says which APIs work on which side.
 //! - [`lua_definitions`] describes that API for editors, and [`api_reference`]
@@ -42,6 +43,7 @@ mod modules;
 mod remote;
 mod run_service;
 mod sandbox;
+mod save;
 mod scheduler;
 mod sides;
 mod task;
@@ -49,13 +51,16 @@ mod tween;
 mod types;
 mod watchdog;
 
+use std::cell::Ref;
 use std::collections::VecDeque;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use axcenity_assets::Assets;
 use axcenity_audio::SoundAction;
 use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
 use axcenity_physics::RayHit;
+use axcenity_save::Saves;
 use mlua::Lua;
 
 use crate::context::Context;
@@ -144,6 +149,9 @@ pub struct ScriptRuntime {
     /// Whether the error for change events that never stop has been shown,
     /// so it's shown once rather than every frame.
     reported_change_loop: bool,
+    /// `SaveService`'s player data, settings and checkpoint, which both
+    /// sides share.
+    saves: save::SharedSaves,
 }
 
 impl ScriptRuntime {
@@ -157,15 +165,34 @@ impl ScriptRuntime {
     /// `Box<dyn Transport>` holds any type that implements the `Transport`
     /// trait; which one is only known when the program runs.
     pub fn with_transport(transport: Box<dyn Transport>) -> Self {
+        let saves = save::SharedSaves::default();
+        let server = Context::new(Side::Server);
+        let client = Context::new(Side::Client);
+        server.lua.set_app_data(saves.clone());
+        client.lua.set_app_data(saves.clone());
         Self {
-            server: Context::new(Side::Server),
-            client: Context::new(Side::Client),
+            server,
+            client,
             transport,
             output: Vec::new(),
             sound_actions: Vec::new(),
             particle_emits: Vec::new(),
             reported_change_loop: false,
+            saves,
         }
+    }
+
+    /// Where `SaveService` writes its slots: the player's data for this
+    /// game (`axcenity_save::game_folder`), never the project folder.
+    /// Without one, `SaveSlot` and `LoadSlot` fail with a message. Call it
+    /// before starting scripts, so a script that loads at the start can.
+    pub fn set_save_folder(&mut self, folder: Option<PathBuf>) {
+        self.saves.0.borrow_mut().set_folder(folder);
+    }
+
+    /// `SaveService`'s player data, settings and active checkpoint.
+    pub fn saves(&self) -> Ref<'_, Saves> {
+        self.saves.0.borrow()
     }
 
     /// Bytes the Lua heaps of both sides hold now, for the editor's profiler.
@@ -649,3 +676,6 @@ mod debugger_tests;
 
 #[cfg(test)]
 mod tween_tests;
+
+#[cfg(test)]
+mod save_tests;

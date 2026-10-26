@@ -1,0 +1,63 @@
+{
+  "blocks": [
+    {
+      "id": 1,
+      "kind": {
+        "type": "when_key_pressed",
+        "key": "K",
+        "body": [
+          {
+            "id": 2,
+            "kind": {
+              "type": "save_slot",
+              "slot": { "type": "number", "value": 1 }
+            }
+          },
+          {
+            "id": 3,
+            "kind": {
+              "type": "print",
+              "value": { "type": "text", "value": "Saved slot 1" }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": 4,
+      "kind": {
+        "type": "when_key_pressed",
+        "key": "L",
+        "body": [
+          {
+            "id": 5,
+            "kind": {
+              "type": "load_slot",
+              "slot": { "type": "number", "value": 1 }
+            }
+          },
+          {
+            "id": 6,
+            "kind": {
+              "type": "print",
+              "value": { "type": "text", "value": "Loaded slot 1" }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": 7,
+      "kind": {
+        "type": "when_key_pressed",
+        "key": "R",
+        "body": [
+          {
+            "id": 8,
+            "kind": { "type": "restore_checkpoint" }
+          }
+        ]
+      }
+    }
+  ]
+}

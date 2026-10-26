@@ -363,6 +363,12 @@ pub(super) fn palette(
             B(BlockKind::Destroy {
                 target: first(Filter::Parts),
             }),
+            B(BlockKind::SaveSlot { slot: number(1.0) }),
+            B(BlockKind::LoadSlot { slot: number(1.0) }),
+            B(BlockKind::SetCheckpoint {
+                checkpoint: first(Filter::Checkpoints),
+            }),
+            B(BlockKind::RestoreCheckpoint),
         ],
         // Grey blocks only come from code, so there are none to drag out.
         Category::Lua => Vec::new(),

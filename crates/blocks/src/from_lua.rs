@@ -17,7 +17,12 @@ use crate::{
 
 /// The services blocks get with `game:GetService`, which the translation
 /// declares at the top itself when blocks need them.
-const SERVICES: [&str; 3] = ["UserInputService", "RunService", "TweenService"];
+const SERVICES: [&str; 4] = [
+    "UserInputService",
+    "RunService",
+    "TweenService",
+    "SaveService",
+];
 
 /// Why some Lua couldn't become blocks.
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
@@ -141,6 +146,9 @@ fn used_by(script: &BlockScript) -> (BTreeSet<String>, BTreeSet<String>) {
             }
             kind if kind.tweens() => {
                 services.insert("TweenService".to_owned());
+            }
+            kind if kind.saves() => {
+                services.insert("SaveService".to_owned());
             }
             _ => {}
         }
@@ -668,6 +676,9 @@ impl<'a> Converter<'a> {
         if let Some(tween) = self.tween(call, scope) {
             return Some(tween);
         }
+        if let Some(save) = self.save_call(call, scope) {
+            return Some(save);
+        }
         match &call.kind {
             ExprKind::Call(function, args) => {
                 if self.is_field(function, "task", "wait")
@@ -749,6 +760,30 @@ impl<'a> Converter<'a> {
             }
             _ => None,
         }
+    }
+
+    /// `SaveService:SaveSlot(1)`, `LoadSlot`, `SetCheckpoint(workspace.Cave)`
+    /// and `RestoreCheckpoint()`.
+    fn save_call(&self, call: &Expr, scope: Scope) -> Option<BlockKind> {
+        let ExprKind::Method(object, method, args) = &call.kind else {
+            return None;
+        };
+        if !self.is_service(object, "SaveService") {
+            return None;
+        }
+        Some(match (method.as_str(), args.as_slice()) {
+            ("SaveSlot", [slot]) => BlockKind::SaveSlot {
+                slot: self.expression(slot, scope),
+            },
+            ("LoadSlot", [slot]) => BlockKind::LoadSlot {
+                slot: self.expression(slot, scope),
+            },
+            ("SetCheckpoint", [checkpoint]) => BlockKind::SetCheckpoint {
+                checkpoint: self.target(checkpoint)?,
+            },
+            ("RestoreCheckpoint", []) => BlockKind::RestoreCheckpoint,
+            _ => return None,
+        })
     }
 
     /// `TweenService:Create(object, TweenInfo.new(...), {Property = value}):Play()`:

@@ -727,10 +727,10 @@ A new `save` crate. A `Checkpoint` Instance marks a place in the world. Scripts 
 
 ### Acceptance criteria
 
-- [ ] Saving a slot and loading it restores player data, moved world state, the active checkpoint and settings.
-- [ ] Restoring a checkpoint places the character there with the state captured for it.
-- [ ] The save file is outside the project folder, the project files are unchanged after a save, and Stop still restores the pre-Play world.
-- [ ] Lua and blocks can save, load and restore a checkpoint, and loading a missing slot fails without touching the current world.
+- [x] Saving a slot and loading it restores player data, moved world state, the active checkpoint and settings.
+- [x] Restoring a checkpoint places the character there with the state captured for it.
+- [x] The save file is outside the project folder, the project files are unchanged after a save, and Stop still restores the pre-Play world.
+- [x] Lua and blocks can save, load and restore a checkpoint, and loading a missing slot fails without touching the current world.
 
 ---
 

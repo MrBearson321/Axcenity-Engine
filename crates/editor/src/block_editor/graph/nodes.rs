@@ -102,6 +102,10 @@ pub(super) fn block_names(kind: &BlockKind) -> (&'static str, &'static [&'static
         BlockKind::ChangeVariable { .. } => ("Change Variable", &["Variable", "By"]),
         BlockKind::Print { .. } => ("Print", &["Value"]),
         BlockKind::Destroy { .. } => ("Destroy", &["Object"]),
+        BlockKind::SaveSlot { .. } => ("Save Slot", &["Slot"]),
+        BlockKind::LoadSlot { .. } => ("Load Slot", &["Slot"]),
+        BlockKind::SetCheckpoint { .. } => ("Set Checkpoint", &["Checkpoint"]),
+        BlockKind::RestoreCheckpoint => ("Restore Checkpoint", &[]),
         BlockKind::Code { .. } => ("Lua", &["Code"]),
     }
 }

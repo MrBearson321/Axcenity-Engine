@@ -310,6 +310,7 @@ fn described_fields_and_methods_exist() {
         ("UserInputService", "game:GetService('UserInputService')"),
         ("RunService", "game:GetService('RunService')"),
         ("TweenService", "game:GetService('TweenService')"),
+        ("SaveService", "game:GetService('SaveService')"),
         ("ReplicatedFirst", "game:GetService('ReplicatedFirst')"),
         (
             "Tween",

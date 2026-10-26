@@ -285,6 +285,21 @@ impl EditorApp {
                         clicks.insert = Some(what);
                     }
                 }
+                for what in Insertable::CHECKPOINTS {
+                    let button = RibbonButton::new(theme::insert_icon(what), what.label());
+                    if ui
+                        .add_enabled(!playing, button)
+                        .on_hover_text(
+                            "Insert a Checkpoint on top of the selected part: a place \
+                             SaveService:RestoreCheckpoint (or the \"go back to checkpoint\" \
+                             block) puts the player character back at.",
+                        )
+                        .on_disabled_hover_text("Press Stop to edit.")
+                        .clicked()
+                    {
+                        clicks.insert = Some(what);
+                    }
+                }
             }),
             RibbonGroup::Import => ribbon::group(ui, "Import", |ui| {
                 let button = RibbonButton::new(icons::FILE_ARROW_DOWN, "Import…");

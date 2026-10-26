@@ -567,6 +567,32 @@ pub fn value_from_lua(lua: &Lua, value: mlua::Value, kind: ValueKind) -> Result<
     converted.ok_or_else(|| wrong_type(&value))
 }
 
+/// A Lua value as whichever property value it is, for places that keep any
+/// value (`SaveService:SetPlayerData`). `None` for nil, tables, functions
+/// and Instances.
+pub fn any_value_from_lua(lua: &Lua, value: &mlua::Value) -> Option<Value> {
+    match value {
+        mlua::Value::Boolean(b) => Some(Value::Bool(*b)),
+        mlua::Value::Integer(n) => Some(Value::Number(*n as f64)),
+        mlua::Value::Number(n) => Some(Value::Number(*n)),
+        mlua::Value::String(s) => Some(Value::String(s.to_string_lossy())),
+        mlua::Value::UserData(_) => [
+            ValueKind::Vector3,
+            ValueKind::Vector2,
+            ValueKind::UDim2,
+            ValueKind::Color3,
+        ]
+        .into_iter()
+        .find_map(|kind| value_from_lua(lua, value.clone(), kind).ok())
+        .or_else(|| {
+            LuaEnumItem::from_lua(value.clone(), lua)
+                .ok()
+                .and_then(LuaEnumItem::to_value)
+        }),
+        _ => None,
+    }
+}
+
 /// The type name to show in messages: the engine type for engine values
 /// (`Vector3`, `Part`, `Material`), otherwise Lua's own (`number`, `nil`).
 pub fn type_name(lua: &Lua, value: &mlua::Value) -> String {
@@ -601,6 +627,7 @@ pub fn type_name(lua: &Lua, value: &mlua::Value) -> String {
             (data.is::<crate::events::LuaConnection>(), "Connection"),
             (data.is::<crate::run_service::LuaRunService>(), "RunService"),
             (data.is::<crate::tween::LuaTweenService>(), "TweenService"),
+            (data.is::<crate::save::LuaSaveService>(), "SaveService"),
             (data.is::<crate::tween::LuaTween>(), "Tween"),
             (data.is::<crate::tween::LuaTweenInfo>(), "TweenInfo"),
         ];

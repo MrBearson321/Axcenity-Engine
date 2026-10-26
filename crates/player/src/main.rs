@@ -140,6 +140,8 @@ fn main() -> Result<()> {
     let assets = Assets::new(&project.folder);
     let mut scripts = ScriptRuntime::new();
     scripts.set_assets(assets.clone());
+    // Saves go in the player's data for this game, never the game's folder.
+    scripts.set_save_folder(axcenity_save::game_folder(&project.manifest.name));
     // Animators start in their default states (with their parameters at
     // their defaults) before any script runs, so scripts can read them.
     let mut animators = Animators::new();

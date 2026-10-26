@@ -13,6 +13,7 @@ use mlua::{
 use crate::client::{LocalPlayer, LuaCamera, LuaReplicatedFirst, LuaUserInputService};
 use crate::events::{Event, LuaSignal, Owner};
 use crate::run_service::LuaRunService;
+use crate::save::LuaSaveService;
 use crate::sides;
 use crate::tween::LuaTweenService;
 use crate::types::{LuaVector3, f32_to_lua, type_name, value_from_lua, value_to_lua};
@@ -279,6 +280,7 @@ fn class_member(lua: &Lua, class: ClassName, key: &str) -> mlua::Result<Option<m
         (ClassName::DataModel, "UserInputService") => LuaUserInputService.into_lua(lua)?,
         (ClassName::DataModel, "RunService") => LuaRunService.into_lua(lua)?,
         (ClassName::DataModel, "TweenService") => LuaTweenService.into_lua(lua)?,
+        (ClassName::DataModel, "SaveService") => LuaSaveService.into_lua(lua)?,
         (ClassName::DataModel, "ReplicatedFirst") => LuaReplicatedFirst.into_lua(lua)?,
         (ClassName::Workspace, "CurrentCamera") => LuaCamera.into_lua(lua)?,
         (ClassName::Players, "LocalPlayer") => lua
@@ -873,7 +875,7 @@ fn set_playing(lua: &Lua, sound: InstanceId, playing: bool) -> mlua::Result<()> 
 
 /// `game:GetService(name)`: a service by its class name, such as
 /// `"Players"`, or `"UserInputService"` (LocalScripts only),
-/// `"RunService"`, `"TweenService"` or `"ReplicatedFirst"`, which aren't
+/// `"RunService"`, `"TweenService"`, `"SaveService"` or `"ReplicatedFirst"`, which aren't
 /// Instances.
 pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
     lua.create_function(|lua, (_game, name): (mlua::Value, String)| {
@@ -884,6 +886,7 @@ pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
             }
             "RunService" => return LuaRunService.into_lua(lua),
             "TweenService" => return LuaTweenService.into_lua(lua),
+            "SaveService" => return LuaSaveService.into_lua(lua),
             "ReplicatedFirst" => return LuaReplicatedFirst.into_lua(lua),
             _ => {}
         }
@@ -907,6 +910,7 @@ pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
                 names.extend([
                     "ReplicatedFirst",
                     "RunService",
+                    "SaveService",
                     "TweenService",
                     "UserInputService",
                 ]);

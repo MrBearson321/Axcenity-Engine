@@ -326,3 +326,107 @@ fn f5_plays_and_shift_f5_stops() {
     press(&mut empty, egui::Modifiers::NONE, egui::Key::F5);
     assert!(!empty.playing());
 }
+
+/// Every file under `folder`, by path.
+fn files_in(folder: &std::path::Path) -> std::collections::BTreeMap<std::path::PathBuf, Vec<u8>> {
+    let mut files = std::collections::BTreeMap::new();
+    for entry in std::fs::read_dir(folder).unwrap().flatten() {
+        let path = entry.path();
+        if entry.file_type().unwrap().is_dir() {
+            files.extend(files_in(&path));
+        } else {
+            files.insert(path.clone(), std::fs::read(&path).unwrap());
+        }
+    }
+    files
+}
+
+#[test]
+fn saving_during_play_writes_the_players_data_not_the_project_and_stop_restores_the_world() {
+    use axcenity_core::KeyCode;
+    use axcenity_script::KeyEvent;
+    let folder = copy_of_example("hello-saves", "saves-play");
+    let saves = super::session::play_save_folder("Hello Saves").unwrap();
+    let _ = std::fs::remove_dir_all(&saves);
+    let mut app = EditorApp::new(Some(&folder));
+    let hero = app
+        .world
+        .find_first_child(part(&app, "Hero"), "Body")
+        .unwrap();
+    let project_files = files_in(&folder);
+    let before = everything(&app);
+
+    app.play();
+    play_for(&mut app, 0.1);
+    // Into the first coin, then K saves slot 1 (keys.client.blocks.json).
+    app.play
+        .as_mut()
+        .unwrap()
+        .world_mut()
+        .set_property(hero, "Position", vector(8.0, 2.5, 0.0))
+        .unwrap();
+    play_for(&mut app, 0.1);
+    for pressed in [true, false] {
+        app.play_frame(
+            1.0 / 60.0,
+            &[KeyEvent {
+                key: KeyCode::K,
+                pressed,
+            }],
+            None,
+            None,
+        );
+    }
+    let lines = printed(&app);
+    assert!(lines.contains(&"Coins: 1"), "{lines:?}");
+    assert!(lines.contains(&"Saved slot 1"), "{lines:?}");
+    assert!(saves.join("slot-1.json").is_file());
+    assert!(!saves.starts_with(&folder));
+
+    // Stop puts the editing world back, and the project is as it was.
+    app.stop();
+    assert_eq!(everything(&app), before);
+    assert_eq!(files_in(&folder), project_files);
+
+    // The next Play starts from the slot; the editing world still doesn't change.
+    app.play();
+    play_for(&mut app, 0.1);
+    assert!(
+        printed(&app).contains(&"Loaded slot 1: 1 coins"),
+        "{:?}",
+        printed(&app)
+    );
+    let coins = app.play.as_ref().unwrap().world();
+    let coin = coins
+        .find_first_child(
+            coins.find_first_child(coins.workspace(), "Coins").unwrap(),
+            "Coin1",
+        )
+        .unwrap();
+    assert_eq!(
+        coins.get(coin).unwrap().property("Transparency"),
+        Some(&Value::Number(1.0))
+    );
+    app.stop();
+    assert_eq!(everything(&app), before);
+    assert_eq!(files_in(&folder), project_files);
+    let _ = std::fs::remove_dir_all(&saves);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn a_checkpoint_inserted_on_a_part_stands_on_top_of_it_in_the_workspace() {
+    let mut app = EditorApp::new(Some(&example("hello-saves")));
+    let pad = part(&app, "Pad");
+    let checkpoint = inserted(&mut app, Insertable::Checkpoint, Some(pad));
+    let instance = app.world.get(checkpoint).unwrap();
+    assert_eq!(instance.class(), ClassName::Checkpoint);
+    assert_eq!(instance.parent(), Some(app.world.workspace()));
+    // The pad is 0.1 tall at y = 0.05.
+    assert_eq!(
+        property(&app, checkpoint, "Position"),
+        vector(20.0, 0.1, 10.0)
+    );
+    // hello-saves has a Checkpoint already, so this one is numbered.
+    assert_eq!(app.history.undo_label(), Some("Insert Checkpoint2"));
+}

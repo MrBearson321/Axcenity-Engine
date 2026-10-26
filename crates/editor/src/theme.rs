@@ -744,6 +744,7 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::ThirdPersonController => icons::PERSON_SIMPLE_WALK,
         ClassName::FirstPersonController => icons::EYE,
         ClassName::NavigationAgent => icons::ROBOT,
+        ClassName::Checkpoint => icons::FLAG_PENNANT,
     }
 }
 
@@ -819,7 +820,8 @@ pub fn class_color(class: ClassName, visuals: &egui::Visuals) -> Color32 {
         ClassName::Terrain | ClassName::TerrainLayer => pick((140, 200, 110), (60, 125, 35)),
         ClassName::ThirdPersonController
         | ClassName::FirstPersonController
-        | ClassName::NavigationAgent => pick((90, 200, 160), (20, 130, 100)),
+        | ClassName::NavigationAgent
+        | ClassName::Checkpoint => pick((90, 200, 160), (20, 130, 100)),
         ClassName::Script => pick((226, 145, 82), (185, 95, 10)),
         ClassName::LocalScript => pick((90, 190, 175), (10, 120, 110)),
         ClassName::ModuleScript => pick((170, 145, 240), (105, 75, 190)),

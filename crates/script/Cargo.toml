@@ -10,8 +10,10 @@ authors.workspace = true
 axcenity-anim.workspace = true
 axcenity-assets.workspace = true
 axcenity-audio.workspace = true
+axcenity-character.workspace = true
 axcenity-core.workspace = true
 axcenity-physics.workspace = true
+axcenity-save.workspace = true
 mlua.workspace = true
 
 # Only pins the Luau version `mlua` builds (see the workspace Cargo.toml).

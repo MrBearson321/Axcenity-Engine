@@ -22,6 +22,7 @@ axcenity-nav = { path = "crates/nav" }
 axcenity-physics = { path = "crates/physics" }
 axcenity-project = { path = "crates/project" }
 axcenity-render = { path = "crates/render" }
+axcenity-save = { path = "crates/save" }
 axcenity-scene = { path = "crates/scene" }
 axcenity-script = { path = "crates/script" }
 axcenity-terrain = { path = "crates/terrain" }

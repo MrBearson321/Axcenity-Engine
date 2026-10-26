@@ -93,9 +93,13 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         BlockKind::SetValue { .. } => 40,
         BlockKind::SetDestination { .. } => 41,
         BlockKind::SetVelocity { .. } => 42,
+        BlockKind::SaveSlot { .. } => 43,
+        BlockKind::LoadSlot { .. } => 44,
+        BlockKind::SetCheckpoint { .. } => 45,
+        BlockKind::RestoreCheckpoint => 46,
     })
 }
-const STATEMENT_COUNT: usize = 43;
+const STATEMENT_COUNT: usize = 47;
 
 /// One of each statement block, with the Lua it must produce.
 fn every_statement() -> Vec<(BlockKind, &'static str)> {
@@ -332,6 +336,24 @@ fn every_statement() -> Vec<(BlockKind, &'static str)> {
                 },
             },
             "workspace.Guard.NavigationAgent.Velocity = Vector3.new(0, 0, 8)",
+        ),
+        (
+            BlockKind::SaveSlot { slot: number(1.0) },
+            "SaveService:SaveSlot(1)",
+        ),
+        (
+            BlockKind::LoadSlot { slot: number(2.0) },
+            "SaveService:LoadSlot(2)",
+        ),
+        (
+            BlockKind::SetCheckpoint {
+                checkpoint: "Checkpoints.Cave".to_owned(),
+            },
+            "SaveService:SetCheckpoint(workspace.Checkpoints.Cave)",
+        ),
+        (
+            BlockKind::RestoreCheckpoint,
+            "SaveService:RestoreCheckpoint()",
         ),
         (
             BlockKind::Code {

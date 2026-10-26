@@ -45,6 +45,8 @@ pub enum Insertable {
     FirstPersonController,
     /// Walks a character along the navigation mesh.
     NavigationAgent,
+    /// A place a character is put back at.
+    Checkpoint,
 }
 
 impl Insertable {
@@ -89,6 +91,8 @@ impl Insertable {
     ];
     /// Navigation agents, which walk a character to a destination.
     pub const AGENTS: [Insertable; 1] = [Insertable::NavigationAgent];
+    /// Checkpoints, which a game returns the player character to.
+    pub const CHECKPOINTS: [Insertable; 1] = [Insertable::Checkpoint];
 
     /// What the buttons and menus call it. A Ball is a "Sphere", as in Studio.
     pub fn label(self) -> &'static str {
@@ -125,6 +129,7 @@ impl Insertable {
             Insertable::ThirdPersonController => "Third Person",
             Insertable::FirstPersonController => "First Person",
             Insertable::NavigationAgent => "Agent",
+            Insertable::Checkpoint => "Checkpoint",
         }
     }
 
@@ -159,6 +164,7 @@ impl Insertable {
             Insertable::ThirdPersonController => ClassName::ThirdPersonController,
             Insertable::FirstPersonController => ClassName::FirstPersonController,
             Insertable::NavigationAgent => ClassName::NavigationAgent,
+            Insertable::Checkpoint => ClassName::Checkpoint,
         }
     }
 
@@ -330,6 +336,22 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
                 && is_saved(world, id))
     })
     .unwrap_or(default)
+}
+
+/// The middle of the top of the Part or MeshPart `id`, where a new
+/// Checkpoint goes. `None` for anything else.
+pub fn top_of(world: &World, id: Option<InstanceId>) -> Option<Vector3> {
+    let instance = world.get(id?)?;
+    if !matches!(instance.class(), ClassName::Part | ClassName::MeshPart) {
+        return None;
+    }
+    let position = instance.property("Position")?.as_vector3()?;
+    let size = instance.property("Size")?.as_vector3()?;
+    Some(Vector3::new(
+        position.x,
+        position.y + size.y.abs() / 2.0,
+        position.z,
+    ))
 }
 
 /// True when a character controller already moves `id`: one is inside it,

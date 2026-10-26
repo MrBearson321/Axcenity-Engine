@@ -15,11 +15,12 @@ Which crate owns what, and what it may depend on. Read this before adding a crat
 | `physics` | `rapier3d` integration | `core`, `assets` |
 | `character` | kinematic third-person walk and run; queries physics, never the reverse | `core`, `assets`, `physics` |
 | `nav` | the navigation mesh, built from `physics::solids`, paths across it, the `NavigationAgent` stepper, and behavior trees (checked and run, read from their files with `serde_json`); neither `physics` nor `character` may depend on it | `core`, `assets`, `physics`, `character` |
-| `script` | Luau (`mlua`), sandbox, scheduler, engine API, TweenService (eased by `anim`'s curves) | `anim`, `audio`, `core`, `physics`, `assets` |
+| `save` | save slots and checkpoints: `Saves` (player data, settings, the active checkpoint), world state snapshots and their restore, slot files in the player's data for the game (`game_folder`); never the project folder | `core` |
+| `script` | Luau (`mlua`), sandbox, scheduler, engine API, TweenService (eased by `anim`'s curves), SaveService (over `save`; places the player character found by `character`) | `anim`, `audio`, `character`, `core`, `physics`, `assets`, `save` |
 | `ui` | UI Instance layout, CSS cascade (`taffy`), transitions (eased by `anim`'s curves) and screen-space draw data | `anim`, `core`, `render` |
 | `project` | project folder load and save, including CSS and block-script sources, upgrading older projects (animation files through `anim`), and the editor's asset check | `anim`, `assets`, `blocks`, `core`, `terrain` |
-| `player` | runtime shipped with games (binary) | `anim`, `audio`, `character`, `core`, `assets`, `nav`, `render`, `scene`, `physics`, `script`, `project`, `ui` |
-| `editor` | `egui` editor app (binary) | `anim`, `audio`, `blocks`, `character`, `core`, `assets`, `nav`, `physics`, `project`, `render`, `scene`, `script`, `terrain`, `ui` |
+| `player` | runtime shipped with games (binary) | `anim`, `audio`, `character`, `core`, `assets`, `nav`, `render`, `save`, `scene`, `physics`, `script`, `project`, `ui` |
+| `editor` | `egui` editor app (binary) | `anim`, `audio`, `blocks`, `character`, `core`, `assets`, `nav`, `physics`, `project`, `render`, `save`, `scene`, `script`, `terrain`, `ui` |
 
 Block scripts are translated to Lua at project load and run through the same `ScriptRuntime` as handwritten scripts. Hosts hand queued sound actions to their `GameAudio` after script steps, and fire `Ended` for the sounds it reports finished; the player owns playback for its lifetime, while editor Play owns a separate `GameAudio` that is dropped on Stop.
 

@@ -744,3 +744,30 @@ fn a_navigation_agents_behavior_tree_saves_and_loads() {
         Some(&tree)
     );
 }
+
+#[test]
+fn a_checkpoint_saves_and_loads_with_its_position() {
+    let mut world = World::new();
+    let checkpoint = world.create(ClassName::Checkpoint).unwrap();
+    world.set_name(checkpoint, "Cave").unwrap();
+    world
+        .set_property(
+            checkpoint,
+            "Position",
+            Value::Vector3(Vector3::new(20.0, 0.0, -10.0)),
+        )
+        .unwrap();
+    world
+        .set_parent(checkpoint, Some(world.workspace()))
+        .unwrap();
+    let reloaded = parse_world(&write_world(&world)).unwrap();
+    let id = reloaded
+        .find_first_child(reloaded.workspace(), "Cave")
+        .unwrap();
+    let saved = reloaded.get(id).unwrap();
+    assert_eq!(saved.class(), ClassName::Checkpoint);
+    assert_eq!(
+        saved.property("Position"),
+        Some(&Value::Vector3(Vector3::new(20.0, 0.0, -10.0)))
+    );
+}

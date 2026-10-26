@@ -613,6 +613,7 @@ dependencies = [
  "axcenity-physics",
  "axcenity-project",
  "axcenity-render",
+ "axcenity-save",
  "axcenity-scene",
  "axcenity-script",
  "axcenity-terrain",
@@ -668,6 +669,7 @@ dependencies = [
  "axcenity-physics",
  "axcenity-project",
  "axcenity-render",
+ "axcenity-save",
  "axcenity-scene",
  "axcenity-script",
  "axcenity-ui",
@@ -707,6 +709,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "axcenity-save"
+version = "0.1.0"
+dependencies = [
+ "axcenity-core",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "axcenity-scene"
 version = "0.1.0"
 dependencies = [
@@ -725,8 +737,10 @@ dependencies = [
  "axcenity-anim",
  "axcenity-assets",
  "axcenity-audio",
+ "axcenity-character",
  "axcenity-core",
  "axcenity-physics",
+ "axcenity-save",
  "luau0-src",
  "mlua",
 ]

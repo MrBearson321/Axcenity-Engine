@@ -1975,3 +1975,179 @@ fn hello_ui_graph_runs_its_event_graph_as_an_ordinary_local_script() {
         .collect();
     assert_eq!(output, ["Back on the home page"]);
 }
+
+/// Every file under `folder`, by path, for checking nothing was written there.
+fn files_in(folder: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
+    let mut files = std::collections::BTreeMap::new();
+    for entry in std::fs::read_dir(folder).unwrap().flatten() {
+        let path = entry.path();
+        if entry.file_type().unwrap().is_dir() {
+            files.extend(files_in(&path));
+        } else {
+            files.insert(path.clone(), std::fs::read(&path).unwrap());
+        }
+    }
+    files
+}
+
+/// hello-saves, opened from a copy as the player opens it, with its slots in
+/// `saves` instead of the player's data folder.
+fn start_hello_saves(copy: &str, saves: &Path) -> (World, ScriptRuntime, PathBuf) {
+    let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-saves");
+    let folder =
+        std::env::temp_dir().join(format!("axcenity-player-{copy}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&folder);
+    copy_folder(&example, &folder);
+    let project = axcenity_project::load(&folder).unwrap();
+    let mut world = project.world;
+    let mut scripts = ScriptRuntime::new();
+    scripts.set_save_folder(Some(saves.to_path_buf()));
+    // As `start_scripts` does, keeping the output for the test to read.
+    for script in &project.scripts {
+        scripts.start_script(&mut world, script.instance, &script.path, &script.source);
+    }
+    (world, scripts, folder)
+}
+
+fn script_lines(scripts: &mut ScriptRuntime) -> Vec<String> {
+    scripts
+        .take_output()
+        .into_iter()
+        .map(|line| match line.kind {
+            OutputKind::Print => line.text,
+            OutputKind::Error => format!("error: {}", line.text),
+        })
+        .collect()
+}
+
+#[test]
+fn hello_saves_saves_loads_and_restores_its_checkpoint_from_lua_and_blocks_outside_the_project() {
+    use axcenity_core::KeyCode as K;
+    let saves = std::env::temp_dir().join(format!("axcenity-player-saves-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&saves);
+    let (mut world, mut scripts, folder) = start_hello_saves("hello-saves", &saves);
+    let project_files = files_in(&folder);
+    assert_eq!(
+        script_lines(&mut scripts),
+        ["A new game. K saves, L loads, R goes back to the checkpoint."]
+    );
+    let hero = world
+        .find_first_descendant(world.workspace(), "Hero")
+        .and_then(|hero| world.find_first_child(hero, "Body"))
+        .unwrap();
+    let coin = |world: &World, n: u32| {
+        let coins = world.find_first_child(world.workspace(), "Coins").unwrap();
+        let coin = world.find_first_child(coins, &format!("Coin{n}")).unwrap();
+        world.get(coin).unwrap().property("Transparency").cloned()
+    };
+    let walk_to = |world: &mut World, scripts: &mut ScriptRuntime, at: Vector3| {
+        world
+            .set_property(hero, "Position", Value::Vector3(at))
+            .unwrap();
+        scripts.step(world, 1.0 / 60.0);
+        scripts.heartbeat(world, 1.0 / 60.0);
+    };
+    let press = |world: &mut World, scripts: &mut ScriptRuntime, key: K| {
+        for pressed in [true, false] {
+            scripts.input(world, &[KeyEvent { key, pressed }]);
+        }
+        scripts.step(world, 1.0 / 60.0);
+    };
+
+    walk_to(&mut world, &mut scripts, Vector3::new(8.0, 1.5, 0.0));
+    walk_to(&mut world, &mut scripts, Vector3::new(20.0, 2.5, 10.0));
+    walk_to(&mut world, &mut scripts, Vector3::new(14.0, 1.5, 6.0));
+    assert_eq!(
+        script_lines(&mut scripts),
+        ["Coins: 1", "Checkpoint!", "Coins: 2"]
+    );
+
+    // K saves slot 1 from blocks: in the save folder, not the project.
+    press(&mut world, &mut scripts, K::K);
+    assert_eq!(script_lines(&mut scripts), ["Saved slot 1"]);
+    assert!(saves.join("slot-1.json").is_file());
+    assert_eq!(
+        files_in(&folder),
+        project_files,
+        "saving wrote to the project"
+    );
+
+    // A third coin, then L loads slot 1 from blocks: two coins, the third back.
+    walk_to(&mut world, &mut scripts, Vector3::new(-10.0, 1.5, -10.0));
+    assert_eq!(script_lines(&mut scripts), ["Coins: 3"]);
+    assert_eq!(coin(&world, 3), Some(Value::Number(1.0)));
+    press(&mut world, &mut scripts, K::L);
+    assert_eq!(script_lines(&mut scripts), ["Loaded slot 1"]);
+    assert_eq!(scripts.saves().player_data["Coins"], Value::Number(2.0));
+    assert_eq!(coin(&world, 3), Some(Value::Number(0.0)));
+    assert_eq!(position_of_part(&world, hero), Vector3::new(14.0, 1.5, 6.0));
+
+    // Falling off the floor restores the checkpoint from Lua: on the pad,
+    // with the one coin collected before it.
+    walk_to(&mut world, &mut scripts, Vector3::new(60.0, -40.0, 0.0));
+    assert_eq!(
+        script_lines(&mut scripts),
+        ["Back at the checkpoint, with 1 coins"]
+    );
+    assert_eq!(
+        position_of_part(&world, hero),
+        Vector3::new(20.0, 2.6, 10.0)
+    );
+    assert_eq!(coin(&world, 1), Some(Value::Number(1.0)));
+    assert_eq!(coin(&world, 2), Some(Value::Number(0.0)));
+    // R does the same from blocks.
+    world
+        .set_property(
+            hero,
+            "Position",
+            Value::Vector3(Vector3::new(0.0, 2.5, 0.0)),
+        )
+        .unwrap();
+    press(&mut world, &mut scripts, K::R);
+    assert_eq!(
+        position_of_part(&world, hero),
+        Vector3::new(20.0, 2.6, 10.0)
+    );
+    assert_eq!(script_lines(&mut scripts), Vec::<String>::new());
+
+    // The next run of the game starts from slot 1, with its checkpoint.
+    let (world, mut scripts, _) = start_hello_saves("hello-saves-again", &saves);
+    assert_eq!(script_lines(&mut scripts), ["Loaded slot 1: 2 coins"]);
+    assert_eq!(coin(&world, 1), Some(Value::Number(1.0)));
+    assert_eq!(coin(&world, 3), Some(Value::Number(0.0)));
+    let checkpoint = world.find_first_child(world.workspace(), "Checkpoint");
+    assert_eq!(scripts.saves().checkpoint(&world), checkpoint);
+    assert_eq!(scripts.saves().settings["Volume"], Value::Number(0.8));
+}
+
+#[test]
+fn hello_saves_loading_a_missing_slot_from_blocks_fails_and_leaves_the_world_alone() {
+    use axcenity_core::KeyCode as K;
+    let saves =
+        std::env::temp_dir().join(format!("axcenity-player-no-saves-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&saves);
+    let (mut world, mut scripts, _) = start_hello_saves("hello-saves-missing", &saves);
+    script_lines(&mut scripts);
+    let before = axcenity_save::snapshot(&world);
+    for pressed in [true, false] {
+        scripts.input(&mut world, &[KeyEvent { key: K::L, pressed }]);
+    }
+    let lines = script_lines(&mut scripts);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(
+        lines[0].starts_with("error: scripts/keys.client.blocks.json:")
+            && lines[0].contains("save slot 1 doesn't exist yet"),
+        "{lines:?}"
+    );
+    assert_eq!(axcenity_save::snapshot(&world), before);
+    assert_eq!(scripts.saves().player_data["Coins"], Value::Number(0.0));
+}
+
+fn position_of_part(world: &World, id: InstanceId) -> Vector3 {
+    world
+        .get(id)
+        .unwrap()
+        .property("Position")
+        .and_then(Value::as_vector3)
+        .unwrap()
+}

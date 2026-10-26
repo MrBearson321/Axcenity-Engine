@@ -237,6 +237,74 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
         }],
     },
     ValueType {
+        class: "SaveService",
+        doc: "Save slots, player data, settings and checkpoints, from `game:GetService(\"SaveService\")`. Slots are files in the player's data for this game, never in the project, so saving during Play doesn't change the project. Both sides share the same data.",
+        fields: &[],
+        operators: &[],
+        methods: &[
+            Function {
+                name: "SaveSlot",
+                doc: "Writes save slot `slot` (1 to 999): the player data, the world state (every part and model in the Workspace, and Lighting; not scripts or ScreenGuis), the active checkpoint and the settings. Replaces what the slot held.",
+                params: &[("slot", "number")],
+                returns: "()",
+            },
+            Function {
+                name: "LoadSlot",
+                doc: "Puts the game back as slot `slot` was saved: player data, world state, the active checkpoint and settings. Parts and models still in the world keep being the same Instances. A slot that doesn't exist, or can't be read, is an error and changes nothing.",
+                params: &[("slot", "number")],
+                returns: "()",
+            },
+            Function {
+                name: "HasSlot",
+                doc: "True if slot `slot` has been saved.",
+                params: &[("slot", "number")],
+                returns: "boolean",
+            },
+            Function {
+                name: "SetPlayerData",
+                doc: "Keeps `value` for the player under `name`, such as `SaveService:SetPlayerData(\"Coins\", 10)`: a boolean, number, string, Vector3, Vector2, Color3, UDim2 or EnumItem. nil removes it. Saved in slots and captured at checkpoints.",
+                params: &[("name", "string"), ("value", "any")],
+                returns: "()",
+            },
+            Function {
+                name: "GetPlayerData",
+                doc: "The player data kept under `name`, or nil.",
+                params: &[("name", "string")],
+                returns: "any",
+            },
+            Function {
+                name: "SetSetting",
+                doc: "Keeps a game setting under `name`, such as `SaveService:SetSetting(\"Volume\", 0.5)`, with the same values as SetPlayerData. Saved in slots, but not captured at checkpoints.",
+                params: &[("name", "string"), ("value", "any")],
+                returns: "()",
+            },
+            Function {
+                name: "GetSetting",
+                doc: "The setting kept under `name`, or nil.",
+                params: &[("name", "string")],
+                returns: "any",
+            },
+            Function {
+                name: "SetCheckpoint",
+                doc: "Makes `checkpoint` the active Checkpoint, and captures the player data and world state now, for RestoreCheckpoint.",
+                params: &[("checkpoint", "Checkpoint")],
+                returns: "()",
+            },
+            Function {
+                name: "GetCheckpoint",
+                doc: "The active Checkpoint, or nil.",
+                params: &[],
+                returns: "Checkpoint?",
+            },
+            Function {
+                name: "RestoreCheckpoint",
+                doc: "Puts back the player data and world state captured at the active checkpoint, and stands the player character (the one whose controller owns the camera) at its Position. An error if no checkpoint is active.",
+                params: &[],
+                returns: "()",
+            },
+        ],
+    },
+    ValueType {
         class: "Tween",
         doc: "Properties moving to goals, made by `TweenService:Create`. Each frame it sets them, so their change events fire; a newer tween on the same property of the same Instance cancels it.",
         fields: &[
@@ -497,7 +565,7 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
         ClassName::DataModel,
         Function {
             name: "GetService",
-            doc: "The service with this class name, such as `\"Players\"`, `\"ReplicatedFirst\"`, `\"RunService\"`, `\"TweenService\"` or `\"UserInputService\"`.",
+            doc: "The service with this class name, such as `\"Players\"`, `\"ReplicatedFirst\"`, `\"RunService\"`, `\"SaveService\"`, `\"TweenService\"` or `\"UserInputService\"`.",
             params: &[("className", "string")],
             returns: "Instance",
         },
@@ -775,6 +843,14 @@ pub(super) const CLASS_FIELDS: &[(ClassName, Field)] = &[
             name: "TweenService",
             ty: "TweenService",
             doc: "Moves properties smoothly to goals (same as `game:GetService(\"TweenService\")`).",
+        },
+    ),
+    (
+        ClassName::DataModel,
+        Field {
+            name: "SaveService",
+            ty: "SaveService",
+            doc: "Save slots, player data, settings and checkpoints (same as `game:GetService(\"SaveService\")`).",
         },
     ),
     (

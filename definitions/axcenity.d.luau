@@ -99,6 +99,30 @@ declare extern type TweenService with
 	function Create(self, instance: Instance, tweenInfo: TweenInfo, goals: { [string]: any }): Tween
 end
 
+--- Save slots, player data, settings and checkpoints, from `game:GetService("SaveService")`. Slots are files in the player's data for this game, never in the project, so saving during Play doesn't change the project. Both sides share the same data.
+declare extern type SaveService with
+	--- Writes save slot `slot` (1 to 999): the player data, the world state (every part and model in the Workspace, and Lighting; not scripts or ScreenGuis), the active checkpoint and the settings. Replaces what the slot held.
+	function SaveSlot(self, slot: number): ()
+	--- Puts the game back as slot `slot` was saved: player data, world state, the active checkpoint and settings. Parts and models still in the world keep being the same Instances. A slot that doesn't exist, or can't be read, is an error and changes nothing.
+	function LoadSlot(self, slot: number): ()
+	--- True if slot `slot` has been saved.
+	function HasSlot(self, slot: number): boolean
+	--- Keeps `value` for the player under `name`, such as `SaveService:SetPlayerData("Coins", 10)`: a boolean, number, string, Vector3, Vector2, Color3, UDim2 or EnumItem. nil removes it. Saved in slots and captured at checkpoints.
+	function SetPlayerData(self, name: string, value: any): ()
+	--- The player data kept under `name`, or nil.
+	function GetPlayerData(self, name: string): any
+	--- Keeps a game setting under `name`, such as `SaveService:SetSetting("Volume", 0.5)`, with the same values as SetPlayerData. Saved in slots, but not captured at checkpoints.
+	function SetSetting(self, name: string, value: any): ()
+	--- The setting kept under `name`, or nil.
+	function GetSetting(self, name: string): any
+	--- Makes `checkpoint` the active Checkpoint, and captures the player data and world state now, for RestoreCheckpoint.
+	function SetCheckpoint(self, checkpoint: Checkpoint): ()
+	--- The active Checkpoint, or nil.
+	function GetCheckpoint(self): Checkpoint?
+	--- Puts back the player data and world state captured at the active checkpoint, and stands the player character (the one whose controller owns the camera) at its Position. An error if no checkpoint is active.
+	function RestoreCheckpoint(self): ()
+end
+
 --- Properties moving to goals, made by `TweenService:Create`. Each frame it sets them, so their change events fire; a newer tween on the same property of the same Instance cancels it.
 declare extern type Tween with
 	--- Where it is: Begin, Delayed, Playing, Paused, Completed or Cancelled (read-only).
@@ -381,10 +405,12 @@ declare extern type DataModel extends Instance with
 	RunService: RunService
 	--- Moves properties smoothly to goals (same as `game:GetService("TweenService")`).
 	TweenService: TweenService
+	--- Save slots, player data, settings and checkpoints (same as `game:GetService("SaveService")`).
+	SaveService: SaveService
 	--- What loads first on the player's side, with `RemoveDefaultLoadingScreen` (same as `game:GetService("ReplicatedFirst")`).
 	ReplicatedFirst: ReplicatedFirst
 	[string]: any
-	--- The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"TweenService"` or `"UserInputService"`.
+	--- The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"SaveService"`, `"TweenService"` or `"UserInputService"`.
 	function GetService(self, className: string): Instance
 end
 
@@ -1505,6 +1531,13 @@ declare extern type NavigationAgent extends Instance with
 	[string]: any
 end
 
+--- A place in the world to come back to. `SaveService:SetCheckpoint(checkpoint)` makes it the active one and captures the player data and world state there; `SaveService:RestoreCheckpoint()` puts them back and stands the player character at its Position. A save slot keeps the active checkpoint.
+declare extern type Checkpoint extends Instance with
+	--- Where SaveService:RestoreCheckpoint stands the player character: the middle of its feet goes here.
+	Position: Vector3
+	[string]: any
+end
+
 -- Globals -------------------------------------------------------------------
 
 --- The root of the game. Every service is inside it.
@@ -1525,7 +1558,7 @@ declare function require(module: Instance): any
 --- Creates Instances.
 declare extern type InstanceLibrary with
 	--- Creates an Instance of this class with default properties and no parent. Set `Parent` to put it in the world.
-	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: string) -> Instance)
+	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: string) -> Instance)
 end
 
 --- Creates Instances.

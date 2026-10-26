@@ -122,10 +122,14 @@ pub enum ClassName {
     /// to `Destination` during Play, or straight at `Velocity`. Not a
     /// physics body.
     NavigationAgent,
+    /// A place in the world a character can be put back at. Scripts make
+    /// one active with `SaveService:SetCheckpoint`, which captures the game
+    /// there, and `SaveService:RestoreCheckpoint` returns to it.
+    Checkpoint,
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 44] = [
+    pub const ALL: [ClassName; 45] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -170,6 +174,7 @@ impl ClassName {
         ClassName::ThirdPersonController,
         ClassName::FirstPersonController,
         ClassName::NavigationAgent,
+        ClassName::Checkpoint,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -218,6 +223,7 @@ impl ClassName {
             ClassName::ThirdPersonController => "ThirdPersonController",
             ClassName::FirstPersonController => "FirstPersonController",
             ClassName::NavigationAgent => "NavigationAgent",
+            ClassName::Checkpoint => "Checkpoint",
         }
     }
 
@@ -889,6 +895,10 @@ impl ClassName {
                 // scripts set Destination themselves.
                 ("BehaviorTree", Value::String(String::new())),
             ],
+            ClassName::Checkpoint => vec![
+                // Where a restored character stands: the middle of its feet.
+                ("Position", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
+            ],
             ClassName::SurfaceAppearance => {
                 let map = |name| (name, Value::String(String::new()));
                 let channel = |name, channel| (name, Value::TextureChannel(channel));
@@ -952,7 +962,8 @@ impl ClassName {
             | ClassName::Terrain
             | ClassName::TerrainLayer
             | ClassName::ThirdPersonController
-            | ClassName::FirstPersonController => &[],
+            | ClassName::FirstPersonController
+            | ClassName::Checkpoint => &[],
             // Fires with "Sight" or "Hearing" when it starts seeing or
             // hearing the player character.
             ClassName::NavigationAgent => &["PlayerSensed"],

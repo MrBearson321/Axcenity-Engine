@@ -79,6 +79,9 @@ pub fn translate(script: &BlockScript) -> Result<Translation, TranslateError> {
             kind if kind.tweens() => {
                 services.insert("TweenService");
             }
+            kind if kind.saves() => {
+                services.insert("SaveService");
+            }
             _ => {}
         }
         for expression in block.kind.expressions() {
@@ -445,6 +448,21 @@ impl Writer {
                 let value = self.expression(velocity)?;
                 self.line(format!("{}.Velocity = {value}", target(agent)?));
             }
+            BlockKind::SaveSlot { slot } => {
+                let slot = self.expression(slot)?;
+                self.line(format!("SaveService:SaveSlot({slot})"));
+            }
+            BlockKind::LoadSlot { slot } => {
+                let slot = self.expression(slot)?;
+                self.line(format!("SaveService:LoadSlot({slot})"));
+            }
+            BlockKind::SetCheckpoint { checkpoint } => {
+                self.line(format!(
+                    "SaveService:SetCheckpoint({})",
+                    target(checkpoint)?
+                ));
+            }
+            BlockKind::RestoreCheckpoint => self.line("SaveService:RestoreCheckpoint()".to_owned()),
             BlockKind::SetProperty {
                 target: t,
                 property,

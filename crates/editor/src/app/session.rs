@@ -373,6 +373,7 @@ impl EditorApp {
                 orientation,
             },
             &project.loading_screen,
+            play_save_folder(&project.name),
         ) {
             Ok(session) => {
                 self.play = Some(session);
@@ -856,4 +857,22 @@ impl EditorApp {
             None => {}
         }
     }
+}
+
+/// Where Play's `SaveService` keeps slots: the player's data for the game,
+/// as in the built game, never the project folder.
+#[cfg(not(test))]
+pub(super) fn play_save_folder(game: &str) -> Option<std::path::PathBuf> {
+    axcenity_save::game_folder(game)
+}
+
+/// In tests, a folder of this test run's own, so tests never write to (or
+/// load from) the real player's data.
+#[cfg(test)]
+pub(super) fn play_save_folder(game: &str) -> Option<std::path::PathBuf> {
+    Some(
+        std::env::temp_dir()
+            .join(format!("axcenity-editor-saves-{}", std::process::id()))
+            .join(game),
+    )
 }
