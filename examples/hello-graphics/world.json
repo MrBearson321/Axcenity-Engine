@@ -1,0 +1,277 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Anchored": true,
+          "Color": [0.32, 0.33, 0.35],
+          "Material": "Plastic",
+          "Metalness": 0,
+          "Orientation": [0, 0, 0],
+          "Position": [0, -0.5, 0],
+          "Roughness": 0.8,
+          "Shape": "Block",
+          "Size": [200, 1, 200]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "NearBlock",
+        "properties": {
+          "Anchored": true,
+          "Color": [0.2, 0.45, 0.85],
+          "Material": "Plastic",
+          "Metalness": 0,
+          "Orientation": [0, 15, 0],
+          "Position": [5, 1, 7],
+          "Roughness": 0.5,
+          "Shape": "Block",
+          "Size": [2, 2, 2]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Plastic",
+        "properties": {
+          "Anchored": true,
+          "Color": [0.8, 0.2, 0.15],
+          "Material": "Plastic",
+          "Metalness": 0,
+          "Orientation": [0, 0, 0],
+          "Position": [-4, 1, 2],
+          "Roughness": 0.5,
+          "Shape": "Block",
+          "Size": [2, 2, 2]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Metal",
+        "properties": {
+          "Anchored": true,
+          "Color": [0.95, 0.8, 0.45],
+          "Material": "Metal",
+          "Metalness": 1,
+          "Orientation": [0, 0, 0],
+          "Position": [-1, 1.5, 0],
+          "Roughness": 0.25,
+          "Shape": "Ball",
+          "Size": [3, 3, 3]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Glass",
+        "properties": {
+          "Anchored": true,
+          "Color": [0.6, 0.85, 0.95],
+          "Material": "Glass",
+          "Metalness": 0,
+          "Orientation": [0, -20, 0],
+          "Position": [2.5, 1.5, 2],
+          "Roughness": 0.05,
+          "Shape": "Block",
+          "Size": [3, 3, 0.5]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Neon",
+        "properties": {
+          "Anchored": true,
+          "Color": [0.1, 0.9, 0.8],
+          "Material": "Neon",
+          "Metalness": 0,
+          "Orientation": [0, 0, 0],
+          "Position": [-7, 1.5, -1],
+          "Roughness": 0.5,
+          "Shape": "Cylinder",
+          "Size": [3, 0.6, 0.6]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Wedge",
+        "properties": {
+          "Anchored": true,
+          "Color": [0.55, 0.7, 0.3],
+          "Material": "Plastic",
+          "Metalness": 0,
+          "Orientation": [0, 30, 0],
+          "Position": [7, 1, 1],
+          "Roughness": 0.6,
+          "Shape": "Wedge",
+          "Size": [6, 2, 2]
+        }
+      },
+      {
+        "class": "MeshPart",
+        "name": "PbrPanel",
+        "properties": {
+          "Anchored": true,
+          "MeshId": "assets/models/pbr_panel.fbx",
+          "Orientation": [0, -25, 0],
+          "Position": [-2, 1.5, -5],
+          "Size": [4, 3, 4]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Tiled",
+        "properties": {
+          "Anchored": true,
+          "Color": [1, 1, 1],
+          "Material": "Plastic",
+          "Metalness": 0,
+          "Orientation": [0, 0, 0],
+          "Position": [4, 1, -5],
+          "Roughness": 0.7,
+          "Shape": "Block",
+          "Size": [4, 2, 4],
+          "TileSize": 2
+        },
+        "children": [
+          {
+            "class": "SurfaceAppearance",
+            "name": "SurfaceAppearance",
+            "properties": {
+              "ColorMap": "assets/models/maps/color.png",
+              "NormalMap": "assets/models/maps/normal.png",
+              "RoughnessMap": "assets/models/maps/roughness.png"
+            }
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "Beacon",
+        "properties": {
+          "Anchored": true,
+          "Color": [1, 0.7, 0.4],
+          "EmissiveColor": [1, 0.55, 0.2],
+          "Emission": 6,
+          "Material": "Plastic",
+          "Metalness": 0,
+          "Orientation": [0, 0, 0],
+          "Position": [7, 3.5, -3],
+          "Roughness": 0.5,
+          "Shape": "Ball",
+          "Size": [1.2, 1.2, 1.2]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Lamp",
+        "properties": {
+          "Anchored": true,
+          "CastShadow": false,
+          "Color": [1, 0.85, 0.6],
+          "Material": "Neon",
+          "Metalness": 0,
+          "Orientation": [0, 0, 0],
+          "Position": [-6, 3.5, 4],
+          "Roughness": 0.5,
+          "Shape": "Ball",
+          "Size": [0.8, 0.8, 0.8]
+        },
+        "children": [
+          {
+            "class": "PointLight",
+            "name": "PointLight",
+            "properties": {
+              "Brightness": 8,
+              "Color": [1, 0.75, 0.45],
+              "Enabled": true,
+              "Range": 14
+            }
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "Spotlight",
+        "properties": {
+          "Anchored": true,
+          "CastShadow": false,
+          "Color": [0.2, 0.2, 0.22],
+          "Material": "Metal",
+          "Metalness": 1,
+          "Orientation": [0, 0, 0],
+          "Position": [1, 6, 5],
+          "Roughness": 0.6,
+          "Shape": "Cylinder",
+          "Size": [1.5, 1.2, 1.2]
+        },
+        "children": [
+          {
+            "class": "SpotLight",
+            "name": "SpotLight",
+            "properties": {
+              "Angle": 45,
+              "Brightness": 40,
+              "Color": [0.6, 0.8, 1],
+              "Direction": [0, -1, 0],
+              "Enabled": true,
+              "Range": 24
+            }
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "FarPillar1",
+        "properties": {
+          "Anchored": true,
+          "Color": [0.75, 0.7, 0.6],
+          "Material": "Plastic",
+          "Metalness": 0,
+          "Orientation": [0, 0, 0],
+          "Position": [-10, 4, -40],
+          "Roughness": 0.7,
+          "Shape": "Block",
+          "Size": [3, 8, 3]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "FarPillar2",
+        "properties": {
+          "Anchored": true,
+          "Color": [0.75, 0.7, 0.6],
+          "Material": "Plastic",
+          "Metalness": 0,
+          "Orientation": [0, 0, 0],
+          "Position": [-26, 5, -50],
+          "Roughness": 0.7,
+          "Shape": "Block",
+          "Size": [3, 10, 3]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "MidPillar",
+        "properties": {
+          "Anchored": true,
+          "Color": [0.75, 0.7, 0.6],
+          "Material": "Plastic",
+          "Metalness": 0,
+          "Orientation": [0, 0, 0],
+          "Position": [-12, 3, -14],
+          "Roughness": 0.7,
+          "Shape": "Block",
+          "Size": [2, 6, 2]
+        }
+      }
+    ]
+  },
+  "lighting": {
+    "properties": {
+      "BloomIntensity": 0.5,
+      "EnvironmentIntensity": 0.5,
+      "Exposure": 1
+    }
+  }
+}

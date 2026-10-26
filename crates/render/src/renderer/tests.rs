@@ -558,6 +558,81 @@ fn a_metal_part_reflects_the_sky() {
     );
 }
 
+/// Draw-list colors are sRGB: the renderer turns them linear to shade and
+/// the sRGB target turns them back. A matte grey card lit by flat white
+/// light alone (no sun, sky or post-processing) comes back as its own
+/// color. A black specular map leaves out the 4% a plastic reflects, so
+/// only the diffuse color is left.
+#[test]
+fn a_grey_part_under_flat_white_light_comes_back_as_its_srgb_color() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let no_reflection: Arc<dyn TextureSource> = Arc::new(Painted::new(1, |_, _| [0, 0, 0, 255]));
+    for grey in [0.25, 0.5, 0.75] {
+        let mut card = big_block();
+        card.material = Material {
+            base_color: [grey; 3],
+            roughness: 1.0,
+            maps: crate::draw_list::TextureMaps {
+                specular: Some(no_reflection.clone()),
+                ..Default::default()
+            },
+            ..Material::default()
+        };
+        let mut list = list_of(vec![card]);
+        list.sun.intensity = 0.0;
+        list.ambient.intensity = 1.0;
+        let pixel = middle_pixel(&device, &queue, &list);
+        let expected = (grey * 255.0).round() as u8;
+        for channel in &pixel[..3] {
+            assert!(
+                channel.abs_diff(expected) <= 2,
+                "grey {grey} came back as {pixel:?}, not {expected}"
+            );
+        }
+    }
+}
+
+/// The normal matrix is the model matrix's inverse transpose, so a block
+/// stretched along X shades its top face like an unstretched one.
+#[test]
+fn a_stretched_block_shades_its_top_face_like_a_unit_block() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let block = |size: Vec3| DrawItem {
+        transform: Mat4::from_scale_rotation_translation(
+            size,
+            glam::Quat::from_rotation_y(30f32.to_radians()),
+            Vec3::ZERO,
+        ),
+        ..big_block()
+    };
+    // Looking down at the middle of the top face, lit from a slant.
+    let mut list = list_of(vec![block(Vec3::splat(2.0))]);
+    list.camera = Camera {
+        position: Vec3::new(0.0, 5.0, 3.0),
+        look_at: Vec3::new(0.0, 1.0, 0.0),
+        fov_y_degrees: 30.0,
+    };
+    list.sun.direction = Vec3::new(0.4, 1.0, 0.6);
+    list.ambient.intensity = 0.2;
+    list.shadows.enabled = false;
+    let unit = middle_pixel(&device, &queue, &list);
+    list.items = vec![block(Vec3::new(8.0, 2.0, 2.0))];
+    let stretched = middle_pixel(&device, &queue, &list);
+    assert!(unit[0] > 40, "the top face is lit: {unit:?}");
+    for channel in 0..3 {
+        assert!(
+            unit[channel].abs_diff(stretched[channel]) <= 1,
+            "unit {unit:?} vs stretched {stretched:?}"
+        );
+    }
+}
+
 fn red_sprite(z: f32, light_emission: f32) -> crate::Sprite {
     crate::Sprite {
         position: Vec3::new(0.0, 0.0, z),

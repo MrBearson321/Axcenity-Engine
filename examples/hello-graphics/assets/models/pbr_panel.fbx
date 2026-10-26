@@ -1,0 +1,133 @@
+; FBX 7.4.0 project file
+FBXHeaderExtension:  {
+	FBXHeaderVersion: 1003
+	FBXVersion: 7400
+}
+GlobalSettings:  {
+	Version: 1000
+	Properties70:  {
+		P: "UpAxis", "int", "Integer", "",1
+		P: "UpAxisSign", "int", "Integer", "",1
+		P: "FrontAxis", "int", "Integer", "",2
+		P: "FrontAxisSign", "int", "Integer", "",1
+		P: "CoordAxis", "int", "Integer", "",0
+		P: "CoordAxisSign", "int", "Integer", "",1
+		P: "UnitScaleFactor", "double", "Number", "",100
+	}
+}
+Objects:  {
+	Geometry: 1000, "Geometry::Pyramid", "Mesh" {
+		Vertices: *15 {
+			a: -2,0,-2, 2,0,-2, 2,0,2, -2,0,2, 0,3,0
+		}
+		PolygonVertexIndex: *16 {
+			a: 0,1,2,-4,0,4,-2,1,4,-3,2,4,-4,3,4,-1
+		}
+		GeometryVersion: 124
+		LayerElementUV: 0 {
+			Version: 101
+			Name: "UVMap"
+			MappingInformationType: "ByPolygonVertex"
+			ReferenceInformationType: "IndexToDirect"
+			UV: *10 {
+				a: 0,0,1,0,1,1,0,1,0.5,0.5
+			}
+			UVIndex: *16 {
+				a: 0,1,2,3,0,4,1,1,4,2,2,4,3,3,4,0
+			}
+		}
+		LayerElementMaterial: 0 {
+			Version: 101
+			Name: ""
+			MappingInformationType: "AllSame"
+			ReferenceInformationType: "IndexToDirect"
+			Materials: *1 {
+				a: 0
+			}
+		}
+		Layer: 0 {
+			Version: 100
+			LayerElement:  {
+				Type: "LayerElementUV"
+				TypedIndex: 0
+			}
+			LayerElement:  {
+				Type: "LayerElementMaterial"
+				TypedIndex: 0
+			}
+		}
+	}
+	Model: 2000, "Model::Pyramid", "Mesh" {
+		Version: 232
+		Properties70:  {
+		}
+	}
+	Material: 3000, "Material::Red", "" {
+		Version: 102
+		ShadingModel: "phong"
+		Properties70:  {
+			P: "DiffuseColor", "Color", "", "A",1,0,0
+		}
+	}
+	Texture: 4000, "Texture::Map0", "" {
+		Type: "TextureVideoClip"
+		Version: 202
+		TextureName: "Texture::Map0"
+		FileName: "C:/Users/artist/Desktop/maps/color.png"
+		RelativeFilename: "maps/color.png"
+	}
+	Texture: 4001, "Texture::Map1", "" {
+		Type: "TextureVideoClip"
+		Version: 202
+		TextureName: "Texture::Map1"
+		FileName: "C:/Users/artist/Desktop/maps/normal.png"
+		RelativeFilename: "maps/normal.png"
+	}
+	Texture: 4002, "Texture::Map2", "" {
+		Type: "TextureVideoClip"
+		Version: 202
+		TextureName: "Texture::Map2"
+		FileName: "C:/Users/artist/Desktop/maps/roughness.png"
+		RelativeFilename: "maps/roughness.png"
+	}
+	Texture: 4003, "Texture::Map3", "" {
+		Type: "TextureVideoClip"
+		Version: 202
+		TextureName: "Texture::Map3"
+		FileName: "C:/Users/artist/Desktop/maps/metalness.png"
+		RelativeFilename: "maps/metalness.png"
+	}
+	Texture: 4004, "Texture::Map4", "" {
+		Type: "TextureVideoClip"
+		Version: 202
+		TextureName: "Texture::Map4"
+		FileName: "C:/Users/artist/Desktop/maps/emissive.png"
+		RelativeFilename: "maps/emissive.png"
+	}
+	Texture: 4005, "Texture::Map5", "" {
+		Type: "TextureVideoClip"
+		Version: 202
+		TextureName: "Texture::Map5"
+		FileName: "C:/Users/artist/Desktop/maps/opacity.png"
+		RelativeFilename: "maps/opacity.png"
+	}
+	Texture: 4006, "Texture::Map6", "" {
+		Type: "TextureVideoClip"
+		Version: 202
+		TextureName: "Texture::Map6"
+		FileName: "C:/Users/artist/Desktop/maps/ao.png"
+		RelativeFilename: "maps/ao.png"
+	}
+}
+Connections:  {
+	C: "OO",1000,2000
+	C: "OO",2000,0
+	C: "OO",3000,2000
+	C: "OP",4000,3000, "DiffuseColor"
+	C: "OP",4001,3000, "NormalMap"
+	C: "OP",4002,3000, "CustomRough"
+	C: "OP",4003,3000, "CustomMetal"
+	C: "OP",4004,3000, "EmissiveColor"
+	C: "OP",4005,3000, "TransparentColor"
+	C: "OP",4006,3000, "CustomAO"
+}

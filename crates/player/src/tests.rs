@@ -977,8 +977,9 @@ fn every_example_renders() {
                 .write_image_data(&pixels)
                 .unwrap();
         }
-        // An example can have a reference screenshot of its top-left
-        // corner (where hello-css's HUD is), which it must still match.
+        // An example can have a reference screenshot, which it must still
+        // match: of its top-left corner (where hello-css's HUD is), or of
+        // the whole frame (hello-graphics, the graphics reference scene).
         if let Ok(file) = fs::File::open(folder.join("reference.png")) {
             let mut reader = png::Decoder::new(std::io::BufReader::new(file))
                 .read_info()

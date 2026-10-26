@@ -49,6 +49,36 @@ fn opens_the_milestone_1_demo_and_says_so_in_output() {
     );
 }
 
+/// The graphics reference scene opens with its textured model and
+/// SurfaceAppearance maps, and drawing it finds no broken asset.
+#[test]
+fn opens_the_graphics_reference_scene_with_no_asset_errors() {
+    let app = EditorApp::new(Some(&example("hello-graphics")));
+    assert!(
+        app.output
+            .lines()
+            .iter()
+            .all(|line| line.kind != OutputKind::Error),
+        "{:?}",
+        app.output.lines()
+    );
+    let camera = axcenity_render::Camera {
+        position: Vec3::new(12.0, 8.0, 16.0),
+        look_at: Vec3::ZERO,
+        fov_y_degrees: 70.0,
+    };
+    let list = axcenity_scene::build_draw_list(&app.world, &app.assets, camera);
+    assert!(app.assets.take_errors().is_empty());
+    let textured = list
+        .items
+        .iter()
+        .filter(|item| item.material.base_color_texture.is_some())
+        .count();
+    // The PBR panel and the tiled SurfaceAppearance block.
+    assert!(textured >= 2, "{textured} textured items");
+    assert_eq!(list.lights.len(), 2);
+}
+
 #[test]
 fn unsupported_css_properties_are_reported_as_output_warnings() {
     let manifest = format!(
