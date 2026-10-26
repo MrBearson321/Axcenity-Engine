@@ -677,9 +677,9 @@ While an agent follows a path, it steers around obstacles that weren't in the me
 
 ### Acceptance criteria
 
-- [ ] An agent following a path steers around a part pushed into that path and rejoins the path afterward.
-- [ ] An agent facing a blockage it can't steer around stops and reports that it's blocked.
-- [ ] With nothing in the way, the agent follows the same path as in Phase 13.
+- [x] An agent following a path steers around a part pushed into that path and rejoins the path afterward.
+- [x] An agent facing a blockage it can't steer around stops and reports that it's blocked.
+- [x] With nothing in the way, the agent follows the same path as in Phase 13.
 
 ---
 

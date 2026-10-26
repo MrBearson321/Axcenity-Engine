@@ -1482,11 +1482,11 @@ end
 declare extern type NavigationAgent extends Instance with
 	--- Where the agent walks to, along the navigation mesh, during Play. Setting a new one finds a new path. A point off the mesh, or with no walkable route to it, leaves the agent where it is: Status becomes "Unreachable" and Output says why. The editor starts it where the agent stands. Set it from a script or the "walk to" block.
 	Destination: Vector3
-	--- How fast the agent walks its path, in studs a second.
+	--- How fast the agent walks its path, in studs a second. It steers round anything that moves into its path, and rejoins the path past it.
 	WalkSpeed: number
 	--- Studs a second. Not zero, the agent moves straight that way along the ground, with no path, and stops at the edge of walkable ground. Destination follows it, so setting Velocity back to zero leaves it where it is. Y is ignored. Set it from a script or the "set velocity" block.
 	Velocity: Vector3
-	--- "Moving" while it walks a path or moves at Velocity, "Reached" at its Destination, "Unreachable" when no path leads to its Destination, and "Idle" after Velocity stopped it. Set by the game during Play; read it from a script or the property block.
+	--- "Moving" while it walks a path or moves at Velocity, "Reached" at its Destination, "Unreachable" when no path leads to its Destination, "Blocked" when something in the way of its path has no way round (it stops, Output says so, and it carries on once the way clears), and "Idle" after Velocity stopped it. Set by the game during Play; read it from a script or the property block.
 	Status: string
 	[string]: any
 end

@@ -339,3 +339,200 @@ fn agents_are_held_kinematic_and_left_out_of_the_mesh() {
     let anchored = world.get(body).unwrap().property("Anchored").cloned();
     assert_eq!(anchored, Some(Value::Bool(true)));
 }
+
+/// How far `p` is, across, from the line through `points`.
+fn off_path(points: &[Vector3], p: Vector3) -> f32 {
+    points
+        .windows(2)
+        .map(|w| {
+            let (a, b) = (w[0], w[1]);
+            let (dx, dz) = (b.x - a.x, b.z - a.z);
+            let length = dx * dx + dz * dz;
+            let t = if length > 0.0 {
+                (((p.x - a.x) * dx + (p.z - a.z) * dz) / length).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            horizontal(p, at(a.x + dx * t, 0.0, a.z + dz * t))
+        })
+        .fold(f32::INFINITY, f32::min)
+}
+
+/// An agent at (-20, 0, 0) on its way to (20, 0, 0) across `world`, after
+/// 0.6 s of walking, so the mesh is old enough to rebuild at once.
+fn walking_east(world: &mut World) -> (InstanceId, InstanceId, Agents) {
+    let (agent, body) = agent_at(world, at(-20.0, 0.0, 0.0));
+    set(
+        world,
+        agent,
+        "Destination",
+        Value::Vector3(at(20.0, 0.0, 0.0)),
+    );
+    let mut agents = Agents::default();
+    run(&mut agents, world, 0.6);
+    assert_eq!(status(world, agent), "Moving");
+    assert!(feet(world, body).x < -8.0);
+    (agent, body, agents)
+}
+
+#[test]
+fn an_agent_steers_round_a_part_pushed_into_its_path_and_rejoins_it() {
+    let mut world = World::new();
+    part(&mut world, at(0.0, -0.5, 0.0), at(60.0, 1.0, 60.0));
+    // A crate beside the path to start with.
+    let crate_ = part(&mut world, at(0.0, 3.0, 14.0), at(4.0, 6.0, 4.0));
+    let (agent, body, mut agents) = walking_east(&mut world);
+    let path = agents.path(agent).unwrap();
+    assert_eq!(path.len(), 2, "straight across: {path:?}");
+
+    // Pushed into the path, 10 studs ahead of the agent.
+    set(
+        &mut world,
+        crate_,
+        "Position",
+        Value::Vector3(at(0.0, 3.0, 0.0)),
+    );
+    agents.step(&mut world, &Assets::default(), 1.0 / 60.0);
+    assert_eq!(status(&world, agent), "Moving");
+    let detour = agents.path(agent).unwrap();
+    assert!(detour.iter().any(|p| p.z.abs() >= 2.0), "{detour:?}");
+    assert_eq!(detour.last(), Some(&at(20.0, 0.0, 0.0)));
+    assert!(
+        walkable_all_along(agents.mesh().unwrap(), &detour),
+        "{detour:?}"
+    );
+
+    let mut widest: f32 = 0.0;
+    for _ in 0..(4.0 * 60.0) as usize {
+        agents.step(&mut world, &Assets::default(), 1.0 / 60.0);
+        let p = feet(&world, body);
+        assert!(
+            p.x.abs() >= 2.0 || p.z.abs() >= 2.0,
+            "walked into it: {p:?}"
+        );
+        widest = widest.max(p.z.abs());
+        // Past the crate, it's back on its path.
+        if p.x > 5.0 {
+            assert!(p.z.abs() < 1e-3, "{p:?}");
+        }
+    }
+    assert!(widest > 2.0, "it went round");
+    assert!(horizontal(feet(&world, body), at(20.0, 0.0, 0.0)) < 1e-3);
+    assert_eq!(status(&world, agent), "Reached");
+    assert!(agents.take_warnings().is_empty());
+}
+
+#[test]
+fn an_agent_stops_and_reports_a_blockage_it_cant_go_round_until_it_clears() {
+    let mut world = World::new();
+    // A walkway 6 studs wide, with drops either side.
+    part(&mut world, at(0.0, -0.5, 0.0), at(60.0, 1.0, 6.0));
+    let (agent, body, mut agents) = walking_east(&mut world);
+
+    // A crate across the whole walkway.
+    let crate_ = part(&mut world, at(0.0, 3.0, 0.0), at(4.0, 6.0, 10.0));
+    run(&mut agents, &mut world, 0.1);
+    let stopped = feet(&world, body);
+    assert_eq!(status(&world, agent), "Blocked");
+    run(&mut agents, &mut world, 2.0);
+    assert_eq!(feet(&world, body), stopped, "it stays stopped");
+    assert!(stopped.x < -2.0, "{stopped:?}");
+    assert_eq!(status(&world, agent), "Blocked");
+    assert_eq!(
+        agents.take_warnings(),
+        vec![
+            "Workspace.Model.NavigationAgent is blocked on its way to (20, 0, 0): nothing \
+             walkable goes round what's in the way."
+                .to_owned()
+        ]
+    );
+    // The path it was following still shows.
+    let path = agents.path(agent).unwrap();
+    assert_eq!(path.last(), Some(&at(20.0, 0.0, 0.0)));
+
+    // Cleared, it carries on.
+    set(
+        &mut world,
+        crate_,
+        "Position",
+        Value::Vector3(at(0.0, 3.0, 40.0)),
+    );
+    run(&mut agents, &mut world, 0.1);
+    assert_eq!(status(&world, agent), "Moving");
+    run(&mut agents, &mut world, 3.0);
+    assert_eq!(status(&world, agent), "Reached");
+    assert!(horizontal(feet(&world, body), at(20.0, 0.0, 0.0)) < 1e-3);
+    assert!(agents.take_warnings().is_empty());
+}
+
+#[test]
+fn a_way_round_far_out_of_the_way_is_a_blockage_not_a_detour() {
+    let mut world = World::new();
+    part(&mut world, at(0.0, -0.5, 0.0), at(60.0, 1.0, 60.0));
+    let (agent, body, mut agents) = walking_east(&mut world);
+    // A wall across the floor, with a gap only at its far +Z end.
+    part(&mut world, at(0.0, 3.0, -3.0), at(4.0, 6.0, 54.0));
+    run(&mut agents, &mut world, 0.5);
+    assert_eq!(status(&world, agent), "Blocked");
+    assert!(feet(&world, body).x < -2.0);
+    // A new destination finds the long way round.
+    set(
+        &mut world,
+        agent,
+        "Destination",
+        Value::Vector3(at(20.0, 0.0, 1.0)),
+    );
+    run(&mut agents, &mut world, 0.1);
+    assert_eq!(status(&world, agent), "Moving");
+    assert!(agents.path(agent).unwrap().iter().any(|p| p.z > 24.0));
+}
+
+#[test]
+fn with_nothing_in_the_way_an_agent_keeps_to_the_path_it_found() {
+    let mut world = floor_and_wall();
+    // A part far from the path that keeps moving, so the mesh keeps
+    // being rebuilt.
+    let fidget = part(&mut world, at(25.0, 0.5, 25.0), at(2.0, 1.0, 2.0));
+    let (start, destination) = (at(-10.0, 0.0, -10.0), at(10.0, 0.0, -10.0));
+    let (agent, body) = agent_at(&mut world, start);
+    set(
+        &mut world,
+        agent,
+        "Destination",
+        Value::Vector3(destination),
+    );
+    // The path Phase 13 found.
+    let expected = vec![
+        start,
+        at(-2.5, 0.0, 10.5),
+        at(-0.5, 0.0, 11.5),
+        at(1.5, 0.0, 11.5),
+        at(2.5, 0.0, 9.5),
+        at(9.5, 0.0, -9.5),
+        destination,
+    ];
+    assert_eq!(
+        build(&world).find_path(start, destination),
+        Ok(expected.clone())
+    );
+
+    let mut agents = Agents::default();
+    for frame in 0..(5.0 * 60.0) as usize {
+        let x = 25.0 + (frame % 2) as f32 * 0.5;
+        set(
+            &mut world,
+            fidget,
+            "Position",
+            Value::Vector3(at(x, 0.5, 25.0)),
+        );
+        agents.step(&mut world, &Assets::default(), 1.0 / 60.0);
+        let p = feet(&world, body);
+        assert!(off_path(&expected, p) < 1e-3, "frame {frame}: {p:?}");
+        if let Some(path) = agents.path(agent) {
+            let ahead = &path[1..];
+            assert_eq!(ahead, &expected[expected.len() - ahead.len()..]);
+        }
+    }
+    assert_eq!(status(&world, agent), "Reached");
+    assert!(agents.take_warnings().is_empty());
+}

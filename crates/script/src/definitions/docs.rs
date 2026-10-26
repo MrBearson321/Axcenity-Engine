@@ -1296,7 +1296,7 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     (
         ClassName::NavigationAgent,
         "WalkSpeed",
-        "How fast the agent walks its path, in studs a second.",
+        "How fast the agent walks its path, in studs a second. It steers round anything that moves into its path, and rejoins the path past it.",
     ),
     (
         ClassName::NavigationAgent,
@@ -1306,7 +1306,7 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     (
         ClassName::NavigationAgent,
         "Status",
-        "\"Moving\" while it walks a path or moves at Velocity, \"Reached\" at its Destination, \"Unreachable\" when no path leads to its Destination, and \"Idle\" after Velocity stopped it. Set by the game during Play; read it from a script or the property block.",
+        "\"Moving\" while it walks a path or moves at Velocity, \"Reached\" at its Destination, \"Unreachable\" when no path leads to its Destination, \"Blocked\" when something in the way of its path has no way round (it stops, Output says so, and it carries on once the way clears), and \"Idle\" after Velocity stopped it. Set by the game during Play; read it from a script or the property block.",
     ),
     (
         ClassName::Frame,

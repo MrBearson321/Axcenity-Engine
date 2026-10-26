@@ -869,7 +869,7 @@ impl ClassName {
                 // the ground, with no path, and Destination follows it, so
                 // it stays where it stops.
                 ("Velocity", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
-                // "Idle", "Moving", "Reached" or "Unreachable". Set by the
+                // "Idle", "Moving", "Reached", "Unreachable" or "Blocked". Set by the
                 // game during Play, for scripts to read.
                 ("Status", Value::String("Idle".to_owned())),
             ],

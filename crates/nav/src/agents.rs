@@ -8,6 +8,12 @@
 //! isn't zero moves it straight that way instead, along the ground and
 //! never off it, with `Destination` following it.
 //!
+//! While it walks, it looks along its path ahead on the latest mesh. Where
+//! something that wasn't there when the path was found now stands in the
+//! way, it finds a short detour round it, back onto the path past it. When
+//! there's none, it stops, `Status` becomes `"Blocked"` and it warns once,
+//! and it carries on when the way clears.
+//!
 //! Like a character controller, an agent is kinematic: [`Agents::keep_kinematic`]
 //! anchors its parts before physics. Its parts aren't ground, so the mesh
 //! leaves them out.
@@ -25,6 +31,17 @@ const REBUILD_SECONDS: f32 = 0.5;
 /// The longest stretch moved before the ground is looked up again, in cells.
 const SLICE: f32 = 0.5;
 const MAX_SLICES: f32 = 64.0;
+/// How far along its path an agent looks for something in the way: this
+/// many seconds of walking, and no less than [`MIN_LOOKAHEAD`] cells.
+const LOOKAHEAD_SECONDS: f32 = 1.0;
+const MIN_LOOKAHEAD: f32 = 4.0;
+/// How far past an obstacle, in cells, a detour rejoins the path, where the
+/// path stays clear that long.
+const REJOIN: f32 = 2.0;
+/// The most a detour may cost: this many times the stretch of path it
+/// replaces, plus [`DETOUR_EXTRA`] cells. Anything longer is blocked.
+const DETOUR_FACTOR: f32 = 3.0;
+const DETOUR_EXTRA: f32 = 20.0;
 
 /// Where an agent is in following its destination, as `Status` says.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -37,6 +54,8 @@ pub enum AgentStatus {
     Reached,
     /// Its destination is off the mesh or has no route to it.
     Unreachable,
+    /// Stopped on its path, because something in the way has no way round.
+    Blocked,
 }
 
 impl AgentStatus {
@@ -46,6 +65,7 @@ impl AgentStatus {
             AgentStatus::Moving => "Moving",
             AgentStatus::Reached => "Reached",
             AgentStatus::Unreachable => "Unreachable",
+            AgentStatus::Blocked => "Blocked",
         }
     }
 }
@@ -63,6 +83,9 @@ struct Walk {
     driven: bool,
     /// The last warning given, so a retry that fails the same way is quiet.
     warned: Option<String>,
+    /// The build of the mesh on which the way ahead was found blocked. It
+    /// looks again once the mesh is rebuilt.
+    blocked: Option<u64>,
 }
 
 /// The mesh the agents walk on, and what it was built from.
@@ -71,6 +94,8 @@ struct Built {
     fingerprint: u64,
     /// Game seconds since it was built.
     age: f32,
+    /// Counts builds, so agents know when to look again.
+    generation: u64,
 }
 
 /// Steps every navigation agent. The player and the editor each own one
@@ -104,7 +129,7 @@ impl Agents {
         };
         for id in agents {
             let walk = self.walks.entry(id).or_default();
-            if let Some(warning) = step_agent(world, &built.mesh, id, walk, dt) {
+            if let Some(warning) = step_agent(world, built, id, walk, dt) {
                 self.warnings.push(warning);
             }
         }
@@ -115,7 +140,9 @@ impl Agents {
     /// reach their destination try again on the new mesh.
     fn refresh_mesh(&mut self, world: &World, assets: &Assets, dt: f32) {
         let now = fingerprint(world);
+        let mut generation = 0;
         if let Some(built) = &mut self.built {
+            generation = built.generation + 1;
             built.age += dt;
             if built.fingerprint == now || built.age < REBUILD_SECONDS {
                 return;
@@ -130,6 +157,7 @@ impl Agents {
             mesh: NavMesh::build(world, assets, NavSettings::default()),
             fingerprint: now,
             age: 0.0,
+            generation,
         });
     }
 
@@ -240,14 +268,16 @@ fn set_status(world: &mut World, id: InstanceId, status: AgentStatus) {
     let _ = world.set_property(id, "Status", Value::String(status.as_str().to_owned()));
 }
 
-/// One agent's step. Returns a warning when it can't reach a new destination.
+/// One agent's step. Returns a warning when it can't reach a new
+/// destination, or when it's newly blocked.
 fn step_agent(
     world: &mut World,
-    mesh: &NavMesh,
+    built: &Built,
     id: InstanceId,
     walk: &mut Walk,
     dt: f32,
 ) -> Option<String> {
+    let mesh = &built.mesh;
     let parts = parts_of(world, id);
     let mut feet = feet_of(world, &parts)?;
     let velocity = vector(world, id, "Velocity").unwrap_or(Vector3::new(0.0, 0.0, 0.0));
@@ -255,6 +285,7 @@ fn step_agent(
 
     if velocity.x.hypot(velocity.z) > 1e-4 {
         walk.corners.clear();
+        walk.blocked = None;
         walk.driven = true;
         let to = Vector3::new(feet.x + velocity.x * dt, feet.y, feet.z + velocity.z * dt);
         move_feet(world, mesh, &parts, &mut feet, to, true);
@@ -275,6 +306,7 @@ fn step_agent(
     let mut warning = None;
     if walk.target != Some(destination) {
         walk.target = Some(destination);
+        walk.blocked = None;
         match mesh.find_path(feet, destination) {
             Ok(path) => {
                 walk.corners = path.into_iter().skip(1).collect();
@@ -284,10 +316,11 @@ fn step_agent(
             Err(why) => {
                 walk.corners.clear();
                 set_status(world, id, AgentStatus::Unreachable);
-                let name = world
-                    .full_name(id)
-                    .unwrap_or_else(|| "NavigationAgent".to_owned());
-                let message = format!("{name} can't reach {}: {why}.", point(destination));
+                let message = format!(
+                    "{} can't reach {}: {why}.",
+                    name(world, id),
+                    point(destination)
+                );
                 if walk.warned.as_ref() != Some(&message) {
                     warning = Some(message.clone());
                 }
@@ -304,6 +337,24 @@ fn step_agent(
             .filter(|speed| speed.is_finite())
             .unwrap_or(16.0)
             .max(0.0) as f32;
+        let was_blocked = walk.blocked.is_some();
+        match steer(mesh, built.generation, walk, feet, speed) {
+            Ahead::Clear if was_blocked => set_status(world, id, AgentStatus::Moving),
+            Ahead::Clear => {}
+            Ahead::Blocked => {
+                set_status(world, id, AgentStatus::Blocked);
+                if !was_blocked {
+                    warning = Some(format!(
+                        "{} is blocked on its way to {}: nothing walkable goes round what's in \
+                         the way.",
+                        name(world, id),
+                        point(destination)
+                    ));
+                }
+                walk.feet = feet;
+                return warning;
+            }
+        }
         let mut left = speed * dt;
         while left > 0.0
             && let Some(&corner) = walk.corners.first()
@@ -330,6 +381,134 @@ fn step_agent(
     }
     walk.feet = feet;
     warning
+}
+
+/// What an agent found on its path ahead.
+enum Ahead {
+    /// Clear, or it now walks a detour round what's in the way.
+    Clear,
+    /// Nothing walkable goes round what's in the way.
+    Blocked,
+}
+
+/// Looks along the agent's path ahead, from its feet, on the current mesh.
+/// When a stretch can't be walked any more, its corners become a detour
+/// round it that rejoins the path past it, then the rest of the path. With
+/// no detour it's blocked, until the mesh is rebuilt.
+fn steer(mesh: &NavMesh, generation: u64, walk: &mut Walk, feet: Vector3, speed: f32) -> Ahead {
+    if walk.blocked == Some(generation) {
+        return Ahead::Blocked;
+    }
+    // Off the mesh (something landed where it stands), there's nothing to
+    // steer on, so it keeps to its path.
+    let Some(region) = mesh.region_at(feet) else {
+        walk.blocked = None;
+        return Ahead::Clear;
+    };
+    let lookahead = (speed * LOOKAHEAD_SECONDS).max(mesh.settings().cell_size * MIN_LOOKAHEAD);
+    let mut points = vec![feet];
+    points.extend(&walk.corners);
+    let mut along = 0.0;
+    let mut first = None;
+    for (i, pair) in points.windows(2).enumerate() {
+        if along > lookahead {
+            break;
+        }
+        if !mesh.walkable_line(pair[0], pair[1]) {
+            first = Some(i);
+            break;
+        }
+        along += horizontal(pair[0], pair[1]);
+    }
+    let Some(first) = first else {
+        walk.blocked = None;
+        return Ahead::Clear;
+    };
+    match detour(mesh, &points, first, region) {
+        Some(corners) => {
+            walk.corners = corners;
+            walk.blocked = None;
+            Ahead::Clear
+        }
+        None => {
+            walk.blocked = Some(generation);
+            Ahead::Blocked
+        }
+    }
+}
+
+/// A way from `points[0]` (the feet) round what blocks the stretch starting
+/// at `points[first]`, rejoining the path past it, followed by the rest of
+/// the path. `None` when the path never comes clear again in the feet's
+/// region, or the way round is too long to be a detour.
+fn detour(mesh: &NavMesh, points: &[Vector3], first: usize, region: u32) -> Option<Vec<Vector3>> {
+    let cell = mesh.settings().cell_size;
+    let clear = |p: Vector3| mesh.region_at(p) == Some(region);
+    // Walk the path from the blocked stretch in half-cell samples: past the
+    // samples in the way, the rejoin point is REJOIN cells into the clear.
+    let mut along = horizontal_length(&points[..=first]);
+    let mut in_the_way = false;
+    // The stretch the rejoin point is on, the point, and how far into the clear.
+    let mut rejoin: Option<(usize, Vector3, f32)> = None;
+    'path: for k in first..points.len() - 1 {
+        let (a, b) = (points[k], points[k + 1]);
+        let length = horizontal(a, b);
+        let samples = (length / (cell * SLICE)).ceil().max(1.0) as usize;
+        for sample in 0..=samples {
+            let share = sample as f32 / samples as f32;
+            let p = Vector3::new(
+                a.x + (b.x - a.x) * share,
+                a.y + (b.y - a.y) * share,
+                a.z + (b.z - a.z) * share,
+            );
+            let at = along + length * share;
+            if !clear(p) {
+                in_the_way = true;
+                rejoin = None;
+            } else if in_the_way {
+                let start = rejoin.map_or(at, |(_, _, start)| start);
+                rejoin = Some((k, p, start));
+                if at - start >= REJOIN * cell {
+                    break 'path;
+                }
+            }
+        }
+        along += length;
+    }
+    // Every sample was clear but the stretch can't be walked (a link is
+    // gone): rejoin at the stretch's end.
+    if !in_the_way && clear(points[first + 1]) {
+        rejoin = Some((first, points[first + 1], 0.0));
+    }
+    let (k, point, _) = rejoin?;
+    let replaced = horizontal_length(&points[..=k]) + horizontal(points[k], point);
+    let budget = replaced / cell * DETOUR_FACTOR + DETOUR_EXTRA;
+    let way = mesh.find_path_within(points[0], point, budget).ok()?;
+    let mut corners: Vec<Vector3> = way.into_iter().skip(1).collect();
+    for &p in &points[k + 1..] {
+        if corners
+            .last()
+            .is_none_or(|&last| horizontal(last, p) > 1e-4)
+        {
+            corners.push(p);
+        }
+    }
+    Some(corners)
+}
+
+fn horizontal(a: Vector3, b: Vector3) -> f32 {
+    (a.x - b.x).hypot(a.z - b.z)
+}
+
+/// The length across of a line through `points`.
+fn horizontal_length(points: &[Vector3]) -> f32 {
+    points.windows(2).map(|w| horizontal(w[0], w[1])).sum()
+}
+
+fn name(world: &World, id: InstanceId) -> String {
+    world
+        .full_name(id)
+        .unwrap_or_else(|| "NavigationAgent".to_owned())
 }
 
 /// Moves the body's feet across to `to`'s X and Z in short slices, each on

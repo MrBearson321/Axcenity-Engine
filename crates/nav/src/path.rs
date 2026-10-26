@@ -70,12 +70,26 @@ impl NavMesh {
     /// between is the middle of a cell. Consecutive corners are joined by
     /// ground a character can walk.
     pub fn find_path(&self, from: Vector3, to: Vector3) -> Result<Vec<Vector3>, PathError> {
+        self.find_path_within(from, to, f32::INFINITY)
+    }
+
+    /// As [`Self::find_path`], but only a walk costing no more than
+    /// `max_cost` (in cells, edge cells costing more) counts: a longer one
+    /// is [`PathError::NotConnected`]. Agents find detours with it.
+    pub(crate) fn find_path_within(
+        &self,
+        from: Vector3,
+        to: Vector3,
+        max_cost: f32,
+    ) -> Result<Vec<Vector3>, PathError> {
         let start = self.cell_at(from).ok_or(PathError::StartOffMesh)?;
         let goal = self.cell_at(to).ok_or(PathError::DestinationOffMesh)?;
         if self.cells[start].region != self.cells[goal].region {
             return Err(PathError::NotConnected);
         }
-        let cells = self.search(start, goal).ok_or(PathError::NotConnected)?;
+        let cells = self
+            .search(start, goal, max_cost)
+            .ok_or(PathError::NotConnected)?;
         let on_ground =
             |cell: usize, p: Vector3| Vector3::new(p.x, self.ground_height(cell, p.x, p.z), p.z);
         let mut corners = vec![(start, on_ground(start, from))];
@@ -94,7 +108,7 @@ impl NavMesh {
         let mut i = 0;
         while i + 1 < corners.len() {
             let mut j = i + 1;
-            while j + 1 < corners.len() && self.straight(corners[i], corners[j + 1]) {
+            while j + 1 < corners.len() && self.line(corners[i], corners[j + 1], true) {
                 j += 1;
             }
             path.push(corners[j].1);
@@ -110,8 +124,19 @@ impl NavMesh {
         Some(self.ground_height(cell, point.x, point.z))
     }
 
-    /// The cells from `start` to `goal`, both included, by A*.
-    fn search(&self, start: usize, goal: usize) -> Option<Vec<usize>> {
+    /// True when a character can walk straight from `a` to `b`: both are on
+    /// the mesh and the line between them crosses only linked cells. It may
+    /// pass beside edges, unlike a straightened path.
+    pub(crate) fn walkable_line(&self, a: Vector3, b: Vector3) -> bool {
+        match (self.cell_at(a), self.cell_at(b)) {
+            (Some(from), Some(to)) => self.line((from, a), (to, b), false),
+            _ => false,
+        }
+    }
+
+    /// The cells from `start` to `goal`, both included, by A*, costing no
+    /// more than `max_cost`.
+    fn search(&self, start: usize, goal: usize, max_cost: f32) -> Option<Vec<usize>> {
         let target = &self.cells[goal];
         let guess = |cell: usize| {
             let cell = &self.cells[cell];
@@ -146,6 +171,9 @@ impl NavMesh {
                     1.0 + EDGE_COST
                 };
                 let reached = so_far + step;
+                if reached > max_cost {
+                    continue;
+                }
                 if cost.get(&next).is_none_or(|&known| reached < known) {
                     cost.insert(next, reached);
                     came_from.insert(next, cell);
@@ -160,10 +188,17 @@ impl NavMesh {
     }
 
     /// True when a straight line from `a` (on cell `from`) to `b` (on cell
-    /// `to`) crosses only linked cells, none of them on an edge except
-    /// `from` and `to`, and ends on `to`. Where the line passes exactly
-    /// through a corner, both ways round it must be linked.
-    fn straight(&self, (from, a): (usize, Vector3), (to, b): (usize, Vector3)) -> bool {
+    /// `to`) crosses only linked cells and ends on `to`. With
+    /// `keep_off_edges`, none of them may be on an edge except `from` and
+    /// `to`. Where the line passes exactly through a corner, both ways round
+    /// it must be linked.
+    fn line(
+        &self,
+        (from, a): (usize, Vector3),
+        (to, b): (usize, Vector3),
+        keep_off_edges: bool,
+    ) -> bool {
+        let clear = |cell: usize| !keep_off_edges || self.is_interior(cell);
         let size = self.settings.cell_size;
         let (u0, v0) = ((a.x - self.origin_x) / size, (a.z - self.origin_z) / size);
         let (u1, v1) = ((b.x - self.origin_x) / size, (b.z - self.origin_z) / size);
@@ -184,8 +219,8 @@ impl NavMesh {
                 f32::INFINITY
             }
         };
-        let mut t_x = first_border(u0, cx, du);
-        let mut t_z = first_border(v0, cz, dv);
+        let mut next_x = first_border(u0, cx, du);
+        let mut next_z = first_border(v0, cz, dv);
         let gap_x = if du == 0.0 {
             f32::INFINITY
         } else {
@@ -199,13 +234,27 @@ impl NavMesh {
         let mut left = (end.0 - cx).abs() + (end.1 - cz).abs() + 2;
         let mut cell = from;
         while (cx, cz) != end {
-            if left == 0 || (cell != from && !self.is_interior(cell)) {
+            if left == 0 || (cell != from && !clear(cell)) {
                 return false;
             }
             left -= 1;
+            // A line ending exactly on a border would cross it there, past
+            // `end`'s column. The walkability check stops at that column.
+            // Straightening doesn't, which only keeps one more corner.
+            let stop = !keep_off_edges;
+            let t_x = if stop && cx == end.0 {
+                f32::INFINITY
+            } else {
+                next_x
+            };
+            let t_z = if stop && cz == end.1 {
+                f32::INFINITY
+            } else {
+                next_z
+            };
             if (t_x - t_z).abs() < 1e-5 {
-                let round_x = self.link(cell, dir_x).filter(|&c| self.is_interior(c));
-                let round_z = self.link(cell, dir_z).filter(|&c| self.is_interior(c));
+                let round_x = self.link(cell, dir_x).filter(|&c| clear(c));
+                let round_z = self.link(cell, dir_z).filter(|&c| clear(c));
                 let via_x = round_x.and_then(|c| self.link(c, dir_z));
                 let via_z = round_z.and_then(|c| self.link(c, dir_x));
                 match (via_x, via_z) {
@@ -214,22 +263,22 @@ impl NavMesh {
                 }
                 cx += step_x;
                 cz += step_z;
-                t_x += gap_x;
-                t_z += gap_z;
+                next_x += gap_x;
+                next_z += gap_z;
             } else if t_x < t_z {
                 let Some(next) = self.link(cell, dir_x) else {
                     return false;
                 };
                 cell = next;
                 cx += step_x;
-                t_x += gap_x;
+                next_x += gap_x;
             } else {
                 let Some(next) = self.link(cell, dir_z) else {
                     return false;
                 };
                 cell = next;
                 cz += step_z;
-                t_z += gap_z;
+                next_z += gap_z;
             }
         }
         cell == to
@@ -264,7 +313,7 @@ impl NavMesh {
     }
 }
 
-/// Kept in step with `DIRECTIONS`' order, which `straight` relies on.
+/// Kept in step with `DIRECTIONS`' order, which `line` relies on.
 const _: () = assert!(
     DIRECTIONS[0].0 == -1 && DIRECTIONS[1].0 == 1 && DIRECTIONS[2].1 == -1 && DIRECTIONS[3].1 == 1
 );

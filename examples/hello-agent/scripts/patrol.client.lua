@@ -7,7 +7,8 @@
 local UserInputService = game:GetService("UserInputService")
 local agent = workspace.Guard.NavigationAgent
 
--- Status says how it's getting on: Moving, Reached, Unreachable or Idle.
+-- Status says how it's getting on: Moving, Reached, Unreachable, Blocked
+-- or Idle.
 agent.Changed:Connect(function(property)
     if property == "Status" then
         print("Guard: " .. agent.Status)

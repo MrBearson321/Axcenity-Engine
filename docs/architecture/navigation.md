@@ -1,6 +1,6 @@
 # Navigation
 
-Where characters can walk, and agents that walk there. The `nav` crate builds one navigation mesh from the Workspace (unified plan Phase 12), finds paths across it, and walks `NavigationAgent`s along them during Play (Phase 13). Steering round obstacles that weren't in the mesh comes in Phase 14.
+Where characters can walk, and agents that walk there. The `nav` crate builds one navigation mesh from the Workspace (unified plan Phase 12), finds paths across it, and walks `NavigationAgent`s along them during Play (Phase 13), steering round obstacles that weren't in the mesh when the path was found (Phase 14).
 
 ## What it's built from
 
@@ -40,6 +40,8 @@ A build of a 512-stud terrain at 1-stud cells takes about 50 ms. The crate is op
 
 Errors (`PathError`): the start isn't on walkable ground, the destination isn't, or they're in different regions ("no walkable route leads there").
 
+Two crate-private helpers serve agents' steering: `walkable_line(a, b)` (the straight line crosses only linked cells, beside edges or not, and a line ending exactly on a cell border counts as ending in the cell it reached) and `find_path_within(from, to, max_cost)` (A* that gives up past a cost, in cells, edge cells costing 3).
+
 ## Agents
 
 A `NavigationAgent` (a class in `core`) is parented to a Model or Part, like a character controller, and moves that body (`character::body_parts`). Its feet are the bottom middle of the body's box. Properties:
@@ -47,15 +49,27 @@ A `NavigationAgent` (a class in `core`) is parented to a Model or Part, like a c
 - `Destination` (Vector3): where it walks to. The editor's **Agent** insert sets it to where the agent stands.
 - `WalkSpeed` (16): studs a second along the path.
 - `Velocity` (Vector3): not zero, it moves straight that way, with no path.
-- `Status`: `"Idle"`, `"Moving"`, `"Reached"` or `"Unreachable"`, written by the game.
+- `Status`: `"Idle"`, `"Moving"`, `"Reached"`, `"Unreachable"` or `"Blocked"`, written by the game.
 
 Hosts own an `Agents` (`agents.rs`), as they own `Controllers`. `Agents::step` runs after character controllers and before scripts, and `Agents::keep_kinematic` anchors the agents' parts just before physics. The mesh is built the first time an agent needs it (never in a game without agents), and again when the fingerprint changes, at most every 0.5 s of game time. Each step, for each agent with a body:
 
 - **Velocity not zero**: the path is dropped and the feet move by `Velocity × dt` across, in half-cell slices, each onto `ground_at`. At the edge of the mesh (a drop or a wall) it stops. `Destination` is set to where it now stands, so it stays put when `Velocity` goes back to zero (`Status` then `"Idle"`). Y is ignored.
 - **A Destination it hasn't planned for** (a new one, or the first step): `find_path` from its feet. A path makes it `"Moving"`. No path leaves it where it is, `"Unreachable"`, and gives a warning, `<full name> can't reach (x, y, z): <reason>.`, once per destination and reason. After the mesh rebuilds, an unreachable agent tries again (quietly, if it fails the same way).
+- **Steering** (before each walking step): see below.
 - **Walking**: it moves `WalkSpeed × dt` along the corners, each slice onto `ground_at`, and is `"Reached"` at the last one. It stays there; being pushed off doesn't send it back. Setting the same Destination again doesn't start a new walk, since the value doesn't change.
 
-Warnings go to the editor's Output (`Session::frame`) or the player's stderr. A walking agent keeps its path when the mesh rebuilds; steering round new obstacles is Phase 14.
+Warnings go to the editor's Output (`Session::frame`) or the player's stderr.
+
+### Steering round obstacles
+
+A walking agent keeps its path when the mesh rebuilds, and checks it against the latest mesh every step (`steer` and `detour` in `agents.rs`). Something that moved into the way, such as a pushed crate, leaves no cells where it stands, so the mesh shows it once it rebuilds (at once, if the mesh is 0.5 s old, otherwise within 0.5 s).
+
+1. **Look ahead.** From its feet, each stretch of the path that starts within `WalkSpeed × 1 s` (at least 4 cells) must be a `walkable_line`. With nothing in the way, the path is never changed: the agent walks exactly the corners `find_path` gave.
+2. **Rejoin point.** From the first stretch that isn't, the path is sampled every half cell. Past the samples that aren't on the mesh in the feet's region (the obstacle), the rejoin point is 2 cells into the clear, or the last clear sample before the destination.
+3. **Detour.** `find_path_within` from the feet to the rejoin point, costing no more than 3 × the length of path it replaces + 20 cells. The agent's corners become the detour, then the rest of the original path from the rejoin point on. The Agent Paths overlay draws the detour as part of the path being followed.
+4. **Blocked.** No rejoin point (the path never comes clear in the feet's region, such as a walkway blocked from side to side) or no detour that short: the agent stops where it is, `Status` is `"Blocked"`, and it warns once: `<full name> is blocked on its way to (x, y, z): nothing walkable goes round what's in the way.` It keeps its path (still drawn) and looks again each time the mesh is rebuilt. When the way clears, or a detour opens, it goes back to `"Moving"` and walks on, quietly. A new Destination plans afresh.
+
+An agent whose feet aren't on the mesh (something landed where it stands) has nothing to steer on, and keeps to its path. Only parts are obstacles: characters and other agents aren't in the mesh, so agents walk through them.
 
 Scripts set `Destination` and `Velocity` and read `Status`; blocks have **walk *agent* to (x, y, z)** and **set velocity of *agent* to (x, y, z)** (`docs/scripting/blocks.md`). Example: `examples/hello-agent`. Tests: `crates/nav/src/agent_tests.rs`, the player's `hello_agent_walks_to_destinations_from_properties_lua_and_blocks`, and `crates/editor/src/app/agent_tests.rs`.
 
@@ -65,4 +79,4 @@ Scripts set `Destination` and `Velocity` and read `Status`; blocks have **walk *
 
 **View > Overlays > Agent Paths** (also on the View ribbon tab and in Settings, saved between runs) draws, during Play, what's left of each agent's path: a line from its feet through each corner (a dot) to its destination (a ring), from `Session::agent_paths` (`paint_agent_paths` in `viewport/overlays.rs`). It only reads the paths, so it never changes a route. Insert an agent with **Agent** (Model tab, Effects group, or the Explorer's Insert menu): into the selected Model or part, or into a new `Agent` Model with a `Body` part.
 
-Tests: `crates/nav/src/tests.rs`.
+Tests: `crates/nav/src/tests.rs` (mesh) and `crates/nav/src/agent_tests.rs` (paths, agents, steering).
