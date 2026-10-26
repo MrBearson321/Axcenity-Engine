@@ -51,7 +51,16 @@ pub fn is_styled(class: ClassName) -> bool {
 
 /// The properties that take colours, which get a colour swatch.
 fn is_color(property: &str) -> bool {
-    matches!(property, "background-color" | "color" | "border-color")
+    matches!(
+        property,
+        "background-color"
+            | "color"
+            | "border-color"
+            | "border-top-color"
+            | "border-right-color"
+            | "border-bottom-color"
+            | "border-left-color"
+    )
 }
 
 /// What's typed into a value box, made safe to put in a stylesheet: a
@@ -486,6 +495,13 @@ fn value_choices(property: &str) -> &'static [&'static str] {
         "line-height" => &["normal", "1.2", "1.5", "24px"],
         "vertical-align" => &["top", "middle", "bottom"],
         "white-space" => &["normal", "nowrap"],
+        "border-style" => &["solid", "inset", "outset", "ridge", "groove", "none"],
+        "box-shadow" => &[
+            "0 2px 6px rgba(0, 0, 0, 0.4)",
+            "inset 0 2px 4px rgba(0, 0, 0, 0.4)",
+            "none",
+        ],
+        "border-image" => &["url(\"frame.png\") 16 fill", "none"],
         "font-family" => &[
             "Montserrat",
             "Inter",
@@ -522,6 +538,9 @@ fn example_value(property: &str) -> &'static str {
         "border-radius" | "border-width" | "gap" | "font-size" => "8px",
         "padding" | "margin" => "8px 12px",
         "border" => "2px solid #ffffff",
+        "border-style" => "inset",
+        "box-shadow" => "inset 0 2px 4px #000000",
+        "border-image" => "url(\"frame.png\") 16 fill",
         "opacity" => "0.8",
         "display" => "flex",
         "flex-direction" => "row",

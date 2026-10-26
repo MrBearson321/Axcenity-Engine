@@ -133,10 +133,26 @@ pub(super) struct UiVertex {
     pub(super) color: [f32; 4],
     pub(super) uv: [f32; 2],
     pub(super) size: [f32; 2],
+    /// The top border's colour.
     pub(super) border_color: [f32; 4],
+    /// The corner radius, and what's drawn: [`UI_BOX`], [`UI_SHADOW`] or
+    /// [`UI_INSET_SHADOW`].
     pub(super) border: [f32; 2],
     pub(super) color_end: [f32; 4],
+    /// Border widths: top, right, bottom, left.
+    pub(super) border_widths: [f32; 4],
+    pub(super) border_right: [f32; 4],
+    pub(super) border_bottom: [f32; 4],
+    pub(super) border_left: [f32; 4],
+    /// A shadow's offset, blur and spread.
+    pub(super) shadow: [f32; 4],
 }
+
+/// What a UI quad draws (`UiVertex::border[1]`, matched in `ui.wgsl`): a
+/// filled, bordered box, a shadow behind one, or a shadow inside one.
+pub(super) const UI_BOX: f32 = 0.0;
+pub(super) const UI_SHADOW: f32 = 1.0;
+pub(super) const UI_INSET_SHADOW: f32 = 2.0;
 
 /// A mesh uploaded to the GPU.
 pub(super) struct GpuMesh {

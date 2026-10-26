@@ -249,6 +249,7 @@ pub fn overlay(
         border_color: [0.0; 4],
         border_width: 0.0,
         border_radius: 0.0,
+        ..Default::default()
     }));
 
     // Rings start just outside the wordmark's corners and fade as they grow.
@@ -264,6 +265,7 @@ pub fn overlay(
             border_color: rgba(RING, ring_a),
             border_width: 1.5,
             border_radius: radius,
+            ..Default::default()
         }));
     }
 
@@ -281,6 +283,7 @@ pub fn overlay(
             border_color: [0.0; 4],
             border_width: 0.0,
             border_radius: r,
+            ..Default::default()
         }));
     }
 
@@ -292,6 +295,7 @@ pub fn overlay(
             border_radius: 0.0,
             path: String::new(),
             texture: Some(texture),
+            slice: None,
         }));
     } else {
         items.push(UiDrawItem::Text(UiText {
@@ -319,6 +323,7 @@ pub fn overlay(
         border_color: [0.0; 4],
         border_width: 0.0,
         border_radius: bar_h * 0.5,
+        ..Default::default()
     }));
     let fill = bar_at(t) * bar_w;
     if fill > 0.5 {
@@ -330,6 +335,7 @@ pub fn overlay(
             border_color: [0.0; 4],
             border_width: 0.0,
             border_radius: bar_h * 0.5,
+            ..Default::default()
         }));
         // A brighter leading edge, sweeping with the fill.
         let shimmer_w = (18.0_f32).min(fill);
@@ -341,6 +347,7 @@ pub fn overlay(
             border_color: [0.0; 4],
             border_width: 0.0,
             border_radius: bar_h * 0.5,
+            ..Default::default()
         }));
     }
 

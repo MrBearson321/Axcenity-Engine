@@ -25,8 +25,8 @@ use axcenity_core::{ClassName, Color3, Instance, InstanceId, UDim2, Value, World
 use axcenity_render::glam::Vec3;
 use axcenity_render::glam::camera::rh;
 use axcenity_render::{
-    Camera, TextAlign, TextShadow, TextSpan, TextStroke, UiDrawItem, UiImage, UiRectangle, UiText,
-    VerticalAlign,
+    Camera, TextAlign, TextShadow, TextSpan, TextStroke, UiBorderSide, UiDrawItem, UiImage,
+    UiRectangle, UiShadow, UiSlice, UiText, VerticalAlign,
 };
 use taffy::prelude::*;
 
@@ -729,10 +729,24 @@ fn transform_draw_item(item: &mut UiDrawItem, affine: Affine) {
             place(&mut rectangle.position, &mut rectangle.size);
             rectangle.border_width *= uniform;
             rectangle.border_radius *= uniform;
+            if let Some(sides) = &mut rectangle.border_sides {
+                for side in sides {
+                    side.width *= uniform;
+                }
+            }
+            if let Some(shadow) = &mut rectangle.shadow {
+                shadow.offset = [shadow.offset[0] * sx, shadow.offset[1] * sy];
+                shadow.blur *= uniform;
+                shadow.spread *= uniform;
+            }
         }
         UiDrawItem::Image(image) => {
             place(&mut image.position, &mut image.size);
             image.border_radius *= uniform;
+            if let Some(slice) = &mut image.slice {
+                let [top, right, bottom, left] = slice.widths;
+                slice.widths = [top * sy, right * sx, bottom * sy, left * sx];
+            }
         }
         UiDrawItem::Text(text) => {
             place(&mut text.position, &mut text.size);

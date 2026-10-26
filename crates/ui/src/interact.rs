@@ -7,7 +7,7 @@
 use std::cell::RefCell;
 
 use axcenity_core::{ClassName, InstanceId, Value, World};
-use axcenity_render::{Camera, UiDrawItem, UiRectangle, UiText};
+use axcenity_render::{Camera, UiDrawItem, UiText};
 
 use crate::css::*;
 use crate::style::{PseudoClasses, Stylesheet, resolve_styles, resolve_tooltip_styles};
@@ -320,44 +320,34 @@ fn tooltip_items(
         .unwrap_or((axcenity_core::Color3::new(0.09, 0.09, 0.11), 0.94));
     let (text_color, text_alpha) =
         css_color(&styles, "color").unwrap_or((axcenity_core::Color3::new(1.0, 1.0, 1.0), 1.0));
-    let (border_color, border_width, border_alpha) = css_border(&styles);
     let radius = css_length_property(&styles, "border-radius")
         .unwrap_or(4.0)
         .max(0.0);
     let mut items = Vec::new();
-    if let Some((ox, oy, blur, shadow, alpha)) = css_box_shadow(&styles) {
-        let spread = blur * 0.5;
-        let color = [shadow.r, shadow.g, shadow.b, alpha * opacity * 0.85];
-        items.push(UiDrawItem::Rectangle(UiRectangle {
-            position: [position[0] + ox - spread, position[1] + oy - spread],
-            size: [size[0] + spread * 2.0, size[1] + spread * 2.0],
-            color,
-            color_end: color,
-            border_color: [0.0; 4],
-            border_width: 0.0,
-            border_radius: radius + spread,
-        }));
-    }
     let fill = [
         background.r,
         background.g,
         background.b,
         background_alpha * opacity,
     ];
-    items.push(UiDrawItem::Rectangle(UiRectangle {
-        position,
-        size,
-        color: fill,
-        color_end: fill,
-        border_color: [
-            border_color.r,
-            border_color.g,
-            border_color.b,
-            border_alpha * opacity,
-        ],
-        border_width,
-        border_radius: radius,
-    }));
+    crate::paint::paint_box(
+        &crate::paint::BoxPaint {
+            rect: crate::UiRect {
+                x: position[0],
+                y: position[1],
+                width: size[0],
+                height: size[1],
+            },
+            fill,
+            fill_end: fill,
+            radius,
+            opacity,
+            focus_ring: None,
+            border: true,
+        },
+        &styles,
+        &mut items,
+    );
     items.push(UiDrawItem::Text(UiText {
         position: [position[0] + padding[3], position[1] + padding[0]],
         size: [text_width, text_height],

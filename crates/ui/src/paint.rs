@@ -36,68 +36,57 @@ pub(super) fn paint_instance(
             .map(|n| finite(n as f32).clamp(0.0, 1.0))
             .expect("every UI element has a BackgroundTransparency property")
     };
-    let (border_color, mut border_width, border_opacity) = css_border(styles);
-    let mut border_tint = border_color;
-    if focused && border_width <= 0.0 {
-        border_width = 2.0;
-        border_tint = color_property(instance, "TextColor3");
-    }
     let gradient = css_gradient(styles);
     let fill_alpha = (1.0 - transparency) * opacity * css_background.map_or(1.0, |(_, a)| a);
-    let (color_end, end_alpha) = gradient.map_or(
-        ([color.r, color.g, color.b, fill_alpha], fill_alpha),
-        |(start, end)| {
-            // A gradient replaces the flat background. `color` below is
-            // overwritten by the start color when one was parsed.
-            let _ = start;
-            (
-                [end.0.r, end.0.g, end.0.b, opacity * end.1],
-                opacity * end.1,
-            )
-        },
-    );
-    let (fill, fill_alpha) = if let Some((start, _)) = gradient {
-        ([start.0.r, start.0.g, start.0.b], opacity * start.1)
-    } else {
-        ([color.r, color.g, color.b], fill_alpha)
+    let (fill, fill_end) = match gradient {
+        // A gradient replaces the flat background.
+        Some(((start, start_alpha), (end, end_alpha))) => (
+            [start.r, start.g, start.b, opacity * start_alpha],
+            [end.r, end.g, end.b, opacity * end_alpha],
+        ),
+        None => (
+            [color.r, color.g, color.b, fill_alpha],
+            [color.r, color.g, color.b, fill_alpha],
+        ),
     };
-    if let Some((ox, oy, blur, shadow, shadow_alpha)) = css_box_shadow(styles) {
-        let spread = blur.max(0.0) * 0.5;
-        out.push(UiDrawItem::Rectangle(UiRectangle {
-            position: [rect.x + ox - spread, rect.y + oy - spread],
-            size: [rect.width + spread * 2.0, rect.height + spread * 2.0],
-            color: [shadow.r, shadow.g, shadow.b, opacity * shadow_alpha * 0.85],
-            color_end: [shadow.r, shadow.g, shadow.b, opacity * shadow_alpha * 0.85],
-            border_color: [0.0; 4],
-            border_width: 0.0,
-            border_radius: css_length_property(styles, "border-radius")
-                .unwrap_or(0.0)
-                .max(0.0)
-                + spread,
-        }));
-    }
     let radius = css_length_property(styles, "border-radius")
         .unwrap_or(0.0)
         .max(0.0);
-    if (fill_alpha > 0.0 && opacity > 0.0) || end_alpha > 0.0 || border_width > 0.0 {
-        out.push(UiDrawItem::Rectangle(UiRectangle {
+    let border_image = matches!(
+        instance.class(),
+        ClassName::Frame | ClassName::TextButton | ClassName::ImageLabel
+    )
+    .then(|| css_border_image(styles))
+    .flatten();
+    paint_box(
+        &BoxPaint {
+            rect,
+            fill,
+            fill_end,
+            radius,
+            opacity,
+            focus_ring: focused.then(|| color_property(instance, "TextColor3")),
+            border: border_image.is_none(),
+        },
+        styles,
+        out,
+    );
+    if let Some(border_image) = border_image
+        && opacity > 0.0
+    {
+        out.push(UiDrawItem::Image(UiImage {
             position: [rect.x, rect.y],
             size: [rect.width, rect.height],
-            color: [fill[0], fill[1], fill[2], fill_alpha],
-            color_end,
-            border_color: [
-                border_tint.r,
-                border_tint.g,
-                border_tint.b,
-                opacity
-                    * if focused && css_border(styles).1 <= 0.0 {
-                        1.0
-                    } else {
-                        border_opacity
-                    },
-            ],
-            border_width,
-            border_radius: radius,
+            tint: [1.0, 1.0, 1.0, opacity],
+            border_radius: 0.0,
+            path: border_image.path,
+            texture: None,
+            slice: Some(UiSlice {
+                insets: border_image.slices,
+                widths: border_image.slices,
+                fill: border_image.fill,
+                repeat: border_image.repeat,
+            }),
         }));
     }
 
@@ -126,6 +115,7 @@ pub(super) fn paint_instance(
                 border_radius: radius,
                 path: image_path,
                 texture: None,
+                slice: None,
             }));
         }
     }
@@ -154,6 +144,144 @@ pub(super) fn paint_instance(
                 ..styled_text(instance, styles, opacity, placeholder, text, warnings)
             }));
         }
+    }
+}
+
+/// A box as [`paint_box`] draws it.
+pub(crate) struct BoxPaint {
+    pub(crate) rect: UiRect,
+    /// The background at the top and at the bottom, already faded by `opacity`.
+    pub(crate) fill: [f32; 4],
+    pub(crate) fill_end: [f32; 4],
+    pub(crate) radius: f32,
+    pub(crate) opacity: f32,
+    /// A 2 pixel ring in this colour when the element has no border of its own.
+    pub(crate) focus_ring: Option<Color3>,
+    /// Whether to draw the CSS border; not under a `border-image`.
+    pub(crate) border: bool,
+}
+
+/// A box's shadows, background and border, from its CSS: the outer
+/// `box-shadow`s behind it (the first on top), the background with its
+/// border on each side (two halves for `ridge` and `groove`), then the
+/// `inset` shadows inside the border.
+pub(crate) fn paint_box(look: &BoxPaint, styles: &ResolvedStyles, out: &mut Vec<UiDrawItem>) {
+    let BoxPaint {
+        rect,
+        fill,
+        fill_end,
+        radius,
+        opacity,
+        ..
+    } = *look;
+    let shadows = css_box_shadows(styles);
+    let shadow_item = |shadow: &BoxShadow, rect: UiRect, radius: f32| {
+        let color = [
+            shadow.color.r,
+            shadow.color.g,
+            shadow.color.b,
+            shadow.alpha * opacity,
+        ];
+        UiDrawItem::Rectangle(UiRectangle {
+            position: [rect.x, rect.y],
+            size: [rect.width, rect.height],
+            color,
+            color_end: color,
+            border_radius: radius,
+            shadow: Some(UiShadow {
+                offset: shadow.offset,
+                blur: shadow.blur,
+                spread: shadow.spread,
+                inset: shadow.inset,
+            }),
+            ..UiRectangle::default()
+        })
+    };
+    for shadow in shadows.iter().rev().filter(|shadow| !shadow.inset) {
+        out.push(shadow_item(shadow, rect, radius));
+    }
+
+    let mut borders = if look.border {
+        css_borders(styles)
+    } else {
+        Borders {
+            sides: [BorderSide {
+                width: 0.0,
+                color: Color3::new(0.0, 0.0, 0.0),
+                alpha: 0.0,
+            }; 4],
+            style: BorderStyle::None,
+        }
+    };
+    if let Some(ring) = look.focus_ring
+        && borders.widths().iter().all(|width| *width <= 0.0)
+    {
+        borders.style = BorderStyle::Solid;
+        borders.sides = [BorderSide {
+            width: 2.0,
+            color: ring,
+            alpha: 1.0,
+        }; 4];
+    }
+    let widths = borders.widths();
+    let (outer, inner) = borders.colors();
+    let sides = |colors: [Color3; 4], scale: f32| {
+        let mut sides = [UiBorderSide::default(); 4];
+        for (index, side) in sides.iter_mut().enumerate() {
+            let color = colors[index];
+            *side = UiBorderSide {
+                width: widths[index] * scale,
+                color: [
+                    color.r,
+                    color.g,
+                    color.b,
+                    borders.sides[index].alpha * opacity,
+                ],
+            };
+        }
+        sides
+    };
+    let has_border = widths.iter().any(|width| *width > 0.0);
+    if fill[3] > 0.0 || fill_end[3] > 0.0 || has_border {
+        let outer_sides = sides(outer, 1.0);
+        // The same all round is the plain border.
+        let even = outer_sides.iter().all(|side| *side == outer_sides[0]);
+        out.push(UiDrawItem::Rectangle(UiRectangle {
+            position: [rect.x, rect.y],
+            size: [rect.width, rect.height],
+            color: fill,
+            color_end: fill_end,
+            border_color: outer_sides[0].color,
+            border_width: if even { outer_sides[0].width } else { 0.0 },
+            border_radius: radius,
+            border_sides: (has_border && !even).then_some(outer_sides),
+            ..UiRectangle::default()
+        }));
+    }
+    let [top, right, bottom, left] = widths;
+    let widest = widths.into_iter().fold(0.0, f32::max);
+    if has_border && matches!(borders.style, BorderStyle::Ridge | BorderStyle::Groove) {
+        // The inner half of the border, over the outer.
+        out.push(UiDrawItem::Rectangle(UiRectangle {
+            position: [rect.x + left * 0.5, rect.y + top * 0.5],
+            size: [
+                rect.width - (left + right) * 0.5,
+                rect.height - (top + bottom) * 0.5,
+            ],
+            border_radius: (radius - widest * 0.5).max(0.0),
+            border_sides: Some(sides(inner, 0.5)),
+            ..UiRectangle::default()
+        }));
+    }
+    let padding_box = UiRect {
+        x: rect.x + left,
+        y: rect.y + top,
+        width: (rect.width - left - right).max(0.0),
+        height: (rect.height - top - bottom).max(0.0),
+    };
+    let inner_radius = (radius - widest).max(0.0);
+    for shadow in shadows.iter().rev().filter(|shadow| shadow.inset) {
+        out.push(shadow_item(shadow, padding_box, inner_radius));
     }
 }
 

@@ -268,37 +268,322 @@ pub(super) fn parse_color(value: &str) -> Option<(Color3, f32)> {
     Some((Color3::new(named[0], named[1], named[2]), alpha))
 }
 
-pub(super) fn css_border(styles: &ResolvedStyles) -> (Color3, f32, f32) {
+/// How a border is drawn (CSS `border-style`). Dashed, dotted and double
+/// borders are drawn solid.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum BorderStyle {
+    None,
+    Solid,
+    Inset,
+    Outset,
+    Ridge,
+    Groove,
+}
+
+impl BorderStyle {
+    fn parse(word: &str) -> Option<BorderStyle> {
+        Some(match word.to_ascii_lowercase().as_str() {
+            "none" | "hidden" => BorderStyle::None,
+            "solid" | "dashed" | "dotted" | "double" => BorderStyle::Solid,
+            "inset" => BorderStyle::Inset,
+            "outset" => BorderStyle::Outset,
+            "ridge" => BorderStyle::Ridge,
+            "groove" => BorderStyle::Groove,
+            _ => return None,
+        })
+    }
+}
+
+/// One side of a border: its width in pixels, colour and opacity.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct BorderSide {
+    pub(crate) width: f32,
+    pub(crate) color: Color3,
+    pub(crate) alpha: f32,
+}
+
+/// An element's border: its sides (top, right, bottom, left) and style.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Borders {
+    pub(crate) sides: [BorderSide; 4],
+    pub(crate) style: BorderStyle,
+}
+
+impl Borders {
+    pub(crate) fn widths(&self) -> [f32; 4] {
+        self.sides.map(|side| side.width)
+    }
+
+    /// The colours of the outer and inner halves of each side. They're
+    /// the same but for the 3D styles, whose light and dark edges come
+    /// from the border colour: [`lighter`] and [`darker`].
+    pub(crate) fn colors(&self) -> ([Color3; 4], [Color3; 4]) {
+        let color = self.sides.map(|side| side.color);
+        // Top and left, then bottom and right, shaded.
+        let shade = |top_left: fn(Color3) -> Color3, bottom_right: fn(Color3) -> Color3| {
+            [
+                top_left(color[0]),
+                bottom_right(color[1]),
+                bottom_right(color[2]),
+                top_left(color[3]),
+            ]
+        };
+        let sunk = shade(darker, lighter);
+        let raised = shade(lighter, darker);
+        match self.style {
+            BorderStyle::None | BorderStyle::Solid => (color, color),
+            BorderStyle::Inset => (sunk, sunk),
+            BorderStyle::Outset => (raised, raised),
+            BorderStyle::Groove => (sunk, raised),
+            BorderStyle::Ridge => (raised, sunk),
+        }
+    }
+}
+
+/// A 3D border's lit edge: halfway from its colour to white.
+pub(crate) fn lighter(color: Color3) -> Color3 {
+    Color3::new(
+        (color.r + 1.0) * 0.5,
+        (color.g + 1.0) * 0.5,
+        (color.b + 1.0) * 0.5,
+    )
+}
+
+/// A 3D border's shaded edge: its colour at half the brightness.
+pub(crate) fn darker(color: Color3) -> Color3 {
+    Color3::new(color.r * 0.5, color.g * 0.5, color.b * 0.5)
+}
+
+/// The words of a CSS value, split at spaces outside brackets, so
+/// `2px solid rgb(0, 0, 0)` is three words.
+pub(super) fn css_words(value: &str) -> Vec<&str> {
+    let mut words = Vec::new();
+    let mut start = None;
+    let mut depth = 0;
+    for (index, c) in value.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            _ => {}
+        }
+        if c.is_whitespace() && depth <= 0 {
+            if let Some(from) = start.take() {
+                words.push(&value[from..index]);
+            }
+        } else if start.is_none() {
+            start = Some(index);
+        }
+    }
+    if let Some(from) = start {
+        words.push(&value[from..]);
+    }
+    words
+}
+
+/// A number of pixels: `4px`, or a bare number.
+fn pixels(word: &str) -> Option<f32> {
+    word.strip_suffix("px")
+        .unwrap_or(word)
+        .trim()
+        .parse::<f32>()
+        .ok()
+        .filter(|n| n.is_finite())
+}
+
+/// A border width: pixels, or `thin`, `medium` or `thick`.
+fn border_width(word: &str) -> Option<f32> {
+    match word.to_ascii_lowercase().as_str() {
+        "thin" => Some(1.0),
+        "medium" => Some(3.0),
+        "thick" => Some(5.0),
+        _ => pixels(word).map(|width| width.max(0.0)),
+    }
+}
+
+/// One to four values for top, right, bottom and left, as CSS spreads them.
+fn four<T: Copy>(values: &[T]) -> Option<[T; 4]> {
+    Some(match *values {
+        [all] => [all; 4],
+        [vertical, horizontal] => [vertical, horizontal, vertical, horizontal],
+        [top, horizontal, bottom] => [top, horizontal, bottom, horizontal],
+        [top, right, bottom, left] => [top, right, bottom, left],
+        _ => return None,
+    })
+}
+
+/// A `border` (or `border-top`, …) shorthand's width, style and colour.
+type BorderParts = (Option<f32>, Option<BorderStyle>, Option<(Color3, f32)>);
+
+fn border_parts(value: &str) -> BorderParts {
+    let (mut width, mut style, mut color) = (None, None, None);
+    for word in css_words(value) {
+        if let Some(parsed) = border_width(word) {
+            width = Some(parsed);
+        } else if let Some(parsed) = BorderStyle::parse(word) {
+            style = Some(parsed);
+        } else if let Some(parsed) = parse_color(word) {
+            color = Some(parsed);
+        }
+    }
+    (width, style, color)
+}
+
+const SIDES: [&str; 4] = ["top", "right", "bottom", "left"];
+
+/// The element's border, from `border`, `border-width`, `border-color`,
+/// `border-style` and each side's `border-top` (and so on),
+/// `border-top-width` and `border-top-color`; the more specific win. The
+/// style defaults to solid, so a width alone draws a border, and the
+/// colour to black.
+pub(crate) fn css_borders(styles: &ResolvedStyles) -> Borders {
+    let mut sides = [BorderSide {
+        width: 0.0,
+        color: Color3::new(0.0, 0.0, 0.0),
+        alpha: 1.0,
+    }; 4];
+    let mut style = BorderStyle::Solid;
+    let set_color = |side: &mut BorderSide, (color, alpha): (Color3, f32)| {
+        side.color = color;
+        side.alpha = alpha;
+    };
     if let Some(border) = css_property(styles, "border") {
-        let mut width = None;
-        let mut color = None;
-        for component in border.split_whitespace() {
-            if let Some(pixels) = component.strip_suffix("px") {
-                width = pixels.parse::<f32>().ok();
-            } else if let Some(parsed) = parse_color(component) {
-                color = Some(parsed);
+        let (width, parsed_style, color) = border_parts(&border);
+        for side in &mut sides {
+            side.width = width.unwrap_or(side.width);
+            if let Some(color) = color {
+                set_color(side, color);
             }
         }
-        let color = color.or_else(|| css_color(styles, "border-color"));
-        return (
-            color
-                .map(|(color, _)| color)
-                .unwrap_or(Color3::new(0.0, 0.0, 0.0)),
-            width
-                .or_else(|| css_number(styles, "border-width"))
-                .unwrap_or(0.0)
-                .max(0.0),
-            color.map_or(1.0, |(_, alpha)| alpha),
-        );
+        style = parsed_style.unwrap_or(style);
+        if parsed_style == Some(BorderStyle::None) {
+            sides.iter_mut().for_each(|side| side.width = 0.0);
+        }
     }
-    let color = css_color(styles, "border-color");
-    (
-        color
-            .map(|(color, _)| color)
-            .unwrap_or(Color3::new(0.0, 0.0, 0.0)),
-        css_number(styles, "border-width").unwrap_or(0.0).max(0.0),
-        color.map_or(1.0, |(_, alpha)| alpha),
-    )
+    if let Some(widths) = css_property(styles, "border-width").and_then(|value| {
+        let widths: Option<Vec<f32>> = css_words(&value).into_iter().map(border_width).collect();
+        four(&widths?)
+    }) {
+        for (side, width) in sides.iter_mut().zip(widths) {
+            side.width = width;
+        }
+    }
+    if let Some(colors) = css_property(styles, "border-color").and_then(|value| {
+        let colors: Option<Vec<_>> = css_words(&value).into_iter().map(parse_color).collect();
+        four(&colors?)
+    }) {
+        for (side, color) in sides.iter_mut().zip(colors) {
+            set_color(side, color);
+        }
+    }
+    if let Some(parsed) = css_property(styles, "border-style").and_then(|value| {
+        css_words(&value)
+            .first()
+            .and_then(|word| BorderStyle::parse(word))
+    }) {
+        style = parsed;
+    }
+    for (side, name) in sides.iter_mut().zip(SIDES) {
+        if let Some(value) = css_property(styles, &format!("border-{name}")) {
+            let (width, side_style, color) = border_parts(&value);
+            side.width = width.unwrap_or(side.width);
+            if let Some(color) = color {
+                set_color(side, color);
+            }
+            if side_style == Some(BorderStyle::None) {
+                side.width = 0.0;
+            }
+        }
+        if let Some(width) = css_property(styles, &format!("border-{name}-width"))
+            .and_then(|v| border_width(v.trim()))
+        {
+            side.width = width;
+        }
+        if let Some(color) = css_color(styles, &format!("border-{name}-color")) {
+            set_color(side, color);
+        }
+    }
+    if style == BorderStyle::None {
+        sides.iter_mut().for_each(|side| side.width = 0.0);
+    }
+    Borders { sides, style }
+}
+
+/// CSS `border-image`: a picture cut into nine pieces and drawn as the
+/// element's frame, its corners kept their size (`ui::paint`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct BorderImage {
+    /// The picture, a project path, from `url(…)`.
+    pub path: String,
+    /// Where it's cut, in its own pixels: top, right, bottom and left.
+    /// The corners are drawn this many design pixels big.
+    pub slices: [f32; 4],
+    /// Whether the middle piece is drawn (`fill`).
+    pub fill: bool,
+    /// Whether the edges and middle repeat (`repeat`, `round` or `space`)
+    /// rather than stretch (`stretch`, the default).
+    pub repeat: bool,
+}
+
+impl BorderImage {
+    /// Reads `url(path) <slices> [fill] [stretch | repeat]`, with one to
+    /// four slices in image pixels. `None` for `none` or anything else.
+    pub fn parse(value: &str) -> Option<BorderImage> {
+        let mut path = None;
+        let mut slices = Vec::new();
+        let mut fill = false;
+        let mut repeat = false;
+        for word in css_words(value) {
+            let lower = word.to_ascii_lowercase();
+            if lower.starts_with("url(") && word.ends_with(')') {
+                let inner = word[4..word.len() - 1].trim();
+                path = Some(inner.trim_matches(|c| c == '"' || c == '\'').to_owned());
+            } else if lower == "fill" {
+                fill = true;
+            } else if lower == "stretch" {
+                repeat = false;
+            } else if matches!(lower.as_str(), "repeat" | "round" | "space") {
+                repeat = true;
+            } else {
+                // Slices come after the picture.
+                let slice = pixels(word).filter(|_| path.is_some())?;
+                slices.push(slice.max(0.0));
+            }
+        }
+        let path = path.filter(|path| !path.is_empty())?;
+        Some(BorderImage {
+            path,
+            slices: four(&slices)?,
+            fill,
+            repeat,
+        })
+    }
+
+    /// As CSS, the way [`parse`](Self::parse) reads it: one slice when
+    /// they're all the same.
+    pub fn to_css(&self) -> String {
+        let number = |value: f32| {
+            let text = format!("{:.2}", value.max(0.0));
+            text.trim_end_matches('0').trim_end_matches('.').to_owned()
+        };
+        let [top, right, bottom, left] = self.slices;
+        let slices = if [right, bottom, left].iter().all(|&side| side == top) {
+            number(top)
+        } else {
+            self.slices.map(number).join(" ")
+        };
+        let mut css = format!("url(\"{}\") {slices}", self.path);
+        if self.fill {
+            css.push_str(" fill");
+        }
+        if self.repeat {
+            css.push_str(" repeat");
+        }
+        css
+    }
+}
+
+pub(super) fn css_border_image(styles: &ResolvedStyles) -> Option<BorderImage> {
+    BorderImage::parse(&css_property(styles, "border-image")?)
 }
 
 /// `linear-gradient(to bottom, #fff, #000)`, two colors, top to bottom.
@@ -323,32 +608,71 @@ pub(super) fn css_gradient(styles: &ResolvedStyles) -> Option<((Color3, f32), (C
     (colors.len() >= 2).then(|| (colors[0], colors[1]))
 }
 
-/// `box-shadow: <x> <y> <blur> <color>`, lengths in px. The blur is drawn
-/// as a larger, softer rectangle behind the element.
-pub(super) fn css_box_shadow(styles: &ResolvedStyles) -> Option<(f32, f32, f32, Color3, f32)> {
-    let value = css_property(styles, "box-shadow")?;
-    let value = value.trim();
-    if value.is_empty() || value == "none" {
-        return None;
+/// One `box-shadow`, in pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BoxShadow {
+    pub inset: bool,
+    pub offset: [f32; 2],
+    pub blur: f32,
+    pub spread: f32,
+    pub color: Color3,
+    pub alpha: f32,
+}
+
+impl BoxShadow {
+    /// One shadow of a `box-shadow` list (see [`split_css_list`]).
+    pub fn parse(text: &str) -> Option<BoxShadow> {
+        parse_box_shadow(text)
     }
-    let (lengths, color) = split_shadow_color(value)?;
-    let nums: Vec<f32> = lengths
-        .split_whitespace()
-        .filter_map(|token| {
-            token
-                .strip_suffix("px")
-                .unwrap_or(token)
-                .parse::<f32>()
-                .ok()
-                .filter(|n| n.is_finite())
-        })
-        .collect();
-    let (x, y, blur) = match nums.as_slice() {
-        [x, y, blur, ..] => (*x, *y, *blur),
-        [x, y] => (*x, *y, 0.0),
+}
+
+/// A CSS list (`box-shadow`, `transition`) split at the commas that
+/// aren't inside brackets.
+pub fn split_css_list(value: &str) -> Vec<&str> {
+    split_css_args(value)
+}
+
+/// `box-shadow`: shadows separated by commas, the first on top, each
+/// `[inset] <x> <y> [<blur> [<spread>]] [<color>]` (the colour may come
+/// first; black if it's left out). `none` is none.
+pub(crate) fn css_box_shadows(styles: &ResolvedStyles) -> Vec<BoxShadow> {
+    let Some(value) = css_property(styles, "box-shadow") else {
+        return Vec::new();
+    };
+    split_css_args(&value)
+        .into_iter()
+        .filter_map(parse_box_shadow)
+        .collect()
+}
+
+fn parse_box_shadow(text: &str) -> Option<BoxShadow> {
+    let mut inset = false;
+    let mut lengths = Vec::new();
+    let mut color = None;
+    for word in css_words(text) {
+        if word.eq_ignore_ascii_case("inset") {
+            inset = true;
+        } else if let Some(length) = pixels(word) {
+            lengths.push(length);
+        } else {
+            color = Some(parse_color(word)?);
+        }
+    }
+    let (x, y, blur, spread) = match lengths.as_slice() {
+        [x, y] => (*x, *y, 0.0, 0.0),
+        [x, y, blur] => (*x, *y, *blur, 0.0),
+        [x, y, blur, spread] => (*x, *y, *blur, *spread),
         _ => return None,
     };
-    Some((x, y, blur.max(0.0), color.0, color.1))
+    let (color, alpha) = color.unwrap_or((Color3::new(0.0, 0.0, 0.0), 1.0));
+    Some(BoxShadow {
+        inset,
+        offset: [x, y],
+        blur: blur.max(0.0),
+        spread,
+        color,
+        alpha,
+    })
 }
 
 pub(super) fn split_shadow_color(value: &str) -> Option<(&str, (Color3, f32))> {

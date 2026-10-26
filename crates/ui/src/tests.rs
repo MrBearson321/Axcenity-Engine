@@ -1043,3 +1043,185 @@ fn the_on_top_screen_gui_is_laid_out_last_and_takes_the_pointer_first() {
         Some(cover)
     );
 }
+
+/// A ScreenGui with one `class` element 100 × 100 at (10, 10), `Id` "box",
+/// and its draw items under `css` on an 800 × 600 screen.
+fn box_drawn(class: ClassName, css: &str) -> Vec<UiDrawItem> {
+    let mut world = World::new();
+    let gui = world.create(ClassName::ScreenGui).unwrap();
+    world.set_parent(gui, Some(world.workspace())).unwrap();
+    let element = world.create(class).unwrap();
+    world.set_parent(element, Some(gui)).unwrap();
+    for (name, value) in [
+        ("Id", Value::String("box".to_owned())),
+        ("Position", Value::UDim2(UDim2::new(0.0, 10.0, 0.0, 10.0))),
+        ("Size", Value::UDim2(UDim2::new(0.0, 100.0, 0.0, 100.0))),
+    ] {
+        world.set_property(element, name, value).unwrap();
+    }
+    let (stylesheet, warnings) = parse_stylesheet("ui.css", css);
+    assert!(warnings.is_empty(), "{warnings:?}");
+    build_ui_draw_data(&world, 800, 600, &[stylesheet])
+}
+
+fn rectangles(items: &[UiDrawItem]) -> Vec<UiRectangle> {
+    items
+        .iter()
+        .filter_map(|item| match item {
+            UiDrawItem::Rectangle(rectangle) => Some(*rectangle),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn inset_and_outer_shadows_mix_and_inset_ones_sit_inside_the_border() {
+    let items = box_drawn(
+        ClassName::Frame,
+        "#box { background-color: #808080; border: 4px solid #ffffff; border-radius: 12px; \
+         box-shadow: 0 2px 6px 1px rgba(0, 0, 0, 0.5), inset 2px 2px 3px #ffffff, \
+         inset -2px -2px 3px #000000 }",
+    );
+    let drawn = rectangles(&items);
+    assert_eq!(drawn.len(), 4);
+    // Behind: the outer shadow, its blur and spread kept for the renderer.
+    let outer = drawn[0].shadow.unwrap();
+    assert!(!outer.inset);
+    assert_eq!(
+        (outer.offset, outer.blur, outer.spread),
+        ([0.0, 2.0], 6.0, 1.0)
+    );
+    assert_eq!(drawn[0].color[3], 0.5);
+    // Then the box with its border.
+    assert_eq!(drawn[1].shadow, None);
+    assert_eq!(drawn[1].border_width, 4.0);
+    // Then the inset shadows inside the border, the first on top, rounded
+    // less by the border's width.
+    for inset in &drawn[2..] {
+        assert!(inset.shadow.unwrap().inset);
+        assert_eq!(inset.position, [14.0, 14.0]);
+        assert_eq!(inset.size, [92.0, 92.0]);
+        assert_eq!(inset.border_radius, 8.0);
+    }
+    assert_eq!(drawn[2].color[..3], [0.0, 0.0, 0.0]);
+    assert_eq!(drawn[3].color[..3], [1.0, 1.0, 1.0]);
+    assert_eq!(drawn[3].shadow.unwrap().offset, [2.0, 2.0]);
+}
+
+#[test]
+fn classic_borders_shade_their_sides_from_the_border_colour() {
+    let sides = |css: &str| {
+        rectangles(&box_drawn(ClassName::Frame, css))
+            .iter()
+            .map(|rectangle| rectangle.border_sides)
+            .collect::<Vec<_>>()
+    };
+    let colors = |sides: Option<[UiBorderSide; 4]>| sides.unwrap().map(|side| side.color);
+    // Inset: shaded top and left, lit bottom and right; outset the other way.
+    let inset = sides("#box { border: 4px inset #808080 }");
+    assert_eq!(inset.len(), 1);
+    let half = |[r, g, b, a]: [f32; 4]| [r, g, b, a].map(|c| (c * 1000.0).round() / 1000.0);
+    let rounded = |sides: Option<[UiBorderSide; 4]>| colors(sides).map(half);
+    let expect = |top_left: [f32; 4], bottom_right: [f32; 4]| {
+        [top_left, bottom_right, bottom_right, top_left].map(half)
+    };
+    let mid = 128.0 / 255.0;
+    let lit = [(mid + 1.0) * 0.5, (mid + 1.0) * 0.5, (mid + 1.0) * 0.5, 1.0];
+    let shaded = [mid * 0.5, mid * 0.5, mid * 0.5, 1.0];
+    assert_eq!(rounded(inset[0]), expect(shaded, lit));
+    let outset = sides("#box { border: 4px outset #808080 }");
+    assert_eq!(rounded(outset[0]), expect(lit, shaded));
+    // Ridge and groove: two halves, the inner one the other way round.
+    let ridge = sides("#box { border-width: 4px; border-style: ridge; border-color: #808080 }");
+    assert_eq!(ridge.len(), 2);
+    assert_eq!(rounded(ridge[0]), expect(lit, shaded));
+    assert_eq!(rounded(ridge[1]), expect(shaded, lit));
+    assert_eq!(ridge[1].unwrap()[0].width, 2.0);
+    let groove = sides("#box { border: 4px groove #808080 }");
+    assert_eq!(rounded(groove[0]), expect(shaded, lit));
+    assert_eq!(rounded(groove[1]), expect(lit, shaded));
+    // Each side's own width and colour.
+    let own = sides(
+        "#box { border: 2px solid #000; border-width: 1px 2px 3px 4px; \
+         border-left-color: #ff0000; border-top: 6px solid #00ff00; border-bottom-width: thick }",
+    );
+    let own = own[0].unwrap();
+    assert_eq!(own.map(|side| side.width), [6.0, 2.0, 5.0, 4.0]);
+    assert_eq!(own[0].color, [0.0, 1.0, 0.0, 1.0]);
+    assert_eq!(own[3].color, [1.0, 0.0, 0.0, 1.0]);
+    assert_eq!(own[1].color, [0.0, 0.0, 0.0, 1.0]);
+    // `none` draws none: only the background.
+    let none = rectangles(&box_drawn(
+        ClassName::Frame,
+        "#box { border: 4px none #000 }",
+    ));
+    assert_eq!(none.len(), 1);
+    assert_eq!((none[0].border_width, none[0].border_sides), (0.0, None));
+}
+
+#[test]
+fn border_image_draws_nine_slices_whose_corners_scale_with_the_screen_gui() {
+    let slice = |items: &[UiDrawItem]| {
+        items.iter().find_map(|item| match item {
+            UiDrawItem::Image(image) if image.slice.is_some() => Some(image.clone()),
+            _ => None,
+        })
+    };
+    let css = "#box { border-image: url(\"assets/ui/frame.png\") 10 20 fill repeat }";
+    let image = slice(&box_drawn(ClassName::Frame, css)).expect("a Frame draws its border image");
+    assert_eq!(image.path, "assets/ui/frame.png");
+    assert_eq!(image.position, [10.0, 10.0]);
+    assert_eq!(image.size, [100.0, 100.0]);
+    let cut = image.slice.unwrap();
+    assert_eq!(cut.insets, [10.0, 20.0, 10.0, 20.0]);
+    assert_eq!(cut.widths, cut.insets);
+    assert!(cut.fill && cut.repeat);
+    assert!(slice(&box_drawn(ClassName::TextButton, css)).is_some());
+    assert!(slice(&box_drawn(ClassName::ImageLabel, css)).is_some());
+    assert!(slice(&box_drawn(ClassName::TextLabel, css)).is_none());
+
+    // On a screen twice the design size, the corners are twice as big.
+    let mut world = World::new();
+    let gui = world.create(ClassName::ScreenGui).unwrap();
+    world.set_parent(gui, Some(world.workspace())).unwrap();
+    for (name, value) in [
+        ("ScaleMode", Value::String("Scale".to_owned())),
+        ("DesignWidth", Value::Number(400.0)),
+        ("DesignHeight", Value::Number(300.0)),
+    ] {
+        world.set_property(gui, name, value).unwrap();
+    }
+    let frame = world.create(ClassName::Frame).unwrap();
+    world.set_parent(frame, Some(gui)).unwrap();
+    world
+        .set_property(frame, "Id", Value::String("box".to_owned()))
+        .unwrap();
+    let (stylesheet, _) = parse_stylesheet("ui.css", css);
+    let image = slice(&build_ui_draw_data(&world, 800, 600, &[stylesheet])).unwrap();
+    assert_eq!(image.slice.unwrap().widths, [20.0, 40.0, 20.0, 40.0]);
+}
+
+#[test]
+fn border_image_values_read_and_write_back() {
+    let read = BorderImage::parse("url(frame.png) 12 fill").unwrap();
+    assert_eq!(
+        read,
+        BorderImage {
+            path: "frame.png".to_owned(),
+            slices: [12.0; 4],
+            fill: true,
+            repeat: false,
+        }
+    );
+    assert_eq!(read.to_css(), "url(\"frame.png\") 12 fill");
+    let uneven = BorderImage {
+        slices: [1.0, 2.0, 3.5, 4.0],
+        repeat: true,
+        fill: false,
+        ..read
+    };
+    assert_eq!(uneven.to_css(), "url(\"frame.png\") 1 2 3.5 4 repeat");
+    assert_eq!(BorderImage::parse(&uneven.to_css()), Some(uneven));
+    assert_eq!(BorderImage::parse("none"), None);
+    assert_eq!(BorderImage::parse("url(a.png) 1 2 3 4 5"), None);
+}

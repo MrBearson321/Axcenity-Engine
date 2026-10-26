@@ -62,7 +62,7 @@ pub enum UiDrawItem {
     Text(UiText),
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct UiRectangle {
     pub position: [f32; 2],
     pub size: [f32; 2],
@@ -73,6 +73,33 @@ pub struct UiRectangle {
     pub border_color: [f32; 4],
     pub border_width: f32,
     pub border_radius: f32,
+    /// Each side's own border (top, right, bottom, left), which replaces
+    /// `border_color` and `border_width`. Where two sides meet, the corner
+    /// is split on the diagonal.
+    pub border_sides: Option<[UiBorderSide; 4]>,
+    /// Drawn as a soft shadow in `color` instead of a box (CSS `box-shadow`).
+    pub shadow: Option<UiShadow>,
+}
+
+/// One side of a [`UiRectangle`]'s border.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct UiBorderSide {
+    pub width: f32,
+    pub color: [f32; 4],
+}
+
+/// A [`UiRectangle`] drawn as a shadow of its rounded box.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct UiShadow {
+    /// How far the shadow is moved, in pixels.
+    pub offset: [f32; 2],
+    /// How far it fades out over, in pixels. 0 is a hard edge.
+    pub blur: f32,
+    /// How much bigger the shadow is than the box (smaller, when inset).
+    pub spread: f32,
+    /// Drawn inside the box, around a hole the box's shape moved by
+    /// `offset` and shrunk by `spread`, rather than behind it.
+    pub inset: bool,
 }
 
 /// A picture in a UI rectangle. `texture` is filled in by `scene` from
@@ -85,6 +112,25 @@ pub struct UiImage {
     pub border_radius: f32,
     pub path: String,
     pub texture: Option<Arc<dyn TextureSource>>,
+    /// Drawn in nine pieces (CSS `border-image`) instead of stretched whole.
+    pub slice: Option<UiSlice>,
+}
+
+/// How a [`UiImage`] is cut into nine pieces: the corners keep their size,
+/// and the edges and middle stretch or repeat to fill the rest.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct UiSlice {
+    /// Where the image is cut, in its own pixels from its top, right,
+    /// bottom and left.
+    pub insets: [f32; 4],
+    /// How thick each side is drawn on screen, in pixels (top, right,
+    /// bottom, left): the corners' size.
+    pub widths: [f32; 4],
+    /// Whether the middle is drawn too (CSS `fill`).
+    pub fill: bool,
+    /// Edges and the middle are tiled at the corners' scale, from the top
+    /// left, instead of stretched.
+    pub repeat: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]

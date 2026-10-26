@@ -481,6 +481,7 @@ pub(super) fn decorations(
                     border_color: [0.0; 4],
                     border_width: 0.0,
                     border_radius: 0.0,
+                    ..Default::default()
                 });
             };
             if run.underline {

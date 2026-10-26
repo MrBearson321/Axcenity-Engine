@@ -185,6 +185,30 @@ impl EditorApp {
                 DesignerAction::Drag(edit) => self.apply_ui_drag(edit),
                 DesignerAction::Edit(id, edit) => self.apply(id, edit),
                 DesignerAction::Style(id, edit) => self.apply_style(id, edit),
+                DesignerAction::Bevel {
+                    id,
+                    normal,
+                    pressed,
+                    dragging,
+                } => {
+                    // Both rules in one step: the edits below don't end it.
+                    if !dragging {
+                        self.history.seal();
+                    }
+                    self.set_own_style(id, "box-shadow", &normal, true);
+                    if let Some(pressed) = pressed {
+                        self.set_state_style(
+                            id,
+                            axcenity_ui::UiState::Pressed,
+                            "box-shadow",
+                            &pressed,
+                            true,
+                        );
+                    }
+                    if !dragging {
+                        self.history.seal();
+                    }
+                }
                 DesignerAction::NewScreenGui => self.insert(Insertable::ScreenGui, None),
             }
         }
@@ -249,6 +273,8 @@ impl EditorApp {
                 span: declaration.span,
                 value: value.to_owned(),
             },
+            // Added as part of the gesture, which goes on.
+            _ if dragging => return self.add_style_unsealed(id, "", property, value),
             _ => StyleEdit::Add {
                 property: property.to_owned(),
                 value: value.to_owned(),
@@ -301,6 +327,7 @@ impl EditorApp {
                     value: value.to_owned(),
                 },
             ),
+            None if dragging => self.add_style_unsealed(id, state.pseudo_class(), property, value),
             None => self.add_style_to(id, state.pseudo_class(), property, value),
         }
         if !dragging {

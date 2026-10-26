@@ -35,12 +35,14 @@ fn ui_rectangles_keep_rounded_border_data_and_allow_border_only_shapes() {
         border_width: 3.0,
         border_radius: 80.0,
         color_end: [0.0, 0.0, 0.0, 0.0],
+        ..Default::default()
     });
 
     let vertices = ui_vertices(&[item], 0..1, &[], (200, 100));
     assert_eq!(vertices.len(), 6);
     assert_eq!(vertices[0].size, [100.0, 50.0]);
-    assert_eq!(vertices[0].border, [25.0, 3.0]);
+    assert_eq!(vertices[0].border, [25.0, UI_BOX]);
+    assert_eq!(vertices[0].border_widths, [3.0; 4]);
     assert_eq!(vertices[0].border_color[3], 1.0);
 }
 
@@ -53,6 +55,7 @@ fn ui_rect(position: [f32; 2], size: [f32; 2]) -> UiDrawItem {
         border_width: 0.0,
         border_radius: 0.0,
         color_end: [0.0, 0.0, 0.0, 1.0],
+        ..Default::default()
     })
 }
 
@@ -938,4 +941,274 @@ fn terrain_chunks_show_the_layer_their_weights_pick() {
     );
     let [red, _, blue, _] = middle_pixel(&device, &queue, &ground([128, 127, 0, 0], 30));
     assert!(red > 40 && blue > 40, "half and half: {red}, {blue}");
+}
+
+#[test]
+fn a_sliced_image_keeps_its_corners_whatever_its_size() {
+    let slice = crate::UiSlice {
+        insets: [10.0; 4],
+        widths: [10.0; 4],
+        fill: true,
+        repeat: false,
+    };
+    for [w, h] in [[100.0, 100.0], [600.0, 200.0]] {
+        let pieces = super::ui_pass::slice_pieces(&slice, [0.0, 0.0, w, h], [30.0, 30.0]);
+        assert_eq!(pieces.len(), 9);
+        // The top left corner is 10 × 10 and shows the texture's corner,
+        // up to half a texel inside the cut.
+        assert_eq!(
+            pieces[0],
+            ([0.0, 0.0, 10.0, 10.0], [0.0, 0.0, 9.5 / 30.0, 9.5 / 30.0])
+        );
+        // The bottom right one too, at the far corner.
+        assert_eq!(pieces[8].0, [w - 10.0, h - 10.0, 10.0, 10.0]);
+        // The middle stretches over the rest.
+        assert_eq!(pieces[4].0, [10.0, 10.0, w - 20.0, h - 20.0]);
+    }
+    // Without fill there's no middle; repeating tiles the edges at the
+    // corners' scale, the last tile cut short.
+    let tiled = crate::UiSlice {
+        fill: false,
+        repeat: true,
+        ..slice
+    };
+    let pieces = super::ui_pass::slice_pieces(&tiled, [0.0, 0.0, 45.0, 30.0], [30.0, 30.0]);
+    let top: Vec<_> = pieces.iter().filter(|(rect, _)| rect[1] == 0.0).collect();
+    assert_eq!(
+        top.iter().map(|(rect, _)| rect[2]).collect::<Vec<_>>(),
+        [10.0, 10.0, 10.0, 5.0, 10.0]
+    );
+    assert!(
+        !pieces
+            .iter()
+            .any(|(rect, _)| rect[0] == 10.0 && rect[1] == 10.0)
+    );
+    // Corners too big for the box shrink together.
+    let pieces = super::ui_pass::slice_pieces(&slice, [0.0, 0.0, 10.0, 40.0], [30.0, 30.0]);
+    assert_eq!(pieces[0].0, [0.0, 0.0, 5.0, 5.0]);
+}
+
+/// A texture of `size` × `size` pixels, each the colour `color(x, y)` gives.
+struct Painted {
+    size: u32,
+    rgba: Vec<u8>,
+}
+
+impl Painted {
+    fn new(size: u32, color: impl Fn(u32, u32) -> [u8; 4]) -> Self {
+        let rgba = (0..size)
+            .flat_map(|y| (0..size).map(move |x| (x, y)))
+            .flat_map(|(x, y)| color(x, y))
+            .collect();
+        Painted { size, rgba }
+    }
+}
+
+impl TextureSource for Painted {
+    fn key(&self) -> u64 {
+        0x5_11ce
+    }
+    fn size(&self) -> (u32, u32) {
+        (self.size, self.size)
+    }
+    fn rgba(&self) -> &[u8] {
+        &self.rgba
+    }
+}
+
+/// The pixels of a `width` × `height` frame showing only `ui` over black.
+fn ui_pixels(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    ui: Vec<UiDrawItem>,
+    (width, height): (u32, u32),
+) -> impl Fn(u32, u32) -> [u8; 4] {
+    let mut list = list_of(Vec::new());
+    list.ui = ui;
+    let mut renderer = TextureRenderer::new(device, queue, width, height);
+    renderer.render(&list).unwrap();
+    let pixels = renderer.read_pixels();
+    move |x, y| {
+        pixels[((y * width + x) * 4) as usize..][..4]
+            .try_into()
+            .unwrap()
+    }
+}
+
+#[test]
+fn a_nine_slice_frame_draws_its_corners_unstretched_on_the_gpu() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    // 30 × 30: red corners, green edges and a blue middle, 10 pixels each.
+    let texture = Arc::new(Painted::new(30, |x, y| {
+        match ((x / 10) == 1, (y / 10) == 1) {
+            (false, false) => [255, 0, 0, 255],
+            (true, true) => [0, 0, 255, 255],
+            _ => [0, 255, 0, 255],
+        }
+    }));
+    let image = |position: [f32; 2], size: [f32; 2]| {
+        UiDrawItem::Image(crate::UiImage {
+            position,
+            size,
+            tint: [1.0; 4],
+            border_radius: 0.0,
+            path: "frame.png".to_owned(),
+            texture: Some(texture.clone()),
+            slice: Some(crate::UiSlice {
+                insets: [10.0; 4],
+                widths: [10.0; 4],
+                fill: true,
+                repeat: false,
+            }),
+        })
+    };
+    let red = [255, 0, 0, 255];
+    let green = [0, 255, 0, 255];
+    let blue = [0, 0, 255, 255];
+    for [w, h] in [[100u32, 100u32], [600, 200]] {
+        let pixel = ui_pixels(
+            &device,
+            &queue,
+            vec![image([20.0, 20.0], [w as f32, h as f32])],
+            (w + 40, h + 40),
+        );
+        for (x, y) in [(23, 23), (w + 16, 23), (23, h + 16), (w + 16, h + 16)] {
+            assert_eq!(pixel(x, y), red, "a corner at {x}, {y} on {w} × {h}");
+        }
+        // Just past a 10 pixel corner is an edge, at either size.
+        assert_eq!(pixel(33, 23), green, "the top edge on {w} × {h}");
+        assert_eq!(pixel(23, 33), green, "the left edge on {w} × {h}");
+        assert_eq!(
+            pixel(20 + w / 2, 20 + h / 2),
+            blue,
+            "the middle on {w} × {h}"
+        );
+    }
+}
+
+#[test]
+fn borders_and_inset_shadows_keep_inside_rounded_corners_on_the_gpu() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let side = |color: [f32; 4]| crate::UiBorderSide { width: 6.0, color };
+    let red = [1.0, 0.0, 0.0, 1.0];
+    let blue = [0.0, 0.0, 1.0, 1.0];
+    let rounded = UiRectangle {
+        position: [8.0, 8.0],
+        size: [48.0, 48.0],
+        color: [0.5, 0.5, 0.5, 1.0],
+        color_end: [0.5, 0.5, 0.5, 1.0],
+        border_radius: 16.0,
+        ..UiRectangle::default()
+    };
+    // An inset-style border: lit top and left, shaded bottom and right.
+    let bordered = UiRectangle {
+        border_sides: Some([side(red), side(blue), side(blue), side(red)]),
+        ..rounded
+    };
+    // A ridge's inner half, over it.
+    let inner = UiRectangle {
+        position: [11.0, 11.0],
+        size: [42.0, 42.0],
+        color: [0.0; 4],
+        color_end: [0.0; 4],
+        border_radius: 13.0,
+        border_sides: Some(
+            [crate::UiBorderSide {
+                width: 3.0,
+                color: blue,
+            }; 4],
+        ),
+        ..UiRectangle::default()
+    };
+    let shadow = UiRectangle {
+        color: [1.0, 1.0, 1.0, 1.0],
+        color_end: [1.0, 1.0, 1.0, 1.0],
+        shadow: Some(crate::UiShadow {
+            offset: [6.0, 6.0],
+            blur: 0.0,
+            spread: 0.0,
+            inset: true,
+        }),
+        ..rounded
+    };
+    let black = [0, 0, 0, 255];
+    for (name, items) in [
+        ("border", vec![UiDrawItem::Rectangle(bordered)]),
+        (
+            "ridge",
+            vec![
+                UiDrawItem::Rectangle(bordered),
+                UiDrawItem::Rectangle(inner),
+            ],
+        ),
+        (
+            "inset shadow",
+            vec![
+                UiDrawItem::Rectangle(rounded),
+                UiDrawItem::Rectangle(shadow),
+            ],
+        ),
+    ] {
+        let pixel = ui_pixels(&device, &queue, items, (64, 64));
+        // The square's corner, outside its rounding, stays clear.
+        for (x, y) in [(9, 9), (54, 9), (9, 54), (54, 54)] {
+            assert_eq!(pixel(x, y), black, "{name}: the corner at {x}, {y}");
+        }
+        // The middle of the top edge has the border or shadow.
+        assert_ne!(pixel(32, 9), black, "{name}: the top edge");
+    }
+    let pixel = ui_pixels(
+        &device,
+        &queue,
+        vec![UiDrawItem::Rectangle(bordered)],
+        (64, 64),
+    );
+    assert_eq!(pixel(32, 9)[..3], [255, 0, 0], "lit top");
+    assert_eq!(pixel(54, 32)[..3], [0, 0, 255], "shaded right");
+    // The inset shadow lights the top and left edges only.
+    let pixel = ui_pixels(
+        &device,
+        &queue,
+        vec![
+            UiDrawItem::Rectangle(rounded),
+            UiDrawItem::Rectangle(shadow),
+        ],
+        (64, 64),
+    );
+    assert_eq!(pixel(32, 10)[..3], [255, 255, 255], "the shadow's top");
+    assert_ne!(
+        pixel(32, 53)[..3],
+        [255, 255, 255],
+        "no shadow at the bottom"
+    );
+}
+
+#[test]
+fn an_outer_shadow_with_blur_reaches_past_its_box_and_counts_toward_overlap() {
+    let shadow = UiDrawItem::Rectangle(UiRectangle {
+        position: [0.0, 0.0],
+        size: [20.0, 20.0],
+        color: [0.0, 0.0, 0.0, 0.5],
+        shadow: Some(crate::UiShadow {
+            offset: [0.0, 4.0],
+            blur: 6.0,
+            spread: 2.0,
+            inset: false,
+        }),
+        ..UiRectangle::default()
+    });
+    let vertices = ui_vertices(std::slice::from_ref(&shadow), 0..1, &[], (100, 100));
+    // Its quad is the box moved 4 down, grown by the spread and the blur.
+    assert_eq!(vertices[0].size, [36.0, 36.0]);
+    assert_eq!(vertices[0].border[1], UI_SHADOW);
+    // Text just below the box is under the shadow, so the shadow goes in
+    // an earlier layer.
+    let items = [ui_label([0.0, 24.0], [20.0, 10.0]), shadow];
+    assert_eq!(ui_layers(&items), vec![0..1, 1..2]);
 }

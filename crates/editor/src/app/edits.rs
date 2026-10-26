@@ -583,6 +583,19 @@ impl EditorApp {
         property: &str,
         value: &str,
     ) {
+        self.history.seal();
+        self.add_style_unsealed(id, pseudo_class, property, value);
+        self.history.seal();
+    }
+    /// [`Self::add_style_to`], as part of the gesture under way: a drag,
+    /// or several edits that make one step.
+    pub(super) fn add_style_unsealed(
+        &mut self,
+        id: InstanceId,
+        pseudo_class: &str,
+        property: &str,
+        value: &str,
+    ) {
         let Some(instance) = self.world.get(id) else {
             return;
         };
@@ -604,9 +617,7 @@ impl EditorApp {
         }
         let selector = format!("{}{pseudo_class}", style_panel::own_selector(&element_id));
         let text = self.add_style_text(&selector, property, value);
-        self.history.seal();
         self.record_style(id, before, text.into_iter().collect());
-        self.history.seal();
     }
     /// Adds `property: value` to `selector`'s rule (see [`Self::add_style`])
     /// and returns the stylesheet's text before and after. `before` is

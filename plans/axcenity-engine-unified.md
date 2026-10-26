@@ -490,9 +490,9 @@ Ctrl+B, Ctrl+I and Ctrl+U toggle bold, italic and underline on the selected elem
 
 ### Acceptance criteria
 
-- [ ] A Raised bevel on a button draws a light top-left and a dark bottom-right edge, and flips to sunken while held, in the designer and in Play.
-- [ ] `inset`, `outset`, `ridge` and `groove` borders and inset shadows respect `border-radius`.
-- [ ] A 9-slice frame image resized from 100×100 to 600×200 keeps its corners unstretched, and the four slice lines in the editor change the CSS.
+- [x] A Raised bevel on a button draws a light top-left and a dark bottom-right edge, and flips to sunken while held, in the designer and in Play.
+- [x] `inset`, `outset`, `ridge` and `groove` borders and inset shadows respect `border-radius`.
+- [x] A 9-slice frame image resized from 100×100 to 600×200 keeps its corners unstretched, and the four slice lines in the editor change the CSS.
 
 ---
 

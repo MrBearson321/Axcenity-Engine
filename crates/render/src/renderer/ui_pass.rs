@@ -8,9 +8,9 @@ use std::ops::Range;
 
 use glyphon::Color as GlyphColor;
 
-use crate::draw_list::{UiDrawItem, UiImage, UiRectangle, UiText};
+use crate::draw_list::{UiBorderSide, UiDrawItem, UiImage, UiRectangle, UiShadow, UiSlice, UiText};
 
-use super::{DEPTH_FORMAT, HDR_FORMAT, UiVertex};
+use super::{DEPTH_FORMAT, HDR_FORMAT, UI_BOX, UI_INSET_SHADOW, UI_SHADOW, UiVertex};
 
 use super::lighting::linear_color;
 
@@ -57,7 +57,12 @@ pub(super) fn ui_layers(items: &[UiDrawItem]) -> Vec<Range<usize>> {
 /// and the box it can draw in: left, top, right, bottom.
 fn kind_and_bounds(item: &UiDrawItem) -> (u8, [f32; 4]) {
     let (kind, [x, y], [w, h], margin) = match item {
-        UiDrawItem::Rectangle(rectangle) => (0, rectangle.position, rectangle.size, 0.0),
+        UiDrawItem::Rectangle(rectangle) => (
+            0,
+            rectangle.position,
+            rectangle.size,
+            shadow_spill(rectangle),
+        ),
         UiDrawItem::Image(image) => (1, image.position, image.size, 0.0),
         UiDrawItem::Text(text) => (2, text.position, text.size, text_spill(text)),
     };
@@ -84,6 +89,18 @@ fn text_spill(text: &UiText) -> f32 {
         .fold(0.0, f32::max);
     // Faux bold and italics draw a pixel or two outside the box's letters.
     stroke + shadow + 2.0
+}
+
+/// How far an outer shadow can reach past its rectangle.
+fn shadow_spill(rectangle: &UiRectangle) -> f32 {
+    match rectangle.shadow {
+        Some(shadow) if !shadow.inset => {
+            shadow.offset[0].abs().max(shadow.offset[1].abs())
+                + shadow.spread.max(0.0)
+                + shadow.blur.max(0.0)
+        }
+        _ => 0.0,
+    }
 }
 
 fn overlaps(a: [f32; 4], b: [f32; 4]) -> bool {
@@ -127,79 +144,127 @@ fn push_rectangle(
         size: [w, h],
         color: [r, g, b, alpha],
         color_end: [er, eg, eb, ea],
-        border_color: [br, bg, bb, ba],
+        border_color,
         border_width,
         border_radius,
-    } = rectangle;
-    {
-        if ![
-            x,
-            y,
-            w,
-            h,
-            r,
-            g,
-            b,
-            alpha,
-            br,
-            bg,
-            bb,
-            ba,
-            border_width,
-            border_radius,
-            er,
-            eg,
-            eb,
-            ea,
-        ]
+        border_sides,
+        shadow,
+    } = *rectangle;
+    let sides = border_sides.unwrap_or(
+        [UiBorderSide {
+            width: border_width,
+            color: border_color,
+        }; 4],
+    );
+    let shadow = shadow.unwrap_or_default();
+    let numbers = [
+        x,
+        y,
+        w,
+        h,
+        r,
+        g,
+        b,
+        alpha,
+        border_radius,
+        er,
+        eg,
+        eb,
+        ea,
+        shadow.offset[0],
+        shadow.offset[1],
+        shadow.blur,
+        shadow.spread,
+    ];
+    if !numbers
         .into_iter()
-        .all(|component| component.is_finite())
-            || *w <= 0.0
-            || *h <= 0.0
-            || (*alpha <= 0.0 && *ea <= 0.0 && (*ba <= 0.0 || *border_width <= 0.0))
-        {
-            return;
-        }
-        let point = |px: f32, py: f32| [px / width * 2.0 - 1.0, 1.0 - py / height * 2.0];
-        let top_left = point(*x, *y);
-        let top_right = point(*x + *w, *y);
-        let bottom_left = point(*x, *y + *h);
-        let bottom_right = point(*x + *w, *y + *h);
-        let color = linear_color([*r, *g, *b]);
-        let color = [color.x, color.y, color.z, alpha.clamp(0.0, 1.0)];
-        let border_color = linear_color([*br, *bg, *bb]);
-        let border_color = [
-            border_color.x,
-            border_color.y,
-            border_color.z,
-            ba.clamp(0.0, 1.0),
-        ];
-        let end = linear_color([*er, *eg, *eb]);
-        let color_end = [end.x, end.y, end.z, ea.clamp(0.0, 1.0)];
-        for (position, uv) in [
-            (top_left, [0.0, 0.0]),
-            (bottom_left, [0.0, 1.0]),
-            (top_right, [1.0, 0.0]),
-            (top_right, [1.0, 0.0]),
-            (bottom_left, [0.0, 1.0]),
-            (bottom_right, [1.0, 1.0]),
-        ] {
-            vertices.push(UiVertex {
-                position,
-                color,
-                uv,
-                size: [*w, *h],
-                border_color,
-                border: [
-                    border_radius.clamp(0.0, w.min(*h) * 0.5),
-                    border_width.clamp(0.0, w.min(*h) * 0.5),
-                ],
-                color_end,
-            });
-        }
+        .chain(
+            sides
+                .iter()
+                .flat_map(|side| side.color.into_iter().chain([side.width])),
+        )
+        .all(f32::is_finite)
+        || w <= 0.0
+        || h <= 0.0
+    {
+        return;
+    }
+    let border_shows = sides
+        .iter()
+        .any(|side| side.width > 0.0 && side.color[3] > 0.0);
+    let kind = match rectangle.shadow {
+        Some(UiShadow { inset: true, .. }) => UI_INSET_SHADOW,
+        Some(_) => UI_SHADOW,
+        None => UI_BOX,
+    };
+    if alpha <= 0.0 && (kind != UI_BOX || (ea <= 0.0 && !border_shows)) {
+        return;
+    }
+    // An outer shadow is its box moved and grown by the spread, drawn on a
+    // quad bigger by the blur on every side.
+    let (x, y, w, h, radius) = if kind == UI_SHADOW {
+        let blur = shadow.blur.max(0.0);
+        let spread = shadow.spread.max(-w.min(h) * 0.5);
+        let grow = spread + blur;
+        (
+            x + shadow.offset[0] - grow,
+            y + shadow.offset[1] - grow,
+            w + grow * 2.0,
+            h + grow * 2.0,
+            (border_radius.clamp(0.0, w.min(h) * 0.5) + spread).max(0.0),
+        )
+    } else {
+        (x, y, w, h, border_radius.clamp(0.0, w.min(h) * 0.5))
+    };
+    if w <= 0.0 || h <= 0.0 {
+        return;
+    }
+    let point = |px: f32, py: f32| [px / width * 2.0 - 1.0, 1.0 - py / height * 2.0];
+    let top_left = point(x, y);
+    let top_right = point(x + w, y);
+    let bottom_left = point(x, y + h);
+    let bottom_right = point(x + w, y + h);
+    let linear = |[r, g, b, a]: [f32; 4]| {
+        let color = linear_color([r, g, b]);
+        [color.x, color.y, color.z, a.clamp(0.0, 1.0)]
+    };
+    let color = linear([r, g, b, alpha]);
+    let color_end = linear([er, eg, eb, ea]);
+    let half = w.min(h) * 0.5;
+    let widths = sides.map(|side| side.width.clamp(0.0, half));
+    let [top, right, bottom, left] = sides.map(|side| linear(side.color));
+    for (position, uv) in [
+        (top_left, [0.0, 0.0]),
+        (bottom_left, [0.0, 1.0]),
+        (top_right, [1.0, 0.0]),
+        (top_right, [1.0, 0.0]),
+        (bottom_left, [0.0, 1.0]),
+        (bottom_right, [1.0, 1.0]),
+    ] {
+        vertices.push(UiVertex {
+            position,
+            color,
+            uv,
+            size: [w, h],
+            border_color: top,
+            border: [radius, kind],
+            color_end,
+            border_widths: if kind == UI_BOX { widths } else { [0.0; 4] },
+            border_right: right,
+            border_bottom: bottom,
+            border_left: left,
+            shadow: [
+                shadow.offset[0],
+                shadow.offset[1],
+                shadow.blur.max(0.0),
+                shadow.spread,
+            ],
+        });
     }
 }
 
+/// The quads of `image`: one, or its nine pieces (more when they repeat)
+/// when it's sliced and its texture's size is known.
 pub(super) fn image_quad(image: &UiImage, (width, height): (u32, u32)) -> Vec<UiVertex> {
     if width == 0 || height == 0 {
         return Vec::new();
@@ -216,30 +281,186 @@ pub(super) fn image_quad(image: &UiImage, (width, height): (u32, u32)) -> Vec<Ui
     {
         return Vec::new();
     }
-    let (width, height) = (width as f32, height as f32);
-    let point = |px: f32, py: f32| [px / width * 2.0 - 1.0, 1.0 - py / height * 2.0];
     let color = linear_color([r, g, b]);
     let color = [color.x, color.y, color.z, alpha.clamp(0.0, 1.0)];
-    let radius = image.border_radius.clamp(0.0, w.min(h) * 0.5);
-    [
-        (point(x, y), [0.0, 0.0]),
-        (point(x, y + h), [0.0, 1.0]),
-        (point(x + w, y), [1.0, 0.0]),
-        (point(x + w, y), [1.0, 0.0]),
-        (point(x, y + h), [0.0, 1.0]),
-        (point(x + w, y + h), [1.0, 1.0]),
-    ]
-    .into_iter()
-    .map(|(position, uv)| UiVertex {
-        position,
-        color,
-        uv,
-        size: [w, h],
-        border_color: [0.0; 4],
-        border: [radius, 0.0],
-        color_end: color,
-    })
-    .collect()
+    let screen = (width as f32, height as f32);
+    let texture_size = image.texture.as_ref().map(|texture| texture.size());
+    let pieces = match (image.slice, texture_size) {
+        (Some(slice), Some((tw, th))) if tw > 0 && th > 0 => {
+            slice_pieces(&slice, [x, y, w, h], [tw as f32, th as f32])
+        }
+        _ => vec![([x, y, w, h], [0.0, 0.0, 1.0, 1.0])],
+    };
+    let radius = if image.slice.is_some() {
+        0.0
+    } else {
+        image.border_radius.clamp(0.0, w.min(h) * 0.5)
+    };
+    let mut vertices = Vec::with_capacity(pieces.len() * 6);
+    for (rect, uv) in pieces {
+        push_image_piece(rect, uv, color, radius, screen, &mut vertices);
+    }
+    vertices
+}
+
+/// One textured quad: `[x, y, w, h]` on screen showing `[u0, v0, u1, v1]`.
+fn push_image_piece(
+    [x, y, w, h]: [f32; 4],
+    [u0, v0, u1, v1]: [f32; 4],
+    color: [f32; 4],
+    radius: f32,
+    (width, height): (f32, f32),
+    vertices: &mut Vec<UiVertex>,
+) {
+    if w <= 0.0 || h <= 0.0 {
+        return;
+    }
+    let point = |px: f32, py: f32| [px / width * 2.0 - 1.0, 1.0 - py / height * 2.0];
+    for (position, uv) in [
+        (point(x, y), [u0, v0]),
+        (point(x, y + h), [u0, v1]),
+        (point(x + w, y), [u1, v0]),
+        (point(x + w, y), [u1, v0]),
+        (point(x, y + h), [u0, v1]),
+        (point(x + w, y + h), [u1, v1]),
+    ] {
+        vertices.push(UiVertex {
+            position,
+            color,
+            uv,
+            size: [w, h],
+            border_color: [0.0; 4],
+            border: [radius, UI_BOX],
+            color_end: color,
+            border_widths: [0.0; 4],
+            border_right: [0.0; 4],
+            border_bottom: [0.0; 4],
+            border_left: [0.0; 4],
+            shadow: [0.0; 4],
+        });
+    }
+}
+
+/// At most this many tiles across or down one piece of a repeated slice.
+const MAX_TILES: usize = 256;
+
+/// The pieces of a sliced image on `[x, y, w, h]`, each as its box on
+/// screen and the part of the texture (`[u0, v0, u1, v1]`) it shows. The
+/// corners are `slice.widths` big, scaled down together when they don't
+/// fit, as CSS does; the edges and middle stretch, or repeat from the top
+/// left at the corners' scale.
+pub(super) fn slice_pieces(
+    slice: &UiSlice,
+    [x, y, w, h]: [f32; 4],
+    [tw, th]: [f32; 2],
+) -> Vec<([f32; 4], [f32; 4])> {
+    let clean = |value: f32| {
+        if value.is_finite() {
+            value.max(0.0)
+        } else {
+            0.0
+        }
+    };
+    // The cuts, in texture pixels, kept inside the texture.
+    let [mut it, mut ir, mut ib, mut il] = slice.insets.map(clean);
+    if it + ib > th {
+        let scale = th / (it + ib);
+        it *= scale;
+        ib *= scale;
+    }
+    if il + ir > tw {
+        let scale = tw / (il + ir);
+        il *= scale;
+        ir *= scale;
+    }
+    let [mut top, mut right, mut bottom, mut left] = slice.widths.map(clean);
+    let fit = (w / (left + right)).min(h / (top + bottom)).min(1.0);
+    if fit.is_finite() {
+        [top, right, bottom, left] = [top, right, bottom, left].map(|side| side * fit);
+    }
+    // Across: the left column, the middle and the right column, each as
+    // its span on screen and in the texture.
+    let columns = [
+        (x, left, 0.0, il),
+        (x + left, w - left - right, il, tw - ir),
+        (x + w - right, right, tw - ir, tw),
+    ];
+    let rows = [
+        (y, top, 0.0, it),
+        (y + top, h - top - bottom, it, th - ib),
+        (y + h - bottom, bottom, th - ib, th),
+    ];
+    // How big a repeated tile is: the texture's middle at the scale of the
+    // corners beside it.
+    let scale_x = if it > 0.0 {
+        top / it
+    } else if ib > 0.0 {
+        bottom / ib
+    } else {
+        1.0
+    };
+    let scale_y = if il > 0.0 {
+        left / il
+    } else if ir > 0.0 {
+        right / ir
+    } else {
+        1.0
+    };
+    let mut pieces = Vec::new();
+    for (row, &(sy, sh, v0, v1)) in rows.iter().enumerate() {
+        for (column, &(sx, sw, u0, u1)) in columns.iter().enumerate() {
+            if row == 1 && column == 1 && !slice.fill {
+                continue;
+            }
+            if sw <= 0.0 || sh <= 0.0 || u1 <= u0 || v1 <= v0 {
+                continue;
+            }
+            // Only the middle row and column repeat; corners never do.
+            let tile_w = if slice.repeat && column == 1 {
+                (u1 - u0) * scale_x
+            } else {
+                sw
+            };
+            let tile_h = if slice.repeat && row == 1 {
+                (v1 - v0) * scale_y
+            } else {
+                sh
+            };
+            // Sampled half a texel inside each cut, so smoothing doesn't
+            // bleed the piece next to it in.
+            let inside = |t0: f32, t1: f32, length: f32| {
+                let half = (0.5f32).min((t1 - t0) * 0.5);
+                (
+                    if t0 > 0.0 { t0 + half } else { t0 },
+                    if t1 < length { t1 - half } else { t1 },
+                )
+            };
+            let (u0, u1) = inside(u0, u1, tw);
+            let (v0, v1) = inside(v0, v1, th);
+            for (px, pw, pu0, pu1) in tiles(sx, sw, tile_w, u0, u1) {
+                for (py, ph, pv0, pv1) in tiles(sy, sh, tile_h, v0, v1) {
+                    pieces.push(([px, py, pw, ph], [pu0 / tw, pv0 / th, pu1 / tw, pv1 / th]));
+                }
+            }
+        }
+    }
+    pieces
+}
+
+/// `length` from `start` cut into tiles `tile` long, the last one cut
+/// short, each with its span of the texture from `t0` to `t1`.
+fn tiles(start: f32, length: f32, tile: f32, t0: f32, t1: f32) -> Vec<(f32, f32, f32, f32)> {
+    if tile.is_nan() || tile <= 0.0 || tile >= length || length / tile > MAX_TILES as f32 {
+        return vec![(start, length, t0, t1)];
+    }
+    let mut out = Vec::new();
+    let mut at = 0.0;
+    while at < length - 0.001 {
+        let piece = tile.min(length - at);
+        out.push((start + at, piece, t0, t0 + (t1 - t0) * piece / tile));
+        at += tile;
+    }
+    out
 }
 
 pub(super) fn glyph_color([r, g, b, a]: [f32; 4]) -> GlyphColor {
@@ -250,6 +471,13 @@ pub(super) fn glyph_color([r, g, b, a]: [f32; 4]) -> GlyphColor {
     };
     GlyphColor::rgba(byte(r), byte(g), byte(b), byte(a))
 }
+
+/// [`UiVertex`]'s fields, in order, as `ui.wgsl` reads them.
+const UI_VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 12] = wgpu::vertex_attr_array![
+    0 => Float32x2, 1 => Float32x4, 2 => Float32x2,
+    3 => Float32x2, 4 => Float32x4, 5 => Float32x2, 6 => Float32x4,
+    7 => Float32x4, 8 => Float32x4, 9 => Float32x4, 10 => Float32x4, 11 => Float32x4
+];
 
 pub(super) fn create_ui_pipeline(
     device: &wgpu::Device,
@@ -264,10 +492,7 @@ pub(super) fn create_ui_pipeline(
     let vertex_layout = wgpu::VertexBufferLayout {
         array_stride: size_of::<UiVertex>() as u64,
         step_mode: wgpu::VertexStepMode::Vertex,
-        attributes: &wgpu::vertex_attr_array![
-            0 => Float32x2, 1 => Float32x4, 2 => Float32x2,
-            3 => Float32x2, 4 => Float32x4, 5 => Float32x2, 6 => Float32x4
-        ],
+        attributes: &UI_VERTEX_ATTRIBUTES,
     };
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("UI overlay"),
@@ -341,10 +566,7 @@ pub(super) fn create_ui_image_pipeline(
     let vertex_layout = wgpu::VertexBufferLayout {
         array_stride: size_of::<UiVertex>() as u64,
         step_mode: wgpu::VertexStepMode::Vertex,
-        attributes: &wgpu::vertex_attr_array![
-            0 => Float32x2, 1 => Float32x4, 2 => Float32x2,
-            3 => Float32x2, 4 => Float32x4, 5 => Float32x2, 6 => Float32x4
-        ],
+        attributes: &UI_VERTEX_ATTRIBUTES,
     };
     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("UI image"),

@@ -1,6 +1,6 @@
 //! The designer's side panels: the palette of elements, the hierarchy, and
-//! the inspector (name, text, font, the text toolbar, anchor and the Style
-//! section).
+//! the inspector (name, text, font, the text toolbar, states, bevel, slice,
+//! anchor and the Style section).
 
 use std::sync::Arc;
 
@@ -292,6 +292,10 @@ impl UiDesigner {
                 self.states_editor(ui, scene, id, actions);
             }
             if id != gui {
+                super::bevel::bevel_editor(ui, scene, id, actions);
+                if super::slice::sliceable(instance.class()) {
+                    self.slice_editor(ui, scene, id, actions);
+                }
                 anchor_picker(ui, scene, gui, id, actions);
             }
             if scene.editing

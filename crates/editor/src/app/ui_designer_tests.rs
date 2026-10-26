@@ -1936,3 +1936,314 @@ fn mouse_enter_leave_and_a_disabled_button_reach_the_game_in_play() {
     app.stop();
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+/// `items` drawn on a `width` × `height` screen, as the brightness (0 to
+/// 765) of each pixel, or `None` on a machine without a GPU.
+fn brightness_of(
+    items: Vec<axcenity_render::UiDrawItem>,
+    (width, height): (u32, u32),
+) -> Option<impl Fn(f32, f32) -> u32> {
+    use axcenity_render::wgpu;
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+    let adapter = pollster::block_on(instance.request_adapter(&Default::default())).ok()?;
+    let (device, queue) = pollster::block_on(adapter.request_device(&Default::default())).ok()?;
+    let mut list = axcenity_scene::build_draw_list(
+        &World::new(),
+        &axcenity_assets::Assets::default(),
+        axcenity_render::Camera {
+            position: Vec3::ZERO,
+            look_at: Vec3::NEG_Z,
+            fov_y_degrees: 70.0,
+        },
+    );
+    list.ui = items;
+    let mut renderer = axcenity_render::TextureRenderer::new(&device, &queue, width, height);
+    renderer.render(&list).ok()?;
+    let pixels = renderer.read_pixels();
+    Some(move |x: f32, y: f32| {
+        let at = ((y as u32 * width + x as u32) * 4) as usize;
+        pixels[at..at + 3].iter().map(|&c| u32::from(c)).sum()
+    })
+}
+
+#[test]
+fn a_raised_bevel_lights_the_top_left_and_flips_while_held_in_the_designer_and_in_play() {
+    use crate::ui_designer::bevel::{Bevel, find_bevel};
+    use crate::ui_designer::state_style_action;
+    use axcenity_render::UiDrawItem;
+    use axcenity_ui::{UiInput, UiInteraction, UiState};
+    let folder = copy_of_example("hello-touched", "ui-designer-bevel");
+    let mut app = EditorApp::new(Some(&folder));
+    act(&mut app, DesignerAction::NewScreenGui);
+    let gui = app.selected.unwrap();
+    act(
+        &mut app,
+        DesignerAction::DesignSize {
+            gui,
+            width: 1280,
+            height: 720,
+        },
+    );
+    let play = drop_in(&mut app, Insertable::TextButton, gui, [100.0, 100.0]);
+    act(
+        &mut app,
+        DesignerAction::Edit(play, Edit::Name("Play".into())),
+    );
+    act(
+        &mut app,
+        state_style_action(
+            play,
+            UiState::Normal,
+            "background-color",
+            "#808080".into(),
+            false,
+        ),
+    );
+    let before = state(&app);
+
+    // Raised, clicked in the inspector's Bevel section.
+    let ctx = theme::test_context();
+    let mut clock = 0.0;
+    let size = egui::vec2(1100.0, 1600.0);
+    for _ in 0..3 {
+        designer_frame(&mut app, &ctx, &mut clock, size, Vec::new());
+    }
+    click_named(&mut app, &ctx, &mut clock, size, "Raised");
+    let css = app.stylesheet_text("ui.css").unwrap().replace("\r\n", "\n");
+    let shadows_in = |selector: &str| {
+        let rule = rule_text(&css, selector);
+        let start = rule.find("box-shadow:").unwrap_or_else(|| panic!("{css}")) + 11;
+        rule[start..start + rule[start..].find(';').unwrap()]
+            .trim()
+            .to_owned()
+    };
+    let raised = Bevel::default();
+    assert_eq!(find_bevel(&shadows_in("#Play")), Some((raised, 0)), "{css}");
+    assert_eq!(
+        find_bevel(&shadows_in("#Play:active")),
+        Some((raised.flipped(), 0)),
+        "{css}"
+    );
+
+    // Lit at the top left and shaded at the bottom right, then the other
+    // way round while held: on the artboard, and in Play.
+    let sheets = stylesheets(&app);
+    let shown = |state| {
+        axcenity_ui::layout_artboard_in_state(
+            &app.world,
+            gui,
+            &sheets,
+            (1280, 720),
+            1.0,
+            [0.0, 0.0],
+            Some((play, state)),
+        )
+    };
+    let rect = shown(UiState::Normal).element(play).unwrap().rect;
+    // The light inset shadow is moved down and right when raised, so it
+    // lies along the top and left edges, and up and left when sunken.
+    let light_shadow = |items: &[UiDrawItem]| {
+        items
+            .iter()
+            .find_map(|item| match item {
+                UiDrawItem::Rectangle(r)
+                    if r.shadow.is_some_and(|s| s.inset) && r.color[..3] == [1.0; 3] =>
+                {
+                    Some(*r)
+                }
+                _ => None,
+            })
+            .unwrap()
+    };
+    let check = |items: Vec<UiDrawItem>, raised: bool, place: &str| {
+        let offset = light_shadow(&items).shadow.unwrap().offset;
+        assert_eq!(offset[0] > 0.0 && offset[1] > 0.0, raised, "{place}");
+        let Some(brightness) = brightness_of(items, (1280, 720)) else {
+            eprintln!("no GPU: the pixels weren't checked");
+            return;
+        };
+        let middle = [rect.x + rect.width * 0.5, rect.y + rect.height * 0.5];
+        let top = brightness(middle[0], rect.y + 1.0);
+        let left = brightness(rect.x + 1.0, middle[1]);
+        let bottom = brightness(middle[0], rect.y + rect.height - 2.0);
+        let right = brightness(rect.x + rect.width - 2.0, middle[1]);
+        if raised {
+            assert!(
+                top > bottom && left > right,
+                "{place}: {top} {left} {bottom} {right}"
+            );
+        } else {
+            assert!(
+                top < bottom && left < right,
+                "{place}: {top} {left} {bottom} {right}"
+            );
+        }
+    };
+    check(shown(UiState::Normal).draw_items, true, "designer");
+    check(
+        shown(UiState::Pressed).draw_items,
+        false,
+        "designer, pressed",
+    );
+
+    app.play();
+    let session = app.play.as_ref().expect("playing");
+    let mut ui = UiInteraction::default();
+    let over = UiInput {
+        pointer: Some([rect.x + 20.0, rect.y + 10.0]),
+        ..UiInput::default()
+    };
+    let held = UiInput {
+        pressed: Some(play),
+        ..over
+    };
+    let mut frame = |input, seconds| {
+        ui.layout(session.world(), (1280, 720), &sheets, input, None, seconds)
+            .draw_items
+    };
+    frame(UiInput::default(), 0.0);
+    check(frame(over, 0.1), true, "Play");
+    check(frame(held, 0.1), false, "Play, held");
+    app.stop();
+
+    // Both rules were one undo step.
+    app.undo();
+    assert_eq!(state(&app), before);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn dragging_the_slice_editors_lines_changes_the_border_image_css() {
+    let folder = copy_of_example("hello-touched", "ui-designer-slice");
+    // A 40 × 40 picture to cut.
+    let picture = folder.join("assets/ui/frame.png");
+    std::fs::create_dir_all(picture.parent().unwrap()).unwrap();
+    image::RgbaImage::from_fn(40, 40, |x, y| {
+        image::Rgba([(x * 6) as u8, (y * 6) as u8, 128, 255])
+    })
+    .save(&picture)
+    .unwrap();
+    let mut app = EditorApp::new(Some(&folder));
+    act(&mut app, DesignerAction::NewScreenGui);
+    let gui = app.selected.unwrap();
+    let panel = drop_in(&mut app, Insertable::Frame, gui, [100.0, 100.0]);
+    act(
+        &mut app,
+        DesignerAction::Edit(panel, Edit::Name("Panel".into())),
+    );
+    // What the Image box writes for a picture.
+    act(
+        &mut app,
+        DesignerAction::TextStyle {
+            id: panel,
+            property: "border-image",
+            value: "url(\"assets/ui/frame.png\") 10 fill".into(),
+            dragging: false,
+        },
+    );
+    let before = state(&app);
+    let border_image = |app: &EditorApp| {
+        axcenity_ui::style_value_in_state(
+            &app.world,
+            panel,
+            &stylesheets(app),
+            axcenity_ui::UiState::Normal,
+            "border-image",
+        )
+        .and_then(|value| axcenity_ui::BorderImage::parse(&value))
+        .unwrap()
+    };
+
+    let ctx = theme::test_context();
+    let mut clock = 0.0;
+    let size = egui::vec2(1100.0, 1600.0);
+    for _ in 0..3 {
+        designer_frame(&mut app, &ctx, &mut clock, size, Vec::new());
+    }
+    // Each line dragged 10 points inward: 40 pixels drawn as 200 points
+    // wide at most, so 5 points a pixel and 2 pixels a drag.
+    for side in 0..4 {
+        let output = designer_frame(&mut app, &ctx, &mut clock, size, Vec::new());
+        let update = output.platform_output.accesskit_update.as_ref().unwrap();
+        let ppp = ctx.pixels_per_point();
+        let (_, node) = update
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some("Slice preview"))
+            .expect("the Slice editor shows the picture");
+        let bounds = node.bounds().unwrap();
+        let preview = egui::Rect::from_min_max(
+            egui::pos2(bounds.x0 as f32 / ppp, bounds.y0 as f32 / ppp),
+            egui::pos2(bounds.x1 as f32 / ppp, bounds.y1 as f32 / ppp),
+        );
+        let points = preview.width() / 40.0;
+        let slices = border_image(&app).slices;
+        let middle = preview.center();
+        let (from, inward) = match side {
+            0 => (
+                egui::pos2(middle.x, preview.top() + slices[0] * points),
+                egui::vec2(0.0, 1.0),
+            ),
+            1 => (
+                egui::pos2(preview.right() - slices[1] * points, middle.y),
+                egui::vec2(-1.0, 0.0),
+            ),
+            2 => (
+                egui::pos2(middle.x, preview.bottom() - slices[2] * points),
+                egui::vec2(0.0, -1.0),
+            ),
+            _ => (
+                egui::pos2(preview.left() + slices[3] * points, middle.y),
+                egui::vec2(1.0, 0.0),
+            ),
+        };
+        for events in drag_on_artboard(from, from + inward * points * 2.0) {
+            designer_frame(&mut app, &ctx, &mut clock, size, events);
+        }
+        let mut expected = slices;
+        expected[side] += 2.0;
+        assert_eq!(border_image(&app).slices, expected, "dragging line {side}");
+    }
+    assert_eq!(border_image(&app).slices, [12.0; 4]);
+    // The inspector's Bevel and Slice sections, and the frame, to look at.
+    if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from) {
+        let (normal, pressed) = (
+            crate::ui_designer::bevel::with_bevel(
+                None,
+                Some(crate::ui_designer::bevel::Bevel::default()),
+            ),
+            None,
+        );
+        act(
+            &mut app,
+            DesignerAction::Bevel {
+                id: panel,
+                normal,
+                pressed,
+                dragging: false,
+            },
+        );
+        app.ui_designer = UiDesigner::default();
+        crate::snapshot::snapshot_rendered(
+            &folder.join("ui-designer-slice.png"),
+            egui::vec2(1100.0, 1300.0),
+            vec![Vec::new(); 3],
+            |ctx, render_state| {
+                egui::CentralPanel::default()
+                    .show(ctx, |ui| app.ui_designer_pane(ui, Some(render_state)));
+            },
+        );
+        app.undo();
+    }
+    let css = app.stylesheet_text("ui.css").unwrap();
+    assert!(
+        css.contains("border-image: url(\"assets/ui/frame.png\") 12 fill"),
+        "{css}"
+    );
+    // Each drag is one undo step.
+    for _ in 0..4 {
+        app.undo();
+    }
+    assert_eq!(state(&app), before);
+    let _ = std::fs::remove_dir_all(&folder);
+}

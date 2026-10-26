@@ -26,9 +26,11 @@
 mod anchor_handles;
 mod anchors;
 mod artboard;
+pub(crate) mod bevel;
 mod panels;
 mod rich_text;
 mod rulers;
+mod slice;
 mod states;
 mod text_toolbar;
 
@@ -148,6 +150,14 @@ pub enum DesignerAction {
         value: String,
         dragging: bool,
     },
+    /// The Bevel: `box-shadow` for the element's own `#Id` rule and, for a
+    /// button, `#Id:active`, as one undo step (or part of a drag's).
+    Bevel {
+        id: InstanceId,
+        normal: String,
+        pressed: Option<String>,
+        dragging: bool,
+    },
     /// Makes a ScreenGui, when there's none to design.
     NewScreenGui,
 }
@@ -261,6 +271,12 @@ pub struct UiDesigner {
     state: UiState,
     /// The eye: the selected element is shown in `state` on the artboard.
     show_state: bool,
+    /// The Slice editor's picture path as typed, for the element it's typed for.
+    slice_path: Option<(InstanceId, String)>,
+    /// The Slice editor's picture, and the image it was made from.
+    slice_image: Option<(usize, egui::TextureHandle)>,
+    /// The cut being dragged in the Slice editor: 0 top, 1 right, 2 bottom, 3 left.
+    slice_drag: Option<usize>,
     /// Where the artboard was drawn last, in points.
     board: Option<egui::Rect>,
     /// The canvas inside the rulers, as drawn last.
@@ -294,6 +310,9 @@ impl Default for UiDesigner {
             project_fonts: None,
             state: UiState::Normal,
             show_state: true,
+            slice_path: None,
+            slice_image: None,
+            slice_drag: None,
             board: None,
             canvas_rect: None,
             empty: World::new(),
