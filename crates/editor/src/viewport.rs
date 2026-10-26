@@ -55,6 +55,7 @@ use crate::ui_handles::{self, Grip, Handles, UiDrag, UiDragEdit};
 
 mod input;
 mod overlays;
+pub(crate) use overlays::paint_agent_paths;
 use overlays::*;
 
 /// Where the camera starts, looking at the origin (the same as the player).
@@ -97,6 +98,8 @@ const EMITTER_ICON_RADIUS: f32 = 11.0;
 /// are drawn out to the terrain overlay distance.
 const NAV_FILL_DISTANCE: f32 = 80.0;
 const NAV_EDGE_COLOR: egui::Color32 = egui::Color32::from_rgb(40, 230, 210);
+/// The Agent Paths overlay: what's left of each agent's path.
+const AGENT_PATH_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 150, 40);
 
 /// A left click in the viewport, with the UI element or part under the
 /// mouse (`None` for empty space, which clears the selection). Starting to
@@ -247,6 +250,9 @@ pub struct ViewportScene<'a> {
     pub debug_rays: &'a [DebugRay],
     /// The navigation mesh, for its overlay.
     pub nav_mesh: Option<&'a axcenity_nav::NavMesh>,
+    /// The path each NavigationAgent is walking during Play, from its feet,
+    /// for the Agent Paths overlay.
+    pub agent_paths: &'a [(InstanceId, Vec<axcenity_core::Vector3>)],
     /// Animated MeshParts' poses during Play; `None` draws every model still.
     pub poses: Option<&'a axcenity_scene::Poses>,
     /// A Terrain Studio brush, which takes the left button while it's on.
@@ -264,11 +270,17 @@ pub struct OverlayToggles {
     pub bounds: bool,
     pub emitters: bool,
     pub nav_mesh: bool,
+    pub agent_paths: bool,
 }
 
 impl OverlayToggles {
     pub fn any(self) -> bool {
-        self.colliders || self.raycasts || self.bounds || self.emitters || self.nav_mesh
+        self.colliders
+            || self.raycasts
+            || self.bounds
+            || self.emitters
+            || self.nav_mesh
+            || self.agent_paths
     }
 }
 
@@ -510,6 +522,7 @@ impl Viewport {
             overlays,
             debug_rays,
             nav_mesh,
+            agent_paths,
             poses,
             terrain_brush,
             character_view,
@@ -809,6 +822,9 @@ impl Viewport {
             && let Some(mesh) = nav_mesh
         {
             paint_nav_mesh(&ui.painter_at(rect), &screen, mesh, eye);
+        }
+        if overlays.agent_paths {
+            paint_agent_paths(&ui.painter_at(rect), &screen, agent_paths);
         }
         let painter = ui.painter_at(rect);
         for &pose in preview {

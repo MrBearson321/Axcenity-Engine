@@ -424,6 +424,14 @@ impl Writer {
                 let value = self.expression(value)?;
                 self.line(format!("{}.Value = {value}", target(t)?));
             }
+            BlockKind::SetDestination { agent, position } => {
+                let value = self.expression(position)?;
+                self.line(format!("{}.Destination = {value}", target(agent)?));
+            }
+            BlockKind::SetVelocity { agent, velocity } => {
+                let value = self.expression(velocity)?;
+                self.line(format!("{}.Velocity = {value}", target(agent)?));
+            }
             BlockKind::SetProperty {
                 target: t,
                 property,

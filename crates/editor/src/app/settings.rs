@@ -194,6 +194,11 @@ impl EditorApp {
             theme::with_icon(icons::FOOTPRINTS, "Show navigation mesh"),
         )
         .on_hover_text("Where characters can walk, coloured by connected ground.");
+        ui.checkbox(
+            &mut self.overlays.agent_paths,
+            theme::with_icon(icons::PATH, "Show agent paths"),
+        )
+        .on_hover_text("The path each NavigationAgent is walking, during Play.");
         ui.add_space(16.0);
         widgets::section_label(ui, "Ribbon");
         ui.label(

@@ -1289,6 +1289,26 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "How far above the character's feet its eyes are, in studs. The camera sits there during Play.",
     ),
     (
+        ClassName::NavigationAgent,
+        "Destination",
+        "Where the agent walks to, along the navigation mesh, during Play. Setting a new one finds a new path. A point off the mesh, or with no walkable route to it, leaves the agent where it is: Status becomes \"Unreachable\" and Output says why. The editor starts it where the agent stands. Set it from a script or the \"walk to\" block.",
+    ),
+    (
+        ClassName::NavigationAgent,
+        "WalkSpeed",
+        "How fast the agent walks its path, in studs a second.",
+    ),
+    (
+        ClassName::NavigationAgent,
+        "Velocity",
+        "Studs a second. Not zero, the agent moves straight that way along the ground, with no path, and stops at the edge of walkable ground. Destination follows it, so setting Velocity back to zero leaves it where it is. Y is ignored. Set it from a script or the \"set velocity\" block.",
+    ),
+    (
+        ClassName::NavigationAgent,
+        "Status",
+        "\"Moving\" while it walks a path or moves at Velocity, \"Reached\" at its Destination, \"Unreachable\" when no path leads to its Destination, and \"Idle\" after Velocity stopped it. Set by the game during Play; read it from a script or the property block.",
+    ),
+    (
         ClassName::Frame,
         "ZIndex",
         "Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.",
@@ -2069,6 +2089,9 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::FirstPersonController => {
             "Moves the character model it is parented to just like a ThirdPersonController, with the camera at the character's eyes during Play, looking where the player looks. A character has one controller or the other."
+        }
+        ClassName::NavigationAgent => {
+            "Walks the Model or Part it is parented to during Play: along the navigation mesh to its Destination, round walls and gaps, or straight at its Velocity. It is not a physics body. View > Overlays > Agent Paths draws the path it is walking."
         }
     }
 }

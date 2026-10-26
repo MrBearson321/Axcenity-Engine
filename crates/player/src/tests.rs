@@ -184,6 +184,148 @@ fn hello_character_walks_runs_and_switches_from_lua_and_blocks() {
 }
 
 #[test]
+fn hello_agent_walks_to_destinations_from_properties_lua_and_blocks() {
+    use axcenity_core::KeyCode as K;
+
+    /// The game, stepped in the player's frame order: characters, agents,
+    /// scripts, kinematic holds, physics, Heartbeat.
+    struct Game {
+        world: World,
+        scripts: ScriptRuntime,
+        characters: Controllers,
+        agents: Agents,
+        physics: Physics,
+        printed: Vec<String>,
+        warnings: Vec<String>,
+    }
+    impl Game {
+        fn frame(&mut self, keys: &[KeyEvent]) {
+            let (world, assets, dt) = (&mut self.world, &Assets::default(), 1.0 / 60.0);
+            self.characters
+                .step(world, assets, MoveInput::default(), dt);
+            self.agents.step(world, assets, dt);
+            self.warnings.extend(self.agents.take_warnings());
+            self.scripts.input(world, keys);
+            self.scripts.step(world, f64::from(dt));
+            self.characters.keep_kinematic(world);
+            self.agents.keep_kinematic(world);
+            self.physics.step(world, f64::from(dt));
+            self.scripts.heartbeat(world, f64::from(dt));
+            for line in self.scripts.take_output() {
+                assert_eq!(line.kind, OutputKind::Print, "{}", line.text);
+                self.printed.push(line.text);
+            }
+        }
+        fn run(&mut self, seconds: f32) {
+            for _ in 0..(seconds * 60.0).round() as usize {
+                self.frame(&[]);
+            }
+        }
+        /// Presses and lets go of `key`.
+        fn tap(&mut self, key: K) {
+            self.frame(&[KeyEvent { key, pressed: true }]);
+            self.frame(&[KeyEvent {
+                key,
+                pressed: false,
+            }]);
+        }
+    }
+
+    let (world, scripts) = start_example("hello-agent");
+    let guard = world.find_first_child(world.workspace(), "Guard").unwrap();
+    let agent = world.find_first_child(guard, "NavigationAgent").unwrap();
+    let body = world.find_first_child(guard, "Body").unwrap();
+    let mut game = Game {
+        world,
+        scripts,
+        characters: Controllers::default(),
+        agents: Agents::default(),
+        physics: Physics::new(),
+        printed: Vec::new(),
+        warnings: Vec::new(),
+    };
+    let feet = |game: &Game| axcenity_nav::feet_of(&game.world, &[body]).unwrap();
+    let status = |game: &Game| {
+        game.world
+            .get(agent)
+            .unwrap()
+            .property("Status")
+            .and_then(Value::as_str)
+            .unwrap()
+            .to_owned()
+    };
+    let near = |a: Vector3, x: f32, z: f32| (a.x - x).hypot(a.z - z) < 1e-3;
+
+    // The Destination set in Properties: the Goal, behind the wall. The
+    // Guard goes round the wall's end and is never inside it.
+    let mut furthest_z = f32::NEG_INFINITY;
+    for _ in 0..6 * 60 {
+        game.frame(&[]);
+        let at = feet(&game);
+        furthest_z = furthest_z.max(at.z);
+        assert!(at.x.abs() > 1.5 || at.z > 12.0, "in the wall at {at:?}");
+    }
+    assert!(near(feet(&game), 16.0, 0.0), "{:?}", feet(&game));
+    assert!(furthest_z > 12.0, "went round the end: {furthest_z}");
+    assert_eq!(status(&game), "Reached");
+    assert!(feet(&game).y.abs() < 1e-3, "on the floor, not fallen");
+
+    // P, from Lua.
+    game.tap(K::P);
+    game.run(3.0);
+    assert!(near(feet(&game), 16.0, -16.0), "{:?}", feet(&game));
+
+    // 1, from blocks.
+    game.tap(K::One);
+    game.run(4.0);
+    assert!(near(feet(&game), 16.0, 16.0), "{:?}", feet(&game));
+    assert_eq!(status(&game), "Reached");
+
+    // 2: the island across the gap. The Guard stays, and says why once.
+    let before = feet(&game);
+    game.tap(K::Two);
+    game.run(1.0);
+    assert_eq!(feet(&game), before);
+    assert_eq!(status(&game), "Unreachable");
+    assert_eq!(
+        game.warnings,
+        vec![
+            "Workspace.Guard.NavigationAgent can't reach (0, 0, 50): no walkable route \
+             leads there."
+                .to_owned()
+        ]
+    );
+    assert!(game.printed.iter().any(|line| line == "Guard: Unreachable"));
+
+    // 3 and 4, from blocks: a Velocity moves it with no path, and zero stops it.
+    game.tap(K::Three);
+    game.run(1.0);
+    game.tap(K::Four);
+    let pushed = feet(&game);
+    assert!(pushed.x - before.x > 7.5, "{before:?} -> {pushed:?}");
+    assert_eq!(pushed.z, before.z);
+    assert_eq!(game.agents.path(agent), None);
+    game.run(0.5);
+    assert_eq!(feet(&game), pushed, "it stays where it stopped");
+    assert_eq!(status(&game), "Idle");
+
+    // Held V, from Lua.
+    game.frame(&[KeyEvent {
+        key: K::V,
+        pressed: true,
+    }]);
+    game.run(1.0);
+    game.frame(&[KeyEvent {
+        key: K::V,
+        pressed: false,
+    }]);
+    let backed = feet(&game);
+    assert!(pushed.z - backed.z > 7.5, "{pushed:?} -> {backed:?}");
+    let anchored = game.world.get(body).unwrap().property("Anchored").cloned();
+    assert_eq!(anchored, Some(Value::Bool(true)), "held kinematic");
+}
+
+#[test]
 fn hello_character_hovers_in_a_custom_mode_from_lua_and_blocks() {
     use axcenity_core::KeyCode as K;
     let (mut world, mut scripts) = start_example("hello-character");

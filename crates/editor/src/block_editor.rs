@@ -245,7 +245,9 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::MoveBy { .. }
         | BlockKind::TurnTo { .. }
         | BlockKind::TurnBy { .. }
-        | BlockKind::SetAnchored { .. } => Category::Motion,
+        | BlockKind::SetAnchored { .. }
+        | BlockKind::SetDestination { .. }
+        | BlockKind::SetVelocity { .. } => Category::Motion,
         BlockKind::SetColor { .. }
         | BlockKind::SetText { .. }
         | BlockKind::Show { .. }
@@ -305,6 +307,8 @@ enum Filter {
     Gui,
     Animators,
     Animations,
+    /// NavigationAgents.
+    Agents,
     Any,
 }
 
@@ -325,6 +329,7 @@ impl Filter {
             Filter::Widgets => class.is_value_widget(),
             Filter::Animators => class == ClassName::Animator,
             Filter::Animations => class == ClassName::Animation,
+            Filter::Agents => class == ClassName::NavigationAgent,
             Filter::Gui => matches!(
                 class,
                 ClassName::ScreenGui
@@ -358,6 +363,7 @@ impl Filter {
             Filter::Gui => "Frame",
             Filter::Animators => "Model.Animator",
             Filter::Animations => "Model.Animation",
+            Filter::Agents => "Model.NavigationAgent",
         }
     }
 }
@@ -732,6 +738,18 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
             label("by"),
             Slot(rotation, SlotKind::Vector),
             label("degrees"),
+        ])],
+        BlockKind::SetDestination { agent, position } => vec![Row(vec![
+            label("walk"),
+            Object(agent, Filter::Agents),
+            label("to"),
+            Slot(position, SlotKind::Vector),
+        ])],
+        BlockKind::SetVelocity { agent, velocity } => vec![Row(vec![
+            label("set velocity of"),
+            Object(agent, Filter::Agents),
+            label("to"),
+            Slot(velocity, SlotKind::Vector),
         ])],
         BlockKind::SetAnchored { target, anchored } => vec![Row(vec![
             label("set"),

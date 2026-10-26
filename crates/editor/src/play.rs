@@ -18,7 +18,8 @@ use axcenity_anim::Animators;
 use axcenity_assets::Assets;
 use axcenity_audio::{GameAudio, SoundAction};
 use axcenity_character::{CharacterCamera, Controllers, MoveInput};
-use axcenity_core::{InstanceId, KeyCode, World};
+use axcenity_core::{InstanceId, KeyCode, Vector3, World};
+use axcenity_nav::Agents;
 use axcenity_physics::Physics;
 use axcenity_project::{LoadingScreen, ScriptFile};
 use axcenity_script::{Breakpoints, CameraState, KeyEvent, OutputKind, Pause, ScriptRuntime};
@@ -40,6 +41,8 @@ pub struct Session {
     physics: Physics,
     /// Walks third-person characters and owns the camera when one is present.
     characters: Controllers,
+    /// Walks NavigationAgents along their paths.
+    agents: Agents,
     /// Plays the Animators (state machines, AnimationTracks and played
     /// Animations), posing skeletons and setting keyed properties.
     animators: Animators,
@@ -79,6 +82,7 @@ impl Session {
             scripts: ScriptRuntime::new(),
             physics: Physics::with_assets(assets.clone()),
             characters: Controllers::default(),
+            agents: Agents::default(),
             animators: Animators::new(),
             assets,
             audio: GameAudio::default(),
@@ -287,6 +291,12 @@ impl Session {
             }
             self.characters
                 .step(&mut self.world, &self.assets, motion, seconds as f32);
+            // Then navigation agents, toward their destinations.
+            self.agents
+                .step(&mut self.world, &self.assets, seconds as f32);
+            for warning in self.agents.take_warnings() {
+                output.warning(warning);
+            }
             let mut clock = Instant::now();
             // The time since `clock`, which then starts again.
             let mut lap = || {
@@ -317,6 +327,7 @@ impl Session {
             // scripts and before physics, keeps a script from dropping it
             // for this step. Gravity and friction of other parts are unchanged.
             self.characters.keep_kinematic(&mut self.world);
+            self.agents.keep_kinematic(&mut self.world);
             // 3. Step physics at a fixed 60 Hz (0 to N steps this frame).
             cost.physics_steps = self.physics.step(&mut self.world, seconds);
             cost.physics += lap();
@@ -393,6 +404,12 @@ impl Session {
     /// The posed models of the animated MeshParts, for the viewport.
     pub fn poses(&self) -> &axcenity_scene::Poses {
         self.animators.poses()
+    }
+
+    /// The path each NavigationAgent is walking, from its feet, for the
+    /// Agent Paths overlay. Reading them changes nothing.
+    pub fn agent_paths(&self) -> Vec<(InstanceId, Vec<Vector3>)> {
+        self.agents.paths()
     }
 
     /// Recent `workspace:Raycast` calls, for the editor overlay.

@@ -1478,6 +1478,19 @@ declare extern type FirstPersonController extends Instance with
 	[string]: any
 end
 
+--- Walks the Model or Part it is parented to during Play: along the navigation mesh to its Destination, round walls and gaps, or straight at its Velocity. It is not a physics body. View > Overlays > Agent Paths draws the path it is walking.
+declare extern type NavigationAgent extends Instance with
+	--- Where the agent walks to, along the navigation mesh, during Play. Setting a new one finds a new path. A point off the mesh, or with no walkable route to it, leaves the agent where it is: Status becomes "Unreachable" and Output says why. The editor starts it where the agent stands. Set it from a script or the "walk to" block.
+	Destination: Vector3
+	--- How fast the agent walks its path, in studs a second.
+	WalkSpeed: number
+	--- Studs a second. Not zero, the agent moves straight that way along the ground, with no path, and stops at the edge of walkable ground. Destination follows it, so setting Velocity back to zero leaves it where it is. Y is ignored. Set it from a script or the "set velocity" block.
+	Velocity: Vector3
+	--- "Moving" while it walks a path or moves at Velocity, "Reached" at its Destination, "Unreachable" when no path leads to its Destination, and "Idle" after Velocity stopped it. Set by the game during Play; read it from a script or the property block.
+	Status: string
+	[string]: any
+end
+
 -- Globals -------------------------------------------------------------------
 
 --- The root of the game. Every service is inside it.
@@ -1498,7 +1511,7 @@ declare function require(module: Instance): any
 --- Creates Instances.
 declare extern type InstanceLibrary with
 	--- Creates an Instance of this class with default properties and no parent. Set `Parent` to put it in the world.
-	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: string) -> Instance)
+	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: string) -> Instance)
 end
 
 --- Creates Instances.

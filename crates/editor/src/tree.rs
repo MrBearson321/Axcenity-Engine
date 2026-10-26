@@ -43,6 +43,8 @@ pub enum Insertable {
     ThirdPersonController,
     /// The same movement, with the camera at the character's eyes.
     FirstPersonController,
+    /// Walks a character along the navigation mesh.
+    NavigationAgent,
 }
 
 impl Insertable {
@@ -85,6 +87,8 @@ impl Insertable {
         Insertable::ThirdPersonController,
         Insertable::FirstPersonController,
     ];
+    /// Navigation agents, which walk a character to a destination.
+    pub const AGENTS: [Insertable; 1] = [Insertable::NavigationAgent];
 
     /// What the buttons and menus call it. A Ball is a "Sphere", as in Studio.
     pub fn label(self) -> &'static str {
@@ -120,6 +124,7 @@ impl Insertable {
             Insertable::Animation => "Animation",
             Insertable::ThirdPersonController => "Third Person",
             Insertable::FirstPersonController => "First Person",
+            Insertable::NavigationAgent => "Agent",
         }
     }
 
@@ -153,6 +158,7 @@ impl Insertable {
             Insertable::Animation => ClassName::Animation,
             Insertable::ThirdPersonController => ClassName::ThirdPersonController,
             Insertable::FirstPersonController => ClassName::FirstPersonController,
+            Insertable::NavigationAgent => ClassName::NavigationAgent,
         }
     }
 
@@ -319,6 +325,7 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
                         | Insertable::Animation
                         | Insertable::ThirdPersonController
                         | Insertable::FirstPersonController
+                        | Insertable::NavigationAgent
                 )
                 && is_saved(world, id))
     })

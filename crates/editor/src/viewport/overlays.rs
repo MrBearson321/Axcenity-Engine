@@ -405,6 +405,38 @@ pub(super) fn paint_nav_mesh(
     }
 }
 
+/// Draws what's left of each agent's path: a line from its feet through
+/// the corners ahead, a dot on each corner, and a ring at the end. It only
+/// reads the paths, so drawing them never changes a route.
+pub(crate) fn paint_agent_paths(
+    painter: &egui::Painter,
+    screen: &Screen,
+    paths: &[(InstanceId, Vec<axcenity_core::Vector3>)],
+) {
+    // Raised a little so the line reads on top of the ground it follows.
+    let lift = Vec3::new(0.0, 0.1, 0.0);
+    let stroke = egui::Stroke::new(2.5_f32, AGENT_PATH_COLOR);
+    for (_, path) in paths {
+        let points: Vec<Vec3> = path.iter().map(|&p| v3(p) + lift).collect();
+        for pair in points.windows(2) {
+            if let Some(line) = screen.line(pair[0], pair[1]) {
+                painter.line_segment(line, stroke);
+            }
+        }
+        let corners = points.len().saturating_sub(1);
+        for (i, &corner) in points.iter().enumerate().skip(1) {
+            let Some(at) = screen.point(corner) else {
+                continue;
+            };
+            if i == corners {
+                painter.circle_stroke(at, 7.0, stroke);
+            } else {
+                painter.circle_filled(at, 3.5, AGENT_PATH_COLOR);
+            }
+        }
+    }
+}
+
 /// A distinct hue for each region: the golden angle keeps neighbouring
 /// numbers far apart on the colour wheel.
 fn nav_region_color(region: u32) -> egui::Color32 {

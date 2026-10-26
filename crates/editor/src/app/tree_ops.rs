@@ -116,6 +116,10 @@ impl EditorApp {
                 return;
             }
         }
+        if what == Insertable::NavigationAgent {
+            self.insert_agent(near.or(self.selected));
+            return;
+        }
         if what == Insertable::ParticleEmitter
             && !tree::light_has_part_parent(&self.world, near.or(self.selected))
         {
@@ -184,6 +188,47 @@ impl EditorApp {
         }
         self.insert_named(what, near, what.class().as_str(), Vec::new());
     }
+    /// Inserts a NavigationAgent into the Model or part `near` is (or is
+    /// in), or into a new Model with a Body when there's none. Its
+    /// Destination starts where the body stands, so it stays put in Play
+    /// until it's given somewhere to go.
+    fn insert_agent(&mut self, near: Option<InstanceId>) {
+        let what = Insertable::NavigationAgent;
+        let parent = tree::insert_parent(&self.world, near, what);
+        let has_body = self.world.get(parent).is_some_and(|instance| {
+            matches!(
+                instance.class(),
+                ClassName::Model | ClassName::Part | ClassName::MeshPart
+            )
+        });
+        let holder = if has_body {
+            Some(parent)
+        } else {
+            self.insert_named(Insertable::Model, near, "Agent", Vec::new());
+            let model = self.selected;
+            self.insert_named(
+                Insertable::Part(PartType::Block),
+                model,
+                "Body",
+                vec![
+                    ("Size", Value::Vector3(Vector3::new(2.0, 5.0, 1.0))),
+                    ("Color", Value::Color3(Color3::new(0.78, 0.3, 0.29))),
+                ],
+            );
+            model
+        };
+        let parts = holder.map_or_else(Vec::new, |holder| {
+            axcenity_character::body_parts(&self.world, holder)
+        });
+        let feet = axcenity_nav::feet_of(&self.world, &parts).unwrap_or_default();
+        self.insert_named(
+            what,
+            holder,
+            what.class().as_str(),
+            vec![("Destination", Value::Vector3(feet))],
+        );
+    }
+
     /// Like [`insert`](Self::insert), but named `wanted` (with a number on
     /// the end if a sibling has that name) and with `properties` set.
     pub(super) fn insert_named(

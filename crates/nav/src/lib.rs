@@ -10,8 +10,15 @@
 //! height between them can be stepped or walked up, and linked cells share a
 //! region, so two points in different regions have no path between them.
 //!
-//! Building reads the world and never changes it. Nothing walks on the mesh
-//! yet: agents and paths come later.
+//! Building reads the world and never changes it. [`NavMesh::find_path`]
+//! finds a walk across it, and [`Agents`] walks NavigationAgents along those
+//! paths during Play.
+
+mod agents;
+mod path;
+
+pub use agents::{AgentStatus, Agents, agent_parts, feet_of};
+pub use path::PathError;
 
 use std::collections::VecDeque;
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -91,8 +98,8 @@ pub struct NavMesh {
 
 impl NavMesh {
     /// Builds the mesh from the Workspace's solids. Sensors (`CanCollide`
-    /// off), visual foliage and the parts character controllers move add
-    /// nothing. Run it again after the world changes; [`fingerprint`] tells
+    /// off), visual foliage and the parts character controllers and
+    /// navigation agents move add nothing. Run it again after the world changes; [`fingerprint`] tells
     /// when.
     pub fn build(world: &World, assets: &Assets, settings: NavSettings) -> Self {
         let settings = NavSettings {
@@ -101,7 +108,7 @@ impl NavMesh {
             max_slope: positive(settings.max_slope, 0.0).min(89.0),
             max_step: positive(settings.max_step, 0.0),
         };
-        let skip = axcenity_character::character_parts(world);
+        let skip = moving_parts(world);
         let solids: Vec<_> = axcenity_physics::solids(world, assets, &skip)
             .into_iter()
             .filter(|solid| finite(solid.min) && finite(solid.max))
@@ -396,7 +403,7 @@ impl NavMesh {
 /// Terrain's heights or foliage. Cheap enough to check every frame, so a
 /// host can rebuild only when it changes.
 pub fn fingerprint(world: &World) -> u64 {
-    let skip = axcenity_character::character_parts(world);
+    let skip = moving_parts(world);
     let mut hasher = DefaultHasher::new();
     for id in world.descendants(world.workspace()) {
         let Some(instance) = world.get(id) else {
@@ -435,6 +442,14 @@ pub fn fingerprint(world: &World) -> u64 {
     hasher.finish()
 }
 
+/// The parts characters and agents move: they walk on the ground, so they
+/// aren't ground.
+fn moving_parts(world: &World) -> Vec<axcenity_core::InstanceId> {
+    let mut parts = axcenity_character::character_parts(world);
+    parts.extend(agent_parts(world));
+    parts
+}
+
 fn positive(value: f32, fallback: f32) -> f32 {
     if value.is_finite() {
         value.max(0.0)
@@ -447,5 +462,7 @@ fn finite(v: Vector3) -> bool {
     v.x.is_finite() && v.y.is_finite() && v.z.is_finite()
 }
 
+#[cfg(test)]
+mod agent_tests;
 #[cfg(test)]
 mod tests;

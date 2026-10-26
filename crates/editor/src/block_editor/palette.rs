@@ -120,6 +120,14 @@ pub(super) fn palette(
                 target: part.clone(),
                 anchored: Expression::Boolean { value: true },
             }),
+            B(BlockKind::SetDestination {
+                agent: first(Filter::Agents),
+                position: vector(10.0, 0.0, 0.0),
+            }),
+            B(BlockKind::SetVelocity {
+                agent: first(Filter::Agents),
+                velocity: vector(0.0, 0.0, 0.0),
+            }),
         ],
         Category::Looks => vec![
             B(BlockKind::SetColor {

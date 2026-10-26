@@ -118,10 +118,14 @@ pub enum ClassName {
     /// The same movement as a ThirdPersonController, with the camera at the
     /// character's eyes. A character has one controller or the other.
     FirstPersonController,
+    /// Walks the Model or Part it is parented to along the navigation mesh
+    /// to `Destination` during Play, or straight at `Velocity`. Not a
+    /// physics body.
+    NavigationAgent,
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 43] = [
+    pub const ALL: [ClassName; 44] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -165,6 +169,7 @@ impl ClassName {
         ClassName::TerrainLayer,
         ClassName::ThirdPersonController,
         ClassName::FirstPersonController,
+        ClassName::NavigationAgent,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -212,6 +217,7 @@ impl ClassName {
             ClassName::TerrainLayer => "TerrainLayer",
             ClassName::ThirdPersonController => "ThirdPersonController",
             ClassName::FirstPersonController => "FirstPersonController",
+            ClassName::NavigationAgent => "NavigationAgent",
         }
     }
 
@@ -853,6 +859,20 @@ impl ClassName {
                 properties.push(("EyeHeight", Value::Number(4.5)));
                 properties
             }
+            ClassName::NavigationAgent => vec![
+                // Where it walks to along the navigation mesh. A new value
+                // finds a new path. The editor starts it where the agent stands.
+                ("Destination", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
+                // Studs a second along its path.
+                ("WalkSpeed", Value::Number(16.0)),
+                // Studs a second. Not zero, it moves straight that way along
+                // the ground, with no path, and Destination follows it, so
+                // it stays where it stops.
+                ("Velocity", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
+                // "Idle", "Moving", "Reached" or "Unreachable". Set by the
+                // game during Play, for scripts to read.
+                ("Status", Value::String("Idle".to_owned())),
+            ],
             ClassName::SurfaceAppearance => {
                 let map = |name| (name, Value::String(String::new()));
                 let channel = |name, channel| (name, Value::TextureChannel(channel));
@@ -916,7 +936,8 @@ impl ClassName {
             | ClassName::Terrain
             | ClassName::TerrainLayer
             | ClassName::ThirdPersonController
-            | ClassName::FirstPersonController => &[],
+            | ClassName::FirstPersonController
+            | ClassName::NavigationAgent => &[],
             // Fires when a sound that isn't looped plays to its end.
             ClassName::Sound => &["Ended"],
             // `StateChanged` fires with the new state's name and the old

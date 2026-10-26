@@ -391,6 +391,7 @@ const OVERLAY_RAYCASTS_KEY: &str = "overlay raycasts";
 const OVERLAY_BOUNDS_KEY: &str = "overlay bounds";
 const OVERLAY_EMITTERS_KEY: &str = "overlay emitters";
 const OVERLAY_NAV_MESH_KEY: &str = "overlay nav mesh";
+const OVERLAY_AGENT_PATHS_KEY: &str = "overlay agent paths";
 const CONSOLE_HISTORY_KEY: &str = "console history";
 /// eframe's own key for the window's size and position. eframe still reads
 /// it at startup with `persist_window` off, so `save` blanks it.
@@ -594,6 +595,8 @@ impl EditorApp {
                 storage.get_string(OVERLAY_EMITTERS_KEY).as_deref() == Some("on");
             self.overlays.nav_mesh =
                 storage.get_string(OVERLAY_NAV_MESH_KEY).as_deref() == Some("on");
+            self.overlays.agent_paths =
+                storage.get_string(OVERLAY_AGENT_PATHS_KEY).as_deref() == Some("on");
             if let Some(text) = storage.get_string(CONSOLE_HISTORY_KEY) {
                 self.console.load_history(&text);
             }
@@ -670,6 +673,10 @@ impl eframe::App for EditorApp {
         storage.set_string(
             OVERLAY_NAV_MESH_KEY,
             flag(self.overlays.nav_mesh).to_owned(),
+        );
+        storage.set_string(
+            OVERLAY_AGENT_PATHS_KEY,
+            flag(self.overlays.agent_paths).to_owned(),
         );
         storage.set_string(CONSOLE_HISTORY_KEY, self.console.history_text());
         storage.set_string(RECENT_KEY, recent.join("\n"));
@@ -1005,6 +1012,8 @@ impl EditorApp {
     }
 }
 
+#[cfg(test)]
+mod agent_tests;
 #[cfg(test)]
 mod asset_fix_tests;
 #[cfg(test)]

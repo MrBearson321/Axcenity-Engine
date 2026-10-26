@@ -22,6 +22,7 @@ use axcenity_assets::Assets;
 use axcenity_audio::{GameAudio, SoundAction};
 use axcenity_character::{Controllers, MoveInput};
 use axcenity_core::{InstanceId, World};
+use axcenity_nav::Agents;
 use axcenity_physics::Physics;
 use axcenity_project::ScriptFile;
 use axcenity_render::Renderer;
@@ -171,6 +172,7 @@ fn main() -> Result<()> {
         audio,
         physics: Physics::with_assets(assets.clone()),
         characters: Controllers::default(),
+        agents: Agents::default(),
         particles: axcenity_scene::Particles::new(),
         terrain: axcenity_scene::TerrainCache::new(),
         animators,
@@ -355,6 +357,8 @@ struct App {
     physics: Physics,
     /// Walks a character and owns the camera when one is present.
     characters: Controllers,
+    /// Walks NavigationAgents along their paths.
+    agents: Agents,
     /// Mouse look, in pixels, for the character camera. Right and down are positive.
     look_dx: f32,
     look_dy: f32,
@@ -869,6 +873,11 @@ impl ApplicationHandler for App {
                 self.zoom = 0.0;
                 self.characters
                     .step(&mut self.world, &self.assets, motion, seconds);
+                // Then navigation agents, toward their destinations.
+                self.agents.step(&mut self.world, &self.assets, seconds);
+                for warning in self.agents.take_warnings() {
+                    eprintln!("warning: {warning}");
+                }
                 if self.characters.view(&self.world).is_none() {
                     self.camera.update(&self.keys, seconds);
                 }
@@ -884,11 +893,12 @@ impl ApplicationHandler for App {
                 self.scripts.step(&mut self.world, f64::from(seconds));
                 print_output(&mut self.scripts);
 
-                // 3. Hold the character kinematic, then step physics at a
+                // 3. Hold characters and agents kinematic, then step physics at a
                 //    fixed 60 Hz (0 to N steps this frame). Anchoring is
                 //    after scripts, so a script cannot drop the character
                 //    for this step. Other parts keep their gravity.
                 self.characters.keep_kinematic(&mut self.world);
+                self.agents.keep_kinematic(&mut self.world);
                 self.physics.step(&mut self.world, f64::from(seconds));
 
                 // 4. Fire `Touched` for parts that started touching during

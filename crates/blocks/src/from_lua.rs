@@ -998,6 +998,14 @@ impl<'a> Converter<'a> {
                 target: path,
                 value: converted(),
             },
+            "Destination" => BlockKind::SetDestination {
+                agent: path,
+                position: converted(),
+            },
+            "Velocity" => BlockKind::SetVelocity {
+                agent: path,
+                velocity: converted(),
+            },
             _ => BlockKind::SetProperty {
                 target: path,
                 property: property.clone(),

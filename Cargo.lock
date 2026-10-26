@@ -662,6 +662,7 @@ dependencies = [
  "axcenity-audio",
  "axcenity-character",
  "axcenity-core",
+ "axcenity-nav",
  "axcenity-physics",
  "axcenity-project",
  "axcenity-render",

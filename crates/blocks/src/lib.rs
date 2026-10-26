@@ -374,6 +374,20 @@ pub enum BlockKind {
         value: Expression,
     },
 
+    // Navigation.
+    /// Walks a NavigationAgent along the navigation mesh to `position`: sets
+    /// its `Destination`.
+    SetDestination {
+        agent: String,
+        position: Expression,
+    },
+    /// Moves a NavigationAgent straight at `velocity` studs a second, with
+    /// no path: sets its `Velocity`. Zero stops it where it is.
+    SetVelocity {
+        agent: String,
+        velocity: Expression,
+    },
+
     // Sound.
     PlaySound {
         target: String,
@@ -600,6 +614,8 @@ impl BlockKind {
             | BlockKind::ShowPage { page: e, .. }
             | BlockKind::SetProperty { value: e, .. }
             | BlockKind::SetValue { value: e, .. }
+            | BlockKind::SetDestination { position: e, .. }
+            | BlockKind::SetVelocity { velocity: e, .. }
             | BlockKind::SetVolume { volume: e, .. }
             | BlockKind::SetAnimatorBool { value: e, .. }
             | BlockKind::SetAnimatorNumber { value: e, .. }
@@ -651,6 +667,8 @@ impl BlockKind {
             | BlockKind::ShowPage { page: e, .. }
             | BlockKind::SetProperty { value: e, .. }
             | BlockKind::SetValue { value: e, .. }
+            | BlockKind::SetDestination { position: e, .. }
+            | BlockKind::SetVelocity { velocity: e, .. }
             | BlockKind::SetVolume { volume: e, .. }
             | BlockKind::SetAnimatorBool { value: e, .. }
             | BlockKind::SetAnimatorNumber { value: e, .. }

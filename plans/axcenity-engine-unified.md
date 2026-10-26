@@ -660,10 +660,10 @@ A `NavigationAgent` Instance finds a path on the mesh to a destination and walks
 
 ### Acceptance criteria
 
-- [ ] An agent placed in the editor walks along the mesh to a destination set in Properties, from Lua, and from blocks.
-- [ ] A destination off the mesh doesn't move the agent, and the failure is visible.
-- [ ] Setting a velocity moves the agent without a path, and the path toggle draws the path of an agent that has one.
-- [ ] The path overlay doesn't change the route the agent takes.
+- [x] An agent placed in the editor walks along the mesh to a destination set in Properties, from Lua, and from blocks.
+- [x] A destination off the mesh doesn't move the agent, and the failure is visible.
+- [x] Setting a velocity moves the agent without a path, and the path toggle draws the path of an agent that has one.
+- [x] The path overlay doesn't change the route the agent takes.
 
 ---
 

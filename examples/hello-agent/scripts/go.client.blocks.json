@@ -1,0 +1,79 @@
+{
+  "blocks": [
+    {
+      "id": 1,
+      "kind": {
+        "type": "when_key_pressed",
+        "key": "One",
+        "body": [
+          {
+            "id": 2,
+            "kind": {
+              "type": "set_destination",
+              "agent": "Guard.NavigationAgent",
+              "position": { "type": "vector3", "x": 16, "y": 0, "z": 16 }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "kind": {
+        "type": "when_key_pressed",
+        "key": "Two",
+        "body": [
+          {
+            "id": 4,
+            "kind": {
+              "type": "set_destination",
+              "agent": "Guard.NavigationAgent",
+              "position": { "type": "vector3", "x": 0, "y": 0, "z": 50 }
+            }
+          },
+          {
+            "id": 5,
+            "kind": {
+              "type": "print",
+              "value": { "type": "text", "value": "off to the island, across the gap" }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": 6,
+      "kind": {
+        "type": "when_key_pressed",
+        "key": "Three",
+        "body": [
+          {
+            "id": 7,
+            "kind": {
+              "type": "set_velocity",
+              "agent": "Guard.NavigationAgent",
+              "velocity": { "type": "vector3", "x": 8, "y": 0, "z": 0 }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": 8,
+      "kind": {
+        "type": "when_key_pressed",
+        "key": "Four",
+        "body": [
+          {
+            "id": 9,
+            "kind": {
+              "type": "set_velocity",
+              "agent": "Guard.NavigationAgent",
+              "velocity": { "type": "vector3", "x": 0, "y": 0, "z": 0 }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

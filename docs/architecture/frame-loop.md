@@ -2,14 +2,14 @@
 
 The fixed order of one frame. Do not reorder it casually.
 
-1. Read input. When a `ThirdPersonController` or `FirstPersonController` in the Workspace has a body, `character` steps it here (walk or run, jump and fall, crouch, slopes and steps, and its camera: following and wheel zoom, or at the eyes) before scripts run. Only the first such controller receives the keys.
+1. Read input. When a `ThirdPersonController` or `FirstPersonController` in the Workspace has a body, `character` steps it here (walk or run, jump and fall, crouch, slopes and steps, and its camera: following and wheel zoom, or at the eyes) before scripts run. Only the first such controller receives the keys. Then `nav` steps every `NavigationAgent` with a body toward its `Destination`, or at its `Velocity` (`docs/architecture/navigation.md`).
 2. Move tweens on (`TweenService`, setting their properties), then resume coroutines whose wait has expired, and fire queued events
-3. Hold that character's parts kinematic (`Controllers::keep_kinematic`), then step physics at a fixed 60 Hz (accumulator; may run 0–N steps per frame). Other bodies keep the same gravity and friction.
+3. Hold that character's and the agents' parts kinematic (`Controllers::keep_kinematic`, `Agents::keep_kinematic`), then step physics at a fixed 60 Hz (accumulator; may run 0–N steps per frame). Other bodies keep the same gravity and friction.
 4. Fire `Touched` and collision events, then `RunService.Heartbeat`; then particles and Animators move on (Animators pose their MeshParts and fire `StateChanged`)
 5. Move the loading screen on (a LocalScript's `RemoveDefaultLoadingScreen`, then `LoadingGui::advance`, which may turn its ScreenGui off), then update UI layout (`taffy`) and shape text
 6. Build the draw list and render
 
-The player runs these in `WindowEvent::RedrawRequested` (`crates/player/src/main.rs`), with a comment per step. The editor runs steps 1-4 only during Play (`Session::frame` in `crates/editor/src/play.rs`); its viewport lays out UI at step 5 using its current pixel size, then builds and draws step 6. Visual-debug overlays (colliders, raycasts, bounds, emitters, the navigation mesh) are painted in the editor viewport after the scene texture; they do not change this order, and the player never draws them.
+The player runs these in `WindowEvent::RedrawRequested` (`crates/player/src/main.rs`), with a comment per step. The editor runs steps 1-4 only during Play (`Session::frame` in `crates/editor/src/play.rs`); its viewport lays out UI at step 5 using its current pixel size, then builds and draws step 6. Visual-debug overlays (colliders, raycasts, bounds, emitters, the navigation mesh, agent paths) are painted in the editor viewport after the scene texture; they do not change this order, and the player never draws them.
 
 Since Phase 16, change events (`Changed`, `ChildAdded`, ...) for whatever changed fire at every step that runs scripts, before and after it, so physics' changes fire at the start of step 4 (see `docs/scripting/execution.md`).
 

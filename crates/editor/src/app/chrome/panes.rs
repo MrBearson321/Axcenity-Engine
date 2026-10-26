@@ -684,6 +684,10 @@ impl EditorApp {
             .as_ref()
             .map(Session::debug_rays)
             .unwrap_or_default();
+        let agent_paths = match &self.play {
+            Some(session) if self.overlays.agent_paths => session.agent_paths(),
+            _ => Vec::new(),
+        };
         let output = egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show_inside(ui, |ui| match render_state {
@@ -709,6 +713,7 @@ impl EditorApp {
                             overlays: self.overlays,
                             debug_rays: &debug_rays,
                             nav_mesh: self.nav_mesh.as_ref().map(|cache| &cache.mesh),
+                            agent_paths: &agent_paths,
                             poses: self.play.as_ref().map(Session::poses),
                             terrain_brush,
                             character_view: self.play.as_ref().and_then(Session::character_camera),

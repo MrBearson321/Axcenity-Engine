@@ -359,6 +359,13 @@ impl EditorApp {
                     "Nav Mesh",
                     "Where characters can walk, coloured by connected ground.",
                 );
+                overlay_menu_item(
+                    ui,
+                    &mut self.overlays.agent_paths,
+                    icons::PATH,
+                    "Agent Paths",
+                    "The path each NavigationAgent is walking, during Play.",
+                );
                 ui.separator();
                 if ui
                     .button(theme::with_icon(icons::STAR, "New Ribbon Tab…"))

@@ -62,6 +62,8 @@ pub(super) fn block_names(kind: &BlockKind) -> (&'static str, &'static [&'static
         BlockKind::TurnTo { .. } => ("Turn To", &["Part", "Orientation"]),
         BlockKind::TurnBy { .. } => ("Turn By", &["Part", "Rotation"]),
         BlockKind::SetAnchored { .. } => ("Set Anchored", &["Part", "Anchored"]),
+        BlockKind::SetDestination { .. } => ("Walk To", &["Agent", "Destination"]),
+        BlockKind::SetVelocity { .. } => ("Set Velocity", &["Agent", "Velocity"]),
         BlockKind::SetColor { .. } => ("Set Color", &["Part", "Color"]),
         BlockKind::SetText { .. } => ("Set Text", &["Object", "Text"]),
         BlockKind::Show { .. } => ("Show", &["Object"]),

@@ -389,9 +389,17 @@ fn active_id(world: &World) -> Option<InstanceId> {
 /// The Part and MeshPart descendants of the controller's parent, plus the
 /// parent when the controller is parented directly to a part.
 fn parts_of(world: &World, controller: InstanceId) -> Vec<InstanceId> {
-    let Some(parent) = world.get(controller).and_then(|instance| instance.parent()) else {
-        return Vec::new();
-    };
+    match world.get(controller).and_then(|instance| instance.parent()) {
+        Some(parent) => body_parts(world, parent),
+        None => Vec::new(),
+    }
+}
+
+/// The parts of the character `holder` is: a Model's Part and MeshPart
+/// descendants, or a Part or MeshPart and the parts inside it. Empty for
+/// anything else. Navigation agents move their parent's body the same way.
+pub fn body_parts(world: &World, holder: InstanceId) -> Vec<InstanceId> {
+    let parent = holder;
     let Some(instance) = world.get(parent) else {
         return Vec::new();
     };

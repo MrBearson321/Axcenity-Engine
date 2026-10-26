@@ -90,9 +90,11 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         BlockKind::FadeOut { .. } => 38,
         BlockKind::ScrollTo { .. } => 39,
         BlockKind::SetValue { .. } => 40,
+        BlockKind::SetDestination { .. } => 41,
+        BlockKind::SetVelocity { .. } => 42,
     })
 }
-const STATEMENT_COUNT: usize = 41;
+const STATEMENT_COUNT: usize = 43;
 
 /// One of each statement block, with the Lua it must produce.
 fn every_statement() -> Vec<(BlockKind, &'static str)> {
@@ -307,6 +309,28 @@ fn every_statement() -> Vec<(BlockKind, &'static str)> {
                 value: number(75.0),
             },
             "workspace.Settings.Volume.Value = 75",
+        ),
+        (
+            BlockKind::SetDestination {
+                agent: "Guard.NavigationAgent".to_owned(),
+                position: Expression::Vector3 {
+                    x: 20.0,
+                    y: 0.0,
+                    z: -5.0,
+                },
+            },
+            "workspace.Guard.NavigationAgent.Destination = Vector3.new(20, 0, -5)",
+        ),
+        (
+            BlockKind::SetVelocity {
+                agent: "Guard.NavigationAgent".to_owned(),
+                velocity: Expression::Vector3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 8.0,
+                },
+            },
+            "workspace.Guard.NavigationAgent.Velocity = Vector3.new(0, 0, 8)",
         ),
         (
             BlockKind::Code {
