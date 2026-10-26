@@ -478,6 +478,17 @@ pub struct Cone {
     /// The full width of the beam, in degrees, from 1 to 179. The edge
     /// fades over the outer fifth of it.
     pub angle_degrees: f32,
+    /// `Some` if the beam casts shadows (a SpotLight's `Shadows`). Only the
+    /// nearest few to the camera do, as the graphics settings allow.
+    pub shadows: Option<SpotShadows>,
+}
+
+/// How a spot light's beam casts shadows.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SpotShadows {
+    /// Studs along the beam before anything casts a shadow, so the part the
+    /// light sits on doesn't shade its own beam.
+    pub near: f32,
 }
 
 /// What's done to the scene after it's drawn in high dynamic range, where

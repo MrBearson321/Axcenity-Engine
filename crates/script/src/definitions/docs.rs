@@ -628,6 +628,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "The way the beam points, relative to the parent part.",
     ),
     (
+        ClassName::SpotLight,
+        "Shadows",
+        "If true, parts in the beam cast shadows. Only the few spot lights nearest the camera do, as the graphics settings allow.",
+    ),
+    (
         ClassName::ParticleEmitter,
         "Enabled",
         "If false, it stops giving off particles; those already out live on.",

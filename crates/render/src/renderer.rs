@@ -49,7 +49,7 @@ use gpu::{
 use lighting::{cascade_ends, light_raw, uv_matrix};
 use lighting::{
     frame_uniform, linear_color, maps_uniform_of, material_key, material_textures, plan_draws,
-    plan_lights, post_drawn, post_uniform, shadows_drawn, view_projection,
+    plan_lights, post_drawn, post_uniform, shadows_drawn, spot_casters, view_projection,
 };
 use std::sync::Arc;
 

@@ -226,7 +226,14 @@ const GROUPS: [(&str, &[&str]); 19] = [
     ),
     (
         "Light",
-        &["Enabled", "Brightness", "Range", "Angle", "Direction"],
+        &[
+            "Enabled",
+            "Brightness",
+            "Range",
+            "Angle",
+            "Direction",
+            "Shadows",
+        ],
     ),
     (
         "Emitter",

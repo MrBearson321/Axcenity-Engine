@@ -13,7 +13,8 @@ use axcenity_core::{ClassName, Instance, InstanceId, PartType, TextureChannel, V
 use axcenity_render::glam::{Mat4, Vec3};
 use axcenity_render::{
     AmbientLight, Camera, Channel, ChannelMap, Cone, DrawItem, DrawList, Light, Material,
-    MeshSource, NormalMap, PostProcessing, Shadows, Shape, Sky, Sun, TextureMaps, TextureSource,
+    MeshSource, NormalMap, PostProcessing, Shadows, Shape, Sky, SpotShadows, Sun, TextureMaps,
+    TextureSource,
 };
 use axcenity_ui::{Stylesheet, UiInput, UiInteraction, UiLayout};
 
@@ -113,10 +114,15 @@ fn light_of(world: &World, instance: &Instance) -> Option<Light> {
     let cone = match instance.class() {
         ClassName::SpotLight => {
             let direction = instance.property("Direction").and_then(Value::as_vector3)?;
+            // Relative to the part, so the beam turns with it.
+            let direction = rotation * Vec3::new(direction.x, direction.y, direction.z);
+            let shadows = instance.property("Shadows").and_then(Value::as_bool) == Some(true);
             Some(Cone {
-                // Relative to the part, so the beam turns with it.
-                direction: rotation * Vec3::new(direction.x, direction.y, direction.z),
+                direction,
                 angle_degrees: number("Angle")? as f32,
+                shadows: shadows.then(|| SpotShadows {
+                    near: shadow_near(transform, position, direction),
+                }),
             })
         }
         _ => None,
@@ -353,6 +359,22 @@ pub fn build_draw_list_with_ui_interaction(
 fn light_origin(transform: Mat4) -> Vec3 {
     let (scale, rotation, position) = transform.to_scale_rotation_translation();
     position + rotation * Vec3::Y * (scale.y.abs() * 0.5 + 0.05)
+}
+
+/// How far along a spot light's beam from `origin` its own part (placed by
+/// `transform`) reaches, plus a little: shadows start there, so the part
+/// the light sits on doesn't shade the whole beam. 0 when the beam points
+/// away from the part.
+fn shadow_near(transform: Mat4, origin: Vec3, direction: Vec3) -> f32 {
+    let direction = direction.normalize_or_zero();
+    let farthest = (0..8)
+        .map(|corner| {
+            let half = |bit: i32| if corner & bit == 0 { -0.5 } else { 0.5 };
+            let corner = transform.transform_point3(Vec3::new(half(1), half(2), half(4)));
+            (corner - origin).dot(direction)
+        })
+        .fold(0.0_f32, f32::max);
+    if farthest > 0.0 { farthest + 0.05 } else { 0.0 }
 }
 
 /// Color added to a part that contains a switched-on light, so the fixture
@@ -1300,5 +1322,31 @@ mod tests {
     fn linear_to_srgb_undoes_the_renderers_conversion() {
         let percent = srgb([0.0, 1.0, 0.214]).map(|c| (c * 100.0).round());
         assert_eq!(percent, [0.0, 100.0, 50.0]);
+    }
+
+    #[test]
+    fn a_spot_lights_shadows_start_past_its_own_part() {
+        let mut world = World::new();
+        let lamp = part(&mut world, vec![("Size", vector(1.0, 2.0, 1.0))]);
+        let light = world.create(ClassName::SpotLight).unwrap();
+        world.set_parent(light, Some(lamp)).unwrap();
+        let cone = |world: &World| {
+            let list = build_draw_list(world, &Assets::default(), camera());
+            list.lights[0].cone.unwrap()
+        };
+        assert_eq!(cone(&world).shadows, None, "off by default");
+
+        world
+            .set_property(light, "Shadows", Value::Bool(true))
+            .unwrap();
+        // The light sits 0.05 above the 2-stud lamp and points down through
+        // it, so shadows start past the lamp's bottom.
+        let near = cone(&world).shadows.unwrap().near;
+        assert!((near - 2.1).abs() < 1e-4, "{near}");
+
+        world
+            .set_property(light, "Direction", vector(0.0, 1.0, 0.0))
+            .unwrap();
+        assert_eq!(cone(&world).shadows.unwrap().near, 0.0, "pointing away");
     }
 }

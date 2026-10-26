@@ -34,6 +34,9 @@ struct Frame {
     // x: how many lights there are, y: the size of a light tile in pixels,
     // z: how many tiles across.
     lights: vec4<u32>,
+    // Turns world space to each shadow-casting spot light's view, by its
+    // layer of `spot_shadow_map`.
+    spot_shadows: array<mat4x4<f32>, 8>,
 }
 
 // A point or spot light. Must match `LightRaw` in renderer.rs.
@@ -46,6 +49,9 @@ struct Light {
     // xyz: the direction a spot light points, w: cosine where its edge
     // starts to fade.
     direction_inner: vec4<f32>,
+    // x: its layer of `spot_shadow_map`, or -1 if it casts no shadows,
+    // y: the width of one shadow texel per stud from the light.
+    shadow: vec4<f32>,
 }
 
 // The most lights one tile of the screen lists. Must match `LIGHTS_PER_TILE`
@@ -59,6 +65,9 @@ const LIGHTS_PER_TILE: u32 = 64u;
 // For each screen tile, `LIGHTS_PER_TILE + 1` numbers: how many lights
 // reach it, then their indexes in `lights`.
 @group(0) @binding(4) var<storage, read> tile_lights: array<u32>;
+// One layer per shadow-casting spot light: its depth as the light sees it.
+// (Binding 5 is the shadow pass's own, in shader.wgsl.)
+@group(0) @binding(6) var spot_shadow_map: texture_depth_2d_array;
 
 // Points spread evenly over a disc of radius 1 (a Poisson disc), for
 // sampling the shadow map around a point. `private` so it can be indexed
@@ -191,6 +200,44 @@ fn sun_visibility(world_position: vec3<f32>, normal: vec3<f32>, pixel: vec2<f32>
     return mix(1.0, lit, fade);
 }
 
+// How much of a spot light reaches `world_position`: 1 in the open, 0 in
+// its shadow. `to_light` is the way to the light, `normal` the surface's own
+// (unmapped) normal. The point is pushed off the surface and toward the
+// light by amounts that grow with its distance from the light, as the map's
+// texels do, so it doesn't shadow itself. Then four comparisons around it,
+// each filtered between four texels like the sun's, are averaged.
+fn spot_visibility(
+    light: Light,
+    world_position: vec3<f32>,
+    normal: vec3<f32>,
+    to_light: vec3<f32>,
+    rotation: mat2x2<f32>,
+) -> f32 {
+    let layer = i32(light.shadow.x);
+    if layer < 0 {
+        return 1.0;
+    }
+    let texel = length(to_light) * light.shadow.y;
+    let shifted = world_position + normal * (texel * 1.5) + normalize(to_light) * (texel * 2.0);
+    let clip = frame.spot_shadows[layer] * vec4<f32>(shifted, 1.0);
+    if clip.w <= 0.0 {
+        return 1.0;
+    }
+    let ndc = clip.xyz / clip.w;
+    let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    if any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0)) || ndc.z > 1.0 || ndc.z < 0.0 {
+        return 1.0;
+    }
+    let size = f32(textureDimensions(spot_shadow_map).x);
+    var lit = 0.0;
+    for (var k = 0; k < 4; k++) {
+        let corner = vec2<f32>(f32(k & 1), f32(k >> 1u)) * 2.0 - 1.0;
+        let offset = rotation * corner * (0.75 / size);
+        lit += textureSampleCompareLevel(spot_shadow_map, shadow_sampler, uv + offset, layer, ndc.z);
+    }
+    return lit / 4.0;
+}
+
 const PI: f32 = 3.14159265;
 
 // How many microfacets point along `h` (GGX / Trowbridge-Reitz).
@@ -304,6 +351,8 @@ fn light_surface(
 
     // Point and spot lights: only the ones listed for this pixel's tile.
     var lit = vec3<f32>(0.0);
+    let angle = pixel_noise(pixel) * 6.2831853;
+    let rotation = mat2x2<f32>(cos(angle), sin(angle), -sin(angle), cos(angle));
     let tile_size = max(frame.lights.y, 1u);
     let tile = vec2<u32>(pixel) / tile_size;
     let first = (tile.y * frame.lights.z + tile.x) * (LIGHTS_PER_TILE + 1u);
@@ -330,7 +379,8 @@ fn light_surface(
         }
         if strength > 0.0 {
             lit += shade(n, v, l, base_color, metalness, roughness, f0)
-                * light.radiance_cone.rgb * strength;
+                * light.radiance_cone.rgb * strength
+                * spot_visibility(light, world_position, geometric, to_light, rotation);
         }
     }
 

@@ -9,13 +9,11 @@ use std::borrow::Cow;
 use wgpu::util::DeviceExt;
 
 use crate::draw_list::{MeshSource, TextureSource};
-use crate::graphics::ShadowMapSize;
 use crate::mesh::{self, MeshData, Vertex};
 
 use super::{
     DEPTH_FORMAT, GpuBytes, GpuMaterial, GpuMesh, GpuTexture, InstanceRaw, MATERIAL_TEXTURES,
-    MapsUniform, SHADOW_CASCADES, SHADOW_MAP_SIZE, TARGET_DRAW_FORMAT, TARGET_SHOW_FORMAT,
-    TEXTURE_FORMAT, TEXTURE_SRGB_FORMAT,
+    MapsUniform, TARGET_DRAW_FORMAT, TARGET_SHOW_FORMAT, TEXTURE_FORMAT, TEXTURE_SRGB_FORMAT,
 };
 
 /// The shader for parts and models, and the shadow and sky passes: the
@@ -151,18 +149,20 @@ pub(super) fn create_pipeline(
 /// A square depth texture with one layer per shadow cascade, which the
 /// sun's views are drawn into and the scene pass then reads: a view of the
 /// whole array for reading, and one view per layer for drawing.
+/// A `size`² depth array with `layers` layers: a view of all of them, for
+/// the shader, and one of each, to draw into.
 pub(super) fn create_shadow_views(
     device: &wgpu::Device,
-    ShadowMapSize { size, cascades }: ShadowMapSize,
+    label: &str,
+    size: u32,
+    layers: u32,
 ) -> (wgpu::TextureView, Vec<wgpu::TextureView>) {
-    // The shader holds at most `SHADOW_CASCADES` cascades.
-    debug_assert!(size <= SHADOW_MAP_SIZE && cascades as usize <= SHADOW_CASCADES);
     let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("shadow map"),
+        label: Some(label),
         size: wgpu::Extent3d {
             width: size,
             height: size,
-            depth_or_array_layers: cascades,
+            depth_or_array_layers: layers,
         },
         mip_level_count: 1,
         sample_count: 1,
@@ -172,14 +172,14 @@ pub(super) fn create_shadow_views(
         view_formats: &[],
     });
     let array = texture.create_view(&wgpu::TextureViewDescriptor {
-        label: Some("shadow map"),
+        label: Some(label),
         dimension: Some(wgpu::TextureViewDimension::D2Array),
         ..Default::default()
     });
-    let layers = (0..cascades)
+    let layers = (0..layers)
         .map(|layer| {
             texture.create_view(&wgpu::TextureViewDescriptor {
-                label: Some("shadow cascade"),
+                label: Some(label),
                 dimension: Some(wgpu::TextureViewDimension::D2),
                 base_array_layer: layer,
                 array_layer_count: Some(1),
@@ -194,7 +194,7 @@ pub(super) fn create_frame_bind_group(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
     [frame_buffer, light_buffer, tile_buffer]: [&wgpu::Buffer; 3],
-    shadow_view: &wgpu::TextureView,
+    [shadow_view, spot_shadow_view]: [&wgpu::TextureView; 2],
     shadow_sampler: &wgpu::Sampler,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -221,11 +221,16 @@ pub(super) fn create_frame_bind_group(
                 binding: 4,
                 resource: tile_buffer.as_entire_binding(),
             },
+            wgpu::BindGroupEntry {
+                binding: 6,
+                resource: wgpu::BindingResource::TextureView(spot_shadow_view),
+            },
         ],
     })
 }
 
-/// Draws solid items' depth as the sun sees them. No color, no materials.
+/// Draws solid items' depth as the sun or a spot light sees them. No
+/// color, no materials.
 pub(super) fn create_shadow_pipeline(
     device: &wgpu::Device,
     shadow_layout: &wgpu::BindGroupLayout,

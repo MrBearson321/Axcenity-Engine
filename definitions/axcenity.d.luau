@@ -1237,6 +1237,8 @@ declare extern type SpotLight extends Instance with
 	Angle: number
 	--- The way the beam points, relative to the parent part.
 	Direction: Vector3
+	--- If true, parts in the beam cast shadows. Only the few spot lights nearest the camera do, as the graphics settings allow.
+	Shadows: boolean
 	[string]: any
 end
 

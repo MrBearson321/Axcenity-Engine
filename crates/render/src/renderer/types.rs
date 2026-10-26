@@ -1,4 +1,6 @@
 use super::*;
+use crate::graphics::SpotShadowMapSize;
+use glam::{Mat4, Vec3};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub(super) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -45,6 +47,9 @@ pub(super) struct FrameUniform {
     /// How many lights there are, the size of a light tile in pixels, and
     /// how many tiles are across the screen.
     pub(super) lights: [u32; 4],
+    /// Turns world space to each shadow-casting spot light's view, one per
+    /// layer of the spot shadow map (see [`LightRaw::shadow`]).
+    pub(super) spot_shadows: [[[f32; 4]; 4]; MAX_SPOT_SHADOWS],
 }
 
 /// The most point and spot lights drawn at once.
@@ -79,7 +84,18 @@ pub(super) struct LightRaw {
     pub(super) radiance_cone: [f32; 4],
     /// Where a spot light points, and the cosine where its edge starts to fade.
     pub(super) direction_inner: [f32; 4],
+    /// The layer of the spot shadow map it casts shadows into (-1 for none),
+    /// then the width of one of its shadow texels per stud from the light.
+    pub(super) shadow: [f32; 4],
 }
+
+/// The most spot lights that cast shadows at once (Ultra's). The graphics
+/// settings pick how many do (see [`crate::ShadowQuality::spot_map`]).
+/// Must match the size of `spot_shadows` in lighting.wgsl.
+pub(super) const MAX_SPOT_SHADOWS: usize = 8;
+/// The widest a spot light's shadow map looks, in degrees. Past it, a wider
+/// beam's outer edge is lit without shadows.
+pub(super) const MAX_SPOT_SHADOW_DEGREES: f32 = 170.0;
 
 /// Post-processing settings for the shader. Must match `Post` in post.wgsl.
 #[repr(C)]
@@ -111,18 +127,29 @@ pub(super) const MAX_SUN_SIZE: f32 = 0.1;
 /// Uniform buffer offsets must be multiples of this (wgpu's default limit).
 pub(super) const CASCADE_UNIFORM_STRIDE: u64 = 256;
 
-/// The depth texture the sun's view is drawn into, one layer per cascade,
-/// with the frame bindings that read it.
-pub(super) struct ShadowMap {
-    /// Its size and cascade count, from the effective graphics settings.
-    pub(super) size: ShadowMapSize,
-    /// A clone of [`ScenePipeline::shadow_maps_alive`], so maps still
-    /// alive can be counted.
+/// A depth texture drawn from a light's views, one layer per view: the
+/// sun's cascades ([`ShadowMapSize`]) or shadow-casting spot lights
+/// ([`SpotShadowMapSize`]).
+pub(super) struct ShadowMap<S> {
+    /// Its size and layers, from the effective graphics settings.
+    pub(super) size: S,
+    /// A clone of [`ScenePipeline::shadow_maps_alive`] or
+    /// `spot_shadow_maps_alive`, so maps still alive can be counted.
     pub(super) _alive: Arc<()>,
-    /// One view per cascade, to draw into.
+    /// All the layers, for the shader to read.
+    pub(super) array: wgpu::TextureView,
+    /// One view per layer, to draw into.
     pub(super) layers: Vec<wgpu::TextureView>,
-    /// The frame bindings with this map in place of the empty one.
-    pub(super) frame_bind_group: wgpu::BindGroup,
+}
+
+/// One spot light's shadow view, planned for a frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct SpotShadow {
+    /// Turns world space to the light's view (a perspective one).
+    pub(super) view_proj: Mat4,
+    /// A sphere around everything the beam reaches: casters outside it are
+    /// skipped.
+    pub(super) bounds: (Vec3, f32),
 }
 
 /// One draw item as the GPU reads it. Must match `InstanceIn` in shader.wgsl.
@@ -495,21 +522,29 @@ pub(super) struct ScenePipeline {
     /// The format of what's drawn into, which the sheet shares.
     pub(super) color_format: wgpu::TextureFormat,
     pub(super) frame_buffer: wgpu::Buffer,
-    /// The frame bindings with an empty shadow map, for when shadows are off.
+    /// The frame bindings with the shadow maps alive, and the empty 1×1
+    /// stand-in for each one that isn't. Remade when either map changes.
     pub(super) frame_bind_group: wgpu::BindGroup,
     pub(super) frame_layout: wgpu::BindGroupLayout,
+    /// A 1×1 depth array, bound in place of a shadow map that isn't alive.
+    pub(super) empty_shadow_view: wgpu::TextureView,
     pub(super) shadow_sampler: wgpu::Sampler,
     pub(super) shadow_pipeline: wgpu::RenderPipeline,
-    /// Each cascade's view from the sun, [`CASCADE_UNIFORM_STRIDE`] apart.
+    /// Each shadow view's matrix, [`CASCADE_UNIFORM_STRIDE`] apart: the sun's
+    /// cascades, then the shadow-casting spot lights'.
     pub(super) cascade_buffer: wgpu::Buffer,
-    /// Gives the shadow pass one cascade's matrix (it can't also bind the
+    /// Gives the shadow pass one view's matrix (it can't also bind the
     /// shadow map it's drawing into).
     pub(super) shadow_bind_group: wgpu::BindGroup,
     /// Made when shadows are first turned on, and freed when turned off or
     /// when the graphics settings change its size.
-    pub(super) shadow_map: Option<ShadowMap>,
+    pub(super) shadow_map: Option<ShadowMap<ShadowMapSize>>,
     /// One more strong reference than there are shadow maps alive.
     pub(super) shadow_maps_alive: Arc<()>,
+    /// Made while a spot light casts shadows and the graphics settings
+    /// allow it, and freed when none does.
+    pub(super) spot_shadow_map: Option<ShadowMap<SpotShadowMapSize>>,
+    pub(super) spot_shadow_maps_alive: Arc<()>,
     /// What the device can do, read once.
     pub(super) capabilities: Capabilities,
     /// The graphics settings last asked for, and what's used of them.

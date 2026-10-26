@@ -195,9 +195,9 @@ SpotLight gains `Shadows` (default false, so existing scenes don't change). Up t
 
 ### Acceptance criteria
 
-- [ ] A part between a shadow-casting spot light and a wall leaves a shadow on the wall that moves when the part moves. With `Shadows` false, there's none (GPU test).
-- [ ] With more shadow-casting spots than the setting allows, the nearest ones cast and the others still light without shadows.
-- [ ] At Low, no spot shadow array is allocated.
+- [x] A part between a shadow-casting spot light and a wall leaves a shadow on the wall that moves when the part moves. With `Shadows` false, there's none (GPU test).
+- [x] With more shadow-casting spots than the setting allows, the nearest ones cast and the others still light without shadows.
+- [x] At Low, no spot shadow array is allocated.
 
 ---
 

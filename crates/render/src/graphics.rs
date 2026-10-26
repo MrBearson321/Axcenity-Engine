@@ -81,6 +81,27 @@ impl ShadowQuality {
         };
         Some(ShadowMapSize { size, cascades })
     }
+
+    /// The spot light shadow map this quality draws, or `None` when spot
+    /// lights cast no shadows (Off and Low).
+    pub fn spot_map(self) -> Option<SpotShadowMapSize> {
+        let (size, lights) = match self {
+            ShadowQuality::Off | ShadowQuality::Low => return None,
+            ShadowQuality::Medium => (512, 2),
+            ShadowQuality::High => (1024, 4),
+            ShadowQuality::Ultra => (2048, 8),
+        };
+        Some(SpotShadowMapSize { size, lights })
+    }
+
+    /// Whether a GPU with `capabilities` can hold this quality's maps.
+    fn fits(self, capabilities: &Capabilities) -> bool {
+        let fits = |size: u32, layers: u32| {
+            size <= capabilities.max_texture_size && layers <= capabilities.max_texture_layers
+        };
+        self.map().is_none_or(|map| fits(map.size, map.cascades))
+            && self.spot_map().is_none_or(|map| fits(map.size, map.lights))
+    }
 }
 
 /// How sharp textures on surfaces are: how many of their largest mip levels
@@ -169,6 +190,14 @@ pub const RENDER_SCALE_RANGE: std::ops::RangeInclusive<f32> = 0.5..=2.0;
 pub struct ShadowMapSize {
     pub size: u32,
     pub cascades: u32,
+}
+
+/// Spot light shadow maps: each one's size in texels per side, and how many
+/// spot lights near the camera get one (one layer each).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct SpotShadowMapSize {
+    pub size: u32,
+    pub lights: u32,
 }
 
 /// The machine's graphics choices: a preset, and overrides that each
@@ -288,12 +317,7 @@ impl GraphicsSettings {
             .into_iter()
             .rev()
             .filter(|&quality| quality <= wanted)
-            .find(|quality| {
-                quality.map().is_none_or(|map| {
-                    map.size <= capabilities.max_texture_size
-                        && map.cascades <= capabilities.max_texture_layers
-                })
-            })
+            .find(|quality| quality.fits(capabilities))
             .unwrap_or(ShadowQuality::Off);
         if shadow_quality != wanted {
             notes.push(format!(
@@ -479,6 +503,29 @@ mod tests {
         );
         assert_eq!(ShadowQuality::Off.map(), None);
         assert_eq!(GraphicsSettings::default().quality, Quality::High);
+    }
+
+    #[test]
+    fn each_preset_gives_its_spot_shadow_maps() {
+        let spot = |quality| {
+            GraphicsSettings::preset(quality)
+                .shadow_quality()
+                .spot_map()
+        };
+        let map = |size, lights| Some(SpotShadowMapSize { size, lights });
+        assert_eq!(spot(Quality::Low), None);
+        assert_eq!(spot(Quality::Medium), map(512, 2));
+        assert_eq!(spot(Quality::High), map(1024, 4));
+        assert_eq!(spot(Quality::Ultra), map(2048, 8));
+        assert_eq!(ShadowQuality::Off.spot_map(), None);
+        // A GPU whose arrays can't hold 8 layers drops Ultra's spot maps too.
+        let six_layers = Capabilities {
+            max_texture_layers: 6,
+            ..Capabilities::default()
+        };
+        let lowered = GraphicsSettings::preset(Quality::Ultra).effective(&six_layers);
+        assert_eq!(lowered.shadow_quality, ShadowQuality::High);
+        assert_eq!(lowered.notes.len(), 1, "{:?}", lowered.notes);
     }
 
     #[test]

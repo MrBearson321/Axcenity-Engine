@@ -375,7 +375,7 @@ fn lights_are_listed_only_in_the_tiles_they_can_reach() {
         .push(point_light(Vec3::new(0.0, 0.0, 50.0), 1.0));
     // Not a real light.
     list.lights.push(point_light(Vec3::ZERO, 0.0));
-    let planned = plan_lights(&list, 1.0, (320, 320));
+    let planned = plan_lights(&list, 1.0, (320, 320), None);
     assert_eq!(planned.lights.len(), 1);
     assert_eq!((planned.tile_size, planned.tiles_across), (32, 10));
     let count = |x: usize, y: usize| planned.tiles[(y * 10 + x) * (LIGHTS_PER_TILE + 1)];
@@ -389,7 +389,7 @@ fn a_light_around_the_camera_reaches_every_tile_and_the_nearest_are_kept() {
     let mut list = list_of(vec![]);
     list.lights
         .push(point_light(Vec3::new(0.0, 0.0, 0.1), 100.0));
-    let planned = plan_lights(&list, 1.0, (64, 64));
+    let planned = plan_lights(&list, 1.0, (64, 64), None);
     assert!(
         planned
             .tiles
@@ -400,7 +400,7 @@ fn a_light_around_the_camera_reaches_every_tile_and_the_nearest_are_kept() {
     list.lights = (0..MAX_LIGHTS + 10)
         .map(|i| point_light(Vec3::new(0.0, 0.0, -1.0 - i as f32), 5.0))
         .collect();
-    let planned = plan_lights(&list, 1.0, (64, 64));
+    let planned = plan_lights(&list, 1.0, (64, 64), None);
     assert_eq!(planned.lights.len(), MAX_LIGHTS);
     let farthest = planned
         .lights
@@ -416,6 +416,7 @@ fn spot_lights_describe_their_cone() {
         cone: Some(Cone {
             direction: Vec3::new(0.0, -2.0, 0.0),
             angle_degrees: 90.0,
+            shadows: None,
         }),
         ..point_light(Vec3::ZERO, 10.0)
     });
@@ -525,6 +526,7 @@ fn a_spot_light_lights_only_inside_its_cone() {
     light.cone = Some(Cone {
         direction: Vec3::NEG_Z,
         angle_degrees: 40.0,
+        shadows: None,
     });
     list.lights.push(light);
     assert!(
@@ -535,6 +537,7 @@ fn a_spot_light_lights_only_inside_its_cone() {
     list.lights[0].cone = Some(Cone {
         direction: Vec3::X,
         angle_degrees: 40.0,
+        shadows: None,
     });
     assert_eq!(middle_pixel(&device, &queue, &list)[..3], [0, 0, 0]);
 }
@@ -1620,6 +1623,241 @@ fn switching_shadow_quality_fifty_times_leaves_one_shadow_map() {
     }
     device.poll(wgpu::PollType::Wait).unwrap();
     assert_eq!(renderer.scene.shadow_maps_alive(), 1);
+}
+
+/// A spot light at `position` shining along `direction` in a 90° beam,
+/// casting shadows if `shadows`.
+fn spot_light(position: Vec3, direction: Vec3, range: f32, shadows: bool) -> Light {
+    Light {
+        brightness: 4.0,
+        cone: Some(Cone {
+            direction,
+            angle_degrees: 90.0,
+            shadows: shadows.then_some(crate::SpotShadows { near: 0.0 }),
+        }),
+        ..point_light(position, range)
+    }
+}
+
+/// A wall facing the camera, lit only by a spot light to the right that
+/// shines on its middle, with a small block halfway between them.
+fn spot_lit_wall() -> DrawList {
+    let block = |size: Vec3, position: Vec3| DrawItem {
+        transform: Mat4::from_scale_rotation_translation(size, glam::Quat::IDENTITY, position),
+        ..big_block()
+    };
+    let wall = block(Vec3::new(30.0, 30.0, 1.0), Vec3::new(0.0, 0.0, -10.0));
+    let blocker = block(Vec3::splat(2.0), Vec3::new(3.0, 0.0, -5.5));
+    let mut list = list_of(vec![wall, blocker]);
+    list.sun.intensity = 0.0;
+    let light = Vec3::new(6.0, 0.0, -1.5);
+    let wall_middle = Vec3::new(0.0, 0.0, -9.5);
+    list.lights
+        .push(spot_light(light, wall_middle - light, 30.0, true));
+    list
+}
+
+/// The pixel of a 64 × 64 frame of `list` that `point` is drawn at.
+fn pixel_at(renderer: &mut TextureRenderer, list: &DrawList, point: Vec3) -> [u8; 4] {
+    renderer.render(list).unwrap();
+    let clip = view_projection(list, 1.0) * point.extend(1.0);
+    let ndc = clip.truncate() / clip.w;
+    let x = ((ndc.x * 0.5 + 0.5) * 64.0) as usize;
+    let y = ((0.5 - ndc.y * 0.5) * 64.0) as usize;
+    let pixels = renderer.read_pixels();
+    pixels[(y * 64 + x) * 4..][..4].try_into().unwrap()
+}
+
+#[test]
+fn a_part_in_a_shadow_casting_spot_lights_beam_shadows_the_wall_and_moves_it() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let mut list = spot_lit_wall();
+    let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+    let middle = Vec3::new(0.0, 0.0, -9.5);
+    // Where the shadow falls once the block is moved up 2 studs: twice as
+    // far from the light, so 4 studs up the wall.
+    let higher = Vec3::new(0.0, 4.0, -9.5);
+
+    let shaded = pixel_at(&mut renderer, &list, middle);
+    let higher_before = pixel_at(&mut renderer, &list, higher);
+    list.items[1].casts_shadow = false;
+    let lit = pixel_at(&mut renderer, &list, middle);
+    assert!(
+        lit[0] > shaded[0] + 40,
+        "the block shadows the wall: {shaded:?} vs {lit:?}"
+    );
+
+    // Moved, the shadow moves with it.
+    list.items[1].casts_shadow = true;
+    list.items[1].transform.w_axis.y = 2.0;
+    let middle_after = pixel_at(&mut renderer, &list, middle);
+    let higher_after = pixel_at(&mut renderer, &list, higher);
+    assert!(
+        middle_after[0] > shaded[0] + 40,
+        "the middle is lit again: {shaded:?} vs {middle_after:?}"
+    );
+    assert!(
+        higher_before[0] > higher_after[0] + 40,
+        "the shadow is higher up: {higher_before:?} vs {higher_after:?}"
+    );
+
+    // With `Shadows` false there's none, and no spot shadow map.
+    list.items[1].transform.w_axis.y = 0.0;
+    list.lights[0].cone.as_mut().unwrap().shadows = None;
+    let unshadowed = pixel_at(&mut renderer, &list, middle);
+    assert!(
+        unshadowed[0].abs_diff(lit[0]) <= 2,
+        "{unshadowed:?} vs {lit:?}"
+    );
+    assert!(renderer.scene.spot_shadow_map.is_none());
+    assert_eq!(renderer.scene.spot_shadow_maps_alive(), 0);
+}
+
+#[test]
+fn only_the_nearest_shadow_casting_spots_get_shadow_layers() {
+    let mut list = list_of(vec![]);
+    let spot = |z: f32, shadows| spot_light(Vec3::new(0.0, 0.0, z), Vec3::NEG_Z, 5.0, shadows);
+    // Farthest first, so the order they're listed in doesn't decide.
+    list.lights = vec![
+        spot(-15.0, true),
+        spot(-10.0, true),
+        spot(-5.0, true),
+        spot(-3.0, false),
+    ];
+    let medium = Some(crate::SpotShadowMapSize {
+        size: 512,
+        lights: 2,
+    });
+    let planned = plan_lights(&list, 1.0, (64, 64), medium);
+    let layers: Vec<(f32, f32)> = planned
+        .lights
+        .iter()
+        .map(|light| (light.position_range[2], light.shadow[0]))
+        .collect();
+    // Every light still lights; only the two nearest that cast shadows do.
+    assert_eq!(
+        layers,
+        [(-3.0, -1.0), (-5.0, 0.0), (-10.0, 1.0), (-15.0, -1.0)]
+    );
+    assert_eq!(planned.spot_shadows.len(), 2);
+    assert!(planned.lights[1].shadow[1] > 0.0, "texel width per stud");
+
+    let none = plan_lights(&list, 1.0, (64, 64), None);
+    assert!(none.spot_shadows.is_empty());
+    assert!(none.lights.iter().all(|light| light.shadow[0] == -1.0));
+}
+
+#[test]
+fn a_spot_light_past_the_settings_limit_lights_without_a_shadow() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let mut list = spot_lit_wall();
+    let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+    let middle = Vec3::new(0.0, 0.0, -9.5);
+    let shaded = pixel_at(&mut renderer, &list, middle);
+    // Two shadow-casting spots nearer the camera, pointing away from the
+    // wall, take Medium's two layers.
+    for x in [-1.0, 1.0] {
+        list.lights.push(spot_light(
+            Vec3::new(x, 0.0, -1.0),
+            Vec3::new(x, 0.0, 0.0),
+            3.0,
+            true,
+        ));
+    }
+    renderer.set_graphics(&with_shadows(ShadowQuality::Medium));
+    let unshadowed = pixel_at(&mut renderer, &list, middle);
+    assert!(
+        unshadowed[0] > shaded[0] + 40,
+        "still lit, without a shadow: {shaded:?} vs {unshadowed:?}"
+    );
+    // High has four layers, so the wall's light casts its shadow again.
+    renderer.set_graphics(&with_shadows(ShadowQuality::High));
+    let again = pixel_at(&mut renderer, &list, middle);
+    assert!(again[0].abs_diff(shaded[0]) <= 2, "{shaded:?} vs {again:?}");
+}
+
+#[test]
+fn low_shadows_allocate_no_spot_shadow_map() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let list = spot_lit_wall();
+    let mut renderer = TextureRenderer::new(&device, &queue, 32, 32);
+    let spot_map = |renderer: &TextureRenderer| {
+        let map = renderer.scene.spot_shadow_map.as_ref()?;
+        Some((map.size, map.layers.len()))
+    };
+    renderer.render(&list).unwrap();
+    let high = crate::SpotShadowMapSize {
+        size: 1024,
+        lights: 4,
+    };
+    assert_eq!(spot_map(&renderer), Some((high, 4)));
+
+    renderer.set_graphics(&GraphicsSettings::preset(crate::Quality::Low));
+    renderer.render(&list).unwrap();
+    assert_eq!(spot_map(&renderer), None);
+    assert_eq!(renderer.scene.spot_shadow_maps_alive(), 0);
+
+    for quality in ShadowQuality::ALL.iter().cycle().take(20) {
+        renderer.set_graphics(&with_shadows(*quality));
+        renderer.render(&list).unwrap();
+        let expected = quality.spot_map();
+        assert_eq!(spot_map(&renderer).map(|(size, _)| size), expected);
+        assert_eq!(
+            renderer.scene.spot_shadow_maps_alive(),
+            usize::from(expected.is_some())
+        );
+    }
+}
+
+#[test]
+fn a_cones_bounds_hold_its_whole_beam() {
+    for angle in [10.0, 60.0, 90.0, 120.0, 179.0] {
+        let (apex, direction, range) = (Vec3::new(1.0, 2.0, 3.0), Vec3::NEG_Y, 10.0);
+        let (center, radius) = lighting::cone_bounds(apex, direction, angle, range);
+        let half = (angle * 0.5_f32).to_radians();
+        let inside = |point: Vec3| point.distance(center) <= radius + 1e-3;
+        assert!(inside(apex), "{angle}: apex");
+        assert!(inside(apex + direction * range), "{angle}: tip");
+        for step in 0..8 {
+            let turn = step as f32 * std::f32::consts::FRAC_PI_4;
+            let across = Vec3::new(turn.cos(), 0.0, turn.sin());
+            let rim = apex + (direction * half.cos() + across * half.sin()) * range;
+            assert!(inside(rim), "{angle}: rim");
+        }
+        assert!(
+            radius <= range * 1.0001,
+            "{angle}: no bigger than its reach"
+        );
+    }
+}
+
+#[test]
+fn spot_shadows_skip_casters_outside_the_beams_bounds() {
+    let near = item(Shape::Block, Vec3::new(0.0, 0.0, -3.0), 1.0);
+    let far = item(Shape::Block, Vec3::new(0.0, 0.0, -40.0), 1.0);
+    let glass = item(Shape::Block, Vec3::new(0.0, 0.0, -2.0), 0.5);
+    let mut list = list_of(vec![near, far, glass]);
+    list.items.push(DrawItem {
+        casts_shadow: false,
+        ..item(Shape::Sphere, Vec3::new(0.0, 0.0, -4.0), 1.0)
+    });
+    let (mut instances, batches) = plan_draws(&list);
+    let scene = instances.len() as u32;
+    let casters = spot_casters(&mut instances, &batches, (Vec3::new(0.0, 0.0, -5.0), 4.0));
+    // Only the near solid block: the far one is out of reach, the glass is
+    // see-through and the sphere casts no shadow.
+    assert_eq!(casters, [(MeshKey::Block, scene..scene + 1)]);
+    assert_eq!(instances.len() as u32, scene + 1);
+    assert_eq!(instances[scene as usize].model[3][2], -3.0);
 }
 
 #[test]

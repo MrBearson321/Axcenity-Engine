@@ -56,6 +56,16 @@ impl ScenePipeline {
                 },
                 storage_entry(3),
                 storage_entry(4),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
         let light_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -77,25 +87,18 @@ impl ScenePipeline {
             compare: Some(wgpu::CompareFunction::LessEqual),
             ..Default::default()
         });
-        let (empty_shadow_view, _) = create_shadow_views(
-            &device,
-            ShadowMapSize {
-                size: 1,
-                cascades: 1,
-            },
-        );
-        // The bind group keeps the stand-in 1×1 map alive while shadows are off.
+        let (empty_shadow_view, _) = create_shadow_views(&device, "no shadow map", 1, 1);
         let frame_bind_group = create_frame_bind_group(
             &device,
             &frame_layout,
             [&frame_buffer, &light_buffer, &tile_buffer],
-            &empty_shadow_view,
+            [&empty_shadow_view, &empty_shadow_view],
             &shadow_sampler,
         );
         let cascade_size = size_of::<[[f32; 4]; 4]>() as u64;
         let cascade_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("shadow cascades"),
-            size: CASCADE_UNIFORM_STRIDE * SHADOW_CASCADES as u64,
+            label: Some("shadow views"),
+            size: CASCADE_UNIFORM_STRIDE * (SHADOW_CASCADES + MAX_SPOT_SHADOWS) as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -276,12 +279,15 @@ impl ScenePipeline {
             frame_buffer,
             frame_bind_group,
             frame_layout,
+            empty_shadow_view,
             shadow_sampler,
             shadow_pipeline,
             cascade_buffer,
             shadow_bind_group,
             shadow_map: None,
             shadow_maps_alive: Arc::new(()),
+            spot_shadow_map: None,
+            spot_shadow_maps_alive: Arc::new(()),
             graphics,
             settings,
             capabilities,
@@ -306,12 +312,13 @@ impl ScenePipeline {
     }
 
     /// Uses `settings` from the next frame, lowered to what the device can
-    /// do. A shadow map of the wrong size is freed here and remade at the
-    /// right size when next drawn. A new render scale remakes the scene's
-    /// targets, and a new texture quality frees every texture drawn in the
-    /// scene (and the materials using them), so they're uploaded again at
-    /// the new size. A new anti-aliasing remakes the targets and, if its
-    /// samples per pixel changed, the scene pass's pipelines.
+    /// do. A shadow map (the sun's or the spot lights') of the wrong size is
+    /// freed here and remade at the right size when next drawn. A new render
+    /// scale remakes the scene's targets, and a new texture quality frees
+    /// every texture drawn in the scene (and the materials using them), so
+    /// they're uploaded again at the new size. A new anti-aliasing remakes
+    /// the targets and, if its samples per pixel changed, the scene pass's
+    /// pipelines.
     pub(super) fn set_graphics(&mut self, settings: &GraphicsSettings) {
         if *settings == self.settings {
             return;
@@ -320,10 +327,14 @@ impl ScenePipeline {
         let old_samples = self.graphics.anti_aliasing.samples();
         self.settings = settings.clone();
         self.graphics = settings.effective(&self.capabilities);
-        let wanted = self.graphics.shadow_quality.map();
-        if self.shadow_map.as_ref().map(|map| map.size) != wanted {
+        let quality = self.graphics.shadow_quality;
+        if self.shadow_map.as_ref().map(|map| map.size) != quality.map() {
             self.shadow_map = None;
         }
+        if self.spot_shadow_map.as_ref().map(|map| map.size) != quality.spot_map() {
+            self.spot_shadow_map = None;
+        }
+        self.bind_shadow_maps();
         let samples = self.graphics.anti_aliasing.samples();
         if samples != old_samples {
             (self.sky_pipeline, self.item_pipelines) = scene_pipelines(
@@ -386,7 +397,8 @@ impl ScenePipeline {
     ) -> Result<()> {
         // Lights are planned in the scene's pixels, which the render scale
         // makes fewer or more than the output's. UI uses the output's.
-        let planned_lights = plan_lights(list, aspect, self.post_targets.size);
+        let spot_map = self.graphics.shadow_quality.spot_map();
+        let planned_lights = plan_lights(list, aspect, self.post_targets.size, spot_map);
         let mut frame_uniform = frame_uniform(list, aspect, &self.graphics);
         frame_uniform.lights = [
             planned_lights.lights.len() as u32,
@@ -394,13 +406,25 @@ impl ScenePipeline {
             planned_lights.tiles_across,
             0,
         ];
+        for (matrix, spot) in frame_uniform
+            .spot_shadows
+            .iter_mut()
+            .zip(&planned_lights.spot_shadows)
+        {
+            *matrix = spot.view_proj.to_cols_array_2d();
+        }
         self.queue
             .write_buffer(&self.frame_buffer, 0, bytemuck::bytes_of(&frame_uniform));
-        for (index, cascade) in frame_uniform.cascades.iter().enumerate() {
+        // The sun's cascades, then the spot lights' views.
+        let shadow_views = frame_uniform
+            .cascades
+            .iter()
+            .chain(&frame_uniform.spot_shadows);
+        for (index, matrix) in shadow_views.enumerate() {
             self.queue.write_buffer(
                 &self.cascade_buffer,
                 index as u64 * CASCADE_UNIFORM_STRIDE,
-                bytemuck::bytes_of(cascade),
+                bytemuck::bytes_of(matrix),
             );
         }
         if !planned_lights.lights.is_empty() {
@@ -424,7 +448,13 @@ impl ScenePipeline {
 
         self.frame += 1;
         self.upload_new(list);
-        let (instances, batches) = plan_draws(list);
+        let (mut instances, batches) = plan_draws(list);
+        // Each spot light's casters are copied after the scene's instances.
+        let casters_by_spot: Vec<_> = planned_lights
+            .spot_shadows
+            .iter()
+            .map(|spot| spot_casters(&mut instances, &batches, spot.bounds))
+            .collect();
         self.ensure_instance_capacity(instances.len());
         self.queue
             .write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&instances));
@@ -490,28 +520,44 @@ impl ScenePipeline {
         };
 
         // Shadow maps cost memory, so one exists only while shadows are on,
-        // at the size the graphics settings give.
+        // at the size the graphics settings give. The spot lights' exists
+        // only while one of them casts shadows.
         let map_size = shadows_drawn(list.shadows, &self.graphics).map(|(_, size)| size);
+        let spot_map = spot_map.filter(|_| !planned_lights.spot_shadows.is_empty());
+        let mut changed = false;
         if self.shadow_map.as_ref().map(|map| map.size) != map_size {
-            self.shadow_map = None;
-        }
-        if let Some(size) = map_size
-            && self.shadow_map.is_none()
-        {
-            let (view, layers) = create_shadow_views(&self.device, size);
-            let frame_bind_group = create_frame_bind_group(
-                &self.device,
-                &self.frame_layout,
-                [&self.frame_buffer, &self.light_buffer, &self.tile_buffer],
-                &view,
-                &self.shadow_sampler,
-            );
-            self.shadow_map = Some(ShadowMap {
-                size,
-                _alive: self.shadow_maps_alive.clone(),
-                layers,
-                frame_bind_group,
+            self.shadow_map = map_size.map(|size| {
+                // The shader holds at most `SHADOW_CASCADES` cascades.
+                debug_assert!(
+                    size.size <= SHADOW_MAP_SIZE && size.cascades as usize <= SHADOW_CASCADES
+                );
+                let (array, layers) =
+                    create_shadow_views(&self.device, "shadow map", size.size, size.cascades);
+                ShadowMap {
+                    size,
+                    _alive: self.shadow_maps_alive.clone(),
+                    array,
+                    layers,
+                }
             });
+            changed = true;
+        }
+        if self.spot_shadow_map.as_ref().map(|map| map.size) != spot_map {
+            self.spot_shadow_map = spot_map.map(|size| {
+                debug_assert!(size.lights as usize <= MAX_SPOT_SHADOWS);
+                let (array, layers) =
+                    create_shadow_views(&self.device, "spot shadow map", size.size, size.lights);
+                ShadowMap {
+                    size,
+                    _alive: self.spot_shadow_maps_alive.clone(),
+                    array,
+                    layers,
+                }
+            });
+            changed = true;
+        }
+        if changed {
+            self.bind_shadow_maps();
         }
 
         let mut encoder = self
@@ -533,11 +579,28 @@ impl ScenePipeline {
             draws.1 += u64::from(index_count / 3) * u64::from(instances.end - instances.start);
         };
 
-        // One pass per cascade, each drawing into its own layer of the map.
-        let layers = self.shadow_map.iter().flat_map(|map| &map.layers);
-        for (index, layer) in layers.enumerate() {
+        // One pass per cascade, each drawing into its own layer of the map,
+        // then one per shadow-casting spot light, drawing only what's near
+        // enough to its beam. Each view's matrix is at its index in
+        // `cascade_buffer`, the spot lights' after every cascade's.
+        let all_casters: Vec<_> = batches
+            .iter()
+            .filter(|batch| !batch.transparent && batch.casts_shadow)
+            .map(|batch| (batch.mesh, batch.instances.clone()))
+            .collect();
+        let cascades = self
+            .shadow_map
+            .iter()
+            .flat_map(|map| map.layers.iter().enumerate())
+            .map(|(index, layer)| (index, layer, &all_casters));
+        let spots = self
+            .spot_shadow_map
+            .iter()
+            .flat_map(|map| map.layers.iter().zip(&casters_by_spot).enumerate())
+            .map(|(index, (layer, casters))| (SHADOW_CASCADES + index, layer, casters));
+        for (index, layer, casters) in cascades.chain(spots) {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("shadow cascade"),
+                label: Some("shadow view"),
                 color_attachments: &[],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: layer,
@@ -554,23 +617,17 @@ impl ScenePipeline {
             pass.set_bind_group(0, &self.shadow_bind_group, &[offset]);
             pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             // See-through items, and parts with `CastShadow` off, cast no shadow.
-            for batch in batches
-                .iter()
-                .filter(|batch| !batch.transparent && batch.casts_shadow)
-            {
-                let Some(mesh) = self.gpu_mesh(batch.mesh) else {
+            for (mesh, instances) in casters {
+                let Some(mesh) = self.gpu_mesh(*mesh) else {
                     continue;
                 };
                 pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                 pass.set_index_buffer(mesh.indices.slice(..), mesh.index_format);
-                count(mesh.index_count, &batch.instances);
-                pass.draw_indexed(0..mesh.index_count, 0, batch.instances.clone());
+                count(mesh.index_count, instances);
+                pass.draw_indexed(0..mesh.index_count, 0, instances.clone());
             }
         }
-        let frame_bind_group = self
-            .shadow_map
-            .as_ref()
-            .map_or(&self.frame_bind_group, |map| &map.frame_bind_group);
+        let frame_bind_group = &self.frame_bind_group;
 
         // The scene is drawn into the HDR texture; post-processing then brings
         // it to `view`. With MSAA it's drawn into the multisampled texture,
@@ -741,10 +798,35 @@ impl ScenePipeline {
         Ok(())
     }
 
+    /// Remakes the frame bindings with the shadow maps alive, binding the
+    /// empty stand-in for each that isn't, so a freed map isn't kept alive
+    /// by the bindings.
+    fn bind_shadow_maps(&mut self) {
+        let empty = &self.empty_shadow_view;
+        let sun = self.shadow_map.as_ref().map_or(empty, |map| &map.array);
+        let spot = self
+            .spot_shadow_map
+            .as_ref()
+            .map_or(empty, |map| &map.array);
+        self.frame_bind_group = create_frame_bind_group(
+            &self.device,
+            &self.frame_layout,
+            [&self.frame_buffer, &self.light_buffer, &self.tile_buffer],
+            [sun, spot],
+            &self.shadow_sampler,
+        );
+    }
+
     /// How many shadow maps are alive: 0 or 1, unless one leaked.
     #[cfg(test)]
     pub(super) fn shadow_maps_alive(&self) -> usize {
         Arc::strong_count(&self.shadow_maps_alive) - 1
+    }
+
+    /// How many spot shadow maps are alive: 0 or 1, unless one leaked.
+    #[cfg(test)]
+    pub(super) fn spot_shadow_maps_alive(&self) -> usize {
+        Arc::strong_count(&self.spot_shadow_maps_alive) - 1
     }
 
     /// How many sets of scene targets are alive: 1, unless one leaked.

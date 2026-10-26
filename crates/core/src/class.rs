@@ -345,6 +345,9 @@ impl ClassName {
                 ("Angle", Value::Number(60.0)),
                 // Where the cone points, relative to the parent part.
                 ("Direction", Value::Vector3(Vector3::new(0.0, -1.0, 0.0))),
+                // Whether parts in the beam cast shadows. Off, so worlds
+                // saved without it look as they did.
+                ("Shadows", Value::Bool(false)),
             ],
             ClassName::ParticleEmitter => vec![
                 ("Enabled", Value::Bool(true)),

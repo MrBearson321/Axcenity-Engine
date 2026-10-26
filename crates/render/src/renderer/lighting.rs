@@ -3,6 +3,7 @@
 //! CPU-side planning for one frame. The `Frame`, `Light` and instance layouts
 //! must stay aligned with `shader.wgsl`. Shared GPU types live in `renderer.rs`.
 
+use std::ops::Range;
 use std::sync::Arc;
 
 use glam::camera::rh;
@@ -11,12 +12,13 @@ use glam::{Mat3, Mat4, Vec2, Vec3};
 use crate::draw_list::{
     ChannelMap, DrawItem, DrawList, Light, Material, PostProcessing, Shadows, TextureSource,
 };
-use crate::graphics::{EffectiveGraphics, ShadowMapSize};
+use crate::graphics::{EffectiveGraphics, ShadowMapSize, SpotShadowMapSize};
 
 use super::{
     Batch, CASCADE_SPLIT_BLEND, FAR_PLANE, FrameUniform, InstanceRaw, LIGHT_SCALE, LIGHTS_PER_TILE,
-    LightRaw, MATERIAL_TEXTURES, MAX_LIGHTS, MAX_SUN_SIZE, MAX_TILES, MIN_TILE_SIZE, MapsUniform,
-    MaterialKey, MeshKey, NEAR_PLANE, PostUniform, SHADOW_CASCADES, SHADOW_CASTER_RANGE,
+    LightRaw, MATERIAL_TEXTURES, MAX_LIGHTS, MAX_SPOT_SHADOW_DEGREES, MAX_SPOT_SHADOWS,
+    MAX_SUN_SIZE, MAX_TILES, MIN_TILE_SIZE, MapsUniform, MaterialKey, MeshKey, NEAR_PLANE,
+    PostUniform, SHADOW_CASCADES, SHADOW_CASTER_RANGE, SpotShadow,
 };
 
 pub(super) fn view_projection(list: &DrawList, aspect: f32) -> Mat4 {
@@ -91,6 +93,7 @@ pub(super) fn frame_uniform(
         sky_horizon: linear_color(sky.horizon_color).extend(0.0).to_array(),
         sky_ground: linear_color(sky.ground_color).extend(0.0).to_array(),
         lights: [0; 4],
+        spot_shadows: [Mat4::IDENTITY.to_cols_array_2d(); MAX_SPOT_SHADOWS],
     }
 }
 
@@ -102,17 +105,22 @@ pub(super) struct PlannedLights {
     pub(super) tiles: Vec<u32>,
     pub(super) tile_size: u32,
     pub(super) tiles_across: u32,
+    /// The spot lights casting shadows, by their layer of the spot shadow map.
+    pub(super) spot_shadows: Vec<SpotShadow>,
 }
 
 /// Picks the lights to draw (the nearest [`MAX_LIGHTS`]) and sorts them into
 /// screen tiles, so each pixel only loops over the few lights that can
 /// reach it instead of all of them. A light goes in every tile that its
 /// sphere of reach could touch; tiles with more than [`LIGHTS_PER_TILE`]
-/// keep the nearest ones to the camera.
+/// keep the nearest ones to the camera. Of the spot lights that cast
+/// shadows, the nearest in view get a layer of `spot_map` each, as many as
+/// it has; the rest light without shadows.
 pub(super) fn plan_lights(
     list: &DrawList,
     aspect: f32,
     (width, height): (u32, u32),
+    spot_map: Option<SpotShadowMapSize>,
 ) -> PlannedLights {
     let camera = list.camera.position;
     let mut lights: Vec<&Light> = list
@@ -145,6 +153,7 @@ pub(super) fn plan_lights(
         tiles: Vec::new(),
         tile_size,
         tiles_across: across,
+        spot_shadows: Vec::new(),
     };
     if lights.is_empty() || width == 0 || height == 0 {
         return planned;
@@ -153,12 +162,22 @@ pub(super) fn plan_lights(
     let view_proj = view_projection(list, aspect);
     let stride = LIGHTS_PER_TILE + 1;
     planned.tiles = vec![0; (across * down) as usize * stride];
+    // Lights are nearest first, so the nearest that cast shadows get layers.
+    let spot_layers = spot_map.map_or(0, |map| (map.lights as usize).min(MAX_SPOT_SHADOWS));
     for light in lights {
         let Some((first, last)) = light_tiles(view_proj, light, (width, height), tile_size) else {
             continue;
         };
         let index = planned.lights.len() as u32;
-        planned.lights.push(light_raw(light));
+        let mut raw = light_raw(light);
+        if planned.spot_shadows.len() < spot_layers
+            && let Some(map) = spot_map
+            && let Some((shadow, texel)) = spot_shadow(light, map.size)
+        {
+            raw.shadow = [planned.spot_shadows.len() as f32, texel, 0.0, 0.0];
+            planned.spot_shadows.push(shadow);
+        }
+        planned.lights.push(raw);
         for y in first.1..=last.1 {
             for x in first.0..=last.0 {
                 let tile = (y * across + x) as usize * stride;
@@ -243,7 +262,103 @@ pub(super) fn light_raw(light: &Light) -> LightRaw {
         position_range: light.position.extend(light.range).to_array(),
         radiance_cone: radiance.extend(cone_edge).to_array(),
         direction_inner: direction.extend(cone_inner).to_array(),
+        shadow: [-1.0, 0.0, 0.0, 0.0],
     }
+}
+
+/// A spot light's shadow view, if it casts shadows, with the width of one of
+/// its `size`² map's texels per stud from the light. The view looks down
+/// the beam with a perspective as wide as the cone (at most
+/// [`MAX_SPOT_SHADOW_DEGREES`]), from the shadows' near distance out to the
+/// light's range.
+pub(super) fn spot_shadow(light: &Light, size: u32) -> Option<(SpotShadow, f32)> {
+    let cone = light.cone?;
+    let shadows = cone.shadows?;
+    let direction = cone.direction.normalize_or(Vec3::NEG_Y);
+    let angle = cone.angle_degrees.clamp(1.0, 179.0);
+    // A little wider than the beam, so filtering at its edge stays inside.
+    let fov = (angle * 1.05).min(MAX_SPOT_SHADOW_DEGREES).to_radians();
+    let near = if shadows.near.is_finite() {
+        shadows.near.max(0.05)
+    } else {
+        0.05
+    };
+    if near >= light.range {
+        return None;
+    }
+    let up = if direction.y.abs() > 0.99 {
+        Vec3::X
+    } else {
+        Vec3::Y
+    };
+    let view = rh::view::look_at_mat4(light.position, light.position + direction, up);
+    let projection = rh::proj::directx::perspective(fov, 1.0, near, light.range);
+    let texel = 2.0 * (fov * 0.5).tan() / size as f32;
+    let shadow = SpotShadow {
+        view_proj: projection * view,
+        bounds: cone_bounds(light.position, direction, angle, light.range),
+    };
+    Some((shadow, texel))
+}
+
+/// The smallest sphere around a beam from `apex` along `direction`,
+/// `angle_degrees` wide, reaching `range` studs: the part of the light's
+/// sphere of reach inside the cone.
+pub(super) fn cone_bounds(
+    apex: Vec3,
+    direction: Vec3,
+    angle_degrees: f32,
+    range: f32,
+) -> (Vec3, f32) {
+    let half = (angle_degrees * 0.5).to_radians();
+    let (sin, cos) = half.sin_cos();
+    if half <= std::f32::consts::FRAC_PI_4 {
+        // Narrow: the sphere through the apex and the far rim.
+        let radius = range / (2.0 * cos);
+        (apex + direction * radius, radius)
+    } else if half < std::f32::consts::FRAC_PI_2 {
+        // Wide: the sphere around the rim, which holds the apex and the cap.
+        (apex + direction * range * cos, range * sin)
+    } else {
+        (apex, range)
+    }
+}
+
+/// Copies the solid, shadow-casting instances whose bounds reach `bounds`
+/// to the end of `instances`, and returns them grouped by mesh, for one
+/// spot light's shadow pass. Every shape fits the unit cube, so an
+/// instance's bounding sphere comes from its transform alone.
+pub(super) fn spot_casters(
+    instances: &mut Vec<InstanceRaw>,
+    batches: &[Batch],
+    (center, radius): (Vec3, f32),
+) -> Vec<(MeshKey, Range<u32>)> {
+    let mut casters: Vec<(MeshKey, Range<u32>)> = Vec::new();
+    for batch in batches
+        .iter()
+        .filter(|batch| !batch.transparent && batch.casts_shadow)
+    {
+        for index in batch.instances.clone() {
+            let raw = instances[index as usize];
+            let model = Mat4::from_cols_array_2d(&raw.model);
+            let reach = 0.5
+                * (model.x_axis.truncate().length()
+                    + model.y_axis.truncate().length()
+                    + model.z_axis.truncate().length());
+            if model.w_axis.truncate().distance(center) > radius + reach {
+                continue;
+            }
+            let copy = instances.len() as u32;
+            instances.push(raw);
+            match casters.last_mut() {
+                Some((mesh, range)) if *mesh == batch.mesh && range.end == copy => {
+                    range.end = copy + 1;
+                }
+                _ => casters.push((batch.mesh, copy..copy + 1)),
+            }
+        }
+    }
+    casters
 }
 
 pub(super) fn post_uniform(post: &PostProcessing) -> PostUniform {
