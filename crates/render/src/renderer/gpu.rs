@@ -45,14 +45,14 @@ pub(super) fn shader_module(
 /// solid items, see-through ones when `transparent` is true, or terrain
 /// chunks, by `shader`'s `entry_points` (vertex, fragment). `layouts` are
 /// its bind groups: the frame's, then the material's. `samples` per pixel
-/// must match the scene's targets.
+/// must match the scene's targets. `double_sided` draws back faces too.
 pub(super) fn create_pipeline(
     device: &wgpu::Device,
     shader: &wgpu::ShaderModule,
     (vertex_entry, fragment_entry): (&str, &str),
     layouts: &[&wgpu::BindGroupLayout],
     (color_format, samples): (wgpu::TextureFormat, u32),
-    transparent: bool,
+    (transparent, double_sided): (bool, bool),
 ) -> wgpu::RenderPipeline {
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("scene"),
@@ -114,9 +114,10 @@ pub(super) fn create_pipeline(
             buffers: &[vertex_layout, instance_layout],
         },
         primitive: wgpu::PrimitiveState {
-            // Counter-clockwise triangles face the camera; the backs are skipped.
+            // Counter-clockwise triangles face the camera; the backs are
+            // skipped unless the material is double-sided.
             front_face: wgpu::FrontFace::Ccw,
-            cull_mode: Some(wgpu::Face::Back),
+            cull_mode: (!double_sided).then_some(wgpu::Face::Back),
             ..Default::default()
         },
         depth_stencil: Some(wgpu::DepthStencilState {

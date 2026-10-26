@@ -1073,6 +1073,239 @@ fn a_script_setting_filmic_tone_mapping_changes_the_next_frame() {
     );
 }
 
+/// A GPU device for render tests, or `None` on machines without one.
+fn test_gpu() -> Option<(axcenity_render::wgpu::Device, axcenity_render::wgpu::Queue)> {
+    use axcenity_render::wgpu;
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+    let adapter = pollster::block_on(instance.request_adapter(&Default::default())).ok()?;
+    pollster::block_on(adapter.request_device(&Default::default())).ok()
+}
+
+/// A new, empty project folder for one test, with `stripes.png`: 64×64,
+/// red on its left half and blue on its right.
+fn stripes_project(name: &str) -> PathBuf {
+    let folder =
+        std::env::temp_dir().join(format!("axcenity-player-{name}-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&folder);
+    fs::create_dir_all(&folder).unwrap();
+    let pixels: Vec<u8> = (0..64 * 64)
+        .flat_map(|i| {
+            if i % 64 < 32 {
+                [255, 0, 0, 255]
+            } else {
+                [0, 0, 255, 255]
+            }
+        })
+        .collect();
+    let file = fs::File::create(folder.join("stripes.png")).unwrap();
+    let mut encoder = png::Encoder::new(file, 64, 64);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder
+        .write_header()
+        .unwrap()
+        .write_image_data(&pixels)
+        .unwrap();
+    folder
+}
+
+/// `world` drawn 64×64 from `eye` toward the origin, lit only by a sun
+/// behind the camera: the colors across the middle row, one `R` (red) or
+/// `B` (blue) for each stretch of that color, and the row's brightest
+/// channel.
+fn stripes_seen(
+    renderer: &mut axcenity_render::TextureRenderer,
+    world: &World,
+    assets: &Assets,
+    eye: Vec3,
+) -> (String, u8) {
+    let camera = axcenity_render::Camera {
+        position: eye,
+        look_at: Vec3::ZERO,
+        fov_y_degrees: 70.0,
+    };
+    let mut list = axcenity_scene::build_draw_list(world, assets, camera);
+    list.sun.direction = eye.normalize();
+    list.shadows.enabled = false;
+    list.sky = axcenity_render::Sky {
+        top_color: [0.0; 3],
+        horizon_color: [0.0; 3],
+        ground_color: [0.0; 3],
+        environment_intensity: 0.0,
+    };
+    list.ambient.intensity = 0.0;
+    // Models and textures load the first time they're drawn.
+    renderer.render(&list).unwrap();
+    renderer.render(&list).unwrap();
+    let errors = assets.take_errors();
+    assert!(errors.is_empty(), "{errors:?}");
+    let pixels = renderer.read_pixels();
+    let colors: Vec<char> = (0..64)
+        .map(|x| {
+            let [red, _, blue] = [0, 1, 2].map(|c| u16::from(pixels[(32 * 64 + x) * 4 + c]));
+            if red > blue + 40 {
+                'R'
+            } else if blue > red + 40 {
+                'B'
+            } else {
+                '.'
+            }
+        })
+        .collect();
+    // Stretches of at least two pixels: a texture repeating past an edge
+    // blends in a pixel of its other side there.
+    let mut runs = String::new();
+    for stretch in colors.chunk_by(|a, b| a == b) {
+        let color = stretch[0];
+        if color != '.' && stretch.len() >= 2 && !runs.ends_with(color) {
+            runs.push(color);
+        }
+    }
+    let row = &pixels[32 * 64 * 4..33 * 64 * 4];
+    let brightest = row
+        .chunks(4)
+        .flat_map(|pixel| pixel[..3].iter().copied())
+        .max()
+        .unwrap();
+    (runs, brightest)
+}
+
+/// A glTF leaf: one square, 2 units across, facing +Z, with `stripes.png`
+/// repeated twice across by `KHR_texture_transform`, on a double-sided
+/// material.
+fn write_leaf_gltf(folder: &Path) {
+    let positions: [f32; 12] = [
+        -1.0, -1.0, 0.0, 1.0, -1.0, 0.0, 1.0, 1.0, 0.0, -1.0, 1.0, 0.0,
+    ];
+    let normals: [f32; 12] = [0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0];
+    let uvs: [f32; 8] = [0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0];
+    let indices: [u16; 6] = [0, 1, 2, 0, 2, 3];
+    let mut bytes: Vec<u8> = positions
+        .iter()
+        .chain(&normals)
+        .chain(&uvs)
+        .flat_map(|f| f.to_le_bytes())
+        .collect();
+    bytes.extend(indices.iter().flat_map(|i| i.to_le_bytes()));
+    fs::write(folder.join("leaf.bin"), &bytes).unwrap();
+    let gltf = r#"{
+        "asset": { "version": "2.0" },
+        "extensionsUsed": ["KHR_texture_transform"],
+        "buffers": [ { "uri": "leaf.bin", "byteLength": 140 } ],
+        "bufferViews": [
+            { "buffer": 0, "byteOffset": 0, "byteLength": 48 },
+            { "buffer": 0, "byteOffset": 48, "byteLength": 48 },
+            { "buffer": 0, "byteOffset": 96, "byteLength": 32 },
+            { "buffer": 0, "byteOffset": 128, "byteLength": 12 }
+        ],
+        "accessors": [
+            { "bufferView": 0, "componentType": 5126, "count": 4, "type": "VEC3",
+              "min": [-1, -1, 0], "max": [1, 1, 0] },
+            { "bufferView": 1, "componentType": 5126, "count": 4, "type": "VEC3" },
+            { "bufferView": 2, "componentType": 5126, "count": 4, "type": "VEC2" },
+            { "bufferView": 3, "componentType": 5123, "count": 6, "type": "SCALAR" }
+        ],
+        "images": [ { "uri": "stripes.png" } ],
+        "textures": [ { "source": 0 } ],
+        "materials": [ {
+            "name": "Leaf",
+            "doubleSided": true,
+            "pbrMetallicRoughness": {
+                "baseColorTexture": { "index": 0,
+                    "extensions": { "KHR_texture_transform": { "scale": [2, 1] } } },
+                "metallicFactor": 0,
+                "roughnessFactor": 1
+            }
+        } ],
+        "meshes": [ { "primitives": [ {
+            "attributes": { "POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2 },
+            "indices": 3,
+            "material": 0
+        } ] } ],
+        "nodes": [ { "mesh": 0 } ],
+        "scenes": [ { "nodes": [0] } ],
+        "scene": 0
+    }"#;
+    fs::write(folder.join("leaf.gltf"), gltf).unwrap();
+}
+
+/// A glTF leaf with a texture transform and a double-sided material, in
+/// a MeshPart: its stripes repeat twice across, and its back is drawn
+/// and lit like its front (mirrored, as a back is).
+#[test]
+fn a_gltf_leaf_draws_its_texture_transform_and_both_sides_lit() {
+    let Some((device, queue)) = test_gpu() else {
+        return;
+    };
+    let folder = stripes_project("leaf");
+    write_leaf_gltf(&folder);
+    let assets = Assets::new(&folder);
+    let mut world = World::new();
+    let leaf = world.create(axcenity_core::ClassName::MeshPart).unwrap();
+    world.set_parent(leaf, Some(world.workspace())).unwrap();
+    world
+        .set_property(leaf, "MeshId", Value::String("leaf.gltf".into()))
+        .unwrap();
+    world
+        .set_property(leaf, "Size", Value::Vector3(Vector3::new(8.0, 8.0, 1.0)))
+        .unwrap();
+    let mut renderer = axcenity_render::TextureRenderer::new(&device, &queue, 64, 64);
+    let (front, front_light) =
+        stripes_seen(&mut renderer, &world, &assets, Vec3::new(0.0, 0.0, 10.0));
+    assert_eq!(front, "RBRB");
+    let (back, back_light) =
+        stripes_seen(&mut renderer, &world, &assets, Vec3::new(0.0, 0.0, -10.0));
+    assert_eq!(back, "BRBR");
+    assert!(front_light > 60, "the front is lit: {front_light}");
+    assert!(
+        front_light.abs_diff(back_light) <= 2,
+        "front {front_light}, back {back_light}"
+    );
+}
+
+/// A SurfaceAppearance's `Tiling` of 2 repeats its color map twice as
+/// often across a Part's face, and an `Offset` of 0.5 shifts it by half.
+#[test]
+fn a_surface_appearances_tiling_repeats_its_map_and_its_offset_shifts_it() {
+    use axcenity_core::{ClassName, Vector2};
+    let Some((device, queue)) = test_gpu() else {
+        return;
+    };
+    let folder = stripes_project("surface-tiling");
+    let assets = Assets::new(&folder);
+    let mut world = World::new();
+    let part = world.create(ClassName::Part).unwrap();
+    world.set_parent(part, Some(world.workspace())).unwrap();
+    // One copy of the texture across its 8-stud face (TileSize 8), matte
+    // so the sun's highlight doesn't wash its colors out.
+    world
+        .set_property(part, "Size", Value::Vector3(Vector3::new(8.0, 8.0, 1.0)))
+        .unwrap();
+    world
+        .set_property(part, "Roughness", Value::Number(1.0))
+        .unwrap();
+    let look = world.create(ClassName::SurfaceAppearance).unwrap();
+    world.set_parent(look, Some(part)).unwrap();
+    world
+        .set_property(look, "ColorMap", Value::String("stripes.png".into()))
+        .unwrap();
+    let mut renderer = axcenity_render::TextureRenderer::new(&device, &queue, 64, 64);
+    let eye = Vec3::new(0.0, 0.0, 10.0);
+    let mut seen = |world: &World| stripes_seen(&mut renderer, world, &assets, eye).0;
+    assert_eq!(seen(&world), "RB");
+    world
+        .set_property(look, "Tiling", Value::Vector2(Vector2::new(2.0, 1.0)))
+        .unwrap();
+    assert_eq!(seen(&world), "RBRB");
+    world
+        .set_property(look, "Tiling", Value::Vector2(Vector2::new(1.0, 1.0)))
+        .unwrap();
+    world
+        .set_property(look, "Offset", Value::Vector2(Vector2::new(0.5, 0.0)))
+        .unwrap();
+    assert_eq!(seen(&world), "BR");
+}
+
 fn start_example(name: &str) -> (World, ScriptRuntime) {
     let (world, scripts, _) = start_example_in(name);
     (world, scripts)

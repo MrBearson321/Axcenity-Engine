@@ -994,6 +994,16 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "Multiplies the glow.",
     ),
     (
+        ClassName::SurfaceAppearance,
+        "Tiling",
+        "How many times as often the maps repeat, across and down: `Vector2.new(2, 2)` repeats them twice as often. On a Part, on top of its TileSize.",
+    ),
+    (
+        ClassName::SurfaceAppearance,
+        "Offset",
+        "Shifts the maps across and down, in copies of the texture: `Vector2.new(0.5, 0)` moves them half a copy across.",
+    ),
+    (
         ClassName::Terrain,
         "Position",
         "The middle of the terrain's bottom: its lowest possible ground.",

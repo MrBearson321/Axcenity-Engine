@@ -650,3 +650,44 @@ fn hello_pbr_examples_load_their_maps() {
     assert!(roughness.invert, "glossiness should invert to roughness");
     assert!(material.specular_texture.is_some());
 }
+
+#[test]
+fn a_textures_scaling_and_translation_place_its_maps_with_v_flipped() {
+    let folder = temp_folder("uv-transform");
+    std::fs::create_dir_all(folder.join("textures")).unwrap();
+    std::fs::write(folder.join("textures/checker.png"), checker_png()).unwrap();
+    let fbx = pyramid_fbx(false, Some("textures/checker.png")).replacen(
+        "\t\tType: \"TextureVideoClip\"\n",
+        "\t\tType: \"TextureVideoClip\"\n\
+         \t\tProperties70:  {\n\
+         \t\t\tP: \"Scaling\", \"Vector\", \"\", \"A\",2,4,1\n\
+         \t\t\tP: \"Translation\", \"Vector\", \"\", \"A\",0.25,0.5,0\n\
+         \t\t}\n",
+        1,
+    );
+    let model = load_fbx(&fbx, &folder).unwrap();
+    let material = &model.primitives[0].material;
+    // `ufbx`'s `uv_to_texture` undoes the texture's own placement: a
+    // texture scaled up 2× and moved by 0.25 is sampled at
+    // (uv - 0.25) / 2. V's offset is then flipped to run from the top.
+    assert_eq!(material.uv_scale, [0.5, 0.25]);
+    assert_eq!(material.uv_offset, [-0.125, 1.0 - 0.25 + 0.125]);
+}
+
+#[test]
+fn fbx_texture_placements_flip_v_into_the_engines_coordinates() {
+    assert_eq!(
+        engine_uv_transform([1.0, 1.0], [0.0, 0.0]),
+        ([1.0, 1.0], [0.0, 0.0])
+    );
+    // Sampling v' = 2v + 0.25 from the bottom is 1 - v' = 2(1 - v) - 1.25
+    // from the top.
+    assert_eq!(
+        engine_uv_transform([3.0, 2.0], [0.5, 0.25]),
+        ([3.0, 2.0], [0.5, -1.25])
+    );
+    assert_eq!(
+        engine_uv_transform([f64::NAN, 1.0], [f64::INFINITY, 0.0]),
+        ([1.0, 1.0], [0.0, 0.0])
+    );
+}

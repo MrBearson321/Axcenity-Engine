@@ -657,6 +657,19 @@ pub struct Material {
     pub alpha_cutoff: f32,
     /// More textures, placed like `base_color_texture`.
     pub maps: TextureMaps,
+    /// Multiplies the texture coordinates, after [`DrawItem::uv_tile`]: 2
+    /// repeats the textures twice as often.
+    pub uv_scale: [f32; 2],
+    /// Turns the scaled texture coordinates around their origin, in
+    /// radians, as glTF's `KHR_texture_transform` does (counter-clockwise
+    /// in the texture, which turns the image clockwise).
+    pub uv_rotation: f32,
+    /// Added to the texture coordinates last, in copies of the texture:
+    /// 0.5 shifts the textures by half.
+    pub uv_offset: [f32; 2],
+    /// Draws the backs of triangles too, lit like their fronts (leaves,
+    /// paper, cloth). Off, backs aren't drawn at all.
+    pub double_sided: bool,
     /// For a terrain chunk: its blended layers, which replace everything
     /// above but `opacity` (terrain is always solid).
     pub terrain: Option<TerrainSurface>,
@@ -673,6 +686,10 @@ impl Default for Material {
             opacity: 1.0,
             alpha_cutoff: 0.0,
             maps: TextureMaps::default(),
+            uv_scale: [1.0, 1.0],
+            uv_rotation: 0.0,
+            uv_offset: [0.0, 0.0],
+            double_sided: false,
             terrain: None,
         }
     }

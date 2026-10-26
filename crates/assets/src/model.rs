@@ -192,6 +192,16 @@ pub struct ModelMaterial {
     /// How strongly the non-metal parts reflect, for older (Phong)
     /// materials: 0.5 is the usual amount, 0 none, 1 twice that.
     pub specular_texture: Option<Arc<Image>>,
+    /// Multiplies the texture coordinates: 2 repeats the textures twice
+    /// as often.
+    pub uv_scale: [f32; 2],
+    /// Turns the scaled coordinates, in radians, as glTF's
+    /// `KHR_texture_transform` does.
+    pub uv_rotation: f32,
+    /// Added to the coordinates last, in copies of the texture.
+    pub uv_offset: [f32; 2],
+    /// Both sides of each triangle are drawn, and lit (leaves, paper).
+    pub double_sided: bool,
 }
 
 impl Default for ModelMaterial {
@@ -215,6 +225,10 @@ impl Default for ModelMaterial {
             emissive_texture: None,
             opacity_texture: None,
             specular_texture: None,
+            uv_scale: [1.0, 1.0],
+            uv_rotation: 0.0,
+            uv_offset: [0.0, 0.0],
+            double_sided: false,
         }
     }
 }
@@ -900,6 +914,18 @@ impl Reader<'_> {
         .into_iter()
         .flatten()
         .next();
+        // One transform places every map: the first texture's that has one
+        // (`KHR_texture_transform`), unless it moves that texture to
+        // another coordinate set.
+        let transform = [
+            base_color.as_ref(),
+            metallic_roughness.as_ref(),
+            emissive.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        .find_map(|info| info.texture_transform())
+        .filter(|transform| transform.tex_coord().is_none_or(|set| Some(set) == uv_set));
         // The image of a texture on `uv_set`, decoded.
         let mut image = |texture: Option<(gltf::Texture, u32)>| match texture {
             Some((texture, set)) if Some(set) == uv_set => self.image(&texture.source()).map(Some),
@@ -943,6 +969,10 @@ impl Reader<'_> {
             emissive_texture,
             opacity_texture: None,
             specular_texture: None,
+            uv_scale: transform.as_ref().map_or([1.0, 1.0], |t| t.scale()),
+            uv_rotation: transform.as_ref().map_or(0.0, |t| t.rotation()),
+            uv_offset: transform.as_ref().map_or([0.0, 0.0], |t| t.offset()),
+            double_sided: material.double_sided(),
         };
         Ok((material, uv_set))
     }

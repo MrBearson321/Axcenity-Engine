@@ -600,6 +600,21 @@ fn overlay_appearance(material: &mut Material, appearance: &Instance, assets: &A
     if let Some(image) = texture_of("SpecularMap") {
         material.maps.specular = Some(image);
     }
+    place_maps(material, appearance);
+}
+
+/// Places a material's maps by `appearance`'s `Tiling` and `Offset`, in
+/// place of any placement of its own.
+fn place_maps(material: &mut Material, appearance: &Instance) {
+    let vector = |name, default| {
+        appearance
+            .property(name)
+            .and_then(Value::as_vector2)
+            .map_or(default, |v| [v.x, v.y])
+    };
+    material.uv_scale = vector("Tiling", [1.0, 1.0]);
+    material.uv_rotation = 0.0;
+    material.uv_offset = vector("Offset", [0.0, 0.0]);
 }
 
 /// A MeshPart's draw items, one per part of its model, each with the
@@ -760,6 +775,7 @@ fn surface_material(file: &ModelMaterial, appearance: &Instance, assets: &Assets
         material.alpha_cutoff = 0.5;
     }
     maps.specular = texture_of("SpecularMap");
+    place_maps(&mut material, appearance);
     material
 }
 
@@ -812,6 +828,10 @@ fn model_material(material: &ModelMaterial) -> Material {
             opacity: material.opacity_texture.as_ref().map(channel_map),
             specular: material.specular_texture.as_ref().map(texture),
         },
+        uv_scale: material.uv_scale,
+        uv_rotation: material.uv_rotation,
+        uv_offset: material.uv_offset,
+        double_sided: material.double_sided,
         terrain: None,
     }
 }

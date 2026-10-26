@@ -166,9 +166,9 @@ A Lighting property `ToneMapping` (`Enum.ToneMapping`): `Classic` (today's knee,
 
 ### Acceptance criteria
 
-- [ ] A glTF with a texture transform and a double-sided leaf plane draws with the transform applied and both sides lit (GPU test with a small test model).
-- [ ] A SurfaceAppearance with tiling 2 repeats its map twice as often, and an offset of 0.5 shifts it by half (GPU test on pixel colors).
-- [ ] Existing models and `hello-pbr` look unchanged, and the example snapshots still pass.
+- [x] A glTF with a texture transform and a double-sided leaf plane draws with the transform applied and both sides lit (GPU test with a small test model).
+- [x] A SurfaceAppearance with tiling 2 repeats its map twice as often, and an offset of 0.5 shifts it by half (GPU test on pixel colors).
+- [x] Existing models and `hello-pbr` look unchanged, and the example snapshots still pass.
 
 ---
 

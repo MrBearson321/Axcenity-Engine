@@ -932,6 +932,11 @@ impl ClassName {
                     channel("OpacityChannel", TextureChannel::Alpha),
                     ("InvertOpacity", Value::Bool(false)),
                     ("EmissiveStrength", Value::Number(1.0)),
+                    // Where the maps sit: `Tiling` repeats them that many
+                    // times as often, then `Offset` shifts them, in copies
+                    // of the texture.
+                    ("Tiling", Value::Vector2(Vector2::new(1.0, 1.0))),
+                    ("Offset", Value::Vector2(Vector2::new(0.0, 0.0))),
                 ]
             }
         }

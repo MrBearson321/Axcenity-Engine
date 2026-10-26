@@ -108,6 +108,8 @@ const GROUPS: [(&str, &[&str]); 19] = [
         "Tiling",
         &[
             "TileSize",
+            "Tiling",
+            "Offset",
             "TextureRotation",
             "Triplanar",
             "AntiTiling",
@@ -306,9 +308,10 @@ pub fn sections(instance: &Instance) -> Vec<Section> {
                 ClassName::SurfaceAppearance | ClassName::TerrainLayer
             ),
             "Terrain" => instance.class() == ClassName::Terrain,
-            "Tiling" => {
-                matches!(instance.class(), ClassName::Part | ClassName::TerrainLayer)
-            }
+            "Tiling" => matches!(
+                instance.class(),
+                ClassName::Part | ClassName::TerrainLayer | ClassName::SurfaceAppearance
+            ),
             "Auto Material" => instance.class() == ClassName::TerrainLayer,
             "UI" => crate::style_panel::is_styled(instance.class()),
             "Audio" => instance.class() == ClassName::Sound,
@@ -945,11 +948,17 @@ fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
         }
         Value::Vector2(mut vector) => {
             let mut changed = false;
+            // A SurfaceAppearance's are in copies of a texture, not pixels.
+            let speed = if matches!(name, "Tiling" | "Offset") {
+                0.01
+            } else {
+                1.0
+            };
             ui.horizontal_wrapped(|ui| {
                 for (axis, number) in [("X ", &mut vector.x), ("Y ", &mut vector.y)] {
                     let drag = egui::DragValue::new(number)
                         .prefix(axis)
-                        .speed(1.0)
+                        .speed(speed)
                         .max_decimals(MAX_DECIMALS);
                     changed |= ui.add(drag).changed();
                 }
@@ -1136,7 +1145,16 @@ mod tests {
         let mut world = World::new();
         let look = world.create(ClassName::SurfaceAppearance).unwrap();
         let sections = sections(world.get(look).unwrap());
-        assert_eq!(titles(&sections), ["Appearance", "Surface", "Map Settings"]);
+        assert_eq!(
+            titles(&sections),
+            ["Appearance", "Surface", "Map Settings", "Tiling"]
+        );
+        let placement: Vec<&str> = sections[3]
+            .properties
+            .iter()
+            .map(|(name, _)| *name)
+            .collect();
+        assert_eq!(placement, ["Tiling", "Offset"]);
         let maps: Vec<&str> = sections[1]
             .properties
             .iter()

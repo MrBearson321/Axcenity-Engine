@@ -3,7 +3,7 @@
 // each pixel (`light_surface`). Also the shadow pass's and the sky's entry points.
 
 // How the item's texture maps are read. Must match `MapsUniform` in
-// renderer.rs.
+// renderer/types.rs.
 struct Maps {
     // Which channel of each map holds its value: 1 in that channel, 0 in
     // the others.
@@ -19,6 +19,11 @@ struct Maps {
     settings: vec4<f32>,
     // x: 1 if there's a specular map.
     specular: vec4<f32>,
+    // The columns of a 2x2 matrix that scales and turns the texture
+    // coordinates (read by the vertex shader).
+    uv_matrix: vec4<f32>,
+    // xy: added to the texture coordinates after `uv_matrix`.
+    uv_offset: vec4<f32>,
 }
 
 // The item's material textures. Color ones (base color, emission) are read
@@ -84,6 +89,7 @@ fn vs_main(vertex: VertexIn, instance: InstanceIn) -> VertexOut {
     out.emissive = instance.emissive;
     out.surface = instance.surface.xyz;
     let tile = instance.surface.w;
+    var uv = vertex.uv;
     if (tile > 0.0) {
         // The coordinates are distances on the unit mesh. Scale them by
         // how long those edges are on this part, so the texture repeats
@@ -91,10 +97,10 @@ fn vs_main(vertex: VertexIn, instance: InstanceIn) -> VertexOut {
         let along_u = (model * vec4<f32>(vertex.tangent.xyz, 0.0)).xyz;
         let v_dir = cross(vertex.normal, vertex.tangent.xyz) * vertex.tangent.w;
         let along_v = (model * vec4<f32>(v_dir, 0.0)).xyz;
-        out.uv = vertex.uv * vec2<f32>(length(along_u), length(along_v)) / tile;
-    } else {
-        out.uv = vertex.uv;
+        uv = uv * vec2<f32>(length(along_u), length(along_v)) / tile;
     }
+    // Then the material's own tiling, turn and offset.
+    out.uv = mat2x2<f32>(maps.uv_matrix.xy, maps.uv_matrix.zw) * uv + maps.uv_offset.xy;
     // A direction along the surface, so it stretches with the shape.
     out.tangent = vec4<f32>((model * vec4<f32>(vertex.tangent.xyz, 0.0)).xyz, vertex.tangent.w);
     return out;
@@ -145,7 +151,7 @@ fn surface_normal(in: VertexOut) -> vec3<f32> {
 }
 
 @fragment
-fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
+fn fs_main(in: VertexOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
     // Every texture is sampled before anything branches, as WGSL requires.
     let texel = textureSample(base_color_texture, material_sampler, in.uv);
     let metalness_texel = textureSample(metalness_texture, material_sampler, in.uv);
@@ -154,7 +160,10 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let emissive_texel = textureSample(emissive_texture, material_sampler, in.uv);
     let opacity_texel = textureSample(opacity_texture, material_sampler, in.uv);
     let specular_texel = textureSample(specular_texture, material_sampler, in.uv);
-    let n = surface_normal(in);
+    // Only double-sided items show their backs, which are lit as fronts
+    // facing the other way.
+    let facing = select(-1.0, 1.0, front);
+    let n = surface_normal(in) * facing;
 
     let base_color = in.base_color.rgb * texel.rgb;
     let opacity_map = map_value(opacity_texel, maps.opacity, maps.invert.w);
@@ -174,7 +183,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     // Non-metals reflect about 4% of light, or as their specular map says.
     let dielectric = mix(vec3<f32>(0.04), 0.08 * specular_texel.rgb, maps.specular.x);
 
-    let color = light_surface(in.world_position, normalize(in.normal), n, in.clip_position.xy,
+    let color = light_surface(in.world_position, normalize(in.normal) * facing, n, in.clip_position.xy,
         base_color, metalness, roughness, occlusion, dielectric);
 
     // Solid items stay solid whatever the texture's alpha, so the window's

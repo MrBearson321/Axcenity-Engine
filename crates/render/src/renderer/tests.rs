@@ -166,6 +166,7 @@ fn batch(mesh: MeshKey, transparent: bool, instances: Range<u32>) -> Batch {
         mesh,
         material: MaterialKey::default(),
         transparent,
+        double_sided: false,
         casts_shadow: true,
         instances,
     }
@@ -2246,5 +2247,191 @@ fn neutral_tone_mapping_brings_a_lit_grey_part_back_toward_its_color() {
         if grey >= 0.5 {
             assert!(neutral.abs_diff(picked) <= 3, "grey {picked}: {neutral}");
         }
+    }
+}
+
+#[test]
+fn double_sided_items_get_their_own_batch_and_texture_transforms_their_own_binding() {
+    let list = list_of(vec![
+        item(Shape::Block, Vec3::ZERO, 1.0),
+        Material {
+            double_sided: true,
+            ..Material::default()
+        }
+        .on(item(Shape::Block, Vec3::ZERO, 1.0)),
+        item(Shape::Block, Vec3::ZERO, 1.0),
+    ]);
+    let (_, batches) = plan_draws(&list);
+    let sides: Vec<(bool, Range<u32>)> = batches
+        .into_iter()
+        .map(|batch| (batch.double_sided, batch.instances))
+        .collect();
+    assert_eq!(sides, vec![(false, 0..2), (true, 2..3)]);
+
+    let plain = textured(Shape::Block, Some(1));
+    let mut tiled = plain.clone();
+    tiled.material.uv_scale = [2.0, 2.0];
+    let mut shifted = plain.clone();
+    shifted.material.uv_offset = [0.5, 0.0];
+    let keys = [&plain, &tiled, &shifted].map(material_key);
+    assert_ne!(keys[0], keys[1]);
+    assert_ne!(keys[0], keys[2]);
+    assert_eq!(maps_uniform_of(&keys[0]).uv_matrix, [1.0, 0.0, 0.0, 1.0]);
+    assert_eq!(maps_uniform_of(&keys[1]).uv_matrix, [2.0, 0.0, 0.0, 2.0]);
+    assert_eq!(maps_uniform_of(&keys[2]).uv_offset, [0.5, 0.0, 0.0, 0.0]);
+}
+
+impl Material {
+    /// `item` drawn with this material.
+    fn on(self, item: DrawItem) -> DrawItem {
+        DrawItem {
+            material: self,
+            ..item
+        }
+    }
+}
+
+/// glTF's `KHR_texture_transform` turns coordinates counter-clockwise in a
+/// texture whose V runs down: a quarter turn takes U's direction to -V.
+#[test]
+fn a_quarter_turn_takes_u_to_minus_v_after_scaling() {
+    let material = Material {
+        uv_scale: [2.0, 3.0],
+        uv_rotation: std::f32::consts::FRAC_PI_2,
+        ..Material::default()
+    };
+    let [a, b, c, d] = uv_matrix(&material);
+    let turn = |[u, v]: [f32; 2]| [a * u + c * v, b * u + d * v];
+    let close =
+        |[x, y]: [f32; 2], [ex, ey]: [f32; 2]| (x - ex).abs() < 1e-6 && (y - ey).abs() < 1e-6;
+    assert!(
+        close(turn([1.0, 0.0]), [0.0, -2.0]),
+        "{:?}",
+        turn([1.0, 0.0])
+    );
+    assert!(
+        close(turn([0.0, 1.0]), [3.0, 0.0]),
+        "{:?}",
+        turn([0.0, 1.0])
+    );
+}
+
+/// Whether the texture shows red (`R`) or blue (`B`) at a quarter, three
+/// eighths, five eighths and seven eighths of the way across the block's
+/// face (U runs left to right on it).
+fn colors_across(renderer: &mut TextureRenderer, material: &Material) -> String {
+    let texture: Arc<dyn TextureSource> = Arc::new(Painted::new(64, |x, _| {
+        if x < 32 {
+            [255, 0, 0, 255]
+        } else {
+            [0, 0, 255, 255]
+        }
+    }));
+    let mut block = big_block();
+    block.material = Material {
+        base_color: [1.0; 3],
+        base_color_texture: Some(texture),
+        ..material.clone()
+    };
+    let mut list = list_of(vec![block]);
+    list.sun.intensity = 0.0;
+    list.ambient.intensity = 1.0;
+    renderer.render(&list).unwrap();
+    let pixels = renderer.read_pixels();
+    // The face is 4 studs wide, 3 in front of a 70° camera.
+    let face = 64.0 * 4.0 / (2.0 * 3.0 * 35f32.to_radians().tan());
+    [0.125, 0.375, 0.625, 0.875]
+        .into_iter()
+        .map(|u| {
+            let x = (32.0 + (u - 0.5) * face) as usize;
+            let pixel: [u8; 3] = pixels[(32 * 64 + x) * 4..][..3].try_into().unwrap();
+            let [red, _, blue] = pixel.map(u16::from);
+            if red > 3 * blue {
+                'R'
+            } else if blue > 3 * red {
+                'B'
+            } else {
+                '?'
+            }
+        })
+        .collect()
+}
+
+#[test]
+fn tiling_repeats_a_texture_and_an_offset_shifts_it() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+    let plain = Material::default();
+    assert_eq!(colors_across(&mut renderer, &plain), "RRBB");
+    let tiled = Material {
+        uv_scale: [2.0, 1.0],
+        ..Material::default()
+    };
+    assert_eq!(colors_across(&mut renderer, &tiled), "RBRB");
+    let shifted = Material {
+        uv_offset: [0.5, 0.0],
+        ..Material::default()
+    };
+    assert_eq!(colors_across(&mut renderer, &shifted), "BBRR");
+}
+
+/// A double-sided square seen from behind is drawn, and lit as if its back
+/// were its front, solid or see-through. A one-sided one isn't drawn at all.
+#[test]
+fn a_double_sided_square_shows_its_back_lit_like_its_front() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+    let mut frame = |turned: bool, double_sided: bool, opacity: f32| {
+        let turn = if turned {
+            glam::Quat::from_rotation_y(std::f32::consts::PI)
+        } else {
+            glam::Quat::IDENTITY
+        };
+        let square = DrawItem {
+            shape: Shape::Mesh(Arc::new(Square)),
+            transform: Mat4::from_scale_rotation_translation(
+                Vec3::splat(4.0),
+                turn,
+                Vec3::new(0.0, 0.0, -5.0),
+            ),
+            material: Material {
+                base_color: [0.8; 3],
+                roughness: 1.0,
+                opacity,
+                double_sided,
+                ..Material::default()
+            },
+            uv_tile: 0.0,
+            casts_shadow: true,
+        };
+        let mut list = list_of(vec![square]);
+        // Lit from behind the camera.
+        list.sun.direction = Vec3::Z;
+        list.shadows.enabled = false;
+        middle_of(&mut renderer, &list)
+    };
+    for opacity in [1.0, 0.6] {
+        let front = frame(false, true, opacity);
+        assert!(front[0] > 60, "the front is lit: {front:?}");
+        let back = frame(true, true, opacity);
+        for channel in 0..3 {
+            assert!(
+                front[channel].abs_diff(back[channel]) <= 2,
+                "opacity {opacity}: front {front:?}, back {back:?}"
+            );
+        }
+        let one_sided = frame(true, false, opacity);
+        assert_eq!(
+            one_sided[..3],
+            [0, 0, 0],
+            "opacity {opacity}: no back drawn"
+        );
+        assert_eq!(frame(false, false, opacity), front);
     }
 }

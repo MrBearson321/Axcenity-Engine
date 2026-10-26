@@ -46,7 +46,7 @@ use gpu::{
     upload_texture,
 };
 #[cfg(test)]
-use lighting::{cascade_ends, light_raw};
+use lighting::{cascade_ends, light_raw, uv_matrix};
 use lighting::{
     frame_uniform, linear_color, maps_uniform_of, material_key, material_textures, plan_draws,
     plan_lights, post_drawn, post_uniform, shadows_drawn, view_projection,

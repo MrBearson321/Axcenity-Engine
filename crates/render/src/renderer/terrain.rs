@@ -362,7 +362,7 @@ fn terrain_pipeline(
         ("vs_terrain", "fs_terrain"),
         &[frame_layout, layout],
         (super::HDR_FORMAT, samples),
-        false,
+        (false, false),
     )
 }
 

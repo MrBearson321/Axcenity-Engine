@@ -810,6 +810,18 @@ impl Reader<'_> {
             None
         };
 
+        // Where the textures sit on the coordinates: the base color map's
+        // scale and offset, or else the normal map's.
+        let (uv_scale, uv_offset) = [&pbr.base_color, &pbr.normal_map, &fbx.normal_map]
+            .into_iter()
+            .filter(|map| map.texture_enabled)
+            .find_map(|map| {
+                map.texture
+                    .as_ref()
+                    .and_then(|texture| uv_transform(texture))
+            })
+            .unwrap_or(([1.0, 1.0], [0.0, 0.0]));
+
         let mut result = ModelMaterial {
             name: material.element.name.to_string(),
             base_color: [base.x, base.y, base.z, opacity].map(unit),
@@ -833,6 +845,8 @@ impl Reader<'_> {
             emissive_texture,
             opacity_texture,
             specular_texture,
+            uv_scale,
+            uv_offset,
             ..ModelMaterial::default()
         };
         self.named_maps(material, classic, &mut result);
@@ -1075,6 +1089,29 @@ fn color(map: &ufbx::MaterialMap, default: Vec3) -> Vec3 {
     } else {
         default
     }
+}
+
+/// The scale and offset that place `texture` (or, for a layered texture,
+/// its first file) on the mesh's texture coordinates, in the engine's
+/// space, or `None` if it has no transform. Its rotation is left out.
+fn uv_transform(texture: &ufbx::Texture) -> Option<([f32; 2], [f32; 2])> {
+    let file = texture.file_textures.first().map(|file| &**file);
+    let texture = std::iter::once(texture)
+        .chain(file)
+        .find(|texture| texture.has_uv_transform)?;
+    let m = &texture.uv_to_texture;
+    Some(engine_uv_transform([m.m00, m.m11], [m.m03, m.m13]))
+}
+
+/// A texture placement `scale * uv + offset` in FBX's coordinates, whose V
+/// runs up from the bottom of the texture, in the engine's, whose V runs
+/// down from the top: V is `1 - v` in both the mesh's coordinates and
+/// the texture's, so the offset's V becomes `1 - scale_v - offset_v`.
+fn engine_uv_transform([su, sv]: [f64; 2], [ou, ov]: [f64; 2]) -> ([f32; 2], [f32; 2]) {
+    let finite = |value: f64, default: f64| if value.is_finite() { value } else { default };
+    let (su, sv) = (finite(su, 1.0), finite(sv, 1.0));
+    let (ou, ov) = (finite(ou, 0.0), finite(ov, 0.0));
+    ([su as f32, sv as f32], [ou as f32, (1.0 - sv - ov) as f32])
 }
 
 /// `value` clamped to 0–1, with anything not a number as 0.

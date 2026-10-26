@@ -180,6 +180,81 @@ fn a_gltf_materials_maps_are_all_read() {
     }
 }
 
+/// A glTF triangle whose base color texture has `transform` (its
+/// `KHR_texture_transform`, as JSON) and whose material is `double_sided`.
+fn transformed_triangle(name: &str, transform: &str, double_sided: bool) -> ModelMaterial {
+    let folder = std::env::temp_dir().join(format!("axcenity-gltf-{name}"));
+    let _ = std::fs::remove_dir_all(&folder);
+    std::fs::create_dir_all(&folder).unwrap();
+    let floats: [f32; 24] = [
+        0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, //
+        0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, //
+        0.0, 1.0, 1.0, 1.0, 0.0, 0.0,
+    ];
+    let bytes: Vec<u8> = floats.iter().flat_map(|f| f.to_le_bytes()).collect();
+    std::fs::write(folder.join("tri.bin"), bytes).unwrap();
+    std::fs::write(folder.join("leaf.png"), checker_png()).unwrap();
+    let gltf = format!(
+        r#"{{
+        "asset": {{ "version": "2.0" }},
+        "extensionsUsed": ["KHR_texture_transform"],
+        "buffers": [ {{ "uri": "tri.bin", "byteLength": 96 }} ],
+        "bufferViews": [
+            {{ "buffer": 0, "byteOffset": 0, "byteLength": 36 }},
+            {{ "buffer": 0, "byteOffset": 36, "byteLength": 36 }},
+            {{ "buffer": 0, "byteOffset": 72, "byteLength": 24 }}
+        ],
+        "accessors": [
+            {{ "bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3",
+              "min": [0, 0, 0], "max": [1, 1, 0] }},
+            {{ "bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC3" }},
+            {{ "bufferView": 2, "componentType": 5126, "count": 3, "type": "VEC2" }}
+        ],
+        "images": [ {{ "uri": "leaf.png" }} ],
+        "textures": [ {{ "source": 0 }} ],
+        "materials": [ {{
+            "doubleSided": {double_sided},
+            "pbrMetallicRoughness": {{
+                "baseColorTexture": {{ "index": 0,
+                    "extensions": {{ "KHR_texture_transform": {transform} }} }}
+            }}
+        }} ],
+        "meshes": [ {{ "primitives": [ {{
+            "attributes": {{ "POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2 }},
+            "material": 0
+        }} ] }} ]
+    }}"#
+    );
+    let model = load_model(gltf.as_bytes(), &folder, ModelFormat::Gltf).unwrap();
+    model.primitives[0].material.clone()
+}
+
+#[test]
+fn a_gltf_texture_transform_and_double_sided_material_are_read() {
+    let material = transformed_triangle(
+        "transform",
+        r#"{ "offset": [0.5, 0.25], "rotation": 0.3, "scale": [2, 3] }"#,
+        true,
+    );
+    assert!(material.base_color_texture.is_some());
+    assert_eq!(material.uv_scale, [2.0, 3.0]);
+    assert_eq!(material.uv_rotation, 0.3);
+    assert_eq!(material.uv_offset, [0.5, 0.25]);
+    assert!(material.double_sided);
+
+    // Without the extension or `doubleSided`: as before.
+    let plain = transformed_triangle("no-transform", "{}", false);
+    assert_eq!(
+        (plain.uv_scale, plain.uv_rotation, plain.uv_offset),
+        ([1.0, 1.0], 0.0, [0.0, 0.0])
+    );
+    assert!(!plain.double_sided);
+    // A transform onto another coordinate set isn't for the set drawn.
+    let elsewhere =
+        transformed_triangle("other-set", r#"{ "scale": [2, 2], "texCoord": 1 }"#, false);
+    assert_eq!(elsewhere.uv_scale, [1.0, 1.0]);
+}
+
 #[test]
 fn data_uris_are_decoded() {
     assert_eq!(

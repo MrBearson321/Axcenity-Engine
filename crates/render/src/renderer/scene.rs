@@ -147,9 +147,10 @@ impl ScenePipeline {
                 ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                 count: None,
             },
+            // The vertex shader reads its texture coordinate transform.
             wgpu::BindGroupLayoutEntry {
                 binding: 2,
-                visibility: wgpu::ShaderStages::FRAGMENT,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -188,7 +189,7 @@ impl ScenePipeline {
         let settings = GraphicsSettings::default();
         let graphics = settings.effective(&capabilities);
         let samples = graphics.anti_aliasing.samples();
-        let [sky_pipeline, opaque_pipeline, transparent_pipeline] =
+        let (sky_pipeline, item_pipelines) =
             scene_pipelines(&device, &frame_layout, &material_layout, samples);
         let mut terrain =
             terrain::TerrainPass::new(&device, &frame_layout, texture_bytes.clone(), samples);
@@ -247,8 +248,7 @@ impl ScenePipeline {
             device,
             queue,
             sky_pipeline,
-            opaque_pipeline,
-            transparent_pipeline,
+            item_pipelines,
             sprites,
             post,
             post_targets,
@@ -326,11 +326,7 @@ impl ScenePipeline {
         }
         let samples = self.graphics.anti_aliasing.samples();
         if samples != old_samples {
-            [
-                self.sky_pipeline,
-                self.opaque_pipeline,
-                self.transparent_pipeline,
-            ] = scene_pipelines(
+            (self.sky_pipeline, self.item_pipelines) = scene_pipelines(
                 &self.device,
                 &self.frame_layout,
                 &self.material_layout,
@@ -632,11 +628,7 @@ impl ScenePipeline {
                     pass.set_pipeline(&self.terrain.pipeline);
                     pass.set_bind_group(1, group, &[]);
                 } else {
-                    let pipeline = if batch.transparent {
-                        &self.transparent_pipeline
-                    } else {
-                        &self.opaque_pipeline
-                    };
+                    let pipeline = self.item_pipelines.of(&batch);
                     let material = self
                         .materials
                         .get(&batch.material)
@@ -1193,30 +1185,34 @@ impl ScenePipeline {
     }
 }
 
-/// The scene pass's sky, solid and see-through pipelines, for drawing with
-/// `samples` per pixel.
+/// The scene pass's sky pipeline and its pipelines for items, for drawing
+/// with `samples` per pixel.
 fn scene_pipelines(
     device: &wgpu::Device,
     frame_layout: &wgpu::BindGroupLayout,
     material_layout: &wgpu::BindGroupLayout,
     samples: u32,
-) -> [wgpu::RenderPipeline; 3] {
+) -> (wgpu::RenderPipeline, ItemPipelines) {
     let shader = shader_module(device, "scene", gpu::SCENE_SHADER);
-    let pipeline = |transparent| {
+    let pipeline = |transparent, double_sided| {
         create_pipeline(
             device,
             &shader,
             ("vs_main", "fs_main"),
             &[frame_layout, material_layout],
             (HDR_FORMAT, samples),
-            transparent,
+            (transparent, double_sided),
         )
     };
-    [
+    (
         create_sky_pipeline(device, frame_layout, samples),
-        pipeline(false),
-        pipeline(true),
-    ]
+        ItemPipelines {
+            opaque: pipeline(false, false),
+            transparent: pipeline(true, false),
+            double_sided: pipeline(false, true),
+            double_sided_transparent: pipeline(true, true),
+        },
+    )
 }
 
 /// The scene's samples per pixel, and whether FXAA needs its target.

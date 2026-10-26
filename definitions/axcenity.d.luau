@@ -646,6 +646,10 @@ declare extern type SurfaceAppearance extends Instance with
 	InvertOpacity: boolean
 	--- Multiplies the glow.
 	EmissiveStrength: number
+	--- How many times as often the maps repeat, across and down: `Vector2.new(2, 2)` repeats them twice as often. On a Part, on top of its TileSize.
+	Tiling: Vector2
+	--- Shifts the maps across and down, in copies of the texture: `Vector2.new(0.5, 0)` moves them half a copy across.
+	Offset: Vector2
 	[string]: any
 end
 

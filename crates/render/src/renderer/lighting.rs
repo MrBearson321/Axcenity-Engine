@@ -9,7 +9,7 @@ use glam::camera::rh;
 use glam::{Mat3, Mat4, Vec2, Vec3};
 
 use crate::draw_list::{
-    ChannelMap, DrawItem, DrawList, Light, PostProcessing, Shadows, TextureSource,
+    ChannelMap, DrawItem, DrawList, Light, Material, PostProcessing, Shadows, TextureSource,
 };
 use crate::graphics::{EffectiveGraphics, ShadowMapSize};
 
@@ -374,7 +374,7 @@ pub(super) fn shadow_setup(
 
 /// Puts the visible items in drawing order and groups them into batches.
 ///
-/// Solid items come first, grouped by mesh and texture. See-through items come last,
+/// Solid items come first, grouped by mesh, texture and sidedness. See-through items come last,
 /// farthest from the camera first, so each one blends over what's behind it.
 /// They're sorted by their centers, so two that overlap can still blend in the
 /// wrong order; that's the usual trade-off for this simple approach.
@@ -389,6 +389,7 @@ pub(super) fn plan_draws(list: &DrawList) -> (Vec<InstanceRaw>, Vec<Batch>) {
         (
             MeshKey::of(&item.shape),
             material_key(item),
+            item.material.double_sided,
             !item.casts_shadow,
         )
     });
@@ -414,12 +415,13 @@ pub(super) fn plan_draws(list: &DrawList) -> (Vec<InstanceRaw>, Vec<Batch>) {
         let index = instances.len() as u32;
         instances.push(raw);
         let (mesh, material) = (MeshKey::of(&item.shape), material_key(item));
-        let casts_shadow = item.casts_shadow;
+        let (double_sided, casts_shadow) = (item.material.double_sided, item.casts_shadow);
         match batches.last_mut() {
             Some(last)
                 if last.mesh == mesh
                     && last.material == material
                     && last.transparent == transparent
+                    && last.double_sided == double_sided
                     && last.casts_shadow == casts_shadow =>
             {
                 last.instances.end = index + 1;
@@ -428,6 +430,7 @@ pub(super) fn plan_draws(list: &DrawList) -> (Vec<InstanceRaw>, Vec<Batch>) {
                 mesh,
                 material,
                 transparent,
+                double_sided,
                 casts_shadow,
                 instances: index..index + 1,
             }),
@@ -504,6 +507,13 @@ pub(super) fn material_key(item: &DrawItem) -> MaterialKey {
             used(maps.opacity.is_some()),
         ],
         specular: [used(maps.specular.is_some()), 0.0, 0.0, 0.0],
+        uv_matrix: uv_matrix(&item.material),
+        uv_offset: [
+            item.material.uv_offset[0],
+            item.material.uv_offset[1],
+            0.0,
+            0.0,
+        ],
     };
     MaterialKey {
         textures,
@@ -525,9 +535,21 @@ pub(super) fn maps_uniform_of(key: &MaterialKey) -> MapsUniform {
             invert: [0.0; 4],
             settings: [0.0, 1.0, 0.0, 0.0],
             specular: [0.0; 4],
+            uv_matrix: [1.0, 0.0, 0.0, 1.0],
+            uv_offset: [0.0; 4],
         };
     }
     bytemuck::cast(key.maps)
+}
+
+/// The columns of the 2×2 matrix that scales, then turns, a material's
+/// texture coordinates. Turning by `r` takes (u, v) to
+/// (u cos r + v sin r, v cos r - u sin r): counter-clockwise in the
+/// texture, whose V runs down (glTF's `KHR_texture_transform`).
+pub(super) fn uv_matrix(material: &Material) -> [f32; 4] {
+    let [su, sv] = material.uv_scale;
+    let (sin, cos) = material.uv_rotation.sin_cos();
+    [cos * su, -sin * su, sin * sv, cos * sv]
 }
 
 /// The GPU data for one item, or `None` if it can't be seen.

@@ -49,7 +49,8 @@ glyphon = "0.9"
 # Loads glTF 2.0 models (.gltf and .glb), MIT OR Apache-2.0. The default
 # `import` feature reads buffers and decodes PNG and JPEG textures with the
 # `image` crate (MIT OR Apache-2.0), which eframe already uses.
-gltf = "1.4"
+# `KHR_texture_transform` reads textures' tiling, offset and rotation.
+gltf = { version = "1.4", features = ["KHR_texture_transform"] }
 # Decodes FBX models' textures. The same release `gltf` uses; the decoders are
 # pure Rust (MIT OR Apache-2.0). FBX files often use TGA or BMP textures.
 image = { version = "0.25", default-features = false, features = ["bmp", "jpeg", "png", "tga"] }

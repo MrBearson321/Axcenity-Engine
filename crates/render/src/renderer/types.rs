@@ -243,6 +243,11 @@ pub(super) struct MapsUniform {
     pub(super) settings: [f32; 4],
     /// 1 if there's a specular map, then unused.
     pub(super) specular: [f32; 4],
+    /// Turns texture coordinates, read in the vertex shader: the columns of
+    /// a 2×2 matrix (the material's rotation times its scale).
+    pub(super) uv_matrix: [f32; 4],
+    /// Added to the turned texture coordinates, then unused.
+    pub(super) uv_offset: [f32; 4],
 }
 
 /// A texture uploaded to the GPU, with a view for each way it's read.
@@ -274,7 +279,7 @@ pub(super) const MATERIAL_TEXTURES: usize = 8;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(super) struct MaterialKey {
     pub(super) textures: [Option<u64>; MATERIAL_TEXTURES],
-    pub(super) maps: [u32; 28],
+    pub(super) maps: [[u32; 4]; 9],
     /// A terrain chunk's binding (see `terrain::TerrainKey`), all 0 for
     /// everything else.
     pub(super) terrain: terrain::TerrainKey,
@@ -331,13 +336,15 @@ impl Meshes {
 }
 
 /// Consecutive instances with the same mesh, the same material textures
-/// and the same kind of drawing (solid or see-through), drawn with one
-/// draw call.
+/// and the same kind of drawing (solid or see-through, one- or
+/// double-sided), drawn with one draw call.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct Batch {
     pub(super) mesh: MeshKey,
     pub(super) material: MaterialKey,
     pub(super) transparent: bool,
+    /// Drawn without culling back faces ([`crate::Material::double_sided`]).
+    pub(super) double_sided: bool,
     pub(super) casts_shadow: bool,
     pub(super) instances: Range<u32>,
 }
@@ -420,14 +427,34 @@ pub(super) struct PostTargets {
     pub(super) composite_group: wgpu::BindGroup,
 }
 
+/// The scene pass's pipelines for parts and models: solid or see-through,
+/// each with back faces culled or, for double-sided materials, drawn.
+pub(super) struct ItemPipelines {
+    pub(super) opaque: wgpu::RenderPipeline,
+    pub(super) transparent: wgpu::RenderPipeline,
+    pub(super) double_sided: wgpu::RenderPipeline,
+    pub(super) double_sided_transparent: wgpu::RenderPipeline,
+}
+
+impl ItemPipelines {
+    /// The pipeline that draws `batch`.
+    pub(super) fn of(&self, batch: &Batch) -> &wgpu::RenderPipeline {
+        match (batch.transparent, batch.double_sided) {
+            (false, false) => &self.opaque,
+            (true, false) => &self.transparent,
+            (false, true) => &self.double_sided,
+            (true, true) => &self.double_sided_transparent,
+        }
+    }
+}
+
 /// The GPU objects for drawing a scene, whatever it's drawn into. Both
 /// [`Renderer`] and [`TextureRenderer`] own one.
 pub(super) struct ScenePipeline {
     pub(super) device: wgpu::Device,
     pub(super) queue: wgpu::Queue,
     pub(super) sky_pipeline: wgpu::RenderPipeline,
-    pub(super) opaque_pipeline: wgpu::RenderPipeline,
-    pub(super) transparent_pipeline: wgpu::RenderPipeline,
+    pub(super) item_pipelines: ItemPipelines,
     /// Camera-facing pictures, such as particles.
     pub(super) sprites: sprites::SpritePass,
     pub(super) post: PostPasses,
