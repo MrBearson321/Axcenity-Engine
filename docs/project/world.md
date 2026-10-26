@@ -57,7 +57,7 @@ my-game/
 
 ## Properties
 
-- Property values are plain JSON, and the property's type decides how they're read: `Vector3` and `Color3` are `[a, b, c]`, `UDim2` is `[xScale, xOffset, yScale, yOffset]`, numbers are numbers, and enum items are strings (`"Shape": "Ball"`, `"Material": "Neon"`). `Color3` is sRGB from 0 to 1.
+- Property values are plain JSON, and the property's type decides how they're read: `Vector3` and `Color3` are `[a, b, c]`, `Vector2` is `[x, y]`, `UDim2` is `[xScale, xOffset, yScale, yOffset]`, numbers are numbers, and enum items are strings (`"Shape": "Ball"`, `"Material": "Neon"`). `Color3` is sRGB from 0 to 1.
 - Left-out properties keep their defaults. Note `Anchored` defaults to `false`, so a floor or wall left without `"Anchored": true` falls. `name` defaults to the class name. Unknown fields, classes or properties are errors, not silently ignored.
 - **Models and Folders** (Phase 11) are written like any other Instance, with `class`, `name` and `children`. They have no properties yet, so the saver leaves out `properties` for them. Parts inside them are drawn and simulated like parts directly in the Workspace.
 - `Material` is applied before the other properties wherever it appears in the file, because choosing a material resets `Metalness` and `Roughness` to its preset.

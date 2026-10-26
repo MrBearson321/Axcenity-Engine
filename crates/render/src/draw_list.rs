@@ -79,6 +79,55 @@ pub struct UiRectangle {
     pub border_sides: Option<[UiBorderSide; 4]>,
     /// Drawn as a soft shadow in `color` instead of a box (CSS `box-shadow`).
     pub shadow: Option<UiShadow>,
+    /// Only the part inside this is drawn (CSS `overflow: hidden` on an
+    /// element around it).
+    pub clip: Option<UiClip>,
+}
+
+/// The rounded box a UI item is cut to: what's outside it isn't drawn.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct UiClip {
+    /// Its top left corner, in pixels.
+    pub position: [f32; 2],
+    pub size: [f32; 2],
+    /// How round its corners are, in pixels. Text is cut to the box's
+    /// square corners.
+    pub radius: f32,
+}
+
+impl UiClip {
+    /// The part of `self` that's also inside `other`, rounded as the
+    /// smaller of the two (the inner one, when one is inside the other).
+    pub fn intersect(self, other: UiClip) -> UiClip {
+        let left = self.position[0].max(other.position[0]);
+        let top = self.position[1].max(other.position[1]);
+        let right = (self.position[0] + self.size[0]).min(other.position[0] + other.size[0]);
+        let bottom = (self.position[1] + self.size[1]).min(other.position[1] + other.size[1]);
+        let area = |clip: UiClip| clip.size[0] * clip.size[1];
+        let radius = if area(self) <= area(other) {
+            self.radius
+        } else {
+            other.radius
+        };
+        UiClip {
+            position: [left, top],
+            size: [(right - left).max(0.0), (bottom - top).max(0.0)],
+            radius,
+        }
+    }
+
+    /// Whether a point is inside it, rounded corners and all.
+    pub fn contains(&self, x: f32, y: f32) -> bool {
+        let [w, h] = self.size;
+        let half = [w * 0.5, h * 0.5];
+        let radius = self.radius.clamp(0.0, half[0].min(half[1]));
+        let dx = (x - self.position[0] - half[0]).abs() - (half[0] - radius);
+        let dy = (y - self.position[1] - half[1]).abs() - (half[1] - radius);
+        if dx > radius || dy > radius {
+            return false;
+        }
+        dx <= 0.0 || dy <= 0.0 || dx * dx + dy * dy <= radius * radius
+    }
 }
 
 /// One side of a [`UiRectangle`]'s border.
@@ -114,6 +163,8 @@ pub struct UiImage {
     pub texture: Option<Arc<dyn TextureSource>>,
     /// Drawn in nine pieces (CSS `border-image`) instead of stretched whole.
     pub slice: Option<UiSlice>,
+    /// Only the part inside this is drawn.
+    pub clip: Option<UiClip>,
 }
 
 /// How a [`UiImage`] is cut into nine pieces: the corners keep their size,
@@ -171,6 +222,8 @@ pub struct UiText {
     /// Rich text: the pieces of `text` in their own styles, in order, which
     /// together say `text`. Empty draws `text` in the fields above.
     pub spans: Vec<TextSpan>,
+    /// Only the part inside this box is drawn (its corners are square for text).
+    pub clip: Option<UiClip>,
 }
 
 /// A piece of rich text (`RichText`) and the style its tags give it.
@@ -213,6 +266,7 @@ impl Default for UiText {
             wrap: true,
             scaled: false,
             spans: Vec::new(),
+            clip: None,
         }
     }
 }

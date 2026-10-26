@@ -250,6 +250,7 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::Show { .. }
         | BlockKind::Hide { .. }
         | BlockKind::ShowPage { .. }
+        | BlockKind::ScrollTo { .. }
         | BlockKind::SetProperty { .. } => Category::Looks,
         BlockKind::PlaySound { .. }
         | BlockKind::StopSound { .. }
@@ -296,6 +297,7 @@ enum Filter {
     Buttons,
     Texts,
     PageLayouts,
+    ScrollingFrames,
     Gui,
     Animators,
     Animations,
@@ -315,6 +317,7 @@ impl Filter {
                 )
             }
             Filter::PageLayouts => class == ClassName::PageLayout,
+            Filter::ScrollingFrames => class == ClassName::ScrollingFrame,
             Filter::Animators => class == ClassName::Animator,
             Filter::Animations => class == ClassName::Animation,
             Filter::Gui => matches!(
@@ -327,6 +330,7 @@ impl Filter {
                     | ClassName::TextBox
                     | ClassName::PageLayout
                     | ClassName::Table
+                    | ClassName::ScrollingFrame
             ),
             Filter::Any => true,
         }
@@ -340,6 +344,7 @@ impl Filter {
             Filter::Buttons => "TextButton",
             Filter::Texts => "TextLabel",
             Filter::PageLayouts => "PageLayout",
+            Filter::ScrollingFrames => "ScrollingFrame",
             Filter::Gui => "Frame",
             Filter::Animators => "Model.Animator",
             Filter::Animations => "Model.Animation",
@@ -738,6 +743,14 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
             Slot(page, SlotKind::Text),
             label("of"),
             Object(layout, Filter::PageLayouts),
+        ])],
+        BlockKind::ScrollTo { target, x, y } => vec![Row(vec![
+            label("scroll"),
+            Object(target, Filter::ScrollingFrames),
+            label("to x"),
+            Slot(x, SlotKind::Number),
+            label("y"),
+            Slot(y, SlotKind::Number),
         ])],
         BlockKind::SetProperty {
             target,

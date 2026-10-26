@@ -1063,6 +1063,7 @@ fn a_nine_slice_frame_draws_its_corners_unstretched_on_the_gpu() {
                 fill: true,
                 repeat: false,
             }),
+            clip: None,
         })
     };
     let red = [255, 0, 0, 255];
@@ -1211,4 +1212,70 @@ fn an_outer_shadow_with_blur_reaches_past_its_box_and_counts_toward_overlap() {
     // an earlier layer.
     let items = [ui_label([0.0, 24.0], [20.0, 10.0]), shadow];
     assert_eq!(ui_layers(&items), vec![0..1, 1..2]);
+}
+
+#[test]
+fn a_clip_cuts_images_and_rectangles_to_its_rounded_box_on_the_gpu() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let red = Arc::new(Painted::new(8, |_, _| [255, 0, 0, 255]));
+    let clip = Some(crate::UiClip {
+        position: [8.0, 8.0],
+        size: [48.0, 48.0],
+        radius: 16.0,
+    });
+    // A picture bigger than its clip, and a green bar reaching past it.
+    let picture = UiDrawItem::Image(crate::UiImage {
+        position: [0.0, 0.0],
+        size: [64.0, 64.0],
+        tint: [1.0; 4],
+        border_radius: 0.0,
+        path: "photo.png".to_owned(),
+        texture: Some(red),
+        slice: None,
+        clip,
+    });
+    let bar = UiDrawItem::Rectangle(UiRectangle {
+        position: [0.0, 40.0],
+        size: [64.0, 8.0],
+        color: [0.0, 1.0, 0.0, 1.0],
+        color_end: [0.0, 1.0, 0.0, 1.0],
+        clip,
+        ..UiRectangle::default()
+    });
+    let pixel = ui_pixels(&device, &queue, vec![picture, bar], (64, 64));
+    let black = [0, 0, 0, 255];
+    assert_eq!(pixel(32, 20)[..3], [255, 0, 0], "inside the clip");
+    assert_eq!(pixel(4, 32), black, "left of the clip");
+    assert_eq!(pixel(10, 10), black, "outside its rounded corner");
+    assert_eq!(pixel(52, 52), black, "outside its bottom right corner");
+    assert_eq!(pixel(32, 44)[..3], [0, 255, 0], "the bar inside");
+    assert_eq!(pixel(60, 44), black, "the bar past the clip");
+}
+
+#[test]
+fn a_clip_intersects_with_the_one_around_it_and_knows_its_rounded_corners() {
+    let outer = crate::UiClip {
+        position: [0.0, 0.0],
+        size: [100.0, 100.0],
+        radius: 20.0,
+    };
+    let inner = crate::UiClip {
+        position: [50.0, -10.0],
+        size: [100.0, 40.0],
+        radius: 4.0,
+    };
+    let both = inner.intersect(outer);
+    assert_eq!(both.position, [50.0, 0.0]);
+    assert_eq!(both.size, [50.0, 30.0]);
+    assert_eq!(both.radius, 4.0, "the smaller one's rounding");
+    assert!(outer.contains(50.0, 50.0));
+    assert!(
+        !outer.contains(1.0, 1.0),
+        "in the corner, outside the rounding"
+    );
+    assert!(outer.contains(20.0, 1.0));
+    assert!(!outer.contains(101.0, 50.0));
 }

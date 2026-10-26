@@ -290,6 +290,42 @@ fn a_script_creates_and_updates_ui_instances_with_udim2() {
 }
 
 #[test]
+fn a_script_reads_and_sets_a_scrolling_frames_canvas_position() {
+    let mut world = World::new();
+    let output = output_of(
+        &mut world,
+        r#"
+        local gui = Instance.new("ScreenGui")
+        gui.Parent = workspace
+        local list = Instance.new("ScrollingFrame")
+        list.Name = "List"
+        list.Parent = gui
+        print(list.CanvasPosition)
+        list.CanvasPosition = Vector2.new(0, 120)
+        local at = list.CanvasPosition
+        print(at.X, at.Y, list.ZIndex)
+        local moved = at + Vector2.new(10, 5) * 2
+        print(moved, -moved == Vector2.new(-20, -130))
+        local ok, message = pcall(function()
+            list.CanvasPosition = UDim2.new(0, 1, 0, 2)
+        end)
+        print(ok, message:find("must be a Vector2") ~= nil)
+        "#,
+    );
+    assert_eq!(
+        output,
+        ["0, 0", "0\t120\t1", "20, 130\ttrue", "false\ttrue"]
+    );
+    let list = world
+        .find_first_descendant(world.workspace(), "List")
+        .unwrap();
+    assert_eq!(
+        property(&world, list, "CanvasPosition"),
+        Value::Vector2(axcenity_core::Vector2::new(0.0, 120.0))
+    );
+}
+
+#[test]
 fn dangerous_functions_are_unavailable() {
     let mut world = World::new();
     let output = output_of(

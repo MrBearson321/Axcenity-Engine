@@ -874,6 +874,15 @@ impl EditorApp {
         if output.activated.is_some() {
             self.pending_ui_activation = output.activated;
         }
+        if let Some(play) = self.play.as_mut() {
+            for (id, at) in output.scrolled {
+                let _ = play.world_mut().set_property(
+                    id,
+                    "CanvasPosition",
+                    axcenity_core::Value::Vector2(at),
+                );
+            }
+        }
         if self.playing() {
             self.pending_ui_events.extend(output.ui_events);
         }

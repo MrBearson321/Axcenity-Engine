@@ -1,21 +1,25 @@
 //! The pointer and the UI over time: hover and press states, CSS
-//! transitions, `MouseEnter` and `MouseLeave`, tooltips, the cursor, and
-//! buttons' hover and click sounds. Hosts (the player, the editor's
-//! viewport) keep one [`UiInteraction`] for a game and lay their UI out
-//! through it each frame.
+//! transitions, `MouseEnter` and `MouseLeave`, tooltips, the cursor,
+//! buttons' hover and click sounds, and scrolling ScrollingFrames. Hosts
+//! (the player, the editor's viewport) keep one [`UiInteraction`] for a
+//! game and lay their UI out through it each frame.
 
 use std::cell::RefCell;
 
-use axcenity_core::{ClassName, InstanceId, Value, World};
+use axcenity_core::{ClassName, InstanceId, Value, Vector2, World};
 use axcenity_render::{Camera, UiDrawItem, UiText};
 
 use crate::css::*;
 use crate::style::{PseudoClasses, Stylesheet, resolve_styles, resolve_tooltip_styles};
 use crate::transition::Transitions;
-use crate::{UiLayout, layout_ui_with_pseudo};
+use crate::{UiElement, UiLayout, layout_ui_with_pseudo, scroll_bars};
 
 /// How long the pointer rests on an element before its tooltip shows, in seconds.
 pub const TOOLTIP_DELAY: f64 = 0.5;
+
+/// How far a press on a ScrollingFrame's content moves, in pixels, before
+/// it scrolls the frame instead of pressing what's under it.
+pub const SCROLL_DRAG_SLOP: f32 = 6.0;
 
 /// A state an element can be shown in: the tabs of the UI Designer's
 /// states editor, and the CSS pseudo-class each one writes.
@@ -103,6 +107,51 @@ pub struct UiInteraction {
     /// How long `hovered` has been hovered, in seconds.
     hovered_for: f64,
     events: Vec<UiEvent>,
+    /// Where each element was in the last layout, for scrolling.
+    elements: Vec<UiElement>,
+    scroll_drag: Option<ScrollDrag>,
+}
+
+/// What the pointer did to the ScrollingFrames: [`UiInteraction::wheel`],
+/// [`UiInteraction::press`] and [`UiInteraction::drag`].
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[must_use = "a scroll only shows once its move is applied to the world"]
+pub struct UiScrolled {
+    /// The scroll took the wheel or the press, so the host doesn't use it
+    /// for anything else: the camera doesn't zoom, and no button is pressed.
+    pub taken: bool,
+    /// The ScrollingFrame to set `CanvasPosition` on, and what to.
+    pub moved: Option<(InstanceId, Vector2)>,
+}
+
+impl UiScrolled {
+    /// Sets the moved frame's `CanvasPosition` in `world`. Returns [`Self::taken`].
+    pub fn apply(self, world: &mut World) -> bool {
+        if let Some((id, at)) = self.moved {
+            // A frame removed since the last layout has nothing to set.
+            let _ = world.set_property(id, "CanvasPosition", Value::Vector2(at));
+        }
+        self.taken
+    }
+}
+
+/// A ScrollingFrame being scrolled by the pointer.
+#[derive(Clone, Copy, Debug)]
+enum ScrollDrag {
+    /// Its thumb on `axis`, held `grab` pixels from the thumb's start.
+    Bar {
+        id: InstanceId,
+        axis: usize,
+        grab: f32,
+    },
+    /// Its content, pressed at `from` when it was scrolled to `start`.
+    /// It scrolls once the pointer has moved [`SCROLL_DRAG_SLOP`].
+    Content {
+        id: InstanceId,
+        from: [f32; 2],
+        start: [f32; 2],
+        moving: bool,
+    },
 }
 
 impl UiInteraction {
@@ -144,6 +193,7 @@ impl UiInteraction {
             focused: input.focused,
             forced: None,
             transitions: Some(&self.transitions),
+            scrolled: None,
         };
         let mut layout = layout_ui_with_pseudo(
             world,
@@ -195,7 +245,196 @@ impl UiInteraction {
             cursor(world, id, stylesheets, pseudo)
         });
         layout.animating |= self.transitions.borrow().running();
+        self.elements.clone_from(&layout.elements);
         layout
+    }
+
+    /// Takes where everything is from `layout`, for scrolling, when it
+    /// wasn't laid out by [`Self::layout`]: the UI Designer's artboard.
+    pub fn remember(&mut self, layout: &UiLayout) {
+        self.elements.clone_from(&layout.elements);
+    }
+
+    /// The ScrollingFrames a point is in, innermost first: the top element
+    /// under it and the ScrollingFrames around that, from the last layout.
+    fn scrollers_at(&self, world: &World, [x, y]: [f32; 2]) -> Vec<UiElement> {
+        let Some(top) = self.elements.iter().rev().find(|e| e.contains(x, y)) else {
+            return Vec::new();
+        };
+        let mut found = Vec::new();
+        let mut current = Some(top.id);
+        while let Some(id) = current {
+            if let Some(element) = self.element(id)
+                && element.scroll.is_some()
+            {
+                found.push(*element);
+            }
+            current = world.get(id).and_then(|instance| instance.parent());
+        }
+        found
+    }
+
+    fn element(&self, id: InstanceId) -> Option<&UiElement> {
+        self.elements.iter().find(|element| element.id == id)
+    }
+
+    /// Scrolls `id` to `position` (authored pixels, kept in range) in what
+    /// this remembers of the last layout, and says what to set in the
+    /// world. `None` when that's where it already is.
+    fn scroll_to(&mut self, id: InstanceId, position: [f32; 2]) -> Option<(InstanceId, Vector2)> {
+        let element = self.elements.iter_mut().find(|element| element.id == id)?;
+        let scroll = element.scroll.as_mut()?;
+        let position = scroll.clamp(position);
+        if position == scroll.position {
+            return None;
+        }
+        scroll.position = position;
+        Some((id, Vector2::new(position[0], position[1])))
+    }
+
+    /// The mouse wheel turned by `delta` (pixels across and down; down
+    /// scrolls the content up) with the pointer at `pointer`: scrolls the
+    /// innermost ScrollingFrame there that can move that way. A frame that
+    /// only scrolls across takes the wheel's up and down. The wheel is
+    /// taken whenever the pointer is over a ScrollingFrame.
+    pub fn wheel(&mut self, world: &World, pointer: [f32; 2], delta: [f32; 2]) -> UiScrolled {
+        let scrollers = self.scrollers_at(world, pointer);
+        for element in &scrollers {
+            let Some(scroll) = element.scroll else {
+                continue;
+            };
+            let delta = if !scroll.scrolls[1] && scroll.scrolls[0] && delta[0] == 0.0 {
+                [delta[1], 0.0]
+            } else {
+                delta
+            };
+            let per_unit = element.pixels_per_unit.max(1e-4);
+            let to = [
+                scroll.position[0] + delta[0] / per_unit,
+                scroll.position[1] + delta[1] / per_unit,
+            ];
+            if let Some(moved) = self.scroll_to(element.id, to) {
+                return UiScrolled {
+                    taken: true,
+                    moved: Some(moved),
+                };
+            }
+        }
+        UiScrolled {
+            taken: !scrollers.is_empty(),
+            moved: None,
+        }
+    }
+
+    /// The left button went down at `pointer`. On a ScrollingFrame's scroll
+    /// bar, that bar is dragged from now on (a press on its track first
+    /// moves the thumb there) and the press is taken: it presses no
+    /// button. On a frame's content, a drag that moves far enough scrolls
+    /// it (see [`Self::drag`]).
+    pub fn press(&mut self, world: &World, pointer: [f32; 2]) -> UiScrolled {
+        self.scroll_drag = None;
+        let scrollers = self.scrollers_at(world, pointer);
+        for element in &scrollers {
+            let Some(scroll) = element.scroll else {
+                continue;
+            };
+            for bar in scroll_bars(element.rect, &scroll, element.pixels_per_unit) {
+                if !bar.track.contains(pointer[0], pointer[1]) {
+                    continue;
+                }
+                let along = pointer[bar.axis];
+                let (grab, moved) = if bar.thumb.contains(pointer[0], pointer[1]) {
+                    (along - bar.thumb_start(), None)
+                } else {
+                    let grab = bar.thumb_length() * 0.5;
+                    let mut to = scroll.position;
+                    to[bar.axis] = bar.position_at(&scroll, along - grab);
+                    (grab, self.scroll_to(element.id, to))
+                };
+                self.scroll_drag = Some(ScrollDrag::Bar {
+                    id: element.id,
+                    axis: bar.axis,
+                    grab,
+                });
+                return UiScrolled { taken: true, moved };
+            }
+        }
+        if let Some(element) = scrollers
+            .iter()
+            .find(|element| element.scroll.is_some_and(|s| s.scrolls[0] || s.scrolls[1]))
+        {
+            self.scroll_drag = Some(ScrollDrag::Content {
+                id: element.id,
+                from: pointer,
+                start: element.scroll.map_or([0.0; 2], |scroll| scroll.position),
+                moving: false,
+            });
+        }
+        UiScrolled::default()
+    }
+
+    /// The pointer is at `pointer` with the left button still held:
+    /// carries on a scroll bar's drag, or the content's once it has moved
+    /// [`SCROLL_DRAG_SLOP`]. The press is taken while it's scrolling, so
+    /// the host lets go of the button it went down on (it won't fire).
+    pub fn drag(&mut self, pointer: [f32; 2]) -> UiScrolled {
+        match self.scroll_drag {
+            Some(ScrollDrag::Bar { id, axis, grab }) => {
+                let moved = self.element(id).copied().and_then(|element| {
+                    let scroll = element.scroll?;
+                    let bars = scroll_bars(element.rect, &scroll, element.pixels_per_unit);
+                    let bar = bars.iter().find(|bar| bar.axis == axis)?;
+                    let mut to = scroll.position;
+                    to[axis] = bar.position_at(&scroll, pointer[axis] - grab);
+                    self.scroll_to(id, to)
+                });
+                UiScrolled { taken: true, moved }
+            }
+            Some(ScrollDrag::Content {
+                id,
+                from,
+                start,
+                moving,
+            }) => {
+                let moved = [pointer[0] - from[0], pointer[1] - from[1]];
+                let moving = moving || moved[0].hypot(moved[1]) >= SCROLL_DRAG_SLOP;
+                self.scroll_drag = Some(ScrollDrag::Content {
+                    id,
+                    from,
+                    start,
+                    moving,
+                });
+                if !moving {
+                    return UiScrolled::default();
+                }
+                let per_unit = self
+                    .element(id)
+                    .map_or(1.0, |element| element.pixels_per_unit.max(1e-4));
+                let to = [
+                    start[0] - moved[0] / per_unit,
+                    start[1] - moved[1] / per_unit,
+                ];
+                UiScrolled {
+                    taken: true,
+                    moved: self.scroll_to(id, to),
+                }
+            }
+            None => UiScrolled::default(),
+        }
+    }
+
+    /// The left button went up: any scroll drag ends.
+    pub fn release(&mut self) {
+        self.scroll_drag = None;
+    }
+
+    /// Whether a scroll bar is being dragged, or content dragged far
+    /// enough to scroll.
+    pub fn scrolling(&self) -> bool {
+        matches!(
+            self.scroll_drag,
+            Some(ScrollDrag::Bar { .. } | ScrollDrag::Content { moving: true, .. })
+        )
     }
 
     /// A click activated `button`: queues its `ClickSound`. Returns whether

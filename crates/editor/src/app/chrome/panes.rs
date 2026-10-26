@@ -209,9 +209,42 @@ impl EditorApp {
                         self.history.seal();
                     }
                 }
+                DesignerAction::Restack(changes) => self.restack(changes),
                 DesignerAction::NewScreenGui => self.insert(Insertable::ScreenGui, None),
             }
         }
+    }
+
+    /// Layer order from the designer's menus: each element's new z, in its
+    /// own `#Id` rule's `z-index` where CSS places it, else in `ZIndex`.
+    fn restack(&mut self, changes: Vec<(InstanceId, f64)>) {
+        let stylesheets = self
+            .project
+            .as_ref()
+            .map_or(&[][..], |project| &project.stylesheets[..]);
+        let (css, plain): (Vec<_>, Vec<_>) = changes
+            .into_iter()
+            .partition(|&(id, _)| axcenity_ui::css_sets_z_index(&self.world, id, stylesheets));
+        self.history.seal();
+        if !plain.is_empty() {
+            let name = self
+                .world
+                .get(plain[0].0)
+                .map(|i| i.name().to_owned())
+                .unwrap_or_default();
+            self.change_many(
+                history::Field::Property("ZIndex"),
+                format!("Change layer order of {name}"),
+                plain
+                    .into_iter()
+                    .map(|(id, z)| (id, vec![Edit::Property("ZIndex", Value::Number(z))]))
+                    .collect(),
+            );
+        }
+        for (id, z) in css {
+            self.set_own_style(id, "z-index", &z.to_string(), true);
+        }
+        self.history.seal();
     }
 
     /// Sets `id`'s `Position` and `Size` together, as an anchor change.

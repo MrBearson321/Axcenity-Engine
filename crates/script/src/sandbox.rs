@@ -173,6 +173,7 @@ const ENGINE_GLOBALS: &[&str] = &[
     "script",
     "Instance",
     "Vector3",
+    "Vector2",
     "Color3",
     "UDim2",
     "TweenInfo",

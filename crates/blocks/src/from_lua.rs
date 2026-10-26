@@ -956,6 +956,23 @@ impl<'a> Converter<'a> {
                 layout: path,
                 page: converted(),
             },
+            // Vector2.new(x, y), which the translation writes.
+            "CanvasPosition"
+                if matches!(&value.kind, ExprKind::Call(function, args)
+                    if args.len() == 2
+                        && matches!(&function.kind, ExprKind::Field(library, new)
+                            if new == "new"
+                                && matches!(&library.kind, ExprKind::Name(name) if name == "Vector2"))) =>
+            {
+                let ExprKind::Call(_, args) = &value.kind else {
+                    unreachable!("checked just above");
+                };
+                BlockKind::ScrollTo {
+                    target: path,
+                    x: self.expression(&args[0], scope),
+                    y: self.expression(&args[1], scope),
+                }
+            }
             "Visible" if matches!(value.kind, ExprKind::True) => BlockKind::Show { target: path },
             "Visible" if matches!(value.kind, ExprKind::False) => BlockKind::Hide { target: path },
             "Volume" => BlockKind::SetVolume {

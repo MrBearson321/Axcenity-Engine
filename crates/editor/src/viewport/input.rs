@@ -314,42 +314,49 @@ impl Viewport {
         response: &egui::Response,
         view_height: f32,
         character: bool,
+        wheel_taken: bool,
     ) {
         let ctx = ui.ctx();
         // Read this *before* `ui.input`: egui locks its context while the
         // `ui.input` closure runs, and `drag_delta` takes the same lock, so
         // calling it inside the closure waits for itself forever (a deadlock).
         let drag = response.drag_delta();
-        let (motion, scroll, wheel, alt, shift, seconds, focused, time) = ui.input(|input| {
-            // Key presses and releases, by key position rather than by
-            // letter, so WASD sits in the same place on AZERTY keyboards.
-            for event in &input.events {
-                if let egui::Event::Key {
-                    key,
-                    physical_key,
-                    pressed,
-                    ..
-                } = event
-                {
-                    set_move_key(&mut self.keys, physical_key.unwrap_or(*key), *pressed);
+        let (motion, mut scroll, mut wheel, alt, shift, seconds, focused, time) =
+            ui.input(|input| {
+                // Key presses and releases, by key position rather than by
+                // letter, so WASD sits in the same place on AZERTY keyboards.
+                for event in &input.events {
+                    if let egui::Event::Key {
+                        key,
+                        physical_key,
+                        pressed,
+                        ..
+                    } = event
+                    {
+                        set_move_key(&mut self.keys, physical_key.unwrap_or(*key), *pressed);
+                    }
                 }
-            }
-            (
-                // Raw mouse movement keeps coming while the cursor is held
-                // still; it's missing on some platforms, so fall back to the drag.
-                input.pointer.motion().unwrap_or(drag),
-                input.smooth_scroll_delta.y,
-                // The wheel without egui's smoothing, so each notch is
-                // exactly one speed step. egui turns Shift+wheel into
-                // sideways scrolling (and macOS already does), so add both.
-                input.raw_scroll_delta.x + input.raw_scroll_delta.y,
-                input.modifiers.alt,
-                input.modifiers.shift,
-                input.stable_dt.min(MAX_FRAME_SECONDS),
-                input.focused,
-                input.time,
-            )
-        });
+                (
+                    // Raw mouse movement keeps coming while the cursor is held
+                    // still; it's missing on some platforms, so fall back to the drag.
+                    input.pointer.motion().unwrap_or(drag),
+                    input.smooth_scroll_delta.y,
+                    // The wheel without egui's smoothing, so each notch is
+                    // exactly one speed step. egui turns Shift+wheel into
+                    // sideways scrolling (and macOS already does), so add both.
+                    input.raw_scroll_delta.x + input.raw_scroll_delta.y,
+                    input.modifiers.alt,
+                    input.modifiers.shift,
+                    input.stable_dt.min(MAX_FRAME_SECONDS),
+                    input.focused,
+                    input.time,
+                )
+            });
+        // The wheel scrolled a ScrollingFrame instead.
+        if wheel_taken {
+            scroll = 0.0;
+            wheel = 0.0;
+        }
         // Key releases aren't reported while another window has focus, so
         // let go of everything to avoid the camera drifting on its own.
         if !focused {

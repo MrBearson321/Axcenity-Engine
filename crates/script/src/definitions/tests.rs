@@ -302,6 +302,7 @@ fn described_fields_and_methods_exist() {
     let mut on_input = Vec::new();
     let samples = [
         ("Vector3", "Vector3.new(1, 2, 3)"),
+        ("Vector2", "Vector2.new(1, 2)"),
         ("Color3", "Color3.new(1, 0, 0)"),
         ("UDim", "UDim2.new(0, 1, 0, 1).X"),
         ("UDim2", "UDim2.new(0, 1, 0, 1)"),

@@ -74,6 +74,34 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
         methods: &[],
     },
     ValueType {
+        class: "Vector2",
+        doc: "A point or size on the screen, in pixels, such as a ScrollingFrame's CanvasPosition.",
+        fields: &[
+            Field {
+                name: "X",
+                ty: "number",
+                doc: "Across, in pixels.",
+            },
+            Field {
+                name: "Y",
+                ty: "number",
+                doc: "Down, in pixels.",
+            },
+            Field {
+                name: "Magnitude",
+                ty: "number",
+                doc: "The length of the vector.",
+            },
+        ],
+        operators: &[
+            "__add(self, other: Vector2): Vector2",
+            "__sub(self, other: Vector2): Vector2",
+            "__mul(self, other: Vector2 | number): Vector2",
+            "__unm(self): Vector2",
+        ],
+        methods: &[],
+    },
+    ValueType {
         class: "Color3",
         doc: "A color, with each channel from 0 to 1.",
         fields: &[
@@ -866,6 +894,16 @@ pub(super) const LIBRARIES: &[Library] = &[
             doc: "A new Vector3. Left-out components are 0.",
             params: &[("x?", "number"), ("y?", "number"), ("z?", "number")],
             returns: "Vector3",
+        }],
+    },
+    Library {
+        global: "Vector2",
+        doc: "Creates Vector2 values.",
+        functions: &[Function {
+            name: "new",
+            doc: "A new Vector2. Left-out components are 0.",
+            params: &[("x?", "number"), ("y?", "number")],
+            returns: "Vector2",
         }],
     },
     Library {

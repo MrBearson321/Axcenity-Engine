@@ -156,6 +156,13 @@ const GROUPS: [(&str, &[&str]); 19] = [
             "ScaleMode",
             "DesignWidth",
             "DesignHeight",
+            "ZIndex",
+            "DisplayOrder",
+            "CanvasSize",
+            "CanvasPosition",
+            "ScrollingDirection",
+            "ScrollBarThickness",
+            "AutomaticCanvasSize",
         ],
     ),
     (
@@ -769,6 +776,22 @@ fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
             choice_control(ui, name, current, &["Fixed", "Fit", "Scale"], |mode| mode)
                 .map(|mode| Value::String(mode.to_owned()))
         }
+        // A ScrollingFrame's axes.
+        Value::String(text) if name == "ScrollingDirection" || name == "AutomaticCanvasSize" => {
+            // What the layout makes of anything else.
+            let (choices, otherwise): (&[&'static str], _) = if name == "ScrollingDirection" {
+                (&["X", "Y", "XY"], "XY")
+            } else {
+                (&["None", "X", "Y", "XY"], "None")
+            };
+            let current = choices
+                .iter()
+                .copied()
+                .find(|choice| text.eq_ignore_ascii_case(choice))
+                .unwrap_or(otherwise);
+            choice_control(ui, name, current, choices, |choice| choice)
+                .map(|choice| Value::String(choice.to_owned()))
+        }
         Value::String(mut text) if name == "MeshId" => {
             ui.add_enabled(false, egui::TextEdit::singleline(&mut text))
                 .on_disabled_hover_text(
@@ -807,6 +830,19 @@ fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
                 }
             });
             changed.then_some(Value::Vector3(vector))
+        }
+        Value::Vector2(mut vector) => {
+            let mut changed = false;
+            ui.horizontal_wrapped(|ui| {
+                for (axis, number) in [("X ", &mut vector.x), ("Y ", &mut vector.y)] {
+                    let drag = egui::DragValue::new(number)
+                        .prefix(axis)
+                        .speed(1.0)
+                        .max_decimals(MAX_DECIMALS);
+                    changed |= ui.add(drag).changed();
+                }
+            });
+            changed.then_some(Value::Vector2(vector))
         }
         Value::UDim2(mut value) => {
             let mut changed = false;

@@ -28,7 +28,7 @@
 //!
 //! Property values are plain JSON. Their meaning comes from the class: the
 //! same `[0, 1, 0]` is a `Vector3` for `Position` and a `Color3` for `Color`,
-//! `[0, 0, 1, 0]` is a `UDim2` (X scale, X offset, Y scale, Y offset), and
+//! `[0, 120]` is a `Vector2`, `[0, 0, 1, 0]` is a `UDim2` (X scale, X offset, Y scale, Y offset), and
 //! enum items are strings such as `"Neon"`. Properties that are left out keep
 //! their default values.
 //!
@@ -302,6 +302,15 @@ fn json_to_value(json: &Json, kind: ValueKind) -> Result<Value, String> {
             let [x, y, z] = three_numbers(json).ok_or("expected [x, y, z]: three numbers")?;
             Ok(Value::Vector3(axcenity_core::Vector3::new(x, y, z)))
         }
+        ValueKind::Vector2 => match json.as_array().map(Vec::as_slice) {
+            Some([x, y]) => match (x.as_f64(), y.as_f64()) {
+                (Some(x), Some(y)) => Ok(Value::Vector2(axcenity_core::Vector2::new(
+                    x as f32, y as f32,
+                ))),
+                _ => Err("expected [x, y]: two numbers".to_owned()),
+            },
+            _ => Err("expected [x, y]: two numbers".to_owned()),
+        },
         ValueKind::UDim2 => {
             let [x_scale, x_offset, y_scale, y_offset] =
                 four_numbers(json).ok_or("expected [x_scale, x_offset, y_scale, y_offset]")?;
@@ -487,6 +496,16 @@ fn json_value(value: &Value) -> String {
         Value::Number(n) => json_number(*n),
         Value::String(s) => json_string(s),
         Value::Vector3(v) => json_triple([v.x, v.y, v.z]),
+        Value::Vector2(v) => {
+            let [x, y] = [v.x, v.y].map(|n| {
+                if n.is_finite() {
+                    n.to_string()
+                } else {
+                    "null".to_owned()
+                }
+            });
+            format!("[{x}, {y}]")
+        }
         Value::UDim2(v) => json_quad([v.x.scale, v.x.offset, v.y.scale, v.y.offset]),
         Value::Color3(c) => json_triple([c.r, c.g, c.b]),
         Value::PartType(t) => json_string(t.as_str()),
@@ -756,6 +775,58 @@ mod tests {
             .unwrap();
         assert_eq!(loaded.get(jump).unwrap().class(), ClassName::RemoteEvent);
         assert_eq!(write_world(&loaded), written);
+    }
+
+    #[test]
+    fn a_scrolling_frame_and_layer_order_save_and_load_and_older_worlds_get_defaults() {
+        let mut world = World::new();
+        let gui = world.create(ClassName::ScreenGui).unwrap();
+        world.set_parent(gui, Some(world.workspace())).unwrap();
+        world
+            .set_property(gui, "DisplayOrder", Value::Number(3.0))
+            .unwrap();
+        let list = world.create(ClassName::ScrollingFrame).unwrap();
+        world.set_parent(list, Some(gui)).unwrap();
+        let at = axcenity_core::Vector2::new(0.0, 120.5);
+        world
+            .set_property(list, "CanvasPosition", Value::Vector2(at))
+            .unwrap();
+        world
+            .set_property(list, "ZIndex", Value::Number(4.0))
+            .unwrap();
+
+        let written = write_world(&world);
+        assert!(
+            written.contains("\"CanvasPosition\": [0, 120.5]"),
+            "{written}"
+        );
+        let loaded = parse_world(&written).unwrap();
+        let list = loaded
+            .find_first_descendant(loaded.workspace(), "ScrollingFrame")
+            .unwrap();
+        let list = loaded.get(list).unwrap();
+        assert_eq!(list.property("CanvasPosition"), Some(&Value::Vector2(at)));
+        assert_eq!(list.property("ZIndex"), Some(&Value::Number(4.0)));
+        assert_eq!(write_world(&loaded), written);
+
+        // A world saved before layer order: a Frame without ZIndex and a
+        // ScreenGui without DisplayOrder load with the defaults.
+        let old = parse_world(
+            r#"{ "format_version": 1, "workspace": { "children": [
+                { "class": "ScreenGui", "name": "Hud", "properties": { "Enabled": true },
+                  "children": [ { "class": "Frame", "name": "Panel" } ] } ] } }"#,
+        )
+        .unwrap();
+        let panel = old.find_first_descendant(old.workspace(), "Panel").unwrap();
+        let hud = old.find_first_descendant(old.workspace(), "Hud").unwrap();
+        assert_eq!(
+            old.get(panel).unwrap().property("ZIndex"),
+            Some(&Value::Number(1.0))
+        );
+        assert_eq!(
+            old.get(hud).unwrap().property("DisplayOrder"),
+            Some(&Value::Number(0.0))
+        );
     }
 
     #[test]

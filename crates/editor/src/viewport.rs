@@ -147,6 +147,9 @@ pub struct ViewportOutput {
     pub viewport_clicked: bool,
     /// Page and billboard problems from this frame's layout.
     pub ui_warnings: Vec<String>,
+    /// ScrollingFrames scrolled during Play by the wheel, a bar or a drag:
+    /// the `CanvasPosition` the app sets on each in the game.
+    pub scrolled: Vec<(InstanceId, axcenity_core::Vector2)>,
     pub drag: Option<DragEdit>,
     /// A UI element being moved or resized.
     pub ui_drag: Option<UiDragEdit>,
@@ -500,7 +503,37 @@ impl Viewport {
         let drag_tool = if brush.is_some() { None } else { tool };
         let size = ui.available_size();
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
-        self.handle_input(ui, &response, rect.height(), character_view.is_some());
+        let pixels_per_point = ui.ctx().pixels_per_point();
+        let pointer = ui.input(|input| input.pointer.latest_pos());
+        let pointer_pixels = pointer
+            .filter(|_| response.contains_pointer())
+            .map(|pointer| (pointer - rect.min) * pixels_per_point)
+            .map(|position| [position.x, position.y]);
+        // During Play, the wheel over a ScrollingFrame scrolls it (by the
+        // last frame's layout) instead of moving the camera.
+        let mut scrolled = Vec::new();
+        let wheel_taken = match pointer_pixels.filter(|_| tool.is_none() && response.hovered()) {
+            Some(at) => {
+                let (smooth, raw) =
+                    ui.input(|input| (input.smooth_scroll_delta, input.raw_scroll_delta));
+                if smooth == egui::Vec2::ZERO && raw == egui::Vec2::ZERO {
+                    false
+                } else {
+                    let delta = -smooth * pixels_per_point;
+                    let wheel = self.ui.wheel(world, at, [delta.x, delta.y]);
+                    scrolled.extend(wheel.moved);
+                    wheel.taken
+                }
+            }
+            None => false,
+        };
+        self.handle_input(
+            ui,
+            &response,
+            rect.height(),
+            character_view.is_some(),
+            wheel_taken,
+        );
         let camera = match character_view {
             Some(view) => FlyCamera::from_view(view.position, view.orientation).to_render_camera(),
             None => self.camera.to_render_camera(),
@@ -509,14 +542,30 @@ impl Viewport {
 
         // The texture is sized in physical pixels, so it stays sharp on
         // high-DPI screens where one point is several pixels.
-        let pixels_per_point = ui.ctx().pixels_per_point();
         let pixels = size * pixels_per_point;
         let (width, height) = (pixels.x.round() as u32, pixels.y.round() as u32);
-        let pointer = ui.input(|input| input.pointer.latest_pos());
-        let pointer_pixels = pointer
-            .filter(|_| response.contains_pointer())
-            .map(|pointer| (pointer - rect.min) * pixels_per_point)
-            .map(|position| [position.x, position.y]);
+        // During Play a press on a ScrollingFrame's bar drags it, and one on
+        // its content scrolls it once it has moved far enough; either way
+        // the button under it doesn't fire.
+        let (primary_pressed, primary_down) = ui.input(|input| {
+            (
+                input.pointer.primary_pressed(),
+                input.pointer.primary_down(),
+            )
+        });
+        if tool.is_none()
+            && let Some(at) = pointer_pixels
+        {
+            let scroll = if primary_pressed {
+                self.ui.press(world, at)
+            } else if primary_down {
+                self.ui.drag(at)
+            } else {
+                axcenity_ui::UiScrolled::default()
+            };
+            scrolled.extend(scroll.moved);
+        }
+        let scrolling = self.ui.scrolling();
         let input = axcenity_ui::UiInput {
             pointer: pointer_pixels,
             pressed: None,
@@ -534,8 +583,7 @@ impl Viewport {
             },
             Some(&camera),
         );
-        let held_button = ui
-            .input(|input| input.pointer.primary_down())
+        let held_button = (primary_down && !scrolling)
             .then(|| pointer_pixels.and_then(|[x, y]| base_layout.hit_button(x, y)))
             .flatten();
         let seconds = ui.input(|input| input.unstable_dt).min(MAX_FRAME_SECONDS);
@@ -632,7 +680,11 @@ impl Viewport {
         };
         let activated = clicked_ui(axcenity_ui::UiLayout::hit_button)
             .flatten()
+            .filter(|_| !scrolling)
             .filter(|&button| self.ui.activate(world, button));
+        if !primary_down {
+            self.ui.release();
+        }
         let text_box = clicked_ui(axcenity_ui::UiLayout::hit_text_box).flatten();
         let target = self.target.get_or_insert_with(|| {
             let renderer =
@@ -796,6 +848,7 @@ impl Viewport {
             text_box,
             viewport_clicked: playing,
             ui_warnings: ui_layout.warnings,
+            scrolled,
             drag: drag.edit,
             ui_drag: drag.ui_edit,
             drag_released: drag.released,

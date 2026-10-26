@@ -27,6 +27,7 @@ pub enum Insertable {
     /// A Frame parented under a PageLayout, named as a page.
     Page,
     Table,
+    ScrollingFrame,
     BillboardGui,
     Sound,
     PointLight,
@@ -51,7 +52,7 @@ impl Insertable {
     /// The classes that group other Instances.
     pub const GROUPS: [Insertable; 2] = [Insertable::Model, Insertable::Folder];
     /// UI objects, for the toolbar's UI group and the Explorer's Insert menu.
-    pub const UI: [Insertable; 10] = [
+    pub const UI: [Insertable; 11] = [
         Insertable::ScreenGui,
         Insertable::Frame,
         Insertable::TextLabel,
@@ -61,6 +62,7 @@ impl Insertable {
         Insertable::PageLayout,
         Insertable::Page,
         Insertable::Table,
+        Insertable::ScrollingFrame,
         Insertable::BillboardGui,
     ];
     pub const AUDIO: [Insertable; 1] = [Insertable::Sound];
@@ -96,6 +98,7 @@ impl Insertable {
             Insertable::PageLayout => "PageLayout",
             Insertable::Page => "Page",
             Insertable::Table => "Table",
+            Insertable::ScrollingFrame => "ScrollingFrame",
             Insertable::BillboardGui => "BillboardGui",
             Insertable::Sound => "Sound",
             Insertable::PointLight => "PointLight",
@@ -124,6 +127,7 @@ impl Insertable {
             Insertable::PageLayout => ClassName::PageLayout,
             Insertable::Page => ClassName::Frame,
             Insertable::Table => ClassName::Table,
+            Insertable::ScrollingFrame => ClassName::ScrollingFrame,
             Insertable::BillboardGui => ClassName::BillboardGui,
             Insertable::Sound => ClassName::Sound,
             Insertable::PointLight => ClassName::PointLight,
@@ -148,6 +152,7 @@ impl Insertable {
                 | Insertable::PageLayout
                 | Insertable::Page
                 | Insertable::Table
+                | Insertable::ScrollingFrame
         )
     }
 }
@@ -161,6 +166,7 @@ fn is_ui_container(world: &World, id: InstanceId) -> bool {
                 | ClassName::Frame
                 | ClassName::PageLayout
                 | ClassName::Table
+                | ClassName::ScrollingFrame
                 | ClassName::BillboardGui
         )
     )

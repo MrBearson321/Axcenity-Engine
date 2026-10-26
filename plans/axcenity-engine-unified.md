@@ -516,9 +516,9 @@ Ctrl+B, Ctrl+I and Ctrl+U toggle bold, italic and underline on the selected elem
 
 ### Acceptance criteria
 
-- [ ] Two overlapping siblings swap which is on top with Bring to Front, and the one on top gets the click, in the designer and in Play.
-- [ ] A rounded Frame with `overflow: hidden` clips an image child to its rounded corners.
-- [ ] A ScrollingFrame with twenty buttons scrolls by wheel and by bar, only the visible buttons can be clicked, and `CanvasPosition` can be read and set from Lua.
+- [x] Two overlapping siblings swap which is on top with Bring to Front, and the one on top gets the click, in the designer and in Play.
+- [x] A rounded Frame with `overflow: hidden` clips an image child to its rounded corners.
+- [x] A ScrollingFrame with twenty buttons scrolls by wheel and by bar, only the visible buttons can be clicked, and `CanvasPosition` can be read and set from Lua.
 
 ---
 

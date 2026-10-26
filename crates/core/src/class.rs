@@ -3,7 +3,7 @@
 use std::fmt;
 
 use crate::enums::{Material, PartType, ParticleType, TextureChannel};
-use crate::value::{Color3, UDim2, Value, Vector3};
+use crate::value::{Color3, UDim2, Value, Vector2, Vector3};
 
 /// Events every Instance has, whatever its class. `Changed` fires with the
 /// name of a property that got a new value, `ChildAdded` and `ChildRemoved`
@@ -71,6 +71,9 @@ pub enum ClassName {
     PageLayout,
     /// Lays its children out in a grid, left to right, then top to bottom.
     Table,
+    /// A Frame whose children sit on a canvas bigger than it, scrolled
+    /// with the wheel, its bars, or a drag. It always clips its children.
+    ScrollingFrame,
     /// UI that floats in the world, on the part it is parented to.
     BillboardGui,
     /// Plays an audio file from the project.
@@ -108,7 +111,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 38] = [
+    pub const ALL: [ClassName; 39] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -135,6 +138,7 @@ impl ClassName {
         ClassName::TextBox,
         ClassName::PageLayout,
         ClassName::Table,
+        ClassName::ScrollingFrame,
         ClassName::BillboardGui,
         ClassName::Sound,
         ClassName::PointLight,
@@ -177,6 +181,7 @@ impl ClassName {
             ClassName::TextBox => "TextBox",
             ClassName::PageLayout => "PageLayout",
             ClassName::Table => "Table",
+            ClassName::ScrollingFrame => "ScrollingFrame",
             ClassName::BillboardGui => "BillboardGui",
             ClassName::Sound => "Sound",
             ClassName::PointLight => "PointLight",
@@ -346,6 +351,8 @@ impl ClassName {
                 ("ScaleMode", Value::String("Fixed".to_owned())),
                 ("DesignWidth", Value::Number(1920.0)),
                 ("DesignHeight", Value::Number(1080.0)),
+                // Enabled ScreenGuis are drawn lowest first; ties keep tree order.
+                ("DisplayOrder", Value::Number(0.0)),
             ],
             ClassName::Frame => vec![
                 ("Class", Value::String(String::new())),
@@ -360,6 +367,9 @@ impl ClassName {
                 ("Visible", Value::Bool(true)),
                 ("Interactable", Value::Bool(true)),
                 ("Tooltip", Value::String(String::new())),
+                // Siblings are drawn lowest first (ties keep tree order), and
+                // the one on top takes the pointer. CSS `z-index` wins.
+                ("ZIndex", Value::Number(1.0)),
             ],
             ClassName::TextLabel => vec![
                 ("Class", Value::String(String::new())),
@@ -381,6 +391,9 @@ impl ClassName {
                 ("Visible", Value::Bool(true)),
                 ("Interactable", Value::Bool(true)),
                 ("Tooltip", Value::String(String::new())),
+                // Siblings are drawn lowest first (ties keep tree order), and
+                // the one on top takes the pointer. CSS `z-index` wins.
+                ("ZIndex", Value::Number(1.0)),
             ],
             ClassName::TextButton => vec![
                 ("Class", Value::String(String::new())),
@@ -408,6 +421,9 @@ impl ClassName {
                 ("Interactable", Value::Bool(true)),
                 // Shown in a small box near the pointer after a short hover.
                 ("Tooltip", Value::String(String::new())),
+                // Siblings are drawn lowest first (ties keep tree order), and
+                // the one on top takes the pointer. CSS `z-index` wins.
+                ("ZIndex", Value::Number(1.0)),
                 // Sound files (paths in the project) played when the pointer
                 // comes onto it and when it's clicked. Empty plays nothing.
                 ("HoverSound", Value::String(String::new())),
@@ -437,6 +453,9 @@ impl ClassName {
                 ("Visible", Value::Bool(true)),
                 ("Interactable", Value::Bool(true)),
                 ("Tooltip", Value::String(String::new())),
+                // Siblings are drawn lowest first (ties keep tree order), and
+                // the one on top takes the pointer. CSS `z-index` wins.
+                ("ZIndex", Value::Number(1.0)),
             ],
             ClassName::PageLayout => vec![
                 ("Class", Value::String(String::new())),
@@ -451,6 +470,9 @@ impl ClassName {
                 ("Visible", Value::Bool(true)),
                 ("Interactable", Value::Bool(true)),
                 ("Tooltip", Value::String(String::new())),
+                // Siblings are drawn lowest first (ties keep tree order), and
+                // the one on top takes the pointer. CSS `z-index` wins.
+                ("ZIndex", Value::Number(1.0)),
                 // Empty shows the first child Frame. Any other value is that
                 // Frame's name.
                 ("CurrentPage", Value::String(String::new())),
@@ -468,8 +490,38 @@ impl ClassName {
                 ("Visible", Value::Bool(true)),
                 ("Interactable", Value::Bool(true)),
                 ("Tooltip", Value::String(String::new())),
+                // Siblings are drawn lowest first (ties keep tree order), and
+                // the one on top takes the pointer. CSS `z-index` wins.
+                ("ZIndex", Value::Number(1.0)),
                 // How many cells sit in one row.
                 ("Columns", Value::Number(2.0)),
+            ],
+            ClassName::ScrollingFrame => vec![
+                ("Class", Value::String(String::new())),
+                ("Id", Value::String(String::new())),
+                ("Position", Value::UDim2(UDim2::default())),
+                ("Size", Value::UDim2(UDim2::new(0.0, 300.0, 0.0, 200.0))),
+                (
+                    "BackgroundColor3",
+                    Value::Color3(Color3::new(0.2, 0.2, 0.2)),
+                ),
+                ("BackgroundTransparency", Value::Number(0.0)),
+                ("Visible", Value::Bool(true)),
+                ("Interactable", Value::Bool(true)),
+                ("Tooltip", Value::String(String::new())),
+                ("ZIndex", Value::Number(1.0)),
+                // The area its children are laid out on: scale of the frame's
+                // own size plus pixels. Never smaller than the frame.
+                ("CanvasSize", Value::UDim2(UDim2::new(0.0, 0.0, 2.0, 0.0))),
+                // How far the canvas is scrolled, in pixels from its top left.
+                ("CanvasPosition", Value::Vector2(Vector2::new(0.0, 0.0))),
+                // "X", "Y" or "XY": which ways it scrolls.
+                ("ScrollingDirection", Value::String("XY".to_owned())),
+                // How thick its scroll bars are, in pixels. 0 hides them.
+                ("ScrollBarThickness", Value::Number(12.0)),
+                // "None", "X", "Y" or "XY": the canvas grows that way to fit
+                // the children.
+                ("AutomaticCanvasSize", Value::String("None".to_owned())),
             ],
             ClassName::BillboardGui => vec![
                 ("Class", Value::String(String::new())),
@@ -497,6 +549,9 @@ impl ClassName {
                 ("Visible", Value::Bool(true)),
                 ("Interactable", Value::Bool(true)),
                 ("Tooltip", Value::String(String::new())),
+                // Siblings are drawn lowest first (ties keep tree order), and
+                // the one on top takes the pointer. CSS `z-index` wins.
+                ("ZIndex", Value::Number(1.0)),
             ],
             ClassName::Animator => vec![
                 // The state machine it plays, relative to the project folder,
@@ -764,7 +819,8 @@ impl ClassName {
             | ClassName::TextLabel
             | ClassName::ImageLabel
             | ClassName::PageLayout
-            | ClassName::Table => &["MouseEnter", "MouseLeave"],
+            | ClassName::Table
+            | ClassName::ScrollingFrame => &["MouseEnter", "MouseLeave"],
             ClassName::TextButton => &["Activated", "MouseEnter", "MouseLeave"],
             // `FocusLost` fires in LocalScripts when the player finishes
             // typing: Enter on one line, or a click away (and Enter, on one

@@ -8,9 +8,11 @@ use std::ops::Range;
 
 use glyphon::Color as GlyphColor;
 
-use crate::draw_list::{UiBorderSide, UiDrawItem, UiImage, UiRectangle, UiShadow, UiSlice, UiText};
+use crate::draw_list::{
+    UiBorderSide, UiClip, UiDrawItem, UiImage, UiRectangle, UiShadow, UiSlice, UiText,
+};
 
-use super::{DEPTH_FORMAT, HDR_FORMAT, UI_BOX, UI_INSET_SHADOW, UI_SHADOW, UiVertex};
+use super::{DEPTH_FORMAT, HDR_FORMAT, NO_CLIP, UI_BOX, UI_INSET_SHADOW, UI_SHADOW, UiVertex};
 
 use super::lighting::linear_color;
 
@@ -66,10 +68,50 @@ fn kind_and_bounds(item: &UiDrawItem) -> (u8, [f32; 4]) {
         UiDrawItem::Image(image) => (1, image.position, image.size, 0.0),
         UiDrawItem::Text(text) => (2, text.position, text.size, text_spill(text)),
     };
-    (
-        kind,
-        [x - margin, y - margin, x + w + margin, y + h + margin],
-    )
+    let mut bounds = [x - margin, y - margin, x + w + margin, y + h + margin];
+    // Nothing is drawn outside its clip.
+    if let Some(clip) = item_clip(item) {
+        bounds[0] = bounds[0].max(clip.position[0]);
+        bounds[1] = bounds[1].max(clip.position[1]);
+        bounds[2] = bounds[2].min(clip.position[0] + clip.size[0]);
+        bounds[3] = bounds[3].min(clip.position[1] + clip.size[1]);
+    }
+    (kind, bounds)
+}
+
+/// The box an item is cut to, if it's cut.
+pub(super) fn item_clip(item: &UiDrawItem) -> Option<UiClip> {
+    match item {
+        UiDrawItem::Rectangle(rectangle) => rectangle.clip,
+        UiDrawItem::Image(image) => image.clip,
+        UiDrawItem::Text(text) => text.clip,
+    }
+}
+
+/// A clip as the shader reads it: its box and its radius.
+fn clip_numbers(clip: Option<UiClip>) -> ([f32; 4], f32) {
+    match clip {
+        Some(clip)
+            if clip
+                .position
+                .iter()
+                .chain(&clip.size)
+                .all(|n| n.is_finite())
+                && clip.radius.is_finite() =>
+        {
+            (
+                [
+                    clip.position[0],
+                    clip.position[1],
+                    clip.size[0],
+                    clip.size[1],
+                ],
+                clip.radius.max(0.0),
+            )
+        }
+        Some(_) => ([0.0; 4], 0.0),
+        None => (NO_CLIP, 0.0),
+    }
 }
 
 /// How far a text's outlines and shadows can reach past its box. Each copy
@@ -149,7 +191,12 @@ fn push_rectangle(
         border_radius,
         border_sides,
         shadow,
+        clip,
     } = *rectangle;
+    let (clip, clip_radius) = clip_numbers(clip);
+    if clip[2] <= 0.0 || clip[3] <= 0.0 {
+        return;
+    }
     let sides = border_sides.unwrap_or(
         [UiBorderSide {
             width: border_width,
@@ -259,6 +306,8 @@ fn push_rectangle(
                 shadow.blur.max(0.0),
                 shadow.spread,
             ],
+            clip,
+            clip_radius,
         });
     }
 }
@@ -296,9 +345,13 @@ pub(super) fn image_quad(image: &UiImage, (width, height): (u32, u32)) -> Vec<Ui
     } else {
         image.border_radius.clamp(0.0, w.min(h) * 0.5)
     };
+    let clip = clip_numbers(image.clip);
+    if clip.0[2] <= 0.0 || clip.0[3] <= 0.0 {
+        return Vec::new();
+    }
     let mut vertices = Vec::with_capacity(pieces.len() * 6);
     for (rect, uv) in pieces {
-        push_image_piece(rect, uv, color, radius, screen, &mut vertices);
+        push_image_piece(rect, uv, (color, radius, clip), screen, &mut vertices);
     }
     vertices
 }
@@ -307,8 +360,7 @@ pub(super) fn image_quad(image: &UiImage, (width, height): (u32, u32)) -> Vec<Ui
 fn push_image_piece(
     [x, y, w, h]: [f32; 4],
     [u0, v0, u1, v1]: [f32; 4],
-    color: [f32; 4],
-    radius: f32,
+    (color, radius, (clip, clip_radius)): ([f32; 4], f32, ([f32; 4], f32)),
     (width, height): (f32, f32),
     vertices: &mut Vec<UiVertex>,
 ) {
@@ -337,6 +389,8 @@ fn push_image_piece(
             border_bottom: [0.0; 4],
             border_left: [0.0; 4],
             shadow: [0.0; 4],
+            clip,
+            clip_radius,
         });
     }
 }
@@ -473,10 +527,11 @@ pub(super) fn glyph_color([r, g, b, a]: [f32; 4]) -> GlyphColor {
 }
 
 /// [`UiVertex`]'s fields, in order, as `ui.wgsl` reads them.
-const UI_VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 12] = wgpu::vertex_attr_array![
+const UI_VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 14] = wgpu::vertex_attr_array![
     0 => Float32x2, 1 => Float32x4, 2 => Float32x2,
     3 => Float32x2, 4 => Float32x4, 5 => Float32x2, 6 => Float32x4,
-    7 => Float32x4, 8 => Float32x4, 9 => Float32x4, 10 => Float32x4, 11 => Float32x4
+    7 => Float32x4, 8 => Float32x4, 9 => Float32x4, 10 => Float32x4, 11 => Float32x4,
+    12 => Float32x4, 13 => Float32
 ];
 
 pub(super) fn create_ui_pipeline(

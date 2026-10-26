@@ -146,7 +146,15 @@ pub(super) struct UiVertex {
     pub(super) border_left: [f32; 4],
     /// A shadow's offset, blur and spread.
     pub(super) shadow: [f32; 4],
+    /// The box it's cut to, in screen pixels (left, top, width, height):
+    /// [`NO_CLIP`] when it isn't cut.
+    pub(super) clip: [f32; 4],
+    /// That box's corner radius, in pixels.
+    pub(super) clip_radius: f32,
 }
+
+/// A clip box so big nothing on screen is outside it.
+pub(super) const NO_CLIP: [f32; 4] = [-1.0e7, -1.0e7, 2.0e7, 2.0e7];
 
 /// What a UI quad draws (`UiVertex::border[1]`, matched in `ui.wgsl`): a
 /// filled, bordered box, a shadow behind one, or a shadow inside one.

@@ -55,6 +55,7 @@ fn luau_type(kind: ValueKind) -> String {
         ValueKind::Number => "number".to_owned(),
         ValueKind::String => "string".to_owned(),
         ValueKind::Vector3 => "Vector3".to_owned(),
+        ValueKind::Vector2 => "Vector2".to_owned(),
         ValueKind::UDim2 => "UDim2".to_owned(),
         ValueKind::Color3 => "Color3".to_owned(),
         // Enum properties read as items and also accept item names.

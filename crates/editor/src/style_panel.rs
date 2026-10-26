@@ -45,6 +45,7 @@ pub fn is_styled(class: ClassName) -> bool {
             | ClassName::TextBox
             | ClassName::PageLayout
             | ClassName::Table
+            | ClassName::ScrollingFrame
             | ClassName::BillboardGui
     )
 }

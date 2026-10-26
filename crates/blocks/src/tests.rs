@@ -87,9 +87,10 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         BlockKind::SlideIn { .. } => 36,
         BlockKind::FadeIn { .. } => 37,
         BlockKind::FadeOut { .. } => 38,
+        BlockKind::ScrollTo { .. } => 39,
     })
 }
-const STATEMENT_COUNT: usize = 39;
+const STATEMENT_COUNT: usize = 40;
 
 /// One of each statement block, with the Lua it must produce.
 fn every_statement() -> Vec<(BlockKind, &'static str)> {
@@ -289,6 +290,14 @@ fn every_statement() -> Vec<(BlockKind, &'static str)> {
                 },
             },
             "workspace.Menu.CurrentPage = \"Home\"",
+        ),
+        (
+            BlockKind::ScrollTo {
+                target: "List".to_owned(),
+                x: number(0.0),
+                y: number(120.0),
+            },
+            "workspace.List.CanvasPosition = Vector2.new(0, 120)",
         ),
         (
             BlockKind::Code {

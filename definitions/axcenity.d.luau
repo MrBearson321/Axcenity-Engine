@@ -23,6 +23,20 @@ declare extern type Vector3 with
 	function __unm(self): Vector3
 end
 
+--- A point or size on the screen, in pixels, such as a ScrollingFrame's CanvasPosition.
+declare extern type Vector2 with
+	--- Across, in pixels.
+	X: number
+	--- Down, in pixels.
+	Y: number
+	--- The length of the vector.
+	Magnitude: number
+	function __add(self, other: Vector2): Vector2
+	function __sub(self, other: Vector2): Vector2
+	function __mul(self, other: Vector2 | number): Vector2
+	function __unm(self): Vector2
+end
+
 --- A color, with each channel from 0 to 1.
 declare extern type Color3 with
 	--- Red, from 0 to 1.
@@ -609,6 +623,8 @@ declare extern type ScreenGui extends Instance with
 	DesignWidth: number
 	--- The height, in pixels, this ScreenGui is designed at: Fit and Scale scale it from this size. Ignored when ScaleMode is Fixed.
 	DesignHeight: number
+	--- Where this ScreenGui is drawn among the others: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree.
+	DisplayOrder: number
 	[string]: any
 end
 
@@ -632,6 +648,8 @@ declare extern type Frame extends Instance with
 	Interactable: boolean
 	--- Text shown in a small box near the pointer after a short hover. Empty shows none. Style the box with a CSS Tooltip rule, such as #play Tooltip.
 	Tooltip: string
+	--- Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.
+	ZIndex: number
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
 	MouseEnter: Signal
 	--- Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.
@@ -669,6 +687,8 @@ declare extern type TextLabel extends Instance with
 	Interactable: boolean
 	--- Text shown in a small box near the pointer after a short hover. Empty shows none. Style the box with a CSS Tooltip rule, such as #play Tooltip.
 	Tooltip: string
+	--- Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.
+	ZIndex: number
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
 	MouseEnter: Signal
 	--- Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.
@@ -710,6 +730,8 @@ declare extern type TextButton extends Instance with
 	Interactable: boolean
 	--- Text shown in a small box near the pointer after a short hover. Empty shows none. Style the box with a CSS Tooltip rule, such as #play Tooltip.
 	Tooltip: string
+	--- Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.
+	ZIndex: number
 	--- A sound file (a path in the project) played once when the pointer comes onto the button. Empty plays nothing.
 	HoverSound: string
 	--- A sound file (a path in the project) played once when the button is clicked. Empty plays nothing.
@@ -747,6 +769,8 @@ declare extern type ImageLabel extends Instance with
 	Interactable: boolean
 	--- Text shown in a small box near the pointer after a short hover. Empty shows none. Style the box with a CSS Tooltip rule, such as #play Tooltip.
 	Tooltip: string
+	--- Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.
+	ZIndex: number
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
 	MouseEnter: Signal
 	--- Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.
@@ -788,6 +812,8 @@ declare extern type TextBox extends Instance with
 	Interactable: boolean
 	--- Text shown in a small box near the pointer after a short hover. Empty shows none. Style the box with a CSS Tooltip rule, such as #play Tooltip.
 	Tooltip: string
+	--- Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.
+	ZIndex: number
 	--- Fires when the player finishes typing: Enter on a one-line box, or clicking away (or Escape) on any box. The handler gets no arguments; LocalScripts only.
 	FocusLost: Signal
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
@@ -817,6 +843,8 @@ declare extern type PageLayout extends Instance with
 	Interactable: boolean
 	--- Text shown in a small box near the pointer after a short hover. Empty shows none. Style the box with a CSS Tooltip rule, such as #play Tooltip.
 	Tooltip: string
+	--- Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.
+	ZIndex: number
 	--- The Name of the child Frame to show. Empty shows the first child Frame. A name that matches no Frame is rejected and the current page stays.
 	CurrentPage: string
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
@@ -846,8 +874,49 @@ declare extern type Table extends Instance with
 	Interactable: boolean
 	--- Text shown in a small box near the pointer after a short hover. Empty shows none. Style the box with a CSS Tooltip rule, such as #play Tooltip.
 	Tooltip: string
+	--- Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.
+	ZIndex: number
 	--- How many cells sit in one row. Cells are the table's children, left to right then top to bottom, each the same size.
 	Columns: number
+	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
+	MouseEnter: Signal
+	--- Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.
+	MouseLeave: Signal
+	[string]: any
+end
+
+--- A Frame that scrolls: its children sit on a canvas (CanvasSize) bigger than the frame, moved by CanvasPosition with the wheel, its scroll bars or a drag. Only what's inside the frame shows and takes clicks.
+declare extern type ScrollingFrame extends Instance with
+	--- Space-separated CSS class names used to style this UI Instance.
+	Class: string
+	--- The CSS identifier used to style this UI Instance.
+	Id: string
+	--- The top-left position relative to the parent, in scale and pixel offsets.
+	Position: UDim2
+	--- The size of the window onto the canvas, relative to the parent, in scale and pixel offsets.
+	Size: UDim2
+	--- The frame's background color.
+	BackgroundColor3: Color3
+	--- The background opacity: 0 is opaque and 1 is transparent.
+	BackgroundTransparency: number
+	--- If false, this frame and its children are hidden.
+	Visible: boolean
+	--- If false, it takes no hover or clicks and CSS :disabled styles it.
+	Interactable: boolean
+	--- Text shown in a small box near the pointer after a short hover. Empty shows none. Style the box with a CSS Tooltip rule, such as #play Tooltip.
+	Tooltip: string
+	--- Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.
+	ZIndex: number
+	--- The area the children are laid out on: scale of the frame's own size plus pixels. It's never smaller than the frame. The default, 2 scale down, is twice as tall as the frame.
+	CanvasSize: UDim2
+	--- How far the canvas is scrolled, in pixels from its top left: `Vector2.new(0, 120)` is 120 pixels down. Kept between 0 and as far as the canvas goes. The wheel, the scroll bars and dragging the content set it.
+	CanvasPosition: Vector2
+	--- Which ways it scrolls: "X" (across), "Y" (up and down) or "XY" (both).
+	ScrollingDirection: string
+	--- How thick the scroll bars are, in pixels; 0 hides them. Style them with CSS: ScrollingFrame::scrollbar for the track and ::thumb for the part you drag.
+	ScrollBarThickness: number
+	--- "None", "X", "Y" or "XY": the canvas grows that way to fit the children, past CanvasSize.
+	AutomaticCanvasSize: string
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
 	MouseEnter: Signal
 	--- Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.
@@ -1241,7 +1310,7 @@ declare function require(module: Instance): any
 --- Creates Instances.
 declare extern type InstanceLibrary with
 	--- Creates an Instance of this class with default properties and no parent. Set `Parent` to put it in the world.
-	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: string) -> Instance)
+	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: string) -> Instance)
 end
 
 --- Creates Instances.
@@ -1255,6 +1324,15 @@ end
 
 --- Creates Vector3 values.
 declare Vector3: Vector3Library
+
+--- Creates Vector2 values.
+declare extern type Vector2Library with
+	--- A new Vector2. Left-out components are 0.
+	new: (x: number?, y: number?) -> Vector2
+end
+
+--- Creates Vector2 values.
+declare Vector2: Vector2Library
 
 --- Creates Color3 values.
 declare extern type Color3Library with

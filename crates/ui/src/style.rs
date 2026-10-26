@@ -52,6 +52,7 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "margin-right",
     "margin-top",
     "opacity",
+    "overflow",
     "padding",
     "padding-bottom",
     "padding-left",
@@ -67,6 +68,7 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "vertical-align",
     "white-space",
     "width",
+    "z-index",
 ];
 
 type Specificity = (u32, u32, u32);
@@ -85,6 +87,18 @@ pub(crate) struct PseudoClasses<'a> {
     /// Eases each element's styles toward their new values. `RefCell`
     /// lets the shared borrow update them as styles are resolved.
     pub(crate) transitions: Option<&'a RefCell<Transitions>>,
+    /// ScrollingFrames shown scrolled to these canvas positions instead of
+    /// their own `CanvasPosition`: the UI Designer scrolls them this way.
+    pub(crate) scrolled: Option<&'a HashMap<InstanceId, [f32; 2]>>,
+}
+
+/// A part of an element that isn't an Instance, styled with a CSS
+/// pseudo-element: a ScrollingFrame's bar (`::scrollbar`) and the thumb
+/// dragged along it (`::thumb`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PseudoElement {
+    Scrollbar,
+    Thumb,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -173,6 +187,9 @@ struct SimpleSelector {
     /// The type name `Tooltip`: the box a `Tooltip` property shows, which
     /// isn't an Instance. It's styled as a child of the element it's for.
     tooltip: bool,
+    /// A part of the element (`::thumb`): only the last part of a selector
+    /// has one.
+    element: Option<PseudoElement>,
 }
 
 /// Parses the supported stylesheet subset. Unsupported declarations are
@@ -287,6 +304,37 @@ pub(crate) fn resolve_tooltip_styles(
     resolved.values.clear();
     let winners = winning_declarations(stylesheets, |selector| {
         tooltip_selector_matches(world, owner, selector)
+    });
+    for (name, winner) in winners {
+        let target = if name.starts_with("--") {
+            &mut resolved.variables
+        } else {
+            &mut resolved.values
+        };
+        target.insert(name.to_owned(), winner.declaration.value.clone());
+    }
+    resolved
+}
+
+/// The styles of a part of `owner`, such as a ScrollingFrame's thumb: rules
+/// whose last part names it (`#list::thumb`, `ScrollingFrame:hover::thumb`),
+/// with the rest matching `owner` as usual, and the custom properties
+/// `owner` inherits.
+pub(crate) fn resolve_part_styles(
+    world: &World,
+    owner: InstanceId,
+    stylesheets: &[Stylesheet],
+    pseudo: PseudoClasses<'_>,
+    part: PseudoElement,
+) -> ResolvedStyles {
+    let plain = PseudoClasses {
+        transitions: None,
+        ..pseudo
+    };
+    let mut resolved = resolve_styles(world, owner, stylesheets, plain);
+    resolved.values.clear();
+    let winners = winning_declarations(stylesheets, |selector| {
+        selector_matches_part(world, owner, selector, plain, Some(part))
     });
     for (name, winner) in winners {
         let target = if name.starts_with("--") {
@@ -438,10 +486,21 @@ fn selector_matches(
     selector: &Selector,
     pseudo: PseudoClasses<'_>,
 ) -> bool {
+    selector_matches_part(world, id, selector, pseudo, None)
+}
+
+/// Whether `selector` styles `id` itself (`part` is `None`), or that part of it.
+fn selector_matches_part(
+    world: &World,
+    id: InstanceId,
+    selector: &Selector,
+    pseudo: PseudoClasses<'_>,
+    part: Option<PseudoElement>,
+) -> bool {
     let Some(last) = selector.parts.last() else {
         return false;
     };
-    if !simple_matches(world, id, last, pseudo) {
+    if last.element != part || !simple_matches(world, id, last, pseudo) {
         return false;
     }
     let ancestor = world.get(id).and_then(|instance| instance.parent());
@@ -459,7 +518,7 @@ fn tooltip_selector_matches(world: &World, owner: InstanceId, selector: &Selecto
     let Some(last) = selector.parts.last() else {
         return false;
     };
-    if !last.tooltip || last.id.is_some() || !last.classes.is_empty() {
+    if !last.tooltip || last.id.is_some() || !last.classes.is_empty() || last.element.is_some() {
         return false;
     }
     let parts = &selector.parts[..selector.parts.len() - 1];
@@ -580,6 +639,23 @@ fn parse_selector(selector: &str) -> Option<Selector> {
                         specificity.0 += 1;
                     }
                 }
+                b':' if bytes.get(cursor + 1) == Some(&b':') => {
+                    // A pseudo-element ends the selector.
+                    cursor += 2;
+                    let start = cursor;
+                    while cursor < raw.len() && is_identifier(bytes[cursor]) {
+                        cursor += 1;
+                    }
+                    if cursor < raw.len() || part.element.is_some() {
+                        return None;
+                    }
+                    part.element = Some(match &raw[start..cursor] {
+                        "scrollbar" | "-webkit-scrollbar" => PseudoElement::Scrollbar,
+                        "thumb" | "-webkit-scrollbar-thumb" => PseudoElement::Thumb,
+                        _ => return None,
+                    });
+                    specificity.2 += 1;
+                }
                 b':' => {
                     cursor += 1;
                     let start = cursor;
@@ -632,6 +708,13 @@ fn parse_selector(selector: &str) -> Option<Selector> {
             }
         }
         parts.push(part);
+    }
+    // Only the last part can name a pseudo-element.
+    if parts[..parts.len() - 1]
+        .iter()
+        .any(|part| part.element.is_some())
+    {
+        return None;
     }
     Some(Selector { parts, specificity })
 }

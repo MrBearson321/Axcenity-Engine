@@ -409,6 +409,13 @@ impl Writer {
                 };
                 self.line(format!("{}.CurrentPage = {value}", target(layout)?));
             }
+            BlockKind::ScrollTo { target: t, x, y } => {
+                let (x, y) = (self.expression(x)?, self.expression(y)?);
+                self.line(format!(
+                    "{}.CanvasPosition = Vector2.new({x}, {y})",
+                    target(t)?
+                ));
+            }
             BlockKind::SetProperty {
                 target: t,
                 property,

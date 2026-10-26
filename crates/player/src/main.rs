@@ -457,8 +457,15 @@ impl App {
             let hit = in_window.and_then(|[x, y]| layout.hit_button(x, y));
             let text_box = in_window.and_then(|[x, y]| layout.hit_text_box(x, y));
             if pressed {
-                self.ui_pressed_button = hit;
                 self.ui_mouse_down = true;
+                // A press on a ScrollingFrame's bar drags the bar instead.
+                if let Some(pointer) = in_window
+                    && self.ui.press(&self.world, pointer).apply(&mut self.world)
+                {
+                    self.ui_pressed_button = None;
+                    continue;
+                }
+                self.ui_pressed_button = hit;
                 match text_box {
                     Some(id) => self.focus_text(id),
                     None => {
@@ -477,7 +484,16 @@ impl App {
                 }
                 self.ui_pressed_button = None;
                 self.ui_mouse_down = false;
+                self.ui.release();
             }
+        }
+        // A held press scrolls a ScrollingFrame by its bar, or by its content
+        // once it has moved far enough; then the button it began on won't fire.
+        if self.ui_mouse_down
+            && let Some(pointer) = self.pointer
+            && self.ui.drag(pointer).apply(&mut self.world)
+        {
+            self.ui_pressed_button = None;
         }
     }
 
@@ -652,6 +668,15 @@ fn camera_state(camera: &FlyCamera) -> CameraState {
 
 /// Mouse wheel notches in a scroll, away from the player (toward the
 /// screen) positive. Touchpads report pixels instead of notches.
+/// How far the wheel scrolls a ScrollingFrame, in pixels across and down
+/// (down moves its content up).
+fn wheel_pixels(delta: MouseScrollDelta) -> [f32; 2] {
+    match delta {
+        MouseScrollDelta::LineDelta(x, y) => [-x * PIXELS_PER_NOTCH, -y * PIXELS_PER_NOTCH],
+        MouseScrollDelta::PixelDelta(position) => [-position.x as f32, -position.y as f32],
+    }
+}
+
 fn wheel_notches(delta: MouseScrollDelta) -> f32 {
     match delta {
         MouseScrollDelta::LineDelta(_, y) => y,
@@ -773,7 +798,17 @@ impl ApplicationHandler for App {
                     capture_mouse(window, self.looking);
                 }
             }
-            WindowEvent::MouseWheel { delta, .. } => self.zoom += wheel_notches(delta),
+            // Over a ScrollingFrame the wheel scrolls it; elsewhere it zooms.
+            WindowEvent::MouseWheel { delta, .. } => {
+                let scrolled = self.pointer.is_some_and(|pointer| {
+                    self.ui
+                        .wheel(&self.world, pointer, wheel_pixels(delta))
+                        .apply(&mut self.world)
+                });
+                if !scrolled {
+                    self.zoom += wheel_notches(delta);
+                }
+            }
             // Key releases aren't reported while another window has focus,
             // so let go of everything to avoid the camera drifting on its own.
             WindowEvent::Focused(false) => {

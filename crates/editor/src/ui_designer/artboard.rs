@@ -114,7 +114,7 @@ impl UiDesigner {
             ui.id().with("ui designer artboard"),
             egui::Sense::click_and_drag(),
         );
-        self.place_view(ui, canvas, &response, gui, screen);
+        self.place_view(ui, canvas, &response, (world, gui), screen);
 
         let (unit, unit_origin) = axcenity_ui::screen_mapping(world, gui, screen.0, screen.1);
         let design = axcenity_ui::design_size(world, gui);
@@ -184,7 +184,7 @@ impl UiDesigner {
         ui: &egui::Ui,
         canvas: egui::Rect,
         response: &egui::Response,
-        gui: InstanceId,
+        (world, gui): (&World, InstanceId),
         screen: (u32, u32),
     ) {
         let resized = (canvas.size() - self.fitted_room).length() > 0.5;
@@ -212,7 +212,13 @@ impl UiDesigner {
         if response.hovered() {
             let (scroll, zoom, pointer) =
                 ui.input(|i| (i.smooth_scroll_delta, i.zoom_delta(), i.pointer.hover_pos()));
-            pan += scroll;
+            // Over a ScrollingFrame, the wheel scrolls it instead.
+            let scrolled = zoom == 1.0
+                && scroll != egui::Vec2::ZERO
+                && pointer.is_some_and(|pointer| self.wheel_frame(ui, world, pointer, scroll));
+            if !scrolled {
+                pan += scroll;
+            }
             if zoom != 1.0
                 && let Some(pointer) = pointer
             {
@@ -230,6 +236,28 @@ impl UiDesigner {
             self.pan = at - canvas.min - from_corner * (self.zoom / old);
             self.moved = true;
         }
+    }
+
+    /// Scrolls the ScrollingFrame under `pointer` by the wheel's `scroll`
+    /// (points), on the artboard only. Returns whether one was there.
+    fn wheel_frame(
+        &mut self,
+        ui: &egui::Ui,
+        world: &World,
+        pointer: egui::Pos2,
+        scroll: egui::Vec2,
+    ) -> bool {
+        let Some(visible) = self.board_visible else {
+            return false;
+        };
+        let ppp = ui.ctx().pixels_per_point();
+        let at = (pointer - visible.min) * ppp;
+        let delta = -scroll * ppp;
+        let wheel = self.scroller.wheel(world, [at.x, at.y], [delta.x, delta.y]);
+        if let Some((id, to)) = wheel.moved {
+            self.scrolled.insert(id, [to.x, to.y]);
+        }
+        wheel.taken
     }
 
     /// The screen and everything on it: the UI, guides, handles, distances
@@ -255,15 +283,20 @@ impl UiDesigner {
         let scale = self.zoom * ppp;
         let origin = (view.board.min - visible.min) * ppp;
         let shown = self.shown_state(scene);
-        let layout = axcenity_ui::layout_artboard_in_state(
+        let layout = axcenity_ui::layout_artboard_view(
             world,
             gui,
             scene.stylesheets,
-            screen,
-            scale,
-            [origin.x, origin.y],
-            shown,
+            axcenity_ui::ArtboardView {
+                screen,
+                scale,
+                origin: [origin.x, origin.y],
+                shown,
+                scrolled: Some(&self.scrolled),
+            },
         );
+        self.scroller.remember(&layout);
+        self.board_visible = Some(visible);
         let screen_rect = UiRect {
             x: origin.x,
             y: origin.y,
@@ -361,18 +394,41 @@ impl UiDesigner {
             })
         });
 
-        // A press on the selection's handles drags them, and one on a guide
-        // moves it. A press anywhere else selects what's there, and can
-        // drag it straight away.
+        // A ScrollingFrame's bar being dragged scrolls it on the artboard.
+        if self.scroller.scrolling() {
+            match pointer.filter(|_| down) {
+                Some(pointer) => {
+                    let moved = self.scroller.drag(pixel_of(pointer)).moved;
+                    if let Some((id, to)) = moved {
+                        self.scrolled.insert(id, [to.x, to.y]);
+                    }
+                }
+                None => self.scroller.release(),
+            }
+        }
+        // A press on a scroll bar drags it, one on the selection's handles
+        // drags them, and one on a guide moves it. A press anywhere else
+        // selects what's there, and can drag it straight away.
         if pressed
             && self.drag.is_none()
             && self.anchor_drag.is_none()
             && self.guide_drag.is_none()
+            && !self.scroller.scrolling()
             && scene.editing
             && let Some(pointer) = over
         {
             self.drag_held = Some(pointer);
-            if let (Some(grab), Some(anchor)) = (anchor_grab, &anchor_handles) {
+            let bar = self.scroller.press(world, pixel_of(pointer));
+            if !bar.taken {
+                // The artboard's content drags move elements, not scroll.
+                self.scroller.release();
+            }
+            if let Some((id, to)) = bar.moved {
+                self.scrolled.insert(id, [to.x, to.y]);
+            }
+            if bar.taken {
+                // The bar has it.
+            } else if let (Some(grab), Some(anchor)) = (anchor_grab, &anchor_handles) {
                 if let Some((placement, _)) =
                     panels::placement(world, scene.stylesheets, gui, anchor.id)
                 {
@@ -461,6 +517,25 @@ impl UiDesigner {
             self.anchor_menu = menu.is_some();
         } else {
             self.anchor_menu = false;
+            // Right-click on an element: its layer order.
+            if scene.editing
+                && response.secondary_clicked()
+                && let Some(pointer) = over
+            {
+                let [x, y] = pixel_of(pointer);
+                self.order_target = layout.hit(x, y);
+                if let Some(id) = self.order_target {
+                    actions.push(DesignerAction::Select(Some(id)));
+                }
+            }
+            if let Some(id) = self.order_target.filter(|_| scene.editing) {
+                let menu = response.context_menu(|ui| {
+                    super::order::menu_items(ui, world, scene.stylesheets, id, actions);
+                });
+                if menu.is_none() && !response.secondary_clicked() {
+                    self.order_target = None;
+                }
+            }
         }
         if scene.editing
             && response.double_clicked()
@@ -996,6 +1071,17 @@ fn sketch<'a>(
         )
     };
     for item in items {
+        // A clip cuts the item to its box (its rounding isn't sketched).
+        let clip = match item {
+            UiDrawItem::Rectangle(r) => r.clip,
+            UiDrawItem::Image(image) => image.clip,
+            UiDrawItem::Text(text) => text.clip,
+        };
+        let painter = match clip {
+            Some(clip) => painter
+                .with_clip_rect(rect(clip.position, clip.size).intersect(painter.clip_rect())),
+            None => painter.clone(),
+        };
         match item {
             UiDrawItem::Rectangle(r) => {
                 painter.rect_filled(

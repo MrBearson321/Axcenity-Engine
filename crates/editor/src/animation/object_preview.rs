@@ -126,6 +126,7 @@ fn is_ui(class: ClassName) -> bool {
             | ClassName::ImageLabel
             | ClassName::PageLayout
             | ClassName::Table
+            | ClassName::ScrollingFrame
     )
 }
 

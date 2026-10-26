@@ -726,6 +726,7 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::TextBox => icons::TEXT_T,
         ClassName::PageLayout => icons::STACK,
         ClassName::Table => icons::TABLE,
+        ClassName::ScrollingFrame => icons::SCROLL,
         ClassName::BillboardGui => icons::FLAG,
         ClassName::Sound => icons::MUSIC_NOTE,
         ClassName::PointLight => icons::LIGHTBULB,
@@ -799,6 +800,7 @@ pub fn class_color(class: ClassName, visuals: &egui::Visuals) -> Color32 {
         | ClassName::TextBox
         | ClassName::PageLayout
         | ClassName::Table
+        | ClassName::ScrollingFrame
         | ClassName::BillboardGui => pick((125, 185, 240), (20, 105, 170)),
         ClassName::Sound => pick((226, 162, 80), (165, 100, 10)),
         ClassName::PointLight | ClassName::SpotLight => pick((232, 205, 110), (150, 115, 0)),

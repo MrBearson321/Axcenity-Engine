@@ -87,6 +87,7 @@ pub(super) fn paint_instance(
                 fill: border_image.fill,
                 repeat: border_image.repeat,
             }),
+            clip: None,
         }));
     }
 
@@ -116,6 +117,7 @@ pub(super) fn paint_instance(
                 path: image_path,
                 texture: None,
                 slice: None,
+                clip: None,
             }));
         }
     }
@@ -372,6 +374,7 @@ pub(super) fn styled_text(
         ),
         scaled: instance.property("TextScaled").and_then(Value::as_bool) == Some(true),
         spans: Vec::new(),
+        clip: None,
     };
     match spans {
         Some(spans) => {

@@ -66,6 +66,7 @@ pub(super) fn block_names(kind: &BlockKind) -> (&'static str, &'static [&'static
         BlockKind::Show { .. } => ("Show", &["Object"]),
         BlockKind::Hide { .. } => ("Hide", &["Object"]),
         BlockKind::ShowPage { .. } => ("Show Page", &["Page", "Layout"]),
+        BlockKind::ScrollTo { .. } => ("Scroll To", &["Frame", "X", "Y"]),
         BlockKind::SetProperty { .. } => ("Set Property", &["Property", "Object", "Value"]),
         BlockKind::PlaySound { .. } => ("Play Sound", &["Sound"]),
         BlockKind::StopSound { .. } => ("Stop Sound", &["Sound"]),

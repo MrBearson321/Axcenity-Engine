@@ -12,22 +12,28 @@ mod interact;
 mod loading;
 mod paint;
 mod rich;
+mod scroll;
 mod transition;
 
 pub use css::*;
 use interact::interactable;
-pub use interact::{TOOLTIP_DELAY, UiCursor, UiEvent, UiInput, UiInteraction, UiState};
+pub use interact::{
+    SCROLL_DRAG_SLOP, TOOLTIP_DELAY, UiCursor, UiEvent, UiInput, UiInteraction, UiScrolled, UiState,
+};
 pub use loading::LoadingGui;
 use paint::*;
 pub use rich::{RichSpan, RichStroke, RichStyle, parse_rich_text, rich_text_plain};
+pub use scroll::{ScrollBar, UiScroll, scroll_bars};
 
 use axcenity_core::{ClassName, Color3, Instance, InstanceId, UDim2, Value, World};
+pub use axcenity_render::UiClip;
 use axcenity_render::glam::Vec3;
 use axcenity_render::glam::camera::rh;
 use axcenity_render::{
     Camera, TextAlign, TextShadow, TextSpan, TextStroke, UiBorderSide, UiDrawItem, UiImage,
     UiRectangle, UiShadow, UiSlice, UiText, VerticalAlign,
 };
+use std::collections::HashMap;
 use taffy::prelude::*;
 
 pub use style::{
@@ -72,6 +78,19 @@ pub struct UiElement {
     /// False when its `Interactable` is off: it takes no hover, clicks or
     /// typing, and what's under it doesn't either.
     pub interactable: bool,
+    /// The rounded box an element around it cuts it to (`overflow:
+    /// hidden`, or a ScrollingFrame): outside it, it isn't drawn and
+    /// doesn't take the pointer.
+    pub clip: Option<UiClip>,
+    /// A ScrollingFrame's canvas and how far it's scrolled.
+    pub scroll: Option<UiScroll>,
+}
+
+impl UiElement {
+    /// Whether a point is on the element: in its box and not cut off by a clip.
+    pub fn contains(&self, x: f32, y: f32) -> bool {
+        self.rect.contains(x, y) && self.clip.is_none_or(|clip| clip.contains(x, y))
+    }
 }
 
 /// The UI's draw data, and each element drawn, in drawing order (so later
@@ -97,11 +116,7 @@ pub struct UiLayout {
 impl UiLayout {
     /// The topmost element at a point, in physical pixels.
     pub fn hit(&self, x: f32, y: f32) -> Option<InstanceId> {
-        self.elements
-            .iter()
-            .rev()
-            .find(|element| element.rect.contains(x, y))
-            .map(|element| element.id)
+        self.top_element(x, y).map(|element| element.id)
     }
 
     pub fn element(&self, id: InstanceId) -> Option<&UiElement> {
@@ -131,7 +146,7 @@ impl UiLayout {
         self.elements
             .iter()
             .rev()
-            .find(|element| element.rect.contains(x, y))
+            .find(|element| element.contains(x, y))
     }
 }
 
@@ -339,8 +354,8 @@ pub fn layout_ui_interactive(
     layout
 }
 
-/// Lays out the enabled ScreenGuis in tree order, then the BillboardGuis,
-/// then `on_top` (see [`UiInput::on_top`]).
+/// Lays out the enabled ScreenGuis by `DisplayOrder` (ties in tree
+/// order), then the BillboardGuis, then `on_top` (see [`UiInput::on_top`]).
 pub(crate) fn layout_ui_with_pseudo(
     world: &World,
     width: u32,
@@ -356,10 +371,15 @@ pub(crate) fn layout_ui_with_pseudo(
     }
 
     let workspace = world.workspace();
-    for id in world.descendants(workspace) {
-        if Some(id) == on_top || !enabled_screen_gui(world, id) {
-            continue;
-        }
+    let mut guis: Vec<(f64, InstanceId)> = world
+        .descendants(workspace)
+        .into_iter()
+        .filter(|&id| Some(id) != on_top && enabled_screen_gui(world, id))
+        .map(|id| (number_property(world, id, "DisplayOrder", 0.0), id))
+        .collect();
+    // A stable sort, so equal orders stay in tree order.
+    guis.sort_by(|a, b| a.0.total_cmp(&b.0));
+    for (_, id) in guis {
         layout_screen_gui(world, id, width, height, stylesheets, pseudo, &mut layout);
     }
     if let Some(camera) = camera {
@@ -379,6 +399,16 @@ pub(crate) fn layout_ui_with_pseudo(
         layout_screen_gui(world, id, width, height, stylesheets, pseudo, &mut layout);
     }
     layout
+}
+
+/// A number property of `id`, or `default` when it has none (or it isn't finite).
+fn number_property(world: &World, id: InstanceId, name: &str, default: f64) -> f64 {
+    world
+        .get(id)
+        .and_then(|instance| instance.property(name))
+        .and_then(Value::as_number)
+        .filter(|n| n.is_finite())
+        .unwrap_or(default)
 }
 
 fn enabled_screen_gui(world: &World, id: InstanceId) -> bool {
@@ -428,7 +458,11 @@ fn layout_screen_gui(
     );
     let draws = layout.draw_items.len();
     let elements = layout.elements.len();
-    layout_children(world, gui, bounds, layout, stylesheets, opacity, pseudo);
+    let inherited = Inherited {
+        opacity,
+        clip: None,
+    };
+    layout_children(world, gui, bounds, layout, stylesheets, inherited, pseudo);
     if let Some(fit) = fit {
         apply_fit(layout, draws, elements, fit);
     }
@@ -480,6 +514,47 @@ pub fn layout_artboard_in_state(
     origin: [f32; 2],
     shown: Option<(InstanceId, UiState)>,
 ) -> UiLayout {
+    let view = ArtboardView {
+        screen,
+        scale,
+        origin,
+        shown,
+        scrolled: None,
+    };
+    layout_artboard_view(world, gui, stylesheets, view)
+}
+
+/// How the UI Designer shows a ScreenGui on its artboard: see
+/// [`layout_artboard`] and [`layout_artboard_in_state`].
+#[derive(Clone, Copy, Debug)]
+pub struct ArtboardView<'a> {
+    /// The screen it's laid out on, in pixels.
+    pub screen: (u32, u32),
+    /// Artboard pixels per screen pixel.
+    pub scale: f32,
+    /// Where the screen's corner is on the artboard, in its pixels.
+    pub origin: [f32; 2],
+    /// One element shown in a state, whatever the pointer does.
+    pub shown: Option<(InstanceId, UiState)>,
+    /// ScrollingFrames shown scrolled this far instead of to their own
+    /// `CanvasPosition`, so the designer can scroll them without changing it.
+    pub scrolled: Option<&'a HashMap<InstanceId, [f32; 2]>>,
+}
+
+/// One ScreenGui on the artboard, as `view` says.
+pub fn layout_artboard_view(
+    world: &World,
+    gui: InstanceId,
+    stylesheets: &[Stylesheet],
+    view: ArtboardView<'_>,
+) -> UiLayout {
+    let ArtboardView {
+        screen,
+        scale,
+        origin,
+        shown,
+        scrolled,
+    } = view;
     let mut layout = UiLayout::default();
     let (width, height) = screen;
     layout_screen_gui(
@@ -490,6 +565,7 @@ pub fn layout_artboard_in_state(
         stylesheets,
         PseudoClasses {
             forced: shown,
+            scrolled,
             ..PseudoClasses::default()
         },
         &mut layout,
@@ -506,6 +582,7 @@ pub fn layout_artboard_in_state(
     }
     for element in &mut layout.elements {
         element.rect = scale_rect(element.rect, place);
+        element.clip = element.clip.map(|clip| scale_clip(clip, place));
         element.pixels_per_unit *= scale;
     }
     layout
@@ -585,8 +662,39 @@ fn apply_fit(layout: &mut UiLayout, draws: usize, elements: usize, fit: Fit) {
     }
     for element in &mut layout.elements[elements..] {
         element.rect = scale_rect(element.rect, fit);
+        element.clip = element.clip.map(|clip| scale_clip(clip, fit));
         element.pixels_per_unit = fit.scale;
     }
+}
+
+fn scale_clip(clip: UiClip, fit: Fit) -> UiClip {
+    let rect = scale_rect(
+        UiRect {
+            x: clip.position[0],
+            y: clip.position[1],
+            width: clip.size[0],
+            height: clip.size[1],
+        },
+        fit,
+    );
+    UiClip {
+        position: [rect.x, rect.y],
+        size: [rect.width, rect.height],
+        radius: clip.radius * fit.scale,
+    }
+}
+
+/// Cuts a draw item to `clip`, inside any clip it already has.
+pub(crate) fn set_clip(item: &mut UiDrawItem, clip: Option<UiClip>) {
+    let Some(clip) = clip else {
+        return;
+    };
+    let slot = match item {
+        UiDrawItem::Rectangle(rectangle) => &mut rectangle.clip,
+        UiDrawItem::Image(image) => &mut image.clip,
+        UiDrawItem::Text(text) => &mut text.clip,
+    };
+    *slot = Some(slot.map_or(clip, |own| own.intersect(clip)));
 }
 
 fn scale_rect(rect: UiRect, fit: Fit) -> UiRect {
@@ -724,6 +832,15 @@ fn transform_draw_item(item: &mut UiDrawItem, affine: Affine) {
         size[0] *= sx;
         size[1] *= sy;
     };
+    let clip = match item {
+        UiDrawItem::Rectangle(rectangle) => &mut rectangle.clip,
+        UiDrawItem::Image(image) => &mut image.clip,
+        UiDrawItem::Text(text) => &mut text.clip,
+    };
+    if let Some(clip) = clip {
+        place(&mut clip.position, &mut clip.size);
+        clip.radius *= uniform;
+    }
     match item {
         UiDrawItem::Rectangle(rectangle) => {
             place(&mut rectangle.position, &mut rectangle.size);
@@ -772,19 +889,28 @@ fn transform_draw_item(item: &mut UiDrawItem, affine: Affine) {
     }
 }
 
+/// What an element passes down to its children: how see-through it and
+/// its ancestors make them, and the box they're cut to.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Inherited {
+    pub(crate) opacity: f32,
+    pub(crate) clip: Option<UiClip>,
+}
+
 /// Lays out the UI children of `parent` inside `bounds` with Taffy.
 ///
 /// Outside a flex container, children are absolutely positioned: scale is a
 /// percentage of `bounds` and the UDim2 pixel offsets are added on top. In a
 /// flex container (`display: flex`), Taffy flows them and `Position` is
-/// ignored. Either way, CSS `width`/`height` replace `Size`.
-fn layout_children(
+/// ignored. Either way, CSS `width`/`height` replace `Size`. They're laid out
+/// in tree order but drawn (and so hit) in [`z_order`].
+pub(crate) fn layout_children(
     world: &World,
     parent: InstanceId,
     bounds: UiRect,
     out: &mut UiLayout,
     stylesheets: &[Stylesheet],
-    inherited_opacity: f32,
+    inherited: Inherited,
     pseudo: PseudoClasses<'_>,
 ) {
     let Some(parent_instance) = world.get(parent) else {
@@ -806,7 +932,7 @@ fn layout_children(
             bounds,
             out,
             stylesheets,
-            inherited_opacity,
+            inherited,
             pseudo,
         );
         return;
@@ -838,15 +964,19 @@ fn layout_children(
             - resolve(padding.bottom, bounds.width),
     };
 
+    let styles: Vec<ResolvedStyles> = children
+        .iter()
+        .map(|&id| resolve_styles(world, id, stylesheets, pseudo))
+        .collect();
     let mut tree = TaffyTree::<()>::new();
     let nodes: Vec<_> = children
         .iter()
-        .map(|&id| {
+        .zip(&styles)
+        .map(|(&id, styles)| {
             let instance = world.get(id).expect("filtered children are live");
             let position = ui_property(instance, "Position");
             let size = ui_property(instance, "Size");
-            let styles = resolve_styles(world, id, stylesheets, pseudo);
-            let hidden = css_property(&styles, "display").is_some_and(|display| display == "none");
+            let hidden = css_property(styles, "display").is_some_and(|display| display == "none");
             let node_style = Style {
                 position: if flow_children {
                     Position::Relative
@@ -864,13 +994,13 @@ fn layout_children(
                     }
                 },
                 size: Size {
-                    width: css_dimension(&styles, "width")
+                    width: css_dimension(styles, "width")
                         .unwrap_or_else(|| udim_length(size.x, container.width)),
-                    height: css_dimension(&styles, "height")
+                    height: css_dimension(styles, "height")
                         .unwrap_or_else(|| udim_length(size.y, container.height)),
                 },
-                flex_grow: css_number(&styles, "flex-grow").unwrap_or(0.0).max(0.0),
-                margin: css_margin(&styles),
+                flex_grow: css_number(styles, "flex-grow").unwrap_or(0.0).max(0.0),
+                margin: css_margin(styles),
                 display: if hidden || !visible(instance) {
                     Display::None
                 } else {
@@ -894,19 +1024,17 @@ fn layout_children(
     )
     .expect("the UI root has definite dimensions");
 
-    for (&id, node) in children.iter().zip(nodes) {
+    for index in z_order(world, &children, &styles) {
+        let (id, styles, node) = (children[index], &styles[index], nodes[index]);
         let Some(instance) = world.get(id) else {
             continue;
         };
-        let styles = resolve_styles(world, id, stylesheets, pseudo);
-        let hidden = css_property(&styles, "display").is_some_and(|display| display == "none");
+        let hidden = css_property(styles, "display").is_some_and(|display| display == "none");
         if hidden || !visible(instance) {
             continue;
         }
-        let opacity = inherited_opacity
-            * css_number(&styles, "opacity")
-                .unwrap_or(1.0)
-                .clamp(0.0, 1.0);
+        let opacity =
+            inherited.opacity * css_number(styles, "opacity").unwrap_or(1.0).clamp(0.0, 1.0);
         let layout = tree.layout(node).expect("each child has a computed layout");
         let position = ui_property(instance, "Position");
         let (offset_x, offset_y) = if flow_children {
@@ -922,24 +1050,97 @@ fn layout_children(
         };
         let placed = Placed {
             rect,
-            opacity,
+            inherited: Inherited {
+                opacity,
+                clip: inherited.clip,
+            },
             in_flow: flow_children,
         };
-        place_element(world, id, &styles, placed, out, stylesheets, pseudo);
+        place_element(world, id, styles, placed, out, stylesheets, pseudo);
     }
 }
 
-/// Where layout put an element, and how see-through its ancestors make it.
+/// The order `children` are drawn in, as indices into it: lowest
+/// [`z_index`] first, and equal ones in tree order, so the last is on top.
+fn z_order(world: &World, children: &[InstanceId], styles: &[ResolvedStyles]) -> Vec<usize> {
+    let z: Vec<f64> = children
+        .iter()
+        .zip(styles)
+        .map(|(&id, styles)| {
+            world
+                .get(id)
+                .map_or(1.0, |instance| z_index(instance, styles))
+        })
+        .collect();
+    let mut order: Vec<usize> = (0..children.len()).collect();
+    // `sort_by` is stable: ties keep their order.
+    order.sort_by(|&a, &b| z[a].total_cmp(&z[b]));
+    order
+}
+
+/// An element's place among its siblings: CSS `z-index` when it's set to
+/// a number, else its `ZIndex` (1 by default).
+pub fn z_index_of(world: &World, id: InstanceId, stylesheets: &[Stylesheet]) -> f64 {
+    let styles = resolve_styles(world, id, stylesheets, PseudoClasses::default());
+    world
+        .get(id)
+        .map_or(1.0, |instance| z_index(instance, &styles))
+}
+
+/// Whether CSS `z-index` (rather than `ZIndex`) places `id`.
+pub fn css_sets_z_index(world: &World, id: InstanceId, stylesheets: &[Stylesheet]) -> bool {
+    let styles = resolve_styles(world, id, stylesheets, PseudoClasses::default());
+    css_number(&styles, "z-index").is_some()
+}
+
+fn z_index(instance: &Instance, styles: &ResolvedStyles) -> f64 {
+    css_number(styles, "z-index")
+        .map(f64::from)
+        .or_else(|| instance.property("ZIndex").and_then(Value::as_number))
+        .filter(|z| z.is_finite())
+        .unwrap_or(1.0)
+}
+
+/// Where layout put an element, what its ancestors pass down to it, and
+/// whether a flex layout placed it.
 #[derive(Clone, Copy)]
 struct Placed {
     rect: UiRect,
-    opacity: f32,
+    inherited: Inherited,
     in_flow: bool,
+}
+
+/// Whether an element cuts its children to its box: CSS `overflow` other
+/// than `visible`, or a ScrollingFrame, which always does.
+fn clips_children(instance: &Instance, styles: &ResolvedStyles) -> bool {
+    instance.class() == ClassName::ScrollingFrame
+        || css_keyword(styles, "overflow").is_some_and(|overflow| {
+            matches!(overflow.as_str(), "hidden" | "clip" | "scroll" | "auto")
+        })
+}
+
+/// The box an element at `rect` cuts its children to: inside its border,
+/// with its corners rounded as its border's inside is.
+fn inner_clip(rect: UiRect, styles: &ResolvedStyles) -> UiClip {
+    let [top, right, bottom, left] = css_borders(styles).widths();
+    let radius = css_length_property(styles, "border-radius")
+        .unwrap_or(0.0)
+        .max(0.0);
+    let widest = top.max(right).max(bottom).max(left);
+    UiClip {
+        position: [rect.x + left, rect.y + top],
+        size: [
+            (rect.width - left - right).max(0.0),
+            (rect.height - top - bottom).max(0.0),
+        ],
+        radius: (radius - widest).max(0.0),
+    }
 }
 
 /// Records and paints one element laid out at `placed`, then its
 /// children. Its CSS `transform` moves and scales what it and its children
-/// draw, but not where they are for layout and clicks.
+/// draw, but not where they are for layout and clicks. A ScrollingFrame's
+/// children go on its canvas, under its bars.
 fn place_element(
     world: &World,
     id: InstanceId,
@@ -954,10 +1155,12 @@ fn place_element(
     };
     let Placed {
         rect,
-        opacity,
+        inherited,
         in_flow,
     } = placed;
     let draws = out.draw_items.len();
+    let scroll = (instance.class() == ClassName::ScrollingFrame)
+        .then(|| scroll::measure(world, id, instance, styles, rect, stylesheets, pseudo));
     out.elements.push(UiElement {
         id,
         rect,
@@ -967,17 +1170,44 @@ fn place_element(
         pixels_per_unit: 1.0,
         font_size: paint::font_size(instance, styles),
         interactable: interactable(instance),
+        clip: inherited.clip,
+        scroll,
     });
     paint_instance(
         instance,
         rect,
         styles,
-        opacity,
+        inherited.opacity,
         pseudo.focused == Some(id),
         &mut out.draw_items,
         &mut out.warnings,
     );
-    layout_children(world, id, rect, out, stylesheets, opacity, pseudo);
+    for item in &mut out.draw_items[draws..] {
+        set_clip(item, inherited.clip);
+    }
+    let children = Inherited {
+        opacity: inherited.opacity,
+        clip: if clips_children(instance, styles) {
+            let own = inner_clip(rect, styles);
+            Some(inherited.clip.map_or(own, |outer| own.intersect(outer)))
+        } else {
+            inherited.clip
+        },
+    };
+    let canvas = scroll.map_or(rect, |scroll| scroll.canvas_rect(rect));
+    layout_children(world, id, canvas, out, stylesheets, children, pseudo);
+    if let Some(scroll) = &scroll {
+        scroll::paint_bars(
+            world,
+            id,
+            rect,
+            scroll,
+            children,
+            stylesheets,
+            pseudo,
+            &mut out.draw_items,
+        );
+    }
     if let Some(transform) = css_transform(styles, rect) {
         for item in &mut out.draw_items[draws..] {
             transform_draw_item(item, transform);
@@ -1002,6 +1232,7 @@ fn is_widget(class: ClassName) -> bool {
             | ClassName::TextBox
             | ClassName::PageLayout
             | ClassName::Table
+            | ClassName::ScrollingFrame
     )
 }
 
@@ -1072,7 +1303,7 @@ fn layout_table(
     bounds: UiRect,
     out: &mut UiLayout,
     stylesheets: &[Stylesheet],
-    inherited_opacity: f32,
+    inherited: Inherited,
     pseudo: PseudoClasses<'_>,
 ) {
     let shown: Vec<InstanceId> = children
@@ -1102,12 +1333,14 @@ fn layout_table(
     let cell_w =
         ((bounds.width - gap * (columns.saturating_sub(1) as f32)) / columns as f32).max(0.0);
     let cell_h = ((bounds.height - gap * (rows.saturating_sub(1) as f32)) / rows as f32).max(0.0);
-    for (index, id) in shown.into_iter().enumerate() {
-        let styles = resolve_styles(world, id, stylesheets, pseudo);
-        let opacity = inherited_opacity
-            * css_number(&styles, "opacity")
-                .unwrap_or(1.0)
-                .clamp(0.0, 1.0);
+    let styles: Vec<ResolvedStyles> = shown
+        .iter()
+        .map(|&id| resolve_styles(world, id, stylesheets, pseudo))
+        .collect();
+    for index in z_order(world, &shown, &styles) {
+        let (id, styles) = (shown[index], &styles[index]);
+        let opacity =
+            inherited.opacity * css_number(styles, "opacity").unwrap_or(1.0).clamp(0.0, 1.0);
         let column = index % columns;
         let row = index / columns;
         let rect = UiRect {
@@ -1118,10 +1351,13 @@ fn layout_table(
         };
         let placed = Placed {
             rect,
-            opacity,
+            inherited: Inherited {
+                opacity,
+                clip: inherited.clip,
+            },
             in_flow: true,
         };
-        place_element(world, id, &styles, placed, out, stylesheets, pseudo);
+        place_element(world, id, styles, placed, out, stylesheets, pseudo);
     }
 }
 
@@ -1195,7 +1431,11 @@ fn layout_billboards(
             width: w.max(0.0),
             height: h.max(0.0),
         };
-        layout_children(world, id, rect, out, stylesheets, 1.0, pseudo);
+        let inherited = Inherited {
+            opacity: 1.0,
+            clip: None,
+        };
+        layout_children(world, id, rect, out, stylesheets, inherited, pseudo);
     }
 }
 
@@ -1278,5 +1518,7 @@ fn finite(value: f32) -> f32 {
     if value.is_finite() { value } else { 0.0 }
 }
 
+#[cfg(test)]
+mod layering_tests;
 #[cfg(test)]
 mod tests;

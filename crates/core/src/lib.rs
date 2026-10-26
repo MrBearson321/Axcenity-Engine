@@ -25,5 +25,5 @@ pub use terrain::{
     MIN_TERRAIN_SAMPLES, PaintWeights, SampleRect, TerrainData, TerrainError, TerrainRegion,
     valid_terrain_size,
 };
-pub use value::{Color3, UDim, UDim2, Value, ValueKind, Vector3};
+pub use value::{Color3, UDim, UDim2, Value, ValueKind, Vector2, Vector3};
 pub use world::{Change, Instance, InstanceId, PropertyError, RecordedChange, TreeError, World};

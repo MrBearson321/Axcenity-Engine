@@ -19,6 +19,19 @@ impl Vector3 {
     }
 }
 
+/// A point or size on the screen, in pixels: across and down.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Vector2 {
+    pub x: f32,
+    pub y: f32,
+}
+
+impl Vector2 {
+    pub const fn new(x: f32, y: f32) -> Self {
+        Self { x, y }
+    }
+}
+
 /// A scale and pixel offset on one UI axis.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct UDim {
@@ -68,6 +81,7 @@ pub enum Value {
     Number(f64),
     String(String),
     Vector3(Vector3),
+    Vector2(Vector2),
     UDim2(UDim2),
     Color3(Color3),
     PartType(PartType),
@@ -83,6 +97,7 @@ pub enum ValueKind {
     Number,
     String,
     Vector3,
+    Vector2,
     UDim2,
     Color3,
     PartType,
@@ -98,6 +113,7 @@ impl Value {
             Value::Number(_) => ValueKind::Number,
             Value::String(_) => ValueKind::String,
             Value::Vector3(_) => ValueKind::Vector3,
+            Value::Vector2(_) => ValueKind::Vector2,
             Value::UDim2(_) => ValueKind::UDim2,
             Value::Color3(_) => ValueKind::Color3,
             Value::PartType(_) => ValueKind::PartType,
@@ -124,6 +140,13 @@ impl Value {
     pub fn as_vector3(&self) -> Option<Vector3> {
         match self {
             Value::Vector3(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    pub fn as_vector2(&self) -> Option<Vector2> {
+        match self {
+            Value::Vector2(v) => Some(*v),
             _ => None,
         }
     }
@@ -185,6 +208,7 @@ impl fmt::Display for ValueKind {
             ValueKind::Number => "number",
             ValueKind::String => "string",
             ValueKind::Vector3 => "Vector3",
+            ValueKind::Vector2 => "Vector2",
             ValueKind::UDim2 => "UDim2",
             ValueKind::Color3 => "Color3",
             ValueKind::PartType => "PartType",

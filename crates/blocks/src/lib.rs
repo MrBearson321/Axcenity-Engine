@@ -347,6 +347,12 @@ pub enum BlockKind {
         layout: String,
         page: Expression,
     },
+    /// Scrolls a ScrollingFrame: sets its `CanvasPosition` to `x`, `y` pixels.
+    ScrollTo {
+        target: String,
+        x: Expression,
+        y: Expression,
+    },
     SetProperty {
         target: String,
         property: String,
@@ -585,6 +591,7 @@ impl BlockKind {
             | BlockKind::FadeOut { seconds: e, .. }
             | BlockKind::Print { value: e } => vec![e],
             BlockKind::Tween { value, seconds, .. } => vec![value, seconds],
+            BlockKind::ScrollTo { x, y, .. } => vec![x, y],
             _ => Vec::new(),
         }
     }
@@ -634,6 +641,7 @@ impl BlockKind {
             | BlockKind::FadeOut { seconds: e, .. }
             | BlockKind::Print { value: e } => vec![e],
             BlockKind::Tween { value, seconds, .. } => vec![value, seconds],
+            BlockKind::ScrollTo { x, y, .. } => vec![x, y],
             _ => Vec::new(),
         }
     }

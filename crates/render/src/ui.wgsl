@@ -11,6 +11,8 @@ struct VertexOut {
     @location(8) border_bottom: vec4<f32>,
     @location(9) border_left: vec4<f32>,
     @location(10) shadow: vec4<f32>,
+    @location(11) clip: vec4<f32>,
+    @location(12) clip_radius: f32,
 }
 
 @group(0) @binding(0) var ui_texture: texture_2d<f32>;
@@ -35,6 +37,8 @@ fn vs_main(
     @location(9) border_bottom: vec4<f32>,
     @location(10) border_left: vec4<f32>,
     @location(11) shadow: vec4<f32>,
+    @location(12) clip: vec4<f32>,
+    @location(13) clip_radius: f32,
 ) -> VertexOut {
     var output: VertexOut;
     output.position = vec4<f32>(position, 0.0, 1.0);
@@ -49,6 +53,8 @@ fn vs_main(
     output.border_bottom = border_bottom;
     output.border_left = border_left;
     output.shadow = shadow;
+    output.clip = clip;
+    output.clip_radius = clip_radius;
     return output;
 }
 
@@ -95,8 +101,19 @@ fn shadow_cover(distance: f32, blur: f32) -> f32 {
     return 1.0 - smoothstep(-blur * 0.5, blur * 0.5, distance);
 }
 
+// Whether this pixel is outside the rounded box the quad is cut to (CSS
+// `overflow: hidden` around it). `position` is in framebuffer pixels.
+fn clipped(input: VertexOut) -> bool {
+    let half_size = input.clip.zw * 0.5;
+    let pixel = input.position.xy;
+    return box_distance(pixel, input.clip.xy + half_size, half_size, input.clip_radius) > 0.0;
+}
+
 @fragment
 fn fs_main(input: VertexOut) -> @location(0) vec4<f32> {
+    if clipped(input) {
+        discard;
+    }
     let point = input.uv * input.size;
     let half_size = input.size * 0.5;
     let radius = input.border.x;
@@ -150,6 +167,9 @@ fn fs_main(input: VertexOut) -> @location(0) vec4<f32> {
 
 @fragment
 fn fs_image(input: VertexOut) -> @location(0) vec4<f32> {
+    if clipped(input) {
+        discard;
+    }
     let distance = rounded_distance(input);
     if distance > 0.0 {
         discard;

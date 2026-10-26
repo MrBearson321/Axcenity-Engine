@@ -221,6 +221,11 @@ impl UiDesigner {
             if response.double_clicked() && scene.editing {
                 self.start_typing(scene, id);
             }
+            if scene.editing && id != gui {
+                response.context_menu(|ui| {
+                    super::order::menu_items(ui, scene.world, scene.stylesheets, id, actions);
+                });
+            }
         }
     }
 

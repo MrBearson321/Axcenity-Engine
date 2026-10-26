@@ -27,6 +27,7 @@ mod anchor_handles;
 mod anchors;
 mod artboard;
 pub(crate) mod bevel;
+pub(crate) mod order;
 mod panels;
 mod rich_text;
 mod rulers;
@@ -68,7 +69,7 @@ pub const SCREENS: [(&str, u32, u32); 8] = [
 ];
 
 /// What the palette offers, with its name there.
-pub const PALETTE: [(Insertable, &str); 8] = [
+pub const PALETTE: [(Insertable, &str); 9] = [
     (Insertable::Frame, "Frame"),
     (Insertable::TextLabel, "Text"),
     (Insertable::TextButton, "Button"),
@@ -77,6 +78,7 @@ pub const PALETTE: [(Insertable, &str); 8] = [
     (Insertable::PageLayout, "Pages"),
     (Insertable::Page, "Page"),
     (Insertable::Table, "Table"),
+    (Insertable::ScrollingFrame, "Scroll"),
 ];
 
 /// The scale modes, as the toolbar names them.
@@ -158,6 +160,10 @@ pub enum DesignerAction {
         pressed: Option<String>,
         dragging: bool,
     },
+    /// Bring to Front and the rest: the new z of each element that changes
+    /// (see `order.rs`), as one undo step. Each is its `ZIndex`, or its
+    /// CSS `z-index` when that's what places it.
+    Restack(Vec<(InstanceId, f64)>),
     /// Makes a ScreenGui, when there's none to design.
     NewScreenGui,
 }
@@ -279,6 +285,16 @@ pub struct UiDesigner {
     slice_drag: Option<usize>,
     /// Where the artboard was drawn last, in points.
     board: Option<egui::Rect>,
+    /// The part of the canvas the artboard showed last, in points: where
+    /// its layout's pixel 0, 0 is.
+    board_visible: Option<egui::Rect>,
+    /// How far each ScrollingFrame is scrolled on the artboard, in design
+    /// pixels. The designer's own: its saved `CanvasPosition` doesn't change.
+    scrolled: HashMap<InstanceId, [f32; 2]>,
+    /// Scrolls ScrollingFrames on the artboard by the wheel and their bars.
+    scroller: axcenity_ui::UiInteraction,
+    /// The element whose layer order the artboard's right-click menu is for.
+    order_target: Option<InstanceId>,
     /// The canvas inside the rulers, as drawn last.
     canvas_rect: Option<egui::Rect>,
     /// Nothing but sky, for the renderer's 3D part (the artboard covers it).
@@ -314,6 +330,10 @@ impl Default for UiDesigner {
             slice_image: None,
             slice_drag: None,
             board: None,
+            board_visible: None,
+            scrolled: HashMap::new(),
+            scroller: axcenity_ui::UiInteraction::default(),
+            order_target: None,
             canvas_rect: None,
             empty: World::new(),
         }
@@ -350,7 +370,11 @@ fn screen_guis(world: &World) -> Vec<InstanceId> {
 fn is_container(class: ClassName) -> bool {
     matches!(
         class,
-        ClassName::ScreenGui | ClassName::Frame | ClassName::PageLayout | ClassName::Table
+        ClassName::ScreenGui
+            | ClassName::Frame
+            | ClassName::PageLayout
+            | ClassName::Table
+            | ClassName::ScrollingFrame
     )
 }
 
@@ -487,6 +511,13 @@ impl UiDesigner {
         self.preview = screen;
     }
 
+    /// How far the artboard shows a ScrollingFrame scrolled, when it's
+    /// been scrolled there.
+    #[cfg(test)]
+    pub fn scrolled(&self, id: InstanceId) -> Option<[f32; 2]> {
+        self.scrolled.get(&id).copied()
+    }
+
     /// Picks the states editor's tab and its eye, as clicking them does.
     #[cfg(test)]
     pub fn show_in_state(&mut self, state: UiState, show: bool) {
@@ -548,9 +579,12 @@ impl UiDesigner {
         self.fit_next = true;
     }
 
-    /// True while a handle, an anchor or a guide is being dragged.
+    /// True while a handle, an anchor, a guide or a scroll bar is being dragged.
     pub fn is_dragging(&self) -> bool {
-        self.drag.is_some() || self.anchor_drag.is_some() || self.guide_drag.is_some()
+        self.drag.is_some()
+            || self.anchor_drag.is_some()
+            || self.guide_drag.is_some()
+            || self.scroller.scrolling()
     }
 
     /// Draws the designer and returns what was done in it.

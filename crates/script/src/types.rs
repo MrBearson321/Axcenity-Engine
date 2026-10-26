@@ -1,4 +1,4 @@
-//! Lua versions of the property value types (`Vector3`, `Color3`, enum
+//! Lua versions of the property value types (`Vector3`, `Vector2`, `Color3`, enum
 //! items), and conversion between Lua values and core [`Value`]s.
 //!
 //! Rust's "orphan rule" only allows implementing a trait from another crate
@@ -8,7 +8,7 @@
 use axcenity_anim::EasingDirection;
 use axcenity_core::{
     Color3, KeyCode, Material, PartType, ParticleType, TextureChannel, UDim, UDim2, Value,
-    ValueKind, Vector3,
+    ValueKind, Vector2, Vector3,
 };
 use mlua::{FromLua, IntoLua, Lua, MetaMethod, UserData, UserDataFields, UserDataMethods};
 
@@ -116,6 +116,73 @@ impl UserData for LuaVector3 {
                 component_text(v.x),
                 component_text(v.y),
                 component_text(v.z)
+            ))
+        });
+    }
+}
+
+/// A point or size on the screen in pixels, such as a ScrollingFrame's
+/// `CanvasPosition`.
+#[derive(Clone, Copy, Debug)]
+pub struct LuaVector2(pub Vector2);
+
+impl LuaVector2 {
+    fn zip(self, other: Self, f: impl Fn(f32, f32) -> f32) -> Self {
+        Self(Vector2::new(f(self.0.x, other.0.x), f(self.0.y, other.0.y)))
+    }
+}
+
+impl UserData for LuaVector2 {
+    fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
+        fields.add_field_method_get("X", |_, v| Ok(f32_to_lua(v.0.x)));
+        fields.add_field_method_get("Y", |_, v| Ok(f32_to_lua(v.0.y)));
+        fields.add_field_method_get("Magnitude", |_, v| {
+            Ok(f32_to_lua((v.0.x * v.0.x + v.0.y * v.0.y).sqrt()))
+        });
+    }
+
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_meta_function(MetaMethod::Add, |_, (a, b): (LuaVector2, LuaVector2)| {
+            Ok(a.zip(b, |a, b| a + b))
+        });
+        methods.add_meta_function(MetaMethod::Sub, |_, (a, b): (LuaVector2, LuaVector2)| {
+            Ok(a.zip(b, |a, b| a - b))
+        });
+        methods.add_meta_function(MetaMethod::Mul, |_, (a, b): (mlua::Value, mlua::Value)| {
+            let number = |value: &mlua::Value| match value {
+                mlua::Value::Integer(n) => Some(*n as f32),
+                mlua::Value::Number(n) => Some(*n as f32),
+                _ => None,
+            };
+            let vector = |value: mlua::Value| match value {
+                mlua::Value::UserData(data) => data.borrow::<LuaVector2>().ok().map(|v| *v),
+                _ => None,
+            };
+            match (number(&a), number(&b)) {
+                (Some(n), None) => {
+                    vector(b).map(|v| LuaVector2(Vector2::new(v.0.x * n, v.0.y * n)))
+                }
+                (None, Some(n)) => {
+                    vector(a).map(|v| LuaVector2(Vector2::new(v.0.x * n, v.0.y * n)))
+                }
+                _ => match (vector(a), vector(b)) {
+                    (Some(a), Some(b)) => Some(a.zip(b, |a, b| a * b)),
+                    _ => None,
+                },
+            }
+            .ok_or_else(|| mlua::Error::runtime("a Vector2 multiplies by a Vector2 or a number"))
+        });
+        methods.add_meta_method(MetaMethod::Unm, |_, v, ()| {
+            Ok(LuaVector2(Vector2::new(-v.0.x, -v.0.y)))
+        });
+        methods.add_meta_method(MetaMethod::Eq, |lua, v, other: mlua::Value| {
+            Ok(LuaVector2::from_lua(other, lua).is_ok_and(|other| other.0 == v.0))
+        });
+        methods.add_meta_method(MetaMethod::ToString, |_, v, ()| {
+            Ok(format!(
+                "{}, {}",
+                component_text(v.0.x),
+                component_text(v.0.y)
             ))
         });
     }
@@ -424,6 +491,7 @@ macro_rules! from_lua_by_clone {
 
 from_lua_by_clone! {
     LuaVector3 => "Vector3",
+    LuaVector2 => "Vector2",
     LuaColor3 => "Color3",
     LuaUDim => "UDim",
     LuaUDim2 => "UDim2",
@@ -437,6 +505,7 @@ pub fn value_to_lua(lua: &Lua, value: &Value) -> mlua::Result<mlua::Value> {
         Value::Number(n) => Ok(mlua::Value::Number(*n)),
         Value::String(s) => s.as_str().into_lua(lua),
         Value::Vector3(v) => LuaVector3(*v).into_lua(lua),
+        Value::Vector2(v) => LuaVector2(*v).into_lua(lua),
         Value::UDim2(v) => LuaUDim2(*v).into_lua(lua),
         Value::Color3(c) => LuaColor3(*c).into_lua(lua),
         Value::PartType(_)
@@ -461,6 +530,9 @@ pub fn value_from_lua(lua: &Lua, value: mlua::Value, kind: ValueKind) -> Result<
         (ValueKind::Vector3, _) => LuaVector3::from_lua(value.clone(), lua)
             .ok()
             .map(|v| Value::Vector3(v.0)),
+        (ValueKind::Vector2, _) => LuaVector2::from_lua(value.clone(), lua)
+            .ok()
+            .map(|v| Value::Vector2(v.0)),
         (ValueKind::UDim2, _) => LuaUDim2::from_lua(value.clone(), lua)
             .ok()
             .map(|v| Value::UDim2(v.0)),
@@ -501,6 +573,9 @@ pub fn type_name(lua: &Lua, value: &mlua::Value) -> String {
     if let mlua::Value::UserData(data) = value {
         if data.is::<LuaVector3>() {
             return "Vector3".to_owned();
+        }
+        if data.is::<LuaVector2>() {
+            return "Vector2".to_owned();
         }
         if data.is::<LuaColor3>() {
             return "Color3".to_owned();

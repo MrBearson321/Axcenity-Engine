@@ -296,6 +296,7 @@ pub fn overlay(
             path: String::new(),
             texture: Some(texture),
             slice: None,
+            clip: None,
         }));
     } else {
         items.push(UiDrawItem::Text(UiText {

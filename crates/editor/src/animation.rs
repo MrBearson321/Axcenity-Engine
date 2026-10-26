@@ -114,6 +114,7 @@ pub fn can_animate(class: ClassName) -> bool {
             | ClassName::ImageLabel
             | ClassName::PageLayout
             | ClassName::Table
+            | ClassName::ScrollingFrame
     )
 }
 

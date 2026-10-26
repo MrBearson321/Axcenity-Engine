@@ -685,7 +685,15 @@ impl ScenePipeline {
             lines.extend(
                 text::decorations(&styled, &buffers[first], font_size, [item.position[0], top])
                     .into_iter()
-                    .map(|line| (index, line)),
+                    .map(|line| {
+                        (
+                            index,
+                            UiRectangle {
+                                clip: item.clip,
+                                ..line
+                            },
+                        )
+                    }),
             );
             placed.extend(
                 passes
@@ -714,6 +722,25 @@ impl ScenePipeline {
             }
             let areas = in_layer.into_iter().map(|&(_, text, top, buffer, pass)| {
                 let [dx, dy] = pass.offset;
+                let mut bounds = TextBounds {
+                    left: (text.position[0] + dx).floor() as i32,
+                    top: (text.position[1] + dy).floor() as i32,
+                    right: (text.position[0] + dx + text.size[0].max(0.0)).ceil() as i32,
+                    bottom: (text.position[1] + dy + text.size[1].max(0.0)).ceil() as i32,
+                };
+                // Cut to the clip too, which doesn't move with a shadow.
+                if let Some(clip) = text.clip {
+                    bounds.left = bounds.left.max(clip.position[0].floor() as i32);
+                    bounds.top = bounds.top.max(clip.position[1].floor() as i32);
+                    bounds.right = bounds
+                        .right
+                        .min((clip.position[0] + clip.size[0].max(0.0)).ceil() as i32);
+                    bounds.bottom = bounds
+                        .bottom
+                        .min((clip.position[1] + clip.size[1].max(0.0)).ceil() as i32);
+                    bounds.right = bounds.right.max(bounds.left);
+                    bounds.bottom = bounds.bottom.max(bounds.top);
+                }
                 TextArea {
                     buffer: &buffers[buffer],
                     left: text.position[0] + dx,
@@ -722,12 +749,7 @@ impl ScenePipeline {
                     // Where it may show, in screen pixels (not relative to
                     // the text's position): its box, moved with the copy so
                     // a shadow is cut where its letters are.
-                    bounds: TextBounds {
-                        left: (text.position[0] + dx).floor() as i32,
-                        top: (text.position[1] + dy).floor() as i32,
-                        right: (text.position[0] + dx + text.size[0].max(0.0)).ceil() as i32,
-                        bottom: (text.position[1] + dy + text.size[1].max(0.0)).ceil() as i32,
-                    },
+                    bounds,
                     default_color: glyph_color(pass.color),
                     custom_glyphs: &[],
                 }

@@ -2247,3 +2247,159 @@ fn dragging_the_slice_editors_lines_changes_the_border_image_css() {
     assert_eq!(state(&app), before);
     let _ = std::fs::remove_dir_all(&folder);
 }
+
+/// Where design pixel `at` of `gui` is on the artboard, in points, while
+/// it previews at its design size.
+fn artboard_point(app: &EditorApp, gui: InstanceId, [x, y]: [f32; 2]) -> egui::Pos2 {
+    let (board, zoom) = app.ui_designer.board().unwrap();
+    let (unit, origin) = {
+        let (width, height) = axcenity_ui::design_size(&app.world, gui);
+        axcenity_ui::screen_mapping(&app.world, gui, width, height)
+    };
+    board.min + (egui::vec2(origin[0], origin[1]) + egui::vec2(x, y) * unit) * zoom
+}
+
+#[test]
+fn bring_to_front_swaps_overlapping_buttons_and_the_top_one_takes_the_click_in_the_designer_and_in_play()
+ {
+    let folder = copy_of_example("hello-touched", "ui-designer-layers");
+    let mut app = EditorApp::new(Some(&folder));
+    act(&mut app, DesignerAction::NewScreenGui);
+    let gui = app.selected.unwrap();
+    // Buttons are 160 × 48: these overlap from 140, 120 to 260, 148.
+    let back = drop_in(&mut app, Insertable::TextButton, gui, [100.0, 100.0]);
+    let front = drop_in(&mut app, Insertable::TextButton, gui, [140.0, 120.0]);
+    let ctx = theme::test_context();
+    let mut clock = 0.0;
+    let size = egui::vec2(1200.0, 800.0);
+    for _ in 0..3 {
+        designer_frame(&mut app, &ctx, &mut clock, size, Vec::new());
+    }
+    let click = |app: &mut EditorApp, clock: &mut f64, at: egui::Pos2| {
+        for events in [
+            vec![egui::Event::PointerMoved(at)],
+            vec![press(at, true)],
+            vec![press(at, false)],
+            Vec::new(),
+        ] {
+            designer_frame(app, &ctx, clock, size, events);
+        }
+    };
+    let overlap = artboard_point(&app, gui, [200.0, 135.0]);
+    click(&mut app, &mut clock, overlap);
+    assert_eq!(app.selected, Some(front), "the later one is on top");
+
+    // Right-click the one underneath where it shows, and Bring to Front.
+    let only_back = artboard_point(&app, gui, [110.0, 110.0]);
+    let secondary = |pressed| egui::Event::PointerButton {
+        pos: only_back,
+        button: egui::PointerButton::Secondary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    for events in [
+        vec![egui::Event::PointerMoved(only_back)],
+        vec![secondary(true)],
+        vec![secondary(false)],
+        Vec::new(),
+    ] {
+        designer_frame(&mut app, &ctx, &mut clock, size, events);
+    }
+    click_named(&mut app, &ctx, &mut clock, size, "Bring to Front");
+    let z = |app: &EditorApp, id| app.world.get(id).unwrap().property("ZIndex").cloned();
+    assert_eq!(z(&app, back), Some(Value::Number(2.0)));
+    assert_eq!(
+        z(&app, front),
+        Some(Value::Number(1.0)),
+        "only the one moved changes"
+    );
+    assert_eq!(
+        app.history.undo_label(),
+        Some("Change layer order of TextButton")
+    );
+    click(&mut app, &mut clock, overlap);
+    assert_eq!(app.selected, Some(back), "now it's on top on the artboard");
+
+    // One undo step puts it back.
+    app.undo();
+    assert_eq!(z(&app, back), Some(Value::Number(1.0)));
+    app.redo();
+    assert_eq!(z(&app, back), Some(Value::Number(2.0)));
+
+    // In Play the one on top takes the click.
+    app.play();
+    let world = app.play.as_ref().expect("playing").world();
+    let (width, height) = axcenity_ui::design_size(world, gui);
+    let layout = axcenity_ui::layout_ui(world, width, height, &stylesheets(&app));
+    assert_eq!(layout.hit_button(200.0, 135.0), Some(back));
+    app.stop();
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn the_wheel_scrolls_a_scrolling_frame_on_the_artboard_without_changing_its_canvas_position() {
+    let folder = copy_of_example("hello-touched", "ui-designer-scrolling");
+    let mut app = EditorApp::new(Some(&folder));
+    act(&mut app, DesignerAction::NewScreenGui);
+    let gui = app.selected.unwrap();
+    let list = drop_in(&mut app, Insertable::ScrollingFrame, gui, [100.0, 100.0]);
+    // 300 × 200, its canvas twice as tall: a button near its bottom.
+    let low = drop_in(&mut app, Insertable::TextButton, list, [20.0, 340.0]);
+    let ctx = theme::test_context();
+    let mut clock = 0.0;
+    let size = egui::vec2(1200.0, 800.0);
+    for _ in 0..3 {
+        designer_frame(&mut app, &ctx, &mut clock, size, Vec::new());
+    }
+    let undo = app.history.undo_label().map(str::to_owned);
+    let over = artboard_point(&app, gui, [250.0, 200.0]);
+    let wheel = egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, -60.0),
+        modifiers: egui::Modifiers::NONE,
+    };
+    let board_before = app.ui_designer.board().unwrap().0;
+    designer_frame(
+        &mut app,
+        &ctx,
+        &mut clock,
+        size,
+        vec![egui::Event::PointerMoved(over)],
+    );
+    designer_frame(&mut app, &ctx, &mut clock, size, vec![wheel]);
+    for _ in 0..20 {
+        designer_frame(&mut app, &ctx, &mut clock, size, Vec::new());
+    }
+    let scrolled = app
+        .ui_designer
+        .scrolled(list)
+        .expect("scrolled on the artboard");
+    assert!(scrolled[1] > 0.0, "{scrolled:?}");
+    assert_eq!(
+        app.ui_designer.board().unwrap().0,
+        board_before,
+        "the artboard didn't pan"
+    );
+    assert_eq!(
+        app.world.get(list).unwrap().property("CanvasPosition"),
+        Some(&Value::Vector2(axcenity_core::Vector2::new(0.0, 0.0))),
+        "the saved position is the same"
+    );
+    assert_eq!(
+        app.history.undo_label().map(str::to_owned),
+        undo,
+        "no undo step"
+    );
+    // Clicking where the low button now shows selects it.
+    let shown = artboard_point(&app, gui, [140.0, 100.0 + 340.0 - scrolled[1] + 10.0]);
+    for events in [
+        vec![egui::Event::PointerMoved(shown)],
+        vec![press(shown, true)],
+        vec![press(shown, false)],
+        Vec::new(),
+    ] {
+        designer_frame(&mut app, &ctx, &mut clock, size, events);
+    }
+    assert_eq!(app.selected, Some(low));
+    let _ = std::fs::remove_dir_all(&folder);
+}

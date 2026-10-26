@@ -140,6 +140,11 @@ pub(super) fn palette(
                 layout: first(Filter::PageLayouts),
                 page: text("Home"),
             }),
+            B(BlockKind::ScrollTo {
+                target: first(Filter::ScrollingFrames),
+                x: number(0.0),
+                y: number(0.0),
+            }),
             B(BlockKind::SetProperty {
                 target: part.clone(),
                 property: "Size".to_owned(),

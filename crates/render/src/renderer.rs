@@ -12,7 +12,7 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::time::Duration;
 
-use crate::draw_list::{DrawList, Shape, TextureSource, UiDrawItem, UiText};
+use crate::draw_list::{DrawList, Shape, TextureSource, UiDrawItem, UiRectangle, UiText};
 use crate::mesh::{self};
 use anyhow::{Context, Result};
 use bytemuck::{Pod, Zeroable};
@@ -31,7 +31,7 @@ pub(crate) mod text;
 mod ui_pass;
 
 #[cfg(test)]
-use crate::draw_list::{ChannelMap, MeshSource, UiRectangle};
+use crate::draw_list::{ChannelMap, MeshSource};
 #[cfg(test)]
 use glam::Vec3;
 #[cfg(test)]

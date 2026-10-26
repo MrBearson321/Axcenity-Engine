@@ -1288,6 +1288,121 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "EyeHeight",
         "How far above the character's feet its eyes are, in studs. The camera sits there during Play.",
     ),
+    (
+        ClassName::Frame,
+        "ZIndex",
+        "Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.",
+    ),
+    (
+        ClassName::TextLabel,
+        "ZIndex",
+        "Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.",
+    ),
+    (
+        ClassName::TextButton,
+        "ZIndex",
+        "Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.",
+    ),
+    (
+        ClassName::ImageLabel,
+        "ZIndex",
+        "Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.",
+    ),
+    (
+        ClassName::TextBox,
+        "ZIndex",
+        "Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.",
+    ),
+    (
+        ClassName::PageLayout,
+        "ZIndex",
+        "Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.",
+    ),
+    (
+        ClassName::Table,
+        "ZIndex",
+        "Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.",
+    ),
+    (
+        ClassName::ScreenGui,
+        "DisplayOrder",
+        "Where this ScreenGui is drawn among the others: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree.",
+    ),
+    (
+        ClassName::ScrollingFrame,
+        "Class",
+        "Space-separated CSS class names used to style this UI Instance.",
+    ),
+    (
+        ClassName::ScrollingFrame,
+        "Id",
+        "The CSS identifier used to style this UI Instance.",
+    ),
+    (
+        ClassName::ScrollingFrame,
+        "Position",
+        "The top-left position relative to the parent, in scale and pixel offsets.",
+    ),
+    (
+        ClassName::ScrollingFrame,
+        "Size",
+        "The size of the window onto the canvas, relative to the parent, in scale and pixel offsets.",
+    ),
+    (
+        ClassName::ScrollingFrame,
+        "BackgroundColor3",
+        "The frame's background color.",
+    ),
+    (
+        ClassName::ScrollingFrame,
+        "BackgroundTransparency",
+        "The background opacity: 0 is opaque and 1 is transparent.",
+    ),
+    (
+        ClassName::ScrollingFrame,
+        "Visible",
+        "If false, this frame and its children are hidden.",
+    ),
+    (
+        ClassName::ScrollingFrame,
+        "Interactable",
+        "If false, it takes no hover or clicks and CSS :disabled styles it.",
+    ),
+    (
+        ClassName::ScrollingFrame,
+        "Tooltip",
+        "Text shown in a small box near the pointer after a short hover. Empty shows none. Style the box with a CSS Tooltip rule, such as #play Tooltip.",
+    ),
+    (
+        ClassName::ScrollingFrame,
+        "ZIndex",
+        "Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.",
+    ),
+    (
+        ClassName::ScrollingFrame,
+        "CanvasSize",
+        "The area the children are laid out on: scale of the frame's own size plus pixels. It's never smaller than the frame. The default, 2 scale down, is twice as tall as the frame.",
+    ),
+    (
+        ClassName::ScrollingFrame,
+        "CanvasPosition",
+        "How far the canvas is scrolled, in pixels from its top left: `Vector2.new(0, 120)` is 120 pixels down. Kept between 0 and as far as the canvas goes. The wheel, the scroll bars and dragging the content set it.",
+    ),
+    (
+        ClassName::ScrollingFrame,
+        "ScrollingDirection",
+        "Which ways it scrolls: \"X\" (across), \"Y\" (up and down) or \"XY\" (both).",
+    ),
+    (
+        ClassName::ScrollingFrame,
+        "ScrollBarThickness",
+        "How thick the scroll bars are, in pixels; 0 hides them. Style them with CSS: ScrollingFrame::scrollbar for the track and ::thumb for the part you drag.",
+    ),
+    (
+        ClassName::ScrollingFrame,
+        "AutomaticCanvasSize",
+        "\"None\", \"X\", \"Y\" or \"XY\": the canvas grows that way to fit the children, past CanvasSize.",
+    ),
 ];
 
 /// What each event means, including what its handler receives. A test
@@ -1428,6 +1543,16 @@ pub(super) const EVENT_DOCS: &[(ClassName, &str, &str)] = &[
         "KeyframeReached",
         "Fires each time the track passes one of the clip's events. The handler gets the event's name; GetMarkerReachedSignal hears one name.",
     ),
+    (
+        ClassName::ScrollingFrame,
+        "MouseEnter",
+        "Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.",
+    ),
+    (
+        ClassName::ScrollingFrame,
+        "MouseLeave",
+        "Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.",
+    ),
 ];
 
 /// What each class is. A `match` with no `_` case, so adding a class won't
@@ -1489,6 +1614,9 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::Table => {
             "Lays its children out as equal cells, left to right then top to bottom. Columns is how many cells share a row."
+        }
+        ClassName::ScrollingFrame => {
+            "A Frame that scrolls: its children sit on a canvas (CanvasSize) bigger than the frame, moved by CanvasPosition with the wheel, its scroll bars or a drag. Only what's inside the frame shows and takes clicks."
         }
         ClassName::BillboardGui => {
             "UI that floats in the world, parented to a Part or MeshPart and drawn on the screen UI overlay. Size is on-screen; StudsOffset moves it in world studs."

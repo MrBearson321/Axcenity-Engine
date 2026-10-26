@@ -17,7 +17,7 @@ use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
 use axcenity_anim::{EasingDirection, EasingStyle, ease};
-use axcenity_core::{Color3, InstanceId, UDim, UDim2, Value, ValueKind, Vector3};
+use axcenity_core::{Color3, InstanceId, UDim, UDim2, Value, ValueKind, Vector2, Vector3};
 use mlua::{
     FromLua, Lua, MetaMethod, Table, UserData, UserDataFields, UserDataMethods, Value as LuaValue,
 };
@@ -189,6 +189,9 @@ pub fn interpolate(name: &str, from: &Value, to: &Value, alpha: f32) -> Option<V
         (Value::Vector3(a), Value::Vector3(b)) => {
             Value::Vector3(Vector3::new(lerp(a.x, b.x), lerp(a.y, b.y), lerp(a.z, b.z)))
         }
+        (Value::Vector2(a), Value::Vector2(b)) => {
+            Value::Vector2(Vector2::new(lerp(a.x, b.x), lerp(a.y, b.y)))
+        }
         // Colours can't go past their ends, even when the easing does.
         (Value::Color3(a), Value::Color3(b)) => {
             let channel = |a: f32, b: f32| lerp(a, b).clamp(0.0, 1.0);
@@ -214,6 +217,7 @@ fn tweenable(kind: ValueKind) -> bool {
         kind,
         ValueKind::Number
             | ValueKind::Vector3
+            | ValueKind::Vector2
             | ValueKind::Color3
             | ValueKind::UDim2
             | ValueKind::Bool
@@ -422,7 +426,7 @@ fn read_goals(
         if !tweenable(kind) {
             return Err(mlua::Error::runtime(format!(
                 "{class}.{name} is a {kind}, which can't be tweened; tween numbers, \
-                 Vector3s, Color3s, UDim2s or booleans"
+                 Vector3s, Vector2s, Color3s, UDim2s or booleans"
             )));
         }
         let value = value_from_lua(lua, value, kind)
