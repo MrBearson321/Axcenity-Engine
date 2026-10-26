@@ -775,10 +775,12 @@ pub(super) fn create_ui_image_pipeline(
     (bind_layout, sampler, image, sheet)
 }
 
-/// Draws the sky as a full-screen triangle at the far plane, before any item.
+/// Draws the sky as a full-screen triangle at the far plane, before any
+/// item, with the scene's `samples` per pixel.
 pub(super) fn create_sky_pipeline(
     device: &wgpu::Device,
     frame_layout: &wgpu::BindGroupLayout,
+    samples: u32,
 ) -> wgpu::RenderPipeline {
     let shader = super::gpu::shader_module(device, "sky", super::gpu::SCENE_SHADER);
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -803,7 +805,10 @@ pub(super) fn create_sky_pipeline(
             stencil: Default::default(),
             bias: Default::default(),
         }),
-        multisample: Default::default(),
+        multisample: wgpu::MultisampleState {
+            count: samples,
+            ..Default::default()
+        },
         fragment: Some(wgpu::FragmentState {
             module: &shader,
             entry_point: Some("fs_sky"),

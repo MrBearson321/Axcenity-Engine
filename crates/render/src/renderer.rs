@@ -1,7 +1,7 @@
 //! The wgpu side: GPU setup, the window surface, buffers and drawing.
 //!
 //! `renderer.rs` owns the GPU types and draws a frame. `lighting.rs` plans
-//! uniforms, tiles, shadows and batches. `post.rs` blooms and tone-maps.
+//! uniforms, tiles, shadows and batches. `post.rs` blooms, tone-maps and runs FXAA.
 //! `ui_pass.rs` builds screen-space quads and the UI and sky pipelines.
 //! `gpu.rs` uploads meshes, textures and materials. `sprites.rs` draws particles.
 //! `terrain.rs` draws terrain chunks with their blended layers.

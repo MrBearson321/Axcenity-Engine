@@ -44,13 +44,14 @@ pub(super) fn shader_module(
 /// A pipeline that draws meshes with their instances into the HDR scene:
 /// solid items, see-through ones when `transparent` is true, or terrain
 /// chunks, by `shader`'s `entry_points` (vertex, fragment). `layouts` are
-/// its bind groups: the frame's, then the material's.
+/// its bind groups: the frame's, then the material's. `samples` per pixel
+/// must match the scene's targets.
 pub(super) fn create_pipeline(
     device: &wgpu::Device,
     shader: &wgpu::ShaderModule,
     (vertex_entry, fragment_entry): (&str, &str),
     layouts: &[&wgpu::BindGroupLayout],
-    color_format: wgpu::TextureFormat,
+    (color_format, samples): (wgpu::TextureFormat, u32),
     transparent: bool,
 ) -> wgpu::RenderPipeline {
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -127,7 +128,10 @@ pub(super) fn create_pipeline(
             stencil: Default::default(),
             bias: Default::default(),
         }),
-        multisample: Default::default(),
+        multisample: wgpu::MultisampleState {
+            count: samples,
+            ..Default::default()
+        },
         fragment: Some(wgpu::FragmentState {
             module: shader,
             entry_point: Some(fragment_entry),
@@ -279,10 +283,12 @@ pub(super) fn create_shadow_pipeline(
     })
 }
 
+/// The scene's depth, with `samples` per pixel like its color.
 pub(super) fn create_depth_view(
     device: &wgpu::Device,
     width: u32,
     height: u32,
+    samples: u32,
 ) -> wgpu::TextureView {
     device
         .create_texture(&wgpu::TextureDescriptor {
@@ -293,7 +299,7 @@ pub(super) fn create_depth_view(
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
-            sample_count: 1,
+            sample_count: samples,
             dimension: wgpu::TextureDimension::D2,
             format: DEPTH_FORMAT,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,

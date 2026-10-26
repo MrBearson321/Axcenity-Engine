@@ -1852,3 +1852,269 @@ fn changing_render_scale_and_texture_quality_at_run_time_draws_the_next_frame_ri
     assert_eq!(renderer.stats().texture_bytes, bytes, "nothing leaked");
     assert_eq!(renderer.scene.targets_alive(), 1);
 }
+
+fn with_anti_aliasing(mode: crate::AntiAliasing) -> GraphicsSettings {
+    GraphicsSettings {
+        anti_aliasing: Some(mode),
+        ..GraphicsSettings::default()
+    }
+}
+
+#[test]
+fn capabilities_check_the_formats_the_scene_is_drawn_in() {
+    assert_eq!(crate::graphics::SCENE_FORMATS, [HDR_FORMAT, DEPTH_FORMAT]);
+}
+
+/// A glowing white block turned 20° over a black sky: with no lighting
+/// and post-processing off, every pixel is wholly one or the other unless
+/// its edge is smoothed.
+fn tilted_block() -> DrawList {
+    let block = DrawItem {
+        transform: Mat4::from_scale_rotation_translation(
+            Vec3::splat(2.0),
+            glam::Quat::from_rotation_z(20f32.to_radians()),
+            Vec3::new(0.0, 0.0, -5.0),
+        ),
+        material: Material {
+            base_color: [0.0; 3],
+            emissive: [1.0; 3],
+            ..Material::default()
+        },
+        ..big_block()
+    };
+    let mut list = list_of(vec![block]);
+    list.shadows.enabled = false;
+    list
+}
+
+#[test]
+fn a_tilted_blocks_edge_over_the_sky_is_smoothed_by_msaa_and_fxaa_and_stepped_without() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let list = tilted_block();
+    let in_between = |mode| {
+        let mut renderer = TextureRenderer::new(&device, &queue, 64, 64);
+        renderer.set_graphics(&with_anti_aliasing(mode));
+        assert_eq!(renderer.graphics().anti_aliasing, mode);
+        renderer.render(&list).unwrap();
+        let pixels = renderer.read_pixels();
+        let block = pixels.chunks(4).filter(|pixel| pixel[0] > 245).count();
+        assert!(block > 200, "{mode:?}: the block is drawn ({block} pixels)");
+        pixels
+            .chunks(4)
+            .filter(|pixel| (10..=245).contains(&pixel[0]))
+            .count()
+    };
+    use crate::AntiAliasing::{Fxaa, Msaa4, Off};
+    assert_eq!(in_between(Off), 0, "hard steps");
+    let msaa = in_between(Msaa4);
+    assert!(msaa >= 30, "MSAA 4× blends edge pixels: {msaa}");
+    let fxaa = in_between(Fxaa);
+    assert!(fxaa >= 30, "FXAA blends edge pixels: {fxaa}");
+}
+
+/// A 2 × 1 texture: opaque white on the left, see-through on the right.
+struct HalfCut;
+
+impl TextureSource for HalfCut {
+    fn key(&self) -> u64 {
+        4242
+    }
+    fn size(&self) -> (u32, u32) {
+        (2, 1)
+    }
+    fn rgba(&self) -> &[u8] {
+        &[255, 255, 255, 255, 255, 255, 255, 0]
+    }
+}
+
+/// A pixel to look at, by what should be drawn there.
+type Probe = (&'static str, (u32, u32));
+
+/// One of each kind of drawing over the default sky, at 96 × 64: a solid
+/// block, a see-through one and a cut-out one in a row, a sprite above,
+/// and terrain below, with the pixels to look at.
+fn one_of_everything() -> (DrawList, Vec<Probe>) {
+    let block = |x: f32, material: Material| DrawItem {
+        transform: Mat4::from_scale_rotation_translation(
+            Vec3::splat(3.0),
+            glam::Quat::IDENTITY,
+            Vec3::new(x, 1.0, -10.0),
+        ),
+        material,
+        ..big_block()
+    };
+    let solid = block(
+        -6.0,
+        Material {
+            base_color: [0.8, 0.1, 0.1],
+            ..Material::default()
+        },
+    );
+    let see_through = block(
+        0.0,
+        Material {
+            base_color: [0.1, 0.1, 0.9],
+            opacity: 0.5,
+            ..Material::default()
+        },
+    );
+    let cut_out = block(
+        6.0,
+        Material {
+            base_color: [0.1, 0.8, 0.1],
+            base_color_texture: Some(Arc::new(HalfCut)),
+            alpha_cutoff: 0.5,
+            ..Material::default()
+        },
+    );
+    let layers = Arc::new(crate::TerrainLayers {
+        id: 3,
+        key: 3,
+        layers: vec![crate::TerrainLayer {
+            color: [0.6, 0.5, 0.2],
+            ..terrain::tests::layer()
+        }],
+        view: crate::TerrainView::Shaded,
+        height_range: [0.0, 1.0],
+        grid_origin: [-10.0, -10.0],
+        grid_cell: [1.0, 1.0],
+    });
+    let ground = DrawItem {
+        shape: Shape::Mesh(Arc::new(Ground)),
+        transform: Mat4::from_translation(Vec3::new(0.0, -2.0, 0.0)),
+        material: Material {
+            terrain: Some(crate::TerrainSurface {
+                layers,
+                weights: [
+                    Arc::new(Weights(40, [255, 0, 0, 0])),
+                    Arc::new(Weights(41, [0; 4])),
+                ],
+            }),
+            ..Material::default()
+        },
+        uv_tile: 0.0,
+        casts_shadow: true,
+    };
+    let mut list = list_of(vec![solid, see_through, cut_out, ground]);
+    list.sky = Sky::default();
+    list.ambient.intensity = 0.3;
+    list.sprites = vec![crate::Sprite {
+        position: Vec3::new(0.0, 4.5, -10.0),
+        ..red_sprite(0.0, 0.0)
+    }];
+    let probes = vec![
+        ("sky", (4, 4)),
+        ("solid", (16, 26)),
+        ("see-through", (48, 26)),
+        ("cut-out left", (76, 26)),
+        ("cut-out right", (84, 26)),
+        ("sprite", (48, 11)),
+        ("terrain", (48, 56)),
+    ];
+    (list, probes)
+}
+
+#[test]
+fn every_kind_of_item_draws_the_same_with_each_anti_aliasing() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let (list, probes) = one_of_everything();
+    let (width, height) = (96, 64);
+    let draw = |mode| {
+        let mut renderer = TextureRenderer::new(&device, &queue, width, height);
+        renderer.set_graphics(&with_anti_aliasing(mode));
+        renderer.render(&list).unwrap();
+        let pixels = renderer.read_pixels();
+        probes
+            .iter()
+            .map(|&(name, (x, y))| {
+                let at = (y * width + x) as usize * 4;
+                (name, [pixels[at], pixels[at + 1], pixels[at + 2]])
+            })
+            .collect::<Vec<_>>()
+    };
+    let off = draw(crate::AntiAliasing::Off);
+    let pixel = |name| off.iter().find(|(probe, _)| *probe == name).unwrap().1;
+    let [red, green, blue] = pixel("solid");
+    assert!(
+        red > green + 30 && red > blue + 30,
+        "solid: {red} {green} {blue}"
+    );
+    let [red, _, blue] = pixel("see-through");
+    let [sky_red, _, sky_blue] = pixel("sky");
+    assert!(
+        blue > red && blue.abs_diff(sky_blue) + red.abs_diff(sky_red) > 20,
+        "see-through mixes blue over the sky"
+    );
+    let (left, right) = (pixel("cut-out left"), pixel("cut-out right"));
+    let cut_difference: u32 = (0..3).map(|c| u32::from(left[c].abs_diff(right[c]))).sum();
+    assert!(
+        cut_difference > 30,
+        "one half is cut away: {left:?} vs {right:?}"
+    );
+    let [red, green, _] = pixel("sprite");
+    assert!(red > 200 && green < 60, "sprite: {red} {green}");
+    let [red, _, blue] = pixel("terrain");
+    assert!(red > blue + 20, "terrain's brown layer: {red} {blue}");
+
+    for mode in [crate::AntiAliasing::Fxaa, crate::AntiAliasing::Msaa4] {
+        for ((name, ours), (_, theirs)) in draw(mode).into_iter().zip(&off) {
+            assert!(
+                ours.iter().zip(theirs).all(|(a, b)| a.abs_diff(*b) <= 3),
+                "{mode:?} draws the {name} like Off: {ours:?} vs {theirs:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn switching_anti_aliasing_frees_the_targets_it_no_longer_uses() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let (list, _) = one_of_everything();
+    let (width, height) = (96, 64);
+    let fresh = |settings: &GraphicsSettings| {
+        let mut renderer = TextureRenderer::new(&device, &queue, width, height);
+        renderer.set_graphics(settings);
+        renderer.render(&list).unwrap();
+        renderer.read_pixels()
+    };
+    let mut renderer = TextureRenderer::new(&device, &queue, width, height);
+    for (step, mode) in crate::AntiAliasing::ALL.iter().cycle().take(20).enumerate() {
+        let settings = with_anti_aliasing(*mode);
+        renderer.set_graphics(&settings);
+        renderer.render(&list).unwrap();
+        // A GPU without 2× gets FXAA instead (see `effective`).
+        let used = renderer.graphics().anti_aliasing;
+        let multisampled = used.samples() > 1;
+        assert_eq!(
+            renderer.scene.anti_aliasing_targets_alive(),
+            (
+                usize::from(multisampled),
+                usize::from(used == crate::AntiAliasing::Fxaa)
+            ),
+            "step {step}: {used:?}"
+        );
+        assert_eq!(renderer.scene.post_targets.samples, used.samples());
+        assert_eq!(renderer.scene.targets_alive(), 1, "step {step}");
+        if step % 5 == 0 {
+            assert_eq!(
+                renderer.read_pixels(),
+                fresh(&settings),
+                "step {step}: {used:?}"
+            );
+        }
+    }
+    renderer.set_graphics(&with_anti_aliasing(crate::AntiAliasing::Off));
+    renderer.render(&list).unwrap();
+    device.poll(wgpu::PollType::Wait).unwrap();
+    assert_eq!(renderer.scene.anti_aliasing_targets_alive(), (0, 0));
+    assert_eq!(renderer.scene.targets_alive(), 1);
+}

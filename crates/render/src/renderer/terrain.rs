@@ -131,10 +131,12 @@ pub(super) struct TerrainPass {
 }
 
 impl TerrainPass {
+    /// `samples` per pixel must match the scene's targets.
     pub(super) fn new(
         device: &wgpu::Device,
         frame_layout: &wgpu::BindGroupLayout,
         texture_bytes: GpuBytes,
+        samples: u32,
     ) -> Self {
         let texture = |binding, dimension| wgpu::BindGroupLayoutEntry {
             binding,
@@ -194,15 +196,7 @@ impl TerrainPass {
             mipmap_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
-        let shader = super::gpu::shader_module(device, "terrain", super::gpu::TERRAIN_SHADER);
-        let pipeline = super::gpu::create_pipeline(
-            device,
-            &shader,
-            ("vs_terrain", "fs_terrain"),
-            &[frame_layout, &layout],
-            super::HDR_FORMAT,
-            false,
-        );
+        let pipeline = terrain_pipeline(device, frame_layout, &layout, samples);
         Self {
             layout,
             pipeline,
@@ -214,6 +208,16 @@ impl TerrainPass {
             texture_bytes,
             skipped_levels: 0,
         }
+    }
+
+    /// Remakes the pipeline for drawing with `samples` per pixel.
+    pub(super) fn set_samples(
+        &mut self,
+        device: &wgpu::Device,
+        frame_layout: &wgpu::BindGroupLayout,
+        samples: u32,
+    ) {
+        self.pipeline = terrain_pipeline(device, frame_layout, &self.layout, samples);
     }
 
     /// Halves the layer arrays `skipped_levels` times (the texture quality),
@@ -342,6 +346,24 @@ impl TerrainPass {
         self.arrays
             .retain(|_, cached| within(cached.last_drawn, KEEP_UNDRAWN_FRAMES));
     }
+}
+
+/// Draws terrain chunks into the HDR scene with `samples` per pixel.
+fn terrain_pipeline(
+    device: &wgpu::Device,
+    frame_layout: &wgpu::BindGroupLayout,
+    layout: &wgpu::BindGroupLayout,
+    samples: u32,
+) -> wgpu::RenderPipeline {
+    let shader = super::gpu::shader_module(device, "terrain", super::gpu::TERRAIN_SHADER);
+    super::gpu::create_pipeline(
+        device,
+        &shader,
+        ("vs_terrain", "fs_terrain"),
+        &[frame_layout, layout],
+        (super::HDR_FORMAT, samples),
+        false,
+    )
 }
 
 /// The uniform for `layers`.

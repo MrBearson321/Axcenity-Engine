@@ -1,12 +1,14 @@
-//! Bloom and tone mapping (`post.wgsl`).
+//! Bloom, tone mapping and FXAA (`post.wgsl`).
 //!
 //! The scene is drawn into an HDR target. Bloom blurs the bright parts, then
-//! the composite pass writes the window or the editor's viewport texture.
-
-use std::sync::Arc;
+//! the composite pass writes the window or the editor's viewport texture, or
+//! with FXAA on an LDR target that FXAA then smooths into the output.
 
 use super::gpu::create_depth_view;
-use super::{BLOOM_LEVELS, HDR_FORMAT, PostPasses, PostTargets, PostUniform};
+use super::{
+    BLOOM_LEVELS, FXAA_FORMAT, FxaaTarget, HDR_FORMAT, MsaaTarget, PostPasses, PostTargets,
+    PostUniform, TargetsAlive,
+};
 
 impl PostPasses {
     pub(super) fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
@@ -127,6 +129,14 @@ impl PostPasses {
                 color_format,
                 None,
             ),
+            composite_for_fxaa: pipeline(
+                "composite for FXAA",
+                &composite_layout,
+                "fs_composite",
+                FXAA_FORMAT,
+                None,
+            ),
+            fxaa: pipeline("FXAA", &layout, "fs_fxaa", color_format, None),
             sampler,
             layout,
             composite_layout,
@@ -135,7 +145,7 @@ impl PostPasses {
     }
 
     /// Adds bloom (if `bloom`) to the scene and draws the result, tone
-    /// mapped, into `target`.
+    /// mapped, into `target`: through FXAA if `targets` has its target.
     pub(super) fn draw(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -174,14 +184,27 @@ impl PostPasses {
                 );
             }
         }
+        let clear = wgpu::LoadOp::Clear(wgpu::Color::BLACK);
+        let Some(fxaa) = &targets.fxaa else {
+            fullscreen_pass(
+                encoder,
+                "composite",
+                target,
+                clear,
+                &self.composite,
+                &targets.composite_group,
+            );
+            return;
+        };
         fullscreen_pass(
             encoder,
             "composite",
-            target,
-            wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-            &self.composite,
+            &fxaa.view,
+            clear,
+            &self.composite_for_fxaa,
             &targets.composite_group,
         );
+        fullscreen_pass(encoder, "FXAA", target, clear, &self.fxaa, &fxaa.group);
     }
 }
 
@@ -213,18 +236,26 @@ pub(super) fn fullscreen_pass(
 }
 
 impl PostTargets {
-    /// Makes the HDR and depth textures for a `width` × `height` scene and
-    /// the bloom levels below it, down to [`BLOOM_LEVELS`] halvings of the
-    /// `output`'s size, with the bind groups that connect them. `alive` is
-    /// cloned in, to count the sets alive.
+    /// Makes the HDR and depth textures for a `width` × `height` scene with
+    /// `samples` per pixel and the bloom levels below it, down to
+    /// [`BLOOM_LEVELS`] halvings of the `output`'s size, with the bind
+    /// groups that connect them, and FXAA's target if `fxaa`. Each target
+    /// holds a clone of its counter in `alive`.
     pub(super) fn new(
         device: &wgpu::Device,
         post: &PostPasses,
         (width, height): (u32, u32),
         output: (u32, u32),
-        alive: &Arc<()>,
+        (samples, fxaa): (u32, bool),
+        alive: &TargetsAlive,
     ) -> Self {
-        let make = |label, width: u32, height: u32| {
+        let texture = |label, (width, height): (u32, u32), format, samples| {
+            // A multisampled texture can't be sampled, only resolved.
+            let usage = if samples > 1 {
+                wgpu::TextureUsages::RENDER_ATTACHMENT
+            } else {
+                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING
+            };
             device
                 .create_texture(&wgpu::TextureDescriptor {
                     label: Some(label),
@@ -234,16 +265,20 @@ impl PostTargets {
                         depth_or_array_layers: 1,
                     },
                     mip_level_count: 1,
-                    sample_count: 1,
+                    sample_count: samples,
                     dimension: wgpu::TextureDimension::D2,
-                    format: HDR_FORMAT,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    format,
+                    usage,
                     view_formats: &[],
                 })
                 .create_view(&wgpu::TextureViewDescriptor::default())
         };
+        let make = |label, width, height| texture(label, (width, height), HDR_FORMAT, 1);
         let hdr_view = make("scene (HDR)", width, height);
+        let msaa = (samples > 1).then(|| MsaaTarget {
+            view: texture("scene (MSAA)", (width, height), HDR_FORMAT, samples),
+            _alive: alive.msaa.clone(),
+        });
         let mut levels = Vec::new();
         let (mut level_width, mut level_height) = ((width / 2).max(1), (height / 2).max(1));
         loop {
@@ -296,12 +331,23 @@ impl PostTargets {
             .map(|level| group(&post.layout, &levels[level], None))
             .collect();
         let composite_group = group(&post.composite_layout, &hdr_view, Some(&levels[0]));
+        let fxaa = fxaa.then(|| {
+            let view = texture("tone mapped (FXAA)", output, FXAA_FORMAT, 1);
+            FxaaTarget {
+                group: group(&post.layout, &view, None),
+                view,
+                _alive: alive.fxaa.clone(),
+            }
+        });
         Self {
             size: (width, height),
             output,
-            _alive: alive.clone(),
+            samples,
+            _alive: alive.sets.clone(),
             hdr_view,
-            depth_view: create_depth_view(device, width, height),
+            msaa,
+            depth_view: create_depth_view(device, width, height, samples),
+            fxaa,
             levels,
             prefilter_group,
             downsample_groups,

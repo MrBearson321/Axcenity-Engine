@@ -185,38 +185,23 @@ impl ScenePipeline {
             maps_uniform_of(&MaterialKey::default()),
         );
 
-        let scene_shader = shader_module(&device, "scene", gpu::SCENE_SHADER);
-        let entry_points = ("vs_main", "fs_main");
-        let layouts = [&frame_layout, &material_layout];
-        let opaque_pipeline = create_pipeline(
-            &device,
-            &scene_shader,
-            entry_points,
-            &layouts,
-            HDR_FORMAT,
-            false,
-        );
-        let transparent_pipeline = create_pipeline(
-            &device,
-            &scene_shader,
-            entry_points,
-            &layouts,
-            HDR_FORMAT,
-            true,
-        );
-        let mut terrain = terrain::TerrainPass::new(&device, &frame_layout, texture_bytes.clone());
         let settings = GraphicsSettings::default();
         let graphics = settings.effective(&capabilities);
+        let samples = graphics.anti_aliasing.samples();
+        let [sky_pipeline, opaque_pipeline, transparent_pipeline] =
+            scene_pipelines(&device, &frame_layout, &material_layout, samples);
+        let mut terrain =
+            terrain::TerrainPass::new(&device, &frame_layout, texture_bytes.clone(), samples);
         terrain.set_skipped_levels(graphics.texture_quality.skipped_levels());
-        let sky_pipeline = create_sky_pipeline(&device, &frame_layout);
-        let sprites = sprites::SpritePass::new(&device, &white_texture.srgb);
+        let sprites = sprites::SpritePass::new(&device, &white_texture.srgb, samples);
         let post = PostPasses::new(&device, color_format);
-        let targets_alive = Arc::new(());
+        let targets_alive = TargetsAlive::default();
         let post_targets = PostTargets::new(
             &device,
             &post,
             scene_size((width, height), &graphics, &capabilities),
             (width, height),
+            anti_aliasing_targets(&graphics),
             &targets_alive,
         );
         let ui_pipeline = create_ui_pipeline(&device, color_format);
@@ -325,17 +310,35 @@ impl ScenePipeline {
     /// right size when next drawn. A new render scale remakes the scene's
     /// targets, and a new texture quality frees every texture drawn in the
     /// scene (and the materials using them), so they're uploaded again at
-    /// the new size.
+    /// the new size. A new anti-aliasing remakes the targets and, if its
+    /// samples per pixel changed, the scene pass's pipelines.
     pub(super) fn set_graphics(&mut self, settings: &GraphicsSettings) {
         if *settings == self.settings {
             return;
         }
         let old_quality = self.graphics.texture_quality;
+        let old_samples = self.graphics.anti_aliasing.samples();
         self.settings = settings.clone();
         self.graphics = settings.effective(&self.capabilities);
         let wanted = self.graphics.shadow_quality.map();
         if self.shadow_map.as_ref().map(|map| map.size) != wanted {
             self.shadow_map = None;
+        }
+        let samples = self.graphics.anti_aliasing.samples();
+        if samples != old_samples {
+            [
+                self.sky_pipeline,
+                self.opaque_pipeline,
+                self.transparent_pipeline,
+            ] = scene_pipelines(
+                &self.device,
+                &self.frame_layout,
+                &self.material_layout,
+                samples,
+            );
+            self.terrain
+                .set_samples(&self.device, &self.frame_layout, samples);
+            self.sprites.set_samples(&self.device, samples);
         }
         self.fit_targets();
         if self.graphics.texture_quality != old_quality {
@@ -354,15 +357,23 @@ impl ScenePipeline {
     }
 
     /// Remakes the scene's targets if they weren't made for this output
-    /// size and render scale. The old ones are freed.
+    /// size, render scale and anti-aliasing. The old ones are freed.
     fn fit_targets(&mut self) {
         let size = scene_size(self.output_size, &self.graphics, &self.capabilities);
-        if (self.post_targets.size, self.post_targets.output) != (size, self.output_size) {
+        let anti_aliasing = anti_aliasing_targets(&self.graphics);
+        let targets = &self.post_targets;
+        let made_for = (
+            targets.size,
+            targets.output,
+            (targets.samples, targets.fxaa.is_some()),
+        );
+        if made_for != (size, self.output_size, anti_aliasing) {
             self.post_targets = PostTargets::new(
                 &self.device,
                 &self.post,
                 size,
                 self.output_size,
+                anti_aliasing,
                 &self.targets_alive,
             );
         }
@@ -566,19 +577,34 @@ impl ScenePipeline {
             .map_or(&self.frame_bind_group, |map| &map.frame_bind_group);
 
         // The scene is drawn into the HDR texture; post-processing then brings
-        // it to `view`. The pass is a block so it ends (is dropped) before
-        // `encoder.finish()`, which needs the encoder back.
+        // it to `view`. With MSAA it's drawn into the multisampled texture,
+        // whose samples are averaged into the HDR one as the pass ends. The
+        // pass is a block so it ends (is dropped) before `encoder.finish()`,
+        // which needs the encoder back.
         {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("scene"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &self.post_targets.hdr_view,
+            let targets = &self.post_targets;
+            let color_attachment = match &targets.msaa {
+                Some(msaa) => wgpu::RenderPassColorAttachment {
+                    view: &msaa.view,
+                    resolve_target: Some(&targets.hdr_view),
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        // Only the averaged result is needed.
+                        store: wgpu::StoreOp::Discard,
+                    },
+                },
+                None => wgpu::RenderPassColorAttachment {
+                    view: &targets.hdr_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                         store: wgpu::StoreOp::Store,
                     },
-                })],
+                },
+            };
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("scene"),
+                color_attachments: &[Some(color_attachment)],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &self.post_targets.depth_view,
                     depth_ops: Some(wgpu::Operations {
@@ -732,7 +758,17 @@ impl ScenePipeline {
     /// How many sets of scene targets are alive: 1, unless one leaked.
     #[cfg(test)]
     pub(super) fn targets_alive(&self) -> usize {
-        Arc::strong_count(&self.targets_alive) - 1
+        Arc::strong_count(&self.targets_alive.sets) - 1
+    }
+
+    /// How many multisampled and FXAA targets are alive: 0 or 1 each.
+    #[cfg(test)]
+    pub(super) fn anti_aliasing_targets_alive(&self) -> (usize, usize) {
+        let alive = &self.targets_alive;
+        (
+            Arc::strong_count(&alive.msaa) - 1,
+            Arc::strong_count(&alive.fxaa) - 1,
+        )
     }
 
     pub(super) fn stats(&self) -> RenderStats {
@@ -1155,6 +1191,41 @@ impl ScenePipeline {
             mapped_at_creation: false,
         });
     }
+}
+
+/// The scene pass's sky, solid and see-through pipelines, for drawing with
+/// `samples` per pixel.
+fn scene_pipelines(
+    device: &wgpu::Device,
+    frame_layout: &wgpu::BindGroupLayout,
+    material_layout: &wgpu::BindGroupLayout,
+    samples: u32,
+) -> [wgpu::RenderPipeline; 3] {
+    let shader = shader_module(device, "scene", gpu::SCENE_SHADER);
+    let pipeline = |transparent| {
+        create_pipeline(
+            device,
+            &shader,
+            ("vs_main", "fs_main"),
+            &[frame_layout, material_layout],
+            (HDR_FORMAT, samples),
+            transparent,
+        )
+    };
+    [
+        create_sky_pipeline(device, frame_layout, samples),
+        pipeline(false),
+        pipeline(true),
+    ]
+}
+
+/// The scene's samples per pixel, and whether FXAA needs its target.
+fn anti_aliasing_targets(graphics: &EffectiveGraphics) -> (u32, bool) {
+    let anti_aliasing = graphics.anti_aliasing;
+    (
+        anti_aliasing.samples(),
+        anti_aliasing == crate::AntiAliasing::Fxaa,
+    )
 }
 
 /// The scene's size in pixels for an `output` of that size: scaled by the

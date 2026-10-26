@@ -120,6 +120,45 @@ impl TextureQuality {
     }
 }
 
+/// How the scene's edges are smoothed. Ordered from cheapest to dearest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum AntiAliasing {
+    /// Hard, stair-stepped edges.
+    Off,
+    /// Blurs high-contrast edges in the finished picture: cheap, a little soft.
+    Fxaa,
+    /// Draws the scene with 2 or 4 samples per pixel and averages them.
+    Msaa2,
+    Msaa4,
+}
+
+impl AntiAliasing {
+    pub const ALL: [AntiAliasing; 4] = [
+        AntiAliasing::Off,
+        AntiAliasing::Fxaa,
+        AntiAliasing::Msaa2,
+        AntiAliasing::Msaa4,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            AntiAliasing::Off => "Off",
+            AntiAliasing::Fxaa => "FXAA",
+            AntiAliasing::Msaa2 => "MSAA 2×",
+            AntiAliasing::Msaa4 => "MSAA 4×",
+        }
+    }
+
+    /// How many samples per pixel the scene is drawn with.
+    pub fn samples(self) -> u32 {
+        match self {
+            AntiAliasing::Off | AntiAliasing::Fxaa => 1,
+            AntiAliasing::Msaa2 => 2,
+            AntiAliasing::Msaa4 => 4,
+        }
+    }
+}
+
 /// The smallest and largest render scale: the scene is drawn at this
 /// fraction of the output's width and height.
 pub const RENDER_SCALE_RANGE: std::ops::RangeInclusive<f32> = 0.5..=2.0;
@@ -154,6 +193,8 @@ pub struct GraphicsSettings {
     pub render_scale: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub texture_quality: Option<TextureQuality>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anti_aliasing: Option<AntiAliasing>,
 }
 
 impl GraphicsSettings {
@@ -228,6 +269,15 @@ impl GraphicsSettings {
         })
     }
 
+    /// The anti-aliasing: the override, or the preset's.
+    pub fn anti_aliasing(&self) -> AntiAliasing {
+        self.anti_aliasing.unwrap_or(match self.quality {
+            Quality::Low => AntiAliasing::Off,
+            Quality::Medium => AntiAliasing::Fxaa,
+            Quality::High | Quality::Ultra => AntiAliasing::Msaa4,
+        })
+    }
+
     /// The values the renderer uses: these settings, lowered where the GPU
     /// can't meet them, with a note for each one lowered. Never raises one.
     pub fn effective(&self, capabilities: &Capabilities) -> EffectiveGraphics {
@@ -255,12 +305,31 @@ impl GraphicsSettings {
                 capabilities.max_texture_layers,
             ));
         }
+        let wanted = self.anti_aliasing();
+        // The best mode at or below the one asked for with a sample count
+        // the GPU has. FXAA and Off draw with one sample, which every GPU has.
+        let anti_aliasing = AntiAliasing::ALL
+            .into_iter()
+            .rev()
+            .filter(|&mode| mode <= wanted)
+            .find(|mode| capabilities.supports_samples(mode.samples()))
+            .unwrap_or(AntiAliasing::Off);
+        if anti_aliasing != wanted {
+            notes.push(format!(
+                "Anti-aliasing lowered from {} to {}: this GPU can't draw the scene with {} \
+                 samples per pixel.",
+                wanted.label(),
+                anti_aliasing.label(),
+                wanted.samples(),
+            ));
+        }
         EffectiveGraphics {
             shadow_quality,
             shadow_distance: self.shadow_distance(),
             post_processing: self.post_processing(),
             render_scale: self.render_scale(),
             texture_quality: self.texture_quality(),
+            anti_aliasing,
             notes,
         }
     }
@@ -277,7 +346,17 @@ pub struct Capabilities {
     pub timestamp_queries: bool,
     /// True when the adapter draws on the CPU, not a graphics card.
     pub software: bool,
+    /// The samples per pixel the scene's color and depth can both be drawn
+    /// with, as bits: `n` is set when `n` samples work (1 always is).
+    pub msaa_samples: u32,
 }
+
+/// The formats of the scene's HDR color and its depth, which multisampling
+/// must work for. Must match `HDR_FORMAT` and `DEPTH_FORMAT` in the renderer.
+pub(crate) const SCENE_FORMATS: [wgpu::TextureFormat; 2] = [
+    wgpu::TextureFormat::Rgba16Float,
+    wgpu::TextureFormat::Depth32Float,
+];
 
 impl Capabilities {
     /// Reads `device`'s limits and features. `adapter` (when known) says
@@ -289,8 +368,31 @@ impl Capabilities {
             max_texture_layers: limits.max_texture_array_layers,
             timestamp_queries: device.features().contains(wgpu::Features::TIMESTAMP_QUERY),
             software: adapter.is_some_and(|info| info.device_type == wgpu::DeviceType::Cpu),
+            msaa_samples: msaa_samples(device.features()),
         }
     }
+
+    /// Whether the scene can be drawn with `samples` per pixel.
+    pub fn supports_samples(&self, samples: u32) -> bool {
+        samples == 1 || (samples.is_power_of_two() && self.msaa_samples & samples != 0)
+    }
+}
+
+/// The sample counts both [`SCENE_FORMATS`] support, as bits. Devices are
+/// opened without wgpu's adapter-specific format features, so wgpu checks
+/// textures against the formats' guaranteed features: these.
+fn msaa_samples(features: wgpu::Features) -> u32 {
+    [1, 2, 4, 8, 16]
+        .into_iter()
+        .filter(|&count| {
+            SCENE_FORMATS.iter().all(|format| {
+                format
+                    .guaranteed_format_features(features)
+                    .flags
+                    .sample_count_supported(count)
+            })
+        })
+        .fold(0, |bits, count| bits | count)
 }
 
 impl Default for Capabilities {
@@ -302,6 +404,7 @@ impl Default for Capabilities {
             max_texture_layers: limits.max_texture_array_layers,
             timestamp_queries: false,
             software: false,
+            msaa_samples: msaa_samples(wgpu::Features::empty()),
         }
     }
 }
@@ -318,6 +421,7 @@ pub struct EffectiveGraphics {
     /// the GPU's textures is drawn at the largest size it can hold.
     pub render_scale: f32,
     pub texture_quality: TextureQuality,
+    pub anti_aliasing: AntiAliasing,
     /// Why each lowered value was lowered, for showing in the settings.
     pub notes: Vec<String>,
 }
@@ -347,25 +451,28 @@ mod tests {
                 settings.post_processing(),
                 settings.render_scale(),
                 settings.texture_quality(),
+                settings.anti_aliasing(),
             )
         };
+        use AntiAliasing::{Fxaa, Msaa4, Off};
         use TextureQuality::{Full, Half, Quarter};
         assert_eq!(
             values(Quality::Low),
-            (map(1024, 2), 75.0, false, 0.75, Quarter)
+            (map(1024, 2), 75.0, false, 0.75, Quarter, Off)
         );
         assert_eq!(
             values(Quality::Medium),
-            (map(2048, 2), 100.0, true, 1.0, Half)
+            (map(2048, 2), 100.0, true, 1.0, Half, Fxaa)
         );
         assert_eq!(
             values(Quality::High),
-            (map(2048, 3), 150.0, true, 1.0, Full)
+            (map(2048, 3), 150.0, true, 1.0, Full, Msaa4)
         );
         assert_eq!(
             values(Quality::Ultra),
-            (map(4096, 4), 300.0, true, 1.0, Full)
+            (map(4096, 4), 300.0, true, 1.0, Full, Msaa4)
         );
+        assert_eq!(AntiAliasing::ALL.map(AntiAliasing::samples), [1, 1, 2, 4]);
         assert_eq!(
             [Quarter, Half, Full].map(TextureQuality::skipped_levels),
             [2, 1, 0]
@@ -418,6 +525,16 @@ mod tests {
             assert_eq!(textures.texture_quality(), TextureQuality::Half);
             assert_eq!(textures.render_scale(), preset.render_scale());
             assert_eq!(textures.post_processing(), preset.post_processing());
+            assert_eq!(textures.anti_aliasing(), preset.anti_aliasing());
+
+            let smoothing = GraphicsSettings {
+                anti_aliasing: Some(AntiAliasing::Msaa2),
+                ..preset.clone()
+            };
+            assert_eq!(smoothing.anti_aliasing(), AntiAliasing::Msaa2);
+            assert_eq!(smoothing.texture_quality(), preset.texture_quality());
+            assert_eq!(smoothing.shadow_quality(), preset.shadow_quality());
+            assert_eq!(smoothing.post_processing(), preset.post_processing());
         }
         let broken = GraphicsSettings {
             shadow_distance: Some(f32::NAN),
@@ -445,6 +562,7 @@ mod tests {
             post_processing: Some(false),
             render_scale: Some(0.5),
             texture_quality: Some(TextureQuality::Quarter),
+            anti_aliasing: Some(AntiAliasing::Fxaa),
         };
         let text = serde_json::to_string(&settings).unwrap();
         assert_eq!(
@@ -510,6 +628,58 @@ mod tests {
     }
 
     #[test]
+    fn a_gpu_without_msaa_4x_gets_2x_or_fxaa_with_a_note() {
+        // wgpu guarantees 4× for the scene's formats; 2× needs the adapter.
+        assert_eq!(Capabilities::default().msaa_samples, 1 | 4);
+        let high = GraphicsSettings::preset(Quality::High);
+        assert_eq!(
+            high.effective(&Capabilities::default()).anti_aliasing,
+            AntiAliasing::Msaa4
+        );
+
+        let two_only = Capabilities {
+            msaa_samples: 1 | 2,
+            ..Capabilities::default()
+        };
+        let lowered = high.effective(&two_only);
+        assert_eq!(lowered.anti_aliasing, AntiAliasing::Msaa2);
+        assert_eq!(lowered.notes.len(), 1, "{:?}", lowered.notes);
+        assert!(
+            lowered.notes[0].contains("MSAA 4× to MSAA 2×"),
+            "{:?}",
+            lowered.notes
+        );
+
+        let none = Capabilities {
+            msaa_samples: 1,
+            ..Capabilities::default()
+        };
+        let fxaa = high.effective(&none);
+        assert_eq!(fxaa.anti_aliasing, AntiAliasing::Fxaa);
+        assert!(
+            fxaa.notes[0].contains("MSAA 4× to FXAA"),
+            "{:?}",
+            fxaa.notes
+        );
+        // FXAA and Off need no samples, so they're never lowered.
+        for mode in [AntiAliasing::Off, AntiAliasing::Fxaa] {
+            let settings = GraphicsSettings {
+                anti_aliasing: Some(mode),
+                ..high.clone()
+            };
+            let effective = settings.effective(&none);
+            assert_eq!(effective.anti_aliasing, mode);
+            assert!(effective.notes.is_empty());
+        }
+        // A broken reading (no bits at all) still can't crash or raise.
+        let broken = Capabilities {
+            msaa_samples: 0,
+            ..Capabilities::default()
+        };
+        assert_eq!(high.effective(&broken).anti_aliasing, AntiAliasing::Fxaa);
+    }
+
+    #[test]
     fn effective_never_raises_a_setting() {
         let capabilities = [
             Capabilities::default(),
@@ -518,9 +688,11 @@ mod tests {
                 max_texture_layers: 2048,
                 timestamp_queries: true,
                 software: false,
+                msaa_samples: 1 | 2 | 4 | 8,
             },
             Capabilities {
                 max_texture_size: 1024,
+                msaa_samples: 1 | 2,
                 ..Capabilities::default()
             },
             Capabilities {
@@ -528,9 +700,14 @@ mod tests {
                 max_texture_layers: 1,
                 timestamp_queries: false,
                 software: true,
+                msaa_samples: 1,
             },
         ];
-        for quality in Quality::ALL {
+        let modes = AntiAliasing::ALL.map(Some).into_iter().chain([None]);
+        let combinations = Quality::ALL
+            .into_iter()
+            .flat_map(|quality| modes.clone().map(move |mode| (quality, mode)));
+        for (quality, anti_aliasing) in combinations {
             for shadows in ShadowQuality::ALL.map(Some).into_iter().chain([None]) {
                 for post in [None, Some(false), Some(true)] {
                     let settings = GraphicsSettings {
@@ -540,6 +717,7 @@ mod tests {
                         post_processing: post,
                         render_scale: Some(0.5),
                         texture_quality: Some(TextureQuality::Half),
+                        anti_aliasing,
                     };
                     for capabilities in &capabilities {
                         let effective = settings.effective(capabilities);
@@ -548,10 +726,11 @@ mod tests {
                         assert!(effective.post_processing <= settings.post_processing());
                         assert_eq!(effective.render_scale, settings.render_scale());
                         assert_eq!(effective.texture_quality, settings.texture_quality());
-                        assert_eq!(
-                            effective.notes.is_empty(),
-                            effective.shadow_quality == settings.shadow_quality()
-                        );
+                        assert!(effective.anti_aliasing <= settings.anti_aliasing());
+                        let lowered =
+                            usize::from(effective.shadow_quality != settings.shadow_quality())
+                                + usize::from(effective.anti_aliasing != settings.anti_aliasing());
+                        assert_eq!(effective.notes.len(), lowered);
                     }
                 }
             }

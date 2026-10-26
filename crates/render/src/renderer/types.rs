@@ -60,6 +60,9 @@ pub(super) const LIGHT_SCALE: f32 = 20.0;
 /// The scene is drawn in high dynamic range, into a texture that can hold
 /// light brighter than 1. Post-processing then brings it down to the screen.
 pub(super) const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+/// The finished, tone-mapped picture while FXAA is on, before FXAA smooths
+/// it into the output. sRGB, so 8 bits keep dark shades from banding.
+pub(super) const FXAA_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 /// How many blur levels bloom uses at render scale 1, each half the size of
 /// the one before. Whatever the scale, the last is this many halvings of the
 /// output's size, so the glow spreads as far across the screen.
@@ -350,7 +353,39 @@ pub(super) struct PostPasses {
     pub(super) downsample: wgpu::RenderPipeline,
     /// Adds to what's already in the level it draws into.
     pub(super) upsample: wgpu::RenderPipeline,
+    /// Into what's drawn into (the window or texture), or into
+    /// [`FXAA_FORMAT`] while FXAA is on.
     pub(super) composite: wgpu::RenderPipeline,
+    pub(super) composite_for_fxaa: wgpu::RenderPipeline,
+    pub(super) fxaa: wgpu::RenderPipeline,
+}
+
+/// One more strong reference than there are of each kind of scene target
+/// alive, so tests can tell that none leaked.
+#[derive(Default)]
+pub(super) struct TargetsAlive {
+    /// Sets of [`PostTargets`].
+    pub(super) sets: Arc<()>,
+    pub(super) msaa: Arc<()>,
+    pub(super) fxaa: Arc<()>,
+}
+
+/// The multisampled color the scene is drawn into while MSAA is on. Its
+/// samples are averaged ("resolved") into [`PostTargets::hdr_view`] at the
+/// end of the scene pass, and then thrown away.
+pub(super) struct MsaaTarget {
+    pub(super) view: wgpu::TextureView,
+    /// A clone of [`TargetsAlive::msaa`].
+    pub(super) _alive: Arc<()>,
+}
+
+/// The tone-mapped picture at the output's size while FXAA is on, and the
+/// FXAA pass's binding of it.
+pub(super) struct FxaaTarget {
+    pub(super) view: wgpu::TextureView,
+    pub(super) group: wgpu::BindGroup,
+    /// A clone of [`TargetsAlive::fxaa`].
+    pub(super) _alive: Arc<()>,
 }
 
 /// What the scene draws into and post-processing reads, at the scene's
@@ -359,13 +394,20 @@ pub(super) struct PostTargets {
     /// The scene's size in pixels, and the output's it was made for.
     pub(super) size: (u32, u32),
     pub(super) output: (u32, u32),
-    /// A clone of [`ScenePipeline::targets_alive`], so sets of targets still
-    /// alive can be counted.
+    /// Samples per pixel of the scene's color and depth.
+    pub(super) samples: u32,
+    /// A clone of [`TargetsAlive::sets`], so sets of targets still alive
+    /// can be counted.
     pub(super) _alive: Arc<()>,
-    /// Where the scene is drawn.
+    /// Where the scene is drawn, or with MSAA where it's resolved.
     pub(super) hdr_view: wgpu::TextureView,
-    /// The scene's depth, thrown away after the scene pass.
+    /// Only while MSAA is on.
+    pub(super) msaa: Option<MsaaTarget>,
+    /// The scene's depth, with `samples` per pixel, thrown away after the
+    /// scene pass.
     pub(super) depth_view: wgpu::TextureView,
+    /// Only while FXAA is on.
+    pub(super) fxaa: Option<FxaaTarget>,
     /// Bloom levels from half the scene's size down, each half the one before.
     pub(super) levels: Vec<wgpu::TextureView>,
     /// Scene to the first level.
@@ -388,11 +430,11 @@ pub(super) struct ScenePipeline {
     /// Camera-facing pictures, such as particles.
     pub(super) sprites: sprites::SpritePass,
     pub(super) post: PostPasses,
-    /// The scene's HDR and depth textures and the bloom levels, remade
-    /// when the scene's size changes.
+    /// The scene's HDR and depth textures, the bloom levels and the
+    /// anti-aliasing targets, remade when the scene's size or the
+    /// anti-aliasing changes.
     pub(super) post_targets: PostTargets,
-    /// One more strong reference than there are sets of targets alive.
-    pub(super) targets_alive: Arc<()>,
+    pub(super) targets_alive: TargetsAlive,
     /// The size of what's drawn into (the window or texture), in pixels.
     pub(super) output_size: (u32, u32),
     pub(super) light_buffer: wgpu::Buffer,

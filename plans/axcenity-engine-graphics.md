@@ -137,10 +137,10 @@ An anti-aliasing setting: Off, FXAA, MSAA 2×, MSAA 4×. **MSAA** draws the HDR 
 
 ### Acceptance criteria
 
-- [ ] The edge of a tilted block over the sky has in-between pixel values with MSAA 4× and FXAA, and hard steps with Off (GPU test on edge pixels).
-- [ ] Cut-out (MASK) and see-through items, terrain, sprites and the sky draw correctly with each mode. `hello-graphics` matches its reference with MSAA (within the harness tolerance, regenerated once if edges alone differ, and that difference reviewed by eye).
-- [ ] An adapter that lacks MSAA 4× for the HDR format gets 2× or FXAA, with a note, and doesn't crash (capabilities unit test).
-- [ ] Switching modes at run time frees the multisampled targets when they're unused.
+- [x] The edge of a tilted block over the sky has in-between pixel values with MSAA 4× and FXAA, and hard steps with Off (GPU test on edge pixels).
+- [x] Cut-out (MASK) and see-through items, terrain, sprites and the sky draw correctly with each mode. `hello-graphics` matches its reference with MSAA (within the harness tolerance, regenerated once if edges alone differ, and that difference reviewed by eye).
+- [x] An adapter that lacks MSAA 4× for the HDR format gets 2× or FXAA, with a note, and doesn't crash (capabilities unit test).
+- [x] Switching modes at run time frees the multisampled targets when they're unused.
 
 ---
 

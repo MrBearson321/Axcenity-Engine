@@ -8,7 +8,8 @@ use super::*;
 use crate::theme::{Accent, Appearance, Density, Palette, ThemeChoice, type_scale};
 use crate::widgets;
 use axcenity_render::{
-    Capabilities, GraphicsSettings, Quality, RENDER_SCALE_RANGE, ShadowQuality, TextureQuality,
+    AntiAliasing, Capabilities, GraphicsSettings, Quality, RENDER_SCALE_RANGE, ShadowQuality,
+    TextureQuality,
 };
 
 /// Ctrl+, (Cmd+, on macOS) opens Settings, as in most desktop apps.
@@ -592,6 +593,20 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
                     }
                 });
             ui.end_row();
+
+            ui.label("Anti-aliasing");
+            let label = |mode: Option<AntiAliasing>| match mode {
+                Some(mode) => mode.label().to_owned(),
+                None => format!("Preset ({})", preset.anti_aliasing().label()),
+            };
+            egui::ComboBox::from_id_salt("anti-aliasing")
+                .selected_text(label(settings.anti_aliasing))
+                .show_ui(ui, |ui| {
+                    for choice in std::iter::once(None).chain(AntiAliasing::ALL.map(Some)) {
+                        ui.selectable_value(&mut settings.anti_aliasing, choice, label(choice));
+                    }
+                });
+            ui.end_row();
         });
     ui.add_space(16.0);
     widgets::section_label(ui, "In use");
@@ -619,6 +634,13 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
     ui.label(format!(
         "Textures: {} size",
         effective.texture_quality.label().to_lowercase()
+    ));
+    ui.label(format!(
+        "Anti-aliasing: {}",
+        match effective.anti_aliasing {
+            AntiAliasing::Off => "off".to_owned(),
+            mode => mode.label().to_owned(),
+        }
     ));
     for note in &effective.notes {
         ui.label(egui::RichText::new(note).color(palette.warning));
@@ -909,6 +931,7 @@ mod tests {
             post_processing: None,
             render_scale: Some(0.5),
             texture_quality: Some(TextureQuality::Half),
+            anti_aliasing: Some(AntiAliasing::Msaa2),
         };
         let mut storage = MemoryStorage::default();
         eframe::App::save(&mut app, &mut storage);

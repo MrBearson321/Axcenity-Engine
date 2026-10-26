@@ -91,3 +91,48 @@ fn fs_composite(in: VertexOut) -> @location(0) vec4<f32> {
     // Colors past 1 can't be shown. The screen's sRGB format does the rest.
     return vec4<f32>(clamp(color, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
 }
+
+// FXAA: smooths stair-stepped edges in the finished picture (`source`, the
+// composite's output). Reading it gives linear light, so contrast is judged
+// on the square root of its brightness, closer to how the eye sees it.
+fn fxaa_luma(uv: vec2<f32>) -> f32 {
+    let color = textureSampleLevel(source, linear_sampler, uv, 0.0).rgb;
+    return sqrt(dot(color, vec3<f32>(0.299, 0.587, 0.114)));
+}
+
+fn fxaa_color(uv: vec2<f32>) -> vec3<f32> {
+    return textureSampleLevel(source, linear_sampler, uv, 0.0).rgb;
+}
+
+@fragment
+fn fs_fxaa(in: VertexOut) -> @location(0) vec4<f32> {
+    let texel = 1.0 / vec2<f32>(textureDimensions(source));
+    let center = fxaa_color(in.uv);
+    let middle = sqrt(dot(center, vec3<f32>(0.299, 0.587, 0.114)));
+    let nw = fxaa_luma(in.uv + texel * vec2<f32>(-1.0, -1.0));
+    let ne = fxaa_luma(in.uv + texel * vec2<f32>(1.0, -1.0));
+    let sw = fxaa_luma(in.uv + texel * vec2<f32>(-1.0, 1.0));
+    let se = fxaa_luma(in.uv + texel * vec2<f32>(1.0, 1.0));
+    let lowest = min(middle, min(min(nw, ne), min(sw, se)));
+    let highest = max(middle, max(max(nw, ne), max(sw, se)));
+    // Flat areas and faint edges are left exactly as they are.
+    if highest - lowest < max(0.0312, highest * 0.125) {
+        return vec4<f32>(center, 1.0);
+    }
+    // The edge runs across the direction brightness changes fastest:
+    // blend along it, up to 8 pixels each way.
+    var along = vec2<f32>(-((nw + ne) - (sw + se)), (nw + sw) - (ne + se));
+    let reduce = max((nw + ne + sw + se) * (0.25 / 8.0), 1.0 / 128.0);
+    let scale = 1.0 / (min(abs(along.x), abs(along.y)) + reduce);
+    along = clamp(along * scale, vec2<f32>(-8.0), vec2<f32>(8.0)) * texel;
+    let near = 0.5 * (fxaa_color(in.uv + along * (1.0 / 3.0 - 0.5))
+        + fxaa_color(in.uv + along * (2.0 / 3.0 - 0.5)));
+    let far = near * 0.5 + 0.25 * (fxaa_color(in.uv - along * 0.5)
+        + fxaa_color(in.uv + along * 0.5));
+    // The wider blend reached past the edge into other shades: keep the near one.
+    let far_luma = sqrt(dot(far, vec3<f32>(0.299, 0.587, 0.114)));
+    if far_luma < lowest || far_luma > highest {
+        return vec4<f32>(near, 1.0);
+    }
+    return vec4<f32>(far, 1.0);
+}

@@ -46,6 +46,7 @@ pub(super) struct SpriteDraw {
 
 pub(super) struct SpritePass {
     pipeline: wgpu::RenderPipeline,
+    layout: wgpu::PipelineLayout,
     uniform_buffer: wgpu::Buffer,
     uniform_group: wgpu::BindGroup,
     texture_layout: wgpu::BindGroupLayout,
@@ -59,7 +60,8 @@ pub(super) struct SpritePass {
 }
 
 impl SpritePass {
-    pub(super) fn new(device: &wgpu::Device, white: &wgpu::TextureView) -> Self {
+    /// `samples` per pixel must match the scene's targets.
+    pub(super) fn new(device: &wgpu::Device, white: &wgpu::TextureView, samples: u32) -> Self {
         let uniform_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("sprite camera"),
             entries: &[wgpu::BindGroupLayoutEntry {
@@ -120,60 +122,16 @@ impl SpritePass {
         });
         let white_group = texture_group(device, &texture_layout, white, &sampler);
 
-        let shader = device.create_shader_module(wgpu::include_wgsl!("../sprite.wgsl"));
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("sprites"),
             bind_group_layouts: &[&uniform_layout, &texture_layout],
             push_constant_ranges: &[],
         });
-        let blend = wgpu::BlendComponent {
-            src_factor: wgpu::BlendFactor::One,
-            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-            operation: wgpu::BlendOperation::Add,
-        };
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("sprites"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                compilation_options: Default::default(),
-                buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: size_of::<SpriteRaw>() as u64,
-                    step_mode: wgpu::VertexStepMode::Instance,
-                    attributes: &wgpu::vertex_attr_array![
-                        0 => Float32x4, 1 => Float32x4, 2 => Float32x4
-                    ],
-                }],
-            },
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
-                depth_write_enabled: false,
-                depth_compare: wgpu::CompareFunction::LessEqual,
-                stencil: Default::default(),
-                bias: Default::default(),
-            }),
-            multisample: Default::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: HDR_FORMAT,
-                    blend: Some(wgpu::BlendState {
-                        color: blend,
-                        alpha: blend,
-                    }),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview: None,
-            cache: None,
-        });
+        let pipeline = sprite_pipeline(device, &layout, samples);
         let capacity = 256;
         Self {
             pipeline,
+            layout,
             uniform_buffer,
             uniform_group,
             texture_layout,
@@ -183,6 +141,11 @@ impl SpritePass {
             buffer: create_buffer(device, capacity),
             capacity,
         }
+    }
+
+    /// Remakes the pipeline for drawing with `samples` per pixel.
+    pub(super) fn set_samples(&mut self, device: &wgpu::Device, samples: u32) {
+        self.pipeline = sprite_pipeline(device, &self.layout, samples);
     }
 
     /// Uploads `list`'s sprites, farthest first, and returns the runs to
@@ -288,6 +251,63 @@ impl SpritePass {
     pub(super) fn forget(&mut self, kept: impl Fn(u64) -> bool) {
         self.groups.retain(|key, _| kept(*key));
     }
+}
+
+/// Draws sprites into the HDR scene with `samples` per pixel.
+fn sprite_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    samples: u32,
+) -> wgpu::RenderPipeline {
+    let shader = device.create_shader_module(wgpu::include_wgsl!("../sprite.wgsl"));
+    let blend = wgpu::BlendComponent {
+        src_factor: wgpu::BlendFactor::One,
+        dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+        operation: wgpu::BlendOperation::Add,
+    };
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("sprites"),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            compilation_options: Default::default(),
+            buffers: &[wgpu::VertexBufferLayout {
+                array_stride: size_of::<SpriteRaw>() as u64,
+                step_mode: wgpu::VertexStepMode::Instance,
+                attributes: &wgpu::vertex_attr_array![
+                    0 => Float32x4, 1 => Float32x4, 2 => Float32x4
+                ],
+            }],
+        },
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: false,
+            depth_compare: wgpu::CompareFunction::LessEqual,
+            stencil: Default::default(),
+            bias: Default::default(),
+        }),
+        multisample: wgpu::MultisampleState {
+            count: samples,
+            ..Default::default()
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: HDR_FORMAT,
+                blend: Some(wgpu::BlendState {
+                    color: blend,
+                    alpha: blend,
+                }),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview: None,
+        cache: None,
+    })
 }
 
 fn texture_group(
