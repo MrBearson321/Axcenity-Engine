@@ -718,4 +718,29 @@ fn a_navigation_agents_senses_save_and_load_and_an_older_agent_gets_the_defaults
     assert_eq!(agent.property("SightAngle"), Some(&Value::Number(120.0)));
     assert_eq!(agent.property("HearingRange"), Some(&Value::Number(30.0)));
     assert_eq!(agent.property("SeesPlayer"), Some(&Value::Bool(false)));
+    assert_eq!(
+        agent.property("BehaviorTree"),
+        Some(&Value::String(String::new()))
+    );
+}
+
+#[test]
+fn a_navigation_agents_behavior_tree_saves_and_loads() {
+    let mut world = World::new();
+    let agent = world.create(ClassName::NavigationAgent).unwrap();
+    world.set_parent(agent, Some(world.workspace())).unwrap();
+    let tree = Value::String("assets/ai/Guard.behaviortree.json".to_owned());
+    world
+        .set_property(agent, "BehaviorTree", tree.clone())
+        .unwrap();
+    let text = write_world(&world);
+    assert!(text.contains("\"BehaviorTree\": \"assets/ai/Guard.behaviortree.json\""));
+    let reloaded = parse_world(&text).unwrap();
+    let id = reloaded
+        .find_first_child(reloaded.workspace(), "NavigationAgent")
+        .unwrap();
+    assert_eq!(
+        reloaded.get(id).unwrap().property("BehaviorTree"),
+        Some(&tree)
+    );
 }

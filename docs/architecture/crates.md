@@ -8,13 +8,13 @@ Which crate owns what, and what it may depend on. Read this before adding a crat
 | `assets` | the asset system: loading glTF/FBX models (with FBX skeletons, skin weights and takes), posing them, reading project files (`Assets`) and importing models | nothing engine-internal; plain data out |
 | `anim` | animation: clip and animator controller files, state machines and blending, and `Animators`, which plays every Animator and poses its MeshPart | `assets`, `core` |
 | `audio` | Kira playback for project sounds: `GameAudio` applies queued `SoundAction`s, keeps playback in line with each Sound, and spatializes emitters against the camera | `assets`, `core` |
-| `blocks` | persisted block-script data, node graphs (the UI Event Graph) and their one-way Lua translation | nothing engine-internal (`core` and `script` only in tests) |
+| `blocks` | persisted block-script data, node graphs (the UI Event Graph, and the nodes behavior trees offer) and their one-way Lua translation | nothing engine-internal (`core` and `script` only in tests) |
 | `render` | `wgpu` renderer | nothing engine-internal; takes a draw list |
 | `scene` | Instance tree → draw list (`build_draw_list`, including terrain chunks and UI layout), the shared `FlyCamera`, viewport picking (`pick`) | `core`, `assets`, `render`, `terrain`, `ui` |
 | `terrain` | terrain algorithms over `core::TerrainData`: brushes, generation, erosion, chunk meshes, file codecs | `core` |
 | `physics` | `rapier3d` integration | `core`, `assets` |
 | `character` | kinematic third-person walk and run; queries physics, never the reverse | `core`, `assets`, `physics` |
-| `nav` | the navigation mesh, built from `physics::solids`, paths across it, and the `NavigationAgent` stepper; neither `physics` nor `character` may depend on it | `core`, `assets`, `physics`, `character` |
+| `nav` | the navigation mesh, built from `physics::solids`, paths across it, the `NavigationAgent` stepper, and behavior trees (checked and run, read from their files with `serde_json`); neither `physics` nor `character` may depend on it | `core`, `assets`, `physics`, `character` |
 | `script` | Luau (`mlua`), sandbox, scheduler, engine API, TweenService (eased by `anim`'s curves) | `anim`, `audio`, `core`, `physics`, `assets` |
 | `ui` | UI Instance layout, CSS cascade (`taffy`), transitions (eased by `anim`'s curves) and screen-space draw data | `anim`, `core`, `render` |
 | `project` | project folder load and save, including CSS and block-script sources, upgrading older projects (animation files through `anim`), and the editor's asset check | `anim`, `assets`, `blocks`, `core`, `terrain` |
@@ -36,7 +36,7 @@ A large module is a parent file plus a folder of the same name. The parent keeps
 
 | Parent | Children |
 |---|---|
-| `editor/src/app.rs` | `assets`, `chrome`, `commands`, `edits`, `files`, `session`, `settings`, `terrain`, `tree_ops`, `ui_graphs` |
+| `editor/src/app.rs` | `assets`, `behavior_trees`, `chrome`, `commands`, `edits`, `files`, `session`, `settings`, `terrain`, `tree_ops`, `ui_graphs` |
 | `app/chrome.rs` | `panes` (dock panels), `menus` (title and menu bar), `toolbar` (ribbon and tools), `windows` (shortcuts, versions, pause and overlay widgets) |
 | `app/files.rs` | `export`, `import` (models and animations), `pickers`, `script_files`, `watch` (files changed on disk) |
 | `app/terrain.rs` | `strokes`, `layers`, `jobs` (generate and erode), `disk` |
@@ -51,5 +51,5 @@ A large module is a parent file plus a folder of the same name. The parent keeps
 | `render/src/renderer.rs` | `types` (GPU structs and constants), `scene` (`ScenePipeline`, the frame), `gpu`, `lighting`, `post`, `sprites`, `terrain`, `ui_pass`, `gpu_timer` |
 | `project/src/lib.rs` | `templates`, `scripts`, `stylesheets`, `ui_graphs` (plus `world_file`, `migrate`, `packed`, `versions`, `validate`, `terrain_files`) |
 | `ui/src/lib.rs` | `css` (property parsing), `paint` (draw items), `style` |
-| `blocks/src/lib.rs` | `translate` (Lua output), `from_lua`, `lua`, `node_graph` (generic graphs), `ui_graph` (UI nodes and their Lua) |
+| `blocks/src/lib.rs` | `translate` (Lua output), `from_lua`, `lua`, `node_graph` (generic graphs), `ui_graph` (UI nodes and their Lua), `behavior_tree` (the nodes behavior trees offer) |
 | `script/src/definitions.rs` | `tables` (types, functions), `docs` (property, event and class text) |

@@ -24,6 +24,7 @@
 
 mod asset_fixes;
 mod assets;
+mod behavior_trees;
 mod chrome;
 mod commands;
 mod edits;
@@ -54,6 +55,7 @@ use crate::animation::{AnimationStudio, StudioAction};
 use crate::asset_browser::{AssetBrowser, AssetPayload, BrowserAction};
 use crate::asset_check::AssetCheck;
 use crate::autocomplete;
+use crate::behavior_tree::BehaviorTreeStudio;
 use crate::block_editor;
 use crate::build_tools::{self, BuildSettings, PanelScene, ToolAction};
 use crate::console::Console;
@@ -246,6 +248,8 @@ pub struct EditorApp {
     asset_browser: AssetBrowser,
     /// The Animation panel's clips, open clip and preview.
     animation: AnimationStudio,
+    /// The Behavior Tree tab and the trees open in it.
+    behavior: BehaviorTreeStudio,
     /// The UI Designer tab's view of a ScreenGui.
     ui_designer: UiDesigner,
     /// The Terrain panel's tools, settings, previews and work under way.
@@ -313,6 +317,7 @@ impl egui_dock::TabViewer for DockViewer<'_> {
             Pane::Terrain => self.app.terrain_pane(ui),
             Pane::Profiler => self.app.profiler.show(ui),
             Pane::AssetCheck => self.app.asset_check_pane(ui),
+            Pane::BehaviorTree => self.app.behavior_tree_pane(ui),
             Pane::Script(id) => self.app.script_pane(ui, *id),
         }
     }
@@ -539,6 +544,7 @@ impl EditorApp {
             sound_preview: None,
             asset_browser: AssetBrowser::default(),
             animation: AnimationStudio::default(),
+            behavior: BehaviorTreeStudio::default(),
             ui_designer: UiDesigner::default(),
             terrain: TerrainStudio::default(),
             layout: Layout::default(),
@@ -1016,6 +1022,8 @@ impl EditorApp {
 mod agent_tests;
 #[cfg(test)]
 mod asset_fix_tests;
+#[cfg(test)]
+mod behavior_tree_tests;
 #[cfg(test)]
 mod ik_tests;
 #[cfg(test)]

@@ -10,7 +10,7 @@ Source and tests win when a doc is wrong. Update the topic file you used.
 | Instances and IDs | [architecture/data-model.md](architecture/data-model.md) |
 | The frame loop | [architecture/frame-loop.md](architecture/frame-loop.md) |
 | Physics | [architecture/physics.md](architecture/physics.md) |
-| The navigation mesh | [architecture/navigation.md](architecture/navigation.md) |
+| The navigation mesh, agents, or behavior trees | [architecture/navigation.md](architecture/navigation.md) |
 | Play and Stop | [architecture/play-mode.md](architecture/play-mode.md) |
 | Platforms or file access | [architecture/portability.md](architecture/portability.md) |
 | The editor window, ribbon, or theme | [editor/shell.md](editor/shell.md) |

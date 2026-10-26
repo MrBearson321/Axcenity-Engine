@@ -884,6 +884,10 @@ impl ClassName {
                 // the game during Play, for scripts to read.
                 ("SeesPlayer", Value::Bool(false)),
                 ("HearsPlayer", Value::Bool(false)),
+                // A behavior tree file (`.behaviortree.json`) the agent runs
+                // during Play, deciding where it walks. Empty runs none, and
+                // scripts set Destination themselves.
+                ("BehaviorTree", Value::String(String::new())),
             ],
             ClassName::SurfaceAppearance => {
                 let map = |name| (name, Value::String(String::new()));

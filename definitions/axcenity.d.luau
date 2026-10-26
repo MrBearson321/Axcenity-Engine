@@ -1478,7 +1478,7 @@ declare extern type FirstPersonController extends Instance with
 	[string]: any
 end
 
---- Walks the Model or Part it is parented to during Play: along the navigation mesh to its Destination, round walls and gaps, or straight at its Velocity. It sees and hears the player character within its SightRange, SightAngle and HearingRange, and fires PlayerSensed. It is not a physics body. View > Overlays > Agent Paths draws the path it is walking.
+--- Walks the Model or Part it is parented to during Play: along the navigation mesh to its Destination, round walls and gaps, or straight at its Velocity. It sees and hears the player character within its SightRange, SightAngle and HearingRange, and fires PlayerSensed. Its BehaviorTree, if it has one, decides where it walks. It is not a physics body. View > Overlays > Agent Paths draws the path it is walking.
 declare extern type NavigationAgent extends Instance with
 	--- Where the agent walks to, along the navigation mesh, during Play. Setting a new one finds a new path. A point off the mesh, or with no walkable route to it, leaves the agent where it is: Status becomes "Unreachable" and Output says why. The editor starts it where the agent stands. Set it from a script or the "walk to" block.
 	Destination: Vector3
@@ -1498,6 +1498,8 @@ declare extern type NavigationAgent extends Instance with
 	SeesPlayer: boolean
 	--- True while the agent hears a Sound playing in the player character. Set by the game during Play; PlayerSensed fires when it turns true.
 	HearsPlayer: boolean
+	--- The behavior tree the agent runs during Play: a .behaviortree.json file in the project, made in the Behavior Tree tab. Every frame, before the agent walks, the tree decides where it goes (it can test SeesPlayer and HearsPlayer, set Destination, chase the player character and wait), so it may overwrite a Destination a script set. Empty runs none, and scripts set Destination themselves. A file that isn't a behavior tree, or has problems, runs nothing and Output says why once.
+	BehaviorTree: string
 	--- Fires when the agent starts seeing or hearing the player character. The handler gets the sense: "Sight" or "Hearing".
 	PlayerSensed: Signal
 	[string]: any

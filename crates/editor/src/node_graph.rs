@@ -4,7 +4,7 @@
 //!
 //! It edits any [`NodeGraph`], and what nodes there are comes from a
 //! [`NodeLibrary`], so the UI Event Graph (the UI Designer's Event Graph
-//! tab) and later graphs share it. The view only keeps where it's looking
+//! tab) and behavior trees (the Behavior Tree tab) share it. The view only keeps where it's looking
 //! and what's selected ([`GraphView`]); the graph is the caller's.
 //!
 //! - Right-click the canvas (or **Add node**) for the node menu; drop a
@@ -77,9 +77,11 @@ const ERROR: Color32 = Color32::from_rgb(232, 72, 72);
 /// A node category's header colour.
 pub fn category_color(category: &str) -> Color32 {
     match category {
-        "Events" => Color32::from_rgb(168, 42, 42),
+        // A behavior tree's Root starts it, as an event starts a chain.
+        "Events" | "Root" => Color32::from_rgb(168, 42, 42),
         "Actions" => Color32::from_rgb(52, 104, 186),
-        "Flow" => Color32::from_rgb(92, 96, 110),
+        "Flow" | "Composites" => Color32::from_rgb(92, 96, 110),
+        "Conditions" => Color32::from_rgb(170, 112, 36),
         "Data" => Color32::from_rgb(44, 134, 92),
         "Variables" => Color32::from_rgb(128, 78, 170),
         _ => Color32::from_rgb(92, 96, 110),

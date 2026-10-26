@@ -43,6 +43,41 @@ impl EditorApp {
         }
     }
 
+    /// Asks for a behavior tree file inside the project, and returns its
+    /// path there for a NavigationAgent's `BehaviorTree`.
+    pub(in crate::app) fn pick_behavior_tree(&mut self) -> Option<String> {
+        use axcenity_blocks::behavior_tree::{BEHAVIOR_TREES_FOLDER, is_behavior_tree};
+        let project = self.project.as_ref()?;
+        let trees = project.folder.join(BEHAVIOR_TREES_FOLDER);
+        let start = if trees.is_dir() {
+            trees
+        } else {
+            project.folder.clone()
+        };
+        let file = rfd::FileDialog::new()
+            .set_title("Choose a behavior tree")
+            .add_filter("Behavior tree", &["json"])
+            .set_directory(&start)
+            .pick_file()?;
+        let relative = file
+            .strip_prefix(&project.folder)
+            .ok()
+            .map(|path| {
+                path.components()
+                    .map(|part| part.as_os_str().to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/")
+            })
+            .filter(|path| is_behavior_tree(path));
+        if relative.is_none() {
+            self.output.error(format!(
+                "Could not use `{}`: choose a `.behaviortree.json` file inside the project folder.",
+                file.display()
+            ));
+        }
+        relative
+    }
+
     /// Asks for an animator controller file inside the project, and returns
     /// its path there for an Animator's `Controller`.
     pub(in crate::app) fn pick_controller(&mut self) -> Option<String> {

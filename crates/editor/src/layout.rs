@@ -43,6 +43,9 @@ pub enum Pane {
     /// Missing files, invalid references, import failures, and broken
     /// dependencies (`asset_check.rs`). Starts closed; Check Assets opens it.
     AssetCheck,
+    /// A NavigationAgent's behavior tree in the graph editor
+    /// (`behavior_tree.rs`). Starts closed; opening a tree opens it.
+    BehaviorTree,
     /// An open script, stylesheet or block script, by its tab's id
     /// (`ScriptTab::id`).
     Script(u64),
@@ -50,7 +53,7 @@ pub enum Pane {
 
 impl Pane {
     /// The panels that can be closed and opened again, in menu order.
-    pub const CLOSABLE: [Pane; 9] = [
+    pub const CLOSABLE: [Pane; 10] = [
         Pane::Explorer,
         Pane::Properties,
         Pane::Console,
@@ -60,6 +63,7 @@ impl Pane {
         Pane::Terrain,
         Pane::Profiler,
         Pane::AssetCheck,
+        Pane::BehaviorTree,
     ];
 
     pub fn label(self) -> &'static str {
@@ -74,6 +78,7 @@ impl Pane {
             Pane::Terrain => "Terrain",
             Pane::Profiler => "Profiler",
             Pane::AssetCheck => "Asset Check",
+            Pane::BehaviorTree => "Behavior Tree",
             Pane::Script(_) => "Script",
         }
     }
@@ -90,6 +95,7 @@ impl Pane {
             Pane::Terrain => icons::MOUNTAINS,
             Pane::Profiler => icons::GAUGE,
             Pane::AssetCheck => icons::LIST,
+            Pane::BehaviorTree => icons::BRAIN,
             Pane::Script(_) => icons::CODE,
         }
     }
@@ -153,7 +159,7 @@ impl Layout {
             Pane::Console => Some(Pane::Assets),
             Pane::Assets | Pane::Profiler | Pane::AssetCheck => Some(Pane::Console),
             // A tab beside the Scene, with room for a preview and a graph.
-            Pane::Animation | Pane::UiDesigner => Some(Pane::Scene),
+            Pane::Animation | Pane::UiDesigner | Pane::BehaviorTree => Some(Pane::Scene),
             // A tab beside Properties, down the right.
             Pane::Terrain => Some(Pane::Properties),
             Pane::Script(_) => Some(Pane::Scene),
@@ -384,8 +390,8 @@ mod tests {
     fn every_panel_starts_open() {
         let layout = Layout::default();
         for pane in Pane::CLOSABLE.into_iter().chain([Pane::Scene]) {
-            if pane == Pane::AssetCheck {
-                assert!(!layout.is_open(pane), "Asset Check starts closed");
+            if matches!(pane, Pane::AssetCheck | Pane::BehaviorTree) {
+                assert!(!layout.is_open(pane), "{pane:?} starts closed");
                 continue;
             }
             assert!(layout.is_open(pane), "{pane:?}");

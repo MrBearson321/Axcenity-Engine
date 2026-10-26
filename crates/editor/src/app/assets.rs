@@ -103,6 +103,7 @@ impl EditorApp {
             AssetKind::Particle => self.drop_particle_texture(entry, spot),
             AssetKind::Animation => self.open_animation_clip(&entry.path, true),
             AssetKind::Controller => self.drop_controller(entry, spot),
+            AssetKind::BehaviorTree => self.drop_behavior_tree(&entry.path, spot.part),
         }
     }
 
@@ -592,6 +593,9 @@ impl EditorApp {
                 "animation clips and state machines come from importing an animated FBX model"
                     .to_owned(),
             ),
+            Some(AssetKind::BehaviorTree) => {
+                Err("behavior trees are made with New tree in the Behavior Tree tab".to_owned())
+            }
             Some(AssetKind::TextureSet) => {
                 Err("texture sets are saved with Get texture in the Assets panel".to_owned())
             }

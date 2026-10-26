@@ -15,6 +15,7 @@ mod app;
 mod asset_browser;
 mod asset_check;
 mod autocomplete;
+mod behavior_tree;
 mod block_editor;
 mod build_tools;
 mod console;

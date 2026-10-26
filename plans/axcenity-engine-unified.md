@@ -709,9 +709,9 @@ A behavior tree is its own asset, edited in the generic graph editor from Phase 
 
 ### Acceptance criteria
 
-- [ ] A creator can add, connect and save nodes that test sight and set a destination, and an agent using that tree chases the player when it sees them.
-- [ ] An agent with no tree still pathfinds when a script sets its destination.
-- [ ] Opening a state machine still edits animation states, and assigning one to an agent doesn't run it as AI.
+- [x] A creator can add, connect and save nodes that test sight and set a destination, and an agent using that tree chases the player when it sees them.
+- [x] An agent with no tree still pathfinds when a script sets its destination.
+- [x] Opening a state machine still edits animation states, and assigning one to an agent doesn't run it as AI.
 
 ---
 

@@ -242,6 +242,7 @@ impl EditorApp {
             saved_terrains: HashMap::new(),
         });
         self.animation = AnimationStudio::default();
+        self.behavior = BehaviorTreeStudio::default();
         self.asset_check.clear();
         self.replace_world(project.world);
     }

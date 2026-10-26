@@ -18,6 +18,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde::{Deserialize, Deserializer, Serialize};
 use thiserror::Error;
 
+pub mod behavior_tree;
 pub mod node_graph;
 mod translate;
 pub mod ui_graph;

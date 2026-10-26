@@ -209,7 +209,7 @@ impl EditorApp {
         // Save with nothing changed still writes the world file, as it
         // always has, but never over a world file the editor didn't load.
         let world_unsaved = !self.history.is_saved();
-        let graphs_unsaved = self.ui_graphs_unsaved();
+        let graphs_unsaved = self.ui_graphs_unsaved() || self.behavior.unsaved();
         let save_world =
             world_unsaved || (scripts.is_empty() && !graphs_unsaved && !project.keep_world_file);
 
@@ -229,7 +229,7 @@ impl EditorApp {
             saved.push(path);
         }
         // After the world, so a graph's LocalScript is made against what's saved.
-        if !self.save_ui_graphs(&mut saved) {
+        if !self.save_ui_graphs(&mut saved) || !self.save_behavior_trees(&mut saved) {
             self.toasts.error("Could not save. Output says why.");
             return false;
         }

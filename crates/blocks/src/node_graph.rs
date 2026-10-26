@@ -1,8 +1,8 @@
 //! A node graph: nodes with typed pins, wires between them, and comments.
 //!
 //! It's generic. What nodes there are comes from a library of
-//! [`NodeSpec`]s, so the UI Event Graph ([`crate::ui_graph`]) and later
-//! graphs (behavior trees) share the data, the edits here and the editor.
+//! [`NodeSpec`]s, so the UI Event Graph ([`crate::ui_graph`]) and behavior
+//! trees ([`crate::behavior_tree`]) share the data, the edits here and the editor.
 //! A node keeps its kind's name, where it sits, and the values typed into
 //! its fields and unwired inputs, all as text. Wires go from an output pin
 //! to an input pin.

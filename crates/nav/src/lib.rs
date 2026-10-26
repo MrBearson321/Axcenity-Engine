@@ -12,13 +12,16 @@
 //!
 //! Building reads the world and never changes it. [`NavMesh::find_path`]
 //! finds a walk across it, and [`Agents`] walks NavigationAgents along those
-//! paths during Play, and has them see and hear the player character.
+//! paths during Play, has them see and hear the player character, and runs
+//! their behavior trees.
 
 mod agents;
+mod behavior;
 mod path;
 mod perception;
 
 pub use agents::{AgentStatus, Agents, agent_parts, feet_of};
+pub use behavior::{BEHAVIOR_NODE_KINDS, BEHAVIOR_TREE_SUFFIX, BehaviorTree, TreeError};
 pub use path::PathError;
 pub use perception::{Sense, Sensed};
 
@@ -466,6 +469,8 @@ fn finite(v: Vector3) -> bool {
 
 #[cfg(test)]
 mod agent_tests;
+#[cfg(test)]
+mod behavior_tests;
 #[cfg(test)]
 mod perception_tests;
 #[cfg(test)]

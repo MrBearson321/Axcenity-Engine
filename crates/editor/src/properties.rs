@@ -32,6 +32,10 @@ pub enum Edit {
     PickClip,
     /// Opens the Animation's clip in the Animation tab.
     OpenClip,
+    /// Asks for a behavior tree file for a NavigationAgent's `BehaviorTree`.
+    PickBehaviorTree,
+    /// Opens the agent's behavior tree in the Behavior Tree tab.
+    OpenBehaviorTree,
     /// Animates the selected Part, Model or UI element: an Animator, a new
     /// clip and an Animation playing it, opened in the Animation tab.
     Animate,
@@ -579,6 +583,7 @@ fn value_control(ui: &mut egui::Ui, name: &'static str, value: Value) -> Option<
         Value::String(path) if name == "SoundId" => sound_control(ui, &path),
         Value::String(path) if name == "StateMachine" => controller_control(ui, &path),
         Value::String(path) if name == "Clip" => clip_control(ui, &path),
+        Value::String(path) if name == "BehaviorTree" => behavior_tree_control(ui, &path),
         // Picked by the editor; the Terrain Studio says where it is.
         Value::String(path) if name == "DataFolder" => {
             ui.label(if path.is_empty() {
@@ -690,6 +695,43 @@ fn controller_control(ui: &mut egui::Ui, path: &str) -> Option<Edit> {
         }
         let file = path.rsplit('/').next().unwrap_or(path);
         ui.add(egui::Label::new(file).truncate())
+            .on_hover_text(path);
+    });
+    edit
+}
+
+/// A NavigationAgent's behavior tree file, with buttons to pick another,
+/// open it and clear it.
+fn behavior_tree_control(ui: &mut egui::Ui, path: &str) -> Option<Edit> {
+    let mut edit = None;
+    ui.horizontal(|ui| {
+        if ui
+            .small_button(icons::FOLDER_OPEN)
+            .on_hover_text("Choose a behavior tree (.behaviortree.json) in the project")
+            .clicked()
+        {
+            edit = Some(Edit::PickBehaviorTree);
+        }
+        if path.is_empty() {
+            ui.weak("None");
+            return;
+        }
+        if ui
+            .small_button(icons::BRAIN)
+            .on_hover_text("Open it in the Behavior Tree tab")
+            .clicked()
+        {
+            edit = Some(Edit::OpenBehaviorTree);
+        }
+        if ui
+            .small_button(icons::X)
+            .on_hover_text("Run no tree: scripts set where it walks")
+            .clicked()
+        {
+            edit = Some(Edit::Property("BehaviorTree", Value::String(String::new())));
+        }
+        let name = axcenity_blocks::behavior_tree::behavior_tree_name(path);
+        ui.add(egui::Label::new(name).truncate())
             .on_hover_text(path);
     });
     edit

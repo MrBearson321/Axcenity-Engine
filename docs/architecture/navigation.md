@@ -1,6 +1,6 @@
 # Navigation
 
-Where characters can walk, and agents that walk there. The `nav` crate builds one navigation mesh from the Workspace (unified plan Phase 12), finds paths across it, and walks `NavigationAgent`s along them during Play (Phase 13), steering round obstacles that weren't in the mesh when the path was found (Phase 14). Agents see and hear the player character (Phase 15).
+Where characters can walk, and agents that walk there. The `nav` crate builds one navigation mesh from the Workspace (unified plan Phase 12), finds paths across it, and walks `NavigationAgent`s along them during Play (Phase 13), steering round obstacles that weren't in the mesh when the path was found (Phase 14). Agents see and hear the player character (Phase 15), and an agent with a behavior tree runs it to decide where to walk (Phase 16).
 
 ## What it's built from
 
@@ -51,8 +51,9 @@ A `NavigationAgent` (a class in `core`) is parented to a Model or Part, like a c
 - `Velocity` (Vector3): not zero, it moves straight that way, with no path.
 - `Status`: `"Idle"`, `"Moving"`, `"Reached"`, `"Unreachable"` or `"Blocked"`, written by the game.
 - `SightRange` (60), `SightAngle` (120) and `HearingRange` (30), and `SeesPlayer` and `HearsPlayer`, written by the game: see Perception.
+- `BehaviorTree`: a `.behaviortree.json` file it runs during Play, or empty for none: see Behavior trees.
 
-Hosts own an `Agents` (`agents.rs`), as they own `Controllers`. `Agents::step` runs after character controllers and before scripts, and `Agents::keep_kinematic` anchors the agents' parts just before physics. The mesh is built the first time an agent needs it (never in a game without agents), and again when the fingerprint changes, at most every 0.5 s of game time. Each step, for each agent with a body:
+Hosts own an `Agents` (`agents.rs`), as they own `Controllers`. `Agents::step` runs after character controllers and before scripts, and `Agents::keep_kinematic` anchors the agents' parts just before physics. The mesh is built the first time an agent needs it (never in a game without agents), and again when the fingerprint changes, at most every 0.5 s of game time. Each step, every agent with a body and a `BehaviorTree` first runs its tree (see Behavior trees), and then, for each agent with a body:
 
 - **Velocity not zero**: the path is dropped and the feet move by `Velocity × dt` across, in half-cell slices, each onto `ground_at`. At the edge of the mesh (a drop or a wall) it stops. `Destination` is set to where it now stands, so it stays put when `Velocity` goes back to zero (`Status` then `"Idle"`). Y is ignored.
 - **A Destination it hasn't planned for** (a new one, or the first step): `find_path` from its feet. A path makes it `"Moving"`. No path leaves it where it is, `"Unreachable"`, and gives a warning, `<full name> can't reach (x, y, z): <reason>.`, once per destination and reason. After the mesh rebuilds, an unreachable agent tries again (quietly, if it fails the same way).
@@ -88,6 +89,29 @@ Sight casts at most two rays (plus one per sensor in the way) for each agent wit
 
 Example: `examples/hello-perception`. Tests: `crates/nav/src/perception_tests.rs`, the player's `hello_perception_guard_sees_and_hears_the_player_from_lua_and_blocks`, the editor's `sight_range_set_in_properties_changes_what_the_guard_sees_in_play_and_saves`, and `a_navigation_agents_senses_save_and_load_and_an_older_agent_gets_the_defaults` in `crates/project/src/world_file/tests.rs`.
 
+### Behavior trees
+
+A behavior tree is its own asset, `assets/ai/<Name>.behaviortree.json`, and an agent names it in `BehaviorTree`. The file is a node graph in the same shape as a UI Event Graph (`{ "format_version": 1, "nodes", "wires", "comments" }`, see `docs/scripting/ui-graphs.md`), edited in the same graph editor. A new optional file, so `project::FORMAT_VERSION` didn't change. Its nodes (`blocks::behavior_tree::BEHAVIOR_NODES`, offered by the editor) and what they do (`nav/src/behavior.rs`, which checks and runs them) must match; `BEHAVIOR_NODE_KINDS` lists the kinds, child pins and fields, and an editor test compares the two.
+
+Wires go from a parent's child pin to a child's plain input (the white exec pins). Every frame of Play, before the agent walks, the tree is ticked from its Root, and each node it reaches succeeds, fails or is still running:
+
+| Node | Does |
+|---|---|
+| **Root** | Runs what's wired to its pin. One per tree. |
+| **Selector** (pins 1–4) | Tries its children in order, from 1 every frame, and stops at the first that succeeds or runs; fails when all fail. A child it stops reaching is stopped, so an earlier branch that starts to succeed takes over (Sees Player? interrupts a patrol). |
+| **Sequence** (pins 1–4) | Runs its children in order while each succeeds and picks up at the running one next frame; fails at the first failure. Conditions before the running child are checked again every frame, so a Sees Player? turning false stops the chase after it. |
+| **Sees Player?**, **Hears Player?** | Succeed while `SeesPlayer` or `HearsPlayer` is true (last frame's perception). |
+| **Move To** X, Y, Z | Sets `Destination` and runs until `Status` is `"Reached"` (success) or `"Unreachable"` or `"Blocked"` (failure). Already there, it succeeds at once. |
+| **Set Destination** X, Y, Z | Sets `Destination` and succeeds. |
+| **Chase Player** | Fails with no player character. Within 2.5 studs of them (across), stops the agent where it is and succeeds. Otherwise sets `Destination` to their feet, again whenever they're more than a stud from it (each time finding a path), and runs; fails when that's unreachable or blocked. |
+| **Wait** Seconds | Runs for that much game time, then succeeds. It doesn't stop the agent walking. |
+
+A node stopped (not reached in a frame after it ran) forgets its state: a Wait starts again, a Sequence starts from 1. A Destination is only written when it changes. Velocity still overrides the walk, and a script's Destination is overwritten when the tree sets one.
+
+`BehaviorTree::from_json` checks a file and gives every problem with its node: no Root (or a second one), nothing wired to Root, a Selector or Sequence with no children, a field that isn't a number (or Seconds below zero), an unknown kind, two wires out of one pin, a wire into a Root or out of a pin a node doesn't have, a loop, or more than 4096 nodes once a node wired under several parents is copied under each. `BehaviorTree::load` also refuses a path that isn't a `.behaviortree.json` (a state machine says it plays animation on an Animator). A tree that can't run leaves the agent to its scripts, and warns once: `<full name> doesn't run the behavior tree `<path>`: <why>.` Files are read the first time an agent names them and kept for the rest of Play.
+
+Example: `examples/hello-behavior` (a Guard whose tree patrols and chases, and a Courier with no tree walked by a script). Tests: `crates/nav/src/behavior_tests.rs`, the player's `hello_behavior_guard_runs_its_tree_and_the_courier_walks_where_its_script_sends_it`, and `crates/editor/src/app/behavior_tree_tests.rs`.
+
 ### Scripts and blocks
 
 Scripts set `Destination` and `Velocity` and read `Status`, `SeesPlayer` and `HearsPlayer`, and connect to `PlayerSensed`; blocks have **walk *agent* to (x, y, z)**, **set velocity of *agent* to (x, y, z)** and **when *agent* senses the player by *Sight/Hearing*** (`docs/scripting/blocks.md`). Example: `examples/hello-agent`. Tests: `crates/nav/src/agent_tests.rs`, the player's `hello_agent_walks_to_destinations_from_properties_lua_and_blocks`, and `crates/editor/src/app/agent_tests.rs`.
@@ -97,5 +121,7 @@ Scripts set `Destination` and `Velocity` and read `Status`, `SeesPlayer` and `He
 **View > Overlays > Nav Mesh** (also on the View ribbon tab and in Settings, and saved between runs) draws the mesh of the world the viewport shows, in edit mode or during Play (`app/nav_overlay.rs`, drawn by `paint_nav_mesh` in `viewport/overlays.rs`). Cells within 80 studs of the camera are filled with one colour per region, so unreachable ground stands out. The walkable area's edges are drawn out to 200 studs. The mesh rebuilds when the fingerprint changes, once no mouse button is held (so not mid-drag or mid-stroke), and at most every 0.5 s. The player never draws it, and builds a mesh only for its agents.
 
 **View > Overlays > Agent Paths** (also on the View ribbon tab and in Settings, saved between runs) draws, during Play, what's left of each agent's path: a line from its feet through each corner (a dot) to its destination (a ring), from `Session::agent_paths` (`paint_agent_paths` in `viewport/overlays.rs`). It only reads the paths, so it never changes a route. Insert an agent with **Agent** (Model tab, Effects group, or the Explorer's Insert menu): into the selected Model or part, or into a new `Agent` Model with a `Body` part.
+
+The **Behavior Tree** tab (`behavior_tree.rs`, with `app/behavior_trees.rs`; starts closed) edits trees in the generic graph editor. It follows the selected agent (or the agent in the selected Model) and shows its tree; its picker shows any tree in the project's `assets`. **New tree** makes `assets/ai/<agent's Model>.behaviortree.json` (a number added when taken) with a Root, and gives it to the selected agent if it has none; **Use on <agent>** gives the shown tree to the selected agent (one undo step). Problems show on their nodes, checked by the same code that runs the tree. Trees save with the project (and so before Play); each finished edit is a step of the tree's own undo while the pointer is over the graph. In the Assets panel a tree is a **Behavior tree**: drop it on an agent's body to give it the tree, or double-click to open it. Properties shows `BehaviorTree` with buttons to choose a file, open it and clear it.
 
 Tests: `crates/nav/src/tests.rs` (mesh) and `crates/nav/src/agent_tests.rs` (paths, agents, steering).

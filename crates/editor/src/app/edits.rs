@@ -53,6 +53,7 @@ impl EditorApp {
         !self.history.is_saved()
             || self.tabs.any_unsaved()
             || self.ui_graphs_unsaved()
+            || self.behavior.unsaved()
             || self.project.as_ref().is_some_and(|project| {
                 project
                     .block_scripts
@@ -101,6 +102,25 @@ impl EditorApp {
             }
             Edit::OpenController => {
                 self.open_animator_controller(id);
+                return;
+            }
+            Edit::PickBehaviorTree => {
+                if let Some(path) = self.pick_behavior_tree() {
+                    self.apply(id, Edit::Property("BehaviorTree", Value::String(path)));
+                    self.history.seal();
+                }
+                return;
+            }
+            Edit::OpenBehaviorTree => {
+                if let Some(path) = self
+                    .world
+                    .get(id)
+                    .and_then(|i| i.property("BehaviorTree"))
+                    .and_then(Value::as_str)
+                {
+                    let path = path.to_owned();
+                    self.open_behavior_tree(&path);
+                }
                 return;
             }
             Edit::Animate => {
@@ -825,6 +845,9 @@ impl EditorApp {
         if self.ui_designer.graph_has_pointer() && !self.playing() && self.undo_graph() {
             return;
         }
+        if self.behavior.has_pointer() && !self.playing() && self.behavior.undo() {
+            return;
+        }
         if !self.viewport.is_dragging() && !self.ui_designer.is_dragging() && !self.playing() {
             if let Some(restored) = self.history.undo(&mut self.world) {
                 self.apply_history_texts(restored.texts);
@@ -835,6 +858,9 @@ impl EditorApp {
     }
     pub(super) fn redo(&mut self) {
         if self.ui_designer.graph_has_pointer() && !self.playing() && self.redo_graph() {
+            return;
+        }
+        if self.behavior.has_pointer() && !self.playing() && self.behavior.redo() {
             return;
         }
         if !self.viewport.is_dragging() && !self.ui_designer.is_dragging() && !self.playing() {
@@ -985,6 +1011,8 @@ pub(super) fn set(world: &mut World, id: InstanceId, edit: Edit) -> anyhow::Resu
         | Edit::PickAudio
         | Edit::PickController
         | Edit::OpenController
+        | Edit::PickBehaviorTree
+        | Edit::OpenBehaviorTree
         | Edit::PickClip
         | Edit::OpenClip
         | Edit::Animate

@@ -1,6 +1,7 @@
 //! Finding the project's asset files and what kind each one is.
 
 use axcenity_assets::{AUDIO_EXTENSIONS, TEXTURE_EXTENSIONS};
+use axcenity_blocks::behavior_tree::BEHAVIOR_TREE_SUFFIX;
 
 use super::*;
 
@@ -21,6 +22,9 @@ pub fn kind_of(path: &str) -> Option<AssetKind> {
     }
     if lower.ends_with(axcenity_anim::STATE_MACHINE_EXTENSION) {
         return Some(AssetKind::Controller);
+    }
+    if lower.ends_with(BEHAVIOR_TREE_SUFFIX) {
+        return Some(AssetKind::BehaviorTree);
     }
     let extension = lower.rsplit_once('.')?.1;
     if MODEL_EXTENSIONS.contains(&extension) {
@@ -49,6 +53,7 @@ pub fn display_name(path: &str) -> String {
         axcenity_assets::TEXTURE_SET_SUFFIX,
         axcenity_anim::CLIP_EXTENSION,
         axcenity_anim::STATE_MACHINE_EXTENSION,
+        BEHAVIOR_TREE_SUFFIX,
     ] {
         if lower.ends_with(suffix) {
             return file[..file.len() - suffix.len()].to_owned();

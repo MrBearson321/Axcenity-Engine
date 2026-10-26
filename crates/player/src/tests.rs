@@ -326,6 +326,132 @@ fn hello_agent_walks_to_destinations_from_properties_lua_and_blocks() {
 }
 
 #[test]
+fn hello_behavior_guard_runs_its_tree_and_the_courier_walks_where_its_script_sends_it() {
+    /// The game in the player's frame order, reading files from the project.
+    struct Game {
+        world: World,
+        scripts: ScriptRuntime,
+        characters: Controllers,
+        agents: Agents,
+        physics: Physics,
+        assets: Assets,
+        printed: Vec<String>,
+    }
+    impl Game {
+        fn frame(&mut self) {
+            let (world, assets, dt) = (&mut self.world, &self.assets, 1.0 / 60.0);
+            self.characters
+                .step(world, assets, MoveInput::default(), dt);
+            self.agents.step(world, assets, dt);
+            let warnings = self.agents.take_warnings();
+            assert!(warnings.is_empty(), "{warnings:?}");
+            fire_sensed(&mut self.scripts, world, &mut self.agents);
+            self.scripts.input(world, &[]);
+            self.scripts.step(world, f64::from(dt));
+            self.characters.keep_kinematic(world);
+            self.agents.keep_kinematic(world);
+            self.physics.step(world, f64::from(dt));
+            self.scripts.heartbeat(world, f64::from(dt));
+            for line in self.scripts.take_output() {
+                assert_eq!(line.kind, OutputKind::Print, "{}", line.text);
+                self.printed.push(line.text);
+            }
+        }
+        fn run(&mut self, seconds: f32) {
+            for _ in 0..(seconds * 60.0).round() as usize {
+                self.frame();
+            }
+        }
+        fn feet(&self, body: InstanceId) -> Vector3 {
+            axcenity_nav::feet_of(&self.world, &[body]).unwrap()
+        }
+    }
+    fn across(a: Vector3, b: Vector3) -> f32 {
+        (a.x - b.x).hypot(a.z - b.z)
+    }
+
+    let (world, scripts, folder) = start_example_in("hello-behavior");
+    let find = |model: &str, child: &str| {
+        let model = world.find_first_child(world.workspace(), model).unwrap();
+        world.find_first_child(model, child).unwrap()
+    };
+    let (guard, guard_agent) = (find("Guard", "Body"), find("Guard", "NavigationAgent"));
+    let (courier, courier_agent) = (find("Courier", "Body"), find("Courier", "NavigationAgent"));
+    let player = find("Character", "Body");
+    let mut game = Game {
+        world,
+        scripts,
+        characters: Controllers::default(),
+        agents: Agents::default(),
+        physics: Physics::new(),
+        assets: Assets::new(&folder),
+        printed: Vec::new(),
+    };
+
+    // Out of sight, the Guard patrols to both ends, and the Courier (no
+    // tree) walks to where its script sent it, and is sent back.
+    let (mut east, mut west, mut courier_there) = (false, false, false);
+    for _ in 0..10 * 60 {
+        game.frame();
+        let at = game.feet(guard);
+        east |= across(at, Vector3::new(15.0, 0.0, -15.0)) < 0.5;
+        west |= across(at, Vector3::new(-15.0, 0.0, -15.0)) < 0.5;
+        courier_there |= across(game.feet(courier), Vector3::new(30.0, 0.0, 30.0)) < 0.5;
+    }
+    assert!(east && west, "the Guard patrols");
+    assert!(
+        courier_there,
+        "the Courier walks to its script's Destination"
+    );
+    let back = game
+        .world
+        .get(courier_agent)
+        .unwrap()
+        .property("Destination")
+        .cloned();
+    assert_eq!(back, Some(Value::Vector3(Vector3::new(-30.0, 0.0, 30.0))));
+    assert!(game.printed.is_empty(), "{:?}", game.printed);
+
+    // In front of the patrol: once the Guard faces that way, it sees the
+    // player and chases them down.
+    let spot = Vector3::new(0.0, 0.0, -8.0);
+    let position = Value::Vector3(Vector3::new(spot.x, 2.5, spot.z));
+    game.world
+        .set_property(player, "Position", position)
+        .unwrap();
+    let mut waited = 0;
+    while game.world.get(guard_agent).unwrap().property("SeesPlayer") != Some(&Value::Bool(true)) {
+        game.frame();
+        waited += 1;
+        assert!(waited < 8 * 60, "never seen");
+    }
+    game.run(3.0);
+    assert!(across(game.feet(guard), game.feet(player)) <= 2.6);
+    assert!(game.printed.contains(&"Guard: there you are!".to_owned()));
+
+    // Gone: it loses them and goes back to its rounds.
+    let far = Value::Vector3(Vector3::new(45.0, 2.5, 45.0));
+    game.world.set_property(player, "Position", far).unwrap();
+    game.run(0.3);
+    let destination = game
+        .world
+        .get(guard_agent)
+        .unwrap()
+        .property("Destination")
+        .cloned();
+    let patrol = [
+        Some(Value::Vector3(Vector3::new(-15.0, 0.0, -15.0))),
+        Some(Value::Vector3(Vector3::new(15.0, 0.0, -15.0))),
+    ];
+    assert!(patrol.contains(&destination), "{destination:?}");
+    assert!(
+        game.printed
+            .contains(&"Guard: lost them. Back to my rounds.".to_owned())
+    );
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
 fn hello_perception_guard_sees_and_hears_the_player_from_lua_and_blocks() {
     use axcenity_core::KeyCode as K;
 

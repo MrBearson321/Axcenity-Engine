@@ -14,18 +14,21 @@
 //! there's none, it stops, `Status` becomes `"Blocked"` and it warns once,
 //! and it carries on when the way clears.
 //!
-//! After it moves, it looks and listens for the player character
-//! (`perception.rs`).
+//! Before it moves, an agent with a `BehaviorTree` runs its tree
+//! (`behavior.rs`), which may set its `Destination`. After it moves, it
+//! looks and listens for the player character (`perception.rs`).
 //!
 //! Like a character controller, an agent is kinematic: [`Agents::keep_kinematic`]
 //! anchors its parts before physics. Its parts aren't ground, so the mesh
 //! leaves them out.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use axcenity_assets::Assets;
 use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
 
+use crate::behavior::{self, BehaviorTree, TreeRun};
 use crate::perception::{self, Player, Sensed, Senses};
 use crate::{NavMesh, NavSettings, fingerprint};
 
@@ -109,6 +112,10 @@ pub struct Agents {
     built: Option<Built>,
     walks: BTreeMap<InstanceId, Walk>,
     senses: BTreeMap<InstanceId, Senses>,
+    /// Each agent's behavior tree as it runs.
+    runs: BTreeMap<InstanceId, TreeRun>,
+    /// Every tree file read, by path; `None` when it can't run.
+    trees: BTreeMap<String, Option<Arc<BehaviorTree>>>,
     warnings: Vec<String>,
     sensed: Vec<Sensed>,
 }
@@ -127,11 +134,28 @@ impl Agents {
         };
         self.walks.retain(|id, _| world.contains(*id));
         self.senses.retain(|id, _| world.contains(*id));
+        self.runs.retain(|id, _| world.contains(*id));
         let agents = agents(world);
         if agents.is_empty() {
             return;
         }
         self.refresh_mesh(world, assets, dt);
+        if self.built.is_none() {
+            return;
+        }
+        // Trees decide first, from what the agents sensed last frame.
+        let player_feet = axcenity_character::player_character(world)
+            .and_then(|holder| feet_of(world, &axcenity_character::body_parts(world, holder)));
+        for &id in &agents {
+            if let Some(feet) = feet_of(world, &parts_of(world, id)) {
+                let agent = behavior::Agent {
+                    id,
+                    feet,
+                    player: player_feet,
+                };
+                self.think(world, assets, agent, dt);
+            }
+        }
         let Some(built) = &self.built else {
             return;
         };
@@ -153,6 +177,45 @@ impl Agents {
             {
                 self.sensed.push(Sensed { agent: id, sense });
             }
+        }
+    }
+
+    /// Runs agent's behavior tree, if it has one, reading the file the
+    /// first time it's named. One that can't run warns once and leaves the
+    /// agent to its scripts.
+    fn think(&mut self, world: &mut World, assets: &Assets, agent: behavior::Agent, dt: f32) {
+        let path = world
+            .get(agent.id)
+            .and_then(|instance| instance.property("BehaviorTree"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
+        if path.is_empty() {
+            self.runs.remove(&agent.id);
+            return;
+        }
+        if self.runs.get(&agent.id).is_none_or(|run| run.path != path) {
+            let tree = match self.trees.get(&path) {
+                Some(tree) => tree.clone(),
+                None => {
+                    let tree = BehaviorTree::load(assets, &path)
+                        .map_err(|why| {
+                            self.warnings.push(format!(
+                                "{} doesn't run the behavior tree `{path}`: {why}.",
+                                name(world, agent.id)
+                            ))
+                        })
+                        .ok()
+                        .map(Arc::new);
+                    self.trees.insert(path.clone(), tree.clone());
+                    tree
+                }
+            };
+            self.runs.insert(agent.id, TreeRun::new(path, tree));
+        }
+        if let Some(run) = self.runs.get_mut(&agent.id) {
+            run.tick(world, agent, dt);
         }
     }
 

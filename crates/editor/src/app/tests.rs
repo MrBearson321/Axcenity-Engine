@@ -321,6 +321,8 @@ fn every_panel_fits_a_narrow_column_and_a_short_strip() {
         "scripts/Pad.server.lua:3: an error with a long message, to see it wrap in a \
          narrow column instead of running past it",
     );
+    // A new tree, so the Behavior Tree tab shows its graph and a problem.
+    app.behavior.create("assets/ai/Fit.behaviortree.json");
     // A terrain with a tool picked, so the Terrain Studio shows its forms.
     let terrain = app.world.create(ClassName::Terrain).unwrap();
     app.world
@@ -360,6 +362,7 @@ fn every_panel_fits_a_narrow_column_and_a_short_strip() {
                         Pane::AssetCheck => {
                             let _ = app.asset_check.show(ui, app.project.is_some(), true);
                         }
+                        Pane::BehaviorTree => app.behavior_tree_pane(ui),
                         Pane::Scene | Pane::Script(_) => {}
                     }
                     fit = Some((ui.min_rect(), room));

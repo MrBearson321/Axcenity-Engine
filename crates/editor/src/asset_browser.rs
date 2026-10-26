@@ -76,6 +76,8 @@ pub enum AssetKind {
     Animation,
     /// A state machine (`*.statemachine.json`).
     Controller,
+    /// A navigation agent's behavior tree (`*.behaviortree.json`).
+    BehaviorTree,
 }
 
 impl AssetKind {
@@ -90,6 +92,7 @@ impl AssetKind {
             AssetKind::Particle => icons::SPARKLE,
             AssetKind::Animation => theme::AnimKind::Clip.icon(),
             AssetKind::Controller => theme::AnimKind::StateMachine.icon(),
+            AssetKind::BehaviorTree => icons::BRAIN,
         }
     }
 
@@ -106,6 +109,7 @@ impl AssetKind {
             AssetKind::Particle => theme::class_color(ClassName::PointLight, visuals),
             AssetKind::Animation => theme::AnimKind::Clip.color(visuals),
             AssetKind::Controller => theme::AnimKind::StateMachine.color(visuals),
+            AssetKind::BehaviorTree => theme::class_color(ClassName::NavigationAgent, visuals),
         }
     }
 
@@ -122,6 +126,7 @@ impl AssetKind {
             AssetKind::Particle => "Particle",
             AssetKind::Animation => "Clip",
             AssetKind::Controller => "State machine",
+            AssetKind::BehaviorTree => "Behavior tree",
         }
     }
 
@@ -150,6 +155,10 @@ impl AssetKind {
             }
             AssetKind::Animation => "Double-click to open it in the Animation tab.",
             AssetKind::Controller => "Drag onto a part to give its Animator this state machine.",
+            AssetKind::BehaviorTree => {
+                "Drag onto an agent's body to have it run this tree in Play, or double-click to \
+                 open it in the Behavior Tree tab."
+            }
         }
     }
 }
