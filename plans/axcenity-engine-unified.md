@@ -1099,9 +1099,9 @@ Blocks: "set camera to scriptable", "point camera at", "shake camera", "part und
 
 ### Acceptance criteria
 
-- [ ] A Scriptable camera tweened along a CFrame path plays the same in the editor Play and the player, and returning to Custom gives control back to the controller.
-- [ ] "Part under mouse" returns the part the cursor is over, at any window size.
-- [ ] `WorldToScreenPoint` places a TextLabel exactly over a part as the camera moves.
+- [x] A Scriptable camera tweened along a CFrame path plays the same in the editor Play and the player, and returning to Custom gives control back to the controller.
+- [x] "Part under mouse" returns the part the cursor is over, at any window size.
+- [x] `WorldToScreenPoint` places a TextLabel exactly over a part as the camera moves.
 
 ---
 

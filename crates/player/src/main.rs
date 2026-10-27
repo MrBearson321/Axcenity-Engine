@@ -33,7 +33,7 @@ use axcenity_project::ScriptFile;
 use axcenity_render::glam::Vec3;
 use axcenity_render::{Capabilities, GraphicsSettings, Renderer};
 use axcenity_scene::{FlyCamera, MoveKeys, UiFrame};
-use axcenity_script::{CameraState, OutputKind, ScriptRuntime};
+use axcenity_script::{CameraState, CameraView, GameCamera, OutputKind, ScriptRuntime};
 use axcenity_ui::{LoadingGui, NavKey, UiCursor, UiEvent, UiInput, UiInteraction};
 use input::{CursorLock, PlayerInput, script_key};
 use winit::application::ApplicationHandler;
@@ -280,6 +280,10 @@ fn listener_of_state(camera: CameraState) -> axcenity_audio::Listener {
     axcenity_audio::Listener::from_view(camera.position, camera.orientation)
 }
 
+fn listener_of_view(view: CameraView) -> axcenity_audio::Listener {
+    axcenity_audio::Listener::from_view(view.position, view.orientation)
+}
+
 /// Plays what scripts asked for, then `extra` (buttons' sounds), and fires
 /// `Ended` for sounds that finished.
 fn apply_audio(
@@ -399,6 +403,8 @@ struct App {
     data_folder: Option<PathBuf>,
     error: Option<anyhow::Error>,
     camera: FlyCamera,
+    /// What scripts did to the camera last frame (`ScriptRuntime::step_camera`).
+    game_camera: GameCamera,
     keys: MoveKeys,
     /// Input since the last frame for LocalScripts, the game's held input
     /// and the game controllers.
@@ -476,6 +482,7 @@ impl App {
             data_folder: None,
             error: None,
             camera,
+            game_camera: GameCamera::default(),
             keys: MoveKeys::default(),
             input: PlayerInput::new(map),
             held_keys: BTreeSet::new(),
@@ -519,13 +526,41 @@ impl App {
         }
     }
 
+    /// The camera drawn: the host's (`script_camera`), or where scripts
+    /// hold it, with their field of view and shake.
+    fn shown_view(&self) -> CameraView {
+        self.game_camera.view(self.script_camera())
+    }
+
     fn shown_camera(&self) -> axcenity_render::Camera {
-        let state = self.script_camera();
-        if self.characters.view(&self.world).is_some() {
-            FlyCamera::from_view(state.position, state.orientation).to_render_camera()
-        } else {
-            self.camera.to_render_camera()
+        self.shown_view().render_camera()
+    }
+
+    /// Frame step 1's camera, after the character controllers: the fly
+    /// camera flies (unless a controller or a script holds the view), and
+    /// LocalScripts see the camera and the window's size.
+    fn begin_camera(&mut self, seconds: f32, size: (u32, u32)) {
+        if self.characters.view(&self.world).is_none() && !self.scripts.camera_scripted() {
+            self.camera.update(&self.keys, seconds);
         }
+        let seen = self.script_camera();
+        self.scripts.set_viewport_size(size.0 as f32, size.1 as f32);
+        self.scripts.set_camera(seen);
+    }
+
+    /// Before drawing: a LocalScript's move of a Custom camera goes to the
+    /// fly camera (a character controller owns the view otherwise), then a
+    /// Follow or Track camera follows its subject, which physics and
+    /// animation have moved, and shakes move on.
+    fn end_camera(&mut self, seconds: f32) {
+        if self.characters.view(&self.world).is_none()
+            && let Some(view) = self.scripts.take_camera_move()
+        {
+            self.camera.set_view(view.position, view.orientation);
+        } else {
+            let _ = self.scripts.take_camera_move();
+        }
+        self.game_camera = self.scripts.step_camera(&self.world, f64::from(seconds));
     }
 
     fn process_ui_mouse_events(&mut self, size: (u32, u32)) {
@@ -1052,11 +1087,7 @@ impl ApplicationHandler for App {
                 }
                 fire_sensed(&mut self.scripts, &mut self.world, &mut self.agents);
                 print_output(&mut self.scripts);
-                if self.characters.view(&self.world).is_none() {
-                    self.camera.update(&self.keys, seconds);
-                }
-                let seen = self.script_camera();
-                self.scripts.set_camera(seen);
+                self.begin_camera(seconds, (size.width, size.height));
                 let pointer = self.apply_cursor((size.width, size.height));
                 let events = self.input.take_events(pointer);
                 self.scripts.input_events(&mut self.world, &events);
@@ -1084,7 +1115,7 @@ impl ApplicationHandler for App {
                 self.scripts.fire_touched(&mut self.world, &touches);
                 self.scripts.heartbeat(&mut self.world, f64::from(seconds));
                 print_output(&mut self.scripts);
-                let heard = listener_of_state(self.script_camera());
+                let heard = listener_of_view(self.shown_view());
                 apply_audio(
                     &mut self.scripts,
                     &mut self.world,
@@ -1126,15 +1157,8 @@ impl ApplicationHandler for App {
                 // 5. Lay out ScreenGuis at this window's current pixel size.
                 let ui_size = (size.width, size.height);
 
-                // 6. Build and render. A character controller owns the camera;
-                //    otherwise a LocalScript's move is applied to the fly camera.
-                if self.characters.view(&self.world).is_none()
-                    && let Some(view) = self.scripts.take_camera_move()
-                {
-                    self.camera.set_view(view.position, view.orientation);
-                } else {
-                    let _ = self.scripts.take_camera_move();
-                }
+                // 6. Build and render, from the camera scripts left.
+                self.end_camera(seconds);
                 // A LocalScript's graphics change (`UserGameSettings`) is
                 // saved and drawn from this frame.
                 if let Some(change) = self.scripts.take_graphics_change()
@@ -1146,7 +1170,7 @@ impl ApplicationHandler for App {
                     set_graphics(renderer, &settings);
                 }
                 let render_camera = self.shown_camera();
-                let heard = listener_of_state(self.script_camera());
+                let heard = listener_of_view(self.shown_view());
                 self.audio.set_listener(heard);
 
                 let (mut draw_list, ui_layout) =
@@ -1221,7 +1245,7 @@ impl ApplicationHandler for App {
         }
         let (dx, dy) = (dx as f32, dy as f32);
         self.input.add_motion(dx, dy);
-        if self.looking {
+        if self.looking && !self.scripts.camera_scripted() {
             if self.characters.view(&self.world).is_some() {
                 self.look_dx += dx;
                 self.look_dy += dy;
@@ -1244,6 +1268,9 @@ mod tests;
 
 #[cfg(test)]
 mod input_tests;
+
+#[cfg(test)]
+mod camera_tests;
 
 #[cfg(test)]
 mod graphics_tests;

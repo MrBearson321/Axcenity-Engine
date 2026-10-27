@@ -438,6 +438,22 @@ pub enum BlockKind {
     /// player character standing on it.
     RestoreCheckpoint,
 
+    // Camera: `workspace.CurrentCamera` (LocalScripts only).
+    /// Sets `CameraType` to one of [`CAMERA_TYPES`]: Scriptable leaves the
+    /// camera to scripts, Custom gives it back to the controller.
+    SetCameraType {
+        camera_type: String,
+    },
+    /// Turns the camera to look at `position`, from where it is.
+    PointCameraAt {
+        position: Expression,
+    },
+    /// `Camera:Shake(intensity, seconds)`.
+    ShakeCamera {
+        intensity: Expression,
+        seconds: Expression,
+    },
+
     // Localization: `LocalizationService`.
     /// Sets the language bound UI text shows (`LocalizationService.Language`).
     SetLanguage {
@@ -584,6 +600,8 @@ pub const EASING_STYLES: [&str; 7] = [
 pub const EASING_DIRECTIONS: [&str; 3] = ["In", "Out", "InOut"];
 /// The edges "slide in" can come from.
 pub const SLIDE_EDGES: [&str; 4] = ["Left", "Right", "Top", "Bottom"];
+/// `Enum.CameraType`'s items, which the camera type block offers.
+pub const CAMERA_TYPES: [&str; 5] = ["Scriptable", "Custom", "Follow", "Track", "Fixed"];
 /// `Enum.ToneMapping`'s items, which the tone mapping block offers.
 pub const TONE_MAPPINGS: [&str; 3] = ["Classic", "Neutral", "Filmic"];
 /// `Enum.GraphicsQuality`'s items, which the graphics quality block offers.
@@ -676,6 +694,9 @@ impl BlockKind {
                 | BlockKind::WhenClicked { .. }
                 | BlockKind::WhenMouseEnters { .. }
                 | BlockKind::WhenMouseLeaves { .. }
+                | BlockKind::SetCameraType { .. }
+                | BlockKind::PointCameraAt { .. }
+                | BlockKind::ShakeCamera { .. }
         )
     }
 
@@ -773,9 +794,11 @@ impl BlockKind {
             | BlockKind::FadeIn { seconds: e, .. }
             | BlockKind::FadeOut { seconds: e, .. }
             | BlockKind::SetGraphicsNumber { value: e, .. }
+            | BlockKind::PointCameraAt { position: e }
             | BlockKind::Print { value: e } => vec![e],
             BlockKind::Tween { value, seconds, .. } => vec![value, seconds],
             BlockKind::ScrollTo { x, y, .. } => vec![x, y],
+            BlockKind::ShakeCamera { intensity, seconds } => vec![intensity, seconds],
             _ => Vec::new(),
         }
     }
@@ -853,9 +876,11 @@ impl BlockKind {
             | BlockKind::FadeIn { seconds: e, .. }
             | BlockKind::FadeOut { seconds: e, .. }
             | BlockKind::SetGraphicsNumber { value: e, .. }
+            | BlockKind::PointCameraAt { position: e }
             | BlockKind::Print { value: e } => vec![e],
             BlockKind::Tween { value, seconds, .. } => vec![value, seconds],
             BlockKind::ScrollTo { x, y, .. } => vec![x, y],
+            BlockKind::ShakeCamera { intensity, seconds } => vec![intensity, seconds],
             _ => Vec::new(),
         }
     }
@@ -972,6 +997,9 @@ pub enum Expression {
     },
     /// The part that touched, inside "when touched".
     TouchingPart,
+    /// The part under the mouse: `LocalPlayer:GetMouse().Target`, the
+    /// camera's ray through the mouse cast into the world. Client only.
+    PartUnderMouse,
     /// Whether a key is held down. Client only.
     KeyDown {
         key: String,
@@ -1028,7 +1056,10 @@ impl Expression {
 
     /// Whether this reporter only works in client block scripts.
     pub fn client_only(&self) -> bool {
-        matches!(self, Expression::KeyDown { .. })
+        matches!(
+            self,
+            Expression::KeyDown { .. } | Expression::PartUnderMouse
+        )
     }
 
     /// Like [`Expression::children`], for changing them.

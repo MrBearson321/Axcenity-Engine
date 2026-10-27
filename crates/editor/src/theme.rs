@@ -745,6 +745,7 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::FirstPersonController => icons::EYE,
         ClassName::NavigationAgent => icons::ROBOT,
         ClassName::Checkpoint => icons::FLAG_PENNANT,
+        ClassName::Camera => icons::VIDEO_CAMERA,
         ClassName::IntValue | ClassName::NumberValue => icons::HASH,
         ClassName::StringValue => icons::TEXT_AA,
         ClassName::BoolValue => icons::TOGGLE_LEFT,
@@ -828,7 +829,8 @@ pub fn class_color(class: ClassName, visuals: &egui::Visuals) -> Color32 {
         ClassName::ThirdPersonController
         | ClassName::FirstPersonController
         | ClassName::NavigationAgent
-        | ClassName::Checkpoint => pick((90, 200, 160), (20, 130, 100)),
+        | ClassName::Checkpoint
+        | ClassName::Camera => pick((90, 200, 160), (20, 130, 100)),
         ClassName::Script => pick((226, 145, 82), (185, 95, 10)),
         ClassName::LocalScript => pick((90, 190, 175), (10, 120, 110)),
         ClassName::ModuleScript => pick((170, 145, 240), (105, 75, 190)),

@@ -271,8 +271,24 @@ fn described_fields_and_methods_exist() {
             ClassName::AnimationTrack,
             "Instance.new('Animator'):LoadAnimation(Instance.new('Animation'))",
         ),
+        (ClassName::Camera, "workspace.CurrentCamera"),
+        (ClassName::Player, "game.Players.LocalPlayer"),
     ];
-    let instance = |class: ClassName| {
+    // `CurrentCamera` and `LocalPlayer` are only on the player's side.
+    let side_of = |class: ClassName, name: &'static str| match class {
+        ClassName::Camera => "CurrentCamera",
+        ClassName::Player => "LocalPlayer",
+        _ => name,
+    };
+    // A field that may be nil (`Instance?`) only has to be readable.
+    let read = |sample: &str, field: &Field, owner: &str| {
+        if field.ty.ends_with('?') {
+            format!("local _ = ({sample}).{}", field.name)
+        } else {
+            format!("assert(({sample}).{0} ~= nil, '{owner}.{0}')", field.name)
+        }
+    };
+    let instance = |class: ClassName| -> &'static str {
         instances
             .iter()
             .find(|(c, _)| *c == class)
@@ -281,7 +297,7 @@ fn described_fields_and_methods_exist() {
     };
     for (class, method) in CLASS_METHODS {
         check(
-            method.name,
+            side_of(*class, method.name),
             format!(
                 "assert(type(({0}).{1}) == 'function', '{2}:{1}')",
                 instance(*class),
@@ -293,13 +309,8 @@ fn described_fields_and_methods_exist() {
     for (class, field) in CLASS_FIELDS {
         // `LocalPlayer` is nil only before the player joins.
         check(
-            field.name,
-            format!(
-                "assert(({0}).{1} ~= nil, '{2}.{1}')",
-                instance(*class),
-                field.name,
-                class
-            ),
+            side_of(*class, field.name),
+            read(instance(*class), field, class.as_str()),
         );
     }
     // InputObjects only exist inside input handlers: those checks run
@@ -336,7 +347,8 @@ fn described_fields_and_methods_exist() {
         ),
         ("TweenInfo", "TweenInfo.new()"),
         ("InputObject", "input"),
-        ("Camera", "workspace.CurrentCamera"),
+        ("Ray", "workspace.CurrentCamera:ScreenPointToRay(1, 1)"),
+        ("Mouse", "game.Players.LocalPlayer:GetMouse()"),
         (
             "RaycastResult",
             "workspace:Raycast(Vector3.new(0, 10, 0), Vector3.new(0, -20, 0))",
@@ -349,10 +361,7 @@ fn described_fields_and_methods_exist() {
             .expect("add a sample value for the new value type");
         let mut lines = Vec::new();
         for field in value_type.fields {
-            lines.push(format!(
-                "assert({sample}.{0} ~= nil, '{1}.{0}')",
-                field.name, value_type.class
-            ));
+            lines.push(read(sample, field, value_type.class));
         }
         for method in value_type.methods {
             lines.push(format!(
@@ -363,8 +372,10 @@ fn described_fields_and_methods_exist() {
         for line in lines {
             match value_type.class {
                 "InputObject" => on_input.push(line),
-                // Reached through `workspace.CurrentCamera`, so client only.
-                "Camera" => check("CurrentCamera", line),
+                // Reached through `workspace.CurrentCamera` and
+                // `LocalPlayer`, so client only.
+                "Ray" => check("CurrentCamera", line),
+                "Mouse" => check("LocalPlayer", line),
                 other => check(other, line),
             }
         }

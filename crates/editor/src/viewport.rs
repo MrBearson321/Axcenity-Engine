@@ -231,6 +231,16 @@ pub struct DropTarget {
     pub released: bool,
 }
 
+/// The camera during Play, from the Play session.
+#[derive(Clone, Copy, Debug)]
+pub struct PlayCamera {
+    /// What to draw from.
+    pub shown: axcenity_script::CameraView,
+    /// Whether the game holds the view (a character controller, or a
+    /// script's CameraType), so the fly camera doesn't fly.
+    pub holds: bool,
+}
+
 pub struct ViewportScene<'a> {
     pub world: &'a World,
     pub assets: &'a Assets,
@@ -267,9 +277,10 @@ pub struct ViewportScene<'a> {
     pub poses: Option<&'a axcenity_scene::Poses>,
     /// A Terrain Studio brush, which takes the left button while it's on.
     pub terrain_brush: Option<TerrainBrush>,
-    /// The third-person follow camera during Play, when a controller owns it.
-    /// The fly camera is not moved, so Stop shows it where it was.
-    pub character_view: Option<axcenity_character::CharacterCamera>,
+    /// The camera during Play (`Session::shown_camera`, with whether the
+    /// game holds the view). A controller's or a script's camera doesn't
+    /// move the fly camera, so Stop shows it where it was.
+    pub play_camera: Option<PlayCamera>,
     /// This computer's graphics settings (Settings > Graphics).
     pub graphics: &'a axcenity_render::GraphicsSettings,
 }
@@ -426,6 +437,8 @@ pub struct Viewport {
     held_cursor: (axcenity_core::MouseBehavior, bool),
     /// Where the viewport was last drawn, in points.
     last_rect: egui::Rect,
+    /// Its size in pixels when last drawn, as the game's UI is laid out.
+    last_pixels: (u32, u32),
     /// Where the camera was when the culling overlay went on: culling
     /// stays there until it goes off.
     frozen_culling: Option<axcenity_render::Camera>,
@@ -472,6 +485,7 @@ impl Viewport {
             ui_mouse_taken: false,
             held_cursor: (axcenity_core::MouseBehavior::Default, true),
             last_rect: egui::Rect::NOTHING,
+            last_pixels: (0, 0),
             frozen_culling: None,
         }
     }
@@ -586,6 +600,18 @@ impl Viewport {
         self.camera.view()
     }
 
+    /// Sets the size the viewport was last drawn at, for tests that don't draw.
+    #[cfg(test)]
+    pub fn set_pixel_size(&mut self, size: (u32, u32)) {
+        self.last_pixels = size;
+    }
+
+    /// The viewport's size in pixels when last drawn: the game's view, for
+    /// `Camera.ViewportSize` and screen points.
+    pub fn pixel_size(&self) -> (u32, u32) {
+        self.last_pixels
+    }
+
     /// Moves the camera where a LocalScript put it during Play.
     pub fn set_camera_view(
         &mut self,
@@ -638,7 +664,7 @@ impl Viewport {
             agent_paths,
             poses,
             terrain_brush,
-            character_view,
+            play_camera,
             graphics,
         } = scene;
         // A brush takes the left button: no handles, dragging or picking.
@@ -676,11 +702,11 @@ impl Viewport {
             ui,
             &response,
             rect.height(),
-            character_view.is_some(),
+            play_camera.is_some_and(|play| play.holds),
             wheel_taken,
         );
-        let camera = match character_view {
-            Some(view) => FlyCamera::from_view(view.position, view.orientation).to_render_camera(),
+        let camera = match play_camera {
+            Some(play) => play.shown.render_camera(),
             None => self.camera.to_render_camera(),
         };
         let screen = self.screen(camera, rect);
@@ -689,6 +715,7 @@ impl Viewport {
         // high-DPI screens where one point is several pixels.
         let pixels = size * pixels_per_point;
         let (width, height) = (pixels.x.round() as u32, pixels.y.round() as u32);
+        self.last_pixels = (width, height);
         // During Play a press on a ScrollingFrame's bar drags it, and one on
         // its content scrolls it once it has moved far enough; either way
         // the button under it doesn't fire. A press on a widget changes its

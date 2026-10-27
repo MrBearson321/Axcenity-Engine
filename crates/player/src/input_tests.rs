@@ -15,7 +15,7 @@ const FRAME: f32 = 1.0 / 60.0;
 
 /// A copy of example `name`, with `input.json` written from `map` when
 /// given, opened as the player opens a game: the input map, then the scripts.
-fn open(name: &str, map: Option<&InputMap>) -> (App, PathBuf) {
+pub(super) fn open(name: &str, map: Option<&InputMap>) -> (App, PathBuf) {
     let example = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples")
         .join(name);

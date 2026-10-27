@@ -1036,23 +1036,56 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
         methods: &[],
     },
     ValueType {
-        class: "Camera",
-        doc: "What the player sees through, `workspace.CurrentCamera`. LocalScripts only. Setting Position or Orientation moves the view; the player can still fly on from there.",
+        class: "Ray",
+        doc: "A half-line from `Origin` along `Direction`, from `Camera:ScreenPointToRay`.",
         fields: &[
             Field {
-                name: "Position",
+                name: "Origin",
                 ty: "Vector3",
-                doc: "Where the camera is, in studs.",
+                doc: "Where it starts.",
             },
             Field {
-                name: "Orientation",
+                name: "Direction",
                 ty: "Vector3",
-                doc: "Which way it looks, in degrees like a Part's: X looks up (positive) and down, Y turns left (positive) and right. Z is ignored.",
+                doc: "Which way it goes, one stud long. Multiply it for `workspace:Raycast`: `workspace:Raycast(ray.Origin, ray.Direction * 500)`.",
             },
             Field {
-                name: "LookVector",
-                ty: "Vector3",
-                doc: "The direction the camera looks in, one stud long. Read-only.",
+                name: "Unit",
+                ty: "Ray",
+                doc: "The same ray: its Direction is already one stud long.",
+            },
+        ],
+        operators: &[],
+        methods: &[],
+    },
+    ValueType {
+        class: "Mouse",
+        doc: "The mouse in the world, from `Players.LocalPlayer:GetMouse()`. LocalScripts only.",
+        fields: &[
+            Field {
+                name: "X",
+                ty: "number",
+                doc: "Pixels from the view's left edge.",
+            },
+            Field {
+                name: "Y",
+                ty: "number",
+                doc: "Pixels from the view's top edge.",
+            },
+            Field {
+                name: "UnitRay",
+                ty: "Ray",
+                doc: "The ray from the camera through the mouse (`CurrentCamera:ScreenPointToRay`).",
+            },
+            Field {
+                name: "Target",
+                ty: "Instance?",
+                doc: "The part under the mouse: the first collider along UnitRay within 1000 studs, or nil.",
+            },
+            Field {
+                name: "Hit",
+                ty: "CFrame",
+                doc: "Where UnitRay first meets a collider, or the point 1000 studs along it.",
             },
         ],
         operators: &[],
@@ -1331,6 +1364,60 @@ const GET_PIVOT_DOC: &str = "Where it turns and moves from: a part's own CFrame,
 const PIVOT_TO_DOC: &str = "Moves and turns it so its pivot is at `target`. A Model's parts all move together and keep their places relative to each other.";
 
 pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
+    (
+        ClassName::Camera,
+        Function {
+            name: "ScreenPointToRay",
+            doc: "`CurrentCamera` only: the ray from the camera through pixel `x`, `y` (from the view's top left, like `GetMouseLocation`), starting `depth` studs (0 if left out) in front.",
+            params: &[("x", "number"), ("y", "number"), ("depth", "number?")],
+            returns: "Ray",
+        },
+    ),
+    (
+        ClassName::Camera,
+        Function {
+            name: "ViewportPointToRay",
+            doc: "`CurrentCamera` only: the same as ScreenPointToRay; nothing covers part of the screen.",
+            params: &[("x", "number"), ("y", "number"), ("depth", "number?")],
+            returns: "Ray",
+        },
+    ),
+    (
+        ClassName::Camera,
+        Function {
+            name: "WorldToScreenPoint",
+            doc: "`CurrentCamera` only: where `point` shows, in pixels from the view's top left (Z: studs in front of the camera, negative behind it), and whether it's on screen. Put a UI element there with `UDim2.fromOffset(at.X, at.Y)`.",
+            params: &[("point", "Vector3")],
+            returns: "(Vector3, boolean)",
+        },
+    ),
+    (
+        ClassName::Camera,
+        Function {
+            name: "WorldToViewportPoint",
+            doc: "`CurrentCamera` only: the same as WorldToScreenPoint.",
+            params: &[("point", "Vector3")],
+            returns: "(Vector3, boolean)",
+        },
+    ),
+    (
+        ClassName::Camera,
+        Function {
+            name: "Shake",
+            doc: "`CurrentCamera` only: shakes the view for `duration` seconds, fading out, on top of any CameraType. An `intensity` of 1 moves it about a quarter of a stud and turns it a degree; shakes add up.",
+            params: &[("intensity", "number"), ("duration", "number")],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::Player,
+        Function {
+            name: "GetMouse",
+            doc: "LocalScripts only: the mouse in the world, with the part under it (`Target`).",
+            params: &[],
+            returns: "Mouse",
+        },
+    ),
     (
         ClassName::Part,
         Function {
@@ -1645,6 +1732,54 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
 
 /// Fields only some classes have, besides their properties and events.
 pub(super) const CLASS_FIELDS: &[(ClassName, Field)] = &[
+    (
+        ClassName::Camera,
+        Field {
+            name: "CFrame",
+            ty: "CFrame",
+            doc: "Its Position and Orientation as one CFrame. `workspace.CurrentCamera.CFrame = viewpoint.CFrame` cuts to a viewpoint; TweenService moves it smoothly.",
+        },
+    ),
+    (
+        ClassName::Camera,
+        Field {
+            name: "LookVector",
+            ty: "Vector3",
+            doc: "`CurrentCamera` only: the direction it looks in, one stud long. Read-only.",
+        },
+    ),
+    (
+        ClassName::Camera,
+        Field {
+            name: "CameraType",
+            ty: "EnumCameraType",
+            doc: "`CurrentCamera` only: who moves it. `Custom` (the default) is the character controller's camera, or the fly camera; `Scriptable` leaves CFrame entirely to scripts; `Follow` and `Track` follow CameraSubject from where the camera was (Follow turning as the subject turns, Track not); `Fixed` stays put. Back to Custom, the controller has it again.",
+        },
+    ),
+    (
+        ClassName::Camera,
+        Field {
+            name: "CameraSubject",
+            ty: "Instance?",
+            doc: "`CurrentCamera` only: what Follow and Track follow: a Model, a part, or a character controller or agent (its body). Nil follows nothing.",
+        },
+    ),
+    (
+        ClassName::Camera,
+        Field {
+            name: "Focus",
+            ty: "CFrame",
+            doc: "`CurrentCamera` only: what it's looking at: what a script set, otherwise CameraSubject, otherwise 10 studs in front of it.",
+        },
+    ),
+    (
+        ClassName::Camera,
+        Field {
+            name: "ViewportSize",
+            ty: "Vector2",
+            doc: "`CurrentCamera` only: the view's size in pixels (the window, or the editor's viewport). Read-only.",
+        },
+    ),
     (
         ClassName::Part,
         Field {

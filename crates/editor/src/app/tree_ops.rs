@@ -133,6 +133,20 @@ impl EditorApp {
             self.insert_agent(near.or(self.selected));
             return;
         }
+        // A viewpoint is where the editor's camera is, looking the same way.
+        if what == Insertable::Camera {
+            let (position, orientation) = self.viewport.camera_view();
+            self.insert_named(
+                what,
+                near,
+                what.class().as_str(),
+                vec![
+                    ("Position", Value::Vector3(position)),
+                    ("Orientation", Value::Vector3(orientation)),
+                ],
+            );
+            return;
+        }
         if what == Insertable::Checkpoint {
             let at = tree::top_of(&self.world, near.or(self.selected)).unwrap_or_default();
             self.insert_named(

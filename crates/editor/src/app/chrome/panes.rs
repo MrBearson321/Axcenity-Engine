@@ -758,7 +758,16 @@ impl EditorApp {
                             agent_paths: &agent_paths,
                             poses: self.play.as_ref().map(Session::poses),
                             terrain_brush,
-                            character_view: self.play.as_ref().and_then(Session::character_camera),
+                            play_camera: self.play.as_ref().map(|session| {
+                                let (position, orientation) = self.viewport.camera_view();
+                                crate::viewport::PlayCamera {
+                                    shown: session.shown_camera(axcenity_script::CameraState {
+                                        position,
+                                        orientation,
+                                    }),
+                                    holds: session.holds_camera(),
+                                }
+                            }),
                             // A LocalScript's change lasts until Stop.
                             graphics: self
                                 .play

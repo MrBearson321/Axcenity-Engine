@@ -1,47 +1,19 @@
 //! What only LocalScripts can reach, because it belongs to the player's
-//! device: the camera (`workspace.CurrentCamera`), `Players.LocalPlayer`
-//! and the loading screen (`ReplicatedFirst:RemoveDefaultLoadingScreen`).
-//! Input (`UserInputService`, `ContextActionService`) is `input.rs`.
-//!
-//! The host keeps the camera in step with `set_camera` /
-//! `take_camera_move`. Everything here lives in the client interpreter's
-//! app data.
+//! device: `Players.LocalPlayer` (and its `GetMouse`) and the loading
+//! screen (`ReplicatedFirst:RemoveDefaultLoadingScreen`). The camera
+//! (`workspace.CurrentCamera`) is `camera.rs`; input (`UserInputService`,
+//! `ContextActionService`) is `input.rs`. Everything here lives in the
+//! client interpreter's app data.
 
-use axcenity_core::{InstanceId, Vector3};
-use mlua::{FromLua, Lua, MetaMethod, UserData, UserDataFields, UserDataMethods};
+use axcenity_core::{ClassName, InstanceId};
+use mlua::{Function, Lua, MetaMethod, UserData, UserDataMethods};
 
-use crate::types::{LuaVector3, type_name};
+use crate::camera::LuaMouse;
+use crate::instance::LuaInstance;
 
 /// The Player of whoever plays on this device.
 #[derive(Clone, Copy)]
 pub struct LocalPlayer(pub InstanceId);
-
-/// Where the camera is and which way it looks, in the same terms as a
-/// Part: `orientation` is degrees around X, Y and Z (only X, looking up and
-/// down, and Y, turning, change the view).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct CameraState {
-    pub position: Vector3,
-    pub orientation: Vector3,
-}
-
-impl Default for CameraState {
-    fn default() -> Self {
-        Self {
-            position: Vector3::new(0.0, 0.0, 0.0),
-            orientation: Vector3::new(0.0, 0.0, 0.0),
-        }
-    }
-}
-
-/// The camera as scripts last saw or set it.
-#[derive(Default)]
-pub struct Camera {
-    pub state: CameraState,
-    /// True once a script has set Position or Orientation since the host
-    /// last took the change.
-    pub moved: bool,
-}
 
 /// Set when a LocalScript calls `RemoveDefaultLoadingScreen`, until the
 /// host takes it with `ScriptRuntime::take_loading_screen_removed`.
@@ -67,96 +39,11 @@ impl UserData for LuaReplicatedFirst {
     }
 }
 
-/// `workspace.CurrentCamera`. Holds nothing itself: the state is the
-/// `Camera` in app data, so every read sees the latest values.
-#[derive(Clone, Copy)]
-pub struct LuaCamera;
-
-impl LuaCamera {
-    fn state(lua: &Lua) -> CameraState {
-        lua.app_data_ref::<Camera>()
-            .map(|camera| camera.state)
-            .unwrap_or_default()
-    }
-
-    /// Sets one of the camera's Vector3 fields, and marks the camera moved.
-    fn set(
-        lua: &Lua,
-        field: &str,
-        value: mlua::Value,
-        apply: impl FnOnce(&mut CameraState, Vector3),
-    ) -> mlua::Result<()> {
-        let vector = LuaVector3::from_lua(value.clone(), lua).map_err(|_| {
-            mlua::Error::runtime(format!(
-                "Camera.{field} must be a Vector3, not a {}",
-                type_name(lua, &value)
-            ))
-        })?;
-        if let Some(mut camera) = lua.app_data_mut::<Camera>() {
-            apply(&mut camera.state, vector.0);
-            camera.moved = true;
-        }
-        Ok(())
-    }
-}
-
-/// The direction a camera with this orientation looks in, one stud long.
-/// Turning around Y by `yaw` and then tilting up by `pitch` takes the
-/// starting direction (straight ahead, -Z) here; rolling around Z doesn't
-/// change where it points.
-pub fn look_vector(orientation: Vector3) -> Vector3 {
-    let pitch = orientation.x.to_radians();
-    let yaw = orientation.y.to_radians();
-    Vector3::new(
-        -yaw.sin() * pitch.cos(),
-        pitch.sin(),
-        -yaw.cos() * pitch.cos(),
-    )
-}
-
-impl UserData for LuaCamera {
-    fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("Position", |lua, _| {
-            Ok(LuaVector3(Self::state(lua).position))
-        });
-        fields.add_field_method_set("Position", |lua, _, value: mlua::Value| {
-            Self::set(lua, "Position", value, |state, v| state.position = v)
-        });
-        fields.add_field_method_get("Orientation", |lua, _| {
-            Ok(LuaVector3(Self::state(lua).orientation))
-        });
-        fields.add_field_method_set("Orientation", |lua, _, value: mlua::Value| {
-            Self::set(lua, "Orientation", value, |state, v| state.orientation = v)
-        });
-        fields.add_field_method_get("LookVector", |lua, _| {
-            Ok(LuaVector3(look_vector(Self::state(lua).orientation)))
-        });
-    }
-
-    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_meta_method(MetaMethod::ToString, |_, _, ()| Ok("Camera"));
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn close(a: Vector3, b: Vector3) -> bool {
-        (a.x - b.x).abs() < 1e-5 && (a.y - b.y).abs() < 1e-5 && (a.z - b.z).abs() < 1e-5
-    }
-
-    #[test]
-    fn look_vector_turns_with_yaw_and_tilts_with_pitch() {
-        let ahead = look_vector(Vector3::new(0.0, 0.0, 0.0));
-        assert!(close(ahead, Vector3::new(0.0, 0.0, -1.0)), "{ahead:?}");
-        // Turning left (positive Y) by 90 degrees looks along -X.
-        let left = look_vector(Vector3::new(0.0, 90.0, 0.0));
-        assert!(close(left, Vector3::new(-1.0, 0.0, 0.0)), "{left:?}");
-        let up = look_vector(Vector3::new(90.0, 0.0, 0.0));
-        assert!(close(up, Vector3::new(0.0, 1.0, 0.0)), "{up:?}");
-        // Roll doesn't change where it looks.
-        let rolled = look_vector(Vector3::new(0.0, 0.0, 45.0));
-        assert!(close(rolled, ahead), "{rolled:?}");
-    }
+/// `player:GetMouse()`, on the player's side: the mouse in the world.
+pub fn player_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Function)>> {
+    let get_mouse = lua.create_function(|lua, _: LuaInstance| {
+        crate::sides::check(lua, "GetMouse")?;
+        Ok(LuaMouse)
+    })?;
+    Ok(vec![(ClassName::Player, "GetMouse", get_mouse)])
 }

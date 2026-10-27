@@ -256,7 +256,10 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::SetAnchored { .. }
         | BlockKind::SetDestination { .. }
         | BlockKind::SetVelocity { .. }
-        | BlockKind::WhenAgentSenses { .. } => Category::Motion,
+        | BlockKind::WhenAgentSenses { .. }
+        | BlockKind::SetCameraType { .. }
+        | BlockKind::PointCameraAt { .. }
+        | BlockKind::ShakeCamera { .. } => Category::Motion,
         BlockKind::SetColor { .. }
         | BlockKind::SetText { .. }
         | BlockKind::Show { .. }
@@ -305,6 +308,7 @@ fn reporter_category(expression: &Expression) -> Category {
         Expression::Property { property, .. } if property == "CurrentState" => Category::Animation,
         Expression::Property { .. }
         | Expression::TouchingPart
+        | Expression::PartUnderMouse
         | Expression::KeyDown { .. }
         | Expression::Raycast { .. }
         | Expression::IsA { .. } => Category::Sensing,
@@ -952,6 +956,21 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
             label("set language to"),
             Slot(language, SlotKind::Text),
         ])],
+        BlockKind::SetCameraType { camera_type } => vec![Row(vec![
+            label("set camera to"),
+            Part::Choice(camera_type, &axcenity_blocks::CAMERA_TYPES),
+        ])],
+        BlockKind::PointCameraAt { position } => vec![Row(vec![
+            label("point camera at"),
+            Slot(position, SlotKind::Vector),
+        ])],
+        BlockKind::ShakeCamera { intensity, seconds } => vec![Row(vec![
+            label("shake camera by"),
+            Slot(intensity, SlotKind::Number),
+            label("for"),
+            Slot(seconds, SlotKind::Number),
+            label("seconds"),
+        ])],
         BlockKind::SetToneMapping { curve } => vec![Row(vec![
             label("set tone mapping to"),
             Part::Choice(curve, &axcenity_blocks::TONE_MAPPINGS),
@@ -1054,6 +1073,7 @@ fn reporter_parts<'a>(expression: &'a mut Expression, objects: &[ObjectInfo]) ->
             Slot(direction, SlotKind::Vector),
         ],
         Expression::TouchingPart => vec![label("touching part")],
+        Expression::PartUnderMouse => vec![label("part under mouse")],
         Expression::KeyDown { key } => vec![label("key"), Key(key), label("pressed?")],
         Expression::IsA { value, class } => vec![
             Slot(value, SlotKind::Any),

@@ -394,14 +394,28 @@ declare extern type RaycastResult with
 	Distance: number
 end
 
---- What the player sees through, `workspace.CurrentCamera`. LocalScripts only. Setting Position or Orientation moves the view; the player can still fly on from there.
-declare extern type Camera with
-	--- Where the camera is, in studs.
-	Position: Vector3
-	--- Which way it looks, in degrees like a Part's: X looks up (positive) and down, Y turns left (positive) and right. Z is ignored.
-	Orientation: Vector3
-	--- The direction the camera looks in, one stud long. Read-only.
-	LookVector: Vector3
+--- A half-line from `Origin` along `Direction`, from `Camera:ScreenPointToRay`.
+declare extern type Ray with
+	--- Where it starts.
+	Origin: Vector3
+	--- Which way it goes, one stud long. Multiply it for `workspace:Raycast`: `workspace:Raycast(ray.Origin, ray.Direction * 500)`.
+	Direction: Vector3
+	--- The same ray: its Direction is already one stud long.
+	Unit: Ray
+end
+
+--- The mouse in the world, from `Players.LocalPlayer:GetMouse()`. LocalScripts only.
+declare extern type Mouse with
+	--- Pixels from the view's left edge.
+	X: number
+	--- Pixels from the view's top edge.
+	Y: number
+	--- The ray from the camera through the mouse (`CurrentCamera:ScreenPointToRay`).
+	UnitRay: Ray
+	--- The part under the mouse: the first collider along UnitRay within 1000 studs, or nil.
+	Target: Instance?
+	--- Where UnitRay first meets a collider, or the point 1000 studs along it.
+	Hit: CFrame
 end
 
 -- Enums ---------------------------------------------------------------------
@@ -689,6 +703,19 @@ declare extern type EnumMouseBehaviorItems with
 	LockCurrentPosition: EnumMouseBehavior
 end
 
+--- One choice of `Enum.CameraType`.
+declare extern type EnumCameraType extends EnumItem with
+end
+
+--- The choices of `Enum.CameraType`.
+declare extern type EnumCameraTypeItems with
+	Custom: EnumCameraType
+	Scriptable: EnumCameraType
+	Follow: EnumCameraType
+	Fixed: EnumCameraType
+	Track: EnumCameraType
+end
+
 --- Every enum, such as `Enum.Material`, `Enum.PartType` and `Enum.KeyCode`.
 declare extern type EnumLibrary with
 	Material: EnumMaterialItems
@@ -708,6 +735,7 @@ declare extern type EnumLibrary with
 	UserInputType: EnumUserInputTypeItems
 	UserInputState: EnumUserInputStateItems
 	MouseBehavior: EnumMouseBehaviorItems
+	CameraType: EnumCameraTypeItems
 end
 
 -- Instances -----------------------------------------------------------------
@@ -1026,6 +1054,8 @@ end
 --- Someone playing the game, in Players. Made when they join.
 declare extern type Player extends Instance with
 	[string]: any
+	--- LocalScripts only: the mouse in the world, with the part under it (`Target`). LocalScripts only.
+	function GetMouse(self): Mouse
 end
 
 --- Groups the parts of one thing, such as a car or a house.
@@ -2144,6 +2174,39 @@ declare extern type Checkpoint extends Instance with
 	[string]: any
 end
 
+--- A view of the world. `workspace.CurrentCamera` (LocalScripts only) is the one the player sees through: its `CameraType` says who moves it, and it turns screen points into rays and back. Camera objects placed in the world are named viewpoints, not drawn: `workspace.CurrentCamera.CFrame = workspace.Overlook.CFrame` cuts to one.
+declare extern type Camera extends Instance with
+	--- Where the camera is, in studs.
+	Position: Vector3
+	--- Which way it looks, in degrees like a Part's: X looks up (positive) and down, Y turns left (positive) and right. Z is ignored.
+	Orientation: Vector3
+	--- How much it sees from top to bottom, in degrees (1 to 120; 50 to start with). Smaller zooms in.
+	FieldOfView: number
+	--- Its Position and Orientation as one CFrame. `workspace.CurrentCamera.CFrame = viewpoint.CFrame` cuts to a viewpoint; TweenService moves it smoothly.
+	CFrame: CFrame
+	--- `CurrentCamera` only: the direction it looks in, one stud long. Read-only.
+	LookVector: Vector3
+	--- `CurrentCamera` only: who moves it. `Custom` (the default) is the character controller's camera, or the fly camera; `Scriptable` leaves CFrame entirely to scripts; `Follow` and `Track` follow CameraSubject from where the camera was (Follow turning as the subject turns, Track not); `Fixed` stays put. Back to Custom, the controller has it again.
+	CameraType: EnumCameraType
+	--- `CurrentCamera` only: what Follow and Track follow: a Model, a part, or a character controller or agent (its body). Nil follows nothing.
+	CameraSubject: Instance?
+	--- `CurrentCamera` only: what it's looking at: what a script set, otherwise CameraSubject, otherwise 10 studs in front of it.
+	Focus: CFrame
+	--- `CurrentCamera` only: the view's size in pixels (the window, or the editor's viewport). Read-only.
+	ViewportSize: Vector2
+	[string]: any
+	--- `CurrentCamera` only: the ray from the camera through pixel `x`, `y` (from the view's top left, like `GetMouseLocation`), starting `depth` studs (0 if left out) in front.
+	function ScreenPointToRay(self, x: number, y: number, depth: number?): Ray
+	--- `CurrentCamera` only: the same as ScreenPointToRay; nothing covers part of the screen.
+	function ViewportPointToRay(self, x: number, y: number, depth: number?): Ray
+	--- `CurrentCamera` only: where `point` shows, in pixels from the view's top left (Z: studs in front of the camera, negative behind it), and whether it's on screen. Put a UI element there with `UDim2.fromOffset(at.X, at.Y)`.
+	function WorldToScreenPoint(self, point: Vector3): (Vector3, boolean)
+	--- `CurrentCamera` only: the same as WorldToScreenPoint.
+	function WorldToViewportPoint(self, point: Vector3): (Vector3, boolean)
+	--- `CurrentCamera` only: shakes the view for `duration` seconds, fading out, on top of any CameraType. An `intensity` of 1 moves it about a quarter of a stud and turns it a degree; shakes add up.
+	function Shake(self, intensity: number, duration: number): ()
+end
+
 --- Holds one whole number in Value (other numbers are rounded). Its `Changed` fires with the new value.
 declare extern type IntValue extends Instance with
 	--- The whole number it holds; others are rounded. 0 by default.
@@ -2220,7 +2283,7 @@ declare function require(module: Instance): any
 --- Creates Instances.
 declare extern type InstanceLibrary with
 	--- Creates an Instance of this class with default properties and no parent. Set `Parent` to put it in the world.
-	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
+	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
 end
 
 --- Creates Instances.

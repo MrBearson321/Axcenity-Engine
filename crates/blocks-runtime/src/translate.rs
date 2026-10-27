@@ -535,6 +535,25 @@ impl Writer {
                 let language = self.expression(language)?;
                 self.line(format!("LocalizationService.Language = {language}"));
             }
+            BlockKind::SetCameraType { camera_type } => {
+                let camera_type = choice(camera_type, &CAMERA_TYPES, "a camera type")?;
+                self.line(format!(
+                    "workspace.CurrentCamera.CameraType = Enum.CameraType.{camera_type}"
+                ));
+            }
+            BlockKind::PointCameraAt { position } => {
+                let value = self.expression(position)?;
+                self.line(format!(
+                    "workspace.CurrentCamera.CFrame = \
+                     CFrame.lookAt(workspace.CurrentCamera.Position, {value})"
+                ));
+            }
+            BlockKind::ShakeCamera { intensity, seconds } => {
+                let (intensity, seconds) = (self.expression(intensity)?, self.expression(seconds)?);
+                self.line(format!(
+                    "workspace.CurrentCamera:Shake({intensity}, {seconds})"
+                ));
+            }
             BlockKind::SetToneMapping { curve } => {
                 let curve = choice(curve, &TONE_MAPPINGS, "a tone mapping")?;
                 self.line(format!("Lighting.ToneMapping = Enum.ToneMapping.{curve}"));
@@ -751,6 +770,7 @@ impl Writer {
         Ok(match expression {
             Expression::Variable { .. }
             | Expression::TouchingPart
+            | Expression::PartUnderMouse
             | Expression::Property { .. }
             | Expression::Raycast { .. }
             | Expression::Vector3 { .. }
@@ -839,6 +859,7 @@ impl Writer {
                     self.expression(direction)?
                 )
             }
+            Expression::PartUnderMouse => "game.Players.LocalPlayer:GetMouse().Target".to_owned(),
             Expression::TouchingPart if self.in_touched => "otherPart".to_owned(),
             Expression::TouchingPart => return Err(TranslateError::TouchingPartOutsideTouched),
             Expression::KeyDown { key: name } => {

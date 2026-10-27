@@ -47,6 +47,8 @@ pub enum Insertable {
     NavigationAgent,
     /// A place a character is put back at.
     Checkpoint,
+    /// A named viewpoint scripts cut the camera to.
+    Camera,
     /// An IntValue, StringValue or other Value object.
     Value(ClassName),
 }
@@ -95,6 +97,8 @@ impl Insertable {
     pub const AGENTS: [Insertable; 1] = [Insertable::NavigationAgent];
     /// Checkpoints, which a game returns the player character to.
     pub const CHECKPOINTS: [Insertable; 1] = [Insertable::Checkpoint];
+    /// Camera viewpoints, placed where the editor's camera is.
+    pub const CAMERAS: [Insertable; 1] = [Insertable::Camera];
     /// Value objects, which hold one value for scripts.
     pub const VALUES: [Insertable; 8] = [
         Insertable::Value(ClassName::IntValue),
@@ -143,6 +147,7 @@ impl Insertable {
             Insertable::FirstPersonController => "First Person",
             Insertable::NavigationAgent => "Agent",
             Insertable::Checkpoint => "Checkpoint",
+            Insertable::Camera => "Camera",
             Insertable::Value(class) => class.as_str(),
         }
     }
@@ -179,6 +184,7 @@ impl Insertable {
             Insertable::FirstPersonController => ClassName::FirstPersonController,
             Insertable::NavigationAgent => ClassName::NavigationAgent,
             Insertable::Checkpoint => ClassName::Checkpoint,
+            Insertable::Camera => ClassName::Camera,
             Insertable::Value(class) => class,
         }
     }

@@ -150,6 +150,16 @@ pub(super) fn palette(
                 sense: axcenity_blocks::SENSES[0].to_owned(),
                 body: Vec::new(),
             }),
+            B(BlockKind::SetCameraType {
+                camera_type: axcenity_blocks::CAMERA_TYPES[0].to_owned(),
+            }),
+            B(BlockKind::PointCameraAt {
+                position: vector(0.0, 0.0, 0.0),
+            }),
+            B(BlockKind::ShakeCamera {
+                intensity: number(1.0),
+                seconds: number(0.5),
+            }),
         ],
         Category::Looks => vec![
             B(BlockKind::SetColor {
@@ -302,6 +312,7 @@ pub(super) fn palette(
         }
         Category::Sensing => vec![
             R(Expression::TouchingPart),
+            R(Expression::PartUnderMouse),
             R(Expression::KeyDown {
                 key: "Space".to_owned(),
             }),

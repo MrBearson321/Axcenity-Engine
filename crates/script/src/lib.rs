@@ -35,6 +35,7 @@
 //!   new code runs against the same world.
 
 mod api;
+mod camera;
 mod cframe;
 mod changes;
 mod client;
@@ -80,7 +81,7 @@ use mlua::Lua;
 
 use crate::context::Context;
 
-pub use client::CameraState;
+pub use camera::{CameraState, CameraType, CameraView, DEFAULT_FIELD_OF_VIEW, GameCamera};
 pub use debugger::{Breakpoints, Local, Pause, PausedFrame};
 pub use definitions::{ApiEntry, ApiKind, DEFINITIONS_PATH, api_reference, lua_definitions};
 pub use input::KeyEvent;
@@ -677,9 +678,35 @@ impl ScriptRuntime {
         self.client.set_camera(camera);
     }
 
-    /// Where a LocalScript moved the camera, if one did since the last call.
+    /// The game view's size in pixels (`Camera.ViewportSize`): the
+    /// window in the player, the viewport in the editor. Screen points
+    /// (`ScreenPointToRay`, `WorldToScreenPoint`) are pixels from its top
+    /// left, like mouse positions and UI offsets.
+    pub fn set_viewport_size(&mut self, width: f32, height: f32) {
+        self.client.set_viewport_size(width, height);
+    }
+
+    /// Where a LocalScript moved the camera, if one did since the last
+    /// call, while it's Custom (the host's camera). Other camera types
+    /// are drawn through [`Self::step_camera`] instead.
     pub fn take_camera_move(&mut self) -> Option<CameraState> {
         self.client.take_camera_move()
+    }
+
+    /// Call once a frame, after scripts, physics and animation and just
+    /// before drawing: moves a Follow or Track camera after its subject and
+    /// shakes on by `seconds`. The result's [`GameCamera::view`] turns the
+    /// host's camera (a character controller's, or the fly camera with any
+    /// `take_camera_move` applied) into the one to draw and listen from.
+    pub fn step_camera(&mut self, world: &World, seconds: f64) -> GameCamera {
+        self.client.step_camera(world, seconds)
+    }
+
+    /// Whether scripts hold the camera (`CameraType` isn't Custom): the
+    /// host then leaves its fly camera where it is, and doesn't draw from
+    /// a character controller.
+    pub fn camera_scripted(&self) -> bool {
+        self.client.camera_scripted()
     }
 
     /// True once after a LocalScript calls
@@ -897,6 +924,9 @@ mod client_server_tests;
 
 #[cfg(test)]
 mod input_tests;
+
+#[cfg(test)]
+mod camera_tests;
 
 #[cfg(test)]
 mod events_tests;

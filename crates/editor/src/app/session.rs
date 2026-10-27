@@ -697,6 +697,8 @@ impl EditorApp {
             self.crashed(crash);
             return;
         }
+        let (width, height) = self.viewport.pixel_size();
+        session.set_viewport_size(width as f32, height as f32);
         let (position, orientation) = self.viewport.camera_view();
         let camera = CameraState {
             position,

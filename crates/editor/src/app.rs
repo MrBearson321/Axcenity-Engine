@@ -1149,6 +1149,8 @@ mod attribute_tests;
 #[cfg(test)]
 mod behavior_tree_tests;
 #[cfg(test)]
+mod camera_tests;
+#[cfg(test)]
 mod hot_patch_tests;
 #[cfg(test)]
 mod ik_tests;

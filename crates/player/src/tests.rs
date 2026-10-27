@@ -978,11 +978,19 @@ fn check_example_renders(
         .collect();
     let (mut world, mut scripts) = start_example(name);
     let (mut physics, mut clock) = (Physics::new(), 0);
-    run_until(&mut world, &mut scripts, &mut physics, &mut clock, 1.0);
     let mut camera = FlyCamera::looking_at(START_CAMERA_POSITION, Vec3::ZERO);
+    // LocalScripts see the view's size and the fly camera, as in the player.
+    scripts.set_viewport_size(width as f32, height as f32);
+    scripts.set_camera(camera_state(&camera));
+    run_until(&mut world, &mut scripts, &mut physics, &mut clock, 1.0);
     if let Some(view) = scripts.take_camera_move() {
         camera.set_view(view.position, view.orientation);
     }
+    // Drawn from where scripts hold the camera, if they do.
+    let shown = scripts
+        .step_camera(&world, 0.0)
+        .view(camera_state(&camera))
+        .render_camera();
     let assets = Assets::new(&folder);
     // Models load the first time they're drawn, so draw twice.
     let mut renderer = TextureRenderer::new(device, queue, width, height);
@@ -990,7 +998,7 @@ fn check_example_renders(
         let draw_list = axcenity_scene::build_draw_list_with_ui(
             &world,
             &assets,
-            camera.to_render_camera(),
+            shown,
             (width, height),
             &stylesheets,
         );

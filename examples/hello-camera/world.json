@@ -1,0 +1,253 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Anchored": true,
+          "CanCollide": true,
+          "CastShadow": true,
+          "Color": [
+            0.35,
+            0.37,
+            0.4
+          ],
+          "Emission": 0,
+          "EmissiveColor": [
+            1,
+            1,
+            1
+          ],
+          "Material": "Plastic",
+          "Metalness": 0,
+          "Orientation": [
+            0,
+            0,
+            0
+          ],
+          "Position": [
+            0,
+            -0.5,
+            0
+          ],
+          "Roughness": 0.5,
+          "Shape": "Block",
+          "Size": [
+            160,
+            1,
+            160
+          ],
+          "TileSize": 8,
+          "Transparency": 0,
+          "WindAffected": false
+        }
+      },
+      {
+        "class": "Model",
+        "name": "Character",
+        "children": [
+          {
+            "class": "Part",
+            "name": "Body",
+            "properties": {
+              "Anchored": false,
+              "CanCollide": true,
+              "CastShadow": true,
+              "Color": [
+                0.29,
+                0.45,
+                0.78
+              ],
+              "Emission": 0,
+              "EmissiveColor": [
+                1,
+                1,
+                1
+              ],
+              "Material": "Plastic",
+              "Metalness": 0,
+              "Orientation": [
+                0,
+                0,
+                0
+              ],
+              "Position": [
+                0,
+                2.5,
+                0
+              ],
+              "Roughness": 0.5,
+              "Shape": "Block",
+              "Size": [
+                2,
+                5,
+                1
+              ],
+              "TileSize": 8,
+              "Transparency": 0,
+              "WindAffected": false
+            }
+          },
+          {
+            "class": "ThirdPersonController",
+            "name": "ThirdPersonController",
+            "properties": {
+              "CameraDistance": 12,
+              "CameraHeight": 4,
+              "CameraMaxZoomDistance": 128,
+              "CameraMinZoomDistance": 0.5,
+              "Crouch": false,
+              "CrouchHeight": 3,
+              "CrouchSpeedScale": 0.5,
+              "Jump": false,
+              "JumpHeight": 7.2,
+              "MaxSlopeAngle": 45,
+              "MaxStepHeight": 1,
+              "Movement": "Walk",
+              "RunSpeed": 32,
+              "WalkSpeed": 16
+            }
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "Beacon",
+        "properties": {
+          "Anchored": true,
+          "CanCollide": true,
+          "CastShadow": true,
+          "Color": [
+            0.95,
+            0.6,
+            0.2
+          ],
+          "Emission": 0,
+          "EmissiveColor": [
+            1,
+            1,
+            1
+          ],
+          "Material": "Plastic",
+          "Metalness": 0,
+          "Orientation": [
+            0,
+            0,
+            0
+          ],
+          "Position": [
+            0,
+            4,
+            -20
+          ],
+          "Roughness": 0.5,
+          "Shape": "Block",
+          "Size": [
+            2,
+            8,
+            2
+          ],
+          "TileSize": 8,
+          "Transparency": 0,
+          "WindAffected": false
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Crate",
+        "properties": {
+          "Anchored": true,
+          "CanCollide": true,
+          "CastShadow": true,
+          "Color": [
+            0.72,
+            0.52,
+            0.3
+          ],
+          "Emission": 0,
+          "EmissiveColor": [
+            1,
+            1,
+            1
+          ],
+          "Material": "Plastic",
+          "Metalness": 0,
+          "Orientation": [
+            0,
+            0,
+            0
+          ],
+          "Position": [
+            8,
+            1.5,
+            -8
+          ],
+          "Roughness": 0.5,
+          "Shape": "Block",
+          "Size": [
+            3,
+            3,
+            3
+          ],
+          "TileSize": 8,
+          "Transparency": 0,
+          "WindAffected": false
+        }
+      },
+      {
+        "class": "Camera",
+        "name": "Overlook",
+        "properties": {
+          "Position": [
+            0,
+            30,
+            10
+          ],
+          "Orientation": [
+            -50,
+            0,
+            0
+          ],
+          "FieldOfView": 50
+        }
+      },
+      {
+        "class": "ScreenGui",
+        "name": "Hud",
+        "properties": {
+          "Enabled": true
+        },
+        "children": [
+          {
+            "class": "TextLabel",
+            "name": "Tag",
+            "properties": {
+              "Text": "Beacon",
+              "Size": [
+                0,
+                120,
+                0,
+                28
+              ],
+              "Position": [
+                0,
+                0,
+                0,
+                0
+              ],
+              "BackgroundTransparency": 0.3,
+              "BackgroundColor3": [
+                0.1,
+                0.1,
+                0.12
+              ]
+            },
+            "children": []
+          }
+        ]
+      }
+    ]
+  }
+}

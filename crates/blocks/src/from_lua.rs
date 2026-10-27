@@ -11,9 +11,9 @@ use std::collections::BTreeSet;
 
 use crate::lua::{self, Expr, ExprKind, FunctionBody, Stat, StatKind, SyntaxError};
 use crate::{
-    Block, BlockKind, BlockScript, BlockShape, Comparison, EASING_DIRECTIONS, EASING_STYLES,
-    Expression, GRAPHICS_NUMBERS, GRAPHICS_OPTIONS, GRAPHICS_QUALITIES, LogicOp, MathFunction,
-    MathOp, PRESET, TONE_MAPPINGS, graphics_choices, translate,
+    Block, BlockKind, BlockScript, BlockShape, CAMERA_TYPES, Comparison, EASING_DIRECTIONS,
+    EASING_STYLES, Expression, GRAPHICS_NUMBERS, GRAPHICS_OPTIONS, GRAPHICS_QUALITIES, LogicOp,
+    MathFunction, MathOp, PRESET, TONE_MAPPINGS, graphics_choices, translate,
 };
 
 /// The services blocks get with `game:GetService`, which the translation
@@ -752,6 +752,17 @@ impl<'a> Converter<'a> {
                 }
                 None
             }
+            // workspace.CurrentCamera:Shake(intensity, seconds)
+            ExprKind::Method(object, method, args)
+                if method == "Shake"
+                    && self.target(object).as_deref() == Some("CurrentCamera")
+                    && args.len() == 2 =>
+            {
+                Some(BlockKind::ShakeCamera {
+                    intensity: self.expression(&args[0], scope),
+                    seconds: self.expression(&args[1], scope),
+                })
+            }
             ExprKind::Method(object, method, args)
                 if method == "WaitForChild"
                     && let [
@@ -1093,6 +1104,12 @@ impl<'a> Converter<'a> {
                 language: self.expression(value, scope),
             });
         }
+        // workspace.CurrentCamera.CameraType = Enum.CameraType.Scriptable
+        if property == "CameraType" && self.target(object).as_deref() == Some("CurrentCamera") {
+            return Some(BlockKind::SetCameraType {
+                camera_type: enum_item(value, "CameraType", &CAMERA_TYPES)?,
+            });
+        }
         let path = self.target(object)?;
         let same_property = |expr: &Expr| {
             matches!(&expr.kind, ExprKind::Field(inner, name)
@@ -1106,9 +1123,13 @@ impl<'a> Converter<'a> {
             && matches!(&from.kind, ExprKind::Field(inner, name)
                 if name == "Position" && self.target(inner).as_deref() == Some(path.as_str()))
         {
+            let position = self.expression(position, scope);
+            if path == "CurrentCamera" {
+                return Some(BlockKind::PointCameraAt { position });
+            }
             return Some(BlockKind::LookAt {
                 target: path,
-                position: self.expression(position, scope),
+                position,
             });
         }
         // object.Position = object.Position + v
@@ -1532,6 +1553,14 @@ impl<'a> Converter<'a> {
                 }
                 return None;
             }
+            // game.Players.LocalPlayer:GetMouse().Target
+            ExprKind::Field(object, property)
+                if property == "Target"
+                    && matches!(&object.kind, ExprKind::Method(player, method, none)
+                        if method == "GetMouse" && none.is_empty() && is_local_player(player)) =>
+            {
+                Expression::PartUnderMouse
+            }
             ExprKind::Field(object, property) => Expression::Property {
                 target: self.target(object)?,
                 property: property.clone(),
@@ -1665,4 +1694,12 @@ fn code_mentions(blocks: &[Block], name: &str) -> bool {
             .into_iter()
             .any(|body| code_mentions(body, name))
     })
+}
+
+/// `game.Players.LocalPlayer`.
+fn is_local_player(expr: &Expr) -> bool {
+    matches!(&expr.kind, ExprKind::Field(players, local)
+        if local == "LocalPlayer"
+            && matches!(&players.kind, ExprKind::Field(game, name)
+                if name == "Players" && matches!(&game.kind, ExprKind::Name(g) if g == "game")))
 }

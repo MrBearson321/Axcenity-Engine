@@ -12,6 +12,7 @@ use axcenity_core::{
 };
 use mlua::{FromLua, IntoLua, Lua, MetaMethod, UserData, UserDataFields, UserDataMethods};
 
+use crate::camera::CameraType;
 use crate::cframe::LuaCFrame;
 use crate::instance::LuaInstance;
 use crate::tween::{PlaybackState, TweenStyle};
@@ -518,10 +519,11 @@ pub enum EnumType {
     UserInputType,
     UserInputState,
     MouseBehavior,
+    CameraType,
 }
 
 impl EnumType {
-    pub const ALL: [EnumType; 17] = [
+    pub const ALL: [EnumType; 18] = [
         EnumType::Material,
         EnumType::PartType,
         EnumType::KeyCode,
@@ -539,6 +541,7 @@ impl EnumType {
         EnumType::UserInputType,
         EnumType::UserInputState,
         EnumType::MouseBehavior,
+        EnumType::CameraType,
     ];
 
     pub fn name(self) -> &'static str {
@@ -560,6 +563,7 @@ impl EnumType {
             EnumType::UserInputType => "UserInputType",
             EnumType::UserInputState => "UserInputState",
             EnumType::MouseBehavior => "MouseBehavior",
+            EnumType::CameraType => "CameraType",
         }
     }
 
@@ -583,6 +587,7 @@ impl EnumType {
             EnumType::UserInputType => UserInputType::ALL.iter().map(|t| t.as_str()).collect(),
             EnumType::UserInputState => UserInputState::ALL.iter().map(|s| s.as_str()).collect(),
             EnumType::MouseBehavior => MouseBehavior::ALL.iter().map(|b| b.as_str()).collect(),
+            EnumType::CameraType => CameraType::ALL.iter().map(|t| t.as_str()).collect(),
         }
     }
 
@@ -665,7 +670,8 @@ impl LuaEnumItem {
             | EnumType::AmbientOcclusion
             | EnumType::UserInputType
             | EnumType::UserInputState
-            | EnumType::MouseBehavior => None,
+            | EnumType::MouseBehavior
+            | EnumType::CameraType => None,
         }
     }
 }
@@ -953,7 +959,9 @@ pub fn type_name(lua: &Lua, value: &mlua::Value) -> String {
         }
         // Engine objects that aren't Instances, by the names scripts know them by.
         let others = [
-            (data.is::<crate::client::LuaCamera>(), "Camera"),
+            (data.is::<crate::camera::LuaCamera>(), "Camera"),
+            (data.is::<crate::camera::Ray>(), "Ray"),
+            (data.is::<crate::camera::LuaMouse>(), "Mouse"),
             (data.is::<crate::input::LuaInputObject>(), "InputObject"),
             (
                 data.is::<crate::input::LuaUserInputService>(),

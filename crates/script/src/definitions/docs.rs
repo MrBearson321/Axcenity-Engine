@@ -1797,6 +1797,21 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "Where SaveService:RestoreCheckpoint stands the player character: the middle of its feet goes here.",
     ),
     (
+        ClassName::Camera,
+        "Position",
+        "Where the camera is, in studs.",
+    ),
+    (
+        ClassName::Camera,
+        "Orientation",
+        "Which way it looks, in degrees like a Part's: X looks up (positive) and down, Y turns left (positive) and right. Z is ignored.",
+    ),
+    (
+        ClassName::Camera,
+        "FieldOfView",
+        "How much it sees from top to bottom, in degrees (1 to 120; 50 to start with). Smaller zooms in.",
+    ),
+    (
         ClassName::Frame,
         "ZIndex",
         "Its place among its siblings: higher is drawn over lower and takes the pointer first, and equal ones keep their order in the tree. CSS `z-index` wins over it. Whole numbers; 1 by default.",
@@ -2609,6 +2624,9 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::ObjectValue => {
             "Points at another Instance in Value, or nil. Its `Changed` fires with the new value. `Clone` points a copy at the same place inside the copy; saving keeps the path of names to it."
+        }
+        ClassName::Camera => {
+            "A view of the world. `workspace.CurrentCamera` (LocalScripts only) is the one the player sees through: its `CameraType` says who moves it, and it turns screen points into rays and back. Camera objects placed in the world are named viewpoints, not drawn: `workspace.CurrentCamera.CFrame = workspace.Overlook.CFrame` cuts to one."
         }
         ClassName::Checkpoint => {
             "A place in the world to come back to. `SaveService:SetCheckpoint(checkpoint)` makes it the active one and captures the player data and world state there; `SaveService:RestoreCheckpoint()` puts them back and stands the player character at its Position. A save slot keeps the active checkpoint."

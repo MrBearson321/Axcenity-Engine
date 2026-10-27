@@ -107,6 +107,12 @@ pub const SIDE_ONLY_APIS: &[SideOnlyApi] = &[
         instead: "OnServerEvent handlers get the player who sent the message as their first argument",
     },
     SideOnlyApi {
+        name: "GetMouse",
+        side: Side::Client,
+        because: "the mouse belongs to the player's device",
+        instead: "read the mouse in a LocalScript, and send what it points at to the server with a RemoteEvent's FireServer",
+    },
+    SideOnlyApi {
         name: "FireServer",
         side: Side::Client,
         because: "it sends a message from the player's side to the server",

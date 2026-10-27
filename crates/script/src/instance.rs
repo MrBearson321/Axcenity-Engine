@@ -10,8 +10,9 @@ use mlua::{
     UserDataMethods,
 };
 
+use crate::camera::LuaCamera;
 use crate::cframe::LuaCFrame;
-use crate::client::{LocalPlayer, LuaCamera, LuaReplicatedFirst};
+use crate::client::{LocalPlayer, LuaReplicatedFirst};
 use crate::collection::LuaCollectionService;
 use crate::events::{Event, LuaSignal, Owner};
 use crate::gui_service::LuaGuiService;

@@ -11,7 +11,8 @@ use axcenity_render::{Capabilities, GraphicsSettings};
 use mlua::chunk::ChunkMode;
 use mlua::{Lua, LuaOptions, StdLib, Thread};
 
-use crate::client::{Camera, CameraState, LoadingScreenRemoved, LocalPlayer};
+use crate::camera::{Camera, CameraState, GameCamera};
+use crate::client::{LoadingScreenRemoved, LocalPlayer};
 use crate::errors::error_message;
 use crate::input::{self, Inputs};
 use crate::instance::{self, ClassMethods};
@@ -97,6 +98,10 @@ impl Context {
         methods.extend(
             instance::workspace_methods(&lua)
                 .expect("creating Workspace methods only fails when out of memory"),
+        );
+        methods.extend(
+            crate::client::player_methods(&lua)
+                .expect("creating Player methods only fails when out of memory"),
         );
         methods.extend(
             crate::cframe::pivot_methods(&lua)
@@ -361,14 +366,36 @@ impl Context {
     /// Tells scripts where the camera is now (after the player flew it).
     pub fn set_camera(&self, state: CameraState) {
         if let Some(mut camera) = self.lua.app_data_mut::<Camera>() {
-            camera.state = state;
+            camera.set_host(state);
         }
     }
 
-    /// Where a script moved the camera, if one did since the last call.
+    /// The view's size in pixels, for `ViewportSize` and screen points.
+    pub fn set_viewport_size(&self, width: f32, height: f32) {
+        if let Some(mut camera) = self.lua.app_data_mut::<Camera>() {
+            camera.viewport = axcenity_core::Vector2::new(width, height);
+        }
+    }
+
+    /// Where a script moved a Custom camera, if one did since the last call.
     pub fn take_camera_move(&self) -> Option<CameraState> {
-        let mut camera = self.lua.app_data_mut::<Camera>()?;
-        std::mem::take(&mut camera.moved).then_some(camera.state)
+        self.lua.app_data_mut::<Camera>()?.take_move()
+    }
+
+    /// Moves a following camera and the shakes on, and says what to draw.
+    pub fn step_camera(&self, world: &World, seconds: f64) -> GameCamera {
+        self.lua
+            .app_data_mut::<Camera>()
+            .map(|mut camera| camera.step(world, seconds))
+            .unwrap_or_default()
+    }
+
+    /// Whether scripts hold the camera (any `CameraType` but Custom), so
+    /// the host shouldn't fly or orbit it.
+    pub fn camera_scripted(&self) -> bool {
+        self.lua
+            .app_data_ref::<Camera>()
+            .is_some_and(|camera| camera.camera_type != crate::camera::CameraType::Custom)
     }
 
     pub fn set_graphics(&self, settings: &GraphicsSettings, capabilities: &Capabilities) {

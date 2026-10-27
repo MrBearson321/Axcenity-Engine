@@ -20,6 +20,9 @@
 //! A part's `CFrame` tweens as one rotation and one position (see
 //! [`Goal::CFrame`]), so it turns the short way round and never flips the
 //! way blending three `Orientation` angles can.
+//!
+//! `workspace.CurrentCamera` isn't an Instance, but tweens too: its
+//! `CFrame`, `Position`, `Orientation` and `FieldOfView` ([`Target::Camera`]).
 
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
@@ -27,9 +30,11 @@ use std::rc::{Rc, Weak};
 use axcenity_anim::{EasingDirection, EasingStyle, ease};
 use axcenity_core::{Color3, InstanceId, UDim, UDim2, Value, ValueKind, Vector2, Vector3};
 use mlua::{
-    FromLua, Lua, MetaMethod, Table, UserData, UserDataFields, UserDataMethods, Value as LuaValue,
+    FromLua, IntoLua, Lua, MetaMethod, Table, UserData, UserDataFields, UserDataMethods,
+    Value as LuaValue,
 };
 
+use crate::camera::{self, LuaCamera};
 use crate::cframe::LuaCFrame;
 use crate::events::{self, LuaSignal, Owner};
 use crate::instance::{LuaInstance, world, world_mut};
@@ -250,9 +255,45 @@ fn overlaps(a: &str, b: &str) -> bool {
     moves(a, b) || moves(b, a)
 }
 
+/// What a tween moves.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Target {
+    Instance(InstanceId),
+    /// `workspace.CurrentCamera`, on the player's side.
+    Camera,
+}
+
+/// The camera's properties a tween can move, besides `CFrame`.
+const CAMERA_PROPERTIES: [(&str, ValueKind); 3] = [
+    ("Position", ValueKind::Vector3),
+    ("Orientation", ValueKind::Vector3),
+    ("FieldOfView", ValueKind::Number),
+];
+
+fn camera_value(lua: &Lua, name: &str) -> Option<Value> {
+    let state = camera::state(lua).ok()?;
+    Some(match name {
+        "Position" => Value::Vector3(state.position),
+        "Orientation" => Value::Vector3(state.orientation),
+        "FieldOfView" => Value::Number(f64::from(camera::field_of_view(lua).ok()?)),
+        _ => return None,
+    })
+}
+
+fn set_camera_value(lua: &Lua, name: &str, value: Value) -> mlua::Result<()> {
+    let mut state = camera::state(lua)?;
+    match (name, value) {
+        ("Position", Value::Vector3(v)) => state.position = v,
+        ("Orientation", Value::Vector3(v)) => state.orientation = v,
+        ("FieldOfView", Value::Number(degrees)) => return camera::set_field_of_view(lua, degrees),
+        _ => return Ok(()),
+    }
+    camera::set_state(lua, state)
+}
+
 struct TweenState {
     id: u64,
-    instance: InstanceId,
+    target: Target,
     info: TweenInfo,
     /// Each property and where it goes, sorted by name.
     goals: Vec<(&'static str, Goal)>,
@@ -320,11 +361,14 @@ pub fn step(lua: &Lua, seconds: f64) {
 /// Moves one tween on. Returns whether it finished, and whether it had to
 /// stop because its Instance is gone.
 fn advance(lua: &Lua, tween: &Rc<RefCell<TweenState>>, seconds: f64) -> (bool, bool) {
+    let mut tween = tween.borrow_mut();
+    let Target::Instance(id) = tween.target else {
+        return (advance_camera(lua, &mut tween, seconds), false);
+    };
     let Ok(mut world) = world_mut(lua) else {
         return (false, false);
     };
-    let mut tween = tween.borrow_mut();
-    let Some(instance) = world.get(tween.instance) else {
+    let Some(instance) = world.get(id) else {
         tween.state = PlaybackState::Cancelled;
         return (false, true);
     };
@@ -347,7 +391,6 @@ fn advance(lua: &Lua, tween: &Rc<RefCell<TweenState>>, seconds: f64) -> (bool, b
     // Reduced motion: a UI element's tween goes straight to where it ends.
     let still = world.ui_settings().reduced_motion && instance.class().is_gui();
     let (alpha, done) = tween.info.progress(if still { f64::INFINITY } else { run });
-    let id = tween.instance;
     for ((name, goal), start) in tween.goals.iter().zip(&tween.starts) {
         // Another script may have destroyed it, or its kind can't change,
         // so a failure here only skips this one.
@@ -367,6 +410,44 @@ fn advance(lua: &Lua, tween: &Rc<RefCell<TweenState>>, seconds: f64) -> (bool, b
         tween.state = PlaybackState::Completed;
     }
     (done, false)
+}
+
+/// Moves a camera tween on. Returns whether it finished.
+fn advance_camera(lua: &Lua, tween: &mut TweenState, seconds: f64) -> bool {
+    tween.elapsed += seconds;
+    let run = tween.elapsed - tween.info.delay;
+    if run < 0.0 {
+        return false;
+    }
+    if tween.state == PlaybackState::Delayed {
+        tween.state = PlaybackState::Playing;
+        tween.starts = tween
+            .goals
+            .iter()
+            .map(|(name, goal)| match goal {
+                Goal::Value(_) => camera_value(lua, name).map(Goal::Value),
+                Goal::CFrame(_) => camera::cframe(lua).ok().map(Goal::CFrame),
+            })
+            .collect();
+    }
+    let (alpha, done) = tween.info.progress(run);
+    for ((name, goal), start) in tween.goals.iter().zip(&tween.starts) {
+        match (start, goal) {
+            (Some(Goal::Value(start)), Goal::Value(goal)) => {
+                if let Some(value) = interpolate(name, start, goal, alpha) {
+                    let _ = set_camera_value(lua, name, value);
+                }
+            }
+            (Some(Goal::CFrame(start)), Goal::CFrame(goal)) => {
+                let _ = camera::set_cframe(lua, start.lerp(*goal, alpha));
+            }
+            _ => {}
+        }
+    }
+    if done {
+        tween.state = PlaybackState::Completed;
+    }
+    done
 }
 
 /// `TweenService`, as scripts see it. Both sides have one.
@@ -398,8 +479,11 @@ fn create(
             type_name(lua, value)
         ))
     };
-    let Ok(LuaInstance(id)) = LuaInstance::from_lua(instance.clone(), lua) else {
-        return Err(wrong("an Instance first", &instance));
+    let is_camera = matches!(&instance, LuaValue::UserData(data) if data.is::<LuaCamera>());
+    let target = match LuaInstance::from_lua(instance.clone(), lua) {
+        Ok(LuaInstance(id)) => Target::Instance(id),
+        Err(_) if is_camera => Target::Camera,
+        Err(_) => return Err(wrong("an Instance first", &instance)),
     };
     let Ok(LuaTweenInfo(info)) = LuaTweenInfo::from_lua(info.clone(), lua) else {
         return Err(wrong("a TweenInfo second (TweenInfo.new(...))", &info));
@@ -410,13 +494,16 @@ fn create(
             &goals,
         ));
     };
-    let goals = read_goals(lua, id, &goals)?;
+    let goals = match target {
+        Target::Instance(id) => read_goals(lua, id, &goals)?,
+        Target::Camera => read_camera_goals(lua, &goals)?,
+    };
     let mut tweens = tweens_mut(lua)?;
     let id_number = tweens.next_id;
     tweens.next_id += 1;
     let tween = Rc::new(RefCell::new(TweenState {
         id: id_number,
-        instance: id,
+        target,
         info,
         goals,
         starts: Vec::new(),
@@ -480,6 +567,45 @@ fn read_goals(lua: &Lua, id: InstanceId, goals: &Table) -> mlua::Result<Vec<(&'s
     Ok(read)
 }
 
+/// The camera's goals, sorted by name.
+fn read_camera_goals(lua: &Lua, goals: &Table) -> mlua::Result<Vec<(&'static str, Goal)>> {
+    let mut read = Vec::new();
+    for pair in goals.pairs::<LuaValue, LuaValue>() {
+        let (key, value) = pair?;
+        let key = match &key {
+            LuaValue::String(key) => key.to_string_lossy(),
+            _ => {
+                return Err(mlua::Error::runtime(format!(
+                    "TweenService:Create's goals are property names, not a {}",
+                    type_name(lua, &key)
+                )));
+            }
+        };
+        if key == "CFrame" {
+            let cf = LuaCFrame::from_lua(value.clone(), lua).map_err(|_| {
+                mlua::Error::runtime(format!(
+                    "Camera.CFrame must be a CFrame, not a {}",
+                    type_name(lua, &value)
+                ))
+            })?;
+            read.push(("CFrame", Goal::CFrame(cf)));
+            continue;
+        }
+        let Some((name, kind)) = CAMERA_PROPERTIES.into_iter().find(|(name, _)| *name == key)
+        else {
+            return Err(mlua::Error::runtime(format!(
+                "{key} can't be tweened on the Camera; tween its CFrame, Position, \
+                 Orientation or FieldOfView"
+            )));
+        };
+        let value = value_from_lua(lua, value, kind)
+            .map_err(|message| mlua::Error::runtime(format!("Camera.{name} {message}")))?;
+        read.push((name, Goal::Value(value)));
+    }
+    read.sort_by_key(|(name, _)| *name);
+    Ok(read)
+}
+
 /// A Tween, as scripts see it. Each copy of the Lua value shares one state.
 #[derive(Clone)]
 pub struct LuaTween(Rc<RefCell<TweenState>>);
@@ -506,10 +632,10 @@ impl LuaTween {
         }
         let mut tweens = tweens_mut(lua)?;
         // A newer tween on the same property wins.
-        let (instance, names): (InstanceId, Vec<&str>) = {
+        let (target, names): (Target, Vec<&str>) = {
             let tween = self.0.borrow();
             (
-                tween.instance,
+                tween.target,
                 tween.goals.iter().map(|(name, _)| *name).collect(),
             )
         };
@@ -518,7 +644,7 @@ impl LuaTween {
             .iter()
             .filter(|other| {
                 let other = other.borrow();
-                other.instance == instance
+                other.target == target
                     && other
                         .goals
                         .iter()
@@ -575,8 +701,9 @@ impl UserData for LuaTween {
                 "Completed",
             ))
         });
-        fields.add_field_method_get("Instance", |_, this| {
-            Ok(LuaInstance(this.0.borrow().instance))
+        fields.add_field_method_get("Instance", |lua, this| match this.0.borrow().target {
+            Target::Instance(id) => LuaInstance(id).into_lua(lua),
+            Target::Camera => LuaCamera.into_lua(lua),
         });
         fields.add_field_method_get("TweenInfo", |_, this| {
             Ok(LuaTweenInfo(this.0.borrow().info))

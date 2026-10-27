@@ -107,9 +107,12 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         BlockKind::CloneInto { .. } => 54,
         BlockKind::LookAt { .. } => 55,
         BlockKind::MoveForward { .. } => 56,
+        BlockKind::SetCameraType { .. } => 57,
+        BlockKind::PointCameraAt { .. } => 58,
+        BlockKind::ShakeCamera { .. } => 59,
     })
 }
-const STATEMENT_COUNT: usize = 57;
+const STATEMENT_COUNT: usize = 60;
 
 /// One of each statement block, with the Lua it must produce.
 fn every_statement() -> Vec<(BlockKind, &'static str)> {
@@ -531,6 +534,30 @@ fn every_statement() -> Vec<(BlockKind, &'static str)> {
             },
             "TweenService:Create(workspace.Hud.Menu, TweenInfo.new(0.5), \
              {BackgroundTransparency = 1}):Play()",
+        ),
+        (
+            BlockKind::SetCameraType {
+                camera_type: "Scriptable".to_owned(),
+            },
+            "workspace.CurrentCamera.CameraType = Enum.CameraType.Scriptable",
+        ),
+        (
+            BlockKind::PointCameraAt {
+                position: Expression::Vector3 {
+                    x: 0.0,
+                    y: 2.0,
+                    z: 0.0,
+                },
+            },
+            "workspace.CurrentCamera.CFrame = \
+             CFrame.lookAt(workspace.CurrentCamera.Position, Vector3.new(0, 2, 0))",
+        ),
+        (
+            BlockKind::ShakeCamera {
+                intensity: number(1.5),
+                seconds: number(0.5),
+            },
+            "workspace.CurrentCamera:Shake(1.5, 0.5)",
         ),
     ]
 }
@@ -1493,6 +1520,7 @@ fn reporters_switched_to_code_and_back_are_the_same_reporters() {
                 z: 0.0,
             }),
         },
+        Expression::PartUnderMouse,
     ];
     let body = every_reporter
         .into_iter()
@@ -2060,4 +2088,91 @@ fn look_at_move_forward_lerp_and_random_number_blocks_run_and_come_back_from_lua
         }
         other => panic!("{other:?}"),
     }
+}
+
+#[test]
+fn camera_blocks_hold_point_and_shake_the_camera_and_find_the_part_under_the_mouse() {
+    use axcenity_core::input::{InputEvent, InputKind};
+    use axcenity_script::CameraState;
+
+    let source = translate(&script(vec![block(
+        1,
+        BlockKind::WhenStarted {
+            body: vec![
+                block(
+                    2,
+                    BlockKind::SetCameraType {
+                        camera_type: "Scriptable".to_owned(),
+                    },
+                ),
+                block(
+                    3,
+                    BlockKind::PointCameraAt {
+                        position: Expression::Vector3 {
+                            x: 0.0,
+                            y: 0.0,
+                            z: 0.0,
+                        },
+                    },
+                ),
+                block(
+                    4,
+                    BlockKind::ShakeCamera {
+                        intensity: number(1.0),
+                        seconds: number(0.5),
+                    },
+                ),
+                block(
+                    5,
+                    BlockKind::Wait {
+                        seconds: number(0.0),
+                    },
+                ),
+                block(
+                    6,
+                    BlockKind::Print {
+                        value: Expression::PartUnderMouse,
+                    },
+                ),
+            ],
+        },
+    )]))
+    .unwrap()
+    .source;
+    let mut world = World::new();
+    let pad = world.create(ClassName::Part).unwrap();
+    world.set_name(pad, "Pad").unwrap();
+    world.set_parent(pad, Some(world.workspace())).unwrap();
+    let mut runtime = ScriptRuntime::new();
+    runtime.set_viewport_size(200.0, 100.0);
+    runtime.set_camera(CameraState {
+        position: Vector3::new(0.0, 6.0, 8.0),
+        orientation: Vector3::new(0.0, 0.0, 0.0),
+    });
+    let local = world.create(ClassName::LocalScript).unwrap();
+    world
+        .set_parent(local, Some(world.starter_player_scripts()))
+        .unwrap();
+    runtime.start_script(&mut world, local, "scripts/Camera.client.lua", &source);
+    // The camera now looks at the pad, so the middle of the view is on it.
+    let mouse = InputKind::MouseMove {
+        position: [100.0, 50.0],
+        delta: [0.0, 0.0],
+    };
+    runtime.input_events(&mut world, &[InputEvent::new(mouse)]);
+    runtime.step(&mut world, 1.0 / 60.0);
+    let output: Vec<_> = runtime
+        .take_output()
+        .into_iter()
+        .map(|line| line.text)
+        .collect();
+    assert_eq!(output, ["Pad"]);
+    let game = runtime.step_camera(&world, 1.0 / 60.0);
+    let held = game.scripted.expect("Scriptable");
+    assert_eq!(held.position, Vector3::new(0.0, 6.0, 8.0));
+    assert!(
+        held.orientation.x < -30.0,
+        "looks down at the pad: {held:?}"
+    );
+    assert_ne!(game.shake.position, Vector3::default());
 }

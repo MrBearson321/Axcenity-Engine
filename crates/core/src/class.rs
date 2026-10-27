@@ -136,6 +136,10 @@ pub enum ClassName {
     /// one active with `SaveService:SetCheckpoint`, which captures the game
     /// there, and `SaveService:RestoreCheckpoint` returns to it.
     Checkpoint,
+    /// A named viewpoint in the world, which scripts cut to with
+    /// `workspace.CurrentCamera.CFrame = viewpoint.CFrame`. Not drawn and
+    /// not a body.
+    Camera,
     IntValue,
     NumberValue,
     StringValue,
@@ -147,7 +151,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 53] = [
+    pub const ALL: [ClassName; 54] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -193,6 +197,7 @@ impl ClassName {
         ClassName::FirstPersonController,
         ClassName::NavigationAgent,
         ClassName::Checkpoint,
+        ClassName::Camera,
         ClassName::IntValue,
         ClassName::NumberValue,
         ClassName::StringValue,
@@ -250,6 +255,7 @@ impl ClassName {
             ClassName::FirstPersonController => "FirstPersonController",
             ClassName::NavigationAgent => "NavigationAgent",
             ClassName::Checkpoint => "Checkpoint",
+            ClassName::Camera => "Camera",
             ClassName::IntValue => "IntValue",
             ClassName::NumberValue => "NumberValue",
             ClassName::StringValue => "StringValue",
@@ -1061,6 +1067,14 @@ impl ClassName {
                 // Where a restored character stands: the middle of its feet.
                 ("Position", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
             ],
+            ClassName::Camera => vec![
+                // Where the viewpoint is and which way it looks, in degrees
+                // like a Part's (Z, rolling, isn't drawn).
+                ("Position", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
+                ("Orientation", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
+                // The vertical field of view, in degrees, from 1 to 120.
+                ("FieldOfView", Value::Number(50.0)),
+            ],
             ClassName::SurfaceAppearance => {
                 let map = |name| (name, Value::String(String::new()));
                 let channel = |name, channel| (name, Value::TextureChannel(channel));
@@ -1131,6 +1145,7 @@ impl ClassName {
             | ClassName::ThirdPersonController
             | ClassName::FirstPersonController
             | ClassName::Checkpoint
+            | ClassName::Camera
             | ClassName::IntValue
             | ClassName::NumberValue
             | ClassName::StringValue

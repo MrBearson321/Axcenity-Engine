@@ -17,14 +17,16 @@ use std::time::Instant;
 use axcenity_anim::Animators;
 use axcenity_assets::Assets;
 use axcenity_audio::{GameAudio, SoundAction};
-use axcenity_character::{CharacterCamera, Controllers, MoveInput};
+use axcenity_character::{Controllers, MoveInput};
 use axcenity_core::input::{InputEvent, InputMap, InputState};
 use axcenity_core::{InstanceId, KeyCode, MouseBehavior, Vector3, World};
 use axcenity_nav::Agents;
 use axcenity_physics::Physics;
 use axcenity_project::{LoadingScreen, ScriptFile};
 use axcenity_render::{Capabilities, GraphicsSettings};
-use axcenity_script::{Breakpoints, CameraState, KeyEvent, OutputKind, Pause, ScriptRuntime};
+use axcenity_script::{
+    Breakpoints, CameraState, CameraView, GameCamera, KeyEvent, OutputKind, Pause, ScriptRuntime,
+};
 use axcenity_ui::LoadingGui;
 use eframe::egui;
 
@@ -68,6 +70,9 @@ pub struct Session {
     /// (`UserGameSettings`), for the viewport until Stop. `None` until one
     /// does: the editor's own settings are used.
     graphics: Option<GraphicsSettings>,
+    /// What scripts did to the camera last frame (`CameraType`, field of
+    /// view, shake), for the viewport.
+    game_camera: GameCamera,
     /// Values edited in Properties during Play, and which Stop keeps.
     kept: PlayEdits,
 }
@@ -113,6 +118,7 @@ impl Session {
             panic_next_frame: false,
             cost: None,
             graphics: None,
+            game_camera: GameCamera::default(),
             kept: PlayEdits::default(),
         };
         // Up before any script runs, as in the player.
@@ -290,8 +296,28 @@ impl Session {
 
     /// The follow camera of a third-person controller, if the play world has
     /// one with a body. The fly camera is left alone; Stop shows it again.
-    pub fn character_camera(&self) -> Option<CharacterCamera> {
+    #[cfg(test)]
+    pub fn character_camera(&self) -> Option<axcenity_character::CharacterCamera> {
         self.characters.view(&self.world)
+    }
+
+    /// Whether the game holds the view (a character controller, or a
+    /// CameraType other than Custom), so the fly camera stays put.
+    pub fn holds_camera(&self) -> bool {
+        self.characters.view(&self.world).is_some() || self.scripts.camera_scripted()
+    }
+
+    /// The camera the viewport draws during Play, given the fly camera:
+    /// a character controller's or the fly camera, unless scripts hold it,
+    /// with the scripts' field of view and shake. The fly camera itself is
+    /// never moved by it, so Stop shows it where it was.
+    pub fn shown_camera(&self, fly: CameraState) -> CameraView {
+        self.game_camera.view(self.script_camera(fly))
+    }
+
+    /// The viewport's size in pixels (`Camera.ViewportSize`), before a frame.
+    pub fn set_viewport_size(&mut self, width: f32, height: f32) {
+        self.scripts.set_viewport_size(width, height);
     }
 
     /// Runs one frame, `seconds` long, with the input since the last frame
@@ -397,7 +423,11 @@ impl Session {
             if self.scripts.pause().is_some() {
                 return;
             }
-            let listener = self.script_camera(moved.unwrap_or(camera));
+            let listener = self.shown_camera(moved.unwrap_or(camera));
+            let listener = CameraState {
+                position: listener.position,
+                orientation: listener.orientation,
+            };
             if self.characters.view(&self.world).is_some() {
                 // The controller owns the camera, so a LocalScript's move
                 // is not copied onto the fly camera.
@@ -417,6 +447,9 @@ impl Session {
             self.forward_output(output);
             self.forward_animator_errors(output);
             cost.animation += lap();
+            // Then a Follow or Track camera follows its subject, which
+            // physics and animation have moved, and shakes move on.
+            self.game_camera = self.scripts.step_camera(&self.world, seconds);
         });
         cost.total = started.elapsed();
         self.cost = Some(cost);

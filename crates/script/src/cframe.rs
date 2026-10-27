@@ -391,7 +391,7 @@ pub fn pivot_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, ml
 /// What `GetPivot` gives: a part's own CFrame, or for a Model the centre of
 /// the box around all its parts, unturned. A Model without parts pivots
 /// around the origin.
-fn pivot(world: &World, id: InstanceId) -> mlua::Result<LuaCFrame> {
+pub(crate) fn pivot(world: &World, id: InstanceId) -> mlua::Result<LuaCFrame> {
     let instance = world.get(id).ok_or_else(destroyed)?;
     if let Some(cf) = LuaCFrame::of_instance(instance) {
         return Ok(cf);

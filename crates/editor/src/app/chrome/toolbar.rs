@@ -303,6 +303,21 @@ impl EditorApp {
                         clicks.insert = Some(what);
                     }
                 }
+                for what in Insertable::CAMERAS {
+                    let button = RibbonButton::new(theme::insert_icon(what), what.label());
+                    if ui
+                        .add_enabled(!playing, button)
+                        .on_hover_text(
+                            "Insert a Camera where you're looking from: a named viewpoint \
+                             a LocalScript cuts to with workspace.CurrentCamera.CFrame = \
+                             viewpoint.CFrame. It isn't drawn in the game.",
+                        )
+                        .on_disabled_hover_text("Press Stop to edit.")
+                        .clicked()
+                    {
+                        clicks.insert = Some(what);
+                    }
+                }
             }),
             RibbonGroup::Import => ribbon::group(ui, "Import", |ui| {
                 let button = RibbonButton::new(icons::FILE_ARROW_DOWN, "Import…");

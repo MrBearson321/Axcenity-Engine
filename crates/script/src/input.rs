@@ -324,6 +324,11 @@ fn enum_arg(
         })
 }
 
+/// Where the mouse is, in pixels from the view's top left.
+pub(crate) fn mouse_position(lua: &Lua) -> mlua::Result<[f32; 2]> {
+    Ok(inputs_ref(lua)?.all.mouse_position)
+}
+
 fn inputs_ref(lua: &Lua) -> mlua::Result<mlua::AppDataRef<'_, Inputs>> {
     lua.app_data_ref::<Inputs>()
         .ok_or_else(|| mlua::Error::runtime("input isn't available here"))
