@@ -12,6 +12,7 @@ use mlua::{
 
 use crate::client::{LocalPlayer, LuaCamera, LuaReplicatedFirst, LuaUserInputService};
 use crate::events::{Event, LuaSignal, Owner};
+use crate::localization::LuaLocalizationService;
 use crate::run_service::LuaRunService;
 use crate::save::LuaSaveService;
 use crate::sides;
@@ -282,6 +283,7 @@ fn class_member(lua: &Lua, class: ClassName, key: &str) -> mlua::Result<Option<m
         (ClassName::DataModel, "RunService") => LuaRunService.into_lua(lua)?,
         (ClassName::DataModel, "TweenService") => LuaTweenService.into_lua(lua)?,
         (ClassName::DataModel, "SaveService") => LuaSaveService.into_lua(lua)?,
+        (ClassName::DataModel, "LocalizationService") => LuaLocalizationService.into_lua(lua)?,
         (ClassName::DataModel, "ReplicatedFirst") => LuaReplicatedFirst.into_lua(lua)?,
         (ClassName::DataModel, "UserGameSettings") => LuaUserGameSettings.into_lua(lua)?,
         (ClassName::Workspace, "CurrentCamera") => LuaCamera.into_lua(lua)?,
@@ -877,8 +879,8 @@ fn set_playing(lua: &Lua, sound: InstanceId, playing: bool) -> mlua::Result<()> 
 
 /// `game:GetService(name)`: a service by its class name, such as
 /// `"Players"`, or `"UserInputService"` or `"UserGameSettings"` (LocalScripts
-/// only), `"RunService"`, `"TweenService"`, `"SaveService"` or
-/// `"ReplicatedFirst"`, which aren't Instances.
+/// only), `"RunService"`, `"TweenService"`, `"SaveService"`,
+/// `"LocalizationService"` or `"ReplicatedFirst"`, which aren't Instances.
 pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
     lua.create_function(|lua, (_game, name): (mlua::Value, String)| {
         match name.as_str() {
@@ -893,6 +895,7 @@ pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
             "RunService" => return LuaRunService.into_lua(lua),
             "TweenService" => return LuaTweenService.into_lua(lua),
             "SaveService" => return LuaSaveService.into_lua(lua),
+            "LocalizationService" => return LuaLocalizationService.into_lua(lua),
             "ReplicatedFirst" => return LuaReplicatedFirst.into_lua(lua),
             _ => {}
         }
@@ -914,6 +917,7 @@ pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
                     .filter_map(|&id| world.get(id).map(|s| s.class().as_str()))
                     .collect();
                 names.extend([
+                    "LocalizationService",
                     "ReplicatedFirst",
                     "RunService",
                     "SaveService",

@@ -11,6 +11,7 @@
 //!                   files, in subfolders if you like
 //!   ui/             `<ScreenGui>.uigraph.json` UI Event Graphs
 //!   *.css           project stylesheets, also found in subfolders
+//!   strings.json    the string table: UI text in each language (optional)
 //! ```
 //!
 //! One damaged file never stops the rest from loading: [`load`] leaves it
@@ -35,11 +36,13 @@ mod versions;
 mod world_file;
 
 mod scripts;
+mod strings;
 mod stylesheets;
 mod templates;
 mod ui_graphs;
 
 pub use scripts::*;
+pub use strings::{STRINGS_FILE, parse_strings, save_strings, write_strings};
 pub use stylesheets::*;
 pub use templates::*;
 pub use ui_graphs::*;
@@ -293,6 +296,12 @@ pub enum LoadError {
     BlockScript { path: PathBuf, message: String },
     #[error("the UI Event Graph `{}` doesn't run: {message}", path.display())]
     UiGraph { path: PathBuf, message: String },
+    #[error("`{}` is not a valid string table, so UI text shows its source text", path.display())]
+    Strings {
+        path: PathBuf,
+        #[source]
+        source: serde_json::Error,
+    },
     #[error("the terrain in `{}` couldn't be loaded, so it's flat: {message}", path.display())]
     Terrain { path: PathBuf, message: String },
 }
@@ -402,6 +411,7 @@ pub fn load_with_progress(
             (World::new(), false)
         }
     };
+    strings::load_strings(folder, &mut world, &mut problems);
     let damaged_terrains =
         terrain_files::load_terrains_reporting(folder, &mut world, &mut problems, progress);
     let (mut scripts, block_scripts) = load_scripts(folder, &mut world, &mut problems, progress);

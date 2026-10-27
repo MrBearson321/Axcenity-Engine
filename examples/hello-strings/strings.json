@@ -1,0 +1,29 @@
+{
+  "languages": [
+    "English",
+    "Français",
+    "Español"
+  ],
+  "entries": {
+    "menu.english": {
+      "English": "Back to English",
+      "Español": "Volver al inglés",
+      "Français": "Revenir à l'anglais"
+    },
+    "menu.language": {
+      "English": "Language: English",
+      "Español": "Idioma: español",
+      "Français": "Langue : français"
+    },
+    "menu.play": {
+      "English": "Play",
+      "Español": "Jugar",
+      "Français": "Jouer"
+    },
+    "menu.title": {
+      "English": "Welcome!",
+      "Español": "¡Bienvenido!",
+      "Français": "Bienvenue !"
+    }
+  }
+}

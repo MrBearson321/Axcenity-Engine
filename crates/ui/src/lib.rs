@@ -284,6 +284,19 @@ pub fn style_value_in_state(
     css_property(&resolve_styles(world, id, stylesheets, pseudo), property)
 }
 
+/// The text an element shows: its `TextKey`'s value in the world's active
+/// language when the string table has one, else its own `Text` (the
+/// source text). `None` for an element without `Text`.
+pub fn shown_text<'a>(world: &'a World, instance: &'a Instance) -> Option<&'a str> {
+    let text = instance.property("Text").and_then(Value::as_str)?;
+    let translated = instance
+        .property("TextKey")
+        .and_then(Value::as_str)
+        .filter(|key| !key.is_empty())
+        .and_then(|key| world.translate(key));
+    Some(translated.unwrap_or(text))
+}
+
 /// [`text_style`] with `id` in `state`, for the states editor's tabs.
 pub fn text_style_in_state(
     world: &World,
@@ -292,7 +305,7 @@ pub fn text_style_in_state(
     state: UiState,
 ) -> Option<UiText> {
     let instance = world.get(id)?;
-    let text = instance.property("Text").and_then(Value::as_str)?;
+    let text = shown_text(world, instance)?;
     let pseudo = PseudoClasses {
         forced: Some((id, state)),
         ..PseudoClasses::default()
@@ -1331,6 +1344,7 @@ fn place_element(
         track: None,
     });
     paint_instance(
+        world,
         instance,
         rect,
         styles,
@@ -1710,6 +1724,8 @@ mod focus_tests;
 mod layering_tests;
 #[cfg(test)]
 mod shape_tests;
+#[cfg(test)]
+mod strings_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

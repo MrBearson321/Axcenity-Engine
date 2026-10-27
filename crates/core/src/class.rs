@@ -483,6 +483,9 @@ impl ClassName {
                 ),
                 ("BackgroundTransparency", Value::Number(1.0)),
                 ("Text", Value::String("Label".to_owned())),
+                // A key in the string table: shows its value in the active
+                // language instead of Text. Empty, or a missing entry, shows Text.
+                ("TextKey", Value::String(String::new())),
                 ("TextColor3", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
                 ("TextSize", Value::Number(16.0)),
                 // 0 is solid text, 1 invisible. Only the text fades.
@@ -512,6 +515,9 @@ impl ClassName {
                 ),
                 ("BackgroundTransparency", Value::Number(0.0)),
                 ("Text", Value::String("Button".to_owned())),
+                // A key in the string table: shows its value in the active
+                // language instead of Text. Empty, or a missing entry, shows Text.
+                ("TextKey", Value::String(String::new())),
                 ("TextColor3", Value::Color3(Color3::new(1.0, 1.0, 1.0))),
                 ("TextSize", Value::Number(16.0)),
                 // 0 is solid text, 1 invisible. Only the text fades.

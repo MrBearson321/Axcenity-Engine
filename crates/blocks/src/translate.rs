@@ -82,6 +82,9 @@ pub fn translate(script: &BlockScript) -> Result<Translation, TranslateError> {
             kind if kind.saves() => {
                 services.insert("SaveService");
             }
+            BlockKind::SetLanguage { .. } => {
+                services.insert("LocalizationService");
+            }
             BlockKind::SetToneMapping { .. } => {
                 services.insert("Lighting");
             }
@@ -469,6 +472,10 @@ impl Writer {
                 ));
             }
             BlockKind::RestoreCheckpoint => self.line("SaveService:RestoreCheckpoint()".to_owned()),
+            BlockKind::SetLanguage { language } => {
+                let language = self.expression(language)?;
+                self.line(format!("LocalizationService.Language = {language}"));
+            }
             BlockKind::SetToneMapping { curve } => {
                 let curve = choice(curve, &TONE_MAPPINGS, "a tone mapping")?;
                 self.line(format!("Lighting.ToneMapping = Enum.ToneMapping.{curve}"));

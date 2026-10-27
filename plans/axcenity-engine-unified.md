@@ -786,9 +786,9 @@ A project has a string table the creator can add entries to, with a value per la
 
 ### Acceptance criteria
 
-- [ ] A label bound to a table entry shows that entry's text in the active language, in the UI Designer and in Play.
-- [ ] Switching the active language updates every bound control.
-- [ ] A missing entry shows the control's source text, and the table survives save and reload.
+- [x] A label bound to a table entry shows that entry's text in the active language, in the UI Designer and in Play.
+- [x] Switching the active language updates every bound control.
+- [x] A missing entry shows the control's source text, and the table survives save and reload.
 
 ---
 

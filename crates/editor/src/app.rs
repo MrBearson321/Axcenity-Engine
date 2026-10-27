@@ -1079,6 +1079,8 @@ mod posing_tests;
 #[cfg(test)]
 mod state_machine_tests;
 #[cfg(test)]
+mod strings_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod ui_designer_tests;

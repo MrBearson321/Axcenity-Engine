@@ -101,9 +101,10 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         BlockKind::SetGraphicsQuality { .. } => 48,
         BlockKind::SetGraphicsOption { .. } => 49,
         BlockKind::SetGraphicsNumber { .. } => 50,
+        BlockKind::SetLanguage { .. } => 51,
     })
 }
-const STATEMENT_COUNT: usize = 51;
+const STATEMENT_COUNT: usize = 52;
 
 /// One of each statement block, with the Lua it must produce.
 fn every_statement() -> Vec<(BlockKind, &'static str)> {
@@ -364,6 +365,14 @@ fn every_statement() -> Vec<(BlockKind, &'static str)> {
                 curve: "Filmic".to_owned(),
             },
             "Lighting.ToneMapping = Enum.ToneMapping.Filmic",
+        ),
+        (
+            BlockKind::SetLanguage {
+                language: Expression::Text {
+                    value: "Français".to_owned(),
+                },
+            },
+            "LocalizationService.Language = \"Français\"",
         ),
         (
             BlockKind::SetGraphicsQuality {

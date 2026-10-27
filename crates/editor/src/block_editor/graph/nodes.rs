@@ -107,6 +107,7 @@ pub(super) fn block_names(kind: &BlockKind) -> (&'static str, &'static [&'static
         BlockKind::SetCheckpoint { .. } => ("Set Checkpoint", &["Checkpoint"]),
         BlockKind::RestoreCheckpoint => ("Restore Checkpoint", &[]),
         BlockKind::SetToneMapping { .. } => ("Set Tone Mapping", &["Tone Mapping"]),
+        BlockKind::SetLanguage { .. } => ("Set Language", &["Language"]),
         BlockKind::SetGraphicsQuality { .. } => ("Set Graphics Quality", &["Quality"]),
         BlockKind::SetGraphicsOption { .. } => ("Set Graphics Option", &["Setting", "Choice"]),
         BlockKind::SetGraphicsNumber { .. } => ("Set Graphics Number", &["Setting", "Value"]),

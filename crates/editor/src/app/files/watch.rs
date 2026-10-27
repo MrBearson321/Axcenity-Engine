@@ -119,6 +119,8 @@ impl EditorApp {
                     }
                 }
                 project.keep_world_file = false;
+                // The string table is its own file, so it stays.
+                world.set_strings(self.world.strings().clone());
                 self.replace_world(world);
                 self.output.info(format!(
                     "Reloaded `{world_file}`, which was changed outside the editor."

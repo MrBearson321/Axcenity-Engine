@@ -1,0 +1,79 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "ScreenGui",
+        "name": "Menu",
+        "properties": {
+          "Enabled": true
+        },
+        "children": [
+          {
+            "class": "Frame",
+            "name": "Panel",
+            "properties": {
+              "Class": "menu",
+              "Position": [0.5, -180, 0.5, -170],
+              "Size": [0, 360, 0, 340]
+            },
+            "children": [
+              {
+                "class": "TextLabel",
+                "name": "Title",
+                "properties": {
+                  "Class": "title",
+                  "Text": "Welcome!",
+                  "TextKey": "menu.title",
+                  "Size": [1, 0, 0, 52]
+                },
+                "children": []
+              },
+              {
+                "class": "TextButton",
+                "name": "PlayButton",
+                "properties": {
+                  "Text": "Play",
+                  "TextKey": "menu.play",
+                  "Size": [1, 0, 0, 48]
+                },
+                "children": []
+              },
+              {
+                "class": "TextButton",
+                "name": "LanguageButton",
+                "properties": {
+                  "Text": "Language: English",
+                  "TextKey": "menu.language",
+                  "Size": [1, 0, 0, 48]
+                },
+                "children": []
+              },
+              {
+                "class": "TextButton",
+                "name": "EnglishButton",
+                "properties": {
+                  "Text": "Back to English",
+                  "TextKey": "menu.english",
+                  "Size": [1, 0, 0, 48]
+                },
+                "children": []
+              },
+              {
+                "class": "TextLabel",
+                "name": "Hint",
+                "properties": {
+                  "Id": "hint",
+                  "Text": "This line has no translation yet, so it shows its own Text.",
+                  "TextKey": "menu.hint",
+                  "Size": [1, 0, 0, 44]
+                },
+                "children": []
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

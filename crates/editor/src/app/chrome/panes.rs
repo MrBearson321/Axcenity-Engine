@@ -167,6 +167,15 @@ impl EditorApp {
                     }
                     continue;
                 }
+                DesignerAction::Language(language) => {
+                    // Play shows the game's world; editing, the edit world.
+                    let world = match &mut self.play {
+                        Some(session) => session.world_mut(),
+                        None => &mut self.world,
+                    };
+                    world.set_language(&language);
+                    continue;
+                }
                 _ => {}
             }
             if self.playing()
@@ -267,8 +276,22 @@ impl EditorApp {
                 }
                 DesignerAction::Restack(changes) => self.restack(changes),
                 DesignerAction::NewScreenGui => self.insert(Insertable::ScreenGui, None),
+                DesignerAction::Strings { key, label, table } => {
+                    if key.is_empty() {
+                        self.history.seal();
+                    }
+                    let before = self.world.strings().clone();
+                    self.world.set_strings(std::sync::Arc::new(table));
+                    self.history
+                        .record_strings(&mut self.world, key.clone(), label, before);
+                    if key.is_empty() {
+                        self.history.seal();
+                    }
+                }
                 // Handled above.
-                DesignerAction::GraphStep(_) | DesignerAction::PreviewOutput(_) => {}
+                DesignerAction::GraphStep(_)
+                | DesignerAction::PreviewOutput(_)
+                | DesignerAction::Language(_) => {}
             }
         }
     }

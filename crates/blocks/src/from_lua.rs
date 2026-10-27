@@ -18,11 +18,12 @@ use crate::{
 
 /// The services blocks get with `game:GetService`, which the translation
 /// declares at the top itself when blocks need them.
-const SERVICES: [&str; 6] = [
+const SERVICES: [&str; 7] = [
     "UserInputService",
     "RunService",
     "TweenService",
     "SaveService",
+    "LocalizationService",
     "Lighting",
     "UserGameSettings",
 ];
@@ -152,6 +153,9 @@ fn used_by(script: &BlockScript) -> (BTreeSet<String>, BTreeSet<String>) {
             }
             kind if kind.saves() => {
                 services.insert("SaveService".to_owned());
+            }
+            BlockKind::SetLanguage { .. } => {
+                services.insert("LocalizationService".to_owned());
             }
             BlockKind::SetToneMapping { .. } => {
                 services.insert("Lighting".to_owned());
@@ -1015,6 +1019,12 @@ impl<'a> Converter<'a> {
         }
         if self.is_service(object, "UserGameSettings") {
             return self.graphics_setting(property, value, scope);
+        }
+        // LocalizationService.Language = "Français"
+        if property == "Language" && self.is_service(object, "LocalizationService") {
+            return Some(BlockKind::SetLanguage {
+                language: self.expression(value, scope),
+            });
         }
         let path = self.target(object)?;
         let same_property = |expr: &Expr| {

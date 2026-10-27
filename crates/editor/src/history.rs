@@ -36,13 +36,17 @@
 //! own ([`TerrainChange`]): a brush stroke keeps the chunks it changed, and a
 //! whole new landscape (generated, eroded, resized) keeps both landscapes.
 //!
+//! The string table (`strings.json`) is the world's, not an Instance's, so
+//! its edits are steps of their own that keep the table before and after
+//! ([`History::record_strings`]). Typing into one cell is one step.
+//!
 //! A Console command can change anything, so its step keeps the whole world
 //! from the other side of it ([`History::record_world`]); undo and redo swap
 //! it with the world. Copies keep every `InstanceId`, so older steps still work.
 
 use std::sync::Arc;
 
-use axcenity_core::{InstanceId, TerrainData, TreeError, Value, World};
+use axcenity_core::{InstanceId, StringTable, TerrainData, TreeError, Value, World};
 use axcenity_terrain::brush::TerrainEdit;
 
 /// Something about an Instance that can be changed: its name or one property.
@@ -221,6 +225,13 @@ enum StepKind {
         id: InstanceId,
         change: TerrainChange,
         fields: Vec<Change>,
+    },
+    /// The string table before and after. `key` is the cell being typed
+    /// in; later edits to the same cell merge into the step.
+    Strings {
+        key: String,
+        before: Arc<StringTable>,
+        after: Arc<StringTable>,
     },
     /// The whole world from the other side of the step: before it while
     /// the step can be undone, after it once it has been.
@@ -666,6 +677,52 @@ impl History {
         self.open = None;
     }
 
+    /// Records that the world's string table went from `before` to what it
+    /// is now. `key` names what's being edited (one cell, say): a change to
+    /// the same thing while the gesture is open merges into its step, as
+    /// [`History::record`] does. Does nothing if nothing changed.
+    pub fn record_strings(
+        &mut self,
+        world: &mut World,
+        key: String,
+        label: String,
+        before: Arc<StringTable>,
+    ) {
+        let after = world.strings().clone();
+        let open = self.open;
+        let merging = self.undo.last().is_some_and(|top| {
+            matches!(&top.kind, StepKind::Strings { key: top_key, .. }
+                if open == Some(top.number) && *top_key == key)
+        });
+        if !merging {
+            if before == after {
+                return;
+            }
+            let number = self.push(world, label, StepKind::Strings { key, before, after });
+            self.open = Some(number);
+            return;
+        }
+        let number = self.next_number();
+        let top = self.undo.last_mut().expect("checked by `merging`");
+        let StepKind::Strings {
+            before: top_before,
+            after: top_after,
+            ..
+        } = &mut top.kind
+        else {
+            unreachable!("checked by `merging`");
+        };
+        if *top_before == after {
+            // Typed back to how it was: there's nothing left to undo.
+            self.undo.pop();
+            self.open = None;
+        } else {
+            *top_after = after;
+            top.number = number;
+            self.open = Some(number);
+        }
+    }
+
     /// Records a change that could have touched anything, such as a Console
     /// command, as one step named `label`. `before` is the whole world as
     /// it was; `world` is already changed.
@@ -802,6 +859,7 @@ impl History {
                     })
                     .collect();
             }
+            StepKind::Strings { before, .. } => world.set_strings(before.clone()),
             StepKind::World(other) => std::mem::swap(world, &mut *other.0),
         }
         self.redo.push(step);
@@ -871,6 +929,7 @@ impl History {
                 }
                 blobs = changes.clone();
             }
+            StepKind::Strings { after, .. } => world.set_strings(after.clone()),
             StepKind::World(other) => std::mem::swap(world, &mut *other.0),
         }
         self.undo.push(step);

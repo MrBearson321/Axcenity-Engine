@@ -2767,3 +2767,72 @@ fn hello_menu_moves_focus_the_same_by_keys_and_controller_and_uses_what_is_focus
         game.output
     );
 }
+
+#[test]
+fn hello_strings_shows_the_active_language_and_switches_from_lua_and_blocks() {
+    let (mut world, mut scripts, folder) = start_example_in("hello-strings");
+    let project = axcenity_project::load(&folder).unwrap();
+    let stylesheets: Vec<_> = project
+        .stylesheets
+        .iter()
+        .map(|file| axcenity_ui::parse_stylesheet(&file.path, &file.source).0)
+        .collect();
+    let shown = |world: &World| -> Vec<String> {
+        axcenity_ui::layout_ui(world, 1280, 720, &stylesheets)
+            .draw_items
+            .into_iter()
+            .filter_map(|item| match item {
+                axcenity_render::UiDrawItem::Text(text) => Some(text.text),
+                _ => None,
+            })
+            .collect()
+    };
+    let hint = "This line has no translation yet, so it shows its own Text.";
+    assert_eq!(
+        shown(&world),
+        [
+            "Welcome!",
+            "Play",
+            "Language: English",
+            "Back to English",
+            hint
+        ]
+    );
+    let panel = world
+        .find_first_child(world.workspace(), "Menu")
+        .and_then(|menu| world.find_first_child(menu, "Panel"))
+        .unwrap();
+    let button = |world: &World, name| world.find_first_child(panel, name).unwrap();
+
+    // The Lua LocalScript steps to the next language: every bound control
+    // changes, and the one with no entry keeps its own Text.
+    let language = button(&world, "LanguageButton");
+    scripts.activate_ui_button(&mut world, language);
+    assert_eq!(world.language(), "Français");
+    assert_eq!(
+        shown(&world),
+        [
+            "Bienvenue !",
+            "Jouer",
+            "Langue : français",
+            "Revenir à l'anglais",
+            hint
+        ]
+    );
+    let play = button(&world, "PlayButton");
+    scripts.activate_ui_button(&mut world, play);
+    scripts.activate_ui_button(&mut world, language);
+    assert_eq!(shown(&world)[1], "Jugar");
+
+    // The block script's "set language to English".
+    let english = button(&world, "EnglishButton");
+    scripts.activate_ui_button(&mut world, english);
+    assert_eq!(world.language(), "English");
+    assert_eq!(shown(&world)[0], "Welcome!");
+    let output: Vec<String> = scripts
+        .take_output()
+        .into_iter()
+        .map(|line| line.text)
+        .collect();
+    assert_eq!(output, ["Language: Français", "Jouer", "Language: Español"]);
+}

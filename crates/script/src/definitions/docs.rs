@@ -397,7 +397,16 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "BackgroundTransparency",
         "The background opacity: 0 is opaque and 1 is transparent.",
     ),
-    (ClassName::TextLabel, "Text", "The text to display."),
+    (
+        ClassName::TextLabel,
+        "Text",
+        "The text to display. With a TextKey, this is the source text, shown when the string table has no value for it.",
+    ),
+    (
+        ClassName::TextLabel,
+        "TextKey",
+        "A key in the project's string table, such as \"menu.play\": shows its value in LocalizationService.Language instead of Text. Empty, or a key or language with no value, shows Text.",
+    ),
     (ClassName::TextLabel, "TextColor3", "The text color."),
     (ClassName::TextLabel, "TextSize", "The text size in pixels."),
     (
@@ -445,7 +454,16 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "BackgroundTransparency",
         "The background opacity: 0 is opaque and 1 is transparent.",
     ),
-    (ClassName::TextButton, "Text", "The text to display."),
+    (
+        ClassName::TextButton,
+        "Text",
+        "The text to display. With a TextKey, this is the source text, shown when the string table has no value for it.",
+    ),
+    (
+        ClassName::TextButton,
+        "TextKey",
+        "A key in the project's string table, such as \"menu.play\": shows its value in LocalizationService.Language instead of Text. Empty, or a key or language with no value, shows Text.",
+    ),
     (ClassName::TextButton, "TextColor3", "The text color."),
     (
         ClassName::TextButton,

@@ -41,6 +41,7 @@ mod definitions;
 mod errors;
 mod events;
 mod instance;
+mod localization;
 mod modules;
 mod remote;
 mod run_service;
@@ -696,6 +697,8 @@ mod debugger_tests;
 #[cfg(test)]
 mod tween_tests;
 
+#[cfg(test)]
+mod localization_tests;
 #[cfg(test)]
 mod save_tests;
 

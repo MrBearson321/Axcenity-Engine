@@ -11,7 +11,7 @@ use std::io::{self, ErrorKind};
 use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::{WORLD_FILE, find_scripts, find_stylesheets};
+use crate::{STRINGS_FILE, WORLD_FILE, find_scripts, find_stylesheets};
 
 /// Where versions live, relative to the project folder.
 pub const HISTORY_DIR: &str = ".axcenity/history";
@@ -96,7 +96,8 @@ pub fn record_version(folder: &Path, label: &str) -> io::Result<bool> {
     Ok(true)
 }
 
-/// Puts the version `id` back into `folder`: world, scripts and styles.
+/// Puts the version `id` back into `folder`: world, string table, scripts
+/// and styles.
 /// Scripts or styles that aren't in the version are removed. Assets and the
 /// manifest are left as they are.
 pub fn restore_version(folder: &Path, id: &str) -> io::Result<()> {
@@ -130,12 +131,15 @@ pub fn restore_version(folder: &Path, id: &str) -> io::Result<()> {
     Ok(())
 }
 
-/// `world.json`, every script and every stylesheet, in path order.
+/// `world.json`, `strings.json`, every script and every stylesheet, in
+/// path order.
 fn tracked_files(folder: &Path) -> Vec<String> {
     let mut problems = Vec::new();
     let mut files = Vec::new();
-    if folder.join(WORLD_FILE).is_file() {
-        files.push(WORLD_FILE.to_owned());
+    for file in [WORLD_FILE, STRINGS_FILE] {
+        if folder.join(file).is_file() {
+            files.push(file.to_owned());
+        }
     }
     files.extend(find_scripts(folder, &mut problems));
     files.extend(find_stylesheets(folder, &mut problems));

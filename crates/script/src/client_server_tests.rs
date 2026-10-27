@@ -537,7 +537,8 @@ fn get_service_finds_services_and_lists_them_for_a_wrong_name() {
     assert!(
         output[1].ends_with(
             "there is no service named \"Teams\"; choose from Workspace, Players, Lighting, \
-             ReplicatedStorage, ServerScriptService, StarterPlayer, ReplicatedFirst, RunService, \
+             ReplicatedStorage, ServerScriptService, StarterPlayer, LocalizationService, \
+             ReplicatedFirst, RunService, \
              SaveService, TweenService, UserGameSettings, UserInputService"
         ),
         "{}",

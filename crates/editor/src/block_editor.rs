@@ -258,6 +258,7 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::SetValue { .. }
         | BlockKind::SetProperty { .. }
         | BlockKind::SetToneMapping { .. }
+        | BlockKind::SetLanguage { .. }
         | BlockKind::SetGraphicsQuality { .. }
         | BlockKind::SetGraphicsOption { .. }
         | BlockKind::SetGraphicsNumber { .. } => Category::Looks,
@@ -894,6 +895,10 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
             Object(checkpoint, Filter::Checkpoints),
         ])],
         BlockKind::RestoreCheckpoint => vec![Row(vec![label("go back to checkpoint")])],
+        BlockKind::SetLanguage { language } => vec![Row(vec![
+            label("set language to"),
+            Slot(language, SlotKind::Text),
+        ])],
         BlockKind::SetToneMapping { curve } => vec![Row(vec![
             label("set tone mapping to"),
             Part::Choice(curve, &axcenity_blocks::TONE_MAPPINGS),

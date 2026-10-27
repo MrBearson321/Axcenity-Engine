@@ -26,7 +26,7 @@ Source and tests win when a doc is wrong. Update the topic file you used.
 | Lua, the sandbox, blocks, or graphs | [scripting.md](scripting.md), then one file |
 | Drawing, materials, lights, or animation playback | [rendering.md](rendering.md), then one file |
 | Project files, export, licenses, or GitHub releases | [project-and-export.md](project-and-export.md), then one file |
-| In-game UI | [ui.md](ui.md) |
+| In-game UI, the string table and languages | [ui.md](ui.md) |
 | Terrain algorithms | [terrain.md](terrain.md) |
 
 Product scope is one story in `prd/`. The roadmap is one phase in `plans/`. Don't open either file in full.

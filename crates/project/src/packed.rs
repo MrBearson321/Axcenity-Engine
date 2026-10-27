@@ -227,6 +227,7 @@ fn include_runtime_file(root: &Path, path: &Path) -> bool {
     // family, wherever its file is.
     relative == Path::new(crate::MANIFEST_FILE)
         || relative == Path::new(crate::WORLD_FILE)
+        || relative == Path::new(crate::STRINGS_FILE)
         || relative.extension().is_some_and(|extension| {
             let extension = extension.to_ascii_lowercase();
             extension == "css" || extension == "ttf" || extension == "otf"

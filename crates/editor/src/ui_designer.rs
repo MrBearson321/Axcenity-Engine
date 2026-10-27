@@ -44,6 +44,7 @@ mod rulers;
 mod selection;
 mod slice;
 mod states;
+mod strings;
 mod text_toolbar;
 mod widget_section;
 
@@ -235,6 +236,17 @@ pub enum DesignerAction {
     Restack(Vec<(InstanceId, f64)>),
     /// Makes a ScreenGui, when there's none to design.
     NewScreenGui,
+    /// The string table after an edit in the Strings tab, as one undo step
+    /// named `label`. Edits with the same non-empty `key` (one box typed
+    /// in) merge into one step.
+    Strings {
+        key: String,
+        label: String,
+        table: axcenity_core::StringTable,
+    },
+    /// Shows bound text in this language (the toolbar's picker): not saved,
+    /// and not an undo step.
+    Language(String),
     /// An edit of the shown ScreenGui's Event Graph finished: the graph as
     /// it was before, for undo.
     GraphStep(axcenity_blocks::node_graph::NodeGraph),
@@ -405,6 +417,9 @@ pub struct UiDesigner {
     preview_hover: Option<InstanceId>,
     /// Start the Live Preview on the next frame, as its button does.
     live_wanted: bool,
+    /// The language and the key being typed in the Strings tab, to add.
+    new_language: String,
+    new_key: String,
 }
 
 impl Default for UiDesigner {
@@ -457,6 +472,8 @@ impl Default for UiDesigner {
             preview_clicks: Vec::new(),
             preview_hover: None,
             live_wanted: false,
+            new_language: String::new(),
+            new_key: String::new(),
         }
     }
 }
@@ -764,6 +781,11 @@ impl UiDesigner {
             self.event_graph(ui, scene, gui, graph, &mut actions);
             return actions;
         }
+        if self.tab == DesignerTab::Strings {
+            self.graph_hovered = false;
+            self.strings_tab(ui, scene, &mut actions);
+            return actions;
+        }
         self.graph_hovered = false;
         if self.live.is_some() {
             ui.weak(
@@ -896,8 +918,11 @@ impl UiDesigner {
                         }
                     });
             }
+            if self.tab != DesignerTab::EventGraph {
+                strings::language_picker(ui, scene, actions);
+            }
             // The rest is about the artboard.
-            if self.tab == DesignerTab::EventGraph {
+            if self.tab != DesignerTab::Design {
                 return;
             }
             // The scale mode and design size wrap inside their own group,

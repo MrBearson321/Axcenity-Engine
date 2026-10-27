@@ -285,6 +285,7 @@ impl UiDesigner {
                     }
                     ui.end_row();
                 }
+                super::strings::text_key_row(ui, scene, id, actions);
                 if let Some((built_in, project)) = &fonts {
                     ui.label("Font");
                     let current = current_font(world, id, scene.stylesheets);

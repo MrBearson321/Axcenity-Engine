@@ -11,6 +11,7 @@ use std::sync::Arc;
 use crate::animation::{AnimationTrackState, AnimatorState, PropertyAnimationState};
 use crate::arena::{Arena, Id};
 use crate::class::ClassName;
+use crate::strings::StringTable;
 use crate::terrain::TerrainData;
 use crate::value::{Value, ValueKind};
 
@@ -156,6 +157,10 @@ pub struct World {
     /// Each Terrain's heightfield and paint. Every Terrain has one, made
     /// with it. Shared with copies of the world until one changes it.
     terrains: HashMap<InstanceId, Arc<TerrainData>>,
+    /// The project's string table, shared with copies of the world.
+    strings: Arc<StringTable>,
+    /// The language bound UI text shows (see [`World::language`]).
+    language: String,
 }
 
 impl World {
@@ -205,7 +210,49 @@ impl World {
             property_animations: HashMap::new(),
             animation_tracks: HashMap::new(),
             terrains: HashMap::new(),
+            strings: Arc::default(),
+            language: String::new(),
         }
+    }
+
+    /// The project's string table (`strings.json`).
+    pub fn strings(&self) -> &Arc<StringTable> {
+        &self.strings
+    }
+
+    /// Gives the world its string table. The active language stays when
+    /// the table still has it, else it's the table's first.
+    pub fn set_strings(&mut self, strings: Arc<StringTable>) {
+        self.strings = strings;
+        if !self.strings.has_language(&self.language) {
+            self.language.clear();
+        }
+    }
+
+    /// The language bound UI text shows: the one last set with
+    /// [`World::set_language`], else the string table's first. Empty when
+    /// the table has no languages.
+    pub fn language(&self) -> &str {
+        if self.language.is_empty() {
+            self.strings.default_language()
+        } else {
+            &self.language
+        }
+    }
+
+    /// Makes `language` the active one. False (and nothing changes) when the
+    /// string table doesn't have it.
+    pub fn set_language(&mut self, language: &str) -> bool {
+        if !self.strings.has_language(language) {
+            return false;
+        }
+        self.language = language.to_owned();
+        true
+    }
+
+    /// `key`'s value in the active language, if the string table has one.
+    pub fn translate(&self, key: &str) -> Option<&str> {
+        self.strings.get(key, self.language())
     }
 
     /// The heightfield and paint of the Terrain `id`.

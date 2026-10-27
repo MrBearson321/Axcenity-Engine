@@ -349,6 +349,11 @@ impl EditorApp {
         let Some(project) = &mut self.project else {
             return false;
         };
+        if let Err(err) = project::save_strings(&project.folder, self.world.strings()) {
+            self.output
+                .error(format!("Could not save: {}", chain(&err)));
+            return false;
+        }
         match project::save_world(&project.folder, &self.world) {
             Ok(()) => {
                 // So the watcher's report of this change is known to be ours.

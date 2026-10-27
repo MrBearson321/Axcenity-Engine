@@ -3,12 +3,14 @@
 //! - [`Arena`] stores values and hands out generational [`Id`]s.
 //! - [`World`] is the tree of [`Instance`]s, rooted at `game`.
 //! - [`TerrainData`] is a Terrain's heightfield, kept beside its Instance.
+//! - [`StringTable`] is the project's UI text in each language, kept by the world.
 //! - [`Value`] is a typed property value, such as a [`Vector3`] or [`Color3`].
 
 mod animation;
 mod arena;
 mod class;
 mod enums;
+mod strings;
 mod terrain;
 mod value;
 mod world;
@@ -21,6 +23,7 @@ pub use class::{ClassName, INSTANCE_EVENTS};
 pub use enums::{
     KeyCode, Material, MaterialPreset, PartType, ParticleType, TextureChannel, ToneMapping,
 };
+pub use strings::StringTable;
 pub use terrain::{
     CHUNK_CELLS, DEFAULT_TERRAIN_HEIGHT, DEFAULT_TERRAIN_SAMPLES, FoliageInstance, FoliagePlant,
     FoliageProp, FoliageSource, MAX_FOLIAGE_INSTANCES, MAX_TERRAIN_LAYERS, MAX_TERRAIN_SAMPLES,

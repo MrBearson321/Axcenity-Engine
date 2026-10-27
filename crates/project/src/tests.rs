@@ -651,3 +651,73 @@ fn save_then_load_gives_the_same_world_file() {
     assert_eq!(write_world(&parse_world(&saved).unwrap()), saved);
     assert!(!leftover, "the temporary file was left behind");
 }
+
+#[test]
+fn the_string_table_loads_into_the_world_and_survives_save_and_reload() {
+    let folder = project_with_scripts("string-table", &[]);
+    // No file: an empty table, and saving doesn't make one.
+    let project = load(&folder).unwrap();
+    assert!(project.world.strings().is_empty());
+    save_strings(&folder, project.world.strings()).unwrap();
+    assert!(!folder.join(STRINGS_FILE).exists());
+
+    let mut table = axcenity_core::StringTable::default();
+    table.add_language("English");
+    table.add_language("Deutsch");
+    table.set("menu.play", "English", "Play");
+    table.set("menu.play", "Deutsch", "Spielen");
+    table.set("menu.quit", "English", "Quit");
+    save_strings(&folder, &table).unwrap();
+    let text = fs::read_to_string(folder.join(STRINGS_FILE)).unwrap();
+    assert_eq!(text, write_strings(&table));
+
+    let reloaded = load(&folder).unwrap();
+    assert!(reloaded.problems.is_empty());
+    assert_eq!(**reloaded.world.strings(), table);
+    assert_eq!(reloaded.world.language(), "English");
+    // Its own file: the manifest's format doesn't change.
+    assert_eq!(reloaded.manifest.format_version, FORMAT_VERSION);
+    assert_eq!(
+        read_manifest(&folder).unwrap().format_version,
+        FORMAT_VERSION
+    );
+
+    // Emptied, the file stays, empty, so the emptying is saved too.
+    save_strings(&folder, &axcenity_core::StringTable::default()).unwrap();
+    assert!(load(&folder).unwrap().world.strings().is_empty());
+    fs::remove_dir_all(folder).unwrap();
+}
+
+#[test]
+fn a_damaged_string_table_is_reported_and_the_rest_loads() {
+    let folder = project_with_scripts("damaged-string-table", &[]);
+    fs::write(folder.join(STRINGS_FILE), "{ \"languages\": [").unwrap();
+    let project = load(&folder).unwrap();
+    assert!(project.world_loaded);
+    assert!(project.world.strings().is_empty());
+    assert!(
+        matches!(project.problems.as_slice(), [LoadError::Strings { .. }]),
+        "{:?}",
+        project.problems
+    );
+    fs::remove_dir_all(folder).unwrap();
+}
+
+#[test]
+fn hello_strings_loads_its_table_and_a_built_game_keeps_it() {
+    let example = examples_folder().join("hello-strings");
+    let project = load(&example).unwrap();
+    assert!(project.problems.is_empty(), "{:?}", project.problems);
+    let world = &project.world;
+    assert_eq!(
+        world.strings().languages,
+        ["English", "Français", "Español"]
+    );
+    assert_eq!(world.translate("menu.play"), Some("Play"));
+
+    let built = temp_folder("hello-strings-built");
+    unpack_game(&pack_game(&example).unwrap(), &built).unwrap();
+    assert!(built.join(STRINGS_FILE).is_file());
+    assert_eq!(load(&built).unwrap().world.strings(), world.strings());
+    fs::remove_dir_all(built).unwrap();
+}

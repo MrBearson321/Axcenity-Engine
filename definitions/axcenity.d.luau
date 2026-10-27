@@ -123,6 +123,16 @@ declare extern type SaveService with
 	function RestoreCheckpoint(self): ()
 end
 
+--- The language UI text shows, from `game:GetService("LocalizationService")`. A TextLabel or TextButton with a `TextKey` shows that key's value from the project's string table (`strings.json`, edited in the UI Designer's Strings tab) in `Language`, or its own Text when there's none. Both sides share it.
+declare extern type LocalizationService with
+	--- The active language, such as `"English"`: one of `Languages`, the first when the game starts. Setting it changes every bound label and button; a language the table doesn't have is an error and changes nothing.
+	Language: string
+	--- The string table's languages, in order. Read only.
+	Languages: { string }
+	--- `key`'s value in the active language, or nil when the string table has none.
+	function GetString(self, key: string): string?
+end
+
 --- This computer's graphics settings, from `game:GetService("UserGameSettings")`, for a settings menu. `GraphicsQuality` picks a preset, and each other field overrides one of its values; reading a field gives the value chosen (its override, or the preset's), and setting it to nil goes back to the preset's. Changing the preset keeps the overrides. Saved on this computer by the player (never in the game); in the editor's Play they start from the editor's Graphics settings and are put back at Stop. The GPU may draw less than was chosen: the player's log and the editor's Settings say why. LocalScripts only.
 declare extern type UserGameSettings with
 	--- The preset: Low, Medium, High or Ultra, or Automatic (High, or Low on a computer without a graphics card).
@@ -504,12 +514,14 @@ declare extern type DataModel extends Instance with
 	TweenService: TweenService
 	--- Save slots, player data, settings and checkpoints (same as `game:GetService("SaveService")`).
 	SaveService: SaveService
+	--- The language UI text shows (same as `game:GetService("LocalizationService")`).
+	LocalizationService: LocalizationService
 	--- This computer's graphics settings (same as `game:GetService("UserGameSettings")`). LocalScripts only.
 	UserGameSettings: UserGameSettings
 	--- What loads first on the player's side, with `RemoveDefaultLoadingScreen` (same as `game:GetService("ReplicatedFirst")`).
 	ReplicatedFirst: ReplicatedFirst
 	[string]: any
-	--- The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"SaveService"`, `"TweenService"`, `"UserGameSettings"` or `"UserInputService"`.
+	--- The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"SaveService"`, `"LocalizationService"`, `"TweenService"`, `"UserGameSettings"` or `"UserInputService"`.
 	function GetService(self, className: string): Instance
 end
 
@@ -822,8 +834,10 @@ declare extern type TextLabel extends Instance with
 	BackgroundColor3: Color3
 	--- The background opacity: 0 is opaque and 1 is transparent.
 	BackgroundTransparency: number
-	--- The text to display.
+	--- The text to display. With a TextKey, this is the source text, shown when the string table has no value for it.
 	Text: string
+	--- A key in the project's string table, such as "menu.play": shows its value in LocalizationService.Language instead of Text. Empty, or a key or language with no value, shows Text.
+	TextKey: string
 	--- The text color.
 	TextColor3: Color3
 	--- The text size in pixels.
@@ -875,8 +889,10 @@ declare extern type TextButton extends Instance with
 	BackgroundColor3: Color3
 	--- The background opacity: 0 is opaque and 1 is transparent.
 	BackgroundTransparency: number
-	--- The text to display.
+	--- The text to display. With a TextKey, this is the source text, shown when the string table has no value for it.
 	Text: string
+	--- A key in the project's string table, such as "menu.play": shows its value in LocalizationService.Language instead of Text. Empty, or a key or language with no value, shows Text.
+	TextKey: string
 	--- The text color.
 	TextColor3: Color3
 	--- The text size in pixels.

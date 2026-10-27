@@ -14,7 +14,9 @@ pub(super) fn font_size(instance: &Instance, styles: &ResolvedStyles) -> f32 {
         .max(1.0)
 }
 
+#[allow(clippy::too_many_arguments)] // The world is for bound text (`shown_text`).
 pub(super) fn paint_instance(
+    world: &World,
     instance: &Instance,
     rect: UiRect,
     styles: &ResolvedStyles,
@@ -128,10 +130,7 @@ pub(super) fn paint_instance(
         instance.class(),
         ClassName::TextLabel | ClassName::TextButton | ClassName::TextBox
     ) {
-        let typed = instance
-            .property("Text")
-            .and_then(Value::as_str)
-            .expect("every text element has a Text property");
+        let typed = shown_text(world, instance).expect("every text element has a Text property");
         let placeholder = typed.is_empty() && instance.class() == ClassName::TextBox;
         let text = if placeholder {
             instance

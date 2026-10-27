@@ -1,0 +1,20 @@
+{
+  "blocks": [
+    {
+      "id": 1,
+      "kind": {
+        "type": "when_clicked",
+        "button": "Menu.Panel.EnglishButton",
+        "body": [
+          {
+            "id": 2,
+            "kind": {
+              "type": "set_language",
+              "language": { "type": "text", "value": "English" }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

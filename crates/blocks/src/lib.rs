@@ -414,6 +414,12 @@ pub enum BlockKind {
     /// player character standing on it.
     RestoreCheckpoint,
 
+    // Localization: `LocalizationService`.
+    /// Sets the language bound UI text shows (`LocalizationService.Language`).
+    SetLanguage {
+        language: Expression,
+    },
+
     // Lighting: the world's look.
     /// Sets `Lighting.ToneMapping` to one of [`TONE_MAPPINGS`].
     SetToneMapping {
@@ -704,6 +710,7 @@ impl BlockKind {
             | BlockKind::SetVelocity { velocity: e, .. }
             | BlockKind::SaveSlot { slot: e }
             | BlockKind::LoadSlot { slot: e }
+            | BlockKind::SetLanguage { language: e }
             | BlockKind::SetVolume { volume: e, .. }
             | BlockKind::SetAnimatorBool { value: e, .. }
             | BlockKind::SetAnimatorNumber { value: e, .. }
@@ -781,6 +788,7 @@ impl BlockKind {
             | BlockKind::SetVelocity { velocity: e, .. }
             | BlockKind::SaveSlot { slot: e }
             | BlockKind::LoadSlot { slot: e }
+            | BlockKind::SetLanguage { language: e }
             | BlockKind::SetVolume { volume: e, .. }
             | BlockKind::SetAnimatorBool { value: e, .. }
             | BlockKind::SetAnimatorNumber { value: e, .. }

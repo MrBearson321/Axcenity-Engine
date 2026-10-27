@@ -154,6 +154,7 @@ const GROUPS: [(&str, &[&str]); 19] = [
             "BackgroundColor3",
             "BackgroundTransparency",
             "Text",
+            "TextKey",
             "Placeholder",
             "TextColor3",
             "TextTransparency",

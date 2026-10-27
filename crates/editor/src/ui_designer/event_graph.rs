@@ -29,6 +29,8 @@ pub enum DesignerTab {
     #[default]
     Design,
     EventGraph,
+    /// The string table: languages, keys and their text.
+    Strings,
 }
 
 /// The shown ScreenGui's graph, lent by the app for a frame.
@@ -185,14 +187,15 @@ impl UiDesigner {
         graph: Option<&GraphPane>,
         actions: &mut Vec<DesignerAction>,
     ) {
-        // In a narrow column the icons go, so it fits.
-        let narrow = ui.max_rect().width() < 300.0;
-        responsive::room_for(ui, if narrow { 180.0 } else { 220.0 });
+        // Below 1200 points the icons go, so the toolbar takes fewer rows.
+        let narrow = ui.max_rect().width() < 1200.0;
+        responsive::room_for(ui, if narrow { 220.0 } else { 300.0 });
         let mut tab = self.tab;
         let icon = |icon| (!narrow).then_some(icon);
         let options = [
             (DesignerTab::Design, icon(icons::LAYOUT), "Design"),
             (DesignerTab::EventGraph, icon(icons::GRAPH), "Event Graph"),
+            (DesignerTab::Strings, icon(icons::TRANSLATE), "Strings"),
         ];
         if widgets::segmented(ui, &mut tab, &options) {
             self.tab = tab;

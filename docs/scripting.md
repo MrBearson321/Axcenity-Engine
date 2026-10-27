@@ -13,6 +13,7 @@ Map only. Luau and block scripts (shown as blocks or as a graph) share one runti
 - NavigationAgent (Destination, Velocity, Status, sight and hearing, PlayerSensed): [architecture/navigation.md](architecture/navigation.md)
 - TweenService, TweenInfo and Tweens: [scripting/api-tween.md](scripting/api-tween.md)
 - SaveService, save slots and Checkpoints: [architecture/saves.md](architecture/saves.md)
+- LocalizationService, the string table and `TextKey`: [ui.md](ui.md)
 - Error text: [scripting/errors.md](scripting/errors.md)
 - Sandbox: [scripting/sandbox.md](scripting/sandbox.md)
 - `require`: [scripting/modules.md](scripting/modules.md)
