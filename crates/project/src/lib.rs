@@ -12,6 +12,7 @@
 //!   ui/             `<ScreenGui>.uigraph.json` UI Event Graphs
 //!   *.css           project stylesheets, also found in subfolders
 //!   strings.json    the string table: UI text in each language (optional)
+//!   input.json      the input map: actions and their bindings (optional)
 //! ```
 //!
 //! One damaged file never stops the rest from loading: [`load`] leaves it
@@ -37,12 +38,14 @@ mod versions;
 mod watch;
 mod world_file;
 
+mod input_map;
 mod scripts;
 mod strings;
 mod stylesheets;
 mod templates;
 mod ui_graphs;
 
+pub use input_map::{INPUT_FILE, load_input_map, parse_input_map, save_input_map, write_input_map};
 pub use scripts::*;
 pub use strings::{STRINGS_FILE, parse_strings, save_strings, write_strings};
 pub use stylesheets::*;
@@ -178,6 +181,9 @@ pub struct Project {
     pub ui_graphs: Vec<UiGraphFile>,
     /// CSS files, in stable path order, ready for the UI crate to parse.
     pub stylesheets: Vec<StylesheetFile>,
+    /// The actions and their bindings, from `input.json` (the defaults
+    /// without one).
+    pub input_map: axcenity_core::input::InputMap,
     /// The files that couldn't be loaded. Each was left out, and the rest
     /// of the project loaded without it.
     pub problems: Vec<LoadError>,
@@ -305,6 +311,8 @@ pub enum LoadError {
         #[source]
         source: serde_json::Error,
     },
+    #[error("`{}` is not a valid input map, so the default actions are used: {message}", path.display())]
+    InputMap { path: PathBuf, message: String },
     #[error("the terrain in `{}` couldn't be loaded, so it's flat: {message}", path.display())]
     Terrain { path: PathBuf, message: String },
 }
@@ -421,6 +429,7 @@ pub fn load_with_progress(
     let ui_graphs = load_ui_graphs(folder, &mut world, &mut scripts, &mut problems);
     progress(LoadStep::Stylesheets);
     let stylesheets = load_stylesheets(folder, &mut problems);
+    let input_map = load_input_map(folder, &mut problems);
 
     Ok(Project {
         folder: folder.to_owned(),
@@ -430,6 +439,7 @@ pub fn load_with_progress(
         block_scripts,
         ui_graphs,
         stylesheets,
+        input_map,
         problems,
         world_loaded,
         damaged_terrains,

@@ -53,6 +53,7 @@ use crate::screen::Screen;
 use crate::theme::{self, icons};
 use crate::ui_handles::{self, Grip, Handles, UiDrag, UiDragEdit};
 
+mod game_input;
 mod input;
 mod overlays;
 pub(crate) use overlays::paint_agent_paths;
@@ -151,6 +152,9 @@ pub struct ViewportOutput {
     pub clicked: Option<Clicked>,
     /// A UI button clicked during Play, delivered to LocalScripts next frame.
     pub activated: Option<InstanceId>,
+    /// The mouse's buttons, movement and wheel and touches over the
+    /// viewport during Play, for the game's input.
+    pub game_input: Vec<axcenity_core::input::InputEvent>,
     /// `MouseEnter`, `MouseLeave` and buttons' sounds from this frame's UI.
     /// The app passes them to the game during Play, and drops them otherwise.
     pub ui_events: Vec<axcenity_ui::UiEvent>,
@@ -414,6 +418,14 @@ pub struct Viewport {
     /// The UI took the last press (a widget, a scroll bar, an open
     /// Dropdown's list), so letting it go clicks no button or text box.
     ui_took_press: bool,
+    /// The left button held during Play went down on the game's UI, so
+    /// its release is the UI's too.
+    ui_mouse_taken: bool,
+    /// `UserInputService.MouseBehavior` and `MouseIconEnabled` as last
+    /// applied to the cursor during Play.
+    held_cursor: (axcenity_core::MouseBehavior, bool),
+    /// Where the viewport was last drawn, in points.
+    last_rect: egui::Rect,
     /// Where the camera was when the culling overlay went on: culling
     /// stays there until it goes off.
     frozen_culling: Option<axcenity_render::Camera>,
@@ -457,6 +469,9 @@ impl Viewport {
             character_zoom: 0.0,
             ui: axcenity_ui::UiInteraction::default(),
             ui_took_press: false,
+            ui_mouse_taken: false,
+            held_cursor: (axcenity_core::MouseBehavior::Default, true),
+            last_rect: egui::Rect::NOTHING,
             frozen_culling: None,
         }
     }
@@ -486,6 +501,39 @@ impl Viewport {
         key: axcenity_ui::NavKey,
     ) -> axcenity_ui::UiNavigated {
         self.ui.navigate(world, key)
+    }
+
+    /// Holds the cursor during Play as `UserInputService.MouseBehavior`
+    /// asks (`mouse`, with `MouseIconEnabled`): hidden in the middle of the
+    /// viewport for LockCenter, hidden where it is for
+    /// LockCurrentPosition. Stop passes the defaults, which let it go.
+    pub fn hold_cursor(
+        &mut self,
+        ctx: &egui::Context,
+        mouse: (axcenity_core::MouseBehavior, bool),
+    ) {
+        use axcenity_core::MouseBehavior;
+        let (behavior, icon) = mouse;
+        if mouse != self.held_cursor {
+            self.held_cursor = mouse;
+            if !self.looking {
+                capture_mouse(ctx, behavior != MouseBehavior::Default);
+                ctx.send_viewport_cmd(egui::ViewportCommand::CursorVisible(
+                    icon && behavior == MouseBehavior::Default,
+                ));
+            }
+        }
+        // `Confined` (Windows, X11) lets the cursor drift; put it back.
+        if behavior == MouseBehavior::LockCenter && self.last_rect.is_positive() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CursorPosition(
+                self.last_rect.center(),
+            ));
+        }
+    }
+
+    /// The game UI's hover, press and focus states.
+    pub fn ui(&self) -> &axcenity_ui::UiInteraction {
+        &self.ui
     }
 
     /// Whether `key` is for the game UI's focus rather than the game.
@@ -598,6 +646,7 @@ impl Viewport {
         let drag_tool = if brush.is_some() { None } else { tool };
         let size = ui.available_size();
         let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
+        self.last_rect = rect;
         let pixels_per_point = ui.ctx().pixels_per_point();
         let pointer = ui.input(|input| input.pointer.latest_pos());
         let pointer_pixels = pointer
@@ -684,6 +733,27 @@ impl Viewport {
             },
             Some(&camera),
         );
+        // The game hears every click; one on its UI is `gameProcessedEvent`.
+        let game_input = if tool.is_none() {
+            let events = ui.input(|input| input.events.clone());
+            let area = game_input::GameArea {
+                rect,
+                pixels_per_point,
+                hovered: response.contains_pointer(),
+                wheel_taken,
+            };
+            let took = self.ui_took_press;
+            area.input(
+                &events,
+                |[x, y]| {
+                    took || base_layout.hit_button(x, y).is_some()
+                        || base_layout.hit_text_box(x, y).is_some()
+                },
+                &mut self.ui_mouse_taken,
+            )
+        } else {
+            Vec::new()
+        };
         let held_button = (primary_down && !scrolling)
             .then(|| pointer_pixels.and_then(|[x, y]| base_layout.hit_button(x, y)))
             .flatten();
@@ -971,6 +1041,7 @@ impl Viewport {
         ViewportOutput {
             clicked,
             activated,
+            game_input,
             ui_events: self.ui.take_events(),
             text_box,
             viewport_clicked: playing,

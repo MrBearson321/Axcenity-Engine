@@ -19,7 +19,7 @@ mod turn;
 mod widget;
 
 pub use css::*;
-pub use gamepad::{GamepadButton, Gamepads, NavRepeat, button_key};
+pub use gamepad::{GamepadButton, Gamepads, NavRepeat, PadNavigation, nav_key, pad_key};
 use interact::interactable;
 pub use interact::{
     FOCUS_RING_COLOR, NavKey, SCROLL_DRAG_SLOP, TOOLTIP_DELAY, UiCursor, UiEvent, UiInput,

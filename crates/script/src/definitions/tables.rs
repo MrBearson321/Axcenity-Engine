@@ -460,26 +460,177 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
     },
     ValueType {
         class: "UserInputService",
-        doc: "The player's keyboard, from `game:GetService(\"UserInputService\")`. LocalScripts only.",
+        doc: "The player's keyboard, mouse, touch screen and game controllers, and the input map's actions, from `game:GetService(\"UserInputService\")`. LocalScripts only.",
         fields: &[
             Field {
                 name: "InputBegan",
                 ty: "Signal",
-                doc: "Fires when a key goes down. The handler gets an InputObject and `gameProcessedEvent` (always false for now): `function(input, gameProcessedEvent) ... end`.",
+                doc: "Fires when a key, mouse button, controller button or finger goes down. The handler gets an InputObject and `gameProcessedEvent`, true when the game's UI took it (a click on a button, typing in a TextBox, a key that moved focus): `function(input, gameProcessedEvent) ... end`.",
+            },
+            Field {
+                name: "InputChanged",
+                ty: "Signal",
+                doc: "Fires when the mouse moves, the wheel turns, a finger moves or a controller's stick moves, with the same arguments as InputBegan. `input.Delta` is how far it moved; for the wheel, `input.Position.Z` is the notches.",
             },
             Field {
                 name: "InputEnded",
                 ty: "Signal",
-                doc: "Fires when a key comes back up, with the same arguments as InputBegan.",
+                doc: "Fires when a key, button or finger comes back up, with the same arguments as InputBegan.",
+            },
+            Field {
+                name: "TouchStarted",
+                ty: "Signal",
+                doc: "Fires when a finger touches the screen, with the same arguments as InputBegan (before InputBegan).",
+            },
+            Field {
+                name: "TouchMoved",
+                ty: "Signal",
+                doc: "Fires when a finger moves on the screen, with the same arguments as InputBegan.",
+            },
+            Field {
+                name: "TouchEnded",
+                ty: "Signal",
+                doc: "Fires when a finger leaves the screen, with the same arguments as InputBegan.",
+            },
+            Field {
+                name: "GamepadConnected",
+                ty: "Signal",
+                doc: "Fires when a controller is plugged in (or first used). The handler gets which one: `function(gamepad) ... end`, such as `Enum.UserInputType.Gamepad1`.",
+            },
+            Field {
+                name: "GamepadDisconnected",
+                ty: "Signal",
+                doc: "Fires when a controller is unplugged, with which one, as GamepadConnected.",
+            },
+            Field {
+                name: "MouseBehavior",
+                ty: "EnumMouseBehavior",
+                doc: "What the cursor does: `Default` moves freely; `LockCenter` holds it, hidden, in the middle of the window, and `LockCurrentPosition` where it is. While it's held, `GetMouseDelta` still says how far the mouse moved, for a camera.",
+            },
+            Field {
+                name: "MouseIconEnabled",
+                ty: "boolean",
+                doc: "False hides the cursor over the game.",
             },
         ],
         operators: &[],
-        methods: &[Function {
-            name: "IsKeyDown",
-            doc: "True while `key` is held down, such as `Enum.KeyCode.W`.",
-            params: &[("key", "EnumKeyCode")],
-            returns: "boolean",
-        }],
+        methods: &[
+            Function {
+                name: "IsKeyDown",
+                doc: "True while keyboard key `key` is held down, such as `Enum.KeyCode.W`.",
+                params: &[("key", "EnumKeyCode")],
+                returns: "boolean",
+            },
+            Function {
+                name: "IsMouseButtonPressed",
+                doc: "True while mouse button `button` is held, such as `Enum.UserInputType.MouseButton1`.",
+                params: &[("button", "EnumUserInputType")],
+                returns: "boolean",
+            },
+            Function {
+                name: "GetMouseLocation",
+                doc: "Where the mouse is, in pixels from the window's top left.",
+                params: &[],
+                returns: "Vector2",
+            },
+            Function {
+                name: "GetMouseDelta",
+                doc: "How far the mouse moved this frame, in pixels, right and down positive. It works while the cursor is locked (`MouseBehavior`).",
+                params: &[],
+                returns: "Vector2",
+            },
+            Function {
+                name: "GetConnectedGamepads",
+                doc: "The controllers plugged in, such as `{Enum.UserInputType.Gamepad1}`.",
+                params: &[],
+                returns: "{EnumUserInputType}",
+            },
+            Function {
+                name: "IsGamepadButtonDown",
+                doc: "True while controller `gamepad` holds `button`, such as `Enum.KeyCode.ButtonA`.",
+                params: &[("gamepad", "EnumUserInputType"), ("button", "EnumKeyCode")],
+                returns: "boolean",
+            },
+            Function {
+                name: "GetGamepadState",
+                doc: "An InputObject for each of controller `gamepad`'s buttons and sticks: `UserInputState` Begin while held, and the sticks' `Position`.",
+                params: &[("gamepad", "EnumUserInputType")],
+                returns: "{InputObject}",
+            },
+            Function {
+                name: "IsActionPressed",
+                doc: "True while something bound to action `name` in the input map is held, such as `\"Jump\"`. Input the UI took doesn't count.",
+                params: &[("name", "string")],
+                returns: "boolean",
+            },
+            Function {
+                name: "GetActionAxis",
+                doc: "Where axis action `name` points, such as `\"Move\"`: right and up positive, at most 1 long for keys and sticks (the mouse adds its pixels on top).",
+                params: &[("name", "string")],
+                returns: "Vector2",
+            },
+            Function {
+                name: "GetActionInputs",
+                doc: "The names of what action `name` is bound to now, such as `{\"Space\", \"ButtonA\"}`, for a controls menu.",
+                params: &[("name", "string")],
+                returns: "{string}",
+            },
+            Function {
+                name: "RebindAction",
+                doc: "Binds action `name` to `inputs` instead: `Enum.KeyCode` items, mouse buttons (`Enum.UserInputType.MouseButton1`) or an axis's name such as `\"W,A,S,D\"`. The built-in controllers use it at once. It's kept as the SaveService setting `Input/<name>`, so it's saved in slots and comes back when one loads.",
+                params: &[("name", "string"), ("inputs", "{any}")],
+                returns: "()",
+            },
+        ],
+    },
+    ValueType {
+        class: "ContextActionService",
+        doc: "Functions bound to inputs, from `game:GetService(\"ContextActionService\")`. When a bound input goes down, changes or comes up, only the highest-priority action bound to it is called (the latest bound, of equal ones), so a menu can take a key from the game until it's unbound. Input the UI took doesn't reach actions. LocalScripts only.",
+        fields: &[],
+        operators: &[],
+        methods: &[
+            Function {
+                name: "BindAction",
+                doc: "Calls `handler(actionName, inputState, inputObject)` for `inputs` (`Enum.KeyCode` or `Enum.UserInputType` items), at the default priority (2000). Binding a name again replaces it. `createTouchButton` is kept, but no touch button is drawn yet.",
+                params: &[
+                    ("name", "string"),
+                    ("handler", "(string, EnumUserInputState, InputObject) -> ()"),
+                    ("createTouchButton", "boolean"),
+                    ("...", "EnumItem"),
+                ],
+                returns: "()",
+            },
+            Function {
+                name: "BindActionAtPriority",
+                doc: "BindAction at `priority`: a higher number hides the same inputs from lower ones.",
+                params: &[
+                    ("name", "string"),
+                    ("handler", "(string, EnumUserInputState, InputObject) -> ()"),
+                    ("createTouchButton", "boolean"),
+                    ("priority", "number"),
+                    ("...", "EnumItem"),
+                ],
+                returns: "()",
+            },
+            Function {
+                name: "UnbindAction",
+                doc: "Unbinds action `name`, so the inputs go to the next action down.",
+                params: &[("name", "string")],
+                returns: "()",
+            },
+            Function {
+                name: "UnbindAllActions",
+                doc: "Unbinds every action.",
+                params: &[],
+                returns: "()",
+            },
+            Function {
+                name: "GetBoundActionInfo",
+                doc: "Action `name`'s `priorityLevel`, `inputTypes`, `createTouchButton` and `stackOrder`, or an empty table when it isn't bound.",
+                params: &[("name", "string")],
+                returns: "{[string]: any}",
+            },
+        ],
     },
     ValueType {
         class: "RunService",
@@ -802,12 +953,34 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
     },
     ValueType {
         class: "InputObject",
-        doc: "One key going down or up, as `InputBegan` and `InputEnded` handlers get it.",
-        fields: &[Field {
-            name: "KeyCode",
-            ty: "EnumKeyCode",
-            doc: "Which key, such as `Enum.KeyCode.W`.",
-        }],
+        doc: "One input, as `UserInputService`'s events and `ContextActionService`'s actions get it.",
+        fields: &[
+            Field {
+                name: "KeyCode",
+                ty: "EnumKeyCode",
+                doc: "Which key or controller button, such as `Enum.KeyCode.W` or `Enum.KeyCode.ButtonA` (`Thumbstick1` for the left stick), or `Unknown` for the mouse and touches.",
+            },
+            Field {
+                name: "UserInputType",
+                ty: "EnumUserInputType",
+                doc: "What it came from: `Keyboard`, `MouseButton1` to `MouseButton3`, `MouseMovement`, `MouseWheel`, `Touch`, or a controller (`Gamepad1` to `Gamepad4`).",
+            },
+            Field {
+                name: "UserInputState",
+                ty: "EnumUserInputState",
+                doc: "`Begin` when it went down, `Change` when it moved, `End` when it came up.",
+            },
+            Field {
+                name: "Position",
+                ty: "Vector3",
+                doc: "Where the mouse or finger is, in pixels from the window's top left (Z is the wheel's notches), or a stick's position (-1 to 1, up positive).",
+            },
+            Field {
+                name: "Delta",
+                ty: "Vector3",
+                doc: "How far it moved: the mouse in pixels, right and down positive, or a stick.",
+            },
+        ],
         operators: &[],
         methods: &[],
     },
@@ -1193,7 +1366,7 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
         ClassName::DataModel,
         Function {
             name: "GetService",
-            doc: "The service with this class name, such as `\"Players\"`, `\"ReplicatedFirst\"`, `\"RunService\"`, `\"SaveService\"`, `\"LocalizationService\"`, `\"TweenService\"`, `\"CollectionService\"`, `\"UserGameSettings\"` or `\"UserInputService\"`.",
+            doc: "The service with this class name, such as `\"Players\"`, `\"ReplicatedFirst\"`, `\"RunService\"`, `\"SaveService\"`, `\"LocalizationService\"`, `\"TweenService\"`, `\"CollectionService\"`, `\"UserGameSettings\"`, `\"UserInputService\"` or `\"ContextActionService\"`.",
             params: &[("className", "string")],
             returns: "Instance",
         },
@@ -1470,7 +1643,15 @@ pub(super) const CLASS_FIELDS: &[(ClassName, Field)] = &[
         Field {
             name: "UserInputService",
             ty: "UserInputService",
-            doc: "The player's keyboard (same as `game:GetService(\"UserInputService\")`).",
+            doc: "The player's keyboard, mouse and controllers (same as `game:GetService(\"UserInputService\")`).",
+        },
+    ),
+    (
+        ClassName::DataModel,
+        Field {
+            name: "ContextActionService",
+            ty: "ContextActionService",
+            doc: "Functions bound to inputs by priority (same as `game:GetService(\"ContextActionService\")`).",
         },
     ),
     (

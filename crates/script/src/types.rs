@@ -7,8 +7,8 @@
 
 use axcenity_anim::EasingDirection;
 use axcenity_core::{
-    Color3, KeyCode, Material, PartType, ParticleType, TextureChannel, ToneMapping, UDim, UDim2,
-    Value, ValueKind, Vector2, Vector3,
+    Color3, KeyCode, Material, MouseBehavior, PartType, ParticleType, TextureChannel, ToneMapping,
+    UDim, UDim2, UserInputState, UserInputType, Value, ValueKind, Vector2, Vector3,
 };
 use mlua::{FromLua, IntoLua, Lua, MetaMethod, UserData, UserDataFields, UserDataMethods};
 
@@ -515,10 +515,13 @@ pub enum EnumType {
     TextureQuality,
     AntiAliasing,
     AmbientOcclusion,
+    UserInputType,
+    UserInputState,
+    MouseBehavior,
 }
 
 impl EnumType {
-    pub const ALL: [EnumType; 14] = [
+    pub const ALL: [EnumType; 17] = [
         EnumType::Material,
         EnumType::PartType,
         EnumType::KeyCode,
@@ -533,6 +536,9 @@ impl EnumType {
         EnumType::TextureQuality,
         EnumType::AntiAliasing,
         EnumType::AmbientOcclusion,
+        EnumType::UserInputType,
+        EnumType::UserInputState,
+        EnumType::MouseBehavior,
     ];
 
     pub fn name(self) -> &'static str {
@@ -551,6 +557,9 @@ impl EnumType {
             EnumType::TextureQuality => "TextureQuality",
             EnumType::AntiAliasing => "AntiAliasing",
             EnumType::AmbientOcclusion => "AmbientOcclusion",
+            EnumType::UserInputType => "UserInputType",
+            EnumType::UserInputState => "UserInputState",
+            EnumType::MouseBehavior => "MouseBehavior",
         }
     }
 
@@ -571,6 +580,9 @@ impl EnumType {
             EnumType::TextureQuality => user_settings::texture_quality_names(),
             EnumType::AntiAliasing => user_settings::anti_aliasing_names(),
             EnumType::AmbientOcclusion => user_settings::ambient_occlusion_names(),
+            EnumType::UserInputType => UserInputType::ALL.iter().map(|t| t.as_str()).collect(),
+            EnumType::UserInputState => UserInputState::ALL.iter().map(|s| s.as_str()).collect(),
+            EnumType::MouseBehavior => MouseBehavior::ALL.iter().map(|b| b.as_str()).collect(),
         }
     }
 
@@ -650,7 +662,10 @@ impl LuaEnumItem {
             | EnumType::ShadowQuality
             | EnumType::TextureQuality
             | EnumType::AntiAliasing
-            | EnumType::AmbientOcclusion => None,
+            | EnumType::AmbientOcclusion
+            | EnumType::UserInputType
+            | EnumType::UserInputState
+            | EnumType::MouseBehavior => None,
         }
     }
 }
@@ -939,10 +954,14 @@ pub fn type_name(lua: &Lua, value: &mlua::Value) -> String {
         // Engine objects that aren't Instances, by the names scripts know them by.
         let others = [
             (data.is::<crate::client::LuaCamera>(), "Camera"),
-            (data.is::<crate::client::LuaInputObject>(), "InputObject"),
+            (data.is::<crate::input::LuaInputObject>(), "InputObject"),
             (
-                data.is::<crate::client::LuaUserInputService>(),
+                data.is::<crate::input::LuaUserInputService>(),
                 "UserInputService",
+            ),
+            (
+                data.is::<crate::input::LuaContextActionService>(),
+                "ContextActionService",
             ),
             (data.is::<crate::events::LuaSignal>(), "Signal"),
             (data.is::<crate::events::LuaConnection>(), "Connection"),

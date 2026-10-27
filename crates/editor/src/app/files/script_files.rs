@@ -14,7 +14,7 @@ impl EditorApp {
 
     /// Adds the script at `path` (whose file has `source` in it) to the
     /// project, with a Script or LocalScript for it, and returns that.
-    pub(super) fn add_script(&mut self, path: &str, source: String) -> InstanceId {
+    pub(in crate::app) fn add_script(&mut self, path: &str, source: String) -> InstanceId {
         let instance = project::add_script_instance(&mut self.world, path);
         if let Some(project) = &mut self.project {
             project.scripts.push(ScriptFile {

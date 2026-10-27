@@ -45,6 +45,7 @@ mod debugger;
 mod definitions;
 mod errors;
 mod events;
+mod input;
 mod instance;
 mod localization;
 mod modules;
@@ -69,7 +70,8 @@ use std::time::Duration;
 
 use axcenity_assets::Assets;
 use axcenity_audio::SoundAction;
-use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
+use axcenity_core::input::{InputEvent, InputMap};
+use axcenity_core::{ClassName, InstanceId, MouseBehavior, Value, Vector3, World};
 use axcenity_physics::RayHit;
 use axcenity_render::{Capabilities, GraphicsSettings};
 use axcenity_save::Saves;
@@ -77,9 +79,10 @@ use mlua::Lua;
 
 use crate::context::Context;
 
-pub use client::{CameraState, KeyEvent};
+pub use client::CameraState;
 pub use debugger::{Breakpoints, Local, Pause, PausedFrame};
 pub use definitions::{ApiEntry, ApiKind, DEFINITIONS_PATH, api_reference, lua_definitions};
+pub use input::KeyEvent;
 pub use remote::{Loopback, Message, RemoteValue, Transport};
 pub use sides::{SIDE_ONLY_APIS, Side, SideOnlyApi, side_only};
 pub use watchdog::DEFAULT_LIMIT as WATCHDOG_LIMIT;
@@ -408,15 +411,43 @@ impl ScriptRuntime {
     /// Frame-order step 1: the keys pressed and released since the last
     /// frame, in order. LocalScripts see them through `UserInputService`.
     pub fn input(&mut self, world: &mut World, keys: &[KeyEvent]) {
+        let events: Vec<InputEvent> = keys.iter().map(|&key| key.into()).collect();
+        self.input_events(world, &events);
+    }
+
+    /// Frame-order step 1: everything the keyboard, mouse, touch screen
+    /// and controllers did since the last frame, in order. LocalScripts see
+    /// it through `UserInputService` and `ContextActionService`.
+    pub fn input_events(&mut self, world: &mut World, events: &[InputEvent]) {
         // Changes made since the last frame, such as by the editor.
         self.fire_changes(world);
-        if keys.is_empty() {
+        // Even with no events, so `GetMouseDelta` is this frame's.
+        self.client.fire_input(world, events);
+        if events.is_empty() {
             return;
         }
         self.join(world);
-        self.client.fire_input(world, keys);
         self.collect(Side::Client);
         self.fire_changes(world);
+    }
+
+    /// The project's actions and bindings (`input.json`), for
+    /// `UserInputService`'s actions. Call it before starting scripts.
+    pub fn set_input_map(&mut self, map: InputMap) {
+        self.client.set_input_map(map);
+    }
+
+    /// The input map with the player's rebinds (`RebindAction`, kept in
+    /// SaveService's settings), for the built-in controllers and UI
+    /// navigation.
+    pub fn input_map(&self) -> InputMap {
+        self.client.input_map()
+    }
+
+    /// `UserInputService.MouseBehavior` and `MouseIconEnabled`, which the
+    /// host applies to the cursor.
+    pub fn mouse(&self) -> (MouseBehavior, bool) {
+        self.client.mouse()
     }
 
     /// Frame-order step 2, first on the server, then on the client: fires
@@ -862,6 +893,9 @@ mod tests;
 
 #[cfg(test)]
 mod client_server_tests;
+
+#[cfg(test)]
+mod input_tests;
 
 #[cfg(test)]
 mod events_tests;

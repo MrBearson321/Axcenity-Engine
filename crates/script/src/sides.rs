@@ -89,6 +89,12 @@ pub const SIDE_ONLY_APIS: &[SideOnlyApi] = &[
         instead: "read the input in a LocalScript, and send it to the server with a RemoteEvent's FireServer",
     },
     SideOnlyApi {
+        name: "ContextActionService",
+        side: Side::Client,
+        because: "its actions come from the player's keyboard, mouse and controllers",
+        instead: "bind the action in a LocalScript, and send it to the server with a RemoteEvent's FireServer",
+    },
+    SideOnlyApi {
         name: "CurrentCamera",
         side: Side::Client,
         because: "each player has their own camera",

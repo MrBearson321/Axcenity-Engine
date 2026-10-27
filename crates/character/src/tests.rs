@@ -887,3 +887,73 @@ fn clearing_a_custom_mode_restores_walk_or_crouch() {
     let crept = start.z - pos(&world, body).z;
     assert!((crept - 8.0).abs() < 0.5, "crept {crept}");
 }
+
+#[test]
+fn a_gamepads_left_stick_walks_the_character_and_its_a_button_jumps() {
+    use axcenity_core::KeyCode;
+    use axcenity_core::input::{InputKind, InputMap, InputState};
+
+    let assets = Assets::default();
+    let (mut world, controller, body) = standing();
+    set(&mut world, controller, "WalkSpeed", 16.0);
+    let map = InputMap::default();
+    let mut pad = InputState::default();
+    pad.apply(&InputKind::PadConnected(0));
+    pad.apply(&InputKind::PadStick {
+        pad: 0,
+        stick: KeyCode::Thumbstick1,
+        position: [0.0, 1.0],
+    });
+    let mut controllers = Controllers::default();
+    let input = MoveInput::from_actions(&map, &pad, [0.0, 0.0], 0.0, 1.0);
+    controllers.step(&mut world, &assets, input, 1.0);
+    let walked = pos(&world, body);
+    assert!(
+        (walked.z + 16.0).abs() < 1e-3,
+        "pushed all the way: {walked:?}"
+    );
+
+    // Half way past the dead zone walks at half speed.
+    let half =
+        axcenity_core::input::STICK_DEAD_ZONE + (1.0 - axcenity_core::input::STICK_DEAD_ZONE) * 0.5;
+    pad.apply(&InputKind::PadStick {
+        pad: 0,
+        stick: KeyCode::Thumbstick1,
+        position: [half, 0.0],
+    });
+    let input = MoveInput::from_actions(&map, &pad, [0.0, 0.0], 0.0, 1.0);
+    controllers.step(&mut world, &assets, input, 1.0);
+    let sideways = pos(&world, body);
+    assert!((sideways.x - 8.0).abs() < 1e-2, "half way: {sideways:?}");
+
+    pad.apply(&InputKind::PadStick {
+        pad: 0,
+        stick: KeyCode::Thumbstick1,
+        position: [0.0, 0.0],
+    });
+    pad.apply(&InputKind::PadButton {
+        pad: 0,
+        key: KeyCode::ButtonA,
+        pressed: true,
+    });
+    let input = MoveInput::from_actions(&map, &pad, [0.0, 0.0], 0.0, FRAME);
+    assert!(input.jump);
+    run(&mut world, &mut controllers, input, 10);
+    assert!(pos(&world, body).y > 1.5, "{:?}", pos(&world, body));
+}
+
+#[test]
+fn holding_run_runs_a_walking_character() {
+    let assets = Assets::default();
+    let (mut world, controller, body) = standing();
+    set(&mut world, controller, "WalkSpeed", 16.0);
+    set(&mut world, controller, "RunSpeed", 32.0);
+    let mut controllers = Controllers::default();
+    let input = MoveInput {
+        run: true,
+        ..forward()
+    };
+    controllers.step(&mut world, &assets, input, 1.0);
+    let ran = pos(&world, body);
+    assert!((ran.z + 32.0).abs() < 1e-3, "{ran:?}");
+}

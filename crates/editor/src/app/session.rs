@@ -230,6 +230,7 @@ impl EditorApp {
             name: project.manifest.name,
             show_splash,
             loading_screen,
+            input_map: project.input_map,
             watcher: Watcher::start(project.folder.clone()),
             after_play: Vec::new(),
             folder: project.folder,
@@ -398,6 +399,7 @@ impl EditorApp {
                 orientation,
             },
             loading_screen,
+            &project.input_map,
             play_save_folder(&project.name),
             &self.graphics,
             &self.capabilities.unwrap_or_default(),
@@ -583,7 +585,9 @@ impl EditorApp {
             return;
         };
         let (world, viewport) = (session.world(), &self.viewport);
+        let map = session.input_map();
         let mut taken = Vec::new();
+        let mut heard = Vec::new();
         input.events.retain(|event| {
             let egui::Event::Key {
                 key,
@@ -594,15 +598,22 @@ impl EditorApp {
             else {
                 return true;
             };
-            match crate::play::nav_key(*key, modifiers.shift) {
+            match crate::play::nav_key(&map, *key, modifiers.shift) {
                 Some(nav) if viewport.ui_takes(world, nav) => {
                     taken.push(nav);
+                    // Scripts still hear it, as the UI's.
+                    heard.extend(crate::play::script_key(*key).map(|key| {
+                        axcenity_core::input::InputEvent::processed(
+                            axcenity_core::input::InputKind::Key { key, pressed: true },
+                        )
+                    }));
                     false
                 }
                 _ => true,
             }
         });
         self.nav_keys.extend(taken);
+        self.pending_game_input.extend(heard);
     }
 
     /// Moves the game UI's focus by the keys `take_nav_keys` took and the
@@ -611,11 +622,21 @@ impl EditorApp {
     /// while typing, a controller's Confirm or Back finishes it.
     pub(super) fn navigate_play_ui(&mut self, seconds: f32) {
         let mut keys = std::mem::take(&mut self.nav_keys);
-        keys.extend(
-            self.gamepads
+        if let Some(session) = &self.play {
+            // What the UI takes moves focus; the rest is the game's.
+            let mut pads = self
+                .gamepads
                 .get_or_insert_with(axcenity_ui::Gamepads::new)
-                .poll(seconds),
-        );
+                .poll();
+            keys.extend(self.pad_nav.update(
+                self.viewport.ui(),
+                session.world(),
+                &session.input_map(),
+                &mut pads,
+                seconds,
+            ));
+            self.pending_game_input.extend(pads);
+        }
         for key in keys {
             if let Some(id) = self.focused_text {
                 if matches!(
@@ -649,7 +670,7 @@ impl EditorApp {
     pub(super) fn play_frame(
         &mut self,
         seconds: f64,
-        keys: &[KeyEvent],
+        input: &[axcenity_core::input::InputEvent],
         activation: Option<InstanceId>,
         focus_lost: Option<InstanceId>,
     ) {
@@ -683,15 +704,24 @@ impl EditorApp {
         };
         let (look_dx, look_dy) = self.viewport.take_character_look();
         let zoom = self.viewport.take_character_zoom();
+        // The controllers read the input map's actions, with the player's
+        // rebinds, as in the player.
+        self.game_keys.follow(input);
+        let motion = self.game_keys.motion(
+            &session.input_map(),
+            [look_dx, look_dy],
+            zoom,
+            seconds as f32,
+        );
         let motion = if self.focused_text.is_some() {
             axcenity_character::MoveInput::default()
         } else {
-            self.game_keys.motion(look_dx, look_dy, zoom)
+            motion
         };
         // The game's steps (character, physics, scripts) run the newest
         // code dx patched in, so Play carries on across a patch.
         let frame = hot_patch::call(patched, || {
-            session.frame(seconds, keys, motion, camera, &mut self.output)
+            session.frame(seconds, input, motion, camera, &mut self.output)
         });
         if let Some(cost) = session.cost() {
             self.profiler.record_game(cost, session.load());

@@ -1099,7 +1099,7 @@ mod tests {
             vec![Vec::new(); 3],
             |ctx, render_state| {
                 match frame {
-                    1 => app.play_frame(1.0 / 60.0, &[press], None, None),
+                    1 => app.play_frame(1.0 / 60.0, &[press.into()], None, None),
                     2 => app.stop(),
                     _ => app.play_frame(1.0 / 60.0, &[], None, None),
                 }

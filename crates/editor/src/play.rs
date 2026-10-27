@@ -18,7 +18,8 @@ use axcenity_anim::Animators;
 use axcenity_assets::Assets;
 use axcenity_audio::{GameAudio, SoundAction};
 use axcenity_character::{CharacterCamera, Controllers, MoveInput};
-use axcenity_core::{InstanceId, KeyCode, Vector3, World};
+use axcenity_core::input::{InputEvent, InputMap, InputState};
+use axcenity_core::{InstanceId, KeyCode, MouseBehavior, Vector3, World};
 use axcenity_nav::Agents;
 use axcenity_physics::Physics;
 use axcenity_project::{LoadingScreen, ScriptFile};
@@ -82,7 +83,8 @@ impl Session {
     /// `SaveService` writes its slots in `save_folder` (the player's data for
     /// the game, as in the built game), never the project. LocalScripts see
     /// the editor's `graphics` settings (with the GPU's `capabilities`) as
-    /// `UserGameSettings`, and their changes last until Stop.
+    /// `UserGameSettings`, and their changes last until Stop. Actions come
+    /// from `input_map` (the project's `input.json`).
     #[allow(clippy::too_many_arguments)]
     pub fn start(
         edit_world: &World,
@@ -92,6 +94,7 @@ impl Session {
         assets: Assets,
         camera: CameraState,
         loading: &LoadingScreen,
+        input_map: &InputMap,
         save_folder: Option<PathBuf>,
         graphics: &GraphicsSettings,
         capabilities: &Capabilities,
@@ -128,6 +131,7 @@ impl Session {
         }
         session.scripts.set_assets(session.assets.clone());
         session.scripts.set_save_folder(save_folder);
+        session.scripts.set_input_map(input_map.clone());
         session.scripts.set_graphics(graphics, capabilities);
         session.scripts.enable_debugger();
         session.scripts.set_breakpoints(breakpoints);
@@ -290,8 +294,9 @@ impl Session {
         self.characters.view(&self.world)
     }
 
-    /// Runs one frame, `seconds` long, with the keys pressed and released
-    /// since the last frame, character `motion`, and the viewport's fly
+    /// Runs one frame, `seconds` long, with the input since the last frame
+    /// (keys, the mouse over the viewport, controllers), character
+    /// `motion`, and the viewport's fly
     /// camera. Character controllers step after input and before scripts;
     /// their parts are anchored just before physics. The viewport lays out
     /// UI and draws. Returns where a LocalScript moved the camera, if one
@@ -303,7 +308,7 @@ impl Session {
     pub fn frame(
         &mut self,
         seconds: f64,
-        keys: &[KeyEvent],
+        input: &[InputEvent],
         motion: MoveInput,
         camera: CameraState,
         output: &mut Output,
@@ -346,11 +351,11 @@ impl Session {
                 clock = now;
                 took
             };
-            // 1. Input, for LocalScripts: the camera and the keys. A
+            // 1. Input, for LocalScripts: the camera and the input. A
             //    third-person controller owns the camera when one is present.
             let seen = self.script_camera(camera);
             self.scripts.set_camera(seen);
-            self.scripts.input(&mut self.world, keys);
+            self.scripts.input_events(&mut self.world, input);
             self.forward_output(output);
             if self.scripts.pause().is_some() {
                 cost.scripts += lap();
@@ -429,6 +434,17 @@ impl Session {
             },
             None => fallback,
         }
+    }
+
+    /// The input map with the player's rebinds, for the controllers and
+    /// UI navigation.
+    pub fn input_map(&self) -> InputMap {
+        self.scripts.input_map()
+    }
+
+    /// `UserInputService.MouseBehavior` and `MouseIconEnabled`.
+    pub fn mouse(&self) -> (MouseBehavior, bool) {
+        self.scripts.mouse()
     }
 
     /// What the last frame's steps took, or `None` if it didn't run.
@@ -556,10 +572,12 @@ impl Session {
 }
 
 /// Turns the editor's keyboard events into key presses for LocalScripts
-/// during Play.
+/// during Play, and follows what the game holds for the controllers.
 #[derive(Default)]
 pub struct GameKeys {
     held: BTreeSet<KeyCode>,
+    /// What the game holds: everything but the presses the UI took.
+    game: InputState,
     /// Shift, Ctrl and Alt as last seen. egui reports them as modifiers, not
     /// keys, so a change in them is a press or release of the left one.
     modifiers: egui::Modifiers,
@@ -624,46 +642,33 @@ impl GameKeys {
         keys
     }
 
-    /// Held movement keys for a character controller, plus mouse look and
-    /// wheel notches since the last frame. Arrow keys move as well as WASD;
-    /// Space jumps, and C crouches.
-    pub fn motion(&self, look_dx: f32, look_dy: f32, zoom: f32) -> MoveInput {
-        let down = |key| self.held.contains(&key);
-        MoveInput {
-            forward: down(KeyCode::W) || down(KeyCode::Up),
-            back: down(KeyCode::S) || down(KeyCode::Down),
-            left: down(KeyCode::A) || down(KeyCode::Left),
-            right: down(KeyCode::D) || down(KeyCode::Right),
-            jump: down(KeyCode::Space),
-            crouch: down(KeyCode::C),
-            look_dx,
-            look_dy,
-            zoom,
+    /// Follows a frame's `input` as the game sees it.
+    pub fn follow(&mut self, input: &[InputEvent]) {
+        for event in input {
+            self.game.follow(event);
         }
+    }
+
+    /// A character controller's input from `map`'s actions in what the
+    /// game holds, plus mouse look and wheel notches since the last frame,
+    /// `seconds` after it. Then the next frame starts.
+    pub fn motion(&mut self, map: &InputMap, look: [f32; 2], zoom: f32, seconds: f32) -> MoveInput {
+        let motion = MoveInput::from_actions(map, &self.game, look, zoom, seconds);
+        self.game.end_frame();
+        motion
     }
 }
 
-/// What a key does to the game UI's focus during Play: Tab and Shift+Tab
-/// step through it, the arrows move it, Enter uses the focused element and
-/// Escape lets go. The same keys as the player's.
-pub fn nav_key(key: egui::Key, shift: bool) -> Option<axcenity_ui::NavKey> {
-    use axcenity_ui::NavKey;
-    Some(match key {
-        egui::Key::Tab if shift => NavKey::Previous,
-        egui::Key::Tab => NavKey::Next,
-        egui::Key::ArrowUp => NavKey::Up,
-        egui::Key::ArrowDown => NavKey::Down,
-        egui::Key::ArrowLeft => NavKey::Left,
-        egui::Key::ArrowRight => NavKey::Right,
-        egui::Key::Enter => NavKey::Confirm,
-        egui::Key::Escape => NavKey::Back,
-        _ => return None,
-    })
+/// What a key does to the game UI's focus during Play, by `map`'s UI
+/// actions: by default Tab and Shift+Tab step through it, the arrows move
+/// it, Enter uses the focused element and Escape lets go, as in the player.
+pub fn nav_key(map: &InputMap, key: egui::Key, shift: bool) -> Option<axcenity_ui::NavKey> {
+    axcenity_ui::nav_key(map, script_key(key)?, shift)
 }
 
 /// The key scripts know as `Enum.KeyCode.<name>` for an egui key, if it's
 /// one they can see. Shift, Ctrl and Alt come from the modifiers instead.
-fn script_key(key: egui::Key) -> Option<KeyCode> {
+pub fn script_key(key: egui::Key) -> Option<KeyCode> {
     use egui::Key as E;
     let key = match key {
         E::A => KeyCode::A,

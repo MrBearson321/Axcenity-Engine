@@ -172,14 +172,64 @@ declare extern type EnumItem with
 	Name: string
 end
 
---- The player's keyboard, from `game:GetService("UserInputService")`. LocalScripts only.
+--- The player's keyboard, mouse, touch screen and game controllers, and the input map's actions, from `game:GetService("UserInputService")`. LocalScripts only.
 declare extern type UserInputService with
-	--- Fires when a key goes down. The handler gets an InputObject and `gameProcessedEvent` (always false for now): `function(input, gameProcessedEvent) ... end`.
+	--- Fires when a key, mouse button, controller button or finger goes down. The handler gets an InputObject and `gameProcessedEvent`, true when the game's UI took it (a click on a button, typing in a TextBox, a key that moved focus): `function(input, gameProcessedEvent) ... end`.
 	InputBegan: Signal
-	--- Fires when a key comes back up, with the same arguments as InputBegan.
+	--- Fires when the mouse moves, the wheel turns, a finger moves or a controller's stick moves, with the same arguments as InputBegan. `input.Delta` is how far it moved; for the wheel, `input.Position.Z` is the notches.
+	InputChanged: Signal
+	--- Fires when a key, button or finger comes back up, with the same arguments as InputBegan.
 	InputEnded: Signal
-	--- True while `key` is held down, such as `Enum.KeyCode.W`.
+	--- Fires when a finger touches the screen, with the same arguments as InputBegan (before InputBegan).
+	TouchStarted: Signal
+	--- Fires when a finger moves on the screen, with the same arguments as InputBegan.
+	TouchMoved: Signal
+	--- Fires when a finger leaves the screen, with the same arguments as InputBegan.
+	TouchEnded: Signal
+	--- Fires when a controller is plugged in (or first used). The handler gets which one: `function(gamepad) ... end`, such as `Enum.UserInputType.Gamepad1`.
+	GamepadConnected: Signal
+	--- Fires when a controller is unplugged, with which one, as GamepadConnected.
+	GamepadDisconnected: Signal
+	--- What the cursor does: `Default` moves freely; `LockCenter` holds it, hidden, in the middle of the window, and `LockCurrentPosition` where it is. While it's held, `GetMouseDelta` still says how far the mouse moved, for a camera.
+	MouseBehavior: EnumMouseBehavior
+	--- False hides the cursor over the game.
+	MouseIconEnabled: boolean
+	--- True while keyboard key `key` is held down, such as `Enum.KeyCode.W`.
 	function IsKeyDown(self, key: EnumKeyCode): boolean
+	--- True while mouse button `button` is held, such as `Enum.UserInputType.MouseButton1`.
+	function IsMouseButtonPressed(self, button: EnumUserInputType): boolean
+	--- Where the mouse is, in pixels from the window's top left.
+	function GetMouseLocation(self): Vector2
+	--- How far the mouse moved this frame, in pixels, right and down positive. It works while the cursor is locked (`MouseBehavior`).
+	function GetMouseDelta(self): Vector2
+	--- The controllers plugged in, such as `{Enum.UserInputType.Gamepad1}`.
+	function GetConnectedGamepads(self): {EnumUserInputType}
+	--- True while controller `gamepad` holds `button`, such as `Enum.KeyCode.ButtonA`.
+	function IsGamepadButtonDown(self, gamepad: EnumUserInputType, button: EnumKeyCode): boolean
+	--- An InputObject for each of controller `gamepad`'s buttons and sticks: `UserInputState` Begin while held, and the sticks' `Position`.
+	function GetGamepadState(self, gamepad: EnumUserInputType): {InputObject}
+	--- True while something bound to action `name` in the input map is held, such as `"Jump"`. Input the UI took doesn't count.
+	function IsActionPressed(self, name: string): boolean
+	--- Where axis action `name` points, such as `"Move"`: right and up positive, at most 1 long for keys and sticks (the mouse adds its pixels on top).
+	function GetActionAxis(self, name: string): Vector2
+	--- The names of what action `name` is bound to now, such as `{"Space", "ButtonA"}`, for a controls menu.
+	function GetActionInputs(self, name: string): {string}
+	--- Binds action `name` to `inputs` instead: `Enum.KeyCode` items, mouse buttons (`Enum.UserInputType.MouseButton1`) or an axis's name such as `"W,A,S,D"`. The built-in controllers use it at once. It's kept as the SaveService setting `Input/<name>`, so it's saved in slots and comes back when one loads.
+	function RebindAction(self, name: string, inputs: {any}): ()
+end
+
+--- Functions bound to inputs, from `game:GetService("ContextActionService")`. When a bound input goes down, changes or comes up, only the highest-priority action bound to it is called (the latest bound, of equal ones), so a menu can take a key from the game until it's unbound. Input the UI took doesn't reach actions. LocalScripts only.
+declare extern type ContextActionService with
+	--- Calls `handler(actionName, inputState, inputObject)` for `inputs` (`Enum.KeyCode` or `Enum.UserInputType` items), at the default priority (2000). Binding a name again replaces it. `createTouchButton` is kept, but no touch button is drawn yet.
+	function BindAction(self, name: string, handler: (string, EnumUserInputState, InputObject) -> (), createTouchButton: boolean, ...: EnumItem): ()
+	--- BindAction at `priority`: a higher number hides the same inputs from lower ones.
+	function BindActionAtPriority(self, name: string, handler: (string, EnumUserInputState, InputObject) -> (), createTouchButton: boolean, priority: number, ...: EnumItem): ()
+	--- Unbinds action `name`, so the inputs go to the next action down.
+	function UnbindAction(self, name: string): ()
+	--- Unbinds every action.
+	function UnbindAllActions(self): ()
+	--- Action `name`'s `priorityLevel`, `inputTypes`, `createTouchButton` and `stackOrder`, or an empty table when it isn't bound.
+	function GetBoundActionInfo(self, name: string): {[string]: any}
 end
 
 --- The game's frame loop, from `game:GetService("RunService")`.
@@ -308,10 +358,18 @@ declare extern type TweenInfo with
 	DelayTime: number
 end
 
---- One key going down or up, as `InputBegan` and `InputEnded` handlers get it.
+--- One input, as `UserInputService`'s events and `ContextActionService`'s actions get it.
 declare extern type InputObject with
-	--- Which key, such as `Enum.KeyCode.W`.
+	--- Which key or controller button, such as `Enum.KeyCode.W` or `Enum.KeyCode.ButtonA` (`Thumbstick1` for the left stick), or `Unknown` for the mouse and touches.
 	KeyCode: EnumKeyCode
+	--- What it came from: `Keyboard`, `MouseButton1` to `MouseButton3`, `MouseMovement`, `MouseWheel`, `Touch`, or a controller (`Gamepad1` to `Gamepad4`).
+	UserInputType: EnumUserInputType
+	--- `Begin` when it went down, `Change` when it moved, `End` when it came up.
+	UserInputState: EnumUserInputState
+	--- Where the mouse or finger is, in pixels from the window's top left (Z is the wheel's notches), or a stick's position (-1 to 1, up positive).
+	Position: Vector3
+	--- How far it moved: the mouse in pixels, right and down positive, or a stick.
+	Delta: Vector3
 end
 
 --- Where `workspace:Raycast` first met a collider, or nil when it missed.
@@ -419,6 +477,25 @@ declare extern type EnumKeyCodeItems with
 	RightControl: EnumKeyCode
 	LeftAlt: EnumKeyCode
 	RightAlt: EnumKeyCode
+	ButtonA: EnumKeyCode
+	ButtonB: EnumKeyCode
+	ButtonX: EnumKeyCode
+	ButtonY: EnumKeyCode
+	ButtonL1: EnumKeyCode
+	ButtonR1: EnumKeyCode
+	ButtonL2: EnumKeyCode
+	ButtonR2: EnumKeyCode
+	ButtonL3: EnumKeyCode
+	ButtonR3: EnumKeyCode
+	ButtonStart: EnumKeyCode
+	ButtonSelect: EnumKeyCode
+	DPadUp: EnumKeyCode
+	DPadDown: EnumKeyCode
+	DPadLeft: EnumKeyCode
+	DPadRight: EnumKeyCode
+	Thumbstick1: EnumKeyCode
+	Thumbstick2: EnumKeyCode
+	Unknown: EnumKeyCode
 end
 
 --- One choice of `Enum.TextureChannel`.
@@ -558,6 +635,50 @@ declare extern type EnumAmbientOcclusionItems with
 	High: EnumAmbientOcclusion
 end
 
+--- One choice of `Enum.UserInputType`.
+declare extern type EnumUserInputType extends EnumItem with
+end
+
+--- The choices of `Enum.UserInputType`.
+declare extern type EnumUserInputTypeItems with
+	Keyboard: EnumUserInputType
+	MouseButton1: EnumUserInputType
+	MouseButton2: EnumUserInputType
+	MouseButton3: EnumUserInputType
+	MouseMovement: EnumUserInputType
+	MouseWheel: EnumUserInputType
+	Touch: EnumUserInputType
+	Gamepad1: EnumUserInputType
+	Gamepad2: EnumUserInputType
+	Gamepad3: EnumUserInputType
+	Gamepad4: EnumUserInputType
+	None: EnumUserInputType
+end
+
+--- One choice of `Enum.UserInputState`.
+declare extern type EnumUserInputState extends EnumItem with
+end
+
+--- The choices of `Enum.UserInputState`.
+declare extern type EnumUserInputStateItems with
+	Begin: EnumUserInputState
+	Change: EnumUserInputState
+	End: EnumUserInputState
+	Cancel: EnumUserInputState
+	None: EnumUserInputState
+end
+
+--- One choice of `Enum.MouseBehavior`.
+declare extern type EnumMouseBehavior extends EnumItem with
+end
+
+--- The choices of `Enum.MouseBehavior`.
+declare extern type EnumMouseBehaviorItems with
+	Default: EnumMouseBehavior
+	LockCenter: EnumMouseBehavior
+	LockCurrentPosition: EnumMouseBehavior
+end
+
 --- Every enum, such as `Enum.Material`, `Enum.PartType` and `Enum.KeyCode`.
 declare extern type EnumLibrary with
 	Material: EnumMaterialItems
@@ -574,6 +695,9 @@ declare extern type EnumLibrary with
 	TextureQuality: EnumTextureQualityItems
 	AntiAliasing: EnumAntiAliasingItems
 	AmbientOcclusion: EnumAmbientOcclusionItems
+	UserInputType: EnumUserInputTypeItems
+	UserInputState: EnumUserInputStateItems
+	MouseBehavior: EnumMouseBehaviorItems
 end
 
 -- Instances -----------------------------------------------------------------
@@ -683,8 +807,10 @@ declare extern type DataModel extends Instance with
 	ServerScriptService: ServerScriptService
 	--- The service with what each player starts with, such as StarterPlayerScripts.
 	StarterPlayer: StarterPlayer
-	--- The player's keyboard (same as `game:GetService("UserInputService")`). LocalScripts only.
+	--- The player's keyboard, mouse and controllers (same as `game:GetService("UserInputService")`). LocalScripts only.
 	UserInputService: UserInputService
+	--- Functions bound to inputs by priority (same as `game:GetService("ContextActionService")`). LocalScripts only.
+	ContextActionService: ContextActionService
 	--- The game's frame loop, with `Heartbeat` (same as `game:GetService("RunService")`).
 	RunService: RunService
 	--- Moves properties smoothly to goals (same as `game:GetService("TweenService")`).
@@ -700,7 +826,7 @@ declare extern type DataModel extends Instance with
 	--- What loads first on the player's side, with `RemoveDefaultLoadingScreen` (same as `game:GetService("ReplicatedFirst")`).
 	ReplicatedFirst: ReplicatedFirst
 	[string]: any
-	--- The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"SaveService"`, `"LocalizationService"`, `"TweenService"`, `"CollectionService"`, `"UserGameSettings"` or `"UserInputService"`.
+	--- The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"SaveService"`, `"LocalizationService"`, `"TweenService"`, `"CollectionService"`, `"UserGameSettings"`, `"UserInputService"` or `"ContextActionService"`.
 	function GetService(self, className: string): Instance
 end
 

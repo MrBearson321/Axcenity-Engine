@@ -11,9 +11,10 @@ use mlua::{
 };
 
 use crate::cframe::LuaCFrame;
-use crate::client::{LocalPlayer, LuaCamera, LuaReplicatedFirst, LuaUserInputService};
+use crate::client::{LocalPlayer, LuaCamera, LuaReplicatedFirst};
 use crate::collection::LuaCollectionService;
 use crate::events::{Event, LuaSignal, Owner};
+use crate::input::{LuaContextActionService, LuaUserInputService};
 use crate::localization::LuaLocalizationService;
 use crate::run_service::LuaRunService;
 use crate::save::LuaSaveService;
@@ -321,6 +322,7 @@ fn class_member(lua: &Lua, class: ClassName, key: &str) -> mlua::Result<Option<m
         // Roblox code uses `game:GetService("UserInputService")`, but
         // `game.UserInputService` works there too.
         (ClassName::DataModel, "UserInputService") => LuaUserInputService.into_lua(lua)?,
+        (ClassName::DataModel, "ContextActionService") => LuaContextActionService.into_lua(lua)?,
         (ClassName::DataModel, "RunService") => LuaRunService.into_lua(lua)?,
         (ClassName::DataModel, "TweenService") => LuaTweenService.into_lua(lua)?,
         (ClassName::DataModel, "CollectionService") => LuaCollectionService.into_lua(lua)?,
@@ -920,8 +922,8 @@ fn set_playing(lua: &Lua, sound: InstanceId, playing: bool) -> mlua::Result<()> 
 }
 
 /// `game:GetService(name)`: a service by its class name, such as
-/// `"Players"`, or `"UserInputService"` or `"UserGameSettings"` (LocalScripts
-/// only), `"RunService"`, `"TweenService"`, `"CollectionService"`, `"SaveService"`,
+/// `"Players"`, or `"UserInputService"`, `"ContextActionService"` or
+/// `"UserGameSettings"` (LocalScripts only), `"RunService"`, `"TweenService"`, `"CollectionService"`, `"SaveService"`,
 /// `"LocalizationService"` or `"ReplicatedFirst"`, which aren't Instances.
 pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
     lua.create_function(|lua, (_game, name): (mlua::Value, String)| {
@@ -929,6 +931,10 @@ pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
             "UserInputService" => {
                 sides::check(lua, &name)?;
                 return LuaUserInputService.into_lua(lua);
+            }
+            "ContextActionService" => {
+                sides::check(lua, &name)?;
+                return LuaContextActionService.into_lua(lua);
             }
             "UserGameSettings" => {
                 sides::check(lua, &name)?;
@@ -961,6 +967,7 @@ pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
                     .collect();
                 names.extend([
                     "CollectionService",
+                    "ContextActionService",
                     "LocalizationService",
                     "ReplicatedFirst",
                     "RunService",

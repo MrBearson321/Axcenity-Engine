@@ -5,8 +5,8 @@ use axcenity_core::World;
 use mlua::{Table, Value};
 
 use super::*;
-use crate::client::KeyEvent;
 use crate::context::Context;
+use crate::input::KeyEvent;
 use crate::sandbox::{self, SAFE_FUNCTIONS, SAFE_LIBRARIES, ScriptIds};
 use crate::{OutputKind, ScriptRuntime};
 
@@ -315,6 +315,10 @@ fn described_fields_and_methods_exist() {
         ("UDim2", "UDim2.new(0, 1, 0, 1)"),
         ("EnumItem", "Enum.Material.Neon"),
         ("UserInputService", "game:GetService('UserInputService')"),
+        (
+            "ContextActionService",
+            "game:GetService('ContextActionService')",
+        ),
         ("RunService", "game:GetService('RunService')"),
         ("TweenService", "game:GetService('TweenService')"),
         ("CollectionService", "game:GetService('CollectionService')"),

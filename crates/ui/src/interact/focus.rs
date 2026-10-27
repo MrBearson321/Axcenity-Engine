@@ -22,7 +22,7 @@ const RING_GAP: f32 = 2.0;
 
 /// A key that moves focus or uses the focused element: from the keyboard
 /// (arrows, Tab, Shift+Tab, Enter, Escape) or a controller (see
-/// [`crate::button_key`]).
+/// [`crate::nav_key`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum NavKey {
     Up,
@@ -99,7 +99,8 @@ impl UiInteraction {
     /// Whether `key` is for the UI rather than the game, so a host gives it
     /// to [`Self::navigate`] instead of to scripts: Tab and Shift+Tab when
     /// there's something to focus, and the other keys while something is
-    /// focused. A controller's keys always go to the UI.
+    /// focused. A controller button only the UI uses always goes to it
+    /// ([`crate::PadNavigation`]).
     pub fn takes(&self, world: &World, key: NavKey) -> bool {
         match key {
             NavKey::Next | NavKey::Previous => {

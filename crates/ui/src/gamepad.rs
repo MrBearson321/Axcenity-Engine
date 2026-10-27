@@ -1,37 +1,83 @@
-//! Game controllers, for moving focus through menus. The d-pad and the left
-//! stick move focus (held, they repeat), South (A on an Xbox pad, Cross on
-//! a PlayStation one) confirms, East (B, Circle) goes back, and the
-//! shoulder buttons step through the tab order. Read with `gilrs`; hosts
-//! keep one [`Gamepads`] and pass what [`Gamepads::poll`] returns to
-//! [`crate::UiInteraction::navigate`], as they do with the keyboard's keys.
+//! Game controllers, and how keys and controllers move focus through menus.
+//!
+//! [`Gamepads`] reads controllers with `gilrs` and reports their buttons
+//! and sticks as [`InputKind`]s, for scripts and the input map, as the
+//! keyboard's keys are. What moves focus is the input map's UI actions
+//! ([`nav_key`]): by default the arrows, the d-pad and the left stick move
+//! it (a held direction repeats), Enter and A (South) confirm, Escape and B
+//! (East) go back, and Tab and the shoulder buttons step through the tab
+//! order. Hosts keep one [`PadNavigation`] to turn a frame's controller
+//! input into [`NavKey`]s for [`crate::UiInteraction::navigate`].
 
 use std::collections::HashMap;
 
+use axcenity_core::KeyCode;
+use axcenity_core::input::{
+    Input, InputEvent, InputKind, InputMap, InputState, UI_BACK, UI_CONFIRM, UI_NAVIGATE, UI_NEXT,
+    UI_PREVIOUS,
+};
 use gilrs::{Axis, Button, EventType, GamepadId, Gilrs};
 
-/// A controller's button, as [`button_key`] reads it.
+/// A controller's button, as [`pad_key`] reads it.
 pub use gilrs::Button as GamepadButton;
 
-use crate::NavKey;
+use crate::{NavKey, UiInteraction};
+use axcenity_core::World;
 
 /// How long a direction is held before it repeats, in seconds.
 pub const REPEAT_DELAY: f32 = 0.4;
 /// How often a held direction repeats after that, in seconds.
 pub const REPEAT_INTERVAL: f32 = 0.12;
-/// How far the left stick goes over before it counts as a direction.
+/// How far a stick goes over before it counts as a direction for focus.
 const STICK_THRESHOLD: f32 = 0.5;
+/// Controllers after the fourth aren't reported.
+const MAX_PADS: u8 = 4;
 
-/// What a controller's button does to the UI, when it does anything.
-pub fn button_key(button: Button) -> Option<NavKey> {
+/// The `Enum.KeyCode` a controller's button is, if it's one scripts know.
+pub fn pad_key(button: Button) -> Option<KeyCode> {
     Some(match button {
-        Button::DPadUp => NavKey::Up,
-        Button::DPadDown => NavKey::Down,
-        Button::DPadLeft => NavKey::Left,
-        Button::DPadRight => NavKey::Right,
-        Button::South => NavKey::Confirm,
-        Button::East => NavKey::Back,
-        Button::LeftTrigger => NavKey::Previous,
-        Button::RightTrigger => NavKey::Next,
+        Button::South => KeyCode::ButtonA,
+        Button::East => KeyCode::ButtonB,
+        Button::West => KeyCode::ButtonX,
+        Button::North => KeyCode::ButtonY,
+        Button::LeftTrigger => KeyCode::ButtonL1,
+        Button::RightTrigger => KeyCode::ButtonR1,
+        Button::LeftTrigger2 => KeyCode::ButtonL2,
+        Button::RightTrigger2 => KeyCode::ButtonR2,
+        Button::LeftThumb => KeyCode::ButtonL3,
+        Button::RightThumb => KeyCode::ButtonR3,
+        Button::Start => KeyCode::ButtonStart,
+        Button::Select => KeyCode::ButtonSelect,
+        Button::DPadUp => KeyCode::DPadUp,
+        Button::DPadDown => KeyCode::DPadDown,
+        Button::DPadLeft => KeyCode::DPadLeft,
+        Button::DPadRight => KeyCode::DPadRight,
+        _ => return None,
+    })
+}
+
+/// What pressing `key` (a keyboard key or a controller button) does to
+/// the UI's focus, by the input map's UI actions. With `shift` held, the
+/// next element (Tab) is the one before instead.
+pub fn nav_key(map: &InputMap, key: KeyCode, shift: bool) -> Option<NavKey> {
+    let (action, [x, y]) = map.ui_action(key)?;
+    Some(match action {
+        UI_NAVIGATE => direction_key(x, y)?,
+        UI_CONFIRM => NavKey::Confirm,
+        UI_BACK => NavKey::Back,
+        UI_NEXT if shift => NavKey::Previous,
+        UI_NEXT => NavKey::Next,
+        UI_PREVIOUS => NavKey::Previous,
+        _ => return None,
+    })
+}
+
+fn direction_key(x: i8, y: i8) -> Option<NavKey> {
+    Some(match (x, y) {
+        (0, 1) => NavKey::Up,
+        (0, -1) => NavKey::Down,
+        (-1, 0) => NavKey::Left,
+        (1, 0) => NavKey::Right,
         _ => return None,
     })
 }
@@ -71,31 +117,98 @@ impl NavRepeat {
     }
 }
 
-/// One controller's d-pad and left stick.
-#[derive(Clone, Copy, Debug, Default)]
-struct Pad {
-    /// The d-pad buttons held: up, down, left, right.
-    dpad: [bool; 4],
-    /// The left stick, right and up positive.
-    stick: [f32; 2],
+/// The direction a controller holds for `UINavigate`, and the inputs it
+/// comes from: a d-pad (four controller buttons) first, then a stick's
+/// furthest axis past the threshold. The keyboard's arrows aren't here:
+/// the system repeats a held key itself.
+fn held_direction(map: &InputMap, state: &InputState) -> Option<(NavKey, Input)> {
+    let action = map.action(UI_NAVIGATE)?;
+    for input in &action.inputs {
+        if let Input::Keys(keys) = input
+            && keys.iter().all(|key| key.is_gamepad())
+            && let Some(index) = keys.iter().position(|key| state.is_down(*key))
+        {
+            const WASD: [NavKey; 4] = [NavKey::Up, NavKey::Left, NavKey::Down, NavKey::Right];
+            return Some((WASD[index], *input));
+        }
+    }
+    for input in &action.inputs {
+        if let Input::Key(stick) = input
+            && stick.is_stick()
+            && let Some(key) = stick_direction(state.stick(*stick))
+        {
+            return Some((key, *input));
+        }
+    }
+    None
 }
 
-impl Pad {
-    /// The direction it's held in: the d-pad first, then the stick's
-    /// furthest axis past the threshold.
-    fn direction(&self) -> Option<NavKey> {
-        const DPAD: [NavKey; 4] = [NavKey::Up, NavKey::Down, NavKey::Left, NavKey::Right];
-        if let Some(index) = self.dpad.iter().position(|held| *held) {
-            return Some(DPAD[index]);
+/// The direction a stick at `[x, y]` (right and up positive) points, once
+/// past [`STICK_THRESHOLD`] on its furthest axis.
+fn stick_direction([x, y]: [f32; 2]) -> Option<NavKey> {
+    if x.abs().max(y.abs()) < STICK_THRESHOLD {
+        None
+    } else if x.abs() > y.abs() {
+        Some(if x > 0.0 { NavKey::Right } else { NavKey::Left })
+    } else {
+        Some(if y > 0.0 { NavKey::Up } else { NavKey::Down })
+    }
+}
+
+/// True if an input the game also uses (bound to a non-UI action) should go
+/// to the UI for `key`: only while the UI takes it. Inputs only the UI uses
+/// always go to it, so the d-pad focuses a menu with nothing focused yet.
+fn ui_gets(ui: &UiInteraction, world: &World, map: &InputMap, input: &Input, key: NavKey) -> bool {
+    let game = match input {
+        Input::Key(key) => map.is_game_input(*key),
+        Input::Keys(keys) => keys.iter().any(|key| map.is_game_input(*key)),
+        Input::Mouse(_) | Input::MouseMovement => true,
+    };
+    !game || ui.takes(world, key)
+}
+
+/// Turns a frame's controller input into focus moves.
+#[derive(Clone, Debug, Default)]
+pub struct PadNavigation {
+    /// Every controller input, taken by the UI or not, for the held direction.
+    state: InputState,
+    repeat: NavRepeat,
+}
+
+impl PadNavigation {
+    /// The keys `events` (this frame's controller events, `seconds` after
+    /// the last) give the UI: presses of buttons bound to the UI's actions,
+    /// and the held direction's repeats. An input the game also uses (A for
+    /// Jump, the left stick for Move) moves focus only while the UI
+    /// [takes](UiInteraction::takes) it; the presses it takes are marked
+    /// `processed`, so the game doesn't use them too.
+    pub fn update(
+        &mut self,
+        ui: &UiInteraction,
+        world: &World,
+        map: &InputMap,
+        events: &mut [InputEvent],
+        seconds: f32,
+    ) -> Vec<NavKey> {
+        let mut keys = Vec::new();
+        for event in events.iter_mut() {
+            self.state.apply(&event.kind);
+            if let InputKind::PadButton {
+                key, pressed: true, ..
+            } = event.kind
+                && let Some(nav) = nav_key(map, key, false)
+                && !is_direction(nav)
+                && ui_gets(ui, world, map, &Input::Key(key), nav)
+            {
+                keys.push(nav);
+                event.processed = true;
+            }
         }
-        let [x, y] = self.stick;
-        if x.abs().max(y.abs()) < STICK_THRESHOLD {
-            None
-        } else if x.abs() > y.abs() {
-            Some(if x > 0.0 { NavKey::Right } else { NavKey::Left })
-        } else {
-            Some(if y > 0.0 { NavKey::Up } else { NavKey::Down })
-        }
+        let held = held_direction(map, &self.state)
+            .filter(|(key, input)| ui_gets(ui, world, map, input, *key))
+            .map(|(key, _)| key);
+        keys.extend(self.repeat.update(held, seconds));
+        keys
     }
 }
 
@@ -103,8 +216,9 @@ impl Pad {
 /// can't read controllers on, [`Self::poll`] returns nothing.
 pub struct Gamepads {
     gilrs: Option<Gilrs>,
-    pads: HashMap<GamepadId, Pad>,
-    repeat: NavRepeat,
+    /// Each controller's number (0 is `Gamepad1`), the lowest free one
+    /// when it was first seen.
+    pads: HashMap<GamepadId, u8>,
 }
 
 impl Default for Gamepads {
@@ -125,52 +239,68 @@ impl Gamepads {
         Gamepads {
             gilrs,
             pads: HashMap::new(),
-            repeat: NavRepeat::default(),
         }
     }
 
-    /// What the controllers did since the last call, `seconds` ago, in
-    /// order: button presses, and the held direction's repeats.
-    pub fn poll(&mut self, seconds: f32) -> Vec<NavKey> {
-        let mut keys = Vec::new();
+    /// What the controllers did since the last call, in order. The first
+    /// event from a controller connects it.
+    pub fn poll(&mut self) -> Vec<InputEvent> {
+        let mut events = Vec::new();
         let Some(gilrs) = &mut self.gilrs else {
-            return keys;
+            return events;
         };
         while let Some(event) = gilrs.next_event() {
-            let pad = self.pads.entry(event.id).or_default();
-            match event.event {
-                EventType::ButtonPressed(button, _) => match button_key(button) {
-                    Some(key) if is_direction(key) => set_dpad(pad, key, true),
-                    Some(key) => keys.push(key),
-                    None => {}
-                },
-                EventType::ButtonReleased(button, _) => {
-                    if let Some(key) = button_key(button).filter(|key| is_direction(*key)) {
-                        set_dpad(pad, key, false);
+            if event.event == EventType::Disconnected {
+                if let Some(pad) = self.pads.remove(&event.id) {
+                    events.push(InputKind::PadDisconnected(pad).into());
+                }
+                continue;
+            }
+            let pad = match self.pads.get(&event.id) {
+                Some(pad) => *pad,
+                None => {
+                    let Some(free) = (0..MAX_PADS).find(|n| !self.pads.values().any(|p| p == n))
+                    else {
+                        continue;
+                    };
+                    self.pads.insert(event.id, free);
+                    events.push(InputKind::PadConnected(free).into());
+                    free
+                }
+            };
+            let gamepad = gilrs.gamepad(event.id);
+            let stick = |x: Axis, y: Axis| [gamepad.value(x), gamepad.value(y)];
+            let kind = match event.event {
+                EventType::ButtonPressed(button, _) | EventType::ButtonReleased(button, _) => {
+                    let Some(key) = pad_key(button) else {
+                        continue;
+                    };
+                    InputKind::PadButton {
+                        pad,
+                        key,
+                        pressed: matches!(event.event, EventType::ButtonPressed(..)),
                     }
                 }
-                EventType::AxisChanged(Axis::LeftStickX, value, _) => pad.stick[0] = value,
-                EventType::AxisChanged(Axis::LeftStickY, value, _) => pad.stick[1] = value,
-                EventType::Disconnected => {
-                    self.pads.remove(&event.id);
+                EventType::AxisChanged(Axis::LeftStickX | Axis::LeftStickY, _, _) => {
+                    InputKind::PadStick {
+                        pad,
+                        stick: KeyCode::Thumbstick1,
+                        position: stick(Axis::LeftStickX, Axis::LeftStickY),
+                    }
                 }
-                _ => {}
-            }
+                EventType::AxisChanged(Axis::RightStickX | Axis::RightStickY, _, _) => {
+                    InputKind::PadStick {
+                        pad,
+                        stick: KeyCode::Thumbstick2,
+                        position: stick(Axis::RightStickX, Axis::RightStickY),
+                    }
+                }
+                _ => continue,
+            };
+            events.push(kind.into());
         }
-        let held = self.pads.values().find_map(Pad::direction);
-        keys.extend(self.repeat.update(held, seconds));
-        keys
+        events
     }
-}
-
-fn set_dpad(pad: &mut Pad, key: NavKey, held: bool) {
-    let index = match key {
-        NavKey::Up => 0,
-        NavKey::Down => 1,
-        NavKey::Left => 2,
-        _ => 3,
-    };
-    pad.dpad[index] = held;
 }
 
 #[cfg(test)]
@@ -199,26 +329,56 @@ mod tests {
 
     #[test]
     fn the_stick_counts_past_halfway_on_its_furthest_axis_and_the_dpad_wins() {
-        let mut pad = Pad {
-            stick: [0.3, -0.4],
-            ..Pad::default()
+        let map = InputMap::default();
+        let mut state = InputState::default();
+        let stick = |state: &mut InputState, position| {
+            state.apply(&InputKind::PadStick {
+                pad: 0,
+                stick: KeyCode::Thumbstick1,
+                position,
+            });
         };
-        assert_eq!(pad.direction(), None);
-        pad.stick = [0.3, -0.8];
-        assert_eq!(pad.direction(), Some(NavKey::Down));
-        pad.stick = [-0.9, 0.6];
-        assert_eq!(pad.direction(), Some(NavKey::Left));
-        set_dpad(&mut pad, NavKey::Up, true);
-        assert_eq!(pad.direction(), Some(NavKey::Up));
+        stick(&mut state, [0.3, -0.4]);
+        assert_eq!(held_direction(&map, &state), None);
+        stick(&mut state, [0.3, -0.8]);
+        assert_eq!(held_direction(&map, &state).unwrap().0, NavKey::Down);
+        stick(&mut state, [-0.9, 0.6]);
+        assert_eq!(held_direction(&map, &state).unwrap().0, NavKey::Left);
+        state.apply(&InputKind::PadButton {
+            pad: 0,
+            key: KeyCode::DPadUp,
+            pressed: true,
+        });
+        assert_eq!(held_direction(&map, &state).unwrap().0, NavKey::Up);
+        // The keyboard's arrows repeat by themselves, so they aren't held here.
+        let mut keys = InputState::default();
+        keys.apply(&InputKind::Key {
+            key: KeyCode::Down,
+            pressed: true,
+        });
+        assert_eq!(held_direction(&map, &keys), None);
     }
 
     #[test]
     fn the_face_and_shoulder_buttons_confirm_go_back_and_tab() {
-        assert_eq!(button_key(Button::South), Some(NavKey::Confirm));
-        assert_eq!(button_key(Button::East), Some(NavKey::Back));
-        assert_eq!(button_key(Button::RightTrigger), Some(NavKey::Next));
-        assert_eq!(button_key(Button::LeftTrigger), Some(NavKey::Previous));
-        assert_eq!(button_key(Button::DPadRight), Some(NavKey::Right));
-        assert_eq!(button_key(Button::Start), None);
+        let map = InputMap::default();
+        let key = |button| nav_key(&map, pad_key(button).unwrap(), false);
+        assert_eq!(key(Button::South), Some(NavKey::Confirm));
+        assert_eq!(key(Button::East), Some(NavKey::Back));
+        assert_eq!(key(Button::RightTrigger), Some(NavKey::Next));
+        assert_eq!(key(Button::LeftTrigger), Some(NavKey::Previous));
+        assert_eq!(key(Button::DPadRight), Some(NavKey::Right));
+        assert_eq!(key(Button::Start), None);
+        assert_eq!(nav_key(&map, KeyCode::Tab, true), Some(NavKey::Previous));
+        assert_eq!(nav_key(&map, KeyCode::Return, false), Some(NavKey::Confirm));
+    }
+
+    #[test]
+    fn rebinding_a_ui_action_moves_focus_with_the_new_key() {
+        let mut map = InputMap::default();
+        map.rebind(UI_CONFIRM, vec![Input::Key(KeyCode::F)])
+            .unwrap();
+        assert_eq!(nav_key(&map, KeyCode::F, false), Some(NavKey::Confirm));
+        assert_eq!(nav_key(&map, KeyCode::Return, false), None);
     }
 }

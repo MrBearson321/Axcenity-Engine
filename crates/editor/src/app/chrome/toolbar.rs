@@ -61,6 +61,9 @@ impl EditorApp {
         if let Some(class) = clicks.insert_script {
             self.act(Action::InsertScript(class));
         }
+        if clicks.insert_controls {
+            self.insert_controls_ui();
+        }
         if clicks.import {
             self.import_with_dialog(axcenity_assets::PROJECT_TEXTURES_FOLDER);
         }
@@ -362,6 +365,17 @@ impl EditorApp {
                         clicks.insert = Some(what);
                     }
                 }
+                let button = RibbonButton::new(icons::GAME_CONTROLLER, "Controls");
+                clicks.insert_controls = ui
+                    .add_enabled(!playing && can_play, button)
+                    .on_hover_text(
+                        "Insert a ready-made Controls menu: a ScreenGui listing the input \
+                         map's actions, and a LocalScript that rebinds one to the next key \
+                         or button pressed after its button is clicked. In the game, Menu \
+                         (Escape, or Start on a controller) shows it.",
+                    )
+                    .on_disabled_hover_text("Open a project, and press Stop to edit.")
+                    .clicked();
             }),
             RibbonGroup::Scripts => ribbon::group(ui, "Scripts", |ui| {
                 for class in explorer::SCRIPT_CLASSES {

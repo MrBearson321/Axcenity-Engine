@@ -27,9 +27,11 @@ mod assets;
 mod behavior_trees;
 mod chrome;
 mod commands;
+mod controls_ui;
 mod edits;
 mod engine;
 mod files;
+mod input_settings;
 mod material_files;
 mod nav_overlay;
 mod session;
@@ -50,7 +52,7 @@ use axcenity_blocks::{BlockScript, translate};
 use axcenity_core::{ClassName, Color3, InstanceId, Material, PartType, Value, Vector3, World};
 use axcenity_project::ScriptFile;
 use axcenity_scene::{TerrainCache, orientation_from_rotation};
-use axcenity_script::{CameraState, KeyEvent};
+use axcenity_script::CameraState;
 use eframe::egui;
 
 use crate::angular;
@@ -155,6 +157,8 @@ pub struct EditorApp {
     selection: Vec<InstanceId>,
     /// File > Version History, and the same window after a restore.
     versions_open: bool,
+    /// File ▸ Input…: the project's input map.
+    input_settings: input_settings::InputWindow,
     /// Every change made to `world` since it was opened, for undo and redo.
     /// It also knows whether the world is as saved.
     history: History,
@@ -197,6 +201,11 @@ pub struct EditorApp {
     /// Key presses for the game UI's focus, taken out of egui's input
     /// during Play (`take_nav_keys`) and used before the next game frame.
     nav_keys: Vec<axcenity_ui::NavKey>,
+    /// The game's input from the viewport (the mouse) and from keys the
+    /// game UI took, for the next game frame.
+    pending_game_input: Vec<axcenity_core::input::InputEvent>,
+    /// Turns the controllers' input into the game UI's focus moves.
+    pad_nav: axcenity_ui::PadNavigation,
     /// Game controllers, opened the first time a game frame runs.
     gamepads: Option<axcenity_ui::Gamepads>,
     /// A TextBox the player is typing in during Play.
@@ -300,6 +309,8 @@ pub struct EditorApp {
 struct RibbonClicks {
     insert: Option<Insertable>,
     insert_script: Option<ClassName>,
+    /// UI ▸ Controls: the ready-made controls menu.
+    insert_controls: bool,
     import: bool,
     check_assets: bool,
     play: bool,
@@ -483,6 +494,8 @@ struct OpenProject {
     show_splash: bool,
     /// How built games' loading screen goes (File > Build Game).
     loading_screen: axcenity_project::LoadingScreen,
+    /// The actions and their bindings (`input.json`, the Input window).
+    input_map: axcenity_core::input::InputMap,
     folder: PathBuf,
     stylesheets: Vec<axcenity_ui::Stylesheet>,
     /// Each stylesheet's text as last read or written, by path, to tell the
@@ -530,6 +543,7 @@ impl EditorApp {
             selected: None,
             selection: Vec::new(),
             versions_open: false,
+            input_settings: Default::default(),
             history: History::new(),
             tool: Tool::default(),
             snap: Snap::default(),
@@ -548,6 +562,8 @@ impl EditorApp {
             pending_ui_activation: None,
             pending_ui_events: Vec::new(),
             nav_keys: Vec::new(),
+            pending_game_input: Vec::new(),
+            pad_nav: axcenity_ui::PadNavigation::default(),
             gamepads: None,
             focused_text: None,
             pending_focus_lost: None,
@@ -896,11 +912,18 @@ impl EditorApp {
             // Focus moves before the game's input, as in the player.
             self.navigate_play_ui(seconds as f32);
             let keys = self.game_keys.read(&events, modifiers, focused, typing);
+            let mut input = std::mem::take(&mut self.pending_game_input);
+            input.extend(keys.into_iter().map(axcenity_core::input::InputEvent::from));
             let activation = self.pending_ui_activation.take();
             let focus_lost = self.pending_focus_lost.take();
-            self.play_frame(seconds, &keys, activation, focus_lost);
+            self.play_frame(seconds, &input, activation, focus_lost);
             ctx.request_repaint();
         }
+        let mouse = self.play.as_ref().map_or(
+            (axcenity_core::MouseBehavior::Default, true),
+            Session::mouse,
+        );
+        self.viewport.hold_cursor(ctx, mouse);
         // However Play ended (Stop, a crash, another project), the
         // Profiler's readings freeze.
         if !self.playing() {
@@ -993,6 +1016,9 @@ impl EditorApp {
         if output.activated.is_some() {
             self.pending_ui_activation = output.activated;
         }
+        if self.playing() {
+            self.pending_game_input.extend(output.game_input);
+        }
         if let Some(play) = self.play.as_mut() {
             for (id, at) in output.scrolled {
                 let _ = play.world_mut().set_property(
@@ -1069,6 +1095,7 @@ impl EditorApp {
         if self.versions_open {
             self.version_window(ctx);
         }
+        self.input_window(ctx);
         self.unsaved_changes_prompt(ctx);
         self.delete_script_prompt(ctx);
         self.import_dropped(ctx);

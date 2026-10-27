@@ -10,6 +10,7 @@
 
 mod graphics;
 mod icon;
+mod input;
 mod splash;
 mod watch;
 
@@ -24,15 +25,17 @@ use axcenity_anim::Animators;
 use axcenity_assets::Assets;
 use axcenity_audio::{GameAudio, SoundAction};
 use axcenity_character::{Controllers, MoveInput};
-use axcenity_core::{InstanceId, World};
+use axcenity_core::input::{InputEvent, InputKind};
+use axcenity_core::{InstanceId, MouseBehavior, UserInputType, World};
 use axcenity_nav::Agents;
 use axcenity_physics::Physics;
 use axcenity_project::ScriptFile;
 use axcenity_render::glam::Vec3;
 use axcenity_render::{Capabilities, GraphicsSettings, Renderer};
 use axcenity_scene::{FlyCamera, MoveKeys, UiFrame};
-use axcenity_script::{CameraState, KeyEvent, OutputKind, ScriptRuntime};
-use axcenity_ui::{Gamepads, LoadingGui, NavKey, UiCursor, UiEvent, UiInput, UiInteraction};
+use axcenity_script::{CameraState, OutputKind, ScriptRuntime};
+use axcenity_ui::{LoadingGui, NavKey, UiCursor, UiEvent, UiInput, UiInteraction};
+use input::{CursorLock, PlayerInput, script_key};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{
@@ -160,6 +163,8 @@ fn main() -> Result<()> {
     // their defaults) before any script runs, so scripts can read them.
     let mut animators = Animators::new();
     animators.update(&mut world, &assets, 0.0);
+    // The project's actions, before any LocalScript asks about them.
+    scripts.set_input_map(project.input_map.clone());
     start_scripts(&mut scripts, &mut world, &project.scripts);
     let mut audio = GameAudio::default();
     let camera = FlyCamera::looking_at(START_CAMERA_POSITION, Vec3::ZERO);
@@ -177,48 +182,14 @@ fn main() -> Result<()> {
     // Games redraw continuously instead of waiting for input.
     event_loop.set_control_flow(ControlFlow::Poll);
 
-    let mut app = App {
-        title: format!("{} - Axcenity Player", project.manifest.name),
-        show_splash,
-        splash,
-        loading_gui,
-        world,
-        stylesheets,
-        scripts,
-        audio,
-        physics: Physics::with_assets(assets.clone()),
-        characters: Controllers::default(),
-        agents: Agents::default(),
-        particles: axcenity_scene::Particles::new(),
-        terrain: axcenity_scene::TerrainCache::new(),
-        animators,
-        assets,
-        window: None,
-        renderer: None,
-        data_folder,
-        error: None,
-        camera,
-        keys: MoveKeys::default(),
-        key_events: Vec::new(),
-        held_keys: BTreeSet::new(),
-        looking: false,
-        look_dx: 0.0,
-        look_dy: 0.0,
-        zoom: 0.0,
-        pointer: None,
-        text_focus: None,
-        ui_warnings: Vec::new(),
-        ui_mouse_events: Vec::new(),
-        ui_mouse_down: false,
-        ui_pressed_button: None,
-        ui: UiInteraction::default(),
-        nav_keys: Vec::new(),
-        gamepads: Gamepads::new(),
-        ui_sounds: Vec::new(),
-        cursor: UiCursor::Default,
-        last_frame: None,
-        watcher,
-    };
+    let mut app = App::new(world, scripts, stylesheets, assets, animators, camera);
+    app.title = format!("{} - Axcenity Player", project.manifest.name);
+    app.show_splash = show_splash;
+    app.splash = splash;
+    app.loading_gui = loading_gui;
+    app.audio = audio;
+    app.data_folder = data_folder;
+    app.watcher = watcher;
     event_loop.run_app(&mut app)?;
 
     // Errors inside the event loop can't use `?`, so they're stored and reported here.
@@ -429,10 +400,17 @@ struct App {
     error: Option<anyhow::Error>,
     camera: FlyCamera,
     keys: MoveKeys,
-    /// Key presses and releases since the last frame, for LocalScripts.
-    key_events: Vec<KeyEvent>,
-    /// The keys held down, so they can all be let go when the window loses focus.
+    /// Input since the last frame for LocalScripts, the game's held input
+    /// and the game controllers.
+    input: PlayerInput,
+    /// The keyboard keys held down, so they can all be let go when the
+    /// window loses focus.
     held_keys: BTreeSet<axcenity_core::KeyCode>,
+    /// `UserInputService.MouseBehavior` and `MouseIconEnabled` as last
+    /// applied to the cursor.
+    mouse: (MouseBehavior, bool),
+    /// False while another window has the keyboard.
+    focused: bool,
     /// True while the right mouse button is held, when moving the mouse turns the camera.
     looking: bool,
     /// The mouse position in physical pixels, for on-screen UI.
@@ -445,14 +423,15 @@ struct App {
     /// Left-button transitions since the last frame.
     ui_mouse_events: Vec<bool>,
     ui_mouse_down: bool,
+    /// True while the held left button is the UI's (it pressed a button,
+    /// a text box or a widget), so its release is too.
+    ui_mouse_taken: bool,
     ui_pressed_button: Option<InstanceId>,
     /// Hover and press states, CSS transitions and tooltips over time.
     ui: UiInteraction,
     /// Keys for the UI's focus since the last frame (Tab, the arrows,
     /// Enter, Escape), taken from the game: see [`UiInteraction::takes`].
     nav_keys: Vec<NavKey>,
-    /// Game controllers, which move focus too.
-    gamepads: Gamepads,
     /// Buttons' hover and click sounds, played with the frame's audio.
     ui_sounds: Vec<SoundAction>,
     /// The cursor last shown, so it's only set when it changes.
@@ -465,6 +444,63 @@ struct App {
 }
 
 impl App {
+    /// A player for `world`, whose scripts have started, before its window
+    /// opens: no splash, loading screen, sound yet, save folder or watcher.
+    fn new(
+        world: World,
+        scripts: ScriptRuntime,
+        stylesheets: Vec<axcenity_ui::Stylesheet>,
+        assets: Assets,
+        animators: Animators,
+        camera: FlyCamera,
+    ) -> Self {
+        let map = scripts.input_map();
+        App {
+            title: String::new(),
+            show_splash: false,
+            splash: splash::Splash::new(),
+            loading_gui: None,
+            world,
+            stylesheets,
+            scripts,
+            audio: GameAudio::default(),
+            physics: Physics::with_assets(assets.clone()),
+            characters: Controllers::default(),
+            agents: Agents::default(),
+            particles: axcenity_scene::Particles::new(),
+            terrain: axcenity_scene::TerrainCache::new(),
+            animators,
+            assets,
+            window: None,
+            renderer: None,
+            data_folder: None,
+            error: None,
+            camera,
+            keys: MoveKeys::default(),
+            input: PlayerInput::new(map),
+            held_keys: BTreeSet::new(),
+            mouse: (MouseBehavior::Default, true),
+            focused: true,
+            looking: false,
+            look_dx: 0.0,
+            look_dy: 0.0,
+            zoom: 0.0,
+            pointer: None,
+            text_focus: None,
+            ui_warnings: Vec::new(),
+            ui_mouse_events: Vec::new(),
+            ui_mouse_down: false,
+            ui_mouse_taken: false,
+            ui_pressed_button: None,
+            ui: UiInteraction::default(),
+            nav_keys: Vec::new(),
+            ui_sounds: Vec::new(),
+            cursor: UiCursor::Default,
+            last_frame: None,
+            watcher: None,
+        }
+    }
+
     fn fail(&mut self, event_loop: &ActiveEventLoop, err: anyhow::Error) {
         log::error!("{err:#}");
         self.error = Some(err);
@@ -518,6 +554,11 @@ impl App {
                 .filter(|&[x, y]| x >= 0.0 && y >= 0.0 && x < size.0 as f32 && y < size.1 as f32);
             let hit = in_window.and_then(|[x, y]| layout.hit_button(x, y));
             let text_box = in_window.and_then(|[x, y]| layout.hit_text_box(x, y));
+            let click = |pressed| InputKind::MouseButton {
+                button: UserInputType::MouseButton1,
+                pressed,
+                position: self.pointer.unwrap_or_default(),
+            };
             if pressed {
                 self.ui_mouse_down = true;
                 // A press on a ScrollingFrame's bar drags the bar instead,
@@ -526,8 +567,17 @@ impl App {
                     && self.ui.press(&self.world, pointer).apply(&mut self.world)
                 {
                     self.ui_pressed_button = None;
+                    self.ui_mouse_taken = true;
+                    self.input.push(InputEvent::processed(click(true)));
                     continue;
                 }
+                // Scripts hear every click; one on a button or text box
+                // has `gameProcessedEvent` true, and the game doesn't use it.
+                self.ui_mouse_taken = hit.is_some() || text_box.is_some();
+                self.input.push(InputEvent {
+                    kind: click(true),
+                    processed: self.ui_mouse_taken,
+                });
                 self.ui_pressed_button = hit;
                 match text_box {
                     Some(id) => self.focus_text(id),
@@ -547,6 +597,10 @@ impl App {
                 }
                 self.ui_pressed_button = None;
                 self.ui_mouse_down = false;
+                self.input.push(InputEvent {
+                    kind: click(false),
+                    processed: std::mem::take(&mut self.ui_mouse_taken),
+                });
                 // Let go over a Toggle flips it, over a Dropdown opens its
                 // list, and over one of its options picks it.
                 let _ = self
@@ -571,7 +625,7 @@ impl App {
     /// controller's Confirm or Back finishes.
     fn process_ui_navigation(&mut self, seconds: f32) {
         let mut keys = std::mem::take(&mut self.nav_keys);
-        keys.extend(self.gamepads.poll(seconds));
+        keys.extend(self.input.poll_pads(&self.ui, &self.world, seconds));
         for key in keys {
             if let Some(id) = self.text_focus {
                 if matches!(key, NavKey::Confirm | NavKey::Back) {
@@ -597,12 +651,54 @@ impl App {
         }
         self.text_focus = Some(id);
         self.keys = MoveKeys::default();
+        self.release_keys();
+    }
+
+    /// Lets go of every key held, for scripts and the game.
+    fn release_keys(&mut self) {
         for key in std::mem::take(&mut self.held_keys) {
-            self.key_events.push(KeyEvent {
+            self.input.push(InputEvent::new(InputKind::Key {
                 key,
                 pressed: false,
-            });
+            }));
         }
+    }
+
+    /// Records a key for scripts (the UI took it when `processed`), and as
+    /// held, until it comes up.
+    fn push_key(&mut self, key: axcenity_core::KeyCode, pressed: bool, processed: bool) {
+        if pressed {
+            self.held_keys.insert(key);
+        } else {
+            self.held_keys.remove(&key);
+        }
+        self.input.push(InputEvent {
+            kind: InputKind::Key { key, pressed },
+            processed,
+        });
+    }
+
+    /// Holds or frees the cursor as `MouseBehavior`, `MouseIconEnabled` and
+    /// right-button look ask, and keeps it in the middle while it's locked
+    /// there. Returns where scripts see the pointer.
+    fn apply_cursor(&mut self, size: (u32, u32)) -> Option<[f32; 2]> {
+        let Some(window) = &self.window else {
+            return self.pointer;
+        };
+        let (behavior, icon) = self.scripts.mouse();
+        let (lock, visible) = input::cursor_mode(behavior, icon, self.looking);
+        if (behavior, icon) != self.mouse {
+            self.mouse = (behavior, icon);
+            capture_mouse(window, lock != CursorLock::Free && self.focused);
+            window.set_cursor_visible(visible);
+        }
+        if lock == CursorLock::Centre && self.focused {
+            let [x, y] = input::centre(size);
+            // `Confined` (Windows, X11) lets the cursor drift; put it back.
+            let _ = window.set_cursor_position(winit::dpi::PhysicalPosition::new(x, y));
+            return Some([x, y]);
+        }
+        self.pointer
     }
 
     fn blur_text(&mut self, id: InstanceId) {
@@ -687,89 +783,6 @@ fn set_move_key(keys: &mut MoveKeys, key: KeyCode, pressed: bool) {
         _ => return,
     };
     *held = pressed;
-}
-
-/// What a key does to the UI's focus: Tab and Shift+Tab step through it,
-/// the arrows move it, Enter uses the focused element and Escape lets go.
-fn nav_key(key: KeyCode, shift: bool) -> Option<NavKey> {
-    Some(match key {
-        KeyCode::Tab if shift => NavKey::Previous,
-        KeyCode::Tab => NavKey::Next,
-        KeyCode::ArrowUp => NavKey::Up,
-        KeyCode::ArrowDown => NavKey::Down,
-        KeyCode::ArrowLeft => NavKey::Left,
-        KeyCode::ArrowRight => NavKey::Right,
-        KeyCode::Enter | KeyCode::NumpadEnter => NavKey::Confirm,
-        KeyCode::Escape => NavKey::Back,
-        _ => return None,
-    })
-}
-
-/// Each winit key, and the key scripts know it as (`Enum.KeyCode.<name>`).
-/// Keys are physical positions, like the movement keys.
-const SCRIPT_KEYS: [(KeyCode, axcenity_core::KeyCode); 51] = {
-    use axcenity_core::KeyCode as K;
-    [
-        (KeyCode::KeyA, K::A),
-        (KeyCode::KeyB, K::B),
-        (KeyCode::KeyC, K::C),
-        (KeyCode::KeyD, K::D),
-        (KeyCode::KeyE, K::E),
-        (KeyCode::KeyF, K::F),
-        (KeyCode::KeyG, K::G),
-        (KeyCode::KeyH, K::H),
-        (KeyCode::KeyI, K::I),
-        (KeyCode::KeyJ, K::J),
-        (KeyCode::KeyK, K::K),
-        (KeyCode::KeyL, K::L),
-        (KeyCode::KeyM, K::M),
-        (KeyCode::KeyN, K::N),
-        (KeyCode::KeyO, K::O),
-        (KeyCode::KeyP, K::P),
-        (KeyCode::KeyQ, K::Q),
-        (KeyCode::KeyR, K::R),
-        (KeyCode::KeyS, K::S),
-        (KeyCode::KeyT, K::T),
-        (KeyCode::KeyU, K::U),
-        (KeyCode::KeyV, K::V),
-        (KeyCode::KeyW, K::W),
-        (KeyCode::KeyX, K::X),
-        (KeyCode::KeyY, K::Y),
-        (KeyCode::KeyZ, K::Z),
-        (KeyCode::Digit0, K::Zero),
-        (KeyCode::Digit1, K::One),
-        (KeyCode::Digit2, K::Two),
-        (KeyCode::Digit3, K::Three),
-        (KeyCode::Digit4, K::Four),
-        (KeyCode::Digit5, K::Five),
-        (KeyCode::Digit6, K::Six),
-        (KeyCode::Digit7, K::Seven),
-        (KeyCode::Digit8, K::Eight),
-        (KeyCode::Digit9, K::Nine),
-        (KeyCode::Space, K::Space),
-        (KeyCode::Enter, K::Return),
-        (KeyCode::Escape, K::Escape),
-        (KeyCode::Tab, K::Tab),
-        (KeyCode::Backspace, K::Backspace),
-        (KeyCode::ArrowUp, K::Up),
-        (KeyCode::ArrowDown, K::Down),
-        (KeyCode::ArrowLeft, K::Left),
-        (KeyCode::ArrowRight, K::Right),
-        (KeyCode::ShiftLeft, K::LeftShift),
-        (KeyCode::ShiftRight, K::RightShift),
-        (KeyCode::ControlLeft, K::LeftControl),
-        (KeyCode::ControlRight, K::RightControl),
-        (KeyCode::AltLeft, K::LeftAlt),
-        (KeyCode::AltRight, K::RightAlt),
-    ]
-};
-
-/// The key scripts know for a winit key, if it's one they can see.
-fn script_key(key: KeyCode) -> Option<axcenity_core::KeyCode> {
-    SCRIPT_KEYS
-        .into_iter()
-        .find(|(winit, _)| *winit == key)
-        .map(|(_, script)| script)
 }
 
 /// The camera as `workspace.CurrentCamera` shows it to LocalScripts.
@@ -894,28 +907,34 @@ impl ApplicationHandler for App {
             }
             WindowEvent::CursorLeft { .. } => self.pointer = None,
             WindowEvent::KeyboardInput { event, .. } => {
+                let pressed = event.state == ElementState::Pressed;
+                let key = match event.physical_key {
+                    PhysicalKey::Code(code) => Some(code),
+                    PhysicalKey::Unidentified(_) => None,
+                };
                 if self.text_focus.is_some() {
                     self.type_text(&event);
-                } else if let PhysicalKey::Code(key) = event.physical_key {
-                    let pressed = event.state == ElementState::Pressed;
+                    // Scripts hear typed keys, as the UI's.
+                    if let Some(key) = key.and_then(script_key) {
+                        self.push_key(key, pressed, true);
+                    }
+                } else if let Some(code) = key {
                     // A press that moves focus is the UI's, not the game's.
                     let shift = self.held_keys.contains(&axcenity_core::KeyCode::LeftShift)
                         || self.held_keys.contains(&axcenity_core::KeyCode::RightShift);
+                    let script = script_key(code);
                     if pressed
-                        && let Some(nav) = nav_key(key, shift)
+                        && let Some(key) = script
+                        && let Some(nav) = axcenity_ui::nav_key(&self.input.map, key, shift)
                         && self.ui.takes(&self.world, nav)
                     {
                         self.nav_keys.push(nav);
+                        self.push_key(key, true, true);
                         return;
                     }
-                    set_move_key(&mut self.keys, key, pressed);
-                    if let Some(key) = script_key(key) {
-                        self.key_events.push(KeyEvent { key, pressed });
-                        if pressed {
-                            self.held_keys.insert(key);
-                        } else {
-                            self.held_keys.remove(&key);
-                        }
+                    set_move_key(&mut self.keys, code, pressed);
+                    if let Some(key) = script {
+                        self.push_key(key, pressed, false);
                     }
                 }
             }
@@ -924,14 +943,24 @@ impl ApplicationHandler for App {
                 button: MouseButton::Left,
                 ..
             } => self.ui_mouse_events.push(state == ElementState::Pressed),
-            WindowEvent::MouseInput {
-                state,
-                button: MouseButton::Right,
-                ..
-            } => {
-                self.looking = state == ElementState::Pressed;
-                if let Some(window) = &self.window {
-                    capture_mouse(window, self.looking);
+            WindowEvent::MouseInput { state, button, .. } => {
+                let pressed = state == ElementState::Pressed;
+                // The right button looks around, unless a script holds the cursor.
+                if button == MouseButton::Right {
+                    self.looking = pressed;
+                    if self.mouse.0 == MouseBehavior::Default
+                        && let Some(window) = &self.window
+                    {
+                        capture_mouse(window, self.looking);
+                        window.set_cursor_visible(!self.looking && self.mouse.1);
+                    }
+                }
+                if let Some(button) = input::mouse_button(button) {
+                    self.input.push(InputEvent::new(InputKind::MouseButton {
+                        button,
+                        pressed,
+                        position: self.pointer.unwrap_or_default(),
+                    }));
                 }
             }
             // Over a ScrollingFrame the wheel scrolls it; elsewhere it zooms.
@@ -944,16 +973,28 @@ impl ApplicationHandler for App {
                 if !scrolled {
                     self.zoom += wheel_notches(delta);
                 }
+                self.input.push(InputEvent {
+                    kind: InputKind::Wheel {
+                        position: self.pointer.unwrap_or_default(),
+                        notches: wheel_notches(delta),
+                    },
+                    processed: scrolled,
+                });
+            }
+            WindowEvent::Touch(touch) => self.input.push(InputEvent::new(input::touch(&touch))),
+            WindowEvent::Focused(true) => {
+                self.focused = true;
+                // Locked again, if a script asked for it.
+                self.mouse = (MouseBehavior::Default, true);
             }
             // Key releases aren't reported while another window has focus,
             // so let go of everything to avoid the camera drifting on its own.
             WindowEvent::Focused(false) => {
+                self.focused = false;
                 self.keys = MoveKeys::default();
-                for key in std::mem::take(&mut self.held_keys) {
-                    self.key_events.push(KeyEvent {
-                        key,
-                        pressed: false,
-                    });
+                self.release_keys();
+                for event in self.input.game.release_all() {
+                    self.input.push(event);
                 }
                 self.looking = false;
                 if let Some(window) = &self.window {
@@ -989,22 +1030,15 @@ impl ApplicationHandler for App {
                 }
 
                 // 1. Input. A character controller moves first and owns
-                //    the camera. Otherwise the fly camera moves, and
+                //    the camera, by the input map's actions (with the
+                //    player's rebinds). Otherwise the fly camera moves, and
                 //    LocalScripts see that.
+                self.input.map = self.scripts.input_map();
                 let motion = if self.text_focus.is_some() {
                     MoveInput::default()
                 } else {
-                    MoveInput {
-                        forward: self.keys.forward,
-                        back: self.keys.back,
-                        left: self.keys.left,
-                        right: self.keys.right,
-                        jump: self.held_keys.contains(&axcenity_core::KeyCode::Space),
-                        crouch: self.held_keys.contains(&axcenity_core::KeyCode::C),
-                        look_dx: self.look_dx,
-                        look_dy: self.look_dy,
-                        zoom: self.zoom,
-                    }
+                    self.input
+                        .motion_input([self.look_dx, self.look_dy], self.zoom, seconds)
                 };
                 self.look_dx = 0.0;
                 self.look_dy = 0.0;
@@ -1023,8 +1057,9 @@ impl ApplicationHandler for App {
                 }
                 let seen = self.script_camera();
                 self.scripts.set_camera(seen);
-                let keys = std::mem::take(&mut self.key_events);
-                self.scripts.input(&mut self.world, &keys);
+                let pointer = self.apply_cursor((size.width, size.height));
+                let events = self.input.take_events(pointer);
+                self.scripts.input_events(&mut self.world, &events);
                 print_output(&mut self.scripts);
 
                 // 2. Resume scripts whose wait is over (and due `task.delay`s).
@@ -1175,15 +1210,23 @@ impl ApplicationHandler for App {
     }
 
     /// Raw mouse movement, reported even when the cursor is held still.
+    /// Scripts hear it (`GetMouseDelta`) while the window has focus; it
+    /// turns the camera while the right button is held.
     fn device_event(&mut self, _event_loop: &ActiveEventLoop, _id: DeviceId, event: DeviceEvent) {
-        if let DeviceEvent::MouseMotion { delta: (dx, dy) } = event
-            && self.looking
-        {
+        let DeviceEvent::MouseMotion { delta: (dx, dy) } = event else {
+            return;
+        };
+        if !self.focused {
+            return;
+        }
+        let (dx, dy) = (dx as f32, dy as f32);
+        self.input.add_motion(dx, dy);
+        if self.looking {
             if self.characters.view(&self.world).is_some() {
-                self.look_dx += dx as f32;
-                self.look_dy += dy as f32;
+                self.look_dx += dx;
+                self.look_dy += dy;
             } else {
-                self.camera.look(dx as f32, dy as f32);
+                self.camera.look(dx, dy);
             }
         }
     }
@@ -1198,6 +1241,9 @@ impl ApplicationHandler for App {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod input_tests;
 
 #[cfg(test)]
 mod graphics_tests;

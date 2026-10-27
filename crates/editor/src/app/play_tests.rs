@@ -372,7 +372,8 @@ fn saving_during_play_writes_the_players_data_not_the_project_and_stop_restores_
             &[KeyEvent {
                 key: KeyCode::K,
                 pressed,
-            }],
+            }
+            .into()],
             None,
             None,
         );
@@ -429,4 +430,62 @@ fn a_checkpoint_inserted_on_a_part_stands_on_top_of_it_in_the_workspace() {
     );
     // hello-saves has a Checkpoint already, so this one is numbered.
     assert_eq!(app.history.undo_label(), Some("Insert Checkpoint2"));
+}
+
+#[test]
+fn rebinding_jump_to_e_in_the_input_map_makes_both_controllers_jump_on_e_in_play() {
+    use axcenity_core::KeyCode;
+    use axcenity_core::input::{Input, InputEvent, InputKind, InputMap};
+
+    let mut map = InputMap::default();
+    map.rebind("Jump", vec![Input::Key(KeyCode::E)]).unwrap();
+    for first_person in [false, true] {
+        let folder = copy_of_example("hello-character", &format!("rebind-jump-{first_person}"));
+        axcenity_project::save_input_map(&folder, &map).unwrap();
+        let mut app = EditorApp::new(Some(&folder));
+        let model = part(&app, "Character");
+        if first_person {
+            let third = app
+                .world
+                .find_first_child(model, "ThirdPersonController")
+                .unwrap();
+            app.world.destroy(third).unwrap();
+            let first = app.world.create(ClassName::FirstPersonController).unwrap();
+            app.world.set_parent(first, Some(model)).unwrap();
+        }
+        let body = app.world.find_first_child(model, "Body").unwrap();
+        app.play();
+        let height = |app: &EditorApp| {
+            app.play
+                .as_ref()
+                .unwrap()
+                .world()
+                .get(body)
+                .and_then(|body| body.property("Position"))
+                .and_then(Value::as_vector3)
+                .unwrap()
+                .y
+        };
+        let jumps_on = |app: &mut EditorApp, key| {
+            play_for(app, 1.0);
+            let floor = height(app);
+            let tap = |pressed| [InputEvent::new(InputKind::Key { key, pressed })];
+            app.play_frame(1.0 / 60.0, &tap(true), None, None);
+            app.play_frame(1.0 / 60.0, &tap(false), None, None);
+            let mut highest = floor;
+            for _ in 0..20 {
+                app.play_frame(1.0 / 60.0, &[], None, None);
+                highest = highest.max(height(app));
+            }
+            highest > floor + 0.5
+        };
+        assert!(
+            !jumps_on(&mut app, KeyCode::Space),
+            "first person: {first_person}"
+        );
+        assert!(
+            jumps_on(&mut app, KeyCode::E),
+            "first person: {first_person}"
+        );
+    }
 }

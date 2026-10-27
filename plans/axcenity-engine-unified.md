@@ -1073,11 +1073,11 @@ Blocks cover the common cases: "look at", "move forward by", "lerp", "random num
 
 ### Acceptance criteria
 
-- [ ] A LocalScript gets MouseButton1 with the click's screen position. Clicking a TextButton gives `gameProcessedEvent = true`.
+- [x] A LocalScript gets MouseButton1 with the click's screen position. Clicking a TextButton gives `gameProcessedEvent = true`.
 - [ ] With `MouseBehavior = LockCenter`, `GetMouseDelta` drives a camera, and the cursor stays hidden in the centre.
-- [ ] Rebinding Jump to E in the input map makes both controllers jump on E, in the editor Play and the player. A runtime rebind survives saving and reloading a slot.
+- [x] Rebinding Jump to E in the input map makes both controllers jump on E, in the editor Play and the player. A runtime rebind survives saving and reloading a slot.
 - [ ] A gamepad's left stick walks the character and its A button jumps, with no script.
-- [ ] Two `BindAction`s on the same key at different priorities call only the higher one until it's unbound.
+- [x] Two `BindAction`s on the same key at different priorities call only the higher one until it's unbound.
 
 ---
 

@@ -11,10 +11,9 @@ use axcenity_render::{Capabilities, GraphicsSettings};
 use mlua::chunk::ChunkMode;
 use mlua::{Lua, LuaOptions, StdLib, Thread};
 
-use crate::client::{
-    self, Camera, CameraState, HeldKeys, KeyEvent, LoadingScreenRemoved, LocalPlayer,
-};
+use crate::client::{Camera, CameraState, LoadingScreenRemoved, LocalPlayer};
 use crate::errors::error_message;
+use crate::input::{self, Inputs};
 use crate::instance::{self, ClassMethods};
 use crate::remote::{self, Message, Outbox};
 use crate::sides::Side;
@@ -23,6 +22,8 @@ use crate::{
     Output, OutputLine, changes, console, debugger, events, modules, push_error, sandbox,
     scheduler, tree, tween, watchdog, with_world,
 };
+use axcenity_core::MouseBehavior;
+use axcenity_core::input::{InputEvent, InputMap};
 
 pub struct Context {
     pub lua: Lua,
@@ -57,7 +58,7 @@ impl Context {
         lua.set_app_data(tween::Tweens::default());
         lua.set_app_data(modules::Modules::default());
         if side == Side::Client {
-            lua.set_app_data(HeldKeys::default());
+            lua.set_app_data(Inputs::default());
             lua.set_app_data(Camera::default());
             lua.set_app_data(LoadingScreenRemoved::default());
             lua.set_app_data(UserGraphics::default());
@@ -170,6 +171,9 @@ impl Context {
         }
         if let Some(mut modules) = self.lua.app_data_mut::<modules::Modules>() {
             modules.forget_requirer(script);
+        }
+        if let Some(mut inputs) = self.lua.app_data_mut::<Inputs>() {
+            inputs.forget_script(script);
         }
     }
 
@@ -319,9 +323,29 @@ impl Context {
         });
     }
 
-    /// Frame step 1 on the client: key presses and releases.
-    pub fn fire_input(&self, world: &mut World, keys: &[KeyEvent]) {
-        with_world(&self.lua, world, || client::fire_input(&self.lua, keys));
+    /// Frame step 1 on the client: the frame's input.
+    pub fn fire_input(&self, world: &mut World, events: &[InputEvent]) {
+        with_world(&self.lua, world, || input::fire_input(&self.lua, events));
+    }
+
+    pub fn set_input_map(&self, map: InputMap) {
+        if let Some(mut inputs) = self.lua.app_data_mut::<Inputs>() {
+            inputs.map = map;
+        }
+    }
+
+    /// The input map, with the player's rebinds.
+    pub fn input_map(&self) -> InputMap {
+        input::input_map(&self.lua)
+    }
+
+    /// `UserInputService.MouseBehavior` and `MouseIconEnabled`.
+    pub fn mouse(&self) -> (MouseBehavior, bool) {
+        self.lua
+            .app_data_ref::<Inputs>()
+            .map_or((MouseBehavior::Default, true), |inputs| {
+                (inputs.mouse_behavior, inputs.mouse_icon_enabled)
+            })
     }
 
     pub fn local_player(&self) -> Option<InstanceId> {

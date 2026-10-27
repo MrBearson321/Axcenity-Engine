@@ -19,6 +19,7 @@
 use std::collections::BTreeMap;
 
 use axcenity_assets::Assets;
+use axcenity_core::input::{InputMap, InputState};
 use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
 use axcenity_physics::{GRAVITY, RayHit, cast_ray_excluding};
 
@@ -47,23 +48,63 @@ const MIN_ZOOM_STEP: f32 = 1.0;
 /// The lowest a crouch squashes the character, in studs.
 const MIN_CROUCH_HEIGHT: f32 = 0.5;
 
+/// How fast a controller's right stick turns the camera, in pixels of mouse
+/// movement a second when pushed all the way.
+const STICK_LOOK_SPEED: f32 = 900.0;
+
 /// Keys held for the character that owns the camera, and mouse look since
 /// the last step. Right and down are positive, in pixels, as with the fly
-/// camera. `jump` is Space: held on landing, it jumps again. `crouch` is C:
-/// the character crouches while it is held, as if `Crouch` were true.
-/// `zoom` is mouse wheel notches since the last step, toward the screen
-/// positive: it moves a third-person camera closer.
+/// camera. `jump` held on landing jumps again. `crouch` crouches the
+/// character while it is held, as if `Crouch` were true. `run` runs a
+/// walking character (`RunSpeed`) while it is held. `stick` is a
+/// controller stick, right and forward positive, -1 to 1: pushed part way,
+/// the character walks that much slower. `zoom` is mouse wheel notches
+/// since the last step, toward the screen positive: it moves a third-person
+/// camera closer. [`MoveInput::from_actions`] reads all of it from the
+/// input map's actions.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct MoveInput {
     pub forward: bool,
     pub back: bool,
     pub left: bool,
     pub right: bool,
+    pub stick: [f32; 2],
     pub jump: bool,
     pub crouch: bool,
+    pub run: bool,
     pub look_dx: f32,
     pub look_dy: f32,
     pub zoom: f32,
+}
+
+impl MoveInput {
+    /// What the input map's `Move`, `Look`, `Jump`, `Crouch` and `Run`
+    /// actions say in `state`, `seconds` after the last frame. `look` is the
+    /// mouse look in pixels, which the host decides (while the right button
+    /// is held, or the cursor is locked); the `Look` axis's sticks add to it.
+    pub fn from_actions(
+        map: &InputMap,
+        state: &InputState,
+        look: [f32; 2],
+        zoom: f32,
+        seconds: f32,
+    ) -> Self {
+        let [x, y] = map.axis("Move", state);
+        // The Look axis without the mouse, which `look` already has.
+        let mut sticks = state.clone();
+        sticks.mouse_delta = [0.0, 0.0];
+        let [lx, ly] = map.axis("Look", &sticks);
+        Self {
+            stick: [x, y],
+            jump: map.is_pressed("Jump", state),
+            crouch: map.is_pressed("Crouch", state),
+            run: map.is_pressed("Run", state),
+            look_dx: look[0] + lx * STICK_LOOK_SPEED * seconds,
+            look_dy: look[1] - ly * STICK_LOOK_SPEED * seconds,
+            zoom,
+            ..Self::default()
+        }
+    }
 }
 
 /// Where the character camera is, in the same terms as `FlyCamera::view`:
@@ -275,7 +316,7 @@ impl Controllers {
                 fall.velocity = (2.0 * GRAVITY * limits.jump_height).sqrt();
                 fall.grounded = false;
             }
-            let mut speed = speed_of(world, id);
+            let mut speed = speed_of(world, id, input.run);
             if self.crouches.contains_key(&id) {
                 speed *= crouch_speed_scale(world, id);
             }
@@ -512,8 +553,11 @@ fn movement(world: &World, id: InstanceId) -> Option<Mode> {
     Mode::parse(world.get(id)?.property("Movement"))
 }
 
-fn speed_of(world: &World, id: InstanceId) -> f32 {
-    let name = if movement(world, id) == Some(Mode::Run) {
+/// `RunSpeed` when `Movement` is Run, or when `run` is held while it walks;
+/// otherwise `WalkSpeed`.
+fn speed_of(world: &World, id: InstanceId, run: bool) -> f32 {
+    let mode = movement(world, id);
+    let name = if mode == Some(Mode::Run) || (run && mode != Some(Mode::Crouch)) {
         "RunSpeed"
     } else {
         "WalkSpeed"
@@ -680,12 +724,13 @@ fn camera_height(world: &World, id: InstanceId) -> f32 {
     number(world, id, "CameraHeight").unwrap_or(4.0)
 }
 
-/// Horizontal movement of `distance` studs, relative to the camera's yaw.
-/// Yaw 0 moves toward -Z, the same way the fly camera looks at yaw 0.
+/// Horizontal movement of up to `distance` studs, relative to the camera's
+/// yaw: all of it for keys, and a stick's share of it. Yaw 0 moves toward
+/// -Z, the same way the fly camera looks at yaw 0.
 fn wish(yaw: f32, input: MoveInput, distance: f32) -> (f32, f32) {
     let axis = |positive: bool, negative: bool| f32::from(positive) - f32::from(negative);
-    let forward_amount = axis(input.forward, input.back);
-    let right_amount = axis(input.right, input.left);
+    let forward_amount = axis(input.forward, input.back) + input.stick[1];
+    let right_amount = axis(input.right, input.left) + input.stick[0];
     let (sy, cy) = yaw.sin_cos();
     let x = -sy * forward_amount + cy * right_amount;
     let z = -cy * forward_amount - sy * right_amount;
@@ -693,7 +738,8 @@ fn wish(yaw: f32, input: MoveInput, distance: f32) -> (f32, f32) {
     if len < 1e-6 || distance == 0.0 {
         return (0.0, 0.0);
     }
-    (x / len * distance, z / len * distance)
+    let scale = distance / len.max(1.0);
+    (x * scale, z * scale)
 }
 
 /// The unit direction of a move, or `None` for no move.

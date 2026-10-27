@@ -117,7 +117,10 @@ pub(super) fn key_menu(ui: &mut egui::Ui, key: &mut String) {
     egui::ScrollArea::vertical()
         .max_height(280.0)
         .show(ui, |ui| {
-            for code in KeyCode::ALL {
+            for code in KeyCode::ALL
+                .into_iter()
+                .filter(|code| *code != KeyCode::Unknown)
+            {
                 let name = code.as_str();
                 if ui.selectable_label(key == name, name).clicked() {
                     *key = name.to_owned();

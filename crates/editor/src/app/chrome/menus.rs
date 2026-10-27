@@ -110,6 +110,20 @@ impl EditorApp {
                 }
                 if ui
                     .add_enabled(
+                        self.project.is_some(),
+                        egui::Button::new(theme::with_icon(icons::GAME_CONTROLLER, "Input…")),
+                    )
+                    .on_hover_text(
+                        "The game's actions (Move, Jump, Interact…) and the keys, mouse \
+                         buttons and controller buttons bound to each.",
+                    )
+                    .on_disabled_hover_text("Open a project first.")
+                    .clicked()
+                {
+                    self.input_settings.open = true;
+                }
+                if ui
+                    .add_enabled(
                         editing,
                         egui::Button::new(theme::with_icon(icons::HOUSE, "Close Project")),
                     )

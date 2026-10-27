@@ -1,30 +1,16 @@
 //! What only LocalScripts can reach, because it belongs to the player's
-//! device: the keyboard (`UserInputService`), the camera
-//! (`workspace.CurrentCamera`), `Players.LocalPlayer` and the loading
-//! screen (`ReplicatedFirst:RemoveDefaultLoadingScreen`).
+//! device: the camera (`workspace.CurrentCamera`), `Players.LocalPlayer`
+//! and the loading screen (`ReplicatedFirst:RemoveDefaultLoadingScreen`).
+//! Input (`UserInputService`, `ContextActionService`) is `input.rs`.
 //!
-//! The host feeds key presses in with `ScriptRuntime::input`, and keeps
-//! the camera in step with `set_camera` / `take_camera_move`. Everything
-//! here lives in the client interpreter's app data.
+//! The host keeps the camera in step with `set_camera` /
+//! `take_camera_move`. Everything here lives in the client interpreter's
+//! app data.
 
-use std::collections::BTreeSet;
-
-use axcenity_core::{InstanceId, KeyCode, Vector3};
+use axcenity_core::{InstanceId, Vector3};
 use mlua::{FromLua, Lua, MetaMethod, UserData, UserDataFields, UserDataMethods};
 
-use crate::events::{self, LuaSignal, Owner};
-use crate::types::{LuaEnumItem, LuaVector3, type_name};
-
-/// A key going down or coming back up, as the host reports it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct KeyEvent {
-    pub key: KeyCode,
-    pub pressed: bool,
-}
-
-/// The keys held down right now.
-#[derive(Default)]
-pub struct HeldKeys(BTreeSet<KeyCode>);
+use crate::types::{LuaVector3, type_name};
 
 /// The Player of whoever plays on this device.
 #[derive(Clone, Copy)]
@@ -57,31 +43,6 @@ pub struct Camera {
     pub moved: bool,
 }
 
-/// Updates the held keys from `events`, then fires `InputBegan` or
-/// `InputEnded` for each. A press of a key already held (the OS repeating
-/// it) and a release of one that isn't held do nothing.
-pub fn fire_input(lua: &Lua, events: &[KeyEvent]) {
-    for &KeyEvent { key, pressed } in events {
-        let changed = match lua.app_data_mut::<HeldKeys>() {
-            Some(mut held) if pressed => held.0.insert(key),
-            Some(mut held) => held.0.remove(&key),
-            None => false,
-        };
-        if !changed {
-            continue;
-        }
-        let event = if pressed { "InputBegan" } else { "InputEnded" };
-        // The second argument is Roblox's `gameProcessedEvent`: true when the
-        // game's own UI used the key. There's no UI yet, so always false.
-        events::fire(
-            lua,
-            Owner::UserInputService,
-            event,
-            (LuaInputObject { key }, false),
-        );
-    }
-}
-
 /// Set when a LocalScript calls `RemoveDefaultLoadingScreen`, until the
 /// host takes it with `ScriptRuntime::take_loading_screen_removed`.
 #[derive(Default)]
@@ -103,59 +64,6 @@ impl UserData for LuaReplicatedFirst {
             Ok(())
         });
         methods.add_meta_method(MetaMethod::ToString, |_, _, ()| Ok("ReplicatedFirst"));
-    }
-}
-
-/// `game:GetService("UserInputService")`: the keyboard.
-#[derive(Clone, Copy)]
-pub struct LuaUserInputService;
-
-impl UserData for LuaUserInputService {
-    fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
-        for event in ["InputBegan", "InputEnded"] {
-            fields.add_field_method_get(event, move |_, _| {
-                Ok(LuaSignal::named(Owner::UserInputService, event))
-            });
-        }
-    }
-
-    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method("IsKeyDown", |lua, _, key: mlua::Value| {
-            let key = key_arg(lua, key)?;
-            Ok(lua
-                .app_data_ref::<HeldKeys>()
-                .is_some_and(|held| held.0.contains(&key)))
-        });
-        methods.add_meta_method(MetaMethod::ToString, |_, _, ()| Ok("UserInputService"));
-    }
-}
-
-/// The key `IsKeyDown` was asked about, which must be an `Enum.KeyCode` item.
-fn key_arg(lua: &Lua, value: mlua::Value) -> mlua::Result<KeyCode> {
-    LuaEnumItem::from_lua(value.clone(), lua)
-        .ok()
-        .and_then(LuaEnumItem::as_key)
-        .ok_or_else(|| {
-            mlua::Error::runtime(format!(
-                "IsKeyDown takes an Enum.KeyCode, such as Enum.KeyCode.W, not a {}",
-                type_name(lua, &value)
-            ))
-        })
-}
-
-/// What `InputBegan` and `InputEnded` handlers get: which key it was.
-#[derive(Clone, Copy)]
-pub struct LuaInputObject {
-    key: KeyCode,
-}
-
-impl UserData for LuaInputObject {
-    fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("KeyCode", |_, input| Ok(LuaEnumItem::key(input.key)));
-    }
-
-    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_meta_method(MetaMethod::ToString, |_, _, ()| Ok("InputObject"));
     }
 }
 

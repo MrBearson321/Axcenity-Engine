@@ -10,6 +10,7 @@ mod animation;
 mod arena;
 mod class;
 mod enums;
+pub mod input;
 mod strings;
 mod terrain;
 mod value;
@@ -21,7 +22,8 @@ pub use animation::{
 pub use arena::{Arena, Id};
 pub use class::{ClassName, INSTANCE_EVENTS};
 pub use enums::{
-    KeyCode, Material, MaterialPreset, PartType, ParticleType, TextureChannel, ToneMapping,
+    KeyCode, Material, MaterialPreset, MouseBehavior, PartType, ParticleType, TextureChannel,
+    ToneMapping, UserInputState, UserInputType,
 };
 pub use strings::StringTable;
 pub use terrain::{

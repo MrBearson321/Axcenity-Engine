@@ -1274,9 +1274,9 @@ fn play_runs_hello_remote_and_held_arrow_keys_move_the_block() {
         key: right,
         pressed,
     };
-    app.play_frame(1.0 / 60.0, &[key(true)], None, None);
+    app.play_frame(1.0 / 60.0, &[key(true).into()], None, None);
     play_for(&mut app, 0.5);
-    app.play_frame(1.0 / 60.0, &[key(false)], None, None);
+    app.play_frame(1.0 / 60.0, &[key(false).into()], None, None);
 
     let world = app.play.as_ref().unwrap().world();
     let Some(axcenity_core::Value::Vector3(moved)) =

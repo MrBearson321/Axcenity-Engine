@@ -1,7 +1,9 @@
 use std::path::Path;
 
 use axcenity_core::{ClassName, Value, Vector3};
+use axcenity_script::KeyEvent;
 
+use super::input::SCRIPT_KEYS;
 use super::*;
 
 #[test]
@@ -12,8 +14,11 @@ fn arrow_and_letter_keys_reach_scripts_by_their_roblox_names() {
     assert_eq!(script_key(KeyCode::Digit0), Some(K::Zero));
     assert_eq!(script_key(KeyCode::Enter), Some(K::Return));
     assert_eq!(script_key(KeyCode::F13), None);
-    // Every key scripts know can be pressed in the player.
-    for key in K::ALL {
+    // Every keyboard key scripts know can be pressed in the player.
+    for key in K::ALL
+        .into_iter()
+        .filter(|key| !key.is_gamepad() && *key != K::Unknown)
+    {
         assert!(
             SCRIPT_KEYS.iter().any(|(_, script)| *script == key),
             "{key:?}"
@@ -1489,7 +1494,7 @@ pub(super) fn start_example_in(name: &str) -> (World, ScriptRuntime, PathBuf) {
 }
 
 /// Copies the project files in `from` to `to`, leaving out `.axcenity`.
-fn copy_folder(from: &Path, to: &Path) {
+pub(super) fn copy_folder(from: &Path, to: &Path) {
     std::fs::create_dir_all(to).unwrap();
     for entry in std::fs::read_dir(from).unwrap().flatten() {
         if entry.file_name() == ".axcenity" {
@@ -2602,7 +2607,11 @@ fn position_of_part(world: &World, id: InstanceId) -> Vector3 {
 
 #[test]
 fn hello_menu_moves_focus_the_same_by_keys_and_controller_and_uses_what_is_focused() {
-    use axcenity_ui::{GamepadButton, Stylesheet, TextCommand, TextOutcome, UiLayout, button_key};
+    use axcenity_core::input::InputMap;
+    use axcenity_ui::{GamepadButton, Stylesheet, TextCommand, TextOutcome, UiLayout, pad_key};
+    let map = InputMap::default();
+    let nav_key = |key, shift| axcenity_ui::nav_key(&map, script_key(key).unwrap(), shift);
+    let button_key = |button| axcenity_ui::nav_key(&map, pad_key(button).unwrap(), false);
 
     /// The menu as the player runs it: keys and controller buttons go
     /// through `navigate_ui`, typing through `edit_text_box`.

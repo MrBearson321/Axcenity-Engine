@@ -23,7 +23,7 @@ pub(crate) struct SharedSaves(pub Rc<RefCell<Saves>>);
 #[derive(Clone, Copy)]
 pub struct LuaSaveService;
 
-fn saves(lua: &Lua) -> mlua::Result<Rc<RefCell<Saves>>> {
+pub(crate) fn saves(lua: &Lua) -> mlua::Result<Rc<RefCell<Saves>>> {
     lua.app_data_ref::<SharedSaves>()
         .map(|shared| shared.0.clone())
         .ok_or_else(|| mlua::Error::runtime("saving isn't ready"))

@@ -281,10 +281,34 @@ pub enum KeyCode {
     RightControl,
     LeftAlt,
     RightAlt,
+    // A game controller's buttons, with Xbox letters (South is A). The
+    // sticks are inputs too: `Thumbstick1` (left) and `Thumbstick2` (right)
+    // are their movement, `ButtonL3` and `ButtonR3` pressing them in.
+    ButtonA,
+    ButtonB,
+    ButtonX,
+    ButtonY,
+    ButtonL1,
+    ButtonR1,
+    ButtonL2,
+    ButtonR2,
+    ButtonL3,
+    ButtonR3,
+    ButtonStart,
+    ButtonSelect,
+    DPadUp,
+    DPadDown,
+    DPadLeft,
+    DPadRight,
+    Thumbstick1,
+    Thumbstick2,
+    /// What `InputObject.KeyCode` is for input that isn't a key or a
+    /// button, such as the mouse moving.
+    Unknown,
 }
 
 impl KeyCode {
-    pub const ALL: [KeyCode; 51] = [
+    pub const ALL: [KeyCode; 70] = [
         KeyCode::A,
         KeyCode::B,
         KeyCode::C,
@@ -336,6 +360,25 @@ impl KeyCode {
         KeyCode::RightControl,
         KeyCode::LeftAlt,
         KeyCode::RightAlt,
+        KeyCode::ButtonA,
+        KeyCode::ButtonB,
+        KeyCode::ButtonX,
+        KeyCode::ButtonY,
+        KeyCode::ButtonL1,
+        KeyCode::ButtonR1,
+        KeyCode::ButtonL2,
+        KeyCode::ButtonR2,
+        KeyCode::ButtonL3,
+        KeyCode::ButtonR3,
+        KeyCode::ButtonStart,
+        KeyCode::ButtonSelect,
+        KeyCode::DPadUp,
+        KeyCode::DPadDown,
+        KeyCode::DPadLeft,
+        KeyCode::DPadRight,
+        KeyCode::Thumbstick1,
+        KeyCode::Thumbstick2,
+        KeyCode::Unknown,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -391,6 +434,190 @@ impl KeyCode {
             KeyCode::RightControl => "RightControl",
             KeyCode::LeftAlt => "LeftAlt",
             KeyCode::RightAlt => "RightAlt",
+            KeyCode::ButtonA => "ButtonA",
+            KeyCode::ButtonB => "ButtonB",
+            KeyCode::ButtonX => "ButtonX",
+            KeyCode::ButtonY => "ButtonY",
+            KeyCode::ButtonL1 => "ButtonL1",
+            KeyCode::ButtonR1 => "ButtonR1",
+            KeyCode::ButtonL2 => "ButtonL2",
+            KeyCode::ButtonR2 => "ButtonR2",
+            KeyCode::ButtonL3 => "ButtonL3",
+            KeyCode::ButtonR3 => "ButtonR3",
+            KeyCode::ButtonStart => "ButtonStart",
+            KeyCode::ButtonSelect => "ButtonSelect",
+            KeyCode::DPadUp => "DPadUp",
+            KeyCode::DPadDown => "DPadDown",
+            KeyCode::DPadLeft => "DPadLeft",
+            KeyCode::DPadRight => "DPadRight",
+            KeyCode::Thumbstick1 => "Thumbstick1",
+            KeyCode::Thumbstick2 => "Thumbstick2",
+            KeyCode::Unknown => "Unknown",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|item| item.as_str() == name)
+    }
+
+    /// True for a game controller's buttons and sticks, false for the keyboard's keys.
+    pub fn is_gamepad(self) -> bool {
+        (KeyCode::ButtonA..=KeyCode::Thumbstick2).contains(&self)
+    }
+
+    /// True for `Thumbstick1` and `Thumbstick2`, which move rather than press.
+    pub fn is_stick(self) -> bool {
+        matches!(self, KeyCode::Thumbstick1 | KeyCode::Thumbstick2)
+    }
+}
+
+/// What kind of device an input came from, for `InputObject.UserInputType`.
+/// The mouse's buttons are kinds of their own, as in Roblox; game
+/// controllers are numbered in the order they were plugged in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum UserInputType {
+    Keyboard,
+    MouseButton1,
+    MouseButton2,
+    MouseButton3,
+    MouseMovement,
+    MouseWheel,
+    Touch,
+    Gamepad1,
+    Gamepad2,
+    Gamepad3,
+    Gamepad4,
+    None,
+}
+
+impl UserInputType {
+    pub const ALL: [UserInputType; 12] = [
+        UserInputType::Keyboard,
+        UserInputType::MouseButton1,
+        UserInputType::MouseButton2,
+        UserInputType::MouseButton3,
+        UserInputType::MouseMovement,
+        UserInputType::MouseWheel,
+        UserInputType::Touch,
+        UserInputType::Gamepad1,
+        UserInputType::Gamepad2,
+        UserInputType::Gamepad3,
+        UserInputType::Gamepad4,
+        UserInputType::None,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            UserInputType::Keyboard => "Keyboard",
+            UserInputType::MouseButton1 => "MouseButton1",
+            UserInputType::MouseButton2 => "MouseButton2",
+            UserInputType::MouseButton3 => "MouseButton3",
+            UserInputType::MouseMovement => "MouseMovement",
+            UserInputType::MouseWheel => "MouseWheel",
+            UserInputType::Touch => "Touch",
+            UserInputType::Gamepad1 => "Gamepad1",
+            UserInputType::Gamepad2 => "Gamepad2",
+            UserInputType::Gamepad3 => "Gamepad3",
+            UserInputType::Gamepad4 => "Gamepad4",
+            UserInputType::None => "None",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|item| item.as_str() == name)
+    }
+
+    /// `Gamepad1` for controller 0, up to `Gamepad4`.
+    pub fn gamepad(pad: u8) -> Option<Self> {
+        [
+            UserInputType::Gamepad1,
+            UserInputType::Gamepad2,
+            UserInputType::Gamepad3,
+            UserInputType::Gamepad4,
+        ]
+        .get(usize::from(pad))
+        .copied()
+    }
+
+    /// Which controller a `GamepadN` is, from 0.
+    pub fn pad(self) -> Option<u8> {
+        match self {
+            UserInputType::Gamepad1 => Some(0),
+            UserInputType::Gamepad2 => Some(1),
+            UserInputType::Gamepad3 => Some(2),
+            UserInputType::Gamepad4 => Some(3),
+            _ => None,
+        }
+    }
+
+    /// Which mouse button a `MouseButtonN` is, from 0 (left).
+    pub fn mouse_button(self) -> Option<usize> {
+        match self {
+            UserInputType::MouseButton1 => Some(0),
+            UserInputType::MouseButton2 => Some(1),
+            UserInputType::MouseButton3 => Some(2),
+            _ => None,
+        }
+    }
+}
+
+/// Where an input is in its life, for `InputObject.UserInputState`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum UserInputState {
+    Begin,
+    Change,
+    End,
+    Cancel,
+    None,
+}
+
+impl UserInputState {
+    pub const ALL: [UserInputState; 5] = [
+        UserInputState::Begin,
+        UserInputState::Change,
+        UserInputState::End,
+        UserInputState::Cancel,
+        UserInputState::None,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            UserInputState::Begin => "Begin",
+            UserInputState::Change => "Change",
+            UserInputState::End => "End",
+            UserInputState::Cancel => "Cancel",
+            UserInputState::None => "None",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|item| item.as_str() == name)
+    }
+}
+
+/// What the mouse cursor does, for `UserInputService.MouseBehavior`:
+/// moves freely, or is held in the middle of the window, or where it was.
+/// While held, moving the mouse still reports `GetMouseDelta`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum MouseBehavior {
+    #[default]
+    Default,
+    LockCenter,
+    LockCurrentPosition,
+}
+
+impl MouseBehavior {
+    pub const ALL: [MouseBehavior; 3] = [
+        MouseBehavior::Default,
+        MouseBehavior::LockCenter,
+        MouseBehavior::LockCurrentPosition,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MouseBehavior::Default => "Default",
+            MouseBehavior::LockCenter => "LockCenter",
+            MouseBehavior::LockCurrentPosition => "LockCurrentPosition",
         }
     }
 
@@ -417,6 +644,20 @@ mod tests {
         }
         for item in KeyCode::ALL {
             assert_eq!(KeyCode::from_name(item.as_str()), Some(item));
+            let name = item.as_str();
+            let pad = ["Button", "DPad", "Thumbstick"]
+                .iter()
+                .any(|start| name.starts_with(start));
+            assert_eq!(item.is_gamepad(), pad, "{item:?}");
+        }
+        for item in UserInputType::ALL {
+            assert_eq!(UserInputType::from_name(item.as_str()), Some(item));
+        }
+        for item in UserInputState::ALL {
+            assert_eq!(UserInputState::from_name(item.as_str()), Some(item));
+        }
+        for item in MouseBehavior::ALL {
+            assert_eq!(MouseBehavior::from_name(item.as_str()), Some(item));
         }
     }
 
