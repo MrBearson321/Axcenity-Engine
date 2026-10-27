@@ -84,7 +84,24 @@ pub(crate) fn slider_value_at(instance: &Instance, fraction: f32) -> f64 {
     ((value * 1e9).round() / 1e9).clamp(min, max)
 }
 
-fn vertical(instance: &Instance) -> bool {
+/// A Slider's `Value` one press of an arrow key or the d-pad on from where
+/// it is, up (`by` 1) or down (-1): a twentieth of its range, in whole
+/// `Step`s and at least one, kept between MinValue and MaxValue.
+pub(crate) fn slider_nudged(instance: &Instance, by: f64) -> f64 {
+    let (min, max) = value_range(instance);
+    let step = number(instance, "Step", 0.0);
+    let mut amount = (max - min) / 20.0;
+    if step > 0.0 {
+        amount = (amount / step).round().max(1.0) * step;
+    }
+    let mut value = number(instance, "Value", min).clamp(min, max) + by * amount;
+    if step > 0.0 {
+        value = min + ((value - min) / step).round() * step;
+    }
+    ((value * 1e9).round() / 1e9).clamp(min, max)
+}
+
+pub(crate) fn vertical(instance: &Instance) -> bool {
     instance
         .property("Orientation")
         .and_then(Value::as_str)
@@ -611,8 +628,8 @@ impl DropdownList {
 /// on a screen `screen` pixels big: just below it (above, when there's
 /// more room there), as wide as it, showing up to [`DROPDOWN_ROWS`] rows
 /// scrolled `scroll` authored pixels (`None` scrolls to the chosen
-/// option), with the option under `pointer` lit. `None` when it has no
-/// options.
+/// option), with the option `cursor` (keyboard or controller) lit, else
+/// the one under `pointer`. `None` when it has no options.
 pub(crate) fn dropdown_list(
     world: &World,
     element: &UiElement,
@@ -620,6 +637,7 @@ pub(crate) fn dropdown_list(
     screen: (f32, f32),
     scroll: Option<f32>,
     pointer: Option<[f32; 2]>,
+    cursor: Option<usize>,
 ) -> Option<(DropdownList, Vec<UiDrawItem>)> {
     let instance = world.get(element.id)?;
     let options = options(instance);
@@ -722,7 +740,7 @@ pub(crate) fn dropdown_list(
         per_unit,
         options: options.clone(),
     };
-    let lit = pointer.and_then(|point| list.option_at(point));
+    let lit = cursor.or_else(|| pointer.and_then(|point| list.option_at(point)));
 
     // Drawn in authored pixels from the list's corner, then scaled onto the screen.
     let mut items = Vec::new();

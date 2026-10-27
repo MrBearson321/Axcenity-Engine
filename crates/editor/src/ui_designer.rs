@@ -35,6 +35,7 @@ mod artboard;
 pub(crate) mod bevel;
 mod event_graph;
 mod group;
+mod navigation;
 pub(crate) mod order;
 mod panels;
 mod rich_text;
@@ -186,6 +187,13 @@ pub enum DesignerAction {
         position: UDim2,
         size: UDim2,
     },
+    /// Points the element's `property` (`NextSelectionDown` and so on) at
+    /// `target`, or clears it, from dragging a focus arrow: one undo step.
+    NextSelection {
+        id: InstanceId,
+        property: &'static str,
+        target: Option<InstanceId>,
+    },
     /// Like [`Anchor`](Self::Anchor), from dragging the anchor's diamonds:
     /// every frame of one drag makes one undo step.
     MoveAnchor {
@@ -336,6 +344,8 @@ pub struct UiDesigner {
     anchor_drag: Option<anchor_handles::AnchorDrag>,
     /// The selection being turned by a rotate knob.
     rotate_drag: Option<rotate::RotateDrag>,
+    /// A focus arrow being dragged onto another element.
+    focus_drag: Option<navigation::FocusDrag>,
     /// The diamonds' right-click menu is open.
     anchor_menu: bool,
     /// Where the pointer went down for the drag, until it has moved: a
@@ -418,6 +428,7 @@ impl Default for UiDesigner {
             clipboard: None,
             anchor_drag: None,
             rotate_drag: None,
+            focus_drag: None,
             anchor_menu: false,
             drag_held: None,
             snaps: Vec::new(),

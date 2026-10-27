@@ -194,6 +194,73 @@ impl EditorApp {
         self.history.seal();
     }
 
+    /// Points `id`'s `property` (`NextSelectionDown` and so on) at `target`
+    /// by its `Id`, giving `target` one from its name when it has none, or
+    /// clears it when `target` is `None`: dragging a focus arrow on the
+    /// artboard. One undo step.
+    pub(super) fn set_next_selection(
+        &mut self,
+        id: InstanceId,
+        property: &'static str,
+        target: Option<InstanceId>,
+    ) {
+        if self.playing() || self.world.get(id).is_none() {
+            return;
+        }
+        let mut properties = Vec::new();
+        let target_id = match target {
+            None => String::new(),
+            Some(target) => match element_id(&self.world, target) {
+                Some(element_id) => element_id.to_owned(),
+                None => {
+                    let Some(instance) = self.world.get(target) else {
+                        return;
+                    };
+                    let before = instance.property("Id").cloned();
+                    let wanted = style_panel::id_from_name(instance.name());
+                    let element_id = unused_element_id(&self.world, &wanted);
+                    let after = Value::String(element_id.clone());
+                    if let Err(err) = self.world.set_property(target, "Id", after.clone()) {
+                        self.output.error(format!("Could not change that: {err}"));
+                        return;
+                    }
+                    properties.push(history::PropertyEdit {
+                        id: target,
+                        field: Field::Property("Id"),
+                        before: before.unwrap_or_else(|| Value::String(String::new())),
+                        after,
+                    });
+                    element_id
+                }
+            },
+        };
+        let before = self
+            .world
+            .get(id)
+            .and_then(|instance| instance.property(property))
+            .cloned()
+            .unwrap_or_else(|| Value::String(String::new()));
+        let after = Value::String(target_id);
+        if before == after && properties.is_empty() {
+            return;
+        }
+        if let Err(err) = self.world.set_property(id, property, after.clone()) {
+            self.output.error(format!("Could not change that: {err}"));
+            return;
+        }
+        properties.push(history::PropertyEdit {
+            id,
+            field: Field::Property(property),
+            before,
+            after,
+        });
+        let way = property.trim_start_matches("NextSelection").to_lowercase();
+        let label = format!("Set focus {way} from {}", named(&self.world, &[id]));
+        self.history
+            .record_asset(&mut self.world, label, Vec::new(), properties);
+        self.history.seal();
+    }
+
     /// Sets `property` to `value` in the rule written exactly as
     /// `selector`: in place when it has it, else added (the rule made if
     /// there isn't one). Returns the stylesheet's text before and after.

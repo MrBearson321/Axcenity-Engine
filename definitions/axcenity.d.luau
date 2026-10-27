@@ -791,6 +791,16 @@ declare extern type Frame extends Instance with
 	ZIndex: number
 	--- Degrees clockwise: it and everything in it are drawn turned around its middle, and clicks hit the turned shape. Layout doesn't change, so its Position and Size are those of the upright box. 0 by default.
 	Rotation: number
+	--- If true, keyboard and controller navigation can focus it (CSS :focus). On by default for buttons, text boxes, sliders, toggles and dropdowns.
+	Selectable: boolean
+	--- The Id of the element focus moves to when up is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionUp: string
+	--- The Id of the element focus moves to when down is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionDown: string
+	--- The Id of the element focus moves to when left is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionLeft: string
+	--- The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionRight: string
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
 	MouseEnter: Signal
 	--- Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.
@@ -834,6 +844,16 @@ declare extern type TextLabel extends Instance with
 	ZIndex: number
 	--- Degrees clockwise: it and everything in it are drawn turned around its middle, and clicks hit the turned shape. Layout doesn't change, so its Position and Size are those of the upright box. 0 by default.
 	Rotation: number
+	--- If true, keyboard and controller navigation can focus it (CSS :focus). On by default for buttons, text boxes, sliders, toggles and dropdowns.
+	Selectable: boolean
+	--- The Id of the element focus moves to when up is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionUp: string
+	--- The Id of the element focus moves to when down is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionDown: string
+	--- The Id of the element focus moves to when left is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionLeft: string
+	--- The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionRight: string
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
 	MouseEnter: Signal
 	--- Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.
@@ -885,6 +905,16 @@ declare extern type TextButton extends Instance with
 	HoverSound: string
 	--- A sound file (a path in the project) played once when the button is clicked. Empty plays nothing.
 	ClickSound: string
+	--- If true, keyboard and controller navigation can focus it (CSS :focus). On by default for buttons, text boxes, sliders, toggles and dropdowns.
+	Selectable: boolean
+	--- The Id of the element focus moves to when up is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionUp: string
+	--- The Id of the element focus moves to when down is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionDown: string
+	--- The Id of the element focus moves to when left is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionLeft: string
+	--- The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionRight: string
 	--- Fires when the player clicks or taps this button. The handler gets no arguments; LocalScripts only.
 	Activated: Signal
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
@@ -922,6 +952,16 @@ declare extern type ImageLabel extends Instance with
 	ZIndex: number
 	--- Degrees clockwise: it and everything in it are drawn turned around its middle, and clicks hit the turned shape. Layout doesn't change, so its Position and Size are those of the upright box. 0 by default.
 	Rotation: number
+	--- If true, keyboard and controller navigation can focus it (CSS :focus). On by default for buttons, text boxes, sliders, toggles and dropdowns.
+	Selectable: boolean
+	--- The Id of the element focus moves to when up is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionUp: string
+	--- The Id of the element focus moves to when down is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionDown: string
+	--- The Id of the element focus moves to when left is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionLeft: string
+	--- The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionRight: string
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
 	MouseEnter: Signal
 	--- Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.
@@ -969,6 +1009,16 @@ declare extern type TextBox extends Instance with
 	ZIndex: number
 	--- Degrees clockwise: it and everything in it are drawn turned around its middle, and clicks hit the turned shape. Layout doesn't change, so its Position and Size are those of the upright box. 0 by default.
 	Rotation: number
+	--- If true, keyboard and controller navigation can focus it (CSS :focus). On by default for buttons, text boxes, sliders, toggles and dropdowns.
+	Selectable: boolean
+	--- The Id of the element focus moves to when up is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionUp: string
+	--- The Id of the element focus moves to when down is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionDown: string
+	--- The Id of the element focus moves to when left is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionLeft: string
+	--- The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionRight: string
 	--- Fires when the player finishes typing: Enter on a one-line box, or clicking away (or Escape) on any box. The handler gets no arguments; LocalScripts only.
 	FocusLost: Signal
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
@@ -1004,6 +1054,16 @@ declare extern type PageLayout extends Instance with
 	Rotation: number
 	--- The Name of the child Frame to show. Empty shows the first child Frame. A name that matches no Frame is rejected and the current page stays.
 	CurrentPage: string
+	--- If true, keyboard and controller navigation can focus it (CSS :focus). On by default for buttons, text boxes, sliders, toggles and dropdowns.
+	Selectable: boolean
+	--- The Id of the element focus moves to when up is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionUp: string
+	--- The Id of the element focus moves to when down is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionDown: string
+	--- The Id of the element focus moves to when left is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionLeft: string
+	--- The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionRight: string
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
 	MouseEnter: Signal
 	--- Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.
@@ -1037,6 +1097,16 @@ declare extern type Table extends Instance with
 	Rotation: number
 	--- How many cells sit in one row. Cells are the table's children, left to right then top to bottom, each the same size.
 	Columns: number
+	--- If true, keyboard and controller navigation can focus it (CSS :focus). On by default for buttons, text boxes, sliders, toggles and dropdowns.
+	Selectable: boolean
+	--- The Id of the element focus moves to when up is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionUp: string
+	--- The Id of the element focus moves to when down is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionDown: string
+	--- The Id of the element focus moves to when left is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionLeft: string
+	--- The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionRight: string
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
 	MouseEnter: Signal
 	--- Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.
@@ -1078,6 +1148,16 @@ declare extern type ScrollingFrame extends Instance with
 	ScrollBarThickness: number
 	--- "None", "X", "Y" or "XY": the canvas grows that way to fit the children, past CanvasSize.
 	AutomaticCanvasSize: string
+	--- If true, keyboard and controller navigation can focus it (CSS :focus). On by default for buttons, text boxes, sliders, toggles and dropdowns.
+	Selectable: boolean
+	--- The Id of the element focus moves to when up is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionUp: string
+	--- The Id of the element focus moves to when down is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionDown: string
+	--- The Id of the element focus moves to when left is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionLeft: string
+	--- The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionRight: string
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
 	MouseEnter: Signal
 	--- Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.
@@ -1119,6 +1199,16 @@ declare extern type Slider extends Instance with
 	Step: number
 	--- "Horizontal" (MinValue at the left) or "Vertical" (MinValue at the bottom). Style its parts with CSS: Slider::track, ::fill (the track up to the thumb) and ::thumb.
 	Orientation: string
+	--- If true, keyboard and controller navigation can focus it (CSS :focus). On by default for buttons, text boxes, sliders, toggles and dropdowns.
+	Selectable: boolean
+	--- The Id of the element focus moves to when up is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionUp: string
+	--- The Id of the element focus moves to when down is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionDown: string
+	--- The Id of the element focus moves to when left is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionLeft: string
+	--- The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionRight: string
 	--- Fires each time Value changes, from the pointer or a script, with the new Value.
 	ValueChanged: Signal
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
@@ -1156,6 +1246,16 @@ declare extern type Toggle extends Instance with
 	Value: boolean
 	--- "Switch" (a knob that slides across a track) or "Checkbox" (a box ticked while on). Style its parts with CSS: Toggle::track, ::thumb (a switch's knob) and ::check (a checkbox's tick).
 	Style: string
+	--- If true, keyboard and controller navigation can focus it (CSS :focus). On by default for buttons, text boxes, sliders, toggles and dropdowns.
+	Selectable: boolean
+	--- The Id of the element focus moves to when up is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionUp: string
+	--- The Id of the element focus moves to when down is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionDown: string
+	--- The Id of the element focus moves to when left is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionLeft: string
+	--- The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionRight: string
 	--- Fires each time Value changes, from the pointer or a script, with the new Value.
 	ValueChanged: Signal
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
@@ -1199,6 +1299,16 @@ declare extern type Dropdown extends Instance with
 	TextColor3: Color3
 	--- The size of its text in pixels, unless CSS `font-size` sets it.
 	TextSize: number
+	--- If true, keyboard and controller navigation can focus it (CSS :focus). On by default for buttons, text boxes, sliders, toggles and dropdowns.
+	Selectable: boolean
+	--- The Id of the element focus moves to when up is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionUp: string
+	--- The Id of the element focus moves to when down is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionDown: string
+	--- The Id of the element focus moves to when left is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionLeft: string
+	--- The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionRight: string
 	--- Fires each time Value changes, from the pointer or a script, with the new Value.
 	ValueChanged: Signal
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
@@ -1240,6 +1350,16 @@ declare extern type ProgressBar extends Instance with
 	MaxValue: number
 	--- "Horizontal" (fills from the left) or "Vertical" (fills from the bottom). Style the filled part with CSS ProgressBar::fill, which can be a linear-gradient.
 	Orientation: string
+	--- If true, keyboard and controller navigation can focus it (CSS :focus). On by default for buttons, text boxes, sliders, toggles and dropdowns.
+	Selectable: boolean
+	--- The Id of the element focus moves to when up is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionUp: string
+	--- The Id of the element focus moves to when down is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionDown: string
+	--- The Id of the element focus moves to when left is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionLeft: string
+	--- The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.
+	NextSelectionRight: string
 	--- Fires each time Value changes, from the pointer or a script, with the new Value.
 	ValueChanged: Signal
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.

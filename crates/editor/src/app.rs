@@ -189,6 +189,11 @@ pub struct EditorApp {
     /// `MouseEnter`, `MouseLeave` and buttons' sounds from the viewport,
     /// for the next Play frame.
     pending_ui_events: Vec<axcenity_ui::UiEvent>,
+    /// Key presses for the game UI's focus, taken out of egui's input
+    /// during Play (`take_nav_keys`) and used before the next game frame.
+    nav_keys: Vec<axcenity_ui::NavKey>,
+    /// Game controllers, opened the first time a game frame runs.
+    gamepads: Option<axcenity_ui::Gamepads>,
     /// A TextBox the player is typing in during Play.
     focused_text: Option<InstanceId>,
     pending_focus_lost: Option<InstanceId>,
@@ -523,6 +528,8 @@ impl EditorApp {
             play: None,
             pending_ui_activation: None,
             pending_ui_events: Vec::new(),
+            nav_keys: Vec::new(),
+            gamepads: None,
             focused_text: None,
             pending_focus_lost: None,
             ui_warnings: Vec::new(),
@@ -648,6 +655,12 @@ fn shown<'a>(world: &'a World, play: &'a Option<Session>) -> &'a World {
 }
 
 impl eframe::App for EditorApp {
+    /// Takes the keys that move the game UI's focus during Play before
+    /// egui sees them, so Tab and the arrows don't move egui's own focus.
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        self.take_nav_keys(ctx, raw_input);
+    }
+
     /// Called by eframe to draw each frame (only when something changed,
     /// such as mouse movement, unless a frame is requested).
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
@@ -831,6 +844,8 @@ impl EditorApp {
                     }
                 }
             }
+            // Focus moves before the game's input, as in the player.
+            self.navigate_play_ui(seconds as f32);
             let keys = self.game_keys.read(&events, modifiers, focused, typing);
             let activation = self.pending_ui_activation.take();
             let focus_lost = self.pending_focus_lost.take();
@@ -1055,6 +1070,8 @@ mod behavior_tree_tests;
 mod ik_tests;
 #[cfg(test)]
 mod imported_clip_tests;
+#[cfg(test)]
+mod navigation_tests;
 #[cfg(test)]
 mod play_tests;
 #[cfg(test)]

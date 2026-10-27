@@ -770,9 +770,9 @@ Existing menus and HUDs can be navigated with the keyboard and a game controller
 ### Acceptance criteria
 
 - [ ] The keyboard and a controller both move focus through a menu in the same order and activate the focused button.
-- [ ] A focused button shows its `:focus` style, a `NextSelectionDown` override is followed, and a focused slider moves with left and right.
-- [ ] A focused text box receives typing, and leaving it fires the same `FocusLost` that clicking away does.
-- [ ] A HUD that isn't navigated still shows, clicks and scales as it does today.
+- [x] A focused button shows its `:focus` style, a `NextSelectionDown` override is followed, and a focused slider moves with left and right.
+- [x] A focused text box receives typing, and leaving it fires the same `FocusLost` that clicking away does.
+- [x] A HUD that isn't navigated still shows, clicks and scales as it does today.
 
 ---
 

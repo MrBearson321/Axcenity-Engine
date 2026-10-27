@@ -470,6 +470,83 @@ impl EditorApp {
             self.forget_selection_outside_tree();
         }
     }
+    /// During Play, takes the key presses that move the game UI's focus out
+    /// of `input` (see `UiInteraction::takes`), for `navigate_play_ui`:
+    /// Tab when there's something to focus, and the arrows, Enter and
+    /// Escape while something is. Not while a game text box or one of the
+    /// editor's own widgets has the keyboard.
+    pub(super) fn take_nav_keys(&mut self, ctx: &egui::Context, input: &mut egui::RawInput) {
+        if !self.playing()
+            || self.paused()
+            || self.focused_text.is_some()
+            || ctx.memory(|memory| memory.focused().is_some())
+        {
+            return;
+        }
+        let Some(session) = &self.play else {
+            return;
+        };
+        let (world, viewport) = (session.world(), &self.viewport);
+        let mut taken = Vec::new();
+        input.events.retain(|event| {
+            let egui::Event::Key {
+                key,
+                pressed: true,
+                modifiers,
+                ..
+            } = event
+            else {
+                return true;
+            };
+            match crate::play::nav_key(*key, modifiers.shift) {
+                Some(nav) if viewport.ui_takes(world, nav) => {
+                    taken.push(nav);
+                    false
+                }
+                _ => true,
+            }
+        });
+        self.nav_keys.extend(taken);
+    }
+
+    /// Moves the game UI's focus by the keys `take_nav_keys` took and the
+    /// game controllers, `seconds` after the last frame. Confirm on a
+    /// button fires `Activated`, and on a text box starts typing in it;
+    /// while typing, a controller's Confirm or Back finishes it.
+    pub(super) fn navigate_play_ui(&mut self, seconds: f32) {
+        let mut keys = std::mem::take(&mut self.nav_keys);
+        keys.extend(
+            self.gamepads
+                .get_or_insert_with(axcenity_ui::Gamepads::new)
+                .poll(seconds),
+        );
+        for key in keys {
+            if let Some(id) = self.focused_text {
+                if matches!(
+                    key,
+                    axcenity_ui::NavKey::Confirm | axcenity_ui::NavKey::Back
+                ) {
+                    self.focused_text = None;
+                    self.pending_focus_lost = Some(id);
+                }
+                continue;
+            }
+            let Some(session) = &mut self.play else {
+                return;
+            };
+            let done = self.viewport.navigate_ui(session.world(), key);
+            done.apply(session.world_mut());
+            if let Some(button) = done.activated
+                && let Err(crash) = session.activate_ui_button(button, &mut self.output)
+            {
+                return self.crashed(crash);
+            }
+            if done.text_box.is_some() {
+                self.focused_text = done.text_box;
+            }
+        }
+    }
+
     /// Runs one frame of the game, `seconds` long, with the keys pressed and
     /// released since the last one. LocalScripts see the viewport's camera
     /// as `workspace.CurrentCamera`, and can move it. A crash stops the game.

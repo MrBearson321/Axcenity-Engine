@@ -33,10 +33,11 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      # Audio output (kira, through cpal) needs the ALSA and D-Bus headers on Linux.
+      # Audio output (kira, through cpal) needs the ALSA and D-Bus headers on
+      # Linux, and game controllers (gilrs) need libudev.
       - name: Install Linux audio libraries
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libdbus-1-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libdbus-1-dev libudev-dev pkg-config
       - run: cargo build --workspace --all-targets --locked
       # Exported games ship the player, which must hold no editor code.
       - name: Check the player has no editor code

@@ -82,6 +82,8 @@ pub(crate) struct PseudoClasses<'a> {
     pub(crate) hovered: Option<InstanceId>,
     pub(crate) active: Option<InstanceId>,
     pub(crate) focused: Option<InstanceId>,
+    /// The element keyboard or controller navigation has focused.
+    pub(crate) selected: Option<InstanceId>,
     /// An element shown in a state whatever the pointer does, for the UI
     /// Designer's state preview.
     pub(crate) forced: Option<(InstanceId, UiState)>,
@@ -194,6 +196,8 @@ struct SimpleSelector {
     disabled: bool,
     /// `:checked`: a Toggle that's on.
     checked: bool,
+    /// `:focus`: the element navigation focused, or a TextBox being typed in.
+    focus: bool,
     /// The type name `Tooltip`: the box a `Tooltip` property shows, which
     /// isn't an Instance. It's styled as a child of the element it's for.
     tooltip: bool,
@@ -529,6 +533,23 @@ fn winning_declarations<'a>(
     winners
 }
 
+/// Whether a `:focus` rule styles `id` itself, in `pseudo`'s states. When
+/// none does, a focused element gets the default focus ring.
+pub(crate) fn focus_rule_applies(
+    world: &World,
+    id: InstanceId,
+    stylesheets: &[Stylesheet],
+    pseudo: PseudoClasses<'_>,
+) -> bool {
+    stylesheets
+        .iter()
+        .flat_map(|stylesheet| &stylesheet.rules)
+        .filter(|rule| !rule.declarations.is_empty())
+        .flat_map(|rule| &rule.selectors)
+        .filter(|selector| selector.parts.last().is_some_and(|last| last.focus))
+        .any(|selector| selector_matches(world, id, selector, pseudo))
+}
+
 fn selector_matches(
     world: &World,
     id: InstanceId,
@@ -631,10 +652,12 @@ fn simple_matches(
     };
     let checked = instance.class() == ClassName::Toggle
         && instance.property("Value").and_then(Value::as_bool) == Some(true);
+    let focused = pseudo.focused == Some(id) || pseudo.selected == Some(id);
     if (selector.hovered && !hovered)
         || (selector.active && !active)
         || (selector.disabled && !disabled)
         || (selector.checked && !checked)
+        || (selector.focus && !focused)
     {
         return false;
     }
@@ -734,6 +757,10 @@ fn parse_selector(selector: &str) -> Option<Selector> {
                         }
                         "checked" if start != cursor && !part.checked => {
                             part.checked = true;
+                            specificity.1 += 1;
+                        }
+                        "focus" | "focus-visible" if start != cursor && !part.focus => {
+                            part.focus = true;
                             specificity.1 += 1;
                         }
                         _ => return None,

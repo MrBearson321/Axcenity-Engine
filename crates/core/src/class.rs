@@ -281,9 +281,55 @@ impl ClassName {
         )
     }
 
+    /// A screen element that keyboard and controller navigation can move
+    /// through: every GUI element but ScreenGui and BillboardGui.
+    pub fn is_screen_element(self) -> bool {
+        matches!(
+            self,
+            ClassName::Frame
+                | ClassName::TextLabel
+                | ClassName::TextButton
+                | ClassName::ImageLabel
+                | ClassName::TextBox
+                | ClassName::PageLayout
+                | ClassName::Table
+                | ClassName::ScrollingFrame
+        ) || self.is_value_widget()
+    }
+
+    /// Whether navigation focuses this class unless its `Selectable` is
+    /// turned off: buttons, text boxes and the widgets that can be changed.
+    pub fn selectable_by_default(self) -> bool {
+        matches!(
+            self,
+            ClassName::TextButton
+                | ClassName::TextBox
+                | ClassName::Slider
+                | ClassName::Toggle
+                | ClassName::Dropdown
+        )
+    }
+
     /// Every property this class has, with its default value. A new Instance
     /// starts with all of these, which also fixes each property's type.
     pub fn default_properties(self) -> Vec<(&'static str, Value)> {
+        let mut properties = self.own_properties();
+        if self.is_screen_element() {
+            properties.extend([
+                // Whether keyboard and controller navigation can focus it.
+                ("Selectable", Value::Bool(self.selectable_by_default())),
+                // The `Id` of the element focus moves to on that arrow, or
+                // empty for the nearest selectable element that way.
+                ("NextSelectionUp", Value::String(String::new())),
+                ("NextSelectionDown", Value::String(String::new())),
+                ("NextSelectionLeft", Value::String(String::new())),
+                ("NextSelectionRight", Value::String(String::new())),
+            ]);
+        }
+        properties
+    }
+
+    fn own_properties(self) -> Vec<(&'static str, Value)> {
         match self {
             ClassName::DataModel
             | ClassName::Players

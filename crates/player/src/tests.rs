@@ -2568,3 +2568,202 @@ fn position_of_part(world: &World, id: InstanceId) -> Vector3 {
         .and_then(Value::as_vector3)
         .unwrap()
 }
+
+#[test]
+fn hello_menu_moves_focus_the_same_by_keys_and_controller_and_uses_what_is_focused() {
+    use axcenity_ui::{GamepadButton, Stylesheet, TextCommand, TextOutcome, UiLayout, button_key};
+
+    /// The menu as the player runs it: keys and controller buttons go
+    /// through `navigate_ui`, typing through `edit_text_box`.
+    struct Game {
+        world: World,
+        scripts: ScriptRuntime,
+        sheets: Vec<Stylesheet>,
+        ui: UiInteraction,
+        typing: Option<InstanceId>,
+        output: Vec<String>,
+    }
+    impl Game {
+        fn frame(&mut self) -> UiLayout {
+            self.scripts.step(&mut self.world, 1.0 / 60.0);
+            self.output
+                .extend(self.scripts.take_output().into_iter().map(|line| line.text));
+            let input = UiInput {
+                focused: self.typing,
+                ..UiInput::default()
+            };
+            self.ui.layout(
+                &self.world,
+                (1280, 720),
+                &self.sheets,
+                input,
+                None,
+                1.0 / 60.0,
+            )
+        }
+        fn nav(&mut self, key: NavKey) {
+            assert!(self.ui.takes(&self.world, key) || key == NavKey::Down);
+            if let Some(id) = navigate_ui(&mut self.ui, &mut self.world, &mut self.scripts, key) {
+                self.typing = Some(id);
+            }
+            self.frame();
+        }
+        fn named(&self, name: &str) -> InstanceId {
+            self.world
+                .find_first_descendant(self.world.workspace(), name)
+                .unwrap()
+        }
+        fn focused(&self) -> Option<String> {
+            let id = self.ui.selected()?;
+            Some(self.world.get(id)?.name().to_owned())
+        }
+        fn finish_typing(&mut self) {
+            let id = self.typing.take().unwrap();
+            self.scripts.release_text_box(&mut self.world, id);
+            self.frame();
+        }
+    }
+    let start = || {
+        let (world, scripts, folder) = start_example_in("hello-menu");
+        let css = std::fs::read_to_string(folder.join("ui.css")).unwrap();
+        let (sheet, warnings) = axcenity_ui::parse_stylesheet("ui.css", &css);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let mut game = Game {
+            world,
+            scripts,
+            sheets: vec![sheet],
+            ui: UiInteraction::default(),
+            typing: None,
+            output: Vec::new(),
+        };
+        let first = game.frame();
+        assert!(first.warnings.is_empty(), "{:?}", first.warnings);
+        game
+    };
+
+    // The keyboard: Tab to start, then the down arrow. The controller:
+    // the d-pad all the way. Both visit the same elements in order, and
+    // Quit's NextSelectionDown wraps both round to the name box.
+    let keyboard: Vec<NavKey> = [KeyCode::Tab]
+        .into_iter()
+        .chain([KeyCode::ArrowDown; 5])
+        .map(|key| nav_key(key, false).unwrap())
+        .collect();
+    let controller: Vec<NavKey> = [GamepadButton::DPadDown; 6]
+        .into_iter()
+        .map(|button| button_key(button).unwrap())
+        .collect();
+    let mut orders = Vec::new();
+    for keys in [keyboard, controller] {
+        let mut game = start();
+        let mut order = Vec::new();
+        for key in keys {
+            game.nav(key);
+            order.extend(game.focused());
+        }
+        orders.push(order);
+    }
+    let expected = [
+        "PlayerName",
+        "Play",
+        "Options",
+        "Volume",
+        "Quit",
+        "PlayerName",
+    ];
+    assert_eq!(orders[0], expected);
+    assert_eq!(orders[1], expected);
+
+    // Enter and the controller's A both activate the focused button.
+    for confirm in [
+        nav_key(KeyCode::Enter, false).unwrap(),
+        button_key(GamepadButton::South).unwrap(),
+    ] {
+        let mut game = start();
+        game.nav(NavKey::Next);
+        game.nav(NavKey::Down);
+        game.nav(NavKey::Down);
+        assert_eq!(game.focused().as_deref(), Some("Options"));
+        game.nav(confirm);
+        assert!(
+            game.output.iter().any(|line| line == "Options pressed"),
+            "{:?}",
+            game.output
+        );
+    }
+
+    // The focused buttons show their :focus rule, so no default ring; the
+    // slider has none, so it gets the ring, and moves with left and right.
+    let mut game = start();
+    for _ in 0..4 {
+        game.nav(NavKey::Next);
+    }
+    assert_eq!(game.focused().as_deref(), Some("Volume"));
+    game.nav(nav_key(KeyCode::ArrowRight, false).unwrap());
+    let volume = game.named("Volume");
+    assert_eq!(
+        game.world.get(volume).unwrap().property("Value"),
+        Some(&Value::Number(55.0))
+    );
+    let ring = |layout: &UiLayout| {
+        layout.draw_items.iter().any(|item| {
+            matches!(item, axcenity_render::UiDrawItem::Rectangle(r)
+                if r.border_color == axcenity_ui::FOCUS_RING_COLOR)
+        })
+    };
+    assert!(ring(&game.frame()));
+    let status = game.named("Status");
+    assert_eq!(
+        game.world.get(status).unwrap().property("Text"),
+        Some(&Value::String("Volume 55".into())),
+        "ValueChanged fired"
+    );
+    game.nav(NavKey::Up);
+    game.nav(NavKey::Up);
+    assert_eq!(game.focused().as_deref(), Some("Play"));
+    assert!(!ring(&game.frame()), "TextButton:focus styles it");
+
+    // Confirm on the name box types into it; Enter finishes and fires the
+    // same FocusLost a click away does.
+    let mut game = start();
+    game.nav(NavKey::Next);
+    game.nav(NavKey::Confirm);
+    let name = game.named("PlayerName");
+    assert_eq!(game.typing, Some(name));
+    for command in [TextCommand::Insert("Ana".into()), TextCommand::Submit] {
+        let outcome = axcenity_ui::edit_text_box(&mut game.world, name, command);
+        if outcome == TextOutcome::Finished {
+            game.finish_typing();
+        }
+    }
+    assert_eq!(game.typing, None);
+    assert_eq!(
+        game.focused().as_deref(),
+        Some("PlayerName"),
+        "focus comes back"
+    );
+    assert!(
+        game.output.iter().any(|line| line == "Hello, Ana"),
+        "{:?}",
+        game.output
+    );
+    // Then the arrows move on from it.
+    game.nav(NavKey::Down);
+    assert_eq!(game.focused().as_deref(), Some("Play"));
+
+    // A click on the box and a click away: the same FocusLost.
+    let mut game = start();
+    let layout = game.frame();
+    let rect = layout.element(name).unwrap().rect;
+    let at = [rect.x + 4.0, rect.y + 4.0];
+    let _ = game.ui.press(&game.world, at);
+    assert_eq!(layout.hit_text_box(at[0], at[1]), Some(name));
+    game.typing = Some(name);
+    let _ = axcenity_ui::edit_text_box(&mut game.world, name, TextCommand::Insert("Bo".into()));
+    game.finish_typing();
+    assert!(
+        game.output.iter().any(|line| line == "Hello, Bo"),
+        "{:?}",
+        game.output
+    );
+}

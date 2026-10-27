@@ -10,6 +10,8 @@ authors.workspace = true
 axcenity-anim.workspace = true
 axcenity-core.workspace = true
 axcenity-render.workspace = true
+gilrs.workspace = true
+log.workspace = true
 taffy.workspace = true
 
 [lints]

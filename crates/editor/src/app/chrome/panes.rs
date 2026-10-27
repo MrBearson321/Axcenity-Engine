@@ -216,6 +216,11 @@ impl EditorApp {
                 DesignerAction::MoveAnchor { id, position, size } => {
                     self.anchor(id, position, size);
                 }
+                DesignerAction::NextSelection {
+                    id,
+                    property,
+                    target,
+                } => self.set_next_selection(id, property, target),
                 DesignerAction::Font { id, family } => self.set_font(id, &family),
                 DesignerAction::TextStyle {
                     id,

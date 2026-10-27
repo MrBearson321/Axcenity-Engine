@@ -8,6 +8,7 @@
 mod style;
 
 mod css;
+mod gamepad;
 mod interact;
 mod loading;
 mod paint;
@@ -18,9 +19,11 @@ mod turn;
 mod widget;
 
 pub use css::*;
+pub use gamepad::{GamepadButton, Gamepads, NavRepeat, button_key};
 use interact::interactable;
 pub use interact::{
-    SCROLL_DRAG_SLOP, TOOLTIP_DELAY, UiCursor, UiEvent, UiInput, UiInteraction, UiScrolled, UiState,
+    FOCUS_RING_COLOR, NavKey, SCROLL_DRAG_SLOP, TOOLTIP_DELAY, UiCursor, UiEvent, UiInput,
+    UiInteraction, UiNavigated, UiScrolled, UiState,
 };
 pub use loading::LoadingGui;
 use paint::*;
@@ -1332,7 +1335,9 @@ fn place_element(
         rect,
         styles,
         inherited.opacity,
-        pseudo.focused == Some(id),
+        // A TextBox being typed in has a ring in its text colour, unless a
+        // `:focus` rule styles it.
+        pseudo.focused == Some(id) && !style::focus_rule_applies(world, id, stylesheets, pseudo),
         &mut out.draw_items,
         &mut out.warnings,
     );
@@ -1699,6 +1704,8 @@ fn finite(value: f32) -> f32 {
     if value.is_finite() { value } else { 0.0 }
 }
 
+#[cfg(test)]
+mod focus_tests;
 #[cfg(test)]
 mod layering_tests;
 #[cfg(test)]

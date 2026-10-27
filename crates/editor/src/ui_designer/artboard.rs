@@ -12,6 +12,7 @@ use eframe::egui_wgpu::RenderState;
 
 use super::anchor_handles::{AnchorDrag, AnchorHandles};
 use super::group::{GroupBox, GroupDrag};
+use super::navigation::{self, FocusArrows, FocusDrag};
 use super::rich_text::{self, Format};
 use super::rotate::{self, RotateDrag};
 use super::rulers::{self, RULER};
@@ -159,6 +160,7 @@ impl UiDesigner {
             self.marquee = None;
             self.anchor_drag = None;
             self.rotate_drag = None;
+            self.focus_drag = None;
             painter.text(
                 canvas.center(),
                 egui::Align2::CENTER_CENTER,
@@ -415,6 +417,25 @@ impl UiDesigner {
             }
             _ => false,
         };
+        // Further out from the middle of each edge, an arrow sets where
+        // keyboard and controller focus goes that way.
+        let focus_arrows = handles
+            .as_ref()
+            .and_then(|handles| FocusArrows::new(world, handles.element.id, handles.rect));
+        // An arrow over another element gives way to it, so a click there
+        // still selects that element.
+        let focus_grab = match (over, &focus_arrows) {
+            (Some(pointer), Some(arrows))
+                if anchor_grab.is_none() && grip.is_none() && !rotate_grab =>
+            {
+                let [x, y] = pixel_of(pointer);
+                let clear = layout.hit(x, y).is_none_or(|under| {
+                    under == arrows.id || world.is_descendant_of(arrows.id, under)
+                });
+                arrows.grab_at(pointer).filter(|_| clear)
+            }
+            _ => None,
+        };
         let group_grip = match (over, &group) {
             (Some(pointer), Some(group)) => group.grip_at(pointer),
             _ => None,
@@ -465,6 +486,7 @@ impl UiDesigner {
             && self.marquee.is_none()
             && self.anchor_drag.is_none()
             && self.rotate_drag.is_none()
+            && self.focus_drag.is_none()
             && self.guide_drag.is_none()
             && !self.scroller.scrolling()
             && scene.editing
@@ -489,6 +511,11 @@ impl UiDesigner {
                 self.drag = UiDrag::start(handles, grip, pointer, world);
             } else if let (true, Some(handles)) = (rotate_grab, &handles) {
                 self.rotate_drag = RotateDrag::start(handles, pointer, world);
+            } else if let (Some(index), Some(arrows)) = (focus_grab, &focus_arrows) {
+                self.focus_drag = Some(FocusDrag {
+                    id: arrows.id,
+                    index,
+                });
             } else if let Some(grip) = group_grip.filter(|&grip| grip != Grip::BODY) {
                 self.group_drag =
                     GroupDrag::start(world, scene.stylesheets, &layout, &roots, grip, pointer);
@@ -673,6 +700,29 @@ impl UiDesigner {
                 }
             }
         }
+        // A focus arrow let go over an element points there; over nothing,
+        // it's cleared.
+        let mut aiming = None;
+        if let Some(drag) = self.focus_drag {
+            match pointer {
+                _ if !scene.editing => self.focus_drag = None,
+                Some(pointer) if down => {
+                    let target = navigation::target_at(world, &layout, pixel_of(pointer), drag.id);
+                    aiming = Some((drag, pointer, target));
+                }
+                at => {
+                    self.focus_drag = None;
+                    let target = at.and_then(|pointer| {
+                        navigation::target_at(world, &layout, pixel_of(pointer), drag.id)
+                    });
+                    actions.push(DesignerAction::NextSelection {
+                        id: drag.id,
+                        property: navigation::DIRECTIONS[drag.index].0,
+                        target,
+                    });
+                }
+            }
+        }
         // Right-click on a diamond: Reset anchor.
         if let Some(anchor) = &anchor_handles
             && ((anchor_grab.is_some() && self.anchor_drag.is_none()) || self.anchor_menu)
@@ -817,6 +867,47 @@ impl UiDesigner {
                     handles.paint_measures(&painter, view.board, parent, 1.0 / view.per_unit());
                 }
             }
+        }
+        if let Some(arrows) = &focus_arrows {
+            let by_id = |named: &str| {
+                layout
+                    .elements
+                    .iter()
+                    .find(|element| {
+                        world
+                            .get(element.id)
+                            .and_then(|instance| instance.property("Id"))
+                            .and_then(Value::as_str)
+                            == Some(named)
+                    })
+                    .map(|element| points_of(element.rect))
+            };
+            let lit = self.focus_drag.map(|drag| drag.index).or(focus_grab);
+            arrows.paint(&painter, world, by_id, palette.accent, lit);
+        }
+        if let Some((drag, pointer, target)) = aiming
+            && let Some(arrows) = &focus_arrows
+        {
+            let at = arrows.at(drag.index);
+            match target.and_then(|id| layout.element(id)) {
+                Some(element) => {
+                    let rect = points_of(element.rect);
+                    painter.rect_stroke(
+                        rect,
+                        0.0,
+                        egui::Stroke::new(2.0_f32, palette.accent),
+                        egui::StrokeKind::Outside,
+                    );
+                    navigation::link(&painter, at, rect, palette.accent);
+                }
+                None => {
+                    let tiny = egui::Rect::from_center_size(pointer, egui::Vec2::splat(1.0));
+                    navigation::link(&painter, at, tiny, palette.accent);
+                }
+            }
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        } else if focus_grab.is_some() && self.drag.is_none() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
         }
         if let Some(anchor) = &anchor_handles {
             let lit = self

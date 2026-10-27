@@ -464,6 +464,39 @@ impl Viewport {
         self.particles.clear();
     }
 
+    /// Uses a key for the game UI's focus during Play, by the last frame's
+    /// layout (see `UiInteraction::navigate`).
+    pub fn navigate_ui(
+        &mut self,
+        world: &World,
+        key: axcenity_ui::NavKey,
+    ) -> axcenity_ui::UiNavigated {
+        self.ui.navigate(world, key)
+    }
+
+    /// Whether `key` is for the game UI's focus rather than the game.
+    pub fn ui_takes(&self, world: &World, key: axcenity_ui::NavKey) -> bool {
+        self.ui.takes(world, key)
+    }
+
+    /// The element the game UI's focus is on.
+    #[cfg(test)]
+    pub fn ui_selected(&self) -> Option<InstanceId> {
+        self.ui.selected()
+    }
+
+    /// Lays the UI out as drawing does, without a GPU, for tests.
+    #[cfg(test)]
+    pub fn lay_out_ui(
+        &mut self,
+        world: &World,
+        stylesheets: &[axcenity_ui::Stylesheet],
+        size: (u32, u32),
+    ) {
+        let input = axcenity_ui::UiInput::default();
+        let _ = self.ui.layout(world, size, stylesheets, input, None, 0.0);
+    }
+
     /// Forgets the UI's hover, transitions and tooltip, as Play starts or
     /// stops: the edit world and the game's are different worlds.
     pub fn clear_ui(&mut self) {

@@ -578,6 +578,24 @@ impl GameKeys {
     }
 }
 
+/// What a key does to the game UI's focus during Play: Tab and Shift+Tab
+/// step through it, the arrows move it, Enter uses the focused element and
+/// Escape lets go. The same keys as the player's.
+pub fn nav_key(key: egui::Key, shift: bool) -> Option<axcenity_ui::NavKey> {
+    use axcenity_ui::NavKey;
+    Some(match key {
+        egui::Key::Tab if shift => NavKey::Previous,
+        egui::Key::Tab => NavKey::Next,
+        egui::Key::ArrowUp => NavKey::Up,
+        egui::Key::ArrowDown => NavKey::Down,
+        egui::Key::ArrowLeft => NavKey::Left,
+        egui::Key::ArrowRight => NavKey::Right,
+        egui::Key::Enter => NavKey::Confirm,
+        egui::Key::Escape => NavKey::Back,
+        _ => return None,
+    })
+}
+
 /// The key scripts know as `Enum.KeyCode.<name>` for an egui key, if it's
 /// one they can see. Shift, Ctrl and Alt come from the modifiers instead.
 fn script_key(key: egui::Key) -> Option<KeyCode> {

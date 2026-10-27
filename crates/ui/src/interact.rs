@@ -2,9 +2,14 @@
 //! transitions, `MouseEnter` and `MouseLeave`, tooltips, the cursor,
 //! buttons' hover and click sounds, scrolling ScrollingFrames, and the
 //! widgets' values (dragging a Slider, flipping a Toggle, picking from a
-//! Dropdown's list, which it draws over everything while it's open). Hosts
-//! (the player, the editor's viewport) keep one [`UiInteraction`] for a
-//! game and lay their UI out through it each frame.
+//! Dropdown's list, which it draws over everything while it's open), and
+//! keyboard and controller focus (`focus.rs`). Hosts (the player, the
+//! editor's viewport) keep one [`UiInteraction`] for a game and lay their
+//! UI out through it each frame.
+
+mod focus;
+
+pub use focus::{FOCUS_RING_COLOR, NavKey, UiNavigated};
 
 use std::cell::RefCell;
 
@@ -12,7 +17,9 @@ use axcenity_core::{ClassName, InstanceId, Value, Vector2, World};
 use axcenity_render::{Camera, UiDrawItem, UiText};
 
 use crate::css::*;
-use crate::style::{PseudoClasses, Stylesheet, resolve_styles, resolve_tooltip_styles};
+use crate::style::{
+    PseudoClasses, Stylesheet, focus_rule_applies, resolve_styles, resolve_tooltip_styles,
+};
 use crate::transition::Transitions;
 use crate::widget::{self, DropdownList};
 use crate::{UiElement, UiLayout, layout_ui_with_pseudo, scroll_bars};
@@ -120,6 +127,11 @@ pub struct UiInteraction {
     dropdown: Option<(InstanceId, Option<f32>)>,
     /// That list, as the last layout drew it.
     list: Option<DropdownList>,
+    /// The element keyboard or controller navigation focused (`:focus`).
+    selected: Option<InstanceId>,
+    /// The option of the open list the keyboard or controller is on, when
+    /// it was opened that way.
+    list_cursor: Option<usize>,
 }
 
 /// A press on a widget that does something when it's let go over the same place.
@@ -218,6 +230,7 @@ impl UiInteraction {
             stylesheets,
             PseudoClasses {
                 focused: input.focused,
+                selected: self.selected,
                 ..PseudoClasses::default()
             },
             camera,
@@ -225,8 +238,16 @@ impl UiInteraction {
         );
         // An open Dropdown's list covers everything under it. Where it is
         // comes from this layout, so it's right on the frame it opens.
-        let open = (&mut self.dropdown, &mut self.list);
+        let open = (&mut self.dropdown, &mut self.list, self.list_cursor);
         draw_list(world, screen, stylesheets, input.pointer, open, &mut base);
+        // Focus goes when its element is hidden, removed or turned off.
+        if let Some(id) = self.selected
+            && !base
+                .element(id)
+                .is_some_and(|element| focus::selectable(world, element))
+        {
+            self.selected = None;
+        }
         let on_list = self
             .list
             .as_ref()
@@ -242,6 +263,7 @@ impl UiInteraction {
             hovered,
             active,
             focused: input.focused,
+            selected: self.selected,
             forced: None,
             transitions: Some(&self.transitions),
             scrolled: None,
@@ -257,8 +279,15 @@ impl UiInteraction {
         );
         layout.hovered = hovered;
         layout.active = active;
-        // Only these two fields, since `pseudo` borrows the transitions.
-        let open = (&mut self.dropdown, &mut self.list);
+        // The default focus ring, over the UI but under an open list.
+        let ring = self
+            .selected
+            .and_then(|id| layout.element(id))
+            .filter(|element| !focus_rule_applies(world, element.id, stylesheets, pseudo))
+            .map(|element| focus::focus_ring(world, element, stylesheets, pseudo));
+        layout.draw_items.extend(ring);
+        // Only these fields, since `pseudo` borrows the transitions.
+        let open = (&mut self.dropdown, &mut self.list, self.list_cursor);
         draw_list(world, screen, stylesheets, input.pointer, open, &mut layout);
 
         if hovered != self.hovered {
@@ -315,6 +344,7 @@ impl UiInteraction {
     fn close_list(&mut self) {
         self.dropdown = None;
         self.list = None;
+        self.list_cursor = None;
     }
 
     /// The widget the left button is held on: a Slider being dragged, or
@@ -495,6 +525,9 @@ impl UiInteraction {
     pub fn press(&mut self, world: &World, pointer: [f32; 2]) -> UiScrolled {
         self.scroll_drag = None;
         self.widget_press = None;
+        // The mouse takes over from the keyboard or controller.
+        self.selected = None;
+        self.list_cursor = None;
         if let Some(list) = &self.list {
             if list.rect.contains(pointer[0], pointer[1]) {
                 self.widget_press = list
@@ -696,6 +729,14 @@ impl UiInteraction {
     }
 }
 
+/// [`UiInteraction`]'s open Dropdown and how far it's scrolled, the list as
+/// last drawn, and the row the keyboard or controller is on.
+type OpenList<'a> = (
+    &'a mut Option<(InstanceId, Option<f32>)>,
+    &'a mut Option<DropdownList>,
+    Option<usize>,
+);
+
 /// Draws the open Dropdown's list over everything in `layout`, and
 /// remembers where it is. It closes when its Dropdown is gone, hidden,
 /// not `Interactable` or has no options.
@@ -704,10 +745,7 @@ fn draw_list(
     (width, height): (u32, u32),
     stylesheets: &[Stylesheet],
     pointer: Option<[f32; 2]>,
-    (dropdown, list): (
-        &mut Option<(InstanceId, Option<f32>)>,
-        &mut Option<DropdownList>,
-    ),
+    (dropdown, list, cursor): OpenList<'_>,
     layout: &mut UiLayout,
 ) {
     *list = None;
@@ -719,7 +757,7 @@ fn draw_list(
         .element(id)
         .filter(|element| element.interactable)
         .and_then(|element| {
-            widget::dropdown_list(world, element, stylesheets, screen, scroll, pointer)
+            widget::dropdown_list(world, element, stylesheets, screen, scroll, pointer, cursor)
         });
     match drawn {
         Some((drawn, items)) => {

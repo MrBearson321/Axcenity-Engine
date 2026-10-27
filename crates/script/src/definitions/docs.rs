@@ -3,6 +3,306 @@ use super::*;
 /// What each property means. A test checks every property in `core` is here.
 pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     (
+        ClassName::Frame,
+        "Selectable",
+        "If true, keyboard and controller navigation can focus it (CSS :focus). On by default for buttons, text boxes, sliders, toggles and dropdowns.",
+    ),
+    (
+        ClassName::Frame,
+        "NextSelectionUp",
+        "The Id of the element focus moves to when up is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::Frame,
+        "NextSelectionDown",
+        "The Id of the element focus moves to when down is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::Frame,
+        "NextSelectionLeft",
+        "The Id of the element focus moves to when left is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::Frame,
+        "NextSelectionRight",
+        "The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::TextLabel,
+        "Selectable",
+        "If true, keyboard and controller navigation can focus it (CSS :focus). On by default for buttons, text boxes, sliders, toggles and dropdowns.",
+    ),
+    (
+        ClassName::TextLabel,
+        "NextSelectionUp",
+        "The Id of the element focus moves to when up is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::TextLabel,
+        "NextSelectionDown",
+        "The Id of the element focus moves to when down is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::TextLabel,
+        "NextSelectionLeft",
+        "The Id of the element focus moves to when left is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::TextLabel,
+        "NextSelectionRight",
+        "The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::TextButton,
+        "Selectable",
+        "If true, keyboard and controller navigation can focus it (CSS :focus). On by default for buttons, text boxes, sliders, toggles and dropdowns.",
+    ),
+    (
+        ClassName::TextButton,
+        "NextSelectionUp",
+        "The Id of the element focus moves to when up is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::TextButton,
+        "NextSelectionDown",
+        "The Id of the element focus moves to when down is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::TextButton,
+        "NextSelectionLeft",
+        "The Id of the element focus moves to when left is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::TextButton,
+        "NextSelectionRight",
+        "The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::ImageLabel,
+        "Selectable",
+        "If true, keyboard and controller navigation can focus it (CSS :focus). On by default for buttons, text boxes, sliders, toggles and dropdowns.",
+    ),
+    (
+        ClassName::ImageLabel,
+        "NextSelectionUp",
+        "The Id of the element focus moves to when up is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::ImageLabel,
+        "NextSelectionDown",
+        "The Id of the element focus moves to when down is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::ImageLabel,
+        "NextSelectionLeft",
+        "The Id of the element focus moves to when left is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::ImageLabel,
+        "NextSelectionRight",
+        "The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::TextBox,
+        "Selectable",
+        "If true, keyboard and controller navigation can focus it (CSS :focus). On by default for buttons, text boxes, sliders, toggles and dropdowns.",
+    ),
+    (
+        ClassName::TextBox,
+        "NextSelectionUp",
+        "The Id of the element focus moves to when up is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::TextBox,
+        "NextSelectionDown",
+        "The Id of the element focus moves to when down is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::TextBox,
+        "NextSelectionLeft",
+        "The Id of the element focus moves to when left is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::TextBox,
+        "NextSelectionRight",
+        "The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::PageLayout,
+        "Selectable",
+        "If true, keyboard and controller navigation can focus it (CSS :focus). On by default for buttons, text boxes, sliders, toggles and dropdowns.",
+    ),
+    (
+        ClassName::PageLayout,
+        "NextSelectionUp",
+        "The Id of the element focus moves to when up is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::PageLayout,
+        "NextSelectionDown",
+        "The Id of the element focus moves to when down is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::PageLayout,
+        "NextSelectionLeft",
+        "The Id of the element focus moves to when left is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::PageLayout,
+        "NextSelectionRight",
+        "The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::Table,
+        "Selectable",
+        "If true, keyboard and controller navigation can focus it (CSS :focus). On by default for buttons, text boxes, sliders, toggles and dropdowns.",
+    ),
+    (
+        ClassName::Table,
+        "NextSelectionUp",
+        "The Id of the element focus moves to when up is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::Table,
+        "NextSelectionDown",
+        "The Id of the element focus moves to when down is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::Table,
+        "NextSelectionLeft",
+        "The Id of the element focus moves to when left is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::Table,
+        "NextSelectionRight",
+        "The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::ScrollingFrame,
+        "Selectable",
+        "If true, keyboard and controller navigation can focus it (CSS :focus). On by default for buttons, text boxes, sliders, toggles and dropdowns.",
+    ),
+    (
+        ClassName::ScrollingFrame,
+        "NextSelectionUp",
+        "The Id of the element focus moves to when up is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::ScrollingFrame,
+        "NextSelectionDown",
+        "The Id of the element focus moves to when down is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::ScrollingFrame,
+        "NextSelectionLeft",
+        "The Id of the element focus moves to when left is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::ScrollingFrame,
+        "NextSelectionRight",
+        "The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::Slider,
+        "Selectable",
+        "If true, keyboard and controller navigation can focus it (CSS :focus). On by default for buttons, text boxes, sliders, toggles and dropdowns.",
+    ),
+    (
+        ClassName::Slider,
+        "NextSelectionUp",
+        "The Id of the element focus moves to when up is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::Slider,
+        "NextSelectionDown",
+        "The Id of the element focus moves to when down is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::Slider,
+        "NextSelectionLeft",
+        "The Id of the element focus moves to when left is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::Slider,
+        "NextSelectionRight",
+        "The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::Toggle,
+        "Selectable",
+        "If true, keyboard and controller navigation can focus it (CSS :focus). On by default for buttons, text boxes, sliders, toggles and dropdowns.",
+    ),
+    (
+        ClassName::Toggle,
+        "NextSelectionUp",
+        "The Id of the element focus moves to when up is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::Toggle,
+        "NextSelectionDown",
+        "The Id of the element focus moves to when down is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::Toggle,
+        "NextSelectionLeft",
+        "The Id of the element focus moves to when left is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::Toggle,
+        "NextSelectionRight",
+        "The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::Dropdown,
+        "Selectable",
+        "If true, keyboard and controller navigation can focus it (CSS :focus). On by default for buttons, text boxes, sliders, toggles and dropdowns.",
+    ),
+    (
+        ClassName::Dropdown,
+        "NextSelectionUp",
+        "The Id of the element focus moves to when up is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::Dropdown,
+        "NextSelectionDown",
+        "The Id of the element focus moves to when down is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::Dropdown,
+        "NextSelectionLeft",
+        "The Id of the element focus moves to when left is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::Dropdown,
+        "NextSelectionRight",
+        "The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::ProgressBar,
+        "Selectable",
+        "If true, keyboard and controller navigation can focus it (CSS :focus). On by default for buttons, text boxes, sliders, toggles and dropdowns.",
+    ),
+    (
+        ClassName::ProgressBar,
+        "NextSelectionUp",
+        "The Id of the element focus moves to when up is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::ProgressBar,
+        "NextSelectionDown",
+        "The Id of the element focus moves to when down is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::ProgressBar,
+        "NextSelectionLeft",
+        "The Id of the element focus moves to when left is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::ProgressBar,
+        "NextSelectionRight",
+        "The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
         ClassName::ScreenGui,
         "Class",
         "Space-separated CSS class names used to style this UI Instance.",

@@ -5,7 +5,8 @@
 //! one, pass key presses to LocalScripts, resume scripts whose `task.wait`
 //! is over (and deliver RemoteEvent messages), step physics, fire `Touched`
 //! for parts that started touching, then draw the Workspace. The character's
-//! camera follows it; otherwise a fly camera looks around.
+//! camera follows it; otherwise a fly camera looks around. The keyboard and
+//! game controllers can move focus through menus (`axcenity_ui::NavKey`).
 
 mod graphics;
 mod icon;
@@ -30,7 +31,7 @@ use axcenity_render::glam::Vec3;
 use axcenity_render::{Capabilities, GraphicsSettings, Renderer};
 use axcenity_scene::{FlyCamera, MoveKeys, UiFrame};
 use axcenity_script::{CameraState, KeyEvent, OutputKind, ScriptRuntime};
-use axcenity_ui::{LoadingGui, UiCursor, UiEvent, UiInput, UiInteraction};
+use axcenity_ui::{Gamepads, LoadingGui, NavKey, UiCursor, UiEvent, UiInput, UiInteraction};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{
@@ -208,6 +209,8 @@ fn main() -> Result<()> {
         ui_mouse_down: false,
         ui_pressed_button: None,
         ui: UiInteraction::default(),
+        nav_keys: Vec::new(),
+        gamepads: Gamepads::new(),
         ui_sounds: Vec::new(),
         cursor: UiCursor::Default,
         last_frame: None,
@@ -351,6 +354,23 @@ fn fire_ui_events(
     sounds
 }
 
+/// Uses one key for the UI's focus (see [`UiInteraction::navigate`]): sets
+/// what it changed in `world`, and fires `Activated` for a button it
+/// confirmed, as a click does. Returns the TextBox to start typing in.
+fn navigate_ui(
+    ui: &mut UiInteraction,
+    world: &mut World,
+    scripts: &mut ScriptRuntime,
+    key: NavKey,
+) -> Option<InstanceId> {
+    let done = ui.navigate(world, key);
+    done.apply(world);
+    if let Some(button) = done.activated {
+        scripts.activate_ui_button(world, button);
+    }
+    done.text_box
+}
+
 /// The OS cursor for one the UI asks for (CSS `cursor`).
 fn cursor_icon(cursor: UiCursor) -> CursorIcon {
     match cursor {
@@ -423,6 +443,11 @@ struct App {
     ui_pressed_button: Option<InstanceId>,
     /// Hover and press states, CSS transitions and tooltips over time.
     ui: UiInteraction,
+    /// Keys for the UI's focus since the last frame (Tab, the arrows,
+    /// Enter, Escape), taken from the game: see [`UiInteraction::takes`].
+    nav_keys: Vec<NavKey>,
+    /// Game controllers, which move focus too.
+    gamepads: Gamepads,
     /// Buttons' hover and click sounds, played with the frame's audio.
     ui_sounds: Vec<SoundAction>,
     /// The cursor last shown, so it's only set when it changes.
@@ -532,6 +557,28 @@ impl App {
         }
     }
 
+    /// Moves focus by this frame's keys and controllers, before the
+    /// game's input. Confirm on a button fires `Activated` as a click
+    /// does, and on a text box starts typing in it. While typing, a
+    /// controller's Confirm or Back finishes.
+    fn process_ui_navigation(&mut self, seconds: f32) {
+        let mut keys = std::mem::take(&mut self.nav_keys);
+        keys.extend(self.gamepads.poll(seconds));
+        for key in keys {
+            if let Some(id) = self.text_focus {
+                if matches!(key, NavKey::Confirm | NavKey::Back) {
+                    self.blur_text(id);
+                }
+                continue;
+            }
+            let typing = navigate_ui(&mut self.ui, &mut self.world, &mut self.scripts, key);
+            print_output(&mut self.scripts);
+            if let Some(id) = typing {
+                self.focus_text(id);
+            }
+        }
+    }
+
     fn focus_text(&mut self, id: InstanceId) {
         if self.text_focus == Some(id) {
             return;
@@ -632,6 +679,22 @@ fn set_move_key(keys: &mut MoveKeys, key: KeyCode, pressed: bool) {
         _ => return,
     };
     *held = pressed;
+}
+
+/// What a key does to the UI's focus: Tab and Shift+Tab step through it,
+/// the arrows move it, Enter uses the focused element and Escape lets go.
+fn nav_key(key: KeyCode, shift: bool) -> Option<NavKey> {
+    Some(match key {
+        KeyCode::Tab if shift => NavKey::Previous,
+        KeyCode::Tab => NavKey::Next,
+        KeyCode::ArrowUp => NavKey::Up,
+        KeyCode::ArrowDown => NavKey::Down,
+        KeyCode::ArrowLeft => NavKey::Left,
+        KeyCode::ArrowRight => NavKey::Right,
+        KeyCode::Enter | KeyCode::NumpadEnter => NavKey::Confirm,
+        KeyCode::Escape => NavKey::Back,
+        _ => return None,
+    })
 }
 
 /// Each winit key, and the key scripts know it as (`Enum.KeyCode.<name>`).
@@ -827,6 +890,16 @@ impl ApplicationHandler for App {
                     self.type_text(&event);
                 } else if let PhysicalKey::Code(key) = event.physical_key {
                     let pressed = event.state == ElementState::Pressed;
+                    // A press that moves focus is the UI's, not the game's.
+                    let shift = self.held_keys.contains(&axcenity_core::KeyCode::LeftShift)
+                        || self.held_keys.contains(&axcenity_core::KeyCode::RightShift);
+                    if pressed
+                        && let Some(nav) = nav_key(key, shift)
+                        && self.ui.takes(&self.world, nav)
+                    {
+                        self.nav_keys.push(nav);
+                        return;
+                    }
                     set_move_key(&mut self.keys, key, pressed);
                     if let Some(key) = script_key(key) {
                         self.key_events.push(KeyEvent { key, pressed });
@@ -889,6 +962,7 @@ impl ApplicationHandler for App {
                     .expect("checked at the start of the event")
                     .inner_size();
                 self.process_ui_mouse_events((size.width, size.height));
+                self.process_ui_navigation(seconds);
                 // What the UI did last frame and this click: MouseEnter,
                 // MouseLeave and buttons' sounds.
                 let events = self.ui.take_events();

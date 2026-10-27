@@ -1,0 +1,48 @@
+/* A menu for the keyboard and a controller. Tab and Shift+Tab, the arrow
+   keys, or the d-pad and left stick move focus; Enter or A uses what's
+   focused. The buttons style their focus with :focus. The slider and the
+   name box have no :focus rule, so they get the default focus ring. */
+
+#panel {
+    background-color: #1f2937;
+    border-radius: 16px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+#title {
+    color: #f9fafb;
+    font-size: 28px;
+    font-weight: bold;
+}
+
+TextButton {
+    background-color: #374151;
+    color: #f9fafb;
+    font-size: 20px;
+    border-radius: 10px;
+    transition: all 0.12s ease;
+}
+
+TextButton:hover {
+    background-color: #4b5563;
+}
+
+TextButton:focus {
+    background-color: #2563eb;
+    border: 2px solid #bfdbfe;
+    transform: scale(1.03);
+}
+
+#playername {
+    border-radius: 8px;
+}
+
+#volume::fill {
+    background-color: #22c55e;
+}
+
+#status {
+    color: #d1d5db;
+    font-size: 16px;
+    vertical-align: middle;
+}
