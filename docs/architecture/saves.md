@@ -1,6 +1,6 @@
 # Saves and checkpoints
 
-Save slots, player data, settings and checkpoints (unified plan Phase 17). Code: `crates/save` (files, world state), `crates/script/src/save.rs` (`SaveService`), the save blocks in `crates/blocks`.
+Save slots, player data, settings and checkpoints (unified plan Phase 17), and save versions (Phase 18). Code: `crates/save` (files, world state), `crates/script/src/save.rs` (`SaveService`), the save blocks in `crates/blocks`.
 
 ## SaveService
 
@@ -8,8 +8,8 @@ Save slots, player data, settings and checkpoints (unified plan Phase 17). Code:
 
 | Call | Does |
 |---|---|
-| `SaveSlot(n)` | Writes slot `n` (a whole number, 1 to 999): player data, world state, the active checkpoint and settings. Replaces what the slot held. |
-| `LoadSlot(n)` | Puts the game back as slot `n` was saved. A missing, damaged or newer slot is an error (`script:line: save slot 3 doesn't exist yet; …`) and changes nothing: the file is read and checked before the world is touched. |
+| `SaveSlot(n)` | Writes slot `n` (a whole number, 1 to 999): player data, world state, the active checkpoint and settings. Replaces what the slot held, unless a newer version of the game saved it (an error, and the slot is kept). |
+| `LoadSlot(n)` | Puts the game back as slot `n` was saved. A missing, damaged or newer slot is an error (`script:line: save slot 3 doesn't exist yet; …`) and changes nothing: the file is read and checked before the world is touched. A slot from an older save version is moved up first (see Save versions). |
 | `HasSlot(n)` | True if slot `n` has been saved. |
 | `SetPlayerData(name, value)`, `GetPlayerData(name)` | Values kept for the player, such as coins. A boolean, number, string, Vector3, Vector2, Color3, UDim2 or EnumItem; nil removes it. Saved in slots and captured at checkpoints. |
 | `SetSetting(name, value)`, `GetSetting(name)` | Game settings, such as volume, with the same values. Saved in slots, not captured at checkpoints. Phase 21 adds the game UI settings here. |
@@ -40,4 +40,20 @@ A slot is `slot-<n>.json` in the player's data for the game, `save::game_folder(
 
 The player and editor Play set it with `ScriptRuntime::set_save_folder` before scripts start, so a script can load at the start. Editor Play uses the same folder as the built game; its tests use a temporary folder (`app/session.rs`, `play_save_folder`). Saving never writes the project folder, and Stop still drops the Play world, so the edit world and project files are as before Play. A slot is written beside itself and renamed over the old one.
 
-The file holds `version` (`save::SAVE_VERSION`, 1), `player_data`, `settings`, `world` (`services` and `instances`), and `checkpoint` (its names from the Workspace down, with the player data and world state captured there). Values are JSON booleans, numbers and strings, or one-key objects such as `{"Vector3": [0, 5, 0]}` and `{"Material": "Neon"}`. A file whose version is newer than this engine's is refused. Migrating older versions is Phase 18.
+The file holds `version` (`save::SAVE_VERSION`, 2), `player_data`, `settings`, `world` (`services` and `instances`), and `checkpoint` (`instance`, its entry in `world.instances`, with the player data and world state captured there). Values are JSON booleans, numbers and strings, or one-key objects such as `{"Vector3": [0, 5, 0]}` and `{"Material": "Neon"}`.
+
+## Save versions
+
+`Saves::read` (and so `LoadSlot`) reads the file's `version` first:
+
+- **Older**: moved up to `SAVE_VERSION` one version at a time (`save::migrate`, `crates/save/src/migrate.rs`), then checked and restored like a current file. Each step works on the JSON, so old shapes need no Rust types. Loading never rewrites the file; the slot moves to the new version the next time the game saves over it. A step that can't make sense of the file makes it a damaged slot, and nothing changes.
+- **Current**: read with no migration step.
+- **Newer**: refused (`save slot 3 was saved by a newer version of the game …`), and `SaveSlot` won't write over it either (`… so this game won't write over it`), so an older build of the game can't lose a newer one's progress. The file is left as it was.
+- **None** (no `version`, as in a project's `world.json` or `axcenity.json`): a damaged slot. Project files are never save files; project migration (`project::FORMAT_VERSION`) is separate.
+
+| From | To | Change |
+|---|---|---|
+| 1 | 2 | The checkpoint was `path`, its names from the Workspace down, so two checkpoints with the same name (two inserted `Checkpoint`s) were the first one. It becomes `instance`, its entry in the slot's world state: the first saved Instance with each name in turn, as loading version 1 found it. A path that doesn't reach a saved Checkpoint drops the checkpoint, as loading version 1 did. |
+
+To change the shape of a slot file: raise `SAVE_VERSION`, add a step to `STEPS` in `migrate.rs`, and keep a slot written by the old version under `crates/save/src/fixtures/` with a test that loads it (`slot-v1.json`).
+

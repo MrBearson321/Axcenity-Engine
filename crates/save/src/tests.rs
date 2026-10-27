@@ -395,3 +395,222 @@ fn the_save_folder_is_named_after_the_game() {
         assert!(folder.ends_with("Hello Saves"), "{}", folder.display());
     }
 }
+
+/// The level of `slot-v1.json`: its checkpoint is in a Checkpoints folder.
+fn v1_level() -> Level {
+    let level = level();
+    let mut world = level.world;
+    let folder = world.create(ClassName::Folder).unwrap();
+    world.set_name(folder, "Checkpoints").unwrap();
+    let workspace = world.workspace();
+    world.set_parent(folder, Some(workspace)).unwrap();
+    world.set_parent(level.checkpoint, Some(folder)).unwrap();
+    Level { world, ..level }
+}
+
+/// What `slot-v1.json` was saved from, played out on `level`: player data
+/// and settings, a checkpoint set, then the crate pushed and the coin taken.
+fn play_the_v1_save(level: &Level, world: &mut World, saves: &mut Saves) {
+    saves
+        .player_data
+        .insert("Coins".to_owned(), Value::Number(3.0));
+    saves
+        .settings
+        .insert("Volume".to_owned(), Value::Number(0.5));
+    saves.set_checkpoint(world, level.checkpoint).unwrap();
+    saves
+        .player_data
+        .insert("Coins".to_owned(), Value::Number(7.0));
+    world
+        .set_property(
+            level.crate_part,
+            "Position",
+            Value::Vector3(Vector3::new(9.0, 1.0, 3.0)),
+        )
+        .unwrap();
+    world.destroy(level.coin).unwrap();
+}
+
+#[test]
+fn a_version_1_slot_loads_migrates_and_restores_the_same_player_world_checkpoint_and_settings() {
+    let folder = folder("migrate-v1");
+    fs::create_dir_all(&folder).unwrap();
+    let v1 = include_str!("fixtures/slot-v1.json");
+    fs::write(folder.join("slot-1.json"), v1).unwrap();
+
+    let level = v1_level();
+    let mut world = level.world.clone();
+    let mut saves = Saves::new(Some(folder.clone()));
+    saves.load(&mut world, 1).unwrap();
+    assert_eq!(
+        position(&world, level.crate_part),
+        Vector3::new(9.0, 1.0, 3.0)
+    );
+    assert!(!world.contains(level.coin));
+    assert_eq!(saves.player_data["Coins"], Value::Number(7.0));
+    assert_eq!(saves.settings["Volume"], Value::Number(0.5));
+    assert_eq!(saves.checkpoint(&world), Some(level.checkpoint));
+    let at = saves.restore_checkpoint(&mut world).unwrap();
+    assert_eq!(at, Vector3::new(20.0, 0.0, 10.0));
+    assert_eq!(
+        position(&world, level.crate_part),
+        Vector3::new(5.0, 1.0, 0.0)
+    );
+    let workspace = world.workspace();
+    assert!(world.find_first_child(workspace, "Coin").is_some());
+    assert_eq!(saves.player_data["Coins"], Value::Number(3.0));
+
+    // Migrated, it is what this version saves for the same game.
+    let migrated = saves.read(1).unwrap();
+    assert_eq!(migrated.version, SAVE_VERSION);
+    let level = v1_level();
+    let mut world = level.world.clone();
+    let mut current = Saves::new(Some(folder.clone()));
+    play_the_v1_save(&level, &mut world, &mut current);
+    current.save(&world, 2).unwrap();
+    assert_eq!(current.read(2).unwrap(), migrated);
+
+    // Loading never rewrites the old file.
+    assert_eq!(fs::read_to_string(folder.join("slot-1.json")).unwrap(), v1);
+}
+
+#[test]
+fn moving_a_version_1_checkpoint_finds_it_by_name_or_drops_it() {
+    let file = |path: serde_json::Value| {
+        serde_json::json!({
+            "version": 1,
+            "world": { "instances": [
+                { "parent": "Workspace", "class": "Folder", "name": "Pads" },
+                { "parent": 0, "class": "Checkpoint", "name": "Pad" },
+                { "parent": 0, "class": "Checkpoint", "name": "Pad" },
+                { "parent": "Workspace", "class": "Part", "name": "Pad" },
+            ]},
+            "checkpoint": { "path": path, "player_data": {} },
+        })
+    };
+    // The first of the same name, as loading version 1 found it.
+    let mut found = file(serde_json::json!(["Pads", "Pad"]));
+    assert_eq!(migrate(&mut found, 1), Ok(1));
+    assert_eq!(found["version"], 2);
+    assert_eq!(found["checkpoint"]["instance"], 1);
+    assert!(found["checkpoint"].get("path").is_none());
+    // A path to something that isn't a Checkpoint, or to nothing.
+    for path in [serde_json::json!(["Pad"]), serde_json::json!(["Gone"])] {
+        let mut dropped = file(path);
+        assert_eq!(migrate(&mut dropped, 1), Ok(1));
+        assert!(dropped["checkpoint"].is_null());
+    }
+    // A file with no checkpoint only changes its version.
+    let mut none = serde_json::json!({ "version": 1, "checkpoint": null });
+    assert_eq!(migrate(&mut none, 1), Ok(1));
+    assert_eq!(
+        none,
+        serde_json::json!({ "version": 2, "checkpoint": null })
+    );
+    assert!(migrate(&mut serde_json::json!({}), 0).is_err());
+}
+
+#[test]
+fn two_checkpoints_with_the_same_name_are_told_apart() {
+    let folder = folder("same-name");
+    let mut world = World::new();
+    let workspace = world.workspace();
+    let mut checkpoints = Vec::new();
+    for x in [0.0, 50.0] {
+        let checkpoint = world.create(ClassName::Checkpoint).unwrap();
+        world
+            .set_property(
+                checkpoint,
+                "Position",
+                Value::Vector3(Vector3::new(x, 0.0, 0.0)),
+            )
+            .unwrap();
+        world.set_parent(checkpoint, Some(workspace)).unwrap();
+        checkpoints.push(checkpoint);
+    }
+    let mut saves = Saves::new(Some(folder));
+    saves.set_checkpoint(&world, checkpoints[1]).unwrap();
+    saves.save(&world, 1).unwrap();
+    saves.set_checkpoint(&world, checkpoints[0]).unwrap();
+    saves.load(&mut world, 1).unwrap();
+    assert_eq!(saves.checkpoint(&world), Some(checkpoints[1]));
+    assert_eq!(
+        saves.restore_checkpoint(&mut world).unwrap(),
+        Vector3::new(50.0, 0.0, 0.0)
+    );
+}
+
+#[test]
+fn a_newer_slot_is_refused_and_its_file_is_unchanged() {
+    let folder = folder("newer");
+    fs::create_dir_all(&folder).unwrap();
+    let newer = format!(
+        r#"{{"version": {}, "world": "a shape this game doesn't know"}}"#,
+        SAVE_VERSION + 1
+    );
+    let slot = folder.join("slot-4.json");
+    fs::write(&slot, &newer).unwrap();
+    let Level { mut world, .. } = level();
+    let before = snapshot(&world);
+    let mut saves = Saves::new(Some(folder));
+    saves
+        .player_data
+        .insert("Coins".to_owned(), Value::Number(1.0));
+
+    let err = saves.load(&mut world, 4).unwrap_err();
+    assert!(matches!(err, SaveError::Newer { slot: 4, .. }));
+    let err = saves.save(&world, 4).unwrap_err();
+    assert!(matches!(err, SaveError::WontReplaceNewer { slot: 4, .. }));
+    assert!(err.to_string().contains("won't write over it"));
+
+    assert_eq!(fs::read_to_string(&slot).unwrap(), newer);
+    assert_eq!(snapshot(&world), before);
+    assert_eq!(saves.player_data["Coins"], Value::Number(1.0));
+}
+
+#[test]
+fn a_current_slot_round_trips_without_a_migration_step() {
+    let folder = folder("current");
+    let level = v1_level();
+    let mut world = level.world.clone();
+    let mut saves = Saves::new(Some(folder));
+    play_the_v1_save(&level, &mut world, &mut saves);
+    let path = saves.save(&world, 1).unwrap();
+
+    let mut json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(json["version"], SAVE_VERSION);
+    let unchanged = json.clone();
+    assert_eq!(migrate(&mut json, SAVE_VERSION), Ok(0));
+    assert_eq!(json, unchanged);
+
+    let mut fresh = v1_level().world;
+    let mut loaded = Saves::new(saves.folder().map(Path::to_path_buf));
+    loaded.load(&mut fresh, 1).unwrap();
+    assert_eq!(snapshot(&fresh), snapshot(&world));
+    assert_eq!(loaded.player_data, saves.player_data);
+    assert_eq!(loaded.settings, saves.settings);
+    assert_eq!(loaded.checkpoint(&fresh), Some(level.checkpoint));
+}
+
+#[test]
+fn project_files_are_never_read_as_save_files() {
+    let folder = folder("project-files");
+    fs::create_dir_all(&folder).unwrap();
+    let project = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-saves");
+    let Level { mut world, .. } = level();
+    let before = snapshot(&world);
+    let mut saves = Saves::new(Some(folder.clone()));
+    for (slot, file) in [(1, "world.json"), (2, "axcenity.json")] {
+        let text = fs::read_to_string(project.join(file)).unwrap();
+        let path = folder.join(format!("slot-{slot}.json"));
+        fs::write(&path, &text).unwrap();
+        let err = saves.load(&mut world, slot).unwrap_err();
+        assert!(
+            matches!(&err, SaveError::Damaged { message, .. } if message == "it has no save version"),
+            "{file}: {err}"
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), text);
+    }
+    assert_eq!(snapshot(&world), before);
+}

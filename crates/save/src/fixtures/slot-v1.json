@@ -1,0 +1,194 @@
+{
+  "version": 1,
+  "player_data": {
+    "Coins": 7.0
+  },
+  "settings": {
+    "Volume": 0.5
+  },
+  "world": {
+    "services": {
+      "Lighting": {},
+      "Workspace": {}
+    },
+    "instances": [
+      {
+        "parent": "Workspace",
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Position": {
+            "Vector3": [
+              0.0,
+              -0.5,
+              0.0
+            ]
+          }
+        }
+      },
+      {
+        "parent": "Workspace",
+        "class": "Part",
+        "name": "Crate",
+        "properties": {
+          "Position": {
+            "Vector3": [
+              9.0,
+              1.0,
+              3.0
+            ]
+          }
+        }
+      },
+      {
+        "parent": "Workspace",
+        "class": "Model",
+        "name": "Hero"
+      },
+      {
+        "parent": 2,
+        "class": "Part",
+        "name": "Body",
+        "properties": {
+          "Position": {
+            "Vector3": [
+              0.0,
+              2.5,
+              0.0
+            ]
+          },
+          "Size": {
+            "Vector3": [
+              2.0,
+              5.0,
+              1.0
+            ]
+          }
+        }
+      },
+      {
+        "parent": "Workspace",
+        "class": "Folder",
+        "name": "Checkpoints"
+      },
+      {
+        "parent": 4,
+        "class": "Checkpoint",
+        "name": "Cave",
+        "properties": {
+          "Position": {
+            "Vector3": [
+              20.0,
+              0.0,
+              10.0
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "checkpoint": {
+    "path": [
+      "Checkpoints",
+      "Cave"
+    ],
+    "player_data": {
+      "Coins": 3.0
+    },
+    "world": {
+      "services": {
+        "Lighting": {},
+        "Workspace": {}
+      },
+      "instances": [
+        {
+          "parent": "Workspace",
+          "class": "Part",
+          "name": "Floor",
+          "properties": {
+            "Position": {
+              "Vector3": [
+                0.0,
+                -0.5,
+                0.0
+              ]
+            }
+          }
+        },
+        {
+          "parent": "Workspace",
+          "class": "Part",
+          "name": "Crate",
+          "properties": {
+            "Position": {
+              "Vector3": [
+                5.0,
+                1.0,
+                0.0
+              ]
+            }
+          }
+        },
+        {
+          "parent": "Workspace",
+          "class": "Part",
+          "name": "Coin",
+          "properties": {
+            "Position": {
+              "Vector3": [
+                -5.0,
+                1.0,
+                0.0
+              ]
+            }
+          }
+        },
+        {
+          "parent": "Workspace",
+          "class": "Model",
+          "name": "Hero"
+        },
+        {
+          "parent": 3,
+          "class": "Part",
+          "name": "Body",
+          "properties": {
+            "Position": {
+              "Vector3": [
+                0.0,
+                2.5,
+                0.0
+              ]
+            },
+            "Size": {
+              "Vector3": [
+                2.0,
+                5.0,
+                1.0
+              ]
+            }
+          }
+        },
+        {
+          "parent": "Workspace",
+          "class": "Folder",
+          "name": "Checkpoints"
+        },
+        {
+          "parent": 5,
+          "class": "Checkpoint",
+          "name": "Cave",
+          "properties": {
+            "Position": {
+              "Vector3": [
+                20.0,
+                0.0,
+                10.0
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

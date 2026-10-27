@@ -7,8 +7,11 @@
 //!   data, world state (`state`), the active checkpoint and settings, and
 //!   its save version ([`SAVE_VERSION`]).
 //! - Loading reads and checks the whole file first, so a missing or damaged
-//!   slot fails without changing anything.
+//!   slot fails without changing anything. A slot from an older save version
+//!   is moved up to this one as it's read ([`migrate`]); one from a newer
+//!   version is refused, and never saved over.
 
+mod migrate;
 mod state;
 
 use std::collections::BTreeMap;
@@ -18,12 +21,14 @@ use std::path::{Path, PathBuf};
 use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
 use serde::{Deserialize, Serialize};
 
+pub use migrate::migrate;
 pub use state::{
     Properties, SavedInstance, SavedParent, SavedValue, WorldState, restore, snapshot,
 };
 
-/// The version of the save files this engine writes.
-pub const SAVE_VERSION: u32 = 1;
+/// The version of the save files this engine writes. An older file is moved
+/// up to it when it's read (see [`migrate`]).
+pub const SAVE_VERSION: u32 = 2;
 
 /// The highest slot number.
 pub const MAX_SLOT: u32 = 999;
@@ -44,6 +49,10 @@ pub enum SaveError {
         "save slot {slot} was saved by a newer version of the game (save version {version}, this game reads up to {SAVE_VERSION}), so nothing was loaded"
     )]
     Newer { slot: u32, version: u32 },
+    #[error(
+        "save slot {slot} holds a save from a newer version of the game (save version {version}, this game reads up to {SAVE_VERSION}), so this game won't write over it"
+    )]
+    WontReplaceNewer { slot: u32, version: u32 },
     #[error("can't write save slot {slot}: {message}")]
     Write { slot: u32, message: String },
     #[error("no checkpoint is active; set one with SaveService:SetCheckpoint(checkpoint) first")]
@@ -63,11 +72,12 @@ pub struct Capture {
     pub world: WorldState,
 }
 
-/// The active checkpoint in a slot file, found again by its place in the world.
+/// The active checkpoint in a slot file.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SavedCheckpoint {
-    /// Names from the Workspace down, such as `["Checkpoints", "Cave"]`.
-    pub path: Vec<String>,
+    /// Its entry in the slot's [`WorldState::instances`], so it is found
+    /// again even beside checkpoints with the same name.
+    pub instance: usize,
     #[serde(flatten)]
     pub capture: Capture,
 }
@@ -175,12 +185,24 @@ impl Saves {
     }
 
     /// Writes slot `slot`: player data, world state, the active checkpoint
-    /// and settings. Returns the file it wrote.
+    /// and settings. Returns the file it wrote. A slot saved by a newer
+    /// version of the game is left as it is.
     pub fn save(&self, world: &World, slot: u32) -> Result<PathBuf, SaveError> {
         let path = self.slot_path(slot)?;
+        if let Some(version) = fs::read_to_string(&path)
+            .ok()
+            .and_then(|text| file_version(&text))
+            .filter(|&version| version > u64::from(SAVE_VERSION))
+        {
+            return Err(SaveError::WontReplaceNewer {
+                slot,
+                version: u32::try_from(version).unwrap_or(u32::MAX),
+            });
+        }
+        let (state, ids) = state::snapshot_with_ids(world);
         let checkpoint = self.checkpoint.as_ref().and_then(|(id, capture)| {
             Some(SavedCheckpoint {
-                path: workspace_path(world, *id)?,
+                instance: ids.iter().position(|saved| saved == id)?,
                 capture: capture.clone(),
             })
         });
@@ -188,7 +210,7 @@ impl Saves {
             version: SAVE_VERSION,
             player_data: to_properties(&self.player_data),
             settings: to_properties(&self.settings),
-            world: snapshot(world),
+            world: state,
             checkpoint,
         };
         let text = serde_json::to_string_pretty(&file).expect("a slot file always serializes");
@@ -211,17 +233,18 @@ impl Saves {
     /// damaged or newer slot changes nothing.
     pub fn load(&mut self, world: &mut World, slot: u32) -> Result<(), SaveError> {
         let file = self.read(slot)?;
-        restore(world, &file.world);
+        let restored = restore(world, &file.world);
         self.player_data = from_properties(&file.player_data);
         self.settings = from_properties(&file.settings);
         self.checkpoint = file.checkpoint.and_then(|saved| {
-            let id = find_in_workspace(world, &saved.path)?;
+            let id = (*restored.get(saved.instance)?)?;
             (world.get(id)?.class() == ClassName::Checkpoint).then_some((id, saved.capture))
         });
         Ok(())
     }
 
-    /// Reads and checks slot `slot`, changing nothing.
+    /// Reads and checks slot `slot`, moving an older save version up to
+    /// this one. Changes nothing, the file included.
     pub fn read(&self, slot: u32) -> Result<SlotFile, SaveError> {
         let path = self.slot_path(slot)?;
         let text = match fs::read_to_string(&path) {
@@ -239,7 +262,7 @@ impl Saves {
         let damaged = |message: String| SaveError::Damaged { slot, message };
         // The version first, so a newer file is refused for that reason
         // even if the rest has changed shape.
-        let json: serde_json::Value =
+        let mut json: serde_json::Value =
             serde_json::from_str(&text).map_err(|err| damaged(err.to_string()))?;
         let version = json
             .get("version")
@@ -251,8 +274,17 @@ impl Saves {
                 version: u32::try_from(version).unwrap_or(u32::MAX),
             });
         }
+        migrate(&mut json, version as u32).map_err(damaged)?;
         serde_json::from_value(json).map_err(|err| damaged(err.to_string()))
     }
+}
+
+/// The save version of a slot file's text, if it has one.
+fn file_version(text: &str) -> Option<u64> {
+    serde_json::from_str::<serde_json::Value>(text)
+        .ok()?
+        .get("version")?
+        .as_u64()
 }
 
 /// Checks a slot number.
@@ -285,25 +317,6 @@ fn from_properties(properties: &Properties) -> BTreeMap<String, Value> {
         .iter()
         .map(|(name, value)| (name.clone(), value.0.clone()))
         .collect()
-}
-
-/// The names from the Workspace down to `id`, or `None` if it isn't in the Workspace.
-fn workspace_path(world: &World, id: InstanceId) -> Option<Vec<String>> {
-    let mut names = Vec::new();
-    let mut current = id;
-    while current != world.workspace() {
-        let instance = world.get(current)?;
-        names.push(instance.name().to_owned());
-        current = instance.parent()?;
-    }
-    names.reverse();
-    Some(names)
-}
-
-fn find_in_workspace(world: &World, path: &[String]) -> Option<InstanceId> {
-    path.iter().try_fold(world.workspace(), |parent, name| {
-        world.find_first_child(parent, name)
-    })
 }
 
 /// Moves the character made of `parts` so that the middle of its feet is at

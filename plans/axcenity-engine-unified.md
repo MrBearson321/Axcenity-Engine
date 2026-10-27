@@ -744,9 +744,9 @@ Save files carry a version. Loading a slot from the previous version migrates it
 
 ### Acceptance criteria
 
-- [ ] A slot written by the previous save version loads, migrates, and restores the same player, world, checkpoint and settings.
-- [ ] A slot newer than this game understands is refused, and the slot file is unchanged.
-- [ ] A current slot still round-trips without a migration step, and project folders are never used as save files.
+- [x] A slot written by the previous save version loads, migrates, and restores the same player, world, checkpoint and settings.
+- [x] A slot newer than this game understands is refused, and the slot file is unchanged.
+- [x] A current slot still round-trips without a migration step, and project folders are never used as save files.
 
 ---
 

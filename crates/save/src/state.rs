@@ -150,7 +150,14 @@ fn kept(class: ClassName) -> bool {
 
 /// The world state of `world` now.
 pub fn snapshot(world: &World) -> WorldState {
+    snapshot_with_ids(world).0
+}
+
+/// The world state of `world` now, and the Instance each of its
+/// [`instances`](WorldState::instances) entries was saved from.
+pub(crate) fn snapshot_with_ids(world: &World) -> (WorldState, Vec<InstanceId>) {
     let mut state = WorldState::default();
+    let mut ids = Vec::new();
     for class in SERVICES {
         let Some(service) = world.service(class) else {
             continue;
@@ -174,6 +181,7 @@ pub fn snapshot(world: &World) -> WorldState {
                 continue;
             }
             let index = state.instances.len();
+            ids.push(id);
             state.instances.push(SavedInstance {
                 parent,
                 class: instance.class().as_str().to_owned(),
@@ -185,7 +193,7 @@ pub fn snapshot(world: &World) -> WorldState {
             }
         }
     }
-    state
+    (state, ids)
 }
 
 fn children(world: &World, id: InstanceId) -> Vec<InstanceId> {
@@ -211,8 +219,11 @@ fn changed_properties(world: &World, id: InstanceId) -> Properties {
         .collect()
 }
 
-/// Puts `world` back as `state` says (see the module's notes).
-pub fn restore(world: &mut World, state: &WorldState) {
+/// Puts `world` back as `state` says (see the module's notes), and returns
+/// the live Instance each [`instances`](WorldState::instances) entry became,
+/// or `None` for an entry that was left out.
+pub fn restore(world: &mut World, state: &WorldState) -> Vec<Option<InstanceId>> {
+    let mut restored = vec![None; state.instances.len()];
     let none = Properties::new();
     for class in SERVICES {
         if let Some(service) = world.service(class) {
@@ -291,6 +302,7 @@ pub fn restore(world: &mut World, state: &WorldState) {
                     id
                 }
             };
+            restored[index] = Some(id);
             next.push((id, SavedParent::Index(index)));
         }
         // What the save doesn't have was destroyed (or not made yet) when it was saved.
@@ -299,6 +311,7 @@ pub fn restore(world: &mut World, state: &WorldState) {
         }
         stack.extend(next.into_iter().rev());
     }
+    restored
 }
 
 /// Sets every property of `id` to its saved value, or to its class's
