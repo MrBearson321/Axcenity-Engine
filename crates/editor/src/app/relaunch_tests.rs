@@ -211,8 +211,11 @@ fn relaunch_needs_a_rebuilt_editor_first() {
 
 /// A Cargo workspace in a temporary folder, with one tiny package named
 /// like the editor, whose `main.rs` is `main`.
-fn tiny_workspace(main: &str) -> PathBuf {
-    let folder = std::env::temp_dir().join(format!("axcenity-rebuild-test-{}", std::process::id()));
+pub(super) fn tiny_workspace(test: &str, main: &str) -> PathBuf {
+    let folder = std::env::temp_dir().join(format!(
+        "axcenity-rebuild-{test}-test-{}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&folder);
     std::fs::create_dir_all(folder.join("crates/editor/src")).unwrap();
     std::fs::write(
@@ -230,7 +233,11 @@ fn tiny_workspace(main: &str) -> PathBuf {
 }
 
 /// Runs the editor's frames' engine step until `done`, for up to two minutes.
-fn engine_until(app: &mut EditorApp, ctx: &egui::Context, done: impl Fn(&EditorApp) -> bool) {
+pub(super) fn engine_until(
+    app: &mut EditorApp,
+    ctx: &egui::Context,
+    done: impl Fn(&EditorApp) -> bool,
+) {
     let start = Instant::now();
     while !done(app) && start.elapsed() < Duration::from_secs(120) {
         std::thread::sleep(Duration::from_millis(50));
@@ -241,7 +248,10 @@ fn engine_until(app: &mut EditorApp, ctx: &egui::Context, done: impl Fn(&EditorA
 
 #[test]
 fn a_compile_error_is_listed_with_links_and_fixing_it_rebuilds_and_offers_relaunch() {
-    let workspace = tiny_workspace("fn main() {\n    let x: u32 = \"not a number\";\n}\n");
+    let workspace = tiny_workspace(
+        "errors",
+        "fn main() {\n    let x: u32 = \"not a number\";\n}\n",
+    );
     let ctx = theme::test_context();
     let mut app = EditorApp::new(Some(&copy_of_example("hello-touched", "rebuild-errors")));
     app.rebuilds = Rebuilds {

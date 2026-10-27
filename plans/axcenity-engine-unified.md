@@ -929,6 +929,6 @@ The new process reads the handoff and deletes it. It opens the project with thos
 ### Acceptance criteria
 
 - [ ] During Play, changing the body of a physics or character step function changes behaviour at the next frame, with no relaunch, and the game keeps running.
-- [ ] Changing a struct's fields falls back to rebuild and relaunch, and Output says so.
-- [ ] Without the `hot-patch` feature the editor builds without `subsecond`, and the player never depends on it.
+- [x] Changing a struct's fields falls back to rebuild and relaunch, and Output says so.
+- [x] Without the `hot-patch` feature the editor builds without `subsecond`, and the player never depends on it.
 - [ ] The workspace still builds on Windows, macOS and Linux. On a platform where patching isn't supported, the fallback is used.

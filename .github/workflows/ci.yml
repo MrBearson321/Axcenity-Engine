@@ -43,9 +43,11 @@ jobs:
       - name: Check the player has no editor code
         shell: bash
         run: |
-          if cargo tree -p axcenity-player -e normal --prefix none --locked | grep -E '^(axcenity-editor|eframe|egui) '; then
+          if cargo tree -p axcenity-player -e normal --prefix none --locked | grep -E '^(axcenity-editor|eframe|egui|subsecond) '; then
             echo "axcenity-player depends on editor code"
             exit 1
           fi
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # The editor's dev-only hot-patching (dx and subsecond) still builds here.
+      - run: cargo clippy -p axcenity-editor --all-targets --features hot-patch --locked -- -D warnings
       - run: cargo test --workspace --locked

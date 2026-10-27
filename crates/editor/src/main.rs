@@ -25,6 +25,7 @@ mod explorer;
 mod gizmo;
 mod global_assets;
 mod history;
+mod hot_patch;
 mod import_dialog;
 mod layout;
 mod loading;

@@ -19,6 +19,8 @@ use std::thread::JoinHandle;
 
 use axcenity_project::Watcher;
 
+use crate::hot_patch::HotPatch;
+
 /// The package the background build makes.
 pub const EDITOR_PACKAGE: &str = "axcenity-editor";
 /// The editor's program name, without the OS's extension.
@@ -357,9 +359,21 @@ pub struct Rebuilds {
     pub errors: usize,
     /// A rebuilt editor, ready to relaunch into.
     pub ready: bool,
+    /// Hot-patching, while dx serves this editor (`hot_patch.rs`).
+    pub hot_patch: Option<HotPatch>,
+    /// Whether dx was looked for yet (once per run).
+    pub hot_patch_checked: bool,
 }
 
 impl Rebuilds {
+    /// Whether frames run the code dx patched in: only while hot-patching,
+    /// and not after a change a patch can't carry.
+    pub fn patched_frames(&self) -> bool {
+        self.hot_patch
+            .as_ref()
+            .is_some_and(HotPatch::patched_frames)
+    }
+
     /// How far the running build is, from 0 to 1, if one is running.
     pub fn progress(&self) -> Option<f32> {
         self.build.as_ref()?;

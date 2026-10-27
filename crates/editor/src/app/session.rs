@@ -653,6 +653,7 @@ impl EditorApp {
         activation: Option<InstanceId>,
         focus_lost: Option<InstanceId>,
     ) {
+        let patched = self.rebuilds.patched_frames();
         let Some(session) = &mut self.play else {
             return;
         };
@@ -687,7 +688,11 @@ impl EditorApp {
         } else {
             self.game_keys.motion(look_dx, look_dy, zoom)
         };
-        let frame = session.frame(seconds, keys, motion, camera, &mut self.output);
+        // The game's steps (character, physics, scripts) run the newest
+        // code dx patched in, so Play carries on across a patch.
+        let frame = hot_patch::call(patched, || {
+            session.frame(seconds, keys, motion, camera, &mut self.output)
+        });
         if let Some(cost) = session.cost() {
             self.profiler.record_game(cost, session.load());
         }

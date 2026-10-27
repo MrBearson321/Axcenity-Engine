@@ -30,6 +30,7 @@ Rules:
 - `ui` reads the Instance tree and adds screen-space layout data to the render draw list; `render` remains Instance-free.
 - Don't let crates depend on each other in a cycle. If two crates need each other, move the shared type into `core`.
 - Pin dependency versions in the workspace's root `Cargo.toml` (`[workspace.dependencies]`).
+- Development-only dependencies sit behind a crate feature. The editor's `hot-patch` feature (`subsecond`, `dioxus-devtools`, `dioxus-cli-config`) is off by default, and nothing else, the player included, can turn it on.
 
 ## Where the big files split
 

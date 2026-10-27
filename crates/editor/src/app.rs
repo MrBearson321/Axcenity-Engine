@@ -65,6 +65,7 @@ use crate::dialog;
 use crate::explorer::{self, Action, Explorer};
 use crate::gizmo::{Modes, Pose, Snap, Tool};
 use crate::history::{self, Field, History, Move, Place};
+use crate::hot_patch;
 use crate::import_dialog::ImportDialog;
 use crate::layout::{self, Layout, Pane};
 use crate::loading::{self, Loading};
@@ -692,7 +693,9 @@ impl eframe::App for EditorApp {
     /// Called by eframe to draw each frame (only when something changed,
     /// such as mouse movement, unless a frame is requested).
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        self.frame(ctx, frame.wgpu_render_state());
+        // While dx serves the editor, through the newest code it patched in.
+        let patched = self.rebuilds.patched_frames();
+        hot_patch::call(patched, || self.frame(ctx, frame.wgpu_render_state()));
         // Relaunching into a rebuilt editor saves the settings first.
         self.launch(ctx, frame);
         // Tests call `frame` without a window, so the window's resize edges
@@ -1109,6 +1112,8 @@ mod agent_tests;
 mod asset_fix_tests;
 #[cfg(test)]
 mod behavior_tree_tests;
+#[cfg(test)]
+mod hot_patch_tests;
 #[cfg(test)]
 mod ik_tests;
 #[cfg(test)]
