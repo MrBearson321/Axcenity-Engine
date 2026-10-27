@@ -9,6 +9,8 @@
 //!   through `DataService` ([`DataTable`]).
 //! - [`Assets::sky_image`] reads the sky image Lighting's `SkyImage` names
 //!   ([`SkyImage`]).
+//! - [`Assets::reflection_probe`] reads the bake a `ReflectionProbe`'s
+//!   `Bake` names ([`ProbeImage`]).
 //! - [`load_model`] reads a `.gltf`, `.glb` or `.fbx` file into a [`Model`]: plain
 //!   triangles, materials and textures, fitted into the 1×1×1 cube that every
 //!   part's mesh fills.
@@ -25,6 +27,7 @@ mod fonts;
 mod import;
 mod material;
 mod model;
+mod probe;
 mod reload;
 mod sky_image;
 mod texture_set;
@@ -55,6 +58,10 @@ pub use model::{
     Model, ModelError, ModelFormat, ModelMaterial, ModelObject, Pick, Pose, Posed, PosedPrimitive,
     Primitive, Rig, Take, TextureRole, Track, list_objects, load_model, load_models, load_takes,
     texture_roles,
+};
+pub use probe::{
+    PROBE_SUFFIX, PROBES_FOLDER, ProbeImage, decode_probe, encode_probe, is_probe_file, probe_path,
+    read_probe, write_probe,
 };
 pub use reload::Reload;
 pub use sky_image::{
@@ -115,6 +122,9 @@ struct Shared {
     textures: HashMap<String, Option<Arc<Image>>>,
     /// Every sky image asked for so far, by its path, the same way.
     sky_images: HashMap<String, Option<Arc<SkyImage>>>,
+    /// Every reflection probe bake asked for so far, by its path, the same
+    /// way.
+    probes: HashMap<String, Option<Arc<ProbeImage>>>,
     /// Every material file asked for so far, by its path, put together
     /// with its bases. `None` means it couldn't be read.
     materials: HashMap<String, Option<material::Resolved>>,
@@ -241,6 +251,44 @@ impl Assets {
             return None;
         }
         store_sky_image(&mut shared, path, read_sky_image(&folder, path))
+    }
+
+    /// The reflection probe bake at `path` (a ReflectionProbe's `Bake`,
+    /// such as `assets/probes/Hall.probe.hdr`), read the first time. `None`
+    /// if `path` is empty or it can't be read; the reason goes to
+    /// [`take_errors`](Self::take_errors), once. Bakes are small, so they're
+    /// read at once even while textures load in the background.
+    pub fn reflection_probe(&self, path: &str) -> Option<Arc<ProbeImage>> {
+        if path.is_empty() {
+            return None;
+        }
+        let mut shared = self.lock();
+        if let Some(image) = shared.probes.get(path) {
+            return image.clone();
+        }
+        let folder = shared.folder.clone()?;
+        let image = match read_probe(&folder, path) {
+            Ok(image) => Some(Arc::new(image)),
+            Err(message) => {
+                shared.errors.push(format!(
+                    "Could not load the reflection probe bake `{path}`: {message}.                      The sky is reflected instead; bake the probe again."
+                ));
+                None
+            }
+        };
+        reload::remember_stamp(&mut shared, &folder, path);
+        shared.probes.insert(path.to_owned(), image.clone());
+        image
+    }
+
+    /// Uses `image` as the bake at `path` from now on, without reading the
+    /// file: the editor hands over each bake it saves.
+    pub fn put_reflection_probe(&self, path: &str, image: ProbeImage) {
+        let mut shared = self.lock();
+        if let Some(folder) = shared.folder.clone() {
+            reload::remember_stamp(&mut shared, &folder, path);
+        }
+        shared.probes.insert(path.to_owned(), Some(Arc::new(image)));
     }
 
     /// The material file at `path` (a part's `MaterialVariant`, such as
@@ -448,7 +496,7 @@ impl Assets {
     }
 
     /// Forgets `path` (a model file, with or without a `#` pick, a
-    /// texture, or a material file, and every material built on it), so
+    /// texture, a probe bake, or a material file, and every material built on it), so
     /// it's read again the next time it's asked for, after the file was
     /// changed. The errors it gave are reported again too.
     pub fn forget(&self, path: &str) {
@@ -458,6 +506,7 @@ impl Assets {
             .models
             .retain(|mesh_id, _| mesh_id.split('#').next() != Some(file));
         shared.textures.remove(file);
+        shared.probes.remove(file);
         shared.takes.remove(file);
         shared.tables.remove(file);
         shared.materials.retain(|_, material| {
@@ -469,13 +518,14 @@ impl Assets {
         shared.materials.remove(file);
     }
 
-    /// Forgets every model, texture, take and material that couldn't be
+    /// Forgets every model, texture, probe bake, take and material that couldn't be
     /// loaded (or whose base couldn't), so each is tried again, after files
     /// were added or fixed.
     pub fn forget_failures(&self) {
         let mut shared = self.lock();
         shared.models.retain(|_, model| model.is_some());
         shared.textures.retain(|_, texture| texture.is_some());
+        shared.probes.retain(|_, probe| probe.is_some());
         shared.takes.retain(|_, takes| takes.is_some());
         shared.tables.retain(|_, table| table.is_ok());
         shared

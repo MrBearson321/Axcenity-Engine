@@ -10,6 +10,7 @@ use glam::Mat4;
 mod environment_maps;
 mod frustum_culling;
 mod level_of_detail;
+mod reflection_probes;
 mod skinning;
 mod texture_budget;
 
@@ -152,6 +153,7 @@ fn list_of(items: Vec<DrawItem>) -> DrawList {
         },
         ui: Vec::new(),
         fonts: Vec::new(),
+        reflection_probes: Vec::new(),
     }
 }
 

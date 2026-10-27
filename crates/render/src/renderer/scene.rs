@@ -110,6 +110,16 @@ impl ScenePipeline {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 13,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::CubeArray,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
         let light_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -143,6 +153,7 @@ impl ScenePipeline {
         });
         let environment = environment::Environment::new(&device, &queue);
         let (environment_view, sky_image_view) = environment.views();
+        let probes = probes::Probes::new(&device, &queue);
         let frame_bind_group = create_frame_bind_group(
             &device,
             &frame_layout,
@@ -153,6 +164,7 @@ impl ScenePipeline {
                 &no_occlusion_view,
                 environment_view,
                 sky_image_view,
+                probes.view(),
             ],
             [&shadow_sampler, &occlusion_sampler, &environment.sampler],
         );
@@ -324,6 +336,7 @@ impl ScenePipeline {
             frame_targets,
             occlusion,
             environment,
+            probes,
             no_occlusion_view,
             occlusion_sampler,
             targets_alive,
@@ -520,8 +533,24 @@ impl ScenePipeline {
         ) {
             self.bind_frame();
         }
+        // So are the reflection probes, each only when it's new.
+        if self.probes.prepare(
+            (&self.device, &self.queue),
+            &self.environment,
+            &list.reflection_probes,
+            list.camera.position,
+            (
+                self.graphics.reflection_quality,
+                self.capabilities.max_texture_size,
+            ),
+        ) {
+            self.bind_frame();
+        }
         let mut frame_uniform = frame_uniform(list, aspect, &self.graphics);
         (frame_uniform.environment, frame_uniform.sky_light) = self.environment.uniform();
+        let (probes, probe_count) = self.probes.uniform();
+        frame_uniform.probes = probes;
+        frame_uniform.reflection_probes[0] = probe_count;
         let (scene_width, scene_height) = self.frame_targets.size;
         frame_uniform.ambient_occlusion[2] = 1.0 / scene_width as f32;
         frame_uniform.ambient_occlusion[3] = 1.0 / scene_height as f32;
@@ -1083,6 +1112,7 @@ impl ScenePipeline {
             .as_ref()
             .map_or(&self.no_occlusion_view, |targets| &targets.blurred_view);
         let (environment, sky_image) = self.environment.views();
+        let probes = self.probes.view();
         self.frame_bind_group = create_frame_bind_group(
             &self.device,
             &self.frame_layout,
@@ -1092,7 +1122,7 @@ impl ScenePipeline {
                 &self.tile_buffer,
                 &self.skinning.joints,
             ],
-            [sun, spot, occlusion, environment, sky_image],
+            [sun, spot, occlusion, environment, sky_image, probes],
             [
                 &self.shadow_sampler,
                 &self.occlusion_sampler,
@@ -1179,7 +1209,8 @@ impl ScenePipeline {
             target_bytes: self.frame_targets.bytes
                 + shadow_bytes
                 + sheet_bytes
-                + self.environment.bytes(),
+                + self.environment.bytes()
+                + self.probes.bytes(),
             buffer_bytes: buffers.iter().map(|buffer| buffer.size()).sum(),
         }
     }

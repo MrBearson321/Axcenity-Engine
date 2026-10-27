@@ -25,11 +25,12 @@ pub const HDR_SKY_EXTENSIONS: [&str; 2] = ["exr", "hdr"];
 pub const MAX_SKY_WIDTH: u32 = 4096;
 
 /// Whether `path` names a high dynamic range sky image file, by its
-/// extension.
+/// extension. A reflection probe's bake is an `.hdr` file too, but not a sky.
 pub fn is_hdr_sky_file(path: &str) -> bool {
-    path.rsplit_once('.').is_some_and(|(_, extension)| {
-        HDR_SKY_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str())
-    })
+    !crate::is_probe_file(path)
+        && path.rsplit_once('.').is_some_and(|(_, extension)| {
+            HDR_SKY_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str())
+        })
 }
 
 /// A sky image in linear light, as the renderer draws it.
@@ -194,6 +195,7 @@ mod tests {
         assert!(image.shape_warning().is_none(), "2:1 is a panorama");
         assert!(is_hdr_sky_file("assets/sky/Noon.EXR") && is_hdr_sky_file("a/b.hdr"));
         assert!(!is_hdr_sky_file("assets/sky/noon.png"));
+        assert!(!is_hdr_sky_file("assets/probes/Hall.probe.hdr"));
     }
 
     #[test]

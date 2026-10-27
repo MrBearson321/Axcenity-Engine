@@ -51,6 +51,27 @@ struct Frame {
     // harmonics (rgb each), already blurred over the hemisphere and divided
     // by pi, so `sky_irradiance` gives what a white matte surface returns.
     sky_light: array<vec4<f32>, 9>,
+    // x: how many of `probes` are drawn.
+    reflection_probes: vec4<u32>,
+    // The reflection probes drawn, smallest box first.
+    probes: array<Probe, MAX_PROBES>,
+}
+
+// The most reflection probes drawn at once. Must match `MAX_PROBES` in
+// renderer/probes.rs.
+const MAX_PROBES: u32 = 8u;
+
+// A box of the world that reflects its bake in place of the sky. Must
+// match `ProbeRaw` in renderer/probes.rs.
+struct Probe {
+    // Turns world space to the box's own (its middle at 0, its sides along
+    // the axes), one row each. Each row's xyz is also one of the box's axes
+    // in world space.
+    to_box: array<vec4<f32>, 3>,
+    // xyz: half the box's size, w: how far inside its faces it fades in.
+    extent: vec4<f32>,
+    // x: its layer of `probe_maps`.
+    layer: vec4<u32>,
 }
 
 // A point or spot light. Must match `LightRaw` in renderer.rs.
@@ -94,6 +115,9 @@ const LIGHTS_PER_TILE: u32 = 64u;
 @group(0) @binding(11) var environment_sampler: sampler;
 // The sky image (see `equirect_uv`), or a blank 1×1 texture without one.
 @group(0) @binding(12) var sky_image: texture_2d<f32>;
+// Each reflection probe's bake, blurred like `environment_map`, one cube
+// per probe (its `layer`). A blank 1×1 cube while none are drawn.
+@group(0) @binding(13) var probe_maps: texture_cube_array<f32>;
 
 // Points spread evenly over a disc of radius 1 (a Poisson disc), for
 // sampling the shadow map around a point. `private` so it can be indexed
@@ -377,6 +401,48 @@ fn sky_specular(dir: vec3<f32>, roughness: f32) -> vec3<f32> {
     return environment_specular(dir, roughness);
 }
 
+// What a surface at `position` of `roughness` reflects looking along
+// `dir`: each reflection probe whose box it's inside, read where the
+// reflection leaves the box (so near walls line up with the real ones:
+// parallax-corrected), fading in over the probe's blend distance from its
+// faces. Smaller boxes come first and the bigger ones and then the sky
+// (times the environment intensity) fill what they leave.
+fn reflected(position: vec3<f32>, dir: vec3<f32>, roughness: f32, environment: f32) -> vec3<f32> {
+    var color = vec3<f32>(0.0);
+    var left = 1.0;
+    let count = min(frame.reflection_probes.x, MAX_PROBES);
+    for (var i = 0u; i < count; i++) {
+        let probe = frame.probes[i];
+        let p = vec4<f32>(position, 1.0);
+        let local = vec3<f32>(dot(probe.to_box[0], p), dot(probe.to_box[1], p), dot(probe.to_box[2], p));
+        let half_size = probe.extent.xyz;
+        let inside = min(min(half_size.x - abs(local.x), half_size.y - abs(local.y)), half_size.z - abs(local.z));
+        if inside <= 0.0 {
+            continue;
+        }
+        let weight = left * smoothstep(0.0, 1.0, inside / max(probe.extent.w, 0.001));
+        // The reflection in the box's own space, and how far along it each
+        // pair of faces is: the nearer face it's heading for leaves first.
+        let d = vec3<f32>(
+            dot(probe.to_box[0].xyz, dir),
+            dot(probe.to_box[1].xyz, dir),
+            dot(probe.to_box[2].xyz, dir),
+        );
+        let safe = select(d, vec3<f32>(1e-6), abs(d) < vec3<f32>(1e-6));
+        let exits = (sign(safe) * half_size - local) / safe;
+        let hit = local + d * min(min(exits.x, exits.y), exits.z);
+        // From the box's middle, where it was baked, back in world space.
+        let toward = probe.to_box[0].xyz * hit.x + probe.to_box[1].xyz * hit.y + probe.to_box[2].xyz * hit.z;
+        let level = roughness * frame.environment.y;
+        color += weight * textureSampleLevel(probe_maps, environment_sampler, toward, i32(probe.layer.x), level).rgb;
+        left -= weight;
+        if left <= 0.001 {
+            break;
+        }
+    }
+    return color + left * environment * sky_specular(dir, roughness);
+}
+
 // Average specular reflection of light arriving from every direction
 // (Karis' analytic approximation). Multiplies the environment's color to
 // give what a surface reflects of it.
@@ -478,7 +544,7 @@ fn light_surface(
     let diffuse_color = base_color * (1.0 - metalness);
     let ambient = occlusion * (
         frame.ambient.rgb * (diffuse_color + reflectance)
-        + environment * (sky_diffuse(n) * diffuse_color
-            + sky_specular(reflection, roughness) * reflectance));
+        + environment * sky_diffuse(n) * diffuse_color
+        + reflected(world_position, reflection, roughness, environment) * reflectance);
     return sun + lit + ambient;
 }

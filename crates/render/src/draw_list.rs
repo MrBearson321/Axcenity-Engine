@@ -8,7 +8,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use glam::{Mat3, Mat4, Vec3};
+use glam::{Mat3, Mat4, Quat, Vec3};
 
 use crate::ToneMapping;
 
@@ -33,6 +33,52 @@ pub struct DrawList {
     /// The project's own fonts, which UI text can name besides the built-in
     /// ones. Each is loaded the first time it's seen.
     pub fonts: Vec<crate::UiFont>,
+    /// Baked reflections of parts of the world, reflected by what's inside
+    /// their boxes in place of the sky. Only drawn while the reflection
+    /// quality bakes environment maps (Medium and above).
+    pub reflection_probes: Vec<ReflectionProbe>,
+}
+
+/// A box of the world that reflects what was baked from its middle, in
+/// place of the sky (a `ReflectionProbe`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReflectionProbe {
+    /// The middle of its box, where it was baked from.
+    pub center: Vec3,
+    /// How its box is turned.
+    pub rotation: Quat,
+    /// Half its box's size along its own axes.
+    pub half_size: Vec3,
+    /// How far inside its box's faces, in studs, it fades in from what's
+    /// around it.
+    pub blend_distance: f32,
+    pub image: ProbeImage,
+}
+
+/// What a reflection probe saw from the middle of its box: six square
+/// faces of a cube in linear light.
+#[derive(Clone)]
+pub struct ProbeImage {
+    /// Different for every bake, so the renderer filters each one once.
+    pub key: u64,
+    /// Each face's width and height in pixels.
+    pub size: u32,
+    /// Red, green and blue for each pixel of the faces +X, -X, +Y, -Y, +Z
+    /// and -Z in turn, each as a cubemap keeps it (looking out from the
+    /// middle, rows from the top).
+    pub rgb: Arc<Vec<f32>>,
+}
+
+impl fmt::Debug for ProbeImage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ProbeImage #{} ({}² × 6)", self.key, self.size)
+    }
+}
+
+impl PartialEq for ProbeImage {
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key
+    }
 }
 
 /// A picture in the 3D scene that always faces the camera, such as one

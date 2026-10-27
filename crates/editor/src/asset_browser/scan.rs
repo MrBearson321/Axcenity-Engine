@@ -32,6 +32,10 @@ pub fn kind_of(path: &str) -> Option<AssetKind> {
     if lower.ends_with(axcenity_assets::DATA_TABLE_SUFFIX) {
         return Some(AssetKind::DataTable);
     }
+    // Reflection probe bakes belong to their probes, and aren't picked here.
+    if axcenity_assets::is_probe_file(&lower) {
+        return None;
+    }
     let extension = lower.rsplit_once('.')?.1;
     // PNG and JPEG skies work too, but look like any other image here.
     if axcenity_assets::HDR_SKY_EXTENSIONS.contains(&extension) {

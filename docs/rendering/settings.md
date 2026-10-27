@@ -25,7 +25,7 @@ Where a Lighting value is also a cost, the world's value is a request and the se
 | Texture memory budget (16 MB to 64 GB) | 256 MB | 512 MB | 1024 MB | 2048 MB |
 | Anti-aliasing | Off | FXAA | MSAA 4× | MSAA 4× |
 | Ambient occlusion | Off | Low (8 samples) | High (16) | High |
-| Reflection quality (environment maps) | Low: the gradient, no sky image | Medium: 64², 32 samples | High: 128², 64 | Ultra: 256², 128 |
+| Reflection quality (environment maps, reflection probes) | Low: the gradient, no sky image or probes | Medium: 64², 32 samples | High: 128², 64 | Ultra: 256², 128 |
 
 High is the look worlds were made with. `automatic` (Lua's `Enum.GraphicsQuality.Automatic`) means the quality follows the machine: `GraphicsSettings::automatic(&Capabilities)` is High, or Low on a software adapter (`DeviceType::Cpu`), with no overrides. It's what a machine starts with (`default_for`), saved as `"automatic": true`, and picked again for the machine on each start (`player::graphics::fit_machine`).
 

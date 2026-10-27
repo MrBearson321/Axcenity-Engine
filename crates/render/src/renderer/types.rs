@@ -63,6 +63,10 @@ pub(super) struct FrameUniform {
     /// The sky's diffuse light as spherical harmonics (see
     /// `environment::harmonics`), while the environment maps are on.
     pub(super) sky_light: [[f32; 4]; 9],
+    /// How many reflection probes are drawn, then unused.
+    pub(super) reflection_probes: [u32; 4],
+    /// The reflection probes drawn, smallest box first (see `probes.rs`).
+    pub(super) probes: [probes::ProbeRaw; probes::MAX_PROBES],
 }
 
 /// The most point and spot lights drawn at once.
@@ -535,6 +539,7 @@ pub(super) struct FrameTargets {
     /// can be counted.
     pub(super) _alive: Arc<()>,
     /// Where the scene is drawn, or with MSAA where it's resolved.
+    pub(super) hdr: wgpu::Texture,
     pub(super) hdr_view: wgpu::TextureView,
     /// Only while MSAA is on.
     pub(super) msaa: Option<MsaaTarget>,
@@ -594,6 +599,8 @@ pub(super) struct ScenePipeline {
     pub(super) occlusion: OcclusionPasses,
     /// The sky's environment maps, baked when the sky changes.
     pub(super) environment: environment::Environment,
+    /// Reflection probes' baked reflections, each filtered once.
+    pub(super) probes: probes::Probes,
     /// A 1×1 white texture, bound in place of the ambient occlusion while
     /// it's off, and the sampler the scene pass reads occlusion with.
     pub(super) no_occlusion_view: wgpu::TextureView,

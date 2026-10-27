@@ -15,8 +15,8 @@ use axcenity_core::{ClassName, Instance, InstanceId, PartType, TextureChannel, V
 use axcenity_render::glam::{Mat4, Vec3};
 use axcenity_render::{
     AmbientLight, Camera, Channel, ChannelMap, Cone, DrawItem, DrawList, Light, Material,
-    MeshSource, NormalMap, PostProcessing, Shadows, Shape, Skin, Sky, SkyImage, SpotShadows, Sun,
-    TextureMaps, TextureSource,
+    MeshSource, NormalMap, PostProcessing, ProbeImage, ReflectionProbe, Shadows, Shape, Skin, Sky,
+    SkyImage, SpotShadows, Sun, TextureMaps, TextureSource,
 };
 use axcenity_ui::{Stylesheet, UiInput, UiInteraction, UiLayout};
 
@@ -151,6 +151,38 @@ fn light_of(world: &World, instance: &Instance) -> Option<Light> {
     })
 }
 
+/// The box a ReflectionProbe reflects in: its parent part's, with the bake
+/// its `Bake` names. `None` if it isn't inside a part, or has no bake that
+/// can be read (a missing file is reported once by `assets`), so the sky
+/// is reflected there instead.
+fn reflection_probe_of(
+    world: &World,
+    instance: &Instance,
+    assets: &Assets,
+) -> Option<ReflectionProbe> {
+    let (_, transform) = part_placement(world.get(instance.parent()?)?)?;
+    let Some(Value::String(path)) = instance.property("Bake") else {
+        return None;
+    };
+    let image = assets.reflection_probe(path)?;
+    let (size, rotation, center) = transform.to_scale_rotation_translation();
+    let blend_distance = instance
+        .property("BlendDistance")
+        .and_then(Value::as_number)
+        .unwrap_or(0.0) as f32;
+    Some(ReflectionProbe {
+        center,
+        rotation,
+        half_size: size.abs() * 0.5,
+        blend_distance: blend_distance.max(0.0),
+        image: ProbeImage {
+            key: image.key(),
+            size: image.size,
+            rgb: image.rgb.clone(),
+        },
+    })
+}
+
 /// Where a PointLight or SpotLight in the Workspace is, for the editor to
 /// show it: a light has no shape of its own, so it's drawn as an icon.
 #[derive(Clone, Debug, PartialEq)]
@@ -255,6 +287,7 @@ pub fn build_draw_list_posed(
     };
     let mut items = Vec::new();
     let mut lights = Vec::new();
+    let mut reflection_probes = Vec::new();
     for (id, instance) in world
         .descendants(world.workspace())
         .into_iter()
@@ -267,6 +300,9 @@ pub fn build_draw_list_posed(
             }
             ClassName::PointLight | ClassName::SpotLight => {
                 lights.extend(light_of(world, instance))
+            }
+            ClassName::ReflectionProbe => {
+                reflection_probes.extend(reflection_probe_of(world, instance, assets))
             }
             // Drawn chunk by chunk below.
             ClassName::Terrain => {}
@@ -304,6 +340,7 @@ pub fn build_draw_list_posed(
                 data: file.data.clone(),
             })
             .collect(),
+        reflection_probes,
     }
 }
 
@@ -1419,6 +1456,60 @@ mod tests {
     fn linear_to_srgb_undoes_the_renderers_conversion() {
         let percent = srgb([0.0, 1.0, 0.214]).map(|c| (c * 100.0).round());
         assert_eq!(percent, [0.0, 100.0, 50.0]);
+    }
+
+    #[test]
+    fn a_reflection_probe_reflects_in_its_parts_box_and_a_missing_bake_falls_back_to_the_sky() {
+        let folder =
+            std::env::temp_dir().join(format!("axcenity-scene-probe-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        let path = axcenity_assets::probe_path("Hall");
+        axcenity_assets::write_probe(&folder, &path, 2, &[0.5; 2 * 2 * 6 * 3]).unwrap();
+        let assets = Assets::new(&folder);
+        let mut world = World::new();
+        let room = part(
+            &mut world,
+            vec![
+                ("Size", vector(12.0, 6.0, 8.0)),
+                ("Position", vector(1.0, 3.0, -2.0)),
+                ("Orientation", vector(0.0, 90.0, 0.0)),
+            ],
+        );
+        let probe = world.create(ClassName::ReflectionProbe).unwrap();
+        world.set_parent(probe, Some(room)).unwrap();
+        let probes = |world: &World| build_draw_list(world, &assets, camera()).reflection_probes;
+        assert!(probes(&world).is_empty(), "not baked yet: the sky");
+
+        world
+            .set_property(probe, "Bake", Value::String(path.clone()))
+            .unwrap();
+        let drawn = probes(&world);
+        assert_eq!(drawn.len(), 1);
+        assert_eq!(drawn[0].center, Vec3::new(1.0, 3.0, -2.0));
+        assert!(
+            drawn[0]
+                .half_size
+                .abs_diff_eq(Vec3::new(6.0, 3.0, 4.0), 1e-5)
+        );
+        assert!((drawn[0].rotation * Vec3::X).abs_diff_eq(Vec3::NEG_Z, 1e-5));
+        assert_eq!(drawn[0].blend_distance, 2.0);
+        assert_eq!(drawn[0].image.size, 2);
+        assert_eq!(probes(&world)[0].image.key, drawn[0].image.key, "read once");
+        assert!(assets.take_errors().is_empty());
+
+        world
+            .set_property(
+                probe,
+                "Bake",
+                Value::String("assets/probes/gone.probe.hdr".into()),
+            )
+            .unwrap();
+        assert!(probes(&world).is_empty(), "a missing bake reflects the sky");
+        assert!(probes(&world).is_empty());
+        let errors = assets.take_errors();
+        assert_eq!(errors.len(), 1, "reported once: {errors:?}");
+        assert!(errors[0].contains("gone.probe.hdr"), "{errors:?}");
+        let _ = std::fs::remove_dir_all(&folder);
     }
 
     #[test]

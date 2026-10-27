@@ -216,7 +216,8 @@ pub(super) fn create_frame_bind_group(
         occlusion_view,
         environment_view,
         sky_image_view,
-    ]: [&wgpu::TextureView; 5],
+        probe_view,
+    ]: [&wgpu::TextureView; 6],
     [shadow_sampler, occlusion_sampler, environment_sampler]: [&wgpu::Sampler; 3],
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -270,6 +271,10 @@ pub(super) fn create_frame_bind_group(
             wgpu::BindGroupEntry {
                 binding: 12,
                 resource: wgpu::BindingResource::TextureView(sky_image_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 13,
+                resource: wgpu::BindingResource::TextureView(probe_view),
             },
         ],
     })

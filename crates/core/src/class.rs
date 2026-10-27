@@ -109,6 +109,9 @@ pub enum ClassName {
     PointLight,
     /// Light that shines in a cone from just above its parent part.
     SpotLight,
+    /// Inside a Part: what's in the part's box reflects the world as the
+    /// editor baked it from the part's middle (`Bake`), not the sky.
+    ReflectionProbe,
     /// Gives off particles (sparks, smoke, fire...) from inside its parent part.
     ParticleEmitter,
     /// Inside a Part, MeshPart, Model, ScreenGui or UI element: plays
@@ -165,7 +168,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 59] = [
+    pub const ALL: [ClassName; 60] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -204,6 +207,7 @@ impl ClassName {
         ClassName::Sound,
         ClassName::PointLight,
         ClassName::SpotLight,
+        ClassName::ReflectionProbe,
         ClassName::ParticleEmitter,
         ClassName::Animator,
         ClassName::Animation,
@@ -267,6 +271,7 @@ impl ClassName {
             ClassName::Sound => "Sound",
             ClassName::PointLight => "PointLight",
             ClassName::SpotLight => "SpotLight",
+            ClassName::ReflectionProbe => "ReflectionProbe",
             ClassName::ParticleEmitter => "ParticleEmitter",
             ClassName::Animator => "Animator",
             ClassName::Animation => "Animation",
@@ -531,6 +536,15 @@ impl ClassName {
                 // Whether parts in the beam cast shadows. Off, so worlds
                 // saved without it look as they did.
                 ("Shadows", Value::Bool(false)),
+            ],
+            ClassName::ReflectionProbe => vec![
+                // The bake the editor saved (Bake Reflection Probes), such as
+                // "assets/probes/Hall.probe.hdr". Empty until it's baked,
+                // when the sky is reflected.
+                ("Bake", Value::String(String::new())),
+                // Studs inside the box's faces over which its reflection
+                // fades in from what's around it.
+                ("BlendDistance", Value::Number(2.0)),
             ],
             ClassName::ParticleEmitter => vec![
                 ("Enabled", Value::Bool(true)),
@@ -1194,6 +1208,7 @@ impl ClassName {
             | ClassName::BillboardGui
             | ClassName::PointLight
             | ClassName::SpotLight
+            | ClassName::ReflectionProbe
             | ClassName::ParticleEmitter
             | ClassName::Terrain
             | ClassName::TerrainLayer

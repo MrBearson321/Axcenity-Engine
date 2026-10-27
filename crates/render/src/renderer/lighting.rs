@@ -126,6 +126,8 @@ pub(super) fn frame_uniform(
         // The environment maps fill these in when they're on.
         environment: [0.0; 4],
         sky_light: [[0.0; 4]; 9],
+        reflection_probes: [0; 4],
+        probes: Default::default(),
     }
 }
 

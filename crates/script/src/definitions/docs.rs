@@ -1026,6 +1026,16 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "If true, parts in the beam cast shadows. Only the few spot lights nearest the camera do, as the graphics settings allow.",
     ),
     (
+        ClassName::ReflectionProbe,
+        "Bake",
+        "The bake the editor saved for it (Lighting > Bake Probes), such as \"assets/probes/Hall.probe.hdr\". Empty, or a file that's missing, reflects the sky instead.",
+    ),
+    (
+        ClassName::ReflectionProbe,
+        "BlendDistance",
+        "How far inside the part's faces, in studs, its reflection fades in from what's around it.",
+    ),
+    (
         ClassName::ParticleEmitter,
         "Enabled",
         "If false, it stops giving off particles; those already out live on.",
@@ -2662,6 +2672,9 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::SpotLight => {
             "A light that shines in a cone from just above its parent part. Inserting one with no part selected also inserts an anchored lamp."
+        }
+        ClassName::ReflectionProbe => {
+            "Inside a Part: shiny surfaces in the part's box reflect the world as the editor baked it from the part's middle (Lighting > Bake Probes), lined up with the box's walls, in place of the sky. Overlapping probes blend, the smaller one winning, and each fades into what's around it over its BlendDistance. Changing the world doesn't change a bake until it's baked again. Drawn at Medium reflection quality and above."
         }
         ClassName::ParticleEmitter => {
             "Gives off particles (sparks, smoke, fire, stars...) from inside its parent part, shown in the editor and the game."

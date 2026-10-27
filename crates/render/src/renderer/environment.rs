@@ -22,9 +22,9 @@ use super::lighting::linear_color;
 
 /// The environment maps' and sky image's format: light brighter than 1,
 /// which every GPU can draw into and filter.
-const ENVIRONMENT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+pub(super) const ENVIRONMENT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 /// The size of the reflection cubemap's smallest (roughest) level.
-const ROUGHEST_LEVEL_SIZE: u32 = 4;
+pub(super) const ROUGHEST_LEVEL_SIZE: u32 = 4;
 /// The widest grid of a sky image's pixels its harmonics are worked out on.
 const HARMONICS_WIDTH: u32 = 128;
 
@@ -333,83 +333,132 @@ impl Environment {
             ],
         };
         queue.write_buffer(&self.uniform, 0, bytemuck::bytes_of(&uniform));
-        let image = self.views().1;
-        let group = |source: &wgpu::TextureView| {
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("environment bake"),
-                layout: &self.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: self.uniform.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::TextureView(source),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Sampler(&self.sampler),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::TextureView(image),
-                    },
-                ],
-            })
-        };
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("environment bake"),
         });
-        // Draws `pipeline` into every face of `texture`'s `level`.
-        let mut faces = |texture: &wgpu::Texture,
-                         level: u32,
-                         pipeline: &wgpu::RenderPipeline,
-                         group: &wgpu::BindGroup| {
-            for face in 0..6 {
-                let view = texture.create_view(&wgpu::TextureViewDescriptor {
-                    dimension: Some(wgpu::TextureViewDimension::D2),
-                    base_mip_level: level,
-                    mip_level_count: Some(1),
-                    base_array_layer: face,
-                    array_layer_count: Some(1),
-                    ..Default::default()
-                });
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("environment face"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })],
-                    depth_stencil_attachment: None,
-                    ..Default::default()
-                });
-                pass.set_pipeline(pipeline);
-                pass.set_bind_group(0, group, &[]);
-                // The instance says which face and level (environment.wgsl).
-                let instance = face + 6 * level;
-                pass.draw(0..3, instance..instance + 1);
-            }
-        };
         // 1. The sky into the source's largest level. Nothing is read from
         // the source yet, so the blank cube stands in for it.
-        faces(&maps.source, 0, &self.sky_face, &group(&self.blank_cube));
-        // 2. Each level of the source from the one above it.
-        let source_levels = maps.source.mip_level_count();
-        for level in 1..source_levels {
-            let above = cube_view(&maps.source, level - 1..level);
-            faces(&maps.source, level, &self.downsample, &group(&above));
-        }
-        // 3. Each level of the reflections from the whole source.
-        let source = group(&cube_view(&maps.source, 0..source_levels));
-        for level in 0..maps.reflections.mip_level_count() {
-            faces(&maps.reflections, level, &self.prefilter, &source);
-        }
+        let blank = self.group(device, &self.blank_cube);
+        draw_faces(&mut encoder, (&maps.source, 0, 0), &self.sky_face, &blank);
+        // 2. and 3.
+        self.blur(device, &mut encoder, &maps.source, (&maps.reflections, 0));
         queue.submit([encoder.finish()]);
+    }
+
+    /// Blurs `source`, a cubemap whose largest level is drawn, into each
+    /// level of the cube at array layer `first_layer` of `target`, rougher
+    /// at each level, with `samples` directions per texel of a rough level:
+    /// for a reflection probe (`renderer/probes.rs`), in one submission.
+    pub(super) fn filter(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        source: &wgpu::Texture,
+        (target, first_layer): (&wgpu::Texture, u32),
+        samples: u32,
+    ) {
+        let last_level = (target.mip_level_count() - 1) as f32;
+        let uniform = BakeUniform {
+            settings: [0.0, 0.0, samples as f32, last_level],
+            ..Zeroable::zeroed()
+        };
+        queue.write_buffer(&self.uniform, 0, bytemuck::bytes_of(&uniform));
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("reflection probe filter"),
+        });
+        self.blur(device, &mut encoder, source, (target, first_layer));
+        queue.submit([encoder.finish()]);
+    }
+
+    /// Steps 2 and 3 of a bake: each level of `source` below its largest
+    /// from the one above it, then each level of the cube at `first_layer`
+    /// of `target` from the whole source, one roughness per level (see
+    /// environment.wgsl).
+    fn blur(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        source: &wgpu::Texture,
+        (target, first_layer): (&wgpu::Texture, u32),
+    ) {
+        let source_levels = source.mip_level_count();
+        for level in 1..source_levels {
+            let above = self.group(device, &cube_view(source, level - 1..level));
+            draw_faces(encoder, (source, level, 0), &self.downsample, &above);
+        }
+        let whole = self.group(device, &cube_view(source, 0..source_levels));
+        for level in 0..target.mip_level_count() {
+            draw_faces(
+                encoder,
+                (target, level, first_layer),
+                &self.prefilter,
+                &whole,
+            );
+        }
+    }
+
+    /// The bake passes' bindings, reading `source` (and the sky image).
+    fn group(&self, device: &wgpu::Device, source: &wgpu::TextureView) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("environment bake"),
+            layout: &self.layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.uniform.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(source),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(self.views().1),
+                },
+            ],
+        })
+    }
+}
+
+/// Draws `pipeline` into every face of `level` of the cube at array layer
+/// `first_layer` of `texture`.
+fn draw_faces(
+    encoder: &mut wgpu::CommandEncoder,
+    (texture, level, first_layer): (&wgpu::Texture, u32, u32),
+    pipeline: &wgpu::RenderPipeline,
+    group: &wgpu::BindGroup,
+) {
+    for face in 0..6 {
+        let view = texture.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::D2),
+            base_mip_level: level,
+            mip_level_count: Some(1),
+            base_array_layer: first_layer + face,
+            array_layer_count: Some(1),
+            ..Default::default()
+        });
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("environment face"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            ..Default::default()
+        });
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, group, &[]);
+        // The instance says which face and level (environment.wgsl).
+        let instance = face + 6 * level;
+        pass.draw(0..3, instance..instance + 1);
     }
 }
 
@@ -605,7 +654,7 @@ fn upload_image(
 /// `value` as a 16-bit float's bits, for a texture. Light is never below
 /// 0: anything that isn't a positive number becomes 0, anything too big
 /// for 16 bits the largest it holds, and anything too small 0.
-fn half(value: f32) -> u16 {
+pub(super) fn half(value: f32) -> u16 {
     if value.is_nan() || value <= 0.0 {
         return 0;
     }

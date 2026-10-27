@@ -324,8 +324,8 @@ A `ReflectionProbe` inside a Part (its box is the probe's reach) is baked in the
 
 ### Acceptance criteria
 
-- [ ] A metal sphere inside a red-walled room reflects red walls with a probe, and the sky without one.
-- [ ] Baked probes save, reload and export, and a probe whose file is missing falls back to the sky with a report.
+- [x] A metal sphere inside a red-walled room reflects red walls with a probe, and the sky without one.
+- [x] Baked probes save, reload and export, and a probe whose file is missing falls back to the sky with a report.
 
 ---
 

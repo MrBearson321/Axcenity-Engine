@@ -67,6 +67,9 @@ impl EditorApp {
         if clicks.weld {
             self.weld_selected();
         }
+        if clicks.bake_probes {
+            self.bake_probes_asked = true;
+        }
         if clicks.import {
             self.import_with_dialog(axcenity_assets::PROJECT_TEXTURES_FOLDER);
         }
@@ -259,6 +262,30 @@ impl EditorApp {
                     {
                         clicks.insert = Some(what);
                     }
+                }
+                for what in Insertable::PROBES {
+                    let button = RibbonButton::new(theme::insert_icon(what), what.label());
+                    if ui
+                        .add_enabled(!playing, button)
+                        .on_hover_text(
+                            "Insert a ReflectionProbe into the selected part: shiny things in                              the part's box reflect what's around them there, once baked. With                              no part selected, an invisible room-sized box is made for it.",
+                        )
+                        .on_disabled_hover_text("Press Stop to edit.")
+                        .clicked()
+                    {
+                        clicks.insert = Some(what);
+                    }
+                }
+                let button = RibbonButton::new(icons::CAMERA_ROTATE, "Bake Probes");
+                if ui
+                    .add_enabled(!playing, button)
+                    .on_hover_text(
+                        "Bake every ReflectionProbe: what each sees from the middle of its                          part is saved in assets/probes. Bake again after changing the world.",
+                    )
+                    .on_disabled_hover_text("Press Stop to edit.")
+                    .clicked()
+                {
+                    clicks.bake_probes = true;
                 }
                 for what in Insertable::CHARACTERS {
                     let button = RibbonButton::new(theme::insert_icon(what), what.label());

@@ -33,6 +33,7 @@ use glyphon::{
     TextBounds, TextRenderer as GlyphTextRenderer, Viewport as TextViewport,
 };
 pub use gpu_timer::FramePass;
+pub use probe_bake::PROBE_BAKE_SIZE;
 
 mod culling;
 mod environment;
@@ -42,6 +43,8 @@ mod lighting;
 mod lod;
 mod occlusion;
 mod post;
+mod probe_bake;
+mod probes;
 mod skinning;
 mod sprites;
 mod terrain;

@@ -252,34 +252,41 @@ impl FrameTargets {
     ) -> Self {
         // Bytes of every texture made, for `RenderStats::target_bytes`.
         let bytes = std::cell::Cell::new(0);
-        let texture = |label, (width, height): (u32, u32), format, samples| {
+        let raw_texture = |label, (width, height): (u32, u32), format, samples| {
             let (width, height) = (width.max(1), height.max(1));
             bytes.set(bytes.get() + target_bytes((width, height, 1), format, samples));
-            // A multisampled texture can't be sampled, only resolved.
+            // A multisampled texture can't be sampled or copied, only
+            // resolved. The others can be copied out (a reflection probe's
+            // bake reads the scene's).
             let usage = if samples > 1 {
                 wgpu::TextureUsages::RENDER_ATTACHMENT
             } else {
-                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING
+                wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_SRC
             };
-            device
-                .create_texture(&wgpu::TextureDescriptor {
-                    label: Some(label),
-                    size: wgpu::Extent3d {
-                        width,
-                        height,
-                        depth_or_array_layers: 1,
-                    },
-                    mip_level_count: 1,
-                    sample_count: samples,
-                    dimension: wgpu::TextureDimension::D2,
-                    format,
-                    usage,
-                    view_formats: &[],
-                })
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: samples,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage,
+                view_formats: &[],
+            })
+        };
+        let texture = |label, size, format, samples| {
+            raw_texture(label, size, format, samples)
                 .create_view(&wgpu::TextureViewDescriptor::default())
         };
         let make = |label, width, height| texture(label, (width, height), HDR_FORMAT, 1);
-        let hdr_view = make("scene (HDR)", width, height);
+        let hdr = raw_texture("scene (HDR)", (width, height), HDR_FORMAT, 1);
+        let hdr_view = hdr.create_view(&wgpu::TextureViewDescriptor::default());
         let msaa = (samples > 1).then(|| MsaaTarget {
             view: texture("scene (MSAA)", (width, height), HDR_FORMAT, samples),
             _alive: alive.msaa.clone(),
@@ -354,6 +361,7 @@ impl FrameTargets {
             samples,
             bytes: bytes.get() + depth_bytes + occlusion.as_ref().map_or(0, |o| o.bytes),
             _alive: alive.sets.clone(),
+            hdr,
             hdr_view,
             msaa,
             depth_view: create_depth_view(device, width, height, samples),

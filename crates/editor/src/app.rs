@@ -35,6 +35,7 @@ mod files;
 mod input_settings;
 mod material_files;
 mod nav_overlay;
+mod probes;
 mod session;
 mod settings;
 mod sky;
@@ -235,6 +236,9 @@ pub struct EditorApp {
     confirm_delete: Option<InstanceId>,
     /// A sky image waiting for "Use this sky?" to be answered (`app/sky.rs`).
     confirm_sky: Option<String>,
+    /// Bake Probes was clicked: the probes are baked on the next frame,
+    /// which has the GPU device.
+    bake_probes_asked: bool,
     /// A model file waiting for its objects to be chosen.
     importing: Option<ImportDialog>,
     /// Model files imported together, waiting for the dialog to be free.
@@ -321,6 +325,8 @@ struct RibbonClicks {
     import: bool,
     /// Model ▸ Constraints ▸ Weld.
     weld: bool,
+    /// Bake Probes, beside Reflection Probe.
+    bake_probes: bool,
     check_assets: bool,
     play: bool,
     stop: bool,
@@ -586,6 +592,7 @@ impl EditorApp {
             tabs: ScriptTabs::default(),
             confirm_delete: None,
             confirm_sky: None,
+            bake_probes_asked: false,
             importing: None,
             import_queue: VecDeque::new(),
             game_keys: GameKeys::default(),
@@ -849,6 +856,12 @@ impl EditorApp {
             project.watcher.wake(ctx);
         }
         self.check_disk();
+        if self.bake_probes_asked
+            && let Some(render_state) = render_state
+        {
+            self.bake_probes_asked = false;
+            self.bake_probes(&render_state.device, &render_state.queue);
+        }
         self.finish_thumbnail(ctx);
         // Taken from the input before the viewport sees it, so the S doesn't
         // also fly the camera backward.
