@@ -52,9 +52,11 @@ impl EditorApp {
                 terrain.detail_distance = self.viewport.terrain.detail_distance;
                 self.viewport.terrain = terrain;
                 self.cover_until = Some(ctx.cumulative_frame_nr() + FINISHING_FRAMES);
+                self.follow_pending_handoff(true);
             }
             Err(err) => {
                 self.open_failed(&loading.folder, &err);
+                self.follow_pending_handoff(false);
                 // Output isn't shown without a project, so say it on the start screen.
                 if self.project.is_none()
                     && let Some(line) = self.output.lines().last()
@@ -343,17 +345,39 @@ impl EditorApp {
                 .error("Play didn't start, because the project couldn't be saved first.");
             return;
         }
+        self.start_session(None);
+    }
+    /// Starts the game on a copy of the edit world, or on `resumed`: a game
+    /// world carried over from before a relaunch (see `engine.rs`), whose
+    /// Instances have the edit world's IDs where they match. A resumed game
+    /// doesn't show the loading screen again.
+    pub(super) fn start_session(&mut self, resumed: Option<World>) {
         let Some(project) = &self.project else {
             return;
         };
         // Show the game, not a script.
         self.tabs.show_world();
         self.layout.open(Pane::Scene);
-        self.output.info(format!(
-            "Playing \"{}\". Press Stop (Shift+F5) to go back to editing; the world \
-             will be as it was before Play.",
-            project.name
-        ));
+        if resumed.is_some() {
+            self.output.info(format!(
+                "Play continues in \"{}\" from where it was; its scripts started again. \
+                 Press Stop (Shift+F5) to go back to editing.",
+                project.name
+            ));
+        } else {
+            self.output.info(format!(
+                "Playing \"{}\". Press Stop (Shift+F5) to go back to editing; the world \
+                 will be as it was before Play.",
+                project.name
+            ));
+        }
+        let no_loading_screen = axcenity_project::LoadingScreen::default();
+        let loading_screen = if resumed.is_some() {
+            &no_loading_screen
+        } else {
+            &project.loading_screen
+        };
+        let game = resumed.as_ref().unwrap_or(&self.world);
         // `project` borrows `self.project` and `output` borrows `self.output`:
         // different fields, so Rust allows both borrows at once.
         let scripts = play::read_scripts(
@@ -364,7 +388,7 @@ impl EditorApp {
         );
         let (position, orientation) = self.viewport.camera_view();
         match Session::start(
-            &self.world,
+            game,
             &scripts,
             self.tabs.breakpoints(),
             &mut self.output,
@@ -373,7 +397,7 @@ impl EditorApp {
                 position,
                 orientation,
             },
-            &project.loading_screen,
+            loading_screen,
             play_save_folder(&project.name),
             &self.graphics,
             &self.capabilities.unwrap_or_default(),

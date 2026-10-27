@@ -3,7 +3,9 @@
 //! take clicks or keys; the full message is always in Output too.
 //!
 //! Under them, work still going on ([`Busy`], such as textures loading)
-//! shows with a spinner and a bar until it's done.
+//! shows with a spinner and a bar until it's done. At the bottom, an
+//! [`Offer`] (such as Relaunch after the engine was rebuilt) stays until
+//! its button or its × is clicked.
 
 use eframe::egui::{self, FontId};
 
@@ -37,11 +39,29 @@ pub struct Busy {
     pub fraction: f32,
 }
 
+/// Something to do, offered until it's done or turned down.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Offer {
+    /// Such as "The engine was rebuilt."
+    pub text: String,
+    /// The button's label, such as "Relaunch".
+    pub button: String,
+}
+
+/// What was clicked on the [`Offer`] this frame.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct OfferClick {
+    pub accepted: bool,
+    pub dismissed: bool,
+}
+
 #[derive(Default)]
 pub struct Toasts {
     toasts: Vec<Toast>,
     /// Set each frame by the app; `None` when nothing is going on.
     pub busy: Option<Busy>,
+    /// Set by the app; it stays until the app takes it away.
+    pub offer: Option<Offer>,
 }
 
 impl Toasts {
@@ -73,9 +93,11 @@ impl Toasts {
     }
 
     /// Draws the toasts, newest at the bottom, and forgets finished ones.
-    pub fn show(&mut self, ctx: &egui::Context) {
-        if self.toasts.is_empty() && self.busy.is_none() {
-            return;
+    /// Returns what was clicked on the offer.
+    pub fn show(&mut self, ctx: &egui::Context) -> OfferClick {
+        let mut click = OfferClick::default();
+        if self.toasts.is_empty() && self.busy.is_none() && self.offer.is_none() {
+            return click;
         }
         let now = ctx.input(|input| input.time);
         let reduce_motion = ctx.style().animation_time <= 0.0;
@@ -87,6 +109,37 @@ impl Toasts {
         let palette = theme::palette(ctx);
         let screen = ctx.screen_rect();
         let mut bottom = screen.bottom() - 16.0;
+        if let Some(offer) = &self.offer {
+            let area = egui::Area::new(egui::Id::new("toast offer"))
+                .order(egui::Order::Foreground)
+                .pivot(egui::Align2::RIGHT_BOTTOM)
+                .fixed_pos(egui::pos2(screen.right() - 16.0, bottom))
+                .show(ctx, |ui| {
+                    egui::Frame::popup(ui.style())
+                        .inner_margin(egui::Margin::symmetric(12, 8))
+                        .corner_radius(8)
+                        .show(ui, |ui| {
+                            ui.set_max_width(360.0);
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 8.0;
+                                ui.label(
+                                    egui::RichText::new(icons::CHECK_CIRCLE)
+                                        .size(15.0)
+                                        .color(palette.success),
+                                );
+                                ui.label(
+                                    egui::RichText::new(&offer.text)
+                                        .font(FontId::new(type_scale::BODY, theme::medium_family()))
+                                        .color(palette.text_strong),
+                                );
+                                click.accepted = ui.button(&offer.button).clicked();
+                                click.dismissed =
+                                    ui.small_button(icons::X).on_hover_text("Not now").clicked();
+                            });
+                        });
+                });
+            bottom -= area.response.rect.height() + 8.0;
+        }
         if let Some(busy) = &self.busy {
             let area = egui::Area::new(egui::Id::new("toast busy"))
                 .order(egui::Order::Foreground)
@@ -168,7 +221,10 @@ impl Toasts {
             bottom -= area.response.rect.height() + 8.0;
         }
         // Keep drawing until the last one has gone.
-        ctx.request_repaint_after(std::time::Duration::from_millis(16));
+        if !self.toasts.is_empty() || self.busy.is_some() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(16));
+        }
+        click
     }
 }
 
@@ -189,7 +245,9 @@ mod tests {
                 time: Some(time),
                 ..Default::default()
             };
-            let _ = ctx.run(input, |ctx| toasts.show(ctx));
+            let _ = ctx.run(input, |ctx| {
+                toasts.show(ctx);
+            });
         }
         assert!(toasts.texts().is_empty());
     }

@@ -910,9 +910,9 @@ The new process reads the handoff and deletes it. It opens the project with thos
 ### Acceptance criteria
 
 - [ ] Changing an editor panel's label in Rust rebuilds in the background. After Relaunch, the new label shows with the same project, camera, selection and unsaved edits.
-- [ ] Relaunching during Play continues Play in the new process, with positions and properties as they were.
-- [ ] A compile error leaves the running editor untouched and lists the errors in Output with clickable locations.
-- [ ] Release builds and the player have none of this.
+- [x] Relaunching during Play continues Play in the new process, with positions and properties as they were.
+- [x] A compile error leaves the running editor untouched and lists the errors in Output with clickable locations.
+- [x] Release builds and the player have none of this.
 
 ---
 

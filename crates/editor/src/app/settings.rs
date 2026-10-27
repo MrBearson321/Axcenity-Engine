@@ -1,6 +1,7 @@
 //! The Settings window (File > Settings…, the start screen's sidebar, or
 //! Ctrl+, / Cmd+,): appearance, typography and density, the editor layout,
-//! this computer's graphics, the keyboard shortcuts, and accessibility.
+//! this computer's graphics, the keyboard shortcuts, accessibility, and (in
+//! a debug editor run from the source tree) rebuilding the engine.
 //! Changes apply at once and are saved between runs with the other settings.
 
 use super::*;
@@ -26,16 +27,19 @@ pub(super) enum SettingsPage {
     Graphics,
     Shortcuts,
     Accessibility,
+    /// Only in a debug editor run from the source tree (`engine.rs`).
+    Engine,
 }
 
 impl SettingsPage {
-    const ALL: [SettingsPage; 6] = [
+    const ALL: [SettingsPage; 7] = [
         SettingsPage::Appearance,
         SettingsPage::Typography,
         SettingsPage::Layout,
         SettingsPage::Graphics,
         SettingsPage::Shortcuts,
         SettingsPage::Accessibility,
+        SettingsPage::Engine,
     ];
 
     fn label(self) -> &'static str {
@@ -46,6 +50,7 @@ impl SettingsPage {
             SettingsPage::Graphics => "Graphics",
             SettingsPage::Shortcuts => "Shortcuts",
             SettingsPage::Accessibility => "Accessibility",
+            SettingsPage::Engine => "Engine",
         }
     }
 
@@ -57,6 +62,7 @@ impl SettingsPage {
             SettingsPage::Graphics => icons::MONITOR,
             SettingsPage::Shortcuts => icons::KEYBOARD,
             SettingsPage::Accessibility => icons::EYE,
+            SettingsPage::Engine => icons::HAMMER,
         }
     }
 }
@@ -109,6 +115,9 @@ impl EditorApp {
                         ui.set_width(NAV_WIDTH);
                         ui.spacing_mut().item_spacing.y = 2.0;
                         for page in SettingsPage::ALL {
+                            if page == SettingsPage::Engine && self.rebuilds.source.is_none() {
+                                continue;
+                            }
                             let selected = self.settings.page == page;
                             if widgets::nav_item(ui, page.icon(), page.label(), None, selected)
                                 .clicked()
@@ -138,6 +147,7 @@ impl EditorApp {
                                 SettingsPage::Accessibility => {
                                     accessibility_page(ui, &mut appearance);
                                 }
+                                SettingsPage::Engine => self.engine_page(ui),
                             });
                         });
                 });
@@ -235,7 +245,7 @@ impl EditorApp {
 }
 
 /// A page's title and a line saying what's on it.
-fn page_title(ui: &mut egui::Ui, title: &str, subtitle: &str) {
+pub(super) fn page_title(ui: &mut egui::Ui, title: &str, subtitle: &str) {
     let palette = theme::palette(ui.ctx());
     ui.label(
         egui::RichText::new(title)

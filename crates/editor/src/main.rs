@@ -36,6 +36,8 @@ mod play;
 mod profiler;
 mod properties;
 mod props;
+mod rebuild;
+mod relaunch;
 mod responsive;
 mod ribbon;
 mod ribbon_tabs;
@@ -112,7 +114,16 @@ fn main() -> eframe::Result {
 
     // An optional project folder to open, such as `examples/hello-touched`.
     // `args_os` instead of `args` so folder names that aren't valid Unicode still work.
-    let folder = std::env::args_os().nth(1).map(PathBuf::from);
+    // A debug editor relaunched into after a rebuild gets `--resume <handoff>`
+    // instead (see `relaunch.rs`); release builds never take it.
+    let mut args = std::env::args_os().skip(1);
+    let first = args.next();
+    let (folder, handoff) = match first {
+        Some(flag) if cfg!(debug_assertions) && flag == relaunch::RESUME_FLAG => {
+            (None, args.next().map(PathBuf::from))
+        }
+        other => (other.map(PathBuf::from), None),
+    };
 
     let options = eframe::NativeOptions {
         // The viewport draws with wgpu, so egui must too (they share the GPU device).
@@ -145,7 +156,9 @@ fn main() -> eframe::Result {
             app.load_settings(ctx, creation_context.storage);
             app.set_global_assets(global_assets::default_folder());
             // Read in the background, so the window and splash show at once.
-            if let Some(folder) = &folder {
+            if let Some(handoff) = &handoff {
+                app.resume(ctx, handoff);
+            } else if let Some(folder) = &folder {
                 app.begin_open(ctx, folder);
             }
             Ok(Box::new(app))

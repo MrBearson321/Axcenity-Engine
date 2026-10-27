@@ -946,6 +946,12 @@ impl History {
         self.saved_at = self.top_number();
     }
 
+    /// Counts the world as unsaved until it's next saved, although nothing
+    /// is in the history: its edits were made before a relaunch.
+    pub fn mark_unsaved(&mut self) {
+        self.saved_at = u64::MAX;
+    }
+
     /// True if the world is the same as when it was last saved (or opened).
     pub fn is_saved(&self) -> bool {
         self.top_number() == self.saved_at

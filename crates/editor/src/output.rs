@@ -4,7 +4,8 @@
 //! (`console.rs`) with what they printed.
 //!
 //! Script errors start with `path:line:`. That part is underlined, and
-//! clicking the line opens the script at that line. Under a script error is
+//! clicking the line opens the script at that line. Engine compile errors
+//! (`crates/…/x.rs:line:column:`) link the same way, to the Rust file. Under a script error is
 //! its stack trace: the calls that led to it, innermost first, each a link
 //! to its own script and line.
 
@@ -41,10 +42,11 @@ pub struct TraceLine {
     pub location: Option<Location>,
 }
 
-/// A line in a script file.
+/// A line in a script file, or in an engine source file.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Location {
-    /// The script's path, such as `scripts/pad.server.lua`.
+    /// The script's path, such as `scripts/pad.server.lua`, or the engine
+    /// file's in its workspace, such as `crates/editor/src/app.rs`.
     pub path: String,
     /// Counting from 1.
     pub line: usize,
@@ -338,9 +340,16 @@ fn location_link(
 }
 
 /// The script and line at the start of `text`, if it starts with
-/// `<path>.lua:<line>:`, as script errors do (see `crates/script/src/errors.rs`).
+/// `<path>.lua:<line>:`, as script errors do (see `crates/script/src/errors.rs`),
+/// or the engine file and line if it starts with `<path>.rs:<line>:`, as
+/// compile errors from a rebuild do (see `rebuild.rs`).
 pub fn script_location(text: &str) -> Option<Location> {
-    let (path, rest) = text.split_once(".lua:")?;
+    file_location(text, ".lua").or_else(|| file_location(text, ".rs"))
+}
+
+/// [`script_location`] for files ending in `extension`.
+fn file_location(text: &str, extension: &str) -> Option<Location> {
+    let (path, rest) = text.split_once(&format!("{extension}:"))?;
     // A path is one relative file name; this keeps out sentences that
     // happen to contain ".lua:" further along.
     if path.is_empty() || path.contains([':', '\n', '`', '"']) {
@@ -349,7 +358,7 @@ pub fn script_location(text: &str) -> Option<Location> {
     let (line, _) = rest.split_once(':')?;
     let line = line.parse().ok().filter(|&line| line > 0)?;
     Some(Location {
-        path: format!("{path}.lua"),
+        path: format!("{path}{extension}"),
         line,
     })
 }
@@ -364,6 +373,13 @@ mod tests {
             script_location("scripts/doors/open door.server.lua:12: attempt to index nil"),
             Some(Location {
                 path: "scripts/doors/open door.server.lua".to_string(),
+                line: 12
+            })
+        );
+        assert_eq!(
+            script_location("crates/editor/src/app.rs:12:5: error[E0308]: mismatched types"),
+            Some(Location {
+                path: "crates/editor/src/app.rs".to_string(),
                 line: 12
             })
         );

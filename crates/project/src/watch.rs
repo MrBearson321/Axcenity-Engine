@@ -48,7 +48,13 @@ type Stamp = (Option<SystemTime>, u64);
 pub type Stamps = BTreeMap<String, Stamp>;
 
 /// The stamps of the `watched` files in `folder` now.
-pub fn stamps(folder: &Path, watched: Watched) -> Stamps {
+#[cfg(test)]
+fn stamps(folder: &Path, watched: Watched) -> Stamps {
+    stamps_of(folder, watched_paths(folder, watched))
+}
+
+/// The paths of the `watched` files in `folder`, whether or not they're there.
+fn watched_paths(folder: &Path, watched: Watched) -> Vec<String> {
     // Folders that can't be read just look empty; the host reports
     // problems when it reads the files themselves.
     let mut paths = Vec::new();
@@ -59,6 +65,11 @@ pub fn stamps(folder: &Path, watched: Watched) -> Stamps {
         paths.extend(find_stylesheets(folder, &mut ignored));
     }
     find_files(&folder.join(ASSETS_FOLDER), ASSETS_FOLDER, &mut paths);
+    paths
+}
+
+/// The stamps of the files at `paths` in `folder` now.
+fn stamps_of(folder: &Path, paths: Vec<String>) -> Stamps {
     paths
         .into_iter()
         .filter_map(|path| {
@@ -124,6 +135,10 @@ fn written(last: &Stamps, now: &Stamps, settled: Stamps) -> (Vec<String>, Stamps
 /// Called on the watcher's thread when something changed.
 type Waker = Box<dyn Fn() + Send + Sync>;
 
+/// Names the files a [`Watcher`] looks at in its folder, by their paths
+/// inside it. Called at every look, so new files are noticed.
+type Lister = Box<dyn Fn(&Path) -> Vec<String> + Send>;
+
 /// Watches one project folder until it's dropped.
 pub struct Watcher {
     changes: Receiver<Vec<String>>,
@@ -138,6 +153,18 @@ impl Watcher {
     /// Starts watching the `watched` files in `folder`. Changes from now on
     /// are reported.
     pub fn start(folder: PathBuf, watched: Watched) -> Watcher {
+        Self::start_listing(folder, move |folder| watched_paths(folder, watched))
+    }
+
+    /// Starts watching the files `list` names in `folder`, such as the
+    /// engine's source files for the editor's rebuild. Changes from now on
+    /// are reported.
+    pub fn start_listing(
+        folder: PathBuf,
+        list: impl Fn(&Path) -> Vec<String> + Send + 'static,
+    ) -> Watcher {
+        let list: Lister = Box::new(list);
+        let stamps = move |folder: &Path| stamps_of(folder, list(folder));
         let (sender, changes) = mpsc::channel();
         let stop = Arc::new(AtomicBool::new(false));
         let waker = Arc::new(OnceLock::<Waker>::new());
@@ -149,18 +176,18 @@ impl Watcher {
             // `move` gives the closure ownership of what it uses, because
             // the thread can outlive this function.
             .spawn(move || {
-                let mut last = stamps(&folder, watched);
+                let mut last = stamps(&folder);
                 loop {
                     std::thread::sleep(INTERVAL);
                     if thread_stop.load(Ordering::Relaxed) {
                         return;
                     }
-                    let now = stamps(&folder, watched);
+                    let now = stamps(&folder);
                     if changed(&last, &now).is_empty() {
                         continue;
                     }
                     std::thread::sleep(SETTLE);
-                    let settled = stamps(&folder, watched);
+                    let settled = stamps(&folder);
                     let (paths, next) = written(&last, &now, settled);
                     last = next;
                     if paths.is_empty() {

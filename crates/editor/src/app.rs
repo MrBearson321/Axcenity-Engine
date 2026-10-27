@@ -28,6 +28,7 @@ mod behavior_trees;
 mod chrome;
 mod commands;
 mod edits;
+mod engine;
 mod files;
 mod material_files;
 mod nav_overlay;
@@ -71,6 +72,8 @@ use crate::output::Output;
 use crate::play::{self, Crash, GameKeys, Session};
 use crate::profiler::Profiler;
 use crate::properties::{self, Edit};
+use crate::rebuild::{EngineSource, Rebuilds};
+use crate::relaunch::Handoff;
 use crate::ribbon::{self, RibbonButton};
 use crate::ribbon_tabs::{RibbonGroup, RibbonTabs};
 use crate::scripts::{self, ScriptTabs};
@@ -277,6 +280,14 @@ pub struct EditorApp {
     graphics: axcenity_render::GraphicsSettings,
     /// What the GPU can do, read on the first frame that has one.
     capabilities: Option<axcenity_render::Capabilities>,
+    /// Settings > Engine: rebuilding the editor when engine code changes
+    /// (a debug editor run from the source tree only; see `engine.rs`).
+    rebuilds: Rebuilds,
+    /// A handoff written for the rebuilt editor, which `update` starts.
+    launching: Option<PathBuf>,
+    /// A handoff from the editor this one was relaunched from, with its
+    /// folder, applied once its project has opened.
+    pending_handoff: Option<(PathBuf, Handoff)>,
 }
 
 /// Ribbon buttons that act on the whole app, noted while the ribbon is
@@ -572,6 +583,12 @@ impl EditorApp {
             nav_mesh: None,
             graphics: axcenity_render::GraphicsSettings::default(),
             capabilities: None,
+            rebuilds: Rebuilds {
+                source: EngineSource::find(),
+                ..Rebuilds::default()
+            },
+            launching: None,
+            pending_handoff: None,
         };
         if let Some(folder) = folder {
             app.open(folder);
@@ -632,6 +649,14 @@ impl EditorApp {
             {
                 self.graphics = settings;
             }
+            self.rebuilds.on_change =
+                storage.get_string(engine::REBUILD_KEY).as_deref() == Some("on");
+            self.rebuilds.relaunch_automatically =
+                storage.get_string(engine::RELAUNCH_KEY).as_deref() == Some("on");
+            self.rebuilds.expected = storage
+                .get_string(engine::BUILD_UNITS_KEY)
+                .and_then(|text| text.parse().ok())
+                .unwrap_or(0);
         }
         theme::apply(ctx, &self.appearance);
     }
@@ -668,6 +693,8 @@ impl eframe::App for EditorApp {
     /// such as mouse movement, unless a frame is requested).
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.frame(ctx, frame.wgpu_render_state());
+        // Relaunching into a rebuilt editor saves the settings first.
+        self.launch(ctx, frame);
         // Tests call `frame` without a window, so the window's resize edges
         // and the splash live here.
         window_frame::edges(ctx);
@@ -720,6 +747,15 @@ impl eframe::App for EditorApp {
         if let Ok(text) = serde_json::to_string(&self.graphics) {
             storage.set_string(GRAPHICS_KEY, text);
         }
+        storage.set_string(
+            engine::REBUILD_KEY,
+            flag(self.rebuilds.on_change).to_owned(),
+        );
+        storage.set_string(
+            engine::RELAUNCH_KEY,
+            flag(self.rebuilds.relaunch_automatically).to_owned(),
+        );
+        storage.set_string(engine::BUILD_UNITS_KEY, self.rebuilds.expected.to_string());
         storage.set_string(RECENT_KEY, recent.join("\n"));
         // An empty value doesn't parse, so the next start uses the default size.
         storage.set_string(WINDOW_KEY, String::new());
@@ -749,6 +785,8 @@ impl EditorApp {
                 Some(&render_state.adapter.get_info()),
             ));
         }
+        // Engine code changed: rebuild in the background (debug editors only).
+        self.engine_frame(ctx);
         // While a project loads, only the header and the loading screen.
         if self.follow_loading(ctx) {
             self.loading_frame(ctx);
@@ -1046,7 +1084,7 @@ impl EditorApp {
         }
         self.follow_sound_preview();
         self.settings_window(ctx);
-        self.toasts.busy = self.assets.texture_progress().map(|progress| {
+        let textures = self.assets.texture_progress().map(|progress| {
             let file = progress.current.rsplit('/').next().unwrap_or_default();
             toast::Busy {
                 text: format!(
@@ -1057,7 +1095,9 @@ impl EditorApp {
                 fraction: progress.done as f32 / progress.total.max(1) as f32,
             }
         });
-        self.toasts.show(ctx);
+        self.toasts.busy = self.engine_busy().or(textures);
+        let offer = self.toasts.show(ctx);
+        self.follow_offer(offer);
         self.cover_while_finishing(ctx);
         theme::paint_crossfade(ctx);
     }
@@ -1081,6 +1121,8 @@ mod navigation_tests;
 mod play_tests;
 #[cfg(test)]
 mod posing_tests;
+#[cfg(test)]
+mod relaunch_tests;
 #[cfg(test)]
 mod state_machine_tests;
 #[cfg(test)]

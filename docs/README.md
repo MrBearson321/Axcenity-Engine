@@ -18,7 +18,7 @@ Source and tests win when a doc is wrong. Update the topic file you used.
 | Selection or Properties | [editor/selection.md](editor/selection.md) |
 | Move, scale, rotate, or undo | [editor/transforms.md](editor/transforms.md) |
 | The Explorer tree | [editor/tree.md](editor/tree.md) |
-| Script tabs or file watching | [editor/scripts.md](editor/scripts.md) |
+| Script tabs, file watching, or rebuilding the engine | [editor/scripts.md](editor/scripts.md) |
 | Model import or the Animation panel | [editor/import.md](editor/import.md) |
 | Paint, materials, lights, or the angular tool | [editor/building.md](editor/building.md) |
 | The Assets panel | [editor/assets.md](editor/assets.md) |

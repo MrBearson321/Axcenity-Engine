@@ -28,7 +28,11 @@ impl EditorApp {
                 }
             });
         if let Some(location) = self.output.show(ui) {
-            self.open_script(&location.path, Some(location.line));
+            if location.path.ends_with(".rs") {
+                self.open_engine_source(&location.path, location.line);
+            } else {
+                self.open_script(&location.path, Some(location.line));
+            }
         }
     }
 
