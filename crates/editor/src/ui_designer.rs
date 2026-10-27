@@ -28,6 +28,7 @@
 //! `axcenity_ui::layout_artboard`: exactly what a screen of that size shows
 //! in Play, scaled by the zoom.
 
+mod accessibility;
 mod anchor_handles;
 mod anchors;
 pub(crate) mod arrange;
@@ -247,6 +248,9 @@ pub enum DesignerAction {
     /// Shows bound text in this language (the toolbar's picker): not saved,
     /// and not an undo step.
     Language(String),
+    /// Shows the game UI with these settings (the arrange bar's game UI
+    /// settings menu): not saved, and not an undo step.
+    UiSettings(axcenity_core::UiSettings),
     /// An edit of the shown ScreenGui's Event Graph finished: the graph as
     /// it was before, for undo.
     GraphStep(axcenity_blocks::node_graph::NodeGraph),

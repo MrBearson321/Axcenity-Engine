@@ -358,6 +358,12 @@ impl ClassName {
         )
     }
 
+    /// A game UI class: ScreenGui, BillboardGui or a screen element. Game
+    /// UI settings (reduced motion) apply to these.
+    pub fn is_gui(self) -> bool {
+        matches!(self, ClassName::ScreenGui | ClassName::BillboardGui) || self.is_screen_element()
+    }
+
     /// A screen element that keyboard and controller navigation can move
     /// through: every GUI element but ScreenGui and BillboardGui.
     pub fn is_screen_element(self) -> bool {
@@ -401,6 +407,8 @@ impl ClassName {
                 ("NextSelectionDown", Value::String(String::new())),
                 ("NextSelectionLeft", Value::String(String::new())),
                 ("NextSelectionRight", Value::String(String::new())),
+                // What navigation and scripts call it; empty is its `Name`.
+                ("AccessibleName", Value::String(String::new())),
             ]);
         }
         properties

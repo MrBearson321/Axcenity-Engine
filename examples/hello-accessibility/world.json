@@ -1,0 +1,117 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Anchored": true,
+          "Color": [0.35, 0.37, 0.4],
+          "Position": [0, -0.5, 0],
+          "Size": [40, 1, 40]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Tower",
+        "properties": {
+          "Anchored": true,
+          "Color": [0.9, 0.55, 0.2],
+          "Position": [0, 3, 0],
+          "Size": [4, 6, 4]
+        }
+      },
+      {
+        "class": "ScreenGui",
+        "name": "Settings",
+        "properties": {
+          "Enabled": true
+        },
+        "children": [
+          {
+            "class": "Frame",
+            "name": "Panel",
+            "properties": {
+              "Class": "menu",
+              "Position": [0, 24, 0, 24],
+              "Size": [0, 300, 0, 388]
+            },
+            "children": [
+              {
+                "class": "TextLabel",
+                "name": "Title",
+                "properties": {
+                  "Class": "title",
+                  "Text": "Settings",
+                  "Size": [1, 0, 0, 56]
+                },
+                "children": []
+              },
+              {
+                "class": "TextButton",
+                "name": "TextSizeButton",
+                "properties": {
+                  "Text": "Text size: 100%",
+                  "Size": [1, 0, 0, 40],
+                  "AccessibleName": "Text size"
+                },
+                "children": []
+              },
+              {
+                "class": "TextButton",
+                "name": "ContrastButton",
+                "properties": {
+                  "Text": "Higher contrast: off",
+                  "Size": [1, 0, 0, 40],
+                  "AccessibleName": "Higher contrast"
+                },
+                "children": []
+              },
+              {
+                "class": "TextButton",
+                "name": "MotionButton",
+                "properties": {
+                  "Text": "Reduced motion: off",
+                  "Size": [1, 0, 0, 40],
+                  "AccessibleName": "Reduced motion"
+                },
+                "children": []
+              },
+              {
+                "class": "TextButton",
+                "name": "SaveButton",
+                "properties": {
+                  "Text": "Save settings",
+                  "Size": [1, 0, 0, 40],
+                  "AccessibleName": "Save settings"
+                },
+                "children": []
+              },
+              {
+                "class": "TextButton",
+                "name": "LoadButton",
+                "properties": {
+                  "Text": "Load settings",
+                  "Size": [1, 0, 0, 40],
+                  "AccessibleName": "Load settings"
+                },
+                "children": []
+              },
+              {
+                "class": "TextLabel",
+                "name": "Hint",
+                "properties": {
+                  "Id": "hint",
+                  "Text": "Tab, the arrows and Enter work too.",
+                  "Size": [1, 0, 0, 24]
+                },
+                "children": []
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -45,6 +45,7 @@ mod debugger;
 mod definitions;
 mod errors;
 mod events;
+mod gui_service;
 mod input;
 mod instance;
 mod localization;
@@ -915,6 +916,8 @@ mod tree_tests;
 #[cfg(test)]
 mod tween_tests;
 
+#[cfg(test)]
+mod gui_service_tests;
 #[cfg(test)]
 mod localization_tests;
 #[cfg(test)]

@@ -154,6 +154,7 @@ const GROUPS: [(&str, &[&str]); 19] = [
             "NextSelectionDown",
             "NextSelectionLeft",
             "NextSelectionRight",
+            "AccessibleName",
             "HoverSound",
             "ClickSound",
             "Position",

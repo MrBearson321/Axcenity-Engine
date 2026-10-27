@@ -282,7 +282,7 @@ declare extern type SaveService with
 	function SetPlayerData(self, name: string, value: any): ()
 	--- The player data kept under `name`, or nil.
 	function GetPlayerData(self, name: string): any
-	--- Keeps a game setting under `name`, such as `SaveService:SetSetting("Volume", 0.5)`, with the same values as SetPlayerData. Saved in slots, but not captured at checkpoints.
+	--- Keeps a game setting under `name`, such as `SaveService:SetSetting("Volume", 0.5)`, with the same values as SetPlayerData. Saved in slots, but not captured at checkpoints. The `UI/` names are the game UI settings (see GuiService).
 	function SetSetting(self, name: string, value: any): ()
 	--- The setting kept under `name`, or nil.
 	function GetSetting(self, name: string): any
@@ -302,6 +302,16 @@ declare extern type LocalizationService with
 	Languages: { string }
 	--- `key`'s value in the active language, or nil when the string table has none.
 	function GetString(self, key: string): string?
+end
+
+--- The player's game UI settings, from `game:GetService("GuiService")`, for a settings menu. They change every HUD and menu (and the UI Designer's artboard) and never the 3D world, and they're separate from the editor's own appearance. Both sides share them, and save slots keep them (as the settings `UI/TextScale`, `UI/HighContrast` and `UI/ReducedMotion`).
+declare extern type GuiService with
+	--- How much bigger UI text is drawn than it's authored, from 0.5 to 3; 1 is as authored. Text with TextScaled on still fits its box. Anything else is an error and changes nothing.
+	TextScale: number
+	--- If true, UI text is drawn black or white (whichever is nearer its colour) and see-through backgrounds are drawn solid.
+	HighContrast: boolean
+	--- If true, UI motion that's only for looks happens at once: CSS transitions, tweens of UI elements, and the Animations and AnimationTracks playing on them jump to where they end (a looping one holds its first frame). Events such as Completed and Stopped still fire.
+	ReducedMotion: boolean
 end
 
 --- This computer's graphics settings, from `game:GetService("UserGameSettings")`, for a settings menu. `GraphicsQuality` picks a preset, and each other field overrides one of its values; reading a field gives the value chosen (its override, or the preset's), and setting it to nil goes back to the preset's. Changing the preset keeps the overrides. Saved on this computer by the player (never in the game); in the editor's Play they start from the editor's Graphics settings and are put back at Stop. The GPU may draw less than was chosen: the player's log and the editor's Settings say why. LocalScripts only.
@@ -821,12 +831,14 @@ declare extern type DataModel extends Instance with
 	SaveService: SaveService
 	--- The language UI text shows (same as `game:GetService("LocalizationService")`).
 	LocalizationService: LocalizationService
+	--- The player's game UI settings (same as `game:GetService("GuiService")`).
+	GuiService: GuiService
 	--- This computer's graphics settings (same as `game:GetService("UserGameSettings")`). LocalScripts only.
 	UserGameSettings: UserGameSettings
 	--- What loads first on the player's side, with `RemoveDefaultLoadingScreen` (same as `game:GetService("ReplicatedFirst")`).
 	ReplicatedFirst: ReplicatedFirst
 	[string]: any
-	--- The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"SaveService"`, `"LocalizationService"`, `"TweenService"`, `"CollectionService"`, `"UserGameSettings"`, `"UserInputService"` or `"ContextActionService"`.
+	--- The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"SaveService"`, `"LocalizationService"`, `"GuiService"`, `"TweenService"`, `"CollectionService"`, `"UserGameSettings"`, `"UserInputService"` or `"ContextActionService"`.
 	function GetService(self, className: string): Instance
 end
 
@@ -1134,6 +1146,8 @@ declare extern type Frame extends Instance with
 	NextSelectionLeft: string
 	--- The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.
 	NextSelectionRight: string
+	--- The name navigation and scripts use for it, such as one a screen reader would say. Empty uses its Name; reading it from a script gives the name in use.
+	AccessibleName: string
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
 	MouseEnter: Signal
 	--- Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.
@@ -1189,6 +1203,8 @@ declare extern type TextLabel extends Instance with
 	NextSelectionLeft: string
 	--- The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.
 	NextSelectionRight: string
+	--- The name navigation and scripts use for it, such as one a screen reader would say. Empty uses its Name; reading it from a script gives the name in use.
+	AccessibleName: string
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
 	MouseEnter: Signal
 	--- Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.
@@ -1252,6 +1268,8 @@ declare extern type TextButton extends Instance with
 	NextSelectionLeft: string
 	--- The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.
 	NextSelectionRight: string
+	--- The name navigation and scripts use for it, such as one a screen reader would say. Empty uses its Name; reading it from a script gives the name in use.
+	AccessibleName: string
 	--- Fires when the player clicks or taps this button. The handler gets no arguments; LocalScripts only.
 	Activated: Signal
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
@@ -1299,6 +1317,8 @@ declare extern type ImageLabel extends Instance with
 	NextSelectionLeft: string
 	--- The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.
 	NextSelectionRight: string
+	--- The name navigation and scripts use for it, such as one a screen reader would say. Empty uses its Name; reading it from a script gives the name in use.
+	AccessibleName: string
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
 	MouseEnter: Signal
 	--- Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.
@@ -1356,6 +1376,8 @@ declare extern type TextBox extends Instance with
 	NextSelectionLeft: string
 	--- The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.
 	NextSelectionRight: string
+	--- The name navigation and scripts use for it, such as one a screen reader would say. Empty uses its Name; reading it from a script gives the name in use.
+	AccessibleName: string
 	--- Fires when the player finishes typing: Enter on a one-line box, or clicking away (or Escape) on any box. The handler gets no arguments; LocalScripts only.
 	FocusLost: Signal
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
@@ -1401,6 +1423,8 @@ declare extern type PageLayout extends Instance with
 	NextSelectionLeft: string
 	--- The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.
 	NextSelectionRight: string
+	--- The name navigation and scripts use for it, such as one a screen reader would say. Empty uses its Name; reading it from a script gives the name in use.
+	AccessibleName: string
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
 	MouseEnter: Signal
 	--- Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.
@@ -1444,6 +1468,8 @@ declare extern type Table extends Instance with
 	NextSelectionLeft: string
 	--- The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.
 	NextSelectionRight: string
+	--- The name navigation and scripts use for it, such as one a screen reader would say. Empty uses its Name; reading it from a script gives the name in use.
+	AccessibleName: string
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
 	MouseEnter: Signal
 	--- Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.
@@ -1495,6 +1521,8 @@ declare extern type ScrollingFrame extends Instance with
 	NextSelectionLeft: string
 	--- The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.
 	NextSelectionRight: string
+	--- The name navigation and scripts use for it, such as one a screen reader would say. Empty uses its Name; reading it from a script gives the name in use.
+	AccessibleName: string
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
 	MouseEnter: Signal
 	--- Fires when the pointer goes off this element (or something else comes on top of it under the pointer). The handler gets no arguments; LocalScripts only.
@@ -1546,6 +1574,8 @@ declare extern type Slider extends Instance with
 	NextSelectionLeft: string
 	--- The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.
 	NextSelectionRight: string
+	--- The name navigation and scripts use for it, such as one a screen reader would say. Empty uses its Name; reading it from a script gives the name in use.
+	AccessibleName: string
 	--- Fires each time Value changes, from the pointer or a script, with the new Value.
 	ValueChanged: Signal
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
@@ -1593,6 +1623,8 @@ declare extern type Toggle extends Instance with
 	NextSelectionLeft: string
 	--- The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.
 	NextSelectionRight: string
+	--- The name navigation and scripts use for it, such as one a screen reader would say. Empty uses its Name; reading it from a script gives the name in use.
+	AccessibleName: string
 	--- Fires each time Value changes, from the pointer or a script, with the new Value.
 	ValueChanged: Signal
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
@@ -1646,6 +1678,8 @@ declare extern type Dropdown extends Instance with
 	NextSelectionLeft: string
 	--- The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.
 	NextSelectionRight: string
+	--- The name navigation and scripts use for it, such as one a screen reader would say. Empty uses its Name; reading it from a script gives the name in use.
+	AccessibleName: string
 	--- Fires each time Value changes, from the pointer or a script, with the new Value.
 	ValueChanged: Signal
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.
@@ -1697,6 +1731,8 @@ declare extern type ProgressBar extends Instance with
 	NextSelectionLeft: string
 	--- The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.
 	NextSelectionRight: string
+	--- The name navigation and scripts use for it, such as one a screen reader would say. Empty uses its Name; reading it from a script gives the name in use.
+	AccessibleName: string
 	--- Fires each time Value changes, from the pointer or a script, with the new Value.
 	ValueChanged: Signal
 	--- Fires when the pointer comes onto this element: the topmost visible, interactable element under it, as CSS :hover follows. The handler gets no arguments; LocalScripts only.

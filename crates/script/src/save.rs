@@ -2,13 +2,15 @@
 //! settings and checkpoints (see the `save` crate).
 //!
 //! Both sides share one [`Saves`], so a LocalScript and a Script see the
-//! same player data and the same active checkpoint. Slots go in the folder
+//! same player data and the same active checkpoint. The settings named
+//! `UI/…` are the world's game UI settings (see `GuiService`). Slots go in the folder
 //! the host gives with [`ScriptRuntime::set_save_folder`](crate::ScriptRuntime::set_save_folder);
 //! without one, saving and loading fail with a message.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use axcenity_core::{UI_SETTING_NAMES, UI_SETTING_PREFIX, UiSettings};
 use axcenity_save::{SaveError, Saves, place_character, slot_number};
 use mlua::{FromLua, IntoLua, Lua, MetaMethod, UserData, UserDataMethods};
 
@@ -87,6 +89,36 @@ fn set_value(
     Ok(())
 }
 
+/// `SetSetting` of a game UI setting (`UI/TextScale`): it changes the
+/// world's, and nil puts it back as it starts.
+fn set_ui_setting(lua: &Lua, name: &str, value: mlua::Value) -> mlua::Result<()> {
+    let unknown = || {
+        let names = UI_SETTING_NAMES.map(|setting| format!("{UI_SETTING_PREFIX}{setting}"));
+        mlua::Error::runtime(format!(
+            "\"{name}\" isn't a game UI setting; the UI/ settings are {}",
+            names.join(", ")
+        ))
+    };
+    let value = match &value {
+        mlua::Value::Nil => UiSettings::default().get(name).ok_or_else(unknown)?,
+        other => any_value_from_lua(lua, other).ok_or_else(|| {
+            mlua::Error::runtime(format!(
+                "SetSetting(\"{name}\", ...) needs a number or true or false, not a {}",
+                type_name(lua, other)
+            ))
+        })?,
+    };
+    let mut settings = world(lua)?.ui_settings();
+    match settings.set(name, &value) {
+        Ok(true) => {
+            world_mut(lua)?.set_ui_settings(settings);
+            Ok(())
+        }
+        Ok(false) => Err(unknown()),
+        Err(problem) => Err(mlua::Error::runtime(format!("SetSetting: {problem}"))),
+    }
+}
+
 impl UserData for LuaSaveService {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("SaveSlot", |lua, _, number: mlua::Value| {
@@ -125,11 +157,19 @@ impl UserData for LuaSaveService {
         methods.add_method(
             "SetSetting",
             |lua, _, (name, value): (mlua::Value, mlua::Value)| {
+                let setting = key(lua, &name, "SetSetting")?;
+                if setting.starts_with(UI_SETTING_PREFIX) {
+                    return set_ui_setting(lua, &setting, value);
+                }
                 set_value(lua, "SetSetting", name, value, |saves| &mut saves.settings)
             },
         );
         methods.add_method("GetSetting", |lua, _, name: mlua::Value| {
             let name = key(lua, &name, "GetSetting")?;
+            if name.starts_with(UI_SETTING_PREFIX) {
+                let value = world(lua)?.ui_settings().get(&name);
+                return value.map_or(Ok(mlua::Value::Nil), |value| value_to_lua(lua, &value));
+            }
             let value = saves(lua)?.borrow().settings.get(&name).cloned();
             match value {
                 Some(value) => value_to_lua(lua, &value),

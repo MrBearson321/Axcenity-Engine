@@ -12,7 +12,7 @@ Save slots, player data, settings and checkpoints (unified plan Phase 17), and s
 | `LoadSlot(n)` | Puts the game back as slot `n` was saved. A missing, damaged or newer slot is an error (`script:line: save slot 3 doesn't exist yet; …`) and changes nothing: the file is read and checked before the world is touched. A slot from an older save version is moved up first (see Save versions). |
 | `HasSlot(n)` | True if slot `n` has been saved. |
 | `SetPlayerData(name, value)`, `GetPlayerData(name)` | Values kept for the player, such as coins. A boolean, number, string, Vector3, Vector2, Color3, UDim2 or EnumItem; nil removes it. Saved in slots and captured at checkpoints. |
-| `SetSetting(name, value)`, `GetSetting(name)` | Game settings, such as volume, with the same values. Saved in slots, not captured at checkpoints. Phase 21 adds the game UI settings here. |
+| `SetSetting(name, value)`, `GetSetting(name)` | Game settings, such as volume, with the same values. Saved in slots, not captured at checkpoints. The names `UI/TextScale`, `UI/HighContrast` and `UI/ReducedMotion` are the game UI settings ([../ui.md](../ui.md)): they reach the world's (`World::ui_settings`, the same values as `GuiService`), nil puts one back to its default, and any other `UI/` name is an error. |
 | `SetCheckpoint(checkpoint)` | Makes a `Checkpoint` the active one, and captures player data and world state now. |
 | `GetCheckpoint()` | The active Checkpoint, or nil (also nil once it's destroyed). |
 | `RestoreCheckpoint()` | Puts back what was captured at the active checkpoint, then stands the player character (the one whose controller owns the camera, `character::player_character`) with the middle of its feet at the checkpoint's `Position`. An error with no active checkpoint. |
@@ -42,7 +42,7 @@ A slot is `slot-<n>.json` in the player's data for the game, `save::game_folder(
 
 The player and editor Play set it with `ScriptRuntime::set_save_folder` before scripts start, so a script can load at the start. Editor Play uses the same folder as the built game; its tests use a temporary folder (`app/session.rs`, `play_save_folder`). Saving never writes the project folder, and Stop still drops the Play world, so the edit world and project files are as before Play. A slot is written beside itself and renamed over the old one.
 
-The file holds `version` (`save::SAVE_VERSION`, 2), `player_data`, `settings`, `world` (`services` and `instances`), and `checkpoint` (`instance`, its entry in `world.instances`, with the player data and world state captured there). Values are JSON booleans, numbers and strings, or one-key objects such as `{"Vector3": [0, 5, 0]}` and `{"Material": "Neon"}`.
+The file holds `version` (`save::SAVE_VERSION`, 2), `player_data`, `settings` (with the world's game UI settings as `UI/…`, written on every save; loading sets the ones it has on the world and keeps them out of `Saves::settings`, so older slots load unchanged), `world` (`services` and `instances`), and `checkpoint` (`instance`, its entry in `world.instances`, with the player data and world state captured there). Values are JSON booleans, numbers and strings, or one-key objects such as `{"Vector3": [0, 5, 0]}` and `{"Material": "Neon"}`.
 
 ## Save versions
 

@@ -7,6 +7,7 @@
 
 mod style;
 
+mod accessibility;
 mod css;
 mod gamepad;
 mod interact;
@@ -428,6 +429,7 @@ pub(crate) fn layout_ui_with_pseudo(
         layout_screen_gui(world, id, screen, stylesheets, pseudo, &mut layout);
     }
     if let Some(camera) = camera {
+        let (draws, elements) = (layout.draw_items.len(), layout.elements.len());
         layout_billboards(
             world,
             camera,
@@ -437,6 +439,7 @@ pub(crate) fn layout_ui_with_pseudo(
             stylesheets,
             pseudo,
         );
+        accessibility::apply(world, &mut layout, draws, elements);
     }
     if let Some(id) = on_top
         && enabled_screen_gui(world, id)
@@ -502,6 +505,7 @@ fn layout_screen_gui(
     if let Some(fit) = fit {
         apply_fit(layout, draws, elements, fit);
     }
+    accessibility::apply(world, layout, draws, elements);
 }
 
 /// Whether a ScreenGui keeps out of the device's unsafe edges: its
@@ -1718,6 +1722,8 @@ fn finite(value: f32) -> f32 {
     if value.is_finite() { value } else { 0.0 }
 }
 
+#[cfg(test)]
+mod accessibility_tests;
 #[cfg(test)]
 mod focus_tests;
 #[cfg(test)]

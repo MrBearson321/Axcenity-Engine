@@ -13,6 +13,7 @@ use crate::arena::{Arena, Id};
 use crate::class::ClassName;
 use crate::strings::StringTable;
 use crate::terrain::TerrainData;
+use crate::ui_settings::UiSettings;
 use crate::value::{Value, ValueKind};
 
 /// A handle to an Instance in a [`World`]. It stays valid until the Instance
@@ -52,6 +53,14 @@ impl Instance {
 
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// The name navigation and scripts use for a UI element: its
+    /// `AccessibleName`, or its `Name` when that's empty. `None` for an
+    /// Instance that isn't a UI element.
+    pub fn accessible_name(&self) -> Option<&str> {
+        let own = self.property("AccessibleName").and_then(Value::as_str)?;
+        Some(if own.is_empty() { &self.name } else { own })
     }
 
     pub fn parent(&self) -> Option<InstanceId> {
@@ -219,6 +228,8 @@ pub struct World {
     strings: Arc<StringTable>,
     /// The language bound UI text shows (see [`World::language`]).
     language: String,
+    /// The player's game UI settings (see [`World::ui_settings`]).
+    ui_settings: UiSettings,
 }
 
 impl World {
@@ -270,6 +281,7 @@ impl World {
             terrains: HashMap::new(),
             strings: Arc::default(),
             language: String::new(),
+            ui_settings: UiSettings::default(),
         }
     }
 
@@ -306,6 +318,17 @@ impl World {
         }
         self.language = language.to_owned();
         true
+    }
+
+    /// The player's game UI settings: text scale, higher contrast and
+    /// reduced motion, which HUDs and menus follow. Copies of the world
+    /// (Play) start with them.
+    pub fn ui_settings(&self) -> UiSettings {
+        self.ui_settings
+    }
+
+    pub fn set_ui_settings(&mut self, settings: UiSettings) {
+        self.ui_settings = settings;
     }
 
     /// `key`'s value in the active language, if the string table has one.

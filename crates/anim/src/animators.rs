@@ -90,6 +90,16 @@ impl AnimatorEvent {
     }
 }
 
+/// How a thing's clips move this frame. A UI element's are `Reduced`
+/// while the game UI setting reduced motion is on: a clip that doesn't
+/// loop jumps to its end (firing its events, then Completed or Stopped)
+/// and one that loops holds where it is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Motion {
+    Full,
+    Reduced,
+}
+
 /// Every animated thing's runner, and the poses they make.
 #[derive(Default)]
 pub struct Animators {
@@ -301,6 +311,14 @@ impl Animators {
         let model_key = model.as_ref().map(|model| model.key());
         let (enabled, speed) = parts.animator.map_or((true, 1.0), |id| settings(world, id));
         let dt = if enabled { dt * speed } else { 0.0 };
+        // Reduced motion: a UI element's clips don't move (see `Motion`).
+        let motion = if world.ui_settings().reduced_motion
+            && world.get(owner).is_some_and(|thing| thing.class().is_gui())
+        {
+            Motion::Reduced
+        } else {
+            Motion::Full
+        };
 
         let mut running = self.running.remove(&owner).unwrap_or_default();
         // A machine made again (for a new model or changed files) goes on
@@ -399,7 +417,7 @@ impl Animators {
                 parts.animator,
                 animation,
                 rig.as_deref(),
-                dt,
+                (dt, motion),
                 events,
             ) {
                 layers.push(layer);
@@ -424,7 +442,7 @@ impl Animators {
                     &mut running,
                     track,
                     rig.as_deref(),
-                    dt,
+                    (dt, motion),
                     events,
                 ) {
                     layers.push(layer);
@@ -619,7 +637,7 @@ impl Animators {
         animator: Option<InstanceId>,
         animation: InstanceId,
         rig: Option<&Rig>,
-        dt: f64,
+        (dt, motion): (f64, Motion),
         events: &mut Vec<AnimatorEvent>,
     ) -> Option<Layer> {
         let (path, enabled, speed, looping) = {
@@ -674,7 +692,11 @@ impl Animators {
         let duration = clip.duration();
         let mut completed = false;
         if enabled && state.playing {
-            let mut next = state.time + dt * speed;
+            let mut next = match motion {
+                Motion::Full => state.time + dt * speed,
+                Motion::Reduced if looping => state.time,
+                Motion::Reduced => duration,
+            };
             if !looping && next >= duration {
                 next = duration;
                 state.playing = false;
@@ -713,7 +735,7 @@ impl Animators {
         running: &mut Running,
         track: InstanceId,
         rig: Option<&Rig>,
-        dt: f64,
+        (dt, motion): (f64, Motion),
         events: &mut Vec<AnimatorEvent>,
     ) -> Option<Layer> {
         let animation = world.animation_track(track)?.animation;
@@ -748,7 +770,15 @@ impl Animators {
         }
         let from = running.seen.get(&track).copied().unwrap_or(state.time);
         let mut ended = false;
-        if dt > 0.0 {
+        if motion == Motion::Reduced {
+            // It ends at once at the end it's going toward, or (looping)
+            // holds where it is; fades are instant.
+            if !looping && state.playing && state.speed != 0.0 {
+                state.time = if state.speed < 0.0 { 0.0 } else { duration };
+                ended = true;
+            }
+            state.weight = state.target_weight;
+        } else if dt > 0.0 {
             let mut next = state.time + dt * state.speed;
             if !looping && state.playing && (next >= duration || next < 0.0) {
                 next = next.clamp(0.0, duration);

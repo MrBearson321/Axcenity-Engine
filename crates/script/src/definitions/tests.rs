@@ -327,6 +327,7 @@ fn described_fields_and_methods_exist() {
             "LocalizationService",
             "game:GetService('LocalizationService')",
         ),
+        ("GuiService", "game:GetService('GuiService')"),
         ("UserGameSettings", "game:GetService('UserGameSettings')"),
         ("ReplicatedFirst", "game:GetService('ReplicatedFirst')"),
         (

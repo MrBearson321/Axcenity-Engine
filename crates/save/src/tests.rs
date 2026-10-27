@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use axcenity_core::{Color3, Material, PartType, ParticleType, TextureChannel, UDim2, Vector2};
+use axcenity_core::{
+    Color3, Material, PartType, ParticleType, TextureChannel, UDim2, UiSettings, Vector2,
+};
 
 use super::*;
 
@@ -476,7 +478,13 @@ fn a_version_1_slot_loads_migrates_and_restores_the_same_player_world_checkpoint
     let mut current = Saves::new(Some(folder.clone()));
     play_the_v1_save(&level, &mut world, &mut current);
     current.save(&world, 2).unwrap();
-    assert_eq!(current.read(2).unwrap(), migrated);
+    // Apart from the game UI settings, which slots before them don't have
+    // (loading one keeps the player's).
+    let mut saved = current.read(2).unwrap();
+    saved
+        .settings
+        .retain(|name, _| !name.starts_with(axcenity_core::UI_SETTING_PREFIX));
+    assert_eq!(saved, migrated);
 
     // Loading never rewrites the old file.
     assert_eq!(fs::read_to_string(folder.join("slot-1.json")).unwrap(), v1);
@@ -674,4 +682,51 @@ fn attributes_tags_and_value_objects_survive_a_slot_round_trip() {
     let property = |id| world.get(id).unwrap().property("Value").unwrap().clone();
     assert_eq!(property(target), Value::Instance(Some(coin)));
     assert_eq!(property(score), Value::Number(7.0));
+}
+
+#[test]
+fn a_slot_keeps_the_game_ui_settings_and_loading_puts_them_back_on_the_world() {
+    let folder = folder("ui-settings");
+    let level = level();
+    let mut world = level.world.clone();
+    let mut saves = Saves::new(Some(folder.clone()));
+    saves
+        .settings
+        .insert("Volume".to_owned(), Value::Number(0.5));
+    let chosen = UiSettings {
+        text_scale: 1.25,
+        high_contrast: true,
+        reduced_motion: true,
+    };
+    world.set_ui_settings(chosen);
+    saves.save(&world, 1).unwrap();
+    let file = saves.read(1).unwrap();
+    assert_eq!(
+        file.settings["UI/TextScale"],
+        SavedValue(Value::Number(1.25))
+    );
+    assert_eq!(
+        file.settings["UI/ReducedMotion"],
+        SavedValue(Value::Bool(true))
+    );
+
+    world.set_ui_settings(UiSettings::default());
+    saves.load(&mut world, 1).unwrap();
+    assert_eq!(world.ui_settings(), chosen);
+    // They're the world's, not among the game's own settings.
+    assert_eq!(saves.settings.keys().collect::<Vec<_>>(), ["Volume"]);
+
+    // A slot from before these settings leaves the player's as they are.
+    fs::create_dir_all(&folder).unwrap();
+    fs::write(
+        folder.join("slot-2.json"),
+        include_str!("fixtures/slot-v1.json"),
+    )
+    .unwrap();
+    let old = v1_level();
+    let mut world = old.world.clone();
+    world.set_ui_settings(chosen);
+    saves.load(&mut world, 2).unwrap();
+    assert_eq!(world.ui_settings(), chosen);
+    let _ = fs::remove_dir_all(&folder);
 }

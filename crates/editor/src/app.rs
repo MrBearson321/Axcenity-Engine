@@ -1139,6 +1139,8 @@ impl EditorApp {
 }
 
 #[cfg(test)]
+mod accessibility_tests;
+#[cfg(test)]
 mod agent_tests;
 #[cfg(test)]
 mod asset_fix_tests;

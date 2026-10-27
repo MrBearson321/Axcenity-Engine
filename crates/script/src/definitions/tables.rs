@@ -765,7 +765,7 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
             },
             Function {
                 name: "SetSetting",
-                doc: "Keeps a game setting under `name`, such as `SaveService:SetSetting(\"Volume\", 0.5)`, with the same values as SetPlayerData. Saved in slots, but not captured at checkpoints.",
+                doc: "Keeps a game setting under `name`, such as `SaveService:SetSetting(\"Volume\", 0.5)`, with the same values as SetPlayerData. Saved in slots, but not captured at checkpoints. The `UI/` names are the game UI settings (see GuiService).",
                 params: &[("name", "string"), ("value", "any")],
                 returns: "()",
             },
@@ -817,6 +817,29 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
             params: &[("key", "string")],
             returns: "string?",
         }],
+    },
+    ValueType {
+        class: "GuiService",
+        doc: "The player's game UI settings, from `game:GetService(\"GuiService\")`, for a settings menu. They change every HUD and menu (and the UI Designer's artboard) and never the 3D world, and they're separate from the editor's own appearance. Both sides share them, and save slots keep them (as the settings `UI/TextScale`, `UI/HighContrast` and `UI/ReducedMotion`).",
+        fields: &[
+            Field {
+                name: "TextScale",
+                ty: "number",
+                doc: "How much bigger UI text is drawn than it's authored, from 0.5 to 3; 1 is as authored. Text with TextScaled on still fits its box. Anything else is an error and changes nothing.",
+            },
+            Field {
+                name: "HighContrast",
+                ty: "boolean",
+                doc: "If true, UI text is drawn black or white (whichever is nearer its colour) and see-through backgrounds are drawn solid.",
+            },
+            Field {
+                name: "ReducedMotion",
+                ty: "boolean",
+                doc: "If true, UI motion that's only for looks happens at once: CSS transitions, tweens of UI elements, and the Animations and AnimationTracks playing on them jump to where they end (a looping one holds its first frame). Events such as Completed and Stopped still fire.",
+            },
+        ],
+        operators: &[],
+        methods: &[],
     },
     ValueType {
         class: "UserGameSettings",
@@ -1366,7 +1389,7 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
         ClassName::DataModel,
         Function {
             name: "GetService",
-            doc: "The service with this class name, such as `\"Players\"`, `\"ReplicatedFirst\"`, `\"RunService\"`, `\"SaveService\"`, `\"LocalizationService\"`, `\"TweenService\"`, `\"CollectionService\"`, `\"UserGameSettings\"`, `\"UserInputService\"` or `\"ContextActionService\"`.",
+            doc: "The service with this class name, such as `\"Players\"`, `\"ReplicatedFirst\"`, `\"RunService\"`, `\"SaveService\"`, `\"LocalizationService\"`, `\"GuiService\"`, `\"TweenService\"`, `\"CollectionService\"`, `\"UserGameSettings\"`, `\"UserInputService\"` or `\"ContextActionService\"`.",
             params: &[("className", "string")],
             returns: "Instance",
         },
@@ -1692,6 +1715,14 @@ pub(super) const CLASS_FIELDS: &[(ClassName, Field)] = &[
             name: "LocalizationService",
             ty: "LocalizationService",
             doc: "The language UI text shows (same as `game:GetService(\"LocalizationService\")`).",
+        },
+    ),
+    (
+        ClassName::DataModel,
+        Field {
+            name: "GuiService",
+            ty: "GuiService",
+            doc: "The player's game UI settings (same as `game:GetService(\"GuiService\")`).",
         },
     ),
     (

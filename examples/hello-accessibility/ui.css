@@ -1,0 +1,38 @@
+ScreenGui {
+    --panel: rgba(24, 36, 58, 0.8);
+    --accent: #3b6fb8;
+    --text: #d8e0ec;
+}
+
+.menu {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px;
+    background-color: var(--panel);
+    border: 1px solid #5774a0;
+    border-radius: 12px;
+}
+
+.title {
+    color: var(--text);
+    font-size: 24px;
+}
+
+TextButton {
+    background-color: var(--accent);
+    color: #e8eef8;
+    border-radius: 8px;
+    font-size: 16px;
+    transition: background-color 0.3s ease, transform 0.3s ease;
+}
+
+TextButton:hover {
+    background-color: #60a5fa;
+    transform: scale(1.03);
+}
+
+#hint {
+    color: #9fb0c8;
+    font-size: 13px;
+}

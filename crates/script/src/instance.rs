@@ -14,6 +14,7 @@ use crate::cframe::LuaCFrame;
 use crate::client::{LocalPlayer, LuaCamera, LuaReplicatedFirst};
 use crate::collection::LuaCollectionService;
 use crate::events::{Event, LuaSignal, Owner};
+use crate::gui_service::LuaGuiService;
 use crate::input::{LuaContextActionService, LuaUserInputService};
 use crate::localization::LuaLocalizationService;
 use crate::run_service::LuaRunService;
@@ -137,6 +138,12 @@ fn get(lua: &Lua, id: InstanceId, key: &str) -> mlua::Result<mlua::Value> {
         // Lua, so it can wait (see `tree`).
         "WaitForChild" => return crate::tree::wait_for_child(lua)?.into_lua(lua),
         _ => {}
+    }
+    // Empty is the element's Name (see `Instance::accessible_name`).
+    if key == "AccessibleName"
+        && let Some(name) = instance.accessible_name()
+    {
+        return name.into_lua(lua);
     }
     if let Some(value) = instance.property(key) {
         return value_to_lua(lua, value);
@@ -328,6 +335,7 @@ fn class_member(lua: &Lua, class: ClassName, key: &str) -> mlua::Result<Option<m
         (ClassName::DataModel, "CollectionService") => LuaCollectionService.into_lua(lua)?,
         (ClassName::DataModel, "SaveService") => LuaSaveService.into_lua(lua)?,
         (ClassName::DataModel, "LocalizationService") => LuaLocalizationService.into_lua(lua)?,
+        (ClassName::DataModel, "GuiService") => LuaGuiService.into_lua(lua)?,
         (ClassName::DataModel, "ReplicatedFirst") => LuaReplicatedFirst.into_lua(lua)?,
         (ClassName::DataModel, "UserGameSettings") => LuaUserGameSettings.into_lua(lua)?,
         (ClassName::Workspace, "CurrentCamera") => LuaCamera.into_lua(lua)?,
@@ -924,7 +932,8 @@ fn set_playing(lua: &Lua, sound: InstanceId, playing: bool) -> mlua::Result<()> 
 /// `game:GetService(name)`: a service by its class name, such as
 /// `"Players"`, or `"UserInputService"`, `"ContextActionService"` or
 /// `"UserGameSettings"` (LocalScripts only), `"RunService"`, `"TweenService"`, `"CollectionService"`, `"SaveService"`,
-/// `"LocalizationService"` or `"ReplicatedFirst"`, which aren't Instances.
+/// `"LocalizationService"`, `"GuiService"` or `"ReplicatedFirst"`, which aren't
+/// Instances.
 pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
     lua.create_function(|lua, (_game, name): (mlua::Value, String)| {
         match name.as_str() {
@@ -945,6 +954,7 @@ pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
             "CollectionService" => return LuaCollectionService.into_lua(lua),
             "SaveService" => return LuaSaveService.into_lua(lua),
             "LocalizationService" => return LuaLocalizationService.into_lua(lua),
+            "GuiService" => return LuaGuiService.into_lua(lua),
             "ReplicatedFirst" => return LuaReplicatedFirst.into_lua(lua),
             _ => {}
         }
@@ -968,6 +978,7 @@ pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
                 names.extend([
                     "CollectionService",
                     "ContextActionService",
+                    "GuiService",
                     "LocalizationService",
                     "ReplicatedFirst",
                     "RunService",

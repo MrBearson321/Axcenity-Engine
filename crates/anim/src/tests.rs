@@ -887,3 +887,113 @@ fn a_clip_saved_broken_keeps_its_last_good_motion_and_is_reported_once() {
     assert!(errors[0].starts_with(&format!("Could not reload `{DOOR}`")));
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// A fade: a UI element's BackgroundTransparency from 1 to 0 over a
+/// second, with an event halfway.
+fn fade_clip() -> ClipFile {
+    use crate::files::{ClipEvent, Interp, PropertyKeyframe, PropertyName, PropertyTrack};
+    let key = |id: &str, time: f64, value: f32| PropertyKeyframe {
+        id: id.into(),
+        time,
+        value: vec![value],
+        interp: Interp::Linear,
+        easing: None,
+        bezier: None,
+    };
+    let mut clip = ClipFile::new(1.0);
+    clip.tracks.push(PropertyTrack {
+        id: "fade".into(),
+        target: ".".into(),
+        property: PropertyName::BackgroundTransparency,
+        keys: vec![key("a", 0.0, 1.0), key("b", 1.0, 0.0)],
+    });
+    clip.events.push(ClipEvent {
+        time: 0.5,
+        name: "Halfway".into(),
+    });
+    clip
+}
+
+#[test]
+fn reduced_motion_ends_a_ui_elements_clips_at_once_and_leaves_parts_moving() {
+    const FADE: &str = "assets/animations/Fade/Fade.anim.json";
+    let root = project(
+        "reduced-motion",
+        &[(DOOR, door_clip()), (FADE, fade_clip())],
+    );
+    let assets = Assets::new(&root);
+    let (mut world, part, _, door) = door_world(true);
+    let mut settings = world.ui_settings();
+    settings.reduced_motion = true;
+    world.set_ui_settings(settings);
+    let gui = world.create(ClassName::ScreenGui).unwrap();
+    world.set_parent(gui, Some(world.workspace())).unwrap();
+    let panel = world.create(ClassName::Frame).unwrap();
+    world.set_parent(panel, Some(gui)).unwrap();
+    let animator = world.create(ClassName::Animator).unwrap();
+    world.set_parent(animator, Some(panel)).unwrap();
+    let fade = world.create(ClassName::Animation).unwrap();
+    world.set_parent(fade, Some(animator)).unwrap();
+    world
+        .set_property(fade, "Clip", Value::String(FADE.into()))
+        .unwrap();
+    let transparency = |world: &World| {
+        world
+            .get(panel)
+            .and_then(|p| p.property("BackgroundTransparency"))
+            .and_then(Value::as_number)
+            .unwrap()
+    };
+    let mut animators = Animators::new();
+
+    // A played Animation jumps to its end, with its events.
+    world.property_animation_mut(fade).unwrap().play = true;
+    world.property_animation_mut(door).unwrap().play = true;
+    let events = animators.update(&mut world, &assets, 0.1);
+    assert_eq!(transparency(&world), 0.0);
+    assert!(
+        events.contains(&AnimatorEvent::AnimationMarker {
+            animation: fade,
+            name: "Halfway".into()
+        }),
+        "{events:?}"
+    );
+    assert!(events.contains(&AnimatorEvent::AnimationCompleted { animation: fade }));
+    // The 3D world still moves.
+    assert!((y(&world, part) - 1.0).abs() < 1e-3, "{}", y(&world, part));
+
+    // An AnimationTrack ends at once too, and says so. (The stopped
+    // Animation under it would hold the panel at its start.)
+    world.property_animation_mut(fade).unwrap().stop = true;
+    animators.update(&mut world, &assets, 0.016);
+    assert_eq!(transparency(&world), 1.0);
+    let track = world.load_animation(animator, fade).unwrap();
+    let state = world.animation_track_mut(track).unwrap();
+    state.playing = true;
+    state.target_weight = 1.0;
+    state.fade = 0.3;
+    state.order = 5;
+    let events = animators.update(&mut world, &assets, 0.016);
+    assert_eq!(transparency(&world), 0.0);
+    assert!(
+        events.contains(&AnimatorEvent::TrackStopped { track }),
+        "{events:?}"
+    );
+
+    // A looping one holds where it is.
+    world
+        .set_property(panel, "BackgroundTransparency", Value::Number(1.0))
+        .unwrap();
+    let looped = world.load_animation(animator, fade).unwrap();
+    let state = world.animation_track_mut(looped).unwrap();
+    state.playing = true;
+    state.looped = Some(true);
+    state.target_weight = 1.0;
+    state.order = 6;
+    for _ in 0..5 {
+        animators.update(&mut world, &assets, 0.2);
+    }
+    assert_eq!(world.animation_track(looped).unwrap().time, 0.0);
+    assert_eq!(transparency(&world), 1.0);
+    assert_eq!(animators.take_errors(), Vec::<String>::new());
+}

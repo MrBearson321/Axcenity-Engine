@@ -828,9 +828,9 @@ Game UI settings, separate from the editor's appearance settings, control text s
 
 ### Acceptance criteria
 
-- [ ] Raising text scale, turning on higher contrast and turning on reduced motion each change the game UI and leave the 3D world as it was.
-- [ ] Those settings persist in a save slot and restore on load, and they don't change the editor's theme.
-- [ ] A script can read each control's accessible name, and keyboard focus still moves in the Phase 19 order.
+- [x] Raising text scale, turning on higher contrast and turning on reduced motion each change the game UI and leave the 3D world as it was.
+- [x] Those settings persist in a save slot and restore on load, and they don't change the editor's theme.
+- [x] A script can read each control's accessible name, and keyboard focus still moves in the Phase 19 order.
 
 ---
 

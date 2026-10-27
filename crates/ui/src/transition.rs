@@ -9,7 +9,8 @@
 //! a gradient, `auto` to `40px`) snap. `none` for `transform` blends from
 //! `scale(1)` and `translate(0)`, and for shadows from a clear shadow of
 //! zero size. The timing functions are CSS's, drawn with the same Bezier
-//! curve the animation keys use (`anim::cubic_bezier`).
+//! curve the animation keys use (`anim::cubic_bezier`). With the game UI
+//! setting reduced motion on, nothing eases: the new value shows at once.
 
 use std::collections::HashMap;
 
@@ -247,7 +248,9 @@ impl Transitions {
                     .iter()
                     .rev()
                     .find(|spec| spec.property == property || spec.property == "all")
-                    .filter(|spec| spec.duration > 0.0 && (from_css || track.from_css));
+                    .filter(|spec| spec.duration > 0.0 && (from_css || track.from_css))
+                    // Reduced motion: the new style shows at once.
+                    .filter(|_| !world.ui_settings().reduced_motion);
                 track.run = spec
                     .filter(|_| interpolate(&current, &target, 0.5).is_some())
                     .map(|spec| Run {
@@ -262,7 +265,7 @@ impl Transitions {
                 track.from_css = from_css;
             }
             if let Some(run) = &track.run {
-                if run.done(now) {
+                if run.done(now) || world.ui_settings().reduced_motion {
                     track.run = None;
                 } else {
                     resolved.values.insert(property.to_owned(), run.value(now));

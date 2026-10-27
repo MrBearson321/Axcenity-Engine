@@ -4,6 +4,7 @@
 //! - [`World`] is the tree of [`Instance`]s, rooted at `game`.
 //! - [`TerrainData`] is a Terrain's heightfield, kept beside its Instance.
 //! - [`StringTable`] is the project's UI text in each language, kept by the world.
+//! - [`UiSettings`] is the player's game UI settings (text scale, contrast, motion), kept by the world.
 //! - [`Value`] is a typed property value, such as a [`Vector3`] or [`Color3`].
 
 mod animation;
@@ -13,6 +14,7 @@ mod enums;
 pub mod input;
 mod strings;
 mod terrain;
+mod ui_settings;
 mod value;
 mod world;
 
@@ -32,6 +34,7 @@ pub use terrain::{
     MIN_TERRAIN_SAMPLES, PaintWeights, SampleRect, TerrainData, TerrainError, TerrainRegion,
     valid_terrain_size,
 };
+pub use ui_settings::{TEXT_SCALE_RANGE, UI_SETTING_NAMES, UI_SETTING_PREFIX, UiSettings};
 pub use value::{CFrame, Color3, EnumItem, UDim, UDim2, Value, ValueKind, Vector2, Vector3};
 pub use world::{
     AttributeError, Change, Instance, InstanceId, MAX_ATTRIBUTE_NAME, PropertyError,

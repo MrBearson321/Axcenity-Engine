@@ -126,7 +126,7 @@ impl UiDesigner {
     }
 
     /// Align, distribute, Copy style, Paste style and Duplicate, for the
-    /// selection.
+    /// selection, then the game UI settings menu.
     pub(super) fn arrange_bar(
         &mut self,
         ui: &mut egui::Ui,
@@ -188,6 +188,9 @@ impl UiDesigner {
                 responsive::room_for(ui, 90.0);
                 self.style_buttons(ui, scene, &chosen, actions);
             });
+            // Not about the selection: always there, Play too.
+            ui.separator();
+            super::accessibility::settings_menu(ui, scene, actions);
         });
     }
 

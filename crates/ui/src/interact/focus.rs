@@ -91,6 +91,12 @@ impl UiInteraction {
         self.selected
     }
 
+    /// What the focused element is called, as a screen reader would say
+    /// it: its `AccessibleName`, else its `Name`.
+    pub fn selected_name<'a>(&self, world: &'a World) -> Option<&'a str> {
+        world.get(self.selected?)?.accessible_name()
+    }
+
     /// Focuses `id` (or nothing), as navigation would, from the next layout.
     pub fn select(&mut self, id: Option<InstanceId>) {
         self.selected = id;

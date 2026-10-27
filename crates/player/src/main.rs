@@ -1250,3 +1250,6 @@ mod graphics_tests;
 
 #[cfg(test)]
 mod bench_tests;
+
+#[cfg(test)]
+mod accessibility_tests;

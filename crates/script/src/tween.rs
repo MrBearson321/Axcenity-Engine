@@ -13,6 +13,10 @@
 //! Instance. `Completed` fires with how the tween ended (Completed, or
 //! Cancelled by `Cancel` or by a newer tween), at the next frame step.
 //!
+//! With the game UI setting reduced motion on (`World::ui_settings`), a
+//! tween of a UI element ends as soon as its delay is over: it's set to
+//! where it would end and `Completed` fires.
+//!
 //! A part's `CFrame` tweens as one rotation and one position (see
 //! [`Goal::CFrame`]), so it turns the short way round and never flips the
 //! way blending three `Orientation` angles can.
@@ -340,7 +344,9 @@ fn advance(lua: &Lua, tween: &Rc<RefCell<TweenState>>, seconds: f64) -> (bool, b
             })
             .collect();
     }
-    let (alpha, done) = tween.info.progress(run);
+    // Reduced motion: a UI element's tween goes straight to where it ends.
+    let still = world.ui_settings().reduced_motion && instance.class().is_gui();
+    let (alpha, done) = tween.info.progress(if still { f64::INFINITY } else { run });
     let id = tween.instance;
     for ((name, goal), start) in tween.goals.iter().zip(&tween.starts) {
         // Another script may have destroyed it, or its kind can't change,

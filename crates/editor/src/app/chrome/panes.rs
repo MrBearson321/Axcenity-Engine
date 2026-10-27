@@ -181,6 +181,14 @@ impl EditorApp {
                     world.set_language(&language);
                     continue;
                 }
+                DesignerAction::UiSettings(settings) => {
+                    let world = match &mut self.play {
+                        Some(session) => session.world_mut(),
+                        None => &mut self.world,
+                    };
+                    world.set_ui_settings(settings);
+                    continue;
+                }
                 _ => {}
             }
             if self.playing()
@@ -296,7 +304,8 @@ impl EditorApp {
                 // Handled above.
                 DesignerAction::GraphStep(_)
                 | DesignerAction::PreviewOutput(_)
-                | DesignerAction::Language(_) => {}
+                | DesignerAction::Language(_)
+                | DesignerAction::UiSettings(_) => {}
             }
         }
     }

@@ -310,14 +310,21 @@ impl UiInteraction {
             && let Some(tip) = tooltip_text(world, id)
         {
             if self.hovered_for >= TOOLTIP_DELAY {
-                layout.draw_items.extend(tooltip_items(
+                let mut items = tooltip_items(
                     world,
                     id,
                     stylesheets,
                     &tip,
                     pointer,
                     (width as f32, height as f32),
-                ));
+                );
+                // Its text is already scaled, so only contrast is left.
+                let settings = axcenity_core::UiSettings {
+                    text_scale: 1.0,
+                    ..world.ui_settings()
+                };
+                crate::accessibility::adjust_items(settings, &mut items);
+                layout.draw_items.extend(items);
             } else {
                 // Nothing moves while the pointer rests, so keep drawing
                 // until the tooltip is due.
@@ -760,7 +767,8 @@ fn draw_list(
             widget::dropdown_list(world, element, stylesheets, screen, scroll, pointer, cursor)
         });
     match drawn {
-        Some((drawn, items)) => {
+        Some((drawn, mut items)) => {
+            crate::accessibility::adjust_items(world.ui_settings(), &mut items);
             layout.draw_items.extend(items);
             *dropdown = Some((id, Some(drawn.scroll)));
             *list = Some(drawn);
@@ -834,9 +842,11 @@ fn tooltip_items(
     let opacity = css_number(&styles, "opacity")
         .unwrap_or(1.0)
         .clamp(0.0, 1.0);
+    // The box grows with the game UI setting's text scale.
     let font_size = css_length_property(&styles, "font-size")
         .unwrap_or(14.0)
-        .max(1.0);
+        .max(1.0)
+        * world.ui_settings().text_scale as f32;
     let padding = css_box_values(&styles, "padding").map_or([6.0, 8.0, 6.0, 8.0], |sides| {
         sides.map(|side| match side {
             taffy::LengthPercentage::Length(pixels) => pixels.max(0.0),

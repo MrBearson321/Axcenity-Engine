@@ -4,8 +4,9 @@
 //!   settings and the active checkpoint, with what was captured there.
 //! - A slot is one file, `slot-<n>.json`, in the player's data for the
 //!   game ([`game_folder`]), never in the project folder. It holds player
-//!   data, world state (`state`), the active checkpoint and settings, and
-//!   its save version ([`SAVE_VERSION`]).
+//!   data, world state (`state`), the active checkpoint and settings (the
+//!   world's game UI settings among them, as `UI/…`), and its save version
+//!   ([`SAVE_VERSION`]).
 //! - Loading reads and checks the whole file first, so a missing or damaged
 //!   slot fails without changing anything. A slot from an older save version
 //!   is moved up to this one as it's read ([`migrate`]); one from a newer
@@ -18,7 +19,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
+use axcenity_core::{ClassName, InstanceId, UI_SETTING_PREFIX, Value, Vector3, World};
 use serde::{Deserialize, Serialize};
 
 pub use migrate::migrate;
@@ -103,7 +104,9 @@ pub struct Saves {
     folder: Option<PathBuf>,
     /// Values scripts keep for the player, such as coins collected, by name.
     pub player_data: BTreeMap<String, Value>,
-    /// The game's settings, such as volume, by name.
+    /// The game's settings, such as volume, by name. The game UI settings
+    /// aren't here: they're the world's (`World::ui_settings`), and a slot
+    /// keeps them as settings named `UI/…`.
     pub settings: BTreeMap<String, Value>,
     checkpoint: Option<(InstanceId, Capture)>,
 }
@@ -185,7 +188,8 @@ impl Saves {
     }
 
     /// Writes slot `slot`: player data, world state, the active checkpoint
-    /// and settings. Returns the file it wrote. A slot saved by a newer
+    /// and settings, with the world's game UI settings. Returns the file it
+    /// wrote. A slot saved by a newer
     /// version of the game is left as it is.
     pub fn save(&self, world: &World, slot: u32) -> Result<PathBuf, SaveError> {
         let path = self.slot_path(slot)?;
@@ -206,10 +210,14 @@ impl Saves {
                 capture: capture.clone(),
             })
         });
+        let mut settings = to_properties(&self.settings);
+        for (name, value) in world.ui_settings().to_settings() {
+            settings.insert(name, SavedValue(value));
+        }
         let file = SlotFile {
             version: SAVE_VERSION,
             player_data: to_properties(&self.player_data),
-            settings: to_properties(&self.settings),
+            settings,
             world: state,
             checkpoint,
         };
@@ -229,13 +237,20 @@ impl Saves {
     }
 
     /// Reads slot `slot` and puts the game back as it was saved: player
-    /// data, world state, the active checkpoint and settings. A missing,
-    /// damaged or newer slot changes nothing.
+    /// data, world state, the active checkpoint and settings, with the game
+    /// UI settings going back to the world (one the slot doesn't have stays
+    /// as it is). A missing, damaged or newer slot changes nothing.
     pub fn load(&mut self, world: &mut World, slot: u32) -> Result<(), SaveError> {
         let file = self.read(slot)?;
         let restored = restore(world, &file.world);
         self.player_data = from_properties(&file.player_data);
-        self.settings = from_properties(&file.settings);
+        let mut settings = from_properties(&file.settings);
+        let ui = world
+            .ui_settings()
+            .with_settings(settings.iter().map(|(name, value)| (name.as_str(), value)));
+        world.set_ui_settings(ui);
+        settings.retain(|name, _| !name.starts_with(UI_SETTING_PREFIX));
+        self.settings = settings;
         self.checkpoint = file.checkpoint.and_then(|saved| {
             let id = (*restored.get(saved.instance)?)?;
             (world.get(id)?.class() == ClassName::Checkpoint).then_some((id, saved.capture))

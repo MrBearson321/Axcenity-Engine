@@ -28,6 +28,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.",
     ),
     (
+        ClassName::Frame,
+        "AccessibleName",
+        "The name navigation and scripts use for it, such as one a screen reader would say. Empty uses its Name; reading it from a script gives the name in use.",
+    ),
+    (
         ClassName::TextLabel,
         "Selectable",
         "If true, keyboard and controller navigation can focus it (CSS :focus). On by default for buttons, text boxes, sliders, toggles and dropdowns.",
@@ -51,6 +56,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::TextLabel,
         "NextSelectionRight",
         "The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::TextLabel,
+        "AccessibleName",
+        "The name navigation and scripts use for it, such as one a screen reader would say. Empty uses its Name; reading it from a script gives the name in use.",
     ),
     (
         ClassName::TextButton,
@@ -78,6 +88,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.",
     ),
     (
+        ClassName::TextButton,
+        "AccessibleName",
+        "The name navigation and scripts use for it, such as one a screen reader would say. Empty uses its Name; reading it from a script gives the name in use.",
+    ),
+    (
         ClassName::ImageLabel,
         "Selectable",
         "If true, keyboard and controller navigation can focus it (CSS :focus). On by default for buttons, text boxes, sliders, toggles and dropdowns.",
@@ -101,6 +116,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::ImageLabel,
         "NextSelectionRight",
         "The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::ImageLabel,
+        "AccessibleName",
+        "The name navigation and scripts use for it, such as one a screen reader would say. Empty uses its Name; reading it from a script gives the name in use.",
     ),
     (
         ClassName::TextBox,
@@ -128,6 +148,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.",
     ),
     (
+        ClassName::TextBox,
+        "AccessibleName",
+        "The name navigation and scripts use for it, such as one a screen reader would say. Empty uses its Name; reading it from a script gives the name in use.",
+    ),
+    (
         ClassName::PageLayout,
         "Selectable",
         "If true, keyboard and controller navigation can focus it (CSS :focus). On by default for buttons, text boxes, sliders, toggles and dropdowns.",
@@ -151,6 +176,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::PageLayout,
         "NextSelectionRight",
         "The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::PageLayout,
+        "AccessibleName",
+        "The name navigation and scripts use for it, such as one a screen reader would say. Empty uses its Name; reading it from a script gives the name in use.",
     ),
     (
         ClassName::Table,
@@ -178,6 +208,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.",
     ),
     (
+        ClassName::Table,
+        "AccessibleName",
+        "The name navigation and scripts use for it, such as one a screen reader would say. Empty uses its Name; reading it from a script gives the name in use.",
+    ),
+    (
         ClassName::ScrollingFrame,
         "Selectable",
         "If true, keyboard and controller navigation can focus it (CSS :focus). On by default for buttons, text boxes, sliders, toggles and dropdowns.",
@@ -201,6 +236,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::ScrollingFrame,
         "NextSelectionRight",
         "The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::ScrollingFrame,
+        "AccessibleName",
+        "The name navigation and scripts use for it, such as one a screen reader would say. Empty uses its Name; reading it from a script gives the name in use.",
     ),
     (
         ClassName::Slider,
@@ -228,6 +268,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.",
     ),
     (
+        ClassName::Slider,
+        "AccessibleName",
+        "The name navigation and scripts use for it, such as one a screen reader would say. Empty uses its Name; reading it from a script gives the name in use.",
+    ),
+    (
         ClassName::Toggle,
         "Selectable",
         "If true, keyboard and controller navigation can focus it (CSS :focus). On by default for buttons, text boxes, sliders, toggles and dropdowns.",
@@ -253,6 +298,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.",
     ),
     (
+        ClassName::Toggle,
+        "AccessibleName",
+        "The name navigation and scripts use for it, such as one a screen reader would say. Empty uses its Name; reading it from a script gives the name in use.",
+    ),
+    (
         ClassName::Dropdown,
         "Selectable",
         "If true, keyboard and controller navigation can focus it (CSS :focus). On by default for buttons, text boxes, sliders, toggles and dropdowns.",
@@ -278,6 +328,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.",
     ),
     (
+        ClassName::Dropdown,
+        "AccessibleName",
+        "The name navigation and scripts use for it, such as one a screen reader would say. Empty uses its Name; reading it from a script gives the name in use.",
+    ),
+    (
         ClassName::ProgressBar,
         "Selectable",
         "If true, keyboard and controller navigation can focus it (CSS :focus). On by default for buttons, text boxes, sliders, toggles and dropdowns.",
@@ -301,6 +356,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::ProgressBar,
         "NextSelectionRight",
         "The Id of the element focus moves to when right is pressed while this is focused. Empty picks the nearest selectable element that way.",
+    ),
+    (
+        ClassName::ProgressBar,
+        "AccessibleName",
+        "The name navigation and scripts use for it, such as one a screen reader would say. Empty uses its Name; reading it from a script gives the name in use.",
     ),
     (
         ClassName::ScreenGui,
