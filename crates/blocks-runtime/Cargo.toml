@@ -1,0 +1,18 @@
+[package]
+name = "axcenity-blocks-runtime"
+description = "Block-script and node-graph data and their translation to Lua: the part of blocks games need at runtime."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+axcenity-workspace-hack.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

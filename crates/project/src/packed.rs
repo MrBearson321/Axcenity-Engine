@@ -3,7 +3,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 
-use axcenity_blocks::translate;
+use axcenity_blocks_runtime::translate;
 use thiserror::Error;
 
 use crate::{is_block_script, read_block_script};
@@ -219,7 +219,7 @@ fn include_runtime_file(root: &Path, path: &Path) -> bool {
     // LocalScript under its ScreenGui, as it does for a project folder.
     if matches!(
         first.to_str(),
-        Some("scripts" | "assets" | axcenity_blocks::ui_graph::UI_GRAPHS_FOLDER)
+        Some("scripts" | "assets" | axcenity_blocks_runtime::ui_graph::UI_GRAPHS_FOLDER)
     ) {
         return true;
     }
@@ -282,7 +282,7 @@ fn take<'a>(bytes: &'a [u8], cursor: &mut usize, length: usize) -> Result<&'a [u
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axcenity_blocks::{Block, BlockKind, BlockScript};
+    use axcenity_blocks_runtime::{Block, BlockKind, BlockScript};
 
     fn temp_folder(name: &str) -> PathBuf {
         let path =
@@ -316,7 +316,7 @@ mod tests {
         let blocks = BlockScript {
             blocks: vec![Block::new(BlockKind::WhenStarted {
                 body: vec![Block::new(BlockKind::Wait {
-                    seconds: axcenity_blocks::Expression::Number { value: 1.0 },
+                    seconds: axcenity_blocks_runtime::Expression::Number { value: 1.0 },
                 })],
             })],
             ..Default::default()

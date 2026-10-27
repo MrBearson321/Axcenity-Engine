@@ -543,6 +543,7 @@ version = "0.1.0"
 dependencies = [
  "axcenity-assets",
  "axcenity-core",
+ "axcenity-workspace-hack",
  "glam 0.34.1",
  "serde",
  "serde_json",
@@ -552,6 +553,7 @@ dependencies = [
 name = "axcenity-assets"
 version = "0.1.0"
 dependencies = [
+ "axcenity-workspace-hack",
  "glam 0.34.1",
  "gltf",
  "image",
@@ -568,6 +570,7 @@ version = "0.1.0"
 dependencies = [
  "axcenity-assets",
  "axcenity-core",
+ "axcenity-workspace-hack",
  "kira",
  "mint",
  "thiserror 2.0.21",
@@ -577,8 +580,19 @@ dependencies = [
 name = "axcenity-blocks"
 version = "0.1.0"
 dependencies = [
+ "axcenity-blocks-runtime",
  "axcenity-core",
  "axcenity-script",
+ "axcenity-workspace-hack",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "axcenity-blocks-runtime"
+version = "0.1.0"
+dependencies = [
+ "axcenity-workspace-hack",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -591,12 +605,14 @@ dependencies = [
  "axcenity-assets",
  "axcenity-core",
  "axcenity-physics",
+ "axcenity-workspace-hack",
 ]
 
 [[package]]
 name = "axcenity-core"
 version = "0.1.0"
 dependencies = [
+ "axcenity-workspace-hack",
  "thiserror 2.0.21",
 ]
 
@@ -620,6 +636,7 @@ dependencies = [
  "axcenity-script",
  "axcenity-terrain",
  "axcenity-ui",
+ "axcenity-workspace-hack",
  "dioxus-cli-config",
  "dioxus-devtools",
  "eframe",
@@ -647,6 +664,7 @@ dependencies = [
  "axcenity-character",
  "axcenity-core",
  "axcenity-physics",
+ "axcenity-workspace-hack",
  "serde",
  "serde_json",
 ]
@@ -657,6 +675,7 @@ version = "0.1.0"
 dependencies = [
  "axcenity-assets",
  "axcenity-core",
+ "axcenity-workspace-hack",
  "rapier3d",
 ]
 
@@ -678,6 +697,7 @@ dependencies = [
  "axcenity-scene",
  "axcenity-script",
  "axcenity-ui",
+ "axcenity-workspace-hack",
  "env_logger",
  "log",
  "png",
@@ -692,9 +712,10 @@ version = "0.1.0"
 dependencies = [
  "axcenity-anim",
  "axcenity-assets",
- "axcenity-blocks",
+ "axcenity-blocks-runtime",
  "axcenity-core",
  "axcenity-terrain",
+ "axcenity-workspace-hack",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -706,6 +727,7 @@ name = "axcenity-render"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "axcenity-workspace-hack",
  "bytemuck",
  "glam 0.34.1",
  "glyphon",
@@ -721,6 +743,7 @@ name = "axcenity-save"
 version = "0.1.0"
 dependencies = [
  "axcenity-core",
+ "axcenity-workspace-hack",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -735,6 +758,7 @@ dependencies = [
  "axcenity-render",
  "axcenity-terrain",
  "axcenity-ui",
+ "axcenity-workspace-hack",
  "image",
 ]
 
@@ -750,6 +774,7 @@ dependencies = [
  "axcenity-physics",
  "axcenity-render",
  "axcenity-save",
+ "axcenity-workspace-hack",
  "luau0-src",
  "mlua",
 ]
@@ -759,6 +784,7 @@ name = "axcenity-terrain"
 version = "0.1.0"
 dependencies = [
  "axcenity-core",
+ "axcenity-workspace-hack",
  "glam 0.34.1",
  "png",
  "serde",
@@ -773,9 +799,66 @@ dependencies = [
  "axcenity-anim",
  "axcenity-core",
  "axcenity-render",
+ "axcenity-workspace-hack",
  "gilrs",
  "log",
  "taffy",
+]
+
+[[package]]
+name = "axcenity-workspace-hack"
+version = "0.1.0"
+dependencies = [
+ "ahash",
+ "approx",
+ "arrayvec",
+ "bitflags 2.13.2",
+ "block2 0.6.2",
+ "bytemuck",
+ "cc",
+ "core-foundation",
+ "core-graphics-types",
+ "dispatch2",
+ "either",
+ "getrandom 0.3.4",
+ "glam 0.33.12",
+ "half",
+ "hashbrown 0.17.1",
+ "image",
+ "indexmap",
+ "libc",
+ "lock_api",
+ "log",
+ "memchr",
+ "num-complex",
+ "num-traits",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.2.2",
+ "objc2-core-foundation",
+ "objc2-foundation 0.3.2",
+ "once_cell",
+ "parking_lot",
+ "proc-macro2",
+ "profiling",
+ "quote",
+ "serde",
+ "serde_core",
+ "serde_json",
+ "slotmap",
+ "smallvec",
+ "smol_str",
+ "syn 2.0.119",
+ "syn 3.0.9",
+ "thiserror 2.0.21",
+ "tracing",
+ "tracing-core",
+ "uuid",
+ "windows 0.62.2",
+ "windows-core 0.62.2",
+ "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
+ "winit",
+ "zerocopy",
 ]
 
 [[package]]

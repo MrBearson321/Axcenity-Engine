@@ -9,13 +9,14 @@ authors.workspace = true
 [dependencies]
 axcenity-anim.workspace = true
 axcenity-assets.workspace = true
-axcenity-blocks.workspace = true
+axcenity-blocks-runtime.workspace = true
 axcenity-core.workspace = true
 axcenity-terrain.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 zip.workspace = true
+axcenity-workspace-hack.workspace = true
 
 [lints]
 workspace = true

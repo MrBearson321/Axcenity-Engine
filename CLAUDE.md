@@ -10,7 +10,7 @@ When behavior changes, update the topic file. Keep each crate `CLAUDE.md` under 
 
 ## Invariants
 
-- `player` must not depend on `editor`, `egui` or `blocks`.
+- `player` must not depend on `editor`, `egui` or `blocks`; it translates block scripts and graphs through `blocks-runtime`.
 - `render` only consumes draw data; it must not depend on Instances or scripts.
 - Instances live in a generational-ID arena; don't make an `Rc<RefCell>` tree.
 - Blocks translate to Lua; there is one scripting runtime. Use Axcenity's Roblox-familiar API names, never Roblox branding.
@@ -21,7 +21,8 @@ When behavior changes, update the topic file. Keep each crate `CLAUDE.md` under 
 - Player: `cargo run -p axcenity-player -- examples/hello-part`
 - Editor: `cargo run -p axcenity-editor -- examples/hello-touched`
 - Build: `cargo build --workspace`
-- Test: `cargo test --workspace`
+- Test: `cargo nextest run --workspace` (one crate: `-p axcenity-x`). Doc tests: `cargo test --workspace --doc`
+- After changing dependencies: `cargo hakari generate` ([docs/development.md](docs/development.md))
 - Lint: `cargo clippy --workspace --all-targets -- -D warnings`
 - Format: `cargo fmt --all`
 

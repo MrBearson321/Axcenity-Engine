@@ -16,6 +16,7 @@ axcenity-physics.workspace = true
 axcenity-render.workspace = true
 axcenity-save.workspace = true
 mlua.workspace = true
+axcenity-workspace-hack.workspace = true
 
 # Only pins the Luau version `mlua` builds (see the workspace Cargo.toml).
 [build-dependencies]

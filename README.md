@@ -102,11 +102,12 @@ Useful commands:
 | Task | Command |
 |---|---|
 | Build everything | `cargo build --workspace` |
-| Run tests | `cargo test --workspace` |
+| Run tests | `cargo nextest run --workspace` (or `cargo test --workspace`) |
+| After changing dependencies | `cargo hakari generate` |
 | Lint | `cargo clippy --workspace --all-targets -- -D warnings` |
 | Format | `cargo fmt --all` |
 
-On Linux you may need your distribution's Vulkan driver package (for example `mesa-vulkan-drivers`).
+On Linux you may need your distribution's Vulkan driver package (for example `mesa-vulkan-drivers`). Install the test runner and the workspace-hack tool with `cargo install cargo-nextest cargo-hakari --locked`; [docs/development.md](docs/development.md) explains both and how to keep builds fast on a laptop.
 
 ### Changing the engine while it runs
 

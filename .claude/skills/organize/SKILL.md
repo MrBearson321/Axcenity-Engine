@@ -41,7 +41,7 @@ Work crate by crate. Keep each change behavior-preserving and small enough to re
 
 ### Verify
 
-After code changes run `cargo fmt --all` only on files you edited, then `cargo build --workspace`, `cargo test --workspace`, and `cargo clippy --workspace --all-targets -- -D warnings`. Report failures with output; separate pre-existing failures (see memory) from ones you caused. If something you changed fails, fix or revert that change.
+After code changes run `cargo fmt --all` only on files you edited, then `cargo nextest run --workspace` (or `cargo test --workspace --no-fail-fast` without nextest), `cargo test --workspace --doc`, `cargo hakari generate --diff` (if dependencies changed), and `cargo clippy --workspace --all-targets -- -D warnings`. Report failures with output; separate pre-existing failures (see memory) from ones you caused. If something you changed fails, fix or revert that change.
 
 ## Rules
 

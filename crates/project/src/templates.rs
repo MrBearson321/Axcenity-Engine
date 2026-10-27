@@ -161,7 +161,7 @@ pub(super) const STARTER_WORLD: &str = r#"{
 /// The block script of the starter scene: spin the neon part, and turn the
 /// pad green when something lands on it.
 pub(super) fn starter_blocks() -> BlockScript {
-    use axcenity_blocks::Expression;
+    use axcenity_blocks_runtime::Expression;
     let vector = |x, y, z| Expression::Vector3 { x, y, z };
     BlockScript {
         blocks: vec![

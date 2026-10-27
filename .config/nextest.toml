@@ -1,0 +1,20 @@
+# cargo-nextest settings (https://nexte.st). `cargo nextest run --workspace`
+# runs every test in its own process, all crates at once, and doesn't stop
+# at the first crate with a failure. See docs/development.md.
+
+[profile.default]
+# A test still running after 30 s is reported as SLOW; after 4 periods
+# (2 minutes) it's stopped and fails, so a hung test can't stall the run.
+slow-timeout = { period = "30s", terminate-after = 4 }
+# Run everything and list every failure at the end.
+fail-fast = false
+
+# The slowest tests start first, so the run doesn't end waiting on them.
+[[profile.default.overrides]]
+filter = 'test(=tests::every_example_renders) | test(/^app::(asset_fix_tests|files::package_tests|imported_clip_tests|behavior_tree_tests)::/) | test(=validate::tests::a_clean_example_reports_nothing)'
+priority = 50
+
+# CI runners are slower and share their CPUs: allow more time.
+[profile.ci]
+slow-timeout = { period = "60s", terminate-after = 5 }
+fail-fast = false

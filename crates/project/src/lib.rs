@@ -49,7 +49,7 @@ pub use stylesheets::*;
 pub use templates::*;
 pub use ui_graphs::*;
 
-use axcenity_blocks::{Block, BlockKind, BlockScript, reserve_block_ids, translate};
+use axcenity_blocks_runtime::{Block, BlockKind, BlockScript, reserve_block_ids, translate};
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};

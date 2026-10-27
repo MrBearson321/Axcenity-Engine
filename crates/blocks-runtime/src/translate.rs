@@ -937,3 +937,11 @@ pub fn valid_identifier(name: &str) -> bool {
                 | "while"
         )
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn quote_escapes_quote_marks() {
+        assert_eq!(super::quote("sound\"path"), "\"sound\\\"path\"");
+    }
+}

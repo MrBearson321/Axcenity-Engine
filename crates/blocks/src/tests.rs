@@ -1205,7 +1205,6 @@ fn mistakes_are_reported_instead_of_making_broken_lua() {
         translate(&loose),
         Err(TranslateError::InvalidEventPlacement)
     );
-    assert_eq!(quote("sound\"path"), "\"sound\\\"path\"");
 }
 
 #[test]

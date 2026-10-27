@@ -1,20 +1,21 @@
 [package]
 name = "axcenity-blocks"
-description = "Scratch-style block scripts translated to Lua."
+description = "Scratch-style block scripts for the editor: everything in axcenity-blocks-runtime, plus turning Lua back into blocks."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
 [dependencies]
-serde.workspace = true
-serde_json.workspace = true
+axcenity-blocks-runtime.workspace = true
 thiserror.workspace = true
+axcenity-workspace-hack.workspace = true
 
 [dev-dependencies]
 # Runs translated block scripts, to check they work like typed ones.
 axcenity-core.workspace = true
 axcenity-script.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

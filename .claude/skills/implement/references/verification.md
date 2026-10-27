@@ -8,11 +8,13 @@ From the repository root:
 
 ```text
 cargo fmt --all
-cargo test -p <changed crate> [test name]
-cargo clippy -p <changed crate> --all-targets -- -D warnings
-cargo test --workspace
-cargo build --workspace
+cargo nextest run -p <changed crate> [test name]
+cargo clippy --workspace --all-targets -- -D warnings
+cargo nextest run --workspace
+cargo test --workspace --doc
 ```
+
+If the change touched a `Cargo.toml` dependency, run `cargo hakari generate` first (and `cargo hakari manage-deps` for a new crate); CI fails otherwise. Clippy with `--all-targets` already checks that everything compiles, so a separate `cargo build` is only needed before running a binary. If `cargo-nextest` isn't installed, use `cargo test --workspace --no-fail-fast`. A build after a dependency or `Cargo.toml` change can run past the default 2-minute command timeout: give it a 10-minute timeout or run it in the background.
 
 Fix failures the change caused. Known failures that already fail on `main` (see memory and `git stash` + rerun if unsure) don't block a commit; name them in the handoff. Format only files this task touched if `cargo fmt --all` would rewrite unrelated files. Report what ran and its result, and don't describe a compile or test pass as proof of visual, cross-platform, or feel behavior.
 

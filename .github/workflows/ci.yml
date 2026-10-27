@@ -20,6 +20,21 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all --check
 
+  workspace-hack:
+    name: Workspace hack
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-hakari
+      # crates/workspace-hack must match Cargo.lock and every crate must use
+      # it. If this fails, run `cargo hakari generate` and
+      # `cargo hakari manage-deps` (docs/development.md).
+      - run: cargo hakari generate --diff
+      - run: cargo hakari manage-deps --dry-run
+
   build:
     name: Build and test (${{ matrix.os }})
     strategy:
@@ -39,15 +54,22 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libdbus-1-dev libudev-dev pkg-config
       - run: cargo build --workspace --all-targets --locked
-      # Exported games ship the player, which must hold no editor code.
+      # Exported games ship the player, which must hold no editor code
+      # (`axcenity-blocks-runtime` is allowed: the grep needs a space after the name).
       - name: Check the player has no editor code
         shell: bash
         run: |
-          if cargo tree -p axcenity-player -e normal --prefix none --locked | grep -E '^(axcenity-editor|eframe|egui|subsecond) '; then
+          if cargo tree -p axcenity-player -e normal --prefix none --locked | grep -E '^(axcenity-editor|axcenity-blocks|eframe|egui|subsecond) '; then
             echo "axcenity-player depends on editor code"
             exit 1
           fi
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       # The editor's dev-only hot-patching (dx and subsecond) still builds here.
       - run: cargo clippy -p axcenity-editor --all-targets --features hot-patch --locked -- -D warnings
-      - run: cargo test --workspace --locked
+      # nextest runs every crate's tests at once and reports every failure
+      # (settings: .config/nextest.toml). It doesn't run doc tests.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      - run: cargo nextest run --workspace --locked --profile ci
+      - run: cargo test --workspace --doc --locked

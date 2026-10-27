@@ -15,6 +15,7 @@ glam.workspace = true
 log.workspace = true
 serde.workspace = true
 wgpu.workspace = true
+axcenity-workspace-hack.workspace = true
 
 [dev-dependencies]
 # GPU tests set up a device without a window.

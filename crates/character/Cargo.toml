@@ -10,6 +10,7 @@ authors.workspace = true
 axcenity-assets.workspace = true
 axcenity-core.workspace = true
 axcenity-physics.workspace = true
+axcenity-workspace-hack.workspace = true
 
 [lints]
 workspace = true

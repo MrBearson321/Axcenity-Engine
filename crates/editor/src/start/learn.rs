@@ -86,7 +86,8 @@ impl Learn {
 /// The sample project `examples/<name>`. It's looked for in the folder the
 /// editor was started from, then in each folder above the editor's own
 /// program (a build from source keeps it in `target/`, under the engine's
-/// folder).
+/// folder), then in the source tree a debug build came from (when the
+/// build folder is elsewhere, as with `CARGO_TARGET_DIR`).
 pub(super) fn find_sample(name: &str) -> Option<PathBuf> {
     let mut roots = Vec::new();
     if let Ok(folder) = std::env::current_dir() {
@@ -95,6 +96,7 @@ pub(super) fn find_sample(name: &str) -> Option<PathBuf> {
     if let Ok(program) = std::env::current_exe() {
         roots.extend(program.ancestors().skip(1).map(Path::to_path_buf));
     }
+    roots.extend(crate::rebuild::EngineSource::find().map(|source| source.workspace));
     roots
         .into_iter()
         .map(|root| root.join("examples").join(name))

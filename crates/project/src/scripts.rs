@@ -144,7 +144,7 @@ pub(super) fn find_script_files(
 pub fn script_class(path: &str) -> ClassName {
     if path.ends_with(CLIENT_SCRIPT_SUFFIX)
         || path.ends_with(CLIENT_BLOCK_SCRIPT_SUFFIX)
-        || axcenity_blocks::ui_graph::is_ui_graph(path)
+        || axcenity_blocks_runtime::ui_graph::is_ui_graph(path)
     {
         ClassName::LocalScript
     } else if path.ends_with(MODULE_SCRIPT_SUFFIX) {

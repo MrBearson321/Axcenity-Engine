@@ -3,6 +3,8 @@
 > Sources: `plans/axcenity-engine-v2.md` (PRD `prd/axcenity-engine-v2.md`) and `plans/axcenity-engine-v3.md` (the developer's requests of 2026-10-22 and 2026-10-23), and the developer's requests of 2026-10-25 (Phases 8a to 8d, and the UI requests in Phases 9a to 9i and the additions to Phases 10 and 19, and the asset-fix and live-reload requests in Phases 22 to 26). This plan holds only what has not been built, as of 2026-10-25 (commit `a9b6638`). The phases run in order. Each phase names the v2 or v3 phase it came from. Where the text changed from the source plan, the change is marked **Changed**.
 >
 > Built and committed, but not yet ticked: v2 Phase 12 and v3 Phases 4, 6, 7 and 8. Their open criteria are under **Open checks** below. They need a hands-on check, not new work.
+>
+> Milestones 9 to 14 (Phases 27 to 67) come from the developer's interview of 2026-10-27 (commit `bcbc2a7`). They cover the features found missing in a survey of the engine: scripting essentials, physics, a gameplay kit, levels and editor tools, a mesh-authoring Model Studio, and networking. Graphics stays in `plans/axcenity-engine-graphics.md`. Their decisions are under **Decisions for Milestones 9 to 14**.
 
 ## Architectural decisions
 
@@ -20,6 +22,30 @@ v1, v2 and v3 rules still hold. These are the ones the remaining phases depend o
 - **Dependencies**: **Changed**: `.axpkg` needs no new dependency. `zip` is already pinned in the workspace and used to read and write archives (`editor/src/ambient_cg.rs`). Controller (gamepad) input in Phase 19 needs one new pinned dependency, with its licence checked as Apache-2.0-compatible.
 - **Live reload** (Phases 23 to 26): watching files, reloading scripts during Play, rebuilding and hot-patching are for development only. Exported games never watch or patch anything, and the player only watches with `--watch`. Engine rebuild and hot-patching are editor features, behind a dev-only `hot-patch` feature where they need a dependency, so `player` gains no new dependency. A file that fails to reload keeps the last good version.
 - **Platforms**: Windows, macOS and Linux.
+
+## Decisions for Milestones 9 to 14
+
+These were decided in the developer's interview of 2026-10-27.
+
+- **Order**: scripting essentials, physics, gameplay kit, levels and editor tools, Model Studio, networking. Each milestone may use the ones before it.
+- **New crates**:
+  - `mesh_edit` arrives in Phase 42. It holds the editable-mesh math (cutting, booleans, modeling, UVs, sculpting, skin weights) and has no egui, GPU or `core` dependency. `physics` (fracture), the editor (CSG, Model Studio) and `project` may use it.
+  - `testing` arrives in Phase 53 and builds the `axcenity-test` binary.
+  - `net` arrives in Phase 63, with an `axcenity-server` binary. `net` depends on `core` only. `player` may depend on `net`. `render` and `ui` never do.
+  - Exported games never include `testing`, and include `net` only as the player already does.
+- **Frame order** (extends the one above): network receive, input and actions, character controllers, navigation agents and vehicles, scripts, physics (constraints and movers included), touch events, UI layout, network send, render.
+- **CFrame**: CFrame is a Lua value type. `Part.CFrame` and `Model:PivotTo` read and write the existing `Position` and `Orientation` (degrees, YXZ). Nothing stores a CFrame, so no file changes.
+- **Gameplay kit**: it's built from small Instances (`Health`, `Inventory`, `Tool`, `ProximityPrompt` and others) that work on any Model. A `Humanoid` bundles them for Roblox-familiar scripts. It forwards its properties to the pieces and stores none of its own, so there's one source of truth.
+- **Data**: Attributes, tags and Value objects are optional fields in `world.json`. Data tables (`*.data.json`) are new optional files. Neither bumps `project::FORMAT_VERSION`.
+- **Input**: a project input map (`input.json`) names actions (Jump, Interact and others). Controllers, vehicles, prompts, tools and UI navigation read actions, not fixed keys. Rebinds are saved in the player's settings (Phase 17).
+- **Levels**: `world.json` stays the start level. Other levels live in `levels/<name>.world.json`, a new optional folder, so there's no format bump. Services outside the Workspace (ReplicatedStorage, Players, Lighting, StarterPlayer) persist across level loads.
+- **Prefabs**: nesting and variants extend the existing prefab files with optional fields.
+- **Editor plugins**: these are Lua, editor-only, and sandboxed, with their own interpreter. They change the edit world only through `EditorApp::change`, so every plugin edit undoes. The player never loads plugins.
+- **Model Studio**: a dock tab in the editor. A model's `.glb` stays the asset the game loads. Editing state that `.glb` can't hold (the modifier stack, paint layers, sculpt levels) goes in a sidecar `<model>.meshedit.json` and folder. Opening an FBX saves a `.glb` beside it and leaves the FBX untouched. `render` gains only overlay draw items (edges, vertices, weight and mask colours) through the draw list. The graphics plan is unchanged.
+- **Networking**: Roblox-style. The server is authoritative, and Workspace, ReplicatedStorage, Lighting, Players and Teams replicate automatically. ServerStorage and ServerScriptService never leave the server. A client owns its own character's movement, and the server checks it. Single-player and editor Play run the same code over an in-process loopback, so there's one path. Hosting is direct address or LAN, with a headless dedicated server. There's no relay or matchmaking.
+- **Dependencies to choose and licence-check when their phase starts**: a UDP transport (Phase 63, for example `renet` or `quinn`), mesh booleans (Phase 50: in-house first), and UV unwrapping (Phase 58: in-house LSCM first, `xatlas` only if quality falls short). Writing `.glb` uses `gltf-json`, which comes with the pinned `gltf`; pin it in the workspace. Physics joints, vehicles and convex decomposition use the pinned `rapier3d`. Audio effects use the pinned `kira`.
+- **Blocks parity** still holds: every new creator-facing Lua API gets matching blocks and API reference entries.
+- **Not in this plan**: web, Android and iOS export, Steam integration, relay servers and matchmaking, runtime IK (feet on slopes, look-at), and graphics features.
 
 ---
 
@@ -932,3 +958,1112 @@ The new process reads the handoff and deletes it. It opens the project with thos
 - [x] Changing a struct's fields falls back to rebuild and relaunch, and Output says so.
 - [x] Without the `hot-patch` feature the editor builds without `subsecond`, and the player never depends on it.
 - [ ] The workspace still builds on Windows, macOS and Linux. On a platform where patching isn't supported, the fallback is used.
+
+---
+
+# Milestone 9: Scripting essentials
+
+## Phase 27: The Instance API
+
+**From**: the developer's interview of 2026-10-27. Today a Lua Instance has only `FindFirstChild` and `GetPropertyChangedSignal`.
+
+### What to build
+
+**Tree methods.** These match Roblox's shapes:
+- `Destroy` and `ClearAllChildren`.
+- `Clone`, which copies descendants, Attributes and tags (Phase 29). It returns an Instance with no parent. A cloned Script starts when it's parented under a running service, as an inserted one does.
+- `GetChildren` and `GetDescendants`.
+- `IsA`, using the class hierarchy (a MeshPart is a BasePart).
+- `FindFirstChildOfClass`, `FindFirstChildWhichIsA`, `FindFirstAncestor`, `FindFirstAncestorOfClass` and `FindFirstAncestorWhichIsA`.
+- `WaitForChild(name, timeout?)`, which yields through the scheduler and warns once after 5 seconds.
+- `IsDescendantOf`, `IsAncestorOf` and `GetFullName`.
+
+**Events.** `DescendantAdded`, `DescendantRemoving`, `AncestryChanged` and `Destroying`.
+
+**Rules.** A destroyed Instance's `Parent` is locked, and setting it is an error that says so. Destroying the running script's own Instance stops it after the current resume. Services can't be destroyed or cloned.
+
+Blocks: "destroy", "clone", "for each child", "is a", "wait for child". The API reference lists them all.
+
+### Acceptance criteria
+
+- [x] A script clones a Model with a Script inside it, parents the clone to the Workspace, and the cloned script runs. Destroying the clone stops that script and fires `Destroying` once.
+- [x] `WaitForChild` returns a child added two seconds later, and returns nil after its timeout.
+- [x] `IsA("BasePart")` is true for a Part and a MeshPart, and false for a Frame.
+- [x] Setting `Parent` on a destroyed Instance errors with a clear message. Destroying `workspace` errors and changes nothing.
+- [x] Each new block produces the same Lua as the typed call.
+
+---
+
+## Phase 28: Vector math, CFrame and Random
+
+**From**: the developer's interview of 2026-10-27. **Decided**: CFrame is a Lua type on top of `Position` and `Orientation`. It isn't stored.
+
+### What to build
+
+**Vector3 and Vector2**:
+- `Dot`, `Cross` (Vector3 only), `Lerp`, `Angle`, `FuzzyEq`, `Min`, `Max`, `Abs`, `Floor`, `Ceil`, and division by a vector.
+- The constants `zero`, `one`, `xAxis`, `yAxis` and `zAxis`.
+
+**Color3**: `Lerp`, `fromHSV`, `ToHSV`, `fromHex` and `ToHex`.
+
+**CFrame**:
+- Constructors: `CFrame.new(pos)`, `CFrame.new(x, y, z)`, `CFrame.lookAt(at, target, up?)`, `CFrame.Angles`, `CFrame.fromEulerAnglesYXZ`, `CFrame.fromAxisAngle` and `CFrame.identity`.
+- Fields: `Position`, `LookVector`, `RightVector` and `UpVector`.
+- Operations: `*` with a CFrame or a Vector3, `+` and `-` with a Vector3, `Inverse`, `Lerp`, `ToWorldSpace`, `ToObjectSpace`, `PointToWorldSpace`, `PointToObjectSpace`, `VectorToWorldSpace` and `ToEulerAnglesYXZ`.
+- `Part.CFrame`, `Model:GetPivot()` and `Model:PivotTo(cf)` read and write the stored `Position` and `Orientation` (degrees, YXZ). `PivotTo` moves the whole Model rigidly around its pivot (the bounding box centre, or `PrimaryPart` when it's set).
+- TweenService tweens `CFrame`, as one rotation and one position, without gimbal flips. The camera exposes `CFrame` too (Phase 31).
+
+**Random.new(seed?)**: `NextNumber(min?, max?)`, `NextInteger(min, max)`, `NextUnitVector` and `Shuffle`.
+
+Blocks cover the common cases: "look at", "move forward by", "lerp", "random number between".
+
+### Acceptance criteria
+
+- [ ] `part.CFrame = CFrame.lookAt(part.Position, target.Position)` makes the part's `LookVector` point at the target. Reading `Orientation` back gives the same angles that setting them directly would.
+- [ ] `model:PivotTo(model:GetPivot() * CFrame.Angles(0, math.rad(90), 0))` turns the whole Model around its pivot, and its parts keep their offsets.
+- [ ] A CFrame tween from 0° to 350° about Y takes the short way round.
+- [ ] `Random.new(42)` gives the same sequence on every run and platform.
+- [ ] A saved world is byte-for-byte the same before and after a script reads and writes `CFrame` without changing anything.
+
+---
+
+## Phase 29: Attributes, tags and Value objects
+
+**From**: the developer's interview of 2026-10-27.
+
+### What to build
+
+**Attributes.** `SetAttribute(name, value)`, `GetAttribute`, `GetAttributes`, `GetAttributeChangedSignal(name)` and `AttributeChanged`. A value is a boolean, number, string, Vector3, Vector2, Color3, UDim2, CFrame or EnumItem, and nil removes it. Properties gets an **Attributes** section to add, edit and remove them. Each edit is one undo step.
+
+**Tags.** `CollectionService` has `AddTag`, `RemoveTag`, `HasTag`, `GetTags`, `GetTagged`, `GetInstanceAddedSignal(tag)` and `GetInstanceRemovedSignal(tag)`. `instance:AddTag` and its family exist as shortcuts. Properties has a **Tags** row with chips. A **Tags** panel lists every tag in the world, selects everything with one, and renames a tag across the world.
+
+**Value objects.** `IntValue`, `NumberValue`, `StringValue`, `BoolValue`, `Vector3Value`, `Color3Value`, `CFrameValue` and `ObjectValue`, each with `Value` and `Changed(newValue)`.
+
+**Storage.** All three are saved as optional fields in `world.json` and in prefabs. Save slots (Phase 17) capture them. Clone copies them.
+
+### Acceptance criteria
+
+- [ ] An attribute set in Properties is read by a script in Play, and `GetAttributeChangedSignal` fires when another script changes it.
+- [ ] A script that runs `GetTagged("Lava")` and connects `GetInstanceAddedSignal("Lava")` handles both existing and newly cloned lava parts.
+- [ ] Attributes, tags and Value objects survive save, reload, prefab use and a save slot round trip. A world saved before this phase loads unchanged.
+- [ ] Renaming a tag in the Tags panel renames it everywhere, as one undo step.
+
+---
+
+## Phase 30: Mouse, touch, gamepad input and the input map
+
+**From**: the developer's interview of 2026-10-27. Today `UserInputService` reports only keys, and the controllers read fixed keys.
+
+### What to build
+
+**InputObject.** It gains `UserInputType` (Keyboard, MouseButton1, MouseButton2, MouseButton3, MouseMovement, MouseWheel, Touch and Gamepad1 to Gamepad4), `UserInputState`, `Position`, `Delta`, and `KeyCode` for gamepad buttons and sticks. Gamepad reading reuses `ui::gamepad` (`gilrs`).
+
+**UserInputService**:
+- The events `InputChanged`, `TouchStarted`, `TouchMoved` and `TouchEnded`, plus `GamepadConnected` and `GamepadDisconnected`.
+- `GetMouseLocation`, `GetMouseDelta`, `IsMouseButtonPressed` and `GetGamepadState`.
+- `MouseBehavior` (Default, LockCenter, LockCurrentPosition) and `MouseIconEnabled`.
+- `gameProcessedEvent` is now true when the UI took the input: a button click, typing in a TextBox, or a focused widget.
+
+**Input map.** A project **Input** settings page writes `input.json`. It names actions, each bound to keys, mouse buttons, gamepad buttons or an axis (WASD and the left stick are one `Move` axis).
+- The defaults are Move, Look, Jump, Run, Crouch, Interact, Primary, Secondary, Menu and the UI navigation keys.
+- The built-in controllers, UI navigation (Phase 19) and later prompts, tools and vehicles read actions.
+- `ContextActionService` has `BindAction(name, handler, createTouchButton, ...inputs)`, `BindActionAtPriority`, `UnbindAction` and `GetBoundActionInfo`. A higher priority hides an action from lower ones.
+- `UserInputService:IsActionPressed(name)` and `GetActionAxis(name)`.
+- `UserInputService:RebindAction(name, inputs)` changes a binding at runtime, and the binding is saved in the player's settings. A ready-made **Controls** settings UI can be inserted from the toolbar's UI group.
+
+### Acceptance criteria
+
+- [ ] A LocalScript gets MouseButton1 with the click's screen position. Clicking a TextButton gives `gameProcessedEvent = true`.
+- [ ] With `MouseBehavior = LockCenter`, `GetMouseDelta` drives a camera, and the cursor stays hidden in the centre.
+- [ ] Rebinding Jump to E in the input map makes both controllers jump on E, in the editor Play and the player. A runtime rebind survives saving and reloading a slot.
+- [ ] A gamepad's left stick walks the character and its A button jumps, with no script.
+- [ ] Two `BindAction`s on the same key at different priorities call only the higher one until it's unbound.
+
+---
+
+## Phase 31: Camera control
+
+**From**: the developer's interview of 2026-10-27.
+
+### What to build
+
+`workspace.CurrentCamera`:
+- **Properties**: `CFrame`, `Focus`, `FieldOfView`, `CameraType` (Custom, Scriptable, Follow, Fixed and Track) and `CameraSubject` (a Model, Part or controller).
+- **Custom** is the existing controller camera. **Scriptable** leaves `CFrame` entirely to scripts. **Follow** and **Track** follow `CameraSubject` from a fixed offset, without player control.
+- **Methods**: `ScreenPointToRay`, `ViewportPointToRay`, `WorldToScreenPoint` (with an on-screen flag) and `ViewportSize`.
+- `Camera` objects can be placed in the world as named viewpoints, and `CurrentCamera.CFrame = cameraPart.CFrame` cuts to one. The Sequencer (Phase 51) uses them.
+- **Shake**: `Camera:Shake(intensity, duration)` adds a decaying shake on top of any camera type.
+- When Play stops, the editor camera comes back, as it does now.
+
+Blocks: "set camera to scriptable", "point camera at", "shake camera", "part under mouse" (a `ScreenPointToRay` plus `Raycast` shortcut).
+
+### Acceptance criteria
+
+- [ ] A Scriptable camera tweened along a CFrame path plays the same in the editor Play and the player, and returning to Custom gives control back to the controller.
+- [ ] "Part under mouse" returns the part the cursor is over, at any window size.
+- [ ] `WorldToScreenPoint` places a TextLabel exactly over a part as the camera moves.
+
+---
+
+## Phase 32: Events, frame hooks and utilities
+
+**From**: the developer's interview of 2026-10-27.
+
+### What to build
+
+- **BindableEvent** (`Fire`, `Event`) and **BindableFunction** (`Invoke`, `OnInvoke`), for one side talking to itself.
+- **RemoteFunction**: `InvokeServer` and `OnServerInvoke`. The caller yields until the reply. An error on the other side becomes an error in the caller. (`InvokeClient` waits for networking, Phase 64.)
+- **RunService**: `Stepped(time, dt)` before physics, `RenderStepped(dt)` before render (LocalScripts only), `BindToRenderStep(name, priority, fn)` and `UnbindFromRenderStep`, and `IsServer`, `IsClient`, `IsStudio` and `IsRunning`. `Heartbeat` stays after physics.
+- **Debris**: `Debris:AddItem(instance, seconds)`.
+- **HttpService** without the network: `JSONEncode`, `JSONDecode` and `GenerateGUID`.
+- **task**: `task.cancel`, `task.defer` and `task.synchronize`/`desynchronize` as no-ops, where they're missing.
+
+Blocks for each, in the Events and Control groups.
+
+### Acceptance criteria
+
+- [ ] A LocalScript's `InvokeServer` returns the server's value, and an error in `OnServerInvoke` shows as an error in the caller with the server's `script:line`.
+- [ ] `BindToRenderStep` handlers run in priority order every frame, before the frame is drawn.
+- [ ] `Debris:AddItem(part, 2)` destroys the part about two seconds later, and is a no-op if it was already destroyed.
+- [ ] `JSONDecode(JSONEncode(t))` round-trips nested tables, and a bad JSON string errors with the position of the mistake.
+
+---
+
+## Phase 33: Data tables
+
+**From**: the developer's interview of 2026-10-27. These are the engine's answer to Unity's ScriptableObjects and Godot's Resources.
+
+### What to build
+
+**The asset.** A `*.data.json` file holds a schema and rows.
+- Column types: number, integer, string, boolean, Vector3, Color3, enum (a list of names), asset path (of a kind), and a reference to a row of another table.
+- Each row has a unique key.
+
+**The editor.** A **Data Table** tab edits it as a grid, with typed cells, column add, rename and reorder, row add and duplicate, sort, filter and search. An asset path cell has a picker. Each edit is one undo step. Asset Check reports bad references, and its fixes (Phase 22) work on table cells.
+
+**Lua.** `DataService:GetTable("weapons")` returns a read-only table: `t:Get("sword")`, `t:GetAll()` and `t:Keys()`. A row is a read-only table of its columns. A reference column returns the referenced row. Blocks: "row … of table …", "value of column … in row …".
+
+**Elsewhere.** Live reload (Phase 23) swaps a changed table during Play. Packages (Phase 6) bring the tables a prefab's scripts use when the paths are literal, and list them for a check otherwise. Built games include every table.
+
+### Acceptance criteria
+
+- [ ] A `weapons` table with Damage, Range and Icon columns is made in the grid, and a script reads `DataService:GetTable("weapons"):Get("sword").Damage`.
+- [ ] Changing a cell during Play changes what the script reads next, without restarting.
+- [ ] A row that references a missing row or a missing asset appears in Asset Check, and its fix works.
+- [ ] Writing to a row from Lua errors and says tables are read-only.
+
+---
+
+# Milestone 10: Physics
+
+## Phase 34: Bodies from scripts and physical properties
+
+**From**: the developer's interview of 2026-10-27. Today scripts can move parts only by setting `Position`.
+
+### What to build
+
+**Motion.**
+- `AssemblyLinearVelocity` and `AssemblyAngularVelocity` (read and write).
+- `ApplyImpulse`, `ApplyImpulseAtPosition` and `ApplyAngularImpulse`.
+- `GetMass`, `AssemblyMass` and `AssemblyCenterOfMass`.
+- `Massless`, which adds no mass to its assembly.
+
+**Physical properties.** `CustomPhysicalProperties` with `PhysicalProperties.new(density, friction, elasticity, frictionWeight, elasticityWeight)`. Each `Material` has defaults: Ice is slippery, Rubber is bouncy, Metal is dense. Properties shows them under **Physics**.
+
+**Gravity.** `workspace.Gravity`, with physics' current value as the default. The controllers use it in place of the constant.
+
+Blocks: "push … with force", "set velocity", "set friction".
+
+### Acceptance criteria
+
+- [ ] `ApplyImpulse` on a 1 kg-equivalent part changes its velocity by impulse divided by mass, within a small tolerance.
+- [ ] A box slides further on Ice than on Plastic, and a Rubber ball bounces higher than a Plastic one, with no script.
+- [ ] Halving `workspace.Gravity` makes crates fall slower and the characters jump higher.
+- [ ] A world saved before this phase simulates the same.
+
+---
+
+## Phase 35: Attachments, welds and assemblies
+
+**From**: the developer's interview of 2026-10-27.
+
+### What to build
+
+**Attachment.** An Instance under a part, with `CFrame` (offset), `WorldCFrame`, `Position`, `Orientation` and `Axis`. It's drawn as a small gizmo in the editor, and it can be moved and rotated with the transform tools.
+
+**WeldConstraint** (`Part0`, `Part1`, `Enabled`) holds two parts together as they are now. Welded unanchored parts form one **assembly**: one rigid body with several colliders, so they fall and tumble together. An anchored part anchors its whole assembly. `part:GetConnectedParts(recursive)` and `part:GetRootPart()`.
+
+**Editor.**
+- **Weld** in the ribbon's Model group welds the selection to its largest part.
+- A **Constraints** overlay (View > Overlays) draws welds and attachments.
+- A Model can be welded on import with a checkbox.
+
+### Acceptance criteria
+
+- [ ] A table made of five welded unanchored parts falls and lands as one piece.
+- [ ] Disabling a weld from Lua lets the parts fall apart. Enabling it welds them where they are.
+- [ ] Anchoring one part of a welded assembly holds the whole assembly still.
+- [ ] Attachments placed in the editor keep their offsets when the part moves, and save and reload.
+
+---
+
+## Phase 36: Joints, motors and springs
+
+**From**: the developer's interview of 2026-10-27. These are built on Rapier's impulse joints.
+
+### What to build
+
+**Constraint Instances.** Each joins `Attachment0` to `Attachment1`, and each has `Enabled` and `Visible`. All except RopeConstraint, RodConstraint and SpringConstraint take `LimitsEnabled` where it applies.
+
+| Constraint | What it does | Extra properties |
+|---|---|---|
+| **HingeConstraint** | Turns around one axis | `UpperAngle`, `LowerAngle`, `ActuatorType` (None, Motor or Servo), `AngularVelocity`, `MotorMaxTorque`, `TargetAngle`, `AngularSpeed`, `ServoMaxTorque` |
+| **BallSocketConstraint** | Turns freely around a point | `UpperAngle`, `TwistLowerAngle`, `TwistUpperAngle` |
+| **PrismaticConstraint** | Slides along one axis | Limits, and a motor or servo on position |
+| **CylindricalConstraint** | Slides and turns along one axis | Limits, and a motor or servo on each |
+| **SpringConstraint** | Pulls toward a length | `Stiffness`, `Damping`, `FreeLength`, `MinLength`, `MaxLength`, and a drawn coil |
+| **RopeConstraint** | A maximum length only | `Length`, and a `WinchEnabled` winch with `WinchTarget`, `WinchSpeed` and `WinchForce` |
+| **RodConstraint** | A fixed length | `Length` |
+
+`CurrentAngle`, `CurrentPosition` and `CurrentLength` can be read.
+
+**Editor.** A **Constraint** tool in the ribbon: pick a type, click a surface on one part, then on another. It makes both Attachments and the constraint as one undo step. The overlay draws axes, limits and springs.
+
+### Acceptance criteria
+
+- [ ] A door on a HingeConstraint with limits of 0 to 110° swings when pushed and stops at its limits.
+- [ ] A servo hinge turns to `TargetAngle` set from Lua and holds it under load. A motor hinge spins a wheel at `AngularVelocity`.
+- [ ] A part on a SpringConstraint bounces and settles at `FreeLength`. A rope winch lifts a crate.
+- [ ] Every constraint saves, reloads and simulates the same in the editor Play and the player.
+
+---
+
+## Phase 37: Movers
+
+**From**: the developer's interview of 2026-10-27.
+
+### What to build
+
+Movers act on an `Attachment0`, and some also take an `Attachment1` or a world target:
+- **LinearVelocity**: `VectorVelocity`, `MaxForce`, and `RelativeTo` (World, Attachment0 or Attachment1).
+- **AngularVelocity**: `AngularVelocity`, `MaxTorque` and `RelativeTo`.
+- **VectorForce**: `Force`, `RelativeTo` and `ApplyAtCenterOfMass`.
+- **Torque**: `Torque` and `RelativeTo`.
+- **AlignPosition**: `Mode` (OneAttachment or TwoAttachment), `Position`, `MaxForce`, `MaxVelocity`, `Responsiveness` and `RigidityEnabled`.
+- **AlignOrientation**: `CFrame`, `MaxTorque`, `MaxAngularVelocity`, `Responsiveness` and `RigidityEnabled`.
+
+They use the Phase 36 tool and overlay. They're stepped with physics, in the fixed-step accumulator.
+
+### Acceptance criteria
+
+- [ ] A part with AlignPosition follows a moving target smoothly, and reaches it faster with higher `Responsiveness`.
+- [ ] A VectorForce equal to the part's weight upward makes it hover.
+- [ ] An AlignOrientation keeps a hovering drone level while LinearVelocity flies it forward.
+
+---
+
+## Phase 38: Collision groups and spatial queries
+
+**From**: the developer's interview of 2026-10-27.
+
+### What to build
+
+**Collision groups.** A **Collision Groups** editor (Model ribbon) names groups and shows a matrix of which groups collide. It's saved with the project. Each part has `CollisionGroup`. Lua has `PhysicsService:RegisterCollisionGroup`, `CollisionGroupSetCollidable` and `CollisionGroupsAreCollidable`. Parts also gain `CanQuery` and `CanTouch`.
+
+**Queries.**
+- `RaycastParams.new()` has `FilterDescendantsInstances`, `FilterType` (Include or Exclude), `CollisionGroup`, `RespectCanCollide` and `IgnoreWater`. `workspace:Raycast` takes it.
+- `workspace:Spherecast`, `Blockcast` and `Shapecast`.
+- `OverlapParams` with `GetPartBoundsInBox`, `GetPartBoundsInRadius` and `GetPartsInPart`.
+- `TouchEnded` on parts.
+
+Queries never step or write the world, as now. Blocks: "parts within radius", "parts touching", "raycast from … toward … ignoring …".
+
+### Acceptance criteria
+
+- [ ] Players and NPCs set as non-colliding walk through each other and still collide with walls.
+- [ ] A raycast that excludes the shooter's character hits the wall behind it.
+- [ ] `GetPartsInPart` on a trigger zone lists exactly the parts inside it, and ignores ones with `CanQuery = false`.
+- [ ] `TouchEnded` fires once when a part leaves another.
+
+---
+
+## Phase 39: Seats
+
+**From**: the developer's interview of 2026-10-27.
+
+### What to build
+
+A **Seat** part has `Occupant` (the controller sitting on it), `Disabled`, and `SeatOffset` (an Attachment, or the top centre). A character that touches an empty enabled seat sits.
+- Its controller enters a built-in **Seated** mode. It's welded to the seat, plays the Animator's `Sit` state when there is one, and ignores move input.
+- Jump stands it up, a little in front of the seat.
+- `seat:Sit(controller)` and `controller.Sit = false` work from Lua. `Seated(active, seat)` fires on the controller.
+
+Blocks: "when someone sits on", "make … leave the seat".
+
+### Acceptance criteria
+
+- [ ] Walking into a chair seats the character, and Jump stands it up beside the chair.
+- [ ] A disabled seat ignores touches, and `seat:Sit` from Lua still works on it.
+- [ ] A seat on an unanchored cart carries the sitting character as the cart moves.
+
+---
+
+## Phase 40: Vehicles
+
+**From**: the developer's interview of 2026-10-27. **Decided**: car wheels use Rapier's ray-cast vehicle controller, which stays stable at speed. Cars built from Phase 36 hinges still work.
+
+### What to build
+
+**VehicleSeat** is a Seat. Its properties:
+- `MaxSpeed`, `Torque`, `TurnSpeed` and `SteerAngle`.
+- `Throttle` and `Steer`, read from the Move action while occupied, and settable from Lua.
+- `HandBrake`.
+
+**VehicleWheel** is an Attachment-like Instance under the chassis, with `Radius`, `SuspensionRestLength`, `SuspensionStiffness`, `SuspensionDamping`, `Friction`, and the `Steers`, `Driven` and `Brakes` flags. A chassis with a VehicleSeat and wheels drives as one body. Wheel parts named in `WheelPart` spin and steer visually.
+
+**Camera and setup.** While seated, the camera follows the vehicle (Phase 31 Follow) until the driver leaves. Insert > **Vehicle** makes a ready-to-drive car from parts.
+
+### Acceptance criteria
+
+- [ ] The inserted car drives with WASD and with a gamepad, steers, brakes, and climbs a gentle terrain slope.
+- [ ] Suspension settles the car on uneven ground without jitter at rest.
+- [ ] Getting out with Jump leaves the car where it stopped, and the camera returns to the character.
+- [ ] Throttle and Steer set from Lua drive an empty car.
+
+---
+
+## Phase 41: Ragdolls
+
+**From**: the developer's interview of 2026-10-27.
+
+### What to build
+
+A **Ragdoll** Instance under a skinned Model.
+- **Build** (a button in its Properties) makes a capsule per main bone and a BallSocketConstraint per joint, with limits from a humanoid preset matched by bone name (Mixamo names and `.L`/`.R` names are recognised).
+- Each body's size and each joint's limits can be adjusted, and the ragdoll overlay shows them.
+- `Ragdoll.Enabled = true` (or Humanoid death, Phase 46) hands the skeleton to physics. Each body drives its bone, through a pose override in `anim::Animators`.
+- `Enabled = false` blends back to the Animator's pose over `BlendTime`, after getting up with an optional `GetUpState`.
+- `ragdoll:ApplyImpulse(bone, impulse)` knocks one body.
+
+### Acceptance criteria
+
+- [ ] A Mixamo character's generated ragdoll collapses believably when enabled, with no limb bending past its limit.
+- [ ] Disabling the ragdoll blends back to the idle animation over `BlendTime`, without a snap.
+- [ ] An impulse on the head knocks the ragdoll backward. Its pose is the same in the editor Play and the player.
+
+---
+
+## Phase 42: Destruction
+
+**From**: the developer's interview of 2026-10-27. **The `mesh_edit` crate starts here**, with plane cutting and hole closing. CSG (Phase 50) and the Model Studio (Milestone 13) extend it.
+
+### What to build
+
+**Breakable joints.** Every constraint and weld gains `BreakForce` and `BreakTorque` (0 = never). Past either one, it disables itself and fires `Broken`.
+
+**Fracture.** A **Fracture** Instance on a part or a MeshPart.
+- **Pieces**, **Seed**, and **Pattern** (Uniform or Impact) are its settings. **Generate** cuts the mesh into convex Voronoi pieces in `mesh_edit` and saves them as `<name>.fracture.glb` next to the model. The inside faces use an `InteriorMaterial`.
+- On an impact above `Threshold`, or `fracture:Shatter(point, force)`, the part is replaced by its pieces, which fly from the impact point.
+- `DebrisLifetime` fades the pieces out and destroys them. `Shattered` fires.
+
+### Acceptance criteria
+
+- [ ] A glass pane with 30 pieces shatters when a fast crate hits it, and leaves no gaps or overlaps in the pieces at rest.
+- [ ] A shelf welded with `BreakForce` holds light crates and breaks under heavy ones, firing `Broken` once.
+- [ ] The same Seed makes the same pieces, and a fractured part's pieces are gone after `DebrisLifetime`.
+
+---
+
+# Milestone 11: Gameplay kit
+
+## Phase 43: Health and damage
+
+**From**: the developer's interview of 2026-10-27. **Decided**: these are small composable Instances, and the Humanoid (Phase 46) bundles them.
+
+### What to build
+
+**Health** works under any Model:
+- Properties: `MaxHealth`, `Health`, `RegenRate`, `RegenDelay` and `Invulnerable`.
+- Methods: `TakeDamage(amount, source?)` and `Heal(amount)`.
+- Events: `HealthChanged(new, old)`, `Damaged(amount, source)` and `Died`.
+- At 0 it fires `Died` once, and the Model is left for scripts or the Humanoid to handle.
+
+**Landing.** The controllers fire `Landed(fallSpeed)`. A `FallDamage` setting on Health (off by default, with a speed threshold and a scale) uses it.
+
+**Damage zones.** A **DamageZone** part damages every Health inside it at `DamagePerSecond`, using `GetPartsInPart`.
+
+**Ready-made UI.** Insert > UI > **Health bar** makes a CSS-styled BillboardGui and a HUD bar bound to the nearest Health with an ObjectValue.
+
+**Saving.** Save slots capture Health.
+
+### Acceptance criteria
+
+- [ ] Standing in a DamageZone lowers Health at its rate, and leaving starts regeneration after `RegenDelay`.
+- [ ] `Died` fires once at 0, even when several hits land in one frame.
+- [ ] A fall above the threshold damages the character in proportion to its speed.
+- [ ] The inserted health bars follow Health with no script.
+
+---
+
+## Phase 44: ProximityPrompt and ClickDetector
+
+**From**: the developer's interview of 2026-10-27.
+
+### What to build
+
+**ProximityPrompt**, under a part or an Attachment:
+- Properties: `ActionText`, `ObjectText`, `Action` (from the input map, Interact by default), `HoldDuration`, `MaxActivationDistance`, `RequiresLineOfSight`, `Enabled` and `Exclusivity`.
+- Events: `Triggered`, `TriggerEnded`, `PromptShown`, `PromptHidden`, `PromptButtonHoldBegan` and `PromptButtonHoldEnded`.
+- The nearest visible prompt shows a default UI with a hold ring. It's styleable in CSS as `ProximityPrompt` and its parts, and it shows the bound key or gamepad button.
+
+**ClickDetector**, under a part:
+- Properties: `MaxActivationDistance` and `CursorIcon`.
+- Events: `MouseClick`, `RightMouseClick`, `MouseHoverEnter` and `MouseHoverLeave`.
+
+Blocks: "when prompt … is triggered", "when … is clicked".
+
+### Acceptance criteria
+
+- [ ] Walking up to a door shows "Open · Door", and holding E for `HoldDuration` fires `Triggered` once. With a gamepad, it shows and uses the bound button.
+- [ ] A prompt behind a wall with `RequiresLineOfSight` doesn't show.
+- [ ] Clicking a part with a ClickDetector fires `MouseClick`, the cursor changes on hover, and a click outside `MaxActivationDistance` does nothing.
+
+---
+
+## Phase 45: Tools and inventory
+
+**From**: the developer's interview of 2026-10-27.
+
+### What to build
+
+**Tool**, a Model-like container:
+- Properties: `Handle` (a part), `Grip` (an Attachment), `RequiresHandle`, `CanBeDropped`, `ToolTip`, `TextureId` (an icon) and an optional `Item` (a data-table row, Phase 33).
+- Events: `Equipped`, `Unequipped`, `Activated` (the Primary action) and `Deactivated`.
+
+**Inventory**, under a character:
+- `Capacity`, `GetItems`, `Add(tool)`, `Remove(tool)`, `Equip(tool)`, `UnequipAll` and `Equipped`.
+- Touching a dropped Tool picks it up, when there's room.
+- Equipping welds the Handle's Grip to the character's right hand (found by bone name), and sets the Animator's `Equipped` parameter when one exists.
+- Drop, from a Drop action (Backspace by default) or `tool:Drop()`, places it in front of the character.
+
+**Hotbar.** A default hotbar UI selects tools with number keys, the mouse wheel and the gamepad bumpers. It's CSS-styleable, and it can be turned off for a custom one.
+
+**Saving.** Save slots store the inventory by Tool name and item row.
+
+### Acceptance criteria
+
+- [ ] Picking up a sword shows it in the hotbar. Pressing 1 equips it in the right hand, and clicking fires `Activated`.
+- [ ] A full inventory refuses a pickup and leaves the Tool on the ground.
+- [ ] Dropping and picking up again gives back the same Tool with its Attributes.
+- [ ] Saving and loading a slot restores the inventory and the equipped tool.
+
+---
+
+## Phase 46: Humanoid
+
+**From**: the developer's interview of 2026-10-27. **Decided**: a wrapper over the pieces. It stores no state of its own.
+
+### What to build
+
+A **Humanoid** under a character Model finds or makes its controller, Health, Inventory and Animator.
+- Properties: `WalkSpeed`, `RunSpeed`, `JumpHeight`, `Health`, `MaxHealth`, `Sit`, `PlatformStand`, `AutoRotate`, `DisplayName` and `HealthDisplayDistance`. Each reads and writes the matching piece.
+- Methods:
+  - `MoveTo(position, part?)` paths on the navmesh (Phase 13) and fires `MoveToFinished(reached)`.
+  - `Move(direction, relativeToCamera?)`.
+  - `Jump`, `TakeDamage`, `EquipTool` and `UnequipTools`.
+  - `GetState` and `ChangeState`.
+- `StateChanged(old, new)` covers Running, Jumping, Freefall, Landed, Seated, Swimming (reserved), Ragdoll and Dead.
+- `Died`.
+- `BreakJointsOnDeath` and `RagdollOnDeath` (Phase 41).
+
+Insert > **Character** makes a rigged character with a Humanoid, a third-person controller, Health, Inventory and an Animator with Idle, Walk, Run, Jump, Fall and Sit states.
+
+### Acceptance criteria
+
+- [ ] Setting `humanoid.WalkSpeed` changes the controller's `WalkSpeed`, and the reverse is true too. There's one value.
+- [ ] An NPC with a Humanoid and no controller input walks to a point with `MoveTo` and fires `MoveToFinished(true)`.
+- [ ] Killing a character with `RagdollOnDeath` ragdolls it and fires `Died` and `StateChanged(…, Dead)` once.
+- [ ] A Model with only the pieces and no Humanoid works the same.
+
+---
+
+## Phase 47: Players, spawns, teams and the leaderboard
+
+**From**: the developer's interview of 2026-10-27. This is built for one local player now, and ready for many in Phase 64.
+
+### What to build
+
+**Spawning.**
+- `StarterPlayer.StarterCharacter` is a prefab, or the Insert > Character default.
+- `Players.CharacterAutoLoads` and `Players.RespawnTime`.
+- `Player.Character`, `Player:LoadCharacter()`, and the `Player.CharacterAdded` and `CharacterRemoving` events.
+- A character with a Humanoid that dies respawns after `RespawnTime`.
+
+**SpawnLocation** is a part. It has `Enabled`, `Neutral`, `TeamColor` and `Duration`, which is a spawn shield that blocks damage. Characters spawn on an enabled SpawnLocation for their team, chosen at random. If there's none, they spawn at the origin, with a warning.
+
+**Teams.** A `Teams` service holds `Team` Instances, each with `TeamColor` and `AutoAssignable`. A Player has `Team` and `Neutral`. `Team:GetPlayers()`.
+
+**Leaderboard.** A Folder named `leaderstats` under a Player, holding Value objects (Phase 29), shows a default leaderboard. It's CSS-styleable, toggles with Tab, and can be turned off.
+
+### Acceptance criteria
+
+- [ ] With no script, Play spawns the StarterCharacter on a SpawnLocation, and it respawns there after dying.
+- [ ] A player on the Red team spawns only on red SpawnLocations.
+- [ ] An IntValue named Coins in `leaderstats` shows on the leaderboard and updates when a script changes it.
+
+---
+
+# Milestone 12: Levels and editor power
+
+## Phase 48: Levels
+
+**From**: the developer's interview of 2026-10-27. **Decided**: `world.json` stays the start level, and other levels live in `levels/`.
+
+### What to build
+
+**Editor.**
+- A **Levels** panel lists the start level and `levels/*.world.json`. It has New, Duplicate, Rename, Delete (undoable through `History::record_asset`) and Set as start.
+- Opening a level asks about unsaved changes first.
+- Play starts from the open level, with a **Play from start level** option.
+
+**Runtime.** `LevelService`:
+- `LoadLevel(name, spawnName?)` replaces the Workspace with the level's. The services outside the Workspace persist (see the decisions). The loading screen shows while it loads, and `LevelLoaded(name)` fires after.
+- `AddLevel(name)` loads a level additively into a Model under the Workspace, and `RemoveLevel(name)` takes it out.
+- `CurrentLevel`.
+- Save slots record the current level and the added ones, and restore them.
+
+**Building.** Build Game packs every level. Asset Check checks every level, not only the open one.
+
+Blocks: "load level", "add level", "remove level".
+
+### Acceptance criteria
+
+- [ ] Touching a portal in level 1 loads level 2 at the named spawn. A Folder in ReplicatedStorage and the player data survive the load.
+- [ ] `AddLevel("Dungeon")` streams a dungeon in beside the current level, and `RemoveLevel` takes it away, in the editor Play and in a built game.
+- [ ] Saving in level 2 and loading the slot from the main menu returns to level 2.
+- [ ] A project with only `world.json` opens and plays unchanged.
+
+---
+
+## Phase 49: Nested prefabs and variants
+
+**From**: the developer's interview of 2026-10-27.
+
+### What to build
+
+**Nesting.** A prefab can contain prefab instances, and they stay linked. Editing the inner prefab updates every outer prefab and every placed copy.
+
+**Overrides.** A placed prefab's changed properties, added children and removed children are **overrides**. Properties shows them bold with a ↺ revert. The prefab's right-click menu has:
+- **Apply overrides to prefab**, for all or one.
+- **Revert all**.
+- **Unpack**, which unlinks it.
+
+**Variants.** **New variant** makes a prefab whose base is another prefab, with its own overrides (a Red Enemy from an Enemy). Base changes flow through except where the variant overrode them.
+
+**Tools.** Asset Check reports a missing base or nested prefab. Packages bring bases and nested prefabs. Each operation is one undo step.
+
+### Acceptance criteria
+
+- [ ] Changing a Wheel prefab's colour updates the wheels inside every Car prefab copy in the world.
+- [ ] A Red Enemy variant keeps its red colour when the base Enemy's colour changes, but takes the base's new MaxHealth.
+- [ ] Apply overrides writes a placed copy's change into the prefab, and other copies pick it up.
+- [ ] Prefabs saved before this phase load unchanged.
+
+---
+
+## Phase 50: Solid modeling (CSG)
+
+**From**: the developer's interview of 2026-10-27.
+
+### What to build
+
+**Union**, **Negate**, **Intersect** and **Separate** are in the ribbon's Model group, as in Roblox.
+- A **UnionOperation** keeps its source parts, hidden, for Separate, plus its result mesh, built by `mesh_edit` booleans.
+- Face colours and materials come from the source parts. `UsePartColor` paints the whole result one colour.
+- `CollisionFidelity` is Box, Hull or PreciseConvexDecomposition, which uses parry's convex decomposition through the pinned `rapier3d`.
+- A negated part shows pink and translucent.
+
+**Lua.** `part:UnionAsync(others)`, `part:SubtractAsync(others)` and `part:IntersectAsync(others)` run in a background job and yield.
+
+**Rules.** Each editor operation is one undo step. A failed boolean (a non-manifold input) reports why and leaves the parts unchanged.
+
+### Acceptance criteria
+
+- [ ] A wall with a negated block unioned into it has a doorway that a character walks through, with Precise fidelity.
+- [ ] Separate gives back the original parts, unchanged.
+- [ ] Subtracting a sphere from a block at runtime with `SubtractAsync` makes a crater, and the result collides.
+- [ ] Unions save, reload and pack into a built game.
+
+---
+
+## Phase 51: Cutscene Sequencer
+
+**From**: the developer's interview of 2026-10-27. This is like Unreal's Sequencer and Unity's Timeline.
+
+### What to build
+
+**The asset.** A `*.sequence.json` file, edited in a **Sequencer** dock tab. The tab reuses the Animation tab's timeline, dope sheet and Phase 8 curves. Its tracks are:
+- **Camera cuts**, between Camera objects (Phase 31) or a camera track's own CFrame keys, with FOV.
+- **Property tracks** on any bound Instance.
+- **Animation tracks**, which play clips on a bound Animator with blend in and out.
+- **Audio tracks**, which play Sounds.
+- **Event tracks**, which fire a named event to Lua.
+- **UI tracks**: fades, letterbox and subtitles from the string table (Phase 20).
+- **Level tracks**, which add and remove a level (Phase 48).
+
+**Bindings.** Bound objects are found by path, or by a tag (Phase 29), so prefabs can be bound.
+
+**Playback.** A **Sequence** Instance references the asset. It has:
+- `Play`, `Pause`, `Stop` and `TimePosition`.
+- `Completed` and `EventReached(name)`.
+- `AutoPlay`, `Skippable` (with the Menu action) and `LockPlayerInput`.
+
+Live preview scrubs in the editor without entering Play. Blocks: "play cutscene", "when cutscene finishes".
+
+### Acceptance criteria
+
+- [ ] A 20-second cutscene with three camera cuts, a character walking with a clip, a door opening by property, music and two subtitles plays the same in the preview, in Play and in a built game.
+- [ ] Skipping jumps to the end state: properties at their final values and `Completed` fired once.
+- [ ] Input is locked while it plays when `LockPlayerInput` is on, and control returns after.
+
+---
+
+## Phase 52: Audio buses and effects
+
+**From**: the developer's interview of 2026-10-27. These use the pinned `kira`'s tracks and effects.
+
+### What to build
+
+**SoundGroup.** `Volume`, and nesting: a SoundGroup under a SoundGroup is a sub-bus. `Sound.SoundGroup` routes a sound into one.
+
+**Effects** are children of a Sound or a SoundGroup, applied in `Priority` order:
+
+| Effect | Settings |
+|---|---|
+| `ReverbSoundEffect` | `DecayTime`, `Density`, `DryLevel`, `WetLevel` |
+| `EqualizerSoundEffect` | `LowGain`, `MidGain`, `HighGain`, `MidRange` |
+| `CompressorSoundEffect` | `Threshold`, `Ratio`, `Attack`, `Release`, `GainMakeup` |
+| `EchoSoundEffect` | `Delay`, `Feedback`, `DryLevel`, `WetLevel` |
+| `DistortionSoundEffect` | `Level` |
+| `PitchShiftSoundEffect` | `Octave` |
+| `LowPassSoundEffect` / `HighPassSoundEffect` | `Cutoff`, `Resonance` |
+
+**ReverbZone** is a part volume. While the listener is inside it, its reverb preset blends onto the spatial sounds over `FadeTime`.
+
+**Mixer.** A **Mixer** panel in the editor shows the group tree with live level meters, mute and solo during Play.
+
+**Player settings.** `UserGameSettings` gains `MasterVolume`, and SoundGroups marked `UserAdjustable` show as volume sliders in a default audio settings UI.
+
+### Acceptance criteria
+
+- [ ] Music and SFX groups under a Master group can be set separately from Lua and from the settings UI, and the values persist in a save slot.
+- [ ] Walking into a cave ReverbZone fades reverb in on footsteps and fades it out on leaving.
+- [ ] A low-pass on the Music group dulls the music while a pause menu is open, set from a script.
+
+---
+
+## Phase 53: Game test runner
+
+**From**: the developer's interview of 2026-10-27. **The `testing` crate and `axcenity-test` binary start here.**
+
+### What to build
+
+**Test files.** `tests/**/*.spec.lua` files use `describe`, `it`, `beforeEach`, `afterEach` and `expect(x)`, which has:
+- `toBe`, `toEqual` (deep), `toBeNear(v, tolerance)`, `toBeTruthy`, `toThrow(message?)`, `toHaveAttribute` and `never`.
+
+**The test world.** Each `it` runs in a fresh copy of a level (`Test.level("Arena")`, or the start level by default), with both sides running and no window or audio. The helpers are:
+- `Test.step(seconds)` runs frames with physics, controllers, agents and tweens.
+- `Test.press(action or key, seconds?)`, `Test.click(guiObject)` and `Test.type(textBox, text)`.
+- `Test.find(path)` and `Test.wait(condition, timeout)`.
+
+**Running them.**
+- In the editor, a **Tests** panel has run all, run file, and run one, plus a pass and fail tree, failures with clickable `file:line`, and re-run on save.
+- `axcenity-test <project>` runs them headless and exits non-zero on failure, with JUnit XML via `--junit` for CI.
+- Exported games never include tests.
+
+### Acceptance criteria
+
+- [ ] A spec that holds W for one second and expects the character to have moved more than 5 studs passes. Changing `WalkSpeed` to 0 makes it fail with the line and the values.
+- [ ] `axcenity-test examples/hello-character` runs the same tests as the editor panel, with the same results, on Windows, macOS and Linux.
+- [ ] Tests don't change the project's files, and a test that errors doesn't stop the others.
+
+---
+
+## Phase 54: Lua editor plugins
+
+**From**: the developer's interview of 2026-10-27. **Decided**: these are Lua, editor-only, and use `EditorApp::change`.
+
+### What to build
+
+**Where they come from.** Plugins are Lua folders in `<project>/plugins/` and in the user's editor data folder. Each has a `plugin.json` with a name, a version and permissions. A **Plugins** panel enables and disables them and shows errors. A plugin reloads when its files change.
+
+**The plugin API** runs in its own sandboxed interpreter in edit mode:
+- `plugin:CreateToolbar(name)` and `toolbar:CreateButton(id, tooltip, icon)` with `Click`, which adds a ribbon group.
+- `plugin:CreateDockWidget(id, info)` returns a dock tab whose contents are UI elements (Frame, TextButton, the Phase 9h widgets and others), laid out and styled by the `ui` crate.
+- `Selection:Get`, `Selection:Set` and `SelectionChanged`.
+- `ChangeHistoryService:SetWaypoint(name)`. Every plugin edit between waypoints is one undo step.
+- `plugin:GetSetting` and `SetSetting`, kept per plugin in the editor's data.
+- Read and write access to the edit world with the normal Instance API. File access only through `plugin:ReadProjectFile` and `WriteProjectFile` inside the project, when `plugin.json` asks for the `files` permission.
+- `plugin:GetMouse()` in the Scene View, for picking and placement tools.
+
+**Tooling.** The luau-lsp definitions include a plugin API file.
+
+### Acceptance criteria
+
+- [ ] An example "Align to grid" plugin adds a ribbon button that snaps the selected parts to 1 stud, as one undo step.
+- [ ] A plugin dock tab with a Slider and a TextButton works and restyles through CSS.
+- [ ] A plugin that errors shows the error with `file:line` in Output and in the Plugins panel, and the editor keeps running.
+- [ ] Built games and the player contain no plugin code. A plugin can't read a file outside the project.
+
+---
+
+# Milestone 13: Model Studio
+
+All of this milestone's math lives in `mesh_edit`. The editor draws and edits through it. **Decided**: `.glb` is what games load, and a `<model>.meshedit.json` sidecar holds editing state that a `.glb` can't.
+
+## Phase 55: Model Studio and editable meshes
+
+**From**: the developer's interview of 2026-10-27.
+
+### What to build
+
+**The tab.** A **Model Studio** dock tab.
+- **Open** a `.glb`, `.gltf` or `.fbx` from the Assets panel, or with **Edit in Model Studio** on a MeshPart. An FBX is saved as a `.glb` beside it.
+- **New** from primitives: cube, plane, UV sphere, ico sphere, cylinder, cone and torus, each with segments and sizes.
+- An object list for multi-object files.
+
+**The mesh.** `mesh_edit` holds a half-edge mesh with n-gons, UVs, normals and material slots, and converts to and from `assets::Model`.
+
+**Modes.** Object mode and Edit mode (Tab).
+- Vertex, edge and face selection (1, 2, 3), with click, Shift-click, box select, loop select (Alt-click), select linked (L), and grow and shrink (Ctrl + and Ctrl −).
+- Grab, rotate and scale (G, R, S), with axis locks (X, Y, Z), typed values, snapping (Phase 8b's controls), and local and world axes.
+- Gizmos are the editor's.
+- An overlay draws vertices, edges, face dots and normals.
+
+**Saving.** Save writes the `.glb` with `gltf-json`, keeping materials and texture links. MeshParts using it live-reload (Phase 23). The Studio has its own undo history, and Save records the file change in the editor's history (`record_blobs`).
+
+### Acceptance criteria
+
+- [ ] A cube made in the Studio, with one face scaled up, is saved and used by a MeshPart in the Scene View within a second.
+- [ ] Opening a model made in Blender and saving it unchanged gives a `.glb` that Blender opens with the same geometry, UVs and materials.
+- [ ] Loop select picks a whole edge loop on a cylinder, and every edit undoes and redoes.
+
+---
+
+## Phase 56: Modeling operations
+
+**From**: the developer's interview of 2026-10-27.
+
+### What to build
+
+These are the Blender tools people use most, with their usual keys:
+- **Extrude** (E): region, individual faces, and along normals.
+- **Inset** (I).
+- **Bevel** (Ctrl+B for edges, Ctrl+Shift+B for vertices), with segments and profile.
+- **Loop cut and slide** (Ctrl+R), and **Edge slide** (G G).
+- **Knife** (K).
+- **Bridge edge loops**.
+- **Merge** (M): at centre, at cursor, or by distance.
+- **Dissolve** and **Delete**: vertices, edges, faces or only faces.
+- **Fill** (F) and **Grid fill**.
+- **Subdivide**.
+- **Spin**.
+- **Flip** and **Recalculate normals** (Shift+N).
+- **Shade smooth**, **Shade flat**, and **Auto smooth** by angle.
+- **Proportional editing** (O) with falloff curves.
+- A 3D cursor and pivot options.
+
+Each operation shows its settings in a panel after it runs, and changing them re-runs it, as in Blender's "Adjust last operation". Export triangulates.
+
+### Acceptance criteria
+
+- [ ] A simple chair (a seat, four legs, a backrest) can be modeled from one cube with extrude, inset, loop cut and bevel, and used in the game.
+- [ ] Changing the bevel's segments in the adjust panel re-runs the bevel without another undo step.
+- [ ] Every operation keeps the mesh manifold when its input is, and a test checks each one on a cube and a cylinder.
+
+---
+
+## Phase 57: Modifiers
+
+**From**: the developer's interview of 2026-10-27.
+
+### What to build
+
+A non-destructive stack per object, saved in the sidecar:
+- **Mirror**, on an axis, with clipping and merge.
+- **Subdivision Surface** (Catmull-Clark), with viewport and export levels.
+- **Array**: count, offset, and merge ends.
+- **Solidify**.
+- **Bevel**, by angle.
+- **Decimate**, through the pinned `meshopt`.
+- **Triangulate**.
+
+Each can be shown, hidden, reordered and applied. The `.glb` holds the evaluated result.
+
+**Generate LODs** makes `_LOD1` and `_LOD2` objects with Decimate, named the way `assets::model::lod` reads them.
+
+### Acceptance criteria
+
+- [ ] Half a character head with a Mirror and a Subdivision modifier saves as a whole, smooth head. Reopening it shows the half mesh and the stack, still editable.
+- [ ] Applying a modifier bakes it into the mesh as one undo step.
+- [ ] Generated LODs are picked up by the renderer's level-of-detail system without any other step.
+
+---
+
+## Phase 58: UV unwrapping
+
+**From**: the developer's interview of 2026-10-27. **Decided**: in-house LSCM first.
+
+### What to build
+
+**Seams.** Mark and Clear seam. Seams draw red.
+
+**Unwrap (U).**
+- Unwrap: angle-based (LSCM, with a sparse solver in `mesh_edit`).
+- Smart UV project, by angle.
+- Cube, cylinder and sphere projection.
+- Project from view.
+
+**UV editor.** A UV pane beside the 3D view:
+- Vertex, edge, face and island selection.
+- Grab, rotate and scale.
+- Pin, stitch, and align.
+- **Pack islands**, with margin and rotation.
+- **Average island scale**.
+- Stretch display, by angle and by area.
+- A checker texture preview in the 3D view.
+- A second UV channel, for lightmaps later.
+
+### Acceptance criteria
+
+- [ ] A cube with seams marked as a cross unwraps to six square islands, and packs without overlap.
+- [ ] Smart UV project on the Phase 56 chair gives no overlapping islands, and the checker shows even squares (stretch below a stated threshold).
+- [ ] UVs save in the `.glb` and draw the same textures in the game as in the Studio.
+
+---
+
+## Phase 59: Texture painting
+
+**From**: the developer's interview of 2026-10-27.
+
+### What to build
+
+**Texture paint mode** paints onto a material's maps, at a chosen resolution: base colour, roughness, metalness, height (turned into a normal map on save), emissive and ambient occlusion.
+
+**Brushes:**
+- Draw, soften, smear, clone, fill and erase.
+- Radius, strength, falloff and spacing.
+- Image stencils and texture brushes.
+- X, Y and Z symmetry.
+- Pen pressure, where the platform reports it.
+
+You can paint in the 3D view (projected to UV through a cached triangle-ID buffer) and in the UV pane.
+
+**Layers** per map, with blend modes, opacity and masks. They're kept in the sidecar folder as PNGs.
+
+**Saving.** Save flattens each map to a PNG named by role (the `role_from_name` convention in `assets::model::maps`), so the existing PBR materials pick them up without setup.
+
+### Acceptance criteria
+
+- [ ] Painting rust onto the roughness and colour maps of the chair shows in the Studio and in the Scene View after save, with the material set up automatically.
+- [ ] Hiding a layer and saving removes its paint from the saved maps. The layer is still there after reopening.
+- [ ] Painting across a UV seam leaves no visible line.
+
+---
+
+## Phase 60: Sculpting
+
+**From**: the developer's interview of 2026-10-27.
+
+### What to build
+
+**Sculpt mode.**
+- **Brushes**: Draw, Clay Strips, Smooth, Grab, Inflate, Crease, Flatten, Pinch, Snake Hook and Mask.
+- **Settings**: radius, strength, falloff curve, stroke spacing, pen pressure, and X, Y and Z symmetry.
+- **Masks**: invert, clear, and hide masked.
+- **Detail**: **Voxel remesh** (by voxel size) and **Subdivide** for more detail.
+- **Performance**: a BVH in `mesh_edit` keeps brush hits fast, and only touched chunks re-upload. A 500k-triangle mesh stays above 30 frames per second while sculpting on the reference machine (graphics Phase 1).
+
+### Acceptance criteria
+
+- [ ] A face sculpted from a voxel-remeshed sphere with Draw, Clay Strips, Smooth and Crease, with X symmetry, matches on both sides.
+- [ ] Masked areas don't move under any brush.
+- [ ] The 500k-triangle frame-rate target holds in a benchmark test.
+
+---
+
+## Phase 61: Retopology and baking
+
+**From**: the developer's interview of 2026-10-27.
+
+### What to build
+
+**Retopology.** Set a high-poly object as the **reference**. Snap to surface makes new vertices and edits stick to it. A **Poly build** tool places quads on its surface. A Decimate to target count gives a quick result.
+
+**Bake** from the high-poly object to the low-poly one's UVs, by rays from a cage (an extrusion distance):
+- a normal map (in the engine's convention, with the DirectX flip option the importer already reads)
+- ambient occlusion
+- curvature
+- base colour from the high-poly paint
+
+Results are written as role-named PNGs.
+
+### Acceptance criteria
+
+- [ ] The sculpted face from Phase 60, retopologised to under 5k triangles and baked, looks close to the sculpt in the game. A test compares normals from the bake with the high-poly surface at sample points.
+- [ ] Baking without overlapping UVs gives no seams. With overlap, it warns which islands overlap.
+
+---
+
+## Phase 62: Basic rigging
+
+**From**: the developer's interview of 2026-10-27.
+
+### What to build
+
+**Armature mode.**
+- Add and extrude bones (E), parent, rename, roll, and mirror (with `.L`/`.R` naming).
+- A **Humanoid** template rig in Mixamo bone names, so Phase 41 ragdolls and Mixamo clips work.
+
+**Skinning.**
+- **Automatic weights** (bone heat) and **Weights by distance**.
+- **Weight paint mode**: add, subtract, smooth and blur brushes, normalize, a limit of 4 influences, and mirror weights.
+
+**Testing and saving.**
+- **Pose test** moves bones to check deformation. It isn't saved.
+- Save writes a skinned `.glb`. The Animation window keys it (Phase 7), and IK works on it (Phase 8c).
+
+### Acceptance criteria
+
+- [ ] A modeled humanoid with the template rig and automatic weights bends cleanly at the elbows and knees in Pose test.
+- [ ] The saved model plays a Mixamo walk clip through an Animator without retargeting.
+- [ ] Weight painting a shoulder and saving changes the deformation in the game the same way as in the Studio.
+
+---
+
+# Milestone 14: Networking
+
+**Decided**: Roblox-style automatic replication, an authoritative server, a client-owned character, direct address or LAN, and a headless dedicated server. Single-player is the same code over a loopback.
+
+## Phase 63: Transport, hosting and joining
+
+**From**: the developer's interview of 2026-10-27. **The `net` crate and `axcenity-server` binary start here.**
+
+### What to build
+
+**Transport.** One pinned UDP transport dependency, chosen and licence-checked at the start of the phase.
+- Reliable-ordered and unreliable channels.
+- A handshake with the protocol and game version.
+- Timeouts, and a disconnect reason.
+- A loopback transport with the same interface.
+
+**Hosting.**
+- `axcenity-player --host [port]` runs a listen server.
+- `axcenity-server <game> [--port]` runs headless, with no window, audio or GPU.
+- `--join address:port` joins one.
+- LAN discovery by broadcast.
+
+**Lua.** `NetworkService` has `Host(port)`, `Join(address)`, `FindLanGames()` (it yields and returns a list), `Disconnect()` and `ConnectionFailed(reason)`, so menus can host and join. Matching blocks.
+
+**Settings.** `MaxPlayers`, and an optional join password.
+
+### Acceptance criteria
+
+- [ ] Two players on one machine connect over UDP through `--host` and `--join`, and both appear in each other's `Players` (worlds aren't shared yet).
+- [ ] A game on the LAN shows in `FindLanGames` on another computer.
+- [ ] A version mismatch is refused with a clear reason on both sides.
+- [ ] `axcenity-server` runs on Linux with no display.
+
+---
+
+## Phase 64: Separate worlds and remote calls over the network
+
+**From**: the developer's interview of 2026-10-27. **Changed**: today both sides share one `World`. Each side now has its own.
+
+### What to build
+
+**Two worlds.** The server owns the authoritative World and runs Scripts. Each client owns a replica World and runs LocalScripts. Instances carry a network ID, so references sent across stay the same object on both sides.
+
+**Remote calls.** RemoteEvents and RemoteFunctions send their `RemoteValue`s over the transport. `FireClient`, `FireAllClients` and `InvokeClient` (now available) work with many players.
+
+**Players.** `PlayerAdded` and `PlayerRemoving` fire as people join and leave. `Player.UserId` is a per-install identity, and `DisplayName` is set at join.
+
+**Single-player and Play.** Single-player and editor Play run a server and one client over loopback. Editor Play gains **Clients: 1–8**, each in its own viewport tab, with a server view.
+
+### Acceptance criteria
+
+- [ ] Every existing `hello-*` example plays the same in single-player as before this phase.
+- [ ] A RemoteEvent fired by client 2 reaches the server with client 2's Player, and `FireAllClients` reaches all three clients in editor Play.
+- [ ] A client can't see or reach anything in ServerStorage or ServerScriptService.
+
+---
+
+## Phase 65: Replication
+
+**From**: the developer's interview of 2026-10-27.
+
+### What to build
+
+**On join.** The client gets a snapshot of the replicated services: Workspace, ReplicatedStorage, Lighting, Players, Teams and StarterPlayer, plus a level change (Phase 48).
+
+**After that.** The server sends deltas built from `core`'s change records: new and destroyed Instances, parent changes, and property, Attribute and tag changes. Changes are coalesced per frame.
+- Positions are quantised.
+- A per-client bandwidth budget sends the nearest and most-changed first.
+
+A client's changes to replicated Instances stay local and are never sent. Only RemoteEvents talk to the server.
+
+**Physics.** The server simulates unanchored parts, and clients interpolate them with a short buffer. Animators replicate their parameters and playing tracks. Sounds started on the server play for everyone in range. Tweens and NavigationAgents run on the server.
+
+### Acceptance criteria
+
+- [ ] A part created, moved and destroyed by a server Script appears, moves smoothly and disappears on every client.
+- [ ] A client that sets a part's colour locally sees it, and the server and other clients don't.
+- [ ] A player who joins mid-game sees the same world as the others, including levels added with `AddLevel`.
+- [ ] Bandwidth for 200 moving crates stays under a set budget per client, measured by a test.
+
+---
+
+## Phase 66: Network ownership and character movement
+
+**From**: the developer's interview of 2026-10-27.
+
+### What to build
+
+**Characters.** Each player's character controller runs on their own client, from local input, with no input delay. The client sends its position, velocity and movement mode. The server checks each update against the controller's limits: speed, jump height, and teleport distance. If one fails, the server corrects the client. Other clients interpolate the character.
+
+**Unanchored parts.**
+- They're owned by the server by default.
+- `part:SetNetworkOwner(player or nil)`, `GetNetworkOwner()` and `SetNetworkOwnershipAuto()` give ownership to the nearest player, so a pushed crate or a driven car (Phase 40) responds instantly.
+- Assemblies have one owner.
+
+Tools (Phase 45) fire `Activated` on the client, and replicate through the server.
+
+### Acceptance criteria
+
+- [ ] With 150 ms of emulated latency, a player's own character moves with no delay, and others see it move smoothly.
+- [ ] A modified client that moves at twice `WalkSpeed` is pulled back by the server.
+- [ ] A car driven by one player steers instantly for them, and the others see it drive.
+
+---
+
+## Phase 67: Multiplayer saves, chat and network tools
+
+**From**: the developer's interview of 2026-10-27.
+
+### What to build
+
+**Saves.** In multiplayer, SaveService runs on the server. Player data and slots are kept per `UserId` in the server's data folder. LocalScripts keep settings on their own device.
+
+**Chat.** `TextChatService` gives a default chat window. It's CSS-styleable, toggles with `/`, and has a `Message` event and an `OnIncomingMessage` hook to filter or change messages. System messages are possible. It can be turned off.
+
+**Kicking.** `Player:Kick(reason)`.
+
+**Testing tools.**
+- **Network emulation** in editor Play settings: latency, jitter and packet loss.
+- The Profiler gains a **Network** section: ping, bytes in and out per second, and replicated Instance counts per client.
+
+### Acceptance criteria
+
+- [ ] Two players' coins are saved separately on the server and come back when each rejoins.
+- [ ] A chat message from one client reaches the others, and an `OnIncomingMessage` filter can change or drop it.
+- [ ] With 10% packet loss emulated, play stays usable and the Network section shows the loss.

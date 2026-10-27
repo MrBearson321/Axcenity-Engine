@@ -27,6 +27,6 @@ The Graph view: a block script shown as Unreal Blueprint-style nodes and wires. 
 
 ## Code
 
-- Data: `axcenity_blocks::Graph` and `LooseValue` (`crates/blocks/src/lib.rs`).
+- Data: `axcenity_blocks::Graph` and `LooseValue` (`crates/blocks-runtime/src/lib.rs`).
 - Editor: `crates/editor/src/block_editor/graph.rs` (drawing and the pointer), `graph/edit.rs` (what wiring does to the blocks), `graph/nodes.rs` (titles, pin names, colours), `graph/layout.rs`, `graph/menu.rs`. A new block kind needs a title and pin names in `nodes.rs` (`every_block_and_reporter_has_a_node_with_every_pin_named` checks them).
 - Switching: `EditorApp::switch_script_view` (`crates/editor/src/app/files/script_files.rs`).

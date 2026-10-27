@@ -1,10 +1,10 @@
 //! UI Event Graphs: `ui/<ScreenGui>.uigraph.json`, each compiled to a
 //! LocalScript called `EventGraph` under its ScreenGui (see
-//! `axcenity_blocks::ui_graph`). Like block scripts, the Lua is made at
+//! `axcenity_blocks_runtime::ui_graph`). Like block scripts, the Lua is made at
 //! load and never saved, so the graph file is the only source.
 
-use axcenity_blocks::node_graph::{NodeGraph, ObjectRoot};
-use axcenity_blocks::ui_graph::{
+use axcenity_blocks_runtime::node_graph::{NodeGraph, ObjectRoot};
+use axcenity_blocks_runtime::ui_graph::{
     GraphError, GraphObject, UI_GRAPH_SCRIPT_NAME, UI_GRAPH_SUFFIX, UI_GRAPHS_FOLDER,
     compile_ui_graph, ui_graph_gui_name,
 };

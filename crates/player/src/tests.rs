@@ -916,7 +916,8 @@ fn hello_modules_example_builds_stairs_through_two_modules() {
 /// without a GPU.
 #[test]
 fn every_example_renders() {
-    use axcenity_render::{TextureRenderer, wgpu};
+    use axcenity_render::wgpu;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
     let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
         return;
@@ -935,71 +936,96 @@ fn every_example_renders() {
         .collect();
     names.sort();
     assert!(names.len() >= 10, "{names:?}");
+    // One after another this was the slowest test, so a few threads each
+    // take the next example, with its own world and renderer on the shared
+    // device. `std::thread::scope` lets them borrow these locals, and fails
+    // the test if any of them panics.
+    let next = AtomicUsize::new(0);
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get().min(4));
+    std::thread::scope(|scope| {
+        for _ in 0..threads {
+            scope.spawn(|| {
+                while let Some(name) = names.get(next.fetch_add(1, Ordering::Relaxed)) {
+                    check_example_renders(name, &examples, &device, &queue, snapshots.as_deref());
+                }
+            });
+        }
+    });
+}
+
+/// Renders the example `name` for [`every_example_renders`] and checks the
+/// frame, saving it in `snapshots` if given.
+fn check_example_renders(
+    name: &str,
+    examples: &Path,
+    device: &axcenity_render::wgpu::Device,
+    queue: &axcenity_render::wgpu::Queue,
+    snapshots: Option<&Path>,
+) {
+    use axcenity_render::TextureRenderer;
     let (width, height) = (480, 270);
-    for name in names {
-        let folder = examples.join(&name);
-        let project = axcenity_project::load(&folder).unwrap();
-        let stylesheets: Vec<_> = project
-            .stylesheets
-            .iter()
-            .map(|file| axcenity_ui::parse_stylesheet(&file.path, &file.source).0)
-            .collect();
-        let (mut world, mut scripts) = start_example(&name);
-        let (mut physics, mut clock) = (Physics::new(), 0);
-        run_until(&mut world, &mut scripts, &mut physics, &mut clock, 1.0);
-        let mut camera = FlyCamera::looking_at(START_CAMERA_POSITION, Vec3::ZERO);
-        if let Some(view) = scripts.take_camera_move() {
-            camera.set_view(view.position, view.orientation);
-        }
-        let assets = Assets::new(&folder);
-        // Models load the first time they're drawn, so draw twice.
-        let mut renderer = TextureRenderer::new(&device, &queue, width, height);
-        for _ in 0..2 {
-            let draw_list = axcenity_scene::build_draw_list_with_ui(
-                &world,
-                &assets,
-                camera.to_render_camera(),
-                (width, height),
-                &stylesheets,
-            );
-            renderer.render(&draw_list).unwrap();
-        }
-        let errors = assets.take_errors();
-        assert!(errors.is_empty(), "{name}: {errors:?}");
-        let pixels = renderer.read_pixels();
-        if let Some(folder) = &snapshots {
-            let file = fs::File::create(folder.join(format!("example-{name}.png"))).unwrap();
-            let mut encoder = png::Encoder::new(file, width, height);
-            encoder.set_color(png::ColorType::Rgba);
-            encoder.set_depth(png::BitDepth::Eight);
-            encoder
-                .write_header()
-                .unwrap()
-                .write_image_data(&pixels)
-                .unwrap();
-        }
-        // An example can have a reference screenshot, which it must still
-        // match: of its top-left corner (where hello-css's HUD is), or of
-        // the whole frame (hello-graphics, the graphics reference scene).
-        if let Some(average) = difference_from(&folder.join("reference.png"), &pixels, width) {
-            assert!(
-                average < REFERENCE_TOLERANCE,
-                "{name} differs from reference.png by {average:.1} per channel on average"
-            );
-        }
-        let colors: BTreeSet<[u8; 3]> = pixels
-            .chunks(4)
-            .map(|pixel| [pixel[0] / 16, pixel[1] / 16, pixel[2] / 16])
-            .collect();
-        assert!(colors.len() > 8, "{name} renders almost one color");
-        let center = ((height / 2 * width + width / 2) * 4) as usize;
+    let folder = examples.join(name);
+    let project = axcenity_project::load(&folder).unwrap();
+    let stylesheets: Vec<_> = project
+        .stylesheets
+        .iter()
+        .map(|file| axcenity_ui::parse_stylesheet(&file.path, &file.source).0)
+        .collect();
+    let (mut world, mut scripts) = start_example(name);
+    let (mut physics, mut clock) = (Physics::new(), 0);
+    run_until(&mut world, &mut scripts, &mut physics, &mut clock, 1.0);
+    let mut camera = FlyCamera::looking_at(START_CAMERA_POSITION, Vec3::ZERO);
+    if let Some(view) = scripts.take_camera_move() {
+        camera.set_view(view.position, view.orientation);
+    }
+    let assets = Assets::new(&folder);
+    // Models load the first time they're drawn, so draw twice.
+    let mut renderer = TextureRenderer::new(device, queue, width, height);
+    for _ in 0..2 {
+        let draw_list = axcenity_scene::build_draw_list_with_ui(
+            &world,
+            &assets,
+            camera.to_render_camera(),
+            (width, height),
+            &stylesheets,
+        );
+        renderer.render(&draw_list).unwrap();
+    }
+    let errors = assets.take_errors();
+    assert!(errors.is_empty(), "{name}: {errors:?}");
+    let pixels = renderer.read_pixels();
+    if let Some(folder) = snapshots {
+        let file = fs::File::create(folder.join(format!("example-{name}.png"))).unwrap();
+        let mut encoder = png::Encoder::new(file, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder
+            .write_header()
+            .unwrap()
+            .write_image_data(&pixels)
+            .unwrap();
+    }
+    // An example can have a reference screenshot, which it must still
+    // match: of its top-left corner (where hello-css's HUD is), or of
+    // the whole frame (hello-graphics, the graphics reference scene).
+    if let Some(average) = difference_from(&folder.join("reference.png"), &pixels, width) {
         assert!(
-            pixels[center..center + 3]
-                .iter()
-                .any(|&channel| channel < 250),
-            "{name} is white in the middle"
+            average < REFERENCE_TOLERANCE,
+            "{name} differs from reference.png by {average:.1} per channel on average"
         );
     }
+    let colors: BTreeSet<[u8; 3]> = pixels
+        .chunks(4)
+        .map(|pixel| [pixel[0] / 16, pixel[1] / 16, pixel[2] / 16])
+        .collect();
+    assert!(colors.len() > 8, "{name} renders almost one color");
+    let center = ((height / 2 * width + width / 2) * 4) as usize;
+    assert!(
+        pixels[center..center + 3]
+            .iter()
+            .any(|&channel| channel < 250),
+        "{name} is white in the middle"
+    );
 }
 
 /// How far, on average per channel, an example's frame may be from its

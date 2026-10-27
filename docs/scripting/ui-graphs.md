@@ -9,7 +9,7 @@ A ScreenGui's **Event Graph**: Unreal Blueprint-style nodes and wires that say w
 - Built games carry `ui/` as it is (`pack_game`), and the player's loader compiles it the same way.
 - In the editor the LocalScript can't be edited, renamed, deleted or duplicated by itself: opening it (or an Output link to it) shows the graph, and the Explorer's rename, delete and duplicate say why and show the graph. Renaming the ScreenGui renames the graph's file at the next save.
 
-## Nodes (`crates/blocks/src/ui_graph.rs`, `UI_NODES`)
+## Nodes (`crates/blocks-runtime/src/ui_graph.rs`, `UI_NODES`)
 
 Objects are picked from menus: elements by their path under the ScreenGui (empty is the ScreenGui itself), Sounds by their path under the Workspace, RemoteEvents under ReplicatedStorage. The Lua names them the way blocks do (`gui.Pages.Home.Play`, `gui["Name Box"]`).
 
@@ -52,7 +52,7 @@ Objects are picked from menus: elements by their path under the ScreenGui (empty
 
 ## Code
 
-- Data and edits (generic): `crates/blocks/src/node_graph.rs` (`NodeGraph`, `NodeSpec`, `NodeLibrary`, `connect`, `copy`, `paste`).
-- UI nodes and the compiler: `crates/blocks/src/ui_graph.rs`; tests in `ui_graph_tests.rs`.
+- Data and edits (generic): `crates/blocks-runtime/src/node_graph.rs` (`NodeGraph`, `NodeSpec`, `NodeLibrary`, `connect`, `copy`, `paste`).
+- UI nodes and the compiler: `crates/blocks-runtime/src/ui_graph.rs`; tests in `ui_graph_tests.rs`.
 - Loading and objects: `crates/project/src/ui_graphs.rs` (`graph_objects`, `compile_graph_for`).
 - Editor: `crates/editor/src/node_graph.rs` (with `draw.rs`, `menu.rs`, `variables.rs`), `ui_designer/event_graph.rs`, `app/ui_graphs.rs` (documents, saving, undo); Play reads graphs in `play::read_scripts`.
