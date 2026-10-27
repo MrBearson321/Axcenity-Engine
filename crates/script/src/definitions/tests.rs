@@ -350,6 +350,15 @@ fn described_fields_and_methods_exist() {
         ("GuiService", "game:GetService('GuiService')"),
         ("Debris", "game:GetService('Debris')"),
         ("HttpService", "game:GetService('HttpService')"),
+        ("DataService", "game:GetService('DataService')"),
+        (
+            "DataTable",
+            "game:GetService('DataService'):GetTable('sample')",
+        ),
+        (
+            "DataRow",
+            "game:GetService('DataService'):GetTable('sample'):Get('row')",
+        ),
         ("UserGameSettings", "game:GetService('UserGameSettings')"),
         ("ReplicatedFirst", "game:GetService('ReplicatedFirst')"),
         (
@@ -406,6 +415,13 @@ fn described_fields_and_methods_exist() {
     let start = "local part = Instance.new('Part')\npart.Parent = workspace\n";
     let mut world = World::new();
     let mut runtime = ScriptRuntime::new();
+    // A project with a data table, for the DataTable and DataRow samples.
+    let folder = std::env::temp_dir().join(format!("axcenity-definitions-{}", std::process::id()));
+    let mut table = axcenity_assets::DataTable::default();
+    table.add_row("row", None);
+    axcenity_assets::write_data_table(&folder.join("assets/data/sample.data.json"), &table)
+        .unwrap();
+    runtime.set_assets(axcenity_assets::Assets::new(&folder));
     let script = world.create(ClassName::Script).unwrap();
     let local_script = world.create(ClassName::LocalScript).unwrap();
     let source = format!("{start}{}", server.join("\n"));

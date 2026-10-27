@@ -1,0 +1,28 @@
+{
+  "columns": [
+    {
+      "name": "Name",
+      "type": "string"
+    },
+    {
+      "name": "Count",
+      "type": "integer"
+    }
+  ],
+  "rows": [
+    {
+      "key": "arrows",
+      "cells": {
+        "Count": 20,
+        "Name": "arrows"
+      }
+    },
+    {
+      "key": "bolts",
+      "cells": {
+        "Count": 12,
+        "Name": "bolts"
+      }
+    }
+  ]
+}

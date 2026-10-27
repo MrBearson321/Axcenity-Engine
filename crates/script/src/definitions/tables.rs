@@ -742,6 +742,51 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
         ],
     },
     ValueType {
+        class: "DataService",
+        doc: "The project's data tables (`assets/data/*.data.json`, made in the Data Table tab), from `game:GetService(\"DataService\")`. Scripts read them; they can't change them.",
+        fields: &[],
+        operators: &[],
+        methods: &[Function {
+            name: "GetTable",
+            doc: "The table named `name`: `\"weapons\"` is `assets/data/weapons.data.json`. A table that isn't there, or can't be read, is an error saying why.",
+            params: &[("name", "string")],
+            returns: "DataTable",
+        }],
+    },
+    ValueType {
+        class: "DataTable",
+        doc: "A data table, read-only. Each call reads the version in use now, so an edit made during Play is what the next call sees.",
+        fields: &[],
+        operators: &[],
+        methods: &[
+            Function {
+                name: "Get",
+                doc: "The row with this key, or nil if there's none.",
+                params: &[("key", "string")],
+                returns: "DataRow?",
+            },
+            Function {
+                name: "GetAll",
+                doc: "Every row, by its key: `for key, row in weapons:GetAll() do`. A new table each call.",
+                params: &[],
+                returns: "{ [string]: DataRow }",
+            },
+            Function {
+                name: "Keys",
+                doc: "Every row's key, in the table's order. A new list each call.",
+                params: &[],
+                returns: "{ string }",
+            },
+        ],
+    },
+    ValueType {
+        class: "DataRow",
+        doc: "One row of a data table, read by column name: `row.Damage`. Numbers, strings, booleans, Vector3s and Color3s are what they say; an enum is its option's name, an asset its path, and a reference the row it names (nil for none). `for column, value in row do` goes through its columns. Changing it is an error: tables are read-only in scripts.",
+        fields: &[],
+        operators: &[],
+        methods: &[],
+    },
+    ValueType {
         class: "ReplicatedFirst",
         doc: "What loads first on the player's side, from `game:GetService(\"ReplicatedFirst\")`.",
         fields: &[],
@@ -1574,7 +1619,7 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
         ClassName::DataModel,
         Function {
             name: "GetService",
-            doc: "The service with this class name, such as `\"Players\"`, `\"ReplicatedFirst\"`, `\"RunService\"`, `\"SaveService\"`, `\"LocalizationService\"`, `\"GuiService\"`, `\"Debris\"`, `\"HttpService\"`, `\"TweenService\"`, `\"CollectionService\"`, `\"UserGameSettings\"`, `\"UserInputService\"` or `\"ContextActionService\"`.",
+            doc: "The service with this class name, such as `\"Players\"`, `\"ReplicatedFirst\"`, `\"RunService\"`, `\"SaveService\"`, `\"LocalizationService\"`, `\"GuiService\"`, `\"Debris\"`, `\"HttpService\"`, `\"DataService\"`, `\"TweenService\"`, `\"CollectionService\"`, `\"UserGameSettings\"`, `\"UserInputService\"` or `\"ContextActionService\"`.",
             params: &[("className", "string")],
             returns: "Instance",
         },
@@ -1887,6 +1932,14 @@ pub(super) const CLASS_FIELDS: &[(ClassName, Field)] = &[
             name: "HttpService",
             ty: "HttpService",
             doc: "JSON and GUIDs (same as `game:GetService(\"HttpService\")`).",
+        },
+    ),
+    (
+        ClassName::DataModel,
+        Field {
+            name: "DataService",
+            ty: "DataService",
+            doc: "The project's data tables (same as `game:GetService(\"DataService\")`).",
         },
     ),
     (

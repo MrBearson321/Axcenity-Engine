@@ -12,8 +12,9 @@ use axcenity_anim::{
     ANIMATIONS_FOLDER, CLIP_EXTENSION, ClipFile, Motion, STATE_MACHINE_EXTENSION, StateMachineFile,
 };
 use axcenity_assets::{
-    AUDIO_EXTENSIONS, Assets, MODELS_FOLDER, ModelError, ModelFormat, Pick, TEXTURE_EXTENSIONS,
-    load_models, load_takes, safe_path,
+    AUDIO_EXTENSIONS, AssetType, Assets, Cell, ColumnType, DATA_FOLDER, DataTable, MODELS_FOLDER,
+    ModelError, ModelFormat, Pick, TEXTURE_EXTENSIONS, data_table_name, data_table_path,
+    is_data_table, is_material_file, load_models, load_takes, safe_path,
 };
 use axcenity_core::{ClassName, InstanceId, Value, World};
 
@@ -117,6 +118,12 @@ pub enum Site {
     /// A texture a model file names, by the name the model gives it. The
     /// model looks for it next to itself and in `textures` there.
     ModelTexture { model: String, texture: String },
+    /// A cell of a data table: the row's key and the column's name.
+    TableCell {
+        file: String,
+        row: String,
+        column: String,
+    },
     /// A file that can't be loaded on its own.
     File { file: String },
 }
@@ -142,6 +149,8 @@ pub enum AssetKind {
     Audio,
     Clip,
     StateMachine,
+    Material,
+    Prefab,
     Folder,
 }
 
@@ -153,7 +162,21 @@ impl AssetKind {
             Self::Audio => "a WAV, OGG, MP3 or FLAC file",
             Self::Clip => "a .anim.json clip",
             Self::StateMachine => "a .statemachine.json file",
+            Self::Material => "a .material.json file",
+            Self::Prefab => "a .prefab.json file",
             Self::Folder => "a folder inside the project",
+        }
+    }
+
+    /// The kind an asset column of a data table names.
+    pub fn of_column(asset: AssetType) -> AssetKind {
+        match asset {
+            AssetType::Model => Self::Model,
+            AssetType::Texture => Self::Texture,
+            AssetType::Audio => Self::Audio,
+            AssetType::Material => Self::Material,
+            AssetType::Prefab => Self::Prefab,
+            AssetType::Clip => Self::Clip,
         }
     }
 
@@ -164,6 +187,8 @@ impl AssetKind {
             Self::Audio => has_extension(path, &AUDIO_EXTENSIONS),
             Self::Clip => path.to_ascii_lowercase().ends_with(CLIP_EXTENSION),
             Self::StateMachine => path.to_ascii_lowercase().ends_with(STATE_MACHINE_EXTENSION),
+            Self::Material => is_material_file(path),
+            Self::Prefab => path.to_ascii_lowercase().ends_with(PREFAB_SUFFIX),
             Self::Folder => true,
         }
     }
@@ -183,6 +208,7 @@ pub fn check_assets(folder: &Path, world: &World) -> Report {
     scan.prefabs();
     scan.clips();
     scan.state_machines();
+    scan.data_tables();
     scan.unreferenced_models();
     scan.findings.sort();
     scan.findings.dedup();
@@ -352,6 +378,101 @@ impl Scan {
         }
     }
 
+    /// Each data table: one that can't be read, and its cells that name an
+    /// asset that isn't there or a row another table hasn't got.
+    fn data_tables(&mut self) {
+        let mut tables: Vec<(String, Result<DataTable, String>)> = Vec::new();
+        for path in files_under(&self.folder, DATA_FOLDER) {
+            if !is_data_table(&path) || data_table_name(&path).is_none() {
+                continue;
+            }
+            let disk = self
+                .folder
+                .join(safe_path(&path).unwrap_or_else(|| PathBuf::from(&path)));
+            let table = fs::read_to_string(&disk)
+                .map_err(|err| format!("could not read the data table: {err}"))
+                .and_then(|text| {
+                    DataTable::from_json(&text)
+                        .map_err(|err| format!("could not load the data table: {}", causes(&err)))
+                });
+            tables.push((path, table));
+        }
+        let keys_of = |name: &str| -> Option<Vec<&str>> {
+            let path = data_table_path(name);
+            let (_, table) = tables.iter().find(|(found, _)| *found == path)?;
+            let table = table.as_ref().ok()?;
+            Some(table.rows.iter().map(|row| row.key.as_str()).collect())
+        };
+        let mut found = Vec::new();
+        for (path, table) in &tables {
+            let table = match table {
+                Ok(table) => table,
+                Err(message) => {
+                    found.push(Err((path.clone(), message.clone())));
+                    continue;
+                }
+            };
+            for row in &table.rows {
+                for column in &table.columns {
+                    let Cell::Text(value) = row.cell(column) else {
+                        continue;
+                    };
+                    if value.is_empty() {
+                        continue;
+                    }
+                    let site = Site::TableCell {
+                        file: path.clone(),
+                        row: row.key.clone(),
+                        column: column.name.clone(),
+                    };
+                    let owner = format!("{path} ({}.{})", row.key, column.name);
+                    match &column.kind {
+                        ColumnType::Asset { asset } => found.push(Ok((
+                            owner,
+                            column.name.clone(),
+                            value,
+                            Some(AssetKind::of_column(*asset)),
+                            site,
+                        ))),
+                        ColumnType::Reference { table: other } => {
+                            let there = keys_of(other).is_some_and(|keys| keys.contains(&&*value));
+                            if !there {
+                                found.push(Ok((owner, other.clone(), value, None, site)));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        for item in found {
+            match item {
+                Err((path, message)) => self.push_file(FindingKind::ImportFailure, path, message),
+                Ok((owner, column, value, Some(kind), site)) => {
+                    self.reference(&owner, &column, &value, kind, site);
+                }
+                Ok((owner, other, key, None, site)) => {
+                    let message = if keys_of(&other).is_some() {
+                        format!("names the row `{key}` of `{other}`, which isn't there")
+                    } else {
+                        format!(
+                            "names a row of the data table `{other}`, which isn't there or \
+                             can't be read"
+                        )
+                    };
+                    self.push(
+                        FindingKind::BrokenDependency,
+                        owner,
+                        key,
+                        message,
+                        site,
+                        None,
+                    );
+                }
+            }
+        }
+    }
+
     fn unreferenced_models(&mut self) {
         for path in files_under(&self.folder, MODELS_FOLDER) {
             if ModelFormat::of(Path::new(&path)).is_none() {
@@ -477,7 +598,7 @@ impl Scan {
                     );
                 }
             }
-            AssetKind::Audio | AssetKind::Folder => {}
+            AssetKind::Audio | AssetKind::Material | AssetKind::Prefab | AssetKind::Folder => {}
         }
     }
 

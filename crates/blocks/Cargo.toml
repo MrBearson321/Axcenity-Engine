@@ -13,6 +13,7 @@ axcenity-workspace-hack.workspace = true
 
 [dev-dependencies]
 # Runs translated block scripts, to check they work like typed ones.
+axcenity-assets.workspace = true
 axcenity-core.workspace = true
 axcenity-script.workspace = true
 serde_json.workspace = true

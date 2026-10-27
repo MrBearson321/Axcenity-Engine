@@ -99,10 +99,14 @@ pub fn translate(script: &BlockScript) -> Result<Translation, TranslateError> {
             _ => {}
         }
         for expression in block.kind.expressions() {
-            visit_expressions(expression, &mut |expression| {
-                if let Expression::KeyDown { .. } = expression {
+            visit_expressions(expression, &mut |expression| match expression {
+                Expression::KeyDown { .. } => {
                     services.insert("UserInputService");
                 }
+                Expression::DataRow { .. } => {
+                    services.insert("DataService");
+                }
+                _ => {}
             });
         }
     });
@@ -799,7 +803,9 @@ impl Writer {
             | Expression::Raycast { .. }
             | Expression::Vector3 { .. }
             | Expression::Color3 { .. }
-            | Expression::Lerp { .. } => text,
+            | Expression::Lerp { .. }
+            | Expression::DataRow { .. }
+            | Expression::DataValue { .. } => text,
             _ => format!("({text})"),
         })
     }
@@ -899,6 +905,18 @@ impl Writer {
             } => format!("{}:GetNumber({})", target(animator)?, quote(parameter)),
             Expression::IsA { value, class } => {
                 format!("{}:IsA({})", self.receiver(value)?, quote(class))
+            }
+            Expression::DataRow { table, key } => format!(
+                "DataService:GetTable({}):Get({})",
+                quote(table),
+                self.expression(key)?
+            ),
+            // A column whose name isn't a Lua name (`Fire Rate`) is indexed.
+            Expression::DataValue { column, row } if valid_identifier(column) => {
+                format!("{}.{column}", self.receiver(row)?)
+            }
+            Expression::DataValue { column, row } => {
+                format!("{}[{}]", self.receiver(row)?, quote(column))
             }
             // Bracketed already where it needs to be (see `from_lua`).
             Expression::Code { code } => code.clone(),

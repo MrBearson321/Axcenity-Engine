@@ -22,14 +22,38 @@ impl EditorApp {
     }
 
     /// Export Package… for the object `id` in the Explorer: it goes in the
-    /// package as a prefab, with every asset it uses.
+    /// package as a prefab, with every asset it uses and the data tables
+    /// its scripts read.
     pub(in crate::app) fn export_object_package_with_dialog(&mut self, id: InstanceId) {
         let Some((name, prefab)) = self.object_prefab(id) else {
             return;
         };
         if let Some(destination) = self.ask_package_destination(&name) {
-            self.export_package(&destination, &name, Vec::new(), vec![prefab]);
+            let scripts = self.scripts_in(id);
+            self.export_package_with_scripts(
+                &destination,
+                &name,
+                Vec::new(),
+                vec![prefab],
+                &scripts,
+            );
         }
+    }
+
+    /// The scripts inside `id` (the object itself too): each one's file and
+    /// Lua (a block script's translation).
+    pub(in crate::app) fn scripts_in(&self, id: InstanceId) -> Vec<(String, String)> {
+        let Some(project) = &self.project else {
+            return Vec::new();
+        };
+        project
+            .scripts
+            .iter()
+            .filter(|script| {
+                script.instance == id || self.world.is_descendant_of(script.instance, id)
+            })
+            .map(|script| (script.path.clone(), script.source.clone()))
+            .collect()
     }
 
     /// `id` as a prefab file for a package, at the path it would have in
@@ -76,20 +100,40 @@ impl EditorApp {
         roots: Vec<String>,
         extra: Vec<(String, Vec<u8>)>,
     ) -> bool {
+        self.export_package_with_scripts(destination, name, roots, extra, &[])
+    }
+
+    /// [`export_package`](Self::export_package), with the data tables
+    /// `scripts` read.
+    pub(in crate::app) fn export_package_with_scripts(
+        &mut self,
+        destination: &Path,
+        name: &str,
+        roots: Vec<String>,
+        extra: Vec<(String, Vec<u8>)>,
+        scripts: &[(String, String)],
+    ) -> bool {
         let Some(folder) = self.project.as_ref().map(|p| p.folder.clone()) else {
             return false;
         };
-        let contents = match project::package_contents(&folder, &roots, &extra) {
-            Ok(contents) => contents,
-            Err(err) => {
-                self.output
-                    .error(format!("Could not export the package: {}", chain(&err)));
-                return false;
-            }
-        };
+        let contents =
+            match project::package_contents_with_scripts(&folder, &roots, &extra, scripts) {
+                Ok(contents) => contents,
+                Err(err) => {
+                    self.output
+                        .error(format!("Could not export the package: {}", chain(&err)));
+                    return false;
+                }
+            };
         for missing in &contents.missing {
             self.output.error(format!(
                 "The package needs `{missing}`, which isn't in the project, so it was left out."
+            ));
+        }
+        for place in &contents.unknown_tables {
+            self.output.warning(format!(
+                "`{place}` reads a data table whose name is worked out as the game runs, so \
+                 the package may not have it: check, and export that table too if it's needed."
             ));
         }
         let all_roots: Vec<String> = roots
@@ -214,6 +258,14 @@ impl EditorApp {
         }
         self.asset_browser.refresh();
         self.animation.refresh();
+        // A table a fix (or its undo) rewrote: scripts and its tab read it again.
+        for blob in blobs.iter().take(written) {
+            if axcenity_assets::is_data_table(&blob.path) {
+                self.assets.forget(&blob.path);
+                self.data_tables.file_changed(&folder, &blob.path);
+            }
+        }
+        self.hand_over_tables();
         written
     }
 }

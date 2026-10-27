@@ -1013,6 +1013,9 @@ pub fn type_name(lua: &Lua, value: &mlua::Value) -> String {
                 "CollectionService",
             ),
             (data.is::<crate::save::LuaSaveService>(), "SaveService"),
+            (data.is::<crate::data::LuaDataService>(), "DataService"),
+            (data.is::<crate::data::LuaDataTable>(), "DataTable"),
+            (data.is::<crate::data::LuaDataRow>(), "DataRow"),
             (data.is::<crate::tween::LuaTween>(), "Tween"),
             (data.is::<crate::tween::LuaTweenInfo>(), "TweenInfo"),
         ];

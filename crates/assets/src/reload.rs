@@ -1,7 +1,7 @@
 //! Reading a changed file again while it's in use (live asset reload).
 //!
 //! [`Assets::reload`] swaps in the new version of a model, texture,
-//! material or font file. The swapped-in model or texture is a new load
+//! material, data table or font file. The swapped-in model or texture is a new load
 //! with a new key, so the renderer uploads it again and physics rebuilds
 //! the part's hull. A file that now fails to load keeps the last good
 //! version, and the failure is reported once, through
@@ -167,6 +167,15 @@ impl Assets {
             }
         }
 
+        let mut table = None;
+        if shared.tables.contains_key(file) {
+            used = true;
+            match read_table(&folder, file) {
+                Ok(read) => table = Some(read),
+                Err(message) => problems.push(message),
+            }
+        }
+
         if !used {
             return Reload::Unused;
         }
@@ -201,6 +210,9 @@ impl Assets {
         }
         for (material, resolved) in materials {
             shared.materials.insert(material, Some(resolved));
+        }
+        if let Some(table) = table {
+            shared.tables.insert(file.to_owned(), Ok(Arc::new(table)));
         }
         Reload::Reloaded
     }
@@ -363,6 +375,44 @@ mod tests {
         assert_eq!(assets.reload("assets/fonts/Title.ttf"), Reload::Unused);
         assets.fonts();
         assert_eq!(assets.reload("assets/fonts/Title.ttf"), Reload::Reloaded);
+        let _ = fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn a_changed_data_table_is_swapped_in_and_a_broken_one_is_kept() {
+        let folder = project("table");
+        let path = "assets/data/weapons.data.json";
+        let write = |damage: f64| {
+            let mut table = DataTable::default();
+            table.add_column("Damage", ColumnType::Number).unwrap();
+            let sword = table.add_row("sword", None);
+            table
+                .set_cell(&sword, "Damage", Cell::Number(damage))
+                .unwrap();
+            write_data_table(&folder.join(path), &table).unwrap();
+        };
+        write(10.0);
+        let assets = Assets::new(&folder);
+        let damage = |assets: &Assets| {
+            let table = assets.data_table("weapons").unwrap();
+            table.row("sword").unwrap().cells["Damage"].clone()
+        };
+        assert_eq!(damage(&assets), Cell::Number(10.0));
+        write(12.0);
+        assert_eq!(assets.reload(path), Reload::Reloaded);
+        assert_eq!(damage(&assets), Cell::Number(12.0));
+
+        fs::write(folder.join(path), "{").unwrap();
+        assert_eq!(assets.reload(path), Reload::Failed);
+        assert_eq!(damage(&assets), Cell::Number(12.0));
+        assert_eq!(assets.take_errors().len(), 1);
+
+        // A missing table says which file it looked for.
+        let missing = assets.data_table("shields").unwrap_err();
+        assert!(
+            missing.contains("assets/data/shields.data.json"),
+            "{missing}"
+        );
         let _ = fs::remove_dir_all(&folder);
     }
 

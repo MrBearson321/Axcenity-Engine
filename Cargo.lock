@@ -580,6 +580,7 @@ dependencies = [
 name = "axcenity-blocks"
 version = "0.1.0"
 dependencies = [
+ "axcenity-assets",
  "axcenity-blocks-runtime",
  "axcenity-core",
  "axcenity-script",

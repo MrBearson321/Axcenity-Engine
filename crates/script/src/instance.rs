@@ -14,6 +14,7 @@ use crate::camera::LuaCamera;
 use crate::cframe::LuaCFrame;
 use crate::client::{LocalPlayer, LuaReplicatedFirst};
 use crate::collection::LuaCollectionService;
+use crate::data::LuaDataService;
 use crate::debris::LuaDebris;
 use crate::events::{Event, LuaSignal, Owner};
 use crate::gui_service::LuaGuiService;
@@ -351,6 +352,7 @@ fn class_member(lua: &Lua, class: ClassName, key: &str) -> mlua::Result<Option<m
         (ClassName::DataModel, "GuiService") => LuaGuiService.into_lua(lua)?,
         (ClassName::DataModel, "Debris") => LuaDebris.into_lua(lua)?,
         (ClassName::DataModel, "HttpService") => LuaHttpService.into_lua(lua)?,
+        (ClassName::DataModel, "DataService") => LuaDataService.into_lua(lua)?,
         (ClassName::DataModel, "ReplicatedFirst") => LuaReplicatedFirst.into_lua(lua)?,
         (ClassName::DataModel, "UserGameSettings") => LuaUserGameSettings.into_lua(lua)?,
         (ClassName::Workspace, "CurrentCamera") => LuaCamera.into_lua(lua)?,
@@ -947,8 +949,8 @@ fn set_playing(lua: &Lua, sound: InstanceId, playing: bool) -> mlua::Result<()> 
 /// `game:GetService(name)`: a service by its class name, such as
 /// `"Players"`, or `"UserInputService"`, `"ContextActionService"` or
 /// `"UserGameSettings"` (LocalScripts only), `"RunService"`, `"TweenService"`, `"CollectionService"`, `"SaveService"`,
-/// `"LocalizationService"`, `"GuiService"`, `"Debris"`, `"HttpService"` or
-/// `"ReplicatedFirst"`, which aren't Instances.
+/// `"LocalizationService"`, `"GuiService"`, `"Debris"`, `"HttpService"`,
+/// `"DataService"` or `"ReplicatedFirst"`, which aren't Instances.
 pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
     lua.create_function(|lua, (_game, name): (mlua::Value, String)| {
         match name.as_str() {
@@ -972,6 +974,7 @@ pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
             "GuiService" => return LuaGuiService.into_lua(lua),
             "Debris" => return LuaDebris.into_lua(lua),
             "HttpService" => return LuaHttpService.into_lua(lua),
+            "DataService" => return LuaDataService.into_lua(lua),
             "ReplicatedFirst" => return LuaReplicatedFirst.into_lua(lua),
             _ => {}
         }
@@ -995,6 +998,7 @@ pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
                 names.extend([
                     "CollectionService",
                     "ContextActionService",
+                    "DataService",
                     "Debris",
                     "GuiService",
                     "HttpService",

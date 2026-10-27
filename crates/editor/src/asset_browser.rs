@@ -80,6 +80,8 @@ pub enum AssetKind {
     Controller,
     /// A navigation agent's behavior tree (`*.behaviortree.json`).
     BehaviorTree,
+    /// A data table scripts read (`assets/data/*.data.json`).
+    DataTable,
 }
 
 impl AssetKind {
@@ -96,6 +98,7 @@ impl AssetKind {
             AssetKind::Animation => theme::AnimKind::Clip.icon(),
             AssetKind::Controller => theme::AnimKind::StateMachine.icon(),
             AssetKind::BehaviorTree => icons::BRAIN,
+            AssetKind::DataTable => icons::TABLE,
         }
     }
 
@@ -113,6 +116,7 @@ impl AssetKind {
             AssetKind::Animation => theme::AnimKind::Clip.color(visuals),
             AssetKind::Controller => theme::AnimKind::StateMachine.color(visuals),
             AssetKind::BehaviorTree => theme::class_color(ClassName::NavigationAgent, visuals),
+            AssetKind::DataTable => theme::class_color(ClassName::Script, visuals),
         }
     }
 
@@ -131,6 +135,7 @@ impl AssetKind {
             AssetKind::Animation => "Clip",
             AssetKind::Controller => "State machine",
             AssetKind::BehaviorTree => "Behavior tree",
+            AssetKind::DataTable => "Data table",
         }
     }
 
@@ -165,6 +170,10 @@ impl AssetKind {
             AssetKind::BehaviorTree => {
                 "Drag onto an agent's body to have it run this tree in Play, or double-click to \
                  open it in the Behavior Tree tab."
+            }
+            AssetKind::DataTable => {
+                "Double-click to open it in the Data Table tab. Scripts read it with \
+                 DataService:GetTable."
             }
         }
     }

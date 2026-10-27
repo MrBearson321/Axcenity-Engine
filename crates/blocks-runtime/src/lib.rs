@@ -1057,6 +1057,17 @@ pub enum Expression {
         value: Box<Expression>,
         class: String,
     },
+    /// A row of a data table, by its key:
+    /// `DataService:GetTable("weapons"):Get(key)`. Nil when there's none.
+    DataRow {
+        table: String,
+        key: Box<Expression>,
+    },
+    /// A row's value in one column: `row.Damage`.
+    DataValue {
+        column: String,
+        row: Box<Expression>,
+    },
     /// Lua that has no block, kept word for word from a script switched
     /// from Code to Blocks. Pointed, so it fits any slot.
     Code {
@@ -1113,7 +1124,9 @@ impl Expression {
             Expression::Raycast { origin, direction } => vec![origin, direction],
             Expression::Function { value, .. }
             | Expression::Not { value }
-            | Expression::IsA { value, .. } => vec![value],
+            | Expression::IsA { value, .. }
+            | Expression::DataRow { key: value, .. }
+            | Expression::DataValue { row: value, .. } => vec![value],
             _ => Vec::new(),
         }
     }
@@ -1132,7 +1145,9 @@ impl Expression {
             Expression::Raycast { origin, direction } => vec![origin, direction],
             Expression::Function { value, .. }
             | Expression::Not { value }
-            | Expression::IsA { value, .. } => vec![value],
+            | Expression::IsA { value, .. }
+            | Expression::DataRow { key: value, .. }
+            | Expression::DataValue { row: value, .. } => vec![value],
             _ => Vec::new(),
         }
     }

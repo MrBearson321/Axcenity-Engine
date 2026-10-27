@@ -5,6 +5,8 @@
 //!   per project and share it (it's a cheap handle) with `physics` and `scene`.
 //! - [`Assets::material`] reads a `*.material.json` file a part's
 //!   `MaterialVariant` names, with its base files ([`MaterialFile`]).
+//! - [`Assets::data_table`] reads a `*.data.json` table scripts read
+//!   through `DataService` ([`DataTable`]).
 //! - [`load_model`] reads a `.gltf`, `.glb` or `.fbx` file into a [`Model`]: plain
 //!   triangles, materials and textures, fitted into the 1×1×1 cube that every
 //!   part's mesh fills.
@@ -16,6 +18,7 @@
 //! Every file is read from inside the project folder ([`safe_path`]), so a
 //! world file or script can't make the engine read anything else.
 
+mod data_table;
 mod fonts;
 mod import;
 mod material;
@@ -28,6 +31,10 @@ use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
+pub use data_table::{
+    AssetType, Cell, Column, ColumnType, DATA_FOLDER, DATA_TABLE_SUFFIX, DataTable, DataTableError,
+    Row, data_table_name, data_table_path, is_data_table, read_data_table, write_data_table,
+};
 pub use fonts::{FontFile, is_font_file};
 pub use import::{
     AUDIO_EXTENSIONS, ImportError, MODELS_FOLDER, PROJECT_AUDIO_FOLDER, PROJECT_TEXTURES_FOLDER,
@@ -97,6 +104,9 @@ struct Shared {
     materials: HashMap<String, Option<material::Resolved>>,
     /// The takes of every model file asked for so far, by its path.
     takes: HashMap<String, Option<Arc<Vec<Take>>>>,
+    /// Every data table asked for so far, by its path, or why it can't
+    /// be read.
+    tables: HashMap<String, Result<Arc<DataTable>, String>>,
     /// Loading errors not yet collected by [`Assets::take_errors`].
     errors: Vec<String>,
     /// Set by [`Assets::load_textures_in_background`].
@@ -211,6 +221,34 @@ impl Assets {
         let material = resolved.as_ref().map(|resolved| resolved.material.clone());
         shared.materials.insert(path.to_owned(), resolved);
         material
+    }
+
+    /// The data table named `name` (such as `weapons`, the file
+    /// `assets/data/weapons.data.json`), read the first time, or why it
+    /// can't be. Scripts show that reason in their error, so it isn't
+    /// also put in [`take_errors`](Self::take_errors).
+    pub fn data_table(&self, name: &str) -> Result<Arc<DataTable>, String> {
+        let path = data_table_path(name);
+        let mut shared = self.lock();
+        if let Some(table) = shared.tables.get(&path) {
+            return table.clone();
+        }
+        let Some(folder) = shared.folder.clone() else {
+            return Err("there is no project folder".to_owned());
+        };
+        let table = read_table(&folder, &path).map(Arc::new);
+        reload::remember_stamp(&mut shared, &folder, &path);
+        shared.tables.insert(path, table.clone());
+        table
+    }
+
+    /// Uses `table` as the one at `path` from now on, without reading the
+    /// file: the editor's Data Table tab hands over each edit, so a game
+    /// in Play reads it at once.
+    pub fn put_data_table(&self, path: &str, table: DataTable) {
+        self.lock()
+            .tables
+            .insert(path.to_owned(), Ok(Arc::new(table)));
     }
 
     /// From now on, [`texture`](Self::texture) doesn't wait for a file it
@@ -361,6 +399,7 @@ impl Assets {
             .retain(|mesh_id, _| mesh_id.split('#').next() != Some(file));
         shared.textures.remove(file);
         shared.takes.remove(file);
+        shared.tables.remove(file);
         shared.materials.retain(|_, material| {
             material
                 .as_ref()
@@ -378,6 +417,7 @@ impl Assets {
         shared.models.retain(|_, model| model.is_some());
         shared.textures.retain(|_, texture| texture.is_some());
         shared.takes.retain(|_, takes| takes.is_some());
+        shared.tables.retain(|_, table| table.is_ok());
         shared
             .materials
             .retain(|_, material| material.as_ref().is_some_and(|resolved| !resolved.broken));
@@ -450,6 +490,18 @@ fn read_takes(folder: &Path, path: &str) -> Result<Vec<Take>, String> {
         _ => err.to_string(),
     })?;
     load_takes(&bytes, format).map_err(|err| with_causes(&err))
+}
+
+/// Reads the data table at `path` inside `folder`, or explains why it
+/// can't.
+fn read_table(folder: &Path, path: &str) -> Result<DataTable, String> {
+    let relative = safe_path(path).ok_or("a data table's name must stay inside `assets/data`")?;
+    let text = std::fs::read_to_string(folder.join(relative)).map_err(|err| match err.kind() {
+        std::io::ErrorKind::NotFound => format!("there's no data table file `{path}`"),
+        _ => format!("could not read `{path}`: {err}"),
+    })?;
+    DataTable::from_json(&text)
+        .map_err(|err| format!("`{path}` can't be read: {}", with_causes(&err)))
 }
 
 /// Keeps what reading the texture at `path` gave, reporting a failure.

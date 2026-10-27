@@ -20,7 +20,10 @@ use std::io::{Read, Write};
 use std::path::Path;
 
 use axcenity_anim::{CLIP_EXTENSION, ClipFile, STATE_MACHINE_EXTENSION, StateMachineFile};
-use axcenity_assets::{MODELS_FOLDER, ModelFormat, Pick, safe_path};
+use axcenity_assets::{
+    Cell, ColumnType, DataTable, MODELS_FOLDER, ModelFormat, Pick, data_table_path, is_data_table,
+    safe_path,
+};
 use axcenity_core::World;
 use serde::{Deserialize, Serialize};
 
@@ -93,6 +96,44 @@ pub struct Contents {
     pub files: BTreeMap<String, Vec<u8>>,
     /// Files the assets name that aren't in the project, left out.
     pub missing: Vec<String>,
+    /// Where a script reads a data table by a name worked out as it runs
+    /// (`script.server.lua:3`), so which table it needs isn't known: for
+    /// the creator to check.
+    pub unknown_tables: Vec<String>,
+}
+
+/// The data tables the Lua `source` reads with
+/// `DataService:GetTable("name")`: the names written out in it, and the
+/// lines (from 1) of calls whose name isn't written out.
+pub fn script_tables(source: &str) -> (Vec<String>, Vec<usize>) {
+    let mut names = Vec::new();
+    let mut lines = Vec::new();
+    for (index, line) in source.lines().enumerate() {
+        // A comment's call doesn't run.
+        let code = line.split("--").next().unwrap_or(line);
+        for (at, _) in code.match_indices("GetTable") {
+            let rest = code[at + "GetTable".len()..].trim_start();
+            let Some(rest) = rest.strip_prefix('(') else {
+                continue;
+            };
+            let rest = rest.trim_start();
+            let literal = rest.chars().next().filter(|c| matches!(c, '"' | '\''));
+            let name = literal.and_then(|quote| {
+                let inner = &rest[1..];
+                let end = inner.find(quote)?;
+                let name = &inner[..end];
+                let after = inner[end + 1..].trim_start();
+                (after.starts_with(')') && !name.contains('\\')).then_some(name)
+            });
+            match name {
+                Some(name) => names.push(name.to_owned()),
+                None => lines.push(index + 1),
+            }
+        }
+    }
+    names.sort();
+    names.dedup();
+    (names, lines)
 }
 
 /// The files exporting `roots` (project paths, read from `folder`) packs:
@@ -105,8 +146,28 @@ pub fn package_contents(
     roots: &[String],
     extra: &[(String, Vec<u8>)],
 ) -> Result<Contents, PackageError> {
+    package_contents_with_scripts(folder, roots, extra, &[])
+}
+
+/// [`package_contents`], also bringing the data tables `scripts` read: the
+/// scripts (project path and Lua) of an object exported as a prefab. A
+/// table named in the code is brought like any dependency; a call whose
+/// name isn't written out is listed in [`Contents::unknown_tables`].
+pub fn package_contents_with_scripts(
+    folder: &Path,
+    roots: &[String],
+    extra: &[(String, Vec<u8>)],
+    scripts: &[(String, String)],
+) -> Result<Contents, PackageError> {
     let mut contents = Contents::default();
     let mut wanted: Vec<String> = Vec::new();
+    for (path, source) in scripts {
+        let (names, lines) = script_tables(source);
+        wanted.extend(names.iter().map(|name| data_table_path(name)));
+        contents
+            .unknown_tables
+            .extend(lines.into_iter().map(|line| format!("{path}:{line}")));
+    }
     for (path, bytes) in extra {
         check_path(path)?;
         contents.files.insert(path.clone(), bytes.clone());
@@ -162,6 +223,22 @@ fn needs(folder: &Path, path: &str, bytes: &[u8]) -> Vec<String> {
             && parse_prefab(text, &mut world, workspace).is_ok()
         {
             needed.extend(world_needs(folder, &world));
+        }
+    } else if is_data_table(path) {
+        // The tables its references name, and the assets in its cells.
+        if let Some(table) = text().and_then(|text| DataTable::from_json(text).ok()) {
+            for column in &table.columns {
+                match &column.kind {
+                    ColumnType::Reference { table } => needed.push(data_table_path(table)),
+                    ColumnType::Asset { .. } => {
+                        needed.extend(table.rows.iter().filter_map(|row| match row.cell(column) {
+                            Cell::Text(path) if !path.is_empty() => Some(path),
+                            _ => None,
+                        }))
+                    }
+                    _ => {}
+                }
+            }
         }
     } else if ModelFormat::of(Path::new(path)).is_some()
         && let Some(own) = own_model_folder(path)

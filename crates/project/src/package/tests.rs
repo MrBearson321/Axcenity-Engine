@@ -363,3 +363,52 @@ fn keep_both_numbers_a_file_and_rewrites_what_names_it() {
     );
     let _ = fs::remove_dir_all(&folder);
 }
+
+#[test]
+fn a_prefabs_scripts_bring_the_tables_they_name_and_list_the_rest_for_a_check() {
+    let source = example("hello-data");
+    let prefab = (
+        "assets/prefabs/Rack.prefab.json".to_owned(),
+        br#"{"format_version": 1, "instances": []}"#.to_vec(),
+    );
+    let scripts = [
+        (
+            "scripts/rack.server.lua".to_owned(),
+            "local weapons = game:GetService(\"DataService\"):GetTable(\"weapons\")\n\
+             -- DataService:GetTable(\"commented\")\n\
+             local chosen = DataService:GetTable(kind .. \"s\")\n"
+                .to_owned(),
+        ),
+        (
+            "scripts/other.server.lua".to_owned(),
+            "print(DataService:GetTable( 'weapons' ):Get('bow').Damage)\n".to_owned(),
+        ),
+    ];
+    let contents = package_contents_with_scripts(&source, &[], &[prefab], &scripts).unwrap();
+    let files: Vec<&str> = contents.files.keys().map(String::as_str).collect();
+    // The table, the table its Ammo column names, and the icons in it.
+    assert_eq!(
+        files,
+        [
+            "assets/data/ammo.data.json",
+            "assets/data/weapons.data.json",
+            "assets/prefabs/Rack.prefab.json",
+            "assets/textures/bow.png",
+            "assets/textures/sword.png",
+        ]
+    );
+    assert!(contents.missing.is_empty(), "{:?}", contents.missing);
+    assert_eq!(contents.unknown_tables, ["scripts/rack.server.lua:3"]);
+}
+
+#[test]
+fn script_tables_reads_written_out_names_only() {
+    let (names, lines) = script_tables(
+        "local a = DataService:GetTable(\"weapons\")\n\
+         local b = DataService:GetTable('enemies/bosses')\n\
+         local c = DataService:GetTable(name)\n\
+         local d = DataService:GetTable(\"a\" .. b)\n",
+    );
+    assert_eq!(names, ["enemies/bosses", "weapons"]);
+    assert_eq!(lines, [3, 4]);
+}

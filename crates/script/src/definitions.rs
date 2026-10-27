@@ -291,6 +291,10 @@ fn write() -> Writer {
         for method in value_type.methods {
             w.method(method);
         }
+        // A data row's columns are the project's, so any name reads.
+        if class == "DataRow" {
+            w.line(CHILD_INDEXER);
+        }
         w.end();
     }
 

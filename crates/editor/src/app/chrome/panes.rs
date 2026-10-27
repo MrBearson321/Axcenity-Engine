@@ -854,10 +854,13 @@ impl EditorApp {
             let mut changed = false;
             let folder = self.project.as_ref().map(|project| project.folder.clone());
             let animation = &mut self.animation;
-            let objects = block_objects(&self.world, |controller| match &folder {
+            let mut objects = block_objects(&self.world, |controller| match &folder {
                 Some(folder) => animation.controller_names(folder, controller),
                 None => Vec::new(),
             });
+            if let Some(folder) = &folder {
+                self.add_table_names(folder, &mut objects);
+            }
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
                 .show_inside(ui, |ui| {

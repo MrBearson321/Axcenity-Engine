@@ -1,0 +1,44 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Anchored": true,
+          "Position": [0, -0.5, 0],
+          "Size": [40, 1, 40],
+          "Color": [0.35, 0.37, 0.4]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "sword",
+        "properties": {
+          "Anchored": true,
+          "Position": [-4, 1, 0],
+          "Size": [1, 2, 1]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "bow",
+        "properties": {
+          "Anchored": true,
+          "Position": [0, 1, 0],
+          "Size": [1, 2, 1]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "crossbow",
+        "properties": {
+          "Anchored": true,
+          "Position": [4, 1, 0],
+          "Size": [1, 2, 1]
+        }
+      }
+    ]
+  }
+}

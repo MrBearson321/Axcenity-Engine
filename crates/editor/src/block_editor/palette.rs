@@ -46,6 +46,14 @@ pub(super) fn palette(
                 .map(|(_, name)| name.clone())
         })
         .unwrap_or_else(|| NameKind::Bindable.example().to_owned());
+    // The first data table (or its first column) the project has.
+    let storage_name = |kind: NameKind| {
+        objects
+            .iter()
+            .find(|object| object.path == STORAGE_PATH)
+            .and_then(|storage| storage.names.iter().find(|(of, _)| *of == kind))
+            .map_or_else(|| kind.example().to_owned(), |(_, name)| name.clone())
+    };
     let variable = variables
         .first()
         .cloned()
@@ -456,6 +464,17 @@ pub(super) fn palette(
                 checkpoint: first(Filter::Checkpoints),
             }),
             B(BlockKind::RestoreCheckpoint),
+            R(Expression::DataValue {
+                column: storage_name(NameKind::Column),
+                row: Box::new(Expression::DataRow {
+                    table: storage_name(NameKind::DataTable),
+                    key: Box::new(text("sword")),
+                }),
+            }),
+            R(Expression::DataRow {
+                table: storage_name(NameKind::DataTable),
+                key: Box::new(text("sword")),
+            }),
         ],
         // Grey blocks only come from code, so there are none to drag out.
         Category::Lua => Vec::new(),

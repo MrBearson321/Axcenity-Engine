@@ -28,6 +28,7 @@ mod behavior_trees;
 mod chrome;
 mod commands;
 mod controls_ui;
+mod data_tables;
 mod edits;
 mod engine;
 mod files;
@@ -64,6 +65,7 @@ use crate::behavior_tree::BehaviorTreeStudio;
 use crate::block_editor;
 use crate::build_tools::{self, BuildSettings, PanelScene, ToolAction};
 use crate::console::Console;
+use crate::data_table::DataTableStudio;
 use crate::dialog;
 use crate::explorer::{self, Action, Explorer};
 use crate::gizmo::{Modes, Pose, Snap, Tool};
@@ -272,6 +274,8 @@ pub struct EditorApp {
     animation: AnimationStudio,
     /// The Behavior Tree tab and the trees open in it.
     behavior: BehaviorTreeStudio,
+    /// The Data Table tab.
+    data_tables: DataTableStudio,
     /// The UI Designer tab's view of a ScreenGui.
     ui_designer: UiDesigner,
     /// The Terrain panel's tools, settings, previews and work under way.
@@ -355,6 +359,7 @@ impl egui_dock::TabViewer for DockViewer<'_> {
             Pane::Profiler => self.app.profiler.show(ui),
             Pane::AssetCheck => self.app.asset_check_pane(ui),
             Pane::BehaviorTree => self.app.behavior_tree_pane(ui),
+            Pane::DataTable => self.app.data_table_pane(ui),
             Pane::Tags => self.app.tags_pane(ui),
             Pane::Script(id) => self.app.script_pane(ui, *id),
         }
@@ -596,6 +601,7 @@ impl EditorApp {
             asset_browser: AssetBrowser::default(),
             animation: AnimationStudio::default(),
             behavior: BehaviorTreeStudio::default(),
+            data_tables: DataTableStudio::default(),
             ui_designer: UiDesigner::default(),
             terrain: TerrainStudio::default(),
             layout: Layout::default(),
@@ -1150,6 +1156,8 @@ mod attribute_tests;
 mod behavior_tree_tests;
 #[cfg(test)]
 mod camera_tests;
+#[cfg(test)]
+mod data_table_tests;
 #[cfg(test)]
 mod hot_patch_tests;
 #[cfg(test)]

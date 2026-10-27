@@ -1042,6 +1042,59 @@ fn the_tone_mapping_block_sets_lighting_and_comes_back_from_lua() {
 }
 
 #[test]
+fn data_blocks_read_a_tables_row_and_column_and_come_back_from_lua() {
+    let value = |column: &str, key: &str| Expression::DataValue {
+        column: column.to_owned(),
+        row: boxed(Expression::DataRow {
+            table: "weapons".to_owned(),
+            key: boxed(Expression::Text {
+                value: key.to_owned(),
+            }),
+        }),
+    };
+    let print = |id, value| block(id, BlockKind::Print { value });
+    let blocks = script(vec![block(
+        1,
+        BlockKind::WhenStarted {
+            body: vec![
+                print(2, value("Damage", "sword")),
+                print(3, value("Kind", "bow")),
+            ],
+        },
+    )]);
+    let source = translate(&blocks).unwrap().source;
+    assert!(
+        source.starts_with("local DataService = game:GetService(\"DataService\")"),
+        "{source}"
+    );
+    assert!(
+        source.contains("print(DataService:GetTable(\"weapons\"):Get(\"sword\").Damage)"),
+        "{source}"
+    );
+
+    let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-data");
+    let mut world = World::new();
+    let lua = world.create(ClassName::Script).unwrap();
+    world
+        .set_parent(lua, Some(world.server_script_service()))
+        .unwrap();
+    let mut runtime = ScriptRuntime::new();
+    runtime.set_assets(axcenity_assets::Assets::new(folder));
+    runtime.start_script(&mut world, lua, "scripts/Data.server.blocks.json", &source);
+    runtime.step(&mut world, 0.1);
+    let printed: Vec<String> = runtime
+        .take_output()
+        .into_iter()
+        .map(|line| line.text)
+        .collect();
+    assert_eq!(printed, ["10", "Ranged"]);
+
+    let back = crate::from_lua(&source).unwrap();
+    assert!(!has_code(&back), "{back:#?}");
+    assert_eq!(translate(&back).unwrap().source, source);
+}
+
+#[test]
 fn graphics_blocks_change_user_game_settings_and_come_back_from_lua() {
     let run = |world: &mut World, runtime: &mut ScriptRuntime, path: &str, source: &str| {
         let lua = world.create(ClassName::LocalScript).unwrap();
@@ -1560,6 +1613,28 @@ fn reporters_switched_to_code_and_back_are_the_same_reporters() {
             }),
         },
         Expression::PartUnderMouse,
+        Expression::DataRow {
+            table: "weapons".to_owned(),
+            key: boxed(Expression::Text {
+                value: "sword".to_owned(),
+            }),
+        },
+        Expression::DataValue {
+            column: "Damage".to_owned(),
+            row: boxed(Expression::DataRow {
+                table: "weapons".to_owned(),
+                key: boxed(variable("a")),
+            }),
+        },
+        Expression::DataValue {
+            column: "Fire Rate".to_owned(),
+            row: boxed(Expression::DataRow {
+                table: "enemies/bosses".to_owned(),
+                key: boxed(Expression::Text {
+                    value: "boss".to_owned(),
+                }),
+            }),
+        },
     ];
     let body = every_reporter
         .into_iter()

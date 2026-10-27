@@ -150,6 +150,8 @@ pub(super) fn value_names(expression: &Expression) -> (String, &'static [&'stati
         Expression::IsA { .. } => ("Is A", &["Object", "Class"]),
         Expression::AnimatorBool { .. } => ("Get Bool", &["Parameter", "Animator"]),
         Expression::AnimatorNumber { .. } => ("Get Number", &["Parameter", "Animator"]),
+        Expression::DataRow { .. } => ("Get Row", &["Key", "Table"]),
+        Expression::DataValue { .. } => ("Get Column", &["Column", "Row"]),
         Expression::Code { .. } => ("Lua", &["Code"]),
         Expression::Number { .. } => ("Number", &[]),
         Expression::Text { .. } => ("Text", &[]),

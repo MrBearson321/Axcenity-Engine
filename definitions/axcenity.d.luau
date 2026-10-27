@@ -272,6 +272,27 @@ declare extern type HttpService with
 	function GenerateGUID(self, wrapInCurlyBraces: boolean?): string
 end
 
+--- The project's data tables (`assets/data/*.data.json`, made in the Data Table tab), from `game:GetService("DataService")`. Scripts read them; they can't change them.
+declare extern type DataService with
+	--- The table named `name`: `"weapons"` is `assets/data/weapons.data.json`. A table that isn't there, or can't be read, is an error saying why.
+	function GetTable(self, name: string): DataTable
+end
+
+--- A data table, read-only. Each call reads the version in use now, so an edit made during Play is what the next call sees.
+declare extern type DataTable with
+	--- The row with this key, or nil if there's none.
+	function Get(self, key: string): DataRow?
+	--- Every row, by its key: `for key, row in weapons:GetAll() do`. A new table each call.
+	function GetAll(self): { [string]: DataRow }
+	--- Every row's key, in the table's order. A new list each call.
+	function Keys(self): { string }
+end
+
+--- One row of a data table, read by column name: `row.Damage`. Numbers, strings, booleans, Vector3s and Color3s are what they say; an enum is its option's name, an asset its path, and a reference the row it names (nil for none). `for column, value in row do` goes through its columns. Changing it is an error: tables are read-only in scripts.
+declare extern type DataRow with
+	[string]: any
+end
+
 --- What loads first on the player's side, from `game:GetService("ReplicatedFirst")`.
 declare extern type ReplicatedFirst with
 	--- Says the game is ready: the loading screen goes once it has been up for its minimum time. Only waited for when the project's loading screen is set to wait for a script. LocalScripts only. LocalScripts only.
@@ -897,6 +918,8 @@ declare extern type DataModel extends Instance with
 	Debris: Debris
 	--- JSON and GUIDs (same as `game:GetService("HttpService")`).
 	HttpService: HttpService
+	--- The project's data tables (same as `game:GetService("DataService")`).
+	DataService: DataService
 	--- The player's keyboard, mouse and controllers (same as `game:GetService("UserInputService")`). LocalScripts only.
 	UserInputService: UserInputService
 	--- Functions bound to inputs by priority (same as `game:GetService("ContextActionService")`). LocalScripts only.
@@ -918,7 +941,7 @@ declare extern type DataModel extends Instance with
 	--- What loads first on the player's side, with `RemoveDefaultLoadingScreen` (same as `game:GetService("ReplicatedFirst")`).
 	ReplicatedFirst: ReplicatedFirst
 	[string]: any
-	--- The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"SaveService"`, `"LocalizationService"`, `"GuiService"`, `"Debris"`, `"HttpService"`, `"TweenService"`, `"CollectionService"`, `"UserGameSettings"`, `"UserInputService"` or `"ContextActionService"`.
+	--- The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"SaveService"`, `"LocalizationService"`, `"GuiService"`, `"Debris"`, `"HttpService"`, `"DataService"`, `"TweenService"`, `"CollectionService"`, `"UserGameSettings"`, `"UserInputService"` or `"ContextActionService"`.
 	function GetService(self, className: string): Instance
 end
 

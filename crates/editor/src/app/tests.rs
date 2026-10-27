@@ -360,6 +360,14 @@ fn every_panel_fits_a_narrow_column_and_a_short_strip() {
     );
     // A new tree, so the Behavior Tree tab shows its graph and a problem.
     app.behavior.create("assets/ai/Fit.behaviortree.json");
+    // A table with a column of each type and a row, for the Data Table tab.
+    app.new_data_table("fit");
+    for edit in crate::data_table::every_column() {
+        app.data_tables.edit(edit).unwrap();
+    }
+    app.data_tables
+        .edit(crate::data_table::TableEdit::AddRow)
+        .unwrap();
     // A terrain with a tool picked, so the Terrain Studio shows its forms.
     let terrain = app.world.create(ClassName::Terrain).unwrap();
     app.world
@@ -400,6 +408,7 @@ fn every_panel_fits_a_narrow_column_and_a_short_strip() {
                             let _ = app.asset_check.show(ui, app.project.is_some(), true);
                         }
                         Pane::BehaviorTree => app.behavior_tree_pane(ui),
+                        Pane::DataTable => app.data_table_pane(ui),
                         Pane::Tags => app.tags_pane(ui),
                         Pane::Scene | Pane::Script(_) => {}
                     }

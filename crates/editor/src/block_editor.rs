@@ -71,11 +71,16 @@ pub enum NameKind {
     /// A BindableEvent's path in ReplicatedStorage, suggested from the
     /// ReplicatedStorage entry of the objects (see [`STORAGE_PATH`]).
     Bindable,
+    /// A data table's name, suggested from the same entry.
+    DataTable,
+    /// A column of a data table, suggested from the same entry.
+    Column,
 }
 
 /// The objects' entry for ReplicatedStorage: the empty path, which no
-/// Workspace object has. Its `names` are the BindableEvents in it. It's a
-/// service, so object menus leave it out.
+/// Workspace object has. Its `names` are the BindableEvents in it, and the
+/// project's data tables and their columns. It's a service, so object
+/// menus leave it out.
 pub const STORAGE_PATH: &str = "";
 
 impl NameKind {
@@ -89,6 +94,8 @@ impl NameKind {
             NameKind::Event => "Footstep",
             NameKind::Child => "Door",
             NameKind::Bindable => "Scored",
+            NameKind::DataTable => "weapons",
+            NameKind::Column => "Damage",
         }
     }
 
@@ -101,6 +108,8 @@ impl NameKind {
             NameKind::Event => "animation event",
             NameKind::Child => "child",
             NameKind::Bindable => "BindableEvent",
+            NameKind::DataTable => "data table",
+            NameKind::Column => "column",
         }
     }
 }
@@ -328,6 +337,7 @@ fn reporter_category(expression: &Expression) -> Category {
         | Expression::Raycast { .. }
         | Expression::IsA { .. } => Category::Sensing,
         Expression::AnimatorBool { .. } | Expression::AnimatorNumber { .. } => Category::Animation,
+        Expression::DataRow { .. } | Expression::DataValue { .. } => Category::More,
         Expression::Code { .. } => Category::Lua,
         _ => Category::Operators,
     }
@@ -1136,6 +1146,18 @@ fn reporter_parts<'a>(expression: &'a mut Expression, objects: &[ObjectInfo]) ->
                 Object(animator, Filter::Animators),
             ]
         }
+        Expression::DataRow { table, key } => vec![
+            label("row"),
+            Slot(key, SlotKind::Text),
+            label("of table"),
+            Part::Name(table, NameKind::DataTable, STORAGE_PATH.to_owned()),
+        ],
+        Expression::DataValue { column, row } => vec![
+            label("value of column"),
+            Part::Name(column, NameKind::Column, STORAGE_PATH.to_owned()),
+            label("in row"),
+            Slot(row, SlotKind::Any),
+        ],
         Expression::Code { code } => vec![Part::Code(shown_code(code))],
         // Values typed in aren't reporters, and are drawn as inputs.
         Expression::Number { .. }

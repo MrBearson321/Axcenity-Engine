@@ -1147,10 +1147,10 @@ Blocks for each, in the Events and Control groups.
 
 ### Acceptance criteria
 
-- [ ] A `weapons` table with Damage, Range and Icon columns is made in the grid, and a script reads `DataService:GetTable("weapons"):Get("sword").Damage`.
-- [ ] Changing a cell during Play changes what the script reads next, without restarting.
-- [ ] A row that references a missing row or a missing asset appears in Asset Check, and its fix works.
-- [ ] Writing to a row from Lua errors and says tables are read-only.
+- [x] A `weapons` table with Damage, Range and Icon columns is made in the grid, and a script reads `DataService:GetTable("weapons"):Get("sword").Damage`.
+- [x] Changing a cell during Play changes what the script reads next, without restarting.
+- [x] A row that references a missing row or a missing asset appears in Asset Check, and its fix works.
+- [x] Writing to a row from Lua errors and says tables are read-only.
 
 ---
 

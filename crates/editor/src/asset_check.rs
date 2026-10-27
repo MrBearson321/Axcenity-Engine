@@ -79,6 +79,8 @@ impl AssetCheck {
             AssetKind::Audio,
             AssetKind::Clip,
             AssetKind::StateMachine,
+            AssetKind::Material,
+            AssetKind::Prefab,
         ]
         .into_iter()
         .map(|kind| (kind, axcenity_project::files_of_kind(files, kind)))

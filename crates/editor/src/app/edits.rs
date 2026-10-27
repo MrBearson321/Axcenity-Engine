@@ -54,6 +54,7 @@ impl EditorApp {
             || self.tabs.any_unsaved()
             || self.ui_graphs_unsaved()
             || self.behavior.unsaved()
+            || self.data_tables.unsaved()
             || self.project.as_ref().is_some_and(|project| {
                 project
                     .block_scripts
@@ -923,6 +924,11 @@ impl EditorApp {
         if self.behavior.has_pointer() && !self.playing() && self.behavior.undo() {
             return;
         }
+        // Tables are edited during Play too, so their undo works then.
+        if self.data_tables.has_pointer() && self.data_tables.undo() {
+            self.hand_over_tables();
+            return;
+        }
         if !self.viewport.is_dragging() && !self.ui_designer.is_dragging() && !self.playing() {
             if let Some(restored) = self.history.undo(&mut self.world) {
                 self.apply_history_texts(restored.texts);
@@ -936,6 +942,10 @@ impl EditorApp {
             return;
         }
         if self.behavior.has_pointer() && !self.playing() && self.behavior.redo() {
+            return;
+        }
+        if self.data_tables.has_pointer() && self.data_tables.redo() {
+            self.hand_over_tables();
             return;
         }
         if !self.viewport.is_dragging() && !self.ui_designer.is_dragging() && !self.playing() {

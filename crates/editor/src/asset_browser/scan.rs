@@ -29,6 +29,9 @@ pub fn kind_of(path: &str) -> Option<AssetKind> {
     if lower.ends_with(BEHAVIOR_TREE_SUFFIX) {
         return Some(AssetKind::BehaviorTree);
     }
+    if lower.ends_with(axcenity_assets::DATA_TABLE_SUFFIX) {
+        return Some(AssetKind::DataTable);
+    }
     let extension = lower.rsplit_once('.')?.1;
     if MODEL_EXTENSIONS.contains(&extension) {
         Some(AssetKind::Model)
@@ -58,6 +61,7 @@ pub fn display_name(path: &str) -> String {
         axcenity_anim::CLIP_EXTENSION,
         axcenity_anim::STATE_MACHINE_EXTENSION,
         BEHAVIOR_TREE_SUFFIX,
+        axcenity_assets::DATA_TABLE_SUFFIX,
     ] {
         if lower.ends_with(suffix) {
             return file[..file.len() - suffix.len()].to_owned();

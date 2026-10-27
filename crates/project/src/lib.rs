@@ -67,7 +67,8 @@ pub use asset_fix::{
 pub use migrate::PREVIOUS_FORMAT_DIR;
 pub use package::{
     Clashes, Contents, ImportPlan, PACKAGE_EXTENSION, Package, PackageError, PackageManifest,
-    package_contents, plan_import, read_package, write_package,
+    package_contents, package_contents_with_scripts, plan_import, read_package, script_tables,
+    write_package,
 };
 pub use packed::{PackError, pack_game, unpack_game};
 pub use terrain_files::{

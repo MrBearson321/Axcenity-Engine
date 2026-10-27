@@ -7,6 +7,7 @@ Map only. Open the one file that matches the change.
 - Animation clip and state machine files: [project/animation-files.md](project/animation-files.md)
 - How asset paths are read: [project/assets.md](project/assets.md)
 - Asset packages (`.axpkg`): [project/packages.md](project/packages.md)
+- Data tables (`*.data.json`, the Data Table tab, `DataService`): [project/data-tables.md](project/data-tables.md)
 - Export, version history, splash: [project/export.md](project/export.md)
 - GitHub releases and version tags: [project/releases.md](project/releases.md)
 - Installing a release: [project/install.md](project/install.md)

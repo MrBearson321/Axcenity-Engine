@@ -20,6 +20,7 @@ mod block_editor;
 mod build_tools;
 mod console;
 mod css_syntax;
+mod data_table;
 mod dialog;
 mod explorer;
 mod gizmo;

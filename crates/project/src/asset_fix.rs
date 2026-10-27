@@ -11,13 +11,13 @@ use std::path::{Path, PathBuf};
 
 use axcenity_anim::{ANIMATIONS_FOLDER, ClipFile, StateMachineFile};
 use axcenity_assets::{
-    MODELS_FOLDER, PROJECT_AUDIO_FOLDER, PROJECT_TEXTURES_FOLDER, Pick, TEXTURES_FOLDER,
-    safe_file_name, safe_path, unique_file_name,
+    Cell, DataTable, MATERIALS_FOLDER, MODELS_FOLDER, PROJECT_AUDIO_FOLDER,
+    PROJECT_TEXTURES_FOLDER, Pick, TEXTURES_FOLDER, safe_file_name, safe_path, unique_file_name,
 };
 use axcenity_core::{InstanceId, Value, World};
 use serde::{Deserialize, Serialize};
 
-use crate::validate::{AssetKind, Finding, FindingKind, Site, project_files};
+use crate::validate::{AssetKind, Finding, FindingKind, PREFABS_FOLDER, Site, project_files};
 use crate::world_file::{parse_prefab, write_prefab};
 
 const IMAGES_FOLDER: &str = "assets/images";
@@ -98,6 +98,7 @@ impl Finding {
                 | Site::Prefab { .. }
                 | Site::ClipSource { .. }
                 | Site::StateClip { .. }
+                | Site::TableCell { .. }
         )
     }
 
@@ -138,6 +139,10 @@ impl Finding {
                 },
             ) => model == other_model && texture == other_texture,
             (Site::ModelTexture { .. }, _) | (_, Site::ModelTexture { .. }) => false,
+            // A missing row is only like another missing from the same table.
+            (Site::TableCell { .. }, Site::TableCell { .. }) if self.wants.is_none() => {
+                self.message == other.message
+            }
             (Site::File { .. }, other) | (other, Site::File { .. }) => {
                 matches!(other, Site::File { .. })
             }
@@ -303,6 +308,7 @@ enum Doc {
     },
     Clip(ClipFile),
     Machine(StateMachineFile),
+    Table(DataTable),
 }
 
 struct Planner<'a> {
@@ -371,6 +377,8 @@ impl Planner<'_> {
             AssetKind::Model => MODELS_FOLDER,
             AssetKind::Audio => PROJECT_AUDIO_FOLDER,
             AssetKind::Clip | AssetKind::StateMachine => ANIMATIONS_FOLDER,
+            AssetKind::Material => MATERIALS_FOLDER,
+            AssetKind::Prefab => PREFABS_FOLDER,
             AssetKind::Folder => return Err("pick a folder inside the project".to_owned()),
             AssetKind::Texture => match finding.site {
                 Site::Instance { property, .. } | Site::Prefab { property, .. } => match property {
@@ -507,6 +515,14 @@ impl Planner<'_> {
                 }
                 Ok(())
             }
+            Site::TableCell { file, row, column } => {
+                let Doc::Table(table) = self.doc(file, read_table)? else {
+                    return Err(format!("`{file}` isn't a data table"));
+                };
+                table
+                    .set_cell(row, column, Cell::Text(value.unwrap_or_default()))
+                    .map_err(|_| format!("`{file}` changed since the check; check again"))
+            }
             Site::ModelTexture { .. } | Site::File { .. } => {
                 Err("this problem has no reference to change".to_owned())
             }
@@ -541,6 +557,7 @@ impl Planner<'_> {
                 Doc::Prefab { world, roots } => write_prefab(&world, &roots),
                 Doc::Clip(clip) => clip.to_json(),
                 Doc::Machine(machine) => machine.to_json(),
+                Doc::Table(table) => table.to_json(),
             }
             .into_bytes();
             if after != before {
@@ -575,6 +592,12 @@ fn read_prefab(text: &str) -> Result<Doc, String> {
 fn read_clip(text: &str) -> Result<Doc, String> {
     ClipFile::from_json(text)
         .map(Doc::Clip)
+        .map_err(|err| err.to_string())
+}
+
+fn read_table(text: &str) -> Result<Doc, String> {
+    DataTable::from_json(text)
+        .map(Doc::Table)
         .map_err(|err| err.to_string())
 }
 

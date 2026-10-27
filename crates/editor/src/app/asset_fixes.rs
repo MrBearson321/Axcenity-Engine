@@ -169,7 +169,9 @@ impl EditorApp {
             AssetKind::Model => &["gltf", "glb", "fbx"],
             AssetKind::Texture => &axcenity_assets::TEXTURE_EXTENSIONS,
             AssetKind::Audio => &axcenity_assets::AUDIO_EXTENSIONS,
-            AssetKind::Clip | AssetKind::StateMachine => &["json"],
+            AssetKind::Clip | AssetKind::StateMachine | AssetKind::Material | AssetKind::Prefab => {
+                &["json"]
+            }
         };
         dialog.add_filter(kind.expected(), extensions).pick_file()
     }

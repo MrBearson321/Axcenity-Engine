@@ -17,7 +17,8 @@
 //!   [`ScriptRuntime::fire_touched`] and [`ScriptRuntime::heartbeat`]
 //!   (`run_service`). BindableEvents and BindableFunctions let scripts on
 //!   one side talk (`bindable`); `Debris` destroys Instances later
-//!   (`debris`), and `HttpService` reads and writes JSON (`http`).
+//!   (`debris`), `HttpService` reads and writes JSON (`http`), and
+//!   `DataService` reads the project's data tables (`data`).
 //!   `TweenService` tweens move properties smoothly,
 //!   each frame step (`tween`). `SaveService` writes and loads save slots
 //!   and checkpoints (`save`, over the `save` crate). Change events (`part.Changed`) come from the World's
@@ -47,6 +48,7 @@ mod client;
 mod collection;
 mod console;
 mod context;
+mod data;
 mod debris;
 mod debugger;
 mod definitions;
@@ -246,9 +248,10 @@ impl ScriptRuntime {
         self.server.lua.used_memory() + self.client.lua.used_memory()
     }
 
-    /// MeshParts `workspace:Raycast` collides as, matching physics. Cloning
-    /// `assets` shares the same loaded models. The player and editor Play
-    /// both call this; without it every MeshPart is a box.
+    /// MeshParts `workspace:Raycast` collides as, matching physics, and the
+    /// data tables `DataService` reads. Cloning `assets` shares the same
+    /// loaded models and tables. The player and editor Play both call this;
+    /// without it every MeshPart is a box and there are no tables.
     pub fn set_assets(&mut self, assets: Assets) {
         self.server.set_assets(assets.clone());
         self.client.set_assets(assets);
@@ -1008,5 +1011,7 @@ mod user_settings_tests;
 mod cframe_tests;
 #[cfg(test)]
 mod collection_tests;
+#[cfg(test)]
+mod data_tests;
 #[cfg(test)]
 mod utilities_tests;

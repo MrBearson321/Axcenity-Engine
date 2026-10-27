@@ -1,0 +1,100 @@
+{
+  "columns": [
+    {
+      "name": "Damage",
+      "type": "number"
+    },
+    {
+      "name": "Range",
+      "type": "integer"
+    },
+    {
+      "name": "Icon",
+      "type": "asset",
+      "asset": "texture"
+    },
+    {
+      "name": "Kind",
+      "type": "enum",
+      "options": [
+        "Melee",
+        "Ranged"
+      ]
+    },
+    {
+      "name": "Ammo",
+      "type": "reference",
+      "table": "ammo"
+    },
+    {
+      "name": "Tint",
+      "type": "color3"
+    },
+    {
+      "name": "Offset",
+      "type": "vector3"
+    }
+  ],
+  "rows": [
+    {
+      "key": "sword",
+      "cells": {
+        "Ammo": "",
+        "Damage": 10,
+        "Icon": "assets/textures/sword.png",
+        "Kind": "Melee",
+        "Offset": [
+          0,
+          0,
+          0
+        ],
+        "Range": 2,
+        "Tint": [
+          0.8,
+          0.8,
+          0.85
+        ]
+      }
+    },
+    {
+      "key": "bow",
+      "cells": {
+        "Ammo": "arrows",
+        "Damage": 6,
+        "Icon": "assets/textures/bow.png",
+        "Kind": "Ranged",
+        "Offset": [
+          0,
+          0.5,
+          0
+        ],
+        "Range": 30,
+        "Tint": [
+          0.6,
+          0.4,
+          0.2
+        ]
+      }
+    },
+    {
+      "key": "crossbow",
+      "cells": {
+        "Ammo": "bolts",
+        "Damage": 14,
+        "Icon": "",
+        "Kind": "Ranged",
+        "Offset": [
+          0,
+          1,
+          0
+        ],
+        "Range": 40,
+        "Tint": [
+          0.3,
+          0.3,
+          0.35
+        ]
+      }
+    }
+  ]
+}

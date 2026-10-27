@@ -18,7 +18,7 @@ use crate::{
 
 /// The services blocks get with `game:GetService`, which the translation
 /// declares at the top itself when blocks need them.
-const SERVICES: [&str; 8] = [
+const SERVICES: [&str; 9] = [
     "UserInputService",
     "RunService",
     "Debris",
@@ -27,6 +27,7 @@ const SERVICES: [&str; 8] = [
     "LocalizationService",
     "Lighting",
     "UserGameSettings",
+    "DataService",
 ];
 
 /// Why some Lua couldn't become blocks.
@@ -131,6 +132,9 @@ fn used_by(script: &BlockScript) -> (BTreeSet<String>, BTreeSet<String>) {
             }
             Expression::KeyDown { .. } => {
                 services.insert("UserInputService".to_owned());
+            }
+            Expression::DataRow { .. } => {
+                services.insert("DataService".to_owned());
             }
             _ => {}
         }
@@ -610,6 +614,32 @@ impl<'a> Converter<'a> {
     fn is_field(&self, expr: &Expr, object: &str, field: &str) -> bool {
         matches!(&expr.kind, ExprKind::Field(inner, name)
             if name == field && matches!(&inner.kind, ExprKind::Name(o) if o == object))
+    }
+
+    /// The table's name in `DataService:GetTable("weapons")`.
+    fn data_table(&self, expr: &Expr) -> Option<String> {
+        match &expr.kind {
+            ExprKind::Method(service, method, args)
+                if method == "GetTable" && self.is_service(service, "DataService") =>
+            {
+                match args.as_slice() {
+                    [
+                        Expr {
+                            kind: ExprKind::Str(table),
+                            ..
+                        },
+                    ] => Some(table.clone()),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Whether `expr` is a "row of table" block's Lua.
+    fn is_data_row(&self, expr: &Expr) -> bool {
+        matches!(&expr.kind, ExprKind::Method(table, method, args)
+            if method == "Get" && args.len() == 1 && self.data_table(table).is_some())
     }
 
     fn is_service(&self, expr: &Expr, service: &str) -> bool {
@@ -1618,6 +1648,16 @@ impl<'a> Converter<'a> {
                         max: boxed(max),
                     });
                 }
+                // DataService:GetTable("weapons"):Get(key)
+                if method == "Get"
+                    && let [key] = args.as_slice()
+                    && let Some(table) = self.data_table(object)
+                {
+                    return Some(Expression::DataRow {
+                        table,
+                        key: boxed(key),
+                    });
+                }
                 if method == "IsKeyDown"
                     && self.is_service(object, "UserInputService")
                     && let [key] = args.as_slice()
@@ -1652,6 +1692,20 @@ impl<'a> Converter<'a> {
                         if method == "GetMouse" && none.is_empty() && is_local_player(player)) =>
             {
                 Expression::PartUnderMouse
+            }
+            // A data row's column: `DataService:GetTable("t"):Get(k).Damage`.
+            ExprKind::Field(row, column) if self.is_data_row(row) => Expression::DataValue {
+                column: column.clone(),
+                row: boxed(row),
+            },
+            ExprKind::Index(row, column)
+                if self.is_data_row(row)
+                    && let ExprKind::Str(column) = &column.kind =>
+            {
+                Expression::DataValue {
+                    column: column.clone(),
+                    row: boxed(row),
+                }
             }
             ExprKind::Field(object, property) => Expression::Property {
                 target: self.target(object)?,

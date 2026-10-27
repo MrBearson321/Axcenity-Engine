@@ -356,6 +356,26 @@ mod tests {
     }
 
     #[test]
+    fn a_built_game_has_every_data_table() {
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-data");
+        let output = temp_folder("data-tables");
+        unpack_game(&pack_game(&source).unwrap(), &output).unwrap();
+        for name in ["weapons", "ammo"] {
+            let path = axcenity_assets::data_table_path(name);
+            assert_eq!(
+                fs::read(output.join(&path)).unwrap(),
+                fs::read(source.join(&path)).unwrap(),
+                "{path}"
+            );
+        }
+        // Scripts read them from the unpacked game as they do from the project.
+        let assets = axcenity_assets::Assets::new(&output);
+        let weapons = assets.data_table("weapons").unwrap();
+        assert_eq!(weapons.rows.len(), 3);
+        let _ = fs::remove_dir_all(&output);
+    }
+
+    #[test]
     fn hello_touched_blocks_exports_translated_lua() {
         let source =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-touched-blocks");
