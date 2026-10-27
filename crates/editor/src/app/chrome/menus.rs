@@ -382,6 +382,13 @@ impl EditorApp {
                 );
                 overlay_menu_item(
                     ui,
+                    &mut self.overlays.constraints,
+                    icons::LINK_SIMPLE,
+                    "Constraints",
+                    "Welds as lines between their parts, and every Attachment.",
+                );
+                overlay_menu_item(
+                    ui,
                     &mut self.overlays.culling,
                     icons::FRAME_CORNERS,
                     "Culling",

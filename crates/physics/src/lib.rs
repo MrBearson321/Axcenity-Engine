@@ -28,9 +28,14 @@
 //! a script that sets them throws the part; [`Mass`] tells scripts how much
 //! an impulse changes them.
 //!
+//! Parts held together by enabled WeldConstraints are one assembly: one
+//! rapier body with a collider per part (see [`assembly`]). An anchored part
+//! anchors its whole assembly.
+//!
 //! [`cast_ray`] and [`debug_colliders`] read the world the same way the
 //! simulation does, without stepping it or writing back.
 
+pub mod assembly;
 mod mass;
 mod material;
 mod query;
@@ -50,7 +55,9 @@ use axcenity_core::{
 use rapier3d::glamx::{EulerRot, Quat, Vec3};
 use rapier3d::math::Pose;
 use rapier3d::pipeline::PhysicsWorld;
-use rapier3d::prelude::{ColliderHandle, RigidBodyBuilder, RigidBodyHandle, RigidBodyType};
+use rapier3d::prelude::{
+    Collider, ColliderHandle, RigidBodyBuilder, RigidBodyHandle, RigidBodyType,
+};
 use shapes::Form;
 
 /// How long one physics step is: physics always runs at 60 steps a second.
@@ -109,11 +116,18 @@ pub struct Physics {
     assets: Assets,
 }
 
-/// One Part's rapier body, plus the part's properties as physics last saw or
-/// wrote them. A property that differs from these was changed by a script.
+/// One Part's collider on its assembly's rapier body, plus the part's
+/// properties as physics last saw or wrote them. A property that differs
+/// from these was changed by a script.
 struct Body {
+    /// Its assembly's body, which every part welded to it shares.
     body: RigidBodyHandle,
     collider: ColliderHandle,
+    /// Where the part sits on the body: nowhere off for the root part, which
+    /// the body is placed at.
+    offset: Pose,
+    /// True for its assembly's root part (see [`assembly`]).
+    root: bool,
     /// Extra colliders for colliding foliage, parented to a Terrain.
     foliage: Vec<ColliderHandle>,
     seen: PartState,
@@ -132,6 +146,8 @@ pub(crate) struct PartState {
     orientation: Vector3,
     /// True if the Workspace's wind pushes the part.
     wind_affected: bool,
+    /// True if it adds no mass to the assembly it's welded into.
+    massless: bool,
     /// Its `CustomPhysicalProperties`, or its material's.
     pub(crate) physical: PhysicalProperties,
     /// `AssemblyLinearVelocity` and `AssemblyAngularVelocity`.
@@ -163,6 +179,7 @@ impl PartState {
         let can_collide = instance.property("CanCollide").and_then(Value::as_bool) != Some(false);
         let wind_affected =
             instance.property("WindAffected").and_then(Value::as_bool) == Some(true);
+        let massless = instance.property("Massless").and_then(Value::as_bool) == Some(true);
         // MeshParts have no Material, so they weigh what Plastic does.
         let material = instance
             .property("Material")
@@ -181,6 +198,7 @@ impl PartState {
             position: vector("Position")?,
             orientation: vector("Orientation")?,
             wind_affected,
+            massless,
             physical,
             velocity: vector("AssemblyLinearVelocity").unwrap_or_default(),
             spin: vector("AssemblyAngularVelocity").unwrap_or_default(),
@@ -218,6 +236,7 @@ impl PartState {
             position: vector("Position")?,
             orientation: Vector3::default(),
             wind_affected: false,
+            massless: false,
             physical: PhysicalProperties::LEGACY,
             velocity: Vector3::default(),
             spin: Vector3::default(),
@@ -314,57 +333,93 @@ impl Physics {
     }
 
     /// Adds new Parts, removes ones that left the Workspace or were destroyed,
-    /// and applies anything a script changed since the last step.
+    /// applies anything a script changed since the last step, and welds or
+    /// unwelds assemblies.
     fn sync_from_world(&mut self, world: &World) {
         let current: BTreeMap<InstanceId, PartState> = world
             .descendants(world.workspace())
             .into_iter()
             .filter_map(|id| Some((id, PartState::read(world, id, &self.assets)?)))
             .collect();
+        let ids: Vec<InstanceId> = current.keys().copied().collect();
+        let groups: Vec<(Vec<InstanceId>, InstanceId)> =
+            assembly::group(&ids, &assembly::welds(world))
+                .into_iter()
+                .map(|members| {
+                    let root = assembly::root(world, &members);
+                    (members, root)
+                })
+                .collect();
         let mut anything_changed = false;
 
-        let gone: Vec<InstanceId> = self
+        // An assembly is built again when a part joins or leaves it, its
+        // root changes, or a script moves or (un)anchors a welded part, so
+        // the welds hold the parts where they are now. A part alone keeps
+        // its body (see `apply_change`).
+        let mut sharing: HashMap<RigidBodyHandle, usize> = HashMap::new();
+        for part in self.parts.values() {
+            *sharing.entry(part.body).or_default() += 1;
+        }
+        let rebuild: Vec<bool> = groups
+            .iter()
+            .map(|(members, root)| !self.is_kept(members, *root, &current, &sharing))
+            .collect();
+
+        // Take out the parts that are gone or rebuilt, with their bodies.
+        // Their last state tells the new body how fast to start.
+        let leaving = self
             .parts
             .keys()
             .filter(|id| !current.contains_key(id))
-            .copied()
-            .collect();
-        for id in gone {
-            if let Some(part) = self.parts.remove(&id) {
-                // `true` also removes the body's collider.
-                self.rapier.remove_body_with_colliders(part.body, true);
-                self.owners.remove(&part.collider);
-                for handle in part.foliage {
-                    self.owners.remove(&handle);
-                }
-                anything_changed = true;
+            .copied();
+        let rebuilt = groups
+            .iter()
+            .zip(&rebuild)
+            .filter(|(_, rebuild)| **rebuild)
+            .flat_map(|((members, _), _)| members.iter().copied());
+        let doomed: Vec<InstanceId> = leaving.chain(rebuilt).collect();
+        let mut old: HashMap<InstanceId, PartState> = HashMap::new();
+        for id in doomed {
+            let Some(part) = self.parts.remove(&id) else {
+                continue;
+            };
+            // `true` also removes the body's colliders. Welded parts share a
+            // body, so it may be gone already.
+            self.rapier.remove_body_with_colliders(part.body, true);
+            self.owners.remove(&part.collider);
+            for handle in part.foliage {
+                self.owners.remove(&handle);
             }
+            old.insert(id, part.seen);
+            anything_changed = true;
         }
         // A part that comes back (moved into the Workspace again) touches anew.
         self.touching
             .retain(|(a, b), _| current.contains_key(a) && current.contains_key(b));
 
-        for (id, state) in current {
-            match self.parts.get(&id) {
-                None => {
-                    let mut part = self.add_body(state);
-                    self.owners.insert(part.collider, id);
-                    self.attach_foliage(id, &mut part);
-                    self.parts.insert(id, part);
+        for ((members, root), rebuild) in groups.iter().zip(rebuild) {
+            if rebuild {
+                self.build_assembly(members, *root, &current, &old);
+                continue;
+            }
+            let welded = members.len() > 1;
+            for id in members {
+                let state = &current[id];
+                let part = &self.parts[id];
+                if part.seen == *state {
+                    continue;
                 }
-                Some(part) if part.seen != state => {
-                    let mut part = self.parts.remove(&id).expect("just found");
-                    self.owners.remove(&part.collider);
-                    for handle in &part.foliage {
-                        self.owners.remove(handle);
-                    }
-                    self.apply_change(&mut part, state);
-                    self.owners.insert(part.collider, id);
-                    self.attach_foliage(id, &mut part);
-                    self.parts.insert(id, part);
-                    anything_changed = true;
+                let mut part = self.parts.remove(id).expect("just found");
+                let weightless = welded && !part.root && state.massless;
+                self.owners.remove(&part.collider);
+                for handle in &part.foliage {
+                    self.owners.remove(handle);
                 }
-                Some(_) => {}
+                self.apply_change(&mut part, state.clone(), weightless);
+                self.owners.insert(part.collider, *id);
+                self.attach_foliage(*id, &mut part);
+                self.parts.insert(*id, part);
+                anything_changed = true;
             }
         }
 
@@ -377,25 +432,115 @@ impl Physics {
         }
     }
 
-    fn add_body(&mut self, state: PartState) -> Body {
-        let body = RigidBodyBuilder::new(state.body_type())
-            .pose(state.pose())
+    /// True if the parts `members`, with this `root`, already make up one
+    /// body by themselves that a change to them doesn't rebuild.
+    fn is_kept(
+        &self,
+        members: &[InstanceId],
+        root: InstanceId,
+        current: &BTreeMap<InstanceId, PartState>,
+        sharing: &HashMap<RigidBodyHandle, usize>,
+    ) -> bool {
+        let Some(body) = self.parts.get(&members[0]).map(|part| part.body) else {
+            return false;
+        };
+        if sharing.get(&body) != Some(&members.len()) {
+            return false;
+        }
+        members.iter().all(|id| {
+            let Some(part) = self.parts.get(id) else {
+                return false;
+            };
+            let (seen, now) = (&part.seen, &current[id]);
+            part.body == body
+                && (members.len() == 1
+                    || (part.root == (*id == root)
+                        && seen.position == now.position
+                        && seen.orientation == now.orientation
+                        && seen.anchored == now.anchored))
+        })
+    }
+
+    /// Makes one body for the parts `members`, placed at `root`, with each
+    /// part's collider where the part is now. It's anchored if any part is.
+    /// `old` has the last state of parts that had a body before.
+    fn build_assembly(
+        &mut self,
+        members: &[InstanceId],
+        root: InstanceId,
+        current: &BTreeMap<InstanceId, PartState>,
+        old: &HashMap<InstanceId, PartState>,
+    ) {
+        let root_state = &current[&root];
+        let anchored = members.iter().any(|id| current[id].anchored);
+        // It keeps going at the root's speed, which physics wrote to every
+        // welded part. A part that a script moved or (un)anchored starts
+        // the assembly from rest (decided in Phase 6), and a velocity a
+        // script set throws it.
+        let (mut velocity, mut spin) = (root_state.velocity, root_state.spin);
+        let restarted = members.iter().any(|id| {
+            let now = &current[id];
+            old.get(id).is_some_and(|seen| {
+                seen.position != now.position
+                    || seen.orientation != now.orientation
+                    || seen.anchored != now.anchored
+            })
+        });
+        if restarted {
+            (velocity, spin) = (Vector3::default(), Vector3::default());
+        }
+        for id in members {
+            let now = &current[id];
+            if let Some(seen) = old.get(id) {
+                if seen.velocity != now.velocity {
+                    velocity = now.velocity;
+                }
+                if seen.spin != now.spin {
+                    spin = now.spin;
+                }
+            }
+        }
+        let body_type = if anchored {
+            RigidBodyType::Fixed
+        } else {
+            RigidBodyType::Dynamic
+        };
+        let root_pose = root_state.pose();
+        let body = RigidBodyBuilder::new(body_type)
+            .pose(root_pose)
             // Continuous collision detection: fast parts can't skip through
             // thin ones between two steps.
             .ccd_enabled(true)
             .angular_damping(ANGULAR_DAMPING)
-            .linvel(to_vec3(state.velocity))
-            .angvel(to_vec3(state.spin))
+            .linvel(to_vec3(velocity))
+            .angvel(to_vec3(spin))
             .build();
-        let mut collider = shapes::collider(&state.shape, to_vec3(state.size));
-        collider.set_sensor(!state.can_collide);
-        material::apply(&mut collider, state.physical);
-        let (body, collider) = self.rapier.insert(body, collider);
-        Body {
-            body,
-            collider,
-            foliage: Vec::new(),
-            seen: state,
+        let body = self.rapier.bodies.insert(body);
+        let welded = members.len() > 1;
+        for &id in members {
+            let state = current[&id].clone();
+            let is_root = id == root;
+            let offset = if is_root {
+                Pose::IDENTITY
+            } else {
+                root_pose.inverse() * state.pose()
+            };
+            let collider = part_collider(&state, offset, welded && !is_root && state.massless);
+            let rapier = &mut self.rapier;
+            let collider = rapier
+                .colliders
+                .insert_with_parent(collider, body, &mut rapier.bodies);
+            self.owners.insert(collider, id);
+            let mut part = Body {
+                body,
+                collider,
+                offset,
+                root: is_root,
+                foliage: Vec::new(),
+                seen: state,
+            };
+            self.attach_foliage(id, &mut part);
+            self.parts.insert(id, part);
         }
     }
 
@@ -429,8 +574,12 @@ impl Physics {
         }
     }
 
-    /// Applies what a script changed on a part that already has a body.
-    fn apply_change(&mut self, part: &mut Body, state: PartState) {
+    /// Applies what a script changed on a part that already has a body. A
+    /// welded part (in an assembly that's kept) can only change its
+    /// collider and the assembly's speed; moving or anchoring one rebuilds
+    /// the assembly instead. `weightless` is true for a Massless part that
+    /// isn't its assembly's root.
+    fn apply_change(&mut self, part: &mut Body, state: PartState, weightless: bool) {
         let old = std::mem::replace(&mut part.seen, state);
         let state = &part.seen;
 
@@ -443,9 +592,7 @@ impl Physics {
                 &mut rapier.soft_bodies,
                 true,
             );
-            let mut collider = shapes::collider(&state.shape, to_vec3(state.size));
-            collider.set_sensor(!state.can_collide);
-            material::apply(&mut collider, state.physical);
+            let collider = part_collider(state, part.offset, weightless);
             part.collider =
                 rapier
                     .colliders
@@ -454,8 +601,11 @@ impl Physics {
             if old.can_collide != state.can_collide {
                 collider.set_sensor(!state.can_collide);
             }
-            if old.physical != state.physical {
+            if old.physical != state.physical || old.massless != state.massless {
                 material::apply(collider, state.physical);
+                if weightless {
+                    collider.set_density(0.0);
+                }
             }
         }
 
@@ -485,18 +635,25 @@ impl Physics {
     }
 
     /// Sets the wind's push on every unanchored part for the next step. A
-    /// part's force stays until it's reset, so every part's is reset first,
+    /// body's force stays until it's reset, so every body's is reset first,
     /// in case its WindAffected was just turned off or the wind stopped.
+    /// Each welded part pushes its assembly by its own faces.
     fn blow(&mut self, wind: Vec3) {
+        for part in self.parts.values() {
+            if let Some(body) = self.rapier.bodies.get_mut(part.body)
+                && body.is_dynamic()
+            {
+                body.reset_forces(false);
+            }
+        }
+        if wind == Vec3::ZERO {
+            return;
+        }
         for part in self.parts.values() {
             let Some(body) = self.rapier.bodies.get_mut(part.body) else {
                 continue;
             };
-            if !body.is_dynamic() {
-                continue;
-            }
-            body.reset_forces(false);
-            if !part.seen.wind_affected || wind == Vec3::ZERO {
+            if !body.is_dynamic() || !part.seen.wind_affected {
                 continue;
             }
             let size = part.seen.size;
@@ -549,7 +706,7 @@ impl Physics {
 
     /// Copies where each moving part is now, and how fast it moves, into
     /// its `Position`, `Orientation` and velocities, and remembers the
-    /// values written.
+    /// values written. Welded parts share their assembly's velocities.
     fn write_to_world(&mut self, world: &mut World) {
         for (&id, part) in &mut self.parts {
             let Some(body) = self.rapier.bodies.get(part.body) else {
@@ -573,7 +730,11 @@ impl Physics {
             if !body.is_dynamic() || body.is_sleeping() {
                 continue;
             }
-            let pose = body.position();
+            let pose = if part.root {
+                *body.position()
+            } else {
+                body.position() * part.offset
+            };
             let position = to_vector3(pose.translation);
             let orientation = quat_to_orientation(pose.rotation);
             if position != part.seen.position {
@@ -588,6 +749,20 @@ impl Physics {
             }
         }
     }
+}
+
+/// The collider for a part, `offset` from its assembly's body. A
+/// `weightless` one (Massless, and not the root) adds no mass.
+fn part_collider(state: &PartState, offset: Pose, weightless: bool) -> Collider {
+    let mut collider = shapes::collider(&state.shape, to_vec3(state.size));
+    // A turned shape (a cylinder) keeps its turn within the part.
+    collider.set_position(offset * *collider.position());
+    collider.set_sensor(!state.can_collide);
+    material::apply(&mut collider, state.physical);
+    if weightless {
+        collider.set_density(0.0);
+    }
+    collider
 }
 
 impl Default for Physics {
@@ -645,3 +820,6 @@ fn quat_to_orientation(rotation: Quat) -> Vector3 {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod assembly_tests;

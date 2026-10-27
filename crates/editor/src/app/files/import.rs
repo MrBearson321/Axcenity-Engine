@@ -373,6 +373,10 @@ impl EditorApp {
                         .set_parent(id, Some(container))
                         .expect("a new part can go in a new Model");
                 }
+                // Welded inside the Model, so they're in the same undo step.
+                if dialog.weld {
+                    crate::constraints::weld_model(&mut self.world, root);
+                }
                 self.place_imported(parent, vec![root], format!("Import {file_name}"), &before);
             }
         }

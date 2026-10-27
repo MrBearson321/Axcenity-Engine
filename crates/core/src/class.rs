@@ -147,6 +147,13 @@ pub enum ClassName {
     /// `workspace.CurrentCamera.CFrame = viewpoint.CFrame`. Not drawn and
     /// not a body.
     Camera,
+    /// A point and a direction on the part it's parented to, which moves
+    /// with the part. `Position` and `Orientation` are relative to the
+    /// part; scripts also read `WorldCFrame`. Not drawn in the game.
+    Attachment,
+    /// Holds `Part0` and `Part1` together where they were when it was made
+    /// or enabled. Welded unanchored parts move as one body: an assembly.
+    WeldConstraint,
     IntValue,
     NumberValue,
     StringValue,
@@ -158,7 +165,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 57] = [
+    pub const ALL: [ClassName; 59] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -208,6 +215,8 @@ impl ClassName {
         ClassName::NavigationAgent,
         ClassName::Checkpoint,
         ClassName::Camera,
+        ClassName::Attachment,
+        ClassName::WeldConstraint,
         ClassName::IntValue,
         ClassName::NumberValue,
         ClassName::StringValue,
@@ -269,6 +278,8 @@ impl ClassName {
             ClassName::NavigationAgent => "NavigationAgent",
             ClassName::Checkpoint => "Checkpoint",
             ClassName::Camera => "Camera",
+            ClassName::Attachment => "Attachment",
+            ClassName::WeldConstraint => "WeldConstraint",
             ClassName::IntValue => "IntValue",
             ClassName::NumberValue => "NumberValue",
             ClassName::StringValue => "StringValue",
@@ -1093,6 +1104,19 @@ impl ClassName {
                 // Where a restored character stands: the middle of its feet.
                 ("Position", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
             ],
+            ClassName::Attachment => vec![
+                // Where it sits and how it's turned, relative to the part
+                // it's parented to (degrees, like a Part's Orientation).
+                ("Position", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
+                ("Orientation", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
+            ],
+            ClassName::WeldConstraint => vec![
+                ("Part0", Value::Instance(None)),
+                ("Part1", Value::Instance(None)),
+                // Off, the two parts move apart; on again, they're welded
+                // where they are then.
+                ("Enabled", Value::Bool(true)),
+            ],
             ClassName::Camera => vec![
                 // Where the viewpoint is and which way it looks, in degrees
                 // like a Part's (Z, rolling, isn't drawn).
@@ -1174,6 +1198,8 @@ impl ClassName {
             | ClassName::FirstPersonController
             | ClassName::Checkpoint
             | ClassName::Camera
+            | ClassName::Attachment
+            | ClassName::WeldConstraint
             | ClassName::IntValue
             | ClassName::NumberValue
             | ClassName::StringValue
@@ -1256,8 +1282,8 @@ fn widget_properties(
 
 /// What both character controllers have: how the character moves, jumps
 /// and crouches.
-/// What Parts and MeshParts share about how they move (Phase 34). There
-/// are no welds yet, so each part is an assembly of its own.
+/// What Parts and MeshParts share about how they move (Phase 34). Parts
+/// welded together move as one assembly (Phase 35).
 fn body_properties() -> [(&'static str, Value); 4] {
     [
         // On, the part adds no mass to an assembly it shares with other

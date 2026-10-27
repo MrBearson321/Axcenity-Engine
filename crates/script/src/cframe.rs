@@ -372,7 +372,11 @@ pub fn pivot_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, ml
             world.descendants(this.0)
         };
         for id in parts {
-            if let Some(cf) = world.get(id).and_then(LuaCFrame::of_instance) {
+            // An Attachment's Position is on its part, so it moves with it.
+            let placed = world
+                .get(id)
+                .filter(|instance| instance.class() != ClassName::Attachment);
+            if let Some(cf) = placed.and_then(LuaCFrame::of_instance) {
                 (delta * cf)
                     .write_to(&mut world, id)
                     .map_err(mlua::Error::runtime)?;

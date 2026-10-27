@@ -1200,10 +1200,10 @@ Blocks: "push … with force", "set velocity", "set friction".
 
 ### Acceptance criteria
 
-- [ ] A table made of five welded unanchored parts falls and lands as one piece.
-- [ ] Disabling a weld from Lua lets the parts fall apart. Enabling it welds them where they are.
-- [ ] Anchoring one part of a welded assembly holds the whole assembly still.
-- [ ] Attachments placed in the editor keep their offsets when the part moves, and save and reload.
+- [x] A table made of five welded unanchored parts falls and lands as one piece.
+- [x] Disabling a weld from Lua lets the parts fall apart. Enabling it welds them where they are.
+- [x] Anchoring one part of a welded assembly holds the whole assembly still.
+- [x] Attachments placed in the editor keep their offsets when the part moves, and save and reload.
 
 ---
 

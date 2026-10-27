@@ -40,6 +40,7 @@
 //!   new code runs against the same world.
 
 mod api;
+mod attachment;
 mod bindable;
 mod camera;
 mod cframe;
@@ -1011,6 +1012,8 @@ mod user_settings_tests;
 #[cfg(test)]
 mod cframe_tests;
 
+#[cfg(test)]
+mod assembly_tests;
 #[cfg(test)]
 mod collection_tests;
 #[cfg(test)]

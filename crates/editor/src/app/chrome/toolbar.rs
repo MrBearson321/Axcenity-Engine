@@ -64,6 +64,9 @@ impl EditorApp {
         if clicks.insert_controls {
             self.insert_controls_ui();
         }
+        if clicks.weld {
+            self.weld_selected();
+        }
         if clicks.import {
             self.import_with_dialog(axcenity_assets::PROJECT_TEXTURES_FOLDER);
         }
@@ -319,6 +322,37 @@ impl EditorApp {
                     }
                 }
             }),
+            RibbonGroup::Constraints => ribbon::group(ui, "Constraints", |ui| {
+                let can_weld =
+                    !crate::constraints::weld_pairs(&self.world, &self.tool_parts()).is_empty();
+                let button = RibbonButton::new(icons::LINK_SIMPLE, "Weld");
+                clicks.weld = ui
+                    .add_enabled(!playing && can_weld, button)
+                    .on_hover_text(
+                        "Weld the selected parts to the largest of them, where they are now: \
+                         unanchored, they move as one body in the game.",
+                    )
+                    .on_disabled_hover_text(if playing {
+                        "Press Stop to edit."
+                    } else {
+                        "Select two or more parts to weld."
+                    })
+                    .clicked();
+                for what in Insertable::CONSTRAINTS {
+                    let button = RibbonButton::new(theme::insert_icon(what), what.label());
+                    if ui
+                        .add_enabled(!playing, button)
+                        .on_hover_text(
+                            "Insert an Attachment in the selected part, at its middle: a \
+                             point and direction on the part that moves with it.",
+                        )
+                        .on_disabled_hover_text("Press Stop to edit.")
+                        .clicked()
+                    {
+                        clicks.insert = Some(what);
+                    }
+                }
+            }),
             RibbonGroup::Import => ribbon::group(ui, "Import", |ui| {
                 let button = RibbonButton::new(icons::FILE_ARROW_DOWN, "Import…");
                 clicks.import = ui
@@ -512,6 +546,13 @@ impl EditorApp {
                     icons::PATH,
                     "Agent Paths",
                     "During Play, draw the path each NavigationAgent is walking, from its feet to its Destination.",
+                );
+                overlay_button(
+                    ui,
+                    &mut self.overlays.constraints,
+                    icons::LINK_SIMPLE,
+                    "Constraints",
+                    "Draw each WeldConstraint as a line between its parts (grey when disabled) and every Attachment as a small gizmo.",
                 );
                 overlay_button(
                     ui,

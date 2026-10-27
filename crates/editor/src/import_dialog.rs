@@ -103,6 +103,9 @@ pub struct ImportDialog {
     /// group shows its contents' ticks.
     ticked: Vec<bool>,
     pub placement: Placement,
+    /// With [`Placement::Grouped`], weld the Model's parts to its largest
+    /// one, so it moves as one body in the game.
+    pub weld: bool,
     /// Only objects whose names contain this are shown (ignoring case).
     filter: String,
     /// False for a file with one object: then there's nothing to choose,
@@ -149,6 +152,7 @@ impl ImportDialog {
             } else {
                 Placement::Merged
             },
+            weld: false,
             filter: String::new(),
             pick_objects: meshes > 1,
             found: materials.clone(),

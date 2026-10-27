@@ -294,6 +294,8 @@ pub struct OverlayToggles {
     pub emitters: bool,
     pub nav_mesh: bool,
     pub agent_paths: bool,
+    /// Welds and Attachments (selected Attachments always show).
+    pub constraints: bool,
     /// Freezes culling where the camera is when it goes on, and outlines
     /// what was drawn and what was culled. Not saved between runs.
     pub culling: bool,
@@ -307,6 +309,7 @@ impl OverlayToggles {
             || self.emitters
             || self.nav_mesh
             || self.agent_paths
+            || self.constraints
             || self.culling
     }
 }
@@ -333,7 +336,8 @@ struct DragSelection<'a> {
 
 /// The parts the transform tools act on: each selected part, and the parts
 /// inside each selected Model or Folder, once each, with the last selected
-/// one (or the last part inside it) last.
+/// one (or the last part inside it) last. A selected Attachment counts,
+/// at its place in the world, unless its part moves too.
 pub fn selected_parts(
     world: &World,
     selection: &[InstanceId],
@@ -346,6 +350,12 @@ pub fn selected_parts(
     }
     let mut parts: Vec<(InstanceId, Pose)> = Vec::new();
     for id in ids {
+        // A selected Attachment moves in the world, by its offset on its part.
+        if let Some(pose) = crate::constraints::tool_pose(world, id) {
+            parts.retain(|(seen, _)| *seen != id);
+            parts.push((id, pose));
+            continue;
+        }
         let inside = std::iter::once(id).chain(world.descendants(id));
         for part in inside {
             let Some(pose) = world.get(part).and_then(Pose::of) else {
@@ -356,6 +366,9 @@ pub fn selected_parts(
             parts.push((part, pose));
         }
     }
+    // An Attachment on a part that moves follows it already.
+    let ids: Vec<InstanceId> = parts.iter().map(|(id, _)| *id).collect();
+    parts.retain(|(id, _)| !crate::constraints::on_one_of(world, *id, &ids));
     parts
 }
 
@@ -976,6 +989,13 @@ impl Viewport {
             }
         }
         paint_lights(ui, rect, &lights, selected, pointer);
+        crate::constraints::paint(
+            &ui.painter_at(rect),
+            &screen,
+            world,
+            selection,
+            overlays.constraints,
+        );
         if overlays.any() {
             paint_debug_overlays(
                 &ui.painter_at(rect),

@@ -293,6 +293,39 @@ impl EditorApp {
             self.select_from_viewport(Some(id));
         }
     }
+    /// The Weld button: welds the selected parts (and the parts inside
+    /// selected Models) to the largest of them where they are, with a
+    /// WeldConstraint inside each other part, as one undo step.
+    pub(super) fn weld_selected(&mut self) {
+        if self.playing() || self.viewport.is_dragging() {
+            return;
+        }
+        let pairs = crate::constraints::weld_pairs(&self.world, &self.tool_parts());
+        if pairs.is_empty() {
+            self.output.warning("Select two or more parts to weld.");
+            return;
+        }
+        let mut moves = Vec::new();
+        for (part0, part1) in pairs {
+            let weld = crate::constraints::new_weld(&mut self.world, part0, part1);
+            let name = tree::unique_name(&self.world, part1, ClassName::WeldConstraint.as_str());
+            self.world.set_name(weld, name).expect("just made");
+            let index = self.world.get(part1).map_or(0, |p| p.children().len());
+            let place = Place {
+                parent: part1,
+                index,
+            };
+            if history::put(&mut self.world, weld, Some(place)).is_ok() {
+                moves.push(Move {
+                    id: weld,
+                    before: None,
+                    after: Some(place),
+                });
+            }
+        }
+        let label = format!("Weld {} parts", moves.len() + 1);
+        self.history.record_tree(&mut self.world, label, moves);
+    }
     /// Takes `id` and everything inside it out of the world, as one undo step.
     pub(super) fn delete(&mut self, id: InstanceId) {
         let Some(name) = self.editable_name(id, "delete") else {

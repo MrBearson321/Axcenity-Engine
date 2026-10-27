@@ -1842,6 +1842,31 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "Where SaveService:RestoreCheckpoint stands the player character: the middle of its feet goes here.",
     ),
     (
+        ClassName::Attachment,
+        "Position",
+        "Where it is, in studs from the middle of its part, along the part's own axes.",
+    ),
+    (
+        ClassName::Attachment,
+        "Orientation",
+        "How it's turned relative to its part, in degrees like a Part's Orientation.",
+    ),
+    (
+        ClassName::WeldConstraint,
+        "Part0",
+        "One of the two parts it holds together.",
+    ),
+    (
+        ClassName::WeldConstraint,
+        "Part1",
+        "The other part it holds together.",
+    ),
+    (
+        ClassName::WeldConstraint,
+        "Enabled",
+        "On (the default), it holds the parts together. Off, they move apart; turned on again, it welds them where they are then.",
+    ),
+    (
         ClassName::Camera,
         "Position",
         "Where the camera is, in studs.",
@@ -2686,6 +2711,12 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::Camera => {
             "A view of the world. `workspace.CurrentCamera` (LocalScripts only) is the one the player sees through: its `CameraType` says who moves it, and it turns screen points into rays and back. Camera objects placed in the world are named viewpoints, not drawn: `workspace.CurrentCamera.CFrame = workspace.Overlook.CFrame` cuts to one."
+        }
+        ClassName::Attachment => {
+            "A point and a direction on the part it's parented to, for things that need a spot on a part. `Position` and `Orientation` (and `CFrame`) are relative to the part, so it moves with it; `WorldCFrame`, `WorldPosition` and `WorldOrientation` are where it is in the world. `Axis` and `SecondaryAxis` are the ways its X and Y point on the part (`WorldAxis` and `WorldSecondaryAxis` in the world). Not drawn in the game; the editor shows it as a small gizmo."
+        }
+        ClassName::WeldConstraint => {
+            "Holds `Part0` and `Part1` together where they were when it was made (or enabled). Parts welded together move as one body, an assembly: they fall and tumble together, and an anchored part anchors the whole assembly. `part:GetConnectedParts()` and `part:GetRootPart()` follow welds. Setting a welded part's Position or CFrame moves that part alone, and the weld holds it where it lands."
         }
         ClassName::Checkpoint => {
             "A place in the world to come back to. `SaveService:SetCheckpoint(checkpoint)` makes it the active one and captures the player data and world state there; `SaveService:RestoreCheckpoint()` puts them back and stands the player character at its Position. A save slot keeps the active checkpoint."

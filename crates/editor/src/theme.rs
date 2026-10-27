@@ -749,6 +749,8 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::NavigationAgent => icons::ROBOT,
         ClassName::Checkpoint => icons::FLAG_PENNANT,
         ClassName::Camera => icons::VIDEO_CAMERA,
+        ClassName::Attachment => icons::CROSSHAIR_SIMPLE,
+        ClassName::WeldConstraint => icons::LINK_SIMPLE,
         ClassName::IntValue | ClassName::NumberValue => icons::HASH,
         ClassName::StringValue => icons::TEXT_AA,
         ClassName::BoolValue => icons::TOGGLE_LEFT,
@@ -834,6 +836,7 @@ pub fn class_color(class: ClassName, visuals: &egui::Visuals) -> Color32 {
         | ClassName::NavigationAgent
         | ClassName::Checkpoint
         | ClassName::Camera => pick((90, 200, 160), (20, 130, 100)),
+        ClassName::Attachment | ClassName::WeldConstraint => pick((200, 170, 120), (130, 95, 40)),
         ClassName::Script => pick((226, 145, 82), (185, 95, 10)),
         ClassName::LocalScript => pick((90, 190, 175), (10, 120, 110)),
         ClassName::ModuleScript => pick((170, 145, 240), (105, 75, 190)),

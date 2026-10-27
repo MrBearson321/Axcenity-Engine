@@ -1346,3 +1346,39 @@ fn scripts_switch_between_code_graph_and_blocks_and_run_the_same() {
     assert_eq!(script(&app, "Script"), id);
     fs::remove_dir_all(folder).unwrap();
 }
+
+#[test]
+fn a_model_imported_with_weld_parts_ticked_is_welded_to_its_largest_part() {
+    let folder = copy_of_example("hello-part", "import-weld");
+    let mut app = EditorApp::new(Some(&folder));
+    let file = write_props(&folder);
+    app.import_model(&file);
+    let mut dialog = app.importing.take().expect("three objects ask first");
+    assert_eq!(dialog.placement, Placement::Grouped);
+    assert!(!dialog.weld, "off unless ticked");
+    dialog.weld = true;
+    app.import_chosen(&dialog);
+
+    let model = app.selected.expect("the new Model is selected");
+    let world = &app.world;
+    let of_class = |class| {
+        world
+            .descendants(model)
+            .into_iter()
+            .filter(|&id| world.get(id).unwrap().class() == class)
+            .collect::<Vec<_>>()
+    };
+    let parts = of_class(ClassName::MeshPart);
+    assert_eq!(parts.len(), 3);
+    assert_eq!(of_class(ClassName::WeldConstraint).len(), 2);
+    assert_eq!(
+        axcenity_physics::assembly::connected_parts(world, parts[0], true).len(),
+        3,
+        "one assembly"
+    );
+
+    // The welds are part of the import's undo step.
+    app.undo();
+    assert!(!app.world.contains(model) || app.world.get(model).unwrap().parent().is_none());
+    let _ = fs::remove_dir_all(&folder);
+}

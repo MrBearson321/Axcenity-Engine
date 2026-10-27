@@ -240,9 +240,13 @@ impl Viewport {
                     Dragging::Handle(drag) => {
                         // Shift turns a ring finely.
                         let at = gizmo::Pointer::on(screen, pointer, shift);
-                        drag.update_all(at, &snap).map(|parts| DragEdit {
-                            kind: DragKind::of(drag.handle),
-                            parts,
+                        drag.update_all(at, &snap).map(|mut parts| {
+                            // An Attachment is placed by its offset on its part.
+                            crate::constraints::localize(world, &mut parts);
+                            DragEdit {
+                                kind: DragKind::of(drag.handle),
+                                parts,
+                            }
                         })
                     }
                     Dragging::Body(place, others) => {
@@ -260,6 +264,7 @@ impl Viewport {
                                 })
                                 .collect();
                             parts.push((place.part, vec![("Position", position)]));
+                            crate::constraints::localize(world, &mut parts);
                             DragEdit {
                                 kind: DragKind::Move,
                                 parts,

@@ -1537,17 +1537,55 @@ pub(super) const GLOBAL_FUNCTIONS: &[Function] = &[Function {
 const PART_CFRAME_DOC: &str =
     "Its Position and Orientation as one CFrame. Setting it sets both; it isn't saved itself.";
 const GET_PIVOT_DOC: &str = "Where it turns and moves from: a part's own CFrame, or for a Model the centre of the box around its parts, unturned.";
-const APPLY_IMPULSE_DOC: &str = "Pushes the part through its center of mass: its velocity changes by `impulse` divided by its mass (`GetMass`). Pushes in one frame add up. Anchored parts don't move.";
+const APPLY_IMPULSE_DOC: &str = "Pushes the part through its center of mass: its velocity changes by `impulse` divided by its assembly's mass (`AssemblyMass`, which is `GetMass()` for a part alone). Pushes in one frame add up. Anchored parts don't move.";
+const CONNECTED_PARTS_DOC: &str = "The part, then the parts welded to it by an enabled WeldConstraint; with `recursive` true, every part in its assembly.";
+const ROOT_PART_DOC: &str = "The root of its assembly: an anchored part if there is one, then one that isn't Massless, then the largest. A part alone is its own root.";
 const APPLY_IMPULSE_AT_DOC: &str = "Pushes the part at `position` in the world: it speeds up as `ApplyImpulse` would, and an impulse off its center of mass also spins it.";
 const APPLY_ANGULAR_DOC: &str = "Spins the part: its `AssemblyAngularVelocity` changes by `impulse` (radians a second times inertia) through its inertia.";
 const GET_MASS_DOC: &str = "Its density times its volume: a 1×1×1 Plastic block weighs 1. MeshParts weigh their collision shape.";
-const ASSEMBLY_MASS_DOC: &str = "The mass of everything moving with it. Each part moves on its own until welds exist, so this is `GetMass()`. Read-only.";
+const ASSEMBLY_MASS_DOC: &str = "The mass of everything moving with it: the parts welded into its assembly, except Massless ones (a part alone keeps its own mass). Read-only.";
 const CENTER_OF_MASS_DOC: &str =
     "Where its mass is centered, in the world: the middle of a block or ball. Read-only.";
 const CURRENT_PHYSICAL_DOC: &str = "The physical properties in use: `CustomPhysicalProperties`, or its Material's when that's nil. Read-only.";
 const PIVOT_TO_DOC: &str = "Moves and turns it so its pivot is at `target`. A Model's parts all move together and keep their places relative to each other.";
 
 pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
+    (
+        ClassName::Part,
+        Function {
+            name: "GetConnectedParts",
+            doc: CONNECTED_PARTS_DOC,
+            params: &[("recursive", "boolean?")],
+            returns: "{Instance}",
+        },
+    ),
+    (
+        ClassName::Part,
+        Function {
+            name: "GetRootPart",
+            doc: ROOT_PART_DOC,
+            params: &[],
+            returns: "Instance",
+        },
+    ),
+    (
+        ClassName::MeshPart,
+        Function {
+            name: "GetConnectedParts",
+            doc: CONNECTED_PARTS_DOC,
+            params: &[("recursive", "boolean?")],
+            returns: "{Instance}",
+        },
+    ),
+    (
+        ClassName::MeshPart,
+        Function {
+            name: "GetRootPart",
+            doc: ROOT_PART_DOC,
+            params: &[],
+            returns: "Instance",
+        },
+    ),
     (
         ClassName::Camera,
         Function {
@@ -2101,6 +2139,70 @@ pub(super) const CLASS_FIELDS: &[(ClassName, Field)] = &[
             name: "ViewportSize",
             ty: "Vector2",
             doc: "`CurrentCamera` only: the view's size in pixels (the window, or the editor's viewport). Read-only.",
+        },
+    ),
+    (
+        ClassName::Attachment,
+        Field {
+            name: "CFrame",
+            ty: "CFrame",
+            doc: "Its Position and Orientation on its part as one CFrame. Setting it sets both.",
+        },
+    ),
+    (
+        ClassName::Attachment,
+        Field {
+            name: "WorldCFrame",
+            ty: "CFrame",
+            doc: "Where it is in the world: its part's CFrame times its own. Setting it moves it on its part.",
+        },
+    ),
+    (
+        ClassName::Attachment,
+        Field {
+            name: "WorldPosition",
+            ty: "Vector3",
+            doc: "Where it is in the world. Setting it moves it on its part.",
+        },
+    ),
+    (
+        ClassName::Attachment,
+        Field {
+            name: "WorldOrientation",
+            ty: "Vector3",
+            doc: "How it's turned in the world, in degrees. Setting it turns it on its part.",
+        },
+    ),
+    (
+        ClassName::Attachment,
+        Field {
+            name: "Axis",
+            ty: "Vector3",
+            doc: "The way its X points, relative to its part. Setting it turns the attachment, keeping SecondaryAxis as close as it can.",
+        },
+    ),
+    (
+        ClassName::Attachment,
+        Field {
+            name: "SecondaryAxis",
+            ty: "Vector3",
+            doc: "The way its Y points, relative to its part. Setting it turns the attachment around its Axis.",
+        },
+    ),
+    (
+        ClassName::Attachment,
+        Field {
+            name: "WorldAxis",
+            ty: "Vector3",
+            doc: "The way its X points in the world. Read-only.",
+        },
+    ),
+    (
+        ClassName::Attachment,
+        Field {
+            name: "WorldSecondaryAxis",
+            ty: "Vector3",
+            doc: "The way its Y points in the world. Read-only.",
         },
     ),
     (

@@ -1,11 +1,12 @@
 //! Phase 34: worlds saved before physical properties simulate the same.
+//! Phase 35: the hello-welds example's welded table and crate.
 
 use std::path::Path;
 
 use axcenity_core::{Value, Vector3, World};
 use axcenity_physics::Physics;
 
-use super::tests::copy_folder;
+use super::tests::{copy_folder, position_of, run_until, start_example};
 
 /// Opens the format 3 fixture (a copy, since opening upgrades it) and runs
 /// three seconds of physics. Each unanchored part's name and Position.
@@ -67,4 +68,55 @@ fn a_world_saved_before_physical_properties_simulates_the_same() {
             .fold(0.0, f32::max);
         assert!(apart < 1e-3, "{name} is at {now:?}, not {before:?}");
     }
+}
+
+#[test]
+fn hello_welds_table_lands_in_one_piece_and_its_script_drops_and_holds_the_crate() {
+    let (mut world, mut scripts) = start_example("hello-welds");
+    let mut physics = Physics::new();
+    let mut clock = 0;
+    let mut at = |until| {
+        run_until(&mut world, &mut scripts, &mut physics, &mut clock, until);
+        (position_of(&world, "Crate").y, world.clone())
+    };
+
+    // The crate hangs from the anchored beam it's welded to.
+    let (crate_y, world_then) = at(1.9);
+    assert_eq!(crate_y, 10.5);
+    // By then the table has landed standing, every leg on the floor and
+    // the top on them.
+    for leg in ["Leg1", "Leg2", "Leg3", "Leg4"] {
+        let y = position_of(&world_then, leg).y;
+        assert!((y - 1.5).abs() < 0.05, "{leg} is at {y}");
+    }
+    assert!((position_of(&world_then, "TableTop").y - 3.25).abs() < 0.05);
+    let top = world_then
+        .find_first_child(world_then.workspace(), "TableTop")
+        .unwrap();
+    let handle = world_then.find_first_child(top, "Handle").unwrap();
+    assert_eq!(
+        world_then.get(handle).unwrap().property("Position"),
+        Some(&Value::Vector3(Vector3::new(2.5, 0.25, 0.0))),
+        "the attachment keeps its offset on the top"
+    );
+
+    // Unwelded at 2 s, welded again in mid-air, then dropped for good.
+    let (held, _) = at(2.6);
+    assert!(held < 10.0 && held > 3.0, "it fell a little: {held}");
+    let (still, _) = at(3.5);
+    assert_eq!(still, held, "welded again where it was");
+    let (landed, _) = at(5.0);
+    assert!(
+        (landed - 1.0).abs() < 0.05,
+        "it fell to the floor: {landed}"
+    );
+    let output: Vec<String> = scripts
+        .take_output()
+        .into_iter()
+        .map(|line| line.text.replace('\t', " "))
+        .collect();
+    assert!(
+        output.contains(&"5 parts in the table, rooted at TableTop".to_owned()),
+        "{output:?}"
+    );
 }

@@ -1,0 +1,141 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Position": [0, -0.5, 0],
+          "Size": [40, 1, 40],
+          "Color": [0.35, 0.37, 0.4],
+          "Anchored": true
+        }
+      },
+      {
+        "class": "Part",
+        "name": "TableTop",
+        "properties": {
+          "Position": [0, 11.25, 0],
+          "Size": [6, 0.5, 4],
+          "Color": [0.6, 0.4, 0.22]
+        },
+        "children": [
+          {
+            "class": "Attachment",
+            "name": "Handle",
+            "properties": {
+              "Position": [2.5, 0.25, 0],
+              "Orientation": [0, 0, 90]
+            }
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "Leg1",
+        "properties": {
+          "Position": [-2.5, 9.5, -1.5],
+          "Size": [0.5, 3, 0.5],
+          "Color": [0.5, 0.33, 0.18]
+        },
+        "children": [
+          {
+            "class": "WeldConstraint",
+            "name": "WeldConstraint",
+            "properties": {
+              "Part0": ["Workspace", "TableTop"],
+              "Part1": ["Workspace", "Leg1"]
+            }
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "Leg2",
+        "properties": {
+          "Position": [2.5, 9.5, -1.5],
+          "Size": [0.5, 3, 0.5],
+          "Color": [0.5, 0.33, 0.18]
+        },
+        "children": [
+          {
+            "class": "WeldConstraint",
+            "name": "WeldConstraint",
+            "properties": {
+              "Part0": ["Workspace", "TableTop"],
+              "Part1": ["Workspace", "Leg2"]
+            }
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "Leg3",
+        "properties": {
+          "Position": [-2.5, 9.5, 1.5],
+          "Size": [0.5, 3, 0.5],
+          "Color": [0.5, 0.33, 0.18]
+        },
+        "children": [
+          {
+            "class": "WeldConstraint",
+            "name": "WeldConstraint",
+            "properties": {
+              "Part0": ["Workspace", "TableTop"],
+              "Part1": ["Workspace", "Leg3"]
+            }
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "Leg4",
+        "properties": {
+          "Position": [2.5, 9.5, 1.5],
+          "Size": [0.5, 3, 0.5],
+          "Color": [0.5, 0.33, 0.18]
+        },
+        "children": [
+          {
+            "class": "WeldConstraint",
+            "name": "WeldConstraint",
+            "properties": {
+              "Part0": ["Workspace", "TableTop"],
+              "Part1": ["Workspace", "Leg4"]
+            }
+          }
+        ]
+      },
+      {
+        "class": "Part",
+        "name": "Beam",
+        "properties": {
+          "Position": [8, 12, 0],
+          "Size": [6, 1, 1],
+          "Color": [0.3, 0.55, 0.9],
+          "Anchored": true
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Crate",
+        "properties": {
+          "Position": [8, 10.5, 0],
+          "Size": [2, 2, 2],
+          "Color": [0.85, 0.2, 0.2]
+        },
+        "children": [
+          {
+            "class": "WeldConstraint",
+            "name": "Hold",
+            "properties": {
+              "Part0": ["Workspace", "Beam"],
+              "Part1": ["Workspace", "Crate"]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

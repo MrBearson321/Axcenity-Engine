@@ -52,6 +52,8 @@ pub enum Insertable {
     Checkpoint,
     /// A named viewpoint scripts cut the camera to.
     Camera,
+    /// A point and direction on the selected part, at its middle.
+    Attachment,
     /// An IntValue, StringValue or other Value object.
     Value(ClassName),
 }
@@ -102,6 +104,8 @@ impl Insertable {
     pub const CHECKPOINTS: [Insertable; 1] = [Insertable::Checkpoint];
     /// Camera viewpoints, placed where the editor's camera is.
     pub const CAMERAS: [Insertable; 1] = [Insertable::Camera];
+    /// Points on parts, for constraints and effects.
+    pub const CONSTRAINTS: [Insertable; 1] = [Insertable::Attachment];
     /// What scripts ask and tell each other with, after the RemoteEvent.
     pub const MESSENGERS: [Insertable; 3] = [
         Insertable::Messenger(ClassName::RemoteFunction),
@@ -158,6 +162,7 @@ impl Insertable {
             Insertable::NavigationAgent => "Agent",
             Insertable::Checkpoint => "Checkpoint",
             Insertable::Camera => "Camera",
+            Insertable::Attachment => "Attachment",
             Insertable::Value(class) => class.as_str(),
         }
     }
@@ -196,6 +201,7 @@ impl Insertable {
             Insertable::NavigationAgent => ClassName::NavigationAgent,
             Insertable::Checkpoint => ClassName::Checkpoint,
             Insertable::Camera => ClassName::Camera,
+            Insertable::Attachment => ClassName::Attachment,
             Insertable::Value(class) => class,
         }
     }
@@ -347,10 +353,16 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
             world.get(id).map(|instance| instance.class()),
             Some(ClassName::Part | ClassName::MeshPart | ClassName::Model)
         );
+        // An Attachment's Position is on its part, so only a part holds one.
+        let is_part = matches!(
+            world.get(id).map(|instance| instance.class()),
+            Some(ClassName::Part | ClassName::MeshPart)
+        );
         id == world.replicated_storage()
             || (is_group && is_saved(world, id))
             // A Value object goes inside whatever is selected.
             || (matches!(what, Insertable::Value(_)) && is_saved(world, id))
+            || (what == Insertable::Attachment && is_part && is_saved(world, id))
             || (is_ui_container
                 && (what.is_ui_element() || what == Insertable::Animation)
                 && is_saved(world, id))

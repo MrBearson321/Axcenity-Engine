@@ -316,6 +316,8 @@ struct RibbonClicks {
     /// UI ▸ Controls: the ready-made controls menu.
     insert_controls: bool,
     import: bool,
+    /// Model ▸ Constraints ▸ Weld.
+    weld: bool,
     check_assets: bool,
     play: bool,
     stop: bool,
@@ -440,6 +442,7 @@ const OVERLAY_BOUNDS_KEY: &str = "overlay bounds";
 const OVERLAY_EMITTERS_KEY: &str = "overlay emitters";
 const OVERLAY_NAV_MESH_KEY: &str = "overlay nav mesh";
 const OVERLAY_AGENT_PATHS_KEY: &str = "overlay agent paths";
+const OVERLAY_CONSTRAINTS_KEY: &str = "overlay constraints";
 const CONSOLE_HISTORY_KEY: &str = "console history";
 /// The graphics settings, as JSON.
 const GRAPHICS_KEY: &str = "graphics";
@@ -668,6 +671,8 @@ impl EditorApp {
                 storage.get_string(OVERLAY_NAV_MESH_KEY).as_deref() == Some("on");
             self.overlays.agent_paths =
                 storage.get_string(OVERLAY_AGENT_PATHS_KEY).as_deref() == Some("on");
+            self.overlays.constraints =
+                storage.get_string(OVERLAY_CONSTRAINTS_KEY).as_deref() == Some("on");
             if let Some(text) = storage.get_string(CONSOLE_HISTORY_KEY) {
                 self.console.load_history(&text);
             }
@@ -772,6 +777,10 @@ impl eframe::App for EditorApp {
         storage.set_string(
             OVERLAY_AGENT_PATHS_KEY,
             flag(self.overlays.agent_paths).to_owned(),
+        );
+        storage.set_string(
+            OVERLAY_CONSTRAINTS_KEY,
+            flag(self.overlays.constraints).to_owned(),
         );
         storage.set_string(CONSOLE_HISTORY_KEY, self.console.history_text());
         if let Ok(text) = serde_json::to_string(&self.graphics) {
@@ -1156,6 +1165,8 @@ mod attribute_tests;
 mod behavior_tree_tests;
 #[cfg(test)]
 mod camera_tests;
+#[cfg(test)]
+mod constraint_tests;
 #[cfg(test)]
 mod data_table_tests;
 #[cfg(test)]

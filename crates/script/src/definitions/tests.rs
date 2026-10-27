@@ -272,6 +272,7 @@ fn described_fields_and_methods_exist() {
         (ClassName::Part, "Instance.new('Part')"),
         (ClassName::MeshPart, "Instance.new('MeshPart')"),
         (ClassName::Model, "Instance.new('Model')"),
+        (ClassName::Attachment, "Instance.new('Attachment')"),
         (ClassName::Animation, "Instance.new('Animation')"),
         (
             ClassName::AnimationTrack,

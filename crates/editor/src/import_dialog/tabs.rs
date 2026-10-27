@@ -161,6 +161,13 @@ pub(super) fn placement(dialog: &mut ImportDialog, ui: &mut egui::Ui) {
         }
         ui.add_space(6.0);
     }
+    if dialog.placement == Placement::Grouped {
+        ui.checkbox(&mut dialog.weld, "Weld parts").on_hover_text(
+            "Weld every part of the Model to its largest one where it is, so unanchored \
+                 it falls and tumbles as one piece.",
+        );
+        ui.add_space(6.0);
+    }
     if animated && dialog.placement != Placement::Merged {
         let palette = theme::palette(ui.ctx());
         ui.label(

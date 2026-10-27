@@ -158,6 +158,10 @@ fn get(lua: &Lua, id: InstanceId, key: &str) -> mlua::Result<mlua::Value> {
     {
         return cf.into_lua(lua);
     }
+    // Worked out from the attachment's part (see `attachment`).
+    if let Some(value) = crate::attachment::computed(lua, id, key)? {
+        return Ok(value);
+    }
     // Worked out from the part's shape and material (see `physical`).
     if let Some(value) = crate::physical::computed(lua, id, key)? {
         return Ok(value);
@@ -271,6 +275,9 @@ fn set(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> mlua::Result
             })?;
             cf.write_to(&mut *world_mut(lua)?, id)
                 .map_err(mlua::Error::runtime)
+        }
+        key if crate::attachment::FIELDS.contains(&key) && class == Some(ClassName::Attachment) => {
+            crate::attachment::set(lua, id, key, value)
         }
         key if crate::physical::COMPUTED.contains(&key)
             && class

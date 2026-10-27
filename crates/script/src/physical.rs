@@ -10,8 +10,8 @@
 //! its next step. Impulses in one frame add up. Anchored parts don't move.
 
 use axcenity_assets::Assets;
-use axcenity_core::{ClassName, InstanceId, Material, PhysicalProperties, Value, Vector3};
-use axcenity_physics::Mass;
+use axcenity_core::{ClassName, InstanceId, Material, PhysicalProperties, Value, Vector3, World};
+use axcenity_physics::{Mass, assembly};
 use mlua::{FromLua, IntoLua, Lua, MetaMethod, Table, UserData, UserDataFields, UserDataMethods};
 
 use crate::instance::{LuaInstance, destroyed, world, world_mut};
@@ -107,15 +107,29 @@ fn is_part(lua: &Lua, id: InstanceId) -> mlua::Result<bool> {
     Ok(matches!(class, ClassName::Part | ClassName::MeshPart))
 }
 
-/// The part's mass as physics would simulate it now.
+/// The mass of the part's assembly (everything welded to it) as physics
+/// would simulate it now.
 fn mass(lua: &Lua, id: InstanceId) -> mlua::Result<Mass> {
+    weigh(lua, id, Mass::of_assembly)
+}
+
+/// The part's own mass, for `GetMass`.
+fn part_mass(lua: &Lua, id: InstanceId) -> mlua::Result<Mass> {
+    weigh(lua, id, Mass::of)
+}
+
+fn weigh(
+    lua: &Lua,
+    id: InstanceId,
+    how: fn(&World, &Assets, InstanceId) -> Option<Mass>,
+) -> mlua::Result<Mass> {
     let assets = lua
         .app_data_ref::<Assets>()
         .as_deref()
         .cloned()
         .unwrap_or_default();
     let world = world(lua)?;
-    Mass::of(&world, &assets, id).ok_or_else(|| {
+    how(&world, &assets, id).ok_or_else(|| {
         mlua::Error::runtime(
             "this part has a NaN or infinite Position, Orientation or Size, so it has no mass",
         )
@@ -151,8 +165,9 @@ fn vector_arg(lua: &Lua, value: mlua::Value, call: &str) -> mlua::Result<Vector3
         })
 }
 
-/// `ApplyImpulse`, `ApplyImpulseAtPosition`, `ApplyAngularImpulse` and
-/// `GetMass`, on Parts and MeshParts.
+/// `ApplyImpulse`, `ApplyImpulseAtPosition`, `ApplyAngularImpulse`,
+/// `GetMass`, `GetConnectedParts` and `GetRootPart`, on Parts and
+/// MeshParts. Impulses push the part's whole assembly.
 pub fn body_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, mlua::Function)>> {
     let apply_impulse =
         lua.create_function(|lua, (this, impulse): (LuaInstance, mlua::Value)| {
@@ -183,13 +198,28 @@ pub fn body_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, mlu
             add_velocity(lua, this.0, "AssemblyAngularVelocity", spin)
         })?;
     let get_mass =
-        lua.create_function(|lua, this: LuaInstance| Ok(f32_to_lua(mass(lua, this.0)?.mass)))?;
+        lua.create_function(|lua, this: LuaInstance| Ok(f32_to_lua(part_mass(lua, this.0)?.mass)))?;
+    let get_connected =
+        lua.create_function(|lua, (this, recursive): (LuaInstance, Option<bool>)| {
+            let world = world(lua)?;
+            world.get(this.0).ok_or_else(destroyed)?;
+            let parts = assembly::connected_parts(&world, this.0, recursive.unwrap_or(false));
+            drop(world);
+            lua.create_sequence_from(parts.into_iter().map(LuaInstance))
+        })?;
+    let get_root = lua.create_function(|lua, this: LuaInstance| {
+        let world = world(lua)?;
+        world.get(this.0).ok_or_else(destroyed)?;
+        Ok(LuaInstance(assembly::root_part(&world, this.0)))
+    })?;
     let mut methods = Vec::new();
     for class in [ClassName::Part, ClassName::MeshPart] {
         methods.push((class, "ApplyImpulse", apply_impulse.clone()));
         methods.push((class, "ApplyImpulseAtPosition", apply_at.clone()));
         methods.push((class, "ApplyAngularImpulse", apply_angular.clone()));
         methods.push((class, "GetMass", get_mass.clone()));
+        methods.push((class, "GetConnectedParts", get_connected.clone()));
+        methods.push((class, "GetRootPart", get_root.clone()));
     }
     Ok(methods)
 }
@@ -209,8 +239,8 @@ pub fn computed(lua: &Lua, id: InstanceId, key: &str) -> mlua::Result<Option<mlu
         return Ok(None);
     }
     let value = match key {
-        // Each part is its own assembly (no welds yet), so a Massless one
-        // keeps its own mass, as a root part does.
+        // Everything welded to it; a part alone keeps its own mass even if
+        // it's Massless, as a root part does.
         "AssemblyMass" => f32_to_lua(mass(lua, id)?.mass).into_lua(lua)?,
         "AssemblyCenterOfMass" => LuaVector3(mass(lua, id)?.center).into_lua(lua)?,
         _ => LuaPhysicalProperties(current(lua, id)?).into_lua(lua)?,

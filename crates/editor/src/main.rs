@@ -19,6 +19,7 @@ mod behavior_tree;
 mod block_editor;
 mod build_tools;
 mod console;
+mod constraints;
 mod css_syntax;
 mod data_table;
 mod dialog;

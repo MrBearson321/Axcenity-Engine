@@ -1476,7 +1476,7 @@ fn a_material_variant_saves_reloads_and_exports_with_its_material_files() {
     let _ = fs::remove_dir_all(&exported);
 }
 
-fn start_example(name: &str) -> (World, ScriptRuntime) {
+pub(super) fn start_example(name: &str) -> (World, ScriptRuntime) {
     let (world, scripts, _) = start_example_in(name);
     (world, scripts)
 }
@@ -1744,7 +1744,7 @@ fn hello_mesh_drops_parts_onto_an_imported_model_which_reports_touches() {
     assert_eq!(meshes, 2);
 }
 
-fn position_of(world: &World, name: &str) -> Vector3 {
+pub(super) fn position_of(world: &World, name: &str) -> Vector3 {
     let id = world.find_first_child(world.workspace(), name).unwrap();
     world
         .get(id)

@@ -222,6 +222,11 @@ impl EditorApp {
         )
         .on_hover_text("The path each NavigationAgent is walking, during Play.");
         ui.checkbox(
+            &mut self.overlays.constraints,
+            theme::with_icon(icons::LINK_SIMPLE, "Show constraints"),
+        )
+        .on_hover_text("Welds as lines between their parts, and every Attachment.");
+        ui.checkbox(
             &mut self.overlays.culling,
             theme::with_icon(icons::FRAME_CORNERS, "Show culling"),
         )

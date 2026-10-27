@@ -967,3 +967,55 @@ fn a_bad_attribute_names_the_instance_and_attribute() {
     let err = parse_err(text);
     assert!(err.contains("Workspace.P: attribute `Spawn`"), "{err}");
 }
+
+#[test]
+fn welds_and_attachments_round_trip_through_the_world_file() {
+    let mut world = World::new();
+    let workspace = world.workspace();
+    let mut part = |name: &str| {
+        let id = world.create(ClassName::Part).unwrap();
+        world.set_name(id, name).unwrap();
+        world.set_parent(id, Some(workspace)).unwrap();
+        id
+    };
+    let (top, leg) = (part("Top"), part("Leg"));
+    let weld = world.create(ClassName::WeldConstraint).unwrap();
+    world.set_parent(weld, Some(leg)).unwrap();
+    world
+        .set_property(weld, "Part0", Value::Instance(Some(top)))
+        .unwrap();
+    world
+        .set_property(weld, "Part1", Value::Instance(Some(leg)))
+        .unwrap();
+    world
+        .set_property(weld, "Enabled", Value::Bool(false))
+        .unwrap();
+    let handle = world.create(ClassName::Attachment).unwrap();
+    world.set_name(handle, "Handle").unwrap();
+    world.set_parent(handle, Some(top)).unwrap();
+    let offset = Vector3::new(1.5, 0.25, -2.0);
+    let turn = Vector3::new(0.0, 45.0, 10.0);
+    world
+        .set_property(handle, "Position", Value::Vector3(offset))
+        .unwrap();
+    world
+        .set_property(handle, "Orientation", Value::Vector3(turn))
+        .unwrap();
+    let text = write_world(&world);
+
+    let loaded = parse_world(&text).unwrap();
+    assert_eq!(write_world(&loaded), text);
+    let top = loaded.find_first_child(loaded.workspace(), "Top").unwrap();
+    let leg = loaded.find_first_child(loaded.workspace(), "Leg").unwrap();
+    let weld = loaded.get(loaded.get(leg).unwrap().children()[0]).unwrap();
+    assert_eq!(weld.class(), ClassName::WeldConstraint);
+    assert_eq!(weld.property("Part0"), Some(&Value::Instance(Some(top))));
+    assert_eq!(weld.property("Part1"), Some(&Value::Instance(Some(leg))));
+    assert_eq!(weld.property("Enabled"), Some(&Value::Bool(false)));
+    let handle = loaded.find_first_child(top, "Handle").unwrap();
+    let handle = loaded.get(handle).unwrap();
+    assert_eq!(handle.class(), ClassName::Attachment);
+    assert_eq!(handle.property("Position"), Some(&Value::Vector3(offset)));
+    assert_eq!(handle.property("Orientation"), Some(&Value::Vector3(turn)));
+    assert!(text.contains(r#""Part0": ["Workspace", "Top"]"#), "{text}");
+}

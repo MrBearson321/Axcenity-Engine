@@ -26,6 +26,8 @@ pub enum RibbonGroup {
     Parts,
     /// Sounds, particle emitters, lights, and a third-person character.
     Effects,
+    /// Weld parts together, and insert Attachments.
+    Constraints,
     /// Import…, for models, images, sounds and prefabs.
     Import,
     /// ScreenGui, Frame, TextLabel and the other UI elements.
@@ -43,13 +45,14 @@ pub enum RibbonGroup {
 }
 
 impl RibbonGroup {
-    pub const ALL: [RibbonGroup; 13] = [
+    pub const ALL: [RibbonGroup; 14] = [
         RibbonGroup::Game,
         RibbonGroup::Tools,
         RibbonGroup::Build,
         RibbonGroup::Snapping,
         RibbonGroup::Parts,
         RibbonGroup::Effects,
+        RibbonGroup::Constraints,
         RibbonGroup::Import,
         RibbonGroup::Ui,
         RibbonGroup::Scripts,
@@ -68,6 +71,7 @@ impl RibbonGroup {
             RibbonGroup::Snapping => "Snapping",
             RibbonGroup::Parts => "Parts",
             RibbonGroup::Effects => "Effects",
+            RibbonGroup::Constraints => "Constraints",
             RibbonGroup::Import => "Import",
             RibbonGroup::Ui => "UI",
             RibbonGroup::Scripts => "Scripts",
@@ -90,6 +94,7 @@ impl RibbonGroup {
             RibbonGroup::Effects => {
                 "Insert sounds, particle emitters, lights, and a third-person character"
             }
+            RibbonGroup::Constraints => "Weld parts together and insert Attachments",
             RibbonGroup::Import => "Import models, images, sounds and prefabs",
             RibbonGroup::Ui => "Insert screens, frames, text, buttons and other UI",
             RibbonGroup::Scripts => "Insert scripts",
@@ -153,7 +158,7 @@ impl BuiltInTab {
         use RibbonGroup::*;
         match self {
             BuiltInTab::Home => &[Game, Tools, Snapping, Parts],
-            BuiltInTab::Model => &[Build, Effects, Import],
+            BuiltInTab::Model => &[Build, Constraints, Effects, Import],
             BuiltInTab::Terrain => &[Terrain],
             BuiltInTab::Ui => &[Ui],
             BuiltInTab::Script => &[Game, Scripts],

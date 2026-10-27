@@ -1080,7 +1080,7 @@ declare extern type Part extends Instance with
 	AssemblyAngularVelocity: Vector3
 	--- Its Position and Orientation as one CFrame. Setting it sets both; it isn't saved itself.
 	CFrame: CFrame
-	--- The mass of everything moving with it. Each part moves on its own until welds exist, so this is `GetMass()`. Read-only.
+	--- The mass of everything moving with it: the parts welded into its assembly, except Massless ones (a part alone keeps its own mass). Read-only.
 	AssemblyMass: number
 	--- Where its mass is centered, in the world: the middle of a block or ball. Read-only.
 	AssemblyCenterOfMass: Vector3
@@ -1089,11 +1089,15 @@ declare extern type Part extends Instance with
 	--- Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.
 	Touched: Signal
 	[string]: any
+	--- The part, then the parts welded to it by an enabled WeldConstraint; with `recursive` true, every part in its assembly.
+	function GetConnectedParts(self, recursive: boolean?): {Instance}
+	--- The root of its assembly: an anchored part if there is one, then one that isn't Massless, then the largest. A part alone is its own root.
+	function GetRootPart(self): Instance
 	--- Where it turns and moves from: a part's own CFrame, or for a Model the centre of the box around its parts, unturned.
 	function GetPivot(self): CFrame
 	--- Moves and turns it so its pivot is at `target`. A Model's parts all move together and keep their places relative to each other.
 	function PivotTo(self, target: CFrame): ()
-	--- Pushes the part through its center of mass: its velocity changes by `impulse` divided by its mass (`GetMass`). Pushes in one frame add up. Anchored parts don't move.
+	--- Pushes the part through its center of mass: its velocity changes by `impulse` divided by its assembly's mass (`AssemblyMass`, which is `GetMass()` for a part alone). Pushes in one frame add up. Anchored parts don't move.
 	function ApplyImpulse(self, impulse: Vector3): ()
 	--- Pushes the part at `position` in the world: it speeds up as `ApplyImpulse` would, and an impulse off its center of mass also spins it.
 	function ApplyImpulseAtPosition(self, impulse: Vector3, position: Vector3): ()
@@ -1135,7 +1139,7 @@ declare extern type MeshPart extends Instance with
 	AssemblyAngularVelocity: Vector3
 	--- Its Position and Orientation as one CFrame. Setting it sets both; it isn't saved itself.
 	CFrame: CFrame
-	--- The mass of everything moving with it. Each part moves on its own until welds exist, so this is `GetMass()`. Read-only.
+	--- The mass of everything moving with it: the parts welded into its assembly, except Massless ones (a part alone keeps its own mass). Read-only.
 	AssemblyMass: number
 	--- Where its mass is centered, in the world: the middle of a block or ball. Read-only.
 	AssemblyCenterOfMass: Vector3
@@ -1144,11 +1148,15 @@ declare extern type MeshPart extends Instance with
 	--- Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.
 	Touched: Signal
 	[string]: any
+	--- The part, then the parts welded to it by an enabled WeldConstraint; with `recursive` true, every part in its assembly.
+	function GetConnectedParts(self, recursive: boolean?): {Instance}
+	--- The root of its assembly: an anchored part if there is one, then one that isn't Massless, then the largest. A part alone is its own root.
+	function GetRootPart(self): Instance
 	--- Where it turns and moves from: a part's own CFrame, or for a Model the centre of the box around its parts, unturned.
 	function GetPivot(self): CFrame
 	--- Moves and turns it so its pivot is at `target`. A Model's parts all move together and keep their places relative to each other.
 	function PivotTo(self, target: CFrame): ()
-	--- Pushes the part through its center of mass: its velocity changes by `impulse` divided by its mass (`GetMass`). Pushes in one frame add up. Anchored parts don't move.
+	--- Pushes the part through its center of mass: its velocity changes by `impulse` divided by its assembly's mass (`AssemblyMass`, which is `GetMass()` for a part alone). Pushes in one frame add up. Anchored parts don't move.
 	function ApplyImpulse(self, impulse: Vector3): ()
 	--- Pushes the part at `position` in the world: it speeds up as `ApplyImpulse` would, and an impulse off its center of mass also spins it.
 	function ApplyImpulseAtPosition(self, impulse: Vector3, position: Vector3): ()
@@ -2371,6 +2379,42 @@ declare extern type Camera extends Instance with
 	function Shake(self, intensity: number, duration: number): ()
 end
 
+--- A point and a direction on the part it's parented to, for things that need a spot on a part. `Position` and `Orientation` (and `CFrame`) are relative to the part, so it moves with it; `WorldCFrame`, `WorldPosition` and `WorldOrientation` are where it is in the world. `Axis` and `SecondaryAxis` are the ways its X and Y point on the part (`WorldAxis` and `WorldSecondaryAxis` in the world). Not drawn in the game; the editor shows it as a small gizmo.
+declare extern type Attachment extends Instance with
+	--- Where it is, in studs from the middle of its part, along the part's own axes.
+	Position: Vector3
+	--- How it's turned relative to its part, in degrees like a Part's Orientation.
+	Orientation: Vector3
+	--- Its Position and Orientation on its part as one CFrame. Setting it sets both.
+	CFrame: CFrame
+	--- Where it is in the world: its part's CFrame times its own. Setting it moves it on its part.
+	WorldCFrame: CFrame
+	--- Where it is in the world. Setting it moves it on its part.
+	WorldPosition: Vector3
+	--- How it's turned in the world, in degrees. Setting it turns it on its part.
+	WorldOrientation: Vector3
+	--- The way its X points, relative to its part. Setting it turns the attachment, keeping SecondaryAxis as close as it can.
+	Axis: Vector3
+	--- The way its Y points, relative to its part. Setting it turns the attachment around its Axis.
+	SecondaryAxis: Vector3
+	--- The way its X points in the world. Read-only.
+	WorldAxis: Vector3
+	--- The way its Y points in the world. Read-only.
+	WorldSecondaryAxis: Vector3
+	[string]: any
+end
+
+--- Holds `Part0` and `Part1` together where they were when it was made (or enabled). Parts welded together move as one body, an assembly: they fall and tumble together, and an anchored part anchors the whole assembly. `part:GetConnectedParts()` and `part:GetRootPart()` follow welds. Setting a welded part's Position or CFrame moves that part alone, and the weld holds it where it lands.
+declare extern type WeldConstraint extends Instance with
+	--- One of the two parts it holds together.
+	Part0: Instance?
+	--- The other part it holds together.
+	Part1: Instance?
+	--- On (the default), it holds the parts together. Off, they move apart; turned on again, it welds them where they are then.
+	Enabled: boolean
+	[string]: any
+end
+
 --- Holds one whole number in Value (other numbers are rounded). Its `Changed` fires with the new value.
 declare extern type IntValue extends Instance with
 	--- The whole number it holds; others are rounded. 0 by default.
@@ -2447,7 +2491,7 @@ declare function require(module: Instance): any
 --- Creates Instances.
 declare extern type InstanceLibrary with
 	--- Creates an Instance of this class with default properties and no parent. Set `Parent` to put it in the world.
-	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
+	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
 end
 
 --- Creates Instances.
