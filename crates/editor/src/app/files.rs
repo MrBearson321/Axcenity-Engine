@@ -489,4 +489,6 @@ impl EditorApp {
 #[cfg(test)]
 mod package_tests;
 #[cfg(test)]
+mod reload_tests;
+#[cfg(test)]
 mod tests;

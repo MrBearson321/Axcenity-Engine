@@ -389,6 +389,13 @@ impl AssetBrowser {
         self.scanned_at = None;
     }
 
+    /// The file at `path` changed on disk: list it again, with a new
+    /// thumbnail.
+    pub fn file_changed(&mut self, path: &str) {
+        self.thumbnails.forget(path);
+        self.refresh();
+    }
+
     /// Every tile: the props, then the project's files in path order, then
     /// the global assets it hasn't got.
     pub fn entries(&mut self) -> Vec<AssetEntry> {

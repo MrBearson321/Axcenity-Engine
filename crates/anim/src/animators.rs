@@ -12,17 +12,23 @@
 //! On a MeshPart with a skeleton they pose its bones; on anything they set
 //! the properties their tracks key. Properties keep the value last given
 //! when nothing plays them any more; bones go back to what plays under them.
+//!
+//! A clip, state machine or model file that changed on disk
+//! ([`Animators::reload`]) is bound again at the next update, and each
+//! Animator using it stays in the state it was in, matched by name.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use axcenity_assets::{Assets, Model, Posed, Rig, Take};
+use axcenity_assets::{Assets, Model, ModelFormat, Posed, Rig, Take};
 use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
 use glam::{EulerRot, Quat, Vec3};
 
 use crate::clip::{Clip, RootMotion};
-use crate::controller::{Compiled, Machine};
-use crate::files::{ClipFile, DEFAULT_BLEND, StateMachineFile};
+use crate::controller::{Compiled, Machine, Playing};
+use crate::files::{
+    CLIP_EXTENSION, ClipFile, DEFAULT_BLEND, STATE_MACHINE_EXTENSION, StateMachineFile,
+};
 use crate::property_clip::{Applied, apply_evaluated, blend_evaluated};
 
 /// Each animated MeshPart's posed model, by the MeshPart. The draw list
@@ -92,6 +98,8 @@ pub struct Animators {
     errors: Vec<String>,
     /// Errors already given, so each is reported once.
     reported: HashSet<String>,
+    /// Files changed on disk since the last update ([`Animators::reload`]).
+    changed: HashSet<String>,
 }
 
 /// One animated thing being played.
@@ -157,6 +165,61 @@ impl Animators {
         self.running.clear();
         self.poses.clear();
         self.reported.clear();
+        self.changed.clear();
+    }
+
+    /// Plays the new version of the clip, state machine or model file at
+    /// `path` from the next update, after it changed on disk (other files
+    /// are ignored). Each Animator using it stays in the state it was in,
+    /// matched by name, at the same point in it. A clip or state machine
+    /// that can't be read any more keeps its last good version, and that's
+    /// reported once. True if a clip or state machine playing now uses it.
+    pub fn reload(&mut self, path: &str) -> bool {
+        let file = path.split('#').next().unwrap_or(path);
+        if path.ends_with(CLIP_EXTENSION)
+            || path.ends_with(STATE_MACHINE_EXTENSION)
+            || is_model_file(file)
+        {
+            self.changed.insert(file.to_owned());
+        }
+        self.plays(file)
+    }
+
+    /// True if a clip or state machine playing now is the file at `path`.
+    fn plays(&self, path: &str) -> bool {
+        self.running.values().any(|running| {
+            running.clips.contains_key(path)
+                || running
+                    .machine
+                    .as_ref()
+                    .is_some_and(|machine| machine.uses(|used| used == path))
+        })
+    }
+
+    /// The changed files something plays that can be read now. Those that
+    /// can't are reported and left out, so what uses them keeps its last
+    /// good version.
+    fn readable_changes(&mut self, assets: &Assets) -> HashSet<String> {
+        let mut changed = std::mem::take(&mut self.changed);
+        changed.retain(|path| {
+            if !is_model_file(path) && !self.plays(path) {
+                return false;
+            }
+            let problem = if path.ends_with(CLIP_EXTENSION) {
+                load_clip(assets, path).err()
+            } else if path.ends_with(STATE_MACHINE_EXTENSION) {
+                read_state_machine(assets, path).err()
+            } else {
+                None
+            };
+            if let Some(problem) = &problem {
+                self.errors.push(format!(
+                    "Could not reload `{path}`: {problem}. The last good version stays."
+                ));
+            }
+            problem.is_none()
+        });
+        changed
     }
 
     /// Moves everything animated in the Workspace on by `dt` seconds of
@@ -206,11 +269,12 @@ impl Animators {
         }
         let alive: HashSet<InstanceId> = owners.iter().map(|(owner, _)| *owner).collect();
         self.running.retain(|owner, _| alive.contains(owner));
+        let changed = self.readable_changes(assets);
 
         let mut events = Vec::new();
         let mut posed = HashSet::new();
         for (owner, parts) in owners {
-            if self.update_one(world, assets, owner, &parts, dt, &mut events) {
+            if self.update_one(world, assets, owner, &parts, &changed, dt, &mut events) {
                 posed.insert(owner);
             }
         }
@@ -219,13 +283,16 @@ impl Animators {
         events
     }
 
-    /// Plays one animated thing. Returns true if it posed a skeleton.
+    /// Plays one animated thing, binding again what uses the `changed`
+    /// files. Returns true if it posed a skeleton.
+    #[allow(clippy::too_many_arguments)]
     fn update_one(
         &mut self,
         world: &mut World,
         assets: &Assets,
         owner: InstanceId,
         parts: &Parts,
+        changed: &HashSet<String>,
         dt: f64,
         events: &mut Vec<AnimatorEvent>,
     ) -> bool {
@@ -236,10 +303,29 @@ impl Animators {
         let dt = if enabled { dt * speed } else { 0.0 };
 
         let mut running = self.running.remove(&owner).unwrap_or_default();
+        // A machine made again (for a new model or changed files) goes on
+        // from the state it was in.
+        let mut was_in = None;
         if running.model_key != model_key {
             running.model_key = model_key;
             running.clips.clear();
-            running.machine = None;
+            was_in = running.machine.take().map(RunningMachine::where_it_is);
+        }
+        if !changed.is_empty() {
+            // A changed model file has new takes for its linked clips.
+            let models = changed.iter().any(|path| is_model_file(path));
+            if models {
+                running.clips.clear();
+            } else {
+                running.clips.retain(|path, _| !changed.contains(path));
+            }
+            let stale = running
+                .machine
+                .as_ref()
+                .is_some_and(|machine| models || machine.uses(|used| changed.contains(used)));
+            if stale {
+                was_in = running.machine.take().map(RunningMachine::where_it_is);
+            }
         }
 
         // 1. The state machine.
@@ -262,10 +348,19 @@ impl Animators {
                 .expect("a state machine comes from an Animator");
             running.machine = self
                 .compile(world, assets, animator, &machine_path, rig.as_deref())
-                .map(|compiled| RunningMachine {
-                    path: machine_path.clone(),
-                    machine: Machine::new(&compiled),
-                    compiled,
+                .map(|compiled| {
+                    let mut machine = Machine::new(&compiled);
+                    if let Some((path, state, phase)) = was_in
+                        && path == machine_path
+                        && let Some(state) = compiled.state_index(&state)
+                    {
+                        machine.current = Playing { state, phase };
+                    }
+                    RunningMachine {
+                        path: machine_path.clone(),
+                        machine,
+                        compiled,
+                    }
                 });
         }
         if let (Some(animator), Some(machine)) = (parts.animator, &mut running.machine) {
@@ -745,11 +840,7 @@ impl Animators {
         rig: Option<&Rig>,
     ) -> Option<Arc<Compiled>> {
         let name = world.full_name(animator).unwrap_or_default();
-        let file = assets
-            .read_file(path)
-            .and_then(|bytes| String::from_utf8(bytes).map_err(|_| "it isn't text".to_owned()))
-            .and_then(|text| StateMachineFile::from_json(&text).map_err(|err| err.0));
-        let file = match file {
+        let file = match read_state_machine(assets, path) {
             Ok(file) => file,
             Err(problem) => {
                 self.report(format!(
@@ -880,6 +971,39 @@ fn move_by_root_motion(world: &mut World, part: InstanceId, rig: &Rig, motion: R
     if motion.yaw != 0.0 {
         let _ = world.set_property(part, "Orientation", Value::Vector3(turned));
     }
+}
+
+impl RunningMachine {
+    /// Whether its file, or a clip one of its states plays, is one that
+    /// `is` picks.
+    fn uses(&self, is: impl Fn(&str) -> bool) -> bool {
+        is(&self.path)
+            || self
+                .compiled
+                .file
+                .states
+                .iter()
+                .any(|state| state.motion.clips().into_iter().any(|clip| is(clip)))
+    }
+
+    /// Its path, and the name of the state playing and the point in it.
+    fn where_it_is(self) -> (String, String, f64) {
+        let current = self.machine.current;
+        let name = self.compiled.state_name(current.state).to_owned();
+        (self.path, name, current.phase)
+    }
+}
+
+/// True for a `.gltf`, `.glb` or `.fbx` path.
+fn is_model_file(path: &str) -> bool {
+    ModelFormat::of(std::path::Path::new(path)).is_some()
+}
+
+/// Reads the state machine file at `path`.
+fn read_state_machine(assets: &Assets, path: &str) -> Result<StateMachineFile, String> {
+    let bytes = assets.read_file(path)?;
+    let text = String::from_utf8(bytes).map_err(|_| "it isn't text".to_owned())?;
+    StateMachineFile::from_json(&text).map_err(|err| err.0)
 }
 
 /// A clip file and the takes of the model file it's linked to (`None` if it

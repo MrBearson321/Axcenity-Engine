@@ -445,6 +445,25 @@ impl Session {
         self.scripts.debug_rays()
     }
 
+    /// The asset file at `path` changed on disk during Play: Animators
+    /// using it as a clip, state machine or model pick it up at the next
+    /// frame, in the state they're in, and a Sound uses it the next time it
+    /// plays. A sound that can't be decoded keeps its last good version.
+    /// True if a playing Animator or a Sound that has played uses it.
+    pub fn asset_changed(&mut self, path: &str, output: &mut Output) -> bool {
+        let animated = self.animators.reload(path);
+        let heard = match self.audio.reload(path, &self.assets) {
+            Ok(heard) => heard,
+            Err(err) => {
+                output.error(format!(
+                    "Could not reload `{path}`: {err}. The last good version stays."
+                ));
+                false
+            }
+        };
+        animated || heard
+    }
+
     fn forward_animator_errors(&mut self, output: &mut Output) {
         for error in self.animators.take_errors() {
             output.error(error);

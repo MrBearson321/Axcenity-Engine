@@ -24,6 +24,7 @@
 //! `versions.rs` keeps the copies made on save. `validate.rs` is the
 //! editor's asset check ([`check_assets`]); it does not write the project.
 //! `asset_fix.rs` works out fixes for what it finds ([`plan_fix`]).
+//! `watch.rs` notices files changed by other programs ([`Watcher`]).
 
 mod asset_fix;
 mod migrate;
@@ -33,6 +34,7 @@ mod packed;
 mod terrain_files;
 mod validate;
 mod versions;
+mod watch;
 mod world_file;
 
 mod scripts;
@@ -71,6 +73,7 @@ pub use terrain_files::{
 };
 pub use validate::{AssetKind, Finding, FindingKind, Report, Site, check_assets};
 pub use versions::{Version, list_versions, record_version, restore_version};
+pub use watch::{Watched, Watcher, is_asset_path};
 pub use world_file::{WorldError, parse_prefab, parse_world, write_prefab, write_world};
 
 pub const MANIFEST_FILE: &str = "axcenity.json";

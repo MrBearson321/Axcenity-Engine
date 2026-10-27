@@ -19,7 +19,7 @@ To run from source instead:
    cargo run -p axcenity-player -- examples/hello-part
    ```
 
-   Try editing `examples/hello-part/world.json` (for example the block's `Color`, `Metalness` or `Roughness`) and running it again. For more log output, set `RUST_LOG=info` first.
+   Try editing `examples/hello-part/world.json` (for example the block's `Color`, `Metalness` or `Roughness`) and running it again. For more log output, set `RUST_LOG=info` first. While developing, `cargo run -p axcenity-player -- --watch <project-folder>` reloads models, textures, sounds, fonts, clips and state machines in `assets/` as you save them, without restarting; built games never watch.
 
 3. For every shape and material, run `examples/primitives` instead.
 4. For Lua scripting, run `examples/hello-script`. Its `scripts/build.server.lua` moves the red block and builds a row of glowing balls, and anything it `print`s appears in the terminal. Every `*.server.lua` file in a project's `scripts` folder starts when the game starts; a script error shows the file and line, and the other scripts keep running.

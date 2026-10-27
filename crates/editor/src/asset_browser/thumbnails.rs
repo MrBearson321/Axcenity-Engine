@@ -39,6 +39,12 @@ impl Thumbnails {
         };
     }
 
+    /// Drops the thumbnail of `path`, so it's read again, after the file
+    /// changed.
+    pub fn forget(&mut self, path: &str) {
+        self.done.remove(path);
+    }
+
     /// Drops the thumbnails of files that are gone. It looks at the disk,
     /// not the panel's tiles: a texture set's images aren't tiles, but a
     /// terrain layer still shows them.

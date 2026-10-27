@@ -780,3 +780,100 @@ fn a_clip_saved_before_easing_opens_and_plays_the_same() {
     assert_eq!(seen, [2.0, 4.0, 4.0, 10.0]);
     assert!(animators.take_errors().is_empty());
 }
+
+/// The door clip going up to `top` instead of 10.
+fn door_clip_to(top: f32) -> ClipFile {
+    let mut clip = door_clip();
+    clip.tracks[0].keys[1].value = vec![0.0, top, 0.0];
+    clip
+}
+
+const DOOR_MACHINE: &str = "assets/animations/Door/Door.statemachine.json";
+
+/// A state machine that starts Shut (playing nothing) and has `Swing`
+/// playing the door clip, with `extra` states after them.
+fn door_machine(extra: &[&str]) -> String {
+    use crate::files::{Motion, StateDef};
+    let mut states = vec![
+        StateDef::new("Shut", Motion::Clip(String::new()), [0.0, 0.0]),
+        StateDef::new("Swing", Motion::Clip(DOOR.into()), [0.0, 0.0]),
+    ];
+    for name in extra {
+        states.push(StateDef::new(name, Motion::Clip(String::new()), [0.0, 0.0]));
+    }
+    StateMachineFile {
+        default_state: "Shut".into(),
+        states,
+        ..StateMachineFile::default()
+    }
+    .to_json()
+}
+
+/// The door world with its Animator playing [`door_machine`], swung a
+/// quarter of the way.
+fn swinging_door(root: &Path, assets: &Assets) -> (World, Animators, InstanceId, InstanceId) {
+    crate::files::write_file(&root.join(DOOR_MACHINE), &door_machine(&[])).unwrap();
+    let (mut world, part, animator, animation) = door_world(true);
+    world.destroy(animation).unwrap();
+    let animator = animator.unwrap();
+    world
+        .set_property(animator, "StateMachine", Value::String(DOOR_MACHINE.into()))
+        .unwrap();
+    let mut animators = Animators::new();
+    animators.update(&mut world, assets, 0.0);
+    world.animator_mut(animator).unwrap().play = Some(PlayRequest {
+        state: "Swing".into(),
+        blend: None,
+    });
+    animators.update(&mut world, assets, 0.0);
+    animators.update(&mut world, assets, 0.25);
+    assert!((y(&world, part) - 2.5).abs() < 1e-3, "{}", y(&world, part));
+    (world, animators, part, animator)
+}
+
+#[test]
+fn an_edited_clip_changes_the_motion_and_the_animator_stays_in_its_state() {
+    let root = project("reload-clip", &[(DOOR, door_clip())]);
+    let assets = Assets::new(&root);
+    let (mut world, mut animators, part, animator) = swinging_door(&root, &assets);
+
+    crate::files::write_file(&root.join(DOOR), &door_clip_to(20.0).to_json()).unwrap();
+    assert!(animators.reload(DOOR), "the Swing state plays it");
+    assert!(!animators.reload("assets/animations/Other.anim.json"));
+    animators.update(&mut world, &assets, 0.0);
+    assert_eq!(world.animator(animator).unwrap().current_state, "Swing");
+    assert!((y(&world, part) - 5.0).abs() < 1e-3, "{}", y(&world, part));
+    animators.update(&mut world, &assets, 0.25);
+    assert!((y(&world, part) - 10.0).abs() < 1e-3, "{}", y(&world, part));
+
+    // An edited state machine keeps the state it's in, by name, even when
+    // states were added before it.
+    let mut file = StateMachineFile::from_json(&door_machine(&[])).unwrap();
+    file.states.insert(0, file.states[0].clone());
+    file.states[0].name = "Ajar".into();
+    crate::files::write_file(&root.join(DOOR_MACHINE), &file.to_json()).unwrap();
+    assert!(animators.reload(DOOR_MACHINE));
+    animators.update(&mut world, &assets, 0.0);
+    assert_eq!(world.animator(animator).unwrap().current_state, "Swing");
+    assert!((y(&world, part) - 10.0).abs() < 1e-3, "{}", y(&world, part));
+    assert_eq!(animators.take_errors(), Vec::<String>::new());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn a_clip_saved_broken_keeps_its_last_good_motion_and_is_reported_once() {
+    let root = project("reload-broken", &[(DOOR, door_clip())]);
+    let assets = Assets::new(&root);
+    let (mut world, mut animators, part, animator) = swinging_door(&root, &assets);
+
+    std::fs::write(root.join(DOOR), "{ broken").unwrap();
+    animators.reload(DOOR);
+    animators.update(&mut world, &assets, 0.25);
+    animators.update(&mut world, &assets, 0.0);
+    assert_eq!(world.animator(animator).unwrap().current_state, "Swing");
+    assert!((y(&world, part) - 5.0).abs() < 1e-3, "{}", y(&world, part));
+    let errors = animators.take_errors();
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(errors[0].starts_with(&format!("Could not reload `{DOOR}`")));
+    let _ = std::fs::remove_dir_all(root);
+}

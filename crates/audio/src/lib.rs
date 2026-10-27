@@ -175,6 +175,37 @@ impl GameAudio {
     pub fn playing_count(&self) -> usize {
         self.engine.as_ref().map_or(0, AudioEngine::playing_count)
     }
+
+    /// Decodes the sound file at `path` again after it changed on disk, so
+    /// a Sound uses the new version the next time it plays (what's playing
+    /// now carries on). True if it had been played; a file that can't be
+    /// decoded any more keeps its last good version and gives the error.
+    pub fn reload(&mut self, path: &str, assets: &Assets) -> Result<bool, AudioError> {
+        match &mut self.engine {
+            Some(engine) => reload_decoded(&mut engine.decoded, path, assets),
+            None => Ok(false),
+        }
+    }
+}
+
+/// Decodes `path` again into `decoded` if it's there, keeping the old
+/// version if the new one can't be read or decoded.
+fn reload_decoded(
+    decoded: &mut HashMap<String, StaticSoundData>,
+    path: &str,
+    assets: &Assets,
+) -> Result<bool, AudioError> {
+    if !decoded.contains_key(path) {
+        return Ok(false);
+    }
+    let bytes = assets
+        .read_file(path)
+        .map_err(|message| AudioError::Asset {
+            sound_id: path.to_owned(),
+            message,
+        })?;
+    decoded.insert(path.to_owned(), decode_sound(path, bytes)?);
+    Ok(true)
 }
 
 /// A Sound's settings, as its properties have them now.
@@ -990,6 +1021,39 @@ mod tests {
         let update = audio.update(Vec::new(), &world, &Assets::default(), Listener::default());
         assert!(update.errors.is_empty() && update.ended.is_empty());
         assert!(audio.engine.is_none());
+    }
+
+    #[test]
+    fn a_changed_sound_file_is_decoded_again_and_a_broken_one_is_kept() {
+        let folder =
+            std::env::temp_dir().join(format!("axcenity-audio-reload-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(folder.join("assets/audio")).unwrap();
+        let example = |name: &str| {
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../examples/hello-audio/assets/audio")
+                .join(name)
+        };
+        let path = "assets/audio/tone.wav";
+        std::fs::copy(example("chime.wav"), folder.join(path)).unwrap();
+        let assets = Assets::new(&folder);
+        let mut decoded = HashMap::new();
+        assert!(
+            !reload_decoded(&mut decoded, path, &assets).unwrap(),
+            "not played yet"
+        );
+
+        let chime = decode_sound(path, assets.read_file(path).unwrap()).unwrap();
+        decoded.insert(path.to_owned(), chime.clone());
+        std::fs::copy(example("ambient-loop.wav"), folder.join(path)).unwrap();
+        assert!(reload_decoded(&mut decoded, path, &assets).unwrap());
+        let ambient = decoded[path].duration();
+        assert_ne!(ambient, chime.duration());
+
+        std::fs::write(folder.join(path), b"not a sound").unwrap();
+        assert!(reload_decoded(&mut decoded, path, &assets).is_err());
+        assert_eq!(decoded[path].duration(), ambient, "the last good one stays");
+        let _ = std::fs::remove_dir_all(&folder);
     }
 
     #[test]

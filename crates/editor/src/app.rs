@@ -484,6 +484,9 @@ struct OpenProject {
     remembered_blocks: HashMap<String, (String, BlockScript)>,
     /// Notices files changed by other programs.
     watcher: Watcher,
+    /// Changed files that wait for Stop: the world, scripts and
+    /// stylesheets changed during Play.
+    after_play: Vec<String>,
     /// The world file's text as last read or written, to tell the editor's
     /// own saves from changes made elsewhere. `None` if it couldn't be read.
     world_text: Option<String>,

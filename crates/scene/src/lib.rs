@@ -21,6 +21,8 @@ mod orientation;
 mod particles;
 mod pick;
 mod preload;
+#[cfg(test)]
+mod reload_tests;
 mod terrain;
 
 pub use camera::{FlyCamera, MoveKeys};

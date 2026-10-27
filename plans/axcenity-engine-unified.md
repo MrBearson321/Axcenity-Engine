@@ -857,11 +857,11 @@ A file that now fails to load keeps the last good version on screen and is repor
 
 ### Acceptance criteria
 
-- [ ] Writing a new version of a model over its file updates every MeshPart that uses it within a second, in edit mode and during Play, and the game keeps running.
-- [ ] Overwriting a texture updates the SurfaceAppearances, ImageLabels and terrain layers that use it.
-- [ ] Editing a clip file changes a playing Animator's motion without restarting the game, and it stays in the same state.
-- [ ] Saving a broken model over a good one keeps the good one on screen and reports the problem once.
-- [ ] `axcenity-player --watch` reloads the same way. Without the flag, and in exported games, nothing is watched.
+- [x] Writing a new version of a model over its file updates every MeshPart that uses it within a second, in edit mode and during Play, and the game keeps running.
+- [x] Overwriting a texture updates the SurfaceAppearances, ImageLabels and terrain layers that use it.
+- [x] Editing a clip file changes a playing Animator's motion without restarting the game, and it stays in the same state.
+- [x] Saving a broken model over a good one keeps the good one on screen and reports the problem once.
+- [x] `axcenity-player --watch` reloads the same way. Without the flag, and in exported games, nothing is watched.
 
 ---
 

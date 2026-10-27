@@ -1,17 +1,34 @@
+use axcenity_assets::Reload;
+
 use super::*;
+
+/// True for a changed file that's taken in during Play: an asset, but not
+/// a stylesheet (the UI restyles with those at Stop).
+fn reloads_in_play(path: &str) -> bool {
+    project::is_asset_path(path) && !project::is_stylesheet(path)
+}
 
 impl EditorApp {
     /// Takes in the files other programs changed since the last frame.
     pub(in crate::app) fn check_disk(&mut self) {
-        // During Play, changes wait until Stop: the game runs on a copy of
-        // the edit world, and the two mustn't get mixed up.
-        if self.playing() {
-            return;
-        }
-        let Some(project) = &self.project else {
+        let playing = self.playing();
+        let Some(project) = &mut self.project else {
             return;
         };
-        let paths = project.watcher.changes();
+        let mut paths = project.watcher.changes();
+        // During Play, assets reload in place, but the world, scripts and
+        // stylesheets wait until Stop: the game runs on a copy of the edit
+        // world, and the two mustn't get mixed up.
+        if playing {
+            let (now, later): (Vec<String>, Vec<String>) =
+                paths.into_iter().partition(|path| reloads_in_play(path));
+            project.after_play.extend(later);
+            paths = now;
+        } else if !project.after_play.is_empty() {
+            paths.append(&mut project.after_play);
+            paths.sort();
+            paths.dedup();
+        }
         self.disk_changed(&paths);
     }
 
@@ -24,14 +41,32 @@ impl EditorApp {
                 self.world_file_changed();
             } else if project::is_stylesheet(path) {
                 self.stylesheet_file_changed(path);
-            } else if axcenity_assets::is_material_file(path) {
-                // Parts using it, or a material built on it, draw it anew.
-                self.assets.forget(path);
-                self.asset_browser.refresh();
+            } else if project::is_asset_path(path) {
+                self.asset_file_changed(path);
             } else {
                 self.script_file_changed(path);
             }
         }
+    }
+
+    /// A file under `assets/` changed: what uses it (MeshParts, textures,
+    /// materials, fonts, and during Play Animators and Sounds) takes the
+    /// new version, without reopening the project or stopping the game. A
+    /// file that can't be loaded now keeps its last good version, reported
+    /// once (by `Assets` and the session's errors).
+    pub(super) fn asset_file_changed(&mut self, path: &str) {
+        let mut reloaded = self.assets.reload(path) == Reload::Reloaded;
+        if let Some(session) = &mut self.play {
+            reloaded |= session.asset_changed(path, &mut self.output);
+        }
+        if reloaded {
+            self.output.info(format!("Reloaded `{path}`."));
+        }
+        // A file that failed to reload says so now, once.
+        for error in self.assets.take_errors() {
+            self.output.error(error);
+        }
+        self.asset_browser.file_changed(path);
     }
 
     /// A stylesheet changed on disk, such as one edited in VS Code: restyle

@@ -20,6 +20,7 @@ mod fonts;
 mod import;
 mod material;
 mod model;
+mod reload;
 mod texture_set;
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -45,6 +46,7 @@ pub use model::{
     Primitive, Rig, Take, TextureRole, Track, list_objects, load_model, load_models, load_takes,
     texture_roles,
 };
+pub use reload::Reload;
 pub use texture_set::{
     TEXTURE_SET_SUFFIX, TextureSet, TextureSetError, TextureSetMap, read_texture_set,
     texture_set_from_files, write_texture_set,
@@ -109,6 +111,13 @@ struct Shared {
     fonts: Option<Arc<Vec<FontFile>>>,
     /// Textures asked for since none were loading, for [`TextureProgress`].
     batch: usize,
+    /// Each model and texture file's stamp when it was read, so
+    /// [`Assets::reload`] skips one that hasn't changed since (such as a
+    /// model the editor just imported).
+    stamps: HashMap<String, reload::Stamp>,
+    /// Files whose last reload failed, so the next failure isn't reported
+    /// again until one succeeds.
+    reload_failed: HashSet<String>,
 }
 
 impl Assets {
@@ -153,6 +162,8 @@ impl Assets {
                 None
             }
         };
+        let file = mesh_id.split('#').next().unwrap_or(mesh_id);
+        reload::remember_stamp(&mut shared, &folder, file);
         shared.models.insert(mesh_id.to_owned(), model.clone());
         model
     }
@@ -302,6 +313,7 @@ impl Assets {
                 None
             }
         };
+        reload::remember_stamp(&mut shared, &folder, path);
         shared.takes.insert(path.to_owned(), takes.clone());
         takes
     }
@@ -326,7 +338,12 @@ impl Assets {
     /// it isn't read again.
     pub fn insert(&self, mesh_id: &str, model: Model) -> Arc<Model> {
         let model = Arc::new(model);
-        self.lock()
+        let mut shared = self.lock();
+        if let Some(folder) = shared.folder.clone() {
+            let file = mesh_id.split('#').next().unwrap_or(mesh_id);
+            reload::remember_stamp(&mut shared, &folder, file);
+        }
+        shared
             .models
             .insert(mesh_id.to_owned(), Some(model.clone()));
         model
@@ -450,6 +467,9 @@ fn store_texture(
             None
         }
     };
+    if let Some(folder) = shared.folder.clone() {
+        reload::remember_stamp(shared, &folder, path);
+    }
     shared.textures.insert(path.to_owned(), texture.clone());
     texture
 }

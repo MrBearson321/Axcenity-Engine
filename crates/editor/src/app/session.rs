@@ -229,6 +229,7 @@ impl EditorApp {
             show_splash,
             loading_screen,
             watcher: Watcher::start(project.folder.clone()),
+            after_play: Vec::new(),
             folder: project.folder,
             stylesheets,
             stylesheet_texts,

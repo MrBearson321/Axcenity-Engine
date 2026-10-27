@@ -11,6 +11,7 @@
 mod graphics;
 mod icon;
 mod splash;
+mod watch;
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -49,8 +50,9 @@ const MAX_FRAME_SECONDS: f32 = 0.1;
 /// Touchpads scroll in pixels; this many is one mouse wheel notch.
 const PIXELS_PER_NOTCH: f32 = 40.0;
 const GAME_FILE: &str = "game.axgame";
-const USAGE: &str = "usage: axcenity-player [project-folder | game.axgame]\n\
-                     example: cargo run -p axcenity-player -- examples/hello-part";
+const USAGE: &str = "usage: axcenity-player [--watch] [project-folder | game.axgame]\n\
+                     example: cargo run -p axcenity-player -- examples/hello-part\n\
+                     --watch reloads a project folder's changed assets while it plays";
 
 fn main() -> Result<()> {
     // Show warnings and errors by default. `wgpu_hal` relays harmless graphics
@@ -62,8 +64,9 @@ fn main() -> Result<()> {
     .init();
 
     // `args_os` instead of `args` so folder names that aren't valid Unicode still work.
-    let argument = std::env::args_os().nth(1).map(PathBuf::from);
-    let folder = match argument {
+    let arguments = watch::Arguments::parse(std::env::args_os().skip(1))?;
+    let watcher = arguments.watched_folder().map(watch::start);
+    let folder = match arguments.game {
         Some(path) if path.is_file() => {
             let temporary = PackedProjectFolder::new()?;
             let bytes = fs::read(&path)
@@ -214,6 +217,7 @@ fn main() -> Result<()> {
         ui_sounds: Vec::new(),
         cursor: UiCursor::Default,
         last_frame: None,
+        watcher,
     };
     event_loop.run_app(&mut app)?;
 
@@ -454,6 +458,9 @@ struct App {
     cursor: UiCursor,
     /// When the previous frame was drawn, to measure how much time passed.
     last_frame: Option<Instant>,
+    /// Watches the project's assets with `--watch`; `None` otherwise, and
+    /// always for a built game.
+    watcher: Option<axcenity_project::Watcher>,
 }
 
 impl App {
@@ -968,6 +975,17 @@ impl ApplicationHandler for App {
                 let events = self.ui.take_events();
                 let sounds = fire_ui_events(&mut self.scripts, &mut self.world, events);
                 self.ui_sounds.extend(sounds);
+
+                // Assets changed on disk (`--watch`) are swapped in first,
+                // so this frame's steps use them.
+                if let Some(watcher) = &self.watcher {
+                    let paths = watcher.changes();
+                    let lines =
+                        watch::reload(&paths, &self.assets, &mut self.animators, &mut self.audio);
+                    for line in lines {
+                        eprintln!("{line}");
+                    }
+                }
 
                 // 1. Input. A character controller moves first and owns
                 //    the camera. Otherwise the fly camera moves, and
