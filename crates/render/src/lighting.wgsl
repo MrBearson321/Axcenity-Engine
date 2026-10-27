@@ -44,7 +44,8 @@ struct Frame {
     ambient_occlusion: vec4<f32>,
     // x: 1 when the environment maps light and are reflected (otherwise
     // the gradient is worked out per pixel), y: the reflection cubemap's
-    // last mip level (the roughest), z: 1 when the sky is `sky_image`.
+    // last mip level (the roughest), z: 1 when the sky is `sky_image`,
+    // w: the sky image's width in pixels.
     environment: vec4<f32>,
     // The sky's diffuse light while the environment maps are on: spherical
     // harmonics (rgb each), already blurred over the hemisphere and divided
@@ -307,17 +308,25 @@ fn sky_gradient(dir: vec3<f32>) -> vec3<f32> {
     return gradient_sky(dir, frame.sky_top.rgb, frame.sky_horizon.rgb, frame.sky_ground.rgb);
 }
 
-// What's drawn as the sky: the gradient (or the sky image) plus the sun.
-// The sun's disc is far brighter than 1, so it blooms.
-fn sky_radiance(dir: vec3<f32>) -> vec3<f32> {
+// What's drawn as the sky looking along `dir`, where one pixel covers
+// `spread` radians of it: the sky image, or the gradient plus the sun. The
+// sun's disc is far brighter than 1, so it blooms. A sky image has its own
+// sun (or none), so none is drawn over it.
+fn sky_radiance(dir: vec3<f32>, spread: f32) -> vec3<f32> {
+    if frame.environment.z > 0.5 {
+        // The image's level whose pixels are about the size of the screen's,
+        // so its detail doesn't shimmer. Toward straight up and down its
+        // columns crowd together, so a blurrier level is read there (at
+        // most 4 levels blurrier, so the very top isn't the whole image's
+        // average).
+        let across = max(sqrt(max(1.0 - dir.y * dir.y, 0.0)), 0.0625);
+        let level = log2(max(spread * frame.environment.w / (2.0 * PI) / across, 1.0));
+        return textureSampleLevel(sky_image, environment_sampler, equirect_uv(dir), level).rgb;
+    }
     let toward_sun = dot(dir, frame.sun_direction.xyz);
     let disc = smoothstep(0.99965, 0.99985, toward_sun);
     let glow = pow(max(toward_sun, 0.0), 200.0) * 0.4;
-    var sky = sky_gradient(dir);
-    if frame.environment.z > 0.5 {
-        sky = textureSampleLevel(sky_image, environment_sampler, equirect_uv(dir), 0.0).rgb;
-    }
-    return sky + frame.sun_radiance.rgb * (glow + disc * 8.0);
+    return sky_gradient(dir) + frame.sun_radiance.rgb * (glow + disc * 8.0);
 }
 
 // Light from the whole sky that reaches a surface facing `n`: a smooth

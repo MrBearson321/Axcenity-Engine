@@ -63,7 +63,7 @@ glyphon = "0.9"
 gltf = { version = "1.4", features = ["KHR_texture_transform"] }
 # Decodes FBX models' textures. The same release `gltf` uses; the decoders are
 # pure Rust (MIT OR Apache-2.0). FBX files often use TGA or BMP textures.
-image = { version = "0.25", default-features = false, features = ["bmp", "hdr", "jpeg", "png", "tga"] }
+image = { version = "0.25", default-features = false, features = ["bmp", "exr", "hdr", "jpeg", "png", "tga"] }
 kira = "0.12"
 log = "0.4"
 # Decodes the logo PNG for the player's window icon, and writes the editor's

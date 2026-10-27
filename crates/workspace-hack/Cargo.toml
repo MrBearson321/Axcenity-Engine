@@ -20,14 +20,14 @@ publish = false
 approx = { version = "0.5", default-features = false, features = ["std"] }
 arrayvec = { version = "0.7", default-features = false, features = ["std"] }
 bitflags = { version = "2", default-features = false, features = ["serde"] }
-bytemuck = { version = "1", default-features = false, features = ["derive", "extern_crate_alloc", "min_const_generics"] }
+bytemuck = { version = "1", default-features = false, features = ["aarch64_simd", "derive", "extern_crate_alloc", "min_const_generics", "wasm_simd"] }
 either = { version = "1" }
 glam = { version = "0.33", features = ["approx", "mint", "nostd-libm"] }
 hashbrown = { version = "0.17", default-features = false, features = ["default-hasher"] }
+libm = { version = "0.2" }
 lock_api = { version = "0.4", features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["std"] }
 memchr = { version = "2" }
-num-complex = { version = "0.4" }
 num-traits = { version = "0.2", features = ["i128", "libm"] }
 once_cell = { version = "1" }
 parking_lot = { version = "0.12", features = ["arc_lock"] }
@@ -50,8 +50,8 @@ syn-f595c2ba2a3f28df = { package = "syn", version = "2", features = ["extra-trai
 [target.x86_64-unknown-linux-gnu.dependencies]
 ahash = { version = "0.8", features = ["no-rng", "serde"] }
 bitflags = { version = "2", default-features = false, features = ["std"] }
-bytemuck = { version = "1", default-features = false, features = ["aarch64_simd"] }
 getrandom = { version = "0.3", default-features = false, features = ["std"] }
+half = { version = "2", features = ["num-traits"] }
 indexmap = { version = "2" }
 libc = { version = "0.2", features = ["extra_traits"] }
 proc-macro2 = { version = "1" }
@@ -61,7 +61,6 @@ syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", features = ["extra-trai
 tracing = { version = "0.1", default-features = false, features = ["log"] }
 uuid = { version = "1", features = ["serde"] }
 winit = { version = "0.30" }
-zerocopy = { version = "0.8", default-features = false, features = ["derive", "simd"] }
 
 [target.x86_64-unknown-linux-gnu.build-dependencies]
 hashbrown = { version = "0.17", default-features = false, features = ["default-hasher"] }
@@ -79,7 +78,7 @@ core-foundation = { version = "0.9" }
 core-graphics-types = { version = "0.1" }
 dispatch2 = { version = "0.3" }
 half = { version = "2", features = ["num-traits"] }
-image = { version = "0.25", default-features = false, features = ["bmp", "hdr", "jpeg", "png", "tga", "tiff"] }
+image = { version = "0.25", default-features = false, features = ["bmp", "exr", "hdr", "jpeg", "png", "tga", "tiff"] }
 indexmap = { version = "2" }
 objc2 = { version = "0.6" }
 objc2-app-kit = { version = "0.2", features = ["NSAccessibility", "NSAccessibilityConstants", "NSAccessibilityElement", "NSAccessibilityProtocols", "NSAppearance", "NSApplication", "NSBitmapImageRep", "NSButton", "NSColor", "NSControl", "NSCursor", "NSDragging", "NSEvent", "NSGraphics", "NSGraphicsContext", "NSImage", "NSImageRep", "NSMenu", "NSMenuItem", "NSOpenGLView", "NSPasteboard", "NSResponder", "NSRunningApplication", "NSScreen", "NSTextInputClient", "NSTextInputContext", "NSView", "NSWindow", "NSWindowScripting", "NSWindowTabGroup"] }
@@ -98,7 +97,7 @@ core-foundation = { version = "0.9" }
 core-graphics-types = { version = "0.1" }
 dispatch2 = { version = "0.3" }
 half = { version = "2", features = ["num-traits"] }
-image = { version = "0.25", default-features = false, features = ["bmp", "hdr", "jpeg", "png", "tga", "tiff"] }
+image = { version = "0.25", default-features = false, features = ["bmp", "exr", "hdr", "jpeg", "png", "tga", "tiff"] }
 indexmap = { version = "2" }
 objc2 = { version = "0.6" }
 objc2-app-kit = { version = "0.2", features = ["NSAccessibility", "NSAccessibilityConstants", "NSAccessibilityElement", "NSAccessibilityProtocols", "NSAppearance", "NSApplication", "NSBitmapImageRep", "NSButton", "NSColor", "NSControl", "NSCursor", "NSDragging", "NSEvent", "NSGraphics", "NSGraphicsContext", "NSImage", "NSImageRep", "NSMenu", "NSMenuItem", "NSOpenGLView", "NSPasteboard", "NSResponder", "NSRunningApplication", "NSScreen", "NSTextInputClient", "NSTextInputContext", "NSView", "NSWindow", "NSWindowScripting", "NSWindowTabGroup"] }
@@ -111,6 +110,7 @@ winit = { version = "0.30" }
 syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3", features = ["extra-traits", "fold", "full", "visit"] }
 
 [target.x86_64-pc-windows-msvc.dependencies]
+half = { version = "2", features = ["num-traits"] }
 indexmap = { version = "2" }
 smallvec = { version = "1", default-features = false, features = ["const_generics", "union"] }
 windows = { version = "0.62", features = ["Devices_Power", "Foundation_Collections", "Gaming_Input_ForceFeedback", "System_Power", "Win32_Devices_Properties", "Win32_Media_Audio", "Win32_Media_KernelStreaming", "Win32_Media_Multimedia", "Win32_Security", "Win32_System_Com_StructuredStorage", "Win32_System_Performance", "Win32_System_SystemServices", "Win32_System_Threading", "Win32_System_Variant", "Win32_UI_Shell_PropertiesSystem"] }

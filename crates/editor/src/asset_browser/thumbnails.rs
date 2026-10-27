@@ -134,7 +134,7 @@ fn load(folder: &Path, path: &str, set: bool) -> Option<egui::ColorImage> {
     } else {
         path.to_owned()
     };
-    if picture.to_lowercase().ends_with(".hdr") {
+    if axcenity_assets::is_hdr_sky_file(&picture) {
         let sky = axcenity_assets::read_sky_image(folder, &picture).ok()?;
         return shrink(sky.width, sky.height, &sky_rgba(&sky.rgb), THUMBNAIL_PIXELS);
     }

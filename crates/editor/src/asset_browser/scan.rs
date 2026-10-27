@@ -34,7 +34,7 @@ pub fn kind_of(path: &str) -> Option<AssetKind> {
     }
     let extension = lower.rsplit_once('.')?.1;
     // PNG and JPEG skies work too, but look like any other image here.
-    if extension == "hdr" {
+    if axcenity_assets::HDR_SKY_EXTENSIONS.contains(&extension) {
         return Some(AssetKind::Sky);
     }
     if MODEL_EXTENSIONS.contains(&extension) {

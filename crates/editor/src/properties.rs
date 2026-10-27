@@ -920,7 +920,9 @@ fn sky_control(ui: &mut egui::Ui, path: &str) -> Option<Edit> {
     let row = ui.horizontal(|ui| {
         if ui
             .small_button(icons::FOLDER_OPEN)
-            .on_hover_text("Choose a sky image (.hdr, PNG or JPEG) from this computer")
+            .on_hover_text(
+                "Choose a sky image from this computer: a 2:1 panorama, best as an HDR                  (.exr or .hdr), or a PNG or JPEG",
+            )
             .clicked()
         {
             edit = Some(Edit::PickSkyImage);

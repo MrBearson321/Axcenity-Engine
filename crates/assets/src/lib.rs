@@ -57,7 +57,10 @@ pub use model::{
     texture_roles,
 };
 pub use reload::Reload;
-pub use sky_image::{SKY_IMAGE_EXTENSIONS, SkyImage, decode_sky_image, read_sky_image};
+pub use sky_image::{
+    HDR_SKY_EXTENSIONS, MAX_SKY_WIDTH, SKY_IMAGE_EXTENSIONS, SkyImage, decode_sky_image,
+    is_hdr_sky_file, read_sky_image,
+};
 pub use texture_set::{
     TEXTURE_SET_SUFFIX, TextureSet, TextureSetError, TextureSetMap, read_texture_set,
     texture_set_from_files, write_texture_set,
@@ -93,6 +96,13 @@ pub struct TextureProgress {
     pub current: String,
 }
 
+/// A file for a background worker to read: a texture, or a sky image.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct Queued {
+    path: String,
+    sky: bool,
+}
+
 #[derive(Default)]
 struct Shared {
     /// The project folder, or `None` when no project is open (then there
@@ -117,10 +127,10 @@ struct Shared {
     errors: Vec<String>,
     /// Set by [`Assets::load_textures_in_background`].
     waker: Option<Waker>,
-    /// Texture files waiting for a worker, oldest first.
-    queue: VecDeque<String>,
-    /// Texture files queued or being read.
-    loading: HashSet<String>,
+    /// Texture and sky image files waiting for a worker, oldest first.
+    queue: VecDeque<Queued>,
+    /// Texture and sky image files queued or being read.
+    loading: HashSet<Queued>,
     /// Worker threads running.
     workers: usize,
     /// The project's font files, read the first time they're asked for.
@@ -202,16 +212,21 @@ impl Assets {
         }
         let folder = shared.folder.clone()?;
         if shared.waker.is_some() {
-            self.queue_texture(&mut shared, path);
+            self.queue_file(&mut shared, path, false);
             return None;
         }
         store_texture(&mut shared, path, read_texture(&folder, path))
     }
 
     /// The sky image at `path` (Lighting's `SkyImage`, such as
-    /// `assets/sky/noon.hdr`), decoded the first time. `None` if `path` is
+    /// `assets/sky/noon.exr`), decoded the first time. `None` if `path` is
     /// empty or it can't be read; the reason goes to
-    /// [`take_errors`](Self::take_errors), once.
+    /// [`take_errors`](Self::take_errors), once, as does a warning that it
+    /// isn't a 2:1 panorama.
+    ///
+    /// After [`load_textures_in_background`](Self::load_textures_in_background),
+    /// it's `None` until a worker thread has read it, like a texture, and
+    /// [`texture_progress`](Self::texture_progress) counts it.
     pub fn sky_image(&self, path: &str) -> Option<Arc<SkyImage>> {
         if path.is_empty() {
             return None;
@@ -221,18 +236,11 @@ impl Assets {
             return image.clone();
         }
         let folder = shared.folder.clone()?;
-        let image = match read_sky_image(&folder, path) {
-            Ok(image) => Some(Arc::new(image)),
-            Err(message) => {
-                shared
-                    .errors
-                    .push(format!("Could not load the sky image `{path}`: {message}"));
-                None
-            }
-        };
-        reload::remember_stamp(&mut shared, &folder, path);
-        shared.sky_images.insert(path.to_owned(), image.clone());
-        image
+        if shared.waker.is_some() {
+            self.queue_file(&mut shared, path, true);
+            return None;
+        }
+        store_sky_image(&mut shared, path, read_sky_image(&folder, path))
     }
 
     /// The material file at `path` (a part's `MaterialVariant`, such as
@@ -305,8 +313,9 @@ impl Assets {
         let current = shared
             .loading
             .iter()
-            .find(|path| !shared.queue.contains(path))
+            .find(|queued| !shared.queue.contains(queued))
             .or_else(|| shared.queue.front())?
+            .path
             .clone();
         Some(TextureProgress {
             done: shared.batch - shared.loading.len(),
@@ -315,13 +324,18 @@ impl Assets {
         })
     }
 
-    /// Queues `path` for a background worker, starting one if fewer than
-    /// [`TEXTURE_WORKERS`] are running.
-    fn queue_texture(&self, shared: &mut Shared, path: &str) {
-        if !shared.loading.insert(path.to_owned()) {
+    /// Queues `path` (a sky image if `sky`, otherwise a texture) for a
+    /// background worker, starting one if fewer than [`TEXTURE_WORKERS`]
+    /// are running.
+    fn queue_file(&self, shared: &mut Shared, path: &str, sky: bool) {
+        let queued = Queued {
+            path: path.to_owned(),
+            sky,
+        };
+        if !shared.loading.insert(queued.clone()) {
             return;
         }
-        shared.queue.push_back(path.to_owned());
+        shared.queue.push_back(queued);
         shared.batch += 1;
         if shared.workers < TEXTURE_WORKERS {
             shared.workers += 1;
@@ -330,25 +344,38 @@ impl Assets {
         }
     }
 
-    /// A worker: reads queued textures until there are none left.
+    /// A worker: reads queued textures and sky images until there are
+    /// none left.
     fn read_queued_textures(&self) {
         loop {
-            let (path, folder) = {
+            let (queued, folder) = {
                 let mut shared = self.lock();
-                let Some(path) = shared.queue.pop_front() else {
+                let Some(queued) = shared.queue.pop_front() else {
                     shared.workers -= 1;
                     return;
                 };
-                (path, shared.folder.clone().unwrap_or_default())
+                (queued, shared.folder.clone().unwrap_or_default())
             };
-            // A decoder that panics fails this texture, not the worker,
-            // which would leave the texture "loading" forever.
-            let read = panic::catch_unwind(AssertUnwindSafe(|| read_texture(&folder, &path)))
-                .unwrap_or_else(|_| Err("the decoder failed on it".to_owned()));
-            let waker = {
+            let path = &queued.path;
+            // A decoder that panics fails this file, not the worker, which
+            // would leave the file "loading" forever.
+            let failed = || "the decoder failed on it".to_owned();
+            let waker = if queued.sky {
+                let read = panic::catch_unwind(AssertUnwindSafe(|| read_sky_image(&folder, path)))
+                    .unwrap_or_else(|_| Err(failed()));
                 let mut shared = self.lock();
-                store_texture(&mut shared, &path, read);
-                shared.loading.remove(&path);
+                store_sky_image(&mut shared, path, read);
+                shared.loading.remove(&queued);
+                if shared.loading.is_empty() {
+                    shared.batch = 0;
+                }
+                shared.waker.clone()
+            } else {
+                let read = panic::catch_unwind(AssertUnwindSafe(|| read_texture(&folder, path)))
+                    .unwrap_or_else(|_| Err(failed()));
+                let mut shared = self.lock();
+                store_texture(&mut shared, path, read);
+                shared.loading.remove(&queued);
                 if shared.loading.is_empty() {
                     shared.batch = 0;
                 }
@@ -538,6 +565,36 @@ fn read_table(folder: &Path, path: &str) -> Result<DataTable, String> {
 }
 
 /// Keeps what reading the texture at `path` gave, reporting a failure.
+/// Keeps what reading the sky image at `path` gave, reporting a failure or
+/// a picture that isn't a panorama once.
+fn store_sky_image(
+    shared: &mut Shared,
+    path: &str,
+    read: Result<SkyImage, String>,
+) -> Option<Arc<SkyImage>> {
+    let image = match read {
+        Ok(image) => {
+            if let Some(warning) = image.shape_warning() {
+                shared
+                    .errors
+                    .push(format!("The sky image `{path}` {warning}."));
+            }
+            Some(Arc::new(image))
+        }
+        Err(message) => {
+            shared
+                .errors
+                .push(format!("Could not load the sky image `{path}`: {message}"));
+            None
+        }
+    };
+    if let Some(folder) = shared.folder.clone() {
+        reload::remember_stamp(shared, &folder, path);
+    }
+    shared.sky_images.insert(path.to_owned(), image.clone());
+    image
+}
+
 fn store_texture(
     shared: &mut Shared,
     path: &str,

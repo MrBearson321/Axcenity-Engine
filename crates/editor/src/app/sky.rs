@@ -28,7 +28,7 @@ impl EditorApp {
         let file = rfd::FileDialog::new()
             .set_title("Choose a sky image")
             .add_filter("Sky image", &axcenity_assets::SKY_IMAGE_EXTENSIONS)
-            .add_filter("HDR sky", &["hdr"])
+            .add_filter("HDR sky (EXR or HDR)", &axcenity_assets::HDR_SKY_EXTENSIONS)
             .set_directory(&start)
             .pick_file()?;
         match axcenity_assets::import_sky_image(&project.folder, &file) {

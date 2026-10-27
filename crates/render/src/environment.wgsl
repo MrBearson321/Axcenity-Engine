@@ -18,8 +18,9 @@ struct Bake {
     horizon: vec4<f32>,
     ground: vec4<f32>,
     // x: 1 to draw the sky image instead of the gradient, y: the image's mip
-    // level whose texels match the source faces', z: directions averaged per
-    // texel of a rough level, w: the reflection cubemap's last level.
+    // level whose texels match the source faces' at the horizon (may be
+    // below 0), z: directions averaged per texel of a rough level, w: the
+    // reflection cubemap's last level.
     settings: vec4<f32>,
 }
 
@@ -68,7 +69,12 @@ fn face_direction(face: u32, uv: vec2<f32>) -> vec3<f32> {
 fn fs_sky_face(in: FaceOut) -> @location(0) vec4<f32> {
     let dir = face_direction(in.face, in.uv);
     if bake.settings.x > 0.5 {
-        let texel = textureSampleLevel(sky_image, linear_sampler, equirect_uv(dir), bake.settings.y);
+        // Toward straight up and down the image's columns crowd together,
+        // so a blurrier level is read there (at most 4 levels), as the sky
+        // pass does.
+        let across = max(sqrt(max(1.0 - dir.y * dir.y, 0.0)), 0.0625);
+        let level = max(bake.settings.y - log2(across), 0.0);
+        let texel = textureSampleLevel(sky_image, linear_sampler, equirect_uv(dir), level);
         return vec4<f32>(texel.rgb, 1.0);
     }
     return vec4<f32>(gradient_sky(dir, bake.top.rgb, bake.horizon.rgb, bake.ground.rgb), 1.0);

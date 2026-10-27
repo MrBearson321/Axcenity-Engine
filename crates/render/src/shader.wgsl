@@ -318,5 +318,8 @@ fn vs_sky(@builtin(vertex_index) index: u32) -> SkyOut {
 fn fs_sky(in: SkyOut) -> @location(0) vec4<f32> {
     let far = frame.inv_view_proj * vec4<f32>(in.clip_xy, 1.0, 1.0);
     let dir = normalize(far.xyz / far.w - frame.camera_position.xyz);
-    return vec4<f32>(sky_radiance(dir), 1.0);
+    // How far the direction turns from one pixel to the next: about the
+    // angle each pixel covers (taken here, where every pixel runs together).
+    let spread = length(fwidth(dir));
+    return vec4<f32>(sky_radiance(dir, spread), 1.0);
 }

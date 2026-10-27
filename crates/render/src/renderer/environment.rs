@@ -7,6 +7,7 @@
 //! is worked out on the CPU as spherical harmonics. At Low nothing here is
 //! allocated, and the scene shaders work the gradient out per pixel.
 
+use std::borrow::Cow;
 use std::f32::consts::PI;
 use std::ops::Range;
 
@@ -34,8 +35,9 @@ struct BakeUniform {
     top: [f32; 4],
     horizon: [f32; 4],
     ground: [f32; 4],
-    /// 1 to draw the sky image, the image's level to read, directions per
-    /// texel of a rough level, and the reflection cubemap's last level.
+    /// 1 to draw the sky image, the image's level to read at the horizon,
+    /// directions per texel of a rough level, and the reflection cubemap's
+    /// last level.
     settings: [f32; 4],
 }
 
@@ -280,9 +282,12 @@ impl Environment {
             return ([0.0; 4], [[0.0; 4]; 9]);
         };
         let last_level = (maps.reflections.mip_level_count() - 1) as f32;
-        let image = if self.image.is_some() { 1.0 } else { 0.0 };
+        let (image, width) = self
+            .image
+            .as_ref()
+            .map_or((0.0, 0.0), |image| (1.0, image.width as f32));
         (
-            [1.0, last_level, image, 0.0],
+            [1.0, last_level, image, width],
             self.harmonics.map(|light| light.extend(0.0).to_array()),
         )
     }
@@ -313,7 +318,7 @@ impl Environment {
         };
         let size = maps.size.size;
         let image_level = self.image.as_ref().map_or(0.0, |image| {
-            (image.width as f32 / (4.0 * size as f32)).log2().max(0.0)
+            (image.width as f32 / (4.0 * size as f32)).log2()
         });
         let last_level = (maps.reflections.mip_level_count() - 1) as f32;
         let uniform = BakeUniform {
@@ -463,16 +468,18 @@ fn cube_view(texture: &wgpu::Texture, levels: Range<u32>) -> wgpu::TextureView {
 }
 
 /// One level of a sky image on the CPU: its width, height and linear rgb.
-struct Level {
+/// The largest level borrows the draw list's pixels instead of copying them
+/// (`Cow`: borrowed or owned).
+struct Level<'a> {
     width: u32,
     height: u32,
-    rgb: Vec<f32>,
+    rgb: Cow<'a, [f32]>,
 }
 
-impl Level {
+impl Level<'_> {
     /// Half the width and height (at least 1), each pixel the average of
     /// the square of four it covers.
-    fn halved(&self) -> Level {
+    fn halved(&self) -> Level<'static> {
         let (width, height) = ((self.width / 2).max(1), (self.height / 2).max(1));
         let pixel = |x: u32, y: u32| {
             let at = ((y.min(self.height - 1) * self.width + x.min(self.width - 1)) * 3) as usize;
@@ -487,7 +494,11 @@ impl Level {
                 rgb.extend_from_slice(&(sum * 0.25).to_array());
             }
         }
-        Level { width, height, rgb }
+        Level {
+            width,
+            height,
+            rgb: Cow::Owned(rgb),
+        }
     }
 }
 
@@ -505,14 +516,14 @@ fn upload_image(
         Level {
             width: image.width,
             height: image.height,
-            rgb: image.rgb.to_vec(),
+            rgb: Cow::Borrowed(image.rgb.as_slice()),
         }
     } else {
         log::warn!("{image:?} has broken data, so the sky is drawn black");
         Level {
             width: 1,
             height: 1,
-            rgb: vec![0.0; 3],
+            rgb: Cow::Owned(vec![0.0; 3]),
         }
     };
     while level.width > max_size.max(1) || level.height > max_size.max(1) {
@@ -761,18 +772,18 @@ mod tests {
         let level = Level {
             width: 2,
             height: 2,
-            rgb: vec![0.0, 0.0, 0.0, 4.0, 4.0, 4.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0],
+            rgb: vec![0.0, 0.0, 0.0, 4.0, 4.0, 4.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0].into(),
         };
         let half = level.halved();
         assert_eq!((half.width, half.height), (1, 1));
-        assert_eq!(half.rgb, vec![2.0; 3]);
+        assert_eq!(*half.rgb, [2.0; 3]);
         // An odd edge repeats its last pixel.
         let row = Level {
             width: 3,
             height: 1,
-            rgb: vec![1.0, 1.0, 1.0, 3.0, 3.0, 3.0, 8.0, 8.0, 8.0],
+            rgb: vec![1.0, 1.0, 1.0, 3.0, 3.0, 3.0, 8.0, 8.0, 8.0].into(),
         };
-        assert_eq!(row.halved().rgb, vec![2.0; 3]);
+        assert_eq!(*row.halved().rgb, [2.0; 3]);
     }
 
     #[test]

@@ -610,15 +610,15 @@ impl EditorApp {
                 Err("texture sets are saved with Get texture in the Assets panel".to_owned())
             }
             Some(AssetKind::Material) => Err(
-                "material files name textures in their own project, so they're made with Save                  as Material on a part's Explorer row"
+                "material files name textures in their own project, so they're made with Save \
+                 as Material on a part's Explorer row"
                     .to_owned(),
             ),
-            Some(AssetKind::Prop) | None => {
-                Err(
-                    "it isn't a model, image, sky (`.hdr`), sound or prefab (`.prefab.json`) file"
-                        .to_owned(),
-                )
-            }
+            Some(AssetKind::Prop) | None => Err(
+                "it isn't a model, image, sky (`.exr` or `.hdr`), sound or prefab \
+                     (`.prefab.json`) file"
+                    .to_owned(),
+            ),
         };
         match result {
             Ok(path) => {

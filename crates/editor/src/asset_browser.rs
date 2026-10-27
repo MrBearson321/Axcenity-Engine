@@ -82,7 +82,7 @@ pub enum AssetKind {
     BehaviorTree,
     /// A data table scripts read (`assets/data/*.data.json`).
     DataTable,
-    /// A sky image (`.hdr`) for Lighting's `SkyImage`.
+    /// A sky image (`.exr` or `.hdr`) for Lighting's `SkyImage`.
     Sky,
 }
 
@@ -162,7 +162,8 @@ impl AssetKind {
                  fill its maps, or double-click to fill the selection."
             }
             AssetKind::Material => {
-                "Drag onto a part or MeshPart to draw it in this material (its MaterialVariant),                  or double-click to use it on the selection."
+                "Drag onto a part or MeshPart to draw it in this material (its MaterialVariant), \
+                 or double-click to use it on the selection."
             }
             AssetKind::Audio => {
                 "Drag onto a part to put a Sound in it, or anywhere else for one in the Workspace."

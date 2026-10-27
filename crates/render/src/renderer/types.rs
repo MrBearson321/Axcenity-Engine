@@ -58,7 +58,7 @@ pub(super) struct FrameUniform {
     /// height in pixels, to find a pixel's place in the occlusion texture.
     pub(super) ambient_occlusion: [f32; 4],
     /// 1 while the environment maps are on, the reflection cubemap's last
-    /// mip level, 1 when the sky is an image, then unused.
+    /// mip level, 1 when the sky is an image, and the image's width.
     pub(super) environment: [f32; 4],
     /// The sky's diffuse light as spherical harmonics (see
     /// `environment::harmonics`), while the environment maps are on.

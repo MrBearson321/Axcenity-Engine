@@ -185,6 +185,93 @@ fn a_sky_image_shows_in_reflections_and_behind_the_scene() {
     );
 }
 
+/// The middle `size` × `size` pixels' red values, drawn looking along
+/// `look` at a sky of `image` alone (no items, no post-processing).
+fn sky_seen(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    image: SkyImage,
+    look: Vec3,
+    size: u32,
+) -> Vec<u8> {
+    let mut list = list_of(Vec::new());
+    list.sky = Sky {
+        image: Some(image),
+        ..Sky::default()
+    };
+    list.sun = Sun {
+        direction: look,
+        color: [1.0; 3],
+        intensity: 3.0,
+    };
+    list.camera = Camera {
+        position: Vec3::ZERO,
+        look_at: look,
+        fov_y_degrees: 70.0,
+    };
+    let mut renderer = TextureRenderer::new(device, queue, size, size);
+    renderer.render(&list).unwrap();
+    renderer
+        .read_pixels()
+        .chunks(4)
+        .map(|pixel| pixel[0])
+        .collect()
+}
+
+#[test]
+fn no_sun_is_drawn_over_a_sky_image() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    // Looking straight at the sun: a dim grey image stays dim grey, with
+    // no bright disc or glow added in the middle.
+    let reds = sky_seen(
+        &device,
+        &queue,
+        plain_sky(11, [0.2; 3]),
+        Vec3::new(0.3, 0.5, -1.0),
+        64,
+    );
+    let brightest = reds.iter().copied().max().unwrap();
+    let darkest = reds.iter().copied().min().unwrap();
+    assert!(brightest - darkest <= 2, "{darkest}..{brightest}");
+    assert!(brightest < 140, "no sun over the image: {brightest}");
+}
+
+#[test]
+fn a_detailed_sky_image_is_smoothed_to_the_screen_not_noisy() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    // A 4096-wide checkerboard of single black and white pixels, seen on
+    // 64 pixels: each screen pixel covers dozens of the image's, so it
+    // should read as their average (an even grey), not a sample of one.
+    let (width, height) = (4096u32, 2048u32);
+    let rgb: Vec<f32> = (0..width * height)
+        .flat_map(|i| {
+            let value = ((i % width + i / width) % 2) as f32;
+            [value; 3]
+        })
+        .collect();
+    let checker = SkyImage {
+        key: 12,
+        width,
+        height,
+        rgb: Arc::new(rgb),
+    };
+    let reds = sky_seen(&device, &queue, checker, Vec3::new(0.0, 0.2, -1.0), 64);
+    let brightest = reds.iter().copied().max().unwrap();
+    let darkest = reds.iter().copied().min().unwrap();
+    // Half white in linear light is 188 in sRGB.
+    assert!(
+        brightest - darkest <= 12,
+        "the sky shimmers: {darkest}..{brightest}"
+    );
+    assert!((170..=205).contains(&darkest), "an even grey: {darkest}");
+}
+
 #[test]
 fn changing_the_sky_bakes_the_maps_once_not_every_frame() {
     let Some((device, queue)) = test_device() else {

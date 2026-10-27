@@ -1,9 +1,14 @@
 //! Sky images: high dynamic range pictures of the whole sky that Lighting's
 //! `SkyImage` names, wrapped around the world (equirectangular).
 //!
-//! Radiance `.hdr` files hold light brighter than 1, as a real sky has, so
-//! the sun in them lights and blooms. A PNG or JPEG can stand in, its
-//! colors read as sRGB, though nothing in it is brighter than white.
+//! OpenEXR (`.exr`) and Radiance (`.hdr`) files hold light brighter than 1,
+//! as a real sky has, so the sun in them lights and blooms. A PNG or JPEG
+//! can stand in, its colors read as sRGB, though nothing in it is brighter
+//! than white.
+//!
+//! Images wider than [`MAX_SKY_WIDTH`] are scaled down as they're read: more
+//! detail than that is lost on screen, and an 8K panorama in linear light
+//! takes 400 MB.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -12,7 +17,20 @@ use crate::model::new_key;
 use crate::safe_path;
 
 /// The file extensions a sky image can have.
-pub const SKY_IMAGE_EXTENSIONS: [&str; 4] = ["hdr", "png", "jpg", "jpeg"];
+pub const SKY_IMAGE_EXTENSIONS: [&str; 5] = ["exr", "hdr", "png", "jpg", "jpeg"];
+/// The extensions of the high dynamic range files, which are only ever sky
+/// images (PNG and JPEG are usually textures).
+pub const HDR_SKY_EXTENSIONS: [&str; 2] = ["exr", "hdr"];
+/// The widest a sky image is kept, in pixels.
+pub const MAX_SKY_WIDTH: u32 = 4096;
+
+/// Whether `path` names a high dynamic range sky image file, by its
+/// extension.
+pub fn is_hdr_sky_file(path: &str) -> bool {
+    path.rsplit_once('.').is_some_and(|(_, extension)| {
+        HDR_SKY_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str())
+    })
+}
 
 /// A sky image in linear light, as the renderer draws it.
 #[derive(Clone)]
@@ -29,6 +47,19 @@ impl SkyImage {
     /// Different for every sky image read.
     pub fn key(&self) -> u64 {
         self.key
+    }
+
+    /// Why it may look wrong, if it isn't a panorama twice as wide as it is
+    /// tall (2:1, within 2%): wrapped around the sky, it's stretched.
+    pub fn shape_warning(&self) -> Option<String> {
+        let ratio = self.width as f32 / self.height as f32;
+        ((ratio - 2.0).abs() > 0.04).then(|| {
+            format!(
+                "is {}×{}, not twice as wide as it is tall, so it's stretched around the sky. \
+                 Use a panorama (equirectangular, 2:1), such as an HDRI",
+                self.width, self.height
+            )
+        })
     }
 }
 
@@ -55,35 +86,59 @@ pub fn read_sky_image(folder: &Path, path: &str) -> Result<SkyImage, String> {
 /// Decodes a sky image file's `bytes`; `name` gives its type when the bytes
 /// don't.
 pub fn decode_sky_image(bytes: &[u8], name: &str) -> Result<SkyImage, String> {
-    const ONLY: &str = "only Radiance .hdr, PNG and JPEG sky images can be used";
+    const ONLY: &str = "only OpenEXR, Radiance .hdr, PNG and JPEG sky images can be used";
+    use image::ImageFormat;
     let format = image::guess_format(bytes)
-        .or_else(|_| image::ImageFormat::from_path(name))
+        .or_else(|_| ImageFormat::from_path(name))
         .map_err(|_| ONLY.to_owned())?;
     if !matches!(
         format,
-        image::ImageFormat::Hdr | image::ImageFormat::Png | image::ImageFormat::Jpeg
+        ImageFormat::OpenExr | ImageFormat::Hdr | ImageFormat::Png | ImageFormat::Jpeg
     ) {
         return Err(ONLY.to_owned());
     }
-    let decoded = image::load_from_memory_with_format(bytes, format).map_err(|err| match err {
-        image::ImageError::Unsupported(_) => ONLY.to_owned(),
-        err => err.to_string(),
-    })?;
+    let mut decoded =
+        image::load_from_memory_with_format(bytes, format).map_err(|err| match err {
+            image::ImageError::Unsupported(_) => ONLY.to_owned(),
+            err => err.to_string(),
+        })?;
     if decoded.width() == 0 || decoded.height() == 0 {
         return Err("it has no pixels".to_owned());
     }
-    let mut rgb = decoded.to_rgb32f();
-    // An .hdr file holds linear light already; other images hold sRGB.
-    if format != image::ImageFormat::Hdr {
-        for channel in rgb.iter_mut() {
+    // Scaled down in its own format first, so a huge file never takes the
+    // memory of a huge image in linear light.
+    if decoded.width() > MAX_SKY_WIDTH {
+        let height = (u64::from(decoded.height()) * u64::from(MAX_SKY_WIDTH)
+            / u64::from(decoded.width()))
+        .max(1) as u32;
+        decoded =
+            decoded.resize_exact(MAX_SKY_WIDTH, height, image::imageops::FilterType::Triangle);
+    }
+    let (width, height) = (decoded.width(), decoded.height());
+    let rgb = if matches!(format, ImageFormat::OpenExr | ImageFormat::Hdr) {
+        // Linear light already.
+        decoded.into_rgb32f().into_raw()
+    } else if decoded.color().bytes_per_pixel() / decoded.color().channel_count() == 1 {
+        // 8 bits a channel: each of the 256 values turned linear once.
+        let linear: [f32; 256] = std::array::from_fn(|byte| srgb_to_linear(byte as f32 / 255.0));
+        decoded
+            .into_rgb8()
+            .into_raw()
+            .into_iter()
+            .map(|byte| linear[usize::from(byte)])
+            .collect()
+    } else {
+        let mut rgb = decoded.into_rgb32f().into_raw();
+        for channel in &mut rgb {
             *channel = srgb_to_linear(*channel);
         }
-    }
+        rgb
+    };
     Ok(SkyImage {
         key: new_key(),
-        width: rgb.width(),
-        height: rgb.height(),
-        rgb: Arc::new(rgb.into_raw()),
+        width,
+        height,
+        rgb: Arc::new(rgb),
     })
 }
 
@@ -119,6 +174,43 @@ mod tests {
         for (read, wrote) in first.iter().zip([6.0, 1.0, 0.25]) {
             assert!((read - wrote).abs() < wrote * 0.05, "{first:?}");
         }
+    }
+
+    #[test]
+    fn an_exr_file_keeps_light_brighter_than_white() {
+        let (width, height) = (8u32, 4u32);
+        let pixels: Vec<f32> = [12.5, 0.75, 0.125].repeat((width * height) as usize);
+        let mut bytes = Vec::new();
+        image::Rgb32FImage::from_raw(width, height, pixels)
+            .unwrap()
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::OpenExr,
+            )
+            .unwrap();
+        let image = decode_sky_image(&bytes, "sky.exr").unwrap();
+        assert_eq!((image.width, image.height), (8, 4));
+        assert_eq!(&image.rgb[..3], &[12.5, 0.75, 0.125], "kept exactly");
+        assert!(image.shape_warning().is_none(), "2:1 is a panorama");
+        assert!(is_hdr_sky_file("assets/sky/Noon.EXR") && is_hdr_sky_file("a/b.hdr"));
+        assert!(!is_hdr_sky_file("assets/sky/noon.png"));
+    }
+
+    #[test]
+    fn a_huge_sky_is_scaled_down_to_the_widest_kept() {
+        let image = decode_sky_image(&hdr_file(MAX_SKY_WIDTH * 2, 8, [1.0; 3]), "big.hdr").unwrap();
+        assert_eq!((image.width, image.height), (MAX_SKY_WIDTH, 4));
+        assert_eq!(image.rgb.len(), (MAX_SKY_WIDTH * 4 * 3) as usize);
+    }
+
+    #[test]
+    fn a_picture_that_isnt_a_panorama_says_it_will_stretch() {
+        let image = decode_sky_image(&hdr_file(16, 9, [1.0; 3]), "photo.hdr").unwrap();
+        let warning = image.shape_warning().unwrap();
+        assert!(
+            warning.contains("16×9") && warning.contains("2:1"),
+            "{warning}"
+        );
     }
 
     #[test]
@@ -158,6 +250,36 @@ mod tests {
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(errors[0].contains("Could not load the sky image `assets/sky/gone.hdr`"));
         assert!(assets.sky_image("").is_none());
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn in_the_background_a_sky_arrives_later_with_a_wake_up() {
+        let folder =
+            std::env::temp_dir().join(format!("axcenity-sky-background-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(folder.join("assets/sky")).unwrap();
+        std::fs::write(
+            folder.join("assets/sky/wide.hdr"),
+            hdr_file(16, 9, [1.0; 3]),
+        )
+        .unwrap();
+        let assets = crate::Assets::new(&folder);
+        let (woken, wakes) = std::sync::mpsc::channel();
+        assets.load_textures_in_background(move || {
+            let _ = woken.send(());
+        });
+        // Asked for, not read yet: the sky colors show meanwhile.
+        assert!(assets.sky_image("assets/sky/wide.hdr").is_none());
+        wakes
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the sky wakes the host");
+        assert!(assets.texture_progress().is_none());
+        assert_eq!(assets.sky_image("assets/sky/wide.hdr").unwrap().width, 16);
+        // Not a panorama, so it's said once.
+        let errors = assets.take_errors();
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].contains("stretched"), "{errors:?}");
         let _ = std::fs::remove_dir_all(&folder);
     }
 

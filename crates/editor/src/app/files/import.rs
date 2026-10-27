@@ -89,7 +89,7 @@ impl EditorApp {
         let mut everything: Vec<&str> = MODELS.to_vec();
         everything.extend(axcenity_assets::TEXTURE_EXTENSIONS);
         everything.extend(axcenity_assets::AUDIO_EXTENSIONS);
-        everything.push("hdr");
+        everything.extend(axcenity_assets::HDR_SKY_EXTENSIONS);
         everything.push("json");
         everything.push(project::PACKAGE_EXTENSION);
         let dialog = rfd::FileDialog::new()
@@ -100,7 +100,7 @@ impl EditorApp {
             )
             .add_filter("3D model", &MODELS)
             .add_filter("Image", &axcenity_assets::TEXTURE_EXTENSIONS)
-            .add_filter("Sky (HDR)", &["hdr"])
+            .add_filter("Sky (EXR or HDR)", &axcenity_assets::HDR_SKY_EXTENSIONS)
             .add_filter("Sound", &axcenity_assets::AUDIO_EXTENSIONS)
             .add_filter("Prefab", &["json"])
             .add_filter("Asset package", &[project::PACKAGE_EXTENSION]);
