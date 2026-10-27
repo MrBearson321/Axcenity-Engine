@@ -6,6 +6,8 @@
 //! `gpu.rs` uploads meshes, textures and materials. `sprites.rs` draws particles.
 //! `terrain.rs` draws terrain chunks with their blended layers.
 //! `occlusion.rs` draws the depth and normal prepass and ambient occlusion.
+//! `culling.rs` tests bounds against each view, so what a view can't see
+//! isn't drawn.
 //! `gpu_timer.rs` measures the GPU's time per frame and per pass, for the
 //! editor's profiler and the benchmarks.
 
@@ -21,12 +23,14 @@ use crate::graphics::{Capabilities, EffectiveGraphics, GraphicsSettings, ShadowM
 use crate::mesh::{self};
 use anyhow::{Context, Result};
 use bytemuck::{Pod, Zeroable};
+pub use culling::CullingBounds;
 use glyphon::{
     Buffer, Cache as GlyphCache, FontSystem, Resolution, SwashCache, TextArea, TextAtlas,
     TextBounds, TextRenderer as GlyphTextRenderer, Viewport as TextViewport,
 };
 pub use gpu_timer::FramePass;
 
+mod culling;
 mod gpu;
 mod gpu_timer;
 mod lighting;
@@ -39,6 +43,7 @@ mod ui_pass;
 
 #[cfg(test)]
 use crate::draw_list::{ChannelMap, MeshSource};
+use culling::{Bounds, Frustum, spheres_touch};
 #[cfg(test)]
 use glam::Vec3;
 #[cfg(test)]
@@ -49,12 +54,13 @@ use gpu::{
     drawable_size, shader_module, target_bytes, update_custom_mesh, upload_custom_mesh,
     upload_mesh, upload_texture,
 };
+use lighting::{
+    DrawPlan, camera_view_projection, casters_in, frame_uniform, linear_color, maps_uniform_of,
+    material_key, material_textures, plan_draws, plan_lights, post_drawn, post_uniform,
+    shadows_drawn, view_projection,
+};
 #[cfg(test)]
 use lighting::{cascade_ends, light_raw, uv_matrix};
-use lighting::{
-    frame_uniform, linear_color, maps_uniform_of, material_key, material_textures, plan_draws,
-    plan_lights, post_drawn, post_uniform, shadows_drawn, spot_casters, view_projection,
-};
 use occlusion::occlusion_uniform;
 use std::sync::Arc;
 
@@ -111,11 +117,21 @@ pub struct RenderStats {
     pub pass_times: [Option<Duration>; FramePass::COUNT],
     /// Items in the draw list.
     pub items_submitted: u32,
-    /// Items the scene pass drew: all those submitted, less any whose mesh
-    /// couldn't be uploaded.
+    /// Items the scene pass drew: those submitted in the camera's view,
+    /// less any whose mesh couldn't be uploaded.
     pub items_drawn: u32,
     /// Instanced draws in the scene pass, one per mesh and material.
     pub batches: u32,
+    /// Items outside the camera's view, so not drawn by the scene pass.
+    pub items_culled: u32,
+    /// Casters drawn into the shadow views (each cascade and shadowing spot
+    /// light), counted once per view.
+    pub shadow_casters_drawn: u32,
+    /// Casters left out of a shadow view they couldn't reach, counted once
+    /// per view.
+    pub shadow_casters_culled: u32,
+    /// Sprites (particles) outside the camera's view.
+    pub sprites_culled: u32,
     /// Bytes of textures on the GPU, every mip level included, counted when
     /// uploaded and when freed.
     pub texture_bytes: u64,
@@ -330,6 +346,25 @@ impl TextureRenderer {
     /// Uses `settings` from the next frame (see [`GraphicsSettings::effective`]).
     pub fn set_graphics(&mut self, settings: &GraphicsSettings) {
         self.scene.set_graphics(settings);
+    }
+
+    /// For the editor's culling overlay: while `camera` is set, items and
+    /// sprites are culled as if seen from it (at this texture's aspect)
+    /// rather than from the draw list's camera, and each item's bounds are
+    /// kept for [`culling_bounds`](Self::culling_bounds). Moving the real
+    /// camera away then shows what culling left out. `None` culls normally.
+    pub fn freeze_culling(&mut self, camera: Option<crate::Camera>) {
+        self.scene.frozen_view = camera;
+        if camera.is_none() {
+            self.scene.culling_bounds = Vec::new();
+        }
+    }
+
+    /// Each item's bounding sphere in the last frame, and whether it was
+    /// drawn, while culling is frozen (see [`freeze_culling`](Self::freeze_culling)).
+    /// Empty otherwise.
+    pub fn culling_bounds(&self) -> &[CullingBounds] {
+        &self.scene.culling_bounds
     }
 
     /// Draws as if the GPU could do no more than `limits` (each value the

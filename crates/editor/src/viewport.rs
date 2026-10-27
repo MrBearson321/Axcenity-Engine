@@ -98,6 +98,12 @@ const EMITTER_ICON_RADIUS: f32 = 11.0;
 /// are drawn out to the terrain overlay distance.
 const NAV_FILL_DISTANCE: f32 = 80.0;
 const NAV_EDGE_COLOR: egui::Color32 = egui::Color32::from_rgb(40, 230, 210);
+/// The culling overlay: bounds drawn (green) and culled (red), and the
+/// frozen view's edges out to `FROZEN_VIEW_LENGTH` studs.
+const CULL_DRAWN_COLOR: egui::Color32 = egui::Color32::from_rgb(110, 230, 120);
+const CULL_CULLED_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 90, 90);
+const FROZEN_VIEW_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 220, 80);
+const FROZEN_VIEW_LENGTH: f32 = 60.0;
 /// The Agent Paths overlay: what's left of each agent's path.
 const AGENT_PATH_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 150, 40);
 
@@ -273,6 +279,9 @@ pub struct OverlayToggles {
     pub emitters: bool,
     pub nav_mesh: bool,
     pub agent_paths: bool,
+    /// Freezes culling where the camera is when it goes on, and outlines
+    /// what was drawn and what was culled. Not saved between runs.
+    pub culling: bool,
 }
 
 impl OverlayToggles {
@@ -283,6 +292,7 @@ impl OverlayToggles {
             || self.emitters
             || self.nav_mesh
             || self.agent_paths
+            || self.culling
     }
 }
 
@@ -404,6 +414,9 @@ pub struct Viewport {
     /// The UI took the last press (a widget, a scroll bar, an open
     /// Dropdown's list), so letting it go clicks no button or text box.
     ui_took_press: bool,
+    /// Where the camera was when the culling overlay went on: culling
+    /// stays there until it goes off.
+    frozen_culling: Option<axcenity_render::Camera>,
 }
 
 /// The texture the scene is drawn into, and egui's name for it.
@@ -444,6 +457,7 @@ impl Viewport {
             character_zoom: 0.0,
             ui: axcenity_ui::UiInteraction::default(),
             ui_took_press: false,
+            frozen_culling: None,
         }
     }
 
@@ -790,6 +804,10 @@ impl Viewport {
         });
         // Does nothing unless the settings changed.
         target.renderer.set_graphics(graphics);
+        self.frozen_culling = overlays
+            .culling
+            .then(|| self.frozen_culling.unwrap_or(camera));
+        target.renderer.freeze_culling(self.frozen_culling);
         if target.renderer.size() != (width.max(1), height.max(1)) {
             target.renderer.resize(width, height);
             // The resize made a new texture, so point egui's name at it.
@@ -879,6 +897,16 @@ impl Viewport {
         }
         if overlays.agent_paths {
             paint_agent_paths(&ui.painter_at(rect), &screen, agent_paths);
+        }
+        if let Some(frozen) = self.frozen_culling {
+            paint_culling(
+                &ui.painter_at(rect),
+                &screen,
+                target.renderer.culling_bounds(),
+                frozen,
+                camera,
+                width as f32 / height.max(1) as f32,
+            );
         }
         let painter = ui.painter_at(rect);
         for &pose in preview {

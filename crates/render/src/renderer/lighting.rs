@@ -10,10 +10,12 @@ use glam::camera::rh;
 use glam::{Mat3, Mat4, Vec2, Vec3};
 
 use crate::draw_list::{
-    ChannelMap, DrawItem, DrawList, Light, Material, PostProcessing, Shadows, TextureSource,
+    Camera, ChannelMap, DrawItem, DrawList, Light, Material, PostProcessing, Shadows, Shape,
+    TextureSource,
 };
 use crate::graphics::{AmbientOcclusion, EffectiveGraphics, ShadowMapSize, SpotShadowMapSize};
 
+use super::culling::{Bounds, CullingBounds, Frustum, Sphere};
 use super::{
     Batch, CASCADE_SPLIT_BLEND, FAR_PLANE, FrameUniform, InstanceRaw, LIGHT_SCALE, LIGHTS_PER_TILE,
     LightRaw, MATERIAL_TEXTURES, MAX_LIGHTS, MAX_SPOT_SHADOW_DEGREES, MAX_SPOT_SHADOWS,
@@ -23,8 +25,7 @@ use super::{
 
 /// The camera's view (world to view space) and projection (view to clip
 /// space).
-pub(super) fn camera_matrices(list: &DrawList, aspect: f32) -> (Mat4, Mat4) {
-    let camera = &list.camera;
+pub(super) fn camera_matrices(camera: &Camera, aspect: f32) -> (Mat4, Mat4) {
     let view = rh::view::look_at_mat4(camera.position, camera.look_at, Vec3::Y);
     // wgpu uses DirectX-style clip space: depth from 0 to 1, Y up.
     let projection = rh::proj::directx::perspective(
@@ -37,7 +38,11 @@ pub(super) fn camera_matrices(list: &DrawList, aspect: f32) -> (Mat4, Mat4) {
 }
 
 pub(super) fn view_projection(list: &DrawList, aspect: f32) -> Mat4 {
-    let (view, projection) = camera_matrices(list, aspect);
+    camera_view_projection(&list.camera, aspect)
+}
+
+pub(super) fn camera_view_projection(camera: &Camera, aspect: f32) -> Mat4 {
+    let (view, projection) = camera_matrices(camera, aspect);
     projection * view
 }
 
@@ -78,7 +83,7 @@ pub(super) fn frame_uniform(
     graphics: &EffectiveGraphics,
 ) -> FrameUniform {
     let camera = &list.camera;
-    let (view, projection) = camera_matrices(list, aspect);
+    let (view, projection) = camera_matrices(camera, aspect);
     let view_proj = projection * view;
     let sun_direction = list.sun.direction.normalize_or(Vec3::Y);
     let sun_radiance = linear_color(list.sun.color) * list.sun.intensity;
@@ -345,41 +350,31 @@ pub(super) fn cone_bounds(
     }
 }
 
-/// Copies the solid, shadow-casting instances whose bounds reach `bounds`
-/// to the end of `instances`, and returns them grouped by mesh, for one
-/// spot light's shadow pass. Every shape fits the unit cube, so an
-/// instance's bounding sphere comes from its transform alone.
-pub(super) fn spot_casters(
+/// Copies the casters that `reaches` to the end of `instances`, grouped by
+/// mesh, for one shadow view. Returns the groups, and how many casters were
+/// left out.
+pub(super) fn casters_in(
     instances: &mut Vec<InstanceRaw>,
-    batches: &[Batch],
-    (center, radius): (Vec3, f32),
-) -> Vec<(MeshKey, Range<u32>)> {
-    let mut casters: Vec<(MeshKey, Range<u32>)> = Vec::new();
-    for batch in batches
-        .iter()
-        .filter(|batch| !batch.transparent && batch.casts_shadow)
-    {
-        for index in batch.instances.clone() {
-            let raw = instances[index as usize];
-            let model = Mat4::from_cols_array_2d(&raw.model);
-            let reach = 0.5
-                * (model.x_axis.truncate().length()
-                    + model.y_axis.truncate().length()
-                    + model.z_axis.truncate().length());
-            if model.w_axis.truncate().distance(center) > radius + reach {
-                continue;
+    casters: &[Caster],
+    reaches: impl Fn(Sphere) -> bool,
+) -> (Vec<(MeshKey, Range<u32>)>, u32) {
+    let mut groups: Vec<(MeshKey, Range<u32>)> = Vec::new();
+    let mut left_out = 0;
+    for caster in casters {
+        if !reaches(caster.sphere) {
+            left_out += 1;
+            continue;
+        }
+        let copy = instances.len() as u32;
+        instances.push(caster.raw);
+        match groups.last_mut() {
+            Some((mesh, range)) if *mesh == caster.mesh && range.end == copy => {
+                range.end = copy + 1;
             }
-            let copy = instances.len() as u32;
-            instances.push(raw);
-            match casters.last_mut() {
-                Some((mesh, range)) if *mesh == batch.mesh && range.end == copy => {
-                    range.end = copy + 1;
-                }
-                _ => casters.push((batch.mesh, copy..copy + 1)),
-            }
+            _ => groups.push((caster.mesh, copy..copy + 1)),
         }
     }
-    casters
+    (groups, left_out)
 }
 
 pub(super) fn post_uniform(post: &PostProcessing) -> PostUniform {
@@ -508,51 +503,121 @@ pub(super) fn shadow_setup(
     setup
 }
 
-/// Puts the visible items in drawing order and groups them into batches.
+/// A solid item that casts a shadow, whether or not the camera sees it.
+#[derive(Clone, Copy)]
+pub(super) struct Caster {
+    pub(super) mesh: MeshKey,
+    pub(super) sphere: Sphere,
+    pub(super) raw: InstanceRaw,
+}
+
+/// What a frame draws (see [`plan_draws`]).
+#[derive(Default)]
+pub(super) struct DrawPlan {
+    /// The scene pass's instances. Shadow views copy theirs after these.
+    pub(super) instances: Vec<InstanceRaw>,
+    /// The scene pass's batches: the items in the camera's view.
+    pub(super) batches: Vec<Batch>,
+    /// Every solid item that casts a shadow, in view or not, grouped by
+    /// mesh: one out of view can still shadow what's in it.
+    pub(super) casters: Vec<Caster>,
+    /// Items outside the camera's view.
+    pub(super) culled: u32,
+}
+
+/// Puts the items `view` can see in drawing order and groups them into
+/// batches, and lists the shadow casters for the shadow views to pick from.
 ///
 /// Solid items come first, grouped by mesh, texture and sidedness. See-through items come last,
 /// farthest from the camera first, so each one blends over what's behind it.
 /// They're sorted by their centers, so two that overlap can still blend in the
 /// wrong order; that's the usual trade-off for this simple approach.
-pub(super) fn plan_draws(list: &DrawList) -> (Vec<InstanceRaw>, Vec<Batch>) {
-    let (mut transparent, mut opaque): (Vec<&DrawItem>, Vec<&DrawItem>) = list
-        .items
+///
+/// An item is culled when its bounding sphere is wholly outside `view`.
+/// `bounds` gives each shape's box in its own space: the unit cube for the
+/// built-in shapes, its corners' box for a caller's mesh. Each item's
+/// sphere and whether it was drawn go in `seen`, if given.
+pub(super) fn plan_draws(
+    list: &DrawList,
+    view: &Frustum,
+    bounds: impl Fn(&Shape) -> Bounds,
+    mut seen: Option<&mut Vec<CullingBounds>>,
+) -> DrawPlan {
+    // Each item's mesh and material binding, worked out once. The items
+    // are sorted by index, so sorting compares the keys in place and moves
+    // only indexes.
+    let items = &list.items;
+    let keys: Vec<(MeshKey, MaterialKey)> = items
         .iter()
-        .filter(|item| item.material.opacity > 0.0)
-        .partition(|item| item.material.opacity < 1.0);
+        .map(|item| (MeshKey::of(&item.shape), material_key(item)))
+        .collect();
+    let (mut transparent, mut opaque): (Vec<usize>, Vec<usize>) = (0..items.len())
+        .filter(|&index| items[index].material.opacity > 0.0)
+        .partition(|&index| items[index].material.opacity < 1.0);
 
-    opaque.sort_by_key(|item| {
-        (
-            MeshKey::of(&item.shape),
-            material_key(item),
-            item.material.double_sided,
-            !item.casts_shadow,
-        )
+    let sidedness = |item: &DrawItem| (item.material.double_sided, !item.casts_shadow);
+    opaque.sort_by(|&a, &b| {
+        keys[a]
+            .cmp(&keys[b])
+            .then_with(|| sidedness(&items[a]).cmp(&sidedness(&items[b])))
     });
-    let distance = |item: &DrawItem| {
-        item.transform
+    let distance = |index: usize| {
+        items[index]
+            .transform
             .w_axis
             .truncate()
             .distance_squared(list.camera.position)
     };
     // `total_cmp` orders floats even when one is NaN, so sorting can't panic.
-    transparent.sort_by(|a, b| distance(b).total_cmp(&distance(a)));
+    transparent.sort_by(|&a, &b| distance(b).total_cmp(&distance(a)));
 
-    let mut instances = Vec::new();
-    let mut batches: Vec<Batch> = Vec::new();
+    let mut plan = DrawPlan::default();
+    // Items sharing a mesh are next to each other, so its bounds are looked
+    // up once per run of them.
+    let mut last_bounds: Option<(MeshKey, Bounds)> = None;
     let ordered = opaque
         .into_iter()
-        .map(|item| (item, false))
-        .chain(transparent.into_iter().map(|item| (item, true)));
-    for (item, transparent) in ordered {
+        .map(|index| (index, false))
+        .chain(transparent.into_iter().map(|index| (index, true)));
+    for (at, transparent) in ordered {
+        let (item, (mesh, material)) = (&items[at], keys[at]);
+        let shape_bounds = match last_bounds {
+            Some((last, bounds)) if last == mesh => bounds,
+            _ => {
+                let bounds = bounds(&item.shape);
+                last_bounds = Some((mesh, bounds));
+                bounds
+            }
+        };
+        let sphere = shape_bounds.sphere(item.transform);
+        let visible = view.touches(sphere);
+        if let Some(seen) = seen.as_deref_mut() {
+            seen.push(CullingBounds {
+                center: sphere.0,
+                radius: sphere.1,
+                drawn: visible,
+            });
+        }
+        let caster = !transparent && item.casts_shadow;
+        if !visible {
+            plan.culled += 1;
+            if !caster {
+                continue;
+            }
+        }
         let Some(raw) = instance_raw(item) else {
             continue;
         };
-        let index = instances.len() as u32;
-        instances.push(raw);
-        let (mesh, material) = (MeshKey::of(&item.shape), material_key(item));
+        if caster {
+            plan.casters.push(Caster { mesh, sphere, raw });
+        }
+        if !visible {
+            continue;
+        }
+        let index = plan.instances.len() as u32;
+        plan.instances.push(raw);
         let (double_sided, casts_shadow) = (item.material.double_sided, item.casts_shadow);
-        match batches.last_mut() {
+        match plan.batches.last_mut() {
             Some(last)
                 if last.mesh == mesh
                     && last.material == material
@@ -562,7 +627,7 @@ pub(super) fn plan_draws(list: &DrawList) -> (Vec<InstanceRaw>, Vec<Batch>) {
             {
                 last.instances.end = index + 1;
             }
-            _ => batches.push(Batch {
+            _ => plan.batches.push(Batch {
                 mesh,
                 material,
                 transparent,
@@ -572,7 +637,7 @@ pub(super) fn plan_draws(list: &DrawList) -> (Vec<InstanceRaw>, Vec<Batch>) {
             }),
         }
     }
-    (instances, batches)
+    plan
 }
 
 /// The textures an item is drawn with, in binding order (see

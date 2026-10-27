@@ -199,6 +199,12 @@ impl Profiler {
             triangles: newest.render.stats.triangles,
             batches: newest.render.stats.batches,
             items_drawn: newest.render.stats.items_drawn,
+            items_culled: newest.render.stats.items_culled,
+            shadow_casters: (
+                newest.render.stats.shadow_casters_drawn,
+                newest.render.stats.shadow_casters_culled,
+            ),
+            sprites_culled: newest.render.stats.sprites_culled,
             texture_bytes: newest.render.stats.texture_bytes,
             mesh_bytes: newest.render.stats.mesh_bytes,
             target_bytes: newest.render.stats.target_bytes,
@@ -279,6 +285,14 @@ impl Profiler {
                         "Items drawn",
                         format!("{} of {}", summary.items_drawn, summary.items),
                     );
+                    row(ui, "Items culled", summary.items_culled.to_string());
+                    let (casters, casters_culled) = summary.shadow_casters;
+                    row(
+                        ui,
+                        "Shadow casters",
+                        format!("{casters} drawn, {casters_culled} culled"),
+                    );
+                    row(ui, "Sprites culled", summary.sprites_culled.to_string());
                     row(ui, "Lights", summary.lights.to_string());
                 });
                 section(ui, "GPU passes", |ui| {
@@ -339,6 +353,12 @@ struct Summary {
     triangles: u64,
     batches: u32,
     items_drawn: u32,
+    /// Items outside the camera's view.
+    items_culled: u32,
+    /// Casters drawn into shadow views and left out of them, summed over
+    /// the views.
+    shadow_casters: (u32, u32),
+    sprites_culled: u32,
     /// GPU bytes by kind.
     texture_bytes: u64,
     mesh_bytes: u64,

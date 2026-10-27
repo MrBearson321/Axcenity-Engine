@@ -277,6 +277,8 @@ pub(super) struct GpuMesh {
     pub(super) index_format: wgpu::IndexFormat,
     /// The caller's [`MeshSource::version`] these vertices are of.
     pub(super) version: u64,
+    /// The box its corners span, for culling.
+    pub(super) bounds: Bounds,
     /// Its buffers' size, in [`ScenePipeline::mesh_bytes`].
     pub(super) _bytes: Counted,
 }
@@ -656,6 +658,12 @@ pub(super) struct ScenePipeline {
     pub(super) gpu_timer: Option<gpu_timer::GpuTimer>,
     /// What the last frame drew.
     pub(super) counts: FrameCounts,
+    /// While set, items are culled as if seen from this camera, not the
+    /// draw list's (see [`TextureRenderer::freeze_culling`]).
+    pub(super) frozen_view: Option<crate::Camera>,
+    /// Each item's bounds and whether it was drawn, kept while
+    /// `frozen_view` is set.
+    pub(super) culling_bounds: Vec<CullingBounds>,
     /// Bytes of textures and of meshes on the GPU.
     pub(super) texture_bytes: GpuBytes,
     pub(super) mesh_bytes: GpuBytes,
@@ -673,6 +681,13 @@ pub(super) struct FrameCounts {
     pub(super) items_drawn: u32,
     /// Instanced draws in the scene pass.
     pub(super) batches: u32,
+    /// Items outside the camera's view.
+    pub(super) items_culled: u32,
+    /// Casters drawn into shadow views, and those left out of a view they
+    /// couldn't reach, counted once per view.
+    pub(super) shadow_casters_drawn: u32,
+    pub(super) shadow_casters_culled: u32,
+    pub(super) sprites_culled: u32,
 }
 
 /// Turned UI text: glyphon only draws text upright, so each turned text is

@@ -221,6 +221,14 @@ impl EditorApp {
             theme::with_icon(icons::PATH, "Show agent paths"),
         )
         .on_hover_text("The path each NavigationAgent is walking, during Play.");
+        ui.checkbox(
+            &mut self.overlays.culling,
+            theme::with_icon(icons::FRAME_CORNERS, "Show culling"),
+        )
+        .on_hover_text(
+            "Holds what's drawn to the current view, and outlines what's drawn and culled. \
+             Not saved between runs.",
+        );
         ui.add_space(16.0);
         widgets::section_label(ui, "Ribbon");
         ui.label(

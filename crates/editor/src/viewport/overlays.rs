@@ -365,6 +365,61 @@ pub(super) fn paint_debug_overlays(
     }
 }
 
+/// The culling overlay: each item's bounding sphere, green where it was
+/// drawn and red where it was culled, and the edges of the `frozen` view
+/// culling is held at (seen with `aspect`). Spheres are drawn as circles
+/// facing the `camera`.
+pub(super) fn paint_culling(
+    painter: &egui::Painter,
+    screen: &Screen,
+    bounds: &[axcenity_render::CullingBounds],
+    frozen: axcenity_render::Camera,
+    camera: axcenity_render::Camera,
+    aspect: f32,
+) {
+    let forward = (camera.look_at - camera.position).normalize_or(Vec3::NEG_Z);
+    let right = forward.cross(Vec3::Y).normalize_or(Vec3::X);
+    for sphere in bounds {
+        let (Some(center), Some(edge)) = (
+            screen.point(sphere.center),
+            screen.point(sphere.center + right * sphere.radius),
+        ) else {
+            continue;
+        };
+        let color = if sphere.drawn {
+            CULL_DRAWN_COLOR
+        } else {
+            CULL_CULLED_COLOR
+        };
+        painter.circle_stroke(
+            center,
+            center.distance(edge),
+            egui::Stroke::new(1.0_f32, color),
+        );
+    }
+
+    // The frozen view: lines from its eye along the corners of the
+    // picture, and the picture's frame where they end.
+    let eye = frozen.position;
+    let forward = (frozen.look_at - eye).normalize_or(Vec3::NEG_Z);
+    let right = forward.cross(Vec3::Y).normalize_or(Vec3::X);
+    let up = right.cross(forward);
+    let tall = (frozen.fov_y_degrees.to_radians() * 0.5).tan() * FROZEN_VIEW_LENGTH;
+    let wide = tall * aspect;
+    let middle = eye + forward * FROZEN_VIEW_LENGTH;
+    let corners = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
+        .map(|(x, y)| middle + right * (wide * x) + up * (tall * y));
+    let stroke = egui::Stroke::new(1.5_f32, FROZEN_VIEW_COLOR);
+    for (index, &corner) in corners.iter().enumerate() {
+        let next = corners[(index + 1) % corners.len()];
+        for (a, b) in [(eye, corner), (corner, next)] {
+            if let Some(line) = screen.line(a, b) {
+                painter.line_segment(line, stroke);
+            }
+        }
+    }
+}
+
 /// Fills the navigation mesh's cells near the camera, one colour per
 /// connected region, so ground that can't be reached from elsewhere stands
 /// out, and draws the walkable area's edges.

@@ -14,6 +14,7 @@ use std::ops::Range;
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
 
+use super::culling::Frustum;
 use super::{DEPTH_FORMAT, HDR_FORMAT, linear_color};
 use crate::draw_list::DrawList;
 
@@ -148,19 +149,21 @@ impl SpritePass {
         self.pipeline = sprite_pipeline(device, &self.layout, samples);
     }
 
-    /// Uploads `list`'s sprites, farthest first, and returns the runs to
-    /// draw. `view_of` finds an uploaded texture by its key; a sprite whose
-    /// texture couldn't be uploaded is drawn as a plain square.
+    /// Uploads `list`'s sprites that `view` can see, farthest first, and
+    /// returns the runs to draw and how many were culled. `view_of` finds
+    /// an uploaded texture by its key; a sprite whose texture couldn't be
+    /// uploaded is drawn as a plain square.
     pub(super) fn prepare<'a>(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         list: &DrawList,
         view_proj: Mat4,
+        view: &Frustum,
         view_of: impl Fn(u64) -> Option<&'a wgpu::TextureView>,
-    ) -> Vec<SpriteDraw> {
+    ) -> (Vec<SpriteDraw>, u32) {
         if list.sprites.is_empty() {
-            return Vec::new();
+            return (Vec::new(), 0);
         }
         let eye = list.camera.position;
         let forward = (list.camera.look_at - eye).normalize_or(Vec3::NEG_Z);
@@ -179,6 +182,14 @@ impl SpritePass {
                 sprite.opacity > 0.0 && sprite.size > 0.0 && sprite.position.is_finite()
             })
             .collect();
+        // A turned square reaches half its diagonal from its center.
+        let reach = |size: f32| size * std::f32::consts::FRAC_1_SQRT_2;
+        let shown = order.len();
+        order.retain(|&i| {
+            let sprite = &list.sprites[i];
+            view.touches((sprite.position, reach(sprite.size)))
+        });
+        let culled = (shown - order.len()) as u32;
         let distance = |i: usize| list.sprites[i].position.distance_squared(eye);
         order.sort_by(|&a, &b| distance(b).total_cmp(&distance(a)));
 
@@ -226,7 +237,7 @@ impl SpritePass {
             self.buffer = create_buffer(device, self.capacity);
         }
         queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&raws));
-        draws
+        (draws, culled)
     }
 
     /// Draws the runs [`prepare`](Self::prepare) returned into the scene pass.

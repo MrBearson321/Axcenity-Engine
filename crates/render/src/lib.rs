@@ -25,7 +25,7 @@ pub use graphics::{
     AmbientOcclusion, AntiAliasing, Capabilities, EffectiveGraphics, GraphicsSettings, Quality,
     RENDER_SCALE_RANGE, ShadowMapSize, ShadowQuality, SpotShadowMapSize, TextureQuality,
 };
-pub use renderer::{FramePass, RenderStats, Renderer, TextureRenderer};
+pub use renderer::{CullingBounds, FramePass, RenderStats, Renderer, TextureRenderer};
 pub use tone_mapping::ToneMapping;
 
 /// Re-exported so callers build transforms with the same `glam` version.

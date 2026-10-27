@@ -6,14 +6,16 @@
 
 use std::borrow::Cow;
 
+use glam::Vec3;
 use wgpu::util::DeviceExt;
 
 use crate::draw_list::{MeshSource, TextureSource};
 use crate::mesh::{self, MeshData, Vertex};
 
 use super::{
-    DEPTH_FORMAT, GpuBytes, GpuMaterial, GpuMesh, GpuTexture, InstanceRaw, MATERIAL_TEXTURES,
-    MapsUniform, TARGET_DRAW_FORMAT, TARGET_SHOW_FORMAT, TEXTURE_FORMAT, TEXTURE_SRGB_FORMAT,
+    Bounds, DEPTH_FORMAT, GpuBytes, GpuMaterial, GpuMesh, GpuTexture, InstanceRaw,
+    MATERIAL_TEXTURES, MapsUniform, TARGET_DRAW_FORMAT, TARGET_SHOW_FORMAT, TEXTURE_FORMAT,
+    TEXTURE_SRGB_FORMAT,
 };
 
 /// The shader for parts and models, and the shadow and sky passes: the
@@ -444,6 +446,7 @@ pub(super) fn update_custom_mesh(
         && source.indices().len() == mesh.index_count as usize
     {
         queue.write_buffer(&mesh.vertices, 0, corners);
+        mesh.bounds = vertex_bounds(&vertices);
     } else if let Some(fresh) = upload_custom_mesh(device, bytes, source) {
         *mesh = fresh;
     }
@@ -481,6 +484,10 @@ fn custom_vertices(source: &dyn MeshSource) -> Option<Vec<Vertex>> {
     )
 }
 
+fn vertex_bounds(vertices: &[Vertex]) -> Bounds {
+    Bounds::around(vertices.iter().map(|vertex| Vec3::from(vertex.position)))
+}
+
 pub(super) fn upload_buffers(
     device: &wgpu::Device,
     bytes: &GpuBytes,
@@ -490,9 +497,10 @@ pub(super) fn upload_buffers(
     index_count: usize,
     index_format: wgpu::IndexFormat,
 ) -> GpuMesh {
+    let corners = vertices;
     let vertices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some(name),
-        contents: bytemuck::cast_slice(vertices),
+        contents: bytemuck::cast_slice(corners),
         // COPY_DST so a posed mesh's corners can be rewritten in place.
         usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
     });
@@ -502,6 +510,7 @@ pub(super) fn upload_buffers(
         usage: wgpu::BufferUsages::INDEX,
     });
     GpuMesh {
+        bounds: vertex_bounds(corners),
         _bytes: bytes.count(vertices.size() + indices.size()),
         vertices,
         indices,

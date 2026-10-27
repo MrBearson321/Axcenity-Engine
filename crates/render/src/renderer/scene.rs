@@ -341,6 +341,8 @@ impl ScenePipeline {
             frame: 0,
             gpu_timer,
             counts: FrameCounts::default(),
+            frozen_view: None,
+            culling_bounds: Vec::new(),
             texture_bytes,
             mesh_bytes,
         };
@@ -523,13 +525,43 @@ impl ScenePipeline {
 
         self.frame += 1;
         self.upload_new(list);
-        let (mut instances, batches) = plan_draws(list);
-        // Each spot light's casters are copied after the scene's instances.
-        let casters_by_spot: Vec<_> = planned_lights
-            .spot_shadows
+        // What the camera can see, or the frozen view's while it's set.
+        let camera = self.frozen_view.as_ref().unwrap_or(&list.camera);
+        let camera_view = Frustum::of(camera_view_projection(camera, aspect));
+        let mut seen = std::mem::take(&mut self.culling_bounds);
+        seen.clear();
+        let DrawPlan {
+            mut instances,
+            batches,
+            casters,
+            culled,
+        } = plan_draws(
+            list,
+            &camera_view,
+            |shape| self.mesh_bounds(MeshKey::of(shape)),
+            self.frozen_view.is_some().then_some(&mut seen),
+        );
+        self.culling_bounds = seen;
+        // Shadow maps cost memory, so one exists only while shadows are on,
+        // at the size the graphics settings give.
+        let map_size = shadows_drawn(list.shadows, &self.graphics).map(|(_, size)| size);
+        // Each shadow view's casters are copied after the scene's instances:
+        // the sun's cascades, each a box reaching back toward the sun, then
+        // the spot lights' views, each near enough to its beam.
+        let cascades = map_size.map_or(0, |size| size.cascades as usize);
+        let mut casters_by_view: Vec<_> = frame_uniform.cascades[..cascades]
             .iter()
-            .map(|spot| spot_casters(&mut instances, &batches, spot.bounds))
+            .map(|matrix| {
+                let view = Frustum::of(glam::Mat4::from_cols_array_2d(matrix));
+                casters_in(&mut instances, &casters, |sphere| view.touches(sphere))
+            })
             .collect();
+        for spot in &planned_lights.spot_shadows {
+            let view = Frustum::of(spot.view_proj);
+            casters_by_view.push(casters_in(&mut instances, &casters, |sphere| {
+                spheres_touch(spot.bounds, sphere) && view.touches(sphere)
+            }));
+        }
         self.ensure_instance_capacity(instances.len());
         self.queue
             .write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&instances));
@@ -578,13 +610,14 @@ impl ScenePipeline {
             self.queue
                 .write_buffer(&self.ui_buffer, 0, bytemuck::cast_slice(&ui_vertices));
         }
-        let sprite_draws = {
+        let (sprite_draws, sprites_culled) = {
             let textures = &self.textures;
             self.sprites.prepare(
                 &self.device,
                 &self.queue,
                 list,
                 view_projection(list, aspect),
+                &camera_view,
                 |key| {
                     textures
                         .get(&key)
@@ -594,10 +627,8 @@ impl ScenePipeline {
             )
         };
 
-        // Shadow maps cost memory, so one exists only while shadows are on,
-        // at the size the graphics settings give. The spot lights' exists
-        // only while one of them casts shadows.
-        let map_size = shadows_drawn(list.shadows, &self.graphics).map(|(_, size)| size);
+        // The spot lights' shadow map exists only while one of them casts
+        // shadows.
         let spot_map = spot_map.filter(|_| !planned_lights.spot_shadows.is_empty());
         let mut changed = false;
         if self.shadow_map.as_ref().map(|map| map.size) != map_size {
@@ -656,8 +687,12 @@ impl ScenePipeline {
         mark(&mut encoder, FramePass::Shadows);
         let mut counts = FrameCounts {
             items_submitted: list.items.len() as u32,
+            items_culled: culled,
+            shadow_casters_culled: casters_by_view.iter().map(|(_, culled)| culled).sum(),
+            sprites_culled,
             ..FrameCounts::default()
         };
+        let mut shadow_casters_drawn = 0;
         let mut count = |index_count: u32, instances: &Range<u32>| {
             counts.draw_calls += 1;
             counts.triangles +=
@@ -665,25 +700,20 @@ impl ScenePipeline {
         };
 
         // One pass per cascade, each drawing into its own layer of the map,
-        // then one per shadow-casting spot light, drawing only what's near
-        // enough to its beam. Each view's matrix is at its index in
+        // then one per shadow-casting spot light, each drawing the casters
+        // that can reach its view. Each view's matrix is at its index in
         // `cascade_buffer`, the spot lights' after every cascade's.
-        let all_casters: Vec<_> = batches
-            .iter()
-            .filter(|batch| !batch.transparent && batch.casts_shadow)
-            .map(|batch| (batch.mesh, batch.instances.clone()))
-            .collect();
+        let (cascade_casters, spot_casters) = casters_by_view.split_at(cascades);
         let cascades = self
             .shadow_map
             .iter()
-            .flat_map(|map| map.layers.iter().enumerate())
-            .map(|(index, layer)| (index, layer, &all_casters));
+            .flat_map(|map| map.layers.iter().zip(cascade_casters).enumerate());
         let spots = self
             .spot_shadow_map
             .iter()
-            .flat_map(|map| map.layers.iter().zip(&casters_by_spot).enumerate())
-            .map(|(index, (layer, casters))| (SHADOW_CASCADES + index, layer, casters));
-        for (index, layer, casters) in cascades.chain(spots) {
+            .flat_map(|map| map.layers.iter().zip(spot_casters).enumerate())
+            .map(|(index, view)| (SHADOW_CASCADES + index, view));
+        for (index, (layer, (casters, _))) in cascades.chain(spots) {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("shadow view"),
                 color_attachments: &[],
@@ -709,6 +739,7 @@ impl ScenePipeline {
                 pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                 pass.set_index_buffer(mesh.indices.slice(..), mesh.index_format);
                 count(mesh.index_count, instances);
+                shadow_casters_drawn += instances.end - instances.start;
                 pass.draw_indexed(0..mesh.index_count, 0, instances.clone());
             }
         }
@@ -917,6 +948,7 @@ impl ScenePipeline {
                 turned.drawn || ui_drawn,
             ]);
         }
+        counts.shadow_casters_drawn = shadow_casters_drawn;
         self.counts = counts;
         self.forget_undrawn();
         Ok(())
@@ -1046,11 +1078,21 @@ impl ScenePipeline {
             items_submitted: counts.items_submitted,
             items_drawn: counts.items_drawn,
             batches: counts.batches,
+            items_culled: counts.items_culled,
+            shadow_casters_drawn: counts.shadow_casters_drawn,
+            shadow_casters_culled: counts.shadow_casters_culled,
+            sprites_culled: counts.sprites_culled,
             texture_bytes: self.texture_bytes.total(),
             mesh_bytes: self.mesh_bytes.total(),
             target_bytes: self.frame_targets.bytes + shadow_bytes + sheet_bytes,
             buffer_bytes: buffers.iter().map(|buffer| buffer.size()).sum(),
         }
+    }
+
+    /// The box a mesh's corners span, for culling. A caller's mesh that
+    /// was never uploaded isn't drawn, so the unit cube does for it.
+    pub(super) fn mesh_bounds(&self, key: MeshKey) -> Bounds {
+        self.gpu_mesh(key).map_or(Bounds::UNIT, |mesh| mesh.bounds)
     }
 
     /// The GPU copy of a mesh, or `None` for a caller's mesh that was never uploaded.

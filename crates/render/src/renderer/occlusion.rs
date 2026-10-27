@@ -210,7 +210,7 @@ pub(super) fn occlusion_uniform(
     aspect: f32,
     quality: AmbientOcclusion,
 ) -> OcclusionUniform {
-    let (_, projection) = camera_matrices(list, aspect);
+    let (_, projection) = camera_matrices(&list.camera, aspect);
     OcclusionUniform {
         projection: projection.to_cols_array_2d(),
         inv_projection: projection.inverse().to_cols_array_2d(),

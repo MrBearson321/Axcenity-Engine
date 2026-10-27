@@ -7,6 +7,8 @@ use crate::draw_list::{
 use crate::graphics::ShadowQuality;
 use glam::Mat4;
 
+mod frustum_culling;
+
 #[test]
 fn zero_sized_window_has_nothing_to_draw() {
     assert_eq!(drawable_size(0, 0), None);
@@ -173,6 +175,13 @@ fn batch(mesh: MeshKey, transparent: bool, instances: Range<u32>) -> Batch {
     }
 }
 
+/// Plans `list` as its camera sees it on a square target, with every shape
+/// in the unit cube.
+fn plan(list: &DrawList) -> DrawPlan {
+    let view = Frustum::of(view_projection(list, 1.0));
+    plan_draws(list, &view, |_| Bounds::UNIT, None)
+}
+
 /// A caller's mesh with no triangles, for planning tests (it's never uploaded).
 struct TestMesh(u64);
 
@@ -226,7 +235,7 @@ fn callers_meshes_are_grouped_by_mesh_then_texture() {
         textured(mesh(7), Some(2)),
         textured(Shape::Block, Some(1)),
     ]);
-    let (_, batches) = plan_draws(&list);
+    let batches = plan(&list).batches;
     let textures: Vec<(MeshKey, Option<u64>, Range<u32>)> = batches
         .into_iter()
         .map(|batch| (batch.mesh, batch.material.textures[0], batch.instances))
@@ -302,7 +311,9 @@ fn flat_and_invisible_shapes_are_skipped() {
         flat,
         item(Shape::Block, Vec3::ZERO, 0.0),
     ]);
-    let (instances, batches) = plan_draws(&list);
+    let DrawPlan {
+        instances, batches, ..
+    } = plan(&list);
     assert_eq!(instances.len(), 1);
     assert_eq!(batches, vec![batch(MeshKey::Block, false, 0..1)]);
 }
@@ -315,7 +326,7 @@ fn solid_items_are_grouped_by_shape() {
         item(Shape::Wedge, Vec3::ZERO, 1.0),
         item(Shape::Block, Vec3::ZERO, 1.0),
     ]);
-    let (_, batches) = plan_draws(&list);
+    let batches = plan(&list).batches;
     assert_eq!(
         batches,
         vec![
@@ -333,7 +344,9 @@ fn see_through_items_come_last_and_farthest_first() {
     let solid = item(Shape::Sphere, Vec3::new(0.0, 0.0, -1.0), 1.0);
     let list = list_of(vec![near_glass, far_glass, solid, middle_glass]);
 
-    let (instances, batches) = plan_draws(&list);
+    let DrawPlan {
+        instances, batches, ..
+    } = plan(&list);
     assert_eq!(
         batches,
         vec![
@@ -1946,12 +1959,20 @@ fn spot_shadows_skip_casters_outside_the_beams_bounds() {
         casts_shadow: false,
         ..item(Shape::Sphere, Vec3::new(0.0, 0.0, -4.0), 1.0)
     });
-    let (mut instances, batches) = plan_draws(&list);
+    let DrawPlan {
+        mut instances,
+        casters,
+        ..
+    } = plan(&list);
     let scene = instances.len() as u32;
-    let casters = spot_casters(&mut instances, &batches, (Vec3::new(0.0, 0.0, -5.0), 4.0));
+    let beam = (Vec3::new(0.0, 0.0, -5.0), 4.0);
+    let (groups, left_out) = lighting::casters_in(&mut instances, &casters, |sphere| {
+        spheres_touch(beam, sphere)
+    });
     // Only the near solid block: the far one is out of reach, the glass is
     // see-through and the sphere casts no shadow.
-    assert_eq!(casters, [(MeshKey::Block, scene..scene + 1)]);
+    assert_eq!(groups, [(MeshKey::Block, scene..scene + 1)]);
+    assert_eq!(left_out, 1);
     assert_eq!(instances.len() as u32, scene + 1);
     assert_eq!(instances[scene as usize].model[3][2], -3.0);
 }
@@ -2595,7 +2616,7 @@ fn double_sided_items_get_their_own_batch_and_texture_transforms_their_own_bindi
         .on(item(Shape::Block, Vec3::ZERO, 1.0)),
         item(Shape::Block, Vec3::ZERO, 1.0),
     ]);
-    let (_, batches) = plan_draws(&list);
+    let batches = plan(&list).batches;
     let sides: Vec<(bool, Range<u32>)> = batches
         .into_iter()
         .map(|batch| (batch.double_sided, batch.instances))
@@ -2991,7 +3012,7 @@ fn with_ambient_occlusion_off_no_prepass_or_its_targets_exist() {
     assert!(renderer.scene.frame_targets.occlusion.is_none());
     assert_eq!(renderer.scene.occlusion_targets_alive(), 0);
     // The two solid blocks share a batch; the sphere is the other.
-    let (_, batches) = plan_draws(&list);
+    let batches = plan(&list).batches;
     assert_eq!(batches.len(), 2);
     assert_eq!(renderer.stats().draw_calls, 2, "no prepass is drawn");
 

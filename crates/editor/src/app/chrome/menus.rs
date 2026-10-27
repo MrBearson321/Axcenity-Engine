@@ -366,6 +366,13 @@ impl EditorApp {
                     "Agent Paths",
                     "The path each NavigationAgent is walking, during Play.",
                 );
+                overlay_menu_item(
+                    ui,
+                    &mut self.overlays.culling,
+                    icons::FRAME_CORNERS,
+                    "Culling",
+                    "Holds what's drawn to the current view, and outlines what's drawn and culled.",
+                );
                 ui.separator();
                 if ui
                     .button(theme::with_icon(icons::STAR, "New Ribbon Tab…"))

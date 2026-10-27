@@ -257,8 +257,8 @@ Measure before optimizing. Benchmark scenes are built in code: 10,000 parts, 2,0
 
 ### Acceptance criteria
 
-- [ ] Items behind the camera or off to the side aren't drawn, items crossing the edge of the view are, and shadows from casters outside the view still fall into it (tests on `plan_draws` and a GPU shadow test).
-- [ ] The 10,000-part benchmark's frame time drops when most parts are out of view, measured against the Phase 11 baseline.
+- [x] Items behind the camera or off to the side aren't drawn, items crossing the edge of the view are, and shadows from casters outside the view still fall into it (tests on `plan_draws` and a GPU shadow test).
+- [x] The 10,000-part benchmark's frame time drops when most parts are out of view, measured against the Phase 11 baseline.
 
 ---
 

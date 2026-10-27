@@ -122,6 +122,13 @@ fn run(name: &str, mut frame: impl FnMut(&mut Steps) -> DrawList) {
         "  {} of {} items drawn in {} batches; {} draw calls, {} triangles",
         stats.items_drawn, stats.items_submitted, stats.batches, stats.draw_calls, stats.triangles
     );
+    println!(
+        "  culled: {} items, {} sprites; shadow casters {} drawn, {} culled (summed over views)",
+        stats.items_culled,
+        stats.sprites_culled,
+        stats.shadow_casters_drawn,
+        stats.shadow_casters_culled
+    );
     let mb = |bytes: u64| bytes as f64 / (1024.0 * 1024.0);
     println!(
         "  GPU memory: textures {:.1} MB, meshes {:.1} MB, targets {:.1} MB, buffers {:.1} MB",

@@ -484,6 +484,13 @@ impl EditorApp {
                     "Agent Paths",
                     "During Play, draw the path each NavigationAgent is walking, from its feet to its Destination.",
                 );
+                overlay_button(
+                    ui,
+                    &mut self.overlays.culling,
+                    icons::FRAME_CORNERS,
+                    "Culling",
+                    "Hold what's drawn to where the camera is now, then fly away to see it: each part's bounds in green where it's drawn and red where it's culled, and the view it was held at.",
+                );
             }),
         }
     }
