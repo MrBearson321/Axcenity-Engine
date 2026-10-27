@@ -53,6 +53,7 @@ mod save;
 mod scheduler;
 mod sides;
 mod task;
+mod tree;
 mod tween;
 mod types;
 mod user_settings;
@@ -86,6 +87,9 @@ pub enum OutputKind {
     Print,
     /// A script error, starting with the script's path and line.
     Error,
+    /// Something that may be a mistake but doesn't stop the script, such
+    /// as a `WaitForChild` that has waited a long time.
+    Warning,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -163,6 +167,12 @@ pub struct ScriptRuntime {
     /// Every script and ModuleScript started, in the order they first
     /// started, with the code they run now, so they can run again.
     started: Vec<Started>,
+    /// Scripts copied by `Clone`, with their original's code, waiting to
+    /// be somewhere scripts run (see [`Self::start_clones`]).
+    clones: Vec<Started>,
+    /// True while [`Self::start_clones`] runs, so starting a clone doesn't
+    /// start more inside it.
+    starting_clones: bool,
 }
 
 /// A script as [`ScriptRuntime::start_script`] was last given it.
@@ -198,6 +208,8 @@ impl ScriptRuntime {
             reported_change_loop: false,
             saves,
             started: Vec::new(),
+            clones: Vec::new(),
+            starting_clones: false,
         }
     }
 
@@ -538,7 +550,16 @@ impl ScriptRuntime {
     /// up to [`MAX_CHANGE_ROUNDS`] rounds; the rest wait for the next call.
     /// Only changes made after the first call are seen: it turns on the
     /// World's change log.
+    ///
+    /// Then scripts whose Instance was destroyed stop, and cloned scripts
+    /// that are now where scripts run start.
     pub fn fire_changes(&mut self, world: &mut World) {
+        self.fire_change_rounds(world);
+        self.stop_destroyed_scripts(world);
+        self.start_clones(world);
+    }
+
+    fn fire_change_rounds(&mut self, world: &mut World) {
         world.record_changes();
         for _ in 0..MAX_CHANGE_ROUNDS {
             let changes = world.take_changes();
@@ -563,6 +584,56 @@ impl ScriptRuntime {
                 trace: Vec::new(),
             });
         }
+    }
+
+    /// Stops every started script whose Instance is gone (`Destroy`). A
+    /// script that destroyed itself has finished its current run by now,
+    /// so this is "after the current resume".
+    fn stop_destroyed_scripts(&mut self, world: &World) {
+        let (server, client) = (&self.server, &self.client);
+        self.started.retain(|started| {
+            let alive = world.contains(started.script);
+            if !alive {
+                server.stop_script(started.script);
+                client.stop_script(started.script);
+            }
+            alive
+        });
+    }
+
+    /// Starts each cloned script that's now where scripts of its kind run:
+    /// a Script in the Workspace or ServerScriptService, a LocalScript in
+    /// the Workspace, StarterPlayerScripts or Players. A cloned ModuleScript
+    /// can be required wherever it is. The rest wait for the next call;
+    /// clones destroyed before they ran are forgotten.
+    fn start_clones(&mut self, world: &mut World) {
+        if self.starting_clones || self.clones.is_empty() {
+            return;
+        }
+        self.starting_clones = true;
+        for clone in std::mem::take(&mut self.clones) {
+            let Some(class) = world.get(clone.script).map(|instance| instance.class()) else {
+                continue;
+            };
+            let under = |place| world.is_descendant_of(clone.script, place);
+            let runs = match class {
+                ClassName::Script => {
+                    under(world.workspace()) || under(world.server_script_service())
+                }
+                ClassName::LocalScript => {
+                    under(world.workspace())
+                        || under(world.starter_player_scripts())
+                        || under(world.players())
+                }
+                _ => true,
+            };
+            if runs {
+                self.start_script(world, clone.script, &clone.path, &clone.source);
+            } else {
+                self.clones.push(clone);
+            }
+        }
+        self.starting_clones = false;
     }
 
     /// Tells LocalScripts where the camera is now (`workspace.CurrentCamera`).
@@ -674,6 +745,22 @@ impl ScriptRuntime {
         self.output.extend(context.take_output());
         self.sound_actions.extend(context.take_sound_actions());
         self.particle_emits.extend(context.take_particle_emits());
+        for (copy, original) in context.take_cloned_scripts() {
+            // A clone of a clone that hasn't started yet has its code too.
+            let code = self
+                .started
+                .iter()
+                .chain(&self.clones)
+                .find(|started| started.script == original)
+                .map(|started| (started.path.clone(), started.source.clone()));
+            if let Some((path, source)) = code {
+                self.clones.push(Started {
+                    script: copy,
+                    path,
+                    source,
+                });
+            }
+        }
         for message in context.take_outbox() {
             self.transport.send(message);
         }
@@ -784,6 +871,9 @@ mod watchdog_tests;
 
 #[cfg(test)]
 mod debugger_tests;
+
+#[cfg(test)]
+mod tree_tests;
 
 #[cfg(test)]
 mod tween_tests;

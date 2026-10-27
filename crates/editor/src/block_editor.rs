@@ -66,6 +66,8 @@ pub enum NameKind {
     Trigger,
     State,
     Event,
+    /// A child's name, suggested from what's in the object.
+    Child,
 }
 
 impl NameKind {
@@ -77,6 +79,7 @@ impl NameKind {
             NameKind::Trigger => "Jump",
             NameKind::State => "Idle",
             NameKind::Event => "Footstep",
+            NameKind::Child => "Door",
         }
     }
 
@@ -87,6 +90,7 @@ impl NameKind {
             NameKind::Trigger => "Trigger",
             NameKind::State => "state",
             NameKind::Event => "animation event",
+            NameKind::Child => "child",
         }
     }
 }
@@ -240,7 +244,9 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::RepeatUntil { .. }
         | BlockKind::If { .. }
         | BlockKind::IfElse { .. }
-        | BlockKind::StopScript => Category::Control,
+        | BlockKind::StopScript
+        | BlockKind::ForEachChild { .. }
+        | BlockKind::WaitForChild { .. } => Category::Control,
         BlockKind::MoveTo { .. }
         | BlockKind::MoveBy { .. }
         | BlockKind::TurnTo { .. }
@@ -282,6 +288,7 @@ fn block_category(kind: &BlockKind) -> Category {
         BlockKind::SetVariable { .. } | BlockKind::ChangeVariable { .. } => Category::Variables,
         BlockKind::Print { .. }
         | BlockKind::Destroy { .. }
+        | BlockKind::CloneInto { .. }
         | BlockKind::SaveSlot { .. }
         | BlockKind::LoadSlot { .. }
         | BlockKind::SetCheckpoint { .. }
@@ -297,7 +304,8 @@ fn reporter_category(expression: &Expression) -> Category {
         Expression::Property { .. }
         | Expression::TouchingPart
         | Expression::KeyDown { .. }
-        | Expression::Raycast { .. } => Category::Sensing,
+        | Expression::Raycast { .. }
+        | Expression::IsA { .. } => Category::Sensing,
         Expression::AnimatorBool { .. } | Expression::AnimatorNumber { .. } => Category::Animation,
         Expression::Code { .. } => Category::Lua,
         _ => Category::Operators,
@@ -322,6 +330,8 @@ enum Filter {
     Agents,
     Checkpoints,
     Any,
+    /// Anything, or the Workspace itself (an empty path): where children are.
+    Places,
 }
 
 impl Filter {
@@ -359,7 +369,7 @@ impl Filter {
                     | ClassName::Dropdown
                     | ClassName::ProgressBar
             ),
-            Filter::Any => true,
+            Filter::Any | Filter::Places => true,
         }
     }
 
@@ -367,6 +377,7 @@ impl Filter {
     fn placeholder(self) -> &'static str {
         match self {
             Filter::Parts | Filter::Any => "Part",
+            Filter::Places => "",
             Filter::Sounds => "Sound",
             Filter::Buttons => "TextButton",
             Filter::Texts => "TextLabel",
@@ -694,6 +705,28 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
             Mouth(body),
         ],
         BlockKind::Forever { body } => vec![Row(vec![label("forever")]), Mouth(body)],
+        BlockKind::ForEachChild {
+            target,
+            variable,
+            body,
+        } => vec![
+            Row(vec![
+                label("for each"),
+                Variable(variable),
+                label("in"),
+                Object(target, Filter::Places),
+            ]),
+            Mouth(body),
+        ],
+        BlockKind::WaitForChild { target, name } => {
+            let path = target.clone();
+            vec![Row(vec![
+                label("wait for child"),
+                Part::Name(name, NameKind::Child, path),
+                label("in"),
+                Object(target, Filter::Places),
+            ])]
+        }
         BlockKind::RepeatUntil { condition, body } => vec![
             Row(vec![
                 label("repeat until"),
@@ -882,6 +915,12 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
         BlockKind::Destroy { target } => {
             vec![Row(vec![label("destroy"), Object(target, Filter::Any)])]
         }
+        BlockKind::CloneInto { target, parent } => vec![Row(vec![
+            label("clone"),
+            Object(target, Filter::Any),
+            label("into"),
+            Object(parent, Filter::Places),
+        ])],
         BlockKind::SaveSlot { slot } => vec![Row(vec![
             label("save game to slot"),
             Slot(slot, SlotKind::Number),
@@ -988,6 +1027,11 @@ fn reporter_parts<'a>(expression: &'a mut Expression, objects: &[ObjectInfo]) ->
         ],
         Expression::TouchingPart => vec![label("touching part")],
         Expression::KeyDown { key } => vec![label("key"), Key(key), label("pressed?")],
+        Expression::IsA { value, class } => vec![
+            Slot(value, SlotKind::Any),
+            label("is a"),
+            Part::Choice(class, &axcenity_blocks::IS_A_CLASSES),
+        ],
         Expression::AnimatorBool {
             animator,
             parameter,

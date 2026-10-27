@@ -321,6 +321,18 @@ pub enum BlockKind {
     },
     /// Ends the event's handler early.
     StopScript,
+    /// Runs `body` once for each child of `target` (the Workspace when
+    /// empty), with the child in the variable `variable`.
+    ForEachChild {
+        target: String,
+        variable: String,
+        body: Vec<Block>,
+    },
+    /// Waits until `target` (the Workspace when empty) has a child `name`.
+    WaitForChild {
+        target: String,
+        name: String,
+    },
 
     // Motion.
     MoveTo {
@@ -539,6 +551,11 @@ pub enum BlockKind {
     Destroy {
         target: String,
     },
+    /// Copies `target` and puts the copy in `parent` (the Workspace when empty).
+    CloneInto {
+        target: String,
+        parent: String,
+    },
 
     /// Lua that has no blocks, kept word for word from a script switched
     /// from Code to Blocks.
@@ -585,6 +602,26 @@ pub fn graphics_choices(setting: &str) -> &'static [&'static str] {
         _ => &[],
     }
 }
+
+/// The classes the "is a" block offers, abstract ones first.
+pub const IS_A_CLASSES: [&str; 16] = [
+    "BasePart",
+    "GuiObject",
+    "Part",
+    "MeshPart",
+    "Model",
+    "Folder",
+    "Frame",
+    "TextLabel",
+    "TextButton",
+    "ImageLabel",
+    "Sound",
+    "Light",
+    "ParticleEmitter",
+    "Script",
+    "LocalScript",
+    "ModuleScript",
+];
 
 /// The senses a NavigationAgent's `PlayerSensed` names.
 pub const SENSES: [&str; 2] = ["Sight", "Hearing"];
@@ -649,6 +686,7 @@ impl BlockKind {
             | BlockKind::Repeat { body, .. }
             | BlockKind::Forever { body }
             | BlockKind::RepeatUntil { body, .. }
+            | BlockKind::ForEachChild { body, .. }
             | BlockKind::If { body, .. } => vec![body],
             BlockKind::IfElse {
                 then_body,
@@ -677,6 +715,7 @@ impl BlockKind {
             | BlockKind::Repeat { body, .. }
             | BlockKind::Forever { body }
             | BlockKind::RepeatUntil { body, .. }
+            | BlockKind::ForEachChild { body, .. }
             | BlockKind::If { body, .. } => vec![body],
             BlockKind::IfElse {
                 then_body,
@@ -920,6 +959,12 @@ pub enum Expression {
         animator: String,
         parameter: String,
     },
+    /// Whether `value` (an Instance) is of class `class` or inherits from
+    /// it: `child:IsA("BasePart")`.
+    IsA {
+        value: Box<Expression>,
+        class: String,
+    },
     /// Lua that has no block, kept word for word from a script switched
     /// from Code to Blocks. Pointed, so it fits any slot.
     Code {
@@ -936,6 +981,7 @@ impl Expression {
             | Expression::Not { .. }
             | Expression::KeyDown { .. }
             | Expression::AnimatorBool { .. }
+            | Expression::IsA { .. }
             | Expression::Code { .. } => BlockShape::Boolean,
             _ => BlockShape::Value,
         }
@@ -967,7 +1013,9 @@ impl Expression {
             | Expression::Logic { left, right, .. } => vec![left, right],
             Expression::Random { min, max } => vec![min, max],
             Expression::Raycast { origin, direction } => vec![origin, direction],
-            Expression::Function { value, .. } | Expression::Not { value } => vec![value],
+            Expression::Function { value, .. }
+            | Expression::Not { value }
+            | Expression::IsA { value, .. } => vec![value],
             _ => Vec::new(),
         }
     }
@@ -981,7 +1029,9 @@ impl Expression {
             | Expression::Logic { left, right, .. } => vec![left, right],
             Expression::Random { min, max } => vec![min, max],
             Expression::Raycast { origin, direction } => vec![origin, direction],
-            Expression::Function { value, .. } | Expression::Not { value } => vec![value],
+            Expression::Function { value, .. }
+            | Expression::Not { value }
+            | Expression::IsA { value, .. } => vec![value],
             _ => Vec::new(),
         }
     }

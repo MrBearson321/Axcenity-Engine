@@ -1,5 +1,6 @@
-//! Change events: `Changed`, `GetPropertyChangedSignal`, `ChildAdded` and
-//! `ChildRemoved`, and a widget's `ValueChanged`.
+//! Change events: `Changed`, `GetPropertyChangedSignal`, `ChildAdded`,
+//! `ChildRemoved`, `DescendantAdded`, `DescendantRemoving`,
+//! `AncestryChanged`, and a widget's `ValueChanged`.
 //!
 //! The World keeps a log of every change, whoever made it: a script, physics
 //! moving a part, or the editor during Play. [`ScriptRuntime::fire_changes`]
@@ -16,7 +17,7 @@ use crate::instance::{self, LuaInstance};
 /// Fires the events for `changes`, oldest first, on this side. Changes to
 /// Instances that no longer exist are skipped.
 pub fn fire(lua: &Lua, changes: &[RecordedChange]) {
-    for recorded in changes {
+    for (index, recorded) in changes.iter().enumerate() {
         let number = recorded.number;
         match recorded.change {
             Change::Property { instance, name } => {
@@ -35,12 +36,20 @@ pub fn fire(lua: &Lua, changes: &[RecordedChange]) {
                 {
                     events::fire_change(lua, owner, Event::Named("ValueChanged"), number, value);
                 }
+                if name == "Parent" {
+                    fire_ancestry_changed(lua, instance, number);
+                }
             }
             Change::ChildAdded { parent, child } => {
                 fire_child_event(lua, parent, "ChildAdded", child, number);
+                let later = &changes[index + 1..];
+                fire_descendant_added(lua, parent, child, number, later);
             }
             Change::ChildRemoved { parent, child } => {
                 fire_child_event(lua, parent, "ChildRemoved", child, number);
+                // A destroyed child's were fired by `Destroy`, while it
+                // could still be read (see `tree`).
+                fire_descendant_event(lua, parent, "DescendantRemoving", child, number);
             }
         }
     }
@@ -56,6 +65,87 @@ fn fire_child_event(
     if exists(lua, parent) {
         let owner = Owner::Instance(parent);
         events::fire_change(lua, owner, Event::Named(event), number, LuaInstance(child));
+    }
+}
+
+/// `DescendantAdded` for `child`, unless a `later` change adds something
+/// it's inside now: that one reports `child` too, in the right order. (The
+/// log is read after the fact, so `child` may have been put in a model
+/// that only joined the Workspace afterwards.)
+fn fire_descendant_added(
+    lua: &Lua,
+    parent: InstanceId,
+    child: InstanceId,
+    number: u64,
+    later: &[RecordedChange],
+) {
+    let reported_later = instance::world(lua).is_ok_and(|world| {
+        later.iter().any(|recorded| {
+            matches!(recorded.change, Change::ChildAdded { child: added, .. }
+                if world.is_descendant_of(child, added))
+        })
+    });
+    if !reported_later {
+        fire_descendant_event(lua, parent, "DescendantAdded", child, number);
+    }
+}
+
+/// `DescendantAdded` or `DescendantRemoving` on `parent` and every Instance
+/// above it, once for `child` and once for each Instance inside it.
+fn fire_descendant_event(
+    lua: &Lua,
+    parent: InstanceId,
+    event: &'static str,
+    child: InstanceId,
+    number: u64,
+) {
+    let (above, moved) = {
+        let Ok(world) = instance::world(lua) else {
+            return;
+        };
+        if !world.contains(child) {
+            return;
+        }
+        let mut above = Vec::new();
+        let mut next = Some(parent);
+        while let Some(id) = next {
+            above.push(id);
+            next = world.get(id).and_then(|instance| instance.parent());
+        }
+        let mut moved = vec![child];
+        moved.extend(world.descendants(child));
+        (above, moved)
+    };
+    for ancestor in above {
+        for &descendant in &moved {
+            let owner = Owner::Instance(ancestor);
+            let args = LuaInstance(descendant);
+            events::fire_change(lua, owner, Event::Named(event), number, args);
+        }
+    }
+}
+
+/// `AncestryChanged` on `instance` and everything inside it, with
+/// `instance` and its new Parent.
+fn fire_ancestry_changed(lua: &Lua, instance: InstanceId, number: u64) {
+    let (parent, moved) = {
+        let Ok(world) = instance::world(lua) else {
+            return;
+        };
+        let parent = world.get(instance).and_then(|i| i.parent());
+        let mut moved = vec![instance];
+        moved.extend(world.descendants(instance));
+        (parent, moved)
+    };
+    for id in moved {
+        let args = (LuaInstance(instance), parent.map(LuaInstance));
+        events::fire_change(
+            lua,
+            Owner::Instance(id),
+            Event::Named("AncestryChanged"),
+            number,
+            args,
+        );
     }
 }
 

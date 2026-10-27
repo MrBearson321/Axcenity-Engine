@@ -8,7 +8,15 @@ use crate::value::{Color3, UDim2, Value, Vector2, Vector3};
 /// Events every Instance has, whatever its class. `Changed` fires with the
 /// name of a property that got a new value, `ChildAdded` and `ChildRemoved`
 /// with the child. Scripts reach them like class events: `part.Changed`.
-pub const INSTANCE_EVENTS: [&str; 3] = ["Changed", "ChildAdded", "ChildRemoved"];
+pub const INSTANCE_EVENTS: [&str; 7] = [
+    "Changed",
+    "ChildAdded",
+    "ChildRemoved",
+    "DescendantAdded",
+    "DescendantRemoving",
+    "AncestryChanged",
+    "Destroying",
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ClassName {
@@ -236,6 +244,31 @@ impl ClassName {
             return Some(ClassName::TextButton);
         }
         Self::ALL.into_iter().find(|class| class.as_str() == name)
+    }
+
+    /// The abstract classes this one belongs to, nearest first, as in
+    /// Roblox: a MeshPart is a BasePart, a LocalScript is a Script. Every
+    /// class is also an `Instance`.
+    pub fn superclasses(self) -> &'static [&'static str] {
+        const PART: &[&str] = &["BasePart", "PVInstance"];
+        const GUI: &[&str] = &["GuiObject", "GuiBase2d"];
+        const LAYER: &[&str] = &["LayerCollector", "GuiBase2d"];
+        match self {
+            ClassName::Part | ClassName::MeshPart => PART,
+            ClassName::Model => &["PVInstance"],
+            ClassName::Script | ClassName::ModuleScript => &["LuaSourceContainer"],
+            ClassName::LocalScript => &["Script", "LuaSourceContainer"],
+            ClassName::TextButton => &["GuiButton", "GuiObject", "GuiBase2d"],
+            ClassName::ScreenGui | ClassName::BillboardGui => LAYER,
+            ClassName::PointLight | ClassName::SpotLight => &["Light"],
+            class if class.is_screen_element() => GUI,
+            _ => &[],
+        }
+    }
+
+    /// Whether this class is `name` or inherits from it (`IsA` in scripts).
+    pub fn is_a(self, name: &str) -> bool {
+        name == "Instance" || self.as_str() == name || self.superclasses().contains(&name)
     }
 
     /// A third- or first-person character controller.
@@ -1153,6 +1186,19 @@ mod tests {
         }
         assert_eq!(ClassName::from_name("part"), None);
         assert_eq!(ClassName::from_name("Button"), Some(ClassName::TextButton));
+    }
+
+    #[test]
+    fn is_a_follows_the_class_hierarchy() {
+        assert!(ClassName::Part.is_a("BasePart"));
+        assert!(ClassName::MeshPart.is_a("BasePart"));
+        assert!(!ClassName::Frame.is_a("BasePart"));
+        assert!(ClassName::Frame.is_a("GuiObject"));
+        assert!(ClassName::LocalScript.is_a("Script"));
+        assert!(!ClassName::Script.is_a("LocalScript"));
+        for class in ClassName::ALL {
+            assert!(class.is_a("Instance") && class.is_a(class.as_str()));
+        }
     }
 
     #[test]

@@ -21,7 +21,7 @@ use crate::sides::Side;
 use crate::user_settings::UserGraphics;
 use crate::{
     Output, OutputLine, changes, console, debugger, events, modules, push_error, sandbox,
-    scheduler, tween, watchdog, with_world,
+    scheduler, tree, tween, watchdog, with_world,
 };
 
 pub struct Context {
@@ -64,6 +64,11 @@ impl Context {
         }
         sandbox::Shared::install(&lua)
             .expect("creating the shared script functions only fails when out of memory");
+        let wait = lua
+            .app_data_ref::<sandbox::Shared>()
+            .map(|shared| shared.wait().clone())
+            .expect("installed just above");
+        tree::install(&lua, &wait).expect("creating WaitForChild only fails when out of memory");
         sandbox::lock_string_metatable(&lua)
             .expect("changing the string metatable only fails when out of memory");
         let mut methods = remote::methods(&lua)
@@ -359,6 +364,14 @@ impl Context {
     pub fn take_output(&self) -> Vec<OutputLine> {
         match self.lua.app_data_mut::<Output>() {
             Some(mut output) => std::mem::take(&mut output.0),
+            None => Vec::new(),
+        }
+    }
+
+    /// Scripts `Clone` copied since the last call: each copy and its original.
+    pub fn take_cloned_scripts(&self) -> Vec<(InstanceId, InstanceId)> {
+        match self.lua.app_data_mut::<tree::ClonedScripts>() {
+            Some(mut cloned) => std::mem::take(&mut cloned.0),
             None => Vec::new(),
         }
     }

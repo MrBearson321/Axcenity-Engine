@@ -10,6 +10,14 @@ pub(super) fn object_menu(
     egui::ScrollArea::vertical()
         .max_height(280.0)
         .show(ui, |ui| {
+            if filter == Filter::Places {
+                any = true;
+                let text = theme::with_icon(theme::class_icon(ClassName::Workspace), "Workspace");
+                if ui.selectable_label(path.is_empty(), text).clicked() {
+                    path.clear();
+                    ui.close();
+                }
+            }
             for object in objects.iter().filter(|object| filter.matches(object.class)) {
                 any = true;
                 let text = theme::with_icon(theme::class_icon(object.class), &object.path);
@@ -92,7 +100,9 @@ pub(super) fn name_menu(
             ui.close();
         }
     }
-    if suggestions.is_empty() {
+    if suggestions.is_empty() && kind == NameKind::Child {
+        ui.weak("Nothing is in there yet in the editor.");
+    } else if suggestions.is_empty() {
         ui.weak(format!(
             "Its state machine has no {} yet (or pick the Animator first).",
             kind.what()

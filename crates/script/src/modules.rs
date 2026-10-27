@@ -101,6 +101,18 @@ pub fn add(lua: &Lua, module: InstanceId, path: &str, source: &str) {
     }
 }
 
+/// Makes `copy`, a clone of the ModuleScript `original`, loadable with the
+/// same code. It loads on its own the first time it's required.
+pub fn copy(lua: &Lua, original: InstanceId, copy: InstanceId) {
+    let source = lua.app_data_ref::<Modules>().and_then(|modules| {
+        let source = modules.sources.get(&original)?;
+        Some((source.path.clone(), source.source.clone()))
+    });
+    if let Some((path, source)) = source {
+        add(lua, copy, &path, &source);
+    }
+}
+
 /// Gives `module` new code: it, and every module that required it while
 /// loading, load again the next time they're required. Returns the
 /// scripts that required any of them, which should run again.

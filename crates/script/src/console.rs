@@ -104,6 +104,7 @@ mod tests {
             .map(|line| match line.kind {
                 OutputKind::Print => line.text.clone(),
                 OutputKind::Error => format!("error: {}", line.text),
+                OutputKind::Warning => format!("warning: {}", line.text),
             })
             .collect()
     }

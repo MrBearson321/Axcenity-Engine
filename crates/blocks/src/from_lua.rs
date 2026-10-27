@@ -183,6 +183,8 @@ struct Converter<'a> {
 struct Scope<'a> {
     /// The name "when touched" gives the part that touched.
     touched: Option<&'a str>,
+    /// The innermost "for each child" loop's variable.
+    child: Option<&'a str>,
 }
 
 impl<'a> Converter<'a> {
@@ -374,6 +376,7 @@ impl<'a> Converter<'a> {
                 let param = function.params.first().map(String::as_str);
                 let scope = Scope {
                     touched: param.or(Some("otherPart")),
+                    ..Scope::default()
                 };
                 let body = self.body(&function.body, scope);
                 if let Some(param) = param
@@ -577,6 +580,14 @@ impl<'a> Converter<'a> {
             && matches!(&expr.kind, ExprKind::Name(name) if name == service)
     }
 
+    /// Like [`Self::target`], with `workspace` itself as the empty path.
+    fn container(&self, expr: &Expr) -> Option<String> {
+        match &expr.kind {
+            ExprKind::Name(name) if name == "workspace" => Some(String::new()),
+            _ => self.target(expr),
+        }
+    }
+
     /// An object under the Workspace, such as `workspace.Pad.Chime`, as its
     /// path `Pad.Chime`.
     fn target(&self, expr: &Expr) -> Option<String> {
@@ -675,6 +686,37 @@ impl<'a> Converter<'a> {
                     body: self.body(body, scope),
                 })
             }
+            // for _, child in workspace.Folder:GetChildren() do
+            StatKind::GenericFor {
+                names,
+                values,
+                body,
+            } => {
+                let (
+                    [skip, variable],
+                    [
+                        Expr {
+                            kind: ExprKind::Method(object, method, args),
+                            ..
+                        },
+                    ],
+                ) = (names.as_slice(), values.as_slice())
+                else {
+                    return None;
+                };
+                if skip != "_" || method != "GetChildren" || !args.is_empty() {
+                    return None;
+                }
+                let inner = Scope {
+                    child: Some(variable.as_str()),
+                    ..scope
+                };
+                Some(BlockKind::ForEachChild {
+                    target: self.container(object)?,
+                    variable: variable.clone(),
+                    body: self.body(body, inner),
+                })
+            }
             StatKind::If { arms, otherwise } => self.if_chain(arms, otherwise.as_deref(), scope),
             StatKind::Do(body) if matches!(body.as_slice(), [Stat { kind: StatKind::Return(values), .. }] if values.is_empty()) => {
                 Some(BlockKind::StopScript)
@@ -709,6 +751,20 @@ impl<'a> Converter<'a> {
                     });
                 }
                 None
+            }
+            ExprKind::Method(object, method, args)
+                if method == "WaitForChild"
+                    && let [
+                        Expr {
+                            kind: ExprKind::Str(name),
+                            ..
+                        },
+                    ] = args.as_slice() =>
+            {
+                Some(BlockKind::WaitForChild {
+                    target: self.container(object)?,
+                    name: name.clone(),
+                })
             }
             // An Animator's parameters and states, named by a string.
             ExprKind::Method(object, method, args)
@@ -1011,6 +1067,17 @@ impl<'a> Converter<'a> {
         let ExprKind::Field(object, property) = &target.kind else {
             return None;
         };
+        // workspace.Coin:Clone().Parent = workspace
+        if let ExprKind::Method(original, method, args) = &object.kind
+            && property == "Parent"
+            && method == "Clone"
+            && args.is_empty()
+        {
+            return Some(BlockKind::CloneInto {
+                target: self.target(original)?,
+                parent: self.container(value)?,
+            });
+        }
         // Lighting.ToneMapping = Enum.ToneMapping.Neutral
         if property == "ToneMapping" && self.is_service(object, "Lighting") {
             return Some(BlockKind::SetToneMapping {
@@ -1277,7 +1344,9 @@ impl<'a> Converter<'a> {
             ExprKind::Name(name) if scope.touched == Some(name.as_str()) => {
                 Expression::TouchingPart
             }
-            ExprKind::Name(name) if self.variables.contains(name) => {
+            ExprKind::Name(name)
+                if self.variables.contains(name) || scope.child == Some(name.as_str()) =>
+            {
                 Expression::Variable { name: name.clone() }
             }
             ExprKind::Binary(op, left, right) => {
@@ -1353,6 +1422,19 @@ impl<'a> Converter<'a> {
                     return Some(Expression::Raycast {
                         origin: boxed(origin),
                         direction: boxed(direction),
+                    });
+                }
+                if method == "IsA"
+                    && let [
+                        Expr {
+                            kind: ExprKind::Str(class),
+                            ..
+                        },
+                    ] = args.as_slice()
+                {
+                    return Some(Expression::IsA {
+                        value: boxed(object),
+                        class: class.clone(),
                     });
                 }
                 if method == "IsKeyDown"
@@ -1467,6 +1549,7 @@ fn may_wait(block: &Block) -> bool {
         block.kind,
         BlockKind::Wait { .. }
             | BlockKind::WaitUntil { .. }
+            | BlockKind::WaitForChild { .. }
             | BlockKind::Forever { .. }
             | BlockKind::RepeatUntil { .. }
             | BlockKind::StopScript

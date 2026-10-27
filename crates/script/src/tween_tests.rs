@@ -36,6 +36,7 @@ fn output(runtime: &mut ScriptRuntime) -> Vec<String> {
         .map(|line| match line.kind {
             OutputKind::Print => line.text,
             OutputKind::Error => format!("error: {}", line.text),
+            OutputKind::Warning => format!("warning: {}", line.text),
         })
         .collect()
 }

@@ -693,6 +693,7 @@ fn hello_character_hovers_in_a_custom_mode_from_lua_and_blocks() {
         .map(|line| match line.kind {
             OutputKind::Print => line.text,
             OutputKind::Error => format!("error: {}", line.text),
+            OutputKind::Warning => format!("warning: {}", line.text),
         })
         .collect();
     assert!(
@@ -1572,6 +1573,7 @@ fn hello_events_reacts_to_physics_heartbeat_new_children_and_script_changes() {
         .map(|line| match line.kind {
             OutputKind::Print => line.text,
             OutputKind::Error => format!("error: {}", line.text),
+            OutputKind::Warning => format!("warning: {}", line.text),
         })
         .collect();
     // Physics moved the ball, which fired its Position signal.
@@ -1671,6 +1673,7 @@ fn hello_mesh_drops_parts_onto_an_imported_model_which_reports_touches() {
         .map(|line| match line.kind {
             OutputKind::Print => line.text,
             OutputKind::Error => format!("error: {}", line.text),
+            OutputKind::Warning => format!("warning: {}", line.text),
         })
         .collect();
     // (What the script printed as it started went to the terminal then.)
@@ -1855,6 +1858,7 @@ fn run_and_collect(
                 .map(|line| match line.kind {
                     OutputKind::Print => line.text,
                     OutputKind::Error => format!("error: {}", line.text),
+                    OutputKind::Warning => format!("warning: {}", line.text),
                 }),
         );
     }
@@ -2433,6 +2437,7 @@ fn script_lines(scripts: &mut ScriptRuntime) -> Vec<String> {
         .map(|line| match line.kind {
             OutputKind::Print => line.text,
             OutputKind::Error => format!("error: {}", line.text),
+            OutputKind::Warning => format!("warning: {}", line.text),
         })
         .collect()
 }

@@ -98,6 +98,15 @@ pub(super) fn palette(
                 body: Vec::new(),
             }),
             B(BlockKind::StopScript),
+            B(BlockKind::ForEachChild {
+                target: String::new(),
+                variable: "child".to_owned(),
+                body: Vec::new(),
+            }),
+            B(BlockKind::WaitForChild {
+                target: String::new(),
+                name: NameKind::Child.example().to_owned(),
+            }),
         ],
         Category::Motion => vec![
             B(BlockKind::MoveTo {
@@ -287,6 +296,10 @@ pub(super) fn palette(
                 origin: Box::new(vector(0.0, 10.0, 0.0)),
                 direction: Box::new(vector(0.0, -20.0, 0.0)),
             }),
+            R(Expression::IsA {
+                value: Box::new(Expression::TouchingPart),
+                class: "BasePart".to_owned(),
+            }),
         ],
         Category::Animation => {
             let animator = first(Filter::Animators);
@@ -379,6 +392,10 @@ pub(super) fn palette(
             }),
             B(BlockKind::Destroy {
                 target: first(Filter::Parts),
+            }),
+            B(BlockKind::CloneInto {
+                target: first(Filter::Parts),
+                parent: String::new(),
             }),
             B(BlockKind::SaveSlot { slot: number(1.0) }),
             B(BlockKind::LoadSlot { slot: number(1.0) }),

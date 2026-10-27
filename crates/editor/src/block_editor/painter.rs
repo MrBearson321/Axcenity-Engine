@@ -147,9 +147,8 @@ impl<'a> BlockPainter<'a> {
                     self.reporter_size(ui, expression)
                 }
             }
-            Part::Object(text, _) | Part::Property(text, _) | Part::Key(text) => {
-                self.dropdown_size(ui, text)
-            }
+            Part::Object(text, filter) => self.dropdown_size(ui, shown_path(text, *filter)),
+            Part::Property(text, _) | Part::Key(text) => self.dropdown_size(ui, text),
             Part::Variable(name) => self.dropdown_size(ui, name),
             Part::Name(name, _, _) => self.dropdown_size(ui, name),
             Part::Math(op) => self.dropdown_size(ui, op.symbol()),
@@ -643,7 +642,8 @@ impl<'a> BlockPainter<'a> {
             Part::Slot(..) => {}
             Part::Object(path, filter) => {
                 let filter = *filter;
-                if let Some(response) = self.dropdown(ui, rect, part_id, path) {
+                let shown = shown_path(path, filter).to_owned();
+                if let Some(response) = self.dropdown(ui, rect, part_id, &shown) {
                     let objects = self.objects;
                     egui::Popup::menu(&response).show(|ui| {
                         object_menu(ui, path, filter, objects);
@@ -667,6 +667,26 @@ impl<'a> BlockPainter<'a> {
             Part::Key(key) => {
                 if let Some(response) = self.dropdown(ui, rect, part_id, key) {
                     egui::Popup::menu(&response).show(|ui| key_menu(ui, key));
+                }
+            }
+            // Children of the object at `parent` (the Workspace when empty).
+            Part::Name(name, NameKind::Child, parent) => {
+                let prefix = if parent.is_empty() {
+                    String::new()
+                } else {
+                    format!("{parent}.")
+                };
+                let suggestions: Vec<String> = self
+                    .objects
+                    .iter()
+                    .filter_map(|object| object.path.strip_prefix(prefix.as_str()))
+                    .filter(|rest| !rest.is_empty() && !rest.contains('.'))
+                    .map(str::to_owned)
+                    .collect();
+                if let Some(response) = self.dropdown(ui, rect, part_id, name) {
+                    egui::Popup::menu(&response)
+                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                        .show(|ui| name_menu(ui, name, NameKind::Child, &suggestions));
                 }
             }
             Part::Name(name, kind, animator) => {
@@ -1240,4 +1260,14 @@ pub(super) fn rounded(
         }
     }
     points
+}
+
+/// What an object menu shows for `path`: "Workspace" for the empty path of
+/// a place (where the Workspace itself can be picked).
+fn shown_path(path: &str, filter: Filter) -> &str {
+    if path.is_empty() && filter == Filter::Places {
+        "Workspace"
+    } else {
+        path
+    }
 }

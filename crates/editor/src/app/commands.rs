@@ -197,6 +197,7 @@ impl EditorApp {
                 for line in command.output {
                     match line.kind {
                         axcenity_script::OutputKind::Print => self.output.info(line.text),
+                        axcenity_script::OutputKind::Warning => self.output.warning(line.text),
                         axcenity_script::OutputKind::Error => {
                             self.output.script_error(line.text, line.trace)
                         }

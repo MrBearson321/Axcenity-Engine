@@ -38,7 +38,7 @@ fn no_world() -> mlua::Error {
     mlua::Error::runtime("the game world can only be used while scripts are running")
 }
 
-fn destroyed() -> mlua::Error {
+pub(crate) fn destroyed() -> mlua::Error {
     mlua::Error::runtime("this Instance has been destroyed")
 }
 
@@ -73,6 +73,8 @@ impl UserData for LuaInstance {
                 Ok(found.map(LuaInstance))
             },
         );
+        // `GetChildren`, `IsA`, `Clone`, `Destroy` and the rest of the tree.
+        crate::tree::add_methods(methods);
         // `part:GetPropertyChangedSignal("Position")`: an event for one
         // property, whose handlers get no arguments.
         methods.add_method("GetPropertyChangedSignal", |lua, this, property: String| {
@@ -127,6 +129,8 @@ fn get(lua: &Lua, id: InstanceId, key: &str) -> mlua::Result<mlua::Value> {
         "Name" => return instance.name().into_lua(lua),
         "ClassName" => return instance.class().as_str().into_lua(lua),
         "Parent" => return instance.parent().map(LuaInstance).into_lua(lua),
+        // Lua, so it can wait (see `tree`).
+        "WaitForChild" => return crate::tree::wait_for_child(lua)?.into_lua(lua),
         _ => {}
     }
     if let Some(value) = instance.property(key) {
@@ -200,7 +204,18 @@ fn set(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> mlua::Result
                     }
                 },
             };
-            world_mut(lua)?
+            let mut world = world_mut(lua)?;
+            if !world.contains(id) {
+                return Err(mlua::Error::runtime(
+                    "can't set Parent: this Instance has been destroyed, so its Parent is locked",
+                ));
+            }
+            if parent.is_some_and(|parent| !world.contains(parent)) {
+                return Err(mlua::Error::runtime(
+                    "can't set Parent: the new Parent has been destroyed",
+                ));
+            }
+            world
                 .set_parent(id, parent)
                 .map_err(|err| mlua::Error::runtime(format!("can't set Parent: {err}")))
         }

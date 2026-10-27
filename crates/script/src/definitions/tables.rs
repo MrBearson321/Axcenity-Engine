@@ -556,6 +556,96 @@ pub(super) const INSTANCE_METHODS: &[Function] = &[
         params: &[("property", "string")],
         returns: "Signal",
     },
+    Function {
+        name: "FindFirstChildOfClass",
+        doc: "The first child whose class is exactly `className`, or nil.",
+        params: &[("className", "string")],
+        returns: "Instance?",
+    },
+    Function {
+        name: "FindFirstChildWhichIsA",
+        doc: "The first child that `IsA(className)`, or nil. With `recursive`, searches every descendant.",
+        params: &[("className", "string"), ("recursive?", "boolean")],
+        returns: "Instance?",
+    },
+    Function {
+        name: "FindFirstAncestor",
+        doc: "The nearest Instance above this one with this name, or nil.",
+        params: &[("name", "string")],
+        returns: "Instance?",
+    },
+    Function {
+        name: "FindFirstAncestorOfClass",
+        doc: "The nearest Instance above this one whose class is exactly `className`, or nil.",
+        params: &[("className", "string")],
+        returns: "Instance?",
+    },
+    Function {
+        name: "FindFirstAncestorWhichIsA",
+        doc: "The nearest Instance above this one that `IsA(className)`, or nil.",
+        params: &[("className", "string")],
+        returns: "Instance?",
+    },
+    Function {
+        name: "WaitForChild",
+        doc: "The child with this name, waiting (as `task.wait` does) until there is one. With `timeout`, gives nil after that many seconds. Without one, warns once after 5 seconds and keeps waiting.",
+        params: &[("name", "string"), ("timeout?", "number")],
+        returns: "Instance?",
+    },
+    Function {
+        name: "GetChildren",
+        doc: "The Instances directly inside this one, in order.",
+        params: &[],
+        returns: "{Instance}",
+    },
+    Function {
+        name: "GetDescendants",
+        doc: "Every Instance inside this one, parents before their children.",
+        params: &[],
+        returns: "{Instance}",
+    },
+    Function {
+        name: "IsA",
+        doc: "Whether this Instance's class is `className` or inherits from it: a Part and a MeshPart are both a `\"BasePart\"`, and everything is an `\"Instance\"`.",
+        params: &[("className", "string")],
+        returns: "boolean",
+    },
+    Function {
+        name: "IsDescendantOf",
+        doc: "Whether this Instance is somewhere inside `ancestor`.",
+        params: &[("ancestor", "Instance")],
+        returns: "boolean",
+    },
+    Function {
+        name: "IsAncestorOf",
+        doc: "Whether `descendant` is somewhere inside this Instance.",
+        params: &[("descendant", "Instance")],
+        returns: "boolean",
+    },
+    Function {
+        name: "GetFullName",
+        doc: "The names from the service down to this Instance, joined by dots, such as `\"Workspace.Model.Part\"`.",
+        params: &[],
+        returns: "string",
+    },
+    Function {
+        name: "Clone",
+        doc: "A copy of this Instance and everything inside it, with no Parent. A copied Script starts once it's put where scripts run (the Workspace or ServerScriptService; a LocalScript also in StarterPlayerScripts or Players). Services can't be cloned.",
+        params: &[],
+        returns: "Instance",
+    },
+    Function {
+        name: "Destroy",
+        doc: "Removes this Instance and everything inside it for good, firing `Destroying` first. Its Parent can't be set again, and a script inside it stops. Services can't be destroyed; destroying twice is harmless.",
+        params: &[],
+        returns: "()",
+    },
+    Function {
+        name: "ClearAllChildren",
+        doc: "Destroys every child of this Instance (except services).",
+        params: &[],
+        returns: "()",
+    },
 ];
 
 /// What each event every Instance has means (`core`'s `INSTANCE_EVENTS`).
@@ -572,6 +662,22 @@ pub(super) const INSTANCE_EVENT_DOCS: &[(&str, &str)] = &[
     (
         "ChildRemoved",
         "Fires when an Instance is taken out of this one. The handler gets the child.",
+    ),
+    (
+        "DescendantAdded",
+        "Fires when an Instance is put anywhere inside this one, once for it and once for each Instance inside it. The handler gets that descendant.",
+    ),
+    (
+        "DescendantRemoving",
+        "Fires when an Instance is taken out from anywhere inside this one, once for it and once for each Instance inside it. The handler gets that descendant.",
+    ),
+    (
+        "AncestryChanged",
+        "Fires when this Instance or one of its ancestors gets a new Parent. The handler gets the Instance that moved and its new Parent (nil when it was taken out or destroyed).",
+    ),
+    (
+        "Destroying",
+        "Fires once when `Destroy` is called on this Instance or one of its ancestors, while it can still be read.",
     ),
 ];
 

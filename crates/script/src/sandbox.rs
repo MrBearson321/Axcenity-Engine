@@ -123,6 +123,11 @@ impl Shared {
         });
         Ok(())
     }
+
+    /// `task.wait`, for engine Lua that needs to wait.
+    pub fn wait(&self) -> &Function {
+        self.task.wait()
+    }
 }
 
 /// Every string has the same metatable, whose `__index` is Lua's real

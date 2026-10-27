@@ -94,17 +94,14 @@ pub fn translate(script: &BlockScript) -> Result<Translation, TranslateError> {
             _ => {}
         }
         for expression in block.kind.expressions() {
-            visit_expressions(expression, &mut |expression| match expression {
-                Expression::Variable { name } => {
-                    variables.insert(name.clone());
-                }
-                Expression::KeyDown { .. } => {
+            visit_expressions(expression, &mut |expression| {
+                if let Expression::KeyDown { .. } = expression {
                     services.insert("UserInputService");
                 }
-                _ => {}
             });
         }
     });
+    read_variables(&script.blocks, &mut Vec::new(), &mut variables);
     for service in &services {
         writer.line(format!("local {service} = game:GetService(\"{service}\")"));
     }
@@ -131,6 +128,34 @@ pub fn translate(script: &BlockScript) -> Result<Translation, TranslateError> {
         source,
         block_lines: writer.block_lines,
     })
+}
+
+/// Adds the variables `blocks` read, except a "for each child" loop's own
+/// variable inside that loop (the loop declares it).
+fn read_variables(blocks: &[Block], loops: &mut Vec<String>, variables: &mut BTreeSet<String>) {
+    for block in blocks {
+        for expression in block.kind.expressions() {
+            visit_expressions(expression, &mut |expression| {
+                if let Expression::Variable { name } = expression
+                    && !loops.contains(name)
+                {
+                    variables.insert(name.clone());
+                }
+            });
+        }
+        let looping = match &block.kind {
+            BlockKind::ForEachChild { variable, .. } => Some(variable.clone()),
+            _ => None,
+        };
+        let pushed = looping.is_some();
+        loops.extend(looping);
+        for body in block.kind.bodies() {
+            read_variables(body, loops, variables);
+        }
+        if pushed {
+            loops.pop();
+        }
+    }
 }
 
 pub(super) fn note_ids(block: &Block, ids: &mut HashSet<u64>) -> Result<(), TranslateError> {
@@ -357,6 +382,22 @@ impl Writer {
                 self.line("task.wait()");
                 self.indent -= 1;
                 self.line("end");
+            }
+            BlockKind::ForEachChild {
+                target: t,
+                variable,
+                body,
+            } => {
+                if !valid_identifier(variable) {
+                    return Err(TranslateError::InvalidVariable(variable.clone()));
+                }
+                let object = container(t)?;
+                self.line(format!("for _, {variable} in {object}:GetChildren() do"));
+                self.nested(body, ids)?;
+                self.line("end");
+            }
+            BlockKind::WaitForChild { target: t, name } => {
+                self.line(format!("{}:WaitForChild({})", container(t)?, quote(name)));
             }
             BlockKind::If { condition, body } => {
                 let condition = self.expression(condition)?;
@@ -645,6 +686,11 @@ impl Writer {
                 self.line(format!("print({value})"));
             }
             BlockKind::Destroy { target: t } => self.line(format!("{}:Destroy()", target(t)?)),
+            BlockKind::CloneInto { target: t, parent } => self.line(format!(
+                "{}:Clone().Parent = {}",
+                target(t)?,
+                container(parent)?
+            )),
             BlockKind::Code { code } => self.code(code),
             BlockKind::WhenStarted { .. }
             | BlockKind::WhenTouched { .. }
@@ -760,6 +806,19 @@ impl Writer {
                 animator,
                 parameter,
             } => format!("{}:GetNumber({})", target(animator)?, quote(parameter)),
+            // A method call needs a name or a call before the colon, so
+            // anything else is bracketed: `(a or b):IsA("Part")`.
+            Expression::IsA { value, class } => {
+                let object = self.expression(value)?;
+                let object = match value.as_ref() {
+                    Expression::Variable { .. }
+                    | Expression::TouchingPart
+                    | Expression::Property { .. }
+                    | Expression::Raycast { .. } => object,
+                    _ => format!("({object})"),
+                };
+                format!("{object}:IsA({})", quote(class))
+            }
             // Bracketed already where it needs to be (see `from_lua`).
             Expression::Code { code } => code.clone(),
         })
@@ -813,6 +872,15 @@ pub(super) fn target(path: &str) -> Result<String, TranslateError> {
                 format!("{prefix}[{}]", quote(part))
             }
         }))
+}
+
+/// Like [`target`], with an empty path meaning the Workspace itself.
+pub(super) fn container(path: &str) -> Result<String, TranslateError> {
+    if path.is_empty() {
+        Ok("workspace".to_owned())
+    } else {
+        target(path)
+    }
 }
 
 pub(super) fn quote(text: &str) -> String {

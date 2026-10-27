@@ -286,6 +286,7 @@ fn print_output(runtime: &mut ScriptRuntime) {
     for line in runtime.take_output() {
         match line.kind {
             OutputKind::Print => println!("{}", line.text),
+            OutputKind::Warning => eprintln!("warning: {}", line.text),
             OutputKind::Error => {
                 eprintln!("error: {}", line.text);
                 for frame in &line.trace {

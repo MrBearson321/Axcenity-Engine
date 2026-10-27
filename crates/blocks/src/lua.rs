@@ -437,11 +437,17 @@ pub(crate) enum StatKind {
         step: Option<Expr>,
         body: Vec<Stat>,
     },
+    /// `for a, b in values do ... end`, without type annotations.
+    GenericFor {
+        names: Vec<String>,
+        values: Vec<Expr>,
+        body: Vec<Stat>,
+    },
     Do(Vec<Stat>),
     Return(Vec<Expr>),
-    /// Anything the blocks have no use for the inside of: `repeat`, a
-    /// generic `for`, function statements, `break`, `continue`, `;`, type
-    /// definitions, and locals or numeric `for`s with type annotations.
+    /// Anything the blocks have no use for the inside of: `repeat`,
+    /// function statements, `break`, `continue`, `;`, type definitions,
+    /// and locals or `for`s with type annotations.
     Other,
 }
 
@@ -719,16 +725,26 @@ impl Parser<'_> {
                         }
                     }
                 } else {
+                    let mut names = vec![first];
+                    let mut typed = typed;
                     while self.accept(",") {
-                        self.name()?;
-                        self.annotation()?;
+                        names.push(self.name()?);
+                        typed |= self.annotation()?;
                     }
                     self.expect("in")?;
-                    self.expression_list()?;
+                    let values = self.expression_list()?;
                     self.expect("do")?;
-                    self.block()?;
+                    let body = self.block()?;
                     self.expect("end")?;
-                    StatKind::Other
+                    if typed {
+                        StatKind::Other
+                    } else {
+                        StatKind::GenericFor {
+                            names,
+                            values,
+                            body,
+                        }
+                    }
                 }
             }
             Token::Keyword("function") => {

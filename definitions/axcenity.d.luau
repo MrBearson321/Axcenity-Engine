@@ -485,11 +485,49 @@ declare extern type Instance with
 	ChildAdded: Signal
 	--- Fires when an Instance is taken out of this one. The handler gets the child.
 	ChildRemoved: Signal
+	--- Fires when an Instance is put anywhere inside this one, once for it and once for each Instance inside it. The handler gets that descendant.
+	DescendantAdded: Signal
+	--- Fires when an Instance is taken out from anywhere inside this one, once for it and once for each Instance inside it. The handler gets that descendant.
+	DescendantRemoving: Signal
+	--- Fires when this Instance or one of its ancestors gets a new Parent. The handler gets the Instance that moved and its new Parent (nil when it was taken out or destroyed).
+	AncestryChanged: Signal
+	--- Fires once when `Destroy` is called on this Instance or one of its ancestors, while it can still be read.
+	Destroying: Signal
 	[string]: any
 	--- The first child with this name, or nil. With `recursive`, searches every descendant.
 	function FindFirstChild(self, name: string, recursive: boolean?): Instance?
 	--- An event that fires when this one property (or `Name` or `Parent`) gets a different value. The handler gets nothing: read the property to see its new value.
 	function GetPropertyChangedSignal(self, property: string): Signal
+	--- The first child whose class is exactly `className`, or nil.
+	function FindFirstChildOfClass(self, className: string): Instance?
+	--- The first child that `IsA(className)`, or nil. With `recursive`, searches every descendant.
+	function FindFirstChildWhichIsA(self, className: string, recursive: boolean?): Instance?
+	--- The nearest Instance above this one with this name, or nil.
+	function FindFirstAncestor(self, name: string): Instance?
+	--- The nearest Instance above this one whose class is exactly `className`, or nil.
+	function FindFirstAncestorOfClass(self, className: string): Instance?
+	--- The nearest Instance above this one that `IsA(className)`, or nil.
+	function FindFirstAncestorWhichIsA(self, className: string): Instance?
+	--- The child with this name, waiting (as `task.wait` does) until there is one. With `timeout`, gives nil after that many seconds. Without one, warns once after 5 seconds and keeps waiting.
+	function WaitForChild(self, name: string, timeout: number?): Instance?
+	--- The Instances directly inside this one, in order.
+	function GetChildren(self): {Instance}
+	--- Every Instance inside this one, parents before their children.
+	function GetDescendants(self): {Instance}
+	--- Whether this Instance's class is `className` or inherits from it: a Part and a MeshPart are both a `"BasePart"`, and everything is an `"Instance"`.
+	function IsA(self, className: string): boolean
+	--- Whether this Instance is somewhere inside `ancestor`.
+	function IsDescendantOf(self, ancestor: Instance): boolean
+	--- Whether `descendant` is somewhere inside this Instance.
+	function IsAncestorOf(self, descendant: Instance): boolean
+	--- The names from the service down to this Instance, joined by dots, such as `"Workspace.Model.Part"`.
+	function GetFullName(self): string
+	--- A copy of this Instance and everything inside it, with no Parent. A copied Script starts once it's put where scripts run (the Workspace or ServerScriptService; a LocalScript also in StarterPlayerScripts or Players). Services can't be cloned.
+	function Clone(self): Instance
+	--- Removes this Instance and everything inside it for good, firing `Destroying` first. Its Parent can't be set again, and a script inside it stops. Services can't be destroyed; destroying twice is harmless.
+	function Destroy(self): ()
+	--- Destroys every child of this Instance (except services).
+	function ClearAllChildren(self): ()
 end
 
 --- The root of the game, called `game` in scripts.

@@ -102,9 +102,12 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         BlockKind::SetGraphicsOption { .. } => 49,
         BlockKind::SetGraphicsNumber { .. } => 50,
         BlockKind::SetLanguage { .. } => 51,
+        BlockKind::ForEachChild { .. } => 52,
+        BlockKind::WaitForChild { .. } => 53,
+        BlockKind::CloneInto { .. } => 54,
     })
 }
-const STATEMENT_COUNT: usize = 52;
+const STATEMENT_COUNT: usize = 55;
 
 /// One of each statement block, with the Lua it must produce.
 fn every_statement() -> Vec<(BlockKind, &'static str)> {
@@ -295,6 +298,28 @@ fn every_statement() -> Vec<(BlockKind, &'static str)> {
                 target: "Red Ball".to_owned(),
             },
             "workspace[\"Red Ball\"]:Destroy()",
+        ),
+        (
+            BlockKind::ForEachChild {
+                target: "Coins".to_owned(),
+                variable: "coin".to_owned(),
+                body: Vec::new(),
+            },
+            "for _, coin in workspace.Coins:GetChildren() do",
+        ),
+        (
+            BlockKind::WaitForChild {
+                target: String::new(),
+                name: "Door".to_owned(),
+            },
+            "workspace:WaitForChild(\"Door\")",
+        ),
+        (
+            BlockKind::CloneInto {
+                target: "Coin".to_owned(),
+                parent: "Coins".to_owned(),
+            },
+            "workspace.Coin:Clone().Parent = workspace.Coins",
         ),
         (
             BlockKind::ShowPage {
@@ -1383,6 +1408,10 @@ fn reporters_switched_to_code_and_back_are_the_same_reporters() {
             target: animator(),
             property: "CurrentState".to_owned(),
         },
+        Expression::IsA {
+            value: boxed(variable("a")),
+            class: "BasePart".to_owned(),
+        },
         Expression::Raycast {
             origin: boxed(Expression::Vector3 {
                 x: 0.0,
@@ -1409,6 +1438,129 @@ fn reporters_switched_to_code_and_back_are_the_same_reporters() {
         "every reporter should come back:\n{back:#?}"
     );
     assert_eq!(translate(&back).unwrap().source, lua);
+}
+
+#[test]
+fn instance_tree_blocks_give_the_same_lua_as_the_typed_calls() {
+    // As "when game starts" writes it.
+    let typed = "\
+task.spawn(function()
+    workspace.Coin:Clone().Parent = workspace.Bank
+    for _, child in workspace.Bank:GetChildren() do
+        print(child:IsA(\"BasePart\"), child:IsA(\"Model\"))
+    end
+    print(workspace.Bank:WaitForChild(\"Coin\"))
+    workspace.Coin:Destroy()
+end)
+";
+    let blocks = from_lua(typed).unwrap();
+    let [
+        Block {
+            kind: BlockKind::WhenStarted { body },
+            ..
+        },
+    ] = blocks.blocks.as_slice()
+    else {
+        panic!("unexpected blocks: {:#?}", blocks.blocks);
+    };
+    let kinds: Vec<_> = body.iter().map(|block| &block.kind).collect();
+    assert!(
+        matches!(
+            kinds.as_slice(),
+            [
+                BlockKind::CloneInto { .. },
+                BlockKind::ForEachChild { .. },
+                BlockKind::Print {
+                    value: Expression::Code { .. }
+                },
+                BlockKind::Destroy { .. },
+            ]
+        ),
+        "{kinds:#?}"
+    );
+    // Blocks made from the typed calls give back exactly that code.
+    let source = translate(&blocks).unwrap().source;
+    assert_eq!(source, typed);
+
+    // The same blocks built by hand give the same Lua too.
+    let is_a = |class: &str| Expression::IsA {
+        value: boxed(variable("child")),
+        class: class.to_owned(),
+    };
+    let by_hand = script(vec![block(
+        1,
+        BlockKind::WhenStarted {
+            body: vec![
+                block(
+                    2,
+                    BlockKind::CloneInto {
+                        target: "Coin".to_owned(),
+                        parent: "Bank".to_owned(),
+                    },
+                ),
+                block(
+                    3,
+                    BlockKind::ForEachChild {
+                        target: "Bank".to_owned(),
+                        variable: "child".to_owned(),
+                        body: vec![block(
+                            4,
+                            BlockKind::Print {
+                                value: is_a("Part"),
+                            },
+                        )],
+                    },
+                ),
+                block(
+                    5,
+                    BlockKind::WaitForChild {
+                        target: "Bank".to_owned(),
+                        name: "Coin".to_owned(),
+                    },
+                ),
+            ],
+        },
+    )]);
+    let hand = translate(&by_hand).unwrap().source;
+    assert!(
+        hand.starts_with(
+            "task.spawn(function()\n    \
+             workspace.Coin:Clone().Parent = workspace.Bank\n    \
+             for _, child in workspace.Bank:GetChildren() do\n"
+        ),
+        "{hand}"
+    );
+    assert!(
+        hand.contains(
+            "\n        print(child:IsA(\"Part\"))\n    end\n    workspace.Bank:WaitForChild(\"Coin\")\n"
+        ),
+        "{hand}"
+    );
+    assert!(!hand.contains("local child"), "{hand}");
+
+    // And it runs.
+    let mut world = World::new();
+    let bank = world.create(ClassName::Folder).unwrap();
+    world.set_name(bank, "Bank").unwrap();
+    world.set_parent(bank, Some(world.workspace())).unwrap();
+    let coin = world.create(ClassName::Part).unwrap();
+    world.set_name(coin, "Coin").unwrap();
+    world.set_parent(coin, Some(world.workspace())).unwrap();
+    let lua = world.create(ClassName::Script).unwrap();
+    world
+        .set_parent(lua, Some(world.server_script_service()))
+        .unwrap();
+    let mut runtime = ScriptRuntime::new();
+    runtime.start_script(&mut world, lua, "scripts/Bank.server.blocks.json", &source);
+    runtime.step(&mut world, 0.1);
+    let output: Vec<_> = runtime
+        .take_output()
+        .into_iter()
+        .map(|line| line.text)
+        .collect();
+    assert_eq!(output, ["true\tfalse", "Coin"]);
+    assert!(world.find_first_child(world.workspace(), "Coin").is_none());
+    assert_eq!(world.get(bank).unwrap().children().len(), 1);
 }
 
 #[test]
