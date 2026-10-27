@@ -550,6 +550,19 @@ pub struct Light {
     pub range: f32,
     /// `None` shines in every direction (a point light), `Some` in a cone.
     pub cone: Option<Cone>,
+    /// `Some` if a point light casts shadows (a PointLight's `Shadows`).
+    /// Only the nearest few to the camera do, as the graphics settings
+    /// allow. A spot light's shadows are its cone's.
+    pub point_shadows: Option<PointShadows>,
+}
+
+/// How a point light casts shadows, on every side of it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PointShadows {
+    /// Studs from the light before anything casts a shadow, along each
+    /// world axis: +X, -X, +Y, -Y, +Z, -Z. So the part the light sits on
+    /// doesn't shade everything on its side.
+    pub near: [f32; 6],
 }
 
 /// The shape of a spot light's beam.

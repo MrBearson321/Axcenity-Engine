@@ -523,6 +523,9 @@ impl ClassName {
                 ("Brightness", Value::Number(1.0)),
                 // How far the light reaches, in studs.
                 ("Range", Value::Number(16.0)),
+                // Whether parts around it cast shadows. Off, so worlds
+                // saved without it look as they did.
+                ("Shadows", Value::Bool(false)),
             ],
             ClassName::SpotLight => vec![
                 ("Enabled", Value::Bool(true)),

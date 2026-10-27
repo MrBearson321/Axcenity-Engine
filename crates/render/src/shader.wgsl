@@ -266,7 +266,7 @@ fn fs_main(in: VertexOut, @builtin(front_facing) front: bool) -> @location(0) ve
     let dielectric = mix(vec3<f32>(0.04), 0.08 * specular_texel.rgb, maps.specular.x);
 
     let color = light_surface(in.world_position, normalize(in.normal) * facing, n, in.clip_position.xy,
-        base_color, metalness, roughness, occlusion, dielectric);
+        base_color, metalness, roughness, occlusion, dielectric, solid);
 
     // Solid items stay solid whatever the texture's alpha, so the window's
     // own alpha stays 1.

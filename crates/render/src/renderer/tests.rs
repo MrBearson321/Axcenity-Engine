@@ -10,6 +10,7 @@ use glam::Mat4;
 mod environment_maps;
 mod frustum_culling;
 mod level_of_detail;
+mod point_and_contact_shadows;
 mod reflection_probes;
 mod skinning;
 mod texture_budget;
@@ -392,6 +393,7 @@ fn point_light(position: Vec3, range: f32) -> Light {
         brightness: 1.0,
         range,
         cone: None,
+        point_shadows: None,
     }
 }
 
@@ -406,7 +408,7 @@ fn lights_are_listed_only_in_the_tiles_they_can_reach() {
         .push(point_light(Vec3::new(0.0, 0.0, 50.0), 1.0));
     // Not a real light.
     list.lights.push(point_light(Vec3::ZERO, 0.0));
-    let planned = plan_lights(&list, 1.0, (320, 320), None);
+    let planned = plan_lights(&list, 1.0, (320, 320), ShadowQuality::Off);
     assert_eq!(planned.lights.len(), 1);
     assert_eq!((planned.tile_size, planned.tiles_across), (32, 10));
     let count = |x: usize, y: usize| planned.tiles[(y * 10 + x) * (LIGHTS_PER_TILE + 1)];
@@ -420,7 +422,7 @@ fn a_light_around_the_camera_reaches_every_tile_and_the_nearest_are_kept() {
     let mut list = list_of(vec![]);
     list.lights
         .push(point_light(Vec3::new(0.0, 0.0, 0.1), 100.0));
-    let planned = plan_lights(&list, 1.0, (64, 64), None);
+    let planned = plan_lights(&list, 1.0, (64, 64), ShadowQuality::Off);
     assert!(
         planned
             .tiles
@@ -431,7 +433,7 @@ fn a_light_around_the_camera_reaches_every_tile_and_the_nearest_are_kept() {
     list.lights = (0..MAX_LIGHTS + 10)
         .map(|i| point_light(Vec3::new(0.0, 0.0, -1.0 - i as f32), 5.0))
         .collect();
-    let planned = plan_lights(&list, 1.0, (64, 64), None);
+    let planned = plan_lights(&list, 1.0, (64, 64), ShadowQuality::Off);
     assert_eq!(planned.lights.len(), MAX_LIGHTS);
     let farthest = planned
         .lights
@@ -1763,6 +1765,15 @@ fn switching_shadow_quality_fifty_times_leaves_one_shadow_map() {
     assert_eq!(renderer.scene.shadow_maps_alive(), 1);
 }
 
+/// A point light at `position` that casts shadows, starting right at it.
+fn shadowing_point_light(position: Vec3, range: f32) -> Light {
+    Light {
+        brightness: 4.0,
+        point_shadows: Some(crate::PointShadows { near: [0.0; 6] }),
+        ..point_light(position, range)
+    }
+}
+
 /// A spot light at `position` shining along `direction` in a 90° beam,
 /// casting shadows if `shadows`.
 fn spot_light(position: Vec3, direction: Vec3, range: f32, shadows: bool) -> Light {
@@ -1865,11 +1876,7 @@ fn only_the_nearest_shadow_casting_spots_get_shadow_layers() {
         spot(-5.0, true),
         spot(-3.0, false),
     ];
-    let medium = Some(crate::SpotShadowMapSize {
-        size: 512,
-        lights: 2,
-    });
-    let planned = plan_lights(&list, 1.0, (64, 64), medium);
+    let planned = plan_lights(&list, 1.0, (64, 64), ShadowQuality::Medium);
     let layers: Vec<(f32, f32)> = planned
         .lights
         .iter()
@@ -1883,7 +1890,7 @@ fn only_the_nearest_shadow_casting_spots_get_shadow_layers() {
     assert_eq!(planned.spot_shadows.len(), 2);
     assert!(planned.lights[1].shadow[1] > 0.0, "texel width per stud");
 
-    let none = plan_lights(&list, 1.0, (64, 64), None);
+    let none = plan_lights(&list, 1.0, (64, 64), ShadowQuality::Off);
     assert!(none.spot_shadows.is_empty());
     assert!(none.lights.iter().all(|light| light.shadow[0] == -1.0));
 }
@@ -2826,9 +2833,12 @@ fn a_double_sided_square_shows_its_back_lit_like_its_front() {
     }
 }
 
+/// High with ambient occlusion at `mode`, and contact shadows off: they
+/// draw the prepass too.
 fn with_occlusion(mode: crate::AmbientOcclusion) -> GraphicsSettings {
     GraphicsSettings {
         ambient_occlusion: Some(mode),
+        contact_shadows: Some(false),
         ..GraphicsSettings::default()
     }
 }
@@ -3151,6 +3161,14 @@ fn every_setting_and_value() -> Vec<GraphicsSettings> {
     for quality in ReflectionQuality::ALL {
         all.push(with(&|s| s.reflection_quality = Some(quality)));
     }
+    for on in [false, true] {
+        all.push(with(&|s| s.contact_shadows = Some(on)));
+    }
+    // Contact shadows alone still draw the prepass.
+    all.push(with(&|s| {
+        s.ambient_occlusion = Some(AmbientOcclusion::Off);
+        s.contact_shadows = Some(true);
+    }));
     all.push(high);
     all
 }
@@ -3195,6 +3213,8 @@ fn switching_every_setting_and_dropping_renderers_leaves_no_resources_behind() {
         20.0,
         true,
     ));
+    list.lights
+        .push(shadowing_point_light(Vec3::new(2.0, 4.0, -8.0), 20.0));
     let settings = every_setting_and_value();
     // What a renderer holds: its caches and its targets.
     let counts = |renderer: &TextureRenderer| {
@@ -3209,7 +3229,10 @@ fn switching_every_setting_and_dropping_renderers_leaves_no_resources_behind() {
             (stats.texture_bytes, stats.mesh_bytes),
             (
                 scene.shadow_maps_alive(),
-                scene.spot_shadow_maps_alive(),
+                (
+                    scene.spot_shadow_maps_alive(),
+                    scene.point_shadow_maps_alive(),
+                ),
                 scene.targets_alive(),
                 scene.occlusion_targets_alive(),
                 scene.anti_aliasing_targets_alive(),
@@ -3232,7 +3255,7 @@ fn switching_every_setting_and_dropping_renderers_leaves_no_resources_behind() {
             renderer.set_graphics(settings);
             renderer.render(&list).unwrap();
             let used = renderer.graphics().clone();
-            let (_, _, (sun, spot, targets, occlusion, (msaa, fxaa)), environment) =
+            let (_, _, (sun, (spot, point), targets, occlusion, (msaa, fxaa)), environment) =
                 counts(&renderer);
             let context = format!("round {round}, step {step}: {settings:?}");
             // A ceiling of 0 studs draws no sun shadows, so needs no map.
@@ -3243,9 +3266,16 @@ fn switching_every_setting_and_dropping_renderers_leaves_no_resources_behind() {
                 usize::from(used.shadow_quality.spot_map().is_some()),
                 "{context}"
             );
+            assert_eq!(
+                point,
+                usize::from(used.shadow_quality.point_map().is_some()),
+                "{context}"
+            );
             assert_eq!(targets, 1, "{context}");
-            let occluded = used.ambient_occlusion != crate::AmbientOcclusion::Off;
-            assert_eq!(occlusion, usize::from(occluded), "{context}");
+            // The prepass is drawn for ambient occlusion or contact shadows.
+            let prepass =
+                used.ambient_occlusion != crate::AmbientOcclusion::Off || used.contact_shadows;
+            assert_eq!(occlusion, usize::from(prepass), "{context}");
             assert_eq!(
                 msaa,
                 usize::from(used.anti_aliasing.samples() > 1),

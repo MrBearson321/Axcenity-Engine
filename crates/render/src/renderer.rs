@@ -23,7 +23,9 @@ use std::time::Duration;
 use crate::draw_list::{
     DrawList, Shape, Skin, TextureSource, UiDrawItem, UiRectangle, UiText, is_turned,
 };
-use crate::graphics::{Capabilities, EffectiveGraphics, GraphicsSettings, ShadowMapSize};
+use crate::graphics::{
+    Capabilities, EffectiveGraphics, GraphicsSettings, POINT_SHADOW_FACES, ShadowMapSize,
+};
 use crate::mesh::{self};
 use anyhow::{Context, Result};
 use bytemuck::{Pod, Zeroable};

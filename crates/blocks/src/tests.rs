@@ -1197,6 +1197,7 @@ fn graphics_blocks_change_user_game_settings_and_come_back_from_lua() {
                 set(4, option("PostProcessing", "Off")),
                 set(5, option("ShadowQuality", "Off")),
                 set(6, option("ShadowQuality", "Preset")),
+                set(8, option("ContactShadows", "On")),
                 set(
                     7,
                     BlockKind::SetGraphicsNumber {
@@ -1218,6 +1219,10 @@ fn graphics_blocks_change_user_game_settings_and_come_back_from_lua() {
     );
     assert!(
         source.contains("UserGameSettings.ShadowQuality = nil"),
+        "{source}"
+    );
+    assert!(
+        source.contains("UserGameSettings.ContactShadows = true"),
         "{source}"
     );
 
@@ -1248,6 +1253,7 @@ fn graphics_blocks_change_user_game_settings_and_come_back_from_lua() {
     back.for_each_block(&mut |b| kinds.push(b.kind.clone()));
     assert!(kinds.contains(&option("PostProcessing", "Off")));
     assert!(kinds.contains(&option("ShadowQuality", "Preset")));
+    assert!(kinds.contains(&option("ContactShadows", "On")));
 
     for wrong in [
         BlockKind::SetGraphicsQuality {

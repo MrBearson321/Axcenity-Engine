@@ -649,22 +649,25 @@ pub const TONE_MAPPINGS: [&str; 3] = ["Classic", "Neutral", "Filmic"];
 /// `Enum.GraphicsQuality`'s items, which the graphics quality block offers.
 pub const GRAPHICS_QUALITIES: [&str; 5] = ["Automatic", "Low", "Medium", "High", "Ultra"];
 /// The `UserGameSettings` overrides the graphics option block sets.
-pub const GRAPHICS_OPTIONS: [&str; 6] = [
+pub const GRAPHICS_OPTIONS: [&str; 7] = [
     "ShadowQuality",
     "AntiAliasing",
     "TextureQuality",
     "AmbientOcclusion",
     "ReflectionQuality",
     "PostProcessing",
+    "ContactShadows",
 ];
+/// The [`GRAPHICS_OPTIONS`] that are on or off (booleans in Lua), not enums.
+pub const GRAPHICS_SWITCHES: [&str; 2] = ["PostProcessing", "ContactShadows"];
 /// The `UserGameSettings` overrides the graphics number block sets.
 pub const GRAPHICS_NUMBERS: [&str; 2] = ["ShadowDistance", "RenderScale"];
 /// The graphics option block's choice that removes the override (nil).
 pub const PRESET: &str = "Preset";
 
 /// What the graphics option block can set `setting` (one of
-/// [`GRAPHICS_OPTIONS`]) to: its enum's items (On and Off for
-/// PostProcessing), then [`PRESET`]. Empty for any other name.
+/// [`GRAPHICS_OPTIONS`]) to: its enum's items (On and Off for the
+/// [`GRAPHICS_SWITCHES`]), then [`PRESET`]. Empty for any other name.
 pub fn graphics_choices(setting: &str) -> &'static [&'static str] {
     match setting {
         "ShadowQuality" => &["Off", "Low", "Medium", "High", "Ultra", PRESET],
@@ -672,7 +675,7 @@ pub fn graphics_choices(setting: &str) -> &'static [&'static str] {
         "TextureQuality" => &["Quarter", "Half", "Full", PRESET],
         "AmbientOcclusion" => &["Off", "Low", "High", PRESET],
         "ReflectionQuality" => &["Low", "Medium", "High", "Ultra", PRESET],
-        "PostProcessing" => &["On", "Off", PRESET],
+        "PostProcessing" | "ContactShadows" => &["On", "Off", PRESET],
         _ => &[],
     }
 }

@@ -94,6 +94,18 @@ impl ShadowQuality {
         Some(SpotShadowMapSize { size, lights })
     }
 
+    /// The point light shadow maps this quality draws, or `None` when point
+    /// lights cast no shadows (Off and Low).
+    pub fn point_map(self) -> Option<PointShadowMapSize> {
+        let (size, lights) = match self {
+            ShadowQuality::Off | ShadowQuality::Low => return None,
+            ShadowQuality::Medium => (512, 1),
+            ShadowQuality::High => (512, 2),
+            ShadowQuality::Ultra => (1024, 4),
+        };
+        Some(PointShadowMapSize { size, lights })
+    }
+
     /// Whether a GPU with `capabilities` can hold this quality's maps.
     fn fits(self, capabilities: &Capabilities) -> bool {
         let fits = |size: u32, layers: u32| {
@@ -101,6 +113,9 @@ impl ShadowQuality {
         };
         self.map().is_none_or(|map| fits(map.size, map.cascades))
             && self.spot_map().is_none_or(|map| fits(map.size, map.lights))
+            && self
+                .point_map()
+                .is_none_or(|map| fits(map.size, map.lights * POINT_SHADOW_FACES))
     }
 }
 
@@ -288,6 +303,19 @@ pub struct SpotShadowMapSize {
     pub lights: u32,
 }
 
+/// Point light shadow maps: the size of each of a light's six faces (one
+/// per direction along the axes) in texels per side, and how many point
+/// lights near the camera get them (six layers each).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct PointShadowMapSize {
+    pub size: u32,
+    pub lights: u32,
+}
+
+/// How many views of the world a point light's shadows are drawn from: one
+/// along each way of each axis.
+pub const POINT_SHADOW_FACES: u32 = 6;
+
 /// The sky's environment maps: each cubemap face's size in texels per
 /// side, and how many directions each texel of a rough reflection averages.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -333,6 +361,9 @@ pub struct GraphicsSettings {
     pub ambient_occlusion: Option<AmbientOcclusion>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reflection_quality: Option<ReflectionQuality>,
+    /// Short shadows found on screen, for the gaps the shadow maps miss.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contact_shadows: Option<bool>,
 }
 
 impl GraphicsSettings {
@@ -457,6 +488,13 @@ impl GraphicsSettings {
         })
     }
 
+    /// Whether contact shadows are drawn: the override, or the preset's (on
+    /// at High and Ultra).
+    pub fn contact_shadows(&self) -> bool {
+        self.contact_shadows
+            .unwrap_or(self.quality >= Quality::High)
+    }
+
     /// The values the renderer uses: these settings, lowered where the GPU
     /// can't meet them, with a note for each one lowered. Never raises one.
     pub fn effective(&self, capabilities: &Capabilities) -> EffectiveGraphics {
@@ -528,6 +566,8 @@ impl GraphicsSettings {
             // Every GPU can draw it: it needs nothing past what the scene does.
             ambient_occlusion: self.ambient_occlusion(),
             reflection_quality,
+            // Like ambient occlusion, it reads only the prepass.
+            contact_shadows: self.contact_shadows(),
             notes,
         }
     }
@@ -624,6 +664,7 @@ pub struct EffectiveGraphics {
     pub anti_aliasing: AntiAliasing,
     pub ambient_occlusion: AmbientOcclusion,
     pub reflection_quality: ReflectionQuality,
+    pub contact_shadows: bool,
     /// Why each lowered value was lowered, for showing in the settings.
     pub notes: Vec<String>,
 }
@@ -717,14 +758,52 @@ mod tests {
         assert_eq!(spot(Quality::High), map(1024, 4));
         assert_eq!(spot(Quality::Ultra), map(2048, 8));
         assert_eq!(ShadowQuality::Off.spot_map(), None);
-        // A GPU whose arrays can't hold 8 layers drops Ultra's spot maps too.
-        let six_layers = Capabilities {
-            max_texture_layers: 6,
+        // A GPU whose arrays can't hold Ultra's layers (8 spot lights, 24
+        // point light faces) drops its spot and point maps too.
+        let twelve_layers = Capabilities {
+            max_texture_layers: 12,
             ..Capabilities::default()
         };
-        let lowered = GraphicsSettings::preset(Quality::Ultra).effective(&six_layers);
+        let lowered = GraphicsSettings::preset(Quality::Ultra).effective(&twelve_layers);
         assert_eq!(lowered.shadow_quality, ShadowQuality::High);
         assert_eq!(lowered.notes.len(), 1, "{:?}", lowered.notes);
+    }
+
+    #[test]
+    fn each_preset_gives_its_point_shadow_maps_and_contact_shadows() {
+        let point = |quality| {
+            GraphicsSettings::preset(quality)
+                .shadow_quality()
+                .point_map()
+        };
+        let map = |size, lights| Some(PointShadowMapSize { size, lights });
+        assert_eq!(point(Quality::Low), None);
+        assert_eq!(point(Quality::Medium), map(512, 1));
+        assert_eq!(point(Quality::High), map(512, 2));
+        assert_eq!(point(Quality::Ultra), map(1024, 4));
+        assert_eq!(ShadowQuality::Off.point_map(), None);
+        let contact =
+            Quality::ALL.map(|quality| GraphicsSettings::preset(quality).contact_shadows());
+        assert_eq!(contact, [false, false, true, true]);
+        // Six faces per light: a GPU whose arrays hold 11 layers can't
+        // give High's two point lights theirs.
+        let eleven_layers = Capabilities {
+            max_texture_layers: 11,
+            ..Capabilities::default()
+        };
+        let lowered = GraphicsSettings::preset(Quality::High).effective(&eleven_layers);
+        assert_eq!(lowered.shadow_quality, ShadowQuality::Medium);
+        // Every GPU can draw contact shadows.
+        let tiny = Capabilities {
+            max_texture_size: 1,
+            max_texture_layers: 1,
+            ..Capabilities::default()
+        };
+        assert!(
+            GraphicsSettings::preset(Quality::Ultra)
+                .effective(&tiny)
+                .contact_shadows
+        );
     }
 
     #[test]
@@ -800,6 +879,15 @@ mod tests {
             assert_eq!(reflections.ambient_occlusion(), preset.ambient_occlusion());
             assert_eq!(occlusion.reflection_quality(), preset.reflection_quality());
 
+            let contact = GraphicsSettings {
+                contact_shadows: Some(!preset.contact_shadows()),
+                ..preset.clone()
+            };
+            assert_eq!(contact.contact_shadows(), !preset.contact_shadows());
+            assert_eq!(contact.shadow_quality(), preset.shadow_quality());
+            assert_eq!(contact.ambient_occlusion(), preset.ambient_occlusion());
+            assert_eq!(occlusion.contact_shadows(), preset.contact_shadows());
+
             let budget = GraphicsSettings {
                 texture_budget: Some(64),
                 ..preset.clone()
@@ -851,6 +939,7 @@ mod tests {
             anti_aliasing: Some(AntiAliasing::Fxaa),
             ambient_occlusion: Some(AmbientOcclusion::Off),
             reflection_quality: Some(ReflectionQuality::Medium),
+            contact_shadows: Some(true),
         };
         let text = serde_json::to_string(&settings).unwrap();
         assert_eq!(
@@ -914,11 +1003,13 @@ mod tests {
         assert_eq!(off.shadow_quality, ShadowQuality::Off);
         assert_eq!(off.notes.len(), 1);
 
-        let two_layers = Capabilities {
-            max_texture_layers: 2,
+        // High's maps need 12 layers (two point lights' six faces each),
+        // Medium's 6.
+        let six_layers = Capabilities {
+            max_texture_layers: 6,
             ..Capabilities::default()
         };
-        let medium = GraphicsSettings::preset(Quality::High).effective(&two_layers);
+        let medium = GraphicsSettings::preset(Quality::High).effective(&six_layers);
         assert_eq!(medium.shadow_quality, ShadowQuality::Medium);
     }
 
@@ -1052,6 +1143,7 @@ mod tests {
                         anti_aliasing,
                         ambient_occlusion: Some(AmbientOcclusion::Low),
                         reflection_quality: None,
+                        contact_shadows: post,
                     };
                     for capabilities in &capabilities {
                         let effective = settings.effective(capabilities);
@@ -1064,6 +1156,7 @@ mod tests {
                         assert!(effective.anti_aliasing <= settings.anti_aliasing());
                         assert_eq!(effective.ambient_occlusion, settings.ambient_occlusion());
                         assert!(effective.reflection_quality <= settings.reflection_quality());
+                        assert_eq!(effective.contact_shadows, settings.contact_shadows());
                         let lowered =
                             usize::from(effective.shadow_quality != settings.shadow_quality())
                                 + usize::from(effective.anti_aliasing != settings.anti_aliasing())

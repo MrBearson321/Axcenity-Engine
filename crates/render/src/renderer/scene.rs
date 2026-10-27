@@ -120,6 +120,26 @@ impl ScenePipeline {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 14,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 15,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
         let light_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -141,7 +161,9 @@ impl ScenePipeline {
             compare: Some(wgpu::CompareFunction::LessEqual),
             ..Default::default()
         });
-        let (empty_shadow_view, _) = create_shadow_views(&device, "no shadow map", 1, 1);
+        let (empty_shadow_view, empty_layers) = create_shadow_views(&device, "no shadow map", 1, 1);
+        // Its one layer, as a plain 2D depth texture.
+        let no_prepass_depth_view = empty_layers[0].clone();
         let no_occlusion_view = create_white_occlusion(&device, &queue);
         // The occlusion is drawn at half the scene's size, so it's
         // smoothed back up as it's read.
@@ -165,13 +187,17 @@ impl ScenePipeline {
                 environment_view,
                 sky_image_view,
                 probes.view(),
+                &empty_shadow_view,
+                &no_prepass_depth_view,
             ],
             [&shadow_sampler, &occlusion_sampler, &environment.sampler],
         );
+        let prepass_frame_bind_group = frame_bind_group.clone();
         let cascade_size = size_of::<[[f32; 4]; 4]>() as u64;
         let cascade_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("shadow views"),
-            size: CASCADE_UNIFORM_STRIDE * (SHADOW_CASCADES + MAX_SPOT_SHADOWS) as u64,
+            size: CASCADE_UNIFORM_STRIDE
+                * (SHADOW_CASCADES + MAX_SPOT_SHADOWS + MAX_POINT_SHADOW_VIEWS) as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -362,8 +388,10 @@ impl ScenePipeline {
             color_format,
             frame_buffer,
             frame_bind_group,
+            prepass_frame_bind_group,
             frame_layout,
             empty_shadow_view,
+            no_prepass_depth_view,
             shadow_sampler,
             shadow_pipeline,
             cascade_buffer,
@@ -374,6 +402,8 @@ impl ScenePipeline {
             shadow_maps_alive: Arc::new(()),
             spot_shadow_map: None,
             spot_shadow_maps_alive: Arc::new(()),
+            point_shadow_map: None,
+            point_shadow_maps_alive: Arc::new(()),
             graphics,
             settings,
             capabilities,
@@ -403,7 +433,8 @@ impl ScenePipeline {
     }
 
     /// Uses `settings` from the next frame, lowered to what the device can
-    /// do. A shadow map (the sun's or the spot lights') of the wrong size is
+    /// do. A shadow map (the sun's, the spot lights' or the point lights')
+    /// of the wrong size is
     /// freed here and remade at the right size when next drawn. A new render
     /// scale remakes the scene's targets, and a new texture quality frees
     /// every texture drawn in the scene (and the materials using them), so
@@ -448,6 +479,9 @@ impl ScenePipeline {
         if self.spot_shadow_map.as_ref().map(|map| map.size) != quality.spot_map() {
             self.spot_shadow_map = None;
         }
+        if self.point_shadow_map.as_ref().map(|map| map.size) != quality.point_map() {
+            self.point_shadow_map = None;
+        }
         self.bind_frame();
         let samples = self.graphics.anti_aliasing.samples();
         if samples != old_samples {
@@ -481,8 +515,8 @@ impl ScenePipeline {
     }
 
     /// Remakes the scene's targets if they weren't made for this output
-    /// size, render scale, anti-aliasing and ambient occlusion. The old ones
-    /// are freed.
+    /// size, render scale, anti-aliasing, ambient occlusion and contact
+    /// shadows. The old ones are freed.
     fn fit_targets(&mut self) {
         let size = scene_size(self.output_size, &self.graphics, &self.capabilities);
         let used = targets_used(&self.graphics);
@@ -521,8 +555,8 @@ impl ScenePipeline {
     ) -> Result<()> {
         // Lights are planned in the scene's pixels, which the render scale
         // makes fewer or more than the output's. UI uses the output's.
-        let spot_map = self.graphics.shadow_quality.spot_map();
-        let planned_lights = plan_lights(list, aspect, self.frame_targets.size, spot_map);
+        let quality = self.graphics.shadow_quality;
+        let planned_lights = plan_lights(list, aspect, self.frame_targets.size, quality);
         // The sky's maps are baked here only when the sky has changed.
         if self.environment.prepare(
             &self.device,
@@ -567,13 +601,22 @@ impl ScenePipeline {
         {
             *matrix = spot.view_proj.to_cols_array_2d();
         }
+        let point_faces = planned_lights
+            .point_shadows
+            .iter()
+            .flat_map(|point| point.faces);
+        for (matrix, face) in frame_uniform.point_shadows.iter_mut().zip(point_faces) {
+            *matrix = face.to_cols_array_2d();
+        }
         self.queue
             .write_buffer(&self.frame_buffer, 0, bytemuck::bytes_of(&frame_uniform));
-        // The sun's cascades, then the spot lights' views.
+        // The sun's cascades, then the spot lights' views, then the point
+        // lights' faces.
         let shadow_views = frame_uniform
             .cascades
             .iter()
-            .chain(&frame_uniform.spot_shadows);
+            .chain(&frame_uniform.spot_shadows)
+            .chain(&frame_uniform.point_shadows);
         for (index, matrix) in shadow_views.enumerate() {
             self.queue.write_buffer(
                 &self.cascade_buffer,
@@ -593,7 +636,8 @@ impl ScenePipeline {
                 bytemuck::cast_slice(&planned_lights.tiles),
             );
         }
-        if self.frame_targets.occlusion.is_some() {
+        let ambient_occlusion = self.graphics.ambient_occlusion != crate::AmbientOcclusion::Off;
+        if ambient_occlusion && self.frame_targets.occlusion.is_some() {
             let uniform = occlusion_uniform(list, aspect, self.graphics.ambient_occlusion);
             self.queue
                 .write_buffer(&self.occlusion.uniform, 0, bytemuck::bytes_of(&uniform));
@@ -639,7 +683,8 @@ impl ScenePipeline {
         let map_size = shadows_drawn(list.shadows, &self.graphics).map(|(_, size)| size);
         // Each shadow view's casters are copied after the scene's instances:
         // the sun's cascades, each a box reaching back toward the sun, then
-        // the spot lights' views, each near enough to its beam.
+        // the spot lights' views, each near enough to its beam, then each
+        // point light's faces, each within its reach.
         let cascades = map_size.map_or(0, |size| size.cascades as usize);
         let mut casters_by_view: Vec<_> = frame_uniform.cascades[..cascades]
             .iter()
@@ -653,6 +698,14 @@ impl ScenePipeline {
             casters_by_view.push(casters_in(&mut instances, &casters, |sphere| {
                 spheres_touch(spot.bounds, sphere) && view.touches(sphere)
             }));
+        }
+        for point in &planned_lights.point_shadows {
+            for face in point.faces {
+                let view = Frustum::of(face);
+                casters_by_view.push(casters_in(&mut instances, &casters, |sphere| {
+                    spheres_touch(point.bounds, sphere) && view.touches(sphere)
+                }));
+            }
         }
         self.ensure_instance_capacity(instances.len());
         self.queue
@@ -719,9 +772,14 @@ impl ScenePipeline {
             )
         };
 
-        // The spot lights' shadow map exists only while one of them casts
-        // shadows.
-        let spot_map = spot_map.filter(|_| !planned_lights.spot_shadows.is_empty());
+        // The spot and point lights' shadow maps exist only while one of
+        // them casts shadows.
+        let spot_map = quality
+            .spot_map()
+            .filter(|_| !planned_lights.spot_shadows.is_empty());
+        let point_map = quality
+            .point_map()
+            .filter(|_| !planned_lights.point_shadows.is_empty());
         let mut changed = false;
         if self.shadow_map.as_ref().map(|map| map.size) != map_size {
             self.shadow_map = map_size.map(|size| {
@@ -750,6 +808,22 @@ impl ScenePipeline {
                     size,
                     _alive: self.spot_shadow_maps_alive.clone(),
                     bytes: target_bytes((size.size, size.size, size.lights), DEPTH_FORMAT, 1),
+                    array,
+                    layers,
+                }
+            });
+            changed = true;
+        }
+        if self.point_shadow_map.as_ref().map(|map| map.size) != point_map {
+            self.point_shadow_map = point_map.map(|size| {
+                debug_assert!(size.lights as usize <= MAX_POINT_SHADOWS);
+                let count = size.lights * POINT_SHADOW_FACES;
+                let (array, layers) =
+                    create_shadow_views(&self.device, "point shadow map", size.size, count);
+                ShadowMap {
+                    size,
+                    _alive: self.point_shadow_maps_alive.clone(),
+                    bytes: target_bytes((size.size, size.size, count), DEPTH_FORMAT, 1),
                     array,
                     layers,
                 }
@@ -792,10 +866,14 @@ impl ScenePipeline {
         };
 
         // One pass per cascade, each drawing into its own layer of the map,
-        // then one per shadow-casting spot light, each drawing the casters
-        // that can reach its view. Each view's matrix is at its index in
-        // `cascade_buffer`, the spot lights' after every cascade's.
-        let (cascade_casters, spot_casters) = casters_by_view.split_at(cascades);
+        // then one per shadow-casting spot light and one per face of each
+        // shadow-casting point light, each drawing the casters that can
+        // reach its view. Each view's matrix is at its index in
+        // `cascade_buffer`: the spot lights' after every cascade's, the
+        // point lights' after every spot light's.
+        let (cascade_casters, lamp_casters) = casters_by_view.split_at(cascades);
+        let (spot_casters, point_casters) =
+            lamp_casters.split_at(planned_lights.spot_shadows.len());
         let cascades = self
             .shadow_map
             .iter()
@@ -805,7 +883,12 @@ impl ScenePipeline {
             .iter()
             .flat_map(|map| map.layers.iter().zip(spot_casters).enumerate())
             .map(|(index, view)| (SHADOW_CASCADES + index, view));
-        for (index, (layer, (casters, _))) in cascades.chain(spots) {
+        let points = self
+            .point_shadow_map
+            .iter()
+            .flat_map(|map| map.layers.iter().zip(point_casters).enumerate())
+            .map(|(index, view)| (SHADOW_CASCADES + MAX_SPOT_SHADOWS + index, view));
+        for (index, (layer, (casters, _))) in cascades.chain(spots).chain(points) {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("shadow view"),
                 color_attachments: &[],
@@ -840,8 +923,9 @@ impl ScenePipeline {
         let frame_bind_group = &self.frame_bind_group;
         mark(&mut encoder, FramePass::Prepass);
 
-        // While ambient occlusion is on: solid items' depth and normals,
-        // then how hidden each pixel is by what's around it.
+        // While ambient occlusion or contact shadows are on: solid items'
+        // depth and normals, then (for ambient occlusion) how hidden each
+        // pixel is by what's around it.
         if let Some(occlusion) = &self.frame_targets.occlusion {
             {
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -864,7 +948,7 @@ impl ScenePipeline {
                     }),
                     ..Default::default()
                 });
-                pass.set_bind_group(0, frame_bind_group, &[]);
+                pass.set_bind_group(0, &self.prepass_frame_bind_group, &[]);
                 pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
                 for batch in batches.iter().filter(|batch| !batch.transparent) {
                     let Some(mesh) = self.bind_batch(&mut pass, batch, true) else {
@@ -875,7 +959,9 @@ impl ScenePipeline {
                 }
             }
             mark(&mut encoder, FramePass::AmbientOcclusion);
-            self.occlusion.draw(&mut encoder, occlusion);
+            if ambient_occlusion {
+                self.occlusion.draw(&mut encoder, occlusion);
+            }
         } else {
             mark(&mut encoder, FramePass::AmbientOcclusion);
         }
@@ -1031,12 +1117,14 @@ impl ScenePipeline {
         }
         self.queue.submit([encoder.finish()]);
         if timed && let Some(timer) = &mut self.gpu_timer {
-            let shadows = self.shadow_map.is_some() || self.spot_shadow_map.is_some();
-            let occlusion = self.frame_targets.occlusion.is_some();
+            let shadows = self.shadow_map.is_some()
+                || self.spot_shadow_map.is_some()
+                || self.point_shadow_map.is_some();
+            let prepass = self.frame_targets.occlusion.is_some();
             timer.submitted([
                 shadows,
-                occlusion,
-                occlusion,
+                prepass,
+                prepass && ambient_occlusion,
                 true,
                 true,
                 turned.drawn || ui_drawn,
@@ -1095,10 +1183,10 @@ impl ScenePipeline {
             .map_or(&self.skinning.none, |skin| &skin.bind_group)
     }
 
-    /// Remakes the frame bindings with the shadow maps and ambient
-    /// occlusion alive, binding the empty stand-in for each that isn't, so
-    /// a freed map or target isn't kept alive by the bindings, and with
-    /// the frame's joints (the shadow passes' bindings too).
+    /// Remakes the frame bindings with the shadow maps, ambient occlusion
+    /// and prepass depth alive, binding the empty stand-in for each that
+    /// isn't, so a freed map or target isn't kept alive by the bindings,
+    /// and with the frame's joints (the shadow passes' bindings too).
     fn bind_frame(&mut self) {
         let empty = &self.empty_shadow_view;
         let sun = self.shadow_map.as_ref().map_or(empty, |map| &map.array);
@@ -1106,29 +1194,48 @@ impl ScenePipeline {
             .spot_shadow_map
             .as_ref()
             .map_or(empty, |map| &map.array);
-        let occlusion = self
-            .frame_targets
-            .occlusion
+        let point = self
+            .point_shadow_map
             .as_ref()
+            .map_or(empty, |map| &map.array);
+        let prepass = self.frame_targets.occlusion.as_ref();
+        let occlusion = prepass
+            .filter(|_| self.graphics.ambient_occlusion != crate::AmbientOcclusion::Off)
             .map_or(&self.no_occlusion_view, |targets| &targets.blurred_view);
+        let prepass_depth = prepass
+            .filter(|_| self.graphics.contact_shadows)
+            .map_or(&self.no_prepass_depth_view, |targets| &targets.depth_view);
         let (environment, sky_image) = self.environment.views();
         let probes = self.probes.view();
-        self.frame_bind_group = create_frame_bind_group(
-            &self.device,
-            &self.frame_layout,
-            [
-                &self.frame_buffer,
-                &self.light_buffer,
-                &self.tile_buffer,
-                &self.skinning.joints,
-            ],
-            [sun, spot, occlusion, environment, sky_image, probes],
-            [
-                &self.shadow_sampler,
-                &self.occlusion_sampler,
-                &self.environment.sampler,
-            ],
-        );
+        let bind = |prepass_depth| {
+            create_frame_bind_group(
+                &self.device,
+                &self.frame_layout,
+                [
+                    &self.frame_buffer,
+                    &self.light_buffer,
+                    &self.tile_buffer,
+                    &self.skinning.joints,
+                ],
+                [
+                    sun,
+                    spot,
+                    occlusion,
+                    environment,
+                    sky_image,
+                    probes,
+                    point,
+                    prepass_depth,
+                ],
+                [
+                    &self.shadow_sampler,
+                    &self.occlusion_sampler,
+                    &self.environment.sampler,
+                ],
+            )
+        };
+        self.frame_bind_group = bind(prepass_depth);
+        self.prepass_frame_bind_group = bind(&self.no_prepass_depth_view);
         self.shadow_bind_group = create_shadow_bind_group(
             &self.device,
             &self.shadow_layout,
@@ -1147,6 +1254,12 @@ impl ScenePipeline {
     #[cfg(test)]
     pub(super) fn spot_shadow_maps_alive(&self) -> usize {
         Arc::strong_count(&self.spot_shadow_maps_alive) - 1
+    }
+
+    /// How many point shadow maps are alive: 0 or 1, unless one leaked.
+    #[cfg(test)]
+    pub(super) fn point_shadow_maps_alive(&self) -> usize {
+        Arc::strong_count(&self.point_shadow_maps_alive) - 1
     }
 
     /// How many sets of scene targets are alive: 1, unless one leaked.
@@ -1175,7 +1288,8 @@ impl ScenePipeline {
     pub(super) fn stats(&self) -> RenderStats {
         let counts = self.counts;
         let shadow_bytes = self.shadow_map.as_ref().map_or(0, |map| map.bytes)
-            + self.spot_shadow_map.as_ref().map_or(0, |map| map.bytes);
+            + self.spot_shadow_map.as_ref().map_or(0, |map| map.bytes)
+            + self.point_shadow_map.as_ref().map_or(0, |map| map.bytes);
         let sheet_bytes = self.turned_text.sheet.as_ref().map_or(0, |(sheet, _, _)| {
             target_bytes((sheet.width(), sheet.height(), 1), sheet.format(), 1)
         });
@@ -1704,7 +1818,7 @@ fn targets_used(graphics: &EffectiveGraphics) -> (u32, bool, bool) {
     (
         anti_aliasing.samples(),
         anti_aliasing == crate::AntiAliasing::Fxaa,
-        graphics.ambient_occlusion != crate::AmbientOcclusion::Off,
+        graphics.ambient_occlusion != crate::AmbientOcclusion::Off || graphics.contact_shadows,
     )
 }
 

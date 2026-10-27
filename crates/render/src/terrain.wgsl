@@ -281,7 +281,7 @@ fn fs_terrain(in: TerrainOut) -> @location(0) vec4<f32> {
 
     var color = light_surface(in.world_position, n, shading_normal, in.clip_position.xy,
         base_color, clamp(metalness, 0.0, 1.0), clamp(roughness, 0.04, 1.0),
-        clamp(occlusion, 0.0, 1.0) * screen_occlusion(in.clip_position.xy), vec3<f32>(0.04));
+        clamp(occlusion, 0.0, 1.0) * screen_occlusion(in.clip_position.xy), vec3<f32>(0.04), true);
     if view == 4u {
         // Lines along the grid of samples, the same width on screen.
         let to_line = abs(fract(grid - 0.5) - 0.5) / max(grid_width, vec2<f32>(0.0001));

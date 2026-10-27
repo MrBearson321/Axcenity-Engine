@@ -147,6 +147,18 @@ fn number_choice(lua: &Lua, property: &str, value: mlua::Value) -> mlua::Result<
     Ok(Some(number as f32))
 }
 
+/// What a script set an on-or-off override to, or `None` for nil.
+fn bool_choice(lua: &Lua, property: &str, value: mlua::Value) -> mlua::Result<Option<bool>> {
+    match value {
+        mlua::Value::Nil => Ok(None),
+        mlua::Value::Boolean(on) => Ok(Some(on)),
+        ref other => Err(mlua::Error::runtime(format!(
+            "UserGameSettings.{property} must be true, false, or nil for the preset's, not a {}",
+            type_name(lua, other)
+        ))),
+    }
+}
+
 impl UserData for LuaUserGameSettings {
     fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
         fields.add_field_method_get("GraphicsQuality", |lua, _| {
@@ -214,17 +226,7 @@ impl UserData for LuaUserGameSettings {
             Ok(settings(lua).post_processing())
         });
         fields.add_field_method_set("PostProcessing", |lua, _, value: mlua::Value| {
-            let chosen = match value {
-                mlua::Value::Nil => None,
-                mlua::Value::Boolean(on) => Some(on),
-                ref other => {
-                    return Err(mlua::Error::runtime(format!(
-                        "UserGameSettings.PostProcessing must be true, false, or nil for the \
-                         preset's, not a {}",
-                        type_name(lua, other)
-                    )));
-                }
-            };
+            let chosen = bool_choice(lua, "PostProcessing", value)?;
             change(lua, |settings, _| settings.post_processing = chosen);
             Ok(())
         });
@@ -307,6 +309,15 @@ impl UserData for LuaUserGameSettings {
                 value,
             )?;
             change(lua, |settings, _| settings.reflection_quality = chosen);
+            Ok(())
+        });
+
+        fields.add_field_method_get("ContactShadows", |lua, _| {
+            Ok(settings(lua).contact_shadows())
+        });
+        fields.add_field_method_set("ContactShadows", |lua, _, value: mlua::Value| {
+            let chosen = bool_choice(lua, "ContactShadows", value)?;
+            change(lua, |settings, _| settings.contact_shadows = chosen);
             Ok(())
         });
     }

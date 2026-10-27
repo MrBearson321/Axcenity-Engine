@@ -115,6 +115,7 @@ mod tests {
             anti_aliasing: Some(AntiAliasing::Fxaa),
             ambient_occlusion: Some(AmbientOcclusion::High),
             reflection_quality: Some(ReflectionQuality::Low),
+            contact_shadows: Some(true),
         };
         save(&folder, &settings).unwrap();
         assert_eq!(load(&folder), Some(settings));

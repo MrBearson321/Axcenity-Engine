@@ -995,6 +995,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "How far the light reaches, in studs.",
     ),
     (
+        ClassName::PointLight,
+        "Shadows",
+        "If true, parts around the light cast shadows on every side of it. Only the few point lights nearest the camera do, as the graphics settings allow.",
+    ),
+    (
         ClassName::SpotLight,
         "Enabled",
         "If false, the light is off.",

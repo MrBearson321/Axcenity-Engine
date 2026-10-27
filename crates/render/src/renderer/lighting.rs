@@ -14,16 +14,17 @@ use crate::draw_list::{
     Camera, ChannelMap, DrawItem, DrawList, Light, Material, PostProcessing, Shadows, Skin,
     TextureSource,
 };
-use crate::graphics::{AmbientOcclusion, EffectiveGraphics, ShadowMapSize, SpotShadowMapSize};
+use crate::graphics::{AmbientOcclusion, EffectiveGraphics, ShadowMapSize, ShadowQuality};
 
 use super::culling::{Bounds, CullingBounds, Frustum, Sphere};
 use super::lod::Draw;
 use super::skinning::JointRaw;
 use super::{
-    Batch, CASCADE_SPLIT_BLEND, FAR_PLANE, FrameUniform, InstanceRaw, LIGHT_SCALE, LIGHTS_PER_TILE,
-    LightRaw, MATERIAL_TEXTURES, MAX_LIGHTS, MAX_SPOT_SHADOW_DEGREES, MAX_SPOT_SHADOWS,
-    MAX_SUN_SIZE, MAX_TILES, MIN_TILE_SIZE, MapsUniform, MaterialKey, MeshKey, NEAR_PLANE,
-    PostUniform, SHADOW_CASCADES, SHADOW_CASTER_RANGE, SpotShadow,
+    Batch, CASCADE_SPLIT_BLEND, CONTACT_SHADOW_LENGTH, CONTACT_SHADOW_THICKNESS, FAR_PLANE,
+    FrameUniform, InstanceRaw, LIGHT_SCALE, LIGHTS_PER_TILE, LightRaw, MATERIAL_TEXTURES,
+    MAX_LIGHTS, MAX_POINT_SHADOWS, MAX_SPOT_SHADOW_DEGREES, MAX_SPOT_SHADOWS, MAX_SUN_SIZE,
+    MAX_TILES, MIN_TILE_SIZE, MapsUniform, MaterialKey, MeshKey, NEAR_PLANE, POINT_SHADOW_SPREAD,
+    PointShadow, PostUniform, SHADOW_CASCADES, SHADOW_CASTER_RANGE, SpotShadow,
 };
 
 /// The camera's view (world to view space) and projection (view to clip
@@ -70,6 +71,12 @@ pub(super) fn shadows_drawn(
     let usable = world.enabled && world.distance.is_finite() && world.distance > 0.0;
     let distance = world.distance.min(graphics.shadow_distance);
     (usable && distance > 0.0).then_some((Shadows { distance, ..world }, map))
+}
+
+/// Whether contact shadows are drawn: when the world's shadows are on and
+/// the graphics settings allow them, whatever the shadow maps' quality.
+pub(super) fn contact_drawn(world: Shadows, graphics: &EffectiveGraphics) -> bool {
+    world.enabled && graphics.contact_shadows
 }
 
 /// The world's post-processing, turned off if the graphics settings don't allow it.
@@ -128,6 +135,13 @@ pub(super) fn frame_uniform(
         sky_light: [[0.0; 4]; 9],
         reflection_probes: [0; 4],
         probes: Default::default(),
+        point_shadows: Default::default(),
+        contact: [
+            f32::from(u8::from(contact_drawn(list.shadows, graphics))),
+            CONTACT_SHADOW_LENGTH,
+            CONTACT_SHADOW_THICKNESS,
+            0.0,
+        ],
     }
 }
 
@@ -141,6 +155,9 @@ pub(super) struct PlannedLights {
     pub(super) tiles_across: u32,
     /// The spot lights casting shadows, by their layer of the spot shadow map.
     pub(super) spot_shadows: Vec<SpotShadow>,
+    /// The point lights casting shadows, by their place in the point shadow
+    /// map (six layers each).
+    pub(super) point_shadows: Vec<PointShadow>,
 }
 
 /// Picks the lights to draw (the nearest [`MAX_LIGHTS`]) and sorts them into
@@ -148,13 +165,14 @@ pub(super) struct PlannedLights {
 /// reach it instead of all of them. A light goes in every tile that its
 /// sphere of reach could touch; tiles with more than [`LIGHTS_PER_TILE`]
 /// keep the nearest ones to the camera. Of the spot lights that cast
-/// shadows, the nearest in view get a layer of `spot_map` each, as many as
-/// it has; the rest light without shadows.
+/// shadows, the nearest in view get a layer of `quality`'s spot map each,
+/// as many as it has, and likewise the point lights six layers each of its
+/// point map; the rest light without shadows.
 pub(super) fn plan_lights(
     list: &DrawList,
     aspect: f32,
     (width, height): (u32, u32),
-    spot_map: Option<SpotShadowMapSize>,
+    quality: ShadowQuality,
 ) -> PlannedLights {
     let camera = list.camera.position;
     let mut lights: Vec<&Light> = list
@@ -188,6 +206,7 @@ pub(super) fn plan_lights(
         tile_size,
         tiles_across: across,
         spot_shadows: Vec::new(),
+        point_shadows: Vec::new(),
     };
     if lights.is_empty() || width == 0 || height == 0 {
         return planned;
@@ -197,7 +216,9 @@ pub(super) fn plan_lights(
     let stride = LIGHTS_PER_TILE + 1;
     planned.tiles = vec![0; (across * down) as usize * stride];
     // Lights are nearest first, so the nearest that cast shadows get layers.
+    let (spot_map, point_map) = (quality.spot_map(), quality.point_map());
     let spot_layers = spot_map.map_or(0, |map| (map.lights as usize).min(MAX_SPOT_SHADOWS));
+    let point_lights = point_map.map_or(0, |map| (map.lights as usize).min(MAX_POINT_SHADOWS));
     for light in lights {
         let Some((first, last)) = light_tiles(view_proj, light, (width, height), tile_size) else {
             continue;
@@ -210,6 +231,12 @@ pub(super) fn plan_lights(
         {
             raw.shadow = [planned.spot_shadows.len() as f32, texel, 0.0, 0.0];
             planned.spot_shadows.push(shadow);
+        } else if planned.point_shadows.len() < point_lights
+            && let Some(map) = point_map
+            && let Some((shadow, texel)) = point_shadow(light, map.size)
+        {
+            raw.shadow = [planned.point_shadows.len() as f32, texel, 0.0, 0.0];
+            planned.point_shadows.push(shadow);
         }
         planned.lights.push(raw);
         for y in first.1..=last.1 {
@@ -331,6 +358,47 @@ pub(super) fn spot_shadow(light: &Light, size: u32) -> Option<(SpotShadow, f32)>
     let shadow = SpotShadow {
         view_proj: projection * view,
         bounds: cone_bounds(light.position, direction, angle, light.range),
+    };
+    Some((shadow, texel))
+}
+
+/// A point light's six shadow views, if it casts shadows, with the width of
+/// one of its `size`² faces' texels per stud from the light. Each face
+/// looks along one way of a world axis (+X, -X, +Y, -Y, +Z, -Z), a little
+/// over 90° wide ([`POINT_SHADOW_SPREAD`]), from that side's near distance
+/// out to the light's range.
+pub(super) fn point_shadow(light: &Light, size: u32) -> Option<(PointShadow, f32)> {
+    if light.cone.is_some() {
+        return None;
+    }
+    let shadows = light.point_shadows?;
+    let fov = 2.0 * POINT_SHADOW_SPREAD.atan();
+    let axes = [
+        (Vec3::X, Vec3::NEG_Y),
+        (Vec3::NEG_X, Vec3::NEG_Y),
+        (Vec3::Y, Vec3::Z),
+        (Vec3::NEG_Y, Vec3::NEG_Z),
+        (Vec3::Z, Vec3::NEG_Y),
+        (Vec3::NEG_Z, Vec3::NEG_Y),
+    ];
+    let mut faces = [Mat4::IDENTITY; 6];
+    for (face, ((direction, up), near)) in faces.iter_mut().zip(axes.into_iter().zip(shadows.near))
+    {
+        // Past the range nothing is lit, so that side casts nothing.
+        let near = if near.is_finite() {
+            near.max(0.05)
+        } else {
+            0.05
+        };
+        let near = near.min(light.range * 0.99);
+        let view = rh::view::look_at_mat4(light.position, light.position + direction, up);
+        let projection = rh::proj::directx::perspective(fov, 1.0, near, light.range);
+        *face = projection * view;
+    }
+    let texel = 2.0 * POINT_SHADOW_SPREAD / size as f32;
+    let shadow = PointShadow {
+        faces,
+        bounds: (light.position, light.range),
     };
     Some((shadow, texel))
 }

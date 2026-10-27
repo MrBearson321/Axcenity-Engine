@@ -12,8 +12,9 @@ use std::collections::BTreeSet;
 use crate::lua::{self, Expr, ExprKind, FunctionBody, Stat, StatKind, SyntaxError};
 use crate::{
     Block, BlockKind, BlockScript, BlockShape, CAMERA_TYPES, Comparison, EASING_DIRECTIONS,
-    EASING_STYLES, Expression, GRAPHICS_NUMBERS, GRAPHICS_OPTIONS, GRAPHICS_QUALITIES, LogicOp,
-    MathFunction, MathOp, PRESET, TONE_MAPPINGS, graphics_choices, translate,
+    EASING_STYLES, Expression, GRAPHICS_NUMBERS, GRAPHICS_OPTIONS, GRAPHICS_QUALITIES,
+    GRAPHICS_SWITCHES, LogicOp, MathFunction, MathOp, PRESET, TONE_MAPPINGS, graphics_choices,
+    translate,
 };
 
 /// The services blocks get with `game:GetService`, which the translation
@@ -1218,9 +1219,9 @@ impl<'a> Converter<'a> {
         }
         let choice = match (&value.kind, property) {
             (ExprKind::Nil, _) => PRESET.to_owned(),
-            (ExprKind::True, "PostProcessing") => "On".to_owned(),
-            (ExprKind::False, "PostProcessing") => "Off".to_owned(),
-            (_, "PostProcessing") => return None,
+            (ExprKind::True, setting) if GRAPHICS_SWITCHES.contains(&setting) => "On".to_owned(),
+            (ExprKind::False, setting) if GRAPHICS_SWITCHES.contains(&setting) => "Off".to_owned(),
+            (_, setting) if GRAPHICS_SWITCHES.contains(&setting) => return None,
             (_, setting) => {
                 let items = graphics_choices(setting);
                 // Every item but the last, which is `PRESET`.

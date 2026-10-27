@@ -337,8 +337,8 @@ PointLight gains `Shadows`, using a cube depth map per light (six faces, budgete
 
 ### Acceptance criteria
 
-- [ ] A shadow-casting point light shadows a part on every side of it.
-- [ ] Contact shadows darken the gap under a small object resting on a floor, and turning them off removes only that.
+- [x] A shadow-casting point light shadows a part on every side of it.
+- [x] Contact shadows darken the gap under a small object resting on a floor, and turning them off removes only that.
 
 ---
 

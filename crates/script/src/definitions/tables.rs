@@ -1029,7 +1029,7 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
             Field {
                 name: "ShadowQuality",
                 ty: "EnumShadowQuality",
-                doc: "The sun's shadow map: Off, Low (1024² × 2 cascades), Medium (2048² × 2), High (2048² × 3) or Ultra (4096² × 4), and how many spot lights cast shadows (none up to Low, then 2, 4, 8).",
+                doc: "The sun's shadow map: Off, Low (1024² × 2 cascades), Medium (2048² × 2), High (2048² × 3) or Ultra (4096² × 4), and how many spot lights cast shadows (none up to Low, then 2, 4, 8) and point lights (none up to Low, then 1, 2, 4).",
             },
             Field {
                 name: "ShadowDistance",
@@ -1065,6 +1065,11 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
                 name: "ReflectionQuality",
                 ty: "EnumReflectionQuality",
                 doc: "How the sky is reflected and lights surfaces: Low works its gradient out per pixel (no sky image), Medium, High and Ultra bake it into a 64², 128² or 256² cubemap.",
+            },
+            Field {
+                name: "ContactShadows",
+                ty: "boolean",
+                doc: "Short shadows found on screen for the small gaps the shadow maps miss, such as under a part resting on the floor. On at High and Ultra.",
             },
         ],
         operators: &[],

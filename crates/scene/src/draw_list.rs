@@ -15,8 +15,8 @@ use axcenity_core::{ClassName, Instance, InstanceId, PartType, TextureChannel, V
 use axcenity_render::glam::{Mat4, Vec3};
 use axcenity_render::{
     AmbientLight, Camera, Channel, ChannelMap, Cone, DrawItem, DrawList, Light, Material,
-    MeshSource, NormalMap, PostProcessing, ProbeImage, ReflectionProbe, Shadows, Shape, Skin, Sky,
-    SkyImage, SpotShadows, Sun, TextureMaps, TextureSource,
+    MeshSource, NormalMap, PointShadows, PostProcessing, ProbeImage, ReflectionProbe, Shadows,
+    Shape, Skin, Sky, SkyImage, SpotShadows, Sun, TextureMaps, TextureSource,
 };
 use axcenity_ui::{Stylesheet, UiInput, UiInteraction, UiLayout};
 
@@ -126,12 +126,12 @@ fn light_of(world: &World, instance: &Instance) -> Option<Light> {
     let (_, rotation, _) = transform.to_scale_rotation_translation();
     let color = instance.property("Color").and_then(Value::as_color3)?;
     let number = |name| instance.property(name).and_then(Value::as_number);
+    let shadows = instance.property("Shadows").and_then(Value::as_bool) == Some(true);
     let cone = match instance.class() {
         ClassName::SpotLight => {
             let direction = instance.property("Direction").and_then(Value::as_vector3)?;
             // Relative to the part, so the beam turns with it.
             let direction = rotation * Vec3::new(direction.x, direction.y, direction.z);
-            let shadows = instance.property("Shadows").and_then(Value::as_bool) == Some(true);
             Some(Cone {
                 direction,
                 angle_degrees: number("Angle")? as f32,
@@ -142,12 +142,25 @@ fn light_of(world: &World, instance: &Instance) -> Option<Light> {
         }
         _ => None,
     };
+    // Each way along each world axis, as the point light's shadow faces are.
+    let point_shadows = (shadows && cone.is_none()).then(|| PointShadows {
+        near: [
+            Vec3::X,
+            Vec3::NEG_X,
+            Vec3::Y,
+            Vec3::NEG_Y,
+            Vec3::Z,
+            Vec3::NEG_Z,
+        ]
+        .map(|axis| shadow_near(transform, position, axis)),
+    });
     Some(Light {
         position,
         color: [color.r, color.g, color.b],
         brightness: number("Brightness")? as f32,
         range: number("Range")? as f32,
         cone,
+        point_shadows,
     })
 }
 
@@ -413,10 +426,11 @@ fn light_origin(transform: Mat4) -> Vec3 {
     position + rotation * Vec3::Y * (scale.y.abs() * 0.5 + 0.05)
 }
 
-/// How far along a spot light's beam from `origin` its own part (placed by
-/// `transform`) reaches, plus a little: shadows start there, so the part
-/// the light sits on doesn't shade the whole beam. 0 when the beam points
-/// away from the part.
+/// How far along a spot light's beam (or one of a point light's shadow
+/// faces' directions) from `origin` its own part (placed by `transform`)
+/// reaches, plus a little: shadows start there, so the part the light sits
+/// on doesn't shade the whole beam. 0 when the beam points away from the
+/// part.
 fn shadow_near(transform: Mat4, origin: Vec3, direction: Vec3) -> f32 {
     let direction = direction.normalize_or_zero();
     let farthest = (0..8)
@@ -1536,6 +1550,31 @@ mod tests {
             .set_property(light, "Direction", vector(0.0, 1.0, 0.0))
             .unwrap();
         assert_eq!(cone(&world).shadows.unwrap().near, 0.0, "pointing away");
+    }
+
+    #[test]
+    fn a_point_lights_shadows_start_past_its_own_part_on_each_side() {
+        let mut world = World::new();
+        let lamp = part(&mut world, vec![("Size", vector(1.0, 2.0, 1.0))]);
+        let light = world.create(ClassName::PointLight).unwrap();
+        world.set_parent(light, Some(lamp)).unwrap();
+        let shadows = |world: &World| {
+            let list = build_draw_list(world, &Assets::default(), camera());
+            list.lights[0].point_shadows
+        };
+        assert_eq!(shadows(&world), None, "off by default");
+
+        world
+            .set_property(light, "Shadows", Value::Bool(true))
+            .unwrap();
+        // The light sits 0.05 above the 2-stud lamp: below it the lamp
+        // reaches 2.05 studs, to each side half its width, and above it
+        // not at all.
+        let near = shadows(&world).unwrap().near;
+        let expected = [0.55, 0.55, 0.0, 2.1, 0.55, 0.55];
+        for (near, expected) in near.iter().zip(expected) {
+            assert!((near - expected).abs() < 1e-4, "{near:?}");
+        }
     }
 
     fn examples() -> std::path::PathBuf {

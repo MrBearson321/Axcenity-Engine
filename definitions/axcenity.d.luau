@@ -387,7 +387,7 @@ end
 declare extern type UserGameSettings with
 	--- The preset: Low, Medium, High or Ultra, or Automatic (High, or Low on a computer without a graphics card).
 	GraphicsQuality: EnumGraphicsQuality
-	--- The sun's shadow map: Off, Low (1024² × 2 cascades), Medium (2048² × 2), High (2048² × 3) or Ultra (4096² × 4), and how many spot lights cast shadows (none up to Low, then 2, 4, 8).
+	--- The sun's shadow map: Off, Low (1024² × 2 cascades), Medium (2048² × 2), High (2048² × 3) or Ultra (4096² × 4), and how many spot lights cast shadows (none up to Low, then 2, 4, 8) and point lights (none up to Low, then 1, 2, 4).
 	ShadowQuality: EnumShadowQuality
 	--- The farthest shadows reach, in studs: a ceiling on `Lighting.ShadowDistance`.
 	ShadowDistance: number
@@ -403,6 +403,8 @@ declare extern type UserGameSettings with
 	AmbientOcclusion: EnumAmbientOcclusion
 	--- How the sky is reflected and lights surfaces: Low works its gradient out per pixel (no sky image), Medium, High and Ultra bake it into a 64², 128² or 256² cubemap.
 	ReflectionQuality: EnumReflectionQuality
+	--- Short shadows found on screen for the small gaps the shadow maps miss, such as under a part resting on the floor. On at High and Ultra.
+	ContactShadows: boolean
 end
 
 --- Properties moving to goals, made by `TweenService:Create`. Each frame it sets them, so their change events fire; a newer tween on the same property of the same Instance cancels it.
@@ -2021,6 +2023,8 @@ declare extern type PointLight extends Instance with
 	Brightness: number
 	--- How far the light reaches, in studs.
 	Range: number
+	--- If true, parts around the light cast shadows on every side of it. Only the few point lights nearest the camera do, as the graphics settings allow.
+	Shadows: boolean
 	[string]: any
 end
 

@@ -217,7 +217,9 @@ pub(super) fn create_frame_bind_group(
         environment_view,
         sky_image_view,
         probe_view,
-    ]: [&wgpu::TextureView; 6],
+        point_shadow_view,
+        prepass_depth_view,
+    ]: [&wgpu::TextureView; 8],
     [shadow_sampler, occlusion_sampler, environment_sampler]: [&wgpu::Sampler; 3],
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -276,12 +278,20 @@ pub(super) fn create_frame_bind_group(
                 binding: 13,
                 resource: wgpu::BindingResource::TextureView(probe_view),
             },
+            wgpu::BindGroupEntry {
+                binding: 14,
+                resource: wgpu::BindingResource::TextureView(point_shadow_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 15,
+                resource: wgpu::BindingResource::TextureView(prepass_depth_view),
+            },
         ],
     })
 }
 
-/// Draws solid items' depth as the sun or a spot light sees them. No
-/// color, no materials.
+/// Draws solid items' depth as the sun, a spot light or a point light's
+/// face sees them. No color, no materials.
 pub(super) fn create_shadow_pipeline(
     device: &wgpu::Device,
     shadow_layout: &wgpu::BindGroupLayout,

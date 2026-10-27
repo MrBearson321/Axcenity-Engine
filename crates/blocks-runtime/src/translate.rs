@@ -627,7 +627,9 @@ impl Writer {
                 let chosen = choice(chosen, graphics_choices(setting), "a choice for it")?;
                 let value = match (setting, chosen) {
                     (_, PRESET) => "nil".to_owned(),
-                    ("PostProcessing", on) => (on == "On").to_string(),
+                    (setting, on) if GRAPHICS_SWITCHES.contains(&setting) => {
+                        (on == "On").to_string()
+                    }
                     (setting, item) => format!("Enum.{setting}.{item}"),
                 };
                 self.line(format!("UserGameSettings.{setting} = {value}"));

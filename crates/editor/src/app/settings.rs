@@ -691,6 +691,21 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
                     }
                 });
             ui.end_row();
+
+            ui.label("Contact shadows");
+            let on_off = |on: bool| if on { "On" } else { "Off" };
+            let label = |on: Option<bool>| match on {
+                Some(on) => on_off(on).to_owned(),
+                None => format!("Preset ({})", on_off(preset.contact_shadows())),
+            };
+            egui::ComboBox::from_id_salt("contact shadows")
+                .selected_text(label(settings.contact_shadows))
+                .show_ui(ui, |ui| {
+                    for choice in [None, Some(true), Some(false)] {
+                        ui.selectable_value(&mut settings.contact_shadows, choice, label(choice));
+                    }
+                });
+            ui.end_row();
         });
     ui.add_space(16.0);
     widgets::section_label(ui, "In use");
@@ -743,6 +758,11 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
             map.samples
         ),
         None => "Reflections: Low, from the sky's gradient (no sky image)".to_owned(),
+    });
+    ui.label(if effective.contact_shadows {
+        "Contact shadows: on (small gaps the shadow maps miss)"
+    } else {
+        "Contact shadows: off"
     });
     for note in &effective.notes {
         ui.label(egui::RichText::new(note).color(palette.warning));
@@ -1038,6 +1058,7 @@ mod tests {
             anti_aliasing: Some(AntiAliasing::Msaa2),
             ambient_occlusion: Some(AmbientOcclusion::Low),
             reflection_quality: Some(ReflectionQuality::Medium),
+            contact_shadows: Some(false),
         };
         let mut storage = MemoryStorage::default();
         eframe::App::save(&mut app, &mut storage);

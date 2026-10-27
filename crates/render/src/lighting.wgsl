@@ -55,6 +55,13 @@ struct Frame {
     reflection_probes: vec4<u32>,
     // The reflection probes drawn, smallest box first.
     probes: array<Probe, MAX_PROBES>,
+    // Turns world space to each face of each shadow-casting point light's
+    // view, six per light (+X, -X, +Y, -Y, +Z, -Z), by its layer of
+    // `point_shadow_map`.
+    point_shadows: array<mat4x4<f32>, 24>,
+    // x: 1 while contact shadows are drawn, y: how far toward a light they
+    // look in studs, z: how thick what's on screen is taken to be.
+    contact: vec4<f32>,
 }
 
 // The most reflection probes drawn at once. Must match `MAX_PROBES` in
@@ -84,8 +91,10 @@ struct Light {
     // xyz: the direction a spot light points, w: cosine where its edge
     // starts to fade.
     direction_inner: vec4<f32>,
-    // x: its layer of `spot_shadow_map`, or -1 if it casts no shadows,
-    // y: the width of one shadow texel per stud from the light.
+    // x: a spot light's layer of `spot_shadow_map`, or a point light's place
+    // in `point_shadow_map` (its six layers start at six times it), or -1
+    // if it casts no shadows, y: the width of one shadow texel per stud
+    // from the light.
     shadow: vec4<f32>,
 }
 
@@ -118,6 +127,12 @@ const LIGHTS_PER_TILE: u32 = 64u;
 // Each reflection probe's bake, blurred like `environment_map`, one cube
 // per probe (its `layer`). A blank 1×1 cube while none are drawn.
 @group(0) @binding(13) var probe_maps: texture_cube_array<f32>;
+// Six layers per shadow-casting point light, one for each way along each
+// axis: its depth as the light sees it that way.
+@group(0) @binding(14) var point_shadow_map: texture_depth_2d_array;
+// The prepass's depth (solid items only), for contact shadows. A 1×1
+// stand-in while they're off.
+@group(0) @binding(15) var prepass_depth: texture_depth_2d;
 
 // Points spread evenly over a disc of radius 1 (a Poisson disc), for
 // sampling the shadow map around a point. `private` so it can be indexed
@@ -250,26 +265,18 @@ fn sun_visibility(world_position: vec3<f32>, normal: vec3<f32>, pixel: vec2<f32>
     return mix(1.0, lit, fade);
 }
 
-// How much of a spot light reaches `world_position`: 1 in the open, 0 in
-// its shadow. `to_light` is the way to the light, `normal` the surface's own
-// (unmapped) normal. The point is pushed off the surface and toward the
-// light by amounts that grow with its distance from the light, as the map's
-// texels do, so it doesn't shadow itself. Then four comparisons around it,
-// each filtered between four texels like the sun's, are averaged.
-fn spot_visibility(
-    light: Light,
-    world_position: vec3<f32>,
-    normal: vec3<f32>,
-    to_light: vec3<f32>,
+// How much of a lamp's light reaches `point`, by layer `layer` of `map`,
+// drawn through `view`: 1 in the open, 0 in its shadow, and 1 outside the
+// view. Four comparisons around the point, each filtered between four
+// texels like the sun's, are averaged.
+fn lamp_shadow(
+    map: texture_depth_2d_array,
+    view: mat4x4<f32>,
+    layer: i32,
+    point: vec3<f32>,
     rotation: mat2x2<f32>,
 ) -> f32 {
-    let layer = i32(light.shadow.x);
-    if layer < 0 {
-        return 1.0;
-    }
-    let texel = length(to_light) * light.shadow.y;
-    let shifted = world_position + normal * (texel * 1.5) + normalize(to_light) * (texel * 2.0);
-    let clip = frame.spot_shadows[layer] * vec4<f32>(shifted, 1.0);
+    let clip = view * vec4<f32>(point, 1.0);
     if clip.w <= 0.0 {
         return 1.0;
     }
@@ -278,14 +285,102 @@ fn spot_visibility(
     if any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0)) || ndc.z > 1.0 || ndc.z < 0.0 {
         return 1.0;
     }
-    let size = f32(textureDimensions(spot_shadow_map).x);
+    let size = f32(textureDimensions(map).x);
     var lit = 0.0;
     for (var k = 0; k < 4; k++) {
         let corner = vec2<f32>(f32(k & 1), f32(k >> 1u)) * 2.0 - 1.0;
         let offset = rotation * corner * (0.75 / size);
-        lit += textureSampleCompareLevel(spot_shadow_map, shadow_sampler, uv + offset, layer, ndc.z);
+        lit += textureSampleCompareLevel(map, shadow_sampler, uv + offset, layer, ndc.z);
     }
     return lit / 4.0;
+}
+
+// How much of a spot or point light reaches `world_position`: 1 in the
+// open, 0 in its shadow. `to_light` is the way to the light, `normal` the
+// surface's own (unmapped) normal. The point is pushed off the surface and
+// toward the light by amounts that grow with its distance from the light,
+// as the map's texels do, so it doesn't shadow itself. A point light's is
+// looked up in the face of its six that looks the way the point is: the
+// one along its longest axis from the light.
+fn lamp_visibility(
+    light: Light,
+    world_position: vec3<f32>,
+    normal: vec3<f32>,
+    to_light: vec3<f32>,
+    rotation: mat2x2<f32>,
+) -> f32 {
+    let index = i32(light.shadow.x);
+    if index < 0 {
+        return 1.0;
+    }
+    let texel = length(to_light) * light.shadow.y;
+    let shifted = world_position + normal * (texel * 1.5) + normalize(to_light) * (texel * 2.0);
+    if light.radiance_cone.w > -1.5 {
+        return lamp_shadow(spot_shadow_map, frame.spot_shadows[index], index, shifted, rotation);
+    }
+    let away = shifted - light.position_range.xyz;
+    let size = abs(away);
+    var face = select(5, 4, away.z > 0.0);
+    if size.x >= size.y && size.x >= size.z {
+        face = select(1, 0, away.x > 0.0);
+    } else if size.y >= size.z {
+        face = select(3, 2, away.y > 0.0);
+    }
+    let layer = index * 6 + face;
+    return lamp_shadow(point_shadow_map, frame.point_shadows[layer], layer, shifted, rotation);
+}
+
+// How many steps contact shadows take toward a light.
+const CONTACT_STEPS: u32 = 12u;
+
+// How much light from the way `toward` (normalized) reaches the solid
+// surface at `world_position`, by contact shadows: a short march toward
+// the light through the prepass's depth, for the small gaps the shadow
+// maps are too coarse to see. A step that's behind what's on screen there
+// (by less than its thickness) is blocked. Darkest where the blocker is
+// nearest, fading to 1 at `reach` studs. 1 while they're off.
+fn contact_visibility(
+    world_position: vec3<f32>,
+    normal: vec3<f32>,
+    toward: vec3<f32>,
+    reach: f32,
+    pixel: vec2<f32>,
+) -> f32 {
+    if frame.contact.x == 0.0 || reach <= 0.0 || dot(normal, toward) <= 0.0 {
+        return 1.0;
+    }
+    let size = vec2<i32>(textureDimensions(prepass_depth));
+    let camera = frame.camera_position.xyz;
+    // Off the surface, by more the further away it is as depth gets coarser.
+    let bias = 0.01 + distance(camera, world_position) * 0.002;
+    let start = world_position + normal * bias;
+    let step = toward * (reach / f32(CONTACT_STEPS));
+    let jitter = pixel_noise(pixel);
+    for (var i = 0u; i < CONTACT_STEPS; i++) {
+        let along = f32(i) + jitter;
+        let p = start + step * along;
+        let clip = frame.view_proj * vec4<f32>(p, 1.0);
+        if clip.w <= 0.0 {
+            break;
+        }
+        let ndc = clip.xyz / clip.w;
+        if any(abs(ndc.xy) >= vec2<f32>(1.0)) {
+            break;
+        }
+        let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+        let texel = min(vec2<i32>(uv * vec2<f32>(size)), size - vec2<i32>(1));
+        let depth = textureLoad(prepass_depth, texel, 0);
+        if depth >= 1.0 {
+            continue;
+        }
+        // What's on screen there, back in world space.
+        let seen = frame.inv_view_proj * vec4<f32>(ndc.xy, depth, 1.0);
+        let behind = distance(camera, p) - distance(camera, seen.xyz / seen.w);
+        if behind > bias && behind < frame.contact.z {
+            return along / f32(CONTACT_STEPS);
+        }
+    }
+    return 1.0;
 }
 
 // How much ambient and sky light reaches the solid surface drawn at
@@ -480,8 +575,9 @@ fn shade(
 // tile, and the sky. `n` is the shading normal (tipped by any normal map),
 // `geometric` the surface's own, `pixel` where it is on screen,
 // `occlusion` how much ambient and sky light reaches it (texture maps and
-// screen-space ambient occlusion together), and `dielectric` how much a
-// non-metal reflects head-on (usually 4%).
+// screen-space ambient occlusion together), `dielectric` how much a
+// non-metal reflects head-on (usually 4%), and `solid` whether it's in the
+// prepass (see-through surfaces aren't), so contact shadows can fall on it.
 fn light_surface(
     world_position: vec3<f32>,
     geometric: vec3<f32>,
@@ -492,15 +588,20 @@ fn light_surface(
     roughness: f32,
     occlusion: f32,
     dielectric: vec3<f32>,
+    solid: bool,
 ) -> vec3<f32> {
     let v = normalize(frame.camera_position.xyz - world_position);
     let n_dot_v = max(dot(n, v), 0.0001);
     // Metals reflect in their own color.
     let f0 = mix(dielectric, base_color, metalness);
 
-    let sun = shade(n, v, frame.sun_direction.xyz, base_color, metalness, roughness, f0)
+    var sun = shade(n, v, frame.sun_direction.xyz, base_color, metalness, roughness, f0)
         * frame.sun_radiance.rgb
         * sun_visibility(world_position, geometric, pixel);
+    if solid {
+        sun *= contact_visibility(world_position, geometric, frame.sun_direction.xyz,
+            frame.contact.y, pixel);
+    }
 
     // Point and spot lights: only the ones listed for this pixel's tile.
     var lit = vec3<f32>(0.0);
@@ -531,9 +632,14 @@ fn light_surface(
                 dot(-l, light.direction_inner.xyz));
         }
         if strength > 0.0 {
+            var visible = lamp_visibility(light, world_position, geometric, to_light, rotation);
+            // Contact shadows for lamps that cast shadows, up to the lamp.
+            if solid && light.shadow.x >= 0.0 {
+                visible *= contact_visibility(world_position, geometric, l,
+                    min(frame.contact.y, dist), pixel);
+            }
             lit += shade(n, v, l, base_color, metalness, roughness, f0)
-                * light.radiance_cone.rgb * strength
-                * spot_visibility(light, world_position, geometric, to_light, rotation);
+                * light.radiance_cone.rgb * strength * visible;
         }
     }
 

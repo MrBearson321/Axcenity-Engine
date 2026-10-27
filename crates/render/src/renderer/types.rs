@@ -1,5 +1,5 @@
 use super::*;
-use crate::graphics::SpotShadowMapSize;
+use crate::graphics::{PointShadowMapSize, SpotShadowMapSize};
 use glam::{Mat4, Vec3};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -67,6 +67,13 @@ pub(super) struct FrameUniform {
     pub(super) reflection_probes: [u32; 4],
     /// The reflection probes drawn, smallest box first (see `probes.rs`).
     pub(super) probes: [probes::ProbeRaw; probes::MAX_PROBES],
+    /// Turns world space to each face of each shadow-casting point light's
+    /// view, six per light (+X, -X, +Y, -Y, +Z, -Z), one per layer of the
+    /// point shadow map (see [`LightRaw::shadow`]).
+    pub(super) point_shadows: [[[f32; 4]; 4]; MAX_POINT_SHADOW_VIEWS],
+    /// 1 while contact shadows are drawn, how far toward a light they look
+    /// in studs, and how thick what's on screen is taken to be, then unused.
+    pub(super) contact: [f32; 4],
 }
 
 /// The most point and spot lights drawn at once.
@@ -108,8 +115,10 @@ pub(super) struct LightRaw {
     pub(super) radiance_cone: [f32; 4],
     /// Where a spot light points, and the cosine where its edge starts to fade.
     pub(super) direction_inner: [f32; 4],
-    /// The layer of the spot shadow map it casts shadows into (-1 for none),
-    /// then the width of one of its shadow texels per stud from the light.
+    /// A spot light's layer of the spot shadow map, or a point light's
+    /// place in the point shadow map (its six layers start at six times
+    /// it), or -1 for no shadows. Then the width of one of its shadow
+    /// texels per stud from the light.
     pub(super) shadow: [f32; 4],
 }
 
@@ -120,6 +129,23 @@ pub(super) const MAX_SPOT_SHADOWS: usize = 8;
 /// The widest a spot light's shadow map looks, in degrees. Past it, a wider
 /// beam's outer edge is lit without shadows.
 pub(super) const MAX_SPOT_SHADOW_DEGREES: f32 = 170.0;
+/// The most point lights that cast shadows at once (Ultra's). The graphics
+/// settings pick how many do (see [`crate::ShadowQuality::point_map`]).
+/// Six times it must match the size of `point_shadows` in lighting.wgsl.
+pub(super) const MAX_POINT_SHADOWS: usize = 4;
+/// The most point light faces drawn at once: six per light.
+pub(super) const MAX_POINT_SHADOW_VIEWS: usize = MAX_POINT_SHADOWS * POINT_SHADOW_FACES as usize;
+/// Half the width of a point light's shadow face, as the tangent of half
+/// its angle: a little over 90° wide, so filtering at a face's edge stays
+/// inside it.
+pub(super) const POINT_SHADOW_SPREAD: f32 = 1.05;
+/// How far contact shadows look toward a light, in studs. They're for the
+/// small gaps the shadow maps miss, so it's short.
+pub(super) const CONTACT_SHADOW_LENGTH: f32 = 1.0;
+/// How thick contact shadows take what's on screen to be, in studs: a step
+/// of the search behind a surface by more than this has passed behind it,
+/// not into it.
+pub(super) const CONTACT_SHADOW_THICKNESS: f32 = 0.5;
 
 /// Post-processing settings for the shader. Must match `Post` in post.wgsl.
 #[repr(C)]
@@ -152,13 +178,14 @@ pub(super) const MAX_SUN_SIZE: f32 = 0.1;
 pub(super) const CASCADE_UNIFORM_STRIDE: u64 = 256;
 
 /// A depth texture drawn from a light's views, one layer per view: the
-/// sun's cascades ([`ShadowMapSize`]) or shadow-casting spot lights
-/// ([`SpotShadowMapSize`]).
+/// sun's cascades ([`ShadowMapSize`]), shadow-casting spot lights
+/// ([`SpotShadowMapSize`]) or point lights' faces ([`PointShadowMapSize`]).
 pub(super) struct ShadowMap<S> {
     /// Its size and layers, from the effective graphics settings.
     pub(super) size: S,
-    /// A clone of [`ScenePipeline::shadow_maps_alive`] or
-    /// `spot_shadow_maps_alive`, so maps still alive can be counted.
+    /// A clone of [`ScenePipeline::shadow_maps_alive`],
+    /// `spot_shadow_maps_alive` or `point_shadow_maps_alive`, so maps still
+    /// alive can be counted.
     pub(super) _alive: Arc<()>,
     /// Bytes of its depth texture.
     pub(super) bytes: u64,
@@ -175,6 +202,15 @@ pub(super) struct SpotShadow {
     pub(super) view_proj: Mat4,
     /// A sphere around everything the beam reaches: casters outside it are
     /// skipped.
+    pub(super) bounds: (Vec3, f32),
+}
+
+/// One point light's six shadow views, planned for a frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct PointShadow {
+    /// Turns world space to each face's view: +X, -X, +Y, -Y, +Z, -Z.
+    pub(super) faces: [Mat4; POINT_SHADOW_FACES as usize],
+    /// The light's sphere of reach: casters outside it are skipped.
     pub(super) bounds: (Vec3, f32),
 }
 
@@ -548,7 +584,8 @@ pub(super) struct FrameTargets {
     pub(super) depth_view: wgpu::TextureView,
     /// Only while FXAA is on.
     pub(super) fxaa: Option<FxaaTarget>,
-    /// Only while ambient occlusion is on.
+    /// Only while ambient occlusion or contact shadows are on (contact
+    /// shadows read only the prepass's depth).
     pub(super) occlusion: Option<OcclusionTargets>,
     /// Bloom levels from half the scene's size down, each half the one before.
     pub(super) levels: Vec<wgpu::TextureView>,
@@ -638,17 +675,24 @@ pub(super) struct ScenePipeline {
     /// The format of what's drawn into, which the sheet shares.
     pub(super) color_format: wgpu::TextureFormat,
     pub(super) frame_buffer: wgpu::Buffer,
-    /// The frame bindings with the shadow maps alive and the ambient
-    /// occlusion, and the empty 1×1 stand-in for each one that isn't.
-    /// Remade when any of them changes.
+    /// The frame bindings with the shadow maps alive, the ambient
+    /// occlusion and the prepass's depth, and the empty 1×1 stand-in for
+    /// each one that isn't. Remade when any of them changes.
     pub(super) frame_bind_group: wgpu::BindGroup,
+    /// The same, with the stand-in for the prepass's depth, for the
+    /// prepass itself (which draws into that depth, so can't also read it).
+    pub(super) prepass_frame_bind_group: wgpu::BindGroup,
     pub(super) frame_layout: wgpu::BindGroupLayout,
     /// A 1×1 depth array, bound in place of a shadow map that isn't alive.
     pub(super) empty_shadow_view: wgpu::TextureView,
+    /// A 1×1 depth texture, bound in place of the prepass's depth while
+    /// contact shadows are off.
+    pub(super) no_prepass_depth_view: wgpu::TextureView,
     pub(super) shadow_sampler: wgpu::Sampler,
     pub(super) shadow_pipeline: wgpu::RenderPipeline,
     /// Each shadow view's matrix, [`CASCADE_UNIFORM_STRIDE`] apart: the sun's
-    /// cascades, then the shadow-casting spot lights'.
+    /// cascades, then the shadow-casting spot lights', then the point
+    /// lights' faces.
     pub(super) cascade_buffer: wgpu::Buffer,
     /// Gives the shadow pass one view's matrix (it can't also bind the
     /// shadow map it's drawing into).
@@ -666,6 +710,10 @@ pub(super) struct ScenePipeline {
     /// allow it, and freed when none does.
     pub(super) spot_shadow_map: Option<ShadowMap<SpotShadowMapSize>>,
     pub(super) spot_shadow_maps_alive: Arc<()>,
+    /// Made while a point light casts shadows and the graphics settings
+    /// allow it, and freed when none does: six layers per light.
+    pub(super) point_shadow_map: Option<ShadowMap<PointShadowMapSize>>,
+    pub(super) point_shadow_maps_alive: Arc<()>,
     /// What the device can do, read once.
     pub(super) capabilities: Capabilities,
     /// The graphics settings last asked for, and what's used of them.

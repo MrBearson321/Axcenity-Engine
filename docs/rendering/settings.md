@@ -17,7 +17,7 @@ Where a Lighting value is also a cost, the world's value is a request and the se
 
 | Setting | Low | Medium | High | Ultra |
 |---|---|---|---|---|
-| Shadow quality (sun map; spot maps) | Low: 1024² × 2; none | Medium: 2048² × 2; 2 at 512² | High: 2048² × 3; 4 at 1024² | Ultra: 4096² × 4; 8 at 2048² |
+| Shadow quality (sun map; spot maps; point maps, six faces each) | Low: 1024² × 2; none; none | Medium: 2048² × 2; 2 at 512²; 1 at 512² | High: 2048² × 3; 4 at 1024²; 2 at 512² | Ultra: 4096² × 4; 8 at 2048²; 4 at 1024² |
 | Shadow distance ceiling | 75 studs | 100 | 150 | 300 |
 | Post-processing | off | on | on | on |
 | Render scale (50% to 200%) | 75% | 100% | 100% | 100% |
@@ -26,12 +26,13 @@ Where a Lighting value is also a cost, the world's value is a request and the se
 | Anti-aliasing | Off | FXAA | MSAA 4× | MSAA 4× |
 | Ambient occlusion | Off | Low (8 samples) | High (16) | High |
 | Reflection quality (environment maps, reflection probes) | Low: the gradient, no sky image or probes | Medium: 64², 32 samples | High: 128², 64 | Ultra: 256², 128 |
+| Contact shadows | off | off | on | on |
 
 High is the look worlds were made with. `automatic` (Lua's `Enum.GraphicsQuality.Automatic`) means the quality follows the machine: `GraphicsSettings::automatic(&Capabilities)` is High, or Low on a software adapter (`DeviceType::Cpu`), with no overrides. It's what a machine starts with (`default_for`), saved as `"automatic": true`, and picked again for the machine on each start (`player::graphics::fit_machine`).
 
 ## Capabilities
 
-`render::Capabilities` is read from the device once (`Capabilities::read`): the largest 2D texture and array, timestamp queries, whether it's a software adapter, and the sample counts both scene formats support. `GraphicsSettings::effective(&Capabilities)` gives the `EffectiveGraphics` the renderer uses: a shadow quality whose maps don't fit drops to the best that does, an MSAA count the GPU lacks drops to the next mode down (4× → 2× → FXAA), and a reflection cubemap larger than the GPU's textures drops to one that fits (or Low), each with a note saying why. It never raises a value. The render scale is held to the largest texture the GPU can make (`scene::scene_size`), and textures leave out levels wider than it (`gpu::create_texture`).
+`render::Capabilities` is read from the device once (`Capabilities::read`): the largest 2D texture and array, timestamp queries, whether it's a software adapter, and the sample counts both scene formats support. `GraphicsSettings::effective(&Capabilities)` gives the `EffectiveGraphics` the renderer uses: a shadow quality whose maps don't fit drops to the best that does (a point light's six faces are six layers), an MSAA count the GPU lacks drops to the next mode down (4× → 2× → FXAA), and a reflection cubemap larger than the GPU's textures drops to one that fits (or Low), each with a note saying why. It never raises a value. The render scale is held to the largest texture the GPU can make (`scene::scene_size`), and textures leave out levels wider than it (`gpu::create_texture`).
 
 `Renderer::set_graphics` and `TextureRenderer::set_graphics` apply settings from the next frame; settings equal to the last ones do nothing. Every frame target exists only while a setting uses it, and a change frees what's no longer used. `TextureRenderer::limit_capabilities` draws as if the GPU could do less (each value the lower of the two), for checking fallbacks on a GPU that can do more.
 
@@ -39,7 +40,7 @@ High is the look worlds were made with. `automatic` (Lua's `Enum.GraphicsQuality
 
 - **Editor**: Settings > Graphics (`editor/src/app/settings.rs`) shows the preset, each override and what's in effect, with the notes. It's saved with the editor's settings, and the viewport uses it at once.
 - **Player**: `graphics.json` in the game's player data folder (`save::game_folder`, `player/src/graphics.rs`). The first start writes Automatic. A file that doesn't read as settings is warned about and replaced by the default. The notes go to the log.
-- **LocalScripts**: `game:GetService("UserGameSettings")` (`script/src/user_settings.rs`) has `GraphicsQuality` (`Enum.GraphicsQuality`: Automatic, Low, Medium, High, Ultra) and the overrides `ShadowQuality` (`Enum.ShadowQuality`), `ShadowDistance`, `PostProcessing`, `RenderScale` (kept within 0.5 to 2), `TextureQuality` (`Enum.TextureQuality`), `AntiAliasing` (`Enum.AntiAliasing`: Off, FXAA, MSAA2, MSAA4), `AmbientOcclusion` (`Enum.AmbientOcclusion`) and `ReflectionQuality` (`Enum.ReflectionQuality`: Low, Medium, High, Ultra). Reading one gives the value chosen (the override, or the preset's), not what the GPU lowered it to, and setting an override to nil goes back to the preset's. The texture memory budget isn't among them: it's the machine's to set, in the editor or `graphics.json` (`texture_budget`, in MB). A Script gets "UserGameSettings only works in a LocalScript…". Hosts hand the settings in with `ScriptRuntime::set_graphics(settings, capabilities)` before scripts start (the capabilities pick Automatic's quality) and take a change with `take_graphics_change`. The player then fits it to the machine, saves it to `graphics.json` and draws with it from that frame. The editor's Play starts from the editor's own settings, draws a script's change in the viewport (`Session::graphics`) and drops it at Stop. Blocks: "set graphics quality to", "set graphics *option* to" (a choice, or Preset for nil) and "set graphics *number* to" ([scripting/blocks.md](../scripting/blocks.md)). `examples/hello-graphics`' LocalScript steps through the presets on G.
+- **LocalScripts**: `game:GetService("UserGameSettings")` (`script/src/user_settings.rs`) has `GraphicsQuality` (`Enum.GraphicsQuality`: Automatic, Low, Medium, High, Ultra) and the overrides `ShadowQuality` (`Enum.ShadowQuality`), `ShadowDistance`, `PostProcessing`, `RenderScale` (kept within 0.5 to 2), `TextureQuality` (`Enum.TextureQuality`), `AntiAliasing` (`Enum.AntiAliasing`: Off, FXAA, MSAA2, MSAA4), `AmbientOcclusion` (`Enum.AmbientOcclusion`), `ReflectionQuality` (`Enum.ReflectionQuality`: Low, Medium, High, Ultra) and `ContactShadows` (true or false). Reading one gives the value chosen (the override, or the preset's), not what the GPU lowered it to, and setting an override to nil goes back to the preset's. The texture memory budget isn't among them: it's the machine's to set, in the editor or `graphics.json` (`texture_budget`, in MB). A Script gets "UserGameSettings only works in a LocalScript…". Hosts hand the settings in with `ScriptRuntime::set_graphics(settings, capabilities)` before scripts start (the capabilities pick Automatic's quality) and take a change with `take_graphics_change`. The player then fits it to the machine, saves it to `graphics.json` and draws with it from that frame. The editor's Play starts from the editor's own settings, draws a script's change in the viewport (`Session::graphics`) and drops it at Stop. Blocks: "set graphics quality to", "set graphics *option* to" (a choice, or Preset for nil) and "set graphics *number* to" ([scripting/blocks.md](../scripting/blocks.md)). `examples/hello-graphics`' LocalScript steps through the presets on G.
 
 ## Tests
 
@@ -49,7 +50,7 @@ High is the look worlds were made with. `automatic` (Lua's `Enum.GraphicsQuality
 
 ## Each setting
 
-- Shadow quality and distance: [shadows.md](shadows.md); spot light shadows: [lights.md](lights.md).
+- Shadow quality and distance, and contact shadows: [shadows.md](shadows.md); spot and point light shadows: [lights.md](lights.md).
 - Render scale, texture quality and the texture memory budget: [shadows.md](shadows.md) (targets and textures) and [models.md](models.md) (textures).
 - Anti-aliasing and ambient occlusion: [shadows.md](shadows.md); post-processing: [post.md](post.md).
 - Reflection quality: [sky.md](sky.md).
