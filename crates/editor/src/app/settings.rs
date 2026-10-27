@@ -10,7 +10,7 @@ use crate::theme::{Accent, Appearance, Density, Palette, ThemeChoice, type_scale
 use crate::widgets;
 use axcenity_render::{
     AmbientOcclusion, AntiAliasing, Capabilities, GraphicsSettings, Quality, RENDER_SCALE_RANGE,
-    ShadowQuality, TextureQuality,
+    ShadowQuality, TEXTURE_BUDGET_RANGE, TextureQuality,
 };
 
 /// Ctrl+, (Cmd+, on macOS) opens Settings, as in most desktop apps.
@@ -617,6 +617,35 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
                 });
             ui.end_row();
 
+            ui.label("Texture memory");
+            ui.horizontal(|ui| {
+                let mut custom = settings.texture_budget.is_some();
+                if ui
+                    .checkbox(&mut custom, "")
+                    .on_hover_text("Off, the preset's budget is used.")
+                    .changed()
+                {
+                    settings.texture_budget = custom.then(|| preset.texture_budget());
+                }
+                match &mut settings.texture_budget {
+                    Some(budget) => {
+                        ui.add(
+                            egui::DragValue::new(budget)
+                                .range(TEXTURE_BUDGET_RANGE)
+                                .speed(4.0)
+                                .suffix(" MB"),
+                        );
+                    }
+                    None => {
+                        ui.label(
+                            egui::RichText::new(format!("Preset ({} MB)", preset.texture_budget()))
+                                .color(palette.text_secondary),
+                        );
+                    }
+                }
+            });
+            ui.end_row();
+
             ui.label("Anti-aliasing");
             let label = |mode: Option<AntiAliasing>| match mode {
                 Some(mode) => mode.label().to_owned(),
@@ -669,8 +698,9 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
         (effective.render_scale * 100.0).round()
     ));
     ui.label(format!(
-        "Textures: {} size",
-        effective.texture_quality.label().to_lowercase()
+        "Textures: {} size, within {} MB (the least recently drawn lose detail first)",
+        effective.texture_quality.label().to_lowercase(),
+        effective.texture_budget >> 20
     ));
     ui.label(format!(
         "Anti-aliasing: {}",
@@ -977,6 +1007,7 @@ mod tests {
             post_processing: None,
             render_scale: Some(0.5),
             texture_quality: Some(TextureQuality::Half),
+            texture_budget: Some(128),
             anti_aliasing: Some(AntiAliasing::Msaa2),
             ambient_occlusion: Some(AmbientOcclusion::Low),
         };

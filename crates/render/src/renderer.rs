@@ -43,6 +43,7 @@ mod skinning;
 mod sprites;
 mod terrain;
 pub(crate) mod text;
+mod texture_budget;
 mod ui_pass;
 
 #[cfg(test)]

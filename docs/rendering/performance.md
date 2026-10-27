@@ -25,6 +25,7 @@ Each prints its last frame's counts (items drawn, batches, draw calls, triangles
 | `bench_terrain_with_foliage` | A 2,048-stud terrain of 1,025² samples with hills, two layers and 20,000 plants (grass, flowers, bushes, trees) |
 | `bench_20_animated_characters` | 20 copies of hello-animation's Noodle (about 200 triangles each), each with an Animator, posed every frame |
 | `bench_20_walking_characters` | 20 copies of hello-character's walking character (about 76,000 triangles and 8 primitives each), each with an Animator, posed every frame (added in graphics Phase 14) |
+| `bench_2000_mesh_parts_behind_a_wall` | The 2,000 helmets in view but hidden behind an 80-stud wall the camera stands 40 studs from, then the same view with no helmets (added in graphics Phase 15, for occlusion culling) |
 
 ## Baseline
 
@@ -125,3 +126,27 @@ What it says:
 
 - **The walking characters cost a thirteenth of the CPU time** (4.85 ms to 0.38 ms in `ScenePipeline::draw`): nothing is skinned, checked or uploaded per frame but the joints (112 bytes each). The 20 characters share one copy of each primitive, so 149 batches become 22 and mesh memory drops from 13 MB to 2.3 MB. The GPU does the blending at no measurable cost.
 - **Vertex-heavy scenes pay a little for it.** Every instance is 8 bytes wider (its skin) and every vertex checks it, so the helmets' scene pass, with 23 M triangles, takes 5% longer (2.46 ms to 2.59 ms) and their CPU time 6% (the wider instances are copied for every shadow view). Plain parts and terrain are within noise. If that matters, skinned items can get pipelines of their own, so other items skip the check.
+
+## Texture budget and occlusion culling (graphics Phase 15)
+
+**The texture memory budget** (see [shadows.md](shadows.md)) costs nothing while textures fit: each frame checks the total once. None of the benchmarks passes even the Low preset's 256 MB (the helmets take 106.7 MB), so their numbers are unchanged. Over the budget, a texture shrinks by a GPU copy of its smaller levels, once, and only grows again (an upload) when it fits.
+
+**Occlusion culling was not built.** The plan allowed it only if a benchmark showed overdraw-heavy scenes that frustum culling and LOD don't fix. `bench_2000_mesh_parts_behind_a_wall` measures the most it could save: everything hidden items cost, as the hidden view minus the empty one. Three runs on the machine above (AMD Radeon RX 9070 XT, Vulkan) agreed within 0.1 ms; times are milliseconds.
+
+| | Helmets hidden behind the wall | No helmets | Hidden items cost |
+|---|---|---|---|
+| Items drawn / submitted | 1,840 / 2,002 | 2 / 2 | |
+| Triangles | 23.2 M | 120 | |
+| CPU `build_draw_list` | 0.69–0.81 | 0.00 | 0.7–0.8 |
+| CPU `ScenePipeline::draw` | 1.08–1.13 | 0.16–0.17 | 0.9 |
+| GPU frame | 3.52–3.53 | 0.37–0.39 | 3.1 |
+| GPU shadows | 1.29 | 0.03 | 1.26 |
+| GPU depth prepass | 0.64–0.65 | 0.02 | 0.63 |
+| GPU scene | 1.46 | 0.24–0.26 | 1.2 |
+
+What it says:
+
+- **The hidden helmets aren't overdraw.** The wall is drawn first (built-in shapes sort before meshes), so their pixels fail the depth test before shading. What they cost is vertex work for 23 M triangles that LOD has already cut to a quarter, and CPU planning.
+- **Culling them by a Hi-Z pyramid would save at most 1.9 ms of GPU** (the prepass and scene), not the 1.3 ms of shadows: casters behind the wall still shade what the sun's cascades cover, and camera occlusion doesn't cull shadow casters. That is from a scene built to be its best case, 2,000 15,500-triangle models packed behind one wall, and its frame still takes 3.5 ms at 1280 × 720 on High. The other benchmarks have no large occluders, so it would save nothing there.
+- **It would cost more than it saves today.** The prepass exists only with ambient occlusion on (Off at Low), so Low, the preset for weak GPUs, would need a depth pass of its own. Testing last frame's bounds on the CPU needs a readback a frame or two old, which culls an item for those frames as it comes out from behind something: the popping the criterion rules out, unless items are drawn GPU-driven (compute culling and indirect draws), a rewrite of `plan_draws` and its batching.
+- **When to reconsider:** a real scene (an interior, a city) whose GPU scene and prepass time is mostly hidden items, measured the same way (with and without what's hidden). Cheaper fixes come first: a cull distance on dense models (as foliage has, `DrawItem::cull_distance`) and coarser LODs.

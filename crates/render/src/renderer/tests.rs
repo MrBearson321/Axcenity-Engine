@@ -10,6 +10,7 @@ use glam::Mat4;
 mod frustum_culling;
 mod level_of_detail;
 mod skinning;
+mod texture_budget;
 
 #[test]
 fn zero_sized_window_has_nothing_to_draw() {
@@ -2136,7 +2137,7 @@ fn half_texture_quality_uploads_a_1024_texture_at_512_and_a_quarter_of_the_bytes
     let empty = renderer.stats().texture_bytes;
     renderer.render(&list).unwrap();
     let uploaded = |renderer: &TextureRenderer| {
-        let texture = &renderer.scene.textures[&7].gpu.as_ref().unwrap()._texture;
+        let texture = &renderer.scene.textures[&7].gpu.as_ref().unwrap().texture;
         (texture.width(), texture.height(), texture.mip_level_count())
     };
     assert_eq!(uploaded(&renderer), (1024, 1024, 11));
@@ -2182,7 +2183,7 @@ fn half_texture_quality_uploads_a_1024_texture_at_512_and_a_quarter_of_the_bytes
         .gpu
         .as_ref()
         .unwrap()
-        ._texture;
+        .texture;
     assert_eq!(image.width(), 1024);
 }
 

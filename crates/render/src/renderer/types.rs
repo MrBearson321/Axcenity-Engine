@@ -267,6 +267,12 @@ pub(super) struct Counted {
     total: Arc<AtomicU64>,
 }
 
+impl Counted {
+    pub(super) fn bytes(&self) -> u64 {
+        self.bytes
+    }
+}
+
 impl Drop for Counted {
     fn drop(&mut self) {
         self.total.fetch_sub(self.bytes, Ordering::Relaxed);
@@ -317,14 +323,20 @@ pub(super) struct MapsUniform {
 
 /// A texture uploaded to the GPU, with a view for each way it's read.
 pub(super) struct GpuTexture {
-    /// Kept so it lives as long as the bind groups that use it.
-    pub(super) _texture: wgpu::Texture,
+    /// Kept so it lives as long as the bind groups that use it, and read
+    /// from when the texture budget shrinks it.
+    pub(super) texture: wgpu::Texture,
     /// Converts sRGB to linear light, for colors.
     pub(super) srgb: wgpu::TextureView,
     /// Gives the bytes as they are (128 is 0.5), for values.
     pub(super) linear: wgpu::TextureView,
+    /// The largest level's width and height, and the number of levels, at
+    /// the texture quality's size, before the budget left any out.
+    pub(super) base: (u32, u32, u32),
+    /// How many of those largest levels the texture budget left out.
+    pub(super) dropped: u32,
     /// Its size with every mip level, in [`ScenePipeline::texture_bytes`].
-    pub(super) _bytes: Counted,
+    pub(super) bytes: Counted,
 }
 
 /// A material's textures and [`MapsUniform`], bound together for the shader.

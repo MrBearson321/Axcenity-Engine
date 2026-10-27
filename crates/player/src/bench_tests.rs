@@ -319,6 +319,65 @@ fn bench_2000_mesh_parts() {
     assert!(assets.take_errors().is_empty());
 }
 
+/// The case occlusion culling is for (graphics Phase 15): 2,000 helmets in
+/// view but hidden behind a wall the camera stands close to, against the
+/// same view with no helmets. The difference is the most that culling
+/// hidden items could save.
+#[test]
+#[ignore = "benchmark: run with --release -- --ignored bench_"]
+fn bench_2000_mesh_parts_behind_a_wall() {
+    for helmets in [true, false] {
+        let (mut world, _scripts, folder) = start_example_in("hello-pbr");
+        let workspace = world.workspace();
+        let floor = world.find_first_child(workspace, "Floor").unwrap();
+        for name in ["DamagedHelmet", "PbrPanel", "PhongPanel"] {
+            let model = world.find_first_child(workspace, name).unwrap();
+            world.destroy(model).unwrap();
+        }
+        world
+            .set_property(floor, "Size", vector(400.0, 1.0, 400.0))
+            .unwrap();
+        add_part(
+            &mut world,
+            ClassName::Part,
+            &[
+                ("Position", vector(0.0, 40.0, 0.0)),
+                ("Size", vector(400.0, 80.0, 2.0)),
+                ("Color", Value::Color3(Color3::new(0.7, 0.68, 0.62))),
+            ],
+        );
+        let mut random = Random(2);
+        for index in 0..if helmets { 2_000 } else { 0 } {
+            let (x, z) = ((index % 50) as f32, (index / 50) as f32);
+            add_part(
+                &mut world,
+                ClassName::MeshPart,
+                &[
+                    (
+                        "MeshId",
+                        Value::String("assets/models/DamagedHelmet/DamagedHelmet.glb".into()),
+                    ),
+                    ("Position", vector(x * 6.0 - 147.0, 2.5, -10.0 - z * 6.0)),
+                    ("Orientation", vector(0.0, random.next() * 360.0, 0.0)),
+                    ("Size", vector(4.0, 4.0, 4.0)),
+                ],
+            );
+        }
+        let assets = Assets::new(&folder);
+        let camera = camera(Vec3::new(0.0, 8.0, 40.0), Vec3::new(0.0, 6.0, -100.0));
+        let view = if helmets { "hidden" } else { "removed" };
+        run(
+            &format!("bench_2000_mesh_parts_behind_a_wall: {view}"),
+            |steps| {
+                steps.time("build_draw_list", || {
+                    axcenity_scene::build_draw_list(&world, &assets, camera)
+                })
+            },
+        );
+        assert!(assets.take_errors().is_empty());
+    }
+}
+
 /// A 2,048-stud terrain of 1,025 × 1,025 samples with rolling hills, two
 /// layers and 20,000 plants, seen across from one side.
 #[test]

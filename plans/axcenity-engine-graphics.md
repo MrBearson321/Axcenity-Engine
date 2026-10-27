@@ -296,8 +296,8 @@ Textures get a GPU memory budget from the settings. Over it, the least recently 
 
 ### Acceptance criteria
 
-- [ ] A scene with more texture data than the budget stays within it and draws without errors (GPU byte count test).
-- [ ] Occlusion culling, if built, removes hidden items in the benchmark without visible popping. If not built, the decision and its numbers are written down.
+- [x] A scene with more texture data than the budget stays within it and draws without errors (GPU byte count test).
+- [x] Occlusion culling, if built, removes hidden items in the benchmark without visible popping. If not built, the decision and its numbers are written down.
 
 ---
 

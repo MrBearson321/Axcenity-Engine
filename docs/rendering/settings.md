@@ -22,6 +22,7 @@ Where a Lighting value is also a cost, the world's value is a request and the se
 | Post-processing | off | on | on | on |
 | Render scale (50% to 200%) | 75% | 100% | 100% | 100% |
 | Texture quality | Quarter | Half | Full | Full |
+| Texture memory budget (16 MB to 64 GB) | 256 MB | 512 MB | 1024 MB | 2048 MB |
 | Anti-aliasing | Off | FXAA | MSAA 4× | MSAA 4× |
 | Ambient occlusion | Off | Low (8 samples) | High (16) | High |
 
@@ -37,7 +38,7 @@ High is the look worlds were made with. `automatic` (Lua's `Enum.GraphicsQuality
 
 - **Editor**: Settings > Graphics (`editor/src/app/settings.rs`) shows the preset, each override and what's in effect, with the notes. It's saved with the editor's settings, and the viewport uses it at once.
 - **Player**: `graphics.json` in the game's player data folder (`save::game_folder`, `player/src/graphics.rs`). The first start writes Automatic. A file that doesn't read as settings is warned about and replaced by the default. The notes go to the log.
-- **LocalScripts**: `game:GetService("UserGameSettings")` (`script/src/user_settings.rs`) has `GraphicsQuality` (`Enum.GraphicsQuality`: Automatic, Low, Medium, High, Ultra) and the overrides `ShadowQuality` (`Enum.ShadowQuality`), `ShadowDistance`, `PostProcessing`, `RenderScale` (kept within 0.5 to 2), `TextureQuality` (`Enum.TextureQuality`), `AntiAliasing` (`Enum.AntiAliasing`: Off, FXAA, MSAA2, MSAA4) and `AmbientOcclusion` (`Enum.AmbientOcclusion`). Reading one gives the value chosen (the override, or the preset's), not what the GPU lowered it to, and setting an override to nil goes back to the preset's. A Script gets "UserGameSettings only works in a LocalScript…". Hosts hand the settings in with `ScriptRuntime::set_graphics(settings, capabilities)` before scripts start (the capabilities pick Automatic's quality) and take a change with `take_graphics_change`. The player then fits it to the machine, saves it to `graphics.json` and draws with it from that frame. The editor's Play starts from the editor's own settings, draws a script's change in the viewport (`Session::graphics`) and drops it at Stop. Blocks: "set graphics quality to", "set graphics *option* to" (a choice, or Preset for nil) and "set graphics *number* to" ([scripting/blocks.md](../scripting/blocks.md)). `examples/hello-graphics`' LocalScript steps through the presets on G.
+- **LocalScripts**: `game:GetService("UserGameSettings")` (`script/src/user_settings.rs`) has `GraphicsQuality` (`Enum.GraphicsQuality`: Automatic, Low, Medium, High, Ultra) and the overrides `ShadowQuality` (`Enum.ShadowQuality`), `ShadowDistance`, `PostProcessing`, `RenderScale` (kept within 0.5 to 2), `TextureQuality` (`Enum.TextureQuality`), `AntiAliasing` (`Enum.AntiAliasing`: Off, FXAA, MSAA2, MSAA4) and `AmbientOcclusion` (`Enum.AmbientOcclusion`). Reading one gives the value chosen (the override, or the preset's), not what the GPU lowered it to, and setting an override to nil goes back to the preset's. The texture memory budget isn't among them: it's the machine's to set, in the editor or `graphics.json` (`texture_budget`, in MB). A Script gets "UserGameSettings only works in a LocalScript…". Hosts hand the settings in with `ScriptRuntime::set_graphics(settings, capabilities)` before scripts start (the capabilities pick Automatic's quality) and take a change with `take_graphics_change`. The player then fits it to the machine, saves it to `graphics.json` and draws with it from that frame. The editor's Play starts from the editor's own settings, draws a script's change in the viewport (`Session::graphics`) and drops it at Stop. Blocks: "set graphics quality to", "set graphics *option* to" (a choice, or Preset for nil) and "set graphics *number* to" ([scripting/blocks.md](../scripting/blocks.md)). `examples/hello-graphics`' LocalScript steps through the presets on G.
 
 ## Tests
 
@@ -48,5 +49,5 @@ High is the look worlds were made with. `automatic` (Lua's `Enum.GraphicsQuality
 ## Each setting
 
 - Shadow quality and distance: [shadows.md](shadows.md); spot light shadows: [lights.md](lights.md).
-- Render scale and texture quality: [shadows.md](shadows.md) (targets) and [models.md](models.md) (textures).
+- Render scale, texture quality and the texture memory budget: [shadows.md](shadows.md) (targets and textures) and [models.md](models.md) (textures).
 - Anti-aliasing and ambient occlusion: [shadows.md](shadows.md); post-processing: [post.md](post.md).

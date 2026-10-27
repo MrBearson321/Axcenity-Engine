@@ -95,6 +95,7 @@ fn setting_the_quality_and_overrides_is_a_change_the_host_takes_once() {
         post_processing: Some(true),
         render_scale: Some(2.0),
         texture_quality: Some(TextureQuality::Full),
+        texture_budget: None,
         anti_aliasing: Some(AntiAliasing::Msaa2),
         ambient_occlusion: Some(AmbientOcclusion::High),
     };

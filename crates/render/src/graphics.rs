@@ -223,6 +223,10 @@ impl AmbientOcclusion {
 /// fraction of the output's width and height.
 pub const RENDER_SCALE_RANGE: std::ops::RangeInclusive<f32> = 0.5..=2.0;
 
+/// The smallest and largest texture memory budget an override can set, in
+/// megabytes (MiB).
+pub const TEXTURE_BUDGET_RANGE: std::ops::RangeInclusive<u32> = 16..=65_536;
+
 /// A shadow map's size in texels per side, and its number of cascades
 /// (one layer each).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -266,6 +270,10 @@ pub struct GraphicsSettings {
     pub render_scale: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub texture_quality: Option<TextureQuality>,
+    /// The most GPU memory textures may take, in megabytes (MiB). Over it,
+    /// the least recently drawn surface textures lose their largest mips.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub texture_budget: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub anti_aliasing: Option<AntiAliasing>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -352,6 +360,20 @@ impl GraphicsSettings {
         })
     }
 
+    /// The texture memory budget in megabytes (MiB): the override, kept
+    /// within [`TEXTURE_BUDGET_RANGE`], or the preset's.
+    pub fn texture_budget(&self) -> u32 {
+        self.texture_budget.map_or(
+            match self.quality {
+                Quality::Low => 256,
+                Quality::Medium => 512,
+                Quality::High => 1024,
+                Quality::Ultra => 2048,
+            },
+            |budget| budget.clamp(*TEXTURE_BUDGET_RANGE.start(), *TEXTURE_BUDGET_RANGE.end()),
+        )
+    }
+
     /// The anti-aliasing: the override, or the preset's.
     pub fn anti_aliasing(&self) -> AntiAliasing {
         self.anti_aliasing.unwrap_or(match self.quality {
@@ -416,6 +438,7 @@ impl GraphicsSettings {
             post_processing: self.post_processing(),
             render_scale: self.render_scale(),
             texture_quality: self.texture_quality(),
+            texture_budget: u64::from(self.texture_budget()) * 1024 * 1024,
             anti_aliasing,
             // Every GPU can draw it: it needs nothing past what the scene does.
             ambient_occlusion: self.ambient_occlusion(),
@@ -510,6 +533,8 @@ pub struct EffectiveGraphics {
     /// the GPU's textures is drawn at the largest size it can hold.
     pub render_scale: f32,
     pub texture_quality: TextureQuality,
+    /// The most bytes textures may take on the GPU.
+    pub texture_budget: u64,
     pub anti_aliasing: AntiAliasing,
     pub ambient_occlusion: AmbientOcclusion,
     /// Why each lowered value was lowered, for showing in the settings.
@@ -574,6 +599,9 @@ mod tests {
         use AmbientOcclusion as Ao;
         assert_eq!(occlusion, [Ao::Off, Ao::Low, Ao::High, Ao::High]);
         assert_eq!(Ao::ALL.map(Ao::samples), [0, 8, 16]);
+        let budgets =
+            Quality::ALL.map(|quality| GraphicsSettings::preset(quality).texture_budget());
+        assert_eq!(budgets, [256, 512, 1024, 2048]);
     }
 
     #[test]
@@ -662,6 +690,18 @@ mod tests {
             assert_eq!(occlusion.anti_aliasing(), preset.anti_aliasing());
             assert_eq!(occlusion.shadow_quality(), preset.shadow_quality());
             assert_eq!(occlusion.render_scale(), preset.render_scale());
+
+            let budget = GraphicsSettings {
+                texture_budget: Some(64),
+                ..preset.clone()
+            };
+            assert_eq!(budget.texture_budget(), 64);
+            assert_eq!(budget.texture_quality(), preset.texture_quality());
+            assert_eq!(budget.anti_aliasing(), preset.anti_aliasing());
+            assert_eq!(
+                budget.effective(&Capabilities::default()).texture_budget,
+                64 << 20
+            );
         }
         let broken = GraphicsSettings {
             shadow_distance: Some(f32::NAN),
@@ -678,6 +718,14 @@ mod tests {
             .render_scale()
         };
         assert_eq!((scale(0.1), scale(9.0)), (0.5, 2.0), "kept within 50–200%");
+        let budget = |budget| {
+            GraphicsSettings {
+                texture_budget: Some(budget),
+                ..GraphicsSettings::default()
+            }
+            .texture_budget()
+        };
+        assert_eq!((budget(0), budget(u32::MAX)), (16, 65_536));
     }
 
     #[test]
@@ -690,6 +738,7 @@ mod tests {
             post_processing: Some(false),
             render_scale: Some(0.5),
             texture_quality: Some(TextureQuality::Quarter),
+            texture_budget: Some(300),
             anti_aliasing: Some(AntiAliasing::Fxaa),
             ambient_occlusion: Some(AmbientOcclusion::Off),
         };
@@ -854,6 +903,7 @@ mod tests {
                         post_processing: post,
                         render_scale: Some(0.5),
                         texture_quality: Some(TextureQuality::Half),
+                        texture_budget: Some(200),
                         anti_aliasing,
                         ambient_occlusion: Some(AmbientOcclusion::Low),
                     };
@@ -864,6 +914,7 @@ mod tests {
                         assert!(effective.post_processing <= settings.post_processing());
                         assert_eq!(effective.render_scale, settings.render_scale());
                         assert_eq!(effective.texture_quality, settings.texture_quality());
+                        assert_eq!(effective.texture_budget, 200 << 20);
                         assert!(effective.anti_aliasing <= settings.anti_aliasing());
                         assert_eq!(effective.ambient_occlusion, settings.ambient_occlusion());
                         let lowered =

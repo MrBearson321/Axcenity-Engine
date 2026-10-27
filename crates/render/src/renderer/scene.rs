@@ -207,6 +207,7 @@ impl ScenePipeline {
             &texture_bytes,
             (1, 1, &[255; 4]),
             (0, capabilities.max_texture_size),
+            0,
         );
         let plain_material = create_material(
             &device,
@@ -1325,7 +1326,8 @@ impl ScenePipeline {
 
     /// Uploads the callers' meshes in `draws` (each item's level of
     /// detail) and textures in `list` that aren't on the GPU yet, and notes
-    /// that the rest were drawn this frame.
+    /// that the rest were drawn this frame. Textures are fitted to the
+    /// texture budget before the materials using them are bound.
     pub(super) fn upload_new(&mut self, list: &DrawList, draws: &[Draw]) {
         let frame = self.frame;
         for source in draws.iter().filter_map(Draw::source) {
@@ -1379,10 +1381,37 @@ impl ScenePipeline {
                 );
                 continue;
             }
-            let sources = material_textures(item);
-            for source in sources.iter().flatten() {
+            for source in material_textures(item).iter().flatten() {
                 self.note_texture(source.as_ref(), frame, false);
             }
+        }
+        for item in &list.ui {
+            if let UiDrawItem::Image(image) = item
+                && let Some(source) = &image.texture
+            {
+                self.note_texture(source.as_ref(), frame, true);
+            }
+        }
+        for sprite in &list.sprites {
+            if let Some(source) = &sprite.texture {
+                self.note_texture(source.as_ref(), frame, false);
+            }
+        }
+        let replaced = self.fit_texture_budget(list);
+        if !replaced.is_empty() {
+            self.materials.retain(|key, _| {
+                !key.textures
+                    .iter()
+                    .flatten()
+                    .any(|texture| replaced.contains(texture))
+            });
+            self.sprites.forget(|key| !replaced.contains(&key));
+        }
+        for item in &list.items {
+            if item.material.terrain.is_some() {
+                continue;
+            }
+            let sources = material_textures(item);
             let key = material_key(item);
             if key == MaterialKey::default() {
                 continue;
@@ -1407,18 +1436,6 @@ impl ScenePipeline {
                         last_drawn: frame,
                     });
                 }
-            }
-        }
-        for item in &list.ui {
-            if let UiDrawItem::Image(image) = item
-                && let Some(source) = &image.texture
-            {
-                self.note_texture(source.as_ref(), frame, true);
-            }
-        }
-        for sprite in &list.sprites {
-            if let Some(source) = &sprite.texture {
-                self.note_texture(source.as_ref(), frame, false);
             }
         }
     }
@@ -1515,6 +1532,7 @@ impl ScenePipeline {
                         &self.texture_bytes,
                         source,
                         (skipped_levels, self.capabilities.max_texture_size),
+                        0,
                     ),
                     last_drawn: frame,
                 });

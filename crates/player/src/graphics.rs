@@ -109,6 +109,7 @@ mod tests {
             post_processing: Some(false),
             render_scale: Some(1.25),
             texture_quality: Some(TextureQuality::Half),
+            texture_budget: Some(512),
             anti_aliasing: Some(AntiAliasing::Fxaa),
             ambient_occlusion: Some(AmbientOcclusion::High),
         };

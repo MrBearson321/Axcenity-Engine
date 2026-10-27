@@ -557,15 +557,16 @@ pub(super) fn upload_buffers(
 }
 
 /// Uploads a caller's texture without its `skipped_levels` largest mip
-/// levels, or any wider or taller than `max_size` (see [`create_texture`]),
-/// or `None` (with a warning) if it has no pixels or the wrong number of
-/// them.
+/// levels, or any wider or taller than `max_size`, and then without
+/// `dropped` more (see [`create_texture`]), or `None` (with a warning) if
+/// it has no pixels or the wrong number of them.
 pub(super) fn upload_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     bytes: &GpuBytes,
     source: &dyn TextureSource,
     (skipped_levels, max_size): (u32, u32),
+    dropped: u32,
 ) -> Option<GpuTexture> {
     let (width, height) = source.size();
     let rgba = source.rgba();
@@ -582,6 +583,7 @@ pub(super) fn upload_texture(
         bytes,
         (width, height, rgba),
         (skipped_levels, max_size),
+        dropped,
     ))
 }
 
@@ -646,13 +648,16 @@ pub(super) fn create_material(
 /// (smaller copies, so far away surfaces don't shimmer), with an sRGB and a
 /// plain view. The `skipped_levels` largest are left out (the texture
 /// quality), and so are any wider or taller than `max_size` (the GPU's
-/// largest), so a huge texture still shows, just less sharp.
+/// largest), so a huge texture still shows, just less sharp. What's left is
+/// the texture's base size, and `dropped` more levels are left out for the
+/// texture budget.
 pub(super) fn create_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     bytes: &GpuBytes,
     (width, height, rgba): (u32, u32, &[u8]),
     (skipped_levels, max_size): (u32, u32),
+    dropped: u32,
 ) -> GpuTexture {
     let mut levels = mip_levels(width, height, rgba);
     let max = max_size.min(device.limits().max_texture_dimension_2d);
@@ -663,21 +668,10 @@ pub(super) fn create_texture(
     // The last level is 1×1, so one is always left.
     let skipped = too_big.max(skipped_levels as usize).min(levels.len() - 1);
     levels.drain(..skipped);
-    let (width, height) = (levels[0].0, levels[0].1);
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("material texture"),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: levels.len() as u32,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: TEXTURE_FORMAT,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[TEXTURE_SRGB_FORMAT],
-    });
+    let base = (levels[0].0, levels[0].1, levels.len() as u32);
+    let dropped = dropped.min(base.2 - 1);
+    levels.drain(..dropped as usize);
+    let texture = empty_texture(device, base, dropped);
     for (level, (width, height, pixels)) in levels.iter().enumerate() {
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
@@ -699,20 +693,102 @@ pub(super) fn create_texture(
             },
         );
     }
+    finish_texture(texture, bytes, base, dropped)
+}
+
+/// Records copying `old` without its `more` largest levels into a new
+/// texture, for the texture budget: the smaller levels are already on the
+/// GPU, so nothing is read from the caller. At least one level is kept.
+pub(super) fn shrink_texture(
+    device: &wgpu::Device,
+    encoder: &mut wgpu::CommandEncoder,
+    bytes: &GpuBytes,
+    old: &GpuTexture,
+    more: u32,
+) -> GpuTexture {
+    let more = more.min(old.texture.mip_level_count() - 1);
+    let dropped = old.dropped + more;
+    let texture = empty_texture(device, old.base, dropped);
+    let at = |texture, mip_level| wgpu::TexelCopyTextureInfo {
+        texture,
+        mip_level,
+        origin: wgpu::Origin3d::ZERO,
+        aspect: wgpu::TextureAspect::All,
+    };
+    for level in 0..texture.mip_level_count() {
+        let (width, height) = level_size(old.base, dropped + level);
+        encoder.copy_texture_to_texture(
+            at(&old.texture, level + more),
+            at(&texture, level),
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
+    finish_texture(texture, bytes, old.base, dropped)
+}
+
+/// The width and height of mip `level` of a texture of `base` size (see
+/// [`GpuTexture::base`]): each level is half the last, at least 1.
+pub(super) fn level_size((width, height, _): (u32, u32, u32), level: u32) -> (u32, u32) {
+    ((width >> level).max(1), (height >> level).max(1))
+}
+
+/// The bytes of a texture of `base` size without its `dropped` largest
+/// levels (at least one is always kept).
+pub(super) fn texture_bytes(base: (u32, u32, u32), dropped: u32) -> u64 {
+    (dropped.min(base.2 - 1)..base.2)
+        .map(|level| {
+            let (width, height) = level_size(base, level);
+            u64::from(width) * u64::from(height) * 4
+        })
+        .sum()
+}
+
+/// A material texture of `base` size without its `dropped` largest levels,
+/// with nothing in it yet.
+fn empty_texture(device: &wgpu::Device, base: (u32, u32, u32), dropped: u32) -> wgpu::Texture {
+    let (width, height) = level_size(base, dropped);
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("material texture"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: base.2 - dropped,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: TEXTURE_FORMAT,
+        // Copied from when the texture budget shrinks it.
+        usage: wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_DST
+            | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[TEXTURE_SRGB_FORMAT],
+    })
+}
+
+/// Makes `texture`'s two views and counts its bytes.
+fn finish_texture(
+    texture: wgpu::Texture,
+    bytes: &GpuBytes,
+    base: (u32, u32, u32),
+    dropped: u32,
+) -> GpuTexture {
     let linear = texture.create_view(&wgpu::TextureViewDescriptor::default());
     let srgb = texture.create_view(&wgpu::TextureViewDescriptor {
         format: Some(TEXTURE_SRGB_FORMAT),
         ..Default::default()
     });
-    let size = levels
-        .iter()
-        .map(|(_, _, pixels)| pixels.len() as u64)
-        .sum();
     GpuTexture {
-        _texture: texture,
+        texture,
         srgb,
         linear,
-        _bytes: bytes.count(size),
+        base,
+        dropped,
+        bytes: bytes.count(texture_bytes(base, dropped)),
     }
 }
 
