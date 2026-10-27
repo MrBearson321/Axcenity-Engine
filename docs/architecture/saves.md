@@ -27,6 +27,8 @@ A `Checkpoint` Instance has one property, `Position`: where a restored character
 
 `save::snapshot` keeps every Instance in the Workspace and Lighting, parents before children, as class, name and the properties that differ from the class defaults, plus the two services' own properties. `save::restore` matches each saved Instance to a live one with the same parent, class, name and place among same-named siblings; it sets matched ones' properties (missing ones go back to their defaults, `Material` first), makes the saved ones that are missing, and destroys live ones the save doesn't have. Matched Instances keep their `InstanceId`, so references scripts hold stay valid.
 
+Each saved Instance also keeps its attributes and tags (`attributes`, `tags`), and restoring gives it exactly those, removing others. A property that points at an Instance (`ObjectValue.Value`) is saved in `references` as the number of the entry it points at (or `null` for none) and points at whatever that entry became once everything is restored; one that points outside the saved Instances isn't saved and keeps its live value. All three fields are optional, so older slots load unchanged and `SAVE_VERSION` stays 2. Values add `{"CFrame": [x, y, z, qx, qy, qz, qw]}` and `{"EnumItem": "KeyCode.E"}`.
+
 Not world state, never saved, made or destroyed: scripts, Players, AnimationTracks and ScreenGuis (with everything in them). A Terrain's landscape isn't saved, only its properties. A recreated Instance doesn't get back a script that was inside it.
 
 ## Files

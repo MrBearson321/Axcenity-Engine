@@ -47,6 +47,8 @@ pub enum Insertable {
     NavigationAgent,
     /// A place a character is put back at.
     Checkpoint,
+    /// An IntValue, StringValue or other Value object.
+    Value(ClassName),
 }
 
 impl Insertable {
@@ -93,6 +95,17 @@ impl Insertable {
     pub const AGENTS: [Insertable; 1] = [Insertable::NavigationAgent];
     /// Checkpoints, which a game returns the player character to.
     pub const CHECKPOINTS: [Insertable; 1] = [Insertable::Checkpoint];
+    /// Value objects, which hold one value for scripts.
+    pub const VALUES: [Insertable; 8] = [
+        Insertable::Value(ClassName::IntValue),
+        Insertable::Value(ClassName::NumberValue),
+        Insertable::Value(ClassName::StringValue),
+        Insertable::Value(ClassName::BoolValue),
+        Insertable::Value(ClassName::Vector3Value),
+        Insertable::Value(ClassName::Color3Value),
+        Insertable::Value(ClassName::CFrameValue),
+        Insertable::Value(ClassName::ObjectValue),
+    ];
 
     /// What the buttons and menus call it. A Ball is a "Sphere", as in Studio.
     pub fn label(self) -> &'static str {
@@ -130,6 +143,7 @@ impl Insertable {
             Insertable::FirstPersonController => "First Person",
             Insertable::NavigationAgent => "Agent",
             Insertable::Checkpoint => "Checkpoint",
+            Insertable::Value(class) => class.as_str(),
         }
     }
 
@@ -165,6 +179,7 @@ impl Insertable {
             Insertable::FirstPersonController => ClassName::FirstPersonController,
             Insertable::NavigationAgent => ClassName::NavigationAgent,
             Insertable::Checkpoint => ClassName::Checkpoint,
+            Insertable::Value(class) => class,
         }
     }
 
@@ -316,6 +331,8 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
         );
         id == world.replicated_storage()
             || (is_group && is_saved(world, id))
+            // A Value object goes inside whatever is selected.
+            || (matches!(what, Insertable::Value(_)) && is_saved(world, id))
             || (is_ui_container
                 && (what.is_ui_element() || what == Insertable::Animation)
                 && is_saved(world, id))

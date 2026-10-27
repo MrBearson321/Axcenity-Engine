@@ -40,10 +40,16 @@
 //! its edits are steps of their own that keep the table before and after
 //! ([`History::record_strings`]). Typing into one cell is one step.
 //!
+//! Attributes and tags aren't properties, so their edits are steps of their
+//! own that keep each changed Instance's attributes and tags before and
+//! after ([`History::record_annotations`]). Renaming a tag across the world
+//! is one such step. Dragging one attribute's number is one step.
+//!
 //! A Console command can change anything, so its step keeps the whole world
 //! from the other side of it ([`History::record_world`]); undo and redo swap
 //! it with the world. Copies keep every `InstanceId`, so older steps still work.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use axcenity_core::{InstanceId, StringTable, TerrainData, TreeError, Value, World};
@@ -69,6 +75,49 @@ pub fn snapshot(world: &World, id: InstanceId) -> Snapshot {
         .properties()
         .map(|(name, value)| (Field::Property(name), value.clone()));
     std::iter::once(name).chain(properties).collect()
+}
+
+/// An Instance's attributes and tags, as recorded before and after a change.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Annotations {
+    pub attributes: BTreeMap<String, Value>,
+    pub tags: Vec<String>,
+}
+
+/// The attributes and tags of `id` now (empty if it no longer exists).
+pub fn annotations(world: &World, id: InstanceId) -> Annotations {
+    world
+        .get(id)
+        .map_or_else(Annotations::default, |instance| Annotations {
+            attributes: instance.attributes().clone(),
+            tags: instance.tags().to_vec(),
+        })
+}
+
+/// Gives `id` exactly these attributes and tags, in this order.
+pub fn put_annotations(world: &mut World, id: InstanceId, annotations: &Annotations) {
+    let Some(instance) = world.get(id) else {
+        return;
+    };
+    let old_names: Vec<String> = instance.attributes().keys().cloned().collect();
+    let old_tags = instance.tags().to_vec();
+    for name in old_names {
+        if !annotations.attributes.contains_key(&name) {
+            let _ = world.set_attribute(id, &name, None);
+        }
+    }
+    for (name, value) in &annotations.attributes {
+        let _ = world.set_attribute(id, name, Some(value.clone()));
+    }
+    // All off and back on, so the order comes back too.
+    if old_tags != annotations.tags {
+        for tag in &old_tags {
+            let _ = world.remove_tag(id, tag);
+        }
+        for tag in &annotations.tags {
+            let _ = world.add_tag(id, tag);
+        }
+    }
 }
 
 /// Where an Instance sits in the tree: its parent, and its position among
@@ -232,6 +281,13 @@ enum StepKind {
         key: String,
         before: Arc<StringTable>,
         after: Arc<StringTable>,
+    },
+    /// Attributes and tags of some Instances, before and after. `key`
+    /// names what's being edited (one attribute of one Instance); later
+    /// edits with the same key merge into the step.
+    Annotations {
+        key: String,
+        parts: Vec<(InstanceId, Annotations, Annotations)>,
     },
     /// The whole world from the other side of the step: before it while
     /// the step can be undone, after it once it has been.
@@ -723,6 +779,67 @@ impl History {
         }
     }
 
+    /// Records attribute and tag changes (already made) as one step named
+    /// `label`: each Instance's [`annotations`] before, and as they are
+    /// now. Edits with the same `key` while the step is open (a drag)
+    /// merge into it. Does nothing if nothing changed.
+    pub fn record_annotations(
+        &mut self,
+        world: &mut World,
+        key: String,
+        label: String,
+        before: Vec<(InstanceId, Annotations)>,
+    ) {
+        let parts: Vec<_> = before
+            .into_iter()
+            .map(|(id, before)| {
+                let after = annotations(world, id);
+                (id, before, after)
+            })
+            .collect();
+        let open = self.open;
+        let merging = self.undo.last().is_some_and(|top| {
+            matches!(&top.kind, StepKind::Annotations { key: top_key, .. }
+                if open == Some(top.number) && *top_key == key)
+        });
+        if !merging {
+            let parts: Vec<_> = parts
+                .into_iter()
+                .filter(|(_, before, after)| before != after)
+                .collect();
+            if parts.is_empty() {
+                return;
+            }
+            self.seal();
+            let number = self.push(world, label, StepKind::Annotations { key, parts });
+            self.open = Some(number);
+            return;
+        }
+        let number = self.next_number();
+        let top = self.undo.last_mut().expect("checked by `merging`");
+        let StepKind::Annotations {
+            parts: top_parts, ..
+        } = &mut top.kind
+        else {
+            unreachable!("checked by `merging`");
+        };
+        for (id, before, after) in parts {
+            // Keep the oldest "before" and the newest "after".
+            match top_parts.iter_mut().find(|(top_id, _, _)| *top_id == id) {
+                Some(part) => part.2 = after,
+                None => top_parts.push((id, before, after)),
+            }
+        }
+        top_parts.retain(|(_, before, after)| before != after);
+        if top_parts.is_empty() {
+            self.undo.pop();
+            self.open = None;
+        } else {
+            top.number = number;
+            self.open = Some(number);
+        }
+    }
+
     /// Records a change that could have touched anything, such as a Console
     /// command, as one step named `label`. `before` is the whole world as
     /// it was; `world` is already changed.
@@ -860,6 +977,11 @@ impl History {
                     .collect();
             }
             StepKind::Strings { before, .. } => world.set_strings(before.clone()),
+            StepKind::Annotations { parts, .. } => {
+                for (id, before, _) in parts {
+                    put_annotations(world, *id, before);
+                }
+            }
             StepKind::World(other) => std::mem::swap(world, &mut *other.0),
         }
         self.redo.push(step);
@@ -930,6 +1052,11 @@ impl History {
                 blobs = changes.clone();
             }
             StepKind::Strings { after, .. } => world.set_strings(after.clone()),
+            StepKind::Annotations { parts, .. } => {
+                for (id, _, after) in parts {
+                    put_annotations(world, *id, after);
+                }
+            }
             StepKind::World(other) => std::mem::swap(world, &mut *other.0),
         }
         self.undo.push(step);

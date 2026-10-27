@@ -62,6 +62,20 @@ impl LuaCFrame {
         }
     }
 
+    /// A stored CFrame (`CFrameValue.Value`, an attribute).
+    pub fn from_core(cf: axcenity_core::CFrame) -> Self {
+        let [x, y, z, w] = cf.rotation;
+        Self::new(to_vec3(cf.position), Quat::from_xyzw(x, y, z, w))
+    }
+
+    /// This CFrame, to store.
+    pub fn to_core(self) -> axcenity_core::CFrame {
+        axcenity_core::CFrame {
+            position: from_vec3(self.position),
+            rotation: self.rotation.to_array(),
+        }
+    }
+
     /// Facing from `at` towards `target`, with its top as close to `up` as
     /// it can be. Looking straight along `up` uses -Z or +X as the top instead.
     pub fn look_at(at: Vec3, target: Vec3, up: Vec3) -> Self {

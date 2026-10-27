@@ -1,6 +1,7 @@
 //! Change events: `Changed`, `GetPropertyChangedSignal`, `ChildAdded`,
 //! `ChildRemoved`, `DescendantAdded`, `DescendantRemoving`,
-//! `AncestryChanged`, and a widget's `ValueChanged`.
+//! `AncestryChanged`, a widget's `ValueChanged`, `AttributeChanged` and
+//! `CollectionService`'s tag signals (see `collection`).
 //!
 //! The World keeps a log of every change, whoever made it: a script, physics
 //! moving a part, or the editor during Play. [`ScriptRuntime::fire_changes`]
@@ -26,8 +27,15 @@ pub fn fire(lua: &Lua, changes: &[RecordedChange]) {
                 }
                 let owner = Owner::Instance(instance);
                 // `Changed` gets the property's name; a property's own signal
-                // gets nothing, as in Roblox.
-                events::fire_change(lua, owner, Event::Named("Changed"), number, name);
+                // gets nothing, as in Roblox. A Value object's `Changed`
+                // only fires for its `Value`, with the new value.
+                match value_object_value(lua, instance) {
+                    None => events::fire_change(lua, owner, Event::Named("Changed"), number, name),
+                    Some(value) if name == "Value" => {
+                        events::fire_change(lua, owner, Event::Named("Changed"), number, value);
+                    }
+                    Some(_) => {}
+                }
                 events::fire_change(lua, owner, Event::PropertyChanged(name), number, ());
                 // A Slider, Toggle, Dropdown or ProgressBar also says what
                 // its new Value is.
@@ -40,6 +48,13 @@ pub fn fire(lua: &Lua, changes: &[RecordedChange]) {
                     fire_ancestry_changed(lua, instance, number);
                 }
             }
+            Change::Attribute { instance, ref name } => {
+                if exists(lua, instance) {
+                    crate::collection::fire_attribute_changed(lua, instance, name, number);
+                }
+            }
+            // Fired together after the rest (see `collection`).
+            Change::Tag { .. } => {}
             Change::ChildAdded { parent, child } => {
                 fire_child_event(lua, parent, "ChildAdded", child, number);
                 let later = &changes[index + 1..];
@@ -53,6 +68,7 @@ pub fn fire(lua: &Lua, changes: &[RecordedChange]) {
             }
         }
     }
+    crate::collection::fire_tag_changes(lua, changes);
 }
 
 fn fire_child_event(
@@ -147,6 +163,20 @@ fn fire_ancestry_changed(lua: &Lua, instance: InstanceId, number: u64) {
             args,
         );
     }
+}
+
+/// The `Value` of a Value object (see `ClassName::is_value_object`), as
+/// Lua; `None` for any other class.
+fn value_object_value(lua: &Lua, id: InstanceId) -> Option<mlua::Value> {
+    let value = {
+        let world = instance::world(lua).ok()?;
+        let object = world.get(id)?;
+        if !object.class().is_value_object() {
+            return None;
+        }
+        object.property("Value")?.clone()
+    };
+    crate::types::value_to_lua(lua, &value).ok()
 }
 
 /// The `Value` of a widget (see `ClassName::is_value_widget`), as Lua.

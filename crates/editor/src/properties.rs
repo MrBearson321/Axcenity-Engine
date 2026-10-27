@@ -6,8 +6,8 @@
 //! and gives one place to notice unsaved changes.
 
 use axcenity_core::{
-    ClassName, Color3, Instance, InstanceId, Material, PartType, ParticleType, TextureChannel,
-    ToneMapping, Value, World,
+    CFrame, ClassName, Color3, EnumItem, Instance, InstanceId, Material, PartType, ParticleType,
+    TextureChannel, ToneMapping, UDim2, Value, Vector2, Vector3, World, is_attribute_name,
 };
 use eframe::egui;
 
@@ -46,6 +46,10 @@ pub enum Edit {
     /// During Play, pins (true) or unpins a value edited during Play, so
     /// Stop copies it into the edit world (see `play::kept`).
     Keep(Field, bool),
+    /// Sets an attribute, or removes it (`None`).
+    Attribute(String, Option<Value>),
+    AddTag(String),
+    RemoveTag(String),
 }
 
 /// One group of properties in the panel, such as "Appearance".
@@ -522,12 +526,27 @@ pub fn show(
                             if let Some(keep) = field_name_with_pin(ui, name, pin(field)) {
                                 edit = Some(Edit::Keep(field, keep));
                             }
-                            if let Some(made) = value_control(ui, name, value) {
-                                edit = Some(made);
+                            let made = match value {
+                                // An ObjectValue's Value picks from the world.
+                                Value::Instance(target) => object_control(ui, world, id, target)
+                                    .map(|target| Edit::Property(name, Value::Instance(target))),
+                                value => value_control(ui, name, value),
+                            };
+                            if made.is_some() {
+                                edit = made;
                             }
                             ui.end_row();
                         }
                     });
+                }
+                // Services keep neither in the world file.
+                if !instance.class().is_service() {
+                    if let Some(made) = attributes_section(ui, instance) {
+                        edit = Some(made);
+                    }
+                    if let Some(made) = tags_section(ui, instance) {
+                        edit = Some(made);
+                    }
                 }
                 if instance.class() == ClassName::ScreenGui
                     && instance
@@ -548,6 +567,175 @@ pub fn show(
     edit
 }
 
+/// The types an attribute can be, by name, with the value a new one starts at.
+/// Makes the value a new attribute of one type starts at.
+type NewValue = fn() -> Value;
+
+pub const ATTRIBUTE_TYPES: [(&str, NewValue); 9] = [
+    ("Boolean", || Value::Bool(false)),
+    ("Number", || Value::Number(0.0)),
+    ("String", || Value::String(String::new())),
+    ("Vector3", || Value::Vector3(Vector3::default())),
+    ("Vector2", || Value::Vector2(Vector2::default())),
+    ("Color3", || Value::Color3(Color3::new(1.0, 1.0, 1.0))),
+    ("UDim2", || Value::UDim2(UDim2::default())),
+    ("CFrame", || Value::CFrame(CFrame::IDENTITY)),
+    ("EnumItem", || {
+        Value::EnumItem(EnumItem {
+            enum_name: "Material".to_owned(),
+            item: "Plastic".to_owned(),
+        })
+    }),
+];
+
+/// The Attributes section: each attribute with its control and a button
+/// that removes it, then a row that adds one by name and type.
+fn attributes_section(ui: &mut egui::Ui, instance: &Instance) -> Option<Edit> {
+    let mut edit = None;
+    section(ui, "Attributes", |ui| {
+        for (name, value) in instance.attributes() {
+            // The ✕ goes by the name, so the value keeps the whole width.
+            ui.horizontal(|ui| {
+                field_name(ui, name);
+                if widgets_remove(ui, &format!("Remove the attribute {name}")) {
+                    edit = Some(Edit::Attribute(name.clone(), None));
+                }
+            });
+            ui.push_id(name, |ui| {
+                if let Some(value) = value_edit(ui, name, value.clone()) {
+                    edit = Some(Edit::Attribute(name.clone(), Some(value)));
+                }
+            });
+            ui.end_row();
+        }
+        // The half-typed name and the picked type, kept by egui between frames.
+        let id = ui.id().with("new attribute");
+        let (mut name, mut kind): (String, usize) =
+            ui.data_mut(|data| data.get_temp(id)).unwrap_or_default();
+        field_name(ui, "Add");
+        ui.vertical(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut name)
+                    .hint_text("Name")
+                    .desired_width(f32::INFINITY),
+            );
+            ui.horizontal(|ui| {
+                egui::ComboBox::from_id_salt(id.with("type"))
+                    .selected_text(ATTRIBUTE_TYPES[kind].0)
+                    .show_ui(ui, |ui| {
+                        for (index, (label, _)) in ATTRIBUTE_TYPES.iter().enumerate() {
+                            ui.selectable_value(&mut kind, index, *label);
+                        }
+                    });
+                let taken = instance.attribute(&name).is_some();
+                let valid = is_attribute_name(&name) && !taken;
+                let hint = if taken {
+                    "It already has an attribute with this name."
+                } else {
+                    "Names are 1 to 100 letters, digits and underscores."
+                };
+                let add = ui
+                    .add_enabled(valid, egui::Button::new(format!("{} Add", icons::PLUS)))
+                    .on_disabled_hover_text(hint);
+                if add.clicked() {
+                    edit = Some(Edit::Attribute(
+                        name.clone(),
+                        Some(ATTRIBUTE_TYPES[kind].1()),
+                    ));
+                    name.clear();
+                }
+            });
+        });
+        ui.data_mut(|data| data.insert_temp(id, (name, kind)));
+        ui.end_row();
+    });
+    edit
+}
+
+/// The Tags row: a chip for each tag (click its ✕ to remove it), and a box
+/// that adds one on Enter.
+fn tags_section(ui: &mut egui::Ui, instance: &Instance) -> Option<Edit> {
+    let mut edit = None;
+    section(ui, "Tags", |ui| {
+        field_name(ui, "Tags");
+        ui.vertical(|ui| {
+            ui.horizontal_wrapped(|ui| {
+                for tag in instance.tags() {
+                    let chip = egui::Button::new(format!("{} {tag}  {}", icons::TAG, icons::X))
+                        .corner_radius(10.0)
+                        .small();
+                    if ui
+                        .add(chip)
+                        .on_hover_text(format!("Remove the tag {tag}"))
+                        .clicked()
+                    {
+                        edit = Some(Edit::RemoveTag(tag.clone()));
+                    }
+                }
+            });
+            let id = ui.id().with("new tag");
+            let mut text: String = ui.data_mut(|data| data.get_temp(id)).unwrap_or_default();
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut text)
+                    .hint_text("Add a tag")
+                    .desired_width(f32::INFINITY),
+            );
+            let entered = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let tag = text.trim();
+            if entered && !tag.is_empty() {
+                edit = Some(Edit::AddTag(tag.to_owned()));
+                text.clear();
+            }
+            ui.data_mut(|data| data.insert_temp(id, text));
+        });
+        ui.end_row();
+    });
+    edit
+}
+
+/// A small ✕ button. True when clicked.
+fn widgets_remove(ui: &mut egui::Ui, tooltip: &str) -> bool {
+    ui.small_button(icons::X).on_hover_text(tooltip).clicked()
+}
+
+/// An ObjectValue's `Value`: a dropdown of every Instance in the Workspace
+/// and ReplicatedStorage by its full name, and None. Returns the new
+/// target, if one was picked.
+fn object_control(
+    ui: &mut egui::Ui,
+    world: &World,
+    owner: InstanceId,
+    target: Option<InstanceId>,
+) -> Option<Option<InstanceId>> {
+    let target = target.filter(|&target| world.contains(target));
+    let current = target
+        .and_then(|target| world.full_name(target))
+        .unwrap_or_else(|| "None".to_owned());
+    let mut picked = None;
+    egui::ComboBox::from_id_salt(("object value", owner))
+        .selected_text(current)
+        .truncate()
+        .show_ui(ui, |ui| {
+            if ui.selectable_label(target.is_none(), "None").clicked() {
+                picked = Some(None);
+            }
+            let places = [world.workspace(), world.replicated_storage()];
+            for id in places
+                .into_iter()
+                .flat_map(|place| world.descendants(place))
+            {
+                if id == owner {
+                    continue;
+                }
+                let name = world.full_name(id).unwrap_or_default();
+                if ui.selectable_label(target == Some(id), name).clicked() {
+                    picked = Some(Some(id));
+                }
+            }
+        });
+    picked.filter(|&picked| picked != target)
+}
+
 /// A collapsible group with a two-column grid of names and controls.
 fn section(ui: &mut egui::Ui, title: &str, rows: impl FnOnce(&mut egui::Ui)) {
     let icon = match title {
@@ -566,6 +754,8 @@ fn section(ui: &mut egui::Ui, title: &str, rows: impl FnOnce(&mut egui::Ui)) {
         "Sky" => icons::CLOUD_SUN,
         "Post-processing" => icons::SPARKLE,
         "Light" => icons::LIGHTBULB,
+        "Attributes" => icons::LIST_BULLETS,
+        "Tags" => icons::TAG,
         _ => icons::DOTS_THREE_OUTLINE,
     };
     let palette = theme::palette(ui.ctx());
@@ -1084,7 +1274,65 @@ fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
             choice_control(ui, name, curve, &ToneMapping::ALL, |c| c.as_str())
                 .map(Value::ToneMapping)
         }
+        Value::CFrame(cf) => cframe_control(ui, cf).map(Value::CFrame),
+        Value::EnumItem(item) => enum_item_control(ui, name, &item).map(Value::EnumItem),
+        // Edited with the world at hand (`object_control`).
+        Value::Instance(_) => None,
     }
+}
+
+/// A CFrame as its position and its rotation in degrees (as a part's
+/// Orientation). The rotation is only rewritten when it's edited.
+fn cframe_control(ui: &mut egui::Ui, cf: CFrame) -> Option<CFrame> {
+    use axcenity_render::glam::Quat;
+    let [x, y, z, w] = cf.rotation;
+    let rotation = Quat::from_xyzw(x, y, z, w);
+    let orientation = axcenity_scene::orientation_from_rotation(rotation);
+    let (position, turned) = ui
+        .vertical(|ui| {
+            (
+                value_edit(ui, "Position", Value::Vector3(cf.position)),
+                value_edit(ui, "Orientation", Value::Vector3(orientation)),
+            )
+        })
+        .inner;
+    let mut changed = None;
+    if let Some(Value::Vector3(position)) = position {
+        changed = Some(CFrame { position, ..cf });
+    }
+    if let Some(Value::Vector3(orientation)) = turned {
+        let rotation = axcenity_scene::rotation_from_orientation(orientation);
+        changed = Some(CFrame {
+            rotation: rotation.to_array(),
+            ..changed.unwrap_or(cf)
+        });
+    }
+    changed
+}
+
+/// An enum item: a dropdown of the items when it's one of the enums
+/// properties use, else its name, shown.
+fn enum_item_control(ui: &mut egui::Ui, name: &str, item: &EnumItem) -> Option<EnumItem> {
+    let names: Vec<&'static str> = match item.enum_name.as_str() {
+        "Material" => Material::ALL.iter().map(|m| m.as_str()).collect(),
+        "PartType" => PartType::ALL.iter().map(|t| t.as_str()).collect(),
+        "TextureChannel" => TextureChannel::ALL.iter().map(|c| c.as_str()).collect(),
+        "ParticleType" => ParticleType::ALL.iter().map(|t| t.as_str()).collect(),
+        "ToneMapping" => ToneMapping::ALL.iter().map(|t| t.as_str()).collect(),
+        _ => {
+            ui.label(format!("{}.{}", item.enum_name, item.item));
+            return None;
+        }
+    };
+    let current = names
+        .iter()
+        .copied()
+        .find(|n| *n == item.item)
+        .unwrap_or(names[0]);
+    choice_control(ui, name, current, &names, |n| n).map(|picked| EnumItem {
+        enum_name: item.enum_name.clone(),
+        item: picked.to_owned(),
+    })
 }
 
 /// A color swatch that opens a color picker, with the 0–255 values beside it.
@@ -1254,5 +1502,60 @@ mod tests {
         assert!(!can_rename_here(world.get(script).unwrap()));
         assert!(!can_rename(world.get(world.workspace()).unwrap()));
         assert!(!can_rename(world.get(world.root()).unwrap()));
+    }
+}
+
+#[cfg(test)]
+mod attribute_section_tests {
+    use super::*;
+
+    /// A Folder with an attribute of every kind and some tags draws its
+    /// Attributes section and Tags row inside a 260-point column, and
+    /// clicking nothing makes no edit. With `AXCENITY_SNAPSHOTS` set it's
+    /// saved as `properties-attributes.png`.
+    #[test]
+    fn attributes_and_tags_draw_in_a_narrow_column() {
+        let mut world = World::new();
+        let folder = world.create(ClassName::Folder).unwrap();
+        world.set_parent(folder, Some(world.workspace())).unwrap();
+        for (name, make) in ATTRIBUTE_TYPES {
+            world.set_attribute(folder, name, Some(make())).unwrap();
+        }
+        world.add_tag(folder, "Lava").unwrap();
+        world.add_tag(folder, "Hazard").unwrap();
+        let size = egui::vec2(260.0, 1100.0);
+        let mut fit = None;
+        let mut edit = None;
+        let mut draw = |ctx: &egui::Context| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let room = ui.max_rect();
+                edit = show(ui, &world, Some(folder), false, &[], 1, |_| {});
+                fit = Some((ui.min_rect(), room));
+            });
+        };
+        let ctx = theme::test_context();
+        for _ in 0..3 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                ..Default::default()
+            };
+            let _ = ctx.run(input, &mut draw);
+        }
+        if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") {
+            crate::snapshot::snapshot(
+                &std::path::PathBuf::from(folder).join("properties-attributes.png"),
+                size,
+                vec![Vec::new(); 3],
+                &mut draw,
+            );
+        }
+        let (used, room) = fit.unwrap();
+        assert!(
+            used.width() <= room.width() + 0.5,
+            "{} in {}",
+            used.width(),
+            room.width()
+        );
+        assert_eq!(edit, None);
     }
 }

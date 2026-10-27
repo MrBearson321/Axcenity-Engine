@@ -759,7 +759,62 @@ pub fn value_to_lua(lua: &Lua, value: &Value) -> mlua::Result<mlua::Value> {
         | Value::ToneMapping(_) => LuaEnumItem::from_value(value)
             .expect("enum property values are enum items")
             .into_lua(lua),
+        Value::CFrame(cf) => crate::cframe::LuaCFrame::from_core(*cf).into_lua(lua),
+        // An item this engine no longer has reads as its name.
+        Value::EnumItem(item) => match EnumType::ALL
+            .into_iter()
+            .find(|enum_type| enum_type.name() == item.enum_name)
+            .and_then(|enum_type| LuaEnumItem::find(enum_type, &item.item))
+        {
+            Some(found) => found.into_lua(lua),
+            None => item.item.as_str().into_lua(lua),
+        },
+        // An ObjectValue pointing at a destroyed Instance holds nil.
+        Value::Instance(id) => {
+            let alive = id
+                .filter(|&id| crate::instance::world(lua).map_or(true, |world| world.contains(id)));
+            alive.map(LuaInstance).into_lua(lua)
+        }
     }
+}
+
+/// A Lua value as an attribute's value (`SetAttribute`): `None` for nil,
+/// which removes the attribute. Errors name what was given instead.
+pub fn attribute_from_lua(lua: &Lua, value: &mlua::Value) -> Result<Option<Value>, String> {
+    let converted = match value {
+        mlua::Value::Nil => return Ok(None),
+        mlua::Value::Boolean(b) => Some(Value::Bool(*b)),
+        mlua::Value::Integer(n) => Some(Value::Number(*n as f64)),
+        mlua::Value::Number(n) => Some(Value::Number(*n)),
+        mlua::Value::String(s) => Some(Value::String(s.to_string_lossy())),
+        mlua::Value::UserData(data) => {
+            if let Ok(item) = data.borrow::<LuaEnumItem>() {
+                Some(Value::EnumItem(axcenity_core::EnumItem {
+                    enum_name: item.enum_type.name().to_owned(),
+                    item: item.name.to_owned(),
+                }))
+            } else if let Ok(cf) = data.borrow::<crate::cframe::LuaCFrame>() {
+                Some(Value::CFrame(cf.to_core()))
+            } else {
+                [
+                    ValueKind::Vector3,
+                    ValueKind::Vector2,
+                    ValueKind::UDim2,
+                    ValueKind::Color3,
+                ]
+                .into_iter()
+                .find_map(|kind| value_from_lua(lua, value.clone(), kind).ok())
+            }
+        }
+        _ => None,
+    };
+    converted.map(Some).ok_or_else(|| {
+        format!(
+            "an attribute can be a boolean, number, string, Vector3, Vector2, Color3, UDim2, \
+             CFrame, EnumItem or nil, not a {}",
+            type_name(lua, value)
+        )
+    })
 }
 
 /// A Lua value as a property value of `kind`, or a message ending a sentence
@@ -809,6 +864,19 @@ pub fn value_from_lua(lua: &Lua, value: mlua::Value, kind: ValueKind) -> Result<
             .ok()
             .and_then(LuaEnumItem::to_value)
             .filter(|item| item.kind() == kind),
+        (ValueKind::CFrame, _) => crate::cframe::LuaCFrame::from_lua(value.clone(), lua)
+            .ok()
+            .map(|cf| Value::CFrame(cf.to_core())),
+        (ValueKind::EnumItem, _) => LuaEnumItem::from_lua(value.clone(), lua).ok().map(|item| {
+            Value::EnumItem(axcenity_core::EnumItem {
+                enum_name: item.enum_type.name().to_owned(),
+                item: item.name.to_owned(),
+            })
+        }),
+        (ValueKind::Instance, mlua::Value::Nil) => Some(Value::Instance(None)),
+        (ValueKind::Instance, _) => LuaInstance::from_lua(value.clone(), lua)
+            .ok()
+            .map(|instance| Value::Instance(Some(instance.0))),
         _ => None,
     };
     converted.ok_or_else(|| wrong_type(&value))
@@ -880,6 +948,10 @@ pub fn type_name(lua: &Lua, value: &mlua::Value) -> String {
             (data.is::<crate::events::LuaConnection>(), "Connection"),
             (data.is::<crate::run_service::LuaRunService>(), "RunService"),
             (data.is::<crate::tween::LuaTweenService>(), "TweenService"),
+            (
+                data.is::<crate::collection::LuaCollectionService>(),
+                "CollectionService",
+            ),
             (data.is::<crate::save::LuaSaveService>(), "SaveService"),
             (data.is::<crate::tween::LuaTween>(), "Tween"),
             (data.is::<crate::tween::LuaTweenInfo>(), "TweenInfo"),

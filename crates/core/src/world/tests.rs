@@ -389,8 +389,8 @@ fn only_real_changes_are_recorded_and_numbered_in_order() {
     let recorded = world.take_changes();
     let names: Vec<_> = recorded
         .iter()
-        .map(|recorded| match recorded.change {
-            Change::Property { name, .. } => name,
+        .map(|recorded| match &recorded.change {
+            Change::Property { name, .. } => *name,
             other => panic!("{other:?}"),
         })
         .collect();
@@ -467,4 +467,127 @@ fn every_terrain_has_data_that_copies_share_until_one_changes() {
     let part = world.create(ClassName::Part).unwrap();
     assert!(world.terrain(part).is_none());
     assert!(!world.set_terrain(part, data));
+}
+
+#[test]
+fn attributes_are_set_changed_and_removed_with_change_records() {
+    let mut world = World::new();
+    let workspace = world.workspace();
+    let part = part_in(&mut world, workspace, "Lava");
+    world.record_changes();
+    world
+        .set_attribute(part, "Damage", Some(Value::Number(10.0)))
+        .unwrap();
+    // The same value again isn't a change.
+    world
+        .set_attribute(part, "Damage", Some(Value::Number(10.0)))
+        .unwrap();
+    world
+        .set_attribute(part, "Kind", Some(Value::Material(Material::Neon)))
+        .unwrap();
+    assert_eq!(
+        world.get(part).unwrap().attribute("Damage"),
+        Some(&Value::Number(10.0))
+    );
+    // Property enums are kept as plain enum items.
+    assert_eq!(
+        world.get(part).unwrap().attribute("Kind"),
+        Some(&Value::EnumItem(crate::EnumItem {
+            enum_name: "Material".into(),
+            item: "Neon".into()
+        }))
+    );
+    world.set_attribute(part, "Damage", None).unwrap();
+    assert_eq!(world.get(part).unwrap().attribute("Damage"), None);
+
+    let names: Vec<String> = world
+        .take_changes()
+        .into_iter()
+        .map(|recorded| match recorded.change {
+            Change::Attribute { name, .. } => name,
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(names, ["Damage", "Kind", "Damage"]);
+
+    assert!(matches!(
+        world.set_attribute(part, "has space", Some(Value::Bool(true))),
+        Err(AttributeError::BadName(_))
+    ));
+    assert_eq!(
+        world.set_attribute(part, "Target", Some(Value::Instance(Some(part)))),
+        Err(AttributeError::BadValue)
+    );
+}
+
+#[test]
+fn tags_are_listed_in_order_and_only_found_inside_the_game() {
+    let mut world = World::new();
+    let workspace = world.workspace();
+    let lava = part_in(&mut world, workspace, "Lava");
+    let loose = world.create(ClassName::Part).unwrap();
+    assert!(world.add_tag(lava, "Lava").unwrap());
+    assert!(!world.add_tag(lava, "Lava").unwrap());
+    world.add_tag(lava, "Hot").unwrap();
+    world.add_tag(loose, "Lava").unwrap();
+    assert_eq!(world.get(lava).unwrap().tags(), ["Lava", "Hot"]);
+    assert_eq!(world.tagged("Lava"), [lava]);
+    assert_eq!(
+        world.all_tags().into_iter().collect::<Vec<_>>(),
+        [("Hot".to_owned(), 1), ("Lava".to_owned(), 1)]
+    );
+    assert!(world.remove_tag(lava, "Lava").unwrap());
+    assert!(!world.remove_tag(lava, "Lava").unwrap());
+    assert!(world.tagged("Lava").is_empty());
+}
+
+#[test]
+fn duplicate_copies_attributes_tags_and_points_references_inside_the_copy() {
+    let mut world = World::new();
+    let workspace = world.workspace();
+    let model = world.create(ClassName::Model).unwrap();
+    world.set_parent(model, Some(workspace)).unwrap();
+    let door = part_in(&mut world, model, "Door");
+    let outside = part_in(&mut world, workspace, "Outside");
+    let to_door = world.create(ClassName::ObjectValue).unwrap();
+    world.set_parent(to_door, Some(model)).unwrap();
+    world
+        .set_property(to_door, "Value", Value::Instance(Some(door)))
+        .unwrap();
+    let to_outside = world.create(ClassName::ObjectValue).unwrap();
+    world.set_parent(to_outside, Some(model)).unwrap();
+    world
+        .set_property(to_outside, "Value", Value::Instance(Some(outside)))
+        .unwrap();
+    world.add_tag(door, "Door").unwrap();
+    world
+        .set_attribute(door, "Locked", Some(Value::Bool(true)))
+        .unwrap();
+
+    let copy = world.duplicate(model).unwrap();
+    let children = world.get(copy).unwrap().children().to_vec();
+    let [new_door, new_to_door, new_to_outside] = children[..] else {
+        panic!("{children:?}");
+    };
+    assert_eq!(world.get(new_door).unwrap().tags(), ["Door"]);
+    assert_eq!(
+        world.get(new_door).unwrap().attribute("Locked"),
+        Some(&Value::Bool(true))
+    );
+    let value = |id| world.get(id).unwrap().property("Value").unwrap().clone();
+    assert_eq!(value(new_to_door), Value::Instance(Some(new_door)));
+    assert_eq!(value(new_to_outside), Value::Instance(Some(outside)));
+}
+
+#[test]
+fn an_int_value_rounds_to_a_whole_number() {
+    let mut world = World::new();
+    let int = world.create(ClassName::IntValue).unwrap();
+    world
+        .set_property(int, "Value", Value::Number(2.6))
+        .unwrap();
+    assert_eq!(
+        world.get(int).unwrap().property("Value"),
+        Some(&Value::Number(3.0))
+    );
 }

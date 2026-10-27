@@ -1043,10 +1043,10 @@ Blocks cover the common cases: "look at", "move forward by", "lerp", "random num
 
 ### Acceptance criteria
 
-- [ ] An attribute set in Properties is read by a script in Play, and `GetAttributeChangedSignal` fires when another script changes it.
-- [ ] A script that runs `GetTagged("Lava")` and connects `GetInstanceAddedSignal("Lava")` handles both existing and newly cloned lava parts.
-- [ ] Attributes, tags and Value objects survive save, reload, prefab use and a save slot round trip. A world saved before this phase loads unchanged.
-- [ ] Renaming a tag in the Tags panel renames it everywhere, as one undo step.
+- [x] An attribute set in Properties is read by a script in Play, and `GetAttributeChangedSignal` fires when another script changes it.
+- [x] A script that runs `GetTagged("Lava")` and connects `GetInstanceAddedSignal("Lava")` handles both existing and newly cloned lava parts.
+- [x] Attributes, tags and Value objects survive save, reload, prefab use and a save slot round trip. A world saved before this phase loads unchanged.
+- [x] Renaming a tag in the Tags panel renames it everywhere, as one undo step.
 
 ---
 

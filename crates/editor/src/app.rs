@@ -34,6 +34,7 @@ mod material_files;
 mod nav_overlay;
 mod session;
 mod settings;
+mod tags;
 mod terrain;
 mod texture_set;
 mod tree_ops;
@@ -212,6 +213,8 @@ pub struct EditorApp {
     profiler: Profiler,
     /// The last asset check, for the Asset Check panel.
     asset_check: AssetCheck,
+    /// The Tags panel's rename box.
+    tags: crate::tags::TagsPanel,
     /// Each script's uses of APIs from the other side, for the warning badges.
     warnings: WarningCache,
     /// The open script tabs, and whether the viewport or a script is shown.
@@ -341,6 +344,7 @@ impl egui_dock::TabViewer for DockViewer<'_> {
             Pane::Profiler => self.app.profiler.show(ui),
             Pane::AssetCheck => self.app.asset_check_pane(ui),
             Pane::BehaviorTree => self.app.behavior_tree_pane(ui),
+            Pane::Tags => self.app.tags_pane(ui),
             Pane::Script(id) => self.app.script_pane(ui, *id),
         }
     }
@@ -551,6 +555,7 @@ impl EditorApp {
             last_frame: None,
             profiler: Profiler::default(),
             asset_check: AssetCheck::default(),
+            tags: crate::tags::TagsPanel::default(),
             tabs: ScriptTabs::default(),
             confirm_delete: None,
             importing: None,
@@ -1110,6 +1115,8 @@ impl EditorApp {
 mod agent_tests;
 #[cfg(test)]
 mod asset_fix_tests;
+#[cfg(test)]
+mod attribute_tests;
 #[cfg(test)]
 mod behavior_tree_tests;
 #[cfg(test)]

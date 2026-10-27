@@ -51,6 +51,7 @@ mod splash;
 mod start;
 mod style_panel;
 mod surface;
+mod tags;
 mod terrain_studio;
 mod theme;
 mod thumbnail;

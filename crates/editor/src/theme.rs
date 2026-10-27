@@ -745,6 +745,13 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::FirstPersonController => icons::EYE,
         ClassName::NavigationAgent => icons::ROBOT,
         ClassName::Checkpoint => icons::FLAG_PENNANT,
+        ClassName::IntValue | ClassName::NumberValue => icons::HASH,
+        ClassName::StringValue => icons::TEXT_AA,
+        ClassName::BoolValue => icons::TOGGLE_LEFT,
+        ClassName::Vector3Value => icons::ARROWS_OUT_CARDINAL,
+        ClassName::Color3Value => icons::PALETTE,
+        ClassName::CFrameValue => icons::COMPASS,
+        ClassName::ObjectValue => icons::LINK,
     }
 }
 

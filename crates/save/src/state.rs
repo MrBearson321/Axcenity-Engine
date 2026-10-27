@@ -8,6 +8,11 @@
 //! ones the save doesn't have. Matched Instances keep their `InstanceId`,
 //! so a script that holds one still has it after a load.
 //!
+//! Attributes and tags are saved with each Instance and put back exactly.
+//! A property that points at an Instance (`ObjectValue.Value`) is saved as
+//! the number of the entry it points at, and points at whatever that entry
+//! became; one that points outside the saved Instances isn't saved.
+//!
 //! Scripts, Players and ScreenGuis (with everything inside them) are not
 //! world state: they're never saved, matched, made or destroyed. A Terrain's
 //! landscape isn't saved, only its properties.
@@ -15,8 +20,8 @@
 use std::collections::{BTreeMap, HashMap};
 
 use axcenity_core::{
-    ClassName, Color3, InstanceId, Material, PartType, ParticleType, TextureChannel, ToneMapping,
-    UDim2, Value, Vector2, Vector3, World,
+    CFrame, ClassName, Color3, EnumItem, InstanceId, Material, PartType, ParticleType,
+    TextureChannel, ToneMapping, UDim2, Value, ValueKind, Vector2, Vector3, World,
 };
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -46,6 +51,14 @@ pub struct SavedInstance {
     pub name: String,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub properties: Properties,
+    /// Properties that point at an Instance, as the number of the entry
+    /// they point at (`None` for nothing).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub references: BTreeMap<String, Option<usize>>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub attributes: Properties,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
 }
 
 /// Where a saved Instance was: in a service, or in an earlier entry of
@@ -94,6 +107,13 @@ fn to_json(value: &Value) -> serde_json::Value {
         Value::TextureChannel(c) => json!({ "TextureChannel": c.as_str() }),
         Value::ParticleType(t) => json!({ "ParticleType": t.as_str() }),
         Value::ToneMapping(t) => json!({ "ToneMapping": t.as_str() }),
+        Value::CFrame(c) => {
+            let (p, q) = (c.position, c.rotation);
+            json!({ "CFrame": [p.x, p.y, p.z, q[0], q[1], q[2], q[3]] })
+        }
+        Value::EnumItem(item) => json!({ "EnumItem": format!("{}.{}", item.enum_name, item.item) }),
+        // Saved as `SavedInstance::references` instead.
+        Value::Instance(_) => serde_json::Value::Null,
     }
 }
 
@@ -118,6 +138,19 @@ fn from_json(json: &serde_json::Value) -> Option<Value> {
                 "TextureChannel" => TextureChannel::from_name(name()?).map(Value::TextureChannel),
                 "ParticleType" => ParticleType::from_name(name()?).map(Value::ParticleType),
                 "ToneMapping" => ToneMapping::from_name(name()?).map(Value::ToneMapping),
+                "CFrame" => numbers(value).map(|[x, y, z, qx, qy, qz, qw]| {
+                    Value::CFrame(CFrame {
+                        position: Vector3::new(x, y, z),
+                        rotation: [qx, qy, qz, qw],
+                    })
+                }),
+                "EnumItem" => {
+                    let (enum_name, item) = name()?.split_once('.')?;
+                    Some(Value::EnumItem(EnumItem {
+                        enum_name: enum_name.to_owned(),
+                        item: item.to_owned(),
+                    }))
+                }
                 _ => None,
             }
         }
@@ -187,9 +220,43 @@ pub(crate) fn snapshot_with_ids(world: &World) -> (WorldState, Vec<InstanceId>) 
                 class: instance.class().as_str().to_owned(),
                 name: instance.name().to_owned(),
                 properties: changed_properties(world, id),
+                references: BTreeMap::new(),
+                attributes: instance
+                    .attributes()
+                    .iter()
+                    .filter(|(_, value)| value.as_number().is_none_or(f64::is_finite))
+                    .map(|(name, value)| (name.clone(), SavedValue(value.clone())))
+                    .collect(),
+                tags: instance.tags().to_vec(),
             });
             for &child in instance.children().iter().rev() {
                 stack.push((child, SavedParent::Index(index)));
+            }
+        }
+    }
+    // References last, once every saved Instance has its number.
+    let numbers: HashMap<InstanceId, usize> = ids
+        .iter()
+        .enumerate()
+        .map(|(index, &id)| (id, index))
+        .collect();
+    for (entry, &id) in state.instances.iter_mut().zip(&ids) {
+        let Some(instance) = world.get(id) else {
+            continue;
+        };
+        for (name, value) in instance.properties() {
+            let Value::Instance(target) = value else {
+                continue;
+            };
+            match target.filter(|&target| world.contains(target)) {
+                None => {
+                    entry.references.insert(name.to_owned(), None);
+                }
+                Some(target) => {
+                    if let Some(&number) = numbers.get(&target) {
+                        entry.references.insert(name.to_owned(), Some(number));
+                    }
+                }
             }
         }
     }
@@ -215,6 +282,7 @@ fn changed_properties(world: &World, id: InstanceId) -> Properties {
         .properties()
         .filter(|(name, value)| defaults.get(name) != Some(*value))
         .filter(|(_, value)| value.as_number().is_none_or(f64::is_finite))
+        .filter(|(_, value)| value.kind() != ValueKind::Instance)
         .map(|(name, value)| (name.to_owned(), SavedValue(value.clone())))
         .collect()
 }
@@ -302,6 +370,7 @@ pub fn restore(world: &mut World, state: &WorldState) -> Vec<Option<InstanceId>>
                     id
                 }
             };
+            set_attributes_and_tags(world, id, entry);
             restored[index] = Some(id);
             next.push((id, SavedParent::Index(index)));
         }
@@ -311,7 +380,42 @@ pub fn restore(world: &mut World, state: &WorldState) -> Vec<Option<InstanceId>>
         }
         stack.extend(next.into_iter().rev());
     }
+    for (entry, id) in state.instances.iter().zip(&restored) {
+        let Some(id) = *id else {
+            continue;
+        };
+        for (name, target) in &entry.references {
+            let target = target.and_then(|index| restored.get(index).copied().flatten());
+            let _ = world.set_property(id, name, Value::Instance(target));
+        }
+    }
     restored
+}
+
+/// Gives `id` exactly the saved attributes and tags.
+fn set_attributes_and_tags(world: &mut World, id: InstanceId, entry: &SavedInstance) {
+    let Some(instance) = world.get(id) else {
+        return;
+    };
+    let gone: Vec<String> = instance
+        .attributes()
+        .keys()
+        .filter(|name| !entry.attributes.contains_key(*name))
+        .cloned()
+        .collect();
+    let old_tags = instance.tags().to_vec();
+    for name in gone {
+        let _ = world.set_attribute(id, &name, None);
+    }
+    for (name, value) in &entry.attributes {
+        let _ = world.set_attribute(id, name, Some(value.0.clone()));
+    }
+    for tag in old_tags.iter().filter(|tag| !entry.tags.contains(tag)) {
+        let _ = world.remove_tag(id, tag);
+    }
+    for tag in &entry.tags {
+        let _ = world.add_tag(id, tag);
+    }
 }
 
 /// Sets every property of `id` to its saved value, or to its class's
@@ -326,6 +430,8 @@ fn set_properties(world: &mut World, id: InstanceId, saved: &Properties) {
         .class()
         .default_properties()
         .into_iter()
+        // References are set once every Instance is restored.
+        .filter(|(_, default)| default.kind() != ValueKind::Instance)
         .map(|(name, default)| {
             let value = saved
                 .get(name)

@@ -27,6 +27,10 @@ pub struct Instance {
     parent: Option<InstanceId>,
     children: Vec<InstanceId>,
     properties: BTreeMap<&'static str, Value>,
+    /// Values a creator or script attached by name (`SetAttribute`).
+    attributes: BTreeMap<String, Value>,
+    /// Tags (`CollectionService`), in the order they were added.
+    tags: Vec<String>,
 }
 
 impl Instance {
@@ -37,6 +41,8 @@ impl Instance {
             parent: None,
             children: Vec::new(),
             properties: class.default_properties().into_iter().collect(),
+            attributes: BTreeMap::new(),
+            tags: Vec::new(),
         }
     }
 
@@ -65,6 +71,49 @@ impl Instance {
     pub fn properties(&self) -> impl Iterator<Item = (&'static str, &Value)> {
         self.properties.iter().map(|(name, value)| (*name, value))
     }
+
+    pub fn attribute(&self, name: &str) -> Option<&Value> {
+        self.attributes.get(name)
+    }
+
+    /// Every attribute, sorted by name.
+    pub fn attributes(&self) -> &BTreeMap<String, Value> {
+        &self.attributes
+    }
+
+    /// Its tags, in the order they were added.
+    pub fn tags(&self) -> &[String] {
+        &self.tags
+    }
+
+    pub fn has_tag(&self, tag: &str) -> bool {
+        self.tags.iter().any(|t| t == tag)
+    }
+}
+
+/// The longest attribute name, as in Roblox.
+pub const MAX_ATTRIBUTE_NAME: usize = 100;
+
+#[derive(Debug, PartialEq, thiserror::Error)]
+pub enum AttributeError {
+    #[error("the Instance no longer exists")]
+    Stale,
+    #[error(
+        "`{0}` isn't an attribute name: use 1 to 100 letters, digits and underscores, not starting with `RBX`"
+    )]
+    BadName(String),
+    #[error("an attribute can't hold an Instance")]
+    BadValue,
+}
+
+/// Whether `name` can name an attribute: 1 to [`MAX_ATTRIBUTE_NAME`]
+/// letters, digits and underscores, not starting with `RBX` (kept for the
+/// engine, as in Roblox).
+pub fn is_attribute_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= MAX_ATTRIBUTE_NAME
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && !name.starts_with("RBX")
 }
 
 #[derive(Debug, PartialEq, thiserror::Error)]
@@ -93,8 +142,9 @@ pub enum PropertyError {
 }
 
 /// Something that changed in the tree. Scripts hear about these through
-/// `Changed`, `GetPropertyChangedSignal`, `ChildAdded` and `ChildRemoved`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// `Changed`, `GetPropertyChangedSignal`, `ChildAdded`, `ChildRemoved`,
+/// `AttributeChanged` and `CollectionService`'s signals.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Change {
     /// A property of `instance` got a different value. `Name` and `Parent`
     /// count as properties here.
@@ -112,12 +162,20 @@ pub enum Change {
         parent: InstanceId,
         child: InstanceId,
     },
+    /// The attribute `name` of `instance` was set to a different value or removed.
+    Attribute { instance: InstanceId, name: String },
+    /// `instance` was given the tag `tag` (`added`), or lost it.
+    Tag {
+        instance: InstanceId,
+        tag: String,
+        added: bool,
+    },
 }
 
 /// A [`Change`] with its number. Changes are numbered 0, 1, 2, ... in the
 /// order they happened, so a script that starts listening after change 5
 /// can skip changes 0 to 5.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RecordedChange {
     pub number: u64,
     pub change: Change,
@@ -573,6 +631,18 @@ impl World {
             self.copy_terrain(old, new);
             copies.insert(old, new);
         }
+        // An ObjectValue in the copy that points inside the original points
+        // at the same place in the copy, as `Clone` does in Roblox.
+        for &copy in copies.values() {
+            let instance = self.instances.get_mut(copy.0).expect("copied above");
+            for value in instance.properties.values_mut() {
+                if let Value::Instance(Some(target)) = value
+                    && let Some(&moved) = copies.get(target)
+                {
+                    *target = moved;
+                }
+            }
+        }
         Ok(root)
     }
 
@@ -633,6 +703,13 @@ impl World {
     ) -> Result<(), PropertyError> {
         let instance = self.instances.get_mut(id.0).ok_or(PropertyError::Stale)?;
         let class = instance.class;
+        // An IntValue holds whole numbers only.
+        let value = match value {
+            Value::Number(n) if class == ClassName::IntValue && name == "Value" => {
+                Value::Number(n.round())
+            }
+            value => value,
+        };
         // `get_key_value` also returns the stored `&'static str` key, which the
         // error needs because `name` only lives as long as this call.
         let Some((&key, _)) = instance.properties.get_key_value(name) else {
@@ -680,6 +757,91 @@ impl World {
             self.changed(Change::Property { instance: id, name });
         }
         Ok(())
+    }
+
+    /// Sets the attribute `name` of `id` to `value`, or removes it for
+    /// `None`. Setting the value it already has isn't a [`Change`].
+    pub fn set_attribute(
+        &mut self,
+        id: InstanceId,
+        name: &str,
+        value: Option<Value>,
+    ) -> Result<(), AttributeError> {
+        if !is_attribute_name(name) {
+            return Err(AttributeError::BadName(name.to_owned()));
+        }
+        if value.as_ref().is_some_and(|value| !value.is_attribute()) {
+            return Err(AttributeError::BadValue);
+        }
+        // Attributes keep every enum item the same way.
+        let value = value.map(|value| match value.to_enum_item() {
+            Some(item) => Value::EnumItem(item),
+            None => value,
+        });
+        let instance = self.instances.get_mut(id.0).ok_or(AttributeError::Stale)?;
+        let changed = match value {
+            Some(value) => {
+                instance.attributes.insert(name.to_owned(), value.clone()) != Some(value)
+            }
+            None => instance.attributes.remove(name).is_some(),
+        };
+        if changed {
+            self.changed(Change::Attribute {
+                instance: id,
+                name: name.to_owned(),
+            });
+        }
+        Ok(())
+    }
+
+    /// Gives `id` the tag `tag`. True if it didn't have it already.
+    pub fn add_tag(&mut self, id: InstanceId, tag: &str) -> Result<bool, TreeError> {
+        let instance = self.instances.get_mut(id.0).ok_or(TreeError::Stale)?;
+        if instance.has_tag(tag) {
+            return Ok(false);
+        }
+        instance.tags.push(tag.to_owned());
+        self.changed(Change::Tag {
+            instance: id,
+            tag: tag.to_owned(),
+            added: true,
+        });
+        Ok(true)
+    }
+
+    /// Takes the tag `tag` off `id`. True if it had it.
+    pub fn remove_tag(&mut self, id: InstanceId, tag: &str) -> Result<bool, TreeError> {
+        let instance = self.instances.get_mut(id.0).ok_or(TreeError::Stale)?;
+        let Some(index) = instance.tags.iter().position(|t| t == tag) else {
+            return Ok(false);
+        };
+        instance.tags.remove(index);
+        self.changed(Change::Tag {
+            instance: id,
+            tag: tag.to_owned(),
+            added: false,
+        });
+        Ok(true)
+    }
+
+    /// Every Instance in the game (inside `game`) with the tag `tag`, in
+    /// [`descendants`](Self::descendants) order.
+    pub fn tagged(&self, tag: &str) -> Vec<InstanceId> {
+        self.descendants(self.root)
+            .into_iter()
+            .filter(|&id| self.get(id).is_some_and(|instance| instance.has_tag(tag)))
+            .collect()
+    }
+
+    /// Every tag an Instance in the game has, sorted, with how many have it.
+    pub fn all_tags(&self) -> BTreeMap<String, usize> {
+        let mut tags = BTreeMap::new();
+        for id in self.descendants(self.root) {
+            for tag in self.get(id).map(Instance::tags).unwrap_or_default() {
+                *tags.entry(tag.clone()).or_default() += 1;
+            }
+        }
+        tags
     }
 
     /// The first child of `parent` with this name, in child order.

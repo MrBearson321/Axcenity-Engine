@@ -37,6 +37,8 @@ pub enum Owner {
     RunService,
     /// A Tween, by its number (see `tween`).
     Tween(u64),
+    /// `CollectionService`'s tag signals.
+    CollectionService,
 }
 
 /// Which event of its owner.
@@ -48,21 +50,28 @@ pub enum Event {
     /// property changes.
     PropertyChanged(&'static str),
     /// `track:GetMarkerReachedSignal(name)`: fires when an AnimationTrack
-    /// passes the event with that name, by its number in [`MarkerNames`].
+    /// passes the event with that name, by its number in [`EventNames`].
     Marker(u32),
+    /// `instance:GetAttributeChangedSignal(name)`, by the attribute's
+    /// number in [`EventNames`].
+    AttributeChanged(u32),
+    /// `CollectionService:GetInstanceAddedSignal(tag)`, by the tag's number.
+    TagAdded(u32),
+    /// `CollectionService:GetInstanceRemovedSignal(tag)`, by the tag's number.
+    TagRemoved(u32),
 }
 
-/// The event names `GetMarkerReachedSignal` was asked for, so an
-/// [`Event::Marker`] can stay a small `Copy` value.
+/// The marker, attribute and tag names signals were asked for, so an
+/// [`Event`] can stay a small `Copy` value.
 #[derive(Default)]
-pub struct MarkerNames(Vec<String>);
+pub struct EventNames(Vec<String>);
 
-/// The number of the marker `name`, giving it one the first time.
-pub fn marker_id(lua: &Lua, name: &str) -> u32 {
-    if lua.app_data_ref::<MarkerNames>().is_none() {
-        lua.set_app_data(MarkerNames::default());
+/// The number of `name`, giving it one the first time.
+pub fn name_id(lua: &Lua, name: &str) -> u32 {
+    if lua.app_data_ref::<EventNames>().is_none() {
+        lua.set_app_data(EventNames::default());
     }
-    let mut names = lua.app_data_mut::<MarkerNames>().expect("made just above");
+    let mut names = lua.app_data_mut::<EventNames>().expect("made just above");
     match names.0.iter().position(|known| known == name) {
         Some(index) => index as u32,
         None => {
@@ -72,18 +81,18 @@ pub fn marker_id(lua: &Lua, name: &str) -> u32 {
     }
 }
 
+/// The number of `name`, if a signal was ever asked for with it.
+pub fn known_name_id(lua: &Lua, name: &str) -> Option<u32> {
+    lua.app_data_ref::<EventNames>()
+        .and_then(|names| names.0.iter().position(|known| known == name))
+        .map(|index| index as u32)
+}
+
 /// Fires `owner`'s `GetMarkerReachedSignal(name)` handlers, with the name.
 pub fn fire_marker(lua: &Lua, owner: Owner, name: &str) {
-    let id = lua
-        .app_data_ref::<MarkerNames>()
-        .and_then(|names| names.0.iter().position(|known| known == name));
+    let id = known_name_id(lua, name);
     if let Some(id) = id {
-        fire_handlers(
-            lua,
-            (owner, Event::Marker(id as u32)),
-            None,
-            name.to_owned(),
-        );
+        fire_handlers(lua, (owner, Event::Marker(id)), None, name.to_owned());
     }
 }
 
@@ -160,7 +169,7 @@ impl Connections {
         self.handlers.retain(|(owner, _), _| match owner {
             Owner::Instance(instance) => exists(*instance),
             Owner::Tween(tween) => tweens.contains(tween),
-            Owner::UserInputService | Owner::RunService => true,
+            Owner::UserInputService | Owner::RunService | Owner::CollectionService => true,
         });
     }
 }
@@ -175,6 +184,11 @@ fn connections_mut(lua: &Lua) -> mlua::Result<AppDataRefMut<'_, Connections>> {
 /// only itself, and an error in one is reported without stopping the others.
 pub fn fire(lua: &Lua, owner: Owner, event: &'static str, args: impl IntoLuaMulti) {
     fire_handlers(lua, (owner, Event::Named(event)), None, args);
+}
+
+/// Like [`fire`], for any kind of event.
+pub fn fire_event(lua: &Lua, owner: Owner, event: Event, args: impl IntoLuaMulti) {
+    fire_handlers(lua, (owner, event), None, args);
 }
 
 /// Like [`fire`], for change number `change` of the World: only handlers
@@ -258,6 +272,9 @@ impl UserData for LuaSignal {
                 Event::Named(name) => format!("Signal {name}"),
                 Event::PropertyChanged(property) => format!("Signal {property} changed"),
                 Event::Marker(_) => "Signal MarkerReached".to_owned(),
+                Event::AttributeChanged(_) => "Signal AttributeChanged".to_owned(),
+                Event::TagAdded(_) => "Signal InstanceAdded".to_owned(),
+                Event::TagRemoved(_) => "Signal InstanceRemoved".to_owned(),
             })
         });
         // `part.Touched == part.Touched` is true, although each read makes a new value.

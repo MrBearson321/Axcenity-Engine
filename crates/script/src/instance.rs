@@ -12,6 +12,7 @@ use mlua::{
 
 use crate::cframe::LuaCFrame;
 use crate::client::{LocalPlayer, LuaCamera, LuaReplicatedFirst, LuaUserInputService};
+use crate::collection::LuaCollectionService;
 use crate::events::{Event, LuaSignal, Owner};
 use crate::localization::LuaLocalizationService;
 use crate::run_service::LuaRunService;
@@ -76,6 +77,8 @@ impl UserData for LuaInstance {
         );
         // `GetChildren`, `IsA`, `Clone`, `Destroy` and the rest of the tree.
         crate::tree::add_methods(methods);
+        // Attributes and the tag shortcuts.
+        crate::collection::add_methods(methods);
         // `part:GetPropertyChangedSignal("Position")`: an event for one
         // property, whose handlers get no arguments.
         methods.add_method("GetPropertyChangedSignal", |lua, this, property: String| {
@@ -320,6 +323,7 @@ fn class_member(lua: &Lua, class: ClassName, key: &str) -> mlua::Result<Option<m
         (ClassName::DataModel, "UserInputService") => LuaUserInputService.into_lua(lua)?,
         (ClassName::DataModel, "RunService") => LuaRunService.into_lua(lua)?,
         (ClassName::DataModel, "TweenService") => LuaTweenService.into_lua(lua)?,
+        (ClassName::DataModel, "CollectionService") => LuaCollectionService.into_lua(lua)?,
         (ClassName::DataModel, "SaveService") => LuaSaveService.into_lua(lua)?,
         (ClassName::DataModel, "LocalizationService") => LuaLocalizationService.into_lua(lua)?,
         (ClassName::DataModel, "ReplicatedFirst") => LuaReplicatedFirst.into_lua(lua)?,
@@ -696,7 +700,7 @@ pub fn animation_track_methods(
         if world(lua)?.get(this.0).is_none() {
             return Err(destroyed());
         }
-        let id = crate::events::marker_id(lua, &name.to_string_lossy());
+        let id = crate::events::name_id(lua, &name.to_string_lossy());
         Ok(LuaSignal {
             owner: Owner::Instance(this.0),
             event: Event::Marker(id),
@@ -917,7 +921,7 @@ fn set_playing(lua: &Lua, sound: InstanceId, playing: bool) -> mlua::Result<()> 
 
 /// `game:GetService(name)`: a service by its class name, such as
 /// `"Players"`, or `"UserInputService"` or `"UserGameSettings"` (LocalScripts
-/// only), `"RunService"`, `"TweenService"`, `"SaveService"`,
+/// only), `"RunService"`, `"TweenService"`, `"CollectionService"`, `"SaveService"`,
 /// `"LocalizationService"` or `"ReplicatedFirst"`, which aren't Instances.
 pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
     lua.create_function(|lua, (_game, name): (mlua::Value, String)| {
@@ -932,6 +936,7 @@ pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
             }
             "RunService" => return LuaRunService.into_lua(lua),
             "TweenService" => return LuaTweenService.into_lua(lua),
+            "CollectionService" => return LuaCollectionService.into_lua(lua),
             "SaveService" => return LuaSaveService.into_lua(lua),
             "LocalizationService" => return LuaLocalizationService.into_lua(lua),
             "ReplicatedFirst" => return LuaReplicatedFirst.into_lua(lua),
@@ -955,6 +960,7 @@ pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
                     .filter_map(|&id| world.get(id).map(|s| s.class().as_str()))
                     .collect();
                 names.extend([
+                    "CollectionService",
                     "LocalizationService",
                     "ReplicatedFirst",
                     "RunService",

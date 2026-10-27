@@ -156,8 +156,66 @@ impl EditorApp {
                 }
                 return;
             }
+            Edit::Attribute(name, value) => {
+                let verb = if value.is_some() { "Set" } else { "Remove" };
+                let label = format!("{verb} attribute {name} of {}", instance.name());
+                let key = format!("attribute {name} of {id:?}");
+                let (name, value) = (name.clone(), value.clone());
+                self.annotate(&[id], key, label, |world, id| {
+                    world.set_attribute(id, &name, value.clone())?;
+                    Ok(())
+                });
+                return;
+            }
+            Edit::AddTag(tag) | Edit::RemoveTag(tag) => {
+                let adding = matches!(edit, Edit::AddTag(_));
+                let verb = if adding { "Tag" } else { "Untag" };
+                let label = format!("{verb} {} {tag}", instance.name());
+                let tag = tag.clone();
+                self.annotate(&[id], label.clone(), label, |world, id| {
+                    if adding {
+                        world.add_tag(id, &tag)?;
+                    } else {
+                        world.remove_tag(id, &tag)?;
+                    }
+                    Ok(())
+                });
+                // A tag is added or removed with one click: its own step.
+                self.history.seal();
+                return;
+            }
         };
         self.change(id, key, label, vec![edit]);
+    }
+    /// Changes the attributes or tags of `ids` with `change`, as one undo
+    /// step named `label` (`key` merges a drag into one step). During Play
+    /// it changes the game's world instead, with no undo step.
+    pub(super) fn annotate(
+        &mut self,
+        ids: &[InstanceId],
+        key: String,
+        label: String,
+        change: impl Fn(&mut World, InstanceId) -> anyhow::Result<()>,
+    ) {
+        if let Some(session) = &mut self.play {
+            for &id in ids {
+                if let Err(err) = change(session.world_mut(), id) {
+                    self.output.error(format!("Could not change that: {err:#}"));
+                }
+            }
+            return;
+        }
+        let before: Vec<_> = ids
+            .iter()
+            .map(|&id| (id, history::annotations(&self.world, id)))
+            .collect();
+        for &id in ids {
+            if let Err(err) = change(&mut self.world, id) {
+                self.output.error(format!("Could not change that: {err:#}"));
+            }
+        }
+        self.history
+            .record_annotations(&mut self.world, key, label, before);
     }
     /// Applies a drag from the viewport (a part or one of its handles), as
     /// an undo step such as "Move Pad".
@@ -1034,7 +1092,10 @@ pub(super) fn set(world: &mut World, id: InstanceId, edit: Edit) -> anyhow::Resu
         | Edit::OpenClip
         | Edit::Animate
         | Edit::PreviewSound(_)
-        | Edit::Keep(..) => {}
+        | Edit::Keep(..)
+        | Edit::Attribute(..)
+        | Edit::AddTag(_)
+        | Edit::RemoveTag(_) => {}
     }
     Ok(())
 }

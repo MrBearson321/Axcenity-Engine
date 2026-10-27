@@ -4,6 +4,7 @@
 use std::fmt;
 
 use crate::enums::{Material, PartType, ParticleType, TextureChannel, ToneMapping};
+use crate::world::InstanceId;
 
 /// A position, size or direction in studs. Y is up.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -75,6 +76,36 @@ impl Color3 {
     }
 }
 
+/// A position and a rotation together. The rotation is a unit quaternion
+/// (`x`, `y`, `z`, `w`), so it keeps a script's CFrame exactly.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CFrame {
+    pub position: Vector3,
+    pub rotation: [f32; 4],
+}
+
+impl CFrame {
+    pub const IDENTITY: Self = Self {
+        position: Vector3::new(0.0, 0.0, 0.0),
+        rotation: [0.0, 0.0, 0.0, 1.0],
+    };
+}
+
+impl Default for CFrame {
+    fn default() -> Self {
+        Self::IDENTITY
+    }
+}
+
+/// An item of any enum scripts know, by name, such as `Material.Neon` or
+/// `KeyCode.E`. Attributes keep enum items this way; `core` doesn't list
+/// every enum, so the script side checks the names.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnumItem {
+    pub enum_name: String,
+    pub item: String,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Bool(bool),
@@ -89,6 +120,10 @@ pub enum Value {
     TextureChannel(TextureChannel),
     ParticleType(ParticleType),
     ToneMapping(ToneMapping),
+    CFrame(CFrame),
+    EnumItem(EnumItem),
+    /// Another Instance, or none (`ObjectValue.Value`).
+    Instance(Option<InstanceId>),
 }
 
 /// The type of a [`Value`], without the data. Used to check assignments.
@@ -106,6 +141,9 @@ pub enum ValueKind {
     TextureChannel,
     ParticleType,
     ToneMapping,
+    CFrame,
+    EnumItem,
+    Instance,
 }
 
 impl Value {
@@ -123,6 +161,9 @@ impl Value {
             Value::TextureChannel(_) => ValueKind::TextureChannel,
             Value::ParticleType(_) => ValueKind::ParticleType,
             Value::ToneMapping(_) => ValueKind::ToneMapping,
+            Value::CFrame(_) => ValueKind::CFrame,
+            Value::EnumItem(_) => ValueKind::EnumItem,
+            Value::Instance(_) => ValueKind::Instance,
         }
     }
 
@@ -203,6 +244,45 @@ impl Value {
         }
     }
 
+    pub fn as_cframe(&self) -> Option<CFrame> {
+        match self {
+            Value::CFrame(c) => Some(*c),
+            _ => None,
+        }
+    }
+
+    /// The Instance an `Instance` value points at, if it points at one.
+    pub fn as_instance(&self) -> Option<InstanceId> {
+        match self {
+            Value::Instance(id) => *id,
+            _ => None,
+        }
+    }
+
+    /// A property enum's value as a plain enum item (`Material.Neon`), as
+    /// attributes keep them.
+    pub fn to_enum_item(&self) -> Option<EnumItem> {
+        let (enum_name, item) = match self {
+            Value::PartType(t) => ("PartType", t.as_str()),
+            Value::Material(m) => ("Material", m.as_str()),
+            Value::TextureChannel(c) => ("TextureChannel", c.as_str()),
+            Value::ParticleType(t) => ("ParticleType", t.as_str()),
+            Value::ToneMapping(t) => ("ToneMapping", t.as_str()),
+            _ => return None,
+        };
+        Some(EnumItem {
+            enum_name: enum_name.to_owned(),
+            item: item.to_owned(),
+        })
+    }
+
+    /// Whether an attribute can hold this value: a boolean, number,
+    /// string, Vector3, Vector2, Color3, UDim2, CFrame or enum item.
+    /// Property enums count as enum items.
+    pub fn is_attribute(&self) -> bool {
+        !matches!(self, Value::Instance(_))
+    }
+
     pub fn as_bool(&self) -> Option<bool> {
         match self {
             Value::Bool(b) => Some(*b),
@@ -226,6 +306,9 @@ impl fmt::Display for ValueKind {
             ValueKind::TextureChannel => "TextureChannel",
             ValueKind::ParticleType => "ParticleType",
             ValueKind::ToneMapping => "ToneMapping",
+            ValueKind::CFrame => "CFrame",
+            ValueKind::EnumItem => "EnumItem",
+            ValueKind::Instance => "Instance",
         };
         f.write_str(name)
     }

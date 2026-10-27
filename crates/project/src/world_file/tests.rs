@@ -772,3 +772,148 @@ fn a_checkpoint_saves_and_loads_with_its_position() {
         Some(&Value::Vector3(Vector3::new(20.0, 0.0, -10.0)))
     );
 }
+
+#[test]
+fn attributes_tags_and_value_objects_round_trip_through_the_world_file() {
+    let mut world = World::new();
+    let workspace = world.workspace();
+    let lava = world.create(ClassName::Part).unwrap();
+    world.set_name(lava, "Lava").unwrap();
+    world.set_parent(lava, Some(workspace)).unwrap();
+    world.add_tag(lava, "Lava").unwrap();
+    world.add_tag(lava, "Hot").unwrap();
+    let attributes = [
+        ("Damage", Value::Number(10.0)),
+        ("On", Value::Bool(true)),
+        ("Label", Value::String("hot".into())),
+        ("Spawn", Value::Vector3(Vector3::new(0.0, 5.0, 0.0))),
+        (
+            "Offset",
+            Value::Vector2(axcenity_core::Vector2::new(1.0, 2.0)),
+        ),
+        ("Tint", Value::Color3(Color3::new(1.0, 0.5, 0.0))),
+        (
+            "Box",
+            Value::UDim2(axcenity_core::UDim2::new(0.5, 4.0, 1.0, 0.0)),
+        ),
+        (
+            "Pivot",
+            Value::CFrame(CFrame {
+                position: Vector3::new(1.0, 2.0, 3.0),
+                rotation: [0.0, 0.6, 0.0, 0.8],
+            }),
+        ),
+        ("Kind", Value::Material(Material::Neon)),
+    ];
+    for (name, value) in attributes.clone() {
+        world.set_attribute(lava, name, Some(value)).unwrap();
+    }
+    let target = world.create(ClassName::ObjectValue).unwrap();
+    world.set_name(target, "Target").unwrap();
+    world.set_parent(target, Some(workspace)).unwrap();
+    world
+        .set_property(target, "Value", Value::Instance(Some(lava)))
+        .unwrap();
+    let pivot = world.create(ClassName::CFrameValue).unwrap();
+    world.set_parent(pivot, Some(workspace)).unwrap();
+    let text = write_world(&world);
+
+    let loaded = parse_world(&text).unwrap();
+    assert_eq!(write_world(&loaded), text);
+    let lava = loaded.find_first_child(loaded.workspace(), "Lava").unwrap();
+    let part = loaded.get(lava).unwrap();
+    assert_eq!(part.tags(), ["Lava", "Hot"]);
+    for (name, value) in attributes {
+        let value = value.to_enum_item().map(Value::EnumItem).unwrap_or(value);
+        assert_eq!(part.attribute(name), Some(&value), "{name}");
+    }
+    let target = loaded
+        .find_first_child(loaded.workspace(), "Target")
+        .unwrap();
+    assert_eq!(
+        loaded.get(target).unwrap().property("Value"),
+        Some(&Value::Instance(Some(lava)))
+    );
+    assert!(text.contains(r#""Value": ["Workspace", "Lava"]"#), "{text}");
+    assert!(
+        text.contains(r#""Kind": { "EnumItem": "Material.Neon" }"#),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_prefab_keeps_attributes_tags_and_references_inside_itself() {
+    let mut world = World::new();
+    let workspace = world.workspace();
+    // Something with the prefab's name already there, which a placed
+    // copy's references must not find.
+    let other = world.create(ClassName::Model).unwrap();
+    world.set_name(other, "Door").unwrap();
+    world.set_parent(other, Some(workspace)).unwrap();
+
+    let model = world.create(ClassName::Model).unwrap();
+    world.set_name(model, "Door").unwrap();
+    world.set_parent(model, Some(workspace)).unwrap();
+    let hinge = world.create(ClassName::Part).unwrap();
+    world.set_name(hinge, "Hinge").unwrap();
+    world.set_parent(hinge, Some(model)).unwrap();
+    world.add_tag(hinge, "Hinge").unwrap();
+    world
+        .set_attribute(hinge, "Angle", Some(Value::Number(90.0)))
+        .unwrap();
+    let link = world.create(ClassName::ObjectValue).unwrap();
+    world.set_parent(link, Some(model)).unwrap();
+    world
+        .set_property(link, "Value", Value::Instance(Some(hinge)))
+        .unwrap();
+    let text = write_prefab(&world, &[model]);
+
+    let added = parse_prefab(&text, &mut world, workspace).unwrap();
+    let [copy] = added[..] else { panic!() };
+    let new_hinge = world.find_first_child(copy, "Hinge").unwrap();
+    let new_link = world.find_first_child(copy, "ObjectValue").unwrap();
+    assert_eq!(world.get(new_hinge).unwrap().tags(), ["Hinge"]);
+    assert_eq!(
+        world.get(new_hinge).unwrap().attribute("Angle"),
+        Some(&Value::Number(90.0))
+    );
+    assert_eq!(
+        world.get(new_link).unwrap().property("Value"),
+        Some(&Value::Instance(Some(new_hinge)))
+    );
+}
+
+#[test]
+fn a_world_saved_before_attributes_loads_unchanged() {
+    let text = r#"{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Block",
+        "properties": { "Position": [0, 1, 0] }
+      }
+    ]
+  }
+}"#;
+    let world = parse_world(text).unwrap();
+    let block = world.find_first_child(world.workspace(), "Block").unwrap();
+    assert!(world.get(block).unwrap().attributes().is_empty());
+    assert!(world.get(block).unwrap().tags().is_empty());
+    // Saving it again adds no attributes or tags fields.
+    let saved = write_world(&world);
+    assert!(
+        !saved.contains("attributes") && !saved.contains("tags"),
+        "{saved}"
+    );
+    assert_eq!(write_world(&parse_world(&saved).unwrap()), saved);
+}
+
+#[test]
+fn a_bad_attribute_names_the_instance_and_attribute() {
+    let text = r#"{ "format_version": 1, "workspace": { "children": [
+        { "class": "Part", "name": "P", "attributes": { "Spawn": { "Vector4": [1] } } } ] } }"#;
+    let err = parse_err(text);
+    assert!(err.contains("Workspace.P: attribute `Spawn`"), "{err}");
+}

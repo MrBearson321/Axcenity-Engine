@@ -1692,6 +1692,46 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "The behavior tree the agent runs during Play: a .behaviortree.json file in the project, made in the Behavior Tree tab. Every frame, before the agent walks, the tree decides where it goes (it can test SeesPlayer and HearsPlayer, set Destination, chase the player character and wait), so it may overwrite a Destination a script set. Empty runs none, and scripts set Destination themselves. A file that isn't a behavior tree, or has problems, runs nothing and Output says why once.",
     ),
     (
+        ClassName::IntValue,
+        "Value",
+        "The whole number it holds; others are rounded. 0 by default.",
+    ),
+    (
+        ClassName::NumberValue,
+        "Value",
+        "The number it holds. 0 by default.",
+    ),
+    (
+        ClassName::StringValue,
+        "Value",
+        "The string it holds. Empty by default.",
+    ),
+    (
+        ClassName::BoolValue,
+        "Value",
+        "The boolean it holds. False by default.",
+    ),
+    (
+        ClassName::Vector3Value,
+        "Value",
+        "The Vector3 it holds. Zero by default.",
+    ),
+    (
+        ClassName::Color3Value,
+        "Value",
+        "The Color3 it holds. Black by default.",
+    ),
+    (
+        ClassName::CFrameValue,
+        "Value",
+        "The CFrame it holds. At the origin, unturned, by default.",
+    ),
+    (
+        ClassName::ObjectValue,
+        "Value",
+        "The Instance it points at, or nil (the default).",
+    ),
+    (
         ClassName::Checkpoint,
         "Position",
         "Where SaveService:RestoreCheckpoint stands the player character: the middle of its feet goes here.",
@@ -2485,6 +2525,30 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::NavigationAgent => {
             "Walks the Model or Part it is parented to during Play: along the navigation mesh to its Destination, round walls and gaps, or straight at its Velocity. It sees and hears the player character within its SightRange, SightAngle and HearingRange, and fires PlayerSensed. Its BehaviorTree, if it has one, decides where it walks. It is not a physics body. View > Overlays > Agent Paths draws the path it is walking."
+        }
+        ClassName::IntValue => {
+            "Holds one whole number in Value (other numbers are rounded). Its `Changed` fires with the new value."
+        }
+        ClassName::NumberValue => {
+            "Holds one number in Value. Its `Changed` fires with the new value."
+        }
+        ClassName::StringValue => {
+            "Holds one string in Value. Its `Changed` fires with the new value."
+        }
+        ClassName::BoolValue => {
+            "Holds one boolean in Value. Its `Changed` fires with the new value."
+        }
+        ClassName::Vector3Value => {
+            "Holds one Vector3 in Value. Its `Changed` fires with the new value."
+        }
+        ClassName::Color3Value => {
+            "Holds one Color3 in Value. Its `Changed` fires with the new value."
+        }
+        ClassName::CFrameValue => {
+            "Holds one CFrame in Value. Its `Changed` fires with the new value."
+        }
+        ClassName::ObjectValue => {
+            "Points at another Instance in Value, or nil. Its `Changed` fires with the new value. `Clone` points a copy at the same place inside the copy; saving keeps the path of names to it."
         }
         ClassName::Checkpoint => {
             "A place in the world to come back to. `SaveService:SetCheckpoint(checkpoint)` makes it the active one and captures the player data and world state there; `SaveService:RestoreCheckpoint()` puts them back and stands the player character at its Position. A save slot keeps the active checkpoint."

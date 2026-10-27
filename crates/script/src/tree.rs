@@ -366,6 +366,7 @@ pub fn destroy(lua: &Lua, id: InstanceId) -> mlua::Result<()> {
         let args = (LuaInstance(id), Value::Nil);
         events::fire(lua, Owner::Instance(instance), "AncestryChanged", args);
     }
+    crate::collection::removing(lua, &going);
     // A handler may have destroyed it already, which is fine.
     let _ = world_mut(lua)?.destroy(id);
     if let Some(mut destroying) = lua.app_data_mut::<Destroying>() {

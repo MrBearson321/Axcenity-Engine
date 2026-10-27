@@ -521,6 +521,62 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
         }],
     },
     ValueType {
+        class: "CollectionService",
+        doc: "Tags on Instances, from `game:GetService(\"CollectionService\")`. An Instance counts as tagged while it is in the game. Tags are saved with the world, in prefabs and in save slots, and copied by `Clone`; the editor's Tags panel lists them.",
+        fields: &[],
+        operators: &[],
+        methods: &[
+            Function {
+                name: "AddTag",
+                doc: "Gives `instance` the tag `tag`. Adding a tag it has does nothing.",
+                params: &[("instance", "Instance"), ("tag", "string")],
+                returns: "()",
+            },
+            Function {
+                name: "RemoveTag",
+                doc: "Takes the tag `tag` off `instance`.",
+                params: &[("instance", "Instance"), ("tag", "string")],
+                returns: "()",
+            },
+            Function {
+                name: "HasTag",
+                doc: "Whether `instance` has the tag `tag`.",
+                params: &[("instance", "Instance"), ("tag", "string")],
+                returns: "boolean",
+            },
+            Function {
+                name: "GetTags",
+                doc: "The tags of `instance`, in the order they were added.",
+                params: &[("instance", "Instance")],
+                returns: "{string}",
+            },
+            Function {
+                name: "GetTagged",
+                doc: "Every Instance in the game with the tag `tag`, parents before their children.",
+                params: &[("tag", "string")],
+                returns: "{Instance}",
+            },
+            Function {
+                name: "GetAllTags",
+                doc: "Every tag an Instance in the game has, sorted.",
+                params: &[],
+                returns: "{string}",
+            },
+            Function {
+                name: "GetInstanceAddedSignal",
+                doc: "An event that fires with an Instance when it gets the tag `tag` while in the game, or joins the game with it (such as a tagged clone put in the Workspace).",
+                params: &[("tag", "string")],
+                returns: "Signal",
+            },
+            Function {
+                name: "GetInstanceRemovedSignal",
+                doc: "An event that fires with an Instance when it loses the tag `tag`, or leaves the game with it (taken out, or destroyed).",
+                params: &[("tag", "string")],
+                returns: "Signal",
+            },
+        ],
+    },
+    ValueType {
         class: "SaveService",
         doc: "Save slots, player data, settings and checkpoints, from `game:GetService(\"SaveService\")`. Slots are files in the player's data for this game, never in the project, so saving during Play doesn't change the project. Both sides share the same data.",
         fields: &[],
@@ -930,6 +986,54 @@ pub(super) const INSTANCE_METHODS: &[Function] = &[
         params: &[],
         returns: "()",
     },
+    Function {
+        name: "SetAttribute",
+        doc: "Sets the attribute `name` to `value`: a boolean, number, string, Vector3, Vector2, Color3, UDim2, CFrame or EnumItem; nil removes it. Names are 1 to 100 letters, digits and underscores. Attributes are saved with the world, in prefabs and in save slots, and copied by `Clone`.",
+        params: &[("name", "string"), ("value", "any")],
+        returns: "()",
+    },
+    Function {
+        name: "GetAttribute",
+        doc: "The value of the attribute `name`, or nil if it has none.",
+        params: &[("name", "string")],
+        returns: "any",
+    },
+    Function {
+        name: "GetAttributes",
+        doc: "Every attribute, as a table from name to value.",
+        params: &[],
+        returns: "{ [string]: any }",
+    },
+    Function {
+        name: "GetAttributeChangedSignal",
+        doc: "An event that fires when the attribute `name` gets a different value or is removed. The handler gets nothing: read it with `GetAttribute`.",
+        params: &[("name", "string")],
+        returns: "Signal",
+    },
+    Function {
+        name: "AddTag",
+        doc: "Gives this Instance the tag `tag` (same as `CollectionService:AddTag`). Adding a tag it has does nothing.",
+        params: &[("tag", "string")],
+        returns: "()",
+    },
+    Function {
+        name: "RemoveTag",
+        doc: "Takes the tag `tag` off this Instance (same as `CollectionService:RemoveTag`).",
+        params: &[("tag", "string")],
+        returns: "()",
+    },
+    Function {
+        name: "HasTag",
+        doc: "Whether this Instance has the tag `tag`.",
+        params: &[("tag", "string")],
+        returns: "boolean",
+    },
+    Function {
+        name: "GetTags",
+        doc: "This Instance's tags, in the order they were added.",
+        params: &[],
+        returns: "{string}",
+    },
 ];
 
 /// What each event every Instance has means (`core`'s `INSTANCE_EVENTS`).
@@ -962,6 +1066,10 @@ pub(super) const INSTANCE_EVENT_DOCS: &[(&str, &str)] = &[
     (
         "Destroying",
         "Fires once when `Destroy` is called on this Instance or one of its ancestors, while it can still be read.",
+    ),
+    (
+        "AttributeChanged",
+        "Fires when an attribute gets a different value or is removed. The handler gets the attribute's name.",
     ),
 ];
 
@@ -1085,7 +1193,7 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
         ClassName::DataModel,
         Function {
             name: "GetService",
-            doc: "The service with this class name, such as `\"Players\"`, `\"ReplicatedFirst\"`, `\"RunService\"`, `\"SaveService\"`, `\"LocalizationService\"`, `\"TweenService\"`, `\"UserGameSettings\"` or `\"UserInputService\"`.",
+            doc: "The service with this class name, such as `\"Players\"`, `\"ReplicatedFirst\"`, `\"RunService\"`, `\"SaveService\"`, `\"LocalizationService\"`, `\"TweenService\"`, `\"CollectionService\"`, `\"UserGameSettings\"` or `\"UserInputService\"`.",
             params: &[("className", "string")],
             returns: "Instance",
         },
@@ -1379,6 +1487,14 @@ pub(super) const CLASS_FIELDS: &[(ClassName, Field)] = &[
             name: "TweenService",
             ty: "TweenService",
             doc: "Moves properties smoothly to goals (same as `game:GetService(\"TweenService\")`).",
+        },
+    ),
+    (
+        ClassName::DataModel,
+        Field {
+            name: "CollectionService",
+            ty: "CollectionService",
+            doc: "Tags on Instances (same as `game:GetService(\"CollectionService\")`).",
         },
     ),
     (

@@ -38,6 +38,7 @@ mod api;
 mod cframe;
 mod changes;
 mod client;
+mod collection;
 mod console;
 mod context;
 mod debugger;
@@ -892,3 +893,5 @@ mod user_settings_tests;
 
 #[cfg(test)]
 mod cframe_tests;
+#[cfg(test)]
+mod collection_tests;

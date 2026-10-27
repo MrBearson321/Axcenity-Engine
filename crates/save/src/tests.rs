@@ -351,6 +351,14 @@ fn every_kind_of_value_survives_a_slot_file() {
         Value::Material(Material::Neon),
         Value::TextureChannel(TextureChannel::Green),
         Value::ParticleType(ParticleType::Spark),
+        Value::CFrame(axcenity_core::CFrame {
+            position: Vector3::new(1.0, 2.0, 3.0),
+            rotation: [0.0, 0.6, 0.0, 0.8],
+        }),
+        Value::EnumItem(axcenity_core::EnumItem {
+            enum_name: "KeyCode".into(),
+            item: "E".into(),
+        }),
     ];
     for value in values {
         let json = serde_json::to_string(&SavedValue(value.clone())).unwrap();
@@ -613,4 +621,57 @@ fn project_files_are_never_read_as_save_files() {
         assert_eq!(fs::read_to_string(&path).unwrap(), text);
     }
     assert_eq!(snapshot(&world), before);
+}
+
+#[test]
+fn attributes_tags_and_value_objects_survive_a_slot_round_trip() {
+    let folder = folder("attributes-tags");
+    let Level {
+        mut world,
+        crate_part,
+        coin,
+        ..
+    } = level();
+    let workspace = world.workspace();
+    world
+        .set_attribute(crate_part, "Health", Some(Value::Number(30.0)))
+        .unwrap();
+    world.add_tag(crate_part, "Breakable").unwrap();
+    let target = world.create(ClassName::ObjectValue).unwrap();
+    world.set_name(target, "Target").unwrap();
+    world.set_parent(target, Some(workspace)).unwrap();
+    world
+        .set_property(target, "Value", Value::Instance(Some(coin)))
+        .unwrap();
+    let score = world.create(ClassName::IntValue).unwrap();
+    world.set_parent(score, Some(workspace)).unwrap();
+    world
+        .set_property(score, "Value", Value::Number(7.0))
+        .unwrap();
+    let mut saves = Saves::new(Some(folder));
+    saves.save(&world, 1).unwrap();
+
+    // Changed after saving: all of it goes back on load.
+    world
+        .set_attribute(crate_part, "Health", Some(Value::Number(1.0)))
+        .unwrap();
+    world
+        .set_attribute(crate_part, "Extra", Some(Value::Bool(true)))
+        .unwrap();
+    world.remove_tag(crate_part, "Breakable").unwrap();
+    world.add_tag(crate_part, "Other").unwrap();
+    world.destroy(coin).unwrap();
+    world
+        .set_property(score, "Value", Value::Number(0.0))
+        .unwrap();
+    saves.load(&mut world, 1).unwrap();
+
+    let crate_now = world.get(crate_part).unwrap();
+    assert_eq!(crate_now.attribute("Health"), Some(&Value::Number(30.0)));
+    assert_eq!(crate_now.attribute("Extra"), None);
+    assert_eq!(crate_now.tags(), ["Breakable"]);
+    let coin = world.find_first_child(workspace, "Coin").unwrap();
+    let property = |id| world.get(id).unwrap().property("Value").unwrap().clone();
+    assert_eq!(property(target), Value::Instance(Some(coin)));
+    assert_eq!(property(score), Value::Number(7.0));
 }

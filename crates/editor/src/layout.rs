@@ -46,6 +46,8 @@ pub enum Pane {
     /// A NavigationAgent's behavior tree in the graph editor
     /// (`behavior_tree.rs`). Starts closed; opening a tree opens it.
     BehaviorTree,
+    /// Every tag in the world (`tags.rs`). Starts closed.
+    Tags,
     /// An open script, stylesheet or block script, by its tab's id
     /// (`ScriptTab::id`).
     Script(u64),
@@ -53,7 +55,7 @@ pub enum Pane {
 
 impl Pane {
     /// The panels that can be closed and opened again, in menu order.
-    pub const CLOSABLE: [Pane; 10] = [
+    pub const CLOSABLE: [Pane; 11] = [
         Pane::Explorer,
         Pane::Properties,
         Pane::Console,
@@ -64,6 +66,7 @@ impl Pane {
         Pane::Profiler,
         Pane::AssetCheck,
         Pane::BehaviorTree,
+        Pane::Tags,
     ];
 
     pub fn label(self) -> &'static str {
@@ -79,6 +82,7 @@ impl Pane {
             Pane::Profiler => "Profiler",
             Pane::AssetCheck => "Asset Check",
             Pane::BehaviorTree => "Behavior Tree",
+            Pane::Tags => "Tags",
             Pane::Script(_) => "Script",
         }
     }
@@ -96,6 +100,7 @@ impl Pane {
             Pane::Profiler => icons::GAUGE,
             Pane::AssetCheck => icons::LIST,
             Pane::BehaviorTree => icons::BRAIN,
+            Pane::Tags => icons::TAG,
             Pane::Script(_) => icons::CODE,
         }
     }
@@ -161,7 +166,7 @@ impl Layout {
             // A tab beside the Scene, with room for a preview and a graph.
             Pane::Animation | Pane::UiDesigner | Pane::BehaviorTree => Some(Pane::Scene),
             // A tab beside Properties, down the right.
-            Pane::Terrain => Some(Pane::Properties),
+            Pane::Terrain | Pane::Tags => Some(Pane::Properties),
             Pane::Script(_) => Some(Pane::Scene),
         };
         let beside = neighbor
@@ -174,7 +179,7 @@ impl Layout {
                 tree.push_to_focused_leaf(pane);
             }
             // Its neighbor is closed too: split it off the Scene's side.
-            (Pane::Explorer | Pane::Properties | Pane::Terrain, None) => {
+            (Pane::Explorer | Pane::Properties | Pane::Terrain | Pane::Tags, None) => {
                 tree.split_right(NodeIndex::root(), 0.78, vec![pane]);
             }
             _ => {
@@ -390,7 +395,7 @@ mod tests {
     fn every_panel_starts_open() {
         let layout = Layout::default();
         for pane in Pane::CLOSABLE.into_iter().chain([Pane::Scene]) {
-            if matches!(pane, Pane::AssetCheck | Pane::BehaviorTree) {
+            if matches!(pane, Pane::AssetCheck | Pane::BehaviorTree | Pane::Tags) {
                 assert!(!layout.is_open(pane), "{pane:?} starts closed");
                 continue;
             }

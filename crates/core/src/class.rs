@@ -3,12 +3,12 @@
 use std::fmt;
 
 use crate::enums::{Material, PartType, ParticleType, TextureChannel, ToneMapping};
-use crate::value::{Color3, UDim2, Value, Vector2, Vector3};
+use crate::value::{CFrame, Color3, UDim2, Value, Vector2, Vector3};
 
 /// Events every Instance has, whatever its class. `Changed` fires with the
 /// name of a property that got a new value, `ChildAdded` and `ChildRemoved`
 /// with the child. Scripts reach them like class events: `part.Changed`.
-pub const INSTANCE_EVENTS: [&str; 7] = [
+pub const INSTANCE_EVENTS: [&str; 8] = [
     "Changed",
     "ChildAdded",
     "ChildRemoved",
@@ -16,6 +16,8 @@ pub const INSTANCE_EVENTS: [&str; 7] = [
     "DescendantRemoving",
     "AncestryChanged",
     "Destroying",
+    // Fires with an attribute's name when `SetAttribute` changes it.
+    "AttributeChanged",
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -134,10 +136,18 @@ pub enum ClassName {
     /// one active with `SaveService:SetCheckpoint`, which captures the game
     /// there, and `SaveService:RestoreCheckpoint` returns to it.
     Checkpoint,
+    IntValue,
+    NumberValue,
+    StringValue,
+    BoolValue,
+    Vector3Value,
+    Color3Value,
+    CFrameValue,
+    ObjectValue,
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 45] = [
+    pub const ALL: [ClassName; 53] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -183,6 +193,14 @@ impl ClassName {
         ClassName::FirstPersonController,
         ClassName::NavigationAgent,
         ClassName::Checkpoint,
+        ClassName::IntValue,
+        ClassName::NumberValue,
+        ClassName::StringValue,
+        ClassName::BoolValue,
+        ClassName::Vector3Value,
+        ClassName::Color3Value,
+        ClassName::CFrameValue,
+        ClassName::ObjectValue,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -232,6 +250,14 @@ impl ClassName {
             ClassName::FirstPersonController => "FirstPersonController",
             ClassName::NavigationAgent => "NavigationAgent",
             ClassName::Checkpoint => "Checkpoint",
+            ClassName::IntValue => "IntValue",
+            ClassName::NumberValue => "NumberValue",
+            ClassName::StringValue => "StringValue",
+            ClassName::BoolValue => "BoolValue",
+            ClassName::Vector3Value => "Vector3Value",
+            ClassName::Color3Value => "Color3Value",
+            ClassName::CFrameValue => "CFrameValue",
+            ClassName::ObjectValue => "ObjectValue",
         }
     }
 
@@ -261,6 +287,7 @@ impl ClassName {
             ClassName::TextButton => &["GuiButton", "GuiObject", "GuiBase2d"],
             ClassName::ScreenGui | ClassName::BillboardGui => LAYER,
             ClassName::PointLight | ClassName::SpotLight => &["Light"],
+            class if class.is_value_object() => &["ValueBase"],
             class if class.is_screen_element() => GUI,
             _ => &[],
         }
@@ -303,6 +330,23 @@ impl ClassName {
         matches!(
             self,
             ClassName::Slider | ClassName::Toggle | ClassName::Dropdown | ClassName::ProgressBar
+        )
+    }
+
+    /// IntValue, NumberValue, StringValue, BoolValue, Vector3Value,
+    /// Color3Value, CFrameValue or ObjectValue: one `Value`, whose
+    /// `Changed` fires with the new value (not the property's name).
+    pub fn is_value_object(self) -> bool {
+        matches!(
+            self,
+            ClassName::IntValue
+                | ClassName::NumberValue
+                | ClassName::StringValue
+                | ClassName::BoolValue
+                | ClassName::Vector3Value
+                | ClassName::Color3Value
+                | ClassName::CFrameValue
+                | ClassName::ObjectValue
         )
     }
 
@@ -378,6 +422,15 @@ impl ClassName {
             | ClassName::Model
             | ClassName::Folder
             | ClassName::AnimationTrack => Vec::new(),
+            // An IntValue's number is always whole (`World::set_property`
+            // rounds it).
+            ClassName::IntValue | ClassName::NumberValue => vec![("Value", Value::Number(0.0))],
+            ClassName::StringValue => vec![("Value", Value::String(String::new()))],
+            ClassName::BoolValue => vec![("Value", Value::Bool(false))],
+            ClassName::Vector3Value => vec![("Value", Value::Vector3(Vector3::default()))],
+            ClassName::Color3Value => vec![("Value", Value::Color3(Color3::default()))],
+            ClassName::CFrameValue => vec![("Value", Value::CFrame(CFrame::IDENTITY))],
+            ClassName::ObjectValue => vec![("Value", Value::Instance(None))],
             ClassName::Workspace => vec![
                 // The wind everywhere, in studs a second. It pushes particles
                 // from emitters with WindAffectsDrag, and parts with
@@ -1069,7 +1122,15 @@ impl ClassName {
             | ClassName::TerrainLayer
             | ClassName::ThirdPersonController
             | ClassName::FirstPersonController
-            | ClassName::Checkpoint => &[],
+            | ClassName::Checkpoint
+            | ClassName::IntValue
+            | ClassName::NumberValue
+            | ClassName::StringValue
+            | ClassName::BoolValue
+            | ClassName::Vector3Value
+            | ClassName::Color3Value
+            | ClassName::CFrameValue
+            | ClassName::ObjectValue => &[],
             // Fires with "Sight" or "Hearing" when it starts seeing or
             // hearing the player character.
             ClassName::NavigationAgent => &["PlayerSensed"],

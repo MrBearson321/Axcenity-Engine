@@ -200,6 +200,26 @@ declare extern type TweenService with
 	function Create(self, instance: Instance, tweenInfo: TweenInfo, goals: { [string]: any }): Tween
 end
 
+--- Tags on Instances, from `game:GetService("CollectionService")`. An Instance counts as tagged while it is in the game. Tags are saved with the world, in prefabs and in save slots, and copied by `Clone`; the editor's Tags panel lists them.
+declare extern type CollectionService with
+	--- Gives `instance` the tag `tag`. Adding a tag it has does nothing.
+	function AddTag(self, instance: Instance, tag: string): ()
+	--- Takes the tag `tag` off `instance`.
+	function RemoveTag(self, instance: Instance, tag: string): ()
+	--- Whether `instance` has the tag `tag`.
+	function HasTag(self, instance: Instance, tag: string): boolean
+	--- The tags of `instance`, in the order they were added.
+	function GetTags(self, instance: Instance): {string}
+	--- Every Instance in the game with the tag `tag`, parents before their children.
+	function GetTagged(self, tag: string): {Instance}
+	--- Every tag an Instance in the game has, sorted.
+	function GetAllTags(self): {string}
+	--- An event that fires with an Instance when it gets the tag `tag` while in the game, or joins the game with it (such as a tagged clone put in the Workspace).
+	function GetInstanceAddedSignal(self, tag: string): Signal
+	--- An event that fires with an Instance when it loses the tag `tag`, or leaves the game with it (taken out, or destroyed).
+	function GetInstanceRemovedSignal(self, tag: string): Signal
+end
+
 --- Save slots, player data, settings and checkpoints, from `game:GetService("SaveService")`. Slots are files in the player's data for this game, never in the project, so saving during Play doesn't change the project. Both sides share the same data.
 declare extern type SaveService with
 	--- Writes save slot `slot` (1 to 999): the player data, the world state (every part and model in the Workspace, and Lighting; not scripts or ScreenGuis), the active checkpoint and the settings. Replaces what the slot held.
@@ -594,6 +614,8 @@ declare extern type Instance with
 	AncestryChanged: Signal
 	--- Fires once when `Destroy` is called on this Instance or one of its ancestors, while it can still be read.
 	Destroying: Signal
+	--- Fires when an attribute gets a different value or is removed. The handler gets the attribute's name.
+	AttributeChanged: Signal
 	[string]: any
 	--- The first child with this name, or nil. With `recursive`, searches every descendant.
 	function FindFirstChild(self, name: string, recursive: boolean?): Instance?
@@ -629,6 +651,22 @@ declare extern type Instance with
 	function Destroy(self): ()
 	--- Destroys every child of this Instance (except services).
 	function ClearAllChildren(self): ()
+	--- Sets the attribute `name` to `value`: a boolean, number, string, Vector3, Vector2, Color3, UDim2, CFrame or EnumItem; nil removes it. Names are 1 to 100 letters, digits and underscores. Attributes are saved with the world, in prefabs and in save slots, and copied by `Clone`.
+	function SetAttribute(self, name: string, value: any): ()
+	--- The value of the attribute `name`, or nil if it has none.
+	function GetAttribute(self, name: string): any
+	--- Every attribute, as a table from name to value.
+	function GetAttributes(self): { [string]: any }
+	--- An event that fires when the attribute `name` gets a different value or is removed. The handler gets nothing: read it with `GetAttribute`.
+	function GetAttributeChangedSignal(self, name: string): Signal
+	--- Gives this Instance the tag `tag` (same as `CollectionService:AddTag`). Adding a tag it has does nothing.
+	function AddTag(self, tag: string): ()
+	--- Takes the tag `tag` off this Instance (same as `CollectionService:RemoveTag`).
+	function RemoveTag(self, tag: string): ()
+	--- Whether this Instance has the tag `tag`.
+	function HasTag(self, tag: string): boolean
+	--- This Instance's tags, in the order they were added.
+	function GetTags(self): {string}
 end
 
 --- The root of the game, called `game` in scripts.
@@ -651,6 +689,8 @@ declare extern type DataModel extends Instance with
 	RunService: RunService
 	--- Moves properties smoothly to goals (same as `game:GetService("TweenService")`).
 	TweenService: TweenService
+	--- Tags on Instances (same as `game:GetService("CollectionService")`).
+	CollectionService: CollectionService
 	--- Save slots, player data, settings and checkpoints (same as `game:GetService("SaveService")`).
 	SaveService: SaveService
 	--- The language UI text shows (same as `game:GetService("LocalizationService")`).
@@ -660,7 +700,7 @@ declare extern type DataModel extends Instance with
 	--- What loads first on the player's side, with `RemoveDefaultLoadingScreen` (same as `game:GetService("ReplicatedFirst")`).
 	ReplicatedFirst: ReplicatedFirst
 	[string]: any
-	--- The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"SaveService"`, `"LocalizationService"`, `"TweenService"`, `"UserGameSettings"` or `"UserInputService"`.
+	--- The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"SaveService"`, `"LocalizationService"`, `"TweenService"`, `"CollectionService"`, `"UserGameSettings"` or `"UserInputService"`.
 	function GetService(self, className: string): Instance
 end
 
@@ -1942,6 +1982,62 @@ declare extern type Checkpoint extends Instance with
 	[string]: any
 end
 
+--- Holds one whole number in Value (other numbers are rounded). Its `Changed` fires with the new value.
+declare extern type IntValue extends Instance with
+	--- The whole number it holds; others are rounded. 0 by default.
+	Value: number
+	[string]: any
+end
+
+--- Holds one number in Value. Its `Changed` fires with the new value.
+declare extern type NumberValue extends Instance with
+	--- The number it holds. 0 by default.
+	Value: number
+	[string]: any
+end
+
+--- Holds one string in Value. Its `Changed` fires with the new value.
+declare extern type StringValue extends Instance with
+	--- The string it holds. Empty by default.
+	Value: string
+	[string]: any
+end
+
+--- Holds one boolean in Value. Its `Changed` fires with the new value.
+declare extern type BoolValue extends Instance with
+	--- The boolean it holds. False by default.
+	Value: boolean
+	[string]: any
+end
+
+--- Holds one Vector3 in Value. Its `Changed` fires with the new value.
+declare extern type Vector3Value extends Instance with
+	--- The Vector3 it holds. Zero by default.
+	Value: Vector3
+	[string]: any
+end
+
+--- Holds one Color3 in Value. Its `Changed` fires with the new value.
+declare extern type Color3Value extends Instance with
+	--- The Color3 it holds. Black by default.
+	Value: Color3
+	[string]: any
+end
+
+--- Holds one CFrame in Value. Its `Changed` fires with the new value.
+declare extern type CFrameValue extends Instance with
+	--- The CFrame it holds. At the origin, unturned, by default.
+	Value: CFrame
+	[string]: any
+end
+
+--- Points at another Instance in Value, or nil. Its `Changed` fires with the new value. `Clone` points a copy at the same place inside the copy; saving keeps the path of names to it.
+declare extern type ObjectValue extends Instance with
+	--- The Instance it points at, or nil (the default).
+	Value: Instance?
+	[string]: any
+end
+
 -- Globals -------------------------------------------------------------------
 
 --- The root of the game. Every service is inside it.
@@ -1962,7 +2058,7 @@ declare function require(module: Instance): any
 --- Creates Instances.
 declare extern type InstanceLibrary with
 	--- Creates an Instance of this class with default properties and no parent. Set `Parent` to put it in the world.
-	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: string) -> Instance)
+	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
 end
 
 --- Creates Instances.

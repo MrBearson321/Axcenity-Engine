@@ -32,12 +32,31 @@
 //! enum items are strings such as `"Neon"`. Properties that are left out keep
 //! their default values.
 //!
-//! [`write_world`] saves every property, sorted by name, so saving the same
-//! world always produces the same text.
+//! A `CFrame` is `[x, y, z, qx, qy, qz, qw]`: the position, then the
+//! rotation as a quaternion. An `ObjectValue`'s `Value` is the path of
+//! names to the Instance it points at (`["Workspace", "Door"]`; in a
+//! prefab, from one of the prefab's own Instances), or `null`. A path
+//! through siblings with the same name finds the first.
+//!
+//! An Instance can also have `"attributes"` and `"tags"`, both left out
+//! when empty:
+//!
+//! ```json
+//! { "class": "Part", "name": "Lava",
+//!   "attributes": { "Damage": 10, "Spawn": { "Vector3": [0, 5, 0] } },
+//!   "tags": ["Lava"] }
+//! ```
+//!
+//! Booleans, numbers and strings are plain JSON; any other attribute value
+//! is an object with one field naming its type (`Vector3`, `Vector2`,
+//! `Color3`, `UDim2`, `CFrame`, or `EnumItem` as `"Material.Neon"`).
+//!
+//! [`write_world`] saves every property and attribute, sorted by name, so
+//! saving the same world always produces the same text.
 
 use axcenity_core::{
-    ClassName, InstanceId, Material, PartType, ParticleType, TextureChannel, ToneMapping, Value,
-    ValueKind, World,
+    CFrame, ClassName, EnumItem, InstanceId, Material, PartType, ParticleType, TextureChannel,
+    ToneMapping, Value, ValueKind, World,
 };
 use serde::Deserialize;
 use serde_json::{Map, Value as Json};
@@ -76,6 +95,12 @@ pub enum WorldError {
     InvalidProperty {
         path: String,
         property: String,
+        message: String,
+    },
+    #[error("{path}: attribute `{attribute}`: {message}")]
+    InvalidAttribute {
+        path: String,
+        attribute: String,
         message: String,
     },
 }
@@ -120,7 +145,67 @@ struct InstanceNode {
     #[serde(default)]
     properties: Map<String, Json>,
     #[serde(default)]
+    attributes: Map<String, Json>,
+    #[serde(default)]
+    tags: Vec<String>,
+    #[serde(default)]
     children: Vec<InstanceNode>,
+}
+
+/// An `ObjectValue` (or other Instance property) read from a file, waiting
+/// for every Instance to exist before its path is looked up.
+struct Reference {
+    id: InstanceId,
+    property: String,
+    path: Vec<String>,
+}
+
+/// Points each of `references` at the Instance its path names, starting
+/// from one of `roots` by name. A path that names nothing stays `nil`.
+fn resolve(world: &mut World, roots: &[InstanceId], references: Vec<Reference>) {
+    for reference in references {
+        let Some((first, rest)) = reference.path.split_first() else {
+            continue;
+        };
+        let mut target = roots
+            .iter()
+            .copied()
+            .find(|&root| world.get(root).is_some_and(|r| r.name() == first));
+        for name in rest {
+            target = target.and_then(|parent| world.find_first_child(parent, name));
+        }
+        if let Some(target) = target {
+            let _ = world.set_property(
+                reference.id,
+                &reference.property,
+                Value::Instance(Some(target)),
+            );
+        }
+    }
+}
+
+/// The path of names from one of `roots` (included) down to `target`, as
+/// JSON, or `null` when `target` is none, gone, or not inside any of them.
+fn reference_json(world: &World, target: Option<InstanceId>, roots: &[InstanceId]) -> String {
+    let mut names = Vec::new();
+    let mut current = target;
+    while let Some(id) = current {
+        let Some(instance) = world.get(id) else {
+            break;
+        };
+        names.push(json_string(instance.name()));
+        if roots.contains(&id) {
+            names.reverse();
+            return format!("[{}]", names.join(", "));
+        }
+        current = instance.parent();
+    }
+    "null".to_owned()
+}
+
+/// The Instances a world file's references start from: the services.
+fn world_roots(world: &World) -> Vec<InstanceId> {
+    vec![world.workspace(), world.replicated_storage()]
 }
 
 /// Builds a [`World`] from the text of a world file.
@@ -133,18 +218,26 @@ pub fn parse_world(text: &str) -> Result<World, WorldError> {
     }
 
     let mut world = World::new();
+    let mut references = Vec::new();
     let lighting = world.lighting();
-    apply_properties(&mut world, lighting, &file.lighting.properties)?;
+    apply_properties(
+        &mut world,
+        lighting,
+        &file.lighting.properties,
+        &mut references,
+    )?;
     let services = [
         (world.workspace(), &file.workspace),
         (world.replicated_storage(), &file.replicated_storage),
     ];
     for (service, node) in services {
-        apply_properties(&mut world, service, &node.properties)?;
+        apply_properties(&mut world, service, &node.properties, &mut references)?;
         for child in &node.children {
-            add_instance(&mut world, service, child)?;
+            add_instance(&mut world, service, child, &mut references)?;
         }
     }
+    let roots = world_roots(&world);
+    resolve(&mut world, &roots, references);
     Ok(world)
 }
 
@@ -180,12 +273,14 @@ pub fn parse_prefab(
     let mut check = World::new();
     let workspace = check.workspace();
     for node in &file.instances {
-        add_instance(&mut check, workspace, node)?;
+        add_instance(&mut check, workspace, node, &mut Vec::new())?;
     }
     let mut added = Vec::new();
+    let mut references = Vec::new();
     for node in &file.instances {
-        added.push(add_instance(world, parent, node)?);
+        added.push(add_instance(world, parent, node, &mut references)?);
     }
+    resolve(world, &added, references);
     Ok(added)
 }
 
@@ -205,7 +300,7 @@ pub fn write_prefab(world: &World, ids: &[InstanceId]) -> String {
         .collect();
     for (i, &id) in ids.iter().enumerate() {
         out.push_str("    ");
-        write_instance(world, id, 2, &mut out);
+        write_instance(world, id, 2, &ids, &mut out);
         if i + 1 < ids.len() {
             out.push(',');
         }
@@ -220,6 +315,7 @@ fn add_instance(
     world: &mut World,
     parent: InstanceId,
     node: &InstanceNode,
+    references: &mut Vec<Reference>,
 ) -> Result<InstanceId, WorldError> {
     let parent_path = world.full_name(parent).expect("parent exists");
     let name = node.name.as_deref().unwrap_or(&node.class);
@@ -241,17 +337,73 @@ fn add_instance(
     world.set_name(id, name).expect("just created");
     world.set_parent(id, Some(parent)).expect("both exist");
 
-    apply_properties(world, id, &node.properties)?;
+    apply_properties(world, id, &node.properties, references)?;
+    for (attribute, json) in &node.attributes {
+        let result = json_to_attribute(json).and_then(|value| {
+            world
+                .set_attribute(id, attribute, Some(value))
+                .map_err(|err| err.to_string())
+        });
+        if let Err(message) = result {
+            return Err(WorldError::InvalidAttribute {
+                path: world.full_name(id).unwrap_or_default(),
+                attribute: attribute.clone(),
+                message,
+            });
+        }
+    }
+    for tag in &node.tags {
+        world.add_tag(id, tag).expect("just created");
+    }
     for child in &node.children {
-        add_instance(world, id, child)?;
+        add_instance(world, id, child, references)?;
     }
     Ok(id)
+}
+
+/// Reads an attribute's value (see the module docs).
+fn json_to_attribute(json: &Json) -> Result<Value, String> {
+    const EXPECTED: &str = "expected true or false, a number, a string, or an object with one \
+         field: Vector3, Vector2, Color3, UDim2, CFrame or EnumItem";
+    match json {
+        Json::Bool(b) => Ok(Value::Bool(*b)),
+        Json::Number(n) => n.as_f64().map(Value::Number).ok_or(EXPECTED.to_owned()),
+        Json::String(s) => Ok(Value::String(s.clone())),
+        Json::Object(fields) if fields.len() == 1 => {
+            let (kind, inner) = fields.iter().next().expect("one field");
+            let kind = match kind.as_str() {
+                "Vector3" => ValueKind::Vector3,
+                "Vector2" => ValueKind::Vector2,
+                "Color3" => ValueKind::Color3,
+                "UDim2" => ValueKind::UDim2,
+                "CFrame" => ValueKind::CFrame,
+                "EnumItem" => ValueKind::EnumItem,
+                _ => return Err(EXPECTED.to_owned()),
+            };
+            json_to_value(inner, kind).map_err(|message| format!("{kind}: {message}"))
+        }
+        _ => Err(EXPECTED.to_owned()),
+    }
+}
+
+/// An attribute's value as JSON (see the module docs).
+fn attribute_json(value: &Value) -> String {
+    let kind = match value {
+        Value::Bool(_) | Value::Number(_) | Value::String(_) => return json_value(value),
+        other => other.kind(),
+    };
+    format!(
+        "{{ {}: {} }}",
+        json_string(&kind.to_string()),
+        json_value(value)
+    )
 }
 
 fn apply_properties(
     world: &mut World,
     id: InstanceId,
     properties: &Map<String, Json>,
+    references: &mut Vec<Reference>,
 ) -> Result<(), WorldError> {
     // `Material` goes first: setting it resets `Metalness` and `Roughness` to
     // its preset, and any values the file gives for those must win.
@@ -270,6 +422,33 @@ fn apply_properties(
             });
         };
 
+        if current.kind() == ValueKind::Instance {
+            // Looked up once every Instance exists (see `resolve`).
+            match json {
+                Json::Null => {}
+                Json::Array(names) if names.iter().all(Json::is_string) => {
+                    references.push(Reference {
+                        id,
+                        property: property.clone(),
+                        path: names
+                            .iter()
+                            .filter_map(Json::as_str)
+                            .map(str::to_owned)
+                            .collect(),
+                    });
+                }
+                _ => {
+                    return Err(WorldError::InvalidProperty {
+                        path,
+                        property: property.clone(),
+                        message:
+                            "expected a path of names, such as [\"Workspace\", \"Door\"], or null"
+                                .to_owned(),
+                    });
+                }
+            }
+            continue;
+        }
         let value =
             json_to_value(json, current.kind()).map_err(|message| WorldError::InvalidProperty {
                 path,
@@ -360,6 +539,37 @@ fn json_to_value(json: &Json, kind: ValueKind) -> Result<Value, String> {
                 ToneMapping::from_name(name).expect("checked"),
             ))
         }
+        ValueKind::CFrame => {
+            const EXPECTED: &str = "expected [x, y, z, qx, qy, qz, qw]: a position and a rotation";
+            let numbers: Option<Vec<f32>> = json
+                .as_array()
+                .filter(|items| items.len() == 7)
+                .and_then(|items| items.iter().map(|n| n.as_f64().map(|n| n as f32)).collect());
+            let numbers = numbers.ok_or(EXPECTED)?;
+            let length = numbers[3..].iter().map(|n| n * n).sum::<f32>().sqrt();
+            if length < 1e-6 {
+                return Err(format!("{EXPECTED} (the rotation can't be all zeros)"));
+            }
+            let rotation = [3, 4, 5, 6].map(|i| numbers[i] / length);
+            Ok(Value::CFrame(CFrame {
+                position: axcenity_core::Vector3::new(numbers[0], numbers[1], numbers[2]),
+                rotation,
+            }))
+        }
+        ValueKind::EnumItem => {
+            const EXPECTED: &str = "expected \"Enum.Item\", such as \"Material.Neon\"";
+            let (enum_name, item) = json
+                .as_str()
+                .and_then(|text| text.split_once('.'))
+                .filter(|(e, i)| !e.is_empty() && !i.is_empty())
+                .ok_or(EXPECTED)?;
+            Ok(Value::EnumItem(EnumItem {
+                enum_name: enum_name.to_owned(),
+                item: item.to_owned(),
+            }))
+        }
+        // Read by `apply_properties` as a path.
+        ValueKind::Instance => Err("expected a path of names".to_owned()),
     }
 }
 
@@ -394,12 +604,13 @@ fn four_numbers(json: &Json) -> Option<[f32; 4]> {
 /// hand: two-space indents, and `[x, y, z]` values on one line.
 pub fn write_world(world: &World) -> String {
     let mut out = format!("{{\n  \"format_version\": {WORLD_FORMAT_VERSION},\n  \"workspace\": ");
-    write_instance(world, world.workspace(), 1, &mut out);
+    let roots = world_roots(world);
+    write_instance(world, world.workspace(), 1, &roots, &mut out);
     // Left out when empty, so worlds without one look as they always have.
     let replicated = world.replicated_storage();
     if !saved_children(world, replicated).is_empty() {
         out.push_str(",\n  \"replicated_storage\": ");
-        write_instance(world, replicated, 1, &mut out);
+        write_instance(world, replicated, 1, &roots, &mut out);
     }
     // Left out while every setting is its default, for the same reason.
     let lighting = world.lighting();
@@ -411,7 +622,7 @@ pub fn write_world(world: &World) -> String {
     });
     if changed {
         out.push_str(",\n  \"lighting\": ");
-        write_instance(world, lighting, 1, &mut out);
+        write_instance(world, lighting, 1, &roots, &mut out);
     }
     out.push_str("\n}\n");
     out
@@ -434,8 +645,15 @@ fn saved_children(world: &World, id: InstanceId) -> Vec<InstanceId> {
     })
 }
 
-/// Appends `id` as a JSON object whose closing brace is indented `depth` levels.
-fn write_instance(world: &World, id: InstanceId, depth: usize, out: &mut String) {
+/// Appends `id` as a JSON object whose closing brace is indented `depth`
+/// levels. References are written as paths from one of `roots`.
+fn write_instance(
+    world: &World,
+    id: InstanceId,
+    depth: usize,
+    roots: &[InstanceId],
+    out: &mut String,
+) {
     let instance = world.get(id).expect("only live Instances are in the tree");
     let indent = "  ".repeat(depth + 1);
     let inner_indent = "  ".repeat(depth + 2);
@@ -462,7 +680,13 @@ fn write_instance(world: &World, id: InstanceId, depth: usize, out: &mut String)
     let properties: Vec<String> = instance
         .properties()
         .filter(|(name, value)| !defaults.iter().any(|(n, v)| n == name && v == *value))
-        .map(|(name, value)| format!("{inner_indent}{}: {}", json_string(name), json_value(value)))
+        .map(|(name, value)| {
+            let json = match value {
+                Value::Instance(target) => reference_json(world, *target, roots),
+                value => json_value(value),
+            };
+            format!("{inner_indent}{}: {json}", json_string(name))
+        })
         .collect();
     if !properties.is_empty() {
         fields.push(format!(
@@ -471,12 +695,37 @@ fn write_instance(world: &World, id: InstanceId, depth: usize, out: &mut String)
         ));
     }
 
+    // Services keep neither (the file has nowhere for them).
+    if !instance.class().is_service() {
+        let attributes: Vec<String> = instance
+            .attributes()
+            .iter()
+            .map(|(name, value)| {
+                format!(
+                    "{inner_indent}{}: {}",
+                    json_string(name),
+                    attribute_json(value)
+                )
+            })
+            .collect();
+        if !attributes.is_empty() {
+            fields.push(format!(
+                "{indent}\"attributes\": {{\n{}\n{indent}}}",
+                attributes.join(",\n")
+            ));
+        }
+        if !instance.tags().is_empty() {
+            let tags: Vec<String> = instance.tags().iter().map(|t| json_string(t)).collect();
+            fields.push(format!("{indent}\"tags\": [{}]", tags.join(", ")));
+        }
+    }
+
     let children = saved_children(world, id);
     if !children.is_empty() {
         let mut text = format!("{indent}\"children\": [\n");
         for (i, &child) in children.iter().enumerate() {
             text.push_str(&inner_indent);
-            write_instance(world, child, depth + 2, &mut text);
+            write_instance(world, child, depth + 2, roots, &mut text);
             if i + 1 < children.len() {
                 text.push(',');
             }
@@ -520,6 +769,33 @@ fn json_value(value: &Value) -> String {
         Value::TextureChannel(c) => json_string(c.as_str()),
         Value::ParticleType(t) => json_string(t.as_str()),
         Value::ToneMapping(t) => json_string(t.as_str()),
+        Value::CFrame(c) => {
+            let p = c.position;
+            let numbers = [
+                p.x,
+                p.y,
+                p.z,
+                c.rotation[0],
+                c.rotation[1],
+                c.rotation[2],
+                c.rotation[3],
+            ];
+            // As `f32`s, for the same reason as `json_triple`.
+            let numbers: Vec<String> = numbers
+                .iter()
+                .map(|n| {
+                    if n.is_finite() {
+                        n.to_string()
+                    } else {
+                        "null".to_owned()
+                    }
+                })
+                .collect();
+            format!("[{}]", numbers.join(", "))
+        }
+        Value::EnumItem(item) => json_string(&format!("{}.{}", item.enum_name, item.item)),
+        // Written by `write_instance` as a path; attributes never hold one.
+        Value::Instance(_) => "null".to_owned(),
     }
 }
 

@@ -58,6 +58,10 @@ fn luau_type(kind: ValueKind) -> String {
         ValueKind::Vector2 => "Vector2".to_owned(),
         ValueKind::UDim2 => "UDim2".to_owned(),
         ValueKind::Color3 => "Color3".to_owned(),
+        ValueKind::CFrame => "CFrame".to_owned(),
+        // No property holds one yet; attributes do (`GetAttribute` is `any`).
+        ValueKind::EnumItem => "any".to_owned(),
+        ValueKind::Instance => "Instance?".to_owned(),
         // Enum properties read as items and also accept item names.
         ValueKind::Material
         | ValueKind::PartType

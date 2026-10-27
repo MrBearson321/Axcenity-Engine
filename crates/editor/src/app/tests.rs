@@ -347,6 +347,13 @@ fn every_panel_fits_a_narrow_column_and_a_short_strip() {
         .and_then(|workspace| workspace.children().last().copied())
         .expect("the example has parts");
     app.select_clicked(Some(pad), egui::Modifiers::NONE, None, false);
+    // Attributes of every kind and a few tags, for Properties and the Tags panel.
+    for (name, make) in crate::properties::ATTRIBUTE_TYPES {
+        app.world.set_attribute(pad, name, Some(make())).unwrap();
+    }
+    for tag in ["Lava", "Hazard", "AVeryLongTagNameThatMustStillFit"] {
+        app.world.add_tag(pad, tag).unwrap();
+    }
     app.output.error(
         "scripts/Pad.server.lua:3: an error with a long message, to see it wrap in a \
          narrow column instead of running past it",
@@ -393,6 +400,7 @@ fn every_panel_fits_a_narrow_column_and_a_short_strip() {
                             let _ = app.asset_check.show(ui, app.project.is_some(), true);
                         }
                         Pane::BehaviorTree => app.behavior_tree_pane(ui),
+                        Pane::Tags => app.tags_pane(ui),
                         Pane::Scene | Pane::Script(_) => {}
                     }
                     fit = Some((ui.min_rect(), room));
