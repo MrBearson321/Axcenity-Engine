@@ -1074,6 +1074,8 @@ mod ik_tests;
 #[cfg(test)]
 mod imported_clip_tests;
 #[cfg(test)]
+mod live_script_tests;
+#[cfg(test)]
 mod navigation_tests;
 #[cfg(test)]
 mod play_tests;

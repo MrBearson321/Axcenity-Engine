@@ -12,6 +12,9 @@
 //! the change happened. Each handler remembers the World's next change
 //! number when it was connected, so it never hears about a change from
 //! before it was connected.
+//!
+//! A handler belongs to the script that connected it, and runs as that
+//! script, so reloading the script disconnects it ([`Connections::forget_script`]).
 
 use std::collections::BTreeMap;
 
@@ -104,18 +107,35 @@ struct Handler {
     /// The World's next change number when this was connected: change
     /// events only run it for changes numbered this or higher.
     since: u64,
+    /// The script that connected it (see `scheduler`).
+    script: Option<InstanceId>,
 }
 
 impl Connections {
-    fn connect(&mut self, key: EventKey, callback: Function, since: u64) -> u64 {
+    fn connect(
+        &mut self,
+        key: EventKey,
+        callback: Function,
+        since: u64,
+        script: Option<InstanceId>,
+    ) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
         self.handlers.entry(key).or_default().push(Handler {
             id,
             callback,
             since,
+            script,
         });
         id
+    }
+
+    /// Disconnects every handler `script` connected.
+    pub fn forget_script(&mut self, script: InstanceId) {
+        self.handlers.retain(|_, handlers| {
+            handlers.retain(|handler| handler.script != Some(script));
+            !handlers.is_empty()
+        });
     }
 
     fn disconnect(&mut self, key: EventKey, id: u64) {
@@ -166,12 +186,13 @@ pub fn fire_change(lua: &Lua, owner: Owner, event: Event, change: u64, args: imp
 fn fire_handlers(lua: &Lua, key: EventKey, change: Option<u64>, args: impl IntoLuaMulti) {
     // Take a list first and let go of `Connections`, because a handler may
     // connect or disconnect handlers while it runs.
-    let handlers: Vec<(u64, Function)> = match lua.app_data_ref::<Connections>() {
+    let handlers: Vec<(u64, Function, Option<InstanceId>)> = match lua.app_data_ref::<Connections>()
+    {
         Some(connections) => match connections.handlers.get(&key) {
             Some(handlers) => handlers
                 .iter()
                 .filter(|handler| change.is_none_or(|change| handler.since <= change))
-                .map(|handler| (handler.id, handler.callback.clone()))
+                .map(|handler| (handler.id, handler.callback.clone(), handler.script))
                 .collect(),
             None => return,
         },
@@ -183,7 +204,7 @@ fn fire_handlers(lua: &Lua, key: EventKey, change: Option<u64>, args: impl IntoL
     let Ok(args) = args.into_lua_multi(lua) else {
         return;
     };
-    for (id, callback) in handlers {
+    for (id, callback, script) in handlers {
         // An earlier handler may have disconnected this one.
         let connected = lua
             .app_data_ref::<Connections>()
@@ -192,7 +213,7 @@ fn fire_handlers(lua: &Lua, key: EventKey, change: Option<u64>, args: impl IntoL
             continue;
         }
         match lua.create_thread(callback) {
-            Ok(thread) => scheduler::resume(lua, &thread, args.clone()),
+            Ok(thread) => scheduler::resume_as(lua, &thread, args.clone(), script),
             Err(err) => push_error(lua, &err),
         }
     }
@@ -228,7 +249,8 @@ impl UserData for LuaSignal {
             // Scripts only run while the World is lent to Lua, so it's
             // always there.
             let since = instance::world(lua)?.next_change_number();
-            let id = connections_mut(lua)?.connect(key, callback, since);
+            let script = scheduler::running_script(lua);
+            let id = connections_mut(lua)?.connect(key, callback, since, script);
             Ok(LuaConnection { key, id })
         });
         methods.add_meta_method(MetaMethod::ToString, |_, this, ()| {

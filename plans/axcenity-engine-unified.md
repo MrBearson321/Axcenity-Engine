@@ -884,10 +884,10 @@ Script tabs no longer say changes wait for the next Play.
 
 ### Acceptance criteria
 
-- [ ] Changing a printed message in a running script during Play prints the new text from then on without Stop, and a part that another script moves keeps moving.
-- [ ] After a reload, the script's old `Touched` connection no longer fires and its old `wait` loop stops.
-- [ ] Saving a syntax error keeps the old version running and shows the error with its line.
-- [ ] A kept Play edit is in the edit world after Stop as one undo step. Values that weren't kept are discarded.
+- [x] Changing a printed message in a running script during Play prints the new text from then on without Stop, and a part that another script moves keeps moving.
+- [x] After a reload, the script's old `Touched` connection no longer fires and its old `wait` loop stops.
+- [x] Saving a syntax error keeps the old version running and shows the error with its line.
+- [x] A kept Play edit is in the edit world after Stop as one undo step. Values that weren't kept are discarded.
 
 ---
 

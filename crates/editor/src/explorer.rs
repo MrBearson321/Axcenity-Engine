@@ -117,6 +117,8 @@ pub enum Action {
     ExportPackage(InstanceId),
     /// Save the Part `id`'s look as a material file.
     SaveMaterial(InstanceId),
+    /// During Play, keep every change to `id` after Stop (see `play::kept`).
+    KeepPlayChanges(InstanceId),
 }
 
 /// Changes `selection` for a click. The last id is the primary one (Properties
@@ -287,8 +289,9 @@ impl Explorer {
 
     /// Draws the tree with every id in `selected` highlighted. Returns the row
     /// that was clicked, and anything to do to the tree. When not `editable`
-    /// (during Play), rows can still be clicked and opened, but there's no
-    /// right-click menu, renaming or dragging. Ctrl (or Cmd) toggles a row
+    /// (during Play), rows can still be clicked and opened, and the
+    /// right-click menu only has Keep changes, but there's no renaming or
+    /// dragging. Ctrl (or Cmd) toggles a row
     /// and Shift selects the range; see [`update_selection`].
     pub fn show(
         &mut self,
@@ -443,6 +446,11 @@ impl Explorer {
                         }
 
                         if !editable {
+                            label.context_menu(|ui| {
+                                if play_row_menu(ui, &row.name) {
+                                    output.action = Some(Action::KeepPlayChanges(row.id));
+                                }
+                            });
                             return;
                         }
                         if tree::check_editable(world, row.id).is_ok() {
@@ -626,6 +634,20 @@ fn paint_dragged_name(ui: &egui::Ui, world: &World, id: InstanceId) {
     painter.galley(at, galley, egui::Color32::WHITE);
 }
 
+/// The right-click menu of `name`'s row during Play. True when Keep
+/// changes was picked.
+fn play_row_menu(ui: &mut egui::Ui, name: &str) -> bool {
+    ui.button(theme::with_icon(
+        icons::PUSH_PIN,
+        &format!("Keep changes to {name}"),
+    ))
+    .on_hover_text(
+        "At Stop, copy this object's values as the game has them into the world you're \
+         editing, as one undo step. Other changes made during Play are still undone.",
+    )
+    .clicked()
+}
+
 /// A choice in a row's right-click menu.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum RowCommand {
@@ -773,7 +795,8 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
         && ui
             .button(theme::with_icon(icons::SPHERE, "Save as Material"))
             .on_hover_text(
-                "Save its color, material and SurfaceAppearance as a material file in                  assets/materials, to drag onto other parts.",
+                "Save its color, material and SurfaceAppearance as a material file in \
+                 assets/materials, to drag onto other parts.",
             )
             .clicked()
     {

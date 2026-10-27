@@ -10,6 +10,17 @@ impl EditorApp {
     /// shortcut. Ignored while a part is being dragged in the viewport, and
     /// during Play.
     pub(super) fn act(&mut self, action: Action) {
+        if let Action::KeepPlayChanges(id) = action {
+            if let Some(session) = &mut self.play {
+                session.kept_mut().keep_whole(id);
+                let name = session.world().get(id).map(|i| i.name().to_owned());
+                if let Some(name) = name {
+                    self.output
+                        .info(format!("Stop will keep the changes to {name}."));
+                }
+            }
+            return;
+        }
         if self.viewport.is_dragging() || self.playing() {
             return;
         }
@@ -54,6 +65,7 @@ impl EditorApp {
             Action::Animate(id) => self.animate(id),
             Action::ExportPackage(id) => self.export_object_package_with_dialog(id),
             Action::SaveMaterial(id) => self.save_material(id),
+            Action::KeepPlayChanges(_) => {}
         }
     }
     /// Where a new part goes: the camera's focus point, on the move grid

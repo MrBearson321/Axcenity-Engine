@@ -6,7 +6,14 @@
 //! The clock is game time: the sum of the frame times the host passes in, not
 //! the computer's clock. That keeps the order of events predictable, and lets
 //! tests drive the clock exactly.
+//!
+//! Every coroutine belongs to the script whose code started it: a script's
+//! own body, its event handlers, and what they `task.spawn` or
+//! `task.delay`. The scheduler knows which script is running now
+//! ([`running_script`]), so what's paused and connected can be dropped for
+//! one script when its file is reloaded ([`Scheduler::forget_script`]).
 
+use axcenity_core::InstanceId;
 use mlua::{IntoLuaMulti, Lua, MultiValue, Thread};
 
 use crate::errors::error_message;
@@ -26,6 +33,9 @@ pub struct Scheduler {
     /// moment resume in the order they were scheduled.
     next_order: u64,
     waiting: Vec<Waiting>,
+    /// The script whose coroutine is running now, if any (not the
+    /// Console's commands).
+    running: Option<InstanceId>,
 }
 
 /// A coroutine waiting for its time to come.
@@ -35,6 +45,8 @@ struct Waiting {
     order: u64,
     thread: Thread,
     resume_with: ResumeWith,
+    /// The script it belongs to.
+    script: Option<InstanceId>,
 }
 
 enum ResumeWith {
@@ -64,8 +76,14 @@ impl Scheduler {
             order: self.next_order,
             thread,
             resume_with,
+            script: self.running,
         });
         self.next_order += 1;
+    }
+
+    /// Drops every waiting coroutine of `script`, so they never resume.
+    pub fn forget_script(&mut self, script: InstanceId) {
+        self.waiting.retain(|task| task.script != Some(script));
     }
 
     /// Moves the clock forward and removes every task that is due, sorted
@@ -92,6 +110,29 @@ pub fn scheduler_mut(lua: &Lua) -> mlua::Result<mlua::AppDataRefMut<'_, Schedule
         .ok_or_else(|| mlua::Error::runtime("the task scheduler isn't running"))
 }
 
+/// The script whose code is running now: the owner of the coroutine being
+/// resumed.
+pub fn running_script(lua: &Lua) -> Option<InstanceId> {
+    lua.app_data_ref::<Scheduler>()
+        .and_then(|scheduler| scheduler.running)
+}
+
+/// Like [`resume`], with `script` as the running script until `thread`
+/// pauses or ends, so what it connects and schedules belongs to `script`.
+pub fn resume_as(lua: &Lua, thread: &Thread, args: impl IntoLuaMulti, script: Option<InstanceId>) {
+    let before = set_running(lua, script);
+    resume(lua, thread, args);
+    set_running(lua, before);
+}
+
+/// Sets the running script and returns the one before.
+fn set_running(lua: &Lua, script: Option<InstanceId>) -> Option<InstanceId> {
+    match lua.app_data_mut::<Scheduler>() {
+        Some(mut scheduler) => std::mem::replace(&mut scheduler.running, script),
+        None => None,
+    }
+}
+
 /// Moves the clock forward by `seconds` and resumes every task that is due.
 ///
 /// Tasks scheduled while this runs (such as a resumed task calling
@@ -109,8 +150,10 @@ pub fn step(lua: &Lua, seconds: f64) {
     };
     for task in due {
         match task.resume_with {
-            ResumeWith::WaitedSince(since) => resume(lua, &task.thread, now - since),
-            ResumeWith::Arguments(args) => resume(lua, &task.thread, args),
+            ResumeWith::WaitedSince(since) => {
+                resume_as(lua, &task.thread, now - since, task.script);
+            }
+            ResumeWith::Arguments(args) => resume_as(lua, &task.thread, args, task.script),
         }
     }
 }

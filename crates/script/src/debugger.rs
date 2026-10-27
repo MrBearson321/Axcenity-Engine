@@ -99,13 +99,17 @@ struct Debugger {
     paused: Option<Stop>,
     /// What runs on Continue, in order: the paused coroutine first (with
     /// no arguments; Lua ignores them after a hook's yield), then the rest.
-    held: VecDeque<(Thread, MultiValue)>,
+    held: VecDeque<Held>,
     /// Breakpoints Output has said it couldn't pause at, so it says so once.
     reported: HashSet<(String, usize)>,
     /// Where the hook asked coroutines to yield. They don't stop there again
     /// until they've moved on.
     spots: Vec<Spot>,
 }
+
+/// A coroutine held for Continue: what to resume it with, and the script
+/// it belongs to (see `scheduler`).
+type Held = (Thread, MultiValue, Option<axcenity_core::InstanceId>);
 
 /// A line one coroutine was stopped at, in the function `depth` calls deep.
 struct Spot {
@@ -169,13 +173,14 @@ fn is_paused(lua: &Lua) -> bool {
 /// Called by the scheduler before it resumes `thread`. While paused, the
 /// thread waits for Continue (`None`); otherwise the arguments come back.
 pub fn hold_while_paused(lua: &Lua, thread: &Thread, args: MultiValue) -> Option<MultiValue> {
+    let script = scheduler::running_script(lua);
     let Some(mut debugger) = lua.app_data_mut::<Debugger>() else {
         return Some(args);
     };
     if debugger.paused.is_none() {
         return Some(args);
     }
-    debugger.held.push_back((thread.clone(), args));
+    debugger.held.push_back((thread.clone(), args, script));
     None
 }
 
@@ -191,6 +196,7 @@ pub fn enter(lua: &Lua, thread: &Thread) {
 /// the hook made it yield, it's held for Continue; if it's the one at the
 /// breakpoint, Play is now paused.
 pub fn leave(lua: &Lua, thread: &Thread) {
+    let script = scheduler::running_script(lua);
     let Some(mut debugger) = lua.app_data_mut::<Debugger>() else {
         return;
     };
@@ -214,9 +220,11 @@ pub fn leave(lua: &Lua, thread: &Thread) {
             stop.yielded = true;
             debugger
                 .held
-                .push_front((thread.clone(), MultiValue::new()));
+                .push_front((thread.clone(), MultiValue::new(), script));
         }
-        _ => debugger.held.push_back((thread.clone(), MultiValue::new())),
+        _ => debugger
+            .held
+            .push_back((thread.clone(), MultiValue::new(), script)),
     }
 }
 
@@ -301,9 +309,9 @@ pub fn release(lua: &Lua) {
     run_held(lua, queue);
 }
 
-fn run_held(lua: &Lua, mut queue: VecDeque<(Thread, MultiValue)>) {
-    while let Some((thread, args)) = queue.pop_front() {
-        scheduler::resume(lua, &thread, args);
+fn run_held(lua: &Lua, mut queue: VecDeque<Held>) {
+    while let Some((thread, args, script)) = queue.pop_front() {
+        scheduler::resume_as(lua, &thread, args, script);
         if is_paused(lua) {
             // Paused again: the new pause's coroutines go first, then these.
             if let Some(mut debugger) = lua.app_data_mut::<Debugger>() {

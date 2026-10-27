@@ -45,8 +45,13 @@ impl EditorApp {
             .as_ref()
             .map_or(&[][..], |project| project.stylesheets.as_slice());
         let selected = self.selected;
+        let kept = match (&self.play, selected) {
+            (Some(session), Some(id)) => session.kept().fields(id),
+            _ => Vec::new(),
+        };
         let mut style_edit = None;
-        let edit = properties::show(ui, world, selected, !editing, self.selection.len(), |ui| {
+        let count = self.selection.len();
+        let edit = properties::show(ui, world, selected, !editing, &kept, count, |ui| {
             // Stylesheets are edited, not the game, so not during Play.
             if editing {
                 style_edit = style_panel::show(ui, world, selected, stylesheets);

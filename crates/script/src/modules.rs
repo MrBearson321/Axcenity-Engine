@@ -6,8 +6,12 @@
 //! `script` set to the ModuleScript), and every later `require` on that side
 //! returns the same value. Only ModuleScripts can be required, never a file
 //! path or a library name, so nothing outside the project can be loaded.
+//!
+//! Each side remembers which scripts required each module, and which
+//! modules required it while they loaded, so a changed module can be
+//! loaded again by the scripts that use it ([`replace`]).
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use axcenity_core::{ClassName, InstanceId};
 use mlua::chunk::ChunkMode;
@@ -15,6 +19,7 @@ use mlua::{Function, Lua, Table, Thread, Value};
 
 use crate::instance::{LuaInstance, world};
 use crate::sandbox::{self, ScriptIds};
+use crate::scheduler;
 use crate::types::type_name;
 
 /// `require` runs the module's code in the requiring coroutine, so that a
@@ -53,6 +58,20 @@ end
 pub struct Modules {
     sources: HashMap<InstanceId, ModuleSource>,
     states: HashMap<InstanceId, State>,
+    /// The scripts that required each module, directly or through another
+    /// module (the module's code runs as the requiring script).
+    required_by: HashMap<InstanceId, BTreeSet<InstanceId>>,
+    /// The modules that required each module while they loaded.
+    dependents: HashMap<InstanceId, BTreeSet<InstanceId>>,
+}
+
+impl Modules {
+    /// Forgets that `script` required anything: it's about to run again.
+    pub fn forget_requirer(&mut self, script: InstanceId) {
+        for scripts in self.required_by.values_mut() {
+            scripts.remove(&script);
+        }
+    }
 }
 
 struct ModuleSource {
@@ -80,6 +99,28 @@ pub fn add(lua: &Lua, module: InstanceId, path: &str, source: &str) {
             },
         );
     }
+}
+
+/// Gives `module` new code: it, and every module that required it while
+/// loading, load again the next time they're required. Returns the
+/// scripts that required any of them, which should run again.
+pub fn replace(lua: &Lua, module: InstanceId, path: &str, source: &str) -> BTreeSet<InstanceId> {
+    add(lua, module, path, source);
+    let Some(mut modules) = lua.app_data_mut::<Modules>() else {
+        return BTreeSet::new();
+    };
+    let mut stale = vec![module];
+    let mut seen = BTreeSet::new();
+    let mut scripts = BTreeSet::new();
+    while let Some(next) = stale.pop() {
+        if !seen.insert(next) {
+            continue;
+        }
+        modules.states.remove(&next);
+        scripts.extend(modules.required_by.get(&next).into_iter().flatten());
+        stale.extend(modules.dependents.get(&next).into_iter().flatten());
+    }
+    scripts
 }
 
 /// Creates the `require` function every script shares. `wait` is
@@ -110,10 +151,27 @@ fn modules_mut(lua: &Lua) -> mlua::Result<mlua::AppDataRefMut<'_, Modules>> {
 /// The first step of `require(module)`: see [`REQUIRE`].
 fn begin(lua: &Lua, module: Value) -> mlua::Result<(&'static str, Value)> {
     let id = module_id(lua, &module)?;
+    let script = scheduler::running_script(lua);
     // The block ends the borrow of `Modules` before compiling, which needs
     // other app data.
     let (path, source) = {
-        let modules = modules_mut(lua)?;
+        let mut modules = modules_mut(lua)?;
+        if let Some(script) = script {
+            modules.required_by.entry(id).or_default().insert(script);
+        }
+        // Modules loading in this coroutine required this one.
+        let thread = lua.current_thread();
+        let loading: Vec<InstanceId> = modules
+            .states
+            .iter()
+            .filter(|(other, state)| {
+                **other != id && matches!(state, State::Loading(t) if *t == thread)
+            })
+            .map(|(other, _)| *other)
+            .collect();
+        for other in loading {
+            modules.dependents.entry(id).or_default().insert(other);
+        }
         match modules.states.get(&id) {
             Some(State::Loaded(value)) => return Ok(("done", value.clone())),
             Some(State::Loading(thread)) if *thread == lua.current_thread() => {

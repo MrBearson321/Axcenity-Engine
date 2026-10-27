@@ -150,6 +150,12 @@ impl EditorApp {
                 self.preview_sound(id, play);
                 return;
             }
+            &Edit::Keep(field, kept) => {
+                if let Some(session) = &mut self.play {
+                    session.kept_mut().set_kept(id, field, kept);
+                }
+                return;
+            }
         };
         self.change(id, key, label, vec![edit]);
     }
@@ -785,14 +791,11 @@ impl EditorApp {
     ///
     /// During Play the panels show the game's world, so the edits go there
     /// instead: the game's scripts see them (`Changed` fires), there's no
-    /// undo step, and Stop throws them away with the rest of the game.
+    /// undo step, and Stop throws them away with the rest of the game,
+    /// unless they're kept (see `play::kept`).
     pub(super) fn change(&mut self, id: InstanceId, key: Field, label: String, edits: Vec<Edit>) {
-        if let Some(session) = &mut self.play {
-            for edit in edits {
-                if let Err(err) = set(session.world_mut(), id, edit) {
-                    self.output.error(format!("Could not change that: {err:#}"));
-                }
-            }
+        if self.play.is_some() {
+            self.change_in_play(id, edits);
             return;
         }
         let before = history::snapshot(&self.world, id);
@@ -806,6 +809,24 @@ impl EditorApp {
         self.history
             .record(&mut self.world, id, key, label, before, after);
     }
+    /// Makes `edits` to `id` in the game's world, and notes each value
+    /// they changed, for its Keep pin.
+    fn change_in_play(&mut self, id: InstanceId, edits: Vec<Edit>) {
+        let Some(session) = &mut self.play else {
+            return;
+        };
+        let before = history::snapshot(session.world(), id);
+        for edit in edits {
+            if let Err(err) = set(session.world_mut(), id, edit) {
+                self.output.error(format!("Could not change that: {err:#}"));
+            }
+        }
+        for (field, value) in history::snapshot(session.world(), id) {
+            if !before.contains(&(field, value)) {
+                session.kept_mut().edited(id, field);
+            }
+        }
+    }
     /// Like [`change`](Self::change), for edits to several Instances that
     /// make one undo step, such as painting the whole selection.
     pub(super) fn change_many(
@@ -814,13 +835,9 @@ impl EditorApp {
         label: String,
         edits: Vec<(InstanceId, Vec<Edit>)>,
     ) {
-        if let Some(session) = &mut self.play {
+        if self.play.is_some() {
             for (id, edits) in edits {
-                for edit in edits {
-                    if let Err(err) = set(session.world_mut(), id, edit) {
-                        self.output.error(format!("Could not change that: {err:#}"));
-                    }
-                }
+                self.change_in_play(id, edits);
             }
             return;
         }
@@ -1016,7 +1033,8 @@ pub(super) fn set(world: &mut World, id: InstanceId, edit: Edit) -> anyhow::Resu
         | Edit::PickClip
         | Edit::OpenClip
         | Edit::Animate
-        | Edit::PreviewSound(_) => {}
+        | Edit::PreviewSound(_)
+        | Edit::Keep(..) => {}
     }
     Ok(())
 }

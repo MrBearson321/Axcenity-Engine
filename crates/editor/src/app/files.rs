@@ -418,6 +418,8 @@ impl EditorApp {
                 self.add_script(path, source);
             }
         }
+        // During Play the game runs the saved code from now on.
+        self.reload_in_play(path);
         true
     }
 
@@ -482,6 +484,7 @@ impl EditorApp {
             tab.text = translation.source;
             tab.mark_saved();
         }
+        self.reload_in_play(path);
         true
     }
 }

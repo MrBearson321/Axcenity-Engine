@@ -144,10 +144,45 @@ impl Context {
         };
         with_world(&self.lua, world, || {
             match self.load_script(ids, path, source) {
-                Ok(thread) => scheduler::resume(&self.lua, &thread, ()),
+                Ok(thread) => scheduler::resume_as(&self.lua, &thread, (), Some(script)),
                 Err(err) => push_error(&self.lua, &err),
             }
         });
+    }
+
+    /// Stops `script` without touching the world: disconnects its handlers
+    /// and drops its waiting coroutines, so none of its code runs again.
+    pub fn stop_script(&self, script: InstanceId) {
+        if let Some(mut connections) = self.lua.app_data_mut::<events::Connections>() {
+            connections.forget_script(script);
+        }
+        if let Ok(mut scheduler) = scheduler::scheduler_mut(&self.lua) {
+            scheduler.forget_script(script);
+        }
+        if let Some(mut modules) = self.lua.app_data_mut::<modules::Modules>() {
+            modules.forget_requirer(script);
+        }
+    }
+
+    /// Compiles `source` without running it, for its syntax errors.
+    pub fn check_syntax(&self, path: &str, source: &str) -> mlua::Result<()> {
+        self.lua
+            .load(source)
+            .set_name(format!("@{path}"))
+            .set_mode(ChunkMode::Text)
+            .into_function()
+            .map(|_| ())
+    }
+
+    /// Gives the ModuleScript `module` new code (see `modules::replace`),
+    /// and returns the scripts on this side that required it.
+    pub fn replace_module(
+        &self,
+        module: InstanceId,
+        path: &str,
+        source: &str,
+    ) -> std::collections::BTreeSet<InstanceId> {
+        modules::replace(&self.lua, module, path, source)
     }
 
     /// Runs a Console command as a new coroutine until it finishes, fails or

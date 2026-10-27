@@ -11,6 +11,7 @@ use axcenity_core::{
 };
 use eframe::egui;
 
+use crate::history::Field;
 use crate::theme::{self, icons};
 
 /// A change made in the Properties panel.
@@ -42,6 +43,9 @@ pub enum Edit {
     /// Plays the selected Sound in the editor, to hear it without pressing
     /// Play, or (false) stops that.
     PreviewSound(bool),
+    /// During Play, pins (true) or unpins a value edited during Play, so
+    /// Stop copies it into the edit world (see `play::kept`).
+    Keep(Field, bool),
 }
 
 /// One group of properties in the panel, such as "Appearance".
@@ -382,13 +386,16 @@ pub fn can_rename_here(instance: &Instance) -> bool {
 
 /// Draws the panel for `selected` and returns the edit made this frame, if any.
 /// While `playing`, `world` is the game's, and the panel says that changes
-/// last only until Stop. `more` draws further sections (the Style section)
-/// at the end, in the same scrolling area.
+/// last only until Stop unless kept: `kept` lists the fields edited during
+/// Play and whether each is kept, and each gets a Keep pin by its name.
+/// `more` draws further sections (the Style section) at the end, in the
+/// same scrolling area.
 pub fn show(
     ui: &mut egui::Ui,
     world: &World,
     selected: Option<InstanceId>,
     playing: bool,
+    kept: &[(Field, bool)],
     selection_count: usize,
     more: impl FnOnce(&mut egui::Ui),
 ) -> Option<Edit> {
@@ -397,9 +404,16 @@ pub fn show(
         notice(
             ui,
             icons::INFO,
-            "Changes made during Play are undone at Stop.",
+            "Changes made during Play are undone at Stop, unless you keep them: click the pin \
+             beside a value you changed, or right-click the object in the Explorer and pick \
+             Keep changes.",
         );
     }
+    let pin = |field: Field| {
+        kept.iter()
+            .find(|(edited, _)| *edited == field)
+            .map(|(_, kept)| *kept)
+    };
     if selection_count > 1 {
         notice(
             ui,
@@ -478,7 +492,9 @@ pub fn show(
             // part turns up on the next one selected.
             ui.push_id(id, |ui| {
                 section(ui, "Data", |ui| {
-                    field_name(ui, "Name");
+                    if let Some(keep) = field_name_with_pin(ui, "Name", pin(Field::Name)) {
+                        edit = Some(Edit::Keep(Field::Name, keep));
+                    }
                     let mut name = instance.name().to_string();
                     if can_rename_here(instance) {
                         if ui.text_edit_singleline(&mut name).changed() {
@@ -502,7 +518,10 @@ pub fn show(
                 for group in sections(instance) {
                     section(ui, group.title, |ui| {
                         for (name, value) in group.properties {
-                            field_name(ui, name);
+                            let field = Field::Property(name);
+                            if let Some(keep) = field_name_with_pin(ui, name, pin(field)) {
+                                edit = Some(Edit::Keep(field, keep));
+                            }
                             if let Some(made) = value_control(ui, name, value) {
                                 edit = Some(made);
                             }
@@ -565,6 +584,31 @@ fn section(ui: &mut egui::Ui, title: &str, rows: impl FnOnce(&mut egui::Ui)) {
         .show_unindented(ui, |ui| {
             crate::responsive::form(ui, title, rows);
         });
+}
+
+/// A property's name in the left column, after its Keep pin when it was
+/// edited during Play (`pin` says whether it's kept). Returns the pin's new
+/// state when it was clicked.
+fn field_name_with_pin(ui: &mut egui::Ui, name: &str, pin: Option<bool>) -> Option<bool> {
+    let Some(kept) = pin else {
+        field_name(ui, name);
+        return None;
+    };
+    let mut clicked = None;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        let tooltip = if kept {
+            "Kept: Stop copies this value into the world you're editing, as one undo step. \
+             Click to let it go at Stop."
+        } else {
+            "Changed during Play. Click to keep this value after Stop."
+        };
+        if crate::widgets::icon_button(ui, icons::PUSH_PIN, tooltip, kept).clicked() {
+            clicked = Some(!kept);
+        }
+        field_name(ui, name);
+    });
+    clicked
 }
 
 /// A property's name, in the left column.

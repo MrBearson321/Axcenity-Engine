@@ -1,11 +1,18 @@
 use axcenity_assets::Reload;
 
+use crate::app::OpenProject;
+
 use super::*;
 
-/// True for a changed file that's taken in during Play: an asset, but not
-/// a stylesheet (the UI restyles with those at Stop).
-fn reloads_in_play(path: &str) -> bool {
-    project::is_asset_path(path) && !project::is_stylesheet(path)
+/// True for a changed file that's taken in during Play: an asset (but not
+/// a stylesheet: the UI restyles with those at Stop), or a script the game
+/// runs that's still there (it runs again in place). A new or deleted
+/// script waits for Stop, since it adds or removes an Instance.
+fn reloads_in_play(project: &OpenProject, path: &str) -> bool {
+    if project::is_asset_path(path) {
+        return !project::is_stylesheet(path);
+    }
+    project.scripts.iter().any(|script| script.path == path) && project.folder.join(path).exists()
 }
 
 impl EditorApp {
@@ -16,12 +23,14 @@ impl EditorApp {
             return;
         };
         let mut paths = project.watcher.changes();
-        // During Play, assets reload in place, but the world, scripts and
-        // stylesheets wait until Stop: the game runs on a copy of the edit
-        // world, and the two mustn't get mixed up.
+        // During Play, assets and changed scripts reload in place, but the
+        // world, new or deleted scripts and stylesheets wait until Stop: the
+        // game runs on a copy of the edit world, and the two mustn't get
+        // mixed up.
         if playing {
-            let (now, later): (Vec<String>, Vec<String>) =
-                paths.into_iter().partition(|path| reloads_in_play(path));
+            let (now, later): (Vec<String>, Vec<String>) = paths
+                .into_iter()
+                .partition(|path| reloads_in_play(project, path));
             project.after_play.extend(later);
             paths = now;
         } else if !project.after_play.is_empty() {
@@ -215,6 +224,7 @@ impl EditorApp {
                 }
                 self.output
                     .info(format!("`{path}` was changed outside the editor."));
+                self.reload_in_play(path);
             }
             None => {
                 self.add_script(path, source.clone());
@@ -222,6 +232,22 @@ impl EditorApp {
             }
         }
         self.sync_tab(path, Some(&source));
+    }
+
+    /// During Play, runs the script at `path` again in place, with the code
+    /// the editor now has for it (see `Session::reload_script`).
+    pub(in crate::app) fn reload_in_play(&mut self, path: &str) {
+        let (Some(project), Some(session)) = (&self.project, &mut self.play) else {
+            return;
+        };
+        let Some(script) = project.scripts.iter().find(|script| script.path == path) else {
+            return;
+        };
+        if let Err(crash) =
+            session.reload_script(script.instance, path, &script.source, &mut self.output)
+        {
+            self.crashed(crash);
+        }
     }
 
     pub(super) fn block_script_file_changed(&mut self, path: &str) {
@@ -295,6 +321,7 @@ impl EditorApp {
                 self.output.info(format!(
                     "`{path}` changed outside the editor; your unsaved blocks are kept."
                 ));
+                self.reload_in_play(path);
             }
             Some(_) => {
                 if let Some(project) = &mut self.project {
@@ -312,6 +339,7 @@ impl EditorApp {
                 }
                 self.output
                     .info(format!("`{path}` was changed outside the editor."));
+                self.reload_in_play(path);
             }
             None => {
                 let id = self.add_script(path, source.clone());

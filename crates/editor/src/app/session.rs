@@ -457,19 +457,90 @@ impl EditorApp {
         }
     }
     /// Stops the game and throws its world away. The world being edited was
-    /// never touched, so it's back exactly as before Play.
+    /// never touched, so it's back exactly as before Play, except for the
+    /// values kept from Play, which are copied in as one undo step.
     pub(super) fn stop(&mut self) {
         self.tabs.paused = None;
-        if self.play.take().is_some() {
+        if let Some(session) = self.play.take() {
             self.viewport.clear_particles();
             self.viewport.clear_ui();
             self.pending_emits.clear();
-            self.output
-                .info("Stopped. The world is back as it was before Play.");
+            let kept = self.keep_play_edits(&session);
+            let gone = session.kept().made_in_play(&self.world);
+            drop(session);
+            if kept == 0 {
+                self.output
+                    .info("Stopped. The world is back as it was before Play.");
+            } else {
+                self.output.info(format!(
+                    "Stopped. Kept {kept} {} from Play (Undo takes {}); everything else is \
+                     back as it was before Play.",
+                    if kept == 1 { "value" } else { "values" },
+                    if kept == 1 { "it back" } else { "them back" },
+                ));
+            }
+            if gone > 0 {
+                self.output.warning(format!(
+                    "{gone} kept {} made during Play, so {} gone with the game.",
+                    if gone == 1 {
+                        "object was"
+                    } else {
+                        "objects were"
+                    },
+                    if gone == 1 { "it's" } else { "they're" },
+                ));
+            }
             self.focused_text = None;
             self.pending_focus_lost = None;
             self.forget_selection_outside_tree();
         }
+    }
+    /// Copies the values kept from Play (see `play::kept`) from the game's
+    /// world into the edit world, as one undo step. Returns how many.
+    fn keep_play_edits(&mut self, session: &Session) -> usize {
+        let kept = session.kept().values(session.world(), &self.world);
+        if kept.is_empty() {
+            return 0;
+        }
+        let label = match kept.as_slice() {
+            [only] => format!(
+                "Keep Play changes to {}",
+                session
+                    .world()
+                    .get(only.id)
+                    .map_or("", |instance| instance.name())
+            ),
+            many => format!("Keep Play changes to {} objects", many.len()),
+        };
+        let mut count = 0;
+        let mut changed = Vec::new();
+        for item in kept {
+            let before = history::snapshot(&self.world, item.id);
+            for (field, value) in item.values {
+                let edit = match field {
+                    Field::Name => Edit::Name(value.as_str().unwrap_or_default().to_owned()),
+                    Field::Property(name) => Edit::Property(name, value),
+                };
+                match edits::set(&mut self.world, item.id, edit) {
+                    Ok(()) => count += 1,
+                    Err(err) => self
+                        .output
+                        .error(format!("Could not keep a Play change: {err:#}")),
+                }
+            }
+            let after = history::snapshot(&self.world, item.id);
+            changed.push(history::Changed {
+                id: item.id,
+                before,
+                after,
+            });
+        }
+        // Its own step, never merged into the last edit before Play.
+        self.history.seal();
+        self.history
+            .record_many(&mut self.world, Field::Name, label, changed);
+        self.history.seal();
+        count
     }
     /// During Play, takes the key presses that move the game UI's focus out
     /// of `input` (see `UiInteraction::takes`), for `navigate_play_ui`:

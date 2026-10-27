@@ -30,6 +30,10 @@ use eframe::egui;
 use crate::output::Output;
 use crate::profiler::{FrameCost, GameLoad};
 
+pub mod kept;
+
+pub use kept::PlayEdits;
+
 /// The message of a Rust panic caught during Play.
 #[derive(Debug)]
 pub struct Crash(pub String);
@@ -63,6 +67,8 @@ pub struct Session {
     /// (`UserGameSettings`), for the viewport until Stop. `None` until one
     /// does: the editor's own settings are used.
     graphics: Option<GraphicsSettings>,
+    /// Values edited in Properties during Play, and which Stop keeps.
+    kept: PlayEdits,
 }
 
 impl Session {
@@ -104,6 +110,7 @@ impl Session {
             panic_next_frame: false,
             cost: None,
             graphics: None,
+            kept: PlayEdits::default(),
         };
         // Up before any script runs, as in the player.
         session.loading_gui = LoadingGui::start(
@@ -159,6 +166,15 @@ impl Session {
     /// game's scripts see those changes at the next frame.
     pub fn world_mut(&mut self) -> &mut World {
         &mut self.world
+    }
+
+    /// The values edited in Properties during Play, and which are kept.
+    pub fn kept(&self) -> &PlayEdits {
+        &self.kept
+    }
+
+    pub fn kept_mut(&mut self) -> &mut PlayEdits {
+        &mut self.kept
     }
 
     /// Where a script is paused at a breakpoint, if one is. While paused,
@@ -462,6 +478,35 @@ impl Session {
             }
         };
         animated || heard
+    }
+
+    /// Runs a script's changed file in place (see
+    /// `ScriptRuntime::reload_script`), inside the guard. Output says
+    /// "Reloaded Door.server.lua", or shows the syntax error with its line
+    /// and that the last good version still runs.
+    pub fn reload_script(
+        &mut self,
+        script: InstanceId,
+        path: &str,
+        source: &str,
+        output: &mut Output,
+    ) -> Result<(), Crash> {
+        let name = path.rsplit('/').next().unwrap_or(path);
+        guard(|| {
+            let reloaded = self
+                .scripts
+                .reload_script(&mut self.world, script, path, source);
+            self.forward_output(output);
+            match reloaded {
+                Ok(()) => output.info(format!("Reloaded {name}")),
+                Err(_) if !self.world.contains(script) => output.info(format!(
+                    "{name} isn't in the game any more, so it wasn't reloaded."
+                )),
+                Err(_) => output.warning(format!(
+                    "{name} still runs its last good version until the error is fixed."
+                )),
+            }
+        })
     }
 
     fn forward_animator_errors(&mut self, output: &mut Output) {

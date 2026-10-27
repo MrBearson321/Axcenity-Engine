@@ -30,6 +30,9 @@
 //! - The editor's breakpoints pause its Play on a line, show the paused
 //!   script's locals, and continue ([`ScriptRuntime::enable_debugger`], see
 //!   `debugger`). The player never turns them on, and scripts can't.
+//! - [`ScriptRuntime::reload_script`] runs a script's changed file in place
+//!   while the game runs: its handlers and waiting coroutines go, and the
+//!   new code runs against the same world.
 
 mod api;
 mod changes;
@@ -56,7 +59,7 @@ mod user_settings;
 mod watchdog;
 
 use std::cell::Ref;
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -157,6 +160,16 @@ pub struct ScriptRuntime {
     /// `SaveService`'s player data, settings and checkpoint, which both
     /// sides share.
     saves: save::SharedSaves,
+    /// Every script and ModuleScript started, in the order they first
+    /// started, with the code they run now, so they can run again.
+    started: Vec<Started>,
+}
+
+/// A script as [`ScriptRuntime::start_script`] was last given it.
+struct Started {
+    script: InstanceId,
+    path: String,
+    source: String,
 }
 
 impl ScriptRuntime {
@@ -184,6 +197,7 @@ impl ScriptRuntime {
             particle_emits: Vec::new(),
             reported_change_loop: false,
             saves,
+            started: Vec::new(),
         }
     }
 
@@ -250,6 +264,7 @@ impl ScriptRuntime {
         path: &str,
         source: &str,
     ) {
+        self.remember(script, path, source);
         let class = world.get(script).map(|instance| instance.class());
         if class == Some(ClassName::ModuleScript) {
             self.server.add_module(script, path, source);
@@ -264,6 +279,82 @@ impl ScriptRuntime {
         self.context(side).start_script(world, script, path, source);
         self.collect(side);
         self.fire_changes(world);
+    }
+
+    /// Keeps `script`'s code for running it again, in the place it first
+    /// started.
+    fn remember(&mut self, script: InstanceId, path: &str, source: &str) {
+        match self.started.iter_mut().find(|s| s.script == script) {
+            Some(started) => {
+                started.path = path.to_owned();
+                started.source = source.to_owned();
+            }
+            None => self.started.push(Started {
+                script,
+                path: path.to_owned(),
+                source: source.to_owned(),
+            }),
+        }
+    }
+
+    /// Runs `script`'s new code in place while the game runs. Its handlers
+    /// are disconnected and its waiting coroutines (`task.wait`,
+    /// `task.spawn`, `task.delay`) are dropped, then `source` runs as a new
+    /// start against the world as it is now. Every other script, and the
+    /// world, carry on.
+    ///
+    /// A ModuleScript loads again the next time it's required, with every
+    /// module that required it while loading, and the scripts that required
+    /// any of them run again, in the order they first started.
+    ///
+    /// Code with a syntax error isn't run: the old code keeps running, and
+    /// the error (`path:line: message`) joins the output and is returned.
+    /// A script no longer in the game isn't run either.
+    pub fn reload_script(
+        &mut self,
+        world: &mut World,
+        script: InstanceId,
+        path: &str,
+        source: &str,
+    ) -> Result<(), String> {
+        let Some(class) = world.get(script).map(|instance| instance.class()) else {
+            return Err(format!("`{path}` isn't in the game any more."));
+        };
+        let side = Side::of_class(class).unwrap_or(Side::Server);
+        if let Err(err) = self.context(side).check_syntax(path, source) {
+            let text = errors::error_message(&err);
+            self.output.push(OutputLine {
+                kind: OutputKind::Error,
+                text: text.clone(),
+                trace: Vec::new(),
+            });
+            return Err(text);
+        }
+        if class != ClassName::ModuleScript {
+            self.context(side).stop_script(script);
+            self.start_script(world, script, path, source);
+            return Ok(());
+        }
+        self.remember(script, path, source);
+        let mut again = BTreeSet::new();
+        for side in [Side::Server, Side::Client] {
+            again.extend(self.context(side).replace_module(script, path, source));
+        }
+        let again: Vec<(InstanceId, String, String)> = self
+            .started
+            .iter()
+            .filter(|started| again.contains(&started.script))
+            .map(|started| (started.script, started.path.clone(), started.source.clone()))
+            .collect();
+        for (script, path, source) in again {
+            let Some(class) = world.get(script).map(|instance| instance.class()) else {
+                continue;
+            };
+            let side = Side::of_class(class).unwrap_or(Side::Server);
+            self.context(side).stop_script(script);
+            self.start_script(world, script, &path, &source);
+        }
+        Ok(())
     }
 
     /// The player on this device joins the game, once: a Player Instance
@@ -699,6 +790,8 @@ mod tween_tests;
 
 #[cfg(test)]
 mod localization_tests;
+#[cfg(test)]
+mod reload_tests;
 #[cfg(test)]
 mod save_tests;
 
