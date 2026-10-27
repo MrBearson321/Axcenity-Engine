@@ -115,9 +115,12 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         BlockKind::ShakeCamera { .. } => 59,
         BlockKind::DestroyAfter { .. } => 60,
         BlockKind::FireEvent { .. } => 61,
+        BlockKind::PushWithForce { .. } => 62,
+        BlockKind::SetPartVelocity { .. } => 63,
+        BlockKind::SetFriction { .. } => 64,
     })
 }
-const STATEMENT_COUNT: usize = 62;
+const STATEMENT_COUNT: usize = 65;
 
 /// One of each statement block, with the Lua it must produce.
 fn every_statement() -> Vec<(BlockKind, &'static str)> {
@@ -236,6 +239,36 @@ fn every_statement() -> Vec<(BlockKind, &'static str)> {
                 anchored: Expression::Boolean { value: false },
             },
             "workspace.Pad.Anchored = false",
+        ),
+        (
+            BlockKind::PushWithForce {
+                target: pad(),
+                force: Expression::Vector3 {
+                    x: 0.0,
+                    y: 50.0,
+                    z: 0.0,
+                },
+            },
+            "workspace.Pad:ApplyImpulse(Vector3.new(0, 50, 0))",
+        ),
+        (
+            BlockKind::SetPartVelocity {
+                target: pad(),
+                velocity: Expression::Vector3 {
+                    x: 10.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            },
+            "workspace.Pad.AssemblyLinearVelocity = Vector3.new(10, 0, 0)",
+        ),
+        (
+            BlockKind::SetFriction {
+                target: pad(),
+                friction: number(0.1),
+            },
+            "workspace.Pad.CustomPhysicalProperties = PhysicalProperties.new(physical.Density, \
+             friction, physical.Elasticity, physical.FrictionWeight, physical.ElasticityWeight)",
         ),
         (
             BlockKind::SetColor {

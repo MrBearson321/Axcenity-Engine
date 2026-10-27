@@ -1,5 +1,7 @@
 use axcenity_assets::Assets;
-use axcenity_core::{ClassName, InstanceId, PartType, TerrainData, Value, Vector3, World};
+use axcenity_core::{
+    ClassName, InstanceId, Material, PartType, TerrainData, Value, Vector3, World,
+};
 
 use super::*;
 
@@ -691,5 +693,129 @@ fn a_part_lands_on_colliding_foliage_and_falls_through_visual_foliage() {
     assert!(
         (resting.y - 0.5).abs() < 0.15,
         "should rest on the terrain, got {resting:?}"
+    );
+}
+
+/// How far a 2×1×2 Plastic box thrown at 20 studs a second along X slides
+/// across a floor of `material`, with no script: its velocity is set
+/// before the game starts.
+fn slide_on(material: Material) -> f32 {
+    let (mut world, floor) = world_with_floor();
+    set(&mut world, floor, "Material", Value::Material(material));
+    let block = part(&mut world, Vector3::new(-15.0, 0.5, 0.0), false);
+    set(&mut world, block, "Size", vector(2.0, 1.0, 2.0));
+    set(
+        &mut world,
+        block,
+        "AssemblyLinearVelocity",
+        vector(20.0, 0.0, 0.0),
+    );
+    let mut physics = Physics::new();
+    run(&mut physics, &mut world, 3.0, 60.0);
+    position(&world, block).x + 15.0
+}
+
+#[test]
+fn a_box_slides_further_on_ice_than_on_plastic() {
+    let plastic = slide_on(Material::Plastic);
+    let ice = slide_on(Material::Ice);
+    // At friction 0.5 it stops after about v² / (2 μ g) = 2 studs; Ice
+    // (weighted against Plastic) leaves about a quarter of that friction.
+    assert!(plastic > 1.0 && plastic < 4.0, "{plastic}");
+    assert!(ice > 2.5 * plastic, "ice {ice}, plastic {plastic}");
+}
+
+/// The highest a 2-stud ball of `material` gets after its first bounce,
+/// dropped from 10 studs onto the Plastic floor, with no script.
+fn bounce_of(material: Material) -> f32 {
+    let (mut world, _) = world_with_floor();
+    let ball = part(&mut world, Vector3::new(0.0, 10.0, 0.0), false);
+    set(&mut world, ball, "Shape", Value::PartType(PartType::Ball));
+    set(&mut world, ball, "Size", vector(2.0, 2.0, 2.0));
+    set(&mut world, ball, "Material", Value::Material(material));
+    let mut physics = Physics::new();
+    let mut bounced = false;
+    let mut highest = 0.0_f32;
+    for _ in 0..180 {
+        physics.step(&mut world, 1.0 / 60.0);
+        let rising = world
+            .get(ball)
+            .unwrap()
+            .property("AssemblyLinearVelocity")
+            .and_then(Value::as_vector3)
+            .unwrap()
+            .y
+            > 0.0;
+        bounced |= rising;
+        if bounced {
+            highest = highest.max(position(&world, ball).y);
+            if !rising {
+                break;
+            }
+        }
+    }
+    highest
+}
+
+#[test]
+fn a_rubber_ball_bounces_higher_than_a_plastic_one() {
+    let plastic = bounce_of(Material::Plastic);
+    let rubber = bounce_of(Material::Rubber);
+    assert!(rubber > plastic + 2.0, "rubber {rubber}, plastic {plastic}");
+    assert!(
+        rubber < 10.0,
+        "it never bounces higher than it fell: {rubber}"
+    );
+}
+
+/// Where a crate dropped from 50 studs is after half a second, under the
+/// Workspace's `gravity`.
+fn drop_with_gravity(gravity: f64) -> f32 {
+    let (mut world, _) = world_with_floor();
+    let workspace = world.workspace();
+    set(&mut world, workspace, "Gravity", Value::Number(gravity));
+    let crate_id = part(&mut world, Vector3::new(0.0, 50.0, 0.0), false);
+    let mut physics = Physics::new();
+    run(&mut physics, &mut world, 0.5, 60.0);
+    50.0 - position(&world, crate_id).y
+}
+
+#[test]
+fn halving_workspace_gravity_makes_crates_fall_slower() {
+    assert_eq!(gravity(&World::new()), GRAVITY);
+    let full = drop_with_gravity(f64::from(GRAVITY));
+    let half = drop_with_gravity(f64::from(GRAVITY) / 2.0);
+    // ½ g t² over half a second: about 24.5 and 12.3 studs.
+    assert!((full - 24.5).abs() < 1.0, "{full}");
+    assert!((half / full - 0.5).abs() < 0.03, "half {half}, full {full}");
+}
+
+#[test]
+fn a_part_s_velocity_is_written_back_and_a_set_one_is_kept() {
+    let (mut world, _) = world_with_floor();
+    let block = part(&mut world, Vector3::new(0.0, 60.0, 0.0), false);
+    let mut physics = Physics::new();
+    run(&mut physics, &mut world, 0.5, 60.0);
+    let falling = world
+        .get(block)
+        .unwrap()
+        .property("AssemblyLinearVelocity")
+        .and_then(Value::as_vector3)
+        .unwrap();
+    // v = g t after half a second.
+    assert!((falling.y + 98.1).abs() < 2.0, "{falling:?}");
+    // Teleporting and throwing it in the same frame keeps the throw.
+    set(&mut world, block, "Position", vector(0.0, 30.0, 0.0));
+    set(
+        &mut world,
+        block,
+        "AssemblyLinearVelocity",
+        vector(0.0, 50.0, 0.0),
+    );
+    physics.step(&mut world, 1.0 / 60.0);
+    assert!(
+        position(&world, block).y > 30.5,
+        "{:?}",
+        position(&world, block)
     );
 }

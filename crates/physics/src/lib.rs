@@ -21,12 +21,22 @@
 //! `WindAffected` on: before each step, each gets a drag force toward the
 //! wind's speed, larger for parts with bigger faces (see [`WIND_DRAG`]).
 //!
+//! Each part weighs, grips and bounces by its `CustomPhysicalProperties`,
+//! or its Material's (see [`axcenity_core::Material::physical`]). The
+//! Workspace's `Gravity` pulls everything down. Physics writes each moving
+//! part's `AssemblyLinearVelocity` and `AssemblyAngularVelocity` back, and
+//! a script that sets them throws the part; [`Mass`] tells scripts how much
+//! an impulse changes them.
+//!
 //! [`cast_ray`] and [`debug_colliders`] read the world the same way the
 //! simulation does, without stepping it or writing back.
 
+mod mass;
+mod material;
 mod query;
 mod shapes;
 
+pub use mass::Mass;
 pub use query::{
     ColliderOutline, Column, RayHit, Solid, cast_ray, cast_ray_excluding, debug_colliders, solids,
 };
@@ -34,7 +44,9 @@ pub use query::{
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use axcenity_assets::Assets;
-use axcenity_core::{ClassName, Instance, InstanceId, Value, Vector3, World};
+use axcenity_core::{
+    ClassName, Instance, InstanceId, Material, PhysicalProperties, Value, Vector3, World,
+};
 use rapier3d::glamx::{EulerRot, Quat, Vec3};
 use rapier3d::math::Pose;
 use rapier3d::pipeline::PhysicsWorld;
@@ -44,7 +56,8 @@ use shapes::Form;
 /// How long one physics step is: physics always runs at 60 steps a second.
 pub const STEP_SECONDS: f64 = 1.0 / 60.0;
 
-/// Downward pull in studs per second squared (about 1 stud = 0.28 m).
+/// Downward pull in studs per second squared (about 1 stud = 0.28 m): the
+/// default of the Workspace's `Gravity`, which [`gravity`] reads.
 pub const GRAVITY: f32 = 196.2;
 
 /// The most steps one frame may run. The player already caps a frame at
@@ -119,6 +132,11 @@ pub(crate) struct PartState {
     orientation: Vector3,
     /// True if the Workspace's wind pushes the part.
     wind_affected: bool,
+    /// Its `CustomPhysicalProperties`, or its material's.
+    pub(crate) physical: PhysicalProperties,
+    /// `AssemblyLinearVelocity` and `AssemblyAngularVelocity`.
+    velocity: Vector3,
+    spin: Vector3,
 }
 
 impl PartState {
@@ -145,6 +163,16 @@ impl PartState {
         let can_collide = instance.property("CanCollide").and_then(Value::as_bool) != Some(false);
         let wind_affected =
             instance.property("WindAffected").and_then(Value::as_bool) == Some(true);
+        // MeshParts have no Material, so they weigh what Plastic does.
+        let material = instance
+            .property("Material")
+            .and_then(Value::as_material)
+            .unwrap_or(Material::Plastic);
+        let physical = instance
+            .property("CustomPhysicalProperties")
+            .and_then(Value::as_physical_properties)
+            .flatten()
+            .map_or_else(|| material.physical(), PhysicalProperties::clamped);
         let state = Self {
             anchored,
             can_collide,
@@ -153,11 +181,21 @@ impl PartState {
             position: vector("Position")?,
             orientation: vector("Orientation")?,
             wind_affected,
+            physical,
+            velocity: vector("AssemblyLinearVelocity").unwrap_or_default(),
+            spin: vector("AssemblyAngularVelocity").unwrap_or_default(),
         };
-        let finite = [state.size, state.position, state.orientation]
+        // A NaN or infinite velocity is ignored, not simulated.
+        let placed = [state.size, state.position, state.orientation]
             .iter()
-            .all(|v| v.x.is_finite() && v.y.is_finite() && v.z.is_finite());
-        finite.then_some(state)
+            .all(|v| finite(*v));
+        placed.then_some(Self {
+            velocity: Some(state.velocity)
+                .filter(|v| finite(*v))
+                .unwrap_or_default(),
+            spin: Some(state.spin).filter(|v| finite(*v)).unwrap_or_default(),
+            ..state
+        })
     }
 
     /// A Terrain: always anchored, never turned, colliding as its heightfield.
@@ -180,11 +218,14 @@ impl PartState {
             position: vector("Position")?,
             orientation: Vector3::default(),
             wind_affected: false,
+            physical: PhysicalProperties::LEGACY,
+            velocity: Vector3::default(),
+            spin: Vector3::default(),
         };
-        let finite = [state.size, state.position]
+        [state.size, state.position]
             .iter()
-            .all(|v| v.x.is_finite() && v.y.is_finite() && v.z.is_finite());
-        finite.then_some(state)
+            .all(|v| finite(*v))
+            .then_some(state)
     }
 
     pub(crate) fn pose(&self) -> Pose {
@@ -233,6 +274,7 @@ impl Physics {
     pub fn step(&mut self, world: &mut World, seconds: f64) -> u32 {
         self.sync_from_world(world);
         let wind = global_wind(world);
+        self.rapier.gravity = Vec3::new(0.0, -gravity(world), 0.0);
 
         // `max` also turns NaN into 0, so a bad time can't stop physics forever.
         self.unsimulated_seconds += seconds.max(0.0);
@@ -243,7 +285,9 @@ impl Physics {
                 break;
             }
             self.blow(wind);
-            self.rapier.step();
+            // The hook only runs for colliders with friction or
+            // elasticity weights (see `material`).
+            self.rapier.step_with_events(&material::Weighted, &());
             self.write_to_world(world);
             self.find_touches();
             self.unsimulated_seconds = (self.unsimulated_seconds - STEP_SECONDS).max(0.0);
@@ -340,9 +384,12 @@ impl Physics {
             // thin ones between two steps.
             .ccd_enabled(true)
             .angular_damping(ANGULAR_DAMPING)
+            .linvel(to_vec3(state.velocity))
+            .angvel(to_vec3(state.spin))
             .build();
         let mut collider = shapes::collider(&state.shape, to_vec3(state.size));
         collider.set_sensor(!state.can_collide);
+        material::apply(&mut collider, state.physical);
         let (body, collider) = self.rapier.insert(body, collider);
         Body {
             body,
@@ -398,14 +445,18 @@ impl Physics {
             );
             let mut collider = shapes::collider(&state.shape, to_vec3(state.size));
             collider.set_sensor(!state.can_collide);
+            material::apply(&mut collider, state.physical);
             part.collider =
                 rapier
                     .colliders
                     .insert_with_parent(collider, part.body, &mut rapier.bodies);
-        } else if old.can_collide != state.can_collide
-            && let Some(collider) = self.rapier.colliders.get_mut(part.collider)
-        {
-            collider.set_sensor(!state.can_collide);
+        } else if let Some(collider) = self.rapier.colliders.get_mut(part.collider) {
+            if old.can_collide != state.can_collide {
+                collider.set_sensor(!state.can_collide);
+            }
+            if old.physical != state.physical {
+                material::apply(collider, state.physical);
+            }
         }
 
         let Some(body) = self.rapier.bodies.get_mut(part.body) else {
@@ -423,6 +474,13 @@ impl Physics {
         if moved || old.anchored != state.anchored {
             body.set_linvel(Vec3::ZERO, true);
             body.set_angvel(Vec3::ZERO, true);
+        }
+        // A velocity set at the same time still throws it.
+        if old.velocity != state.velocity {
+            body.set_linvel(to_vec3(state.velocity), true);
+        }
+        if old.spin != state.spin {
+            body.set_angvel(to_vec3(state.spin), true);
         }
     }
 
@@ -489,13 +547,29 @@ impl Physics {
         self.started = true;
     }
 
-    /// Copies where each moving part is now into its `Position` and
-    /// `Orientation`, and remembers the values written.
+    /// Copies where each moving part is now, and how fast it moves, into
+    /// its `Position`, `Orientation` and velocities, and remembers the
+    /// values written.
     fn write_to_world(&mut self, world: &mut World) {
         for (&id, part) in &mut self.parts {
             let Some(body) = self.rapier.bodies.get(part.body) else {
                 continue;
             };
+            // An anchored part doesn't move, whatever was set; a part that
+            // falls asleep stops. Either way its velocities become zero.
+            let (velocity, spin) = if body.is_dynamic() {
+                (to_vector3(body.linvel()), to_vector3(body.angvel()))
+            } else {
+                (Vector3::default(), Vector3::default())
+            };
+            if velocity != part.seen.velocity {
+                part.seen.velocity = velocity;
+                let _ = world.set_property(id, "AssemblyLinearVelocity", Value::Vector3(velocity));
+            }
+            if spin != part.seen.spin {
+                part.seen.spin = spin;
+                let _ = world.set_property(id, "AssemblyAngularVelocity", Value::Vector3(spin));
+            }
             if !body.is_dynamic() || body.is_sleeping() {
                 continue;
             }
@@ -531,6 +605,22 @@ fn global_wind(world: &World) -> Vec3 {
         .map(to_vec3)
         .filter(|wind| wind.is_finite())
         .unwrap_or(Vec3::ZERO)
+}
+
+/// The Workspace's `Gravity` in studs a second squared, or [`GRAVITY`] if
+/// it isn't a finite number. The character controllers fall by it too.
+pub fn gravity(world: &World) -> f32 {
+    world
+        .get(world.workspace())
+        .and_then(|workspace| workspace.property("Gravity"))
+        .and_then(Value::as_number)
+        .map(|gravity| gravity as f32)
+        .filter(|gravity| gravity.is_finite())
+        .unwrap_or(GRAVITY)
+}
+
+fn finite(v: Vector3) -> bool {
+    v.x.is_finite() && v.y.is_finite() && v.z.is_finite()
 }
 
 pub(crate) fn to_vec3(v: Vector3) -> Vec3 {

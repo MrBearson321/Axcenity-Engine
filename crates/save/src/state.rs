@@ -21,7 +21,8 @@ use std::collections::{BTreeMap, HashMap};
 
 use axcenity_core::{
     CFrame, ClassName, Color3, EnumItem, InstanceId, Material, PartType, ParticleType,
-    TextureChannel, ToneMapping, UDim2, Value, ValueKind, Vector2, Vector3, World,
+    PhysicalProperties, TextureChannel, ToneMapping, UDim2, Value, ValueKind, Vector2, Vector3,
+    World,
 };
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -114,6 +115,9 @@ fn to_json(value: &Value) -> serde_json::Value {
         Value::EnumItem(item) => json!({ "EnumItem": format!("{}.{}", item.enum_name, item.item) }),
         // Saved as `SavedInstance::references` instead.
         Value::Instance(_) => serde_json::Value::Null,
+        Value::PhysicalProperties(p) => {
+            json!({ "PhysicalProperties": p.map(PhysicalProperties::to_array) })
+        }
     }
 }
 
@@ -143,6 +147,12 @@ fn from_json(json: &serde_json::Value) -> Option<Value> {
                         position: Vector3::new(x, y, z),
                         rotation: [qx, qy, qz, qw],
                     })
+                }),
+                "PhysicalProperties" if value.is_null() => Some(Value::PhysicalProperties(None)),
+                "PhysicalProperties" => numbers(value).map(|numbers| {
+                    Value::PhysicalProperties(Some(
+                        PhysicalProperties::from_array(numbers).clamped(),
+                    ))
                 }),
                 "EnumItem" => {
                     let (enum_name, item) = name()?.split_once('.')?;

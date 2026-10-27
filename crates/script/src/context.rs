@@ -113,6 +113,10 @@ impl Context {
             crate::cframe::pivot_methods(&lua)
                 .expect("creating the pivot methods only fails when out of memory"),
         );
+        methods.extend(
+            crate::physical::body_methods(&lua)
+                .expect("creating the body methods only fails when out of memory"),
+        );
         methods.push((
             axcenity_core::ClassName::DataModel,
             "GetService",

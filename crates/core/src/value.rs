@@ -97,6 +97,77 @@ impl Default for CFrame {
     }
 }
 
+/// How a part weighs, grips and bounces. Where two parts touch, each
+/// coefficient is the average of theirs, weighted by their weights:
+/// `(f1 * w1 + f2 * w2) / (w1 + w2)`. A part's `CustomPhysicalProperties`
+/// holds one, or none for its material's (see [`Material::physical`]).
+///
+/// [`Material::physical`]: crate::Material::physical
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PhysicalProperties {
+    /// Mass per cubic stud.
+    pub density: f32,
+    /// 0 slides like ice; 2 grips.
+    pub friction: f32,
+    /// How much of its speed a bounce keeps: 0 none, 1 all.
+    pub elasticity: f32,
+    pub friction_weight: f32,
+    pub elasticity_weight: f32,
+}
+
+impl PhysicalProperties {
+    /// What every part used before materials had their own (Phase 34).
+    pub const LEGACY: Self = Self::new(1.0, 0.5, 0.25, 1.0, 1.0);
+
+    /// The smallest density: a part with none couldn't be simulated.
+    pub const MIN_DENSITY: f32 = 0.0001;
+
+    pub const fn new(
+        density: f32,
+        friction: f32,
+        elasticity: f32,
+        friction_weight: f32,
+        elasticity_weight: f32,
+    ) -> Self {
+        Self {
+            density,
+            friction,
+            elasticity,
+            friction_weight,
+            elasticity_weight,
+        }
+    }
+
+    /// Each number kept in its range, as scripts and files may give any:
+    /// density 0.0001 to 100, friction 0 to 2, elasticity 0 to 1 and the
+    /// weights 0 to 100. NaN becomes the smallest.
+    pub fn clamped(self) -> Self {
+        let clamp = |n: f32, min: f32, max: f32| if n.is_nan() { min } else { n.clamp(min, max) };
+        Self {
+            density: clamp(self.density, Self::MIN_DENSITY, 100.0),
+            friction: clamp(self.friction, 0.0, 2.0),
+            elasticity: clamp(self.elasticity, 0.0, 1.0),
+            friction_weight: clamp(self.friction_weight, 0.0, 100.0),
+            elasticity_weight: clamp(self.elasticity_weight, 0.0, 100.0),
+        }
+    }
+
+    /// The five numbers in the order `PhysicalProperties.new` takes them.
+    pub fn to_array(self) -> [f32; 5] {
+        [
+            self.density,
+            self.friction,
+            self.elasticity,
+            self.friction_weight,
+            self.elasticity_weight,
+        ]
+    }
+
+    pub fn from_array([density, friction, elasticity, fw, ew]: [f32; 5]) -> Self {
+        Self::new(density, friction, elasticity, fw, ew)
+    }
+}
+
 /// An item of any enum scripts know, by name, such as `Material.Neon` or
 /// `KeyCode.E`. Attributes keep enum items this way; `core` doesn't list
 /// every enum, so the script side checks the names.
@@ -124,6 +195,8 @@ pub enum Value {
     EnumItem(EnumItem),
     /// Another Instance, or none (`ObjectValue.Value`).
     Instance(Option<InstanceId>),
+    /// A part's `CustomPhysicalProperties`, or none for its material's.
+    PhysicalProperties(Option<PhysicalProperties>),
 }
 
 /// The type of a [`Value`], without the data. Used to check assignments.
@@ -144,6 +217,7 @@ pub enum ValueKind {
     CFrame,
     EnumItem,
     Instance,
+    PhysicalProperties,
 }
 
 impl Value {
@@ -164,6 +238,7 @@ impl Value {
             Value::CFrame(_) => ValueKind::CFrame,
             Value::EnumItem(_) => ValueKind::EnumItem,
             Value::Instance(_) => ValueKind::Instance,
+            Value::PhysicalProperties(_) => ValueKind::PhysicalProperties,
         }
     }
 
@@ -276,11 +351,19 @@ impl Value {
         })
     }
 
+    /// A `CustomPhysicalProperties` value: `Some(None)` for nil.
+    pub fn as_physical_properties(&self) -> Option<Option<PhysicalProperties>> {
+        match self {
+            Value::PhysicalProperties(p) => Some(*p),
+            _ => None,
+        }
+    }
+
     /// Whether an attribute can hold this value: a boolean, number,
     /// string, Vector3, Vector2, Color3, UDim2, CFrame or enum item.
     /// Property enums count as enum items.
     pub fn is_attribute(&self) -> bool {
-        !matches!(self, Value::Instance(_))
+        !matches!(self, Value::Instance(_) | Value::PhysicalProperties(_))
     }
 
     pub fn as_bool(&self) -> Option<bool> {
@@ -309,6 +392,7 @@ impl fmt::Display for ValueKind {
             ValueKind::CFrame => "CFrame",
             ValueKind::EnumItem => "EnumItem",
             ValueKind::Instance => "Instance",
+            ValueKind::PhysicalProperties => "PhysicalProperties",
         };
         f.write_str(name)
     }

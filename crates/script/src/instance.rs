@@ -158,6 +158,10 @@ fn get(lua: &Lua, id: InstanceId, key: &str) -> mlua::Result<mlua::Value> {
     {
         return cf.into_lua(lua);
     }
+    // Worked out from the part's shape and material (see `physical`).
+    if let Some(value) = crate::physical::computed(lua, id, key)? {
+        return Ok(value);
+    }
     let class = instance.class();
     // Live animator state, not a saved property (see `core::AnimatorState`).
     if class == ClassName::Animator && key == "CurrentState" {
@@ -267,6 +271,14 @@ fn set(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> mlua::Result
             })?;
             cf.write_to(&mut *world_mut(lua)?, id)
                 .map_err(mlua::Error::runtime)
+        }
+        key if crate::physical::COMPUTED.contains(&key)
+            && class
+                .is_some_and(|class| matches!(class, ClassName::Part | ClassName::MeshPart)) =>
+        {
+            Err(mlua::Error::runtime(format!(
+                "{key} is read-only: it comes from the part's size, shape and physical properties"
+            )))
         }
         "CurrentState"
             if world(lua)?

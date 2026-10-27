@@ -466,6 +466,10 @@ impl ClassName {
                 // from emitters with WindAffectsDrag, and parts with
                 // WindAffected.
                 ("GlobalWind", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
+                // Downward pull on unanchored parts and the characters, in
+                // studs a second squared (Roblox's default; physics'
+                // `GRAVITY`).
+                ("Gravity", Value::Number(196.2)),
             ],
             ClassName::Lighting => vec![
                 ("ShadowsEnabled", Value::Bool(true)),
@@ -907,7 +911,7 @@ impl ClassName {
             ClassName::Part => {
                 let material = Material::Plastic;
                 let preset = material.preset();
-                vec![
+                let mut properties = vec![
                     // Anchored parts stay put; unanchored ones fall and collide.
                     ("Anchored", Value::Bool(false)),
                     ("Shape", Value::PartType(PartType::Block)),
@@ -939,25 +943,31 @@ impl ClassName {
                     // Studs one copy of a SurfaceAppearance's textures covers.
                     // 0 leaves the shape's own texture coordinates unscaled.
                     ("TileSize", Value::Number(8.0)),
-                ]
+                ];
+                properties.extend(body_properties());
+                properties
             }
-            ClassName::MeshPart => vec![
-                ("Anchored", Value::Bool(false)),
-                // The model's file, relative to the project folder, such as
-                // "assets/models/chair.glb". Empty means no model yet.
-                ("MeshId", Value::String(String::new())),
-                // A material file drawn in place of the model's materials.
-                // Empty for none.
-                ("MaterialVariant", Value::String(String::new())),
-                ("Position", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
-                ("Orientation", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
-                // The model is stretched so its bounding box is this size.
-                ("Size", Value::Vector3(Vector3::new(2.0, 2.0, 2.0))),
-                ("CastShadow", Value::Bool(true)),
-                ("Transparency", Value::Number(0.0)),
-                ("CanCollide", Value::Bool(true)),
-                ("WindAffected", Value::Bool(false)),
-            ],
+            ClassName::MeshPart => {
+                let mut properties = vec![
+                    ("Anchored", Value::Bool(false)),
+                    // The model's file, relative to the project folder, such as
+                    // "assets/models/chair.glb". Empty means no model yet.
+                    ("MeshId", Value::String(String::new())),
+                    // A material file drawn in place of the model's materials.
+                    // Empty for none.
+                    ("MaterialVariant", Value::String(String::new())),
+                    ("Position", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
+                    ("Orientation", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
+                    // The model is stretched so its bounding box is this size.
+                    ("Size", Value::Vector3(Vector3::new(2.0, 2.0, 2.0))),
+                    ("CastShadow", Value::Bool(true)),
+                    ("Transparency", Value::Number(0.0)),
+                    ("CanCollide", Value::Bool(true)),
+                    ("WindAffected", Value::Bool(false)),
+                ];
+                properties.extend(body_properties());
+                properties
+            }
             ClassName::Terrain => vec![
                 // The middle of the terrain's footprint, at the bottom of its
                 // height range.
@@ -1246,6 +1256,31 @@ fn widget_properties(
 
 /// What both character controllers have: how the character moves, jumps
 /// and crouches.
+/// What Parts and MeshParts share about how they move (Phase 34). There
+/// are no welds yet, so each part is an assembly of its own.
+fn body_properties() -> [(&'static str, Value); 4] {
+    [
+        // On, the part adds no mass to an assembly it shares with other
+        // parts. A part alone keeps its own mass.
+        ("Massless", Value::Bool(false)),
+        // Density, friction, bounce and their weights; nil uses the
+        // material's (`Material::physical`). MeshParts have no Material and
+        // use Plastic's.
+        ("CustomPhysicalProperties", Value::PhysicalProperties(None)),
+        // How fast the part moves, in studs a second, and spins, in radians
+        // a second around each axis. Physics writes them as it moves the
+        // part; a script or the editor can set them to throw it.
+        (
+            "AssemblyLinearVelocity",
+            Value::Vector3(Vector3::new(0.0, 0.0, 0.0)),
+        ),
+        (
+            "AssemblyAngularVelocity",
+            Value::Vector3(Vector3::new(0.0, 0.0, 0.0)),
+        ),
+    ]
+}
+
 fn movement_properties() -> Vec<(&'static str, Value)> {
     vec![
         // "Walk", "Run" or "Crouch". Any other name is a custom mode that

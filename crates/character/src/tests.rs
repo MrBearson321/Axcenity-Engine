@@ -310,6 +310,42 @@ fn jump_height_sets_how_high_a_jump_rises() {
     assert!((peak - 2.0).abs() < 0.1, "peak {peak}");
 }
 
+/// How high a character with a controller of `class` jumps under the
+/// Workspace's `gravity`.
+fn jump_peak(class: ClassName, gravity: f64) -> f32 {
+    let (mut world, controller, body) = standing_as(class);
+    let workspace = world.workspace();
+    world
+        .set_property(workspace, "Gravity", Value::Number(gravity))
+        .unwrap();
+    let mut controllers = Controllers::default();
+    run(&mut world, &mut controllers, MoveInput::default(), 1);
+    world
+        .set_property(controller, "Jump", Value::Bool(true))
+        .unwrap();
+    let mut peak: f32 = 0.0;
+    for _ in 0..180 {
+        run(&mut world, &mut controllers, MoveInput::default(), 1);
+        peak = peak.max(pos(&world, body).y - 1.0);
+    }
+    assert!((pos(&world, body).y - 1.0).abs() < 1e-3, "it lands again");
+    peak
+}
+
+#[test]
+fn halving_workspace_gravity_makes_both_characters_jump_higher() {
+    for class in [
+        ClassName::ThirdPersonController,
+        ClassName::FirstPersonController,
+    ] {
+        let full = jump_peak(class, 196.2);
+        let half = jump_peak(class, 98.1);
+        // The same launch speed: half the gravity reaches twice as high.
+        assert!((full - 7.2).abs() < 0.1, "{class}: {full}");
+        assert!((half - 14.4).abs() < 0.2, "{class}: {half}");
+    }
+}
+
 #[test]
 fn a_jump_stops_under_a_ceiling() {
     let (mut world, controller, body) = standing();

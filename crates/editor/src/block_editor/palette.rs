@@ -170,6 +170,18 @@ pub(super) fn palette(
                 target: part.clone(),
                 anchored: Expression::Boolean { value: true },
             }),
+            B(BlockKind::PushWithForce {
+                target: part.clone(),
+                force: vector(0.0, 50.0, 0.0),
+            }),
+            B(BlockKind::SetPartVelocity {
+                target: part.clone(),
+                velocity: vector(0.0, 20.0, 0.0),
+            }),
+            B(BlockKind::SetFriction {
+                target: part.clone(),
+                friction: number(0.1),
+            }),
             B(BlockKind::SetDestination {
                 agent: first(Filter::Agents),
                 position: vector(10.0, 0.0, 0.0),

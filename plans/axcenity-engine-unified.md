@@ -1176,10 +1176,10 @@ Blocks: "push … with force", "set velocity", "set friction".
 
 ### Acceptance criteria
 
-- [ ] `ApplyImpulse` on a 1 kg-equivalent part changes its velocity by impulse divided by mass, within a small tolerance.
-- [ ] A box slides further on Ice than on Plastic, and a Rubber ball bounces higher than a Plastic one, with no script.
-- [ ] Halving `workspace.Gravity` makes crates fall slower and the characters jump higher.
-- [ ] A world saved before this phase simulates the same.
+- [x] `ApplyImpulse` on a 1 kg-equivalent part changes its velocity by impulse divided by mass, within a small tolerance.
+- [x] A box slides further on Ice than on Plastic, and a Rubber ball bounces higher than a Plastic one, with no script.
+- [x] Halving `workspace.Gravity` makes crates fall slower and the characters jump higher.
+- [x] A world saved before this phase simulates the same.
 
 ---
 

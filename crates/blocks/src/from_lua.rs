@@ -823,7 +823,9 @@ impl<'a> Converter<'a> {
             StatKind::Do(body) if matches!(body.as_slice(), [Stat { kind: StatKind::Return(values), .. }] if values.is_empty()) => {
                 Some(BlockKind::StopScript)
             }
-            StatKind::Do(body) => self.slide_in(body, scope),
+            StatKind::Do(body) => self
+                .slide_in(body, scope)
+                .or_else(|| self.set_friction(body, scope)),
             StatKind::Return(values) if values.is_empty() => Some(BlockKind::StopScript),
             _ => None,
         }
@@ -949,6 +951,15 @@ impl<'a> Converter<'a> {
                     seconds: self.expression(seconds, scope),
                 })
             }
+            // workspace.Ball:ApplyImpulse(Vector3.new(0, 50, 0))
+            ExprKind::Method(object, method, args)
+                if method == "ApplyImpulse" && args.len() == 1 =>
+            {
+                Some(BlockKind::PushWithForce {
+                    target: self.target(object)?,
+                    force: self.expression(&args[0], scope),
+                })
+            }
             ExprKind::Method(object, method, args) if args.is_empty() => {
                 let target = self.target(object)?;
                 Some(match method.as_str() {
@@ -1070,16 +1081,6 @@ impl<'a> Converter<'a> {
         let [info, goal, moved, play] = body else {
             return None;
         };
-        // The value of `local <wanted> = value`.
-        fn local<'s>(stat: &'s Stat, wanted: &str) -> Option<&'s Expr> {
-            match &stat.kind {
-                StatKind::Local { names, values } => match (names.as_slice(), values.as_slice()) {
-                    ([name], [value]) if name == wanted => Some(value),
-                    _ => None,
-                },
-                _ => None,
-            }
-        }
         let is_name = |expr: &Expr, wanted: &str| matches!(&expr.kind, ExprKind::Name(name) if name == wanted);
         let ExprKind::Call(new, info) = &local(info, "info")?.kind else {
             return None;
@@ -1142,6 +1143,60 @@ impl<'a> Converter<'a> {
             target,
             from: from.to_owned(),
             seconds: self.expression(seconds, scope),
+        })
+    }
+
+    /// The `do` block "set friction" translates to: the friction in a
+    /// local, the part's current properties in another, then new custom
+    /// ones with that friction.
+    fn set_friction(&self, body: &[Stat], scope: Scope) -> Option<BlockKind> {
+        let [friction, physical, assign] = body else {
+            return None;
+        };
+        let friction = local(friction, "friction")?;
+        let ExprKind::Field(object, current) = &local(physical, "physical")?.kind else {
+            return None;
+        };
+        let target = self
+            .target(object)
+            .filter(|_| current == "CurrentPhysicalProperties")?;
+        let StatKind::Assign { targets, values } = &assign.kind else {
+            return None;
+        };
+        let ([custom], [made]) = (targets.as_slice(), values.as_slice()) else {
+            return None;
+        };
+        let same_custom = matches!(&custom.kind, ExprKind::Field(inner, name)
+            if name == "CustomPhysicalProperties"
+                && self.target(inner).as_deref() == Some(target.as_str()));
+        let ExprKind::Call(new, args) = &made.kind else {
+            return None;
+        };
+        let is_name = |expr: &Expr, wanted: &str| matches!(&expr.kind, ExprKind::Name(name) if name == wanted);
+        let is_physical = |expr: &Expr, field: &str| {
+            matches!(&expr.kind, ExprKind::Field(inner, name)
+            if name == field && is_name(inner, "physical"))
+        };
+        let [
+            density,
+            given,
+            elasticity,
+            friction_weight,
+            elasticity_weight,
+        ] = args.as_slice()
+        else {
+            return None;
+        };
+        let matches = same_custom
+            && self.is_field(new, "PhysicalProperties", "new")
+            && is_physical(density, "Density")
+            && is_name(given, "friction")
+            && is_physical(elasticity, "Elasticity")
+            && is_physical(friction_weight, "FrictionWeight")
+            && is_physical(elasticity_weight, "ElasticityWeight");
+        matches.then(|| BlockKind::SetFriction {
+            target,
+            friction: self.expression(friction, scope),
         })
     }
 
@@ -1351,6 +1406,10 @@ impl<'a> Converter<'a> {
             },
             "Velocity" => BlockKind::SetVelocity {
                 agent: path,
+                velocity: converted(),
+            },
+            "AssemblyLinearVelocity" => BlockKind::SetPartVelocity {
+                target: path,
                 velocity: converted(),
             },
             _ => BlockKind::SetProperty {
@@ -1787,6 +1846,17 @@ impl<'a> Converter<'a> {
 
 /// Whether a block here can wait, or stop the script: then it can't be
 /// moved into "when game starts" without changing when things happen.
+/// The value of `local <wanted> = value`.
+fn local<'s>(stat: &'s Stat, wanted: &str) -> Option<&'s Expr> {
+    match &stat.kind {
+        StatKind::Local { names, values } => match (names.as_slice(), values.as_slice()) {
+            ([name], [value]) if name == wanted => Some(value),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 fn may_wait(block: &Block) -> bool {
     let waits = matches!(
         block.kind,

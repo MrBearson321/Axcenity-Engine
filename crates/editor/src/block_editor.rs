@@ -278,6 +278,9 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::TurnTo { .. }
         | BlockKind::TurnBy { .. }
         | BlockKind::SetAnchored { .. }
+        | BlockKind::PushWithForce { .. }
+        | BlockKind::SetPartVelocity { .. }
+        | BlockKind::SetFriction { .. }
         | BlockKind::SetDestination { .. }
         | BlockKind::SetVelocity { .. }
         | BlockKind::WhenAgentSenses { .. }
@@ -871,6 +874,24 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
             Object(target, Filter::Parts),
             label("anchored to"),
             Slot(anchored, SlotKind::Truth),
+        ])],
+        BlockKind::PushWithForce { target, force } => vec![Row(vec![
+            label("push"),
+            Object(target, Filter::Parts),
+            label("with force"),
+            Slot(force, SlotKind::Vector),
+        ])],
+        BlockKind::SetPartVelocity { target, velocity } => vec![Row(vec![
+            label("set velocity of"),
+            Object(target, Filter::Parts),
+            label("to"),
+            Slot(velocity, SlotKind::Vector),
+        ])],
+        BlockKind::SetFriction { target, friction } => vec![Row(vec![
+            label("set friction of"),
+            Object(target, Filter::Parts),
+            label("to"),
+            Slot(friction, SlotKind::Number),
         ])],
         BlockKind::SetColor { target, color } => vec![Row(vec![
             label("set color of"),

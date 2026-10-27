@@ -62,6 +62,7 @@ fn luau_type(kind: ValueKind) -> String {
         // No property holds one yet; attributes do (`GetAttribute` is `any`).
         ValueKind::EnumItem => "any".to_owned(),
         ValueKind::Instance => "Instance?".to_owned(),
+        ValueKind::PhysicalProperties => "PhysicalProperties?".to_owned(),
         // Enum properties read as items and also accept item names.
         ValueKind::Material
         | ValueKind::PartType

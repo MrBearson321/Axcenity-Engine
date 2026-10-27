@@ -681,7 +681,7 @@ impl LuaEnumItem {
     }
 
     /// This item as a property value, if it's an item of a property enum.
-    fn to_value(self) -> Option<Value> {
+    pub(crate) fn to_value(self) -> Option<Value> {
         match self.enum_type {
             EnumType::Material => Material::from_name(self.name).map(Value::Material),
             EnumType::PartType => PartType::from_name(self.name).map(Value::PartType),
@@ -823,6 +823,7 @@ pub fn value_to_lua(lua: &Lua, value: &Value) -> mlua::Result<mlua::Value> {
             Some(found) => found.into_lua(lua),
             None => item.item.as_str().into_lua(lua),
         },
+        Value::PhysicalProperties(p) => p.map(crate::physical::LuaPhysicalProperties).into_lua(lua),
         // An ObjectValue pointing at a destroyed Instance holds nil.
         Value::Instance(id) => {
             let alive = id
@@ -927,6 +928,12 @@ pub fn value_from_lua(lua: &Lua, value: mlua::Value, kind: ValueKind) -> Result<
                 item: item.name.to_owned(),
             })
         }),
+        (ValueKind::PhysicalProperties, mlua::Value::Nil) => Some(Value::PhysicalProperties(None)),
+        (ValueKind::PhysicalProperties, _) => {
+            crate::physical::LuaPhysicalProperties::from_lua(value.clone(), lua)
+                .ok()
+                .map(|p| Value::PhysicalProperties(Some(p.0.clamped())))
+        }
         (ValueKind::Instance, mlua::Value::Nil) => Some(Value::Instance(None)),
         (ValueKind::Instance, _) => LuaInstance::from_lua(value.clone(), lua)
             .ok()
@@ -986,6 +993,9 @@ pub fn type_name(lua: &Lua, value: &mlua::Value) -> String {
         }
         if data.is::<crate::random::LuaRandom>() {
             return "Random".to_owned();
+        }
+        if data.is::<crate::physical::LuaPhysicalProperties>() {
+            return "PhysicalProperties".to_owned();
         }
         if let Ok(item) = data.borrow::<LuaEnumItem>() {
             return item.enum_type.name().to_owned();

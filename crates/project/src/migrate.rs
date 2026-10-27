@@ -72,6 +72,7 @@ fn step(from: u32) -> Option<Migration> {
     match from {
         1 => Some(migrate_v1_to_v2),
         2 => Some(migrate_v2_to_v3),
+        3 => Some(migrate_v3_to_v4),
         _ => None,
     }
 }
@@ -87,6 +88,12 @@ fn migrate_v1_to_v2(folder: &Path) -> Result<(), String> {
 fn migrate_v2_to_v3(folder: &Path) -> Result<(), String> {
     crate::migrate_animation::migrate(folder)?;
     write_manifest_version(folder, 3)
+}
+
+/// Physical properties (Phase 34): see `migrate_physics.rs`.
+fn migrate_v3_to_v4(folder: &Path) -> Result<(), String> {
+    crate::migrate_physics::migrate(folder)?;
+    write_manifest_version(folder, 4)
 }
 
 fn write_manifest_version(folder: &Path, version: u32) -> Result<(), String> {

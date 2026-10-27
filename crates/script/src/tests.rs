@@ -668,7 +668,7 @@ fn a_misspelled_enum_item_lists_the_choices() {
     let output = output_of(&mut world, r#"workspace.Block.Material = "Wood""#);
     assert_eq!(output.len(), 1);
     assert!(
-        output[0].ends_with("choose from Plastic, Metal, Glass, Neon"),
+        output[0].ends_with("choose from Plastic, Metal, Glass, Neon, Ice, Rubber"),
         "{output:?}"
     );
 

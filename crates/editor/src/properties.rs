@@ -7,7 +7,8 @@
 
 use axcenity_core::{
     CFrame, ClassName, Color3, EnumItem, Instance, InstanceId, Material, PartType, ParticleType,
-    TextureChannel, ToneMapping, UDim2, Value, Vector2, Vector3, World, is_attribute_name,
+    PhysicalProperties, TextureChannel, ToneMapping, UDim2, Value, Vector2, Vector3, World,
+    is_attribute_name,
 };
 use eframe::egui;
 
@@ -61,7 +62,7 @@ pub struct Section {
 
 /// The groups, in panel order, and which properties go in each. Name and
 /// ClassName come first, under "Data", and aren't in the property map.
-const GROUPS: [(&str, &[&str]); 19] = [
+const GROUPS: [(&str, &[&str]); 20] = [
     (
         "Appearance",
         &[
@@ -77,6 +78,16 @@ const GROUPS: [(&str, &[&str]); 19] = [
         ],
     ),
     ("Behavior", &["Anchored", "CanCollide", "WindAffected"]),
+    (
+        "Physics",
+        &[
+            "CustomPhysicalProperties",
+            "Massless",
+            "AssemblyLinearVelocity",
+            "AssemblyAngularVelocity",
+            "Gravity",
+        ],
+    ),
     ("Wind", &["GlobalWind"]),
     (
         "Part",
@@ -531,6 +542,12 @@ pub fn show(
                                 // An ObjectValue's Value picks from the world.
                                 Value::Instance(target) => object_control(ui, world, id, target)
                                     .map(|target| Edit::Property(name, Value::Instance(target))),
+                                // Shows the material's values while it has none.
+                                Value::PhysicalProperties(custom) => {
+                                    physical_control(ui, instance, custom).map(|custom| {
+                                        Edit::Property(name, Value::PhysicalProperties(custom))
+                                    })
+                                }
                                 value => value_control(ui, name, value),
                             };
                             if made.is_some() {
@@ -743,6 +760,7 @@ fn section(ui: &mut egui::Ui, title: &str, rows: impl FnOnce(&mut egui::Ui)) {
         "Data" => icons::IDENTIFICATION_CARD,
         "Appearance" => icons::PALETTE,
         "Behavior" => icons::GEAR,
+        "Physics" => icons::ATOM,
         "Part" => icons::CUBE,
         "Surface" => icons::IMAGE,
         "Map Settings" => icons::SLIDERS,
@@ -1277,9 +1295,79 @@ fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
         }
         Value::CFrame(cf) => cframe_control(ui, cf).map(Value::CFrame),
         Value::EnumItem(item) => enum_item_control(ui, name, &item).map(Value::EnumItem),
-        // Edited with the world at hand (`object_control`).
-        Value::Instance(_) => None,
+        // Edited with the world at hand (`object_control`), and with the
+        // part's material at hand (`physical_control`).
+        Value::Instance(_) | Value::PhysicalProperties(_) => None,
     }
+}
+
+/// A part's `CustomPhysicalProperties`: a Custom box and its five numbers.
+/// Off, the numbers are the material's, greyed out; turning it on starts
+/// from them. Returns the new value (`None` for the material's).
+fn physical_control(
+    ui: &mut egui::Ui,
+    instance: &Instance,
+    custom: Option<PhysicalProperties>,
+) -> Option<Option<PhysicalProperties>> {
+    let material = instance
+        .property("Material")
+        .and_then(Value::as_material)
+        .unwrap_or(Material::Plastic);
+    let mut on = custom.is_some();
+    let mut numbers = custom.unwrap_or_else(|| material.physical()).to_array();
+    let mut changed = None;
+    let mut dragged = false;
+    // In `PhysicalProperties.new`'s order: name, range, hover text.
+    let rows: [(&str, f32, f32, &str); 5] = [
+        (
+            "Density ",
+            PhysicalProperties::MIN_DENSITY,
+            100.0,
+            "Mass per cubic stud.",
+        ),
+        ("Friction ", 0.0, 2.0, "0 slides like ice; 2 grips."),
+        (
+            "Elasticity ",
+            0.0,
+            1.0,
+            "How much speed a bounce keeps: 0 none, 1 all.",
+        ),
+        (
+            "Friction weight ",
+            0.0,
+            100.0,
+            "Where two parts touch, the one with the bigger weight decides more of the friction.",
+        ),
+        (
+            "Elasticity weight ",
+            0.0,
+            100.0,
+            "Where two parts touch, the one with the bigger weight decides more of the bounce.",
+        ),
+    ];
+    ui.vertical(|ui| {
+        let hint = format!(
+            "Off, it weighs, grips and bounces like {}. On, these numbers are its own.",
+            material.as_str()
+        );
+        if ui.checkbox(&mut on, "Custom").on_hover_text(hint).changed() {
+            changed = Some(on.then(|| material.physical()));
+        }
+        ui.add_enabled_ui(on, |ui| {
+            for (number, (label, min, max, hint)) in numbers.iter_mut().zip(rows) {
+                let drag = egui::DragValue::new(number)
+                    .prefix(label)
+                    .speed(0.01)
+                    .range(min..=max)
+                    .max_decimals(MAX_DECIMALS);
+                dragged |= ui.add(drag).on_hover_text(hint).changed();
+            }
+        });
+    });
+    if dragged {
+        changed = Some(Some(PhysicalProperties::from_array(numbers)));
+    }
+    changed
 }
 
 /// A CFrame as its position and its rotation in degrees (as a part's
@@ -1405,7 +1493,7 @@ mod tests {
         let sections = sections(instance);
         assert_eq!(
             titles(&sections),
-            ["Appearance", "Behavior", "Part", "Tiling"]
+            ["Appearance", "Behavior", "Physics", "Part", "Tiling"]
         );
         let names: Vec<&str> = sections
             .iter()
@@ -1426,6 +1514,10 @@ mod tests {
                 "Anchored",
                 "CanCollide",
                 "WindAffected",
+                "CustomPhysicalProperties",
+                "Massless",
+                "AssemblyLinearVelocity",
+                "AssemblyAngularVelocity",
                 "Shape",
                 "Position",
                 "Orientation",
@@ -1483,12 +1575,13 @@ mod tests {
     }
 
     #[test]
-    fn the_workspace_shows_only_its_wind_and_other_services_nothing() {
+    fn the_workspace_shows_only_its_gravity_and_wind_and_other_services_nothing() {
         let world = World::new();
         let workspace = world.get(world.workspace()).unwrap();
         let sections = sections(workspace);
-        assert_eq!(titles(&sections), ["Wind"]);
-        assert_eq!(sections[0].properties[0].0, "GlobalWind");
+        assert_eq!(titles(&sections), ["Physics", "Wind"]);
+        assert_eq!(sections[0].properties[0].0, "Gravity");
+        assert_eq!(sections[1].properties[0].0, "GlobalWind");
         let storage = world.get(world.replicated_storage()).unwrap();
         assert!(super::sections(storage).is_empty());
     }
@@ -1545,6 +1638,75 @@ mod attribute_section_tests {
         if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") {
             crate::snapshot::snapshot(
                 &std::path::PathBuf::from(folder).join("properties-attributes.png"),
+                size,
+                vec![Vec::new(); 3],
+                &mut draw,
+            );
+        }
+        let (used, room) = fit.unwrap();
+        assert!(
+            used.width() <= room.width() + 0.5,
+            "{} in {}",
+            used.width(),
+            room.width()
+        );
+        assert_eq!(edit, None);
+    }
+}
+
+#[cfg(test)]
+mod physics_section_tests {
+    use super::*;
+
+    /// A Rubber Part with its own physical properties draws the Physics
+    /// section (Custom on, five numbers, Massless and both velocities)
+    /// inside a 260-point column. With `AXCENITY_SNAPSHOTS` set it's saved
+    /// as `properties-physics.png`.
+    #[test]
+    fn a_parts_physics_section_draws_in_a_narrow_column() {
+        let mut world = World::new();
+        let part = world.create(ClassName::Part).unwrap();
+        world.set_parent(part, Some(world.workspace())).unwrap();
+        world
+            .set_property(part, "Material", Value::Material(Material::Rubber))
+            .unwrap();
+        let custom = PhysicalProperties {
+            friction: 0.2,
+            ..Material::Rubber.physical()
+        };
+        world
+            .set_property(
+                part,
+                "CustomPhysicalProperties",
+                Value::PhysicalProperties(Some(custom)),
+            )
+            .unwrap();
+        let titles: Vec<&str> = sections(world.get(part).unwrap())
+            .iter()
+            .map(|section| section.title)
+            .collect();
+        assert!(titles.contains(&"Physics"), "{titles:?}");
+        let size = egui::vec2(260.0, 1300.0);
+        let mut fit = None;
+        let mut edit = None;
+        let mut draw = |ctx: &egui::Context| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let room = ui.max_rect();
+                edit = show(ui, &world, Some(part), false, &[], 1, |_| {});
+                fit = Some((ui.min_rect(), room));
+            });
+        };
+        let ctx = theme::test_context();
+        for _ in 0..3 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                ..Default::default()
+            };
+            let _ = ctx.run(input, &mut draw);
+        }
+        if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") {
+            crate::snapshot::snapshot(
+                &std::path::PathBuf::from(folder).join("properties-physics.png"),
                 size,
                 vec![Vec::new(); 3],
                 &mut draw,

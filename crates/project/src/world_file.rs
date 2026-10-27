@@ -33,7 +33,10 @@
 //! their default values.
 //!
 //! A `CFrame` is `[x, y, z, qx, qy, qz, qw]`: the position, then the
-//! rotation as a quaternion. An `ObjectValue`'s `Value` is the path of
+//! rotation as a quaternion. `CustomPhysicalProperties` is `null` (the
+//! material's) or `{ "Density": 1, "Friction": 0.5, "Elasticity": 0.25,
+//! "FrictionWeight": 1, "ElasticityWeight": 1 }`; numbers left out are
+//! Plastic's, and each is kept in its range. An `ObjectValue`'s `Value` is the path of
 //! names to the Instance it points at (`["Workspace", "Door"]`; in a
 //! prefab, from one of the prefab's own Instances), or `null`. A path
 //! through siblings with the same name finds the first.
@@ -570,7 +573,46 @@ fn json_to_value(json: &Json, kind: ValueKind) -> Result<Value, String> {
         }
         // Read by `apply_properties` as a path.
         ValueKind::Instance => Err("expected a path of names".to_owned()),
+        ValueKind::PhysicalProperties => physical_properties(json),
     }
+}
+
+/// The names of a `PhysicalProperties`' numbers in a file, in the order
+/// `PhysicalProperties.new` takes them.
+const PHYSICAL_FIELDS: [&str; 5] = [
+    "Density",
+    "Friction",
+    "Elasticity",
+    "FrictionWeight",
+    "ElasticityWeight",
+];
+
+fn physical_properties(json: &Json) -> Result<Value, String> {
+    const EXPECTED: &str = "expected null or { \"Density\": 1, \"Friction\": 0.5, \
+         \"Elasticity\": 0.25, \"FrictionWeight\": 1, \"ElasticityWeight\": 1 }";
+    let fields = match json {
+        Json::Null => return Ok(Value::PhysicalProperties(None)),
+        Json::Object(fields) => fields,
+        _ => return Err(EXPECTED.to_owned()),
+    };
+    if let Some(unknown) = fields
+        .keys()
+        .find(|key| !PHYSICAL_FIELDS.contains(&key.as_str()))
+    {
+        return Err(format!("{EXPECTED} (there is no \"{unknown}\")"));
+    }
+    let mut numbers = axcenity_core::PhysicalProperties::LEGACY.to_array();
+    for (number, field) in numbers.iter_mut().zip(PHYSICAL_FIELDS) {
+        if let Some(value) = fields.get(field) {
+            *number = value
+                .as_f64()
+                .ok_or_else(|| format!("{EXPECTED} ({field} must be a number)"))?
+                as f32;
+        }
+    }
+    Ok(Value::PhysicalProperties(Some(
+        axcenity_core::PhysicalProperties::from_array(numbers).clamped(),
+    )))
 }
 
 /// Reads `json` as one of `names`, or explains which names are allowed.
@@ -796,6 +838,17 @@ fn json_value(value: &Value) -> String {
         Value::EnumItem(item) => json_string(&format!("{}.{}", item.enum_name, item.item)),
         // Written by `write_instance` as a path; attributes never hold one.
         Value::Instance(_) => "null".to_owned(),
+        Value::PhysicalProperties(None) => "null".to_owned(),
+        Value::PhysicalProperties(Some(physical)) => {
+            let fields: Vec<String> = PHYSICAL_FIELDS
+                .iter()
+                .zip(physical.to_array())
+                // As `f32`s, for the same reason as `json_triple`. Kept
+                // in range, so never NaN or infinite.
+                .map(|(field, n)| format!("\"{field}\": {n}"))
+                .collect();
+            format!("{{ {} }}", fields.join(", "))
+        }
     }
 }
 

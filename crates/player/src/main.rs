@@ -1293,3 +1293,6 @@ mod bench_tests;
 
 #[cfg(test)]
 mod accessibility_tests;
+
+#[cfg(test)]
+mod physics_tests;

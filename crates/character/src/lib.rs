@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 use axcenity_assets::Assets;
 use axcenity_core::input::{InputMap, InputState};
 use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
-use axcenity_physics::{GRAVITY, RayHit, cast_ray_excluding};
+use axcenity_physics::{GRAVITY, RayHit, cast_ray_excluding, gravity};
 
 /// Gap left between the character and a wall or ceiling, in studs. Ground
 /// probes also start this far above the surface they look for.
@@ -313,6 +313,9 @@ impl Controllers {
             let limits = Limits::read(world, id);
             let fall = self.falls.entry(id).or_default();
             if jump && fall.grounded {
+                // The same launch speed whatever the Workspace's Gravity:
+                // JumpHeight is how high it reaches at the default, so in
+                // lower gravity characters jump higher, as parts fly.
                 fall.velocity = (2.0 * GRAVITY * limits.jump_height).sqrt();
                 fall.grounded = false;
             }
@@ -960,7 +963,7 @@ fn fly(
     dt: f32,
 ) {
     let start = fall.velocity;
-    fall.velocity -= GRAVITY * dt;
+    fall.velocity -= gravity(world) * dt;
     let dy = (start + fall.velocity) * 0.5 * dt;
     if dy > 0.0 {
         let origin = Vector3::new(body.pivot_x, body.feet_y + body.height - SKIN, body.pivot_z);

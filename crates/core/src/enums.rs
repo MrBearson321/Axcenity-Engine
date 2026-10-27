@@ -1,6 +1,8 @@
 //! Enum types, such as a part's shape or material. World files and scripts
 //! refer to their items by name, for example `"Neon"` or `Enum.KeyCode.W`.
 
+use crate::value::PhysicalProperties;
+
 /// The shape of a Part.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PartType {
@@ -38,15 +40,21 @@ impl PartType {
 }
 
 /// A material preset. Choosing one sets the part's `Metalness` and
-/// `Roughness` to the preset's values, which can then be adjusted.
+/// `Roughness` to the preset's values, which can then be adjusted. Each
+/// also has its own [`PhysicalProperties`] (see [`Material::physical`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Material {
     Plastic,
+    /// Dense.
     Metal,
     /// See-through.
     Glass,
     /// Glows in the part's `Color`.
     Neon,
+    /// Slippery.
+    Ice,
+    /// Grippy and bouncy.
+    Rubber,
 }
 
 /// What a [`Material`] stands for.
@@ -64,11 +72,13 @@ pub struct MaterialPreset {
 }
 
 impl Material {
-    pub const ALL: [Material; 4] = [
+    pub const ALL: [Material; 6] = [
         Material::Plastic,
         Material::Metal,
         Material::Glass,
         Material::Neon,
+        Material::Ice,
+        Material::Rubber,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -77,6 +87,8 @@ impl Material {
             Material::Metal => "Metal",
             Material::Glass => "Glass",
             Material::Neon => "Neon",
+            Material::Ice => "Ice",
+            Material::Rubber => "Rubber",
         }
     }
 
@@ -109,6 +121,29 @@ impl Material {
                 glows: true,
                 ..solid
             },
+            Material::Ice => MaterialPreset {
+                roughness: 0.1,
+                ..solid
+            },
+            Material::Rubber => MaterialPreset {
+                roughness: 0.9,
+                ..solid
+            },
+        }
+    }
+
+    /// How a part of this material weighs, grips and bounces while its
+    /// `CustomPhysicalProperties` is nil. Plastic, Glass and Neon keep the
+    /// values every part had before materials had their own (Phase 34), so
+    /// worlds from then simulate the same; a project upgraded from then
+    /// gives its Metal parts those values too.
+    pub fn physical(self) -> PhysicalProperties {
+        match self {
+            Material::Plastic | Material::Glass | Material::Neon => PhysicalProperties::LEGACY,
+            Material::Metal => PhysicalProperties::new(7.85, 0.4, 0.25, 1.0, 1.0),
+            // The heavier weight makes ice slippery against anything.
+            Material::Ice => PhysicalProperties::new(0.92, 0.02, 0.15, 3.0, 1.0),
+            Material::Rubber => PhysicalProperties::new(1.3, 0.9, 0.85, 2.0, 3.0),
         }
     }
 }

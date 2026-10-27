@@ -409,6 +409,39 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
         ],
     },
     ValueType {
+        class: "PhysicalProperties",
+        doc: "How a part weighs, grips and bounces. Where two parts touch, each coefficient is the average of theirs, weighted by their weights.",
+        fields: &[
+            Field {
+                name: "Density",
+                ty: "number",
+                doc: "Mass per cubic stud, from 0.0001 to 100. Plastic is 1, Metal 7.85.",
+            },
+            Field {
+                name: "Friction",
+                ty: "number",
+                doc: "From 0 (slides like ice) to 2 (grips).",
+            },
+            Field {
+                name: "Elasticity",
+                ty: "number",
+                doc: "How much of its speed a bounce keeps, from 0 (none) to 1 (all).",
+            },
+            Field {
+                name: "FrictionWeight",
+                ty: "number",
+                doc: "How much its friction counts against the other part's, from 0 to 100.",
+            },
+            Field {
+                name: "ElasticityWeight",
+                ty: "number",
+                doc: "How much its elasticity counts against the other part's, from 0 to 100.",
+            },
+        ],
+        operators: &[],
+        methods: &[],
+    },
+    ValueType {
         class: "UDim",
         doc: "One UI axis as a scale and pixel offset.",
         fields: &[
@@ -1504,6 +1537,14 @@ pub(super) const GLOBAL_FUNCTIONS: &[Function] = &[Function {
 const PART_CFRAME_DOC: &str =
     "Its Position and Orientation as one CFrame. Setting it sets both; it isn't saved itself.";
 const GET_PIVOT_DOC: &str = "Where it turns and moves from: a part's own CFrame, or for a Model the centre of the box around its parts, unturned.";
+const APPLY_IMPULSE_DOC: &str = "Pushes the part through its center of mass: its velocity changes by `impulse` divided by its mass (`GetMass`). Pushes in one frame add up. Anchored parts don't move.";
+const APPLY_IMPULSE_AT_DOC: &str = "Pushes the part at `position` in the world: it speeds up as `ApplyImpulse` would, and an impulse off its center of mass also spins it.";
+const APPLY_ANGULAR_DOC: &str = "Spins the part: its `AssemblyAngularVelocity` changes by `impulse` (radians a second times inertia) through its inertia.";
+const GET_MASS_DOC: &str = "Its density times its volume: a 1×1×1 Plastic block weighs 1. MeshParts weigh their collision shape.";
+const ASSEMBLY_MASS_DOC: &str = "The mass of everything moving with it. Each part moves on its own until welds exist, so this is `GetMass()`. Read-only.";
+const CENTER_OF_MASS_DOC: &str =
+    "Where its mass is centered, in the world: the middle of a block or ball. Read-only.";
+const CURRENT_PHYSICAL_DOC: &str = "The physical properties in use: `CustomPhysicalProperties`, or its Material's when that's nil. Read-only.";
 const PIVOT_TO_DOC: &str = "Moves and turns it so its pivot is at `target`. A Model's parts all move together and keep their places relative to each other.";
 
 pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
@@ -1595,6 +1636,78 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
             doc: PIVOT_TO_DOC,
             params: &[("target", "CFrame")],
             returns: "()",
+        },
+    ),
+    (
+        ClassName::Part,
+        Function {
+            name: "ApplyImpulse",
+            doc: APPLY_IMPULSE_DOC,
+            params: &[("impulse", "Vector3")],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::Part,
+        Function {
+            name: "ApplyImpulseAtPosition",
+            doc: APPLY_IMPULSE_AT_DOC,
+            params: &[("impulse", "Vector3"), ("position", "Vector3")],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::Part,
+        Function {
+            name: "ApplyAngularImpulse",
+            doc: APPLY_ANGULAR_DOC,
+            params: &[("impulse", "Vector3")],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::Part,
+        Function {
+            name: "GetMass",
+            doc: GET_MASS_DOC,
+            params: &[],
+            returns: "number",
+        },
+    ),
+    (
+        ClassName::MeshPart,
+        Function {
+            name: "ApplyImpulse",
+            doc: APPLY_IMPULSE_DOC,
+            params: &[("impulse", "Vector3")],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::MeshPart,
+        Function {
+            name: "ApplyImpulseAtPosition",
+            doc: APPLY_IMPULSE_AT_DOC,
+            params: &[("impulse", "Vector3"), ("position", "Vector3")],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::MeshPart,
+        Function {
+            name: "ApplyAngularImpulse",
+            doc: APPLY_ANGULAR_DOC,
+            params: &[("impulse", "Vector3")],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::MeshPart,
+        Function {
+            name: "GetMass",
+            doc: GET_MASS_DOC,
+            params: &[],
+            returns: "number",
         },
     ),
     (
@@ -2007,6 +2120,54 @@ pub(super) const CLASS_FIELDS: &[(ClassName, Field)] = &[
         },
     ),
     (
+        ClassName::Part,
+        Field {
+            name: "AssemblyMass",
+            ty: "number",
+            doc: ASSEMBLY_MASS_DOC,
+        },
+    ),
+    (
+        ClassName::Part,
+        Field {
+            name: "AssemblyCenterOfMass",
+            ty: "Vector3",
+            doc: CENTER_OF_MASS_DOC,
+        },
+    ),
+    (
+        ClassName::Part,
+        Field {
+            name: "CurrentPhysicalProperties",
+            ty: "PhysicalProperties",
+            doc: CURRENT_PHYSICAL_DOC,
+        },
+    ),
+    (
+        ClassName::MeshPart,
+        Field {
+            name: "AssemblyMass",
+            ty: "number",
+            doc: ASSEMBLY_MASS_DOC,
+        },
+    ),
+    (
+        ClassName::MeshPart,
+        Field {
+            name: "AssemblyCenterOfMass",
+            ty: "Vector3",
+            doc: CENTER_OF_MASS_DOC,
+        },
+    ),
+    (
+        ClassName::MeshPart,
+        Field {
+            name: "CurrentPhysicalProperties",
+            ty: "PhysicalProperties",
+            doc: CURRENT_PHYSICAL_DOC,
+        },
+    ),
+    (
         ClassName::DataModel,
         Field {
             name: "UserInputService",
@@ -2255,6 +2416,23 @@ pub(super) const LIBRARIES: &[Library] = &[
             doc: "A new Vector2. Left-out components are 0.",
             params: &[("x?", "number"), ("y?", "number")],
             returns: "Vector2",
+        }],
+    },
+    Library {
+        global: "PhysicalProperties",
+        doc: "Creates PhysicalProperties for `CustomPhysicalProperties`.",
+        constants: &[],
+        functions: &[Function {
+            name: "new",
+            doc: "A material's properties (`PhysicalProperties.new(Enum.Material.Ice)`), or your own: `PhysicalProperties.new(density, friction, elasticity, frictionWeight, elasticityWeight)`. The weights are 1 when left out; numbers out of range are brought into it.",
+            params: &[
+                ("densityOrMaterial", "number | EnumMaterial"),
+                ("friction?", "number"),
+                ("elasticity?", "number"),
+                ("frictionWeight?", "number"),
+                ("elasticityWeight?", "number"),
+            ],
+            returns: "PhysicalProperties",
         }],
     },
     Library {

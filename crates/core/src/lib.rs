@@ -35,7 +35,9 @@ pub use terrain::{
     valid_terrain_size,
 };
 pub use ui_settings::{TEXT_SCALE_RANGE, UI_SETTING_NAMES, UI_SETTING_PREFIX, UiSettings};
-pub use value::{CFrame, Color3, EnumItem, UDim, UDim2, Value, ValueKind, Vector2, Vector3};
+pub use value::{
+    CFrame, Color3, EnumItem, PhysicalProperties, UDim, UDim2, Value, ValueKind, Vector2, Vector3,
+};
 pub use world::{
     AttributeError, Change, Instance, InstanceId, MAX_ATTRIBUTE_NAME, PropertyError,
     RecordedChange, TreeError, World, is_attribute_name,

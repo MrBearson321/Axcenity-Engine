@@ -895,6 +895,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     ),
     (
         ClassName::Workspace,
+        "Gravity",
+        "How hard unanchored parts and the characters are pulled down, in studs a second squared: 196.2 by default. Halve it and things fall slower and characters jump higher.",
+    ),
+    (
+        ClassName::Workspace,
         "GlobalWind",
         "The wind everywhere, in studs a second. It carries particles from emitters with WindAffectsDrag and pushes unanchored parts with WindAffected.",
     ),
@@ -1228,6 +1233,26 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     ),
     (
         ClassName::Part,
+        "Massless",
+        "If true, the part adds no mass to an assembly it shares with other parts. A part on its own (every part, until welds exist) keeps its own mass.",
+    ),
+    (
+        ClassName::Part,
+        "CustomPhysicalProperties",
+        "Its own density, friction, elasticity and their weights (`PhysicalProperties.new(...)`), or nil for its Material's. Read `CurrentPhysicalProperties` for the ones in use.",
+    ),
+    (
+        ClassName::Part,
+        "AssemblyLinearVelocity",
+        "How fast the part moves, in studs a second. Physics updates it as the part moves; setting it throws the part. Anchored parts don't move.",
+    ),
+    (
+        ClassName::Part,
+        "AssemblyAngularVelocity",
+        "How fast the part spins, in radians a second around each world axis. Physics updates it; setting it spins the part.",
+    ),
+    (
+        ClassName::Part,
         "EmissiveColor",
         "The color the part glows in when Emission is above 0.",
     ),
@@ -1260,6 +1285,26 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::MeshPart,
         "WindAffected",
         "If true and the part isn't anchored, workspace.GlobalWind pushes it, harder for parts with bigger faces.",
+    ),
+    (
+        ClassName::MeshPart,
+        "Massless",
+        "If true, the part adds no mass to an assembly it shares with other parts. A part on its own (every part, until welds exist) keeps its own mass.",
+    ),
+    (
+        ClassName::MeshPart,
+        "CustomPhysicalProperties",
+        "Its own density, friction, elasticity and their weights (`PhysicalProperties.new(...)`), or nil for Plastic's. Read `CurrentPhysicalProperties` for the ones in use.",
+    ),
+    (
+        ClassName::MeshPart,
+        "AssemblyLinearVelocity",
+        "How fast the part moves, in studs a second. Physics updates it as the part moves; setting it throws the part. Anchored parts don't move.",
+    ),
+    (
+        ClassName::MeshPart,
+        "AssemblyAngularVelocity",
+        "How fast the part spins, in radians a second around each world axis. Physics updates it; setting it spins the part.",
     ),
     (
         ClassName::MeshPart,

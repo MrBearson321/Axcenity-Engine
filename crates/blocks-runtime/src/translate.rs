@@ -497,6 +497,37 @@ impl Writer {
                 let value = self.expression(anchored)?;
                 self.line(format!("{}.Anchored = {value}", target(t)?));
             }
+            BlockKind::PushWithForce { target: t, force } => {
+                let value = self.expression(force)?;
+                self.line(format!("{}:ApplyImpulse({value})", target(t)?));
+            }
+            BlockKind::SetPartVelocity {
+                target: t,
+                velocity,
+            } => {
+                let value = self.expression(velocity)?;
+                self.line(format!("{}.AssemblyLinearVelocity = {value}", target(t)?));
+            }
+            // The friction first, so it can't see the `physical` local.
+            BlockKind::SetFriction {
+                target: t,
+                friction,
+            } => {
+                let (object, friction) = (target(t)?, self.expression(friction)?);
+                self.line("do");
+                self.indent += 1;
+                self.line(format!("local friction = {friction}"));
+                self.line(format!(
+                    "local physical = {object}.CurrentPhysicalProperties"
+                ));
+                self.line(format!(
+                    "{object}.CustomPhysicalProperties = PhysicalProperties.new(physical.Density, \
+                     friction, physical.Elasticity, physical.FrictionWeight, \
+                     physical.ElasticityWeight)"
+                ));
+                self.indent -= 1;
+                self.line("end");
+            }
             BlockKind::SetColor { target: t, color } => {
                 let value = self.expression(color)?;
                 self.line(format!("{}.Color = {value}", target(t)?));

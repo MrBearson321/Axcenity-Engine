@@ -30,6 +30,7 @@
 mod asset_fix;
 mod migrate;
 mod migrate_animation;
+mod migrate_physics;
 mod package;
 mod packed;
 mod terrain_files;
@@ -101,8 +102,9 @@ pub const CLIENT_BLOCK_SCRIPT_SUFFIX: &str = ".client.blocks.json";
 /// The newest manifest (`axcenity.json`) this engine writes. Opening an older
 /// one upgrades the project and keeps the previous files. `world.json` and
 /// prefabs have their own version and are not this number. Format 3 (v3
-/// Phase 7) is the one clip format and state machines.
-pub const FORMAT_VERSION: u32 = 3;
+/// Phase 7) is the one clip format and state machines; format 4 (Phase 34)
+/// physical properties, which keep older Metal parts' physics.
+pub const FORMAT_VERSION: u32 = 4;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]

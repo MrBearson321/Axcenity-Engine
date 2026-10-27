@@ -388,6 +388,23 @@ pub enum BlockKind {
         target: String,
         anchored: Expression,
     },
+    /// Pushes `target` with an impulse: `ApplyImpulse`, which changes its
+    /// velocity by `force` over its mass.
+    PushWithForce {
+        target: String,
+        force: Expression,
+    },
+    /// Throws `target`: sets its `AssemblyLinearVelocity`.
+    SetPartVelocity {
+        target: String,
+        velocity: Expression,
+    },
+    /// Sets `target`'s friction, keeping its other physical properties:
+    /// its `CustomPhysicalProperties` from its `CurrentPhysicalProperties`.
+    SetFriction {
+        target: String,
+        friction: Expression,
+    },
 
     // Looks.
     SetColor {
@@ -810,6 +827,9 @@ impl BlockKind {
             | BlockKind::TurnTo { orientation: e, .. }
             | BlockKind::TurnBy { rotation: e, .. }
             | BlockKind::SetAnchored { anchored: e, .. }
+            | BlockKind::PushWithForce { force: e, .. }
+            | BlockKind::SetPartVelocity { velocity: e, .. }
+            | BlockKind::SetFriction { friction: e, .. }
             | BlockKind::SetColor { color: e, .. }
             | BlockKind::SetText { text: e, .. }
             | BlockKind::ShowPage { page: e, .. }
@@ -893,6 +913,9 @@ impl BlockKind {
             | BlockKind::TurnTo { orientation: e, .. }
             | BlockKind::TurnBy { rotation: e, .. }
             | BlockKind::SetAnchored { anchored: e, .. }
+            | BlockKind::PushWithForce { force: e, .. }
+            | BlockKind::SetPartVelocity { velocity: e, .. }
+            | BlockKind::SetFriction { friction: e, .. }
             | BlockKind::SetColor { color: e, .. }
             | BlockKind::SetText { text: e, .. }
             | BlockKind::ShowPage { page: e, .. }

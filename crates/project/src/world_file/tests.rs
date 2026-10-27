@@ -485,8 +485,54 @@ fn unknown_enum_item_lists_the_choices() {
     );
     assert_eq!(
         message,
-        r#"Workspace.Part.Material: expected one of: "Plastic", "Metal", "Glass", "Neon""#
+        r#"Workspace.Part.Material: expected one of: "Plastic", "Metal", "Glass", "Neon", "Ice", "Rubber""#
     );
+}
+
+#[test]
+fn custom_physical_properties_save_reload_and_are_kept_in_range() {
+    let world = parse_world(
+        r#"{ "format_version": 1, "workspace": { "properties": { "Gravity": 98.1 }, "children": [
+                { "class": "Part", "name": "Ice", "properties": {
+                    "Material": "Ice", "AssemblyLinearVelocity": [0, 0, 20] } },
+                { "class": "Part", "name": "Tuned", "properties": { "CustomPhysicalProperties":
+                    { "Density": 0.45, "Friction": 9, "ElasticityWeight": 2 } } },
+                { "class": "MeshPart", "name": "Light", "properties": { "Massless": true } } ] } }"#,
+    )
+    .unwrap();
+    let custom = |name: &str| {
+        let id = world.find_first_child(world.workspace(), name).unwrap();
+        world
+            .get(id)
+            .unwrap()
+            .property("CustomPhysicalProperties")
+            .cloned()
+    };
+    assert_eq!(custom("Ice"), Some(Value::PhysicalProperties(None)));
+    // Left-out numbers are Plastic's; friction is brought down to 2.
+    let tuned = axcenity_core::PhysicalProperties::new(0.45, 2.0, 0.25, 1.0, 2.0);
+    assert_eq!(
+        custom("Tuned"),
+        Some(Value::PhysicalProperties(Some(tuned)))
+    );
+    let text = write_world(&world);
+    assert!(text.contains("\"Gravity\": 98.1"), "{text}");
+    assert!(
+        text.contains(
+            "\"CustomPhysicalProperties\": { \"Density\": 0.45, \"Friction\": 2, \
+             \"Elasticity\": 0.25, \"FrictionWeight\": 1, \"ElasticityWeight\": 2 }"
+        ),
+        "{text}"
+    );
+    assert_eq!(write_world(&parse_world(&text).unwrap()), text);
+    // The default gravity isn't written.
+    assert!(!write_world(&World::new()).contains("Gravity"));
+
+    let message = parse_err(
+        r#"{ "format_version": 1, "workspace": { "children": [
+                { "class": "Part", "properties": { "CustomPhysicalProperties": { "Bounce": 1 } } } ] } }"#,
+    );
+    assert!(message.contains("there is no \"Bounce\""), "{message}");
 }
 
 #[test]
@@ -517,11 +563,15 @@ fn written_world_has_the_hand_written_layout() {
             format!("{indent}  \"name\": {name},"),
             format!("{indent}  \"properties\": {{"),
             format!("{indent}    \"Anchored\": false,"),
+            format!("{indent}    \"AssemblyAngularVelocity\": [0, 0, 0],"),
+            format!("{indent}    \"AssemblyLinearVelocity\": [0, 0, 0],"),
             format!("{indent}    \"CanCollide\": true,"),
             format!("{indent}    \"CastShadow\": true,"),
             format!("{indent}    \"Color\": [0.64, 0.64, 0.64],"),
+            format!("{indent}    \"CustomPhysicalProperties\": null,"),
             format!("{indent}    \"Emission\": 0,"),
             format!("{indent}    \"EmissiveColor\": [1, 1, 1],"),
+            format!("{indent}    \"Massless\": false,"),
             format!("{indent}    \"Material\": \"{material}\","),
             format!("{indent}    \"MaterialVariant\": \"\","),
             format!("{indent}    \"Metalness\": 0,"),

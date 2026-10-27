@@ -7,7 +7,7 @@ use std::f32::consts::{FRAC_PI_2, TAU};
 use std::sync::Arc;
 
 use axcenity_assets::{Assets, Model};
-use axcenity_core::{FoliageSource, PartType, TerrainData, Vector3};
+use axcenity_core::{FoliageSource, PartType, PhysicalProperties, TerrainData, Vector3};
 use rapier3d::geometry::Array2;
 use rapier3d::glamx::{Quat, Vec3};
 use rapier3d::math::Pose;
@@ -17,10 +17,11 @@ use rapier3d::prelude::{Collider, ColliderBuilder};
 /// no volume has no mass, which rapier can't simulate.
 const MIN_SIZE: f32 = 0.01;
 
-/// How much parts grip each other (0 is ice) and bounce (0 is no bounce).
-/// The same for every material until materials get their own.
-const FRICTION: f32 = 0.5;
-const RESTITUTION: f32 = 0.25;
+/// How much terrains and foliage grip (0 is ice) and bounce (0 is no
+/// bounce): what every part had before materials had their own. Parts get
+/// theirs afterwards (`material::apply`).
+const FRICTION: f32 = PhysicalProperties::LEGACY.friction;
+const RESTITUTION: f32 = PhysicalProperties::LEGACY.elasticity;
 
 /// What a part collides as.
 #[derive(Clone, PartialEq)]

@@ -1,0 +1,105 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "properties": {
+      "GlobalWind": [30, 0, 0]
+    },
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Anchored": true,
+          "Position": [0, -0.5, 0],
+          "Size": [60, 1, 60]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "MetalFloor",
+        "properties": {
+          "Anchored": true,
+          "Material": "Metal",
+          "Position": [20, 0.1, 0],
+          "Size": [10, 0.2, 10]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Ramp",
+        "properties": {
+          "Anchored": true,
+          "Shape": "Wedge",
+          "Position": [5, 2, 0],
+          "Size": [4, 4, 8]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "RampBall",
+        "properties": {
+          "Shape": "Ball",
+          "Material": "Metal",
+          "Position": [5, 10, 1],
+          "Size": [2, 2, 2]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Target",
+        "properties": {
+          "Position": [5, 1, -6],
+          "Size": [2, 2, 2]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "HeavyDrop",
+        "properties": {
+          "Material": "Metal",
+          "Position": [-5.6, 9, 0.3],
+          "Size": [2, 2, 2]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Stack",
+        "properties": {
+          "Material": "Glass",
+          "Position": [-5, 1, 0],
+          "Size": [2, 2, 2]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Sheet",
+        "properties": {
+          "Material": "Metal",
+          "WindAffected": true,
+          "Position": [-12, 20, 8],
+          "Size": [2, 0.2, 2]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Slider",
+        "properties": {
+          "Material": "Neon",
+          "WindAffected": true,
+          "Position": [20, 1.2, 0],
+          "Size": [2, 2, 2]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "MetalSlider",
+        "properties": {
+          "Material": "Metal",
+          "WindAffected": true,
+          "Position": [20, 1.2, 3],
+          "Size": [2, 0.4, 2]
+        }
+      }
+    ]
+  }
+}

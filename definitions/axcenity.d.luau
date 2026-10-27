@@ -148,6 +148,20 @@ declare extern type Random with
 	function Clone(self): Random
 end
 
+--- How a part weighs, grips and bounces. Where two parts touch, each coefficient is the average of theirs, weighted by their weights.
+declare extern type PhysicalProperties with
+	--- Mass per cubic stud, from 0.0001 to 100. Plastic is 1, Metal 7.85.
+	Density: number
+	--- From 0 (slides like ice) to 2 (grips).
+	Friction: number
+	--- How much of its speed a bounce keeps, from 0 (none) to 1 (all).
+	Elasticity: number
+	--- How much its friction counts against the other part's, from 0 to 100.
+	FrictionWeight: number
+	--- How much its elasticity counts against the other part's, from 0 to 100.
+	ElasticityWeight: number
+end
+
 --- One UI axis as a scale and pixel offset.
 declare extern type UDim with
 	--- The fraction of the parent size.
@@ -485,6 +499,8 @@ declare extern type EnumMaterialItems with
 	Metal: EnumMaterial
 	Glass: EnumMaterial
 	Neon: EnumMaterial
+	Ice: EnumMaterial
+	Rubber: EnumMaterial
 end
 
 --- One choice of `Enum.PartType`.
@@ -949,6 +965,8 @@ end
 declare extern type Workspace extends Instance with
 	--- The wind everywhere, in studs a second. It carries particles from emitters with WindAffectsDrag and pushes unanchored parts with WindAffected.
 	GlobalWind: Vector3
+	--- How hard unanchored parts and the characters are pulled down, in studs a second squared: 196.2 by default. Halve it and things fall slower and characters jump higher.
+	Gravity: number
 	--- The camera the player sees through. LocalScripts only.
 	CurrentCamera: Camera
 	[string]: any
@@ -1031,7 +1049,7 @@ declare extern type Part extends Instance with
 	--- The part's color.
 	Color: Color3
 	--- Plastic, Metal, Glass (see-through) or Neon (glows). Setting it resets Metalness and Roughness.
-	Material: EnumMaterial | "Plastic" | "Metal" | "Glass" | "Neon"
+	Material: EnumMaterial | "Plastic" | "Metal" | "Glass" | "Neon" | "Ice" | "Rubber"
 	--- A material file in the project, such as "assets/materials/brick.material.json", drawn in place of Material, Metalness, Roughness and Emission; Color tints it and Transparency fades it. A SurfaceAppearance inside the part wins over it. Empty for none.
 	MaterialVariant: string
 	--- From 0 (not metal) to 1 (metal).
@@ -1052,8 +1070,22 @@ declare extern type Part extends Instance with
 	Emission: number
 	--- Studs one copy of a SurfaceAppearance's textures covers. 0 leaves the shape's own coordinates unscaled.
 	TileSize: number
+	--- If true, the part adds no mass to an assembly it shares with other parts. A part on its own (every part, until welds exist) keeps its own mass.
+	Massless: boolean
+	--- Its own density, friction, elasticity and their weights (`PhysicalProperties.new(...)`), or nil for its Material's. Read `CurrentPhysicalProperties` for the ones in use.
+	CustomPhysicalProperties: PhysicalProperties?
+	--- How fast the part moves, in studs a second. Physics updates it as the part moves; setting it throws the part. Anchored parts don't move.
+	AssemblyLinearVelocity: Vector3
+	--- How fast the part spins, in radians a second around each world axis. Physics updates it; setting it spins the part.
+	AssemblyAngularVelocity: Vector3
 	--- Its Position and Orientation as one CFrame. Setting it sets both; it isn't saved itself.
 	CFrame: CFrame
+	--- The mass of everything moving with it. Each part moves on its own until welds exist, so this is `GetMass()`. Read-only.
+	AssemblyMass: number
+	--- Where its mass is centered, in the world: the middle of a block or ball. Read-only.
+	AssemblyCenterOfMass: Vector3
+	--- The physical properties in use: `CustomPhysicalProperties`, or its Material's when that's nil. Read-only.
+	CurrentPhysicalProperties: PhysicalProperties
 	--- Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.
 	Touched: Signal
 	[string]: any
@@ -1061,6 +1093,14 @@ declare extern type Part extends Instance with
 	function GetPivot(self): CFrame
 	--- Moves and turns it so its pivot is at `target`. A Model's parts all move together and keep their places relative to each other.
 	function PivotTo(self, target: CFrame): ()
+	--- Pushes the part through its center of mass: its velocity changes by `impulse` divided by its mass (`GetMass`). Pushes in one frame add up. Anchored parts don't move.
+	function ApplyImpulse(self, impulse: Vector3): ()
+	--- Pushes the part at `position` in the world: it speeds up as `ApplyImpulse` would, and an impulse off its center of mass also spins it.
+	function ApplyImpulseAtPosition(self, impulse: Vector3, position: Vector3): ()
+	--- Spins the part: its `AssemblyAngularVelocity` changes by `impulse` (radians a second times inertia) through its inertia.
+	function ApplyAngularImpulse(self, impulse: Vector3): ()
+	--- Its density times its volume: a 1×1×1 Plastic block weighs 1. MeshParts weigh their collision shape.
+	function GetMass(self): number
 end
 
 --- A solid 3D model imported from a glTF or FBX file, drawn with the file's own materials (or its SurfaceAppearances'). It collides as the model's convex hull.
@@ -1085,8 +1125,22 @@ declare extern type MeshPart extends Instance with
 	CanCollide: boolean
 	--- If true and the part isn't anchored, workspace.GlobalWind pushes it, harder for parts with bigger faces.
 	WindAffected: boolean
+	--- If true, the part adds no mass to an assembly it shares with other parts. A part on its own (every part, until welds exist) keeps its own mass.
+	Massless: boolean
+	--- Its own density, friction, elasticity and their weights (`PhysicalProperties.new(...)`), or nil for Plastic's. Read `CurrentPhysicalProperties` for the ones in use.
+	CustomPhysicalProperties: PhysicalProperties?
+	--- How fast the part moves, in studs a second. Physics updates it as the part moves; setting it throws the part. Anchored parts don't move.
+	AssemblyLinearVelocity: Vector3
+	--- How fast the part spins, in radians a second around each world axis. Physics updates it; setting it spins the part.
+	AssemblyAngularVelocity: Vector3
 	--- Its Position and Orientation as one CFrame. Setting it sets both; it isn't saved itself.
 	CFrame: CFrame
+	--- The mass of everything moving with it. Each part moves on its own until welds exist, so this is `GetMass()`. Read-only.
+	AssemblyMass: number
+	--- Where its mass is centered, in the world: the middle of a block or ball. Read-only.
+	AssemblyCenterOfMass: Vector3
+	--- The physical properties in use: `CustomPhysicalProperties`, or its Material's when that's nil. Read-only.
+	CurrentPhysicalProperties: PhysicalProperties
 	--- Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.
 	Touched: Signal
 	[string]: any
@@ -1094,6 +1148,14 @@ declare extern type MeshPart extends Instance with
 	function GetPivot(self): CFrame
 	--- Moves and turns it so its pivot is at `target`. A Model's parts all move together and keep their places relative to each other.
 	function PivotTo(self, target: CFrame): ()
+	--- Pushes the part through its center of mass: its velocity changes by `impulse` divided by its mass (`GetMass`). Pushes in one frame add up. Anchored parts don't move.
+	function ApplyImpulse(self, impulse: Vector3): ()
+	--- Pushes the part at `position` in the world: it speeds up as `ApplyImpulse` would, and an impulse off its center of mass also spins it.
+	function ApplyImpulseAtPosition(self, impulse: Vector3, position: Vector3): ()
+	--- Spins the part: its `AssemblyAngularVelocity` changes by `impulse` (radians a second times inertia) through its inertia.
+	function ApplyAngularImpulse(self, impulse: Vector3): ()
+	--- Its density times its volume: a 1×1×1 Plastic block weighs 1. MeshParts weigh their collision shape.
+	function GetMass(self): number
 end
 
 --- Lua code that runs on the server, from a `.server.lua` file.
@@ -2426,6 +2488,15 @@ end
 
 --- Creates Vector2 values.
 declare Vector2: Vector2Library
+
+--- Creates PhysicalProperties for `CustomPhysicalProperties`.
+declare extern type PhysicalPropertiesLibrary with
+	--- A material's properties (`PhysicalProperties.new(Enum.Material.Ice)`), or your own: `PhysicalProperties.new(density, friction, elasticity, frictionWeight, elasticityWeight)`. The weights are 1 when left out; numbers out of range are brought into it.
+	new: (densityOrMaterial: number | EnumMaterial, friction: number?, elasticity: number?, frictionWeight: number?, elasticityWeight: number?) -> PhysicalProperties
+end
+
+--- Creates PhysicalProperties for `CustomPhysicalProperties`.
+declare PhysicalProperties: PhysicalPropertiesLibrary
 
 --- Creates Color3 values.
 declare extern type Color3Library with

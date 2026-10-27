@@ -60,6 +60,7 @@ mod input;
 mod instance;
 mod localization;
 mod modules;
+mod physical;
 mod random;
 mod remote;
 mod run_service;
@@ -1009,9 +1010,12 @@ mod user_settings_tests;
 
 #[cfg(test)]
 mod cframe_tests;
+
 #[cfg(test)]
 mod collection_tests;
 #[cfg(test)]
 mod data_tests;
+#[cfg(test)]
+mod physical_tests;
 #[cfg(test)]
 mod utilities_tests;

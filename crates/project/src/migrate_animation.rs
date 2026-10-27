@@ -70,12 +70,22 @@ pub(crate) fn migrate(folder: &Path) -> Result<(), String> {
         write_moved(folder, path, &moved(path), &machine.to_json())?;
     }
 
+    upgrade_world_and_prefabs(folder, |json| upgrade_node(json, &moved))
+}
+
+/// Runs `upgrade` on the world file and on each prefab, and writes back
+/// each one it changed (it returns true for those), as the engine writes
+/// it. Also used by later steps (`migrate_physics`).
+pub(crate) fn upgrade_world_and_prefabs(
+    folder: &Path,
+    upgrade: impl Fn(&mut Json) -> bool,
+) -> Result<(), String> {
     // The world, then each prefab.
     let world_path = folder.join(WORLD_FILE);
     if world_path.exists() {
         let text = fs::read_to_string(&world_path)
             .map_err(|err| format!("could not read `{WORLD_FILE}`: {err}"))?;
-        if let Some(text) = upgrade_instances(&text, &moved, Kind::World)? {
+        if let Some(text) = upgrade_instances(&text, &upgrade, Kind::World)? {
             write(&world_path, &text)?;
         }
     }
@@ -91,7 +101,7 @@ pub(crate) fn migrate(folder: &Path) -> Result<(), String> {
             }
             let text = fs::read_to_string(&path)
                 .map_err(|err| format!("could not read `{}`: {err}", path.display()))?;
-            if let Some(text) = upgrade_instances(&text, &moved, Kind::Prefab)? {
+            if let Some(text) = upgrade_instances(&text, &upgrade, Kind::Prefab)? {
                 write(&path, &text)?;
             }
         }
@@ -177,19 +187,18 @@ enum Kind {
     Prefab,
 }
 
-/// The world or prefab `text` with its animation paths moved, Controller
-/// renamed StateMachine, and an Animator beside each Animation that has
-/// none, written as the engine writes it. `None` if nothing changed.
+/// The world or prefab `text` after `upgrade`, written as the engine writes
+/// it. `None` if nothing changed.
 fn upgrade_instances(
     text: &str,
-    moved: &impl Fn(&str) -> String,
+    upgrade: &impl Fn(&mut Json) -> bool,
     kind: Kind,
 ) -> Result<Option<String>, String> {
     let Ok(mut json) = serde_json::from_str::<Json>(text) else {
         // A damaged file is left for loading to report.
         return Ok(None);
     };
-    if !upgrade_node(&mut json, moved) {
+    if !upgrade(&mut json) {
         return Ok(None);
     }
     let raw = serde_json::to_string_pretty(&json).map_err(|err| err.to_string())? + "\n";
