@@ -4,10 +4,10 @@
 //! the composite pass writes the window or the editor's viewport texture, or
 //! with FXAA on an LDR target that FXAA then smooths into the output.
 
-use super::gpu::create_depth_view;
+use super::gpu::{create_depth_view, target_bytes};
 use super::{
-    BLOOM_LEVELS, FXAA_FORMAT, FrameTargets, FxaaTarget, HDR_FORMAT, MsaaTarget, OcclusionPasses,
-    OcclusionTargets, PostPasses, PostUniform, TargetsAlive,
+    BLOOM_LEVELS, DEPTH_FORMAT, FXAA_FORMAT, FrameTargets, FxaaTarget, HDR_FORMAT, MsaaTarget,
+    OcclusionPasses, OcclusionTargets, PostPasses, PostUniform, TargetsAlive,
 };
 
 impl PostPasses {
@@ -250,7 +250,11 @@ impl FrameTargets {
         (samples, fxaa, occlusion): (u32, bool, bool),
         alive: &TargetsAlive,
     ) -> Self {
+        // Bytes of every texture made, for `RenderStats::target_bytes`.
+        let bytes = std::cell::Cell::new(0);
         let texture = |label, (width, height): (u32, u32), format, samples| {
+            let (width, height) = (width.max(1), height.max(1));
+            bytes.set(bytes.get() + target_bytes((width, height, 1), format, samples));
             // A multisampled texture can't be sampled, only resolved.
             let usage = if samples > 1 {
                 wgpu::TextureUsages::RENDER_ATTACHMENT
@@ -261,8 +265,8 @@ impl FrameTargets {
                 .create_texture(&wgpu::TextureDescriptor {
                     label: Some(label),
                     size: wgpu::Extent3d {
-                        width: width.max(1),
-                        height: height.max(1),
+                        width,
+                        height,
                         depth_or_array_layers: 1,
                     },
                     mip_level_count: 1,
@@ -340,18 +344,21 @@ impl FrameTargets {
                 _alive: alive.fxaa.clone(),
             }
         });
+        let occlusion = occlusion.then(|| {
+            OcclusionTargets::new(device, occlusion_passes, (width, height), &alive.occlusion)
+        });
+        let depth_bytes = target_bytes((width, height, 1), DEPTH_FORMAT, samples);
         Self {
             size: (width, height),
             output,
             samples,
+            bytes: bytes.get() + depth_bytes + occlusion.as_ref().map_or(0, |o| o.bytes),
             _alive: alive.sets.clone(),
             hdr_view,
             msaa,
             depth_view: create_depth_view(device, width, height, samples),
             fxaa,
-            occlusion: occlusion.then(|| {
-                OcclusionTargets::new(device, occlusion_passes, (width, height), &alive.occlusion)
-            }),
+            occlusion,
             levels,
             prefilter_group,
             downsample_groups,

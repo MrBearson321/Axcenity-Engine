@@ -150,6 +150,8 @@ pub(super) struct ShadowMap<S> {
     /// A clone of [`ScenePipeline::shadow_maps_alive`] or
     /// `spot_shadow_maps_alive`, so maps still alive can be counted.
     pub(super) _alive: Arc<()>,
+    /// Bytes of its depth texture.
+    pub(super) bytes: u64,
     /// All the layers, for the shader to read.
     pub(super) array: wgpu::TextureView,
     /// One view per layer, to draw into.
@@ -452,6 +454,8 @@ pub(super) struct OcclusionTargets {
     pub(super) occlusion_group: wgpu::BindGroup,
     /// Depth and the raw occlusion, for the blur.
     pub(super) blur_group: wgpu::BindGroup,
+    /// Bytes of its four textures.
+    pub(super) bytes: u64,
     /// A clone of [`TargetsAlive::occlusion`].
     pub(super) _alive: Arc<()>,
 }
@@ -497,6 +501,8 @@ pub(super) struct FrameTargets {
     pub(super) output: (u32, u32),
     /// Samples per pixel of the scene's color and depth.
     pub(super) samples: u32,
+    /// Bytes of every texture here, those in `occlusion` included.
+    pub(super) bytes: u64,
     /// A clone of [`TargetsAlive::sets`], so sets of targets still alive
     /// can be counted.
     pub(super) _alive: Arc<()>,
@@ -648,11 +654,25 @@ pub(super) struct ScenePipeline {
     pub(super) frame: u64,
     /// Only on devices that can take timestamps (the editor asks for them).
     pub(super) gpu_timer: Option<gpu_timer::GpuTimer>,
-    /// Draw calls and triangles of the last frame.
-    pub(super) draws: (u32, u64),
+    /// What the last frame drew.
+    pub(super) counts: FrameCounts,
     /// Bytes of textures and of meshes on the GPU.
     pub(super) texture_bytes: GpuBytes,
     pub(super) mesh_bytes: GpuBytes,
+}
+
+/// What a frame drew, for [`RenderStats`].
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct FrameCounts {
+    /// Indexed draws, the shadow passes' and prepass's included.
+    pub(super) draw_calls: u32,
+    /// Triangles those draws sent, counting every instance.
+    pub(super) triangles: u64,
+    pub(super) items_submitted: u32,
+    /// Instances drawn in the scene pass.
+    pub(super) items_drawn: u32,
+    /// Instanced draws in the scene pass.
+    pub(super) batches: u32,
 }
 
 /// Turned UI text: glyphon only draws text upright, so each turned text is

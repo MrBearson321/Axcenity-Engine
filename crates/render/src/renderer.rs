@@ -6,7 +6,8 @@
 //! `gpu.rs` uploads meshes, textures and materials. `sprites.rs` draws particles.
 //! `terrain.rs` draws terrain chunks with their blended layers.
 //! `occlusion.rs` draws the depth and normal prepass and ambient occlusion.
-//! `gpu_timer.rs` measures the GPU's time per frame, for the editor's profiler.
+//! `gpu_timer.rs` measures the GPU's time per frame and per pass, for the
+//! editor's profiler and the benchmarks.
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
@@ -24,6 +25,7 @@ use glyphon::{
     Buffer, Cache as GlyphCache, FontSystem, Resolution, SwashCache, TextArea, TextAtlas,
     TextBounds, TextRenderer as GlyphTextRenderer, Viewport as TextViewport,
 };
+pub use gpu_timer::FramePass;
 
 mod gpu;
 mod gpu_timer;
@@ -44,8 +46,8 @@ use gpu::mip_levels;
 use gpu::{
     create_frame_bind_group, create_instance_buffer, create_material, create_pipeline,
     create_shadow_pipeline, create_shadow_views, create_target_texture, create_texture,
-    drawable_size, shader_module, update_custom_mesh, upload_custom_mesh, upload_mesh,
-    upload_texture,
+    drawable_size, shader_module, target_bytes, update_custom_mesh, upload_custom_mesh,
+    upload_mesh, upload_texture,
 };
 #[cfg(test)]
 use lighting::{cascade_ends, light_raw, uv_matrix};
@@ -100,13 +102,38 @@ pub struct RenderStats {
     /// The GPU's time for a recent frame (a frame or two behind), or `None`
     /// before the first reading or when it can't be measured.
     pub gpu_time: Option<Duration>,
-    /// False when the device can't take timestamps, so `gpu_time` stays `None`.
+    /// False when the device can't take timestamps, so `gpu_time` and
+    /// `pass_times` stay `None`.
     pub gpu_timing: bool,
+    /// The GPU's time for each pass of the frame `gpu_time` measured, in
+    /// [`FramePass::ALL`]'s order: `None` for a pass that frame didn't draw
+    /// (see [`RenderStats::pass_time`]).
+    pub pass_times: [Option<Duration>; FramePass::COUNT],
+    /// Items in the draw list.
+    pub items_submitted: u32,
+    /// Items the scene pass drew: all those submitted, less any whose mesh
+    /// couldn't be uploaded.
+    pub items_drawn: u32,
+    /// Instanced draws in the scene pass, one per mesh and material.
+    pub batches: u32,
     /// Bytes of textures on the GPU, every mip level included, counted when
     /// uploaded and when freed.
     pub texture_bytes: u64,
     /// Bytes of mesh vertices and indices on the GPU, counted the same way.
     pub mesh_bytes: u64,
+    /// Bytes of the frame's own targets: HDR, depth, MSAA, bloom, FXAA,
+    /// prepass and ambient occlusion targets, the shadow maps and the
+    /// turned-text sheet.
+    pub target_bytes: u64,
+    /// Bytes of buffers: instances, lights, tiles, uniforms and UI vertices.
+    pub buffer_bytes: u64,
+}
+
+impl RenderStats {
+    /// The GPU's time for `pass`, if it was measured and drawn.
+    pub fn pass_time(&self, pass: FramePass) -> Option<Duration> {
+        self.pass_times[pass as usize]
+    }
 }
 
 impl Renderer {

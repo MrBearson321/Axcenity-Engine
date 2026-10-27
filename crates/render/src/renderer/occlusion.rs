@@ -11,7 +11,7 @@ use std::sync::Arc;
 use crate::draw_list::DrawList;
 use crate::graphics::AmbientOcclusion;
 
-use super::gpu::{create_pipeline, shader_module};
+use super::gpu::{create_pipeline, shader_module, target_bytes};
 use super::lighting::camera_matrices;
 use super::post::fullscreen_pass;
 use super::{
@@ -143,13 +143,16 @@ impl OcclusionTargets {
         (width, height): (u32, u32),
         alive: &Arc<()>,
     ) -> Self {
+        let bytes = std::cell::Cell::new(0);
         let view = |label, (width, height): (u32, u32), format| {
+            let (width, height) = (width.max(1), height.max(1));
+            bytes.set(bytes.get() + target_bytes((width, height, 1), format, 1));
             device
                 .create_texture(&wgpu::TextureDescriptor {
                     label: Some(label),
                     size: wgpu::Extent3d {
-                        width: width.max(1),
-                        height: height.max(1),
+                        width,
+                        height,
                         depth_or_array_layers: 1,
                     },
                     mip_level_count: 1,
@@ -194,6 +197,7 @@ impl OcclusionTargets {
             normal_view,
             raw_view,
             blurred_view,
+            bytes: bytes.get(),
             _alive: alive.clone(),
         }
     }

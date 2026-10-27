@@ -301,6 +301,20 @@ pub(super) fn create_shadow_pipeline(
 }
 
 /// The scene's depth, with `samples` per pixel like its color.
+/// Bytes of a `width` × `height` × `layers` target of `format` with
+/// `samples` per pixel and one mip level.
+pub(super) fn target_bytes(
+    (width, height, layers): (u32, u32, u32),
+    format: wgpu::TextureFormat,
+    samples: u32,
+) -> u64 {
+    let texel = format
+        .block_copy_size(None)
+        .or_else(|| format.block_copy_size(Some(wgpu::TextureAspect::DepthOnly)))
+        .unwrap_or(4);
+    u64::from(width) * u64::from(height) * u64::from(layers) * u64::from(texel * samples)
+}
+
 pub(super) fn create_depth_view(
     device: &wgpu::Device,
     width: u32,

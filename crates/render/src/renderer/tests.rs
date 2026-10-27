@@ -780,6 +780,98 @@ fn stats_count_draws_and_triangles_and_time_the_gpu_where_it_can() {
 }
 
 #[test]
+fn stats_count_items_batches_and_gpu_bytes_by_kind() {
+    let Some((device, queue)) = test_device() else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let mut renderer = TextureRenderer::new(&device, &queue, 64, 32);
+    let mut settings = with_occlusion(crate::AmbientOcclusion::Off);
+    settings.anti_aliasing = Some(crate::AntiAliasing::Off);
+    renderer.set_graphics(&settings);
+    let mut sphere = big_block();
+    sphere.shape = Shape::Sphere;
+    // Two blocks share a batch; the sphere is its own.
+    let mut list = list_of(vec![big_block(), big_block(), sphere]);
+    list.shadows.enabled = false;
+    renderer.render(&list).unwrap();
+    let stats = renderer.stats();
+    assert_eq!(
+        (stats.items_submitted, stats.items_drawn, stats.batches),
+        (3, 3, 2)
+    );
+    assert!(stats.buffer_bytes > 0);
+    let plain = stats.target_bytes;
+    // At least the HDR target and the depth: 8 and 4 bytes a pixel.
+    assert!(plain >= 64 * 32 * 12, "{plain}");
+
+    // Shadows add their map, and MSAA its multisampled color and depth.
+    list.shadows.enabled = true;
+    renderer.render(&list).unwrap();
+    let shadowed = renderer.stats().target_bytes;
+    assert!(shadowed > plain + 1024 * 1024, "{plain} then {shadowed}");
+    settings.anti_aliasing = Some(crate::AntiAliasing::Msaa4);
+    renderer.set_graphics(&settings);
+    renderer.render(&list).unwrap();
+    if renderer.graphics().anti_aliasing == crate::AntiAliasing::Msaa4 {
+        let multisampled = renderer.stats().target_bytes;
+        assert!(
+            multisampled >= shadowed + 64 * 32 * 12 * 3,
+            "{multisampled}"
+        );
+    }
+}
+
+/// With timestamps, each pass a frame draws gets a time, and the passes it
+/// skips don't.
+#[test]
+fn stats_time_each_pass_the_frame_draws() {
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+    let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
+        return;
+    };
+    if !adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY) {
+        eprintln!("skipped GPU timing: the adapter has no timestamps");
+        return;
+    }
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        required_features: wgpu::Features::TIMESTAMP_QUERY,
+        ..Default::default()
+    }))
+    .unwrap();
+    let mut renderer = TextureRenderer::new(&device, &queue, 64, 32);
+    let draw = |renderer: &mut TextureRenderer, list: &DrawList| {
+        for _ in 0..10 {
+            renderer.render(list).unwrap();
+            device.poll(wgpu::PollType::Wait).unwrap();
+        }
+        renderer.stats()
+    };
+
+    // Shadows and ambient occlusion on, no UI.
+    renderer.set_graphics(&with_occlusion(crate::AmbientOcclusion::High));
+    let mut list = list_of(vec![big_block()]);
+    list.shadows.enabled = true;
+    let stats = draw(&mut renderer, &list);
+    for pass in FramePass::ALL {
+        let expected = pass != FramePass::Ui;
+        assert_eq!(stats.pass_time(pass).is_some(), expected, "{pass:?}");
+    }
+    let passes: Duration = stats.pass_times.iter().flatten().sum();
+    assert!(passes <= stats.gpu_time.unwrap(), "{stats:?}");
+
+    // Both off: no shadow, prepass or occlusion time.
+    renderer.set_graphics(&with_occlusion(crate::AmbientOcclusion::Off));
+    list.shadows.enabled = false;
+    let stats = draw(&mut renderer, &list);
+    let timed: Vec<_> = FramePass::ALL
+        .into_iter()
+        .filter(|&pass| stats.pass_time(pass).is_some())
+        .collect();
+    assert_eq!(timed, [FramePass::Scene, FramePass::PostProcessing]);
+}
+
+#[test]
 fn texture_renderer_draws_the_sky_and_a_part_into_a_texture() {
     let Some((device, queue)) = test_device() else {
         eprintln!("skipped: no graphics adapter on this machine");

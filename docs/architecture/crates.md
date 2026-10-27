@@ -50,7 +50,7 @@ A large module is a parent file plus a folder of the same name. The parent keeps
 | `editor/src/terrain_studio.rs` | `tool_settings`, `layers`, `presets` |
 | `editor/src/start.rs` | `dialogs`, `cards`, `pages`, `global` |
 | `editor/src/viewport.rs` | `input` (camera, picking, dragging), `overlays` (selection, lights, brush, debug) |
-| `render/src/renderer.rs` | `types` (GPU structs and constants), `scene` (`ScenePipeline`, the frame), `gpu`, `lighting`, `post`, `sprites`, `terrain`, `ui_pass`, `gpu_timer` |
+| `render/src/renderer.rs` | `types` (GPU structs and constants), `scene` (`ScenePipeline`, the frame), `gpu`, `lighting`, `post`, `sprites`, `terrain`, `ui_pass`, `gpu_timer` (per-pass GPU time, `FramePass`) |
 | `project/src/lib.rs` | `templates`, `scripts`, `stylesheets`, `ui_graphs` (plus `world_file`, `migrate`, `packed`, `versions`, `validate`, `terrain_files`) |
 | `ui/src/lib.rs` | `css` (property parsing), `paint` (draw items), `style` |
 | `blocks/src/lib.rs` | `translate` (Lua output), `from_lua`, `lua`, `node_graph` (generic graphs), `ui_graph` (UI nodes and their Lua), `behavior_tree` (the nodes behavior trees offer) |

@@ -1,0 +1,54 @@
+# Rendering performance
+
+How drawing is measured, and the baseline that optimizations (culling, LOD, GPU skinning, occlusion) are compared against. Measure before optimizing: a change that claims to make drawing faster shows it here.
+
+## What's measured
+
+- **`RenderStats`** (`TextureRenderer::stats`, `render/src/renderer.rs`), for the last frame: draw calls and triangles (shadow views and the prepass included); items submitted (in the draw list) and drawn (by the scene pass); batches (the scene pass's instanced draws, one per mesh and material); GPU bytes by kind: textures and meshes (counted at upload and when freed), render targets (`FrameTargets`, the shadow maps and the turned-text sheet, counted when made) and buffers; and the GPU's time for the frame and for each pass (`pass_times`, `pass_time(FramePass)`).
+- **Per-pass GPU time** (`renderer/gpu_timer.rs`) needs `Features::TIMESTAMP_QUERY`, which the editor and the benchmarks ask for where the adapter has it and the player never does. An empty compute pass writes a timestamp before each `FramePass` (Shadows, Depth prepass, Ambient occlusion, Scene, Post-processing, UI) and one after the last, so a part made of many render passes (three cascades, the bloom chain) is timed whole. A pass the frame didn't draw (shadows or ambient occlusion off, no UI) is `None`. The readings come back a frame or two later without the CPU waiting.
+- **The editor's Profiler** (`editor/src/profiler.rs`) shows these while playing: draw calls, batches, triangles, items drawn of submitted, a **GPU passes** section with each pass's average time ("off" for one no recent frame drew, or one "not available on this GPU" line without timestamps), and a **GPU memory** section by kind.
+
+## Benchmarks
+
+`player/src/bench_tests.rs` builds four scenes in code and draws each at 1280 × 720 on the High preset (MSAA 4×, three 2048² cascades, ambient occlusion High). They're ignored tests:
+
+```text
+cargo test -p axcenity-player --release -- --ignored bench_ --nocapture --test-threads 1
+```
+
+Each warms up for at least a second (models load, caches fill, the GPU clocks up), then draws 5 batches of 60 frames, waiting for the GPU after each (untimed) so frames don't queue. Every number printed is the fastest batch's median, so a moment of other work on the machine doesn't count. CPU steps are `build_draw_list` (and, for the characters, `Animators::update`, which poses them) and `ScenePipeline::draw` (the CPU side of `TextureRenderer::render`: planning, uploads, recording and submitting).
+
+| Benchmark | Scene |
+|---|---|
+| `bench_10000_parts` | 100 × 100 grid of blocks, balls, cylinders and wedges on a floor, drawn twice: an overview with all in view, and from one edge with most out of view (Phase 12's culling is measured against both) |
+| `bench_2000_mesh_parts` | 2,000 copies of hello-pbr's textured helmet (about 15,500 triangles each, drawn in five views: three cascades, the prepass and the scene) |
+| `bench_terrain_with_foliage` | A 2,048-stud terrain of 1,025² samples with hills, two layers and 20,000 plants (grass, flowers, bushes, trees) |
+| `bench_20_animated_characters` | 20 copies of hello-animation's Noodle, each with an Animator, posed on the CPU every frame |
+
+## Baseline
+
+Taken at the commit that added the benchmarks, on an AMD Radeon RX 9070 XT (Vulkan, driver 26.10.1), Windows 11. Three runs agreed within 10% on every number (the widest was `build_draw_list` for the MeshParts, 8%; GPU times within 4%). Times are milliseconds. Absolute numbers depend on the machine; compare runs on one machine.
+
+| | 10,000 parts, overview | 10,000 parts, edge | 2,000 MeshParts | Terrain + foliage | 20 characters |
+|---|---|---|---|---|---|
+| Items drawn / submitted | 10,001 / 10,001 | 10,001 / 10,001 | 2,001 / 2,001 | 37,691 / 37,691 | 41 / 41 |
+| Batches | 4 | 4 | 2 | 1,027 | 41 |
+| Draw calls | 20 | 20 | 10 | 5,135 | 205 |
+| Triangles | 13.9 M | 13.9 M | 154.5 M | 53.7 M | 4,060 |
+| CPU `Animators::update` | | | | | 0.05 |
+| CPU `build_draw_list` | 3.28 | 3.33 | 0.64 | 6.48 | 0.01 |
+| CPU `ScenePipeline::draw` | 2.44 | 2.43 | 0.92 | 12.14 | 0.28 |
+| GPU frame | 1.92 | 2.31 | 9.29 | 5.99 | 0.43 |
+| GPU shadows | 0.83 | 1.20 | 4.29 | 2.90 | 0.04 |
+| GPU depth prepass | 0.27 | 0.26 | 1.24 | 0.95 | 0.02 |
+| GPU ambient occlusion | 0.05 | 0.04 | 0.03 | 0.04 | 0.04 |
+| GPU scene | 0.70 | 0.73 | 3.68 | 2.02 | 0.26 |
+| GPU post-processing | 0.07 | 0.07 | 0.04 | 0.07 | 0.07 |
+| GPU memory: textures / meshes / targets / buffers (MB) | 0 / 0 / 110.5 / 4.6 | same | 106.7 / 0.9 / 110.5 / 2.7 | 11.2 / 6.5 / 110.5 / 11.4 | 0 / 0.1 / 110.5 / 2.4 |
+
+What it says, for the phases that follow:
+
+- **Nothing is culled.** The edge view, with most parts out of view, draws every item and costs no less (its shadows cost more). Shadows are the largest GPU pass in every heavy scene (43% to 52% of the frame), since each cascade draws every caster. Frustum culling (Phase 12) should cut both.
+- **Triangles dominate the MeshPart scene** (154.5 M a frame, 9.3 ms on the GPU, under 2 ms on the CPU): the case for LOD (Phase 13).
+- **The terrain scene is CPU-bound**: 1,027 batches (mostly its 1,024 chunks, each its own mesh) drawn in five views make 5,135 draw calls, and `ScenePipeline::draw` takes 12 ms, twice the GPU's time. `build_draw_list` takes another 6.5 ms for its 37,691 items. Culling chunks and plants (Phase 12) and a foliage cull distance (Phase 13) should cut both.
+- **CPU posing is not a cost** at 20 characters of this rig (0.05 ms), so GPU skinning (Phase 14) isn't called for by this benchmark. Each posed character is its own mesh and batch (41 batches for 41 items), which a heavier rig or many more characters would feel first.

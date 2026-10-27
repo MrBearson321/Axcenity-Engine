@@ -1200,3 +1200,6 @@ mod tests;
 
 #[cfg(test)]
 mod graphics_tests;
+
+#[cfg(test)]
+mod bench_tests;

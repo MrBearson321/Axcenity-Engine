@@ -340,7 +340,7 @@ impl ScenePipeline {
             terrain,
             frame: 0,
             gpu_timer,
-            draws: (0, 0),
+            counts: FrameCounts::default(),
             texture_bytes,
             mesh_bytes,
         };
@@ -611,6 +611,7 @@ impl ScenePipeline {
                 ShadowMap {
                     size,
                     _alive: self.shadow_maps_alive.clone(),
+                    bytes: target_bytes((size.size, size.size, size.cascades), DEPTH_FORMAT, 1),
                     array,
                     layers,
                 }
@@ -625,6 +626,7 @@ impl ScenePipeline {
                 ShadowMap {
                     size,
                     _alive: self.spot_shadow_maps_alive.clone(),
+                    bytes: target_bytes((size.size, size.size, size.lights), DEPTH_FORMAT, 1),
                     array,
                     layers,
                 }
@@ -645,13 +647,21 @@ impl ScenePipeline {
             Some(timer) => timer.collect(&self.device),
             None => false,
         };
-        if timed && let Some(timer) = &self.gpu_timer {
-            timer.begin(&mut encoder);
-        }
-        let mut draws = (0u32, 0u64);
+        let timer = self.gpu_timer.as_ref().filter(|_| timed);
+        let mark = |encoder: &mut wgpu::CommandEncoder, pass| {
+            if let Some(timer) = timer {
+                timer.mark(encoder, pass);
+            }
+        };
+        mark(&mut encoder, FramePass::Shadows);
+        let mut counts = FrameCounts {
+            items_submitted: list.items.len() as u32,
+            ..FrameCounts::default()
+        };
         let mut count = |index_count: u32, instances: &Range<u32>| {
-            draws.0 += 1;
-            draws.1 += u64::from(index_count / 3) * u64::from(instances.end - instances.start);
+            counts.draw_calls += 1;
+            counts.triangles +=
+                u64::from(index_count / 3) * u64::from(instances.end - instances.start);
         };
 
         // One pass per cascade, each drawing into its own layer of the map,
@@ -703,6 +713,7 @@ impl ScenePipeline {
             }
         }
         let frame_bind_group = &self.frame_bind_group;
+        mark(&mut encoder, FramePass::Prepass);
 
         // While ambient occlusion is on: solid items' depth and normals,
         // then how hidden each pixel is by what's around it.
@@ -738,8 +749,12 @@ impl ScenePipeline {
                     pass.draw_indexed(0..mesh.index_count, 0, batch.instances.clone());
                 }
             }
+            mark(&mut encoder, FramePass::AmbientOcclusion);
             self.occlusion.draw(&mut encoder, occlusion);
+        } else {
+            mark(&mut encoder, FramePass::AmbientOcclusion);
         }
+        mark(&mut encoder, FramePass::Scene);
 
         // The scene is drawn into the HDR texture; post-processing then brings
         // it to `view`. With MSAA it's drawn into the multisampled texture,
@@ -785,16 +800,21 @@ impl ScenePipeline {
             pass.set_pipeline(&self.sky_pipeline);
             pass.draw(0..3, 0..1);
             pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+            let mut drawn = (0, 0);
             for batch in batches {
                 let Some(mesh) = self.bind_batch(&mut pass, &batch, false) else {
                     continue;
                 };
                 count(mesh.index_count, &batch.instances);
+                drawn.0 += batch.instances.end - batch.instances.start;
+                drawn.1 += 1;
                 pass.draw_indexed(0..mesh.index_count, 0, batch.instances);
             }
+            (counts.items_drawn, counts.batches) = drawn;
             // Last, over everything, but hidden behind solid items.
             self.sprites.draw(&mut pass, &sprite_draws);
         }
+        mark(&mut encoder, FramePass::PostProcessing);
 
         self.post.draw(
             &mut encoder,
@@ -803,6 +823,7 @@ impl ScenePipeline {
             post.enabled && post.bloom_enabled && post.bloom_intensity > 0.0,
         );
 
+        mark(&mut encoder, FramePass::Ui);
         if turned.drawn
             && let Some((sheet, _, _)) = &self.turned_text.sheet
         {
@@ -832,7 +853,8 @@ impl ScenePipeline {
         }
         let _ = &turned.buffers;
 
-        if !ui_vertices.is_empty() || !text_buffers.is_empty() {
+        let ui_drawn = !ui_vertices.is_empty() || !text_buffers.is_empty();
+        if ui_drawn {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("UI overlay"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -879,14 +901,23 @@ impl ScenePipeline {
             }
         }
 
-        if timed && let Some(timer) = &self.gpu_timer {
+        if let Some(timer) = timer {
             timer.end(&mut encoder);
         }
         self.queue.submit([encoder.finish()]);
         if timed && let Some(timer) = &mut self.gpu_timer {
-            timer.submitted();
+            let shadows = self.shadow_map.is_some() || self.spot_shadow_map.is_some();
+            let occlusion = self.frame_targets.occlusion.is_some();
+            timer.submitted([
+                shadows,
+                occlusion,
+                occlusion,
+                true,
+                true,
+                turned.drawn || ui_drawn,
+            ]);
         }
-        self.draws = draws;
+        self.counts = counts;
         self.forget_undrawn();
         Ok(())
     }
@@ -989,13 +1020,36 @@ impl ScenePipeline {
     }
 
     pub(super) fn stats(&self) -> RenderStats {
+        let counts = self.counts;
+        let shadow_bytes = self.shadow_map.as_ref().map_or(0, |map| map.bytes)
+            + self.spot_shadow_map.as_ref().map_or(0, |map| map.bytes);
+        let sheet_bytes = self.turned_text.sheet.as_ref().map_or(0, |(sheet, _, _)| {
+            target_bytes((sheet.width(), sheet.height(), 1), sheet.format(), 1)
+        });
+        let buffers = [
+            &self.instance_buffer,
+            &self.ui_buffer,
+            &self.light_buffer,
+            &self.tile_buffer,
+            &self.frame_buffer,
+            &self.cascade_buffer,
+        ];
         RenderStats {
-            draw_calls: self.draws.0,
-            triangles: self.draws.1,
+            draw_calls: counts.draw_calls,
+            triangles: counts.triangles,
             gpu_time: self.gpu_timer.as_ref().and_then(gpu_timer::GpuTimer::last),
             gpu_timing: self.gpu_timer.is_some(),
+            pass_times: self
+                .gpu_timer
+                .as_ref()
+                .map_or([None; FramePass::COUNT], gpu_timer::GpuTimer::last_passes),
+            items_submitted: counts.items_submitted,
+            items_drawn: counts.items_drawn,
+            batches: counts.batches,
             texture_bytes: self.texture_bytes.total(),
             mesh_bytes: self.mesh_bytes.total(),
+            target_bytes: self.frame_targets.bytes + shadow_bytes + sheet_bytes,
+            buffer_bytes: buffers.iter().map(|buffer| buffer.size()).sum(),
         }
     }
 

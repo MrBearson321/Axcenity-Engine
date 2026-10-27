@@ -244,8 +244,8 @@ Measure before optimizing. Benchmark scenes are built in code: 10,000 parts, 2,0
 
 ### Acceptance criteria
 
-- [ ] Each benchmark runs and prints repeatable numbers (within 10% across three runs on one machine). The numbers are recorded in `docs/rendering/performance.md` as the baseline.
-- [ ] The Profiler lists the time of each pass where timestamps are supported, and says so where they aren't.
+- [x] Each benchmark runs and prints repeatable numbers (within 10% across three runs on one machine). The numbers are recorded in `docs/rendering/performance.md` as the baseline.
+- [x] The Profiler lists the time of each pass where timestamps are supported, and says so where they aren't.
 
 ---
 

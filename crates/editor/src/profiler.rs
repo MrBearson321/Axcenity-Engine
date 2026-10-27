@@ -9,7 +9,7 @@
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-use axcenity_render::RenderStats;
+use axcenity_render::{FramePass, RenderStats};
 use eframe::egui::{self, RichText};
 
 use crate::responsive;
@@ -172,8 +172,16 @@ impl Profiler {
                 .map(|s| s.game.total + s.render.cpu)
                 .max()
                 .unwrap_or_default(),
-            gpu: (!gpu.is_empty()).then(|| gpu.iter().sum::<Duration>() / gpu.len() as u32),
+            gpu: mean(&gpu),
             gpu_timing: newest.render.stats.gpu_timing,
+            passes: FramePass::ALL.map(|pass| {
+                let times: Vec<Duration> = self
+                    .samples
+                    .iter()
+                    .filter_map(|s| s.render.stats.pass_time(pass))
+                    .collect();
+                mean(&times)
+            }),
             memory: self.memory,
             lua_bytes: newest.load.lua_bytes,
             scripts: average(|s| s.game.scripts),
@@ -189,8 +197,12 @@ impl Profiler {
             render_cpu: average(|s| s.render.cpu),
             draw_calls: newest.render.stats.draw_calls,
             triangles: newest.render.stats.triangles,
+            batches: newest.render.stats.batches,
+            items_drawn: newest.render.stats.items_drawn,
             texture_bytes: newest.render.stats.texture_bytes,
             mesh_bytes: newest.render.stats.mesh_bytes,
+            target_bytes: newest.render.stats.target_bytes,
+            buffer_bytes: newest.render.stats.buffer_bytes,
             items: newest.render.items,
             lights: newest.render.lights,
             audio: average(|s| s.game.audio),
@@ -260,11 +272,29 @@ impl Profiler {
                     row(ui, "CPU", millis(summary.render_cpu));
                     row(ui, "GPU", gpu_text(summary.gpu, summary.gpu_timing));
                     row(ui, "Draw calls", summary.draw_calls.to_string());
+                    row(ui, "Batches", summary.batches.to_string());
                     row(ui, "Triangles", thousands(summary.triangles));
+                    row(
+                        ui,
+                        "Items drawn",
+                        format!("{} of {}", summary.items_drawn, summary.items),
+                    );
+                    row(ui, "Lights", summary.lights.to_string());
+                });
+                section(ui, "GPU passes", |ui| {
+                    if summary.gpu_timing {
+                        for (pass, time) in FramePass::ALL.iter().zip(summary.passes) {
+                            row(ui, pass.label(), time.map_or("off".into(), millis));
+                        }
+                    } else {
+                        row(ui, "Per pass", "not available on this GPU".into());
+                    }
+                });
+                section(ui, "GPU memory", |ui| {
                     row(ui, "Textures", bytes(summary.texture_bytes as usize));
                     row(ui, "Meshes", bytes(summary.mesh_bytes as usize));
-                    row(ui, "Items", summary.items.to_string());
-                    row(ui, "Lights", summary.lights.to_string());
+                    row(ui, "Render targets", bytes(summary.target_bytes as usize));
+                    row(ui, "Buffers", bytes(summary.buffer_bytes as usize));
                 });
                 section(ui, "Physics", |ui| {
                     row(ui, "CPU", millis(summary.physics));
@@ -294,6 +324,9 @@ struct Summary {
     cpu_peak: Duration,
     gpu: Option<Duration>,
     gpu_timing: bool,
+    /// Each pass's average GPU time, in [`FramePass::ALL`]'s order: `None`
+    /// for one no recent frame drew.
+    passes: [Option<Duration>; FramePass::COUNT],
     memory: Option<usize>,
     lua_bytes: usize,
     scripts: Duration,
@@ -304,9 +337,13 @@ struct Summary {
     render_cpu: Duration,
     draw_calls: u32,
     triangles: u64,
-    /// GPU bytes of textures and meshes.
+    batches: u32,
+    items_drawn: u32,
+    /// GPU bytes by kind.
     texture_bytes: u64,
     mesh_bytes: u64,
+    target_bytes: u64,
+    buffer_bytes: u64,
     items: usize,
     lights: usize,
     audio: Duration,
@@ -370,6 +407,11 @@ fn history(ui: &mut egui::Ui, frames: &[f32]) {
         y,
         egui::Stroke::new(1.0_f32, palette.border_strong),
     );
+}
+
+/// The average of `times`, or `None` if there are none.
+fn mean(times: &[Duration]) -> Option<Duration> {
+    (!times.is_empty()).then(|| times.iter().sum::<Duration>() / times.len() as u32)
 }
 
 fn gpu_text(gpu: Option<Duration>, timing: bool) -> String {
@@ -470,6 +512,75 @@ mod tests {
         // The next Play starts again from nothing.
         profiler.start();
         assert!(profiler.summary().is_none());
+    }
+
+    /// Every piece of text the panel shows.
+    fn shown_text(profiler: &Profiler) -> String {
+        let ctx = theme::test_context();
+        // Tall enough that nothing is scrolled out of view.
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(400.0, 2000.0),
+            )),
+            ..egui::RawInput::default()
+        };
+        let output = ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| profiler.show(ui));
+        });
+        let mut text = String::new();
+        for clipped in output.shapes {
+            if let egui::Shape::Text(shape) = clipped.shape {
+                text.push_str(shape.galley.text());
+                text.push('\n');
+            }
+        }
+        text
+    }
+
+    fn timed_render(scene_ms: u64) -> RenderCost {
+        let mut stats = RenderStats {
+            gpu_timing: true,
+            gpu_time: Some(Duration::from_millis(scene_ms + 1)),
+            ..RenderStats::default()
+        };
+        stats.pass_times[FramePass::Scene as usize] = Some(Duration::from_millis(scene_ms));
+        stats.pass_times[FramePass::PostProcessing as usize] = Some(Duration::from_millis(1));
+        RenderCost {
+            stats,
+            ..RenderCost::default()
+        }
+    }
+
+    #[test]
+    fn the_panel_lists_each_passs_gpu_time_or_says_it_cant() {
+        let mut profiler = Profiler::default();
+        profiler.start();
+        for scene_ms in [2, 4] {
+            profiler.record_game(frame(1), GameLoad::default());
+            profiler.record_render(timed_render(scene_ms));
+        }
+        // Averaged over the frames that drew each pass.
+        let summary = profiler.summary().unwrap();
+        assert_eq!(
+            summary.passes[FramePass::Scene as usize],
+            Some(Duration::from_millis(3))
+        );
+        assert_eq!(summary.passes[FramePass::Shadows as usize], None);
+        let text = shown_text(&profiler);
+        for pass in FramePass::ALL {
+            assert!(text.contains(pass.label()), "{pass:?} in {text}");
+        }
+        assert!(text.contains("3.00 ms"), "{text}");
+        assert!(!text.contains("not available"), "{text}");
+
+        // A GPU without timestamps: the panel says so, once, for every pass.
+        profiler.start();
+        profiler.record_game(frame(1), GameLoad::default());
+        profiler.record_render(RenderCost::default());
+        let text = shown_text(&profiler);
+        assert!(text.contains("Per pass"), "{text}");
+        assert!(!text.contains(FramePass::Scene.label()), "{text}");
     }
 
     #[test]
