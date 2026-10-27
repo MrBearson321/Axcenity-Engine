@@ -211,9 +211,9 @@ The new `FrameTargets` owns the HDR, depth, MSAA, prepass, SSAO and bloom target
 
 ### Acceptance criteria
 
-- [ ] The inside corner where a block meets a floor is darker with AO on than off, and an open stretch of floor is within 2 levels either way (GPU test).
-- [ ] AO doesn't darken the sky, see-through items or emissive light. Sun-lit faces darken only in their ambient share.
-- [ ] With AO off, no prepass or AO targets exist and no prepass is drawn (resource count test, and the draw-call count in `RenderStats`).
+- [x] The inside corner where a block meets a floor is darker with AO on than off, and an open stretch of floor is within 2 levels either way (GPU test).
+- [x] AO doesn't darken the sky, see-through items or emissive light. Sun-lit faces darken only in their ambient share.
+- [x] With AO off, no prepass or AO targets exist and no prepass is drawn (resource count test, and the draw-call count in `RenderStats`).
 
 ---
 

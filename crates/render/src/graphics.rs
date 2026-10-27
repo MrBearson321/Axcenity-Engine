@@ -180,6 +180,45 @@ impl AntiAliasing {
     }
 }
 
+/// Screen-space ambient occlusion: how much the corners and creases between
+/// solid items darken their ambient and sky light. Ordered from cheapest
+/// to dearest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum AmbientOcclusion {
+    /// No darkening, and no prepass or ambient occlusion targets.
+    Off,
+    /// 8 samples per pixel.
+    Low,
+    /// 16 samples per pixel.
+    High,
+}
+
+impl AmbientOcclusion {
+    pub const ALL: [AmbientOcclusion; 3] = [
+        AmbientOcclusion::Off,
+        AmbientOcclusion::Low,
+        AmbientOcclusion::High,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            AmbientOcclusion::Off => "Off",
+            AmbientOcclusion::Low => "Low",
+            AmbientOcclusion::High => "High",
+        }
+    }
+
+    /// How many points around each pixel are tested for what hides it: 0
+    /// when it's off.
+    pub fn samples(self) -> u32 {
+        match self {
+            AmbientOcclusion::Off => 0,
+            AmbientOcclusion::Low => 8,
+            AmbientOcclusion::High => 16,
+        }
+    }
+}
+
 /// The smallest and largest render scale: the scene is drawn at this
 /// fraction of the output's width and height.
 pub const RENDER_SCALE_RANGE: std::ops::RangeInclusive<f32> = 0.5..=2.0;
@@ -224,6 +263,8 @@ pub struct GraphicsSettings {
     pub texture_quality: Option<TextureQuality>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub anti_aliasing: Option<AntiAliasing>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ambient_occlusion: Option<AmbientOcclusion>,
 }
 
 impl GraphicsSettings {
@@ -307,6 +348,15 @@ impl GraphicsSettings {
         })
     }
 
+    /// The ambient occlusion: the override, or the preset's.
+    pub fn ambient_occlusion(&self) -> AmbientOcclusion {
+        self.ambient_occlusion.unwrap_or(match self.quality {
+            Quality::Low => AmbientOcclusion::Off,
+            Quality::Medium => AmbientOcclusion::Low,
+            Quality::High | Quality::Ultra => AmbientOcclusion::High,
+        })
+    }
+
     /// The values the renderer uses: these settings, lowered where the GPU
     /// can't meet them, with a note for each one lowered. Never raises one.
     pub fn effective(&self, capabilities: &Capabilities) -> EffectiveGraphics {
@@ -354,6 +404,8 @@ impl GraphicsSettings {
             render_scale: self.render_scale(),
             texture_quality: self.texture_quality(),
             anti_aliasing,
+            // Every GPU can draw it: it needs nothing past what the scene does.
+            ambient_occlusion: self.ambient_occlusion(),
             notes,
         }
     }
@@ -446,6 +498,7 @@ pub struct EffectiveGraphics {
     pub render_scale: f32,
     pub texture_quality: TextureQuality,
     pub anti_aliasing: AntiAliasing,
+    pub ambient_occlusion: AmbientOcclusion,
     /// Why each lowered value was lowered, for showing in the settings.
     pub notes: Vec<String>,
 }
@@ -503,6 +556,11 @@ mod tests {
         );
         assert_eq!(ShadowQuality::Off.map(), None);
         assert_eq!(GraphicsSettings::default().quality, Quality::High);
+        let occlusion =
+            Quality::ALL.map(|quality| GraphicsSettings::preset(quality).ambient_occlusion());
+        use AmbientOcclusion as Ao;
+        assert_eq!(occlusion, [Ao::Off, Ao::Low, Ao::High, Ao::High]);
+        assert_eq!(Ao::ALL.map(Ao::samples), [0, 8, 16]);
     }
 
     #[test]
@@ -582,6 +640,15 @@ mod tests {
             assert_eq!(smoothing.texture_quality(), preset.texture_quality());
             assert_eq!(smoothing.shadow_quality(), preset.shadow_quality());
             assert_eq!(smoothing.post_processing(), preset.post_processing());
+
+            let occlusion = GraphicsSettings {
+                ambient_occlusion: Some(AmbientOcclusion::Low),
+                ..preset.clone()
+            };
+            assert_eq!(occlusion.ambient_occlusion(), AmbientOcclusion::Low);
+            assert_eq!(occlusion.anti_aliasing(), preset.anti_aliasing());
+            assert_eq!(occlusion.shadow_quality(), preset.shadow_quality());
+            assert_eq!(occlusion.render_scale(), preset.render_scale());
         }
         let broken = GraphicsSettings {
             shadow_distance: Some(f32::NAN),
@@ -610,6 +677,7 @@ mod tests {
             render_scale: Some(0.5),
             texture_quality: Some(TextureQuality::Quarter),
             anti_aliasing: Some(AntiAliasing::Fxaa),
+            ambient_occlusion: Some(AmbientOcclusion::Off),
         };
         let text = serde_json::to_string(&settings).unwrap();
         assert_eq!(
@@ -765,6 +833,7 @@ mod tests {
                         render_scale: Some(0.5),
                         texture_quality: Some(TextureQuality::Half),
                         anti_aliasing,
+                        ambient_occlusion: Some(AmbientOcclusion::Low),
                     };
                     for capabilities in &capabilities {
                         let effective = settings.effective(capabilities);
@@ -774,6 +843,7 @@ mod tests {
                         assert_eq!(effective.render_scale, settings.render_scale());
                         assert_eq!(effective.texture_quality, settings.texture_quality());
                         assert!(effective.anti_aliasing <= settings.anti_aliasing());
+                        assert_eq!(effective.ambient_occlusion, settings.ambient_occlusion());
                         let lowered =
                             usize::from(effective.shadow_quality != settings.shadow_quality())
                                 + usize::from(effective.anti_aliasing != settings.anti_aliasing());

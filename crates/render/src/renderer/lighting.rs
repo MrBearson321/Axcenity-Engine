@@ -12,7 +12,7 @@ use glam::{Mat3, Mat4, Vec2, Vec3};
 use crate::draw_list::{
     ChannelMap, DrawItem, DrawList, Light, Material, PostProcessing, Shadows, TextureSource,
 };
-use crate::graphics::{EffectiveGraphics, ShadowMapSize, SpotShadowMapSize};
+use crate::graphics::{AmbientOcclusion, EffectiveGraphics, ShadowMapSize, SpotShadowMapSize};
 
 use super::{
     Batch, CASCADE_SPLIT_BLEND, FAR_PLANE, FrameUniform, InstanceRaw, LIGHT_SCALE, LIGHTS_PER_TILE,
@@ -21,7 +21,9 @@ use super::{
     PostUniform, SHADOW_CASCADES, SHADOW_CASTER_RANGE, SpotShadow,
 };
 
-pub(super) fn view_projection(list: &DrawList, aspect: f32) -> Mat4 {
+/// The camera's view (world to view space) and projection (view to clip
+/// space).
+pub(super) fn camera_matrices(list: &DrawList, aspect: f32) -> (Mat4, Mat4) {
     let camera = &list.camera;
     let view = rh::view::look_at_mat4(camera.position, camera.look_at, Vec3::Y);
     // wgpu uses DirectX-style clip space: depth from 0 to 1, Y up.
@@ -31,7 +33,22 @@ pub(super) fn view_projection(list: &DrawList, aspect: f32) -> Mat4 {
         NEAR_PLANE,
         FAR_PLANE,
     );
+    (view, projection)
+}
+
+pub(super) fn view_projection(list: &DrawList, aspect: f32) -> Mat4 {
+    let (view, projection) = camera_matrices(list, aspect);
     projection * view
+}
+
+/// How strongly ambient occlusion darkens ambient light as drawn: the
+/// world's strength (0 to 2), or 0 while the graphics settings have it off.
+pub(super) fn occlusion_drawn(list: &DrawList, graphics: &EffectiveGraphics) -> f32 {
+    let strength = list.ambient.occlusion;
+    if graphics.ambient_occlusion == AmbientOcclusion::Off || !strength.is_finite() {
+        return 0.0;
+    }
+    strength.clamp(0.0, 2.0)
 }
 
 /// The sun's shadows as drawn: the world's request, within the graphics
@@ -61,7 +78,8 @@ pub(super) fn frame_uniform(
     graphics: &EffectiveGraphics,
 ) -> FrameUniform {
     let camera = &list.camera;
-    let view_proj = view_projection(list, aspect);
+    let (view, projection) = camera_matrices(list, aspect);
+    let view_proj = projection * view;
     let sun_direction = list.sun.direction.normalize_or(Vec3::Y);
     let sun_radiance = linear_color(list.sun.color) * list.sun.intensity;
     let ambient = linear_color(list.ambient.color) * list.ambient.intensity;
@@ -94,6 +112,9 @@ pub(super) fn frame_uniform(
         sky_ground: linear_color(sky.ground_color).extend(0.0).to_array(),
         lights: [0; 4],
         spot_shadows: [Mat4::IDENTITY.to_cols_array_2d(); MAX_SPOT_SHADOWS],
+        view: view.to_cols_array_2d(),
+        // The scene's size is filled in when it's drawn.
+        ambient_occlusion: [occlusion_drawn(list, graphics), 0.0, 1.0, 1.0],
     }
 }
 

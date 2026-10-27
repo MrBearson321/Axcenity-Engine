@@ -66,6 +66,22 @@ impl ScenePipeline {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 8,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
         });
         let light_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -88,12 +104,21 @@ impl ScenePipeline {
             ..Default::default()
         });
         let (empty_shadow_view, _) = create_shadow_views(&device, "no shadow map", 1, 1);
+        let no_occlusion_view = create_white_occlusion(&device, &queue);
+        // The occlusion is drawn at half the scene's size, so it's
+        // smoothed back up as it's read.
+        let occlusion_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("ambient occlusion"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
         let frame_bind_group = create_frame_bind_group(
             &device,
             &frame_layout,
             [&frame_buffer, &light_buffer, &tile_buffer],
-            [&empty_shadow_view, &empty_shadow_view],
-            &shadow_sampler,
+            [&empty_shadow_view, &empty_shadow_view, &no_occlusion_view],
+            [&shadow_sampler, &occlusion_sampler],
         );
         let cascade_size = size_of::<[[f32; 4]; 4]>() as u64;
         let cascade_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -199,13 +224,14 @@ impl ScenePipeline {
         terrain.set_skipped_levels(graphics.texture_quality.skipped_levels());
         let sprites = sprites::SpritePass::new(&device, &white_texture.srgb, samples);
         let post = PostPasses::new(&device, color_format);
+        let occlusion = OcclusionPasses::new(&device, &frame_layout, &material_layout);
         let targets_alive = TargetsAlive::default();
-        let post_targets = PostTargets::new(
+        let frame_targets = FrameTargets::new(
             &device,
-            &post,
+            (&post, &occlusion),
             scene_size((width, height), &graphics, &capabilities),
             (width, height),
-            anti_aliasing_targets(&graphics),
+            targets_used(&graphics),
             &targets_alive,
         );
         let ui_pipeline = create_ui_pipeline(&device, color_format);
@@ -247,14 +273,17 @@ impl ScenePipeline {
         };
         let gpu_timer = gpu_timer::GpuTimer::new(&device, &queue);
 
-        Self {
+        let mut pipeline = Self {
             device,
             queue,
             sky_pipeline,
             item_pipelines,
             sprites,
             post,
-            post_targets,
+            frame_targets,
+            occlusion,
+            no_occlusion_view,
+            occlusion_sampler,
             targets_alive,
             output_size: (width, height),
             light_buffer,
@@ -308,7 +337,9 @@ impl ScenePipeline {
             draws: (0, 0),
             texture_bytes,
             mesh_bytes,
-        }
+        };
+        pipeline.bind_frame();
+        pipeline
     }
 
     /// Uses `settings` from the next frame, lowered to what the device can
@@ -334,7 +365,7 @@ impl ScenePipeline {
         if self.spot_shadow_map.as_ref().map(|map| map.size) != quality.spot_map() {
             self.spot_shadow_map = None;
         }
-        self.bind_shadow_maps();
+        self.bind_frame();
         let samples = self.graphics.anti_aliasing.samples();
         if samples != old_samples {
             (self.sky_pipeline, self.item_pipelines) = scene_pipelines(
@@ -364,25 +395,32 @@ impl ScenePipeline {
     }
 
     /// Remakes the scene's targets if they weren't made for this output
-    /// size, render scale and anti-aliasing. The old ones are freed.
+    /// size, render scale, anti-aliasing and ambient occlusion. The old ones
+    /// are freed.
     fn fit_targets(&mut self) {
         let size = scene_size(self.output_size, &self.graphics, &self.capabilities);
-        let anti_aliasing = anti_aliasing_targets(&self.graphics);
-        let targets = &self.post_targets;
+        let used = targets_used(&self.graphics);
+        let targets = &self.frame_targets;
         let made_for = (
             targets.size,
             targets.output,
-            (targets.samples, targets.fxaa.is_some()),
+            (
+                targets.samples,
+                targets.fxaa.is_some(),
+                targets.occlusion.is_some(),
+            ),
         );
-        if made_for != (size, self.output_size, anti_aliasing) {
-            self.post_targets = PostTargets::new(
+        if made_for != (size, self.output_size, used) {
+            self.frame_targets = FrameTargets::new(
                 &self.device,
-                &self.post,
+                (&self.post, &self.occlusion),
                 size,
                 self.output_size,
-                anti_aliasing,
+                used,
                 &self.targets_alive,
             );
+            // The frame bindings held the old occlusion texture.
+            self.bind_frame();
         }
     }
 
@@ -398,8 +436,11 @@ impl ScenePipeline {
         // Lights are planned in the scene's pixels, which the render scale
         // makes fewer or more than the output's. UI uses the output's.
         let spot_map = self.graphics.shadow_quality.spot_map();
-        let planned_lights = plan_lights(list, aspect, self.post_targets.size, spot_map);
+        let planned_lights = plan_lights(list, aspect, self.frame_targets.size, spot_map);
         let mut frame_uniform = frame_uniform(list, aspect, &self.graphics);
+        let (scene_width, scene_height) = self.frame_targets.size;
+        frame_uniform.ambient_occlusion[2] = 1.0 / scene_width as f32;
+        frame_uniform.ambient_occlusion[3] = 1.0 / scene_height as f32;
         frame_uniform.lights = [
             planned_lights.lights.len() as u32,
             planned_lights.tile_size,
@@ -438,6 +479,11 @@ impl ScenePipeline {
                 0,
                 bytemuck::cast_slice(&planned_lights.tiles),
             );
+        }
+        if self.frame_targets.occlusion.is_some() {
+            let uniform = occlusion_uniform(list, aspect, self.graphics.ambient_occlusion);
+            self.queue
+                .write_buffer(&self.occlusion.uniform, 0, bytemuck::bytes_of(&uniform));
         }
         let post = post_drawn(&list.post, &self.graphics);
         self.queue.write_buffer(
@@ -557,7 +603,7 @@ impl ScenePipeline {
             changed = true;
         }
         if changed {
-            self.bind_shadow_maps();
+            self.bind_frame();
         }
 
         let mut encoder = self
@@ -629,13 +675,50 @@ impl ScenePipeline {
         }
         let frame_bind_group = &self.frame_bind_group;
 
+        // While ambient occlusion is on: solid items' depth and normals,
+        // then how hidden each pixel is by what's around it.
+        if let Some(occlusion) = &self.frame_targets.occlusion {
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("depth and normal prepass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &occlusion.normal_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &occlusion.depth_view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(1.0),
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    ..Default::default()
+                });
+                pass.set_bind_group(0, frame_bind_group, &[]);
+                pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+                for batch in batches.iter().filter(|batch| !batch.transparent) {
+                    let Some(mesh) = self.bind_batch(&mut pass, batch, true) else {
+                        continue;
+                    };
+                    count(mesh.index_count, &batch.instances);
+                    pass.draw_indexed(0..mesh.index_count, 0, batch.instances.clone());
+                }
+            }
+            self.occlusion.draw(&mut encoder, occlusion);
+        }
+
         // The scene is drawn into the HDR texture; post-processing then brings
         // it to `view`. With MSAA it's drawn into the multisampled texture,
         // whose samples are averaged into the HDR one as the pass ends. The
         // pass is a block so it ends (is dropped) before `encoder.finish()`,
         // which needs the encoder back.
         {
-            let targets = &self.post_targets;
+            let targets = &self.frame_targets;
             let color_attachment = match &targets.msaa {
                 Some(msaa) => wgpu::RenderPassColorAttachment {
                     view: &msaa.view,
@@ -659,7 +742,7 @@ impl ScenePipeline {
                 label: Some("scene"),
                 color_attachments: &[Some(color_attachment)],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.post_targets.depth_view,
+                    view: &self.frame_targets.depth_view,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(1.0),
                         store: wgpu::StoreOp::Discard,
@@ -674,28 +757,9 @@ impl ScenePipeline {
             pass.draw(0..3, 0..1);
             pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             for batch in batches {
-                // A caller's mesh with broken data was never uploaded.
-                let Some(mesh) = self.gpu_mesh(batch.mesh) else {
+                let Some(mesh) = self.bind_batch(&mut pass, &batch, false) else {
                     continue;
                 };
-                if batch.material.terrain != terrain::TerrainKey::default() {
-                    let Some(group) = self.terrain.group(&batch.material.terrain) else {
-                        continue;
-                    };
-                    pass.set_pipeline(&self.terrain.pipeline);
-                    pass.set_bind_group(1, group, &[]);
-                } else {
-                    let pipeline = self.item_pipelines.of(&batch);
-                    let material = self
-                        .materials
-                        .get(&batch.material)
-                        .and_then(|cached| cached.gpu.as_ref())
-                        .unwrap_or(&self.plain_material);
-                    pass.set_pipeline(pipeline);
-                    pass.set_bind_group(1, &material.bind_group, &[]);
-                }
-                pass.set_vertex_buffer(0, mesh.vertices.slice(..));
-                pass.set_index_buffer(mesh.indices.slice(..), mesh.index_format);
                 count(mesh.index_count, &batch.instances);
                 pass.draw_indexed(0..mesh.index_count, 0, batch.instances);
             }
@@ -705,7 +769,7 @@ impl ScenePipeline {
 
         self.post.draw(
             &mut encoder,
-            &self.post_targets,
+            &self.frame_targets,
             view,
             post.enabled && post.bloom_enabled && post.bloom_intensity > 0.0,
         );
@@ -798,22 +862,65 @@ impl ScenePipeline {
         Ok(())
     }
 
-    /// Remakes the frame bindings with the shadow maps alive, binding the
-    /// empty stand-in for each that isn't, so a freed map isn't kept alive
-    /// by the bindings.
-    fn bind_shadow_maps(&mut self) {
+    /// Sets `pass` up to draw `batch`, in the scene pass or (`prepass`) the
+    /// depth and normal prepass: its pipeline, its material or terrain
+    /// binding, and its mesh, which is returned. `None` skips it: a
+    /// caller's mesh with broken data was never uploaded.
+    fn bind_batch(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        batch: &Batch,
+        prepass: bool,
+    ) -> Option<&GpuMesh> {
+        let mesh = self.gpu_mesh(batch.mesh)?;
+        if batch.material.terrain != terrain::TerrainKey::default() {
+            let group = self.terrain.group(&batch.material.terrain)?;
+            pass.set_pipeline(if prepass {
+                &self.terrain.prepass
+            } else {
+                &self.terrain.pipeline
+            });
+            pass.set_bind_group(1, group, &[]);
+        } else {
+            let pipeline = match (prepass, batch.double_sided) {
+                (false, _) => self.item_pipelines.of(batch),
+                (true, false) => &self.occlusion.prepass,
+                (true, true) => &self.occlusion.double_sided_prepass,
+            };
+            let material = self
+                .materials
+                .get(&batch.material)
+                .and_then(|cached| cached.gpu.as_ref())
+                .unwrap_or(&self.plain_material);
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(1, &material.bind_group, &[]);
+        }
+        pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+        pass.set_index_buffer(mesh.indices.slice(..), mesh.index_format);
+        Some(mesh)
+    }
+
+    /// Remakes the frame bindings with the shadow maps and ambient
+    /// occlusion alive, binding the empty stand-in for each that isn't, so
+    /// a freed map or target isn't kept alive by the bindings.
+    fn bind_frame(&mut self) {
         let empty = &self.empty_shadow_view;
         let sun = self.shadow_map.as_ref().map_or(empty, |map| &map.array);
         let spot = self
             .spot_shadow_map
             .as_ref()
             .map_or(empty, |map| &map.array);
+        let occlusion = self
+            .frame_targets
+            .occlusion
+            .as_ref()
+            .map_or(&self.no_occlusion_view, |targets| &targets.blurred_view);
         self.frame_bind_group = create_frame_bind_group(
             &self.device,
             &self.frame_layout,
             [&self.frame_buffer, &self.light_buffer, &self.tile_buffer],
-            [sun, spot],
-            &self.shadow_sampler,
+            [sun, spot, occlusion],
+            [&self.shadow_sampler, &self.occlusion_sampler],
         );
     }
 
@@ -833,6 +940,13 @@ impl ScenePipeline {
     #[cfg(test)]
     pub(super) fn targets_alive(&self) -> usize {
         Arc::strong_count(&self.targets_alive.sets) - 1
+    }
+
+    /// How many sets of prepass and ambient occlusion targets are alive: 0
+    /// or 1, unless one leaked.
+    #[cfg(test)]
+    pub(super) fn occlusion_targets_alive(&self) -> usize {
+        Arc::strong_count(&self.targets_alive.occlusion) - 1
     }
 
     /// How many multisampled and FXAA targets are alive: 0 or 1 each.
@@ -1297,13 +1411,48 @@ fn scene_pipelines(
     )
 }
 
-/// The scene's samples per pixel, and whether FXAA needs its target.
-fn anti_aliasing_targets(graphics: &EffectiveGraphics) -> (u32, bool) {
+/// The scene's samples per pixel, whether FXAA needs its target, and
+/// whether ambient occlusion needs the prepass's and its own.
+fn targets_used(graphics: &EffectiveGraphics) -> (u32, bool, bool) {
     let anti_aliasing = graphics.anti_aliasing;
     (
         anti_aliasing.samples(),
         anti_aliasing == crate::AntiAliasing::Fxaa,
+        graphics.ambient_occlusion != crate::AmbientOcclusion::Off,
     )
+}
+
+/// A 1×1 white occlusion texture: nothing hidden.
+fn create_white_occlusion(device: &wgpu::Device, queue: &wgpu::Queue) -> wgpu::TextureView {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("no ambient occlusion"),
+        size: wgpu::Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: OCCLUSION_FORMAT,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        texture.as_image_copy(),
+        &[255],
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(1),
+            rows_per_image: Some(1),
+        },
+        wgpu::Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+    );
+    texture.create_view(&wgpu::TextureViewDescriptor::default())
 }
 
 /// The scene's size in pixels for an `output` of that size: scaled by the

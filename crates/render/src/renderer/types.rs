@@ -50,6 +50,13 @@ pub(super) struct FrameUniform {
     /// Turns world space to each shadow-casting spot light's view, one per
     /// layer of the spot shadow map (see [`LightRaw::shadow`]).
     pub(super) spot_shadows: [[[f32; 4]; 4]; MAX_SPOT_SHADOWS],
+    /// Turns world space to the camera's (view space), for the prepass's
+    /// normals.
+    pub(super) view: [[f32; 4]; 4],
+    /// How strongly screen-space ambient occlusion darkens ambient light (0
+    /// while it's off), then unused, then 1 over the scene's width and
+    /// height in pixels, to find a pixel's place in the occlusion texture.
+    pub(super) ambient_occlusion: [f32; 4],
 }
 
 /// The most point and spot lights drawn at once.
@@ -68,6 +75,13 @@ pub(super) const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Fl
 /// The finished, tone-mapped picture while FXAA is on, before FXAA smooths
 /// it into the output. sRGB, so 8 bits keep dark shades from banding.
 pub(super) const FXAA_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+/// The prepass's view-space normals, which ambient occlusion reads.
+pub(super) const NORMAL_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+/// Ambient occlusion: 1 in the open, toward 0 in corners.
+pub(super) const OCCLUSION_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
+/// How far around a point ambient occlusion looks for what hides it, in studs.
+pub(super) const OCCLUSION_RADIUS: f32 = 1.5;
+
 /// How many blur levels bloom uses at render scale 1, each half the size of
 /// the one before. Whatever the scale, the last is this many halvings of the
 /// output's size, so the glow spreads as far across the screen.
@@ -150,6 +164,18 @@ pub(super) struct SpotShadow {
     /// A sphere around everything the beam reaches: casters outside it are
     /// skipped.
     pub(super) bounds: (Vec3, f32),
+}
+
+/// What the ambient occlusion passes read each frame. Must match `Occlusion`
+/// in ssao.wgsl.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub(super) struct OcclusionUniform {
+    /// Turns view space to clip space, and back.
+    pub(super) projection: [[f32; 4]; 4],
+    pub(super) inv_projection: [[f32; 4]; 4],
+    /// Samples per pixel, the radius in studs, then unused.
+    pub(super) settings: [f32; 4],
 }
 
 /// One draw item as the GPU reads it. Must match `InstanceIn` in shader.wgsl.
@@ -395,18 +421,55 @@ pub(super) struct PostPasses {
     pub(super) fxaa: wgpu::RenderPipeline,
 }
 
+/// The depth and normal prepass's and the ambient occlusion passes'
+/// pipelines, which don't depend on the scene's size.
+pub(super) struct OcclusionPasses {
+    /// Solid items' depth and view-space normals, with back faces culled or
+    /// (double-sided) drawn. Terrain's is [`terrain::TerrainPass`]'s.
+    pub(super) prepass: wgpu::RenderPipeline,
+    pub(super) double_sided_prepass: wgpu::RenderPipeline,
+    /// Depth, a second texture and the uniform, for both passes below.
+    pub(super) layout: wgpu::BindGroupLayout,
+    pub(super) uniform: wgpu::Buffer,
+    /// Tests the hemisphere around each pixel, at half the scene's size.
+    pub(super) occlusion: wgpu::RenderPipeline,
+    /// Blurs that, without blurring across a change in depth.
+    pub(super) blur: wgpu::RenderPipeline,
+}
+
+/// What the prepass draws into and ambient occlusion reads and writes,
+/// while ambient occlusion is on.
+pub(super) struct OcclusionTargets {
+    /// Solid items' depth, at the scene's size, kept for reading.
+    pub(super) depth_view: wgpu::TextureView,
+    /// Their view-space normals, at the scene's size.
+    pub(super) normal_view: wgpu::TextureView,
+    /// Occlusion as tested, then blurred, at half the scene's size. The
+    /// scene pass reads the blurred one.
+    pub(super) raw_view: wgpu::TextureView,
+    pub(super) blurred_view: wgpu::TextureView,
+    /// Depth and normals, for the occlusion pass.
+    pub(super) occlusion_group: wgpu::BindGroup,
+    /// Depth and the raw occlusion, for the blur.
+    pub(super) blur_group: wgpu::BindGroup,
+    /// A clone of [`TargetsAlive::occlusion`].
+    pub(super) _alive: Arc<()>,
+}
+
 /// One more strong reference than there are of each kind of scene target
 /// alive, so tests can tell that none leaked.
 #[derive(Default)]
 pub(super) struct TargetsAlive {
-    /// Sets of [`PostTargets`].
+    /// Sets of [`FrameTargets`].
     pub(super) sets: Arc<()>,
     pub(super) msaa: Arc<()>,
     pub(super) fxaa: Arc<()>,
+    /// Sets of [`OcclusionTargets`].
+    pub(super) occlusion: Arc<()>,
 }
 
 /// The multisampled color the scene is drawn into while MSAA is on. Its
-/// samples are averaged ("resolved") into [`PostTargets::hdr_view`] at the
+/// samples are averaged ("resolved") into [`FrameTargets::hdr_view`] at the
 /// end of the scene pass, and then thrown away.
 pub(super) struct MsaaTarget {
     pub(super) view: wgpu::TextureView,
@@ -423,9 +486,12 @@ pub(super) struct FxaaTarget {
     pub(super) _alive: Arc<()>,
 }
 
-/// What the scene draws into and post-processing reads, at the scene's
-/// size: the output's times the render scale.
-pub(super) struct PostTargets {
+/// Every target a frame draws into, at the scene's size (the output's times
+/// the render scale) unless said otherwise: the scene's HDR color and depth,
+/// the multisampled and FXAA targets, the prepass and ambient occlusion
+/// targets, and the bloom levels. Each optional one exists only while the
+/// effective graphics settings use it, and all are remade together.
+pub(super) struct FrameTargets {
     /// The scene's size in pixels, and the output's it was made for.
     pub(super) size: (u32, u32),
     pub(super) output: (u32, u32),
@@ -443,6 +509,8 @@ pub(super) struct PostTargets {
     pub(super) depth_view: wgpu::TextureView,
     /// Only while FXAA is on.
     pub(super) fxaa: Option<FxaaTarget>,
+    /// Only while ambient occlusion is on.
+    pub(super) occlusion: Option<OcclusionTargets>,
     /// Bloom levels from half the scene's size down, each half the one before.
     pub(super) levels: Vec<wgpu::TextureView>,
     /// Scene to the first level.
@@ -485,10 +553,15 @@ pub(super) struct ScenePipeline {
     /// Camera-facing pictures, such as particles.
     pub(super) sprites: sprites::SpritePass,
     pub(super) post: PostPasses,
-    /// The scene's HDR and depth textures, the bloom levels and the
-    /// anti-aliasing targets, remade when the scene's size or the
-    /// anti-aliasing changes.
-    pub(super) post_targets: PostTargets,
+    /// The scene's targets, remade when the scene's size, the
+    /// anti-aliasing or the ambient occlusion changes.
+    pub(super) frame_targets: FrameTargets,
+    /// The prepass and ambient occlusion pipelines.
+    pub(super) occlusion: OcclusionPasses,
+    /// A 1×1 white texture, bound in place of the ambient occlusion while
+    /// it's off, and the sampler the scene pass reads occlusion with.
+    pub(super) no_occlusion_view: wgpu::TextureView,
+    pub(super) occlusion_sampler: wgpu::Sampler,
     pub(super) targets_alive: TargetsAlive,
     /// The size of what's drawn into (the window or texture), in pixels.
     pub(super) output_size: (u32, u32),
@@ -522,8 +595,9 @@ pub(super) struct ScenePipeline {
     /// The format of what's drawn into, which the sheet shares.
     pub(super) color_format: wgpu::TextureFormat,
     pub(super) frame_buffer: wgpu::Buffer,
-    /// The frame bindings with the shadow maps alive, and the empty 1×1
-    /// stand-in for each one that isn't. Remade when either map changes.
+    /// The frame bindings with the shadow maps alive and the ambient
+    /// occlusion, and the empty 1×1 stand-in for each one that isn't.
+    /// Remade when any of them changes.
     pub(super) frame_bind_group: wgpu::BindGroup,
     pub(super) frame_layout: wgpu::BindGroupLayout,
     /// A 1×1 depth array, bound in place of a shadow map that isn't alive.

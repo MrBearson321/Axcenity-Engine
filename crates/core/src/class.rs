@@ -311,6 +311,9 @@ impl ClassName {
                 // 0 is crisp; higher blurs edges more the further they are
                 // from what casts them.
                 ("ShadowSoftness", Value::Number(0.2)),
+                // How strongly screen-space ambient occlusion darkens the
+                // ambient and sky light in corners, from 0 to 2.
+                ("AmbientOcclusionIntensity", Value::Number(1.0)),
                 // The procedural sky, which also lights and is reflected by parts.
                 ("SkyTopColor", Value::Color3(Color3::new(0.25, 0.5, 0.9))),
                 (

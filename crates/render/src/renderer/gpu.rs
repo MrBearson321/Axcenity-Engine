@@ -190,12 +190,15 @@ pub(super) fn create_shadow_views(
     (array, layers)
 }
 
+/// The frame's bindings (group 0 in lighting.wgsl): its uniform, lights
+/// and tiles, the sun's and spot lights' shadow maps, and the ambient
+/// occlusion, with a sampler for each kind of map.
 pub(super) fn create_frame_bind_group(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
     [frame_buffer, light_buffer, tile_buffer]: [&wgpu::Buffer; 3],
-    [shadow_view, spot_shadow_view]: [&wgpu::TextureView; 2],
-    shadow_sampler: &wgpu::Sampler,
+    [shadow_view, spot_shadow_view, occlusion_view]: [&wgpu::TextureView; 3],
+    [shadow_sampler, occlusion_sampler]: [&wgpu::Sampler; 2],
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("frame"),
@@ -224,6 +227,14 @@ pub(super) fn create_frame_bind_group(
             wgpu::BindGroupEntry {
                 binding: 6,
                 resource: wgpu::BindingResource::TextureView(spot_shadow_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 7,
+                resource: wgpu::BindingResource::TextureView(occlusion_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 8,
+                resource: wgpu::BindingResource::Sampler(occlusion_sampler),
             },
         ],
     })

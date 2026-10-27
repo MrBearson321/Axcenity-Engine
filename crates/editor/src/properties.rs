@@ -202,7 +202,12 @@ const GROUPS: [(&str, &[&str]); 19] = [
     ),
     (
         "Shadows",
-        &["ShadowsEnabled", "ShadowDistance", "ShadowSoftness"],
+        &[
+            "ShadowsEnabled",
+            "ShadowDistance",
+            "ShadowSoftness",
+            "AmbientOcclusionIntensity",
+        ],
     ),
     (
         "Sky",
@@ -818,6 +823,10 @@ fn value_edit(ui: &mut egui::Ui, name: &str, value: Value) -> Option<Value> {
         // A slider shows where between crisp and soft the shadows are.
         Value::Number(mut number) if name == "ShadowSoftness" => ui
             .add(egui::Slider::new(&mut number, 0.0..=1.0).clamping(egui::SliderClamping::Edits))
+            .changed()
+            .then_some(Value::Number(number)),
+        Value::Number(mut number) if name == "AmbientOcclusionIntensity" => ui
+            .add(egui::Slider::new(&mut number, 0.0..=2.0).clamping(egui::SliderClamping::Edits))
             .changed()
             .then_some(Value::Number(number)),
         // A UI element's three see-through parts, as percentages.

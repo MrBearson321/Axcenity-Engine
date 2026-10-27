@@ -31,6 +31,7 @@ const SUN: Sun = Sun {
 const AMBIENT: AmbientLight = AmbientLight {
     color: [0.75, 0.85, 1.0],
     intensity: 0.05,
+    occlusion: 1.0,
 };
 /// How much brighter than its color a glowing part is drawn when bloom is
 /// on, so it goes past the bloom threshold and glows.
@@ -45,6 +46,7 @@ struct LightingSettings {
     shadows: Shadows,
     sky: Sky,
     post: PostProcessing,
+    ambient: AmbientLight,
 }
 
 fn lighting_settings(world: &World) -> LightingSettings {
@@ -52,6 +54,7 @@ fn lighting_settings(world: &World) -> LightingSettings {
         shadows: Shadows::default(),
         sky: Sky::default(),
         post: PostProcessing::default(),
+        ambient: AMBIENT,
     };
     let Some(lighting) = world.get(world.lighting()) else {
         return settings;
@@ -72,6 +75,8 @@ fn lighting_settings(world: &World) -> LightingSettings {
     shadows.enabled = bool_of("ShadowsEnabled", shadows.enabled);
     shadows.distance = number_of("ShadowDistance", shadows.distance);
     shadows.softness = number_of("ShadowSoftness", shadows.softness);
+    let ambient = &mut settings.ambient;
+    ambient.occlusion = number_of("AmbientOcclusionIntensity", ambient.occlusion).clamp(0.0, 2.0);
     sky.top_color = color_of("SkyTopColor", sky.top_color);
     sky.horizon_color = color_of("SkyHorizonColor", sky.horizon_color);
     sky.ground_color = color_of("GroundColor", sky.ground_color);
@@ -274,7 +279,7 @@ pub fn build_draw_list_posed(
         sky: settings.sky,
         camera,
         sun: SUN,
-        ambient: AMBIENT,
+        ambient: settings.ambient,
         shadows: settings.shadows,
         lights,
         post: settings.post,
@@ -1044,6 +1049,24 @@ mod tests {
             world.set_property(part, name, value).unwrap();
         }
         part
+    }
+
+    #[test]
+    fn ambient_occlusion_intensity_sets_the_ambient_lights_occlusion_within_0_to_2() {
+        let mut world = World::new();
+        let occlusion = |world: &World| {
+            build_draw_list(world, &Assets::default(), camera())
+                .ambient
+                .occlusion
+        };
+        assert_eq!(occlusion(&world), 1.0);
+        let lighting = world.lighting();
+        for (set, drawn) in [(0.5, 0.5), (2.0, 2.0), (5.0, 2.0), (-1.0, 0.0)] {
+            world
+                .set_property(lighting, "AmbientOcclusionIntensity", Value::Number(set))
+                .unwrap();
+            assert_eq!(occlusion(&world), drawn);
+        }
     }
 
     fn only_item(world: &World) -> DrawItem {

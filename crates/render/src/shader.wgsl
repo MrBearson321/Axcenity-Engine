@@ -177,8 +177,11 @@ fn fs_main(in: VertexOut, @builtin(front_facing) front: bool) -> @location(0) ve
     // Perfectly smooth surfaces make the highlight infinitely small, so keep a minimum.
     let roughness = clamp(
         in.surface.y * map_value(roughness_texel, maps.roughness, maps.invert.y), 0.04, 1.0);
+    // The map's, and for solid items the screen-space ambient occlusion's.
+    let solid = in.base_color.a >= 1.0;
     let occlusion = mix(
-        1.0, map_value(occlusion_texel, maps.occlusion, maps.invert.z), maps.settings.z);
+        1.0, map_value(occlusion_texel, maps.occlusion, maps.invert.z), maps.settings.z)
+        * select(1.0, screen_occlusion(in.clip_position.xy), solid);
     let emissive = in.emissive * emissive_texel.rgb;
     // Non-metals reflect about 4% of light, or as their specular map says.
     let dielectric = mix(vec3<f32>(0.04), 0.08 * specular_texel.rgb, maps.specular.x);
@@ -188,8 +191,22 @@ fn fs_main(in: VertexOut, @builtin(front_facing) front: bool) -> @location(0) ve
 
     // Solid items stay solid whatever the texture's alpha, so the window's
     // own alpha stays 1.
-    let alpha = select(opacity, 1.0, in.base_color.a >= 1.0);
+    let alpha = select(opacity, 1.0, solid);
     return vec4<f32>(color + emissive, alpha);
+}
+
+// The depth and normal prepass, for ambient occlusion: solid items' depth
+// and view-space normals. Cut-out pixels are left out, as in `fs_main`.
+@fragment
+fn fs_prepass(in: VertexOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    let texel = textureSample(base_color_texture, material_sampler, in.uv);
+    let opacity_texel = textureSample(opacity_texture, material_sampler, in.uv);
+    let opacity_map = map_value(opacity_texel, maps.opacity, maps.invert.w);
+    let opacity = in.base_color.a * mix(texel.a, opacity_map, maps.settings.w);
+    if opacity < in.surface.z {
+        discard;
+    }
+    return prepass_normal(normalize(in.normal) * select(-1.0, 1.0, front));
 }
 
 // A full-screen triangle at the far plane, for drawing the sky.

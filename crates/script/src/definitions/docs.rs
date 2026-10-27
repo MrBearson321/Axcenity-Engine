@@ -537,6 +537,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     ),
     (
         ClassName::Lighting,
+        "AmbientOcclusionIntensity",
+        "How strongly ambient occlusion darkens the ambient and sky light in corners and creases between parts, from 0 (not at all) to 2. 1 is normal. It's drawn only where the player's graphics settings turn ambient occlusion on, and never darkens sunlight, lamps or glowing parts.",
+    ),
+    (
+        ClassName::Lighting,
         "SkyTopColor",
         "The sky's color straight up.",
     ),

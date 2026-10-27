@@ -1,4 +1,4 @@
-//! Bloom, tone mapping and FXAA (`post.wgsl`).
+//! Bloom, tone mapping and FXAA (`post.wgsl`), and the frame's targets.
 //!
 //! The scene is drawn into an HDR target. Bloom blurs the bright parts, then
 //! the composite pass writes the window or the editor's viewport texture, or
@@ -6,8 +6,8 @@
 
 use super::gpu::create_depth_view;
 use super::{
-    BLOOM_LEVELS, FXAA_FORMAT, FxaaTarget, HDR_FORMAT, MsaaTarget, PostPasses, PostTargets,
-    PostUniform, TargetsAlive,
+    BLOOM_LEVELS, FXAA_FORMAT, FrameTargets, FxaaTarget, HDR_FORMAT, MsaaTarget, OcclusionPasses,
+    OcclusionTargets, PostPasses, PostUniform, TargetsAlive,
 };
 
 impl PostPasses {
@@ -149,7 +149,7 @@ impl PostPasses {
     pub(super) fn draw(
         &self,
         encoder: &mut wgpu::CommandEncoder,
-        targets: &PostTargets,
+        targets: &FrameTargets,
         target: &wgpu::TextureView,
         bloom: bool,
     ) {
@@ -235,18 +235,19 @@ pub(super) fn fullscreen_pass(
     pass.draw(0..3, 0..1);
 }
 
-impl PostTargets {
+impl FrameTargets {
     /// Makes the HDR and depth textures for a `width` × `height` scene with
     /// `samples` per pixel and the bloom levels below it, down to
     /// [`BLOOM_LEVELS`] halvings of the `output`'s size, with the bind
-    /// groups that connect them, and FXAA's target if `fxaa`. Each target
-    /// holds a clone of its counter in `alive`.
+    /// groups that connect them, FXAA's target if `fxaa`, and the prepass's
+    /// and ambient occlusion's if `occlusion`. Each target holds a clone of
+    /// its counter in `alive`.
     pub(super) fn new(
         device: &wgpu::Device,
-        post: &PostPasses,
+        (post, occlusion_passes): (&PostPasses, &OcclusionPasses),
         (width, height): (u32, u32),
         output: (u32, u32),
-        (samples, fxaa): (u32, bool),
+        (samples, fxaa, occlusion): (u32, bool, bool),
         alive: &TargetsAlive,
     ) -> Self {
         let texture = |label, (width, height): (u32, u32), format, samples| {
@@ -348,6 +349,9 @@ impl PostTargets {
             msaa,
             depth_view: create_depth_view(device, width, height, samples),
             fxaa,
+            occlusion: occlusion.then(|| {
+                OcclusionTargets::new(device, occlusion_passes, (width, height), &alive.occlusion)
+            }),
             levels,
             prefilter_group,
             downsample_groups,

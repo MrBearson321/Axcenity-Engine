@@ -22,8 +22,8 @@ pub use draw_list::{
 };
 pub use fonts::{BUILT_IN_FONTS, BuiltInFont, UiFont, font_families};
 pub use graphics::{
-    AntiAliasing, Capabilities, EffectiveGraphics, GraphicsSettings, Quality, RENDER_SCALE_RANGE,
-    ShadowMapSize, ShadowQuality, SpotShadowMapSize, TextureQuality,
+    AmbientOcclusion, AntiAliasing, Capabilities, EffectiveGraphics, GraphicsSettings, Quality,
+    RENDER_SCALE_RANGE, ShadowMapSize, ShadowQuality, SpotShadowMapSize, TextureQuality,
 };
 pub use renderer::{RenderStats, Renderer, TextureRenderer};
 pub use tone_mapping::ToneMapping;

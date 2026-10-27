@@ -452,6 +452,8 @@ declare extern type Lighting extends Instance with
 	ShadowDistance: number
 	--- How soft shadow edges are, from 0 (crisp) to 1 (very soft). Edges stay sharp where a part touches what it shades and soften further away, like real shadows.
 	ShadowSoftness: number
+	--- How strongly ambient occlusion darkens the ambient and sky light in corners and creases between parts, from 0 (not at all) to 2. 1 is normal. It's drawn only where the player's graphics settings turn ambient occlusion on, and never darkens sunlight, lamps or glowing parts.
+	AmbientOcclusionIntensity: number
 	--- The sky's color straight up.
 	SkyTopColor: Color3
 	--- The sky's color at the horizon.

@@ -8,8 +8,8 @@ use super::*;
 use crate::theme::{Accent, Appearance, Density, Palette, ThemeChoice, type_scale};
 use crate::widgets;
 use axcenity_render::{
-    AntiAliasing, Capabilities, GraphicsSettings, Quality, RENDER_SCALE_RANGE, ShadowQuality,
-    TextureQuality,
+    AmbientOcclusion, AntiAliasing, Capabilities, GraphicsSettings, Quality, RENDER_SCALE_RANGE,
+    ShadowQuality, TextureQuality,
 };
 
 /// Ctrl+, (Cmd+, on macOS) opens Settings, as in most desktop apps.
@@ -607,6 +607,20 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
                     }
                 });
             ui.end_row();
+
+            ui.label("Ambient occlusion");
+            let label = |mode: Option<AmbientOcclusion>| match mode {
+                Some(mode) => mode.label().to_owned(),
+                None => format!("Preset ({})", preset.ambient_occlusion().label()),
+            };
+            egui::ComboBox::from_id_salt("ambient occlusion")
+                .selected_text(label(settings.ambient_occlusion))
+                .show_ui(ui, |ui| {
+                    for choice in std::iter::once(None).chain(AmbientOcclusion::ALL.map(Some)) {
+                        ui.selectable_value(&mut settings.ambient_occlusion, choice, label(choice));
+                    }
+                });
+            ui.end_row();
         });
     ui.add_space(16.0);
     widgets::section_label(ui, "In use");
@@ -642,6 +656,14 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
             mode => mode.label().to_owned(),
         }
     ));
+    ui.label(match effective.ambient_occlusion {
+        AmbientOcclusion::Off => "Ambient occlusion: off".to_owned(),
+        mode => format!(
+            "Ambient occlusion: {}, {} samples per pixel",
+            mode.label(),
+            mode.samples()
+        ),
+    });
     for note in &effective.notes {
         ui.label(egui::RichText::new(note).color(palette.warning));
     }
@@ -932,6 +954,7 @@ mod tests {
             render_scale: Some(0.5),
             texture_quality: Some(TextureQuality::Half),
             anti_aliasing: Some(AntiAliasing::Msaa2),
+            ambient_occlusion: Some(AmbientOcclusion::Low),
         };
         let mut storage = MemoryStorage::default();
         eframe::App::save(&mut app, &mut storage);

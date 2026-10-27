@@ -117,6 +117,8 @@ fn arrays_key(layers: &TerrainLayers) -> u64 {
 pub(super) struct TerrainPass {
     layout: wgpu::BindGroupLayout,
     pub(super) pipeline: wgpu::RenderPipeline,
+    /// Draws chunks' depth and view-space normals, for ambient occlusion.
+    pub(super) prepass: wgpu::RenderPipeline,
     layer_sampler: wgpu::Sampler,
     weight_sampler: wgpu::Sampler,
     arrays: HashMap<u64, Cached<TerrainArrays>>,
@@ -197,9 +199,18 @@ impl TerrainPass {
             ..Default::default()
         });
         let pipeline = terrain_pipeline(device, frame_layout, &layout, samples);
+        let prepass = super::gpu::create_pipeline(
+            device,
+            &super::gpu::shader_module(device, "terrain prepass", super::gpu::TERRAIN_SHADER),
+            ("vs_terrain", "fs_terrain_prepass"),
+            &[frame_layout, &layout],
+            (super::NORMAL_FORMAT, 1),
+            (false, false),
+        );
         Self {
             layout,
             pipeline,
+            prepass,
             layer_sampler,
             weight_sampler,
             arrays: HashMap::new(),

@@ -37,6 +37,11 @@ struct Frame {
     // Turns world space to each shadow-casting spot light's view, by its
     // layer of `spot_shadow_map`.
     spot_shadows: array<mat4x4<f32>, 8>,
+    // Turns world space to the camera's view space.
+    view: mat4x4<f32>,
+    // x: how strongly screen-space ambient occlusion darkens ambient light
+    // (0 while it's off), zw: 1 over the scene's width and height in pixels.
+    ambient_occlusion: vec4<f32>,
 }
 
 // A point or spot light. Must match `LightRaw` in renderer.rs.
@@ -68,6 +73,10 @@ const LIGHTS_PER_TILE: u32 = 64u;
 // One layer per shadow-casting spot light: its depth as the light sees it.
 // (Binding 5 is the shadow pass's own, in shader.wgsl.)
 @group(0) @binding(6) var spot_shadow_map: texture_depth_2d_array;
+// Screen-space ambient occlusion at half the scene's size (ssao.wgsl): 1
+// in the open, toward 0 in corners. White while it's off.
+@group(0) @binding(7) var screen_occlusion_map: texture_2d<f32>;
+@group(0) @binding(8) var screen_occlusion_sampler: sampler;
 
 // Points spread evenly over a disc of radius 1 (a Poisson disc), for
 // sampling the shadow map around a point. `private` so it can be indexed
@@ -238,6 +247,22 @@ fn spot_visibility(
     return lit / 4.0;
 }
 
+// How much ambient and sky light reaches the solid surface drawn at
+// `pixel`, by screen-space ambient occlusion: 1 in the open, less in
+// corners, raised to the world's strength. 1 while it's off. See-through
+// surfaces aren't in the prepass, so they mustn't use this.
+fn screen_occlusion(pixel: vec2<f32>) -> f32 {
+    let uv = pixel * frame.ambient_occlusion.zw;
+    let open = textureSampleLevel(screen_occlusion_map, screen_occlusion_sampler, uv, 0.0).r;
+    return exp2(frame.ambient_occlusion.x * log2(max(open, 0.001)));
+}
+
+// What the depth and normal prepass writes for a surface facing `normal`
+// (world space): that direction in view space.
+fn prepass_normal(normal: vec3<f32>) -> vec4<f32> {
+    return vec4<f32>(normalize((frame.view * vec4<f32>(normal, 0.0)).xyz), 1.0);
+}
+
 const PI: f32 = 3.14159265;
 
 // How many microfacets point along `h` (GGX / Trowbridge-Reitz).
@@ -327,8 +352,10 @@ fn shade(
 // The light a surface point gives back toward the camera: the sun (with
 // its shadow), the point and spot lights listed for the point's screen
 // tile, and the sky. `n` is the shading normal (tipped by any normal map),
-// `geometric` the surface's own, `pixel` where it is on screen, and
-// `dielectric` how much a non-metal reflects head-on (usually 4%).
+// `geometric` the surface's own, `pixel` where it is on screen,
+// `occlusion` how much ambient and sky light reaches it (texture maps and
+// screen-space ambient occlusion together), and `dielectric` how much a
+// non-metal reflects head-on (usually 4%).
 fn light_surface(
     world_position: vec3<f32>,
     geometric: vec3<f32>,

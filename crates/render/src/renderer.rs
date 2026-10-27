@@ -5,6 +5,7 @@
 //! `ui_pass.rs` builds screen-space quads and the UI and sky pipelines.
 //! `gpu.rs` uploads meshes, textures and materials. `sprites.rs` draws particles.
 //! `terrain.rs` draws terrain chunks with their blended layers.
+//! `occlusion.rs` draws the depth and normal prepass and ambient occlusion.
 //! `gpu_timer.rs` measures the GPU's time per frame, for the editor's profiler.
 
 use std::collections::hash_map::Entry;
@@ -27,6 +28,7 @@ use glyphon::{
 mod gpu;
 mod gpu_timer;
 mod lighting;
+mod occlusion;
 mod post;
 mod sprites;
 mod terrain;
@@ -51,6 +53,7 @@ use lighting::{
     frame_uniform, linear_color, maps_uniform_of, material_key, material_textures, plan_draws,
     plan_lights, post_drawn, post_uniform, shadows_drawn, spot_casters, view_projection,
 };
+use occlusion::occlusion_uniform;
 use std::sync::Arc;
 
 mod scene;

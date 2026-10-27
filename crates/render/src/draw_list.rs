@@ -430,6 +430,11 @@ pub struct Sun {
 pub struct AmbientLight {
     pub color: [f32; 3],
     pub intensity: f32,
+    /// How strongly screen-space ambient occlusion darkens this light and
+    /// the sky's in the corners and creases between solid items, from 0
+    /// (not at all) to 2. 1 is normal. Only drawn while the graphics
+    /// settings' ambient occlusion is on.
+    pub occlusion: f32,
 }
 
 /// A procedural sky: a gradient from the ground up through the horizon to
