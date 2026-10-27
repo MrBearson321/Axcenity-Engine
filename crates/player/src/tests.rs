@@ -980,27 +980,9 @@ fn every_example_renders() {
         // An example can have a reference screenshot, which it must still
         // match: of its top-left corner (where hello-css's HUD is), or of
         // the whole frame (hello-graphics, the graphics reference scene).
-        if let Ok(file) = fs::File::open(folder.join("reference.png")) {
-            let mut reader = png::Decoder::new(std::io::BufReader::new(file))
-                .read_info()
-                .unwrap();
-            let mut reference = vec![0; reader.output_buffer_size().unwrap()];
-            let info = reader.next_frame(&mut reference).unwrap();
-            let channels = info.color_type.samples();
-            let mut difference = 0u64;
-            for y in 0..info.height {
-                for x in 0..info.width {
-                    let ours = ((y * width + x) * 4) as usize;
-                    let theirs = ((y * info.width + x) as usize) * channels;
-                    for channel in 0..3 {
-                        difference +=
-                            u64::from(pixels[ours + channel].abs_diff(reference[theirs + channel]));
-                    }
-                }
-            }
-            let average = difference as f64 / f64::from(info.width * info.height * 3);
+        if let Some(average) = difference_from(&folder.join("reference.png"), &pixels, width) {
             assert!(
-                average < 6.0,
+                average < REFERENCE_TOLERANCE,
                 "{name} differs from reference.png by {average:.1} per channel on average"
             );
         }
@@ -1017,6 +999,48 @@ fn every_example_renders() {
             "{name} is white in the middle"
         );
     }
+}
+
+/// How far, on average per channel, an example's frame may be from its
+/// reference image.
+pub(super) const REFERENCE_TOLERANCE: f64 = 6.0;
+
+/// How far `pixels` (RGBA rows `width` wide) are from the reference image
+/// at `path`, on average per channel, over the reference's size (it may
+/// cover only the top-left corner). `None` when there's no such image.
+pub(super) fn difference_from(path: &Path, pixels: &[u8], width: u32) -> Option<f64> {
+    let file = fs::File::open(path).ok()?;
+    let mut reader = png::Decoder::new(std::io::BufReader::new(file))
+        .read_info()
+        .unwrap();
+    let mut reference = vec![0; reader.output_buffer_size().unwrap()];
+    let info = reader.next_frame(&mut reference).unwrap();
+    let channels = info.color_type.samples();
+    let mut difference = 0u64;
+    for y in 0..info.height {
+        for x in 0..info.width {
+            let ours = ((y * width + x) * 4) as usize;
+            let theirs = ((y * info.width + x) as usize) * channels;
+            for channel in 0..3 {
+                difference +=
+                    u64::from(pixels[ours + channel].abs_diff(reference[theirs + channel]));
+            }
+        }
+    }
+    Some(difference as f64 / f64::from(info.width * info.height * 3))
+}
+
+/// Writes RGBA `pixels` as a PNG.
+pub(super) fn write_png(path: &Path, pixels: &[u8], (width, height): (u32, u32)) {
+    let file = fs::File::create(path).unwrap();
+    let mut encoder = png::Encoder::new(file, width, height);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder
+        .write_header()
+        .unwrap()
+        .write_image_data(pixels)
+        .unwrap();
 }
 
 /// The example project in `examples/<name>`, with its scripts started.
@@ -1074,7 +1098,7 @@ fn a_script_setting_filmic_tone_mapping_changes_the_next_frame() {
 }
 
 /// A GPU device for render tests, or `None` on machines without one.
-fn test_gpu() -> Option<(axcenity_render::wgpu::Device, axcenity_render::wgpu::Queue)> {
+pub(super) fn test_gpu() -> Option<(axcenity_render::wgpu::Device, axcenity_render::wgpu::Queue)> {
     use axcenity_render::wgpu;
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
     let adapter = pollster::block_on(instance.request_adapter(&Default::default())).ok()?;
@@ -1418,7 +1442,7 @@ fn start_example(name: &str) -> (World, ScriptRuntime) {
 }
 
 /// Like [`start_example`], with the folder of the copy it opened.
-fn start_example_in(name: &str) -> (World, ScriptRuntime, PathBuf) {
+pub(super) fn start_example_in(name: &str) -> (World, ScriptRuntime, PathBuf) {
     let example = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples")
         .join(name);
@@ -1456,7 +1480,7 @@ fn copy_folder(from: &Path, to: &Path) {
 /// Runs frames at 60 fps until the game clock reaches `until` seconds,
 /// with scripts, physics, then `Touched` and `Heartbeat` each frame, as
 /// the frame loop does.
-fn run_until(
+pub(super) fn run_until(
     world: &mut World,
     scripts: &mut ScriptRuntime,
     physics: &mut Physics,

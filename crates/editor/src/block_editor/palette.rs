@@ -174,6 +174,17 @@ pub(super) fn palette(
             B(BlockKind::SetToneMapping {
                 curve: "Neutral".to_owned(),
             }),
+            B(BlockKind::SetGraphicsQuality {
+                quality: "High".to_owned(),
+            }),
+            B(BlockKind::SetGraphicsOption {
+                setting: "ShadowQuality".to_owned(),
+                choice: "High".to_owned(),
+            }),
+            B(BlockKind::SetGraphicsNumber {
+                setting: "RenderScale".to_owned(),
+                value: number(1.0),
+            }),
         ],
         Category::Sound => vec![
             B(BlockKind::PlaySound {

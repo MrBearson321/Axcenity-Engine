@@ -257,7 +257,10 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::ScrollTo { .. }
         | BlockKind::SetValue { .. }
         | BlockKind::SetProperty { .. }
-        | BlockKind::SetToneMapping { .. } => Category::Looks,
+        | BlockKind::SetToneMapping { .. }
+        | BlockKind::SetGraphicsQuality { .. }
+        | BlockKind::SetGraphicsOption { .. }
+        | BlockKind::SetGraphicsNumber { .. } => Category::Looks,
         BlockKind::PlaySound { .. }
         | BlockKind::StopSound { .. }
         | BlockKind::PauseSound { .. }
@@ -894,6 +897,31 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
         BlockKind::SetToneMapping { curve } => vec![Row(vec![
             label("set tone mapping to"),
             Part::Choice(curve, &axcenity_blocks::TONE_MAPPINGS),
+        ])],
+        BlockKind::SetGraphicsQuality { quality } => vec![Row(vec![
+            label("set graphics quality to"),
+            Part::Choice(quality, &axcenity_blocks::GRAPHICS_QUALITIES),
+        ])],
+        BlockKind::SetGraphicsOption { setting, choice } => {
+            // A choice the newly picked setting doesn't have becomes its first.
+            let choices = axcenity_blocks::graphics_choices(setting);
+            if !choices.contains(&choice.as_str())
+                && let Some(first) = choices.first()
+            {
+                *choice = (*first).to_owned();
+            }
+            vec![Row(vec![
+                label("set graphics"),
+                Part::Choice(setting, &axcenity_blocks::GRAPHICS_OPTIONS),
+                label("to"),
+                Part::Choice(choice, choices),
+            ])]
+        }
+        BlockKind::SetGraphicsNumber { setting, value } => vec![Row(vec![
+            label("set graphics"),
+            Part::Choice(setting, &axcenity_blocks::GRAPHICS_NUMBERS),
+            label("to"),
+            Part::Slot(value, SlotKind::Number),
         ])],
         BlockKind::Code { code } | BlockKind::TopCode { code } => {
             vec![Row(vec![label("Lua"), Part::Code(shown_code(code))])]

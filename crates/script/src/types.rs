@@ -14,6 +14,7 @@ use mlua::{FromLua, IntoLua, Lua, MetaMethod, UserData, UserDataFields, UserData
 
 use crate::instance::LuaInstance;
 use crate::tween::{PlaybackState, TweenStyle};
+use crate::user_settings;
 
 /// Lua stores numbers as `f64`, and core stores components as `f32`. A plain
 /// `as f64` turns `0.1f32` into `0.10000000149011612`, so this goes through
@@ -281,9 +282,10 @@ impl UserData for LuaUDim2 {
 }
 
 /// The `Enum` global. `Enum.Material`, `Enum.PartType`, `Enum.KeyCode`,
-/// `Enum.TextureChannel`, `Enum.ParticleType`, `Enum.ToneMapping` and the tween enums
-/// (`Enum.EasingStyle`, `Enum.EasingDirection`, `Enum.PlaybackState`) are
-/// its members.
+/// `Enum.TextureChannel`, `Enum.ParticleType`, `Enum.ToneMapping`, the tween enums
+/// (`Enum.EasingStyle`, `Enum.EasingDirection`, `Enum.PlaybackState`) and
+/// the graphics settings' enums (`Enum.GraphicsQuality` and the ones
+/// `UserGameSettings` overrides take) are its members.
 #[derive(Clone, Copy, Debug)]
 pub struct LuaEnum;
 
@@ -299,10 +301,15 @@ pub enum EnumType {
     EasingStyle,
     EasingDirection,
     PlaybackState,
+    GraphicsQuality,
+    ShadowQuality,
+    TextureQuality,
+    AntiAliasing,
+    AmbientOcclusion,
 }
 
 impl EnumType {
-    pub const ALL: [EnumType; 9] = [
+    pub const ALL: [EnumType; 14] = [
         EnumType::Material,
         EnumType::PartType,
         EnumType::KeyCode,
@@ -312,6 +319,11 @@ impl EnumType {
         EnumType::EasingStyle,
         EnumType::EasingDirection,
         EnumType::PlaybackState,
+        EnumType::GraphicsQuality,
+        EnumType::ShadowQuality,
+        EnumType::TextureQuality,
+        EnumType::AntiAliasing,
+        EnumType::AmbientOcclusion,
     ];
 
     pub fn name(self) -> &'static str {
@@ -325,6 +337,11 @@ impl EnumType {
             EnumType::EasingStyle => "EasingStyle",
             EnumType::EasingDirection => "EasingDirection",
             EnumType::PlaybackState => "PlaybackState",
+            EnumType::GraphicsQuality => "GraphicsQuality",
+            EnumType::ShadowQuality => "ShadowQuality",
+            EnumType::TextureQuality => "TextureQuality",
+            EnumType::AntiAliasing => "AntiAliasing",
+            EnumType::AmbientOcclusion => "AmbientOcclusion",
         }
     }
 
@@ -340,6 +357,11 @@ impl EnumType {
             EnumType::EasingStyle => TweenStyle::names(),
             EnumType::EasingDirection => EasingDirection::ALL.iter().map(|d| d.as_str()).collect(),
             EnumType::PlaybackState => PlaybackState::ALL.iter().map(|s| s.as_str()).collect(),
+            EnumType::GraphicsQuality => user_settings::quality_names(),
+            EnumType::ShadowQuality => user_settings::shadow_quality_names(),
+            EnumType::TextureQuality => user_settings::texture_quality_names(),
+            EnumType::AntiAliasing => user_settings::anti_aliasing_names(),
+            EnumType::AmbientOcclusion => user_settings::ambient_occlusion_names(),
         }
     }
 
@@ -414,7 +436,12 @@ impl LuaEnumItem {
             EnumType::KeyCode
             | EnumType::EasingStyle
             | EnumType::EasingDirection
-            | EnumType::PlaybackState => None,
+            | EnumType::PlaybackState
+            | EnumType::GraphicsQuality
+            | EnumType::ShadowQuality
+            | EnumType::TextureQuality
+            | EnumType::AntiAliasing
+            | EnumType::AmbientOcclusion => None,
         }
     }
 }

@@ -19,6 +19,8 @@
 //!   and checkpoints (`save`, over the `save` crate). Change events (`part.Changed`) come from the World's
 //!   change log (`changes`). Client-only APIs (keyboard, camera) live in
 //!   `client`, and `sides` says which APIs work on which side.
+//!   `UserGameSettings` (`user_settings`) lets LocalScripts change the
+//!   player's graphics settings.
 //! - [`lua_definitions`] describes that API for editors, and [`api_reference`]
 //!   lists it for the editor's API reference (see `definitions`).
 //! - `print` output and errors are collected as [`OutputLine`]s for the host to
@@ -49,6 +51,7 @@ mod sides;
 mod task;
 mod tween;
 mod types;
+mod user_settings;
 mod watchdog;
 
 use std::cell::Ref;
@@ -60,6 +63,7 @@ use axcenity_assets::Assets;
 use axcenity_audio::SoundAction;
 use axcenity_core::{ClassName, InstanceId, Value, Vector3, World};
 use axcenity_physics::RayHit;
+use axcenity_render::{Capabilities, GraphicsSettings};
 use axcenity_save::Saves;
 use mlua::Lua;
 
@@ -487,6 +491,21 @@ impl ScriptRuntime {
         self.client.take_loading_screen_removed()
     }
 
+    /// Tells LocalScripts this computer's graphics settings
+    /// (`UserGameSettings`), and what its GPU can do (which picks the
+    /// quality for `Enum.GraphicsQuality.Automatic`). It isn't a change for
+    /// [`ScriptRuntime::take_graphics_change`]. Call it before starting
+    /// scripts, so a script that reads them at the start sees them.
+    pub fn set_graphics(&mut self, settings: &GraphicsSettings, capabilities: &Capabilities) {
+        self.client.set_graphics(settings, capabilities);
+    }
+
+    /// The graphics settings as a LocalScript left them, if one changed
+    /// them since the last call.
+    pub fn take_graphics_change(&mut self) -> Option<GraphicsSettings> {
+        self.client.take_graphics_change()
+    }
+
     /// How long a script may run without pausing before the watchdog stops
     /// it with an error. [`WATCHDOG_LIMIT`] (3 seconds) unless changed;
     /// tests use a shorter one.
@@ -679,3 +698,6 @@ mod tween_tests;
 
 #[cfg(test)]
 mod save_tests;
+
+#[cfg(test)]
+mod user_settings_tests;

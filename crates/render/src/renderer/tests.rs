@@ -2964,3 +2964,153 @@ fn the_prepass_and_occlusion_follow_the_render_scale() {
         off[0]
     );
 }
+
+/// Every graphics setting through every value, one at a time from High,
+/// then back to High: the settings the resource test switches through.
+fn every_setting_and_value() -> Vec<GraphicsSettings> {
+    use crate::{AmbientOcclusion, AntiAliasing, Quality, TextureQuality};
+    let high = GraphicsSettings::default();
+    let mut all: Vec<GraphicsSettings> = Quality::ALL
+        .map(GraphicsSettings::preset)
+        .into_iter()
+        .collect();
+    let with = |change: &dyn Fn(&mut GraphicsSettings)| {
+        let mut settings = high.clone();
+        change(&mut settings);
+        settings
+    };
+    for quality in ShadowQuality::ALL {
+        all.push(with(&|s| s.shadow_quality = Some(quality)));
+    }
+    for distance in [0.0, 20.0, 500.0] {
+        all.push(with(&|s| s.shadow_distance = Some(distance)));
+    }
+    for on in [false, true] {
+        all.push(with(&|s| s.post_processing = Some(on)));
+    }
+    for scale in [0.5, 0.75, 1.5, 2.0] {
+        all.push(with(&|s| s.render_scale = Some(scale)));
+    }
+    for quality in TextureQuality::ALL {
+        all.push(with(&|s| s.texture_quality = Some(quality)));
+    }
+    for mode in AntiAliasing::ALL {
+        all.push(with(&|s| s.anti_aliasing = Some(mode)));
+    }
+    for mode in AmbientOcclusion::ALL {
+        all.push(with(&|s| s.ambient_occlusion = Some(mode)));
+    }
+    all.push(high);
+    all
+}
+
+#[test]
+fn switching_every_setting_and_dropping_renderers_leaves_no_resources_behind() {
+    // The instance is kept, so its report can count what's still alive.
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+    let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
+        eprintln!("skipped: no graphics adapter on this machine");
+        return;
+    };
+    let Ok((device, queue)) = pollster::block_on(adapter.request_device(&Default::default()))
+    else {
+        return;
+    };
+    // The GPU objects the program holds, of each kind that could leak.
+    let held = || {
+        device.poll(wgpu::PollType::Wait).unwrap();
+        let report = instance.generate_report().expect("a native backend");
+        let hub = report.hub_report();
+        [
+            ("textures", hub.textures.num_kept_from_user),
+            ("texture views", hub.texture_views.num_kept_from_user),
+            ("buffers", hub.buffers.num_kept_from_user),
+            ("bind groups", hub.bind_groups.num_kept_from_user),
+            ("pipelines", hub.render_pipelines.num_kept_from_user),
+            ("samplers", hub.samplers.num_kept_from_user),
+            ("query sets", hub.query_sets.num_kept_from_user),
+        ]
+    };
+    let before = held();
+
+    let (mut list, _) = one_of_everything();
+    list.shadows = Shadows {
+        enabled: true,
+        ..Shadows::default()
+    };
+    list.lights.push(spot_light(
+        Vec3::new(0.0, 6.0, -8.0),
+        Vec3::NEG_Y,
+        20.0,
+        true,
+    ));
+    let settings = every_setting_and_value();
+    // What a renderer holds: its caches and its targets.
+    let counts = |renderer: &TextureRenderer| {
+        let scene = &renderer.scene;
+        let stats = renderer.stats();
+        (
+            (
+                scene.textures.len(),
+                scene.materials.len(),
+                scene.custom_meshes.len(),
+            ),
+            (stats.texture_bytes, stats.mesh_bytes),
+            (
+                scene.shadow_maps_alive(),
+                scene.spot_shadow_maps_alive(),
+                scene.targets_alive(),
+                scene.occlusion_targets_alive(),
+                scene.anti_aliasing_targets_alive(),
+            ),
+        )
+    };
+    for round in 0..3 {
+        let mut renderer = TextureRenderer::new(&device, &queue, 96, 64);
+        renderer.render(&list).unwrap();
+        let start = counts(&renderer);
+        // The report does see a renderer's objects.
+        let alive = held();
+        assert!(alive.iter().zip(&before).all(|(now, then)| now.1 >= then.1));
+        assert!(
+            alive[0].1 > before[0].1 && alive[3].1 > before[3].1,
+            "{alive:?}"
+        );
+        for (step, settings) in settings.iter().enumerate() {
+            renderer.set_graphics(settings);
+            renderer.render(&list).unwrap();
+            let used = renderer.graphics().clone();
+            let (_, _, (sun, spot, targets, occlusion, (msaa, fxaa))) = counts(&renderer);
+            let context = format!("round {round}, step {step}: {settings:?}");
+            // A ceiling of 0 studs draws no sun shadows, so needs no map.
+            let sun_drawn = used.shadow_quality.map().is_some() && used.shadow_distance > 0.0;
+            assert_eq!(sun, usize::from(sun_drawn), "{context}");
+            assert_eq!(
+                spot,
+                usize::from(used.shadow_quality.spot_map().is_some()),
+                "{context}"
+            );
+            assert_eq!(targets, 1, "{context}");
+            let occluded = used.ambient_occlusion != crate::AmbientOcclusion::Off;
+            assert_eq!(occlusion, usize::from(occluded), "{context}");
+            assert_eq!(
+                msaa,
+                usize::from(used.anti_aliasing.samples() > 1),
+                "{context}"
+            );
+            assert_eq!(
+                fxaa,
+                usize::from(used.anti_aliasing == crate::AntiAliasing::Fxaa),
+                "{context}"
+            );
+        }
+        // Back on High, as it started.
+        assert_eq!(counts(&renderer), start, "round {round}");
+        drop(renderer);
+        assert_eq!(
+            held(),
+            before,
+            "round {round}: a dropped renderer left GPU objects"
+        );
+    }
+}

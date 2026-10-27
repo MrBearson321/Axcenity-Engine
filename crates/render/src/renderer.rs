@@ -305,6 +305,13 @@ impl TextureRenderer {
         self.scene.set_graphics(settings);
     }
 
+    /// Draws as if the GPU could do no more than `limits` (each value the
+    /// lower of the two, so nothing is raised), with the settings lowered
+    /// to fit and noted: for checking fallbacks on a GPU that can do more.
+    pub fn limit_capabilities(&mut self, limits: &Capabilities) {
+        self.scene.limit_capabilities(limits);
+    }
+
     /// The graphics values in use, and why any were lowered.
     pub fn graphics(&self) -> &EffectiveGraphics {
         &self.scene.graphics

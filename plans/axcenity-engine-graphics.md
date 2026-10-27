@@ -225,12 +225,12 @@ The brief's Phase 1 acceptance criteria are checked together. `UserGameSettings`
 
 ### Acceptance criteria
 
-- [ ] The workspace builds, tests and passes clippy. Every example still renders and matches its reference.
-- [ ] `hello-graphics` renders correctly at each preset and matches each preset's reference.
-- [ ] Lighting changes (sun direction, `EnvironmentIntensity`, a lamp's color) change metal, rough plastic, glass and textured materials consistently, compared with the reference.
-- [ ] Shadows, exposure, tone mapping and anti-aliasing are configurable in the editor and from a LocalScript, and each change shows in the rendered frame.
-- [ ] A forced-unsupported capability (no MSAA, a small max texture size) renders with fallbacks and notes, without crashing.
-- [ ] No GPU resource count grows after the setting-switching test.
+- [x] The workspace builds, tests and passes clippy. Every example still renders and matches its reference.
+- [x] `hello-graphics` renders correctly at each preset and matches each preset's reference.
+- [x] Lighting changes (sun direction, `EnvironmentIntensity`, a lamp's color) change metal, rough plastic, glass and textured materials consistently, compared with the reference.
+- [x] Shadows, exposure, tone mapping and anti-aliasing are configurable in the editor and from a LocalScript, and each change shows in the rendered frame.
+- [x] A forced-unsupported capability (no MSAA, a small max texture size) renders with fallbacks and notes, without crashing.
+- [x] No GPU resource count grows after the setting-switching test.
 
 ---
 

@@ -17,6 +17,7 @@ use crate::save::LuaSaveService;
 use crate::sides;
 use crate::tween::LuaTweenService;
 use crate::types::{LuaVector3, f32_to_lua, type_name, value_from_lua, value_to_lua};
+use crate::user_settings::LuaUserGameSettings;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LuaInstance(pub InstanceId);
@@ -282,6 +283,7 @@ fn class_member(lua: &Lua, class: ClassName, key: &str) -> mlua::Result<Option<m
         (ClassName::DataModel, "TweenService") => LuaTweenService.into_lua(lua)?,
         (ClassName::DataModel, "SaveService") => LuaSaveService.into_lua(lua)?,
         (ClassName::DataModel, "ReplicatedFirst") => LuaReplicatedFirst.into_lua(lua)?,
+        (ClassName::DataModel, "UserGameSettings") => LuaUserGameSettings.into_lua(lua)?,
         (ClassName::Workspace, "CurrentCamera") => LuaCamera.into_lua(lua)?,
         (ClassName::Players, "LocalPlayer") => lua
             .app_data_ref::<LocalPlayer>()
@@ -874,15 +876,19 @@ fn set_playing(lua: &Lua, sound: InstanceId, playing: bool) -> mlua::Result<()> 
 }
 
 /// `game:GetService(name)`: a service by its class name, such as
-/// `"Players"`, or `"UserInputService"` (LocalScripts only),
-/// `"RunService"`, `"TweenService"`, `"SaveService"` or `"ReplicatedFirst"`, which aren't
-/// Instances.
+/// `"Players"`, or `"UserInputService"` or `"UserGameSettings"` (LocalScripts
+/// only), `"RunService"`, `"TweenService"`, `"SaveService"` or
+/// `"ReplicatedFirst"`, which aren't Instances.
 pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
     lua.create_function(|lua, (_game, name): (mlua::Value, String)| {
         match name.as_str() {
             "UserInputService" => {
                 sides::check(lua, &name)?;
                 return LuaUserInputService.into_lua(lua);
+            }
+            "UserGameSettings" => {
+                sides::check(lua, &name)?;
+                return LuaUserGameSettings.into_lua(lua);
             }
             "RunService" => return LuaRunService.into_lua(lua),
             "TweenService" => return LuaTweenService.into_lua(lua),
@@ -912,6 +918,7 @@ pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
                     "RunService",
                     "SaveService",
                     "TweenService",
+                    "UserGameSettings",
                     "UserInputService",
                 ]);
                 Err(mlua::Error::runtime(format!(

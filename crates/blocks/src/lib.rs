@@ -420,6 +420,24 @@ pub enum BlockKind {
         curve: String,
     },
 
+    // Graphics: the player's computer's settings (LocalScripts only).
+    /// Sets `UserGameSettings.GraphicsQuality` to one of
+    /// [`GRAPHICS_QUALITIES`].
+    SetGraphicsQuality {
+        quality: String,
+    },
+    /// Sets one of [`GRAPHICS_OPTIONS`] in `UserGameSettings` to one of its
+    /// [`graphics_choices`]; [`PRESET`] goes back to the preset's.
+    SetGraphicsOption {
+        setting: String,
+        choice: String,
+    },
+    /// Sets one of [`GRAPHICS_NUMBERS`] in `UserGameSettings`.
+    SetGraphicsNumber {
+        setting: String,
+        value: Expression,
+    },
+
     // Sound.
     PlaySound {
         target: String,
@@ -533,6 +551,35 @@ pub const EASING_DIRECTIONS: [&str; 3] = ["In", "Out", "InOut"];
 pub const SLIDE_EDGES: [&str; 4] = ["Left", "Right", "Top", "Bottom"];
 /// `Enum.ToneMapping`'s items, which the tone mapping block offers.
 pub const TONE_MAPPINGS: [&str; 3] = ["Classic", "Neutral", "Filmic"];
+/// `Enum.GraphicsQuality`'s items, which the graphics quality block offers.
+pub const GRAPHICS_QUALITIES: [&str; 5] = ["Automatic", "Low", "Medium", "High", "Ultra"];
+/// The `UserGameSettings` overrides the graphics option block sets.
+pub const GRAPHICS_OPTIONS: [&str; 5] = [
+    "ShadowQuality",
+    "AntiAliasing",
+    "TextureQuality",
+    "AmbientOcclusion",
+    "PostProcessing",
+];
+/// The `UserGameSettings` overrides the graphics number block sets.
+pub const GRAPHICS_NUMBERS: [&str; 2] = ["ShadowDistance", "RenderScale"];
+/// The graphics option block's choice that removes the override (nil).
+pub const PRESET: &str = "Preset";
+
+/// What the graphics option block can set `setting` (one of
+/// [`GRAPHICS_OPTIONS`]) to: its enum's items (On and Off for
+/// PostProcessing), then [`PRESET`]. Empty for any other name.
+pub fn graphics_choices(setting: &str) -> &'static [&'static str] {
+    match setting {
+        "ShadowQuality" => &["Off", "Low", "Medium", "High", "Ultra", PRESET],
+        "AntiAliasing" => &["Off", "FXAA", "MSAA2", "MSAA4", PRESET],
+        "TextureQuality" => &["Quarter", "Half", "Full", PRESET],
+        "AmbientOcclusion" => &["Off", "Low", "High", PRESET],
+        "PostProcessing" => &["On", "Off", PRESET],
+        _ => &[],
+    }
+}
+
 /// The senses a NavigationAgent's `PlayerSensed` names.
 pub const SENSES: [&str; 2] = ["Sight", "Hearing"];
 
@@ -665,11 +712,22 @@ impl BlockKind {
             | BlockKind::SlideIn { seconds: e, .. }
             | BlockKind::FadeIn { seconds: e, .. }
             | BlockKind::FadeOut { seconds: e, .. }
+            | BlockKind::SetGraphicsNumber { value: e, .. }
             | BlockKind::Print { value: e } => vec![e],
             BlockKind::Tween { value, seconds, .. } => vec![value, seconds],
             BlockKind::ScrollTo { x, y, .. } => vec![x, y],
             _ => Vec::new(),
         }
+    }
+
+    /// Graphics settings blocks, which need `UserGameSettings`.
+    pub fn sets_graphics(&self) -> bool {
+        matches!(
+            self,
+            BlockKind::SetGraphicsQuality { .. }
+                | BlockKind::SetGraphicsOption { .. }
+                | BlockKind::SetGraphicsNumber { .. }
+        )
     }
 
     /// Tween blocks, which need `TweenService`.
@@ -731,6 +789,7 @@ impl BlockKind {
             | BlockKind::SlideIn { seconds: e, .. }
             | BlockKind::FadeIn { seconds: e, .. }
             | BlockKind::FadeOut { seconds: e, .. }
+            | BlockKind::SetGraphicsNumber { value: e, .. }
             | BlockKind::Print { value: e } => vec![e],
             BlockKind::Tween { value, seconds, .. } => vec![value, seconds],
             BlockKind::ScrollTo { x, y, .. } => vec![x, y],

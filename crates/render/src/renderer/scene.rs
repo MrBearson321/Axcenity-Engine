@@ -205,7 +205,13 @@ impl ScenePipeline {
             ..Default::default()
         });
         let (texture_bytes, mesh_bytes) = (GpuBytes::default(), GpuBytes::default());
-        let white_texture = create_texture(&device, &queue, &texture_bytes, (1, 1, &[255; 4]), 0);
+        let white_texture = create_texture(
+            &device,
+            &queue,
+            &texture_bytes,
+            (1, 1, &[255; 4]),
+            (0, capabilities.max_texture_size),
+        );
         let plain_material = create_material(
             &device,
             &material_layout,
@@ -351,9 +357,32 @@ impl ScenePipeline {
     /// the targets and, if its samples per pixel changed, the scene pass's
     /// pipelines.
     pub(super) fn set_graphics(&mut self, settings: &GraphicsSettings) {
-        if *settings == self.settings {
-            return;
+        if *settings != self.settings {
+            self.apply_graphics(settings);
         }
+    }
+
+    /// Draws as if the device could do no more than `limits`: each value is
+    /// the lower of the two, so nothing is raised. The settings are lowered
+    /// again to fit, and textures are uploaded again within the new size.
+    pub(super) fn limit_capabilities(&mut self, limits: &Capabilities) {
+        let real = self.capabilities;
+        self.capabilities = Capabilities {
+            max_texture_size: real.max_texture_size.min(limits.max_texture_size),
+            max_texture_layers: real.max_texture_layers.min(limits.max_texture_layers),
+            timestamp_queries: real.timestamp_queries && limits.timestamp_queries,
+            software: real.software || limits.software,
+            msaa_samples: real.msaa_samples & limits.msaa_samples,
+        };
+        let settings = self.settings.clone();
+        self.apply_graphics(&settings);
+        self.materials.clear();
+        self.textures.clear();
+        self.sprites.forget(|_| false);
+    }
+
+    /// Uses `settings` from the next frame (see [`Self::set_graphics`]).
+    fn apply_graphics(&mut self, settings: &GraphicsSettings) {
         let old_quality = self.graphics.texture_quality;
         let old_samples = self.graphics.anti_aliasing.samples();
         self.settings = settings.clone();
@@ -1333,7 +1362,7 @@ impl ScenePipeline {
                         &self.queue,
                         &self.texture_bytes,
                         source,
-                        skipped_levels,
+                        (skipped_levels, self.capabilities.max_texture_size),
                     ),
                     last_drawn: frame,
                 });

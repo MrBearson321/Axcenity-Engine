@@ -374,6 +374,8 @@ impl EditorApp {
             },
             &project.loading_screen,
             play_save_folder(&project.name),
+            &self.graphics,
+            &self.capabilities.unwrap_or_default(),
         ) {
             Ok(session) => {
                 self.play = Some(session);

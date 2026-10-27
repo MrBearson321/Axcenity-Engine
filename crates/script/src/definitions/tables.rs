@@ -305,6 +305,54 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
         ],
     },
     ValueType {
+        class: "UserGameSettings",
+        doc: "This computer's graphics settings, from `game:GetService(\"UserGameSettings\")`, for a settings menu. `GraphicsQuality` picks a preset, and each other field overrides one of its values; reading a field gives the value chosen (its override, or the preset's), and setting it to nil goes back to the preset's. Changing the preset keeps the overrides. Saved on this computer by the player (never in the game); in the editor's Play they start from the editor's Graphics settings and are put back at Stop. The GPU may draw less than was chosen: the player's log and the editor's Settings say why. LocalScripts only.",
+        fields: &[
+            Field {
+                name: "GraphicsQuality",
+                ty: "EnumGraphicsQuality",
+                doc: "The preset: Low, Medium, High or Ultra, or Automatic (High, or Low on a computer without a graphics card).",
+            },
+            Field {
+                name: "ShadowQuality",
+                ty: "EnumShadowQuality",
+                doc: "The sun's shadow map: Off, Low (1024² × 2 cascades), Medium (2048² × 2), High (2048² × 3) or Ultra (4096² × 4), and how many spot lights cast shadows (none up to Low, then 2, 4, 8).",
+            },
+            Field {
+                name: "ShadowDistance",
+                ty: "number",
+                doc: "The farthest shadows reach, in studs: a ceiling on `Lighting.ShadowDistance`.",
+            },
+            Field {
+                name: "PostProcessing",
+                ty: "boolean",
+                doc: "False turns bloom and tone mapping off, whatever Lighting asks for.",
+            },
+            Field {
+                name: "RenderScale",
+                ty: "number",
+                doc: "The scene's size as a fraction of the window's, from 0.5 to 2 (kept within that). The UI is always drawn at the window's size.",
+            },
+            Field {
+                name: "TextureQuality",
+                ty: "EnumTextureQuality",
+                doc: "How sharp surface textures are: Full, Half or Quarter of their width and height.",
+            },
+            Field {
+                name: "AntiAliasing",
+                ty: "EnumAntiAliasing",
+                doc: "How edges are smoothed: Off, FXAA, MSAA2 or MSAA4.",
+            },
+            Field {
+                name: "AmbientOcclusion",
+                ty: "EnumAmbientOcclusion",
+                doc: "How corners and creases darken their ambient light: Off, Low or High.",
+            },
+        ],
+        operators: &[],
+        methods: &[],
+    },
+    ValueType {
         class: "Tween",
         doc: "Properties moving to goals, made by `TweenService:Create`. Each frame it sets them, so their change events fire; a newer tween on the same property of the same Instance cancels it.",
         fields: &[
@@ -565,7 +613,7 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
         ClassName::DataModel,
         Function {
             name: "GetService",
-            doc: "The service with this class name, such as `\"Players\"`, `\"ReplicatedFirst\"`, `\"RunService\"`, `\"SaveService\"`, `\"TweenService\"` or `\"UserInputService\"`.",
+            doc: "The service with this class name, such as `\"Players\"`, `\"ReplicatedFirst\"`, `\"RunService\"`, `\"SaveService\"`, `\"TweenService\"`, `\"UserGameSettings\"` or `\"UserInputService\"`.",
             params: &[("className", "string")],
             returns: "Instance",
         },
@@ -851,6 +899,14 @@ pub(super) const CLASS_FIELDS: &[(ClassName, Field)] = &[
             name: "SaveService",
             ty: "SaveService",
             doc: "Save slots, player data, settings and checkpoints (same as `game:GetService(\"SaveService\")`).",
+        },
+    ),
+    (
+        ClassName::DataModel,
+        Field {
+            name: "UserGameSettings",
+            ty: "UserGameSettings",
+            doc: "This computer's graphics settings (same as `game:GetService(\"UserGameSettings\")`).",
         },
     ),
     (

@@ -421,6 +421,14 @@ impl Viewport {
             .map(|target| target.renderer.graphics())
     }
 
+    /// The last frame the viewport drew, as RGBA rows, once it has drawn.
+    #[cfg(test)]
+    pub fn pixels(&self) -> Option<Vec<u8>> {
+        self.target
+            .as_ref()
+            .map(|target| target.renderer.read_pixels())
+    }
+
     pub fn new() -> Self {
         Self {
             camera: start_camera(),

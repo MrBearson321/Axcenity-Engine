@@ -85,6 +85,9 @@ pub fn translate(script: &BlockScript) -> Result<Translation, TranslateError> {
             BlockKind::SetToneMapping { .. } => {
                 services.insert("Lighting");
             }
+            kind if kind.sets_graphics() => {
+                services.insert("UserGameSettings");
+            }
             _ => {}
         }
         for expression in block.kind.expressions() {
@@ -469,6 +472,30 @@ impl Writer {
             BlockKind::SetToneMapping { curve } => {
                 let curve = choice(curve, &TONE_MAPPINGS, "a tone mapping")?;
                 self.line(format!("Lighting.ToneMapping = Enum.ToneMapping.{curve}"));
+            }
+            BlockKind::SetGraphicsQuality { quality } => {
+                let quality = choice(quality, &GRAPHICS_QUALITIES, "a graphics quality")?;
+                self.line(format!(
+                    "UserGameSettings.GraphicsQuality = Enum.GraphicsQuality.{quality}"
+                ));
+            }
+            BlockKind::SetGraphicsOption {
+                setting,
+                choice: chosen,
+            } => {
+                let setting = choice(setting, &GRAPHICS_OPTIONS, "a graphics option")?;
+                let chosen = choice(chosen, graphics_choices(setting), "a choice for it")?;
+                let value = match (setting, chosen) {
+                    (_, PRESET) => "nil".to_owned(),
+                    ("PostProcessing", on) => (on == "On").to_string(),
+                    (setting, item) => format!("Enum.{setting}.{item}"),
+                };
+                self.line(format!("UserGameSettings.{setting} = {value}"));
+            }
+            BlockKind::SetGraphicsNumber { setting, value } => {
+                let setting = choice(setting, &GRAPHICS_NUMBERS, "a graphics number")?;
+                let value = self.expression(value)?;
+                self.line(format!("UserGameSettings.{setting} = {value}"));
             }
             BlockKind::SetProperty {
                 target: t,

@@ -26,8 +26,8 @@ use axcenity_core::{InstanceId, World};
 use axcenity_nav::Agents;
 use axcenity_physics::Physics;
 use axcenity_project::ScriptFile;
-use axcenity_render::Renderer;
 use axcenity_render::glam::Vec3;
+use axcenity_render::{Capabilities, GraphicsSettings, Renderer};
 use axcenity_scene::{FlyCamera, MoveKeys, UiFrame};
 use axcenity_script::{CameraState, KeyEvent, OutputKind, ScriptRuntime};
 use axcenity_ui::{LoadingGui, UiCursor, UiEvent, UiInput, UiInteraction};
@@ -144,6 +144,14 @@ fn main() -> Result<()> {
     // Saves go in the player's data for this game, never the game's folder.
     let data_folder = axcenity_save::game_folder(&project.manifest.name);
     scripts.set_save_folder(data_folder.clone());
+    // LocalScripts see the saved graphics settings from the start. The
+    // GPU's own capabilities replace these guesses once the window opens.
+    let unknown_gpu = Capabilities::default();
+    let saved_graphics = data_folder
+        .as_deref()
+        .and_then(graphics::load)
+        .unwrap_or_else(|| GraphicsSettings::default_for(&unknown_gpu));
+    scripts.set_graphics(&saved_graphics, &unknown_gpu);
     // Animators start in their default states (with their parameters at
     // their defaults) before any script runs, so scripts can read them.
     let mut animators = Animators::new();
@@ -594,6 +602,15 @@ impl App {
 ///
 /// This takes only the `last_frame` field rather than all of `App`, so it can
 /// be called while other fields of `App` are borrowed.
+/// Draws with `settings` from the next frame, logging anything the GPU
+/// can't do.
+fn set_graphics(renderer: &mut Renderer, settings: &GraphicsSettings) {
+    renderer.set_graphics(settings);
+    for note in &renderer.graphics().notes {
+        log::info!("graphics: {note}");
+    }
+}
+
 fn frame_seconds(last_frame: &mut Option<Instant>) -> f32 {
     let now = Instant::now();
     let seconds = last_frame.map_or(0.0, |last| (now - last).as_secs_f32());
@@ -749,12 +766,15 @@ impl ApplicationHandler for App {
         let size = window.inner_size();
         match pollster::block_on(Renderer::new(window.clone(), size.width, size.height)) {
             Ok(mut renderer) => {
-                let settings =
-                    graphics::start(self.data_folder.as_deref(), renderer.capabilities());
-                renderer.set_graphics(&settings);
-                for note in &renderer.graphics().notes {
-                    log::info!("graphics: {note}");
-                }
+                let folder = self.data_folder.as_deref();
+                let capabilities = *renderer.capabilities();
+                // A LocalScript may have changed them as it started.
+                let settings = match self.scripts.take_graphics_change() {
+                    Some(change) => graphics::changed(folder, change, &capabilities),
+                    None => graphics::start(folder, &capabilities),
+                };
+                self.scripts.set_graphics(&settings, &capabilities);
+                set_graphics(&mut renderer, &settings);
                 self.renderer = Some(renderer);
             }
             Err(err) => return self.fail(event_loop, err),
@@ -987,6 +1007,16 @@ impl ApplicationHandler for App {
                 } else {
                     let _ = self.scripts.take_camera_move();
                 }
+                // A LocalScript's graphics change (`UserGameSettings`) is
+                // saved and drawn from this frame.
+                if let Some(change) = self.scripts.take_graphics_change()
+                    && let Some(renderer) = &mut self.renderer
+                {
+                    let capabilities = *renderer.capabilities();
+                    let settings =
+                        graphics::changed(self.data_folder.as_deref(), change, &capabilities);
+                    set_graphics(renderer, &settings);
+                }
                 let render_camera = self.shown_camera();
                 let heard = listener_of_state(self.script_camera());
                 self.audio.set_listener(heard);
@@ -1075,3 +1105,6 @@ impl ApplicationHandler for App {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod graphics_tests;

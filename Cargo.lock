@@ -744,6 +744,7 @@ dependencies = [
  "axcenity-character",
  "axcenity-core",
  "axcenity-physics",
+ "axcenity-render",
  "axcenity-save",
  "luau0-src",
  "mlua",

@@ -22,6 +22,7 @@ use axcenity_core::{InstanceId, KeyCode, Vector3, World};
 use axcenity_nav::Agents;
 use axcenity_physics::Physics;
 use axcenity_project::{LoadingScreen, ScriptFile};
+use axcenity_render::{Capabilities, GraphicsSettings};
 use axcenity_script::{Breakpoints, CameraState, KeyEvent, OutputKind, Pause, ScriptRuntime};
 use axcenity_ui::LoadingGui;
 use eframe::egui;
@@ -58,6 +59,10 @@ pub struct Session {
     /// What the last frame's steps took, for the Profiler; `None` when it
     /// didn't run (paused at a breakpoint).
     cost: Option<FrameCost>,
+    /// The graphics settings as a LocalScript last changed them
+    /// (`UserGameSettings`), for the viewport until Stop. `None` until one
+    /// does: the editor's own settings are used.
+    graphics: Option<GraphicsSettings>,
 }
 
 impl Session {
@@ -69,7 +74,9 @@ impl Session {
     /// the scripts after it start on Continue. The project's own `loading`
     /// screen shows as in the built game; the Axcenity splash doesn't.
     /// `SaveService` writes its slots in `save_folder` (the player's data for
-    /// the game, as in the built game), never the project.
+    /// the game, as in the built game), never the project. LocalScripts see
+    /// the editor's `graphics` settings (with the GPU's `capabilities`) as
+    /// `UserGameSettings`, and their changes last until Stop.
     #[allow(clippy::too_many_arguments)]
     pub fn start(
         edit_world: &World,
@@ -80,6 +87,8 @@ impl Session {
         camera: CameraState,
         loading: &LoadingScreen,
         save_folder: Option<PathBuf>,
+        graphics: &GraphicsSettings,
+        capabilities: &Capabilities,
     ) -> Result<Session, Crash> {
         let mut session = Session {
             world: edit_world.clone(),
@@ -94,6 +103,7 @@ impl Session {
             loading_gui: None,
             panic_next_frame: false,
             cost: None,
+            graphics: None,
         };
         // Up before any script runs, as in the player.
         session.loading_gui = LoadingGui::start(
@@ -111,6 +121,7 @@ impl Session {
         }
         session.scripts.set_assets(session.assets.clone());
         session.scripts.set_save_folder(save_folder);
+        session.scripts.set_graphics(graphics, capabilities);
         session.scripts.enable_debugger();
         session.scripts.set_breakpoints(breakpoints);
         guard(|| {
@@ -358,6 +369,9 @@ impl Session {
                 loading.advance(&mut self.world, seconds as f32, ready);
             }
             moved = self.scripts.take_camera_move();
+            if let Some(graphics) = self.scripts.take_graphics_change() {
+                self.graphics = Some(graphics);
+            }
             cost.scripts += lap();
             if self.scripts.pause().is_some() {
                 return;
@@ -435,6 +449,12 @@ impl Session {
         for error in self.animators.take_errors() {
             output.error(error);
         }
+    }
+
+    /// The graphics settings a LocalScript changed during this Play, which
+    /// the viewport uses in place of the editor's until Stop.
+    pub fn graphics(&self) -> Option<&GraphicsSettings> {
+        self.graphics.as_ref()
     }
 
     /// The `emitter:Emit(count)` calls scripts made since the last call.

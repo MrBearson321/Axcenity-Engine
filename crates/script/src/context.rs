@@ -7,6 +7,7 @@
 
 use axcenity_assets::Assets;
 use axcenity_core::{InstanceId, RecordedChange, World};
+use axcenity_render::{Capabilities, GraphicsSettings};
 use mlua::chunk::ChunkMode;
 use mlua::{Lua, LuaOptions, StdLib, Thread};
 
@@ -17,6 +18,7 @@ use crate::errors::error_message;
 use crate::instance::{self, ClassMethods};
 use crate::remote::{self, Message, Outbox};
 use crate::sides::Side;
+use crate::user_settings::UserGraphics;
 use crate::{
     Output, OutputLine, changes, console, debugger, events, modules, push_error, sandbox,
     scheduler, tween, watchdog, with_world,
@@ -58,6 +60,7 @@ impl Context {
             lua.set_app_data(HeldKeys::default());
             lua.set_app_data(Camera::default());
             lua.set_app_data(LoadingScreenRemoved::default());
+            lua.set_app_data(UserGraphics::default());
         }
         sandbox::Shared::install(&lua)
             .expect("creating the shared script functions only fails when out of memory");
@@ -298,6 +301,18 @@ impl Context {
     pub fn take_camera_move(&self) -> Option<CameraState> {
         let mut camera = self.lua.app_data_mut::<Camera>()?;
         std::mem::take(&mut camera.moved).then_some(camera.state)
+    }
+
+    pub fn set_graphics(&self, settings: &GraphicsSettings, capabilities: &Capabilities) {
+        if let Some(mut graphics) = self.lua.app_data_mut::<UserGraphics>() {
+            graphics.settings = settings.clone();
+            graphics.capabilities = *capabilities;
+        }
+    }
+
+    pub fn take_graphics_change(&self) -> Option<GraphicsSettings> {
+        let mut graphics = self.lua.app_data_mut::<UserGraphics>()?;
+        std::mem::take(&mut graphics.changed).then(|| graphics.settings.clone())
     }
 
     pub fn take_loading_screen_removed(&self) -> bool {

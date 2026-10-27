@@ -246,6 +246,11 @@ pub struct SpotShadowMapSize {
 #[serde(default)]
 pub struct GraphicsSettings {
     pub quality: Quality,
+    /// True when `quality` follows the machine (see
+    /// [`GraphicsSettings::automatic`]) instead of being picked, so it's
+    /// picked again on each start.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub automatic: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shadow_quality: Option<ShadowQuality>,
     /// The farthest shadows reach, in studs: a ceiling on the world's
@@ -276,14 +281,22 @@ impl GraphicsSettings {
         }
     }
 
-    /// The settings a machine starts with: High, or Low on a software
-    /// adapter (one that draws on the CPU).
+    /// The settings a machine starts with: [`GraphicsSettings::automatic`].
     pub fn default_for(capabilities: &Capabilities) -> Self {
-        Self::preset(if capabilities.software {
-            Quality::Low
-        } else {
-            Quality::High
-        })
+        Self::automatic(capabilities)
+    }
+
+    /// The quality that suits the machine, with no overrides: High, or Low
+    /// on a software adapter (one that draws on the CPU).
+    pub fn automatic(capabilities: &Capabilities) -> Self {
+        Self {
+            automatic: true,
+            ..Self::preset(if capabilities.software {
+                Quality::Low
+            } else {
+                Quality::High
+            })
+        }
     }
 
     /// The shadow quality: the override, or the preset's.
@@ -671,6 +684,7 @@ mod tests {
     fn settings_round_trip_through_json() {
         let settings = GraphicsSettings {
             quality: Quality::Medium,
+            automatic: true,
             shadow_quality: Some(ShadowQuality::Ultra),
             shadow_distance: Some(80.0),
             post_processing: Some(false),
@@ -705,6 +719,13 @@ mod tests {
         );
         let card = Capabilities::default();
         assert_eq!(GraphicsSettings::default_for(&card).quality, Quality::High);
+        // The machine's default is Automatic, saved as such.
+        let automatic = GraphicsSettings::default_for(&card);
+        assert!(automatic.automatic);
+        assert_eq!(
+            serde_json::to_string(&automatic).unwrap(),
+            r#"{"quality":"High","automatic":true}"#
+        );
     }
 
     #[test]
@@ -827,6 +848,7 @@ mod tests {
                 for post in [None, Some(false), Some(true)] {
                     let settings = GraphicsSettings {
                         quality,
+                        automatic: false,
                         shadow_quality: shadows,
                         shadow_distance: Some(60.0),
                         post_processing: post,

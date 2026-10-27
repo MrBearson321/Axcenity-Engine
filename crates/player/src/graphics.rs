@@ -35,23 +35,55 @@ pub fn save(folder: &Path, settings: &GraphicsSettings) -> std::io::Result<()> {
 }
 
 /// The settings a game starts with: the saved ones, or else the machine's
-/// default (High, or Low on a software adapter), which is then saved so
-/// there's a file to change. `folder` is `None` when the player has no data
-/// folder, and nothing is saved.
+/// default (Automatic: High, or Low on a software adapter), which is then
+/// saved so there's a file to change. Saved Automatic settings pick their
+/// quality for this machine again. `folder` is `None` when the player has
+/// no data folder, and nothing is saved.
 pub fn start(folder: Option<&Path>, capabilities: &Capabilities) -> GraphicsSettings {
     if let Some(settings) = folder.and_then(load) {
-        return settings;
+        return fit_machine(settings, capabilities);
     }
     let settings = GraphicsSettings::default_for(capabilities);
-    if let Some(folder) = folder
-        && let Err(err) = save(folder, &settings)
-    {
+    if let Some(folder) = folder {
+        keep(folder, &settings);
+    }
+    settings
+}
+
+/// A LocalScript's change to the settings (`UserGameSettings`): fitted to
+/// this machine and saved in `folder`, if there is one. Returns the
+/// settings to draw with.
+pub fn changed(
+    folder: Option<&Path>,
+    settings: GraphicsSettings,
+    capabilities: &Capabilities,
+) -> GraphicsSettings {
+    let settings = fit_machine(settings, capabilities);
+    if let Some(folder) = folder {
+        keep(folder, &settings);
+    }
+    settings
+}
+
+/// `settings`, with an Automatic quality picked for this machine.
+pub fn fit_machine(settings: GraphicsSettings, capabilities: &Capabilities) -> GraphicsSettings {
+    if !settings.automatic {
+        return settings;
+    }
+    GraphicsSettings {
+        quality: GraphicsSettings::automatic(capabilities).quality,
+        ..settings
+    }
+}
+
+/// Saves `settings` in `folder`, logging (not failing) when it can't.
+pub fn keep(folder: &Path, settings: &GraphicsSettings) {
+    if let Err(err) = save(folder, settings) {
         log::warn!(
             "could not save the graphics settings in {}: {err}",
             folder.display()
         );
     }
-    settings
 }
 
 #[cfg(test)]
@@ -71,6 +103,7 @@ mod tests {
         let folder = temp_folder("round-trip");
         let settings = GraphicsSettings {
             quality: Quality::Ultra,
+            automatic: false,
             shadow_quality: Some(ShadowQuality::Low),
             shadow_distance: Some(90.0),
             post_processing: Some(false),
@@ -91,18 +124,46 @@ mod tests {
         assert_eq!(start(Some(&folder), &card).quality, Quality::High);
         assert_eq!(load(&folder).unwrap().quality, Quality::High);
 
-        // Saved settings win over the machine's default.
+        // That's Automatic, so on another machine it picks for that one.
+        assert!(load(&folder).unwrap().automatic);
         let software = Capabilities {
             software: true,
             ..card
         };
-        assert_eq!(start(Some(&folder), &software).quality, Quality::High);
+        assert_eq!(start(Some(&folder), &software).quality, Quality::Low);
+        // A picked quality wins over the machine's default.
+        save(&folder, &GraphicsSettings::preset(Quality::Ultra)).unwrap();
+        assert_eq!(start(Some(&folder), &software).quality, Quality::Ultra);
         fs::remove_dir_all(&folder).unwrap();
         assert_eq!(start(Some(&folder), &software).quality, Quality::Low);
 
         fs::write(folder.join(FILE_NAME), "not json").unwrap();
         assert_eq!(start(Some(&folder), &card).quality, Quality::High);
         assert_eq!(start(None, &software).quality, Quality::Low);
+        fs::remove_dir_all(&folder).unwrap();
+    }
+
+    #[test]
+    fn a_scripts_change_is_saved_and_automatic_picks_for_this_machine() {
+        let folder = temp_folder("script-change");
+        let software = Capabilities {
+            software: true,
+            ..Capabilities::default()
+        };
+        // A script on a graphics card's settings asked for Automatic.
+        let automatic = GraphicsSettings {
+            shadow_quality: Some(ShadowQuality::Off),
+            ..GraphicsSettings::automatic(&Capabilities::default())
+        };
+        let used = changed(Some(&folder), automatic.clone(), &software);
+        assert_eq!(used.quality, Quality::Low);
+        assert_eq!(used.shadow_quality, Some(ShadowQuality::Off));
+        assert_eq!(load(&folder), Some(used));
+        // Picked settings are saved as they are.
+        let picked = GraphicsSettings::preset(Quality::Medium);
+        assert_eq!(changed(Some(&folder), picked.clone(), &software), picked);
+        assert_eq!(load(&folder), Some(picked.clone()));
+        assert_eq!(changed(None, picked.clone(), &software), picked);
         fs::remove_dir_all(&folder).unwrap();
     }
 }

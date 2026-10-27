@@ -18,6 +18,7 @@ Map only. Luau and block scripts (shown as blocks or as a graph) share one runti
 - `require`: [scripting/modules.md](scripting/modules.md)
 - Scheduler, watchdog, change events: [scripting/execution.md](scripting/execution.md)
 - Server, client, input, camera: [scripting/client-server.md](scripting/client-server.md)
+- UserGameSettings (graphics quality and overrides from LocalScripts): [rendering/settings.md](rendering/settings.md)
 - Blocks and the Lua each becomes: [scripting/blocks.md](scripting/blocks.md)
 - The Graph view (Blueprint-style nodes and wires for block scripts): [scripting/graphs.md](scripting/graphs.md)
 - UI Event Graphs (a ScreenGui's nodes compiled to its LocalScript, the generic graph editor, Live Preview): [scripting/ui-graphs.md](scripting/ui-graphs.md)

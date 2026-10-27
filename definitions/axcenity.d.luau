@@ -123,6 +123,26 @@ declare extern type SaveService with
 	function RestoreCheckpoint(self): ()
 end
 
+--- This computer's graphics settings, from `game:GetService("UserGameSettings")`, for a settings menu. `GraphicsQuality` picks a preset, and each other field overrides one of its values; reading a field gives the value chosen (its override, or the preset's), and setting it to nil goes back to the preset's. Changing the preset keeps the overrides. Saved on this computer by the player (never in the game); in the editor's Play they start from the editor's Graphics settings and are put back at Stop. The GPU may draw less than was chosen: the player's log and the editor's Settings say why. LocalScripts only.
+declare extern type UserGameSettings with
+	--- The preset: Low, Medium, High or Ultra, or Automatic (High, or Low on a computer without a graphics card).
+	GraphicsQuality: EnumGraphicsQuality
+	--- The sun's shadow map: Off, Low (1024² × 2 cascades), Medium (2048² × 2), High (2048² × 3) or Ultra (4096² × 4), and how many spot lights cast shadows (none up to Low, then 2, 4, 8).
+	ShadowQuality: EnumShadowQuality
+	--- The farthest shadows reach, in studs: a ceiling on `Lighting.ShadowDistance`.
+	ShadowDistance: number
+	--- False turns bloom and tone mapping off, whatever Lighting asks for.
+	PostProcessing: boolean
+	--- The scene's size as a fraction of the window's, from 0.5 to 2 (kept within that). The UI is always drawn at the window's size.
+	RenderScale: number
+	--- How sharp surface textures are: Full, Half or Quarter of their width and height.
+	TextureQuality: EnumTextureQuality
+	--- How edges are smoothed: Off, FXAA, MSAA2 or MSAA4.
+	AntiAliasing: EnumAntiAliasing
+	--- How corners and creases darken their ambient light: Off, Low or High.
+	AmbientOcclusion: EnumAmbientOcclusion
+end
+
 --- Properties moving to goals, made by `TweenService:Create`. Each frame it sets them, so their change events fire; a newer tween on the same property of the same Instance cancels it.
 declare extern type Tween with
 	--- Where it is: Begin, Delayed, Playing, Paused, Completed or Cancelled (read-only).
@@ -347,6 +367,66 @@ declare extern type EnumPlaybackStateItems with
 	Cancelled: EnumPlaybackState
 end
 
+--- One choice of `Enum.GraphicsQuality`.
+declare extern type EnumGraphicsQuality extends EnumItem with
+end
+
+--- The choices of `Enum.GraphicsQuality`.
+declare extern type EnumGraphicsQualityItems with
+	Automatic: EnumGraphicsQuality
+	Low: EnumGraphicsQuality
+	Medium: EnumGraphicsQuality
+	High: EnumGraphicsQuality
+	Ultra: EnumGraphicsQuality
+end
+
+--- One choice of `Enum.ShadowQuality`.
+declare extern type EnumShadowQuality extends EnumItem with
+end
+
+--- The choices of `Enum.ShadowQuality`.
+declare extern type EnumShadowQualityItems with
+	Off: EnumShadowQuality
+	Low: EnumShadowQuality
+	Medium: EnumShadowQuality
+	High: EnumShadowQuality
+	Ultra: EnumShadowQuality
+end
+
+--- One choice of `Enum.TextureQuality`.
+declare extern type EnumTextureQuality extends EnumItem with
+end
+
+--- The choices of `Enum.TextureQuality`.
+declare extern type EnumTextureQualityItems with
+	Quarter: EnumTextureQuality
+	Half: EnumTextureQuality
+	Full: EnumTextureQuality
+end
+
+--- One choice of `Enum.AntiAliasing`.
+declare extern type EnumAntiAliasing extends EnumItem with
+end
+
+--- The choices of `Enum.AntiAliasing`.
+declare extern type EnumAntiAliasingItems with
+	Off: EnumAntiAliasing
+	FXAA: EnumAntiAliasing
+	MSAA2: EnumAntiAliasing
+	MSAA4: EnumAntiAliasing
+end
+
+--- One choice of `Enum.AmbientOcclusion`.
+declare extern type EnumAmbientOcclusion extends EnumItem with
+end
+
+--- The choices of `Enum.AmbientOcclusion`.
+declare extern type EnumAmbientOcclusionItems with
+	Off: EnumAmbientOcclusion
+	Low: EnumAmbientOcclusion
+	High: EnumAmbientOcclusion
+end
+
 --- Every enum, such as `Enum.Material`, `Enum.PartType` and `Enum.KeyCode`.
 declare extern type EnumLibrary with
 	Material: EnumMaterialItems
@@ -358,6 +438,11 @@ declare extern type EnumLibrary with
 	EasingStyle: EnumEasingStyleItems
 	EasingDirection: EnumEasingDirectionItems
 	PlaybackState: EnumPlaybackStateItems
+	GraphicsQuality: EnumGraphicsQualityItems
+	ShadowQuality: EnumShadowQualityItems
+	TextureQuality: EnumTextureQualityItems
+	AntiAliasing: EnumAntiAliasingItems
+	AmbientOcclusion: EnumAmbientOcclusionItems
 end
 
 -- Instances -----------------------------------------------------------------
@@ -419,10 +504,12 @@ declare extern type DataModel extends Instance with
 	TweenService: TweenService
 	--- Save slots, player data, settings and checkpoints (same as `game:GetService("SaveService")`).
 	SaveService: SaveService
+	--- This computer's graphics settings (same as `game:GetService("UserGameSettings")`). LocalScripts only.
+	UserGameSettings: UserGameSettings
 	--- What loads first on the player's side, with `RemoveDefaultLoadingScreen` (same as `game:GetService("ReplicatedFirst")`).
 	ReplicatedFirst: ReplicatedFirst
 	[string]: any
-	--- The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"SaveService"`, `"TweenService"` or `"UserInputService"`.
+	--- The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"SaveService"`, `"TweenService"`, `"UserGameSettings"` or `"UserInputService"`.
 	function GetService(self, className: string): Instance
 end
 

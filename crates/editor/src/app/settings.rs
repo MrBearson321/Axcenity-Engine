@@ -948,6 +948,7 @@ mod tests {
         let mut app = EditorApp::new(None);
         app.graphics = GraphicsSettings {
             quality: Quality::Medium,
+            automatic: false,
             shadow_quality: Some(ShadowQuality::Off),
             shadow_distance: Some(60.0),
             post_processing: None,
@@ -973,10 +974,116 @@ mod tests {
         crate::snapshot::snapshot_rendered(
             &std::env::temp_dir().join(format!("axcenity-graphics-{}.png", std::process::id())),
             egui::vec2(320.0, 200.0),
-            vec![Vec::new(); 2],
+            vec![Vec::new(); 3],
             |ctx, render_state| {
-                if frame == 1 {
-                    app.graphics.shadow_quality = Some(ShadowQuality::Off);
+                match frame {
+                    1 => app.graphics.shadow_quality = Some(ShadowQuality::Off),
+                    2 => app.graphics.anti_aliasing = Some(AntiAliasing::Fxaa),
+                    _ => {}
+                }
+                frame += 1;
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    app.scene_pane(ui, Some(render_state));
+                });
+                seen.push(
+                    app.viewport
+                        .graphics()
+                        .map(|used| (used.shadow_quality, used.anti_aliasing)),
+                );
+            },
+        );
+        if seen.is_empty() {
+            return; // No GPU.
+        }
+        let (high, off) = (ShadowQuality::High, ShadowQuality::Off);
+        assert_eq!(
+            seen,
+            [
+                Some((high, AntiAliasing::Msaa4)),
+                Some((off, AntiAliasing::Msaa4)),
+                Some((off, AntiAliasing::Fxaa))
+            ]
+        );
+    }
+
+    /// Lighting's Exposure and ToneMapping, set as the Properties panel sets
+    /// them, change what the viewport draws.
+    #[test]
+    fn exposure_and_tone_mapping_set_in_properties_change_the_viewport() {
+        use axcenity_core::{ToneMapping, Value};
+        let mut app = EditorApp::new(Some(&super::super::tests::example("hello-graphics")));
+        let lighting = app.world.lighting();
+        let mut frame = 0;
+        let mut drawn = Vec::new();
+        crate::snapshot::snapshot_rendered(
+            &std::env::temp_dir().join(format!("axcenity-look-{}.png", std::process::id())),
+            egui::vec2(320.0, 200.0),
+            vec![Vec::new(); 3],
+            |ctx, render_state| {
+                match frame {
+                    1 => app.apply(lighting, Edit::Property("Exposure", Value::Number(2.0))),
+                    2 => app.apply(
+                        lighting,
+                        Edit::Property("ToneMapping", Value::ToneMapping(ToneMapping::Filmic)),
+                    ),
+                    _ => {}
+                }
+                frame += 1;
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    app.scene_pane(ui, Some(render_state));
+                });
+                drawn.extend(app.viewport.pixels());
+            },
+        );
+        if drawn.is_empty() {
+            return; // No GPU.
+        }
+        let [before, brighter, filmic] = &drawn[..] else {
+            panic!("drew {} frames, not 3", drawn.len());
+        };
+        let changed = |a: &[u8], b: &[u8]| {
+            a.chunks(4)
+                .zip(b.chunks(4))
+                .filter(|(a, b)| a[..3] != b[..3])
+                .count()
+        };
+        let pixels = before.len() / 4;
+        let exposed = changed(before, brighter);
+        assert!(
+            exposed > pixels / 4,
+            "exposure changed {exposed} of {pixels}"
+        );
+        let curved = changed(brighter, filmic);
+        assert!(
+            curved > pixels / 4,
+            "tone mapping changed {curved} of {pixels}"
+        );
+    }
+
+    /// hello-graphics' LocalScript steps the quality on G. In Play that
+    /// changes the viewport, starting from the editor's own settings, and
+    /// Stop puts them back without saving the script's choice.
+    #[test]
+    fn a_local_scripts_graphics_change_lasts_until_stop() {
+        use axcenity_script::KeyEvent;
+        let mut app = EditorApp::new(Some(&super::super::tests::example("hello-graphics")));
+        app.play();
+        let press = KeyEvent {
+            key: axcenity_core::KeyCode::G,
+            pressed: true,
+        };
+        let mut frame = 0;
+        let mut seen = Vec::new();
+        crate::snapshot::snapshot_rendered(
+            &std::env::temp_dir()
+                .join(format!("axcenity-play-graphics-{}.png", std::process::id())),
+            egui::vec2(320.0, 200.0),
+            vec![Vec::new(); 3],
+            |ctx, render_state| {
+                match frame {
+                    1 => app.play_frame(1.0 / 60.0, &[press], None, None),
+                    2 => app.stop(),
+                    _ => app.play_frame(1.0 / 60.0, &[], None, None),
                 }
                 frame += 1;
                 egui::CentralPanel::default().show(ctx, |ui| {
@@ -988,6 +1095,23 @@ mod tests {
         if seen.is_empty() {
             return; // No GPU.
         }
-        assert_eq!(seen, [Some(ShadowQuality::High), Some(ShadowQuality::Off)]);
+        // The editor's High, then Ultra (the one after it), then High again.
+        assert_eq!(
+            seen,
+            [
+                Some(ShadowQuality::High),
+                Some(ShadowQuality::Ultra),
+                Some(ShadowQuality::High)
+            ]
+        );
+        assert_eq!(app.graphics, GraphicsSettings::default());
+        assert!(
+            app.output
+                .lines()
+                .iter()
+                .any(|line| line.text == "Graphics quality: Ultra"),
+            "{:?}",
+            app.output.lines()
+        );
     }
 }

@@ -498,14 +498,15 @@ pub(super) fn upload_buffers(
 }
 
 /// Uploads a caller's texture without its `skipped_levels` largest mip
-/// levels (see [`create_texture`]), or `None` (with a warning) if it has no
-/// pixels or the wrong number of them.
+/// levels, or any wider or taller than `max_size` (see [`create_texture`]),
+/// or `None` (with a warning) if it has no pixels or the wrong number of
+/// them.
 pub(super) fn upload_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     bytes: &GpuBytes,
     source: &dyn TextureSource,
-    skipped_levels: u32,
+    (skipped_levels, max_size): (u32, u32),
 ) -> Option<GpuTexture> {
     let (width, height) = source.size();
     let rgba = source.rgba();
@@ -521,7 +522,7 @@ pub(super) fn upload_texture(
         queue,
         bytes,
         (width, height, rgba),
-        skipped_levels,
+        (skipped_levels, max_size),
     ))
 }
 
@@ -585,17 +586,17 @@ pub(super) fn create_material(
 /// Uploads RGBA pixels (width, height, pixels) with a full set of mipmaps
 /// (smaller copies, so far away surfaces don't shimmer), with an sRGB and a
 /// plain view. The `skipped_levels` largest are left out (the texture
-/// quality), and so are any too big for this GPU, so a huge texture still
-/// shows, just less sharp.
+/// quality), and so are any wider or taller than `max_size` (the GPU's
+/// largest), so a huge texture still shows, just less sharp.
 pub(super) fn create_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     bytes: &GpuBytes,
     (width, height, rgba): (u32, u32, &[u8]),
-    skipped_levels: u32,
+    (skipped_levels, max_size): (u32, u32),
 ) -> GpuTexture {
     let mut levels = mip_levels(width, height, rgba);
-    let max = device.limits().max_texture_dimension_2d;
+    let max = max_size.min(device.limits().max_texture_dimension_2d);
     let too_big = levels
         .iter()
         .take_while(|(width, height, _)| *width > max || *height > max)

@@ -98,9 +98,12 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         BlockKind::SetCheckpoint { .. } => 45,
         BlockKind::RestoreCheckpoint => 46,
         BlockKind::SetToneMapping { .. } => 47,
+        BlockKind::SetGraphicsQuality { .. } => 48,
+        BlockKind::SetGraphicsOption { .. } => 49,
+        BlockKind::SetGraphicsNumber { .. } => 50,
     })
 }
-const STATEMENT_COUNT: usize = 48;
+const STATEMENT_COUNT: usize = 51;
 
 /// One of each statement block, with the Lua it must produce.
 fn every_statement() -> Vec<(BlockKind, &'static str)> {
@@ -361,6 +364,26 @@ fn every_statement() -> Vec<(BlockKind, &'static str)> {
                 curve: "Filmic".to_owned(),
             },
             "Lighting.ToneMapping = Enum.ToneMapping.Filmic",
+        ),
+        (
+            BlockKind::SetGraphicsQuality {
+                quality: "Low".to_owned(),
+            },
+            "UserGameSettings.GraphicsQuality = Enum.GraphicsQuality.Low",
+        ),
+        (
+            BlockKind::SetGraphicsOption {
+                setting: "AntiAliasing".to_owned(),
+                choice: "FXAA".to_owned(),
+            },
+            "UserGameSettings.AntiAliasing = Enum.AntiAliasing.FXAA",
+        ),
+        (
+            BlockKind::SetGraphicsNumber {
+                setting: "ShadowDistance".to_owned(),
+                value: number(80.0),
+            },
+            "UserGameSettings.ShadowDistance = 80",
         ),
         (
             BlockKind::Code {
@@ -871,6 +894,149 @@ fn the_tone_mapping_block_sets_lighting_and_comes_back_from_lua() {
         },
     )]);
     assert!(translate(&wrong).is_err());
+}
+
+#[test]
+fn graphics_blocks_change_user_game_settings_and_come_back_from_lua() {
+    let run = |world: &mut World, runtime: &mut ScriptRuntime, path: &str, source: &str| {
+        let lua = world.create(ClassName::LocalScript).unwrap();
+        world
+            .set_parent(lua, Some(world.starter_player_scripts()))
+            .unwrap();
+        runtime.start_script(world, lua, path, source);
+        runtime.step(world, 0.1);
+        runtime
+            .take_output()
+            .into_iter()
+            .map(|line| line.text)
+            .collect::<Vec<_>>()
+    };
+    // Every choice the menus offer is one the script API takes.
+    let mut every = vec![];
+    for quality in crate::GRAPHICS_QUALITIES {
+        every.push(BlockKind::SetGraphicsQuality {
+            quality: quality.to_owned(),
+        });
+    }
+    for setting in crate::GRAPHICS_OPTIONS {
+        assert_eq!(
+            crate::graphics_choices(setting).last(),
+            Some(&crate::PRESET)
+        );
+        for choice in crate::graphics_choices(setting) {
+            every.push(BlockKind::SetGraphicsOption {
+                setting: setting.to_owned(),
+                choice: (*choice).to_owned(),
+            });
+        }
+    }
+    let body = every
+        .into_iter()
+        .enumerate()
+        .map(|(index, kind)| block(index as u64 + 10, kind))
+        .collect();
+    let source = translate(&script(vec![block(1, BlockKind::WhenStarted { body })]))
+        .unwrap()
+        .source;
+    let (mut world, mut runtime) = (World::new(), ScriptRuntime::new());
+    let output = run(
+        &mut world,
+        &mut runtime,
+        "scripts/All.client.blocks.json",
+        &source,
+    );
+    assert!(output.is_empty(), "{output:?}");
+
+    let set = |id, kind| block(id, kind);
+    let option = |setting: &str, choice: &str| BlockKind::SetGraphicsOption {
+        setting: setting.to_owned(),
+        choice: choice.to_owned(),
+    };
+    let blocks = script(vec![block(
+        1,
+        BlockKind::WhenStarted {
+            body: vec![
+                set(
+                    2,
+                    BlockKind::SetGraphicsQuality {
+                        quality: "Medium".to_owned(),
+                    },
+                ),
+                set(3, option("AntiAliasing", "MSAA2")),
+                set(4, option("PostProcessing", "Off")),
+                set(5, option("ShadowQuality", "Off")),
+                set(6, option("ShadowQuality", "Preset")),
+                set(
+                    7,
+                    BlockKind::SetGraphicsNumber {
+                        setting: "RenderScale".to_owned(),
+                        value: number(0.5),
+                    },
+                ),
+            ],
+        },
+    )]);
+    let source = translate(&blocks).unwrap().source;
+    assert!(
+        source.starts_with("local UserGameSettings = game:GetService(\"UserGameSettings\")"),
+        "{source}"
+    );
+    assert!(
+        source.contains("UserGameSettings.PostProcessing = false"),
+        "{source}"
+    );
+    assert!(
+        source.contains("UserGameSettings.ShadowQuality = nil"),
+        "{source}"
+    );
+
+    let (mut world, mut runtime) = (World::new(), ScriptRuntime::new());
+    let output = run(
+        &mut world,
+        &mut runtime,
+        "scripts/Menu.client.blocks.json",
+        &source,
+    );
+    assert!(output.is_empty(), "{output:?}");
+    let output = run(
+        &mut world,
+        &mut runtime,
+        "scripts/check.client.lua",
+        "local s = game:GetService('UserGameSettings')
+        print(s.GraphicsQuality, s.AntiAliasing, s.PostProcessing, s.ShadowQuality, s.RenderScale)",
+    );
+    assert_eq!(
+        output,
+        ["Enum.GraphicsQuality.Medium	Enum.AntiAliasing.MSAA2	false	Enum.ShadowQuality.Medium	0.5"]
+    );
+    assert!(runtime.take_graphics_change().is_some());
+
+    let back = crate::from_lua(&source).unwrap();
+    assert_eq!(translate(&back).unwrap().source, source);
+    let mut kinds = Vec::new();
+    back.for_each_block(&mut |b| kinds.push(b.kind.clone()));
+    assert!(kinds.contains(&option("PostProcessing", "Off")));
+    assert!(kinds.contains(&option("ShadowQuality", "Preset")));
+
+    for wrong in [
+        BlockKind::SetGraphicsQuality {
+            quality: "Best".to_owned(),
+        },
+        option("Shadows", "Off"),
+        option("AntiAliasing", "Quarter"),
+        BlockKind::SetGraphicsNumber {
+            setting: "Exposure".to_owned(),
+            value: number(1.0),
+        },
+    ] {
+        let wrong = script(vec![block(
+            1,
+            BlockKind::WhenStarted {
+                body: vec![block(2, wrong.clone())],
+            },
+        )]);
+        assert!(translate(&wrong).is_err(), "{wrong:?}");
+    }
 }
 
 #[test]

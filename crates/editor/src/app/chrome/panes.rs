@@ -717,7 +717,12 @@ impl EditorApp {
                             poses: self.play.as_ref().map(Session::poses),
                             terrain_brush,
                             character_view: self.play.as_ref().and_then(Session::character_camera),
-                            graphics: &self.graphics,
+                            // A LocalScript's change lasts until Stop.
+                            graphics: self
+                                .play
+                                .as_ref()
+                                .and_then(Session::graphics)
+                                .unwrap_or(&self.graphics),
                         },
                     )
                 }

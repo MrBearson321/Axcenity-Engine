@@ -2,7 +2,7 @@
 
 HDR, bloom, and tone mapping.
 
-- The scene draws into an `Rgba16Float` texture. A bloom chain (prefilter above `BloomThreshold`, downsample, additive upsample) feeds a composite pass that adds bloom, applies `Exposure` and tone mapping into the real target (or, with FXAA on, into an LDR target that FXAA then smooths into the real one), then the UI draws on top. With MSAA on, the scene pass draws multisampled and resolves into the HDR texture before bloom. Anti-aliasing is a graphics setting: [shadows.md](shadows.md).
+- The scene draws into an `Rgba16Float` texture. A bloom chain (prefilter above `BloomThreshold`, downsample, additive upsample) feeds a composite pass that adds bloom, applies `Exposure` and tone mapping into the real target (or, with FXAA on, into an LDR target that FXAA then smooths into the real one), then the UI draws on top. With MSAA on, the scene pass draws multisampled and resolves into the HDR texture before bloom. Anti-aliasing is a graphics setting: [shadows.md](shadows.md). The machine's post-processing setting is a ceiling on `PostProcessingEnabled` (off on the Low preset; [settings.md](settings.md)), while `Exposure` and `ToneMapping` are the world's look, and no setting changes them.
 - Lighting properties `PostProcessingEnabled`, `Exposure`, `ToneMapping`, `BloomEnabled`, `BloomIntensity` and `BloomThreshold` configure it. Off means a plain clamp with no bloom, whatever the curve.
 - `ToneMapping` (`Enum.ToneMapping`, `render::ToneMapping`) picks the curve, after exposure:
   - `Classic`: each channel under 0.6 unchanged, brighter ones roll off toward 1 (it shifts the hue of bright colors). The default, so a world saved without the property looks as it did.

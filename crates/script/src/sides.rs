@@ -113,6 +113,12 @@ pub const SIDE_ONLY_APIS: &[SideOnlyApi] = &[
         instead: "use OnServerEvent to receive what LocalScripts send",
     },
     SideOnlyApi {
+        name: "UserGameSettings",
+        side: Side::Client,
+        because: "graphics settings belong to the player's computer",
+        instead: "change them from a LocalScript, such as one behind a settings menu",
+    },
+    SideOnlyApi {
         name: "RemoveDefaultLoadingScreen",
         side: Side::Client,
         because: "the loading screen is on the player's screen",
