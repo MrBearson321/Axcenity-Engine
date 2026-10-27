@@ -82,6 +82,8 @@ pub enum AssetKind {
     BehaviorTree,
     /// A data table scripts read (`assets/data/*.data.json`).
     DataTable,
+    /// A sky image (`.hdr`) for Lighting's `SkyImage`.
+    Sky,
 }
 
 impl AssetKind {
@@ -99,6 +101,7 @@ impl AssetKind {
             AssetKind::Controller => theme::AnimKind::StateMachine.icon(),
             AssetKind::BehaviorTree => icons::BRAIN,
             AssetKind::DataTable => icons::TABLE,
+            AssetKind::Sky => icons::SUN_HORIZON,
         }
     }
 
@@ -117,6 +120,7 @@ impl AssetKind {
             AssetKind::Controller => theme::AnimKind::StateMachine.color(visuals),
             AssetKind::BehaviorTree => theme::class_color(ClassName::NavigationAgent, visuals),
             AssetKind::DataTable => theme::class_color(ClassName::Script, visuals),
+            AssetKind::Sky => theme::class_color(ClassName::Lighting, visuals),
         }
     }
 
@@ -136,6 +140,7 @@ impl AssetKind {
             AssetKind::Controller => "State machine",
             AssetKind::BehaviorTree => "Behavior tree",
             AssetKind::DataTable => "Data table",
+            AssetKind::Sky => "Sky",
         }
     }
 
@@ -174,6 +179,10 @@ impl AssetKind {
             AssetKind::DataTable => {
                 "Double-click to open it in the Data Table tab. Scripts read it with \
                  DataService:GetTable."
+            }
+            AssetKind::Sky => {
+                "Double-click, or drag into the viewport or onto Lighting's SkyImage, to use it \
+                 as the sky. You're asked first."
             }
         }
     }
@@ -242,12 +251,13 @@ pub enum Category {
     Audio,
     Particles,
     Animations,
+    Skies,
     /// The global assets, of any kind.
     Global,
 }
 
 impl Category {
-    const ALL: [Category; 10] = [
+    const ALL: [Category; 11] = [
         Category::All,
         Category::Props,
         Category::Models,
@@ -257,6 +267,7 @@ impl Category {
         Category::Audio,
         Category::Particles,
         Category::Animations,
+        Category::Skies,
         Category::Global,
     ];
 
@@ -271,6 +282,7 @@ impl Category {
             Category::Audio => "Audio",
             Category::Particles => "Particles",
             Category::Animations => "Animations",
+            Category::Skies => "Skies",
             Category::Global => "Global",
         }
     }
@@ -291,6 +303,7 @@ impl Category {
             Category::Animations => {
                 matches!(kind, AssetKind::Animation | AssetKind::Controller)
             }
+            Category::Skies => kind == AssetKind::Sky,
             // Which files are global is the path's, checked by the panel.
             Category::Global => kind != AssetKind::Prop,
         }
@@ -1087,7 +1100,11 @@ impl AssetBrowser {
         let thumbnail = (ui.is_rect_visible(rect)
             && matches!(
                 entry.kind,
-                AssetKind::Image | AssetKind::Texture | AssetKind::TextureSet | AssetKind::Particle
+                AssetKind::Image
+                    | AssetKind::Texture
+                    | AssetKind::TextureSet
+                    | AssetKind::Particle
+                    | AssetKind::Sky
             ))
         .then(|| self.thumbnail_of(ui.ctx(), entry))
         .flatten();

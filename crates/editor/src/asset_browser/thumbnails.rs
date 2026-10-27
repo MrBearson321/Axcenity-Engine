@@ -134,8 +134,32 @@ fn load(folder: &Path, path: &str, set: bool) -> Option<egui::ColorImage> {
     } else {
         path.to_owned()
     };
+    if picture.to_lowercase().ends_with(".hdr") {
+        let sky = axcenity_assets::read_sky_image(folder, &picture).ok()?;
+        return shrink(sky.width, sky.height, &sky_rgba(&sky.rgb), THUMBNAIL_PIXELS);
+    }
     let image = axcenity_assets::read_texture(folder, &picture).ok()?;
     shrink(image.width, image.height, &image.rgba, THUMBNAIL_PIXELS)
+}
+
+/// A sky image's linear light (red, green, blue, brighter than 1 where the
+/// sun is) as sRGB bytes for a thumbnail: each channel rolled off toward
+/// white (Reinhard), so the sun doesn't wash the rest out.
+fn sky_rgba(rgb: &[f32]) -> Vec<u8> {
+    let byte = |light: f32| {
+        let light = (light.max(0.0) / (1.0 + light.max(0.0))).min(1.0);
+        let srgb = if light <= 0.0031308 {
+            light * 12.92
+        } else {
+            1.055 * light.powf(1.0 / 2.4) - 0.055
+        };
+        (srgb * 255.0).round() as u8
+    };
+    rgb.as_chunks::<3>()
+        .0
+        .iter()
+        .flat_map(|&[red, green, blue]| [byte(red), byte(green), byte(blue), 255])
+        .collect()
 }
 
 /// `rgba` (`width` × `height`) scaled down to at most `most` pixels across.

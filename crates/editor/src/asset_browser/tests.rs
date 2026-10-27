@@ -40,6 +40,8 @@ fn files_are_sorted_into_kinds_by_extension_and_folder() {
         Some(AssetKind::Prefab)
     );
     assert_eq!(kind_of("assets/audio/ding.ogg"), Some(AssetKind::Audio));
+    assert_eq!(kind_of("assets/sky/Noon.HDR"), Some(AssetKind::Sky));
+    assert_eq!(kind_of("assets/images/sky.hdr"), Some(AssetKind::Sky));
     assert_eq!(
         kind_of("assets/particles/spark_01.png"),
         Some(AssetKind::Particle)

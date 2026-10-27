@@ -33,6 +33,10 @@ pub fn kind_of(path: &str) -> Option<AssetKind> {
         return Some(AssetKind::DataTable);
     }
     let extension = lower.rsplit_once('.')?.1;
+    // PNG and JPEG skies work too, but look like any other image here.
+    if extension == "hdr" {
+        return Some(AssetKind::Sky);
+    }
     if MODEL_EXTENSIONS.contains(&extension) {
         Some(AssetKind::Model)
     } else if AUDIO_EXTENSIONS.contains(&extension) {

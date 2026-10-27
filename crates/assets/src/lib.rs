@@ -40,10 +40,10 @@ pub use data_table::{
 };
 pub use fonts::{FontFile, is_font_file};
 pub use import::{
-    AUDIO_EXTENSIONS, ImportError, MODELS_FOLDER, PROJECT_AUDIO_FOLDER, PROJECT_TEXTURES_FOLDER,
-    TEXTURE_EXTENSIONS, TEXTURES_FOLDER, import_animation_file, import_audio, import_model,
-    import_picks, import_texture, list_model_objects, load_model_file, load_takes_file,
-    safe_file_name, unique_file_name,
+    AUDIO_EXTENSIONS, ImportError, MODELS_FOLDER, PROJECT_AUDIO_FOLDER, PROJECT_SKY_FOLDER,
+    PROJECT_TEXTURES_FOLDER, TEXTURE_EXTENSIONS, TEXTURES_FOLDER, import_animation_file,
+    import_audio, import_model, import_picks, import_sky_image, import_texture, list_model_objects,
+    load_model_file, load_takes_file, safe_file_name, unique_file_name,
 };
 pub use material::{
     MATERIAL_SUFFIX, MATERIALS_FOLDER, MapFile, MapSettings, MaterialFile, MaterialFileError,

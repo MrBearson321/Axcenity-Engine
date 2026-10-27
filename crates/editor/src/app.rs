@@ -37,6 +37,7 @@ mod material_files;
 mod nav_overlay;
 mod session;
 mod settings;
+mod sky;
 mod tags;
 mod terrain;
 mod texture_set;
@@ -232,6 +233,8 @@ pub struct EditorApp {
     tabs: ScriptTabs,
     /// A Script waiting for an answer to "Delete script?".
     confirm_delete: Option<InstanceId>,
+    /// A sky image waiting for "Use this sky?" to be answered (`app/sky.rs`).
+    confirm_sky: Option<String>,
     /// A model file waiting for its objects to be chosen.
     importing: Option<ImportDialog>,
     /// Model files imported together, waiting for the dialog to be free.
@@ -582,6 +585,7 @@ impl EditorApp {
             tags: crate::tags::TagsPanel::default(),
             tabs: ScriptTabs::default(),
             confirm_delete: None,
+            confirm_sky: None,
             importing: None,
             import_queue: VecDeque::new(),
             game_keys: GameKeys::default(),
@@ -1113,6 +1117,7 @@ impl EditorApp {
         self.input_window(ctx);
         self.unsaved_changes_prompt(ctx);
         self.delete_script_prompt(ctx);
+        self.sky_prompt(ctx);
         self.import_dropped(ctx);
         self.import_prompt(ctx, render_state);
         self.ribbon_tabs.editor_window(ctx);

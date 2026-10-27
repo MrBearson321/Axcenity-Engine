@@ -105,6 +105,17 @@ impl EditorApp {
                 self.open_animator_controller(id);
                 return;
             }
+            Edit::PickSkyImage => {
+                if let Some(path) = self.pick_sky_image() {
+                    self.ask_sky(path);
+                }
+                return;
+            }
+            Edit::AskSkyImage(path) => {
+                let path = path.clone();
+                self.ask_sky(path);
+                return;
+            }
             Edit::PickBehaviorTree => {
                 if let Some(path) = self.pick_behavior_tree() {
                     self.apply(id, Edit::Property("BehaviorTree", Value::String(path)));
@@ -1098,6 +1109,8 @@ pub(super) fn set(world: &mut World, id: InstanceId, edit: Edit) -> anyhow::Resu
         | Edit::OpenController
         | Edit::PickBehaviorTree
         | Edit::OpenBehaviorTree
+        | Edit::PickSkyImage
+        | Edit::AskSkyImage(_)
         | Edit::PickClip
         | Edit::OpenClip
         | Edit::Animate

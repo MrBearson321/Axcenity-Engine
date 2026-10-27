@@ -89,13 +89,18 @@ impl EditorApp {
         let mut everything: Vec<&str> = MODELS.to_vec();
         everything.extend(axcenity_assets::TEXTURE_EXTENSIONS);
         everything.extend(axcenity_assets::AUDIO_EXTENSIONS);
+        everything.push("hdr");
         everything.push("json");
         everything.push(project::PACKAGE_EXTENSION);
         let dialog = rfd::FileDialog::new()
             .set_title("Import")
-            .add_filter("Models, images, sounds, prefabs and packages", &everything)
+            .add_filter(
+                "Models, images, skies, sounds, prefabs and packages",
+                &everything,
+            )
             .add_filter("3D model", &MODELS)
             .add_filter("Image", &axcenity_assets::TEXTURE_EXTENSIONS)
+            .add_filter("Sky (HDR)", &["hdr"])
             .add_filter("Sound", &axcenity_assets::AUDIO_EXTENSIONS)
             .add_filter("Prefab", &["json"])
             .add_filter("Asset package", &[project::PACKAGE_EXTENSION]);

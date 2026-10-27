@@ -33,6 +33,8 @@ pub enum Tone {
     Warning,
     /// Something will be destroyed.
     Danger,
+    /// A change that undo takes back, asked about so it isn't a surprise.
+    Question,
 }
 
 /// What the box is about, besides its buttons.
@@ -65,6 +67,7 @@ pub fn ask(ctx: &egui::Context, question: &Question, buttons: &[Button]) -> Opti
     let accent = match question.tone {
         Tone::Warning => palette.warning,
         Tone::Danger => palette.error,
+        Tone::Question => palette.accent,
     };
     let frame = egui::Frame::popup(&ctx.style())
         .corner_radius(12)

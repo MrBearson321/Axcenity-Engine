@@ -106,6 +106,7 @@ impl EditorApp {
             AssetKind::Controller => self.drop_controller(entry, spot),
             AssetKind::BehaviorTree => self.drop_behavior_tree(&entry.path, spot.part),
             AssetKind::DataTable => self.open_data_table(&entry.path),
+            AssetKind::Sky => self.ask_sky(entry.path.clone()),
         }
     }
 
@@ -589,6 +590,10 @@ impl EditorApp {
                     .map_err(|err| err.to_string())
             }
             Some(AssetKind::Prefab) => copy_prefab(folder, file),
+            Some(AssetKind::Sky) => axcenity_assets::import_sky_image(folder, file)
+                // Brought in to be the sky, most likely: offer that.
+                .inspect(|path| self.ask_sky(path.clone()))
+                .map_err(|err| err.to_string()),
             // Clips and controllers name files in their own project, so
             // they come with an imported FBX instead.
             Some(AssetKind::Animation | AssetKind::Controller) => Err(
@@ -609,7 +614,10 @@ impl EditorApp {
                     .to_owned(),
             ),
             Some(AssetKind::Prop) | None => {
-                Err("it isn't a model, image, sound or prefab (`.prefab.json`) file".to_owned())
+                Err(
+                    "it isn't a model, image, sky (`.hdr`), sound or prefab (`.prefab.json`) file"
+                        .to_owned(),
+                )
             }
         };
         match result {

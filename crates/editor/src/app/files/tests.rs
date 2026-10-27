@@ -530,6 +530,37 @@ fn every_way_in_opens_the_same_dialog_for_a_model() {
     let _ = fs::remove_dir_all(&folder);
 }
 
+#[test]
+fn a_sky_dropped_on_the_window_is_copied_in_and_asked_about() {
+    let folder = copy_of_example("hello-part", "drop-sky");
+    let mut app = EditorApp::new(Some(&folder));
+    let sky = folder.join("..").join("drop-sky-noon.hdr");
+    fs::write(&sky, b"#?RADIANCE").unwrap();
+    let ctx = crate::theme::test_context();
+    let input = egui::RawInput {
+        dropped_files: vec![egui::DroppedFile {
+            path: Some(sky.clone()),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let _ = ctx.run(input, |ctx| app.import_dropped(ctx));
+    let copy = "assets/sky/drop-sky-noon.hdr";
+    assert!(folder.join(copy).is_file());
+    assert_eq!(
+        app.confirm_sky.as_deref(),
+        Some(copy),
+        "asked before it's the sky"
+    );
+    let lighting = app.world.get(app.world.lighting()).unwrap();
+    assert_eq!(
+        lighting.property("SkyImage"),
+        Some(&Value::String(String::new()))
+    );
+    let _ = fs::remove_file(&sky);
+    let _ = fs::remove_dir_all(&folder);
+}
+
 /// Opens the Import Model dialog for `file`, unticks `Small`, and
 /// imports the rest as `placement` says.
 fn import_without_small(app: &mut EditorApp, file: &Path, placement: Placement) {

@@ -21,6 +21,8 @@ pub enum ImportError {
     NotATexture,
     #[error("only WAV, OGG, MP3 and FLAC sounds can be used")]
     NotAudio,
+    #[error("only Radiance .hdr, PNG and JPEG sky images can be used")]
+    NotASkyImage,
     #[error("could not read it")]
     Read(#[source] io::Error),
     #[error(transparent)]
@@ -132,6 +134,23 @@ pub fn import_audio(project: &Path, file: &Path) -> Result<String, ImportError> 
         "sound",
     )
     .ok_or(ImportError::NotAudio)?
+}
+
+/// Where sky images picked from outside the project are copied to.
+pub const PROJECT_SKY_FOLDER: &str = "assets/sky";
+
+/// The path in `project` of the sky image `file`, for Lighting's
+/// `SkyImage`: its own if it's inside the project, otherwise a copy's in
+/// [`PROJECT_SKY_FOLDER`], as [`import_texture`] does for textures.
+pub fn import_sky_image(project: &Path, file: &Path) -> Result<String, ImportError> {
+    import_file(
+        project,
+        file,
+        PROJECT_SKY_FOLDER,
+        &crate::SKY_IMAGE_EXTENSIONS,
+        "sky",
+    )
+    .ok_or(ImportError::NotASkyImage)?
 }
 
 /// `file`'s path in `project`, copying it into `into` first if it's
@@ -328,6 +347,26 @@ mod tests {
     fn example_model() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../examples/hello-mesh/assets/models/pyramid.gltf")
+    }
+
+    #[test]
+    fn a_sky_image_from_outside_is_copied_into_the_sky_folder() {
+        let source = temp_folder("import-sky-source");
+        fs::write(source.join("noon.hdr"), b"#?RADIANCE").unwrap();
+        fs::write(source.join("notes.txt"), b"not a sky").unwrap();
+        let project = temp_folder("import-sky");
+        let path = import_sky_image(&project, &source.join("noon.hdr")).unwrap();
+        assert_eq!(path, "assets/sky/noon.hdr");
+        assert!(project.join("assets/sky/noon.hdr").is_file());
+        // One already in the project is used where it is.
+        assert_eq!(
+            import_sky_image(&project, &project.join("assets/sky/noon.hdr")).unwrap(),
+            "assets/sky/noon.hdr"
+        );
+        assert!(matches!(
+            import_sky_image(&project, &source.join("notes.txt")),
+            Err(ImportError::NotASkyImage)
+        ));
     }
 
     #[test]

@@ -38,6 +38,12 @@ pub enum Edit {
     PickBehaviorTree,
     /// Opens the agent's behavior tree in the Behavior Tree tab.
     OpenBehaviorTree,
+    /// Asks for a sky image file for Lighting's `SkyImage` with the file
+    /// picker, then asks whether to use it.
+    PickSkyImage,
+    /// Asks whether to use the sky image at this project path (dragged onto
+    /// the row from the Assets panel).
+    AskSkyImage(String),
     /// Animates the selected Part, Model or UI element: an Animator, a new
     /// clip and an Animation playing it, opened in the Animation tab.
     Animate,
@@ -861,6 +867,7 @@ fn value_control(ui: &mut egui::Ui, name: &'static str, value: Value) -> Option<
         Value::String(path) if name == "StateMachine" => controller_control(ui, &path),
         Value::String(path) if name == "Clip" => clip_control(ui, &path),
         Value::String(path) if name == "BehaviorTree" => behavior_tree_control(ui, &path),
+        Value::String(path) if name == "SkyImage" => sky_control(ui, &path),
         // Picked by the editor; the Terrain Studio says where it is.
         Value::String(path) if name == "DataFolder" => {
             ui.label(if path.is_empty() {
@@ -902,6 +909,56 @@ fn map_control(ui: &mut egui::Ui, name: &'static str, path: &str) -> Option<Edit
         ui.add(egui::Label::new(file).truncate())
             .on_hover_text(path);
     });
+    edit
+}
+
+/// Lighting's sky image, with buttons to pick a file and to go back to the
+/// sky colors. A sky dragged from the Assets panel can be let go on it.
+/// Both ask before the sky changes.
+fn sky_control(ui: &mut egui::Ui, path: &str) -> Option<Edit> {
+    let mut edit = None;
+    let row = ui.horizontal(|ui| {
+        if ui
+            .small_button(icons::FOLDER_OPEN)
+            .on_hover_text("Choose a sky image (.hdr, PNG or JPEG) from this computer")
+            .clicked()
+        {
+            edit = Some(Edit::PickSkyImage);
+        }
+        if path.is_empty() {
+            ui.weak("Sky colors");
+            return;
+        }
+        if ui
+            .small_button(icons::X)
+            .on_hover_text("Go back to the sky colors")
+            .clicked()
+        {
+            edit = Some(Edit::Property("SkyImage", Value::String(String::new())));
+        }
+        let file = path.rsplit('/').next().unwrap_or(path);
+        ui.add(egui::Label::new(file).truncate())
+            .on_hover_text(path);
+    });
+    if let Some(held) = row
+        .response
+        .dnd_hover_payload::<crate::asset_browser::AssetPayload>()
+        && held.0.kind == crate::asset_browser::AssetKind::Sky
+    {
+        let palette = theme::palette(ui.ctx());
+        ui.painter().rect_stroke(
+            row.response.rect.expand(2.0),
+            4,
+            egui::Stroke::new(1.5_f32, palette.accent),
+            egui::StrokeKind::Outside,
+        );
+        if let Some(payload) = row
+            .response
+            .dnd_release_payload::<crate::asset_browser::AssetPayload>()
+        {
+            edit = Some(Edit::AskSkyImage(payload.0.path.clone()));
+        }
+    }
     edit
 }
 

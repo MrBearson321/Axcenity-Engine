@@ -147,7 +147,7 @@ pub fn order(kind: AssetKind) -> u8 {
         AssetKind::Animation => 2,
         AssetKind::TextureSet | AssetKind::Material => 3,
         AssetKind::Texture | AssetKind::Image | AssetKind::Particle => 4,
-        AssetKind::Audio | AssetKind::BehaviorTree | AssetKind::DataTable => 5,
+        AssetKind::Audio | AssetKind::BehaviorTree | AssetKind::DataTable | AssetKind::Sky => 5,
     }
 }
 
