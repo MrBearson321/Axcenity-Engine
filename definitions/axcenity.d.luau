@@ -170,6 +170,8 @@ end
 declare extern type EnumItem with
 	--- The item's name, such as `"Neon"`.
 	Name: string
+	--- The item's number: an `Enum.RenderPriority`'s priority (`Enum.RenderPriority.Camera.Value` is 200), and for other enums its place in the list, from 0.
+	Value: number
 end
 
 --- The player's keyboard, mouse, touch screen and game controllers, and the input map's actions, from `game:GetService("UserInputService")`. LocalScripts only.
@@ -236,6 +238,38 @@ end
 declare extern type RunService with
 	--- Fires once every frame, after physics. The handler gets the frame's length in seconds: `function(deltaTime) ... end`.
 	Heartbeat: Signal
+	--- Fires once every frame, before physics. The handler gets the game time and the frame's length, in seconds: `function(time, deltaTime) ... end`.
+	Stepped: Signal
+	--- Fires once every frame just before it's drawn, after the functions bound with `BindToRenderStep`. The handler gets the frame's length in seconds. LocalScripts only. LocalScripts only.
+	RenderStepped: Signal
+	--- Runs `callback` with the frame's length every frame just before it's drawn, in `priority` order with the others bound (lowest first; `Enum.RenderPriority.Camera.Value` is 200). Binding a name again replaces it. LocalScripts only. LocalScripts only.
+	function BindToRenderStep(self, name: string, priority: number, callback: (number) -> ()): ()
+	--- Stops what was bound as `name`. LocalScripts only. LocalScripts only.
+	function UnbindFromRenderStep(self, name: string): ()
+	--- Whether this is a Script, on the server.
+	function IsServer(self): boolean
+	--- Whether this is a LocalScript, on the player's side.
+	function IsClient(self): boolean
+	--- Whether the game runs in the editor (Play, or the Console), not the player.
+	function IsStudio(self): boolean
+	--- Whether the game runs: false only in the editor's Console outside Play.
+	function IsRunning(self): boolean
+end
+
+--- Destroys Instances later without waiting, from `game:GetService("Debris")`.
+declare extern type Debris with
+	--- Destroys `instance` once `seconds` (left out: 10) have passed. Nothing happens if it's destroyed before then. The script carries on at once.
+	function AddItem(self, instance: Instance, seconds: number?): ()
+end
+
+--- JSON and GUIDs, from `game:GetService("HttpService")`. It doesn't reach the network.
+declare extern type HttpService with
+	--- `value` as JSON text. A table with keys 1, 2, 3 (or none) becomes an array; one with text keys an object. Numbers, strings, booleans and nil can go in; anything else, or a table inside itself, is an error.
+	function JSONEncode(self, value: any): string
+	--- The value JSON text holds: arrays and objects become tables, `null` nil. Text that isn't JSON is an error saying the line and column of the mistake.
+	function JSONDecode(self, json: string): any
+	--- A new random ID such as `"{0F8FAD5B-D9CB-469F-A165-70867728950E}"`; `false` leaves the braces off.
+	function GenerateGUID(self, wrapInCurlyBraces: boolean?): string
 end
 
 --- What loads first on the player's side, from `game:GetService("ReplicatedFirst")`.
@@ -716,6 +750,19 @@ declare extern type EnumCameraTypeItems with
 	Track: EnumCameraType
 end
 
+--- One choice of `Enum.RenderPriority`.
+declare extern type EnumRenderPriority extends EnumItem with
+end
+
+--- The choices of `Enum.RenderPriority`.
+declare extern type EnumRenderPriorityItems with
+	First: EnumRenderPriority
+	Input: EnumRenderPriority
+	Camera: EnumRenderPriority
+	Character: EnumRenderPriority
+	Last: EnumRenderPriority
+end
+
 --- Every enum, such as `Enum.Material`, `Enum.PartType` and `Enum.KeyCode`.
 declare extern type EnumLibrary with
 	Material: EnumMaterialItems
@@ -736,6 +783,7 @@ declare extern type EnumLibrary with
 	UserInputState: EnumUserInputStateItems
 	MouseBehavior: EnumMouseBehaviorItems
 	CameraType: EnumCameraTypeItems
+	RenderPriority: EnumRenderPriorityItems
 end
 
 -- Instances -----------------------------------------------------------------
@@ -845,11 +893,15 @@ declare extern type DataModel extends Instance with
 	ServerScriptService: ServerScriptService
 	--- The service with what each player starts with, such as StarterPlayerScripts.
 	StarterPlayer: StarterPlayer
+	--- Destroys Instances later (same as `game:GetService("Debris")`).
+	Debris: Debris
+	--- JSON and GUIDs (same as `game:GetService("HttpService")`).
+	HttpService: HttpService
 	--- The player's keyboard, mouse and controllers (same as `game:GetService("UserInputService")`). LocalScripts only.
 	UserInputService: UserInputService
 	--- Functions bound to inputs by priority (same as `game:GetService("ContextActionService")`). LocalScripts only.
 	ContextActionService: ContextActionService
-	--- The game's frame loop, with `Heartbeat` (same as `game:GetService("RunService")`).
+	--- The game's frame loop, with `Stepped`, `Heartbeat` and `RenderStepped` (same as `game:GetService("RunService")`).
 	RunService: RunService
 	--- Moves properties smoothly to goals (same as `game:GetService("TweenService")`).
 	TweenService: TweenService
@@ -866,7 +918,7 @@ declare extern type DataModel extends Instance with
 	--- What loads first on the player's side, with `RemoveDefaultLoadingScreen` (same as `game:GetService("ReplicatedFirst")`).
 	ReplicatedFirst: ReplicatedFirst
 	[string]: any
-	--- The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"SaveService"`, `"LocalizationService"`, `"GuiService"`, `"TweenService"`, `"CollectionService"`, `"UserGameSettings"`, `"UserInputService"` or `"ContextActionService"`.
+	--- The service with this class name, such as `"Players"`, `"ReplicatedFirst"`, `"RunService"`, `"SaveService"`, `"LocalizationService"`, `"GuiService"`, `"Debris"`, `"HttpService"`, `"TweenService"`, `"CollectionService"`, `"UserGameSettings"`, `"UserInputService"` or `"ContextActionService"`.
 	function GetService(self, className: string): Instance
 end
 
@@ -1049,6 +1101,33 @@ declare extern type RemoteEvent extends Instance with
 	function FireClient(self, player: Player, ...: any): ()
 	--- Sends the arguments to every player, where `OnClientEvent` fires. Scripts only.
 	function FireAllClients(self, ...: any): ()
+end
+
+--- Asks the server and waits for the answer: a LocalScript's `InvokeServer(...)` pauses until the server's `OnServerInvoke` returns, and returns what it returned. An error there is raised in the LocalScript. Keep it in ReplicatedStorage.
+declare extern type RemoteFunction extends Instance with
+	--- The function that answers `InvokeServer`: `remote.OnServerInvoke = function(player, ...) return ... end`. Setting it replaces the one before; it can be set, not read. Questions asked before it's set wait for it. Scripts only. Scripts only.
+	OnServerInvoke: (Player, ...any) -> ...any
+	[string]: any
+	--- Asks the server: pauses until its `OnServerInvoke` returns (it gets this player first, then the arguments), and returns what it returned. An error there is raised here, with the server script's line. LocalScripts only. LocalScripts only.
+	function InvokeServer(self, ...: any): ...any
+end
+
+--- An event scripts on the same side fire for each other: `Fire(...)` fires `Event` with the same values. It doesn't cross between Scripts and LocalScripts.
+declare extern type BindableEvent extends Instance with
+	--- Fires when a script on the same side calls `Fire`. The handler gets the same arguments (tables aren't copied).
+	Event: Signal
+	[string]: any
+	--- Fires `Event` with the arguments, for scripts on this side.
+	function Fire(self, ...: any): ()
+end
+
+--- A function scripts on the same side call for each other: `Invoke(...)` calls `OnInvoke` and returns what it returns. It doesn't cross between Scripts and LocalScripts.
+declare extern type BindableFunction extends Instance with
+	--- The function `Invoke` calls: `func.OnInvoke = function(...) return ... end`. Setting it replaces the one before; it can be set, not read. Each side has its own.
+	OnInvoke: (...any) -> ...any
+	[string]: any
+	--- Calls `OnInvoke` with the arguments and returns what it returns, waiting while it waits. Its errors are raised here.
+	function Invoke(self, ...: any): ...any
 end
 
 --- Someone playing the game, in Players. Made when they join.
@@ -2283,7 +2362,7 @@ declare function require(module: Instance): any
 --- Creates Instances.
 declare extern type InstanceLibrary with
 	--- Creates an Instance of this class with default properties and no parent. Set `Parent` to put it in the world.
-	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
+	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
 end
 
 --- Creates Instances.
@@ -2398,6 +2477,14 @@ declare extern type taskLibrary with
 	spawn: (callback: (...any) -> (), ...any) -> thread
 	--- Runs `callback` with the given arguments after `seconds`, without pausing this code.
 	delay: (seconds: number, callback: (...any) -> (), ...any) -> thread
+	--- Runs `callback` (or resumes a thread) with the given arguments at the next frame step, after this code has finished or paused.
+	defer: (callback: (...any) -> (), ...any) -> thread
+	--- Stops `thread` (from `task.spawn`, `task.delay` or `task.defer`) for good: it doesn't start or resume again. It can't stop the code running now.
+	cancel: (thread: thread) -> ()
+	--- Does nothing: every script runs on one thread, so there's nothing to wait for. For code written for parallel Luau.
+	synchronize: () -> ()
+	--- Does nothing: every script runs on one thread. For code written for parallel Luau.
+	desynchronize: () -> ()
 end
 
 --- Pauses scripts and runs functions later, without stopping the game.

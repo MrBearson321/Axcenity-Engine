@@ -714,6 +714,9 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::LocalScript => icons::CODE,
         ClassName::ModuleScript => icons::PUZZLE_PIECE,
         ClassName::RemoteEvent => icons::BROADCAST,
+        ClassName::RemoteFunction => icons::PHONE_CALL,
+        ClassName::BindableEvent => icons::LIGHTNING,
+        ClassName::BindableFunction => icons::FUNCTION,
         ClassName::Player => icons::USER,
         ClassName::Model => icons::PACKAGE,
         ClassName::Folder => icons::FOLDER,
@@ -834,7 +837,10 @@ pub fn class_color(class: ClassName, visuals: &egui::Visuals) -> Color32 {
         ClassName::Script => pick((226, 145, 82), (185, 95, 10)),
         ClassName::LocalScript => pick((90, 190, 175), (10, 120, 110)),
         ClassName::ModuleScript => pick((170, 145, 240), (105, 75, 190)),
-        ClassName::RemoteEvent => pick((232, 130, 170), (175, 50, 105)),
+        ClassName::RemoteEvent
+        | ClassName::RemoteFunction
+        | ClassName::BindableEvent
+        | ClassName::BindableFunction => pick((232, 130, 170), (175, 50, 105)),
         ClassName::Player => pick((125, 195, 125), (45, 125, 55)),
         _ => visuals.weak_text_color(),
     }

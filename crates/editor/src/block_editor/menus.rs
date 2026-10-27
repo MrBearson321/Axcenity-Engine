@@ -102,6 +102,8 @@ pub(super) fn name_menu(
     }
     if suggestions.is_empty() && kind == NameKind::Child {
         ui.weak("Nothing is in there yet in the editor.");
+    } else if suggestions.is_empty() && kind == NameKind::Bindable {
+        ui.weak("ReplicatedStorage has no BindableEvent yet: insert one there.");
     } else if suggestions.is_empty() {
         ui.weak(format!(
             "Its state machine has no {} yet (or pick the Animator first).",

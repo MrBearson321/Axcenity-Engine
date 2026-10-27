@@ -147,7 +147,39 @@ pub(super) fn block_objects(
                 names: controller_names,
             })
         })
+        .chain(std::iter::once(storage_info(world)))
         .collect()
+}
+
+/// ReplicatedStorage's entry (`block_editor::STORAGE_PATH`), whose names are
+/// the paths of the BindableEvents in it, for the event blocks' menus.
+fn storage_info(world: &World) -> block_editor::ObjectInfo {
+    let storage = world.replicated_storage();
+    let names = world
+        .descendants(storage)
+        .into_iter()
+        .filter(|&id| {
+            world
+                .get(id)
+                .is_some_and(|instance| instance.class() == ClassName::BindableEvent)
+        })
+        .filter_map(|id| {
+            let mut names = Vec::new();
+            let mut at = Some(id);
+            while let Some(here) = at.filter(|&here| here != storage) {
+                let instance = world.get(here)?;
+                names.push(instance.name().to_owned());
+                at = instance.parent();
+            }
+            names.reverse();
+            Some((block_editor::NameKind::Bindable, names.join(".")))
+        })
+        .collect();
+    block_editor::ObjectInfo {
+        path: block_editor::STORAGE_PATH.to_owned(),
+        class: ClassName::ReplicatedStorage,
+        names,
+    }
 }
 
 pub(super) fn overlay_button(

@@ -33,7 +33,7 @@ impl LuaRandom {
 
     /// A seed that differs each time, for `Random.new()`. Rust seeds each
     /// `RandomState` from the operating system's randomness.
-    fn fresh_seed() -> u64 {
+    pub(crate) fn fresh_seed() -> u64 {
         std::collections::hash_map::RandomState::new()
             .build_hasher()
             .finish()
@@ -46,7 +46,7 @@ impl LuaRandom {
         shifted.rotate_right((old >> 59) as u32)
     }
 
-    fn next_u64(&mut self) -> u64 {
+    pub(crate) fn next_u64(&mut self) -> u64 {
         (u64::from(self.next_u32()) << 32) | u64::from(self.next_u32())
     }
 

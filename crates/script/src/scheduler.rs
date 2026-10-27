@@ -22,7 +22,7 @@ use crate::{OutputKind, debugger, push_error, push_output, watchdog};
 /// Frame times are summed as floating-point numbers, which aren't exact:
 /// sixty steps of 1/60 add up to slightly less than 1. A task this close to
 /// due counts as due, so rounding never delays it by a whole frame.
-const TOLERANCE_SECONDS: f64 = 1e-6;
+pub const TOLERANCE_SECONDS: f64 = 1e-6;
 
 /// Lives in Lua's app data, so that `task.wait` and `task.delay` can reach it.
 #[derive(Default)]
@@ -81,6 +81,11 @@ impl Scheduler {
         self.next_order += 1;
     }
 
+    /// Drops `thread` from the waiting coroutines (`task.cancel`).
+    pub fn cancel(&mut self, thread: &Thread) {
+        self.waiting.retain(|task| task.thread != *thread);
+    }
+
     /// Drops every waiting coroutine of `script`, so they never resume.
     pub fn forget_script(&mut self, script: InstanceId) {
         self.waiting.retain(|task| task.script != Some(script));
@@ -108,6 +113,12 @@ impl Scheduler {
 pub fn scheduler_mut(lua: &Lua) -> mlua::Result<mlua::AppDataRefMut<'_, Scheduler>> {
     lua.app_data_mut::<Scheduler>()
         .ok_or_else(|| mlua::Error::runtime("the task scheduler isn't running"))
+}
+
+/// Game time in seconds since the runtime was created.
+pub fn now(lua: &Lua) -> f64 {
+    lua.app_data_ref::<Scheduler>()
+        .map_or(0.0, |scheduler| scheduler.now)
 }
 
 /// The script whose code is running now: the owner of the coroutine being

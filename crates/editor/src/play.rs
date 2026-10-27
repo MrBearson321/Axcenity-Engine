@@ -140,6 +140,8 @@ impl Session {
         session.scripts.set_input_map(input_map.clone());
         session.scripts.set_graphics(graphics, capabilities);
         session.scripts.enable_debugger();
+        // `RunService:IsStudio()` is true in the editor's Play.
+        session.scripts.set_studio(true);
         session.scripts.set_breakpoints(breakpoints);
         guard(|| {
             // Animators start in their default states before any script
@@ -390,6 +392,10 @@ impl Session {
             // 2. Resume scripts whose wait is over (and due `task.delay`s),
             //    after delivering RemoteEvent messages.
             self.scripts.step(&mut self.world, seconds);
+            // `RunService.Stepped`, before physics.
+            if self.scripts.pause().is_none() {
+                self.scripts.stepped(&mut self.world, seconds);
+            }
             self.forward_output(output);
             cost.scripts += lap();
             if self.scripts.pause().is_some() {
@@ -414,6 +420,13 @@ impl Session {
             let ready = self.scripts.take_loading_screen_removed();
             if let Some(loading) = &mut self.loading_gui {
                 loading.advance(&mut self.world, seconds as f32, ready);
+            }
+            // Before the frame is drawn: functions bound with
+            // `BindToRenderStep`, then `RenderStepped`, so a camera they
+            // move is this frame's.
+            if self.scripts.pause().is_none() {
+                self.scripts.render_step(&mut self.world, seconds);
+                self.forward_output(output);
             }
             moved = self.scripts.take_camera_move();
             if let Some(graphics) = self.scripts.take_graphics_change() {

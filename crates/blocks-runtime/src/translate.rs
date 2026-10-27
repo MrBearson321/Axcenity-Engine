@@ -73,8 +73,13 @@ pub fn translate(script: &BlockScript) -> Result<Translation, TranslateError> {
             BlockKind::WhenKeyPressed { .. } => {
                 services.insert("UserInputService");
             }
-            BlockKind::EveryFrame { .. } => {
+            BlockKind::EveryFrame { .. }
+            | BlockKind::BeforePhysics { .. }
+            | BlockKind::BeforeRender { .. } => {
                 services.insert("RunService");
+            }
+            BlockKind::DestroyAfter { .. } => {
+                services.insert("Debris");
             }
             kind if kind.tweens() => {
                 services.insert("TweenService");
@@ -247,6 +252,17 @@ impl Writer {
                 "RunService.Heartbeat:Connect(function(deltaTime)".to_owned(),
                 body,
             ),
+            BlockKind::BeforePhysics { body } => (
+                "RunService.Stepped:Connect(function(time, deltaTime)".to_owned(),
+                body,
+            ),
+            BlockKind::BeforeRender { body } => (
+                "RunService.RenderStepped:Connect(function(deltaTime)".to_owned(),
+                body,
+            ),
+            BlockKind::WhenEventFired { event, body } => {
+                (format!("{}.Event:Connect(function()", stored(event)?), body)
+            }
             BlockKind::WhenSoundEnded { sound, body } => {
                 (format!("{}.Ended:Connect(function()", target(sound)?), body)
             }
@@ -398,6 +414,10 @@ impl Writer {
             }
             BlockKind::WaitForChild { target: t, name } => {
                 self.line(format!("{}:WaitForChild({})", container(t)?, quote(name)));
+            }
+            BlockKind::DestroyAfter { target: t, seconds } => {
+                let seconds = self.expression(seconds)?;
+                self.line(format!("Debris:AddItem({}, {seconds})", target(t)?));
             }
             BlockKind::If { condition, body } => {
                 let condition = self.expression(condition)?;
@@ -723,6 +743,7 @@ impl Writer {
                 self.line(format!("print({value})"));
             }
             BlockKind::Destroy { target: t } => self.line(format!("{}:Destroy()", target(t)?)),
+            BlockKind::FireEvent { event } => self.line(format!("{}:Fire()", stored(event)?)),
             BlockKind::CloneInto { target: t, parent } => self.line(format!(
                 "{}:Clone().Parent = {}",
                 target(t)?,
@@ -737,6 +758,9 @@ impl Writer {
             | BlockKind::WhenMouseLeaves { .. }
             | BlockKind::WhenValueChanged { .. }
             | BlockKind::EveryFrame { .. }
+            | BlockKind::BeforePhysics { .. }
+            | BlockKind::BeforeRender { .. }
+            | BlockKind::WhenEventFired { .. }
             | BlockKind::WhenSoundEnded { .. }
             | BlockKind::WhenStateChanged { .. }
             | BlockKind::WhenAnimationEvent { .. }
@@ -929,6 +953,12 @@ pub(super) fn target(path: &str) -> Result<String, TranslateError> {
                 format!("{prefix}[{}]", quote(part))
             }
         }))
+}
+
+/// An object in ReplicatedStorage, such as a BindableEvent, by its dotted
+/// path there: `Events.Scored` is `game.ReplicatedStorage.Events.Scored`.
+pub(super) fn stored(path: &str) -> Result<String, TranslateError> {
+    Ok(target(path)?.replacen("workspace", "game.ReplicatedStorage", 1))
 }
 
 /// Like [`target`], with an empty path meaning the Workspace itself.

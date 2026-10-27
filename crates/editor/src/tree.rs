@@ -17,6 +17,9 @@ pub enum Insertable {
     Model,
     Folder,
     RemoteEvent,
+    /// A RemoteFunction, BindableEvent or BindableFunction: like a
+    /// RemoteEvent, kept where both sides find it.
+    Messenger(ClassName),
     ScreenGui,
     Frame,
     TextLabel,
@@ -99,6 +102,12 @@ impl Insertable {
     pub const CHECKPOINTS: [Insertable; 1] = [Insertable::Checkpoint];
     /// Camera viewpoints, placed where the editor's camera is.
     pub const CAMERAS: [Insertable; 1] = [Insertable::Camera];
+    /// What scripts ask and tell each other with, after the RemoteEvent.
+    pub const MESSENGERS: [Insertable; 3] = [
+        Insertable::Messenger(ClassName::RemoteFunction),
+        Insertable::Messenger(ClassName::BindableEvent),
+        Insertable::Messenger(ClassName::BindableFunction),
+    ];
     /// Value objects, which hold one value for scripts.
     pub const VALUES: [Insertable; 8] = [
         Insertable::Value(ClassName::IntValue),
@@ -122,6 +131,7 @@ impl Insertable {
             Insertable::Model => "Model",
             Insertable::Folder => "Folder",
             Insertable::RemoteEvent => "RemoteEvent",
+            Insertable::Messenger(class) => class.as_str(),
             Insertable::ScreenGui => "ScreenGui",
             Insertable::Frame => "Frame",
             Insertable::TextLabel => "TextLabel",
@@ -159,6 +169,7 @@ impl Insertable {
             Insertable::Model => ClassName::Model,
             Insertable::Folder => ClassName::Folder,
             Insertable::RemoteEvent => ClassName::RemoteEvent,
+            Insertable::Messenger(class) => class,
             Insertable::ScreenGui => ClassName::ScreenGui,
             Insertable::Frame => ClassName::Frame,
             Insertable::TextLabel => ClassName::TextLabel,
@@ -318,11 +329,12 @@ pub fn create(world: &mut World, what: Insertable, position: Vector3) -> Instanc
 /// Where a new `what` goes: into `near` if it's ReplicatedStorage, or a
 /// Model or Folder in a place that's saved (see [`is_saved`]), or for an
 /// Animation, a part or a ScreenGui or frame it can animate. Otherwise a
-/// RemoteEvent goes into ReplicatedStorage (where both sides find it, as in
-/// Roblox), and anything else into the Workspace.
+/// RemoteEvent (or RemoteFunction, BindableEvent or BindableFunction) goes
+/// into ReplicatedStorage (where both sides find it, as in Roblox), and
+/// anything else into the Workspace.
 pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) -> InstanceId {
     let default = match what {
-        Insertable::RemoteEvent => world.replicated_storage(),
+        Insertable::RemoteEvent | Insertable::Messenger(_) => world.replicated_storage(),
         what if what.is_ui_element() => screen_gui_for(world, near).unwrap_or(world.workspace()),
         _ => world.workspace(),
     };

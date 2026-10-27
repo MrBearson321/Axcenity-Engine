@@ -18,9 +18,10 @@ use crate::{
 
 /// The services blocks get with `game:GetService`, which the translation
 /// declares at the top itself when blocks need them.
-const SERVICES: [&str; 7] = [
+const SERVICES: [&str; 8] = [
     "UserInputService",
     "RunService",
+    "Debris",
     "TweenService",
     "SaveService",
     "LocalizationService",
@@ -145,8 +146,13 @@ fn used_by(script: &BlockScript) -> (BTreeSet<String>, BTreeSet<String>) {
             BlockKind::WhenKeyPressed { .. } => {
                 services.insert("UserInputService".to_owned());
             }
-            BlockKind::EveryFrame { .. } => {
+            BlockKind::EveryFrame { .. }
+            | BlockKind::BeforePhysics { .. }
+            | BlockKind::BeforeRender { .. } => {
                 services.insert("RunService".to_owned());
+            }
+            BlockKind::DestroyAfter { .. } => {
+                services.insert("Debris".to_owned());
             }
             kind if kind.tweens() => {
                 services.insert("TweenService".to_owned());
@@ -470,6 +476,37 @@ impl<'a> Converter<'a> {
                 }
                 Some(Block::new(BlockKind::EveryFrame { body }))
             }
+            "Stepped" if self.is_service(object, "RunService") => {
+                let function = self.handler(handler, 2)?;
+                let body = self.body(&function.body, Scope::default());
+                let named = ["time", "deltaTime"];
+                if function
+                    .params
+                    .iter()
+                    .zip(named)
+                    .any(|(param, name)| param != name && code_mentions(&body, param))
+                {
+                    return None;
+                }
+                Some(Block::new(BlockKind::BeforePhysics { body }))
+            }
+            "RenderStepped" if self.is_service(object, "RunService") => {
+                let function = self.handler(handler, 1)?;
+                let body = self.body(&function.body, Scope::default());
+                if let Some(param) = function.params.first()
+                    && param != "deltaTime"
+                    && code_mentions(&body, param)
+                {
+                    return None;
+                }
+                Some(Block::new(BlockKind::BeforeRender { body }))
+            }
+            "Event" => {
+                let event = self.stored(object)?;
+                let function = self.handler(handler, 0)?;
+                let body = self.body(&function.body, Scope::default());
+                Some(Block::new(BlockKind::WhenEventFired { event, body }))
+            }
             "InputBegan" if self.is_service(object, "UserInputService") => {
                 let function = self.handler(handler, 1)?;
                 let param = function.params.first()?;
@@ -578,6 +615,41 @@ impl<'a> Converter<'a> {
     fn is_service(&self, expr: &Expr, service: &str) -> bool {
         self.services.contains(service)
             && matches!(&expr.kind, ExprKind::Name(name) if name == service)
+    }
+
+    /// An object in ReplicatedStorage, such as
+    /// `game.ReplicatedStorage.Events.Scored`, as its path there `Events.Scored`.
+    fn stored(&self, expr: &Expr) -> Option<String> {
+        fn parts(expr: &Expr, out: &mut Vec<String>) -> Option<()> {
+            match &expr.kind {
+                ExprKind::Field(game, name)
+                    if name == "ReplicatedStorage"
+                        && matches!(&game.kind, ExprKind::Name(g) if g == "game") =>
+                {
+                    Some(())
+                }
+                ExprKind::Field(inner, name) => {
+                    parts(inner, out)?;
+                    out.push(name.clone());
+                    Some(())
+                }
+                ExprKind::Index(inner, key) => {
+                    let ExprKind::Str(name) = &key.kind else {
+                        return None;
+                    };
+                    if name.is_empty() || name.contains('.') {
+                        return None;
+                    }
+                    parts(inner, out)?;
+                    out.push(name.clone());
+                    Some(())
+                }
+                _ => None,
+            }
+        }
+        let mut path = Vec::new();
+        parts(expr, &mut path)?;
+        (!path.is_empty()).then(|| path.join("."))
     }
 
     /// Like [`Self::target`], with `workspace` itself as the empty path.
@@ -825,6 +897,26 @@ impl<'a> Converter<'a> {
                 Some(BlockKind::PlayAnimation {
                     animator: self.target(animator)?,
                     animation: self.target(&loaded[0])?,
+                })
+            }
+            // game.ReplicatedStorage.Scored:Fire()
+            ExprKind::Method(object, method, args)
+                if method == "Fire" && args.is_empty() && self.stored(object).is_some() =>
+            {
+                Some(BlockKind::FireEvent {
+                    event: self.stored(object)?,
+                })
+            }
+            // Debris:AddItem(workspace.Spark, 2)
+            ExprKind::Method(object, method, args)
+                if method == "AddItem" && self.is_service(object, "Debris") =>
+            {
+                let [item, seconds] = args.as_slice() else {
+                    return None;
+                };
+                Some(BlockKind::DestroyAfter {
+                    target: self.target(item)?,
+                    seconds: self.expression(seconds, scope),
                 })
             }
             ExprKind::Method(object, method, args) if args.is_empty() => {

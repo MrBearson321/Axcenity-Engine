@@ -520,10 +520,11 @@ pub enum EnumType {
     UserInputState,
     MouseBehavior,
     CameraType,
+    RenderPriority,
 }
 
 impl EnumType {
-    pub const ALL: [EnumType; 18] = [
+    pub const ALL: [EnumType; 19] = [
         EnumType::Material,
         EnumType::PartType,
         EnumType::KeyCode,
@@ -542,6 +543,7 @@ impl EnumType {
         EnumType::UserInputState,
         EnumType::MouseBehavior,
         EnumType::CameraType,
+        EnumType::RenderPriority,
     ];
 
     pub fn name(self) -> &'static str {
@@ -564,6 +566,7 @@ impl EnumType {
             EnumType::UserInputState => "UserInputState",
             EnumType::MouseBehavior => "MouseBehavior",
             EnumType::CameraType => "CameraType",
+            EnumType::RenderPriority => "RenderPriority",
         }
     }
 
@@ -588,6 +591,7 @@ impl EnumType {
             EnumType::UserInputState => UserInputState::ALL.iter().map(|s| s.as_str()).collect(),
             EnumType::MouseBehavior => MouseBehavior::ALL.iter().map(|b| b.as_str()).collect(),
             EnumType::CameraType => CameraType::ALL.iter().map(|t| t.as_str()).collect(),
+            EnumType::RenderPriority => RENDER_PRIORITIES.iter().map(|(name, _)| *name).collect(),
         }
     }
 
@@ -603,6 +607,16 @@ impl EnumType {
         }
     }
 }
+
+/// `Enum.RenderPriority`'s items and their `Value`s: where in the frame a
+/// function bound with `BindToRenderStep` runs, lowest first.
+const RENDER_PRIORITIES: [(&str, u32); 5] = [
+    ("First", 0),
+    ("Input", 100),
+    ("Camera", 200),
+    ("Character", 300),
+    ("Last", 2000),
+];
 
 /// One enum item, such as `Enum.Material.Neon`. `name` is always one of
 /// `enum_type`'s item names.
@@ -620,6 +634,23 @@ impl LuaEnumItem {
             .into_iter()
             .find(|item| *item == name)
             .map(|name| Self { enum_type, name })
+    }
+
+    /// The item's `Value`: a RenderPriority's priority, or for any other
+    /// enum the item's place in its list, from 0.
+    pub fn value(self) -> u32 {
+        if self.enum_type == EnumType::RenderPriority
+            && let Some((_, value)) = RENDER_PRIORITIES
+                .iter()
+                .find(|(name, _)| *name == self.name)
+        {
+            return *value;
+        }
+        let names = self.enum_type.item_names();
+        names
+            .iter()
+            .position(|name| *name == self.name)
+            .unwrap_or(0) as u32
     }
 
     pub fn key(key: KeyCode) -> Self {
@@ -671,7 +702,8 @@ impl LuaEnumItem {
             | EnumType::UserInputType
             | EnumType::UserInputState
             | EnumType::MouseBehavior
-            | EnumType::CameraType => None,
+            | EnumType::CameraType
+            | EnumType::RenderPriority => None,
         }
     }
 }
@@ -719,6 +751,7 @@ impl UserData for LuaEnumType {
 impl UserData for LuaEnumItem {
     fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
         fields.add_field_method_get("Name", |_, item| Ok(item.name));
+        fields.add_field_method_get("Value", |_, item| Ok(item.value()));
     }
 
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {

@@ -778,6 +778,7 @@ dependencies = [
  "glam 0.34.1",
  "luau0-src",
  "mlua",
+ "serde_json",
 ]
 
 [[package]]

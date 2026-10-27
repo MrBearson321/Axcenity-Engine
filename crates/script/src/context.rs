@@ -20,8 +20,8 @@ use crate::remote::{self, Message, Outbox};
 use crate::sides::Side;
 use crate::user_settings::UserGraphics;
 use crate::{
-    Output, OutputLine, changes, console, debugger, events, modules, push_error, sandbox,
-    scheduler, tree, tween, watchdog, with_world,
+    Output, OutputLine, bindable, changes, console, debris, debugger, events, modules, push_error,
+    run_service, sandbox, scheduler, tree, tween, watchdog, with_world,
 };
 use axcenity_core::MouseBehavior;
 use axcenity_core::input::{InputEvent, InputMap};
@@ -58,6 +58,8 @@ impl Context {
         lua.set_app_data(events::Connections::default());
         lua.set_app_data(tween::Tweens::default());
         lua.set_app_data(modules::Modules::default());
+        lua.set_app_data(bindable::Callbacks::default());
+        lua.set_app_data(run_service::RunFlags::default());
         if side == Side::Client {
             lua.set_app_data(Inputs::default());
             lua.set_app_data(Camera::default());
@@ -75,6 +77,10 @@ impl Context {
             .expect("changing the string metatable only fails when out of memory");
         let mut methods = remote::methods(&lua)
             .expect("creating the RemoteEvent methods only fails when out of memory");
+        methods.extend(
+            bindable::methods(&lua)
+                .expect("creating the Bindable methods only fails when out of memory"),
+        );
         methods.extend(
             instance::sound_methods(&lua)
                 .expect("creating Sound methods only fails when out of memory"),
@@ -180,6 +186,15 @@ impl Context {
         if let Some(mut inputs) = self.lua.app_data_mut::<Inputs>() {
             inputs.forget_script(script);
         }
+        if let Some(mut callbacks) = self.lua.app_data_mut::<bindable::Callbacks>() {
+            callbacks.forget_script(script);
+        }
+        if let Some(mut functions) = self.lua.app_data_mut::<remote::RemoteFunctions>() {
+            functions.forget_script(script);
+        }
+        if let Some(mut steps) = self.lua.app_data_mut::<run_service::RenderSteps>() {
+            steps.forget_script(script);
+        }
     }
 
     /// Compiles `source` without running it, for its syntax errors.
@@ -252,13 +267,38 @@ impl Context {
         if let Some(mut connections) = self.lua.app_data_mut::<events::Connections>() {
             connections.forget(|id| world.contains(id), &tweens);
         }
+        if let Some(mut callbacks) = self.lua.app_data_mut::<bindable::Callbacks>() {
+            callbacks.forget(|id| world.contains(id));
+        }
         with_world(&self.lua, world, || {
             remote::deliver(&self.lua, messages);
             // Before scripts resume, so a script that waited sees this
             // frame's tweened values.
             tween::step(&self.lua, seconds);
             scheduler::step(&self.lua, seconds);
+            debris::step(&self.lua);
         });
+    }
+
+    /// Fires `RunService.Stepped`, before physics.
+    pub fn fire_stepped(&self, world: &mut World, seconds: f64) {
+        with_world(&self.lua, world, || {
+            run_service::fire_stepped(&self.lua, seconds)
+        });
+    }
+
+    /// Runs the functions bound to the render step, then fires
+    /// `RunService.RenderStepped`, just before the frame is drawn.
+    pub fn render_step(&self, world: &mut World, seconds: f64) {
+        with_world(&self.lua, world, || {
+            run_service::render_step(&self.lua, seconds)
+        });
+    }
+
+    /// Whether this is the editor's Play (`RunService:IsStudio`), and
+    /// whether the game runs (`IsRunning`).
+    pub fn set_run_flags(&self, flags: run_service::RunFlags) {
+        self.lua.set_app_data(flags);
     }
 
     /// Frame step 4: fires `Touched` on both parts of each pair.

@@ -125,6 +125,30 @@ pub const SIDE_ONLY_APIS: &[SideOnlyApi] = &[
         instead: "use OnServerEvent to receive what LocalScripts send",
     },
     SideOnlyApi {
+        name: "InvokeServer",
+        side: Side::Client,
+        because: "it asks the server from the player's side",
+        instead: "a Script can call a function on its own side directly, or use a BindableFunction's Invoke",
+    },
+    SideOnlyApi {
+        name: "RenderStepped",
+        side: Side::Client,
+        because: "frames are drawn on the player's screen",
+        instead: "use RunService.Heartbeat or Stepped, which fire every frame on both sides",
+    },
+    SideOnlyApi {
+        name: "BindToRenderStep",
+        side: Side::Client,
+        because: "frames are drawn on the player's screen",
+        instead: "connect to RunService.Heartbeat or Stepped, which fire every frame on both sides",
+    },
+    SideOnlyApi {
+        name: "UnbindFromRenderStep",
+        side: Side::Client,
+        because: "functions are only bound to the render step on the player's side",
+        instead: "disconnect the Heartbeat or Stepped connection instead",
+    },
+    SideOnlyApi {
         name: "UserGameSettings",
         side: Side::Client,
         because: "graphics settings belong to the player's computer",
@@ -147,6 +171,12 @@ pub const SIDE_ONLY_APIS: &[SideOnlyApi] = &[
         side: Side::Server,
         because: "it sends a message from the server to every player",
         instead: "to reach Scripts, use FireServer",
+    },
+    SideOnlyApi {
+        name: "OnServerInvoke",
+        side: Side::Server,
+        because: "it answers what LocalScripts ask with InvokeServer",
+        instead: "call InvokeServer from a LocalScript to ask the server",
     },
     SideOnlyApi {
         name: "OnServerEvent",

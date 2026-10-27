@@ -44,6 +44,9 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         | BlockKind::WhenMouseLeaves { .. }
         | BlockKind::WhenValueChanged { .. }
         | BlockKind::EveryFrame { .. }
+        | BlockKind::BeforePhysics { .. }
+        | BlockKind::BeforeRender { .. }
+        | BlockKind::WhenEventFired { .. }
         | BlockKind::WhenSoundEnded { .. }
         | BlockKind::WhenStateChanged { .. }
         | BlockKind::WhenAnimationEvent { .. }
@@ -110,9 +113,11 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         BlockKind::SetCameraType { .. } => 57,
         BlockKind::PointCameraAt { .. } => 58,
         BlockKind::ShakeCamera { .. } => 59,
+        BlockKind::DestroyAfter { .. } => 60,
+        BlockKind::FireEvent { .. } => 61,
     })
 }
-const STATEMENT_COUNT: usize = 60;
+const STATEMENT_COUNT: usize = 62;
 
 /// One of each statement block, with the Lua it must produce.
 fn every_statement() -> Vec<(BlockKind, &'static str)> {
@@ -559,6 +564,19 @@ fn every_statement() -> Vec<(BlockKind, &'static str)> {
             },
             "workspace.CurrentCamera:Shake(1.5, 0.5)",
         ),
+        (
+            BlockKind::DestroyAfter {
+                target: "Spark".to_owned(),
+                seconds: number(2.0),
+            },
+            "Debris:AddItem(workspace.Spark, 2)",
+        ),
+        (
+            BlockKind::FireEvent {
+                event: "Events.Scored".to_owned(),
+            },
+            "game.ReplicatedStorage.Events.Scored:Fire()",
+        ),
     ]
 }
 
@@ -677,6 +695,15 @@ fn translation_covers_every_event_block() {
                 body: quiet(37),
             },
         ),
+        block(38, BlockKind::BeforePhysics { body: quiet(39) }),
+        block(40, BlockKind::BeforeRender { body: quiet(41) }),
+        block(
+            42,
+            BlockKind::WhenEventFired {
+                event: "Scored".to_owned(),
+                body: quiet(43),
+            },
+        ),
     ];
     let source = translate(&script(blocks)).unwrap().source;
     for lua in [
@@ -698,11 +725,14 @@ fn translation_covers_every_event_block() {
         "workspace.Settings.Volume.ValueChanged:Connect(function()",
         "workspace.Guard.NavigationAgent.PlayerSensed:Connect(function(sense)",
         "    if sense == \"Sight\" then",
+        "RunService.Stepped:Connect(function(time, deltaTime)",
+        "RunService.RenderStepped:Connect(function(deltaTime)",
+        "game.ReplicatedStorage.Scored.Event:Connect(function()",
     ] {
         assert!(source.contains(lua), "missing `{lua}`:\n{source}");
     }
     // Unattached blocks don't run.
-    assert_eq!(source.matches("do return end").count(), 11, "{source}");
+    assert_eq!(source.matches("do return end").count(), 14, "{source}");
 }
 
 #[test]
@@ -1395,6 +1425,15 @@ fn every_block_script() -> BlockScript {
             BlockKind::WhenAgentSenses {
                 agent: "Guard.NavigationAgent".to_owned(),
                 sense: "Hearing".to_owned(),
+                body: body(),
+            },
+        ),
+        block(13, BlockKind::BeforePhysics { body: body() }),
+        block(14, BlockKind::BeforeRender { body: body() }),
+        block(
+            15,
+            BlockKind::WhenEventFired {
+                event: "Events.Scored".to_owned(),
                 body: body(),
             },
         ),
@@ -2175,4 +2214,120 @@ fn camera_blocks_hold_point_and_shake_the_camera_and_find_the_part_under_the_mou
         "looks down at the pad: {held:?}"
     );
     assert_ne!(game.shake.position, Vector3::default());
+}
+
+#[test]
+fn event_and_frame_blocks_fire_bindables_destroy_later_and_run_before_physics_and_render() {
+    let server = translate(&script(vec![
+        block(
+            1,
+            BlockKind::WhenEventFired {
+                event: "Scored".to_owned(),
+                body: vec![
+                    block(
+                        2,
+                        BlockKind::Print {
+                            value: Expression::Text {
+                                value: "scored".to_owned(),
+                            },
+                        },
+                    ),
+                    block(
+                        3,
+                        BlockKind::DestroyAfter {
+                            target: "Spark".to_owned(),
+                            seconds: number(0.5),
+                        },
+                    ),
+                ],
+            },
+        ),
+        block(
+            4,
+            BlockKind::BeforePhysics {
+                body: vec![block(
+                    5,
+                    BlockKind::ChangeVariable {
+                        name: "steps".to_owned(),
+                        by: number(1.0),
+                    },
+                )],
+            },
+        ),
+        block(
+            6,
+            BlockKind::WhenStarted {
+                body: vec![block(
+                    7,
+                    BlockKind::FireEvent {
+                        event: "Scored".to_owned(),
+                    },
+                )],
+            },
+        ),
+    ]))
+    .unwrap()
+    .source;
+    let client = translate(&script(vec![block(
+        1,
+        BlockKind::BeforeRender {
+            body: vec![block(
+                2,
+                BlockKind::Print {
+                    value: Expression::Text {
+                        value: "render".to_owned(),
+                    },
+                },
+            )],
+        },
+    )]))
+    .unwrap()
+    .source;
+    // Both come back from Lua as the same blocks.
+    for lua in [&server, &client] {
+        let back = from_lua(lua).unwrap();
+        assert!(!has_code(&back), "{back:#?}");
+        assert_eq!(&translate(&back).unwrap().source, lua);
+    }
+
+    let mut world = World::new();
+    let scored = world.create(ClassName::BindableEvent).unwrap();
+    world.set_name(scored, "Scored").unwrap();
+    world
+        .set_parent(scored, Some(world.replicated_storage()))
+        .unwrap();
+    let spark = world.create(ClassName::Part).unwrap();
+    world.set_name(spark, "Spark").unwrap();
+    world.set_parent(spark, Some(world.workspace())).unwrap();
+    let mut runtime = ScriptRuntime::new();
+    let script = world.create(ClassName::Script).unwrap();
+    world
+        .set_parent(script, Some(world.server_script_service()))
+        .unwrap();
+    runtime.start_script(&mut world, script, "scripts/Blocks.server.lua", &server);
+    let local = world.create(ClassName::LocalScript).unwrap();
+    world
+        .set_parent(local, Some(world.starter_player_scripts()))
+        .unwrap();
+    runtime.start_script(&mut world, local, "scripts/Blocks.client.lua", &client);
+    let said = |runtime: &mut ScriptRuntime| -> Vec<String> {
+        runtime
+            .take_output()
+            .into_iter()
+            .map(|line| {
+                assert_eq!(line.kind, OutputKind::Print, "{}", line.text);
+                line.text
+            })
+            .collect()
+    };
+    assert_eq!(said(&mut runtime), ["scored"]);
+    for _ in 0..30 {
+        runtime.step(&mut world, 1.0 / 60.0);
+        runtime.stepped(&mut world, 1.0 / 60.0);
+        runtime.render_step(&mut world, 1.0 / 60.0);
+    }
+    assert!(!world.contains(spark), "destroyed half a second later");
+    assert_eq!(said(&mut runtime), vec!["render"; 30]);
+    runtime.run_command(&mut world, "print('ok')").unwrap();
+    assert_eq!(said(&mut runtime), ["ok"]);
 }

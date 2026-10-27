@@ -128,6 +128,11 @@ impl Shared {
     pub fn wait(&self) -> &Function {
         self.task.wait()
     }
+
+    /// The engine's `pcall`, which passes errors on as `path:line: message`.
+    pub fn pcall(&self) -> &Function {
+        &self.protected.pcall
+    }
 }
 
 /// Every string has the same metatable, whose `__index` is Lua's real

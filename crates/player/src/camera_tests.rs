@@ -42,9 +42,11 @@ impl App {
         let events = self.input.take_events(self.pointer);
         self.scripts.input_events(&mut self.world, &events);
         self.scripts.step(&mut self.world, f64::from(FRAME));
+        self.scripts.stepped(&mut self.world, f64::from(FRAME));
         self.characters.keep_kinematic(&mut self.world);
         self.physics.step(&mut self.world, f64::from(FRAME));
         self.scripts.heartbeat(&mut self.world, f64::from(FRAME));
+        self.render_step(FRAME);
         self.end_camera(FRAME);
     }
 
@@ -220,6 +222,49 @@ fn world_to_screen_point_keeps_the_tag_over_the_beacon_as_the_camera_moves() {
     assert!(
         checked > 100,
         "the camera should move for most of it: {checked}"
+    );
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+/// unified Phase 32 with the `hello-messages` example: functions bound with
+/// `BindToRenderStep` run in priority order every frame before it's drawn
+/// (the drawn camera is this frame's orbit), Debris clears each spark two
+/// seconds after it appears, and the LocalScript's `InvokeServer` gets the
+/// server's score.
+#[test]
+fn render_step_functions_place_the_drawn_camera_in_priority_order_and_debris_clears_sparks() {
+    let (mut app, folder) = open("hello-messages", None);
+    let size = (960, 540);
+    let sparks = |app: &App| {
+        app.world
+            .get(app.world.workspace())
+            .unwrap()
+            .children()
+            .iter()
+            .filter(|&&id| app.world.get(id).is_some_and(|part| part.name() == "Spark"))
+            .count()
+    };
+    let mut said = Vec::new();
+    for frame in 1..=200 {
+        app.camera_frame(size);
+        // "Turn" (Input priority) runs before "Orbit" (Camera priority), so
+        // the drawn camera has this frame's angle, not last frame's.
+        let angle = frame as f32 * FRAME * 0.5;
+        let want = Vector3::new(angle.sin() * 20.0, 10.0, angle.cos() * 20.0);
+        let shown = app.shown_view();
+        assert!(
+            near(shown.position, want, 1e-2),
+            "frame {frame}: {shown:?}, want {want:?}"
+        );
+        // A spark a second, each gone two seconds later: never more than two.
+        assert!(sparks(&app) <= 2, "frame {frame}: {} sparks", sparks(&app));
+        said.extend(app.said());
+    }
+    assert_eq!(sparks(&app), 2);
+    assert!(
+        said.iter().any(|line| line.starts_with("Score: ")
+            && line.contains("{\"player\":\"Player\",\"score\":")),
+        "{said:?}"
     );
     let _ = std::fs::remove_dir_all(&folder);
 }

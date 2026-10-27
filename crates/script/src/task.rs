@@ -1,5 +1,7 @@
-//! The `task` library: `task.wait`, `task.spawn` and `task.delay`. The
-//! coroutines they pause and start are kept by the `scheduler`.
+//! The `task` library: `task.wait`, `task.spawn`, `task.delay`,
+//! `task.defer` and `task.cancel`. The coroutines they pause and start are
+//! kept by the `scheduler`. `task.synchronize` and `task.desynchronize`
+//! do nothing: every script runs on one thread.
 
 use mlua::{Function, Lua, MultiValue, Table, Thread, Value};
 
@@ -29,6 +31,9 @@ pub struct TaskFunctions {
     wait: Function,
     spawn: Function,
     delay: Function,
+    defer: Function,
+    cancel: Function,
+    nothing: Function,
 }
 
 impl TaskFunctions {
@@ -64,7 +69,49 @@ impl TaskFunctions {
             },
         )?;
 
-        Ok(Self { wait, spawn, delay })
+        // Deferred work runs at the next frame step, after the code
+        // running now has finished or paused.
+        let defer = lua.create_function(|lua, (callback, args): (Value, MultiValue)| {
+            let thread = match callback {
+                Value::Thread(thread) => thread,
+                other => new_thread(lua, "task.defer", other)?,
+            };
+            scheduler_mut(lua)?.delay(thread.clone(), 0.0, args);
+            Ok(thread)
+        })?;
+
+        let close: Function = coroutine.raw_get("close")?;
+        let cancel = lua.create_function(move |lua, thread: Value| {
+            let Value::Thread(thread) = thread else {
+                return Err(mlua::Error::runtime(format!(
+                    "task.cancel takes a thread, such as one task.spawn or task.delay \
+                     returned, not a {}",
+                    type_name(lua, &thread)
+                )));
+            };
+            if thread.is_running() {
+                return Err(mlua::Error::runtime(
+                    "task.cancel can't cancel the thread that's running; return from it instead",
+                ));
+            }
+            scheduler_mut(lua)?.cancel(&thread);
+            // A thread that has finished, or failed, is already closed.
+            if thread.is_resumable() {
+                close.call::<()>(thread)?;
+            }
+            Ok(())
+        })?;
+
+        let nothing = lua.create_function(|_, ()| Ok(()))?;
+
+        Ok(Self {
+            wait,
+            spawn,
+            delay,
+            defer,
+            cancel,
+            nothing,
+        })
     }
 
     /// `task.wait`, for other engine Lua that needs to wait.
@@ -79,6 +126,10 @@ impl TaskFunctions {
         task.raw_set("wait", &self.wait)?;
         task.raw_set("spawn", &self.spawn)?;
         task.raw_set("delay", &self.delay)?;
+        task.raw_set("defer", &self.defer)?;
+        task.raw_set("cancel", &self.cancel)?;
+        task.raw_set("synchronize", &self.nothing)?;
+        task.raw_set("desynchronize", &self.nothing)?;
         Ok(task)
     }
 }

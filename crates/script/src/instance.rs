@@ -14,8 +14,10 @@ use crate::camera::LuaCamera;
 use crate::cframe::LuaCFrame;
 use crate::client::{LocalPlayer, LuaReplicatedFirst};
 use crate::collection::LuaCollectionService;
+use crate::debris::LuaDebris;
 use crate::events::{Event, LuaSignal, Owner};
 use crate::gui_service::LuaGuiService;
+use crate::http::LuaHttpService;
 use crate::input::{LuaContextActionService, LuaUserInputService};
 use crate::localization::LuaLocalizationService;
 use crate::run_service::LuaRunService;
@@ -180,6 +182,9 @@ fn get(lua: &Lua, id: InstanceId, key: &str) -> mlua::Result<mlua::Value> {
             return Ok(value);
         }
     }
+    if let Some(member) = crate::bindable::callback_member(class, key) {
+        return Err(crate::bindable::read_callback_error(class, member));
+    }
     if let Some(member) = class_member(lua, class, key)? {
         return Ok(member);
     }
@@ -197,6 +202,13 @@ fn get(lua: &Lua, id: InstanceId, key: &str) -> mlua::Result<mlua::Value> {
 }
 
 fn set(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> mlua::Result<()> {
+    // `OnInvoke` and `OnServerInvoke` hold a function, not a property.
+    let class = world(lua)?.get(id).map(|instance| instance.class());
+    if let Some(class) = class
+        && let Some(member) = crate::bindable::callback_member(class, key)
+    {
+        return crate::bindable::set_callback(lua, id, class, member, value);
+    }
     // Converting `value` may need to read the World (to name an Instance's
     // class in a message), so convert first and borrow the World mutably after.
     match key {
@@ -337,6 +349,8 @@ fn class_member(lua: &Lua, class: ClassName, key: &str) -> mlua::Result<Option<m
         (ClassName::DataModel, "SaveService") => LuaSaveService.into_lua(lua)?,
         (ClassName::DataModel, "LocalizationService") => LuaLocalizationService.into_lua(lua)?,
         (ClassName::DataModel, "GuiService") => LuaGuiService.into_lua(lua)?,
+        (ClassName::DataModel, "Debris") => LuaDebris.into_lua(lua)?,
+        (ClassName::DataModel, "HttpService") => LuaHttpService.into_lua(lua)?,
         (ClassName::DataModel, "ReplicatedFirst") => LuaReplicatedFirst.into_lua(lua)?,
         (ClassName::DataModel, "UserGameSettings") => LuaUserGameSettings.into_lua(lua)?,
         (ClassName::Workspace, "CurrentCamera") => LuaCamera.into_lua(lua)?,
@@ -933,8 +947,8 @@ fn set_playing(lua: &Lua, sound: InstanceId, playing: bool) -> mlua::Result<()> 
 /// `game:GetService(name)`: a service by its class name, such as
 /// `"Players"`, or `"UserInputService"`, `"ContextActionService"` or
 /// `"UserGameSettings"` (LocalScripts only), `"RunService"`, `"TweenService"`, `"CollectionService"`, `"SaveService"`,
-/// `"LocalizationService"`, `"GuiService"` or `"ReplicatedFirst"`, which aren't
-/// Instances.
+/// `"LocalizationService"`, `"GuiService"`, `"Debris"`, `"HttpService"` or
+/// `"ReplicatedFirst"`, which aren't Instances.
 pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
     lua.create_function(|lua, (_game, name): (mlua::Value, String)| {
         match name.as_str() {
@@ -956,6 +970,8 @@ pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
             "SaveService" => return LuaSaveService.into_lua(lua),
             "LocalizationService" => return LuaLocalizationService.into_lua(lua),
             "GuiService" => return LuaGuiService.into_lua(lua),
+            "Debris" => return LuaDebris.into_lua(lua),
+            "HttpService" => return LuaHttpService.into_lua(lua),
             "ReplicatedFirst" => return LuaReplicatedFirst.into_lua(lua),
             _ => {}
         }
@@ -979,7 +995,9 @@ pub fn get_service(lua: &Lua) -> mlua::Result<Function> {
                 names.extend([
                     "CollectionService",
                     "ContextActionService",
+                    "Debris",
                     "GuiService",
+                    "HttpService",
                     "LocalizationService",
                     "ReplicatedFirst",
                     "RunService",

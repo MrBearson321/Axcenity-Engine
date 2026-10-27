@@ -548,6 +548,14 @@ impl App {
         self.scripts.set_camera(seen);
     }
 
+    /// Just before step 6 draws: LocalScripts' functions bound with
+    /// `BindToRenderStep` run in priority order, then `RenderStepped`
+    /// fires, so what they move (the camera too) is drawn this frame.
+    fn render_step(&mut self, seconds: f32) {
+        self.scripts
+            .render_step(&mut self.world, f64::from(seconds));
+    }
+
     /// Before drawing: a LocalScript's move of a Custom camera goes to the
     /// fly camera (a character controller owns the view otherwise), then a
     /// Follow or Track camera follows its subject, which physics and
@@ -1097,6 +1105,8 @@ impl ApplicationHandler for App {
                 //    Game time is the sum of the (capped) frame times, so a
                 //    long pause doesn't make every waiting script fire at once.
                 self.scripts.step(&mut self.world, f64::from(seconds));
+                //    Then `RunService.Stepped`, before physics.
+                self.scripts.stepped(&mut self.world, f64::from(seconds));
                 print_output(&mut self.scripts);
 
                 // 3. Hold characters and agents kinematic, then step physics at a
@@ -1157,7 +1167,10 @@ impl ApplicationHandler for App {
                 // 5. Lay out ScreenGuis at this window's current pixel size.
                 let ui_size = (size.width, size.height);
 
-                // 6. Build and render, from the camera scripts left.
+                // 6. Build and render, from the camera scripts left, after
+                //    the render step's bound functions and `RenderStepped`.
+                self.render_step(seconds);
+                print_output(&mut self.scripts);
                 self.end_camera(seconds);
                 // A LocalScript's graphics change (`UserGameSettings`) is
                 // saved and drawn from this frame.

@@ -344,6 +344,7 @@ fn the_loopback_transport_can_be_swapped_for_a_test_double() {
                 to: Side::Server,
                 remote,
                 player: runtime.local_player().unwrap(),
+                kind: MessageKind::Event,
                 args: vec![RemoteValue::Vector3(Vector3::new(1.0, 0.0, 0.0))],
             }]
         );
@@ -539,7 +540,7 @@ fn get_service_finds_services_and_lists_them_for_a_wrong_name() {
         output[1].ends_with(
             "there is no service named \"Teams\"; choose from Workspace, Players, Lighting, \
              ReplicatedStorage, ServerScriptService, StarterPlayer, CollectionService, \
-             ContextActionService, GuiService, LocalizationService, \
+             ContextActionService, Debris, GuiService, HttpService, LocalizationService, \
              ReplicatedFirst, RunService, \
              SaveService, TweenService, UserGameSettings, UserInputService"
         ),

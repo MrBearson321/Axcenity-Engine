@@ -5,7 +5,8 @@
 //!   Lua interpreter (`context`), so they share no globals. RemoteEvents
 //!   carry messages between them through a [`Transport`] (`remote`).
 //! - Each script runs as a coroutine, and the `scheduler` resumes paused
-//!   ones each frame (`task.wait`, `task.spawn` and `task.delay` live in `task`).
+//!   ones each frame (`task.wait`, `task.spawn`, `task.delay`, `task.defer`
+//!   and `task.cancel` live in `task`).
 //! - Every script gets its own global variables, and only safe parts of the
 //!   standard library (see `sandbox`). `require` loads ModuleScripts (see
 //!   `modules`), and the `watchdog` stops a script that runs too long
@@ -14,7 +15,10 @@
 //!   `api`, `instance` and `types`. Events (`part.Touched:Connect`) live in
 //!   `events`, and the host fires them with methods such as
 //!   [`ScriptRuntime::fire_touched`] and [`ScriptRuntime::heartbeat`]
-//!   (`run_service`). `TweenService` tweens move properties smoothly,
+//!   (`run_service`). BindableEvents and BindableFunctions let scripts on
+//!   one side talk (`bindable`); `Debris` destroys Instances later
+//!   (`debris`), and `HttpService` reads and writes JSON (`http`).
+//!   `TweenService` tweens move properties smoothly,
 //!   each frame step (`tween`). `SaveService` writes and loads save slots
 //!   and checkpoints (`save`, over the `save` crate). Change events (`part.Changed`) come from the World's
 //!   change log (`changes`). Client-only APIs (keyboard, camera) live in
@@ -35,6 +39,7 @@
 //!   new code runs against the same world.
 
 mod api;
+mod bindable;
 mod camera;
 mod cframe;
 mod changes;
@@ -42,11 +47,13 @@ mod client;
 mod collection;
 mod console;
 mod context;
+mod debris;
 mod debugger;
 mod definitions;
 mod errors;
 mod events;
 mod gui_service;
+mod http;
 mod input;
 mod instance;
 mod localization;
@@ -85,7 +92,7 @@ pub use camera::{CameraState, CameraType, CameraView, DEFAULT_FIELD_OF_VIEW, Gam
 pub use debugger::{Breakpoints, Local, Pause, PausedFrame};
 pub use definitions::{ApiEntry, ApiKind, DEFINITIONS_PATH, api_reference, lua_definitions};
 pub use input::KeyEvent;
-pub use remote::{Loopback, Message, RemoteValue, Transport};
+pub use remote::{Loopback, Message, MessageKind, RemoteValue, Transport};
 pub use sides::{SIDE_ONLY_APIS, Side, SideOnlyApi, side_only};
 pub use watchdog::DEFAULT_LIMIT as WATCHDOG_LIMIT;
 
@@ -487,6 +494,40 @@ impl ScriptRuntime {
         }
     }
 
+    /// Between frame steps 2 and 3, before physics: fires
+    /// `RunService.Stepped` with the game time and the frame's length in
+    /// seconds, in Scripts and then in LocalScripts.
+    pub fn stepped(&mut self, world: &mut World, seconds: f64) {
+        self.fire_changes(world);
+        for side in [Side::Server, Side::Client] {
+            self.context(side).fire_stepped(world, seconds);
+            self.collect(side);
+            self.fire_changes(world);
+        }
+    }
+
+    /// Frame step 6, just before the frame is built and drawn (and before
+    /// [`Self::step_camera`]): runs the LocalScripts' functions bound with
+    /// `RunService:BindToRenderStep` in priority order, then fires
+    /// `RunService.RenderStepped`, each with the frame's length in seconds.
+    pub fn render_step(&mut self, world: &mut World, seconds: f64) {
+        self.fire_changes(world);
+        self.client.render_step(world, seconds);
+        self.collect(Side::Client);
+        self.fire_changes(world);
+    }
+
+    /// Says the game runs in the editor's Play, for
+    /// `RunService:IsStudio()`. The player never calls it.
+    pub fn set_studio(&mut self, studio: bool) {
+        let flags = run_service::RunFlags {
+            studio,
+            running: true,
+        };
+        self.server.set_run_flags(flags);
+        self.client.set_run_flags(flags);
+    }
+
     /// The end of frame step 4, after `Touched`: fires `RunService.Heartbeat`
     /// with the frame's length in seconds, in Scripts and then in LocalScripts.
     pub fn heartbeat(&mut self, world: &mut World, seconds: f64) {
@@ -851,6 +892,11 @@ pub struct EditCommand {
 /// message for code that isn't valid Lua.
 pub fn run_edit_command(world: &mut World, source: &str) -> Result<EditCommand, String> {
     let context = Context::new(Side::Server);
+    // Not Play: `RunService:IsRunning()` is false, and it's the editor.
+    context.set_run_flags(run_service::RunFlags {
+        studio: true,
+        running: false,
+    });
     let was_recording = world.is_recording_changes();
     let first = world.next_change_number();
     world.record_changes();
@@ -962,3 +1008,5 @@ mod user_settings_tests;
 mod cframe_tests;
 #[cfg(test)]
 mod collection_tests;
+#[cfg(test)]
+mod utilities_tests;

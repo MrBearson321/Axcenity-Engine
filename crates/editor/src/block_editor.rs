@@ -68,7 +68,15 @@ pub enum NameKind {
     Event,
     /// A child's name, suggested from what's in the object.
     Child,
+    /// A BindableEvent's path in ReplicatedStorage, suggested from the
+    /// ReplicatedStorage entry of the objects (see [`STORAGE_PATH`]).
+    Bindable,
 }
+
+/// The objects' entry for ReplicatedStorage: the empty path, which no
+/// Workspace object has. Its `names` are the BindableEvents in it. It's a
+/// service, so object menus leave it out.
+pub const STORAGE_PATH: &str = "";
 
 impl NameKind {
     /// What the menu offers for a block with nothing to suggest.
@@ -80,6 +88,7 @@ impl NameKind {
             NameKind::State => "Idle",
             NameKind::Event => "Footstep",
             NameKind::Child => "Door",
+            NameKind::Bindable => "Scored",
         }
     }
 
@@ -91,6 +100,7 @@ impl NameKind {
             NameKind::State => "state",
             NameKind::Event => "animation event",
             NameKind::Child => "child",
+            NameKind::Bindable => "BindableEvent",
         }
     }
 }
@@ -235,6 +245,10 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::WhenMouseLeaves { .. }
         | BlockKind::WhenValueChanged { .. }
         | BlockKind::EveryFrame { .. }
+        | BlockKind::BeforePhysics { .. }
+        | BlockKind::BeforeRender { .. }
+        | BlockKind::WhenEventFired { .. }
+        | BlockKind::FireEvent { .. }
         | BlockKind::WhenSoundEnded { .. }
         | BlockKind::Unattached { .. } => Category::Events,
         BlockKind::Wait { .. }
@@ -246,7 +260,8 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::IfElse { .. }
         | BlockKind::StopScript
         | BlockKind::ForEachChild { .. }
-        | BlockKind::WaitForChild { .. } => Category::Control,
+        | BlockKind::WaitForChild { .. }
+        | BlockKind::DestroyAfter { .. } => Category::Control,
         BlockKind::MoveTo { .. }
         | BlockKind::MoveBy { .. }
         | BlockKind::LookAt { .. }
@@ -375,7 +390,8 @@ impl Filter {
                     | ClassName::Dropdown
                     | ClassName::ProgressBar
             ),
-            Filter::Any | Filter::Places => true,
+            // Services (the ReplicatedStorage entry) aren't in the Workspace.
+            Filter::Any | Filter::Places => !class.is_service(),
         }
     }
 
@@ -545,6 +561,17 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
             label("value changes"),
         ])],
         BlockKind::EveryFrame { .. } => vec![Row(vec![label("every frame")])],
+        BlockKind::BeforePhysics { .. } => vec![Row(vec![label("every frame, before physics")])],
+        BlockKind::BeforeRender { .. } => vec![Row(vec![label("every frame, before drawing")])],
+        BlockKind::WhenEventFired { event, .. } => vec![Row(vec![
+            label("when event"),
+            Part::Name(event, NameKind::Bindable, STORAGE_PATH.to_owned()),
+            label("fires"),
+        ])],
+        BlockKind::FireEvent { event } => vec![Row(vec![
+            label("fire event"),
+            Part::Name(event, NameKind::Bindable, STORAGE_PATH.to_owned()),
+        ])],
         BlockKind::WhenSoundEnded { sound, .. } => vec![Row(vec![
             label("when"),
             Object(sound, Filter::Sounds),
@@ -724,6 +751,13 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
             ]),
             Mouth(body),
         ],
+        BlockKind::DestroyAfter { target, seconds } => vec![Row(vec![
+            label("destroy"),
+            Object(target, Filter::Any),
+            label("after"),
+            Slot(seconds, SlotKind::Number),
+            label("seconds"),
+        ])],
         BlockKind::WaitForChild { target, name } => {
             let path = target.clone();
             vec![Row(vec![

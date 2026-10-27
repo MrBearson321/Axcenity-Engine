@@ -294,10 +294,13 @@ fn run_editor(script: &mut BlockScript, frames: Vec<Vec<egui::Event>>, name: &st
         crate::snapshot::snapshot(&path, size, held, |ctx| editor(&mut replay, ctx));
     }
     let ctx = theme::test_context();
-    for events in frames {
+    // Half a second a frame, as the snapshot replays them, so animations
+    // (a palette scrolling to a category) finish.
+    for (index, events) in frames.into_iter().enumerate() {
         let input = egui::RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)),
             events,
+            time: Some(index as f64 * 0.5),
             ..Default::default()
         };
         let _ = ctx.run(input, |ctx| editor(script, ctx));
@@ -323,14 +326,30 @@ fn blocks_drag_from_the_palette_and_snap_into_stacks() {
         .expect("dropped where it was let go");
 
     // "wait 1 seconds" (the first Control block) to just under it: it
-    // snaps into the event's stack.
+    // snaps into the event's stack. Clicking Control in the category
+    // column first scrolls the palette to it.
     let hat_top_left = pos2(CATEGORY_WIDTH + PALETTE_WIDTH, TOOLBAR_HEIGHT) + vec2(x, y);
-    // Where the palette draws it (Inter's line height sets the rows).
-    let wait_grab = pos2(110.0, 844.0);
-    let wait_palette_top_left = pos2(88.0, 824.0);
+    let control = pos2(CATEGORY_WIDTH / 2.0, TOOLBAR_HEIGHT + 8.0 + 56.0 + 27.0);
+    let click = |pressed| egui::Event::PointerButton {
+        pos: control,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Default::default(),
+    };
+    // Where the palette draws it then (Inter's line height sets the rows).
+    let wait_grab = pos2(110.0, 86.0);
+    let wait_palette_top_left = pos2(88.0, 66.0);
     let target =
         hat_top_left + vec2(0.0, CAP + ROW_HEIGHT + 10.0) + (wait_grab - wait_palette_top_left);
-    run_editor(&mut script, drag_frames(wait_grab, target), "drag-wait");
+    let mut frames = vec![
+        vec![egui::Event::PointerMoved(control)],
+        vec![click(true)],
+        vec![click(false)],
+        Vec::new(),
+        Vec::new(),
+    ];
+    frames.extend(drag_frames(wait_grab, target));
+    run_editor(&mut script, frames, "drag-wait");
     assert_eq!(script.blocks.len(), 1, "it joined the stack: {script:?}");
     let source = translate(&script).unwrap().source;
     assert_eq!(source, "task.spawn(function()\n    task.wait(1)\nend)\n");

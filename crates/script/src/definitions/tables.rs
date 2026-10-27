@@ -450,11 +450,18 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
     ValueType {
         class: "EnumItem",
         doc: "One choice of an enum, such as `Enum.Material.Neon`.",
-        fields: &[Field {
-            name: "Name",
-            ty: "string",
-            doc: "The item's name, such as `\"Neon\"`.",
-        }],
+        fields: &[
+            Field {
+                name: "Name",
+                ty: "string",
+                doc: "The item's name, such as `\"Neon\"`.",
+            },
+            Field {
+                name: "Value",
+                ty: "number",
+                doc: "The item's number: an `Enum.RenderPriority`'s priority (`Enum.RenderPriority.Camera.Value` is 200), and for other enums its place in the list, from 0.",
+            },
+        ],
         operators: &[],
         methods: &[],
     },
@@ -635,13 +642,104 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
     ValueType {
         class: "RunService",
         doc: "The game's frame loop, from `game:GetService(\"RunService\")`.",
-        fields: &[Field {
-            name: "Heartbeat",
-            ty: "Signal",
-            doc: "Fires once every frame, after physics. The handler gets the frame's length in seconds: `function(deltaTime) ... end`.",
-        }],
+        fields: &[
+            Field {
+                name: "Heartbeat",
+                ty: "Signal",
+                doc: "Fires once every frame, after physics. The handler gets the frame's length in seconds: `function(deltaTime) ... end`.",
+            },
+            Field {
+                name: "Stepped",
+                ty: "Signal",
+                doc: "Fires once every frame, before physics. The handler gets the game time and the frame's length, in seconds: `function(time, deltaTime) ... end`.",
+            },
+            Field {
+                name: "RenderStepped",
+                ty: "Signal",
+                doc: "Fires once every frame just before it's drawn, after the functions bound with `BindToRenderStep`. The handler gets the frame's length in seconds. LocalScripts only.",
+            },
+        ],
         operators: &[],
-        methods: &[],
+        methods: &[
+            Function {
+                name: "BindToRenderStep",
+                doc: "Runs `callback` with the frame's length every frame just before it's drawn, in `priority` order with the others bound (lowest first; `Enum.RenderPriority.Camera.Value` is 200). Binding a name again replaces it. LocalScripts only.",
+                params: &[
+                    ("name", "string"),
+                    ("priority", "number"),
+                    ("callback", "(number) -> ()"),
+                ],
+                returns: "()",
+            },
+            Function {
+                name: "UnbindFromRenderStep",
+                doc: "Stops what was bound as `name`. LocalScripts only.",
+                params: &[("name", "string")],
+                returns: "()",
+            },
+            Function {
+                name: "IsServer",
+                doc: "Whether this is a Script, on the server.",
+                params: &[],
+                returns: "boolean",
+            },
+            Function {
+                name: "IsClient",
+                doc: "Whether this is a LocalScript, on the player's side.",
+                params: &[],
+                returns: "boolean",
+            },
+            Function {
+                name: "IsStudio",
+                doc: "Whether the game runs in the editor (Play, or the Console), not the player.",
+                params: &[],
+                returns: "boolean",
+            },
+            Function {
+                name: "IsRunning",
+                doc: "Whether the game runs: false only in the editor's Console outside Play.",
+                params: &[],
+                returns: "boolean",
+            },
+        ],
+    },
+    ValueType {
+        class: "Debris",
+        doc: "Destroys Instances later without waiting, from `game:GetService(\"Debris\")`.",
+        fields: &[],
+        operators: &[],
+        methods: &[Function {
+            name: "AddItem",
+            doc: "Destroys `instance` once `seconds` (left out: 10) have passed. Nothing happens if it's destroyed before then. The script carries on at once.",
+            params: &[("instance", "Instance"), ("seconds?", "number")],
+            returns: "()",
+        }],
+    },
+    ValueType {
+        class: "HttpService",
+        doc: "JSON and GUIDs, from `game:GetService(\"HttpService\")`. It doesn't reach the network.",
+        fields: &[],
+        operators: &[],
+        methods: &[
+            Function {
+                name: "JSONEncode",
+                doc: "`value` as JSON text. A table with keys 1, 2, 3 (or none) becomes an array; one with text keys an object. Numbers, strings, booleans and nil can go in; anything else, or a table inside itself, is an error.",
+                params: &[("value", "any")],
+                returns: "string",
+            },
+            Function {
+                name: "JSONDecode",
+                doc: "The value JSON text holds: arrays and objects become tables, `null` nil. Text that isn't JSON is an error saying the line and column of the mistake.",
+                params: &[("json", "string")],
+                returns: "any",
+            },
+            Function {
+                name: "GenerateGUID",
+                doc: "A new random ID such as `\"{0F8FAD5B-D9CB-469F-A165-70867728950E}\"`; `false` leaves the braces off.",
+                params: &[("wrapInCurlyBraces?", "boolean")],
+                returns: "string",
+            },
+        ],
     },
     ValueType {
         class: "ReplicatedFirst",
@@ -1476,9 +1574,36 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
         ClassName::DataModel,
         Function {
             name: "GetService",
-            doc: "The service with this class name, such as `\"Players\"`, `\"ReplicatedFirst\"`, `\"RunService\"`, `\"SaveService\"`, `\"LocalizationService\"`, `\"GuiService\"`, `\"TweenService\"`, `\"CollectionService\"`, `\"UserGameSettings\"`, `\"UserInputService\"` or `\"ContextActionService\"`.",
+            doc: "The service with this class name, such as `\"Players\"`, `\"ReplicatedFirst\"`, `\"RunService\"`, `\"SaveService\"`, `\"LocalizationService\"`, `\"GuiService\"`, `\"Debris\"`, `\"HttpService\"`, `\"TweenService\"`, `\"CollectionService\"`, `\"UserGameSettings\"`, `\"UserInputService\"` or `\"ContextActionService\"`.",
             params: &[("className", "string")],
             returns: "Instance",
+        },
+    ),
+    (
+        ClassName::RemoteFunction,
+        Function {
+            name: "InvokeServer",
+            doc: "Asks the server: pauses until its `OnServerInvoke` returns (it gets this player first, then the arguments), and returns what it returned. An error there is raised here, with the server script's line. LocalScripts only.",
+            params: &[("...", "any")],
+            returns: "...any",
+        },
+    ),
+    (
+        ClassName::BindableEvent,
+        Function {
+            name: "Fire",
+            doc: "Fires `Event` with the arguments, for scripts on this side.",
+            params: &[("...", "any")],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::BindableFunction,
+        Function {
+            name: "Invoke",
+            doc: "Calls `OnInvoke` with the arguments and returns what it returns, waiting while it waits. Its errors are raised here.",
+            params: &[("...", "any")],
+            returns: "...any",
         },
     ),
     (
@@ -1733,6 +1858,38 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
 /// Fields only some classes have, besides their properties and events.
 pub(super) const CLASS_FIELDS: &[(ClassName, Field)] = &[
     (
+        ClassName::RemoteFunction,
+        Field {
+            name: "OnServerInvoke",
+            ty: "(Player, ...any) -> ...any",
+            doc: "The function that answers `InvokeServer`: `remote.OnServerInvoke = function(player, ...) return ... end`. Setting it replaces the one before; it can be set, not read. Questions asked before it's set wait for it. Scripts only.",
+        },
+    ),
+    (
+        ClassName::BindableFunction,
+        Field {
+            name: "OnInvoke",
+            ty: "(...any) -> ...any",
+            doc: "The function `Invoke` calls: `func.OnInvoke = function(...) return ... end`. Setting it replaces the one before; it can be set, not read. Each side has its own.",
+        },
+    ),
+    (
+        ClassName::DataModel,
+        Field {
+            name: "Debris",
+            ty: "Debris",
+            doc: "Destroys Instances later (same as `game:GetService(\"Debris\")`).",
+        },
+    ),
+    (
+        ClassName::DataModel,
+        Field {
+            name: "HttpService",
+            ty: "HttpService",
+            doc: "JSON and GUIDs (same as `game:GetService(\"HttpService\")`).",
+        },
+    ),
+    (
         ClassName::Camera,
         Field {
             name: "CFrame",
@@ -1817,7 +1974,7 @@ pub(super) const CLASS_FIELDS: &[(ClassName, Field)] = &[
         Field {
             name: "RunService",
             ty: "RunService",
-            doc: "The game's frame loop, with `Heartbeat` (same as `game:GetService(\"RunService\")`).",
+            doc: "The game's frame loop, with `Stepped`, `Heartbeat` and `RenderStepped` (same as `game:GetService(\"RunService\")`).",
         },
     ),
     (
@@ -2212,6 +2369,30 @@ pub(super) const LIBRARIES: &[Library] = &[
                     ("...", "any"),
                 ],
                 returns: "thread",
+            },
+            Function {
+                name: "defer",
+                doc: "Runs `callback` (or resumes a thread) with the given arguments at the next frame step, after this code has finished or paused.",
+                params: &[("callback", "(...any) -> ()"), ("...", "any")],
+                returns: "thread",
+            },
+            Function {
+                name: "cancel",
+                doc: "Stops `thread` (from `task.spawn`, `task.delay` or `task.defer`) for good: it doesn't start or resume again. It can't stop the code running now.",
+                params: &[("thread", "thread")],
+                returns: "()",
+            },
+            Function {
+                name: "synchronize",
+                doc: "Does nothing: every script runs on one thread, so there's nothing to wait for. For code written for parallel Luau.",
+                params: &[],
+                returns: "()",
+            },
+            Function {
+                name: "desynchronize",
+                doc: "Does nothing: every script runs on one thread. For code written for parallel Luau.",
+                params: &[],
+                returns: "()",
             },
         ],
     },

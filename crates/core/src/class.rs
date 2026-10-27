@@ -56,6 +56,13 @@ pub enum ClassName {
     ModuleScript,
     /// Carries messages between Scripts and LocalScripts.
     RemoteEvent,
+    /// Asks the other side and waits for its answer: a LocalScript's
+    /// `InvokeServer` returns what the server's `OnServerInvoke` returns.
+    RemoteFunction,
+    /// An event scripts on one side fire for each other (`Fire`, `Event`).
+    BindableEvent,
+    /// A function scripts on one side call for each other (`Invoke`, `OnInvoke`).
+    BindableFunction,
     /// Someone playing the game. Made by the engine when they join, in Players.
     Player,
     /// Groups the parts of one thing, such as a car or a house.
@@ -151,7 +158,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 54] = [
+    pub const ALL: [ClassName; 57] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -166,6 +173,9 @@ impl ClassName {
         ClassName::LocalScript,
         ClassName::ModuleScript,
         ClassName::RemoteEvent,
+        ClassName::RemoteFunction,
+        ClassName::BindableEvent,
+        ClassName::BindableFunction,
         ClassName::Player,
         ClassName::Model,
         ClassName::Folder,
@@ -224,6 +234,9 @@ impl ClassName {
             ClassName::LocalScript => "LocalScript",
             ClassName::ModuleScript => "ModuleScript",
             ClassName::RemoteEvent => "RemoteEvent",
+            ClassName::RemoteFunction => "RemoteFunction",
+            ClassName::BindableEvent => "BindableEvent",
+            ClassName::BindableFunction => "BindableFunction",
             ClassName::Player => "Player",
             ClassName::Model => "Model",
             ClassName::Folder => "Folder",
@@ -432,6 +445,9 @@ impl ClassName {
             | ClassName::LocalScript
             | ClassName::ModuleScript
             | ClassName::RemoteEvent
+            | ClassName::RemoteFunction
+            | ClassName::BindableEvent
+            | ClassName::BindableFunction
             | ClassName::Player
             | ClassName::Model
             | ClassName::Folder
@@ -1131,6 +1147,8 @@ impl ClassName {
             | ClassName::Script
             | ClassName::LocalScript
             | ClassName::ModuleScript
+            | ClassName::RemoteFunction
+            | ClassName::BindableFunction
             | ClassName::Player
             | ClassName::Model
             | ClassName::Folder
@@ -1174,6 +1192,8 @@ impl ClassName {
             // `OnServerEvent` fires in Scripts for each `FireServer`, and
             // `OnClientEvent` in LocalScripts for each `FireClient`.
             ClassName::RemoteEvent => &["OnServerEvent", "OnClientEvent"],
+            // Fires on the same side, with what `Fire` was given.
+            ClassName::BindableEvent => &["Event"],
             // `MouseEnter` and `MouseLeave` fire in LocalScripts when the
             // pointer comes onto or goes off the element, as `:hover` does.
             ClassName::Frame

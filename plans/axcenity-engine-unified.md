@@ -1122,10 +1122,10 @@ Blocks for each, in the Events and Control groups.
 
 ### Acceptance criteria
 
-- [ ] A LocalScript's `InvokeServer` returns the server's value, and an error in `OnServerInvoke` shows as an error in the caller with the server's `script:line`.
-- [ ] `BindToRenderStep` handlers run in priority order every frame, before the frame is drawn.
-- [ ] `Debris:AddItem(part, 2)` destroys the part about two seconds later, and is a no-op if it was already destroyed.
-- [ ] `JSONDecode(JSONEncode(t))` round-trips nested tables, and a bad JSON string errors with the position of the mistake.
+- [x] A LocalScript's `InvokeServer` returns the server's value, and an error in `OnServerInvoke` shows as an error in the caller with the server's `script:line`.
+- [x] `BindToRenderStep` handlers run in priority order every frame, before the frame is drawn.
+- [x] `Debris:AddItem(part, 2)` destroys the part about two seconds later, and is a no-op if it was already destroyed.
+- [x] `JSONDecode(JSONEncode(t))` round-trips nested tables, and a bad JSON string errors with the position of the mistake.
 
 ---
 

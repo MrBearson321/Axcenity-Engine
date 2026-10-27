@@ -17,6 +17,7 @@ axcenity-render.workspace = true
 axcenity-save.workspace = true
 glam.workspace = true
 mlua.workspace = true
+serde_json.workspace = true
 axcenity-workspace-hack.workspace = true
 
 # Only pins the Luau version `mlua` builds (see the workspace Cargo.toml).

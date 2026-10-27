@@ -9,7 +9,10 @@ Coroutines, task.wait, the watchdog, and when change events fire.
   - `task.wait(seconds?)` returns the seconds that really passed. Left out, 0, negative or NaN means "until the next step", so `while true do task.wait() end` runs once a frame. A task is never resumed in the step that scheduled it.
   - `task.spawn(fn, ...)` runs `fn` **right away** until it finishes or waits, then the caller continues. Returns the coroutine.
   - `task.delay(seconds, fn, ...)` starts `fn` once `seconds` have passed (at the next step at the earliest). Returns the coroutine.
-  - Both take functions only, not coroutines. `task.cancel` and `task.defer` don't exist yet.
+  - Both take functions only, not coroutines.
+  - (Phase 32) `task.defer(fn or thread, ...)` runs it at the **next step** (Roblox runs it later in the same frame), after the current code finishes or pauses. Returns the coroutine.
+  - (Phase 32) `task.cancel(thread)` drops it from the scheduler and closes it, so it never starts or resumes; a finished thread is fine, the running one is an error. A cancelled `InvokeServer` caller's answer resumes nothing.
+  - (Phase 32) `task.synchronize()` and `task.desynchronize()` do nothing: scripts run on one thread.
 - **Resume order**: earliest due first; ties in the order they were scheduled. A task within 1 µs of due counts as due, so float rounding in summed frame times never costs a whole frame. A `task.wait(1)` loop still drifts by up to a frame per wait when frames are uneven (as in Roblox); use the returned time for exact timing.
 - `task.wait` inside a script's own coroutine (`coroutine.wrap`) pauses just that coroutine and returns control to whoever resumed it; the scheduler resumes it later. It also works inside `pcall`.
 - No legacy `wait`, `spawn` or `delay` globals (decided in Phase 5): only `task.*`.

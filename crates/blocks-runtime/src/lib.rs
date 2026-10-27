@@ -257,6 +257,21 @@ pub enum BlockKind {
     EveryFrame {
         body: Vec<Block>,
     },
+    /// Runs every frame before physics (`RunService.Stepped`).
+    BeforePhysics {
+        body: Vec<Block>,
+    },
+    /// Runs every frame just before it's drawn (`RunService.RenderStepped`).
+    /// Client only.
+    BeforeRender {
+        body: Vec<Block>,
+    },
+    /// When a BindableEvent fires (`Event`): `event` is its path in
+    /// ReplicatedStorage.
+    WhenEventFired {
+        event: String,
+        body: Vec<Block>,
+    },
     WhenSoundEnded {
         sound: String,
         body: Vec<Block>,
@@ -334,6 +349,12 @@ pub enum BlockKind {
     WaitForChild {
         target: String,
         name: String,
+    },
+    /// Destroys `target` after `seconds`, without waiting
+    /// (`Debris:AddItem`).
+    DestroyAfter {
+        target: String,
+        seconds: Expression,
     },
 
     // Motion.
@@ -584,6 +605,10 @@ pub enum BlockKind {
         target: String,
         parent: String,
     },
+    /// Fires a BindableEvent (`event:Fire()`), by its path in ReplicatedStorage.
+    FireEvent {
+        event: String,
+    },
 
     /// Lua that has no blocks, kept word for word from a script switched
     /// from Code to Blocks.
@@ -677,6 +702,9 @@ impl BlockKind {
                 | BlockKind::WhenMouseLeaves { .. }
                 | BlockKind::WhenValueChanged { .. }
                 | BlockKind::EveryFrame { .. }
+                | BlockKind::BeforePhysics { .. }
+                | BlockKind::BeforeRender { .. }
+                | BlockKind::WhenEventFired { .. }
                 | BlockKind::WhenSoundEnded { .. }
                 | BlockKind::WhenStateChanged { .. }
                 | BlockKind::WhenAnimationEvent { .. }
@@ -694,6 +722,7 @@ impl BlockKind {
                 | BlockKind::WhenClicked { .. }
                 | BlockKind::WhenMouseEnters { .. }
                 | BlockKind::WhenMouseLeaves { .. }
+                | BlockKind::BeforeRender { .. }
                 | BlockKind::SetCameraType { .. }
                 | BlockKind::PointCameraAt { .. }
                 | BlockKind::ShakeCamera { .. }
@@ -711,6 +740,9 @@ impl BlockKind {
             | BlockKind::WhenMouseLeaves { body, .. }
             | BlockKind::WhenValueChanged { body, .. }
             | BlockKind::EveryFrame { body }
+            | BlockKind::BeforePhysics { body }
+            | BlockKind::BeforeRender { body }
+            | BlockKind::WhenEventFired { body, .. }
             | BlockKind::WhenSoundEnded { body, .. }
             | BlockKind::WhenStateChanged { body, .. }
             | BlockKind::WhenAnimationEvent { body, .. }
@@ -740,6 +772,9 @@ impl BlockKind {
             | BlockKind::WhenMouseLeaves { body, .. }
             | BlockKind::WhenValueChanged { body, .. }
             | BlockKind::EveryFrame { body }
+            | BlockKind::BeforePhysics { body }
+            | BlockKind::BeforeRender { body }
+            | BlockKind::WhenEventFired { body, .. }
             | BlockKind::WhenSoundEnded { body, .. }
             | BlockKind::WhenStateChanged { body, .. }
             | BlockKind::WhenAnimationEvent { body, .. }
@@ -795,6 +830,7 @@ impl BlockKind {
             | BlockKind::FadeOut { seconds: e, .. }
             | BlockKind::SetGraphicsNumber { value: e, .. }
             | BlockKind::PointCameraAt { position: e }
+            | BlockKind::DestroyAfter { seconds: e, .. }
             | BlockKind::Print { value: e } => vec![e],
             BlockKind::Tween { value, seconds, .. } => vec![value, seconds],
             BlockKind::ScrollTo { x, y, .. } => vec![x, y],
@@ -877,6 +913,7 @@ impl BlockKind {
             | BlockKind::FadeOut { seconds: e, .. }
             | BlockKind::SetGraphicsNumber { value: e, .. }
             | BlockKind::PointCameraAt { position: e }
+            | BlockKind::DestroyAfter { seconds: e, .. }
             | BlockKind::Print { value: e } => vec![e],
             BlockKind::Tween { value, seconds, .. } => vec![value, seconds],
             BlockKind::ScrollTo { x, y, .. } => vec![x, y],

@@ -257,6 +257,12 @@ fn described_fields_and_methods_exist() {
         (ClassName::Workspace, "workspace"),
         (ClassName::Players, "game.Players"),
         (ClassName::RemoteEvent, "Instance.new('RemoteEvent')"),
+        (ClassName::RemoteFunction, "Instance.new('RemoteFunction')"),
+        (ClassName::BindableEvent, "Instance.new('BindableEvent')"),
+        (
+            ClassName::BindableFunction,
+            "Instance.new('BindableFunction')",
+        ),
         (ClassName::Sound, "Instance.new('Sound')"),
         (
             ClassName::ParticleEmitter,
@@ -280,9 +286,12 @@ fn described_fields_and_methods_exist() {
         ClassName::Player => "LocalPlayer",
         _ => name,
     };
-    // A field that may be nil (`Instance?`) only has to be readable.
+    // A field that may be nil (`Instance?`) only has to be readable, and a
+    // callback (a function type) can only be set.
     let read = |sample: &str, field: &Field, owner: &str| {
-        if field.ty.ends_with('?') {
+        if field.ty.starts_with('(') {
+            format!(";({sample}).{} = function() end", field.name)
+        } else if field.ty.ends_with('?') {
             format!("local _ = ({sample}).{}", field.name)
         } else {
             format!("assert(({sample}).{0} ~= nil, '{owner}.{0}')", field.name)
@@ -339,6 +348,8 @@ fn described_fields_and_methods_exist() {
             "game:GetService('LocalizationService')",
         ),
         ("GuiService", "game:GetService('GuiService')"),
+        ("Debris", "game:GetService('Debris')"),
+        ("HttpService", "game:GetService('HttpService')"),
         ("UserGameSettings", "game:GetService('UserGameSettings')"),
         ("ReplicatedFirst", "game:GetService('ReplicatedFirst')"),
         (
@@ -359,23 +370,29 @@ fn described_fields_and_methods_exist() {
             .iter()
             .find(|(class, _)| *class == value_type.class)
             .expect("add a sample value for the new value type");
+        // Each line with the member it checks, for members (such as
+        // `RenderStepped`) that only work on one side.
         let mut lines = Vec::new();
         for field in value_type.fields {
-            lines.push(read(sample, field, value_type.class));
+            lines.push((field.name, read(sample, field, value_type.class)));
         }
         for method in value_type.methods {
-            lines.push(format!(
-                "assert(type({sample}.{0}) == 'function', '{1}:{0}')",
-                method.name, value_type.class
+            lines.push((
+                method.name,
+                format!(
+                    "assert(type({sample}.{0}) == 'function', '{1}:{0}')",
+                    method.name, value_type.class
+                ),
             ));
         }
-        for line in lines {
+        for (member, line) in lines {
             match value_type.class {
                 "InputObject" => on_input.push(line),
                 // Reached through `workspace.CurrentCamera` and
                 // `LocalPlayer`, so client only.
                 "Ray" => check("CurrentCamera", line),
                 "Mouse" => check("LocalPlayer", line),
+                _ if side_only(member).is_some() => check(member, line),
                 other => check(other, line),
             }
         }

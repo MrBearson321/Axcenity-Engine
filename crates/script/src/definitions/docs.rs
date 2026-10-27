@@ -2296,6 +2296,11 @@ pub(super) const EVENT_DOCS: &[(ClassName, &str, &str)] = &[
         "Fires when a Script calls `FireClient` or `FireAllClients`. The handler gets the arguments.",
     ),
     (
+        ClassName::BindableEvent,
+        "Event",
+        "Fires when a script on the same side calls `Fire`. The handler gets the same arguments (tables aren't copied).",
+    ),
+    (
         ClassName::TextButton,
         "Activated",
         "Fires when the player clicks or taps this button. The handler gets no arguments; LocalScripts only.",
@@ -2522,6 +2527,15 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::RemoteEvent => {
             "Carries messages between Scripts and LocalScripts. Keep it in ReplicatedStorage."
+        }
+        ClassName::RemoteFunction => {
+            "Asks the server and waits for the answer: a LocalScript's `InvokeServer(...)` pauses until the server's `OnServerInvoke` returns, and returns what it returned. An error there is raised in the LocalScript. Keep it in ReplicatedStorage."
+        }
+        ClassName::BindableEvent => {
+            "An event scripts on the same side fire for each other: `Fire(...)` fires `Event` with the same values. It doesn't cross between Scripts and LocalScripts."
+        }
+        ClassName::BindableFunction => {
+            "A function scripts on the same side call for each other: `Invoke(...)` calls `OnInvoke` and returns what it returns. It doesn't cross between Scripts and LocalScripts."
         }
         ClassName::Player => "Someone playing the game, in Players. Made when they join.",
         ClassName::Model => "Groups the parts of one thing, such as a car or a house.",

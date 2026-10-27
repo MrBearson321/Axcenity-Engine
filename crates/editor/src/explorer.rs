@@ -61,6 +61,24 @@ pub fn script_hover(class: ClassName) -> &'static str {
 const REMOTE_EVENT_HOVER: &str = "Make a RemoteEvent, for sending messages between Scripts and \
      LocalScripts. It goes in ReplicatedStorage, where both can find it, unless a Model or \
      Folder is selected.";
+/// The hover text of Insert ▸ RemoteFunction, BindableEvent and BindableFunction.
+fn messenger_hover(class: ClassName) -> &'static str {
+    match class {
+        ClassName::RemoteFunction => {
+            "Make a RemoteFunction: a LocalScript's InvokeServer waits for what the server's \
+             OnServerInvoke returns. It goes in ReplicatedStorage, unless a Model or Folder is \
+             selected."
+        }
+        ClassName::BindableEvent => {
+            "Make a BindableEvent, for scripts on the same side to tell each other something: \
+             Fire it, and its Event fires."
+        }
+        _ => {
+            "Make a BindableFunction, for scripts on the same side to ask each other: Invoke \
+             calls its OnInvoke and returns what that returns."
+        }
+    }
+}
 /// The outline around the row something would be dropped into: the same
 /// blue as the viewport's selection box.
 const DROP_COLOR: egui::Color32 = egui::Color32::from_rgb(25, 160, 255);
@@ -781,6 +799,15 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
             .clicked()
         {
             chosen = Some(RowCommand::Insert(remote));
+        }
+        for what in Insertable::MESSENGERS {
+            if ui
+                .button(insert_item(ui, what))
+                .on_hover_text(messenger_hover(what.class()))
+                .clicked()
+            {
+                chosen = Some(RowCommand::Insert(what));
+            }
         }
     });
     if ui

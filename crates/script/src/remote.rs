@@ -8,20 +8,26 @@
 //! frame step 2 the other side takes its messages and fires `OnServerEvent`
 //! or `OnClientEvent`.
 //!
+//! RemoteFunctions ask and wait: `remote:InvokeServer(...)` sends an
+//! [`MessageKind::Invoke`] and pauses the LocalScript. The server runs its
+//! `OnServerInvoke` as a coroutine of its own (so it may wait too), and
+//! sends what it returned, or its error, back as a [`MessageKind::Reply`],
+//! which resumes the caller.
+//!
 //! v1 runs both sides in one process, so the transport is [`Loopback`]: two
 //! queues. A real network only needs another [`Transport`].
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use axcenity_core::{ClassName, Color3, InstanceId, Vector3};
-use mlua::{FromLua, Function, IntoLua, Lua, MultiValue, Value};
+use mlua::{FromLua, Function, IntoLua, Lua, MultiValue, Table, Thread, Value};
 
 use crate::client::LocalPlayer;
 use crate::events::{self, Owner};
 use crate::instance::{LuaInstance, world};
-use crate::push_error;
 use crate::sides::{self, Side};
 use crate::types::{EnumType, LuaColor3, LuaEnumItem, LuaVector3, type_name};
+use crate::{bindable, push_error, scheduler};
 
 /// One argument of a message, as plain data.
 #[derive(Clone, Debug, PartialEq)]
@@ -46,17 +52,32 @@ pub enum RemoteValue {
     Table(Vec<(RemoteValue, RemoteValue)>),
 }
 
-/// A RemoteEvent firing, on its way to the other side.
+/// A RemoteEvent firing, or a RemoteFunction's question or answer, on its
+/// way to the other side.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Message {
     /// The side it's going to.
     pub to: Side,
-    /// The RemoteEvent that was fired.
+    /// The RemoteEvent or RemoteFunction it's for.
     pub remote: InstanceId,
     /// Going to the server: the Player who sent it. Going to a client: the
     /// Player it's for.
     pub player: InstanceId,
+    pub kind: MessageKind,
+    /// The event's or the question's arguments, or the answer's values.
     pub args: Vec<RemoteValue>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum MessageKind {
+    /// A RemoteEvent firing.
+    Event,
+    /// `InvokeServer` asking. `call` numbers it on the asking side, so the
+    /// reply finds the script that waits for it.
+    Invoke { call: u64 },
+    /// The answer to call `call`: the values in `args`, or the error
+    /// `OnServerInvoke` raised (`path:line: message`).
+    Reply { call: u64, error: Option<String> },
 }
 
 /// Carries messages between the server and the clients. The runtime only
@@ -97,11 +118,23 @@ impl Transport for Loopback {
 pub struct Outbox(pub Vec<Message>);
 
 /// Fires `OnServerEvent` (on the server) or `OnClientEvent` (on a client)
-/// for each message. Messages for a RemoteEvent that's gone are dropped,
-/// and so are messages with nothing connected to receive them.
+/// for each message, runs `OnServerInvoke` for each question and resumes
+/// the caller of each answer. Messages for a remote that's gone are
+/// dropped, and so are messages with nothing connected to receive them. A
+/// question for a RemoteFunction without `OnServerInvoke` waits until a
+/// script sets it, as in Roblox.
 pub fn deliver(lua: &Lua, messages: Vec<Message>) {
-    for message in messages {
-        if let Err(err) = deliver_one(lua, &message) {
+    let waiting = lua
+        .app_data_mut::<RemoteFunctions>()
+        .map(|mut functions| std::mem::take(&mut functions.unanswered))
+        .unwrap_or_default();
+    for message in waiting.into_iter().chain(messages) {
+        let result = match message.kind {
+            MessageKind::Event => deliver_one(lua, &message),
+            MessageKind::Invoke { call } => serve(lua, &message, call),
+            MessageKind::Reply { call, ref error } => answer(lua, &message, call, error.clone()),
+        };
+        if let Err(err) = result {
             push_error(lua, &err);
         }
     }
@@ -137,7 +170,8 @@ fn deliver_one(lua: &Lua, message: &Message) -> mlua::Result<()> {
 }
 
 /// The RemoteEvent methods, made once per interpreter: `FireServer`,
-/// `FireClient` and `FireAllClients`.
+/// `FireClient` and `FireAllClients`, and the RemoteFunction's
+/// `InvokeServer`.
 pub fn methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Function)>> {
     let fire_server = lua.create_function(|lua, (this, args): (Value, MultiValue)| {
         let remote = remote_self(lua, "FireServer", this)?;
@@ -184,39 +218,262 @@ pub fn methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, Function
         Ok(())
     })?;
 
+    let functions = RemoteFunctions::new(lua)?;
+    let invoke_server = functions.invoke_server.clone();
+    lua.set_app_data(functions);
+
     Ok(vec![
         (ClassName::RemoteEvent, "FireServer", fire_server),
         (ClassName::RemoteEvent, "FireClient", fire_client),
         (ClassName::RemoteEvent, "FireAllClients", fire_all_clients),
+        (ClassName::RemoteFunction, "InvokeServer", invoke_server),
     ])
 }
 
 fn send(lua: &Lua, to: Side, remote: InstanceId, player: InstanceId, args: Vec<RemoteValue>) {
+    send_kind(lua, to, remote, player, MessageKind::Event, args);
+}
+
+fn send_kind(
+    lua: &Lua,
+    to: Side,
+    remote: InstanceId,
+    player: InstanceId,
+    kind: MessageKind,
+    args: Vec<RemoteValue>,
+) {
     if let Some(mut outbox) = lua.app_data_mut::<Outbox>() {
         outbox.0.push(Message {
             to,
             remote,
             player,
+            kind,
             args,
         });
     }
 }
 
+/// `InvokeServer` must pause the LocalScript until the answer comes, and
+/// only Lua can pause (as for `task.wait`). `ask` (Rust) sends the question
+/// and remembers the coroutine; the answer resumes it with `true` and the
+/// values, or `false` and the server's error, which is raised here as it
+/// is, so it names the server script's line.
+const INVOKE_SERVER: &str = r#"
+local running, yield, error, ask = ...
+
+local function finish(ok, ...)
+    if ok then
+        return ...
+    end
+    error((...), 0)
+end
+
+return function(remote, ...)
+    local thread, is_main = running()
+    if is_main then
+        error("InvokeServer can only pause a script", 2)
+    end
+    ask(thread, remote, ...)
+    return finish(yield())
+end
+"#;
+
+/// Runs `OnServerInvoke` on the server, as a coroutine of its own, and
+/// sends back what it returns or the error it raises. `pcall` is the
+/// engine's, which passes errors on as `path:line: message` and lets the
+/// handler wait.
+const SERVE: &str = r#"
+local pcall, reply = ...
+
+return function(callback, remote, call, player, ...)
+    reply(remote, call, player, pcall(callback, player, ...))
+end
+"#;
+
+/// RemoteFunction calls on one side: the questions this side is waiting to
+/// hear back about, and (on the server) questions that came before their
+/// `OnServerInvoke` was set.
+pub struct RemoteFunctions {
+    invoke_server: Function,
+    serve: Function,
+    next_call: u64,
+    /// Each waiting call's coroutine and the script it belongs to.
+    waiting: BTreeMap<u64, (Thread, Option<InstanceId>)>,
+    unanswered: Vec<Message>,
+}
+
+impl RemoteFunctions {
+    fn new(lua: &Lua) -> mlua::Result<Self> {
+        let coroutine: Table = lua.globals().raw_get("coroutine")?;
+        let ask =
+            lua.create_function(|lua, (thread, this, args): (Thread, Value, MultiValue)| {
+                let remote = function_self(lua, "InvokeServer", this)?;
+                let player = lua
+                    .app_data_ref::<LocalPlayer>()
+                    .map(|player| player.0)
+                    .ok_or_else(|| {
+                        mlua::Error::runtime("InvokeServer: this player hasn't joined yet")
+                    })?;
+                let args = remote_args(lua, "InvokeServer", args)?;
+                let script = scheduler::running_script(lua);
+                let call = {
+                    let mut functions = functions_mut(lua)?;
+                    let call = functions.next_call;
+                    functions.next_call += 1;
+                    functions.waiting.insert(call, (thread.clone(), script));
+                    call
+                };
+                crate::debugger::waiting(lua, &thread);
+                send_kind(
+                    lua,
+                    Side::Server,
+                    remote,
+                    player,
+                    MessageKind::Invoke { call },
+                    args,
+                );
+                Ok(())
+            })?;
+        let invoke_server = lua.load(INVOKE_SERVER).set_name("=[engine]").call((
+            coroutine.raw_get::<Function>("running")?,
+            coroutine.raw_get::<Function>("yield")?,
+            lua.globals().raw_get::<Function>("error")?,
+            ask,
+        ))?;
+
+        let reply = lua.create_function(
+            |lua,
+             (remote, call, player, ok, values): (
+                LuaInstance,
+                u64,
+                LuaInstance,
+                bool,
+                MultiValue,
+            )| {
+                let (error, args) = if ok {
+                    match remote_args(lua, "OnServerInvoke", values) {
+                        Ok(args) => (None, args),
+                        Err(err) => (Some(crate::errors::error_message(&err)), Vec::new()),
+                    }
+                } else {
+                    let message = values.into_iter().next().unwrap_or(Value::Nil);
+                    let message = match lua.coerce_string(message.clone())? {
+                        Some(text) => text.to_string_lossy(),
+                        None => format!("OnServerInvoke raised a {}", type_name(lua, &message)),
+                    };
+                    (Some(message), Vec::new())
+                };
+                send_kind(
+                    lua,
+                    Side::Client,
+                    remote.0,
+                    player.0,
+                    MessageKind::Reply { call, error },
+                    args,
+                );
+                Ok(())
+            },
+        )?;
+        let pcall = lua
+            .app_data_ref::<crate::sandbox::Shared>()
+            .map(|shared| shared.pcall().clone())
+            .ok_or_else(|| mlua::Error::runtime("the script functions aren't ready"))?;
+        let serve = lua.load(SERVE).set_name("=[engine]").call((pcall, reply))?;
+        Ok(Self {
+            invoke_server,
+            serve,
+            next_call: 0,
+            waiting: BTreeMap::new(),
+            unanswered: Vec::new(),
+        })
+    }
+
+    /// Forgets the calls `script` waits on, so their answers resume nothing.
+    pub fn forget_script(&mut self, script: InstanceId) {
+        self.waiting.retain(|_, (_, owner)| *owner != Some(script));
+    }
+}
+
+fn functions_mut(lua: &Lua) -> mlua::Result<mlua::AppDataRefMut<'_, RemoteFunctions>> {
+    lua.app_data_mut::<RemoteFunctions>()
+        .ok_or_else(|| mlua::Error::runtime("RemoteFunctions aren't ready"))
+}
+
+/// A question arrived on the server: runs the RemoteFunction's
+/// `OnServerInvoke` with the Player who asked and the arguments.
+fn serve(lua: &Lua, message: &Message, call: u64) -> mlua::Result<()> {
+    if !world(lua)?.contains(message.remote) {
+        return Ok(());
+    }
+    let Some((callback, script)) = bindable::callback(lua, message.remote, "OnServerInvoke") else {
+        functions_mut(lua)?.unanswered.push(message.clone());
+        return Ok(());
+    };
+    let serve = functions_mut(lua)?.serve.clone();
+    let mut args = vec![
+        Value::Function(callback),
+        LuaInstance(message.remote).into_lua(lua)?,
+        call.into_lua(lua)?,
+        LuaInstance(message.player).into_lua(lua)?,
+    ];
+    for arg in &message.args {
+        args.push(from_remote(lua, arg)?);
+    }
+    let thread = lua.create_thread(serve)?;
+    scheduler::resume_as(lua, &thread, MultiValue::from_vec(args), script);
+    Ok(())
+}
+
+/// An answer arrived: resumes the script waiting in `InvokeServer`.
+fn answer(lua: &Lua, message: &Message, call: u64, error: Option<String>) -> mlua::Result<()> {
+    let Some((thread, script)) = functions_mut(lua)?.waiting.remove(&call) else {
+        return Ok(());
+    };
+    let mut values = Vec::new();
+    match error {
+        Some(error) => {
+            values.push(Value::Boolean(false));
+            values.push(error.into_lua(lua)?);
+        }
+        None => {
+            values.push(Value::Boolean(true));
+            for arg in &message.args {
+                values.push(from_remote(lua, arg)?);
+            }
+        }
+    }
+    scheduler::resume_as(lua, &thread, MultiValue::from_vec(values), script);
+    Ok(())
+}
+
+/// The RemoteFunction a method was called on, as [`remote_self`] checks.
+fn function_self(lua: &Lua, method: &str, this: Value) -> mlua::Result<InstanceId> {
+    instance_self(lua, method, ClassName::RemoteFunction, "remote", this)
+}
+
 /// The RemoteEvent a method was called on. Calling with `.` instead of `:`
 /// leaves it out, which is an easy mistake, so the message says so.
 fn remote_self(lua: &Lua, method: &str, this: Value) -> mlua::Result<InstanceId> {
+    instance_self(lua, method, ClassName::RemoteEvent, "remote", this)
+}
+
+/// The Instance of `class` a method was called on, or an error showing how
+/// to call it with a colon (`variable:method(...)`).
+pub(crate) fn instance_self(
+    lua: &Lua,
+    method: &str,
+    class: ClassName,
+    variable: &str,
+    this: Value,
+) -> mlua::Result<InstanceId> {
     sides::check(lua, method)?;
     let is_remote = |id: InstanceId| {
-        world(lua).is_ok_and(|world| {
-            world
-                .get(id)
-                .is_some_and(|i| i.class() == ClassName::RemoteEvent)
-        })
+        world(lua).is_ok_and(|world| world.get(id).is_some_and(|i| i.class() == class))
     };
     match LuaInstance::from_lua(this, lua) {
         Ok(LuaInstance(id)) if is_remote(id) => Ok(id),
         _ => Err(mlua::Error::runtime(format!(
-            "call {method} with a colon: remote:{method}(...)"
+            "call {method} with a colon: {variable}:{method}(...)"
         ))),
     }
 }

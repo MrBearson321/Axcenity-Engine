@@ -34,6 +34,18 @@ pub(super) fn palette(
     let condition = || Expression::Boolean { value: false };
     let part = first(Filter::Parts);
     let sound = first(Filter::Sounds);
+    // The first BindableEvent in ReplicatedStorage, for the event blocks.
+    let bindable = objects
+        .iter()
+        .find(|object| object.path == STORAGE_PATH && object.class == ClassName::ReplicatedStorage)
+        .and_then(|storage| {
+            storage
+                .names
+                .iter()
+                .find(|(kind, _)| *kind == NameKind::Bindable)
+                .map(|(_, name)| name.clone())
+        })
+        .unwrap_or_else(|| NameKind::Bindable.example().to_owned());
     let variable = variables
         .first()
         .cloned()
@@ -67,6 +79,15 @@ pub(super) fn palette(
                 body: Vec::new(),
             }),
             B(BlockKind::EveryFrame { body: Vec::new() }),
+            B(BlockKind::BeforePhysics { body: Vec::new() }),
+            B(BlockKind::BeforeRender { body: Vec::new() }),
+            B(BlockKind::WhenEventFired {
+                event: bindable.clone(),
+                body: Vec::new(),
+            }),
+            B(BlockKind::FireEvent {
+                event: bindable.clone(),
+            }),
             B(BlockKind::WhenSoundEnded {
                 sound: sound.clone(),
                 body: Vec::new(),
@@ -106,6 +127,10 @@ pub(super) fn palette(
             B(BlockKind::WaitForChild {
                 target: String::new(),
                 name: NameKind::Child.example().to_owned(),
+            }),
+            B(BlockKind::DestroyAfter {
+                target: part.clone(),
+                seconds: number(2.0),
             }),
         ],
         Category::Motion => vec![
