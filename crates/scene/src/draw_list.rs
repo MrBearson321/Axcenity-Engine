@@ -8,7 +8,10 @@ use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 
-use axcenity_assets::{AlphaMode, Assets, ChannelTexture, Image, Model, ModelMaterial, Posed};
+use axcenity_assets::{
+    AlphaMode, Assets, ChannelTexture, Image, Model, ModelMaterial, Posed, PosedPrimitive,
+    Primitive,
+};
 use axcenity_core::{ClassName, Instance, InstanceId, PartType, TextureChannel, Value, World};
 use axcenity_render::glam::{Mat4, Vec3};
 use axcenity_render::{
@@ -252,8 +255,8 @@ pub fn build_draw_list_posed(
     {
         match instance.class() {
             ClassName::MeshPart => {
-                let posed = poses.get(&id).map(|posed| (id, posed));
-                mesh_part_draw_items(world, instance, assets, posed, &mut items)
+                let posed = poses.get(&id);
+                mesh_part_draw_items(world, id, instance, assets, posed, &mut items)
             }
             ClassName::PointLight | ClassName::SpotLight => {
                 lights.extend(light_of(world, instance))
@@ -522,6 +525,8 @@ fn part_draw_item(
         material,
         uv_tile,
         casts_shadow: casts_shadow(instance),
+        id: 0,
+        cull_distance: 0.0,
     })
 }
 
@@ -681,13 +686,14 @@ fn place_maps(material: &mut Material, appearance: &Instance) {
 /// model's own material, or its `MaterialVariant` in place of them all, or
 /// with the maps of the SurfaceAppearance inside it for that material. Until it has a model (no `MeshId` yet, or one
 /// that can't be loaded), it's drawn as a plain grey box, so it can still
-/// be seen and picked. With `posed` (the MeshPart's ID and a pose of its
-/// model), the model is drawn in that pose.
+/// be seen and picked. With `posed` (a pose of its model), the model is
+/// drawn in that pose.
 fn mesh_part_draw_items(
     world: &World,
+    id: InstanceId,
     instance: &Instance,
     assets: &Assets,
-    posed: Option<(InstanceId, &Arc<Posed>)>,
+    posed: Option<&Arc<Posed>>,
     items: &mut Vec<DrawItem>,
 ) {
     let Some((_, transform)) = part_placement(instance) else {
@@ -709,6 +715,8 @@ fn mesh_part_draw_items(
             material: Material::default(),
             uv_tile: 0.0,
             casts_shadow: casts_shadow(instance),
+            id: 0,
+            cull_distance: 0.0,
         });
         return;
     };
@@ -720,9 +728,7 @@ fn mesh_part_draw_items(
         .collect();
     let variant = material::variant_of(instance, assets);
     // A pose of another model (the MeshId just changed) isn't used.
-    let posed = posed.filter(|(_, posed)| {
-        posed.model_key == model.key() && posed.primitives.len() == model.primitives.len()
-    });
+    let posed = posed.filter(|posed| posed.model_key == model.key());
     for (index, primitive) in model.primitives.iter().enumerate() {
         let appearance = appearances.iter().find(|appearance| {
             appearance.property("MaterialName").and_then(Value::as_str)
@@ -734,16 +740,12 @@ fn mesh_part_draw_items(
             (None, None) => model_material(&primitive.material),
         };
         let shape: Arc<dyn MeshSource> = match posed {
-            Some((part, posed)) => Arc::new(PosedMesh {
-                key: posed_key(part, primitive.key()),
-                model: model.clone(),
+            Some(posed) => Arc::new(PosedMesh {
+                part: id,
+                mesh: ModelMesh::new(&model, index),
                 posed: posed.clone(),
-                index,
             }),
-            None => Arc::new(ModelMesh {
-                model: model.clone(),
-                index,
-            }),
+            None => Arc::new(ModelMesh::new(&model, index)),
         };
         items.push(DrawItem {
             shape: Shape::Mesh(shape),
@@ -751,6 +753,8 @@ fn mesh_part_draw_items(
             material,
             uv_tile: 0.0,
             casts_shadow: casts_shadow(instance),
+            id: draw_id(id),
+            cull_distance: 0.0,
         });
     }
     for item in &mut items[first..] {
@@ -842,19 +846,27 @@ fn surface_material(file: &ModelMaterial, appearance: &Instance, assets: &Assets
 }
 
 /// A model's primitives at `transform`, using the file's own materials.
-pub(crate) fn push_model(model: &Arc<Model>, transform: Mat4, items: &mut Vec<DrawItem>) {
+/// `id` is the same for the same thing each frame (see [`DrawItem::id`]).
+pub(crate) fn push_model(model: &Arc<Model>, transform: Mat4, id: u64, items: &mut Vec<DrawItem>) {
     for (index, primitive) in model.primitives.iter().enumerate() {
         items.push(DrawItem {
-            shape: Shape::Mesh(Arc::new(ModelMesh {
-                model: model.clone(),
-                index,
-            })),
+            shape: Shape::Mesh(Arc::new(ModelMesh::new(model, index))),
             transform,
             material: model_material(&primitive.material),
             uv_tile: 0.0,
             casts_shadow: true,
+            id,
+            cull_distance: 0.0,
         });
     }
+}
+
+/// A [`DrawItem::id`] for `thing`: the same for the same thing, and never
+/// 0 (which is none).
+pub(crate) fn draw_id(thing: impl Hash) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    thing.hash(&mut hasher);
+    hasher.finish().max(1)
 }
 
 /// glTF's material values, as the renderer takes them.
@@ -932,64 +944,130 @@ fn srgb(linear: [f32; 3]) -> [f32; 3] {
     })
 }
 
-/// One primitive of a model, handed to the renderer without copying it.
+/// One primitive of a model at one level of detail, handed to the renderer
+/// without copying it.
+#[derive(Clone)]
 struct ModelMesh {
     model: Arc<Model>,
     index: usize,
+    /// 0 for the primitive itself, else which of its simpler copies.
+    level: usize,
+}
+
+impl ModelMesh {
+    fn new(model: &Arc<Model>, index: usize) -> Self {
+        Self {
+            model: model.clone(),
+            index,
+            level: 0,
+        }
+    }
+
+    fn primitive(&self) -> &Primitive {
+        let full = &self.model.primitives[self.index];
+        match self.level {
+            0 => full,
+            level => &full.lods[level - 1],
+        }
+    }
+
+    /// How many simpler copies the full primitive has; a copy has none.
+    fn copies(&self) -> usize {
+        match self.level {
+            0 => self.model.primitives[self.index].lods.len(),
+            _ => 0,
+        }
+    }
+
+    /// The full primitive's simpler copy `level`, if it has one.
+    fn copy(&self, level: usize) -> Option<Self> {
+        (1..=self.copies()).contains(&level).then(|| Self {
+            level,
+            ..self.clone()
+        })
+    }
 }
 
 impl MeshSource for ModelMesh {
     fn key(&self) -> u64 {
-        self.model.primitives[self.index].key()
+        self.primitive().key()
     }
     fn positions(&self) -> &[[f32; 3]] {
-        &self.model.primitives[self.index].positions
+        &self.primitive().positions
     }
     fn normals(&self) -> &[[f32; 3]] {
-        &self.model.primitives[self.index].normals
+        &self.primitive().normals
     }
     fn uvs(&self) -> &[[f32; 2]] {
-        &self.model.primitives[self.index].uvs
+        &self.primitive().uvs
     }
     fn tangents(&self) -> &[[f32; 4]] {
-        &self.model.primitives[self.index].tangents
+        &self.primitive().tangents
     }
     fn indices(&self) -> &[u32] {
-        &self.model.primitives[self.index].indices
+        &self.primitive().indices
+    }
+    fn lod_count(&self) -> usize {
+        self.copies()
+    }
+    fn lod(&self, level: usize) -> Option<Arc<dyn MeshSource>> {
+        Some(Arc::new(self.copy(level)?))
     }
 }
 
-/// One primitive of a posed model: the pose's corners, with the model's
-/// texture coordinates and triangles. Each MeshPart's copy has its own
-/// key, so two parts posed differently don't share one GPU copy.
+/// One primitive of a posed model at one level of detail: the pose's
+/// corners, with the model's texture coordinates and triangles. Each
+/// MeshPart's copy has its own key, so two parts posed differently don't
+/// share one GPU copy. The corners are posed when the renderer first reads
+/// them, so only the level it draws is posed.
 struct PosedMesh {
-    key: u64,
-    model: Arc<Model>,
+    part: InstanceId,
+    mesh: ModelMesh,
     posed: Arc<Posed>,
-    index: usize,
+}
+
+impl PosedMesh {
+    fn posed(&self) -> &PosedPrimitive {
+        let ModelMesh {
+            model,
+            index,
+            level,
+        } = &self.mesh;
+        self.posed.primitive(model, *index, *level)
+    }
 }
 
 impl MeshSource for PosedMesh {
     fn key(&self) -> u64 {
-        self.key
+        posed_key(self.part, self.mesh.key())
     }
     fn positions(&self) -> &[[f32; 3]] {
-        &self.posed.primitives[self.index].positions
+        &self.posed().positions
     }
     fn normals(&self) -> &[[f32; 3]] {
-        &self.posed.primitives[self.index].normals
+        &self.posed().normals
     }
     fn uvs(&self) -> &[[f32; 2]] {
-        &self.model.primitives[self.index].uvs
+        self.mesh.uvs()
     }
     fn tangents(&self) -> &[[f32; 4]] {
-        &self.posed.primitives[self.index].tangents
+        &self.posed().tangents
     }
     fn indices(&self) -> &[u32] {
-        &self.model.primitives[self.index].indices
+        self.mesh.indices()
     }
     fn version(&self) -> u64 {
         self.posed.version
+    }
+    fn lod_count(&self) -> usize {
+        self.mesh.copies()
+    }
+    fn lod(&self, level: usize) -> Option<Arc<dyn MeshSource>> {
+        Some(Arc::new(PosedMesh {
+            part: self.part,
+            mesh: self.mesh.copy(level)?,
+            posed: self.posed.clone(),
+        }))
     }
 }
 
@@ -1371,5 +1449,40 @@ mod tests {
             .set_property(light, "Direction", vector(0.0, 1.0, 0.0))
             .unwrap();
         assert_eq!(cone(&world).shadows.unwrap().near, 0.0, "pointing away");
+    }
+
+    fn examples() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples")
+    }
+
+    #[test]
+    fn a_mesh_part_hands_over_its_models_simpler_copies_with_an_id_of_its_own() {
+        let mut world = World::new();
+        let helmet = "assets/models/DamagedHelmet/DamagedHelmet.glb";
+        let (a, b) = (mesh_part(&mut world, helmet), mesh_part(&mut world, helmet));
+        let assets = Assets::new(examples().join("hello-pbr"));
+        let list = build_draw_list(&world, &assets, camera());
+        assert_eq!(list.items.len(), 2);
+        let [first, second] = [&list.items[0], &list.items[1]];
+        assert_ne!(first.id, 0);
+        assert_ne!(first.id, second.id, "each part keeps its own level");
+        let ids: Vec<u64> = list.items.iter().map(|item| item.id).collect();
+        assert!(
+            ids.contains(&draw_id(a)) && ids.contains(&draw_id(b)),
+            "{ids:?}"
+        );
+        let Shape::Mesh(mesh) = &first.shape else {
+            panic!("a mesh");
+        };
+        assert_eq!(mesh.lod_count(), 2);
+        let triangles = |mesh: &dyn MeshSource| mesh.indices().len() / 3;
+        let full = triangles(mesh.as_ref());
+        let half = mesh.lod(1).unwrap();
+        let quarter = mesh.lod(2).unwrap();
+        assert!(triangles(half.as_ref()) <= full / 2, "{full}");
+        assert!(triangles(quarter.as_ref()) <= full / 4, "{full}");
+        assert_ne!(half.key(), mesh.key());
+        assert_eq!(half.lod_count(), 0);
+        assert!(mesh.lod(3).is_none() && half.lod(1).is_none());
     }
 }

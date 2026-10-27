@@ -84,6 +84,10 @@ rfd = "0.17"
 # `ufbx` C library, compiled from source with `cc` like Lua, so nothing is needed on
 # any OS beyond the C compiler `mlua` already uses.
 ufbx = "0.11"
+# Simplifies imported models' meshes into levels of detail (graphics Phase 13),
+# MIT OR Apache-2.0. Wraps the `meshoptimizer` C++ library (MIT), compiled from
+# source with `cc`, so it needs the C++ compiler `mlua` already uses.
+meshopt = "0.7"
 # Physics. Its math types come from `glamx` (glam-based), re-exported as `rapier3d::math`.
 rapier3d = "0.36"
 serde = { version = "1", features = ["derive"] }

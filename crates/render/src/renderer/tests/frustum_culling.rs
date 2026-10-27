@@ -73,9 +73,8 @@ fn a_mesh_is_culled_by_the_box_its_corners_span_not_by_its_origin() {
         min: Vec3::new(-1.0, -1.0, -51.0),
         max: Vec3::new(1.0, 1.0, -49.0),
     };
-    let view = Frustum::of(view_projection(&list, 1.0));
-    assert_eq!(plan_draws(&list, &view, |_| ahead, None).culled, 0);
-    assert_eq!(plan_draws(&list, &view, |_| Bounds::UNIT, None).culled, 1);
+    assert_eq!(plan_with(&list, |_| ahead).culled, 0);
+    assert_eq!(plan_with(&list, |_| Bounds::UNIT).culled, 1);
 }
 
 #[test]

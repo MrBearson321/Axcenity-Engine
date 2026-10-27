@@ -268,10 +268,12 @@ impl TerrainCache {
                     },
                     uv_tile: 0.0,
                     casts_shadow,
+                    id: 0,
+                    cull_distance: 0.0,
                 });
             }
         }
-        crate::foliage::draw_terrain(&placement, &data, assets, items);
+        crate::foliage::draw_terrain(id, &placement, &data, assets, items);
     }
 }
 

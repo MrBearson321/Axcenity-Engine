@@ -11,6 +11,7 @@
 //!   [samples](Take::sample) into one, and [`Model::pose`] skins the
 //!   model's triangles with it, on the CPU, into a [`Posed`] copy.
 
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use glam::{Mat3, Mat4, Quat, Vec3, Vec4};
@@ -250,14 +251,25 @@ static NEXT_VERSION: AtomicU64 = AtomicU64::new(1);
 
 /// A model's triangles moved by a pose (see [`Model::pose`]). Texture
 /// coordinates and indices don't move, so they stay in the model.
+///
+/// Each primitive is skinned the first time it's asked for, at the level of
+/// detail asked for ([`Posed::primitive`]), so a character far away poses
+/// only its simpler copy and nothing is posed that isn't drawn.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Posed {
     /// The model this is a pose of ([`Model::key`]).
     pub model_key: u64,
     /// Different for every pose made.
     pub version: u64,
-    /// One per primitive of the model, in the same order.
-    pub primitives: Vec<PosedPrimitive>,
+    /// Where each joint moves its vertices from the bind pose, and the
+    /// matching turn for normals.
+    joints: Vec<Mat4>,
+    normal_matrices: Vec<Mat3>,
+    /// How many primitives the model has.
+    primitive_count: usize,
+    /// Each primitive's corners at each level, the full one first
+    /// (`level * primitives + index`), posed when first asked for.
+    posed: Vec<OnceLock<PosedPrimitive>>,
 }
 
 /// One primitive's moved corners.
@@ -269,66 +281,115 @@ pub struct PosedPrimitive {
     pub tangents: Vec<[f32; 4]>,
 }
 
-impl Model {
-    /// The model's triangles moved by `pose` (one bone transform per bone
-    /// of its rig), or `None` if it has no rig. Vertices weighted to
+/// What a primitive that isn't in the pose's model is posed as.
+static NOTHING: PosedPrimitive = PosedPrimitive {
+    positions: Vec::new(),
+    normals: Vec::new(),
+    tangents: Vec::new(),
+};
+
+impl Posed {
+    /// Primitive `index` of `model` (the model this is a pose of) at level
+    /// of detail `level`: 0 is the primitive itself, 1 its first simpler
+    /// copy ([`Primitive::lods`](super::Primitive::lods)), and so on. A level
+    /// it doesn't have, or another model's primitive, is nothing.
+    pub fn primitive(&self, model: &Model, index: usize, level: usize) -> &PosedPrimitive {
+        let full = model
+            .primitives
+            .get(index)
+            .filter(|_| model.key() == self.model_key);
+        let source = match (full, level) {
+            (Some(full), 0) => Some(full),
+            (Some(full), level) => full.lods.get(level - 1),
+            (None, _) => None,
+        };
+        let slot = self.posed.get(level * self.primitive_count + index);
+        match (source, slot) {
+            (Some(source), Some(slot)) => slot.get_or_init(|| self.skin(source)),
+            _ => &NOTHING,
+        }
+    }
+
+    /// Every primitive of `model` at full detail.
+    pub fn primitives<'a>(&'a self, model: &Model) -> Vec<&'a PosedPrimitive> {
+        (0..model.primitives.len())
+            .map(|index| self.primitive(model, index, 0))
+            .collect()
+    }
+
+    /// `primitive`'s corners moved by the pose. Vertices weighted to
     /// nothing stay where they are.
+    fn skin(&self, primitive: &super::Primitive) -> PosedPrimitive {
+        let joints = &self.joints;
+        let mut posed = PosedPrimitive {
+            positions: primitive.positions.clone(),
+            normals: primitive.normals.clone(),
+            tangents: primitive.tangents.clone(),
+        };
+        let count = primitive.joints.len().min(primitive.weights.len());
+        for vertex in 0..count.min(posed.positions.len()) {
+            let (indices, weights) = (primitive.joints[vertex], primitive.weights[vertex]);
+            let mut matrix = Mat4::ZERO;
+            let mut normal_matrix = Mat3::ZERO;
+            let mut total = 0.0;
+            for (&joint, &weight) in indices.iter().zip(&weights) {
+                let joint = usize::from(joint);
+                if weight <= 0.0 || joint >= joints.len() {
+                    continue;
+                }
+                matrix += joints[joint] * weight;
+                normal_matrix += self.normal_matrices[joint] * weight;
+                total += weight;
+            }
+            if total <= 1e-6 {
+                continue;
+            }
+            let position = matrix.transform_point3(Vec3::from(posed.positions[vertex]));
+            posed.positions[vertex] = (position / total).to_array();
+            if let Some(normal) = posed.normals.get_mut(vertex) {
+                *normal = (normal_matrix * Vec3::from(*normal))
+                    .normalize_or_zero()
+                    .to_array();
+            }
+            if let Some(tangent) = posed.tangents.get_mut(vertex) {
+                let turned = matrix.transform_vector3(Vec4::from(*tangent).truncate());
+                let turned = turned.normalize_or_zero();
+                *tangent = [turned.x, turned.y, turned.z, tangent[3]];
+            }
+        }
+        posed
+    }
+}
+
+impl Model {
+    /// The model moved by `pose` (one bone transform per bone of its rig),
+    /// or `None` if it has no rig. Its triangles are skinned when they're
+    /// asked for (see [`Posed::primitive`]).
     pub fn pose(&self, pose: &[BoneTransform]) -> Option<Posed> {
         let rig = self.rig.as_ref()?;
         let joints = rig.joint_matrices(pose);
         // Normals are turned by the inverse transpose, so they stay
         // perpendicular to stretched surfaces.
-        let normal_matrices: Vec<Mat3> = joints
+        let normal_matrices = joints
             .iter()
             .map(|joint| Mat3::from_mat4(*joint).inverse().transpose())
             .collect();
-        let primitives = self
+        let primitive_count = self.primitives.len();
+        let levels = 1 + self
             .primitives
             .iter()
-            .map(|primitive| {
-                let mut posed = PosedPrimitive {
-                    positions: primitive.positions.clone(),
-                    normals: primitive.normals.clone(),
-                    tangents: primitive.tangents.clone(),
-                };
-                let count = primitive.joints.len().min(primitive.weights.len());
-                for vertex in 0..count.min(posed.positions.len()) {
-                    let (indices, weights) = (primitive.joints[vertex], primitive.weights[vertex]);
-                    let mut matrix = Mat4::ZERO;
-                    let mut normal_matrix = Mat3::ZERO;
-                    let mut total = 0.0;
-                    for (&joint, &weight) in indices.iter().zip(&weights) {
-                        let joint = usize::from(joint);
-                        if weight <= 0.0 || joint >= joints.len() {
-                            continue;
-                        }
-                        matrix += joints[joint] * weight;
-                        normal_matrix += normal_matrices[joint] * weight;
-                        total += weight;
-                    }
-                    if total <= 1e-6 {
-                        continue;
-                    }
-                    let position = matrix.transform_point3(Vec3::from(posed.positions[vertex]));
-                    posed.positions[vertex] = (position / total).to_array();
-                    if let Some(normal) = posed.normals.get_mut(vertex) {
-                        *normal = (normal_matrix * Vec3::from(*normal))
-                            .normalize_or_zero()
-                            .to_array();
-                    }
-                    if let Some(tangent) = posed.tangents.get_mut(vertex) {
-                        let turned = matrix.transform_vector3(Vec4::from(*tangent).truncate());
-                        let turned = turned.normalize_or_zero();
-                        *tangent = [turned.x, turned.y, turned.z, tangent[3]];
-                    }
-                }
-                posed
-            })
-            .collect();
+            .map(|primitive| primitive.lods.len())
+            .max()
+            .unwrap_or(0);
         Some(Posed {
             model_key: self.key(),
             version: NEXT_VERSION.fetch_add(1, Ordering::Relaxed),
-            primitives,
+            joints,
+            normal_matrices,
+            primitive_count,
+            posed: (0..levels * primitive_count)
+                .map(|_| OnceLock::new())
+                .collect(),
         })
     }
 }
@@ -387,5 +448,61 @@ mod tests {
         // its left.
         let tip = world[1].transform_point3(Vec3::ZERO);
         assert!((tip - Vec3::new(-1.0, 1.0, 0.0)).length() < 1e-5, "{tip}");
+    }
+
+    #[test]
+    fn a_pose_skins_each_level_of_detail_only_when_it_is_asked_for() {
+        let mut model = crate::model::load_model(
+            super::super::test_rig::noodle_fbx().as_bytes(),
+            std::path::Path::new("."),
+            crate::model::ModelFormat::Fbx,
+        )
+        .unwrap();
+        // A simpler copy of the first primitive: half its triangles.
+        let full = &model.primitives[0];
+        let half = full.indices.len() / 6 * 3;
+        let copy = full.with_triangles(&full.indices[..half]);
+        model.primitives[0].lods = vec![copy];
+        let mut pose = model.rig.as_ref().unwrap().rest_pose();
+        for bone in &mut pose {
+            bone.rotation = Quat::from_rotation_z(0.4);
+        }
+        let posed = model.pose(&pose).unwrap();
+        let skinned = |posed: &Posed| {
+            posed
+                .posed
+                .iter()
+                .filter(|slot| slot.get().is_some())
+                .count()
+        };
+        assert_eq!(
+            skinned(&posed),
+            0,
+            "nothing is skinned before it's asked for"
+        );
+
+        let copy = &model.primitives[0].lods[0];
+        let posed_copy = posed.primitive(&model, 0, 1).clone();
+        assert_eq!(skinned(&posed), 1, "only the copy asked for");
+        assert_eq!(posed_copy.positions.len(), copy.positions.len());
+        assert_ne!(posed_copy.positions, copy.positions, "it moved");
+        // Each of the copy's corners moves where the same corner of the
+        // full primitive does.
+        let full = &model.primitives[0];
+        let posed_full = posed.primitive(&model, 0, 0);
+        for (at, position) in copy.positions.iter().enumerate() {
+            let same = (0..full.positions.len())
+                .find(|&other| {
+                    full.positions[other] == *position
+                        && full.joints[other] == copy.joints[at]
+                        && full.weights[other] == copy.weights[at]
+                })
+                .unwrap();
+            let gap = Vec3::from(posed_full.positions[same]) - Vec3::from(posed_copy.positions[at]);
+            assert!(gap.length() < 1e-5, "{gap}");
+        }
+        // A level it doesn't have, or another model's primitive, is nothing.
+        assert!(posed.primitive(&model, 0, 2).positions.is_empty());
+        assert!(posed.primitive(&model, 99, 0).positions.is_empty());
     }
 }

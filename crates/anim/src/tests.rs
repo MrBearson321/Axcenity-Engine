@@ -3,13 +3,19 @@
 
 use std::path::{Path, PathBuf};
 
-use axcenity_assets::Assets;
+use axcenity_assets::{Assets, Posed, PosedPrimitive};
 use axcenity_core::{ClassName, InstanceId, PlayRequest, Value, Vector3, World};
 
 use crate::{AnimatorEvent, Animators, ClipFile, StateMachineFile};
 
 fn example() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello-animation")
+}
+
+/// The noodle's corners in `posed`, at full detail.
+fn corners(assets: &Assets, posed: &Posed) -> Vec<PosedPrimitive> {
+    let model = assets.model("assets/models/noodle.fbx").unwrap();
+    posed.primitives(&model).into_iter().cloned().collect()
 }
 
 /// A world with the example's noodle: a MeshPart with an Animator.
@@ -66,7 +72,8 @@ fn an_animator_starts_in_its_default_state_and_poses_its_part() {
     let later = animators.poses()[&part].clone();
     assert_ne!(first.version, later.version);
     assert_ne!(
-        first.primitives, later.primitives,
+        corners(&assets, &first),
+        corners(&assets, &later),
         "Idle (Speed 0) sways the noodle"
     );
 }
@@ -551,7 +558,10 @@ fn a_linked_clip_that_also_keys_a_sword_plays_both() {
     let first = animators.poses()[&part].clone();
     animators.update(&mut world, &assets, 0.5);
     // The take moves the bones…
-    assert_ne!(first.primitives, animators.poses()[&part].primitives);
+    assert_ne!(
+        corners(&assets, &first),
+        corners(&assets, &animators.poses()[&part])
+    );
     // …and the clip's own track fades the sword.
     let transparency = world
         .get(sword)
@@ -578,7 +588,7 @@ fn a_track_plays_over_the_state_machine_and_stop_fades_it_out() {
     let (mut alone, alone_part, _) = noodle(STATE_MACHINE);
     let mut animators = Animators::new();
     let mut alone_animators = Animators::new();
-    let primitives = |animators: &Animators, part| animators.poses()[&part].primitives.clone();
+    let primitives = |animators: &Animators, part| corners(&assets, &animators.poses()[&part]);
     let step = |world: &mut World, alone: &mut World, a: &mut Animators, b: &mut Animators, dt| {
         let events = a.update(world, &assets, dt);
         b.update(alone, &assets, dt);

@@ -189,7 +189,10 @@ pub(super) struct InstanceRaw {
     /// perpendicular to the surface when a shape is stretched.
     pub(super) normal_matrix: [[f32; 3]; 3],
     pub(super) base_color_opacity: [f32; 4],
-    pub(super) emissive: [f32; 3],
+    /// Light given off, then how much of the item is drawn: 1 all of it, a
+    /// fade in below 1 and a fade out above it (see [`super::lod`] and
+    /// `dithered_out` in shader.wgsl).
+    pub(super) emissive_fade: [f32; 4],
     /// Metalness, roughness, alpha cutoff, and studs per texture repeat
     /// (0 keeps the mesh's own coordinates).
     pub(super) surface: [f32; 4],
@@ -664,6 +667,8 @@ pub(super) struct ScenePipeline {
     /// Each item's bounds and whether it was drawn, kept while
     /// `frozen_view` is set.
     pub(super) culling_bounds: Vec<CullingBounds>,
+    /// Each item's level of detail, kept between frames.
+    pub(super) lods: LodStates,
     /// Bytes of textures and of meshes on the GPU.
     pub(super) texture_bytes: GpuBytes,
     pub(super) mesh_bytes: GpuBytes,

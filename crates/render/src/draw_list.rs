@@ -564,6 +564,15 @@ pub struct DrawItem {
     /// False draws the item without it casting a sun shadow. It is still
     /// shaded by other items' shadows.
     pub casts_shadow: bool,
+    /// The same every frame for the same thing drawn, and different for
+    /// every other (`scene` hashes the Instance's ID), so a mesh with
+    /// levels of detail ([`MeshSource::lod`]) keeps its level and
+    /// cross-fades when it switches. 0 is none: the level is picked afresh
+    /// each frame, with no fade.
+    pub id: u64,
+    /// Studs from the camera past which the item isn't drawn, fading out
+    /// over the last tenth (painted foliage). 0 draws it at any distance.
+    pub cull_distance: f32,
 }
 
 /// What to draw: a built-in mesh, each fitting the 1×1×1 cube centered on
@@ -621,6 +630,19 @@ pub trait MeshSource: Send + Sync {
     /// place. A mesh that never changes keeps the default.
     fn version(&self) -> u64 {
         0
+    }
+    /// How many simpler copies of this mesh there are ([`MeshSource::lod`]).
+    /// A mesh with none keeps the default.
+    fn lod_count(&self) -> usize {
+        0
+    }
+    /// Simpler copy `level` of this mesh (1 is the first), with fewer
+    /// triangles than the level before, drawn in its place when it's small
+    /// on screen: the renderer asks only for the level it draws. Each copy
+    /// has its own key, fits the same box, and has no copies of its own.
+    fn lod(&self, level: usize) -> Option<Arc<dyn MeshSource>> {
+        let _ = level;
+        None
     }
 }
 

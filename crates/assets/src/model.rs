@@ -8,6 +8,7 @@
 //! `Size` an imported MeshPart starts with.
 
 mod fbx;
+mod lod;
 mod maps;
 mod objects;
 mod rig;
@@ -146,6 +147,13 @@ pub struct Primitive {
     /// moves). Empty when the model isn't animated.
     pub joints: Vec<[u16; 4]>,
     pub weights: Vec<[f32; 4]>,
+    /// Simpler copies with the same material, each with fewer triangles
+    /// than the one before, to draw far away: the file's own `_LOD1` and
+    /// `_LOD2` objects, or simplified when the model was loaded (see
+    /// [`lod`]). Their own `lods` are empty.
+    pub lods: Vec<Primitive>,
+    /// While reading: 0 for the full model, or which simpler copy this is.
+    level: u8,
 }
 
 impl Primitive {
@@ -551,6 +559,7 @@ fn read(bytes: &[u8], folder: &Path, picks: &[Pick]) -> Result<Vec<Model>, Model
         embedded: embedded_image_names(&document),
         wanted: None,
         found: HashSet::new(),
+        level: 0,
     };
     let mut models = Vec::new();
     for pick in picks {
@@ -764,6 +773,8 @@ struct Reader<'a> {
     wanted: Option<HashSet<String>>,
     /// The wanted paths seen so far.
     found: HashSet<String>,
+    /// The level of detail of the objects being read (see [`lod::level_of`]).
+    level: u8,
 }
 
 impl Reader<'_> {
@@ -803,6 +814,9 @@ impl Reader<'_> {
             return Err(ModelError::TooDeep);
         }
         let transform = parent * Mat4::from_cols_array_2d(&node.transform().matrix());
+        // Everything inside a `_LOD1` node is part of that copy.
+        let outer = self.level;
+        self.level = self.level.max(lod::level_of(&node_name(node)));
         if let Some(mesh) = node.mesh()
             && want(&self.wanted, &mut self.found, path)
         {
@@ -813,6 +827,7 @@ impl Reader<'_> {
             let child_path = siblings.path(path, &node_name(&child));
             self.node(&child, transform, depth + 1, &child_path)?;
         }
+        self.level = outer;
         Ok(())
     }
 
@@ -887,6 +902,8 @@ impl Reader<'_> {
                 material,
                 joints: Vec::new(),
                 weights: Vec::new(),
+                lods: Vec::new(),
+                level: self.level,
             });
         }
         Ok(())
@@ -1160,16 +1177,26 @@ fn tangents(
 }
 
 /// Fits the primitives into the 1×1×1 cube centered on the origin and
-/// makes the model.
+/// makes the model. The full model's primitives decide its box and hull;
+/// simpler copies (see [`lod`]) are placed the same way and attached to them.
 fn fit(mut primitives: Vec<Primitive>) -> Result<Model, ModelError> {
+    // A file with only `_LOD1` objects has them as its full model.
+    if primitives.iter().all(|primitive| primitive.level > 0) {
+        for primitive in &mut primitives {
+            primitive.level = 0;
+        }
+    }
+    let full = |primitive: &&Primitive| primitive.level == 0;
     if primitives
         .iter()
+        .filter(full)
         .all(|primitive| primitive.indices.is_empty())
     {
         return Err(ModelError::NoTriangles);
     }
     let corners = primitives
         .iter()
+        .filter(full)
         .flat_map(|primitive| &primitive.positions)
         .map(|&p| Vec3::from(p))
         .filter(|p| p.is_finite());
@@ -1193,8 +1220,12 @@ fn fit(mut primitives: Vec<Primitive>) -> Result<Model, ModelError> {
         for position in &mut primitive.positions {
             let fitted = (Vec3::from(*position) - center) * scale;
             *position = fitted.to_array();
-            // Each distinct finite corner once. Bit patterns compare exactly.
-            if fitted.is_finite() && hull.insert(fitted.to_array().map(f32::to_bits)) {
+            // Each distinct finite corner of the full model once. Bit
+            // patterns compare exactly.
+            if primitive.level == 0
+                && fitted.is_finite()
+                && hull.insert(fitted.to_array().map(f32::to_bits))
+            {
                 hull_points.push(fitted.to_array());
             }
         }
@@ -1217,7 +1248,7 @@ fn fit(mut primitives: Vec<Primitive>) -> Result<Model, ModelError> {
         key: new_key(),
         size: Vec3::select(thick, size, Vec3::ZERO).to_array(),
         center: center.to_array(),
-        primitives,
+        primitives: lod::attach(primitives),
         hull_points,
         warnings: Vec::new(),
         rig: None,

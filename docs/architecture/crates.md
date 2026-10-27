@@ -5,7 +5,7 @@ Which crate owns what, and what it may depend on. Read this before adding a crat
 | Crate | Owns | May depend on |
 |---|---|---|
 | `core` | Instance tree, arena, properties, events, services | nothing engine-internal |
-| `assets` | the asset system: loading glTF/FBX models (with FBX skeletons, skin weights and takes), posing them, reading project files (`Assets`) and importing models | nothing engine-internal; plain data out |
+| `assets` | the asset system: loading glTF/FBX models (with FBX skeletons, skin weights and takes, and levels of detail simplified by `meshopt`), posing them, reading project files (`Assets`) and importing models | nothing engine-internal; plain data out |
 | `anim` | animation: clip and animator controller files, state machines and blending, and `Animators`, which plays every Animator and poses its MeshPart | `assets`, `core` |
 | `audio` | Kira playback for project sounds: `GameAudio` applies queued `SoundAction`s, keeps playback in line with each Sound, and spatializes emitters against the camera | `assets`, `core` |
 | `blocks` | persisted block-script data, node graphs (the UI Event Graph, and the nodes behavior trees offer) and their one-way Lua translation | nothing engine-internal (`core` and `script` only in tests) |

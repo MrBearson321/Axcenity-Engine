@@ -285,3 +285,62 @@ fn missing_normals_are_worked_out_facing_outward() {
     );
     assert_eq!(normals, vec![[0.0, 0.0, 1.0]; 3]);
 }
+
+#[test]
+fn a_files_own_lod1_object_is_the_simpler_copy_and_doesnt_size_the_model() {
+    let folder = std::env::temp_dir().join("axcenity-gltf-lods");
+    let _ = std::fs::remove_dir_all(&folder);
+    std::fs::create_dir_all(&folder).unwrap();
+    // A square in the XY plane (two triangles), then one triangle.
+    let floats: [f32; 27] = [
+        0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, //
+        0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0, //
+        0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0,
+    ];
+    let bytes: Vec<u8> = floats.iter().flat_map(|f| f.to_le_bytes()).collect();
+    std::fs::write(folder.join("rock.bin"), bytes).unwrap();
+    // The copy is moved 5 along Z: if it counted, the model would be 5 deep.
+    let gltf = r#"{
+        "asset": { "version": "2.0" },
+        "buffers": [ { "uri": "rock.bin", "byteLength": 108 } ],
+        "bufferViews": [
+            { "buffer": 0, "byteOffset": 0, "byteLength": 72 },
+            { "buffer": 0, "byteOffset": 72, "byteLength": 36 }
+        ],
+        "accessors": [
+            { "bufferView": 0, "componentType": 5126, "count": 6, "type": "VEC3",
+              "min": [0, 0, 0], "max": [1, 1, 0] },
+            { "bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC3",
+              "min": [0, 0, 0], "max": [1, 1, 0] }
+        ],
+        "meshes": [
+            { "primitives": [ { "attributes": { "POSITION": 0 } } ] },
+            { "primitives": [ { "attributes": { "POSITION": 1 } } ] }
+        ],
+        "nodes": [
+            { "name": "Rock", "mesh": 0 },
+            { "name": "Rock_LOD1", "mesh": 1, "translation": [0, 0, 5] }
+        ],
+        "scenes": [ { "nodes": [0, 1] } ],
+        "scene": 0
+    }"#;
+    let model = load_model(gltf.as_bytes(), &folder, ModelFormat::Gltf).unwrap();
+    assert_eq!(
+        model.primitives.len(),
+        1,
+        "the copy isn't drawn as its own part"
+    );
+    assert_eq!(model.size, [1.0, 1.0, 0.0]);
+    assert_eq!(model.hull_points.len(), 4);
+    let full = &model.primitives[0];
+    assert_eq!(full.indices.len(), 6);
+    assert_eq!(full.lods.len(), 1, "the file's copy, not simplified ones");
+    assert_eq!(full.lods[0].indices.len(), 3);
+    // Placed by the full model's fit, so 5 units back is 5 units back.
+    assert!(
+        full.lods[0]
+            .positions
+            .iter()
+            .all(|p| (p[2] - 5.0).abs() < 1e-5)
+    );
+}

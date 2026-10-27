@@ -3,13 +3,14 @@
 
 use axcenity_assets::Assets;
 use axcenity_core::{
-    FoliageInstance, FoliagePlant, FoliageProp, FoliageSource, PartType, TerrainData, Vector3,
+    FoliageInstance, FoliagePlant, FoliageProp, FoliageSource, InstanceId, PartType, TerrainData,
+    Vector3,
 };
 use axcenity_render::glam::{Mat4, Quat, Vec2, Vec3};
 use axcenity_render::{DrawItem, Material, Shape};
 use axcenity_terrain::Placement;
 
-use crate::draw_list::push_model;
+use crate::draw_list::{draw_id, push_model};
 use crate::orientation::rotation_from_orientation;
 
 /// One part of a built-in plant or prop, in the instance's local space:
@@ -303,14 +304,30 @@ fn shape_of(part: PartType) -> Shape {
     }
 }
 
-/// Adds this terrain's painted foliage to `items`, sitting on the surface.
+/// How far from the camera a plant of scale 1 is drawn, in studs: small
+/// plants vanish nearer than big ones. Each fades out before it's culled
+/// ([`DrawItem::cull_distance`]). Props and models are drawn at any
+/// distance (models use their levels of detail).
+fn cull_distance(source: &FoliageSource) -> f32 {
+    match source {
+        FoliageSource::Plant(FoliagePlant::Grass) => 120.0,
+        FoliageSource::Plant(FoliagePlant::Flower) => 150.0,
+        FoliageSource::Plant(FoliagePlant::Bush) => 300.0,
+        FoliageSource::Plant(FoliagePlant::Tree) | FoliageSource::Prop(FoliageProp::Tree) => 800.0,
+        FoliageSource::Prop(_) | FoliageSource::Model(_) => 0.0,
+    }
+}
+
+/// Adds the painted foliage of `terrain` (its data `data`) to `items`,
+/// sitting on the surface.
 pub(crate) fn draw_terrain(
+    terrain: InstanceId,
     placement: &Placement,
     data: &TerrainData,
     assets: &Assets,
     items: &mut Vec<DrawItem>,
 ) {
-    for instance in data.foliage() {
+    for (index, instance) in data.foliage().iter().enumerate() {
         let Some(transform) = instance_transform(placement, data, instance) else {
             continue;
         };
@@ -328,11 +345,15 @@ pub(crate) fn draw_terrain(
                     Quat::from_rotation_y(instance.yaw),
                     ground + Vec3::new(0.0, size.y.abs() * 0.5, 0.0),
                 );
-                push_model(&model, model_transform, items);
+                push_model(&model, model_transform, draw_id((terrain, index)), items);
             }
-            _ => {
-                for piece in pieces(&instance.source) {
-                    items.push(piece_item(piece, transform));
+            source => {
+                let cull_distance = cull_distance(source) * instance.scale.max(0.01);
+                for piece in pieces(source) {
+                    items.push(DrawItem {
+                        cull_distance,
+                        ..piece_item(piece, transform)
+                    });
                 }
             }
         }
@@ -382,6 +403,8 @@ fn piece_item(piece: &Piece, instance: Mat4) -> DrawItem {
         },
         uv_tile: 0.0,
         casts_shadow: true,
+        id: 0,
+        cull_distance: 0.0,
     }
 }
 
@@ -425,7 +448,7 @@ mod tests {
         let mut items = Vec::new();
         let placement = Placement::of(world.get(terrain).unwrap()).unwrap();
         let data = world.terrain(terrain).unwrap();
-        draw_terrain(&placement, data, &Assets::default(), &mut items);
+        draw_terrain(terrain, &placement, data, &Assets::default(), &mut items);
         assert!(items.len() >= 3, "{} items", items.len());
         let xz = placement.to_world_xz(data, Vec2::ZERO);
         let top = placement.ground_y(data, xz.x, xz.y).unwrap();
@@ -436,5 +459,14 @@ mod tests {
             .expect("a crate");
         let crate_y = crate_item.transform.to_scale_rotation_translation().2.y;
         assert!((crate_y - (top + 1.5)).abs() < 0.05, "{crate_y} vs {top}");
+        // Grass is culled past its distance; a prop never is.
+        assert_eq!(crate_item.cull_distance, 0.0);
+        let grass: Vec<f32> = items
+            .iter()
+            .filter(|item| matches!(item.shape, Shape::Wedge))
+            .map(|item| item.cull_distance)
+            .collect();
+        assert!(!grass.is_empty());
+        assert!(grass.iter().all(|&distance| distance == 120.0), "{grass:?}");
     }
 }

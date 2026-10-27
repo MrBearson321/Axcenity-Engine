@@ -10,12 +10,12 @@ use glam::camera::rh;
 use glam::{Mat3, Mat4, Vec2, Vec3};
 
 use crate::draw_list::{
-    Camera, ChannelMap, DrawItem, DrawList, Light, Material, PostProcessing, Shadows, Shape,
-    TextureSource,
+    Camera, ChannelMap, DrawItem, DrawList, Light, Material, PostProcessing, Shadows, TextureSource,
 };
 use crate::graphics::{AmbientOcclusion, EffectiveGraphics, ShadowMapSize, SpotShadowMapSize};
 
 use super::culling::{Bounds, CullingBounds, Frustum, Sphere};
+use super::lod::Draw;
 use super::{
     Batch, CASCADE_SPLIT_BLEND, FAR_PLANE, FrameUniform, InstanceRaw, LIGHT_SCALE, LIGHTS_PER_TILE,
     LightRaw, MATERIAL_TEXTURES, MAX_LIGHTS, MAX_SPOT_SHADOW_DEGREES, MAX_SPOT_SHADOWS,
@@ -525,8 +525,10 @@ pub(super) struct DrawPlan {
     pub(super) culled: u32,
 }
 
-/// Puts the items `view` can see in drawing order and groups them into
-/// batches, and lists the shadow casters for the shadow views to pick from.
+/// Puts the `draws` (`list`'s items at their levels of detail, see
+/// [`LodStates::resolve`](super::lod::LodStates::resolve)) that `view` can
+/// see in drawing order and groups them into batches, and lists the shadow
+/// casters for the shadow views to pick from.
 ///
 /// Solid items come first, grouped by mesh, texture and sidedness. See-through items come last,
 /// farthest from the camera first, so each one blends over what's behind it.
@@ -539,30 +541,31 @@ pub(super) struct DrawPlan {
 /// sphere and whether it was drawn go in `seen`, if given.
 pub(super) fn plan_draws(
     list: &DrawList,
+    draws: &[Draw],
     view: &Frustum,
-    bounds: impl Fn(&Shape) -> Bounds,
+    bounds: impl Fn(MeshKey) -> Bounds,
     mut seen: Option<&mut Vec<CullingBounds>>,
 ) -> DrawPlan {
-    // Each item's mesh and material binding, worked out once. The items
+    // Each draw's mesh and material binding, worked out once. The draws
     // are sorted by index, so sorting compares the keys in place and moves
     // only indexes.
-    let items = &list.items;
-    let keys: Vec<(MeshKey, MaterialKey)> = items
+    let keys: Vec<(MeshKey, MaterialKey)> = draws
         .iter()
-        .map(|item| (MeshKey::of(&item.shape), material_key(item)))
+        .map(|draw| (draw.mesh(), material_key(draw.item)))
         .collect();
-    let (mut transparent, mut opaque): (Vec<usize>, Vec<usize>) = (0..items.len())
-        .filter(|&index| items[index].material.opacity > 0.0)
-        .partition(|&index| items[index].material.opacity < 1.0);
+    let (mut transparent, mut opaque): (Vec<usize>, Vec<usize>) = (0..draws.len())
+        .filter(|&index| draws[index].item.material.opacity > 0.0)
+        .partition(|&index| draws[index].item.material.opacity < 1.0);
 
-    let sidedness = |item: &DrawItem| (item.material.double_sided, !item.casts_shadow);
+    let sidedness = |draw: &Draw| (draw.item.material.double_sided, !draw.casts_shadow);
     opaque.sort_by(|&a, &b| {
         keys[a]
             .cmp(&keys[b])
-            .then_with(|| sidedness(&items[a]).cmp(&sidedness(&items[b])))
+            .then_with(|| sidedness(&draws[a]).cmp(&sidedness(&draws[b])))
     });
     let distance = |index: usize| {
-        items[index]
+        draws[index]
+            .item
             .transform
             .w_axis
             .truncate()
@@ -580,11 +583,12 @@ pub(super) fn plan_draws(
         .map(|index| (index, false))
         .chain(transparent.into_iter().map(|index| (index, true)));
     for (at, transparent) in ordered {
-        let (item, (mesh, material)) = (&items[at], keys[at]);
+        let (draw, (mesh, material)) = (&draws[at], keys[at]);
+        let item = draw.item;
         let shape_bounds = match last_bounds {
             Some((last, bounds)) if last == mesh => bounds,
             _ => {
-                let bounds = bounds(&item.shape);
+                let bounds = bounds(mesh);
                 last_bounds = Some((mesh, bounds));
                 bounds
             }
@@ -598,25 +602,26 @@ pub(super) fn plan_draws(
                 drawn: visible,
             });
         }
-        let caster = !transparent && item.casts_shadow;
+        let caster = !transparent && draw.casts_shadow;
         if !visible {
             plan.culled += 1;
             if !caster {
                 continue;
             }
         }
-        let Some(raw) = instance_raw(item) else {
+        let Some(mut raw) = instance_raw(item) else {
             continue;
         };
         if caster {
             plan.casters.push(Caster { mesh, sphere, raw });
         }
+        raw.emissive_fade[3] = draw.fade;
         if !visible {
             continue;
         }
         let index = plan.instances.len() as u32;
         plan.instances.push(raw);
-        let (double_sided, casts_shadow) = (item.material.double_sided, item.casts_shadow);
+        let (double_sided, casts_shadow) = (item.material.double_sided, draw.casts_shadow);
         match plan.batches.last_mut() {
             Some(last)
                 if last.mesh == mesh
@@ -766,7 +771,7 @@ pub(super) fn instance_raw(item: &DrawItem) -> Option<InstanceRaw> {
         model: item.transform.to_cols_array_2d(),
         normal_matrix: model3.inverse().transpose().to_cols_array_2d(),
         base_color_opacity: base_color.extend(material.opacity).to_array(),
-        emissive: linear_color(material.emissive).to_array(),
+        emissive_fade: linear_color(material.emissive).extend(1.0).to_array(),
         surface: [
             material.metalness,
             material.roughness,

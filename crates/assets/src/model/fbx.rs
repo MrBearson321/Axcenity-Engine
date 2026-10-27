@@ -47,6 +47,7 @@ pub(super) fn load(bytes: &[u8], folder: &Path, picks: &[Pick]) -> Result<Vec<Mo
             .collect(),
         primitives: Vec::new(),
         warnings: Vec::new(),
+        level: 0,
     };
     let mut models = Vec::new();
     for pick in picks {
@@ -518,6 +519,8 @@ struct Reader<'a> {
     loose: Vec<(&'a ufbx::Texture, Option<u32>)>,
     primitives: Vec<Primitive>,
     warnings: Vec<String>,
+    /// The level of detail of the objects being read (see [`super::lod`]).
+    level: u8,
 }
 
 impl Reader<'_> {
@@ -533,14 +536,20 @@ impl Reader<'_> {
         let mut siblings = Siblings::default();
         for child in &node.children {
             let child_path = siblings.path(path, &node_name(child));
-            // Hidden in the program it was made in, so hidden here too.
+            // Everything inside a `_LOD1` node is part of that copy.
+            let outer = self.level;
+            self.level = self.level.max(super::lod::level_of(&node_name(child)));
+            // Hidden in the program it was made in, so hidden here too. A
+            // level-of-detail group shows one copy at a time, so the others
+            // are often hidden; they're still read.
             if let Some(mesh) = &child.mesh
-                && child.visible
+                && (child.visible || self.level > 0)
                 && want(wanted, found, &child_path)
             {
                 self.mesh(child, mesh);
             }
             self.children(child, &child_path, wanted, found);
+            self.level = outer;
         }
     }
 
@@ -691,6 +700,8 @@ impl Reader<'_> {
                 material,
                 joints,
                 weights,
+                lods: Vec::new(),
+                level: self.level,
             });
         }
     }

@@ -35,9 +35,11 @@ fn assert_same_poses(a: &[BoneTransform], b: &[BoneTransform], what: &str) {
 }
 
 /// Whether two posed models put every corner in the same place.
-fn assert_same_shape(a: &Posed, b: &Posed, what: &str) {
-    assert_eq!(a.primitives.len(), b.primitives.len());
-    for (a, b) in a.primitives.iter().zip(&b.primitives) {
+fn assert_same_shape(app: &EditorApp, a: &Posed, b: &Posed, what: &str) {
+    let model = app.assets.model(NOODLE).unwrap();
+    let (a, b) = (a.primitives(&model), b.primitives(&model));
+    assert_eq!(a.len(), b.len());
+    for (a, b) in a.iter().zip(&b) {
         for (a, b) in a.positions.iter().zip(&b.positions) {
             let off = (0..3).map(|i| (a[i] - b[i]).abs()).fold(0.0, f32::max);
             assert!(off < 1e-2, "{what}: {a:?} vs {b:?}");
@@ -134,7 +136,12 @@ fn a_three_key_wave_made_on_an_imported_rig_plays_in_the_preview_a_state_and_pla
     fs::write(folder.join(MACHINE), machine.to_json()).unwrap();
     app.play();
     play_for(&mut app, 0.5);
-    assert_same_shape(&played(&app, noodle), &shown, "the Wave state in Play");
+    assert_same_shape(
+        &app,
+        &played(&app, noodle),
+        &shown,
+        "the Wave state in Play",
+    );
     app.stop();
 
     // Played by its Animation in Play, with no state machine.
@@ -151,7 +158,7 @@ fn a_three_key_wave_made_on_an_imported_rig_plays_in_the_preview_a_state_and_pla
         .unwrap();
     app.play();
     play_for(&mut app, 0.5);
-    assert_same_shape(&played(&app, noodle), &shown, "the Animation in Play");
+    assert_same_shape(&app, &played(&app, noodle), &shown, "the Animation in Play");
     app.stop();
     let _ = fs::remove_dir_all(&folder);
 }
@@ -340,7 +347,12 @@ pub(super) fn plays_as_previewed(app: &mut EditorApp, noodle: InstanceId, what: 
         app.animation.set_playhead(time);
         let previewed = app.animation.preview_bones(&app.assets, &app.world);
         let shown = model.pose(&previewed).unwrap();
-        assert_same_shape(&played(app, noodle), &shown, &format!("{what} at {time} s"));
+        assert_same_shape(
+            app,
+            &played(app, noodle),
+            &shown,
+            &format!("{what} at {time} s"),
+        );
     }
     app.stop();
 }

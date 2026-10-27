@@ -393,7 +393,7 @@ mod tests {
         let model = noodle();
         let rig = model.rig.as_ref().unwrap();
         let posed = model.pose(&rig.rest_pose()).unwrap();
-        for (primitive, posed) in model.primitives.iter().zip(&posed.primitives) {
+        for (primitive, posed) in model.primitives.iter().zip(posed.primitives(&model)) {
             for (a, b) in primitive.positions.iter().zip(&posed.positions) {
                 assert!(
                     (Vec3::from(*a) - Vec3::from(*b)).length() < 1e-4,
@@ -433,10 +433,10 @@ mod tests {
         let hat = 1 - body;
         // Mid turned 15° around Z swings everything above it toward -X.
         let still = top_middle(&model.primitives[body].positions);
-        let swayed = top_middle(&posed.primitives[body].positions);
+        let swayed = top_middle(&posed.primitive(&model, body, 0).positions);
         assert!(swayed.x < still.x - 0.01, "{still} -> {swayed}");
         let hat_still = top_middle(&model.primitives[hat].positions);
-        let hat_swayed = top_middle(&posed.primitives[hat].positions);
+        let hat_swayed = top_middle(&posed.primitive(&model, hat, 0).positions);
         assert!(
             hat_swayed.x < hat_still.x - 0.01,
             "{hat_still} -> {hat_swayed}"

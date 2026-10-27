@@ -34,6 +34,7 @@ mod culling;
 mod gpu;
 mod gpu_timer;
 mod lighting;
+mod lod;
 mod occlusion;
 mod post;
 mod sprites;
@@ -61,6 +62,7 @@ use lighting::{
 };
 #[cfg(test)]
 use lighting::{cascade_ends, light_raw, uv_matrix};
+use lod::{Draw, LodStates, Resolved};
 use occlusion::occlusion_uniform;
 use std::sync::Arc;
 

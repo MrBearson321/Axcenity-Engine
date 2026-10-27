@@ -270,8 +270,8 @@ Imported models get simplified LODs at import (`meshopt`, if its licence checks 
 
 ### Acceptance criteria
 
-- [ ] A model far from the camera draws with fewer triangles (`RenderStats`) and switches back up as the camera approaches, without flickering at the threshold.
-- [ ] The repeated-MeshPart and foliage benchmarks improve over the baseline. Animated characters and terrain still draw correctly.
+- [x] A model far from the camera draws with fewer triangles (`RenderStats`) and switches back up as the camera approaches, without flickering at the threshold.
+- [x] The repeated-MeshPart and foliage benchmarks improve over the baseline. Animated characters and terrain still draw correctly.
 
 ---
 

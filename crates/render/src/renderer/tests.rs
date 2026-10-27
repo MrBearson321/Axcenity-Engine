@@ -8,6 +8,7 @@ use crate::graphics::ShadowQuality;
 use glam::Mat4;
 
 mod frustum_culling;
+mod level_of_detail;
 
 #[test]
 fn zero_sized_window_has_nothing_to_draw() {
@@ -161,6 +162,8 @@ fn item(shape: Shape, position: Vec3, opacity: f32) -> DrawItem {
         },
         uv_tile: 0.0,
         casts_shadow: true,
+        id: 0,
+        cull_distance: 0.0,
     }
 }
 
@@ -178,8 +181,15 @@ fn batch(mesh: MeshKey, transparent: bool, instances: Range<u32>) -> Batch {
 /// Plans `list` as its camera sees it on a square target, with every shape
 /// in the unit cube.
 fn plan(list: &DrawList) -> DrawPlan {
+    plan_with(list, |_| Bounds::UNIT)
+}
+
+/// Plans `list` as its camera sees it on a square target, at each item's
+/// level of detail on a first frame, with each mesh's box from `bounds`.
+fn plan_with(list: &DrawList, bounds: impl Fn(MeshKey) -> Bounds) -> DrawPlan {
     let view = Frustum::of(view_projection(list, 1.0));
-    plan_draws(list, &view, |_| Bounds::UNIT, None)
+    let draws = LodStates::default().resolve(list, 1).draws;
+    plan_draws(list, &draws, &view, bounds, None)
 }
 
 /// A caller's mesh with no triangles, for planning tests (it's never uploaded).
@@ -462,6 +472,8 @@ fn big_block() -> DrawItem {
         material: Material::default(),
         uv_tile: 0.0,
         casts_shadow: true,
+        id: 0,
+        cull_distance: 0.0,
     }
 }
 
@@ -921,6 +933,8 @@ fn texture_renderer_draws_the_sky_and_a_part_into_a_texture() {
         },
         uv_tile: 0.0,
         casts_shadow: true,
+        id: 0,
+        cull_distance: 0.0,
     });
     renderer.resize(64, 64);
     assert_eq!(renderer.size(), (64, 64));
@@ -1019,6 +1033,8 @@ fn texture_renderer_draws_a_mesh_with_texture_maps() {
         material,
         uv_tile: 0.0,
         casts_shadow: true,
+        id: 0,
+        cull_distance: 0.0,
     });
     let mut renderer = TextureRenderer::new(&device, &queue, 32, 32);
     renderer.render(&list).unwrap();
@@ -1114,6 +1130,8 @@ fn terrain_chunks_show_the_layer_their_weights_pick() {
             },
             uv_tile: 0.0,
             casts_shadow: true,
+            id: 0,
+            cull_distance: 0.0,
         }]);
         // Looking straight down at it, in sunlight.
         list.camera.look_at = Vec3::new(0.0, -1.0, -0.001);
@@ -2354,6 +2372,8 @@ fn one_of_everything() -> (DrawList, Vec<Probe>) {
         },
         uv_tile: 0.0,
         casts_shadow: true,
+        id: 0,
+        cull_distance: 0.0,
     };
     let mut list = list_of(vec![solid, see_through, cut_out, ground]);
     list.sky = Sky::default();
@@ -2764,6 +2784,8 @@ fn a_double_sided_square_shows_its_back_lit_like_its_front() {
             },
             uv_tile: 0.0,
             casts_shadow: true,
+            id: 0,
+            cull_distance: 0.0,
         };
         let mut list = list_of(vec![square]);
         // Lit from behind the camera.

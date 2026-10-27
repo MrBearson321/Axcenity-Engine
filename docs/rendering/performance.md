@@ -78,3 +78,27 @@ What it says:
 - **The terrain scene is still CPU-bound** (13 ms in `ScenePipeline::draw`), even with a third of its draw calls. The time goes to planning and recording its 37,691 items. A foliage cull distance and LOD (Phase 13) are next.
 - **Characters are unchanged**: all 41 items are in view.
 
+
+## Levels of detail and foliage cull distance (graphics Phase 13)
+
+Measured at the commit that added levels of detail, against the commit before it, on the same machine as above (AMD Radeon RX 9070 XT, Vulkan), three runs each, alternating. Each cell is the range of the three runs. Compare within this table.
+
+| | 10,000 parts, overview | 10,000 parts, edge | 2,000 MeshParts | Terrain + foliage | 20 characters |
+|---|---|---|---|---|---|
+| Items drawn / submitted, before | 9,960 / 10,001 | 920 / 10,001 | 1,995 / 2,001 | 27,896 / 37,691 | 41 / 41 |
+| Items drawn / submitted, after | 9,960 / 10,001 | 920 / 10,001 | 1,995 / 2,001 | 1,741 / 37,691 | 41 / 41 |
+| Draw calls, before → after | 14 → 14 | 20 → 20 | 9 → 9 | 1,682 → 1,680 | 205 → 205 |
+| Triangles, before → after | 7.6 M → 7.6 M | 1.5 M → 1.5 M | 93.4 M → 23.3 M | 16.6 M → 1.7 M | 4,060 → 4,060 |
+| GPU frame, before | 1.39–1.41 | 0.82–0.83 | 6.42 | 2.97–4.47 | 0.43 |
+| GPU frame, after | 1.45–1.48 | 0.84–0.85 | 4.39–4.49 | 1.28–1.29 | 0.43–0.44 |
+| GPU scene, before → after | 0.71 → 0.75–0.77 | 0.46–0.47 → 0.47 | 3.61 → 2.45–2.50 | 1.73–3.04 → 0.91–0.92 | 0.26 → 0.26 |
+| CPU `ScenePipeline::draw`, before | 3.01–3.74 | 2.20–2.51 | 0.86–0.94 | 13.66–14.64 | 0.27 |
+| CPU `ScenePipeline::draw`, after | 3.15–3.66 | 2.37–2.81 | 0.95–0.96 | 3.66–3.75 | 0.28–0.29 |
+| GPU meshes, before → after (MB) | 0 → 0 | 0 → 0 | 0.9 → 0.3 | 6.5 → 6.5 | 0.1 → 0.1 |
+
+What it says:
+
+- **The helmets draw a quarter of the triangles** (93.4 M to 23.3 M) and the GPU frame drops by a third (6.4 ms to 4.4 ms). Seen from 200 studs, every copy draws its second simpler copy (a quarter of the helmet's 15,500 triangles). Only the levels drawn are uploaded, so mesh memory drops too.
+- **The terrain scene is no longer CPU-bound.** Plants past their cull distance aren't planned, uploaded or drawn: 35,950 of the 37,691 items are left out (the camera is 900 studs from the middle of a 2,048-stud terrain), so `ScenePipeline::draw` takes 3.7 ms, not 14, and the GPU frame 1.3 ms, not 3 to 4.5. `build_draw_list` (6.2 ms) still builds every plant; culling them in `scene` would save most of that.
+- **Characters are unchanged**: the noodle's primitives are too small to simplify (under 256 triangles each).
+- **Plain parts cost about 5% more in the scene pass** (0.71 ms to 0.76 ms for the overview): each instance is 4 bytes wider (the fade) and the fragment shader checks the dither. Nothing else changed for them.

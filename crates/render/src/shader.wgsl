@@ -58,7 +58,8 @@ struct InstanceIn {
     @location(7) normal_1: vec3<f32>,
     @location(8) normal_2: vec3<f32>,
     @location(9) base_color: vec4<f32>, // rgb, opacity
-    @location(10) emissive: vec3<f32>,
+    // Light given off, then how much of the item is drawn (see `dithered_out`).
+    @location(10) emissive_fade: vec4<f32>,
     // Metalness, roughness, alpha cutoff, and how many studs one copy of
     // the texture covers (0 keeps the mesh's own coordinates).
     @location(11) surface: vec4<f32>,
@@ -73,6 +74,7 @@ struct VertexOut {
     @location(4) surface: vec3<f32>,
     @location(5) uv: vec2<f32>,
     @location(6) tangent: vec4<f32>,
+    @location(7) @interpolate(flat) fade: f32,
 }
 
 @vertex
@@ -86,7 +88,8 @@ fn vs_main(vertex: VertexIn, instance: InstanceIn) -> VertexOut {
     out.world_position = world_position.xyz;
     out.normal = normal_matrix * vertex.normal;
     out.base_color = instance.base_color;
-    out.emissive = instance.emissive;
+    out.emissive = instance.emissive_fade.xyz;
+    out.fade = instance.emissive_fade.w;
     out.surface = instance.surface.xyz;
     let tile = instance.surface.w;
     var uv = vertex.uv;
@@ -169,7 +172,7 @@ fn fs_main(in: VertexOut, @builtin(front_facing) front: bool) -> @location(0) ve
     let opacity_map = map_value(opacity_texel, maps.opacity, maps.invert.w);
     let opacity = in.base_color.a * mix(texel.a, opacity_map, maps.settings.w);
     // Cut-out materials (leaves, fences) leave holes where the texture is clear.
-    if opacity < in.surface.z {
+    if opacity < in.surface.z || dithered_out(in.fade, in.clip_position.xy) {
         discard;
     }
     let metalness = clamp(
@@ -195,6 +198,17 @@ fn fs_main(in: VertexOut, @builtin(front_facing) front: bool) -> @location(0) ve
     return vec4<f32>(color + emissive, alpha);
 }
 
+// Whether a fading item leaves out the pixel at `pixel`, in a fine pattern,
+// so two meshes cross-fade without sorting or blending (level of detail, and
+// foliage near its cull distance). A fade of 1 draws every pixel. Below 1,
+// only the pixels whose noise is under it are drawn; above 1, only the
+// others. So a mesh fading in at `t` and one fading out at `1 + t` draw
+// each pixel exactly once between them.
+fn dithered_out(fade: f32, pixel: vec2<f32>) -> bool {
+    let noise = pixel_noise(pixel);
+    return select(noise >= fade, noise < fade - 1.0, fade > 1.0);
+}
+
 // The depth and normal prepass, for ambient occlusion: solid items' depth
 // and view-space normals. Cut-out pixels are left out, as in `fs_main`.
 @fragment
@@ -203,7 +217,7 @@ fn fs_prepass(in: VertexOut, @builtin(front_facing) front: bool) -> @location(0)
     let opacity_texel = textureSample(opacity_texture, material_sampler, in.uv);
     let opacity_map = map_value(opacity_texel, maps.opacity, maps.invert.w);
     let opacity = in.base_color.a * mix(texel.a, opacity_map, maps.settings.w);
-    if opacity < in.surface.z {
+    if opacity < in.surface.z || dithered_out(in.fade, in.clip_position.xy) {
         discard;
     }
     return prepass_normal(normalize(in.normal) * select(-1.0, 1.0, front));

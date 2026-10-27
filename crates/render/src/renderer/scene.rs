@@ -343,6 +343,7 @@ impl ScenePipeline {
             counts: FrameCounts::default(),
             frozen_view: None,
             culling_bounds: Vec::new(),
+            lods: LodStates::default(),
             texture_bytes,
             mesh_bytes,
         };
@@ -524,7 +525,12 @@ impl ScenePipeline {
         );
 
         self.frame += 1;
-        self.upload_new(list);
+        // Each item's level of detail, which decides the meshes uploaded.
+        let Resolved {
+            draws,
+            culled: past_cull_distance,
+        } = self.lods.resolve(list, self.frame);
+        self.upload_new(list, &draws);
         // What the camera can see, or the frozen view's while it's set.
         let camera = self.frozen_view.as_ref().unwrap_or(&list.camera);
         let camera_view = Frustum::of(camera_view_projection(camera, aspect));
@@ -537,8 +543,9 @@ impl ScenePipeline {
             culled,
         } = plan_draws(
             list,
+            &draws,
             &camera_view,
-            |shape| self.mesh_bounds(MeshKey::of(shape)),
+            |mesh| self.mesh_bounds(mesh),
             self.frozen_view.is_some().then_some(&mut seen),
         );
         self.culling_bounds = seen;
@@ -687,7 +694,7 @@ impl ScenePipeline {
         mark(&mut encoder, FramePass::Shadows);
         let mut counts = FrameCounts {
             items_submitted: list.items.len() as u32,
-            items_culled: culled,
+            items_culled: culled + past_cull_distance,
             shadow_casters_culled: casters_by_view.iter().map(|(_, culled)| culled).sum(),
             sprites_culled,
             ..FrameCounts::default()
@@ -1269,41 +1276,38 @@ impl ScenePipeline {
         }
     }
 
-    /// Uploads the callers' meshes and textures in `list` that aren't on
-    /// the GPU yet, and notes that the rest were drawn this frame.
-    pub(super) fn upload_new(&mut self, list: &DrawList) {
+    /// Uploads the callers' meshes in `draws` (each item's level of
+    /// detail) and textures in `list` that aren't on the GPU yet, and notes
+    /// that the rest were drawn this frame.
+    pub(super) fn upload_new(&mut self, list: &DrawList, draws: &[Draw]) {
         let frame = self.frame;
-        for item in &list.items {
-            if let Shape::Mesh(source) = &item.shape {
-                match self.custom_meshes.entry(source.key()) {
-                    Entry::Occupied(mut cached) => {
-                        let cached = cached.get_mut();
-                        cached.last_drawn = frame;
-                        // A posed (animated) mesh has new corners: rewrite them.
-                        if let Some(gpu) = &mut cached.gpu
-                            && gpu.version != source.version()
-                        {
-                            update_custom_mesh(
-                                &self.device,
-                                &self.queue,
-                                &self.mesh_bytes,
-                                gpu,
-                                source.as_ref(),
-                            );
-                        }
-                    }
-                    Entry::Vacant(slot) => {
-                        slot.insert(Cached {
-                            gpu: upload_custom_mesh(
-                                &self.device,
-                                &self.mesh_bytes,
-                                source.as_ref(),
-                            ),
-                            last_drawn: frame,
-                        });
+        for source in draws.iter().filter_map(Draw::source) {
+            match self.custom_meshes.entry(source.key()) {
+                Entry::Occupied(mut cached) => {
+                    let cached = cached.get_mut();
+                    cached.last_drawn = frame;
+                    // A posed (animated) mesh has new corners: rewrite them.
+                    if let Some(gpu) = &mut cached.gpu
+                        && gpu.version != source.version()
+                    {
+                        update_custom_mesh(
+                            &self.device,
+                            &self.queue,
+                            &self.mesh_bytes,
+                            gpu,
+                            source.as_ref(),
+                        );
                     }
                 }
+                Entry::Vacant(slot) => {
+                    slot.insert(Cached {
+                        gpu: upload_custom_mesh(&self.device, &self.mesh_bytes, source.as_ref()),
+                        last_drawn: frame,
+                    });
+                }
             }
+        }
+        for item in &list.items {
             if let Some(surface) = &item.material.terrain {
                 for weights in &surface.weights {
                     self.note_texture(weights.as_ref(), frame, true);
