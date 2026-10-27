@@ -3,6 +3,7 @@
 //! CPU-side planning for one frame. The `Frame`, `Light` and instance layouts
 //! must stay aligned with `shader.wgsl`. Shared GPU types live in `renderer.rs`.
 
+use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -10,12 +11,14 @@ use glam::camera::rh;
 use glam::{Mat3, Mat4, Vec2, Vec3};
 
 use crate::draw_list::{
-    Camera, ChannelMap, DrawItem, DrawList, Light, Material, PostProcessing, Shadows, TextureSource,
+    Camera, ChannelMap, DrawItem, DrawList, Light, Material, PostProcessing, Shadows, Skin,
+    TextureSource,
 };
 use crate::graphics::{AmbientOcclusion, EffectiveGraphics, ShadowMapSize, SpotShadowMapSize};
 
 use super::culling::{Bounds, CullingBounds, Frustum, Sphere};
 use super::lod::Draw;
+use super::skinning::JointRaw;
 use super::{
     Batch, CASCADE_SPLIT_BLEND, FAR_PLANE, FrameUniform, InstanceRaw, LIGHT_SCALE, LIGHTS_PER_TILE,
     LightRaw, MATERIAL_TEXTURES, MAX_LIGHTS, MAX_SPOT_SHADOW_DEGREES, MAX_SPOT_SHADOWS,
@@ -523,6 +526,9 @@ pub(super) struct DrawPlan {
     pub(super) casters: Vec<Caster>,
     /// Items outside the camera's view.
     pub(super) culled: u32,
+    /// Every drawn skin's joints, each skin's after the one before
+    /// (`InstanceRaw::skin` says where an item's start).
+    pub(super) joints: Vec<JointRaw>,
 }
 
 /// Puts the `draws` (`list`'s items at their levels of detail, see
@@ -536,14 +542,15 @@ pub(super) struct DrawPlan {
 /// wrong order; that's the usual trade-off for this simple approach.
 ///
 /// An item is culled when its bounding sphere is wholly outside `view`.
-/// `bounds` gives each shape's box in its own space: the unit cube for the
-/// built-in shapes, its corners' box for a caller's mesh. Each item's
-/// sphere and whether it was drawn go in `seen`, if given.
+/// `bounds` gives each shape's box in its own space, posed by the item's
+/// skin if it has one: the unit cube for the built-in shapes, its corners'
+/// box for a caller's mesh. Each item's sphere and whether it was drawn go
+/// in `seen`, if given.
 pub(super) fn plan_draws(
     list: &DrawList,
     draws: &[Draw],
     view: &Frustum,
-    bounds: impl Fn(MeshKey) -> Bounds,
+    bounds: impl Fn(MeshKey, Option<&Skin>) -> Bounds,
     mut seen: Option<&mut Vec<CullingBounds>>,
 ) -> DrawPlan {
     // Each draw's mesh and material binding, worked out once. The draws
@@ -575,8 +582,11 @@ pub(super) fn plan_draws(
     transparent.sort_by(|&a, &b| distance(b).total_cmp(&distance(a)));
 
     let mut plan = DrawPlan::default();
+    // Where each skin's joints start, by the skin's address: items posed
+    // alike share one.
+    let mut skins: HashMap<*const Skin, [u32; 2]> = HashMap::new();
     // Items sharing a mesh are next to each other, so its bounds are looked
-    // up once per run of them.
+    // up once per run of them (unless a skin moves them).
     let mut last_bounds: Option<(MeshKey, Bounds)> = None;
     let ordered = opaque
         .into_iter()
@@ -585,10 +595,12 @@ pub(super) fn plan_draws(
     for (at, transparent) in ordered {
         let (draw, (mesh, material)) = (&draws[at], keys[at]);
         let item = draw.item;
-        let shape_bounds = match last_bounds {
-            Some((last, bounds)) if last == mesh => bounds,
-            _ => {
-                let bounds = bounds(mesh);
+        let skin = item.skin.as_deref();
+        let shape_bounds = match (last_bounds, skin) {
+            (_, Some(skin)) => bounds(mesh, Some(skin)),
+            (Some((last, bounds)), None) if last == mesh => bounds,
+            (_, None) => {
+                let bounds = bounds(mesh, None);
                 last_bounds = Some((mesh, bounds));
                 bounds
             }
@@ -612,6 +624,14 @@ pub(super) fn plan_draws(
         let Some(mut raw) = instance_raw(item) else {
             continue;
         };
+        if let Some(skin) = skin {
+            let joints = &mut plan.joints;
+            raw.skin = *skins.entry(std::ptr::from_ref(skin)).or_insert_with(|| {
+                let first = joints.len() as u32;
+                joints.extend(JointRaw::of(skin));
+                [first, joints.len() as u32 - first]
+            });
+        }
         if caster {
             plan.casters.push(Caster { mesh, sphere, raw });
         }
@@ -778,6 +798,7 @@ pub(super) fn instance_raw(item: &DrawItem) -> Option<InstanceRaw> {
             material.alpha_cutoff,
             item.uv_tile,
         ],
+        skin: [0, 0],
     })
 }
 

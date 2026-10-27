@@ -9,15 +9,14 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 
 use axcenity_assets::{
-    AlphaMode, Assets, ChannelTexture, Image, Model, ModelMaterial, Posed, PosedPrimitive,
-    Primitive,
+    AlphaMode, Assets, ChannelTexture, Image, Model, ModelMaterial, Posed, Primitive,
 };
 use axcenity_core::{ClassName, Instance, InstanceId, PartType, TextureChannel, Value, World};
 use axcenity_render::glam::{Mat4, Vec3};
 use axcenity_render::{
     AmbientLight, Camera, Channel, ChannelMap, Cone, DrawItem, DrawList, Light, Material,
-    MeshSource, NormalMap, PostProcessing, Shadows, Shape, Sky, SpotShadows, Sun, TextureMaps,
-    TextureSource,
+    MeshSource, NormalMap, PostProcessing, Shadows, Shape, Skin, Sky, SpotShadows, Sun,
+    TextureMaps, TextureSource,
 };
 use axcenity_ui::{Stylesheet, UiInput, UiInteraction, UiLayout};
 
@@ -527,6 +526,7 @@ fn part_draw_item(
         casts_shadow: casts_shadow(instance),
         id: 0,
         cull_distance: 0.0,
+        skin: None,
     })
 }
 
@@ -717,6 +717,7 @@ fn mesh_part_draw_items(
             casts_shadow: casts_shadow(instance),
             id: 0,
             cull_distance: 0.0,
+            skin: None,
         });
         return;
     };
@@ -727,8 +728,11 @@ fn mesh_part_draw_items(
         .filter(|child| child.class() == ClassName::SurfaceAppearance)
         .collect();
     let variant = material::variant_of(instance, assets);
-    // A pose of another model (the MeshId just changed) isn't used.
-    let posed = posed.filter(|posed| posed.model_key == model.key());
+    // A pose of another model (the MeshId just changed) isn't used. Every
+    // part of the model moves with the pose's joints, on the GPU.
+    let skin = posed
+        .filter(|posed| posed.model_key == model.key())
+        .map(|posed| Arc::new(Skin::new(posed.joints().to_vec())));
     for (index, primitive) in model.primitives.iter().enumerate() {
         let appearance = appearances.iter().find(|appearance| {
             appearance.property("MaterialName").and_then(Value::as_str)
@@ -739,22 +743,15 @@ fn mesh_part_draw_items(
             (None, Some(standard)) => material::variant_material(standard, assets),
             (None, None) => model_material(&primitive.material),
         };
-        let shape: Arc<dyn MeshSource> = match posed {
-            Some(posed) => Arc::new(PosedMesh {
-                part: id,
-                mesh: ModelMesh::new(&model, index),
-                posed: posed.clone(),
-            }),
-            None => Arc::new(ModelMesh::new(&model, index)),
-        };
         items.push(DrawItem {
-            shape: Shape::Mesh(shape),
+            shape: Shape::Mesh(Arc::new(ModelMesh::new(&model, index))),
             transform,
             material,
             uv_tile: 0.0,
             casts_shadow: casts_shadow(instance),
             id: draw_id(id),
             cull_distance: 0.0,
+            skin: skin.clone(),
         });
     }
     for item in &mut items[first..] {
@@ -857,6 +854,7 @@ pub(crate) fn push_model(model: &Arc<Model>, transform: Mat4, id: u64, items: &m
             casts_shadow: true,
             id,
             cull_distance: 0.0,
+            skin: None,
         });
     }
 }
@@ -1007,76 +1005,18 @@ impl MeshSource for ModelMesh {
     fn indices(&self) -> &[u32] {
         &self.primitive().indices
     }
+    fn skin_joints(&self) -> &[[u16; 4]] {
+        &self.primitive().joints
+    }
+    fn skin_weights(&self) -> &[[f32; 4]] {
+        &self.primitive().weights
+    }
     fn lod_count(&self) -> usize {
         self.copies()
     }
     fn lod(&self, level: usize) -> Option<Arc<dyn MeshSource>> {
         Some(Arc::new(self.copy(level)?))
     }
-}
-
-/// One primitive of a posed model at one level of detail: the pose's
-/// corners, with the model's texture coordinates and triangles. Each
-/// MeshPart's copy has its own key, so two parts posed differently don't
-/// share one GPU copy. The corners are posed when the renderer first reads
-/// them, so only the level it draws is posed.
-struct PosedMesh {
-    part: InstanceId,
-    mesh: ModelMesh,
-    posed: Arc<Posed>,
-}
-
-impl PosedMesh {
-    fn posed(&self) -> &PosedPrimitive {
-        let ModelMesh {
-            model,
-            index,
-            level,
-        } = &self.mesh;
-        self.posed.primitive(model, *index, *level)
-    }
-}
-
-impl MeshSource for PosedMesh {
-    fn key(&self) -> u64 {
-        posed_key(self.part, self.mesh.key())
-    }
-    fn positions(&self) -> &[[f32; 3]] {
-        &self.posed().positions
-    }
-    fn normals(&self) -> &[[f32; 3]] {
-        &self.posed().normals
-    }
-    fn uvs(&self) -> &[[f32; 2]] {
-        self.mesh.uvs()
-    }
-    fn tangents(&self) -> &[[f32; 4]] {
-        &self.posed().tangents
-    }
-    fn indices(&self) -> &[u32] {
-        self.mesh.indices()
-    }
-    fn version(&self) -> u64 {
-        self.posed.version
-    }
-    fn lod_count(&self) -> usize {
-        self.mesh.copies()
-    }
-    fn lod(&self, level: usize) -> Option<Arc<dyn MeshSource>> {
-        Some(Arc::new(PosedMesh {
-            part: self.part,
-            mesh: self.mesh.copy(level)?,
-            posed: self.posed.clone(),
-        }))
-    }
-}
-
-/// The key of `part`'s posed copy of a primitive. The top bit is set, so it
-/// never matches a still model's key (those count up from 1).
-fn posed_key(part: InstanceId, primitive: u64) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    (part, primitive).hash(&mut hasher);
-    hasher.finish() | 1 << 63
 }
 
 /// A model's texture, handed to the renderer without copying it.

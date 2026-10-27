@@ -6,4 +6,4 @@
 - A `MeshId` can pick objects in its file (`file.fbx#A/B,C`, `model/objects.rs`); glTF and FBX must build object paths the same way, with `Siblings`.
 - What a texture is for, by file name, and channel-packed layouts: `model/maps.rs` (`role_from_name`, `ModelMaterial::set_map`). A texture set groups those maps in one file: `texture_set.rs`.
 - Levels of detail (`Primitive::lods`: a file's `_LOD1`/`_LOD2` objects, or simplified with `meshopt` at load): `model/lod.rs`. `Posed` skins each primitive and level only when asked (`Posed::primitive`).
-- Skeletons, takes and CPU skinning: `model/rig.rs`; `model/test_rig.rs` generates the rigged example FBX (`AXCENITY_WRITE_EXAMPLES=1` rewrites it). In FBX clusters, `Transform` is the inverse bind.
+- Skeletons, takes and posing: `model/rig.rs` (`Posed::joints` for the GPU, `Posed::primitive` skins on the CPU); `model/test_rig.rs` generates the rigged example FBX (`AXCENITY_WRITE_EXAMPLES=1` rewrites it). In FBX clusters, `Transform` is the inverse bind.

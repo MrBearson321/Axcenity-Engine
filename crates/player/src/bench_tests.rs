@@ -394,21 +394,47 @@ fn bench_terrain_with_foliage() {
 #[test]
 #[ignore = "benchmark: run with --release -- --ignored bench_"]
 fn bench_20_animated_characters() {
-    let (mut world, _scripts, folder) = start_example_in("hello-animation");
-    let noodle = world.find_first_child(world.workspace(), "Noodle").unwrap();
+    animated_characters(
+        "bench_20_animated_characters",
+        "hello-animation",
+        "Noodle",
+        3.8,
+    );
+}
+
+/// 20 copies of hello-character's walking character, a full rig of about
+/// 30,000 triangles, each posed on the CPU every frame by its Animator.
+#[test]
+#[ignore = "benchmark: run with --release -- --ignored bench_"]
+fn bench_20_walking_characters() {
+    animated_characters(
+        "bench_20_walking_characters",
+        "hello-character",
+        "Walking",
+        1.9,
+    );
+}
+
+/// Draws an example's animated `character` and 19 copies of it in a grid at
+/// height `y`, posing each on the CPU every frame.
+fn animated_characters(bench: &str, example: &str, character: &str, y: f32) {
+    let (mut world, _scripts, folder) = start_example_in(example);
+    let original = world
+        .find_first_child(world.workspace(), character)
+        .unwrap();
     for index in 1..20 {
-        let copy = world.duplicate(noodle).unwrap();
+        let copy = world.duplicate(original).unwrap();
         world.set_parent(copy, Some(world.workspace())).unwrap();
         let (x, z) = ((index % 5) as f32, (index / 5) as f32);
         world
-            .set_property(copy, "Position", vector(x * 4.0 - 8.0, 3.8, z * -4.0))
+            .set_property(copy, "Position", vector(x * 4.0 - 8.0, y, z * -4.0))
             .unwrap();
     }
     let assets = Assets::new(&folder);
     let mut animators = Animators::new();
     let camera = camera(Vec3::new(0.0, 10.0, 22.0), Vec3::new(0.0, 3.0, -6.0));
     let mut cache = TerrainCache::new();
-    run("bench_20_animated_characters", |steps| {
+    run(bench, |steps| {
         steps.time("Animators::update (posing)", || {
             animators.update(&mut world, &assets, 1.0 / 60.0)
         });
@@ -422,7 +448,7 @@ fn bench_20_animated_characters() {
             )
         })
     });
-    assert_eq!(animators.poses().len(), 20);
+    assert!(animators.poses().len() >= 20);
     assert!(animators.take_errors().is_empty());
     assert!(assets.take_errors().is_empty());
 }

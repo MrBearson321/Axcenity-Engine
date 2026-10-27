@@ -23,7 +23,8 @@ Each prints its last frame's counts (items drawn, batches, draw calls, triangles
 | `bench_10000_parts` | 100 × 100 grid of blocks, balls, cylinders and wedges on a floor, drawn twice: an overview with all in view, and from one edge with most out of view (culling is measured against both) |
 | `bench_2000_mesh_parts` | 2,000 copies of hello-pbr's textured helmet (about 15,500 triangles each, drawn in five views: three cascades, the prepass and the scene) |
 | `bench_terrain_with_foliage` | A 2,048-stud terrain of 1,025² samples with hills, two layers and 20,000 plants (grass, flowers, bushes, trees) |
-| `bench_20_animated_characters` | 20 copies of hello-animation's Noodle, each with an Animator, posed on the CPU every frame |
+| `bench_20_animated_characters` | 20 copies of hello-animation's Noodle (about 200 triangles each), each with an Animator, posed every frame |
+| `bench_20_walking_characters` | 20 copies of hello-character's walking character (about 76,000 triangles and 8 primitives each), each with an Animator, posed every frame (added in graphics Phase 14) |
 
 ## Baseline
 
@@ -102,3 +103,25 @@ What it says:
 - **The terrain scene is no longer CPU-bound.** Plants past their cull distance aren't planned, uploaded or drawn: 35,950 of the 37,691 items are left out (the camera is 900 studs from the middle of a 2,048-stud terrain), so `ScenePipeline::draw` takes 3.7 ms, not 14, and the GPU frame 1.3 ms, not 3 to 4.5. `build_draw_list` (6.2 ms) still builds every plant; culling them in `scene` would save most of that.
 - **Characters are unchanged**: the noodle's primitives are too small to simplify (under 256 triangles each).
 - **Plain parts cost about 5% more in the scene pass** (0.71 ms to 0.76 ms for the overview): each instance is 4 bytes wider (the fade) and the fragment shader checks the dither. Nothing else changed for them.
+
+## GPU skinning (graphics Phase 14)
+
+The baseline's Noodle is too small to show what posing costs (0.05 ms). So this phase added `bench_20_walking_characters`, 20 of hello-character's walking characters (about 76,000 triangles each), and measured that first. Posing on the CPU was a real cost there: each frame, `ScenePipeline::draw` skinned every posed primitive (`Posed::primitive` runs when the renderer first reads the corners), checked its 4.5 million indices, rebuilt its corners and wrote 13 MB of them to the GPU, about 5 ms of a CPU frame whose GPU work took 0.8 ms. Every posed part was also its own mesh and batch.
+
+Measured at the commit that skins on the GPU, against the commit before it with the new benchmark, on the same machine as above (AMD Radeon RX 9070 XT, Vulkan), three runs each. Each cell is the range of the three runs. Compare within this table.
+
+| | 10,000 parts, overview | 10,000 parts, edge | 2,000 MeshParts | Terrain + foliage | 20 characters (Noodle) | 20 walking characters |
+|---|---|---|---|---|---|---|
+| Batches, before → after | 4 → 4 | 4 → 4 | 2 → 2 | unchanged | 41 → 3 | 149 → 22 |
+| Draw calls, before → after | 14 → 14 | 20 → 20 | 9 → 9 | unchanged | 205 → 15 | 731 → 103 |
+| CPU `ScenePipeline::draw`, before | 3.18–3.43 | 2.35–2.40 | 0.94–0.96 | 3.87–3.95 | 0.29 | 4.85 |
+| CPU `ScenePipeline::draw`, after | 3.22–3.34 | 2.41–2.45 | 1.01–1.02 | 4.00–4.10 | 0.18 | 0.37–0.38 |
+| GPU frame, before | 1.45 | 0.84 | 4.40–4.42 | 1.28–1.29 | 0.43–0.44 | 0.79–0.86 |
+| GPU frame, after | 1.46–1.47 | 0.84–0.85 | 4.53–4.56 | 1.28–1.29 | 0.43–0.44 | 0.80–0.81 |
+| GPU scene, before → after | 0.76 → 0.77 | 0.47 → 0.47 | 2.46 → 2.57–2.60 | 0.91 → 0.91 | 0.26 → 0.26 | 0.48–0.50 → 0.47–0.48 |
+| GPU meshes, before → after (MB) | 0 → 0 | 0 → 0 | 0.3 → 0.3 | 6.5 → 6.5 | 0.1 → 0.1 | 13.0 → 2.3 |
+
+What it says:
+
+- **The walking characters cost a thirteenth of the CPU time** (4.85 ms to 0.38 ms in `ScenePipeline::draw`): nothing is skinned, checked or uploaded per frame but the joints (112 bytes each). The 20 characters share one copy of each primitive, so 149 batches become 22 and mesh memory drops from 13 MB to 2.3 MB. The GPU does the blending at no measurable cost.
+- **Vertex-heavy scenes pay a little for it.** Every instance is 8 bytes wider (its skin) and every vertex checks it, so the helmets' scene pass, with 23 M triangles, takes 5% longer (2.46 ms to 2.59 ms) and their CPU time 6% (the wider instances are copied for every shadow view). Plain parts and terrain are within noise. If that matters, skinned items can get pipelines of their own, so other items skip the check.

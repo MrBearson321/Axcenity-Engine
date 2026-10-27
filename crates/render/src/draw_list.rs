@@ -8,7 +8,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use glam::{Mat4, Vec3};
+use glam::{Mat3, Mat4, Vec3};
 
 use crate::ToneMapping;
 
@@ -573,6 +573,42 @@ pub struct DrawItem {
     /// Studs from the camera past which the item isn't drawn, fading out
     /// over the last tenth (painted foliage). 0 draws it at any distance.
     pub cull_distance: f32,
+    /// Where an animated mesh's joints are this frame: the GPU moves each
+    /// corner by the joints it's weighted to ([`MeshSource::skin_joints`]).
+    /// `None` draws the mesh as it is. Items posed alike share one `Arc`, so
+    /// its joints are uploaded once.
+    pub skin: Option<Arc<Skin>>,
+}
+
+/// One pose of an animated mesh, for skinning on the GPU: where each joint
+/// moves the corners weighted to it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Skin {
+    joints: Vec<Mat4>,
+    /// The matching turn for normals (each joint's inverse transpose), so
+    /// they stay perpendicular to stretched surfaces.
+    normals: Vec<Mat3>,
+}
+
+impl Skin {
+    /// `joints` are from a corner's place in the mesh to its posed place,
+    /// both in the mesh's own space (before the item's transform), in the
+    /// order [`MeshSource::skin_joints`] indexes them.
+    pub fn new(joints: Vec<Mat4>) -> Self {
+        let normals = joints
+            .iter()
+            .map(|joint| Mat3::from_mat4(*joint).inverse().transpose())
+            .collect();
+        Self { joints, normals }
+    }
+
+    pub fn joints(&self) -> &[Mat4] {
+        &self.joints
+    }
+
+    pub(crate) fn normals(&self) -> &[Mat3] {
+        &self.normals
+    }
 }
 
 /// What to draw: a built-in mesh, each fitting the 1×1×1 cube centered on
@@ -625,6 +661,18 @@ pub trait MeshSource: Send + Sync {
     }
     /// Three per triangle, counter-clockwise seen from outside.
     fn indices(&self) -> &[u32];
+    /// For an animated mesh, one per position: up to 4 joints of the
+    /// item's [`Skin`] the corner moves with, and in [`skin_weights`] how
+    /// much each counts (all 0 for a corner that never moves). Empty for a
+    /// mesh that isn't animated, which is the default.
+    ///
+    /// [`skin_weights`]: MeshSource::skin_weights
+    fn skin_joints(&self) -> &[[u16; 4]] {
+        &[]
+    }
+    fn skin_weights(&self) -> &[[f32; 4]] {
+        &[]
+    }
     /// Changes when the corners do (an animated, posed mesh), with the same
     /// key and indices: the renderer then rewrites its copy's corners in
     /// place. A mesh that never changes keeps the default.

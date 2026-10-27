@@ -19,6 +19,7 @@ impl ScenePipeline {
             },
             count: None,
         };
+        let skinning = Skinning::new(&device);
         let frame_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("frame uniform"),
             size: size_of::<FrameUniform>() as u64,
@@ -56,6 +57,7 @@ impl ScenePipeline {
                 },
                 storage_entry(3),
                 storage_entry(4),
+                skinning::joints_entry(),
                 wgpu::BindGroupLayoutEntry {
                     binding: 6,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -116,7 +118,7 @@ impl ScenePipeline {
         let frame_bind_group = create_frame_bind_group(
             &device,
             &frame_layout,
-            [&frame_buffer, &light_buffer, &tile_buffer],
+            [&frame_buffer, &light_buffer, &tile_buffer, &skinning.joints],
             [&empty_shadow_view, &empty_shadow_view, &no_occlusion_view],
             [&shadow_sampler, &occlusion_sampler],
         );
@@ -129,32 +131,26 @@ impl ScenePipeline {
         });
         // Binding 5 matches `shadow_cascade` in shader.wgsl. Each pass picks
         // its cascade with an offset into the buffer (a "dynamic offset").
+        // Binding 9 is the frame's joints, as in the frame's group.
         let shadow_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("shadow pass"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 5,
-                visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: true,
-                    min_binding_size: wgpu::BufferSize::new(cascade_size),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: true,
+                        min_binding_size: wgpu::BufferSize::new(cascade_size),
+                    },
+                    count: None,
                 },
-                count: None,
-            }],
+                skinning::joints_entry(),
+            ],
         });
-        let shadow_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("shadow pass"),
-            layout: &shadow_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 5,
-                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &cascade_buffer,
-                    offset: 0,
-                    size: wgpu::BufferSize::new(cascade_size),
-                }),
-            }],
-        });
-        let shadow_pipeline = create_shadow_pipeline(&device, &shadow_layout);
+        let shadow_bind_group =
+            create_shadow_bind_group(&device, &shadow_layout, &cascade_buffer, &skinning.joints);
+        let shadow_pipeline = create_shadow_pipeline(&device, &shadow_layout, &skinning);
 
         // Bindings 0 and 3–9 are the textures (see `material_bindings`).
         let texture_entry = |binding| wgpu::BindGroupLayoutEntry {
@@ -223,14 +219,18 @@ impl ScenePipeline {
         let settings = GraphicsSettings::default();
         let graphics = settings.effective(&capabilities);
         let samples = graphics.anti_aliasing.samples();
-        let (sky_pipeline, item_pipelines) =
-            scene_pipelines(&device, &frame_layout, &material_layout, samples);
+        let (sky_pipeline, item_pipelines) = scene_pipelines(
+            &device,
+            [&frame_layout, &material_layout, &skinning.layout],
+            samples,
+        );
         let mut terrain =
             terrain::TerrainPass::new(&device, &frame_layout, texture_bytes.clone(), samples);
         terrain.set_skipped_levels(graphics.texture_quality.skipped_levels());
         let sprites = sprites::SpritePass::new(&device, &white_texture.srgb, samples);
         let post = PostPasses::new(&device, color_format);
-        let occlusion = OcclusionPasses::new(&device, &frame_layout, &material_layout);
+        let occlusion =
+            OcclusionPasses::new(&device, [&frame_layout, &material_layout, &skinning.layout]);
         let targets_alive = TargetsAlive::default();
         let frame_targets = FrameTargets::new(
             &device,
@@ -318,7 +318,9 @@ impl ScenePipeline {
             shadow_sampler,
             shadow_pipeline,
             cascade_buffer,
+            shadow_layout,
             shadow_bind_group,
+            skinning,
             shadow_map: None,
             shadow_maps_alive: Arc::new(()),
             spot_shadow_map: None,
@@ -402,8 +404,11 @@ impl ScenePipeline {
         if samples != old_samples {
             (self.sky_pipeline, self.item_pipelines) = scene_pipelines(
                 &self.device,
-                &self.frame_layout,
-                &self.material_layout,
+                [
+                    &self.frame_layout,
+                    &self.material_layout,
+                    &self.skinning.layout,
+                ],
                 samples,
             );
             self.terrain
@@ -541,14 +546,18 @@ impl ScenePipeline {
             batches,
             casters,
             culled,
+            joints,
         } = plan_draws(
             list,
             &draws,
             &camera_view,
-            |mesh| self.mesh_bounds(mesh),
+            |mesh, skin| self.item_bounds(mesh, skin),
             self.frozen_view.is_some().then_some(&mut seen),
         );
         self.culling_bounds = seen;
+        let joints_remade = self
+            .skinning
+            .write_joints(&self.device, &self.queue, &joints);
         // Shadow maps cost memory, so one exists only while shadows are on,
         // at the size the graphics settings give.
         let map_size = shadows_drawn(list.shadows, &self.graphics).map(|(_, size)| size);
@@ -671,7 +680,7 @@ impl ScenePipeline {
             });
             changed = true;
         }
-        if changed {
+        if changed || joints_remade {
             self.bind_frame();
         }
 
@@ -737,12 +746,14 @@ impl ScenePipeline {
             pass.set_pipeline(&self.shadow_pipeline);
             let offset = (index as u64 * CASCADE_UNIFORM_STRIDE) as u32;
             pass.set_bind_group(0, &self.shadow_bind_group, &[offset]);
+            pass.set_bind_group(1, &self.skinning.empty, &[]);
             pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             // See-through items, and parts with `CastShadow` off, cast no shadow.
             for (mesh, instances) in casters {
                 let Some(mesh) = self.gpu_mesh(*mesh) else {
                     continue;
                 };
+                pass.set_bind_group(2, self.skin_group(mesh), &[]);
                 pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                 pass.set_index_buffer(mesh.indices.slice(..), mesh.index_format);
                 count(mesh.index_count, instances);
@@ -993,15 +1004,25 @@ impl ScenePipeline {
                 .unwrap_or(&self.plain_material);
             pass.set_pipeline(pipeline);
             pass.set_bind_group(1, &material.bind_group, &[]);
+            pass.set_bind_group(2, self.skin_group(mesh), &[]);
         }
         pass.set_vertex_buffer(0, mesh.vertices.slice(..));
         pass.set_index_buffer(mesh.indices.slice(..), mesh.index_format);
         Some(mesh)
     }
 
+    /// The skin binding `mesh` is drawn with: its joints and weights, or
+    /// none for a mesh that isn't animated.
+    fn skin_group<'a>(&'a self, mesh: &'a GpuMesh) -> &'a wgpu::BindGroup {
+        mesh.skin
+            .as_ref()
+            .map_or(&self.skinning.none, |skin| &skin.bind_group)
+    }
+
     /// Remakes the frame bindings with the shadow maps and ambient
     /// occlusion alive, binding the empty stand-in for each that isn't, so
-    /// a freed map or target isn't kept alive by the bindings.
+    /// a freed map or target isn't kept alive by the bindings, and with
+    /// the frame's joints (the shadow passes' bindings too).
     fn bind_frame(&mut self) {
         let empty = &self.empty_shadow_view;
         let sun = self.shadow_map.as_ref().map_or(empty, |map| &map.array);
@@ -1017,9 +1038,20 @@ impl ScenePipeline {
         self.frame_bind_group = create_frame_bind_group(
             &self.device,
             &self.frame_layout,
-            [&self.frame_buffer, &self.light_buffer, &self.tile_buffer],
+            [
+                &self.frame_buffer,
+                &self.light_buffer,
+                &self.tile_buffer,
+                &self.skinning.joints,
+            ],
             [sun, spot, occlusion],
             [&self.shadow_sampler, &self.occlusion_sampler],
+        );
+        self.shadow_bind_group = create_shadow_bind_group(
+            &self.device,
+            &self.shadow_layout,
+            &self.cascade_buffer,
+            &self.skinning.joints,
         );
     }
 
@@ -1067,6 +1099,7 @@ impl ScenePipeline {
         });
         let buffers = [
             &self.instance_buffer,
+            &self.skinning.joints,
             &self.ui_buffer,
             &self.light_buffer,
             &self.tile_buffer,
@@ -1100,6 +1133,20 @@ impl ScenePipeline {
     /// was never uploaded isn't drawn, so the unit cube does for it.
     pub(super) fn mesh_bounds(&self, key: MeshKey) -> Bounds {
         self.gpu_mesh(key).map_or(Bounds::UNIT, |mesh| mesh.bounds)
+    }
+
+    /// The box an item's mesh spans, in its own space, once its `skin` (if
+    /// any) moves its corners.
+    pub(super) fn item_bounds(&self, key: MeshKey, skin: Option<&Skin>) -> Bounds {
+        match (self.gpu_mesh(key), skin) {
+            (
+                Some(GpuMesh {
+                    skin: Some(gpu), ..
+                }),
+                Some(skin),
+            ) => gpu.bounds(skin),
+            _ => self.mesh_bounds(key),
+        }
     }
 
     /// The GPU copy of a mesh, or `None` for a caller's mesh that was never uploaded.
@@ -1293,7 +1340,7 @@ impl ScenePipeline {
                         update_custom_mesh(
                             &self.device,
                             &self.queue,
-                            &self.mesh_bytes,
+                            (&self.mesh_bytes, &self.skinning),
                             gpu,
                             source.as_ref(),
                         );
@@ -1301,7 +1348,12 @@ impl ScenePipeline {
                 }
                 Entry::Vacant(slot) => {
                     slot.insert(Cached {
-                        gpu: upload_custom_mesh(&self.device, &self.mesh_bytes, source.as_ref()),
+                        gpu: upload_custom_mesh(
+                            &self.device,
+                            &self.mesh_bytes,
+                            &self.skinning,
+                            source.as_ref(),
+                        ),
                         last_drawn: frame,
                     });
                 }
@@ -1512,19 +1564,21 @@ impl ScenePipeline {
 
 /// The scene pass's sky pipeline and its pipelines for items, for drawing
 /// with `samples` per pixel.
+/// The sky's and items' pipelines, with `layouts` the frame's, the
+/// material's and the skin's bindings.
 fn scene_pipelines(
     device: &wgpu::Device,
-    frame_layout: &wgpu::BindGroupLayout,
-    material_layout: &wgpu::BindGroupLayout,
+    layouts: [&wgpu::BindGroupLayout; 3],
     samples: u32,
 ) -> (wgpu::RenderPipeline, ItemPipelines) {
+    let frame_layout = layouts[0];
     let shader = shader_module(device, "scene", gpu::SCENE_SHADER);
     let pipeline = |transparent, double_sided| {
         create_pipeline(
             device,
             &shader,
             ("vs_main", "fs_main"),
-            &[frame_layout, material_layout],
+            &layouts,
             (HDR_FORMAT, samples),
             (transparent, double_sided),
         )
@@ -1607,4 +1661,32 @@ pub(super) fn text_bounds(text: &UiText, [dx, dy]: [f32; 2]) -> TextBounds {
         right: (text.position[0] + dx + text.size[0].max(0.0)).ceil() as i32,
         bottom: (text.position[1] + dy + text.size[1].max(0.0)).ceil() as i32,
     }
+}
+
+/// The shadow passes' bindings: each view's matrix in `cascades` (picked
+/// by a dynamic offset), and the frame's `joints`.
+fn create_shadow_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    cascades: &wgpu::Buffer,
+    joints: &wgpu::Buffer,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("shadow pass"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: cascades,
+                    offset: 0,
+                    size: wgpu::BufferSize::new(size_of::<[[f32; 4]; 4]>() as u64),
+                }),
+            },
+            wgpu::BindGroupEntry {
+                binding: skinning::JOINTS_BINDING,
+                resource: joints.as_entire_binding(),
+            },
+        ],
+    })
 }

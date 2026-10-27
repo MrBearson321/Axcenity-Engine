@@ -75,6 +75,7 @@ fn square_at(distance: f32, id: u64) -> DrawList {
         casts_shadow: true,
         id,
         cull_distance: 0.0,
+        skin: None,
     }]);
     list.shadows.enabled = false;
     list.sun.intensity = 0.0;

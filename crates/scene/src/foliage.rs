@@ -405,6 +405,7 @@ fn piece_item(piece: &Piece, instance: Mat4) -> DrawItem {
         casts_shadow: true,
         id: 0,
         cull_distance: 0.0,
+        skin: None,
     }
 }
 

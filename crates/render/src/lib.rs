@@ -15,7 +15,7 @@ mod tone_mapping;
 
 pub use draw_list::{
     AmbientLight, Camera, Channel, ChannelMap, Cone, DrawItem, DrawList, Light, Material,
-    MeshSource, NormalMap, PostProcessing, Shadows, Shape, Sky, SpotShadows, Sprite, Sun,
+    MeshSource, NormalMap, PostProcessing, Shadows, Shape, Skin, Sky, SpotShadows, Sprite, Sun,
     TerrainLayer, TerrainLayers, TerrainSurface, TerrainView, TextAlign, TextShadow, TextSpan,
     TextStroke, TextureMaps, TextureSource, UiBorderSide, UiClip, UiDrawItem, UiImage, UiRectangle,
     UiShadow, UiSlice, UiText, VerticalAlign, is_turned, turn_point, turned_bounds,

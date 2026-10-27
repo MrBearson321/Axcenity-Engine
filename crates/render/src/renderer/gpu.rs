@@ -12,6 +12,7 @@ use wgpu::util::DeviceExt;
 use crate::draw_list::{MeshSource, TextureSource};
 use crate::mesh::{self, MeshData, Vertex};
 
+use super::skinning::{JOINTS_BINDING, Skinning};
 use super::{
     Bounds, DEPTH_FORMAT, GpuBytes, GpuMaterial, GpuMesh, GpuTexture, InstanceRaw,
     MATERIAL_TEXTURES, MapsUniform, TARGET_DRAW_FORMAT, TARGET_SHOW_FORMAT, TEXTURE_FORMAT,
@@ -77,6 +78,7 @@ pub(super) fn create_pipeline(
             9 => Float32x4,
             10 => Float32x4,
             11 => Float32x4,
+            14 => Uint32x2,
         ],
     };
 
@@ -198,7 +200,7 @@ pub(super) fn create_shadow_views(
 pub(super) fn create_frame_bind_group(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
-    [frame_buffer, light_buffer, tile_buffer]: [&wgpu::Buffer; 3],
+    [frame_buffer, light_buffer, tile_buffer, joint_buffer]: [&wgpu::Buffer; 4],
     [shadow_view, spot_shadow_view, occlusion_view]: [&wgpu::TextureView; 3],
     [shadow_sampler, occlusion_sampler]: [&wgpu::Sampler; 2],
 ) -> wgpu::BindGroup {
@@ -227,6 +229,10 @@ pub(super) fn create_frame_bind_group(
                 resource: tile_buffer.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
+                binding: JOINTS_BINDING,
+                resource: joint_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
                 binding: 6,
                 resource: wgpu::BindingResource::TextureView(spot_shadow_view),
             },
@@ -247,14 +253,16 @@ pub(super) fn create_frame_bind_group(
 pub(super) fn create_shadow_pipeline(
     device: &wgpu::Device,
     shadow_layout: &wgpu::BindGroupLayout,
+    skinning: &Skinning,
 ) -> wgpu::RenderPipeline {
     let shader = shader_module(device, "shadow", SCENE_SHADER);
+    // No material (group 1), but the skin (group 2) moves the corners.
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("shadow"),
-        bind_group_layouts: &[shadow_layout],
+        bind_group_layouts: &[shadow_layout, &skinning.empty_layout, &skinning.layout],
         push_constant_ranges: &[],
     });
-    // Only the position and the model matrix matter here.
+    // Only the position, the model matrix and the skin matter here.
     let vertex_layout = wgpu::VertexBufferLayout {
         array_stride: size_of::<Vertex>() as u64,
         step_mode: wgpu::VertexStepMode::Vertex,
@@ -263,8 +271,33 @@ pub(super) fn create_shadow_pipeline(
     let instance_layout = wgpu::VertexBufferLayout {
         array_stride: size_of::<InstanceRaw>() as u64,
         step_mode: wgpu::VertexStepMode::Instance,
-        attributes: &wgpu::vertex_attr_array![
-            2 => Float32x4, 3 => Float32x4, 4 => Float32x4, 5 => Float32x4,
+        attributes: &[
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x4,
+                offset: 0,
+                shader_location: 2,
+            },
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x4,
+                offset: 16,
+                shader_location: 3,
+            },
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x4,
+                offset: 32,
+                shader_location: 4,
+            },
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x4,
+                offset: 48,
+                shader_location: 5,
+            },
+            // The skin is last, past the attributes left out.
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Uint32x2,
+                offset: std::mem::offset_of!(InstanceRaw, skin) as u64,
+                shader_location: 14,
+            },
         ],
     };
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -410,6 +443,7 @@ pub(super) fn upload_mesh(
 pub(super) fn upload_custom_mesh(
     device: &wgpu::Device,
     bytes: &GpuBytes,
+    skinning: &Skinning,
     source: &dyn MeshSource,
 ) -> Option<GpuMesh> {
     let vertices = custom_vertices(source)?;
@@ -424,6 +458,7 @@ pub(super) fn upload_custom_mesh(
         wgpu::IndexFormat::Uint32,
     );
     mesh.version = source.version();
+    mesh.skin = skinning.upload(device, bytes, source);
     Some(mesh)
 }
 
@@ -433,7 +468,7 @@ pub(super) fn upload_custom_mesh(
 pub(super) fn update_custom_mesh(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-    bytes: &GpuBytes,
+    (bytes, skinning): (&GpuBytes, &Skinning),
     mesh: &mut GpuMesh,
     source: &dyn MeshSource,
 ) {
@@ -447,7 +482,7 @@ pub(super) fn update_custom_mesh(
     {
         queue.write_buffer(&mesh.vertices, 0, corners);
         mesh.bounds = vertex_bounds(&vertices);
-    } else if let Some(fresh) = upload_custom_mesh(device, bytes, source) {
+    } else if let Some(fresh) = upload_custom_mesh(device, bytes, skinning, source) {
         *mesh = fresh;
     }
 }
@@ -517,6 +552,7 @@ pub(super) fn upload_buffers(
         index_count: index_count as u32,
         index_format,
         version: 0,
+        skin: None,
     }
 }
 

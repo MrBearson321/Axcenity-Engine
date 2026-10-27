@@ -6,6 +6,8 @@
 //! `gpu.rs` uploads meshes, textures and materials. `sprites.rs` draws particles.
 //! `terrain.rs` draws terrain chunks with their blended layers.
 //! `occlusion.rs` draws the depth and normal prepass and ambient occlusion.
+//! `skinning.rs` uploads animated meshes' joints and weights, and each
+//! frame's joints, so the vertex shader poses them.
 //! `culling.rs` tests bounds against each view, so what a view can't see
 //! isn't drawn.
 //! `gpu_timer.rs` measures the GPU's time per frame and per pass, for the
@@ -17,7 +19,7 @@ use std::ops::Range;
 use std::time::Duration;
 
 use crate::draw_list::{
-    DrawList, Shape, TextureSource, UiDrawItem, UiRectangle, UiText, is_turned,
+    DrawList, Shape, Skin, TextureSource, UiDrawItem, UiRectangle, UiText, is_turned,
 };
 use crate::graphics::{Capabilities, EffectiveGraphics, GraphicsSettings, ShadowMapSize};
 use crate::mesh::{self};
@@ -37,6 +39,7 @@ mod lighting;
 mod lod;
 mod occlusion;
 mod post;
+mod skinning;
 mod sprites;
 mod terrain;
 pub(crate) mod text;
@@ -64,6 +67,7 @@ use lighting::{
 use lighting::{cascade_ends, light_raw, uv_matrix};
 use lod::{Draw, LodStates, Resolved};
 use occlusion::occlusion_uniform;
+use skinning::Skinning;
 use std::sync::Arc;
 
 mod scene;

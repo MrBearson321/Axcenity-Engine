@@ -8,8 +8,10 @@
 //!   move the skeleton of a model loaded from another (an animation-only
 //!   FBX for the same character), matched by bone name ([`Take::bind`]).
 //! - A [`Pose`] is where every bone is, relative to its parent. A take
-//!   [samples](Take::sample) into one, and [`Model::pose`] skins the
-//!   model's triangles with it, on the CPU, into a [`Posed`] copy.
+//!   [samples](Take::sample) into one, and [`Model::pose`] turns it into a
+//!   [`Posed`]: each joint's matrix, which the renderer skins the triangles
+//!   with on the GPU, and the triangles skinned on the CPU when they're asked
+//!   for (picking, tests, the bind-pose hull).
 
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -289,6 +291,13 @@ static NOTHING: PosedPrimitive = PosedPrimitive {
 };
 
 impl Posed {
+    /// Where each joint ([`Rig::joints`]) moves the corners weighted to it,
+    /// from the model's triangles to this pose, in the model's fitted space:
+    /// what the renderer skins them with on the GPU.
+    pub fn joints(&self) -> &[Mat4] {
+        &self.joints
+    }
+
     /// Primitive `index` of `model` (the model this is a pose of) at level
     /// of detail `level`: 0 is the primitive itself, 1 its first simpler
     /// copy ([`Primitive::lods`](super::Primitive::lods)), and so on. A level

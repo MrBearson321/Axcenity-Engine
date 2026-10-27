@@ -20,20 +20,16 @@ use super::{
 };
 
 impl OcclusionPasses {
-    /// The prepass pipelines bind the frame and a material like the scene
-    /// pass's, so they draw items the same way.
-    pub(super) fn new(
-        device: &wgpu::Device,
-        frame_layout: &wgpu::BindGroupLayout,
-        material_layout: &wgpu::BindGroupLayout,
-    ) -> Self {
+    /// The prepass pipelines bind the frame, a material and a skin like the
+    /// scene pass's (`item_layouts`), so they draw items the same way.
+    pub(super) fn new(device: &wgpu::Device, item_layouts: [&wgpu::BindGroupLayout; 3]) -> Self {
         let scene_shader = shader_module(device, "prepass", super::gpu::SCENE_SHADER);
         let prepass = |double_sided| {
             create_pipeline(
                 device,
                 &scene_shader,
                 ("vs_main", "fs_prepass"),
-                &[frame_layout, material_layout],
+                &item_layouts,
                 (NORMAL_FORMAT, 1),
                 (false, double_sided),
             )

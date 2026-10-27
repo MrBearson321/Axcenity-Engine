@@ -283,7 +283,7 @@ If the 20-character benchmark shows CPU posing as a real cost, skin on the GPU: 
 
 ### Acceptance criteria
 
-- [ ] A posed character looks the same skinned on the GPU as on the CPU (pixel comparison test), and the character benchmark improves.
+- [x] A posed character looks the same skinned on the GPU as on the CPU (pixel comparison test), and the character benchmark improves.
 - [ ] `examples/hello-animation` and the Animation window's preview still play correctly.
 
 ---

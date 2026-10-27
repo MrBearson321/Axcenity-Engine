@@ -196,6 +196,9 @@ pub(super) struct InstanceRaw {
     /// Metalness, roughness, alpha cutoff, and studs per texture repeat
     /// (0 keeps the mesh's own coordinates).
     pub(super) surface: [f32; 4],
+    /// Where the item's skin's joints start in the frame's joints, and how
+    /// many it has: 0 for an item that isn't skinned (see `skinning.rs`).
+    pub(super) skin: [u32; 2],
 }
 
 #[repr(C)]
@@ -282,6 +285,8 @@ pub(super) struct GpuMesh {
     pub(super) version: u64,
     /// The box its corners span, for culling.
     pub(super) bounds: Bounds,
+    /// Its corners' joints and weights, for an animated mesh.
+    pub(super) skin: Option<skinning::GpuSkin>,
     /// Its buffers' size, in [`ScenePipeline::mesh_bytes`].
     pub(super) _bytes: Counted,
 }
@@ -621,6 +626,10 @@ pub(super) struct ScenePipeline {
     /// Gives the shadow pass one view's matrix (it can't also bind the
     /// shadow map it's drawing into).
     pub(super) shadow_bind_group: wgpu::BindGroup,
+    /// What `shadow_bind_group` is made with, remade with the joints.
+    pub(super) shadow_layout: wgpu::BindGroupLayout,
+    /// Animated meshes' bindings, and the frame's joints.
+    pub(super) skinning: skinning::Skinning,
     /// Made when shadows are first turned on, and freed when turned off or
     /// when the graphics settings change its size.
     pub(super) shadow_map: Option<ShadowMap<ShadowMapSize>>,

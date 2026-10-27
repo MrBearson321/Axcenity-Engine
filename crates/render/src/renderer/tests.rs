@@ -9,6 +9,7 @@ use glam::Mat4;
 
 mod frustum_culling;
 mod level_of_detail;
+mod skinning;
 
 #[test]
 fn zero_sized_window_has_nothing_to_draw() {
@@ -164,6 +165,7 @@ fn item(shape: Shape, position: Vec3, opacity: f32) -> DrawItem {
         casts_shadow: true,
         id: 0,
         cull_distance: 0.0,
+        skin: None,
     }
 }
 
@@ -189,7 +191,7 @@ fn plan(list: &DrawList) -> DrawPlan {
 fn plan_with(list: &DrawList, bounds: impl Fn(MeshKey) -> Bounds) -> DrawPlan {
     let view = Frustum::of(view_projection(list, 1.0));
     let draws = LodStates::default().resolve(list, 1).draws;
-    plan_draws(list, &draws, &view, bounds, None)
+    plan_draws(list, &draws, &view, |mesh, _| bounds(mesh), None)
 }
 
 /// A caller's mesh with no triangles, for planning tests (it's never uploaded).
@@ -474,6 +476,7 @@ fn big_block() -> DrawItem {
         casts_shadow: true,
         id: 0,
         cull_distance: 0.0,
+        skin: None,
     }
 }
 
@@ -935,6 +938,7 @@ fn texture_renderer_draws_the_sky_and_a_part_into_a_texture() {
         casts_shadow: true,
         id: 0,
         cull_distance: 0.0,
+        skin: None,
     });
     renderer.resize(64, 64);
     assert_eq!(renderer.size(), (64, 64));
@@ -1035,6 +1039,7 @@ fn texture_renderer_draws_a_mesh_with_texture_maps() {
         casts_shadow: true,
         id: 0,
         cull_distance: 0.0,
+        skin: None,
     });
     let mut renderer = TextureRenderer::new(&device, &queue, 32, 32);
     renderer.render(&list).unwrap();
@@ -1132,6 +1137,7 @@ fn terrain_chunks_show_the_layer_their_weights_pick() {
             casts_shadow: true,
             id: 0,
             cull_distance: 0.0,
+            skin: None,
         }]);
         // Looking straight down at it, in sunlight.
         list.camera.look_at = Vec3::new(0.0, -1.0, -0.001);
@@ -2374,6 +2380,7 @@ fn one_of_everything() -> (DrawList, Vec<Probe>) {
         casts_shadow: true,
         id: 0,
         cull_distance: 0.0,
+        skin: None,
     };
     let mut list = list_of(vec![solid, see_through, cut_out, ground]);
     list.sky = Sky::default();
@@ -2786,6 +2793,7 @@ fn a_double_sided_square_shows_its_back_lit_like_its_front() {
             casts_shadow: true,
             id: 0,
             cull_distance: 0.0,
+            skin: None,
         };
         let mut list = list_of(vec![square]);
         // Lit from behind the camera.
