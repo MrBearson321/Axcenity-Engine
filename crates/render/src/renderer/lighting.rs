@@ -123,6 +123,9 @@ pub(super) fn frame_uniform(
         view: view.to_cols_array_2d(),
         // The scene's size is filled in when it's drawn.
         ambient_occlusion: [occlusion_drawn(list, graphics), 0.0, 1.0, 1.0],
+        // The environment maps fill these in when they're on.
+        environment: [0.0; 4],
+        sky_light: [[0.0; 4]; 9],
     }
 }
 

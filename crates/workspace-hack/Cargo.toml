@@ -79,7 +79,7 @@ core-foundation = { version = "0.9" }
 core-graphics-types = { version = "0.1" }
 dispatch2 = { version = "0.3" }
 half = { version = "2", features = ["num-traits"] }
-image = { version = "0.25", default-features = false, features = ["bmp", "jpeg", "png", "tga", "tiff"] }
+image = { version = "0.25", default-features = false, features = ["bmp", "hdr", "jpeg", "png", "tga", "tiff"] }
 indexmap = { version = "2" }
 objc2 = { version = "0.6" }
 objc2-app-kit = { version = "0.2", features = ["NSAccessibility", "NSAccessibilityConstants", "NSAccessibilityElement", "NSAccessibilityProtocols", "NSAppearance", "NSApplication", "NSBitmapImageRep", "NSButton", "NSColor", "NSControl", "NSCursor", "NSDragging", "NSEvent", "NSGraphics", "NSGraphicsContext", "NSImage", "NSImageRep", "NSMenu", "NSMenuItem", "NSOpenGLView", "NSPasteboard", "NSResponder", "NSRunningApplication", "NSScreen", "NSTextInputClient", "NSTextInputContext", "NSView", "NSWindow", "NSWindowScripting", "NSWindowTabGroup"] }
@@ -98,7 +98,7 @@ core-foundation = { version = "0.9" }
 core-graphics-types = { version = "0.1" }
 dispatch2 = { version = "0.3" }
 half = { version = "2", features = ["num-traits"] }
-image = { version = "0.25", default-features = false, features = ["bmp", "jpeg", "png", "tga", "tiff"] }
+image = { version = "0.25", default-features = false, features = ["bmp", "hdr", "jpeg", "png", "tga", "tiff"] }
 indexmap = { version = "2" }
 objc2 = { version = "0.6" }
 objc2-app-kit = { version = "0.2", features = ["NSAccessibility", "NSAccessibilityConstants", "NSAccessibilityElement", "NSAccessibilityProtocols", "NSAppearance", "NSApplication", "NSBitmapImageRep", "NSButton", "NSColor", "NSControl", "NSCursor", "NSDragging", "NSEvent", "NSGraphics", "NSGraphicsContext", "NSImage", "NSImageRep", "NSMenu", "NSMenuItem", "NSOpenGLView", "NSPasteboard", "NSResponder", "NSRunningApplication", "NSScreen", "NSTextInputClient", "NSTextInputContext", "NSView", "NSWindow", "NSWindowScripting", "NSWindowTabGroup"] }

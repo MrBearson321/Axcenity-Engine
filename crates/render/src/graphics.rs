@@ -219,6 +219,51 @@ impl AmbientOcclusion {
     }
 }
 
+/// How surfaces reflect the sky and take its light. Ordered from cheapest
+/// to dearest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum ReflectionQuality {
+    /// From the sky's gradient worked out per pixel, with no environment
+    /// maps. A sky image isn't shown.
+    Low,
+    /// The sky baked into a 64² cubemap, filtered with 32 samples.
+    Medium,
+    /// 128², 64 samples.
+    High,
+    /// 256², 128 samples.
+    Ultra,
+}
+
+impl ReflectionQuality {
+    pub const ALL: [ReflectionQuality; 4] = [
+        ReflectionQuality::Low,
+        ReflectionQuality::Medium,
+        ReflectionQuality::High,
+        ReflectionQuality::Ultra,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ReflectionQuality::Low => "Low",
+            ReflectionQuality::Medium => "Medium",
+            ReflectionQuality::High => "High",
+            ReflectionQuality::Ultra => "Ultra",
+        }
+    }
+
+    /// The environment maps this quality bakes, or `None` for the
+    /// gradient alone (Low).
+    pub fn map(self) -> Option<EnvironmentMapSize> {
+        let (size, samples) = match self {
+            ReflectionQuality::Low => return None,
+            ReflectionQuality::Medium => (64, 32),
+            ReflectionQuality::High => (128, 64),
+            ReflectionQuality::Ultra => (256, 128),
+        };
+        Some(EnvironmentMapSize { size, samples })
+    }
+}
+
 /// The smallest and largest render scale: the scene is drawn at this
 /// fraction of the output's width and height.
 pub const RENDER_SCALE_RANGE: std::ops::RangeInclusive<f32> = 0.5..=2.0;
@@ -241,6 +286,14 @@ pub struct ShadowMapSize {
 pub struct SpotShadowMapSize {
     pub size: u32,
     pub lights: u32,
+}
+
+/// The sky's environment maps: each cubemap face's size in texels per
+/// side, and how many directions each texel of a rough reflection averages.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct EnvironmentMapSize {
+    pub size: u32,
+    pub samples: u32,
 }
 
 /// The machine's graphics choices: a preset, and overrides that each
@@ -278,6 +331,8 @@ pub struct GraphicsSettings {
     pub anti_aliasing: Option<AntiAliasing>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ambient_occlusion: Option<AmbientOcclusion>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reflection_quality: Option<ReflectionQuality>,
 }
 
 impl GraphicsSettings {
@@ -392,6 +447,16 @@ impl GraphicsSettings {
         })
     }
 
+    /// The reflection quality: the override, or the preset's.
+    pub fn reflection_quality(&self) -> ReflectionQuality {
+        self.reflection_quality.unwrap_or(match self.quality {
+            Quality::Low => ReflectionQuality::Low,
+            Quality::Medium => ReflectionQuality::Medium,
+            Quality::High => ReflectionQuality::High,
+            Quality::Ultra => ReflectionQuality::Ultra,
+        })
+    }
+
     /// The values the renderer uses: these settings, lowered where the GPU
     /// can't meet them, with a note for each one lowered. Never raises one.
     pub fn effective(&self, capabilities: &Capabilities) -> EffectiveGraphics {
@@ -432,6 +497,26 @@ impl GraphicsSettings {
                 wanted.samples(),
             ));
         }
+        let wanted = self.reflection_quality();
+        // The best quality at or below the one asked for whose cubemap fits.
+        let reflection_quality = ReflectionQuality::ALL
+            .into_iter()
+            .rev()
+            .filter(|&quality| quality <= wanted)
+            .find(|quality| {
+                quality
+                    .map()
+                    .is_none_or(|map| map.size <= capabilities.max_texture_size)
+            })
+            .unwrap_or(ReflectionQuality::Low);
+        if reflection_quality != wanted {
+            notes.push(format!(
+                "Reflection quality lowered from {} to {}: this GPU's textures are at most {}².",
+                wanted.label(),
+                reflection_quality.label(),
+                capabilities.max_texture_size,
+            ));
+        }
         EffectiveGraphics {
             shadow_quality,
             shadow_distance: self.shadow_distance(),
@@ -442,6 +527,7 @@ impl GraphicsSettings {
             anti_aliasing,
             // Every GPU can draw it: it needs nothing past what the scene does.
             ambient_occlusion: self.ambient_occlusion(),
+            reflection_quality,
             notes,
         }
     }
@@ -537,6 +623,7 @@ pub struct EffectiveGraphics {
     pub texture_budget: u64,
     pub anti_aliasing: AntiAliasing,
     pub ambient_occlusion: AmbientOcclusion,
+    pub reflection_quality: ReflectionQuality,
     /// Why each lowered value was lowered, for showing in the settings.
     pub notes: Vec<String>,
 }
@@ -602,6 +689,19 @@ mod tests {
         let budgets =
             Quality::ALL.map(|quality| GraphicsSettings::preset(quality).texture_budget());
         assert_eq!(budgets, [256, 512, 1024, 2048]);
+        let reflections =
+            Quality::ALL.map(|quality| GraphicsSettings::preset(quality).reflection_quality());
+        assert_eq!(reflections, ReflectionQuality::ALL);
+        let environment = |size, samples| Some(EnvironmentMapSize { size, samples });
+        assert_eq!(
+            ReflectionQuality::ALL.map(ReflectionQuality::map),
+            [
+                None,
+                environment(64, 32),
+                environment(128, 64),
+                environment(256, 128)
+            ]
+        );
     }
 
     #[test]
@@ -691,6 +791,15 @@ mod tests {
             assert_eq!(occlusion.shadow_quality(), preset.shadow_quality());
             assert_eq!(occlusion.render_scale(), preset.render_scale());
 
+            let reflections = GraphicsSettings {
+                reflection_quality: Some(ReflectionQuality::Low),
+                ..preset.clone()
+            };
+            assert_eq!(reflections.reflection_quality(), ReflectionQuality::Low);
+            assert_eq!(reflections.shadow_quality(), preset.shadow_quality());
+            assert_eq!(reflections.ambient_occlusion(), preset.ambient_occlusion());
+            assert_eq!(occlusion.reflection_quality(), preset.reflection_quality());
+
             let budget = GraphicsSettings {
                 texture_budget: Some(64),
                 ..preset.clone()
@@ -741,6 +850,7 @@ mod tests {
             texture_budget: Some(300),
             anti_aliasing: Some(AntiAliasing::Fxaa),
             ambient_occlusion: Some(AmbientOcclusion::Off),
+            reflection_quality: Some(ReflectionQuality::Medium),
         };
         let text = serde_json::to_string(&settings).unwrap();
         assert_eq!(
@@ -810,6 +920,41 @@ mod tests {
         };
         let medium = GraphicsSettings::preset(Quality::High).effective(&two_layers);
         assert_eq!(medium.shadow_quality, ShadowQuality::Medium);
+    }
+
+    #[test]
+    fn reflection_quality_drops_to_a_cubemap_the_gpu_can_hold_with_a_note() {
+        let small = Capabilities {
+            max_texture_size: 128,
+            ..Capabilities::default()
+        };
+        let ultra = GraphicsSettings {
+            shadow_quality: Some(ShadowQuality::Off),
+            ..GraphicsSettings::preset(Quality::Ultra)
+        }
+        .effective(&small);
+        assert_eq!(ultra.reflection_quality, ReflectionQuality::High);
+        assert_eq!(ultra.notes.len(), 1, "{:?}", ultra.notes);
+        assert!(
+            ultra.notes[0].contains("Reflection quality lowered from Ultra to High"),
+            "{:?}",
+            ultra.notes
+        );
+        let tiny = Capabilities {
+            max_texture_size: 32,
+            ..small
+        };
+        let low = GraphicsSettings::preset(Quality::Medium).effective(&tiny);
+        assert_eq!(low.reflection_quality, ReflectionQuality::Low);
+        // The gradient needs no texture, so Low is never lowered or noted.
+        let gradient = GraphicsSettings::preset(Quality::Low).effective(&tiny);
+        assert_eq!(gradient.reflection_quality, ReflectionQuality::Low);
+        assert!(
+            !gradient
+                .notes
+                .iter()
+                .any(|note| note.contains("Reflection"))
+        );
     }
 
     #[test]
@@ -906,6 +1051,7 @@ mod tests {
                         texture_budget: Some(200),
                         anti_aliasing,
                         ambient_occlusion: Some(AmbientOcclusion::Low),
+                        reflection_quality: None,
                     };
                     for capabilities in &capabilities {
                         let effective = settings.effective(capabilities);
@@ -917,9 +1063,13 @@ mod tests {
                         assert_eq!(effective.texture_budget, 200 << 20);
                         assert!(effective.anti_aliasing <= settings.anti_aliasing());
                         assert_eq!(effective.ambient_occlusion, settings.ambient_occlusion());
+                        assert!(effective.reflection_quality <= settings.reflection_quality());
                         let lowered =
                             usize::from(effective.shadow_quality != settings.shadow_quality())
-                                + usize::from(effective.anti_aliasing != settings.anti_aliasing());
+                                + usize::from(effective.anti_aliasing != settings.anti_aliasing())
+                                + usize::from(
+                                    effective.reflection_quality != settings.reflection_quality(),
+                                );
                         assert_eq!(effective.notes.len(), lowered);
                     }
                 }

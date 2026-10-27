@@ -945,6 +945,11 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
     ),
     (
         ClassName::Lighting,
+        "SkyImage",
+        "A picture of the whole sky, such as \"assets/sky/noon.hdr\", shown behind the world and reflected by parts in place of the sky colors, with its light on everything. A Radiance .hdr file keeps the sun brighter than white; a PNG or JPEG also works. It wraps once around the world, its middle toward -Z and top straight up. Empty for the sky colors. Only drawn where the player's graphics settings have reflection quality above Low.",
+    ),
+    (
+        ClassName::Lighting,
         "PostProcessingEnabled",
         "If false, the scene is drawn with no tone mapping or bloom.",
     ),

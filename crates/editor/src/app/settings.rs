@@ -10,7 +10,7 @@ use crate::theme::{Accent, Appearance, Density, Palette, ThemeChoice, type_scale
 use crate::widgets;
 use axcenity_render::{
     AmbientOcclusion, AntiAliasing, Capabilities, GraphicsSettings, Quality, RENDER_SCALE_RANGE,
-    ShadowQuality, TEXTURE_BUDGET_RANGE, TextureQuality,
+    ReflectionQuality, ShadowQuality, TEXTURE_BUDGET_RANGE, TextureQuality,
 };
 
 /// Ctrl+, (Cmd+, on macOS) opens Settings, as in most desktop apps.
@@ -673,6 +673,24 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
                     }
                 });
             ui.end_row();
+
+            ui.label("Reflection quality");
+            let label = |quality: Option<ReflectionQuality>| match quality {
+                Some(quality) => quality.label().to_owned(),
+                None => format!("Preset ({})", preset.reflection_quality().label()),
+            };
+            egui::ComboBox::from_id_salt("reflection quality")
+                .selected_text(label(settings.reflection_quality))
+                .show_ui(ui, |ui| {
+                    for choice in std::iter::once(None).chain(ReflectionQuality::ALL.map(Some)) {
+                        ui.selectable_value(
+                            &mut settings.reflection_quality,
+                            choice,
+                            label(choice),
+                        );
+                    }
+                });
+            ui.end_row();
         });
     ui.add_space(16.0);
     widgets::section_label(ui, "In use");
@@ -716,6 +734,15 @@ fn graphics_page(ui: &mut egui::Ui, settings: &mut GraphicsSettings, capabilitie
             mode.label(),
             mode.samples()
         ),
+    });
+    ui.label(match effective.reflection_quality.map() {
+        Some(map) => format!(
+            "Reflections: {}, the sky baked into a {}² cubemap ({} samples)",
+            effective.reflection_quality.label(),
+            map.size,
+            map.samples
+        ),
+        None => "Reflections: Low, from the sky's gradient (no sky image)".to_owned(),
     });
     for note in &effective.notes {
         ui.label(egui::RichText::new(note).color(palette.warning));
@@ -1010,6 +1037,7 @@ mod tests {
             texture_budget: Some(128),
             anti_aliasing: Some(AntiAliasing::Msaa2),
             ambient_occlusion: Some(AmbientOcclusion::Low),
+            reflection_quality: Some(ReflectionQuality::Medium),
         };
         let mut storage = MemoryStorage::default();
         eframe::App::save(&mut app, &mut storage);

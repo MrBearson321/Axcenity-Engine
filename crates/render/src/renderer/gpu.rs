@@ -20,15 +20,24 @@ use super::{
 };
 
 /// The shader for parts and models, and the shadow and sky passes: the
-/// shared lighting, then `shader.wgsl`.
+/// sky's colors and the shared lighting, then `shader.wgsl`.
 pub(super) const SCENE_SHADER: &str = concat!(
+    include_str!("../sky.wgsl"),
     include_str!("../lighting.wgsl"),
     include_str!("../shader.wgsl")
 );
-/// The shader for terrain chunks: the shared lighting, then `terrain.wgsl`.
+/// The shader for terrain chunks: the sky's colors and the shared
+/// lighting, then `terrain.wgsl`.
 pub(super) const TERRAIN_SHADER: &str = concat!(
+    include_str!("../sky.wgsl"),
     include_str!("../lighting.wgsl"),
     include_str!("../terrain.wgsl")
+);
+/// The shader that bakes the sky's environment maps: the sky's colors,
+/// then `environment.wgsl`.
+pub(super) const ENVIRONMENT_SHADER: &str = concat!(
+    include_str!("../sky.wgsl"),
+    include_str!("../environment.wgsl")
 );
 
 pub(super) fn shader_module(
@@ -201,8 +210,14 @@ pub(super) fn create_frame_bind_group(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
     [frame_buffer, light_buffer, tile_buffer, joint_buffer]: [&wgpu::Buffer; 4],
-    [shadow_view, spot_shadow_view, occlusion_view]: [&wgpu::TextureView; 3],
-    [shadow_sampler, occlusion_sampler]: [&wgpu::Sampler; 2],
+    [
+        shadow_view,
+        spot_shadow_view,
+        occlusion_view,
+        environment_view,
+        sky_image_view,
+    ]: [&wgpu::TextureView; 5],
+    [shadow_sampler, occlusion_sampler, environment_sampler]: [&wgpu::Sampler; 3],
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("frame"),
@@ -243,6 +258,18 @@ pub(super) fn create_frame_bind_group(
             wgpu::BindGroupEntry {
                 binding: 8,
                 resource: wgpu::BindingResource::Sampler(occlusion_sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 10,
+                resource: wgpu::BindingResource::TextureView(environment_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 11,
+                resource: wgpu::BindingResource::Sampler(environment_sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 12,
+                resource: wgpu::BindingResource::TextureView(sky_image_view),
             },
         ],
     })

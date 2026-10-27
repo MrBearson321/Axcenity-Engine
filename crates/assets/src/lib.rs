@@ -7,6 +7,8 @@
 //!   `MaterialVariant` names, with its base files ([`MaterialFile`]).
 //! - [`Assets::data_table`] reads a `*.data.json` table scripts read
 //!   through `DataService` ([`DataTable`]).
+//! - [`Assets::sky_image`] reads the sky image Lighting's `SkyImage` names
+//!   ([`SkyImage`]).
 //! - [`load_model`] reads a `.gltf`, `.glb` or `.fbx` file into a [`Model`]: plain
 //!   triangles, materials and textures, fitted into the 1×1×1 cube that every
 //!   part's mesh fills.
@@ -24,6 +26,7 @@ mod import;
 mod material;
 mod model;
 mod reload;
+mod sky_image;
 mod texture_set;
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -54,6 +57,7 @@ pub use model::{
     texture_roles,
 };
 pub use reload::Reload;
+pub use sky_image::{SKY_IMAGE_EXTENSIONS, SkyImage, decode_sky_image, read_sky_image};
 pub use texture_set::{
     TEXTURE_SET_SUFFIX, TextureSet, TextureSetError, TextureSetMap, read_texture_set,
     texture_set_from_files, write_texture_set,
@@ -99,6 +103,8 @@ struct Shared {
     models: HashMap<String, Option<Arc<Model>>>,
     /// Every texture file asked for so far, by its path, the same way.
     textures: HashMap<String, Option<Arc<Image>>>,
+    /// Every sky image asked for so far, by its path, the same way.
+    sky_images: HashMap<String, Option<Arc<SkyImage>>>,
     /// Every material file asked for so far, by its path, put together
     /// with its bases. `None` means it couldn't be read.
     materials: HashMap<String, Option<material::Resolved>>,
@@ -200,6 +206,33 @@ impl Assets {
             return None;
         }
         store_texture(&mut shared, path, read_texture(&folder, path))
+    }
+
+    /// The sky image at `path` (Lighting's `SkyImage`, such as
+    /// `assets/sky/noon.hdr`), decoded the first time. `None` if `path` is
+    /// empty or it can't be read; the reason goes to
+    /// [`take_errors`](Self::take_errors), once.
+    pub fn sky_image(&self, path: &str) -> Option<Arc<SkyImage>> {
+        if path.is_empty() {
+            return None;
+        }
+        let mut shared = self.lock();
+        if let Some(image) = shared.sky_images.get(path) {
+            return image.clone();
+        }
+        let folder = shared.folder.clone()?;
+        let image = match read_sky_image(&folder, path) {
+            Ok(image) => Some(Arc::new(image)),
+            Err(message) => {
+                shared
+                    .errors
+                    .push(format!("Could not load the sky image `{path}`: {message}"));
+                None
+            }
+        };
+        reload::remember_stamp(&mut shared, &folder, path);
+        shared.sky_images.insert(path.to_owned(), image.clone());
+        image
     }
 
     /// The material file at `path` (a part's `MaterialVariant`, such as

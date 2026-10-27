@@ -516,6 +516,7 @@ pub enum EnumType {
     TextureQuality,
     AntiAliasing,
     AmbientOcclusion,
+    ReflectionQuality,
     UserInputType,
     UserInputState,
     MouseBehavior,
@@ -524,7 +525,7 @@ pub enum EnumType {
 }
 
 impl EnumType {
-    pub const ALL: [EnumType; 19] = [
+    pub const ALL: [EnumType; 20] = [
         EnumType::Material,
         EnumType::PartType,
         EnumType::KeyCode,
@@ -539,6 +540,7 @@ impl EnumType {
         EnumType::TextureQuality,
         EnumType::AntiAliasing,
         EnumType::AmbientOcclusion,
+        EnumType::ReflectionQuality,
         EnumType::UserInputType,
         EnumType::UserInputState,
         EnumType::MouseBehavior,
@@ -562,6 +564,7 @@ impl EnumType {
             EnumType::TextureQuality => "TextureQuality",
             EnumType::AntiAliasing => "AntiAliasing",
             EnumType::AmbientOcclusion => "AmbientOcclusion",
+            EnumType::ReflectionQuality => "ReflectionQuality",
             EnumType::UserInputType => "UserInputType",
             EnumType::UserInputState => "UserInputState",
             EnumType::MouseBehavior => "MouseBehavior",
@@ -587,6 +590,7 @@ impl EnumType {
             EnumType::TextureQuality => user_settings::texture_quality_names(),
             EnumType::AntiAliasing => user_settings::anti_aliasing_names(),
             EnumType::AmbientOcclusion => user_settings::ambient_occlusion_names(),
+            EnumType::ReflectionQuality => user_settings::reflection_quality_names(),
             EnumType::UserInputType => UserInputType::ALL.iter().map(|t| t.as_str()).collect(),
             EnumType::UserInputState => UserInputState::ALL.iter().map(|s| s.as_str()).collect(),
             EnumType::MouseBehavior => MouseBehavior::ALL.iter().map(|b| b.as_str()).collect(),
@@ -699,6 +703,7 @@ impl LuaEnumItem {
             | EnumType::TextureQuality
             | EnumType::AntiAliasing
             | EnumType::AmbientOcclusion
+            | EnumType::ReflectionQuality
             | EnumType::UserInputType
             | EnumType::UserInputState
             | EnumType::MouseBehavior

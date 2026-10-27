@@ -440,7 +440,7 @@ pub struct AmbientLight {
 /// A procedural sky: a gradient from the ground up through the horizon to
 /// the top of the sky, with the sun in it. Surfaces are lit by it and metal
 /// and glossy surfaces reflect it.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Sky {
     /// sRGB colors, like every color in the draw list.
     pub top_color: [f32; 3],
@@ -449,6 +449,9 @@ pub struct Sky {
     /// How strongly the sky lights and is reflected by surfaces. 0 leaves
     /// only the sun, the ambient light and point lights.
     pub environment_intensity: f32,
+    /// A picture of the whole sky, drawn and reflected in place of the
+    /// colors above while the reflection quality bakes environment maps.
+    pub image: Option<SkyImage>,
 }
 
 impl Default for Sky {
@@ -458,7 +461,35 @@ impl Default for Sky {
             horizon_color: [0.63, 0.8, 0.95],
             ground_color: [0.35, 0.33, 0.3],
             environment_intensity: 0.6,
+            image: None,
         }
+    }
+}
+
+/// A high dynamic range picture of the whole sky, wrapped around the world
+/// (equirectangular): left to right goes once around, with its middle
+/// toward -Z and its edges toward +Z, and top to bottom from straight up to
+/// straight down.
+#[derive(Clone)]
+pub struct SkyImage {
+    /// Different for every image, so the renderer bakes each one once.
+    pub key: u64,
+    pub width: u32,
+    pub height: u32,
+    /// Linear light, which can be brighter than 1: red, green and blue for
+    /// each pixel, rows from the top.
+    pub rgb: Arc<Vec<f32>>,
+}
+
+impl fmt::Debug for SkyImage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "SkyImage #{} ({}×{})", self.key, self.width, self.height)
+    }
+}
+
+impl PartialEq for SkyImage {
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key
     }
 }
 

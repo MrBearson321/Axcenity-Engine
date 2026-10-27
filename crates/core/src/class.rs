@@ -499,6 +499,9 @@ impl ClassName {
                 ),
                 ("GroundColor", Value::Color3(Color3::new(0.35, 0.33, 0.3))),
                 ("EnvironmentIntensity", Value::Number(0.6)),
+                // A project path to an HDR picture of the whole sky, drawn
+                // and reflected in place of the colors above. Empty for none.
+                ("SkyImage", Value::String(String::new())),
                 // Tone mapping and bloom.
                 ("PostProcessingEnabled", Value::Bool(true)),
                 ("Exposure", Value::Number(1.0)),

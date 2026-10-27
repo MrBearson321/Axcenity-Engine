@@ -7,6 +7,7 @@ use crate::draw_list::{
 use crate::graphics::ShadowQuality;
 use glam::Mat4;
 
+mod environment_maps;
 mod frustum_culling;
 mod level_of_detail;
 mod skinning;
@@ -124,6 +125,7 @@ fn list_of(items: Vec<DrawItem>) -> DrawList {
             horizon_color: [0.0; 3],
             ground_color: [0.0; 3],
             environment_intensity: 0.0,
+            image: None,
         },
         camera: Camera {
             position: Vec3::ZERO,
@@ -3112,7 +3114,7 @@ fn the_prepass_and_occlusion_follow_the_render_scale() {
 /// Every graphics setting through every value, one at a time from High,
 /// then back to High: the settings the resource test switches through.
 fn every_setting_and_value() -> Vec<GraphicsSettings> {
-    use crate::{AmbientOcclusion, AntiAliasing, Quality, TextureQuality};
+    use crate::{AmbientOcclusion, AntiAliasing, Quality, ReflectionQuality, TextureQuality};
     let high = GraphicsSettings::default();
     let mut all: Vec<GraphicsSettings> = Quality::ALL
         .map(GraphicsSettings::preset)
@@ -3143,6 +3145,9 @@ fn every_setting_and_value() -> Vec<GraphicsSettings> {
     }
     for mode in AmbientOcclusion::ALL {
         all.push(with(&|s| s.ambient_occlusion = Some(mode)));
+    }
+    for quality in ReflectionQuality::ALL {
+        all.push(with(&|s| s.reflection_quality = Some(quality)));
     }
     all.push(high);
     all
@@ -3207,6 +3212,7 @@ fn switching_every_setting_and_dropping_renderers_leaves_no_resources_behind() {
                 scene.occlusion_targets_alive(),
                 scene.anti_aliasing_targets_alive(),
             ),
+            scene.environment.bytes(),
         )
     };
     for round in 0..3 {
@@ -3224,7 +3230,8 @@ fn switching_every_setting_and_dropping_renderers_leaves_no_resources_behind() {
             renderer.set_graphics(settings);
             renderer.render(&list).unwrap();
             let used = renderer.graphics().clone();
-            let (_, _, (sun, spot, targets, occlusion, (msaa, fxaa))) = counts(&renderer);
+            let (_, _, (sun, spot, targets, occlusion, (msaa, fxaa)), environment) =
+                counts(&renderer);
             let context = format!("round {round}, step {step}: {settings:?}");
             // A ceiling of 0 studs draws no sun shadows, so needs no map.
             let sun_drawn = used.shadow_quality.map().is_some() && used.shadow_distance > 0.0;
@@ -3245,6 +3252,12 @@ fn switching_every_setting_and_dropping_renderers_leaves_no_resources_behind() {
             assert_eq!(
                 fxaa,
                 usize::from(used.anti_aliasing == crate::AntiAliasing::Fxaa),
+                "{context}"
+            );
+            // The environment maps exist only above Low reflections.
+            assert_eq!(
+                environment > 0,
+                used.reflection_quality.map().is_some(),
                 "{context}"
             );
         }

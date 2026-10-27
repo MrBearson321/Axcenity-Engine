@@ -649,11 +649,12 @@ pub const TONE_MAPPINGS: [&str; 3] = ["Classic", "Neutral", "Filmic"];
 /// `Enum.GraphicsQuality`'s items, which the graphics quality block offers.
 pub const GRAPHICS_QUALITIES: [&str; 5] = ["Automatic", "Low", "Medium", "High", "Ultra"];
 /// The `UserGameSettings` overrides the graphics option block sets.
-pub const GRAPHICS_OPTIONS: [&str; 5] = [
+pub const GRAPHICS_OPTIONS: [&str; 6] = [
     "ShadowQuality",
     "AntiAliasing",
     "TextureQuality",
     "AmbientOcclusion",
+    "ReflectionQuality",
     "PostProcessing",
 ];
 /// The `UserGameSettings` overrides the graphics number block sets.
@@ -670,6 +671,7 @@ pub fn graphics_choices(setting: &str) -> &'static [&'static str] {
         "AntiAliasing" => &["Off", "FXAA", "MSAA2", "MSAA4", PRESET],
         "TextureQuality" => &["Quarter", "Half", "Full", PRESET],
         "AmbientOcclusion" => &["Off", "Low", "High", PRESET],
+        "ReflectionQuality" => &["Low", "Medium", "High", "Ultra", PRESET],
         "PostProcessing" => &["On", "Off", PRESET],
         _ => &[],
     }

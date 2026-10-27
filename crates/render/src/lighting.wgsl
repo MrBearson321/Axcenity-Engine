@@ -1,8 +1,8 @@
 // Lighting shared by every scene shader: the frame's bindings (group 0),
-// the sun and its shadows, point and spot lights, and the procedural sky
-// that lights and reflects. `shader.wgsl` (parts and models) and
-// `terrain.wgsl` are each compiled after this file, and both light their
-// surfaces with `light_surface`.
+// the sun and its shadows, point and spot lights, and the sky that lights
+// and reflects. Compiled after `sky.wgsl`. `shader.wgsl` (parts and models)
+// and `terrain.wgsl` are each compiled after this file, and both light
+// their surfaces with `light_surface`.
 // Colors here are linear light, and can be brighter than 1 (stage 5 maps them down).
 
 struct Frame {
@@ -42,6 +42,14 @@ struct Frame {
     // x: how strongly screen-space ambient occlusion darkens ambient light
     // (0 while it's off), zw: 1 over the scene's width and height in pixels.
     ambient_occlusion: vec4<f32>,
+    // x: 1 when the environment maps light and are reflected (otherwise
+    // the gradient is worked out per pixel), y: the reflection cubemap's
+    // last mip level (the roughest), z: 1 when the sky is `sky_image`.
+    environment: vec4<f32>,
+    // The sky's diffuse light while the environment maps are on: spherical
+    // harmonics (rgb each), already blurred over the hemisphere and divided
+    // by pi, so `sky_irradiance` gives what a white matte surface returns.
+    sky_light: array<vec4<f32>, 9>,
 }
 
 // A point or spot light. Must match `LightRaw` in renderer.rs.
@@ -77,6 +85,14 @@ const LIGHTS_PER_TILE: u32 = 64u;
 // in the open, toward 0 in corners. White while it's off.
 @group(0) @binding(7) var screen_occlusion_map: texture_2d<f32>;
 @group(0) @binding(8) var screen_occlusion_sampler: sampler;
+// (Binding 9 is the frame's joints, in shader.wgsl.)
+// The sky as surfaces reflect it, blurrier at each mip level: level
+// `roughness * frame.environment.y` for a surface of that roughness.
+// A blank 1×1 cube while the environment maps are off.
+@group(0) @binding(10) var environment_map: texture_cube<f32>;
+@group(0) @binding(11) var environment_sampler: sampler;
+// The sky image (see `equirect_uv`), or a blank 1×1 texture without one.
+@group(0) @binding(12) var sky_image: texture_2d<f32>;
 
 // Points spread evenly over a disc of radius 1 (a Poisson disc), for
 // sampling the shadow map around a point. `private` so it can be indexed
@@ -263,8 +279,6 @@ fn prepass_normal(normal: vec3<f32>) -> vec4<f32> {
     return vec4<f32>(normalize((frame.view * vec4<f32>(normal, 0.0)).xyz), 1.0);
 }
 
-const PI: f32 = 3.14159265;
-
 // How many microfacets point along `h` (GGX / Trowbridge-Reitz).
 fn distribution_ggx(n_dot_h: f32, roughness: f32) -> f32 {
     let a = roughness * roughness;
@@ -290,18 +304,20 @@ fn fresnel_schlick(cos_theta: f32, f0: vec3<f32>) -> vec3<f32> {
 // The sky's color looking along `dir`: ground below the horizon, then a
 // gradient up to the top of the sky.
 fn sky_gradient(dir: vec3<f32>) -> vec3<f32> {
-    let up = clamp(dir.y, 0.0, 1.0);
-    let sky = mix(frame.sky_horizon.rgb, frame.sky_top.rgb, pow(up, 0.45));
-    return mix(sky, frame.sky_ground.rgb, smoothstep(0.0, 0.2, -dir.y));
+    return gradient_sky(dir, frame.sky_top.rgb, frame.sky_horizon.rgb, frame.sky_ground.rgb);
 }
 
-// What's drawn as the sky: the gradient plus the sun. The sun's disc is
-// far brighter than 1, so it blooms.
+// What's drawn as the sky: the gradient (or the sky image) plus the sun.
+// The sun's disc is far brighter than 1, so it blooms.
 fn sky_radiance(dir: vec3<f32>) -> vec3<f32> {
     let toward_sun = dot(dir, frame.sun_direction.xyz);
     let disc = smoothstep(0.99965, 0.99985, toward_sun);
     let glow = pow(max(toward_sun, 0.0), 200.0) * 0.4;
-    return sky_gradient(dir) + frame.sun_radiance.rgb * (glow + disc * 8.0);
+    var sky = sky_gradient(dir);
+    if frame.environment.z > 0.5 {
+        sky = textureSampleLevel(sky_image, environment_sampler, equirect_uv(dir), 0.0).rgb;
+    }
+    return sky + frame.sun_radiance.rgb * (glow + disc * 8.0);
 }
 
 // Light from the whole sky that reaches a surface facing `n`: a smooth
@@ -315,6 +331,41 @@ fn environment_diffuse(n: vec3<f32>) -> vec3<f32> {
 // blurring toward its smooth average as roughness grows.
 fn environment_specular(dir: vec3<f32>, roughness: f32) -> vec3<f32> {
     return mix(sky_gradient(dir), environment_diffuse(dir), smoothstep(0.1, 0.9, roughness));
+}
+
+// The sky's light reaching a surface facing `n`, from its spherical
+// harmonics. Never below 0, which a few coefficients can ring under.
+fn sky_irradiance(n: vec3<f32>) -> vec3<f32> {
+    let light = frame.sky_light[0].rgb * 0.282095
+        + frame.sky_light[1].rgb * (0.488603 * n.y)
+        + frame.sky_light[2].rgb * (0.488603 * n.z)
+        + frame.sky_light[3].rgb * (0.488603 * n.x)
+        + frame.sky_light[4].rgb * (1.092548 * n.x * n.y)
+        + frame.sky_light[5].rgb * (1.092548 * n.y * n.z)
+        + frame.sky_light[6].rgb * (0.315392 * (3.0 * n.z * n.z - 1.0))
+        + frame.sky_light[7].rgb * (1.092548 * n.x * n.z)
+        + frame.sky_light[8].rgb * (0.546274 * (n.x * n.x - n.y * n.y));
+    return max(light, vec3<f32>(0.0));
+}
+
+// The sky's diffuse light on a surface facing `n`: from the environment
+// maps' harmonics while they're on, otherwise from the gradient.
+fn sky_diffuse(n: vec3<f32>) -> vec3<f32> {
+    if frame.environment.x > 0.5 {
+        return sky_irradiance(n);
+    }
+    return environment_diffuse(n);
+}
+
+// What a surface of `roughness` reflects looking along `dir`: the
+// reflection cubemap's level for that roughness while the maps are on,
+// otherwise the gradient.
+fn sky_specular(dir: vec3<f32>, roughness: f32) -> vec3<f32> {
+    if frame.environment.x > 0.5 {
+        let level = roughness * frame.environment.y;
+        return textureSampleLevel(environment_map, environment_sampler, dir, level).rgb;
+    }
+    return environment_specular(dir, roughness);
 }
 
 // Average specular reflection of light arriving from every direction
@@ -418,7 +469,7 @@ fn light_surface(
     let diffuse_color = base_color * (1.0 - metalness);
     let ambient = occlusion * (
         frame.ambient.rgb * (diffuse_color + reflectance)
-        + environment * (environment_diffuse(n) * diffuse_color
-            + environment_specular(reflection, roughness) * reflectance));
+        + environment * (sky_diffuse(n) * diffuse_color
+            + sky_specular(reflection, roughness) * reflectance));
     return sun + lit + ambient;
 }

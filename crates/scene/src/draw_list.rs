@@ -15,7 +15,7 @@ use axcenity_core::{ClassName, Instance, InstanceId, PartType, TextureChannel, V
 use axcenity_render::glam::{Mat4, Vec3};
 use axcenity_render::{
     AmbientLight, Camera, Channel, ChannelMap, Cone, DrawItem, DrawList, Light, Material,
-    MeshSource, NormalMap, PostProcessing, Shadows, Shape, Skin, Sky, SpotShadows, Sun,
+    MeshSource, NormalMap, PostProcessing, Shadows, Shape, Skin, Sky, SkyImage, SpotShadows, Sun,
     TextureMaps, TextureSource,
 };
 use axcenity_ui::{Stylesheet, UiInput, UiInteraction, UiLayout};
@@ -51,7 +51,7 @@ struct LightingSettings {
     ambient: AmbientLight,
 }
 
-fn lighting_settings(world: &World) -> LightingSettings {
+fn lighting_settings(world: &World, assets: &Assets) -> LightingSettings {
     let mut settings = LightingSettings {
         shadows: Shadows::default(),
         sky: Sky::default(),
@@ -83,6 +83,14 @@ fn lighting_settings(world: &World) -> LightingSettings {
     sky.horizon_color = color_of("SkyHorizonColor", sky.horizon_color);
     sky.ground_color = color_of("GroundColor", sky.ground_color);
     sky.environment_intensity = number_of("EnvironmentIntensity", sky.environment_intensity);
+    if let Some(Value::String(path)) = lighting.property("SkyImage") {
+        sky.image = assets.sky_image(path).map(|image| SkyImage {
+            key: image.key(),
+            width: image.width,
+            height: image.height,
+            rgb: image.rgb.clone(),
+        });
+    }
     post.enabled = bool_of("PostProcessingEnabled", post.enabled);
     post.exposure = number_of("Exposure", post.exposure);
     if let Some(curve) = lighting
@@ -239,7 +247,7 @@ pub fn build_draw_list_posed(
     poses: &Poses,
     terrain: &mut TerrainCache,
 ) -> DrawList {
-    let settings = lighting_settings(world);
+    let settings = lighting_settings(world, assets);
     let glow = if settings.post.enabled && settings.post.bloom_enabled {
         GLOW_BOOST
     } else {
@@ -1085,6 +1093,54 @@ mod tests {
                 .unwrap();
             assert_eq!(occlusion(&world), drawn);
         }
+    }
+
+    #[test]
+    fn lightings_sky_image_is_handed_to_the_renderer_read_once() {
+        let folder =
+            std::env::temp_dir().join(format!("axcenity-scene-sky-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(folder.join("assets/sky")).unwrap();
+        let pixels = vec![image::Rgb([3.0f32, 2.0, 1.0]); 8 * 4];
+        let mut bytes = Vec::new();
+        image::codecs::hdr::HdrEncoder::new(&mut bytes)
+            .encode(&pixels, 8, 4)
+            .unwrap();
+        std::fs::write(folder.join("assets/sky/noon.hdr"), bytes).unwrap();
+        let assets = Assets::new(&folder);
+        let mut world = World::new();
+        let sky = |world: &World| build_draw_list(world, &assets, camera()).sky;
+        assert_eq!(sky(&world).image, None, "no image by default");
+
+        let lighting = world.lighting();
+        world
+            .set_property(
+                lighting,
+                "SkyImage",
+                Value::String("assets/sky/noon.hdr".into()),
+            )
+            .unwrap();
+        let image = sky(&world).image.expect("the sky image is drawn");
+        assert_eq!(
+            (image.width, image.height, image.rgb.len()),
+            (8, 4, 8 * 4 * 3)
+        );
+        assert_eq!(sky(&world).image.unwrap().key, image.key, "read once");
+
+        world
+            .set_property(
+                lighting,
+                "SkyImage",
+                Value::String("assets/sky/gone.hdr".into()),
+            )
+            .unwrap();
+        assert_eq!(
+            sky(&world).image,
+            None,
+            "a missing image falls back to the colors"
+        );
+        assert_eq!(assets.take_errors().len(), 1);
+        let _ = std::fs::remove_dir_all(&folder);
     }
 
     fn only_item(world: &World) -> DrawItem {

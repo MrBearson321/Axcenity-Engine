@@ -57,6 +57,12 @@ pub(super) struct FrameUniform {
     /// while it's off), then unused, then 1 over the scene's width and
     /// height in pixels, to find a pixel's place in the occlusion texture.
     pub(super) ambient_occlusion: [f32; 4],
+    /// 1 while the environment maps are on, the reflection cubemap's last
+    /// mip level, 1 when the sky is an image, then unused.
+    pub(super) environment: [f32; 4],
+    /// The sky's diffuse light as spherical harmonics (see
+    /// `environment::harmonics`), while the environment maps are on.
+    pub(super) sky_light: [[f32; 4]; 9],
 }
 
 /// The most point and spot lights drawn at once.
@@ -586,6 +592,8 @@ pub(super) struct ScenePipeline {
     pub(super) frame_targets: FrameTargets,
     /// The prepass and ambient occlusion pipelines.
     pub(super) occlusion: OcclusionPasses,
+    /// The sky's environment maps, baked when the sky changes.
+    pub(super) environment: environment::Environment,
     /// A 1×1 white texture, bound in place of the ambient occlusion while
     /// it's off, and the sampler the scene pass reads occlusion with.
     pub(super) no_occlusion_view: wgpu::TextureView,

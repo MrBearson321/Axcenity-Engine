@@ -1061,6 +1061,11 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
                 ty: "EnumAmbientOcclusion",
                 doc: "How corners and creases darken their ambient light: Off, Low or High.",
             },
+            Field {
+                name: "ReflectionQuality",
+                ty: "EnumReflectionQuality",
+                doc: "How the sky is reflected and lights surfaces: Low works its gradient out per pixel (no sky image), Medium, High and Ultra bake it into a 64², 128² or 256² cubemap.",
+            },
         ],
         operators: &[],
         methods: &[],

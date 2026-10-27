@@ -3,8 +3,8 @@
 
 use axcenity_core::{ClassName, World};
 use axcenity_render::{
-    AmbientOcclusion, AntiAliasing, Capabilities, GraphicsSettings, Quality, ShadowQuality,
-    TextureQuality,
+    AmbientOcclusion, AntiAliasing, Capabilities, GraphicsSettings, Quality, ReflectionQuality,
+    ShadowQuality, TextureQuality,
 };
 
 use super::*;
@@ -48,6 +48,7 @@ fn a_local_script_reads_the_settings_the_host_gave() {
         "local s = game:GetService('UserGameSettings')
         print(s.GraphicsQuality, s.ShadowQuality, s.ShadowDistance, s.PostProcessing)
         print(s.RenderScale, s.TextureQuality, s.AntiAliasing, s.AmbientOcclusion)
+        print(s.ReflectionQuality)
         print(s == game.UserGameSettings, tostring(s))",
     );
     assert_eq!(
@@ -55,6 +56,7 @@ fn a_local_script_reads_the_settings_the_host_gave() {
         [
             "Enum.GraphicsQuality.Medium\tEnum.ShadowQuality.Low\t100\ttrue",
             "1.5\tEnum.TextureQuality.Half\tEnum.AntiAliasing.FXAA\tEnum.AmbientOcclusion.Low",
+            "Enum.ReflectionQuality.Medium",
             "false\tUserGameSettings",
         ]
     );
@@ -77,6 +79,7 @@ fn setting_the_quality_and_overrides_is_a_change_the_host_takes_once() {
         s.AntiAliasing = Enum.AntiAliasing.MSAA2
         s.TextureQuality = Enum.TextureQuality.Full
         s.AmbientOcclusion = Enum.AmbientOcclusion.High
+        s.ReflectionQuality = Enum.ReflectionQuality.Ultra
         s.PostProcessing = true
         s.ShadowDistance = 40
         s.RenderScale = 5
@@ -98,6 +101,7 @@ fn setting_the_quality_and_overrides_is_a_change_the_host_takes_once() {
         texture_budget: None,
         anti_aliasing: Some(AntiAliasing::Msaa2),
         ambient_occlusion: Some(AmbientOcclusion::High),
+        reflection_quality: Some(ReflectionQuality::Ultra),
     };
     assert_eq!(runtime.take_graphics_change(), Some(expected.clone()));
     assert_eq!(runtime.take_graphics_change(), None);

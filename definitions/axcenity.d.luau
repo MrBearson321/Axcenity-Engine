@@ -401,6 +401,8 @@ declare extern type UserGameSettings with
 	AntiAliasing: EnumAntiAliasing
 	--- How corners and creases darken their ambient light: Off, Low or High.
 	AmbientOcclusion: EnumAmbientOcclusion
+	--- How the sky is reflected and lights surfaces: Low works its gradient out per pixel (no sky image), Medium, High and Ultra bake it into a 64², 128² or 256² cubemap.
+	ReflectionQuality: EnumReflectionQuality
 end
 
 --- Properties moving to goals, made by `TweenService:Create`. Each frame it sets them, so their change events fire; a newer tween on the same property of the same Instance cancels it.
@@ -730,6 +732,18 @@ declare extern type EnumAmbientOcclusionItems with
 	High: EnumAmbientOcclusion
 end
 
+--- One choice of `Enum.ReflectionQuality`.
+declare extern type EnumReflectionQuality extends EnumItem with
+end
+
+--- The choices of `Enum.ReflectionQuality`.
+declare extern type EnumReflectionQualityItems with
+	Low: EnumReflectionQuality
+	Medium: EnumReflectionQuality
+	High: EnumReflectionQuality
+	Ultra: EnumReflectionQuality
+end
+
 --- One choice of `Enum.UserInputType`.
 declare extern type EnumUserInputType extends EnumItem with
 end
@@ -816,6 +830,7 @@ declare extern type EnumLibrary with
 	TextureQuality: EnumTextureQualityItems
 	AntiAliasing: EnumAntiAliasingItems
 	AmbientOcclusion: EnumAmbientOcclusionItems
+	ReflectionQuality: EnumReflectionQualityItems
 	UserInputType: EnumUserInputTypeItems
 	UserInputState: EnumUserInputStateItems
 	MouseBehavior: EnumMouseBehaviorItems
@@ -999,6 +1014,8 @@ declare extern type Lighting extends Instance with
 	GroundColor: Color3
 	--- How strongly the sky lights and is reflected by parts. 0 turns it off.
 	EnvironmentIntensity: number
+	--- A picture of the whole sky, such as "assets/sky/noon.hdr", shown behind the world and reflected by parts in place of the sky colors, with its light on everything. A Radiance .hdr file keeps the sun brighter than white; a PNG or JPEG also works. It wraps once around the world, its middle toward -Z and top straight up. Empty for the sky colors. Only drawn where the player's graphics settings have reflection quality above Low.
+	SkyImage: string
 	--- If false, the scene is drawn with no tone mapping or bloom.
 	PostProcessingEnabled: boolean
 	--- Brightens or darkens the whole image before tone mapping. 1 is neutral.

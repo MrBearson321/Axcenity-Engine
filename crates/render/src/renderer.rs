@@ -6,6 +6,8 @@
 //! `gpu.rs` uploads meshes, textures and materials. `sprites.rs` draws particles.
 //! `terrain.rs` draws terrain chunks with their blended layers.
 //! `occlusion.rs` draws the depth and normal prepass and ambient occlusion.
+//! `environment.rs` bakes the sky into environment maps for reflections and
+//! sky light.
 //! `skinning.rs` uploads animated meshes' joints and weights, and each
 //! frame's joints, so the vertex shader poses them.
 //! `culling.rs` tests bounds against each view, so what a view can't see
@@ -33,6 +35,7 @@ use glyphon::{
 pub use gpu_timer::FramePass;
 
 mod culling;
+mod environment;
 mod gpu;
 mod gpu_timer;
 mod lighting;
@@ -145,8 +148,8 @@ pub struct RenderStats {
     /// Bytes of mesh vertices and indices on the GPU, counted the same way.
     pub mesh_bytes: u64,
     /// Bytes of the frame's own targets: HDR, depth, MSAA, bloom, FXAA,
-    /// prepass and ambient occlusion targets, the shadow maps and the
-    /// turned-text sheet.
+    /// prepass and ambient occlusion targets, the shadow maps, the sky's
+    /// environment maps and sky image, and the turned-text sheet.
     pub target_bytes: u64,
     /// Bytes of buffers: instances, lights, tiles, uniforms and UI vertices.
     pub buffer_bytes: u64,

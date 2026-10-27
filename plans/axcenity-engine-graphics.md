@@ -311,8 +311,8 @@ The procedural sky is drawn into a cubemap when it changes, then prefiltered int
 
 ### Acceptance criteria
 
-- [ ] With the default sky, metals and rough plastics look as before within the harness tolerance. A sky image shows in reflections.
-- [ ] Changing the sky colors re-bakes the cubemap once, not every frame.
+- [x] With the default sky, metals and rough plastics look as before within the harness tolerance. A sky image shows in reflections.
+- [x] Changing the sky colors re-bakes the cubemap once, not every frame.
 
 ---
 

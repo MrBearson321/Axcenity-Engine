@@ -6,7 +6,7 @@ Map only. `render` draws a draw list. It does not know about Instances. Open the
 - Imported models and texture maps: [rendering/models.md](rendering/models.md)
 - Animation playback: [rendering/animation.md](rendering/animation.md)
 - Point and spot lights, and spot light shadows: [rendering/lights.md](rendering/lights.md)
-- Sky and environment lighting: [rendering/sky.md](rendering/sky.md)
+- Sky, sky images, environment maps and environment lighting: [rendering/sky.md](rendering/sky.md)
 - Bloom and tone mapping: [rendering/post.md](rendering/post.md)
 - Sprites and particles: [rendering/particles.md](rendering/particles.md)
 - The machine's graphics settings (presets, overrides, capabilities, `UserGameSettings`, `graphics.json`, the per-preset references): [rendering/settings.md](rendering/settings.md)

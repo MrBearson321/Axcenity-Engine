@@ -242,6 +242,7 @@ const GROUPS: [(&str, &[&str]); 20] = [
             "SkyHorizonColor",
             "GroundColor",
             "EnvironmentIntensity",
+            "SkyImage",
         ],
     ),
     (

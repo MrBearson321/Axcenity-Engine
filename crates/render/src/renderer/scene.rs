@@ -84,6 +84,32 @@ impl ScenePipeline {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 10,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::Cube,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 11,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 12,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
         let light_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -115,12 +141,20 @@ impl ScenePipeline {
             min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
+        let environment = environment::Environment::new(&device, &queue);
+        let (environment_view, sky_image_view) = environment.views();
         let frame_bind_group = create_frame_bind_group(
             &device,
             &frame_layout,
             [&frame_buffer, &light_buffer, &tile_buffer, &skinning.joints],
-            [&empty_shadow_view, &empty_shadow_view, &no_occlusion_view],
-            [&shadow_sampler, &occlusion_sampler],
+            [
+                &empty_shadow_view,
+                &empty_shadow_view,
+                &no_occlusion_view,
+                environment_view,
+                sky_image_view,
+            ],
+            [&shadow_sampler, &occlusion_sampler, &environment.sampler],
         );
         let cascade_size = size_of::<[[f32; 4]; 4]>() as u64;
         let cascade_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -289,6 +323,7 @@ impl ScenePipeline {
             post,
             frame_targets,
             occlusion,
+            environment,
             no_occlusion_view,
             occlusion_sampler,
             targets_alive,
@@ -475,7 +510,18 @@ impl ScenePipeline {
         // makes fewer or more than the output's. UI uses the output's.
         let spot_map = self.graphics.shadow_quality.spot_map();
         let planned_lights = plan_lights(list, aspect, self.frame_targets.size, spot_map);
+        // The sky's maps are baked here only when the sky has changed.
+        if self.environment.prepare(
+            &self.device,
+            &self.queue,
+            &list.sky,
+            self.graphics.reflection_quality,
+            self.capabilities.max_texture_size,
+        ) {
+            self.bind_frame();
+        }
         let mut frame_uniform = frame_uniform(list, aspect, &self.graphics);
+        (frame_uniform.environment, frame_uniform.sky_light) = self.environment.uniform();
         let (scene_width, scene_height) = self.frame_targets.size;
         frame_uniform.ambient_occlusion[2] = 1.0 / scene_width as f32;
         frame_uniform.ambient_occlusion[3] = 1.0 / scene_height as f32;
@@ -1036,6 +1082,7 @@ impl ScenePipeline {
             .occlusion
             .as_ref()
             .map_or(&self.no_occlusion_view, |targets| &targets.blurred_view);
+        let (environment, sky_image) = self.environment.views();
         self.frame_bind_group = create_frame_bind_group(
             &self.device,
             &self.frame_layout,
@@ -1045,8 +1092,12 @@ impl ScenePipeline {
                 &self.tile_buffer,
                 &self.skinning.joints,
             ],
-            [sun, spot, occlusion],
-            [&self.shadow_sampler, &self.occlusion_sampler],
+            [sun, spot, occlusion, environment, sky_image],
+            [
+                &self.shadow_sampler,
+                &self.occlusion_sampler,
+                &self.environment.sampler,
+            ],
         );
         self.shadow_bind_group = create_shadow_bind_group(
             &self.device,
@@ -1125,7 +1176,10 @@ impl ScenePipeline {
             sprites_culled: counts.sprites_culled,
             texture_bytes: self.texture_bytes.total(),
             mesh_bytes: self.mesh_bytes.total(),
-            target_bytes: self.frame_targets.bytes + shadow_bytes + sheet_bytes,
+            target_bytes: self.frame_targets.bytes
+                + shadow_bytes
+                + sheet_bytes
+                + self.environment.bytes(),
             buffer_bytes: buffers.iter().map(|buffer| buffer.size()).sum(),
         }
     }

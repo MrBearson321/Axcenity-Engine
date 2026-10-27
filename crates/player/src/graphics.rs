@@ -89,7 +89,9 @@ pub fn keep(folder: &Path, settings: &GraphicsSettings) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axcenity_render::{AmbientOcclusion, AntiAliasing, Quality, ShadowQuality, TextureQuality};
+    use axcenity_render::{
+        AmbientOcclusion, AntiAliasing, Quality, ReflectionQuality, ShadowQuality, TextureQuality,
+    };
 
     fn temp_folder(test: &str) -> std::path::PathBuf {
         let folder =
@@ -112,6 +114,7 @@ mod tests {
             texture_budget: Some(512),
             anti_aliasing: Some(AntiAliasing::Fxaa),
             ambient_occlusion: Some(AmbientOcclusion::High),
+            reflection_quality: Some(ReflectionQuality::Low),
         };
         save(&folder, &settings).unwrap();
         assert_eq!(load(&folder), Some(settings));

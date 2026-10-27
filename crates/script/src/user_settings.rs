@@ -12,7 +12,7 @@
 
 use axcenity_render::{
     AmbientOcclusion, AntiAliasing, Capabilities, GraphicsSettings, Quality, RENDER_SCALE_RANGE,
-    ShadowQuality, TextureQuality,
+    ReflectionQuality, ShadowQuality, TextureQuality,
 };
 use mlua::{FromLua, Lua, MetaMethod, UserData, UserDataFields, UserDataMethods};
 
@@ -54,6 +54,12 @@ pub(crate) fn anti_aliasing_names() -> Vec<&'static str> {
 
 pub(crate) fn ambient_occlusion_names() -> Vec<&'static str> {
     AmbientOcclusion::ALL.map(AmbientOcclusion::label).to_vec()
+}
+
+pub(crate) fn reflection_quality_names() -> Vec<&'static str> {
+    ReflectionQuality::ALL
+        .map(ReflectionQuality::label)
+        .to_vec()
 }
 
 /// `mode`'s item name in `Enum.AntiAliasing`. Its label ("MSAA 4×") isn't a
@@ -284,6 +290,23 @@ impl UserData for LuaUserGameSettings {
                 value,
             )?;
             change(lua, |settings, _| settings.ambient_occlusion = chosen);
+            Ok(())
+        });
+
+        fields.add_field_method_get("ReflectionQuality", |lua, _| {
+            let name = settings(lua).reflection_quality().label();
+            Ok(item(EnumType::ReflectionQuality, name))
+        });
+        fields.add_field_method_set("ReflectionQuality", |lua, _, value: mlua::Value| {
+            let chosen = enum_choice(
+                lua,
+                "ReflectionQuality",
+                EnumType::ReflectionQuality,
+                &ReflectionQuality::ALL,
+                ReflectionQuality::label,
+                value,
+            )?;
+            change(lua, |settings, _| settings.reflection_quality = chosen);
             Ok(())
         });
     }

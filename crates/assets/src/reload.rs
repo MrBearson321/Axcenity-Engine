@@ -145,6 +145,15 @@ impl Assets {
             }
         }
 
+        let mut sky_image = None;
+        if shared.sky_images.contains_key(file) {
+            used = true;
+            match read_sky_image(&folder, file) {
+                Ok(image) => sky_image = Some(image),
+                Err(message) => problems.push(message),
+            }
+        }
+
         // Every material made from the file, put together again.
         let paths: Vec<String> = shared
             .materials
@@ -206,6 +215,11 @@ impl Assets {
         if let Some(image) = texture {
             shared
                 .textures
+                .insert(file.to_owned(), Some(Arc::new(image)));
+        }
+        if let Some(image) = sky_image {
+            shared
+                .sky_images
                 .insert(file.to_owned(), Some(Arc::new(image)));
         }
         for (material, resolved) in materials {

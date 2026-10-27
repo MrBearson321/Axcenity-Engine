@@ -49,7 +49,7 @@ const FLAT: f32 = 1e-6;
 /// can keep one GPU copy of each.
 static NEXT_KEY: AtomicU64 = AtomicU64::new(1);
 
-fn new_key() -> u64 {
+pub(crate) fn new_key() -> u64 {
     NEXT_KEY.fetch_add(1, Ordering::Relaxed)
 }
 
