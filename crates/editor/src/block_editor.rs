@@ -249,6 +249,8 @@ fn block_category(kind: &BlockKind) -> Category {
         | BlockKind::WaitForChild { .. } => Category::Control,
         BlockKind::MoveTo { .. }
         | BlockKind::MoveBy { .. }
+        | BlockKind::LookAt { .. }
+        | BlockKind::MoveForward { .. }
         | BlockKind::TurnTo { .. }
         | BlockKind::TurnBy { .. }
         | BlockKind::SetAnchored { .. }
@@ -769,6 +771,18 @@ fn sections<'a>(kind: &'a mut BlockKind, objects: &[ObjectInfo]) -> Vec<Section<
             label("by"),
             Slot(offset, SlotKind::Vector),
         ])],
+        BlockKind::LookAt { target, position } => vec![Row(vec![
+            label("turn"),
+            Object(target, Filter::Parts),
+            label("to look at"),
+            Slot(position, SlotKind::Vector),
+        ])],
+        BlockKind::MoveForward { target, distance } => vec![Row(vec![
+            label("move"),
+            Object(target, Filter::Parts),
+            label("forward by"),
+            Slot(distance, SlotKind::Number),
+        ])],
         BlockKind::TurnTo {
             target,
             orientation,
@@ -994,6 +1008,20 @@ fn reporter_parts<'a>(expression: &'a mut Expression, objects: &[ObjectInfo]) ->
             Slot(min, SlotKind::Number),
             label("to"),
             Slot(max, SlotKind::Number),
+        ],
+        Expression::RandomNumber { min, max } => vec![
+            label("random number between"),
+            Slot(min, SlotKind::Number),
+            label("and"),
+            Slot(max, SlotKind::Number),
+        ],
+        Expression::Lerp { from, to, alpha } => vec![
+            label("lerp"),
+            Slot(from, SlotKind::Any),
+            label("to"),
+            Slot(to, SlotKind::Any),
+            label("by"),
+            Slot(alpha, SlotKind::Number),
         ],
         Expression::Join { left, right } => vec![
             label("join"),

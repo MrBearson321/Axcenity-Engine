@@ -117,6 +117,14 @@ pub(super) fn palette(
                 target: part.clone(),
                 offset: vector(0.0, 1.0, 0.0),
             }),
+            B(BlockKind::MoveForward {
+                target: part.clone(),
+                distance: number(5.0),
+            }),
+            B(BlockKind::LookAt {
+                target: part.clone(),
+                position: vector(0.0, 0.0, 0.0),
+            }),
             B(BlockKind::TurnTo {
                 target: part.clone(),
                 orientation: vector(0.0, 0.0, 0.0),
@@ -246,6 +254,15 @@ pub(super) fn palette(
                 R(Expression::Random {
                     min: Box::new(number(1.0)),
                     max: Box::new(number(10.0)),
+                }),
+                R(Expression::RandomNumber {
+                    min: Box::new(number(0.0)),
+                    max: Box::new(number(1.0)),
+                }),
+                R(Expression::Lerp {
+                    from: Box::new(vector(0.0, 0.0, 0.0)),
+                    to: Box::new(vector(0.0, 10.0, 0.0)),
+                    alpha: Box::new(number(0.5)),
                 }),
                 compare(Comparison::Greater, 50.0),
                 compare(Comparison::Less, 50.0),

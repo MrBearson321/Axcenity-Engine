@@ -180,7 +180,9 @@ fn every_library_function_is_described() {
         let described: BTreeSet<String> = library
             .functions
             .iter()
-            .map(|f| f.name.to_owned())
+            .map(|f| f.name)
+            .chain(library.constants.iter().map(|c| c.name))
+            .map(str::to_owned)
             .collect();
         assert_eq!(keys(&table), described, "{} functions", library.global);
     }
@@ -261,6 +263,9 @@ fn described_fields_and_methods_exist() {
             "Instance.new('ParticleEmitter')",
         ),
         (ClassName::Animator, "Instance.new('Animator')"),
+        (ClassName::Part, "Instance.new('Part')"),
+        (ClassName::MeshPart, "Instance.new('MeshPart')"),
+        (ClassName::Model, "Instance.new('Model')"),
         (ClassName::Animation, "Instance.new('Animation')"),
         (
             ClassName::AnimationTrack,
@@ -304,6 +309,8 @@ fn described_fields_and_methods_exist() {
         ("Vector3", "Vector3.new(1, 2, 3)"),
         ("Vector2", "Vector2.new(1, 2)"),
         ("Color3", "Color3.new(1, 0, 0)"),
+        ("CFrame", "CFrame.new(1, 2, 3)"),
+        ("Random", "Random.new(1)"),
         ("UDim", "UDim2.new(0, 1, 0, 1).X"),
         ("UDim2", "UDim2.new(0, 1, 0, 1)"),
         ("EnumItem", "Enum.Material.Neon"),

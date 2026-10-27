@@ -1098,10 +1098,31 @@ impl<'a> Converter<'a> {
             matches!(&expr.kind, ExprKind::Field(inner, name)
                 if name == property && self.target(inner).as_deref() == Some(path.as_str()))
         };
+        // object.CFrame = CFrame.lookAt(object.Position, v)
+        if property == "CFrame"
+            && let ExprKind::Call(function, args) = &value.kind
+            && self.is_field(function, "CFrame", "lookAt")
+            && let [from, position] = args.as_slice()
+            && matches!(&from.kind, ExprKind::Field(inner, name)
+                if name == "Position" && self.target(inner).as_deref() == Some(path.as_str()))
+        {
+            return Some(BlockKind::LookAt {
+                target: path,
+                position: self.expression(position, scope),
+            });
+        }
         // object.Position = object.Position + v
         if let ExprKind::Binary("+", left, right) = &value.kind
             && same_property(left)
         {
+            if property == "Position"
+                && let Some(distance) = self.forward_distance(&path, right)
+            {
+                return Some(BlockKind::MoveForward {
+                    target: path,
+                    distance: self.expression(distance, scope),
+                });
+            }
             let by = self.expression(right, scope);
             match property.as_str() {
                 "Position" => {
@@ -1197,6 +1218,23 @@ impl<'a> Converter<'a> {
         })
     }
 
+    /// The distance in `object.CFrame.LookVector * n`, where `object` is at `path`.
+    fn forward_distance<'e>(&self, path: &str, expr: &'e Expr) -> Option<&'e Expr> {
+        let ExprKind::Binary("*", look, distance) = &expr.kind else {
+            return None;
+        };
+        let ExprKind::Field(cframe, name) = &look.kind else {
+            return None;
+        };
+        let ExprKind::Field(object, cframe_name) = &cframe.kind else {
+            return None;
+        };
+        (name == "LookVector"
+            && cframe_name == "CFrame"
+            && self.target(object).as_deref() == Some(path))
+        .then_some(distance.as_ref())
+    }
+
     /// `name += n`, `object.Position += v` and `object.Orientation += v`:
     /// the blocks that the translation writes as `name = name + n` and so on.
     fn add_to(&self, target: &Expr, value: &Expr, scope: Scope) -> Option<BlockKind> {
@@ -1209,6 +1247,14 @@ impl<'a> Converter<'a> {
             }
             ExprKind::Field(object, property) => {
                 let target = self.target(object)?;
+                if property == "Position"
+                    && let Some(distance) = self.forward_distance(&target, value)
+                {
+                    return Some(BlockKind::MoveForward {
+                        target,
+                        distance: self.expression(distance, scope),
+                    });
+                }
                 let by = self.expression(value, scope);
                 match property.as_str() {
                     "Position" => Some(BlockKind::MoveBy { target, offset: by }),
@@ -1435,6 +1481,28 @@ impl<'a> Converter<'a> {
                     return Some(Expression::IsA {
                         value: boxed(object),
                         class: class.clone(),
+                    });
+                }
+                // v:Lerp(goal, alpha)
+                if method == "Lerp"
+                    && let [to, alpha] = args.as_slice()
+                {
+                    return Some(Expression::Lerp {
+                        from: boxed(object),
+                        to: boxed(to),
+                        alpha: boxed(alpha),
+                    });
+                }
+                // Random.new():NextNumber(min, max)
+                if method == "NextNumber"
+                    && let ExprKind::Call(function, none) = &object.kind
+                    && none.is_empty()
+                    && self.is_field(function, "Random", "new")
+                    && let [min, max] = args.as_slice()
+                {
+                    return Some(Expression::RandomNumber {
+                        min: boxed(min),
+                        max: boxed(max),
                     });
                 }
                 if method == "IsKeyDown"

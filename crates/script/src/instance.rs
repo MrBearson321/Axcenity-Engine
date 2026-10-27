@@ -10,6 +10,7 @@ use mlua::{
     UserDataMethods,
 };
 
+use crate::cframe::LuaCFrame;
 use crate::client::{LocalPlayer, LuaCamera, LuaReplicatedFirst, LuaUserInputService};
 use crate::events::{Event, LuaSignal, Owner};
 use crate::localization::LuaLocalizationService;
@@ -136,6 +137,12 @@ fn get(lua: &Lua, id: InstanceId, key: &str) -> mlua::Result<mlua::Value> {
     if let Some(value) = instance.property(key) {
         return value_to_lua(lua, value);
     }
+    // Made from Position and Orientation, not stored (see `cframe`).
+    if key == "CFrame"
+        && let Some(cf) = LuaCFrame::of_instance(instance)
+    {
+        return cf.into_lua(lua);
+    }
     let class = instance.class();
     // Live animator state, not a saved property (see `core::AnimatorState`).
     if class == ClassName::Animator && key == "CurrentState" {
@@ -220,6 +227,22 @@ fn set(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> mlua::Result
                 .map_err(|err| mlua::Error::runtime(format!("can't set Parent: {err}")))
         }
         "ClassName" => Err(mlua::Error::runtime("ClassName can't be changed")),
+        "CFrame"
+            if world(lua)?
+                .get(id)
+                .and_then(LuaCFrame::of_instance)
+                .is_some() =>
+        {
+            let class = world(lua)?.get(id).ok_or_else(destroyed)?.class();
+            let cf = LuaCFrame::from_lua(value.clone(), lua).map_err(|_| {
+                mlua::Error::runtime(format!(
+                    "{class}.CFrame must be a CFrame, not a {}",
+                    type_name(lua, &value)
+                ))
+            })?;
+            cf.write_to(&mut *world_mut(lua)?, id)
+                .map_err(mlua::Error::runtime)
+        }
         "CurrentState"
             if world(lua)?
                 .get(id)

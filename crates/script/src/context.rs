@@ -97,6 +97,10 @@ impl Context {
             instance::workspace_methods(&lua)
                 .expect("creating Workspace methods only fails when out of memory"),
         );
+        methods.extend(
+            crate::cframe::pivot_methods(&lua)
+                .expect("creating the pivot methods only fails when out of memory"),
+        );
         methods.push((
             axcenity_core::ClassName::DataModel,
             "GetService",

@@ -30,6 +30,8 @@ pub(super) struct ValueType {
 pub(super) struct Library {
     pub(super) global: &'static str,
     pub(super) doc: &'static str,
+    /// Values in the table, such as `Vector3.zero`.
+    pub(super) constants: &'static [Field],
     pub(super) functions: &'static [Function],
 }
 
@@ -71,7 +73,68 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
             "__div(self, other: Vector3 | number): Vector3",
             "__unm(self): Vector3",
         ],
-        methods: &[],
+        methods: &[
+            Function {
+                name: "Dot",
+                doc: "The dot product: the lengths multiplied, times the cosine of the angle between them.",
+                params: &[("other", "Vector3")],
+                returns: "number",
+            },
+            Function {
+                name: "Cross",
+                doc: "A vector at right angles to both, as long as the area they span.",
+                params: &[("other", "Vector3")],
+                returns: "Vector3",
+            },
+            Function {
+                name: "Lerp",
+                doc: "The point `alpha` of the way from this vector to `goal` (0 is this one, 1 is `goal`).",
+                params: &[("goal", "Vector3"), ("alpha", "number")],
+                returns: "Vector3",
+            },
+            Function {
+                name: "Angle",
+                doc: "The angle to `other` in radians, from 0 to pi. With an `axis`, it's negative when turning to `other` goes clockwise looking down the axis.",
+                params: &[("other", "Vector3"), ("axis?", "Vector3")],
+                returns: "number",
+            },
+            Function {
+                name: "FuzzyEq",
+                doc: "Whether each component is within `epsilon` (left out: 0.00001) of `other`'s.",
+                params: &[("other", "Vector3"), ("epsilon?", "number")],
+                returns: "boolean",
+            },
+            Function {
+                name: "Min",
+                doc: "The smallest of each component of this and the other vectors.",
+                params: &[("...", "Vector3")],
+                returns: "Vector3",
+            },
+            Function {
+                name: "Max",
+                doc: "The largest of each component of this and the other vectors.",
+                params: &[("...", "Vector3")],
+                returns: "Vector3",
+            },
+            Function {
+                name: "Abs",
+                doc: "Each component without its sign.",
+                params: &[],
+                returns: "Vector3",
+            },
+            Function {
+                name: "Floor",
+                doc: "Each component rounded down.",
+                params: &[],
+                returns: "Vector3",
+            },
+            Function {
+                name: "Ceil",
+                doc: "Each component rounded up.",
+                params: &[],
+                returns: "Vector3",
+            },
+        ],
     },
     ValueType {
         class: "Vector2",
@@ -97,9 +160,65 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
             "__add(self, other: Vector2): Vector2",
             "__sub(self, other: Vector2): Vector2",
             "__mul(self, other: Vector2 | number): Vector2",
+            "__div(self, other: Vector2 | number): Vector2",
             "__unm(self): Vector2",
         ],
-        methods: &[],
+        methods: &[
+            Function {
+                name: "Dot",
+                doc: "The dot product: the lengths multiplied, times the cosine of the angle between them.",
+                params: &[("other", "Vector2")],
+                returns: "number",
+            },
+            Function {
+                name: "Lerp",
+                doc: "The point `alpha` of the way from this vector to `goal` (0 is this one, 1 is `goal`).",
+                params: &[("goal", "Vector2"), ("alpha", "number")],
+                returns: "Vector2",
+            },
+            Function {
+                name: "Angle",
+                doc: "The angle to `other` in radians, from 0 to pi. Signed, it's negative when `other` is anticlockwise from this one on the screen.",
+                params: &[("other", "Vector2"), ("isSigned?", "boolean")],
+                returns: "number",
+            },
+            Function {
+                name: "FuzzyEq",
+                doc: "Whether each component is within `epsilon` (left out: 0.00001) of `other`'s.",
+                params: &[("other", "Vector2"), ("epsilon?", "number")],
+                returns: "boolean",
+            },
+            Function {
+                name: "Min",
+                doc: "The smallest of each component of this and the other vectors.",
+                params: &[("...", "Vector2")],
+                returns: "Vector2",
+            },
+            Function {
+                name: "Max",
+                doc: "The largest of each component of this and the other vectors.",
+                params: &[("...", "Vector2")],
+                returns: "Vector2",
+            },
+            Function {
+                name: "Abs",
+                doc: "Each component without its sign.",
+                params: &[],
+                returns: "Vector2",
+            },
+            Function {
+                name: "Floor",
+                doc: "Each component rounded down.",
+                params: &[],
+                returns: "Vector2",
+            },
+            Function {
+                name: "Ceil",
+                doc: "Each component rounded up.",
+                params: &[],
+                returns: "Vector2",
+            },
+        ],
     },
     ValueType {
         class: "Color3",
@@ -122,7 +241,172 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
             },
         ],
         operators: &[],
-        methods: &[],
+        methods: &[
+            Function {
+                name: "Lerp",
+                doc: "The color `alpha` of the way from this one to `goal` (0 is this one, 1 is `goal`).",
+                params: &[("goal", "Color3"), ("alpha", "number")],
+                returns: "Color3",
+            },
+            Function {
+                name: "ToHSV",
+                doc: "Hue, saturation and value, each from 0 to 1, as `Color3.fromHSV` takes them.",
+                params: &[],
+                returns: "(number, number, number)",
+            },
+            Function {
+                name: "ToHex",
+                doc: "Six lowercase hex digits without a `#`, such as `\"ff8000\"`.",
+                params: &[],
+                returns: "string",
+            },
+        ],
+    },
+    ValueType {
+        class: "CFrame",
+        doc: "A position and a rotation together. `part.CFrame` reads and writes the part's Position and Orientation; a CFrame isn't saved.",
+        fields: &[
+            Field {
+                name: "Position",
+                ty: "Vector3",
+                doc: "Where it is.",
+            },
+            Field {
+                name: "X",
+                ty: "number",
+                doc: "The position's X.",
+            },
+            Field {
+                name: "Y",
+                ty: "number",
+                doc: "The position's Y.",
+            },
+            Field {
+                name: "Z",
+                ty: "number",
+                doc: "The position's Z.",
+            },
+            Field {
+                name: "Rotation",
+                ty: "CFrame",
+                doc: "The same turn at the origin.",
+            },
+            Field {
+                name: "LookVector",
+                ty: "Vector3",
+                doc: "The way its front faces (its -Z), one stud long.",
+            },
+            Field {
+                name: "RightVector",
+                ty: "Vector3",
+                doc: "Its right side (its +X), one stud long.",
+            },
+            Field {
+                name: "UpVector",
+                ty: "Vector3",
+                doc: "Its top (its +Y), one stud long.",
+            },
+        ],
+        operators: &[
+            "__mul(self, other: CFrame): CFrame",
+            "__mul(self, other: Vector3): Vector3",
+            "__add(self, other: Vector3): CFrame",
+            "__sub(self, other: Vector3): CFrame",
+        ],
+        methods: &[
+            Function {
+                name: "Inverse",
+                doc: "The CFrame that undoes this one: `cf * cf:Inverse()` is `CFrame.identity`.",
+                params: &[],
+                returns: "CFrame",
+            },
+            Function {
+                name: "Lerp",
+                doc: "The CFrame `alpha` of the way to `goal`: the position in a straight line, and the rotation the short way round.",
+                params: &[("goal", "CFrame"), ("alpha", "number")],
+                returns: "CFrame",
+            },
+            Function {
+                name: "ToWorldSpace",
+                doc: "`other`, given relative to this CFrame, in world space (`cf * other`).",
+                params: &[("other", "CFrame")],
+                returns: "CFrame",
+            },
+            Function {
+                name: "ToObjectSpace",
+                doc: "`other`, given in world space, relative to this CFrame (`cf:Inverse() * other`).",
+                params: &[("other", "CFrame")],
+                returns: "CFrame",
+            },
+            Function {
+                name: "PointToWorldSpace",
+                doc: "A point given relative to this CFrame, in world space (`cf * point`).",
+                params: &[("point", "Vector3")],
+                returns: "Vector3",
+            },
+            Function {
+                name: "PointToObjectSpace",
+                doc: "A point given in world space, relative to this CFrame.",
+                params: &[("point", "Vector3")],
+                returns: "Vector3",
+            },
+            Function {
+                name: "VectorToWorldSpace",
+                doc: "A direction given relative to this CFrame, turned into world space (the position doesn't count).",
+                params: &[("direction", "Vector3")],
+                returns: "Vector3",
+            },
+            Function {
+                name: "VectorToObjectSpace",
+                doc: "A direction given in world space, turned into this CFrame's space (the position doesn't count).",
+                params: &[("direction", "Vector3")],
+                returns: "Vector3",
+            },
+            Function {
+                name: "ToEulerAnglesYXZ",
+                doc: "The angles around X, Y and Z in radians that `CFrame.fromEulerAnglesYXZ` takes: an `Orientation`, in radians.",
+                params: &[],
+                returns: "(number, number, number)",
+            },
+        ],
+    },
+    ValueType {
+        class: "Random",
+        doc: "A random number generator from `Random.new(seed)`. The same seed gives the same numbers on every run and platform.",
+        fields: &[],
+        operators: &[],
+        methods: &[
+            Function {
+                name: "NextNumber",
+                doc: "A number from `min` (left out: 0) up to `max` (left out: 1).",
+                params: &[("min?", "number"), ("max?", "number")],
+                returns: "number",
+            },
+            Function {
+                name: "NextInteger",
+                doc: "A whole number from `min` to `max`, both included.",
+                params: &[("min", "number"), ("max", "number")],
+                returns: "number",
+            },
+            Function {
+                name: "NextUnitVector",
+                doc: "A direction one stud long, every direction equally likely.",
+                params: &[],
+                returns: "Vector3",
+            },
+            Function {
+                name: "Shuffle",
+                doc: "Puts the items of a list in a random order, in place.",
+                params: &[("list", "{ any }")],
+                returns: "()",
+            },
+            Function {
+                name: "Clone",
+                doc: "A new generator that gives the same numbers this one would from here.",
+                params: &[],
+                returns: "Random",
+            },
+        ],
     },
     ValueType {
         class: "UDim",
@@ -737,7 +1021,66 @@ pub(super) const GLOBAL_FUNCTIONS: &[Function] = &[Function {
 }];
 
 /// Methods only some classes have.
+const PART_CFRAME_DOC: &str =
+    "Its Position and Orientation as one CFrame. Setting it sets both; it isn't saved itself.";
+const GET_PIVOT_DOC: &str = "Where it turns and moves from: a part's own CFrame, or for a Model the centre of the box around its parts, unturned.";
+const PIVOT_TO_DOC: &str = "Moves and turns it so its pivot is at `target`. A Model's parts all move together and keep their places relative to each other.";
+
 pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
+    (
+        ClassName::Part,
+        Function {
+            name: "GetPivot",
+            doc: GET_PIVOT_DOC,
+            params: &[],
+            returns: "CFrame",
+        },
+    ),
+    (
+        ClassName::Part,
+        Function {
+            name: "PivotTo",
+            doc: PIVOT_TO_DOC,
+            params: &[("target", "CFrame")],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::MeshPart,
+        Function {
+            name: "GetPivot",
+            doc: GET_PIVOT_DOC,
+            params: &[],
+            returns: "CFrame",
+        },
+    ),
+    (
+        ClassName::MeshPart,
+        Function {
+            name: "PivotTo",
+            doc: PIVOT_TO_DOC,
+            params: &[("target", "CFrame")],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::Model,
+        Function {
+            name: "GetPivot",
+            doc: GET_PIVOT_DOC,
+            params: &[],
+            returns: "CFrame",
+        },
+    ),
+    (
+        ClassName::Model,
+        Function {
+            name: "PivotTo",
+            doc: PIVOT_TO_DOC,
+            params: &[("target", "CFrame")],
+            returns: "()",
+        },
+    ),
     (
         ClassName::DataModel,
         Function {
@@ -999,6 +1342,22 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
 /// Fields only some classes have, besides their properties and events.
 pub(super) const CLASS_FIELDS: &[(ClassName, Field)] = &[
     (
+        ClassName::Part,
+        Field {
+            name: "CFrame",
+            ty: "CFrame",
+            doc: PART_CFRAME_DOC,
+        },
+    ),
+    (
+        ClassName::MeshPart,
+        Field {
+            name: "CFrame",
+            ty: "CFrame",
+            doc: PART_CFRAME_DOC,
+        },
+    ),
+    (
         ClassName::DataModel,
         Field {
             name: "UserInputService",
@@ -1148,6 +1507,7 @@ pub(super) const LIBRARIES: &[Library] = &[
     Library {
         global: "Instance",
         doc: "Creates Instances.",
+        constants: &[],
         functions: &[Function {
             name: "new",
             doc: "Creates an Instance of this class with default properties and no parent. Set `Parent` to put it in the world.",
@@ -1158,6 +1518,33 @@ pub(super) const LIBRARIES: &[Library] = &[
     Library {
         global: "Vector3",
         doc: "Creates Vector3 values.",
+        constants: &[
+            Field {
+                name: "zero",
+                ty: "Vector3",
+                doc: "(0, 0, 0).",
+            },
+            Field {
+                name: "one",
+                ty: "Vector3",
+                doc: "(1, 1, 1).",
+            },
+            Field {
+                name: "xAxis",
+                ty: "Vector3",
+                doc: "(1, 0, 0).",
+            },
+            Field {
+                name: "yAxis",
+                ty: "Vector3",
+                doc: "(0, 1, 0): up.",
+            },
+            Field {
+                name: "zAxis",
+                ty: "Vector3",
+                doc: "(0, 0, 1).",
+            },
+        ],
         functions: &[Function {
             name: "new",
             doc: "A new Vector3. Left-out components are 0.",
@@ -1168,6 +1555,28 @@ pub(super) const LIBRARIES: &[Library] = &[
     Library {
         global: "Vector2",
         doc: "Creates Vector2 values.",
+        constants: &[
+            Field {
+                name: "zero",
+                ty: "Vector2",
+                doc: "(0, 0).",
+            },
+            Field {
+                name: "one",
+                ty: "Vector2",
+                doc: "(1, 1).",
+            },
+            Field {
+                name: "xAxis",
+                ty: "Vector2",
+                doc: "(1, 0).",
+            },
+            Field {
+                name: "yAxis",
+                ty: "Vector2",
+                doc: "(0, 1).",
+            },
+        ],
         functions: &[Function {
             name: "new",
             doc: "A new Vector2. Left-out components are 0.",
@@ -1178,6 +1587,7 @@ pub(super) const LIBRARIES: &[Library] = &[
     Library {
         global: "Color3",
         doc: "Creates Color3 values.",
+        constants: &[],
         functions: &[
             Function {
                 name: "new",
@@ -1191,11 +1601,84 @@ pub(super) const LIBRARIES: &[Library] = &[
                 params: &[("r?", "number"), ("g?", "number"), ("b?", "number")],
                 returns: "Color3",
             },
+            Function {
+                name: "fromHSV",
+                doc: "A color from hue, saturation and value, each from 0 to 1. Hue goes round the color wheel from red (0) through green (1/3) and blue (2/3) back to red (1).",
+                params: &[
+                    ("hue", "number"),
+                    ("saturation", "number"),
+                    ("value", "number"),
+                ],
+                returns: "Color3",
+            },
+            Function {
+                name: "fromHex",
+                doc: "A color from six hex digits such as `\"#ff8000\"` or three such as `\"#f80\"`, with or without the `#`.",
+                params: &[("hex", "string")],
+                returns: "Color3",
+            },
         ],
+    },
+    Library {
+        global: "CFrame",
+        doc: "Creates CFrame values.",
+        constants: &[Field {
+            name: "identity",
+            ty: "CFrame",
+            doc: "At the origin with no turn.",
+        }],
+        functions: &[
+            Function {
+                name: "new",
+                doc: "A CFrame at a position with no turn: `CFrame.new()`, `CFrame.new(position)` or `CFrame.new(x, y, z)`.",
+                params: &[
+                    ("x?", "number | Vector3"),
+                    ("y?", "number"),
+                    ("z?", "number"),
+                ],
+                returns: "CFrame",
+            },
+            Function {
+                name: "lookAt",
+                doc: "A CFrame at `at` whose front (LookVector) faces `target`, with its top as close to `up` (left out: straight up) as it can be.",
+                params: &[("at", "Vector3"), ("target", "Vector3"), ("up?", "Vector3")],
+                returns: "CFrame",
+            },
+            Function {
+                name: "Angles",
+                doc: "A turn by these angles in radians around X, then Y, then Z, such as `CFrame.Angles(0, math.rad(90), 0)`.",
+                params: &[("rx?", "number"), ("ry?", "number"), ("rz?", "number")],
+                returns: "CFrame",
+            },
+            Function {
+                name: "fromEulerAnglesYXZ",
+                doc: "The turn an `Orientation` stands for, in radians: around Z, then X, then Y.",
+                params: &[("rx?", "number"), ("ry?", "number"), ("rz?", "number")],
+                returns: "CFrame",
+            },
+            Function {
+                name: "fromAxisAngle",
+                doc: "A turn by `angle` radians around `axis`.",
+                params: &[("axis", "Vector3"), ("angle", "number")],
+                returns: "CFrame",
+            },
+        ],
+    },
+    Library {
+        global: "Random",
+        doc: "Creates random number generators.",
+        constants: &[],
+        functions: &[Function {
+            name: "new",
+            doc: "A generator. The same `seed` gives the same numbers on every run and platform; left out, each generator is different.",
+            params: &[("seed?", "number")],
+            returns: "Random",
+        }],
     },
     Library {
         global: "UDim2",
         doc: "Creates UI positions and sizes.",
+        constants: &[],
         functions: &[
             Function {
                 name: "new",
@@ -1225,6 +1708,7 @@ pub(super) const LIBRARIES: &[Library] = &[
     Library {
         global: "TweenInfo",
         doc: "Creates TweenInfo values.",
+        constants: &[],
         functions: &[Function {
             name: "new",
             doc: "How a tween plays. Left out: 1 second, `Enum.EasingStyle.Quad`, `Enum.EasingDirection.Out`, no repeats, no reversing and no delay. The style and direction can also be item names, such as `\"Sine\"`.",
@@ -1242,6 +1726,7 @@ pub(super) const LIBRARIES: &[Library] = &[
     Library {
         global: "task",
         doc: "Pauses scripts and runs functions later, without stopping the game.",
+        constants: &[],
         functions: &[
             Function {
                 name: "wait",

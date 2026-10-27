@@ -63,6 +63,8 @@ pub(super) fn block_names(kind: &BlockKind) -> (&'static str, &'static [&'static
         BlockKind::CloneInto { .. } => ("Clone", &["Object", "Into"]),
         BlockKind::MoveTo { .. } => ("Move To", &["Part", "Position"]),
         BlockKind::MoveBy { .. } => ("Move By", &["Part", "Offset"]),
+        BlockKind::LookAt { .. } => ("Look At", &["Part", "Position"]),
+        BlockKind::MoveForward { .. } => ("Move Forward", &["Part", "Distance"]),
         BlockKind::TurnTo { .. } => ("Turn To", &["Part", "Orientation"]),
         BlockKind::TurnBy { .. } => ("Turn By", &["Part", "Rotation"]),
         BlockKind::SetAnchored { .. } => ("Set Anchored", &["Part", "Anchored"]),
@@ -126,6 +128,8 @@ pub(super) fn value_names(expression: &Expression) -> (String, &'static [&'stati
         Expression::Math { .. } => ("Math", &["A", "Operator", "B"]),
         Expression::Function { .. } => ("Math Function", &["Function", "Value"]),
         Expression::Random { .. } => ("Random Integer", &["Min", "Max"]),
+        Expression::RandomNumber { .. } => ("Random Number", &["Min", "Max"]),
+        Expression::Lerp { .. } => ("Lerp", &["From", "To", "Alpha"]),
         Expression::Join { .. } => ("Join Text", &["A", "B"]),
         Expression::Compare { .. } => ("Compare", &["A", "Operator", "B"]),
         Expression::Logic { .. } => ("And / Or", &["A", "Operator", "B"]),
@@ -159,6 +163,7 @@ pub(super) fn value_type(expression: &Expression) -> SlotKind {
         | Expression::Math { .. }
         | Expression::Function { .. }
         | Expression::Random { .. }
+        | Expression::RandomNumber { .. }
         | Expression::AnimatorNumber { .. } => SlotKind::Number,
         Expression::Text { .. } | Expression::Join { .. } => SlotKind::Text,
         Expression::Vector3 { .. } => SlotKind::Vector,

@@ -15,6 +15,7 @@ axcenity-core.workspace = true
 axcenity-physics.workspace = true
 axcenity-render.workspace = true
 axcenity-save.workspace = true
+glam.workspace = true
 mlua.workspace = true
 axcenity-workspace-hack.workspace = true
 

@@ -12,6 +12,7 @@ use axcenity_core::{
 };
 use mlua::{FromLua, IntoLua, Lua, MetaMethod, UserData, UserDataFields, UserDataMethods};
 
+use crate::cframe::LuaCFrame;
 use crate::instance::LuaInstance;
 use crate::tween::{PlaybackState, TweenStyle};
 use crate::user_settings;
@@ -43,9 +44,33 @@ impl LuaVector3 {
     }
 
     fn magnitude(self) -> f32 {
-        let v = self.0;
-        (v.x * v.x + v.y * v.y + v.z * v.z).sqrt()
+        self.dot(self).sqrt()
     }
+
+    fn dot(self, other: Self) -> f32 {
+        let (a, b) = (self.0, other.0);
+        a.x * b.x + a.y * b.y + a.z * b.z
+    }
+
+    fn cross(self, other: Self) -> Self {
+        let (a, b) = (self.0, other.0);
+        Self(Vector3::new(
+            a.y * b.z - a.z * b.y,
+            a.z * b.x - a.x * b.z,
+            a.x * b.y - a.y * b.x,
+        ))
+    }
+}
+
+/// The angle between two vectors in radians, from their dot product and
+/// the length of their cross product (steadier than `acos` near 0 and 180°).
+fn angle_between(dot: f32, cross_length: f32) -> f32 {
+    cross_length.atan2(dot)
+}
+
+/// Each of `others` folded into `first` with `f`, for `Min` and `Max`.
+fn fold<T: Copy>(first: T, others: mlua::Variadic<T>, f: impl Fn(T, T) -> T) -> T {
+    others.into_iter().fold(first, f)
 }
 
 /// What `*` and `/` accept on either side: a Vector3 or a number.
@@ -100,13 +125,58 @@ impl UserData for LuaVector3 {
                 }
             }
         });
-        methods.add_meta_function(MetaMethod::Div, |_, (a, b): (LuaVector3, Operand)| {
-            Ok(match b {
-                Operand::Vector(b) => a.zip(b, |a, b| a / b),
-                Operand::Number(n) => a.map(|c| c / n),
-            })
+        methods.add_meta_function(MetaMethod::Div, |_, (a, b): (Operand, Operand)| {
+            match (a, b) {
+                (Operand::Vector(a), Operand::Vector(b)) => Ok(a.zip(b, |a, b| a / b)),
+                (Operand::Vector(v), Operand::Number(n)) => Ok(v.map(|c| c / n)),
+                (Operand::Number(n), Operand::Vector(v)) => Ok(v.map(|c| n / c)),
+                (Operand::Number(_), Operand::Number(_)) => {
+                    unreachable!("Lua divides numbers itself")
+                }
+            }
         });
         methods.add_meta_method(MetaMethod::Unm, |_, v, ()| Ok(v.map(|c| -c)));
+        methods.add_method("Dot", |_, v, other: LuaVector3| {
+            Ok(f32_to_lua(v.dot(other)))
+        });
+        methods.add_method("Cross", |_, v, other: LuaVector3| Ok(v.cross(other)));
+        methods.add_method("Lerp", |_, v, (goal, alpha): (LuaVector3, f64)| {
+            let alpha = alpha as f32;
+            Ok(v.zip(goal, |a, b| a + (b - a) * alpha))
+        });
+        // With an axis, the angle is negative when turning from `v` to
+        // `other` goes clockwise looking down the axis.
+        methods.add_method(
+            "Angle",
+            |_, v, (other, axis): (LuaVector3, Option<LuaVector3>)| {
+                let cross = v.cross(other);
+                let angle = angle_between(v.dot(other), cross.magnitude());
+                let sign = match axis {
+                    Some(axis) if cross.dot(axis) < 0.0 => -1.0,
+                    _ => 1.0,
+                };
+                Ok(f32_to_lua(angle * sign))
+            },
+        );
+        methods.add_method(
+            "FuzzyEq",
+            |_, v, (other, epsilon): (LuaVector3, Option<f64>)| {
+                let epsilon = epsilon.unwrap_or(1e-5) as f32;
+                let (a, b) = (v.0, other.0);
+                Ok([a.x - b.x, a.y - b.y, a.z - b.z]
+                    .iter()
+                    .all(|d| d.abs() <= epsilon))
+            },
+        );
+        methods.add_method("Min", |_, v, others: mlua::Variadic<LuaVector3>| {
+            Ok(fold(*v, others, |a, b| a.zip(b, f32::min)))
+        });
+        methods.add_method("Max", |_, v, others: mlua::Variadic<LuaVector3>| {
+            Ok(fold(*v, others, |a, b| a.zip(b, f32::max)))
+        });
+        methods.add_method("Abs", |_, v, ()| Ok(v.map(f32::abs)));
+        methods.add_method("Floor", |_, v, ()| Ok(v.map(f32::floor)));
+        methods.add_method("Ceil", |_, v, ()| Ok(v.map(f32::ceil)));
         methods.add_meta_method(MetaMethod::Eq, |lua, v, other: mlua::Value| {
             Ok(LuaVector3::from_lua(other, lua).is_ok_and(|other| other.0 == v.0))
         });
@@ -131,15 +201,44 @@ impl LuaVector2 {
     fn zip(self, other: Self, f: impl Fn(f32, f32) -> f32) -> Self {
         Self(Vector2::new(f(self.0.x, other.0.x), f(self.0.y, other.0.y)))
     }
+
+    fn map(self, f: impl Fn(f32) -> f32) -> Self {
+        Self(Vector2::new(f(self.0.x), f(self.0.y)))
+    }
+
+    fn dot(self, other: Self) -> f32 {
+        self.0.x * other.0.x + self.0.y * other.0.y
+    }
+
+    /// The Z of the 3D cross product: positive when `other` is clockwise
+    /// from `self` on the screen (Y points down).
+    fn cross(self, other: Self) -> f32 {
+        self.0.x * other.0.y - self.0.y * other.0.x
+    }
+}
+
+/// A Lua number, if `value` is one.
+fn number(value: &mlua::Value) -> Option<f32> {
+    match value {
+        mlua::Value::Integer(n) => Some(*n as f32),
+        mlua::Value::Number(n) => Some(*n as f32),
+        _ => None,
+    }
+}
+
+/// A Vector2, if `value` is one.
+fn vector2(value: &mlua::Value) -> Option<LuaVector2> {
+    match value {
+        mlua::Value::UserData(data) => data.borrow::<LuaVector2>().ok().map(|v| *v),
+        _ => None,
+    }
 }
 
 impl UserData for LuaVector2 {
     fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
         fields.add_field_method_get("X", |_, v| Ok(f32_to_lua(v.0.x)));
         fields.add_field_method_get("Y", |_, v| Ok(f32_to_lua(v.0.y)));
-        fields.add_field_method_get("Magnitude", |_, v| {
-            Ok(f32_to_lua((v.0.x * v.0.x + v.0.y * v.0.y).sqrt()))
-        });
+        fields.add_field_method_get("Magnitude", |_, v| Ok(f32_to_lua(v.dot(*v).sqrt())));
     }
 
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
@@ -150,32 +249,65 @@ impl UserData for LuaVector2 {
             Ok(a.zip(b, |a, b| a - b))
         });
         methods.add_meta_function(MetaMethod::Mul, |_, (a, b): (mlua::Value, mlua::Value)| {
-            let number = |value: &mlua::Value| match value {
-                mlua::Value::Integer(n) => Some(*n as f32),
-                mlua::Value::Number(n) => Some(*n as f32),
-                _ => None,
-            };
-            let vector = |value: mlua::Value| match value {
-                mlua::Value::UserData(data) => data.borrow::<LuaVector2>().ok().map(|v| *v),
-                _ => None,
-            };
             match (number(&a), number(&b)) {
-                (Some(n), None) => {
-                    vector(b).map(|v| LuaVector2(Vector2::new(v.0.x * n, v.0.y * n)))
-                }
-                (None, Some(n)) => {
-                    vector(a).map(|v| LuaVector2(Vector2::new(v.0.x * n, v.0.y * n)))
-                }
-                _ => match (vector(a), vector(b)) {
+                (Some(n), None) => vector2(&b).map(|v| v.map(|c| c * n)),
+                (None, Some(n)) => vector2(&a).map(|v| v.map(|c| c * n)),
+                _ => match (vector2(&a), vector2(&b)) {
                     (Some(a), Some(b)) => Some(a.zip(b, |a, b| a * b)),
                     _ => None,
                 },
             }
             .ok_or_else(|| mlua::Error::runtime("a Vector2 multiplies by a Vector2 or a number"))
         });
-        methods.add_meta_method(MetaMethod::Unm, |_, v, ()| {
-            Ok(LuaVector2(Vector2::new(-v.0.x, -v.0.y)))
+        methods.add_meta_function(MetaMethod::Div, |_, (a, b): (mlua::Value, mlua::Value)| {
+            match (number(&a), number(&b)) {
+                (Some(n), None) => vector2(&b).map(|v| v.map(|c| n / c)),
+                (None, Some(n)) => vector2(&a).map(|v| v.map(|c| c / n)),
+                _ => match (vector2(&a), vector2(&b)) {
+                    (Some(a), Some(b)) => Some(a.zip(b, |a, b| a / b)),
+                    _ => None,
+                },
+            }
+            .ok_or_else(|| mlua::Error::runtime("a Vector2 divides by a Vector2 or a number"))
         });
+        methods.add_meta_method(MetaMethod::Unm, |_, v, ()| Ok(v.map(|c| -c)));
+        methods.add_method("Dot", |_, v, other: LuaVector2| {
+            Ok(f32_to_lua(v.dot(other)))
+        });
+        methods.add_method("Lerp", |_, v, (goal, alpha): (LuaVector2, f64)| {
+            let alpha = alpha as f32;
+            Ok(v.zip(goal, |a, b| a + (b - a) * alpha))
+        });
+        // Signed, the angle is negative when `other` is anticlockwise from
+        // `v` on the screen.
+        methods.add_method(
+            "Angle",
+            |_, v, (other, signed): (LuaVector2, Option<bool>)| {
+                let cross = v.cross(other);
+                let angle = angle_between(v.dot(other), cross.abs());
+                Ok(f32_to_lua(if signed == Some(true) && cross < 0.0 {
+                    -angle
+                } else {
+                    angle
+                }))
+            },
+        );
+        methods.add_method(
+            "FuzzyEq",
+            |_, v, (other, epsilon): (LuaVector2, Option<f64>)| {
+                let epsilon = epsilon.unwrap_or(1e-5) as f32;
+                Ok((v.0.x - other.0.x).abs() <= epsilon && (v.0.y - other.0.y).abs() <= epsilon)
+            },
+        );
+        methods.add_method("Min", |_, v, others: mlua::Variadic<LuaVector2>| {
+            Ok(fold(*v, others, |a, b| a.zip(b, f32::min)))
+        });
+        methods.add_method("Max", |_, v, others: mlua::Variadic<LuaVector2>| {
+            Ok(fold(*v, others, |a, b| a.zip(b, f32::max)))
+        });
+        methods.add_method("Abs", |_, v, ()| Ok(v.map(f32::abs)));
+        methods.add_method("Floor", |_, v, ()| Ok(v.map(f32::floor)));
+        methods.add_method("Ceil", |_, v, ()| Ok(v.map(f32::ceil)));
         methods.add_meta_method(MetaMethod::Eq, |lua, v, other: mlua::Value| {
             Ok(LuaVector2::from_lua(other, lua).is_ok_and(|other| other.0 == v.0))
         });
@@ -192,6 +324,67 @@ impl UserData for LuaVector2 {
 #[derive(Clone, Copy, Debug)]
 pub struct LuaColor3(pub Color3);
 
+impl LuaColor3 {
+    /// Hue, saturation and value, each from 0 to 1. A grey has hue 0.
+    pub fn to_hsv(self) -> (f32, f32, f32) {
+        let Color3 { r, g, b } = self.0;
+        let max = r.max(g).max(b);
+        let range = max - r.min(g).min(b);
+        let saturation = if max == 0.0 { 0.0 } else { range / max };
+        // Which sixth of the colour wheel, from the largest channel.
+        let sixths = if range == 0.0 {
+            0.0
+        } else if max == r {
+            ((g - b) / range).rem_euclid(6.0)
+        } else if max == g {
+            (b - r) / range + 2.0
+        } else {
+            (r - g) / range + 4.0
+        };
+        (sixths / 6.0, saturation, max)
+    }
+
+    pub fn from_hsv(hue: f32, saturation: f32, value: f32) -> Self {
+        let [hue, saturation, value] = [hue, saturation, value].map(|c| c.clamp(0.0, 1.0));
+        // `k` walks round the wheel for each channel; red starts at 5, green
+        // at 3 and blue at 1 sixths.
+        let channel = |n: f32| {
+            let k = (n + hue * 6.0) % 6.0;
+            value - value * saturation * k.min(4.0 - k).clamp(0.0, 1.0)
+        };
+        Self(Color3::new(channel(5.0), channel(3.0), channel(1.0)))
+    }
+
+    /// The colour as six hex digits, such as `"ff8000"`.
+    pub fn to_hex(self) -> String {
+        let byte = |c: f32| (c.clamp(0.0, 1.0) * 255.0).round() as u8;
+        let Color3 { r, g, b } = self.0;
+        format!("{:02x}{:02x}{:02x}", byte(r), byte(g), byte(b))
+    }
+
+    /// `"#ff8000"`, `"ff8000"`, `"#f80"` or `"f80"`, in either case.
+    pub fn from_hex(text: &str) -> Option<Self> {
+        let digits = text.strip_prefix('#').unwrap_or(text);
+        if !digits.chars().all(|c| c.is_ascii_hexdigit()) {
+            return None;
+        }
+        let channels: Vec<u8> = match digits.len() {
+            3 => digits
+                .chars()
+                .map(|c| u8::from_str_radix(&format!("{c}{c}"), 16))
+                .collect::<Result<_, _>>()
+                .ok()?,
+            6 => (0..3)
+                .map(|i| u8::from_str_radix(&digits[i * 2..i * 2 + 2], 16))
+                .collect::<Result<_, _>>()
+                .ok()?,
+            _ => return None,
+        };
+        let [r, g, b] = [0, 1, 2].map(|i| f32::from(channels[i]) / 255.0);
+        Some(Self(Color3::new(r, g, b)))
+    }
+}
+
 impl UserData for LuaColor3 {
     fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
         fields.add_field_method_get("R", |_, c| Ok(f32_to_lua(c.0.r)));
@@ -200,6 +393,22 @@ impl UserData for LuaColor3 {
     }
 
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        // Colours can't go past their ends, even when `alpha` does.
+        methods.add_method("Lerp", |_, c, (goal, alpha): (LuaColor3, f64)| {
+            let alpha = alpha as f32;
+            let channel = |a: f32, b: f32| (a + (b - a) * alpha).clamp(0.0, 1.0);
+            let (a, b) = (c.0, goal.0);
+            Ok(LuaColor3(Color3::new(
+                channel(a.r, b.r),
+                channel(a.g, b.g),
+                channel(a.b, b.b),
+            )))
+        });
+        methods.add_method("ToHSV", |_, c, ()| {
+            let (h, s, v) = c.to_hsv();
+            Ok((f32_to_lua(h), f32_to_lua(s), f32_to_lua(v)))
+        });
+        methods.add_method("ToHex", |_, c, ()| Ok(c.to_hex()));
         methods.add_meta_method(MetaMethod::Eq, |lua, c, other: mlua::Value| {
             Ok(LuaColor3::from_lua(other, lua).is_ok_and(|other| other.0 == c.0))
         });
@@ -530,6 +739,7 @@ from_lua_by_clone! {
     LuaUDim => "UDim",
     LuaUDim2 => "UDim2",
     LuaEnumItem => "EnumItem",
+    LuaCFrame => "CFrame",
 }
 
 /// A property value as a Lua value.
@@ -648,6 +858,12 @@ pub fn type_name(lua: &Lua, value: &mlua::Value) -> String {
         }
         if data.is::<LuaUDim2>() {
             return "UDim2".to_owned();
+        }
+        if data.is::<crate::cframe::LuaCFrame>() {
+            return "CFrame".to_owned();
+        }
+        if data.is::<crate::random::LuaRandom>() {
+            return "Random".to_owned();
         }
         if let Ok(item) = data.borrow::<LuaEnumItem>() {
             return item.enum_type.name().to_owned();

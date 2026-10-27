@@ -345,6 +345,16 @@ pub enum BlockKind {
         target: String,
         offset: Expression,
     },
+    /// Turns `target` to face `position`: `CFrame.lookAt`.
+    LookAt {
+        target: String,
+        position: Expression,
+    },
+    /// Moves `target` along the way it faces (its `CFrame.LookVector`).
+    MoveForward {
+        target: String,
+        distance: Expression,
+    },
     TurnTo {
         target: String,
         orientation: Expression,
@@ -739,6 +749,8 @@ impl BlockKind {
             | BlockKind::IfElse { condition: e, .. }
             | BlockKind::MoveTo { position: e, .. }
             | BlockKind::MoveBy { offset: e, .. }
+            | BlockKind::LookAt { position: e, .. }
+            | BlockKind::MoveForward { distance: e, .. }
             | BlockKind::TurnTo { orientation: e, .. }
             | BlockKind::TurnBy { rotation: e, .. }
             | BlockKind::SetAnchored { anchored: e, .. }
@@ -817,6 +829,8 @@ impl BlockKind {
             | BlockKind::IfElse { condition: e, .. }
             | BlockKind::MoveTo { position: e, .. }
             | BlockKind::MoveBy { offset: e, .. }
+            | BlockKind::LookAt { position: e, .. }
+            | BlockKind::MoveForward { distance: e, .. }
             | BlockKind::TurnTo { orientation: e, .. }
             | BlockKind::TurnBy { rotation: e, .. }
             | BlockKind::SetAnchored { anchored: e, .. }
@@ -917,6 +931,17 @@ pub enum Expression {
         min: Box<Expression>,
         max: Box<Expression>,
     },
+    /// Any number from `min` up to `max`: `Random.new():NextNumber`.
+    RandomNumber {
+        min: Box<Expression>,
+        max: Box<Expression>,
+    },
+    /// The Vector3 or Color3 `alpha` of the way from `from` to `to`.
+    Lerp {
+        from: Box<Expression>,
+        to: Box<Expression>,
+        alpha: Box<Expression>,
+    },
     /// Two values as text, one after the other.
     Join {
         left: Box<Expression>,
@@ -1013,7 +1038,10 @@ impl Expression {
             | Expression::Join { left, right }
             | Expression::Compare { left, right, .. }
             | Expression::Logic { left, right, .. } => vec![left, right],
-            Expression::Random { min, max } => vec![min, max],
+            Expression::Random { min, max } | Expression::RandomNumber { min, max } => {
+                vec![min, max]
+            }
+            Expression::Lerp { from, to, alpha } => vec![from, to, alpha],
             Expression::Raycast { origin, direction } => vec![origin, direction],
             Expression::Function { value, .. }
             | Expression::Not { value }
@@ -1029,7 +1057,10 @@ impl Expression {
             | Expression::Join { left, right }
             | Expression::Compare { left, right, .. }
             | Expression::Logic { left, right, .. } => vec![left, right],
-            Expression::Random { min, max } => vec![min, max],
+            Expression::Random { min, max } | Expression::RandomNumber { min, max } => {
+                vec![min, max]
+            }
+            Expression::Lerp { from, to, alpha } => vec![from, to, alpha],
             Expression::Raycast { origin, direction } => vec![origin, direction],
             Expression::Function { value, .. }
             | Expression::Not { value }

@@ -181,6 +181,8 @@ const ENGINE_GLOBALS: &[&str] = &[
     "Vector2",
     "Color3",
     "UDim2",
+    "CFrame",
+    "Random",
     "TweenInfo",
     "Enum",
     "task",

@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use axcenity_core::{Value, Vector3};
+use axcenity_core::{ClassName, Value, Vector3};
 
 use super::*;
 
@@ -2866,4 +2866,44 @@ fn hello_strings_shows_the_active_language_and_switches_from_lua_and_blocks() {
         .map(|line| line.text)
         .collect();
     assert_eq!(output, ["Language: Français", "Jouer", "Language: Español"]);
+}
+
+#[test]
+fn reading_and_writing_cframes_leaves_a_saved_world_byte_for_byte_the_same() {
+    for name in ["primitives", "hello-character", "hello-mesh", "hello-door"] {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples")
+            .join(name)
+            .join("world.json");
+        let mut world =
+            axcenity_project::parse_world(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let script = world.create(ClassName::Script).unwrap();
+        world
+            .set_parent(script, Some(world.server_script_service()))
+            .unwrap();
+        let before = axcenity_project::write_world(&world);
+        let mut scripts = ScriptRuntime::new();
+        scripts.start_script(
+            &mut world,
+            script,
+            "scripts/Pivots.server.lua",
+            r#"
+            local count = 0
+            for _, object in workspace:GetDescendants() do
+                if object:IsA("BasePart") then
+                    object.CFrame = object.CFrame
+                    object:PivotTo(object:GetPivot())
+                    count += 1
+                elseif object:IsA("Model") then
+                    object:PivotTo(object:GetPivot())
+                end
+            end
+            print(count)
+            "#,
+        );
+        let output = scripts.take_output();
+        assert_eq!(output.len(), 1, "{name}: {output:?}");
+        assert_ne!(output[0].text, "0", "{name} has parts");
+        assert_eq!(before, axcenity_project::write_world(&world), "{name}");
+    }
 }

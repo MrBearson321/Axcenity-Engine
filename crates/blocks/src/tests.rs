@@ -105,9 +105,11 @@ fn statement_index(kind: &BlockKind) -> Option<usize> {
         BlockKind::ForEachChild { .. } => 52,
         BlockKind::WaitForChild { .. } => 53,
         BlockKind::CloneInto { .. } => 54,
+        BlockKind::LookAt { .. } => 55,
+        BlockKind::MoveForward { .. } => 56,
     })
 }
-const STATEMENT_COUNT: usize = 55;
+const STATEMENT_COUNT: usize = 57;
 
 /// One of each statement block, with the Lua it must produce.
 fn every_statement() -> Vec<(BlockKind, &'static str)> {
@@ -198,6 +200,27 @@ fn every_statement() -> Vec<(BlockKind, &'static str)> {
                 },
             },
             "workspace.Pad.Orientation = workspace.Pad.Orientation + Vector3.new(0, 5, 0)",
+        ),
+        (
+            BlockKind::LookAt {
+                target: pad(),
+                position: Expression::Property {
+                    target: "Goal".to_owned(),
+                    property: "Position".to_owned(),
+                },
+            },
+            "workspace.Pad.CFrame = CFrame.lookAt(workspace.Pad.Position, workspace.Goal.Position)",
+        ),
+        (
+            BlockKind::MoveForward {
+                target: pad(),
+                distance: Expression::Math {
+                    op: MathOp::Multiply,
+                    left: boxed(variable("speed")),
+                    right: boxed(number(2.0)),
+                },
+            },
+            "workspace.Pad.Position = workspace.Pad.Position + workspace.Pad.CFrame.LookVector * (speed * 2)",
         ),
         (
             BlockKind::SetAnchored {
@@ -684,6 +707,37 @@ fn reporters_translate_with_brackets_where_the_blocks_nest() {
                 max: boxed(number(6.0)),
             },
             "math.random(math.floor(1), math.floor(6))",
+        ),
+        (
+            Expression::RandomNumber {
+                min: boxed(number(0.5)),
+                max: boxed(variable("a")),
+            },
+            "Random.new():NextNumber(0.5, a)",
+        ),
+        (
+            Expression::Lerp {
+                from: boxed(Expression::Color3 {
+                    r: 1.0,
+                    g: 0.0,
+                    b: 0.0,
+                }),
+                to: boxed(variable("a")),
+                alpha: boxed(number(0.25)),
+            },
+            "Color3.new(1, 0, 0):Lerp(a, 0.25)",
+        ),
+        (
+            Expression::Lerp {
+                from: boxed(Expression::Logic {
+                    op: LogicOp::Or,
+                    left: boxed(variable("a")),
+                    right: boxed(variable("b")),
+                }),
+                to: boxed(variable("b")),
+                alpha: boxed(number(0.5)),
+            },
+            "(a or b):Lerp(b, 0.5)",
         ),
         (
             Expression::Join {
@@ -1367,6 +1421,22 @@ fn reporters_switched_to_code_and_back_are_the_same_reporters() {
             min: boxed(number(1.0)),
             max: boxed(number(6.0)),
         },
+        Expression::RandomNumber {
+            min: boxed(number(-1.0)),
+            max: boxed(variable("a")),
+        },
+        Expression::Lerp {
+            from: boxed(Expression::Property {
+                target: "Pad".to_owned(),
+                property: "Position".to_owned(),
+            }),
+            to: boxed(Expression::Vector3 {
+                x: 0.0,
+                y: 10.0,
+                z: 0.0,
+            }),
+            alpha: boxed(number(0.5)),
+        },
         Expression::Join {
             left: boxed(Expression::Text {
                 value: "a \"quoted\"\n".to_owned(),
@@ -1873,4 +1943,121 @@ fn set_property_blocks_turn_a_frame_and_fade_a_labels_text() {
     let number = |id, name| world.get(id).unwrap().property(name).unwrap().clone();
     assert_eq!(number(panel, "Rotation"), Value::Number(30.0));
     assert_eq!(number(title, "TextTransparency"), Value::Number(0.5));
+}
+
+#[test]
+fn look_at_move_forward_lerp_and_random_number_blocks_run_and_come_back_from_lua() {
+    let goal = || Expression::Property {
+        target: "Goal".to_owned(),
+        property: "Position".to_owned(),
+    };
+    let body = vec![
+        block(
+            2,
+            BlockKind::LookAt {
+                target: "Pad".to_owned(),
+                position: goal(),
+            },
+        ),
+        block(
+            3,
+            BlockKind::MoveForward {
+                target: "Pad".to_owned(),
+                distance: number(5.0),
+            },
+        ),
+        block(
+            4,
+            BlockKind::Print {
+                value: Expression::Lerp {
+                    from: boxed(Expression::Vector3 {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    }),
+                    to: boxed(goal()),
+                    alpha: boxed(number(0.5)),
+                },
+            },
+        ),
+        block(
+            5,
+            BlockKind::SetVariable {
+                name: "roll".to_owned(),
+                value: Expression::RandomNumber {
+                    min: boxed(number(2.0)),
+                    max: boxed(number(3.0)),
+                },
+            },
+        ),
+        block(
+            6,
+            BlockKind::Print {
+                value: Expression::Logic {
+                    op: LogicOp::And,
+                    left: boxed(Expression::Compare {
+                        op: Comparison::GreaterOrEqual,
+                        left: boxed(variable("roll")),
+                        right: boxed(number(2.0)),
+                    }),
+                    right: boxed(Expression::Compare {
+                        op: Comparison::Less,
+                        left: boxed(variable("roll")),
+                        right: boxed(number(3.0)),
+                    }),
+                },
+            },
+        ),
+    ];
+    let blocks = script(vec![block(1, BlockKind::WhenStarted { body })]);
+    let lua = translate(&blocks).unwrap().source;
+    let back = from_lua(&lua).unwrap();
+    assert!(!has_code(&back), "{back:#?}");
+    assert_eq!(translate(&back).unwrap().source, lua);
+
+    let mut world = World::new();
+    let workspace = world.workspace();
+    for (name, position) in [
+        ("Pad", Vector3::new(0.0, 0.0, 0.0)),
+        ("Goal", Vector3::new(10.0, 0.0, 0.0)),
+    ] {
+        let part = world.create(ClassName::Part).unwrap();
+        world.set_name(part, name).unwrap();
+        world
+            .set_property(part, "Position", Value::Vector3(position))
+            .unwrap();
+        world.set_parent(part, Some(workspace)).unwrap();
+    }
+    let script_id = world.create(ClassName::Script).unwrap();
+    world
+        .set_parent(script_id, Some(world.server_script_service()))
+        .unwrap();
+    let mut runtime = ScriptRuntime::new();
+    runtime.start_script(&mut world, script_id, "Look.server.blocks.json", &lua);
+    runtime.step(&mut world, 0.0);
+    let output: Vec<String> = runtime
+        .take_output()
+        .into_iter()
+        .map(|line| match line.kind {
+            OutputKind::Error => format!("error: {}", line.text),
+            _ => line.text,
+        })
+        .collect();
+    assert_eq!(output, ["5, 0, 0", "true"]);
+    // Facing +X (turned right, -90 around Y), then 5 studs that way.
+    let pad = world.find_first_child(workspace, "Pad").unwrap();
+    let pad = world.get(pad).unwrap();
+    assert_eq!(
+        pad.property("Orientation"),
+        Some(&Value::Vector3(Vector3::new(0.0, -90.0, 0.0)))
+    );
+    match pad.property("Position") {
+        Some(Value::Vector3(v)) => {
+            assert!(
+                (v.x - 5.0).abs() < 1e-5 && v.y.abs() < 1e-5 && v.z.abs() < 1e-5,
+                "{v:?}"
+            )
+        }
+        other => panic!("{other:?}"),
+    }
 }

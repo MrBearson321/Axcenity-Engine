@@ -775,6 +775,7 @@ dependencies = [
  "axcenity-render",
  "axcenity-save",
  "axcenity-workspace-hack",
+ "glam 0.34.1",
  "luau0-src",
  "mlua",
 ]

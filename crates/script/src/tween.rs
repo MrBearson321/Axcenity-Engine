@@ -12,6 +12,10 @@
 //! cancels any other tween playing on one of the same properties of the same
 //! Instance. `Completed` fires with how the tween ended (Completed, or
 //! Cancelled by `Cancel` or by a newer tween), at the next frame step.
+//!
+//! A part's `CFrame` tweens as one rotation and one position (see
+//! [`Goal::CFrame`]), so it turns the short way round and never flips the
+//! way blending three `Orientation` angles can.
 
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
@@ -22,6 +26,7 @@ use mlua::{
     FromLua, Lua, MetaMethod, Table, UserData, UserDataFields, UserDataMethods, Value as LuaValue,
 };
 
+use crate::cframe::LuaCFrame;
 use crate::events::{self, LuaSignal, Owner};
 use crate::instance::{LuaInstance, world, world_mut};
 use crate::types::{EnumType, LuaEnumItem, type_name, value_from_lua};
@@ -224,14 +229,31 @@ fn tweenable(kind: ValueKind) -> bool {
     )
 }
 
+/// Where one goal of a tween goes.
+#[derive(Clone, Debug, PartialEq)]
+enum Goal {
+    Value(Value),
+    /// A part's `CFrame`, written to its `Position` and `Orientation`.
+    CFrame(LuaCFrame),
+}
+
+/// Whether two goals move the same property: `CFrame` moves `Position`
+/// and `Orientation`.
+fn overlaps(a: &str, b: &str) -> bool {
+    let moves = |goal: &str, property: &str| {
+        goal == property || (goal == "CFrame" && matches!(property, "Position" | "Orientation"))
+    };
+    moves(a, b) || moves(b, a)
+}
+
 struct TweenState {
     id: u64,
     instance: InstanceId,
     info: TweenInfo,
     /// Each property and where it goes, sorted by name.
-    goals: Vec<(&'static str, Value)>,
+    goals: Vec<(&'static str, Goal)>,
     /// Where each goal's property was when the delay ended; empty before.
-    starts: Vec<Option<Value>>,
+    starts: Vec<Option<Goal>>,
     state: PlaybackState,
     /// Seconds since `Play`, delay included.
     elapsed: f64,
@@ -312,18 +334,27 @@ fn advance(lua: &Lua, tween: &Rc<RefCell<TweenState>>, seconds: f64) -> (bool, b
         tween.starts = tween
             .goals
             .iter()
-            .map(|(name, _)| instance.property(name).cloned())
+            .map(|(name, goal)| match goal {
+                Goal::Value(_) => instance.property(name).cloned().map(Goal::Value),
+                Goal::CFrame(_) => LuaCFrame::of_instance(instance).map(Goal::CFrame),
+            })
             .collect();
     }
     let (alpha, done) = tween.info.progress(run);
     let id = tween.instance;
     for ((name, goal), start) in tween.goals.iter().zip(&tween.starts) {
-        if let Some(start) = start
-            && let Some(value) = interpolate(name, start, goal, alpha)
-        {
-            // Another script may have destroyed it, or its kind can't
-            // change, so a failure here only skips this one.
-            let _ = world.set_property(id, name, value);
+        // Another script may have destroyed it, or its kind can't change,
+        // so a failure here only skips this one.
+        match (start, goal) {
+            (Some(Goal::Value(start)), Goal::Value(goal)) => {
+                if let Some(value) = interpolate(name, start, goal, alpha) {
+                    let _ = world.set_property(id, name, value);
+                }
+            }
+            (Some(Goal::CFrame(start)), Goal::CFrame(goal)) => {
+                let _ = start.lerp(*goal, alpha).write_to(&mut world, id);
+            }
+            _ => {}
         }
     }
     if done {
@@ -392,11 +423,7 @@ fn create(
 
 /// Each goal as a property of `id` and a value of that property's kind,
 /// sorted by name.
-fn read_goals(
-    lua: &Lua,
-    id: InstanceId,
-    goals: &Table,
-) -> mlua::Result<Vec<(&'static str, Value)>> {
+fn read_goals(lua: &Lua, id: InstanceId, goals: &Table) -> mlua::Result<Vec<(&'static str, Goal)>> {
     let mut wanted = Vec::new();
     for pair in goals.pairs::<LuaValue, LuaValue>() {
         let (key, value) = pair?;
@@ -416,6 +443,16 @@ fn read_goals(
                 .get(id)
                 .ok_or_else(|| mlua::Error::runtime("this Instance has been destroyed"))?;
             let class = instance.class();
+            if key == "CFrame" && LuaCFrame::of_instance(instance).is_some() {
+                let cf = LuaCFrame::from_lua(value.clone(), lua).map_err(|_| {
+                    mlua::Error::runtime(format!(
+                        "{class}.CFrame must be a CFrame, not a {}",
+                        type_name(lua, &value)
+                    ))
+                })?;
+                read.push(("CFrame", Goal::CFrame(cf)));
+                continue;
+            }
             let Some((name, current)) = instance.properties().find(|(name, _)| *name == key) else {
                 return Err(mlua::Error::runtime(format!(
                     "{key} is not a property of {class}, so it can't be tweened"
@@ -431,7 +468,7 @@ fn read_goals(
         }
         let value = value_from_lua(lua, value, kind)
             .map_err(|message| mlua::Error::runtime(format!("{class}.{name} {message}")))?;
-        read.push((name, value));
+        read.push((name, Goal::Value(value)));
     }
     read.sort_by_key(|(name, _)| *name);
     Ok(read)
@@ -476,7 +513,10 @@ impl LuaTween {
             .filter(|other| {
                 let other = other.borrow();
                 other.instance == instance
-                    && other.goals.iter().any(|(name, _)| names.contains(name))
+                    && other
+                        .goals
+                        .iter()
+                        .any(|(name, _)| names.iter().any(|other| overlaps(name, other)))
             })
             .cloned()
             .collect();

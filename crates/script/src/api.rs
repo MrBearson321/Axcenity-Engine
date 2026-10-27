@@ -1,5 +1,6 @@
 //! The engine's global names in a script: `print`, `game`, `workspace`,
-//! `script`, `Instance`, `Vector3`, `Vector2`, `Color3`, `UDim2`, `TweenInfo` and `Enum`.
+//! `script`, `Instance`, `Vector3`, `Vector2`, `Color3`, `UDim2`, `CFrame`, `Random`,
+//! `TweenInfo` and `Enum`.
 //!
 //! Every script gets its own copy of these tables, so a script that replaces
 //! `Vector3.new` only breaks itself.
@@ -22,6 +23,8 @@ pub fn install(lua: &Lua, env: &Table, ids: ScriptIds) -> mlua::Result<()> {
     env.raw_set("Vector2", vector2_library(lua)?)?;
     env.raw_set("Color3", color3_library(lua)?)?;
     env.raw_set("UDim2", udim2_library(lua)?)?;
+    env.raw_set("CFrame", crate::cframe::library(lua)?)?;
+    env.raw_set("Random", crate::random::library(lua)?)?;
     env.raw_set("TweenInfo", crate::tween::tween_info_library(lua)?)?;
     env.raw_set("Enum", LuaEnum)?;
     Ok(())
@@ -81,6 +84,16 @@ fn vector3_library(lua: &Lua) -> mlua::Result<Table> {
             )))
         })?,
     )?;
+    let constants = [
+        ("zero", Vector3::new(0.0, 0.0, 0.0)),
+        ("one", Vector3::new(1.0, 1.0, 1.0)),
+        ("xAxis", Vector3::new(1.0, 0.0, 0.0)),
+        ("yAxis", Vector3::new(0.0, 1.0, 0.0)),
+        ("zAxis", Vector3::new(0.0, 0.0, 1.0)),
+    ];
+    for (name, value) in constants {
+        library.raw_set(name, LuaVector3(value))?;
+    }
     Ok(library)
 }
 
@@ -96,6 +109,15 @@ fn vector2_library(lua: &Lua) -> mlua::Result<Table> {
             )))
         })?,
     )?;
+    let constants = [
+        ("zero", Vector2::new(0.0, 0.0)),
+        ("one", Vector2::new(1.0, 1.0)),
+        ("xAxis", Vector2::new(1.0, 0.0)),
+        ("yAxis", Vector2::new(0.0, 1.0)),
+    ];
+    for (name, value) in constants {
+        library.raw_set(name, LuaVector2(value))?;
+    }
     Ok(library)
 }
 
@@ -125,6 +147,22 @@ fn color3_library(lua: &Lua) -> mlua::Result<Table> {
             }
             let [r, g, b] = channels.map(|c| (c / 255.0) as f32);
             Ok(LuaColor3(Color3::new(r, g, b)))
+        })?,
+    )?;
+    library.raw_set(
+        "fromHSV",
+        lua.create_function(|_, (h, s, v): (f64, f64, f64)| {
+            Ok(LuaColor3::from_hsv(h as f32, s as f32, v as f32))
+        })?,
+    )?;
+    library.raw_set(
+        "fromHex",
+        lua.create_function(|_, hex: String| {
+            LuaColor3::from_hex(&hex).ok_or_else(|| {
+                mlua::Error::runtime(format!(
+                    "Color3.fromHex takes six hex digits such as \"#ff8000\" (or three, such as \"#f80\"), not \"{hex}\""
+                ))
+            })
         })?,
     )?;
     Ok(library)

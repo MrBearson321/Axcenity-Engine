@@ -432,6 +432,24 @@ impl Writer {
                 let (object, value) = (target(t)?, self.expression(offset)?);
                 self.line(format!("{object}.Position = {object}.Position + {value}"));
             }
+            BlockKind::LookAt {
+                target: t,
+                position,
+            } => {
+                let (object, value) = (target(t)?, self.expression(position)?);
+                self.line(format!(
+                    "{object}.CFrame = CFrame.lookAt({object}.Position, {value})"
+                ));
+            }
+            BlockKind::MoveForward {
+                target: t,
+                distance,
+            } => {
+                let (object, value) = (target(t)?, self.operand(distance)?);
+                self.line(format!(
+                    "{object}.Position = {object}.Position + {object}.CFrame.LookVector * {value}"
+                ));
+            }
             BlockKind::TurnTo {
                 target: t,
                 orientation,
@@ -712,20 +730,38 @@ impl Writer {
         Ok(())
     }
 
+    /// An expression as one side of an operator. Reporters inside other
+    /// reporters are bracketed, so `(a + b) * c` means what the blocks show.
+    fn operand(&self, expression: &Expression) -> Result<String, TranslateError> {
+        let text = self.expression(expression)?;
+        Ok(match expression {
+            Expression::Math { .. }
+            | Expression::Join { .. }
+            | Expression::Compare { .. }
+            | Expression::Logic { .. }
+            | Expression::Not { .. } => format!("({text})"),
+            _ => text,
+        })
+    }
+
+    /// An expression before a `:` method call, which needs a name or a call
+    /// there, so anything else is bracketed: `(a or b):IsA("Part")`.
+    fn receiver(&self, expression: &Expression) -> Result<String, TranslateError> {
+        let text = self.expression(expression)?;
+        Ok(match expression {
+            Expression::Variable { .. }
+            | Expression::TouchingPart
+            | Expression::Property { .. }
+            | Expression::Raycast { .. }
+            | Expression::Vector3 { .. }
+            | Expression::Color3 { .. }
+            | Expression::Lerp { .. } => text,
+            _ => format!("({text})"),
+        })
+    }
+
     pub(super) fn expression(&self, expression: &Expression) -> Result<String, TranslateError> {
-        // Reporters inside other reporters are bracketed, so `(a + b) * c`
-        // means what the blocks show.
-        let inner = |expression: &Expression| -> Result<String, TranslateError> {
-            let text = self.expression(expression)?;
-            Ok(match expression {
-                Expression::Math { .. }
-                | Expression::Join { .. }
-                | Expression::Compare { .. }
-                | Expression::Logic { .. }
-                | Expression::Not { .. } => format!("({text})"),
-                _ => text,
-            })
-        };
+        let inner = |expression: &Expression| self.operand(expression);
         let finite = |values: &[f64]| values.iter().all(|value| value.is_finite());
         Ok(match expression {
             Expression::Number { value } if value.is_finite() => number(*value),
@@ -766,6 +802,16 @@ impl Writer {
                 let (min, max) = (self.expression(min)?, self.expression(max)?);
                 format!("math.random(math.floor({min}), math.floor({max}))")
             }
+            Expression::RandomNumber { min, max } => {
+                let (min, max) = (self.expression(min)?, self.expression(max)?);
+                format!("Random.new():NextNumber({min}, {max})")
+            }
+            Expression::Lerp { from, to, alpha } => format!(
+                "{}:Lerp({}, {})",
+                self.receiver(from)?,
+                self.expression(to)?,
+                self.expression(alpha)?
+            ),
             Expression::Join { left, right } => {
                 let (left, right) = (self.expression(left)?, self.expression(right)?);
                 format!("tostring({left}) .. tostring({right})")
@@ -806,18 +852,8 @@ impl Writer {
                 animator,
                 parameter,
             } => format!("{}:GetNumber({})", target(animator)?, quote(parameter)),
-            // A method call needs a name or a call before the colon, so
-            // anything else is bracketed: `(a or b):IsA("Part")`.
             Expression::IsA { value, class } => {
-                let object = self.expression(value)?;
-                let object = match value.as_ref() {
-                    Expression::Variable { .. }
-                    | Expression::TouchingPart
-                    | Expression::Property { .. }
-                    | Expression::Raycast { .. } => object,
-                    _ => format!("({object})"),
-                };
-                format!("{object}:IsA({})", quote(class))
+                format!("{}:IsA({})", self.receiver(value)?, quote(class))
             }
             // Bracketed already where it needs to be (see `from_lua`).
             Expression::Code { code } => code.clone(),

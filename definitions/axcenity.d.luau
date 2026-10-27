@@ -21,6 +21,26 @@ declare extern type Vector3 with
 	function __mul(self, other: Vector3 | number): Vector3
 	function __div(self, other: Vector3 | number): Vector3
 	function __unm(self): Vector3
+	--- The dot product: the lengths multiplied, times the cosine of the angle between them.
+	function Dot(self, other: Vector3): number
+	--- A vector at right angles to both, as long as the area they span.
+	function Cross(self, other: Vector3): Vector3
+	--- The point `alpha` of the way from this vector to `goal` (0 is this one, 1 is `goal`).
+	function Lerp(self, goal: Vector3, alpha: number): Vector3
+	--- The angle to `other` in radians, from 0 to pi. With an `axis`, it's negative when turning to `other` goes clockwise looking down the axis.
+	function Angle(self, other: Vector3, axis: Vector3?): number
+	--- Whether each component is within `epsilon` (left out: 0.00001) of `other`'s.
+	function FuzzyEq(self, other: Vector3, epsilon: number?): boolean
+	--- The smallest of each component of this and the other vectors.
+	function Min(self, ...: Vector3): Vector3
+	--- The largest of each component of this and the other vectors.
+	function Max(self, ...: Vector3): Vector3
+	--- Each component without its sign.
+	function Abs(self): Vector3
+	--- Each component rounded down.
+	function Floor(self): Vector3
+	--- Each component rounded up.
+	function Ceil(self): Vector3
 end
 
 --- A point or size on the screen, in pixels, such as a ScrollingFrame's CanvasPosition.
@@ -34,7 +54,26 @@ declare extern type Vector2 with
 	function __add(self, other: Vector2): Vector2
 	function __sub(self, other: Vector2): Vector2
 	function __mul(self, other: Vector2 | number): Vector2
+	function __div(self, other: Vector2 | number): Vector2
 	function __unm(self): Vector2
+	--- The dot product: the lengths multiplied, times the cosine of the angle between them.
+	function Dot(self, other: Vector2): number
+	--- The point `alpha` of the way from this vector to `goal` (0 is this one, 1 is `goal`).
+	function Lerp(self, goal: Vector2, alpha: number): Vector2
+	--- The angle to `other` in radians, from 0 to pi. Signed, it's negative when `other` is anticlockwise from this one on the screen.
+	function Angle(self, other: Vector2, isSigned: boolean?): number
+	--- Whether each component is within `epsilon` (left out: 0.00001) of `other`'s.
+	function FuzzyEq(self, other: Vector2, epsilon: number?): boolean
+	--- The smallest of each component of this and the other vectors.
+	function Min(self, ...: Vector2): Vector2
+	--- The largest of each component of this and the other vectors.
+	function Max(self, ...: Vector2): Vector2
+	--- Each component without its sign.
+	function Abs(self): Vector2
+	--- Each component rounded down.
+	function Floor(self): Vector2
+	--- Each component rounded up.
+	function Ceil(self): Vector2
 end
 
 --- A color, with each channel from 0 to 1.
@@ -45,6 +84,68 @@ declare extern type Color3 with
 	G: number
 	--- Blue, from 0 to 1.
 	B: number
+	--- The color `alpha` of the way from this one to `goal` (0 is this one, 1 is `goal`).
+	function Lerp(self, goal: Color3, alpha: number): Color3
+	--- Hue, saturation and value, each from 0 to 1, as `Color3.fromHSV` takes them.
+	function ToHSV(self): (number, number, number)
+	--- Six lowercase hex digits without a `#`, such as `"ff8000"`.
+	function ToHex(self): string
+end
+
+--- A position and a rotation together. `part.CFrame` reads and writes the part's Position and Orientation; a CFrame isn't saved.
+declare extern type CFrame with
+	--- Where it is.
+	Position: Vector3
+	--- The position's X.
+	X: number
+	--- The position's Y.
+	Y: number
+	--- The position's Z.
+	Z: number
+	--- The same turn at the origin.
+	Rotation: CFrame
+	--- The way its front faces (its -Z), one stud long.
+	LookVector: Vector3
+	--- Its right side (its +X), one stud long.
+	RightVector: Vector3
+	--- Its top (its +Y), one stud long.
+	UpVector: Vector3
+	function __mul(self, other: CFrame): CFrame
+	function __mul(self, other: Vector3): Vector3
+	function __add(self, other: Vector3): CFrame
+	function __sub(self, other: Vector3): CFrame
+	--- The CFrame that undoes this one: `cf * cf:Inverse()` is `CFrame.identity`.
+	function Inverse(self): CFrame
+	--- The CFrame `alpha` of the way to `goal`: the position in a straight line, and the rotation the short way round.
+	function Lerp(self, goal: CFrame, alpha: number): CFrame
+	--- `other`, given relative to this CFrame, in world space (`cf * other`).
+	function ToWorldSpace(self, other: CFrame): CFrame
+	--- `other`, given in world space, relative to this CFrame (`cf:Inverse() * other`).
+	function ToObjectSpace(self, other: CFrame): CFrame
+	--- A point given relative to this CFrame, in world space (`cf * point`).
+	function PointToWorldSpace(self, point: Vector3): Vector3
+	--- A point given in world space, relative to this CFrame.
+	function PointToObjectSpace(self, point: Vector3): Vector3
+	--- A direction given relative to this CFrame, turned into world space (the position doesn't count).
+	function VectorToWorldSpace(self, direction: Vector3): Vector3
+	--- A direction given in world space, turned into this CFrame's space (the position doesn't count).
+	function VectorToObjectSpace(self, direction: Vector3): Vector3
+	--- The angles around X, Y and Z in radians that `CFrame.fromEulerAnglesYXZ` takes: an `Orientation`, in radians.
+	function ToEulerAnglesYXZ(self): (number, number, number)
+end
+
+--- A random number generator from `Random.new(seed)`. The same seed gives the same numbers on every run and platform.
+declare extern type Random with
+	--- A number from `min` (left out: 0) up to `max` (left out: 1).
+	function NextNumber(self, min: number?, max: number?): number
+	--- A whole number from `min` to `max`, both included.
+	function NextInteger(self, min: number, max: number): number
+	--- A direction one stud long, every direction equally likely.
+	function NextUnitVector(self): Vector3
+	--- Puts the items of a list in a random order, in place.
+	function Shuffle(self, list: { any }): ()
+	--- A new generator that gives the same numbers this one would from here.
+	function Clone(self): Random
 end
 
 --- One UI axis as a scale and pixel offset.
@@ -670,9 +771,15 @@ declare extern type Part extends Instance with
 	Emission: number
 	--- Studs one copy of a SurfaceAppearance's textures covers. 0 leaves the shape's own coordinates unscaled.
 	TileSize: number
+	--- Its Position and Orientation as one CFrame. Setting it sets both; it isn't saved itself.
+	CFrame: CFrame
 	--- Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.
 	Touched: Signal
 	[string]: any
+	--- Where it turns and moves from: a part's own CFrame, or for a Model the centre of the box around its parts, unturned.
+	function GetPivot(self): CFrame
+	--- Moves and turns it so its pivot is at `target`. A Model's parts all move together and keep their places relative to each other.
+	function PivotTo(self, target: CFrame): ()
 end
 
 --- A solid 3D model imported from a glTF or FBX file, drawn with the file's own materials (or its SurfaceAppearances'). It collides as the model's convex hull.
@@ -697,9 +804,15 @@ declare extern type MeshPart extends Instance with
 	CanCollide: boolean
 	--- If true and the part isn't anchored, workspace.GlobalWind pushes it, harder for parts with bigger faces.
 	WindAffected: boolean
+	--- Its Position and Orientation as one CFrame. Setting it sets both; it isn't saved itself.
+	CFrame: CFrame
 	--- Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.
 	Touched: Signal
 	[string]: any
+	--- Where it turns and moves from: a part's own CFrame, or for a Model the centre of the box around its parts, unturned.
+	function GetPivot(self): CFrame
+	--- Moves and turns it so its pivot is at `target`. A Model's parts all move together and keep their places relative to each other.
+	function PivotTo(self, target: CFrame): ()
 end
 
 --- Lua code that runs on the server, from a `.server.lua` file.
@@ -740,6 +853,10 @@ end
 --- Groups the parts of one thing, such as a car or a house.
 declare extern type Model extends Instance with
 	[string]: any
+	--- Where it turns and moves from: a part's own CFrame, or for a Model the centre of the box around its parts, unturned.
+	function GetPivot(self): CFrame
+	--- Moves and turns it so its pivot is at `target`. A Model's parts all move together and keep their places relative to each other.
+	function PivotTo(self, target: CFrame): ()
 end
 
 --- Groups Instances to keep the tree tidy. Has no effect on the game.
@@ -1853,6 +1970,16 @@ declare Instance: InstanceLibrary
 
 --- Creates Vector3 values.
 declare extern type Vector3Library with
+	--- (0, 0, 0).
+	zero: Vector3
+	--- (1, 1, 1).
+	one: Vector3
+	--- (1, 0, 0).
+	xAxis: Vector3
+	--- (0, 1, 0): up.
+	yAxis: Vector3
+	--- (0, 0, 1).
+	zAxis: Vector3
 	--- A new Vector3. Left-out components are 0.
 	new: (x: number?, y: number?, z: number?) -> Vector3
 end
@@ -1862,6 +1989,14 @@ declare Vector3: Vector3Library
 
 --- Creates Vector2 values.
 declare extern type Vector2Library with
+	--- (0, 0).
+	zero: Vector2
+	--- (1, 1).
+	one: Vector2
+	--- (1, 0).
+	xAxis: Vector2
+	--- (0, 1).
+	yAxis: Vector2
 	--- A new Vector2. Left-out components are 0.
 	new: (x: number?, y: number?) -> Vector2
 end
@@ -1875,10 +2010,42 @@ declare extern type Color3Library with
 	new: (r: number?, g: number?, b: number?) -> Color3
 	--- A color from channels between 0 and 255, as in most paint programs.
 	fromRGB: (r: number?, g: number?, b: number?) -> Color3
+	--- A color from hue, saturation and value, each from 0 to 1. Hue goes round the color wheel from red (0) through green (1/3) and blue (2/3) back to red (1).
+	fromHSV: (hue: number, saturation: number, value: number) -> Color3
+	--- A color from six hex digits such as `"#ff8000"` or three such as `"#f80"`, with or without the `#`.
+	fromHex: (hex: string) -> Color3
 end
 
 --- Creates Color3 values.
 declare Color3: Color3Library
+
+--- Creates CFrame values.
+declare extern type CFrameLibrary with
+	--- At the origin with no turn.
+	identity: CFrame
+	--- A CFrame at a position with no turn: `CFrame.new()`, `CFrame.new(position)` or `CFrame.new(x, y, z)`.
+	new: (x: (number | Vector3)?, y: number?, z: number?) -> CFrame
+	--- A CFrame at `at` whose front (LookVector) faces `target`, with its top as close to `up` (left out: straight up) as it can be.
+	lookAt: (at: Vector3, target: Vector3, up: Vector3?) -> CFrame
+	--- A turn by these angles in radians around X, then Y, then Z, such as `CFrame.Angles(0, math.rad(90), 0)`.
+	Angles: (rx: number?, ry: number?, rz: number?) -> CFrame
+	--- The turn an `Orientation` stands for, in radians: around Z, then X, then Y.
+	fromEulerAnglesYXZ: (rx: number?, ry: number?, rz: number?) -> CFrame
+	--- A turn by `angle` radians around `axis`.
+	fromAxisAngle: (axis: Vector3, angle: number) -> CFrame
+end
+
+--- Creates CFrame values.
+declare CFrame: CFrameLibrary
+
+--- Creates random number generators.
+declare extern type RandomLibrary with
+	--- A generator. The same `seed` gives the same numbers on every run and platform; left out, each generator is different.
+	new: (seed: number?) -> Random
+end
+
+--- Creates random number generators.
+declare Random: RandomLibrary
 
 --- Creates UI positions and sizes.
 declare extern type UDim2Library with

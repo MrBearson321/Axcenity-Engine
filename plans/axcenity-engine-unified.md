@@ -1019,11 +1019,11 @@ Blocks cover the common cases: "look at", "move forward by", "lerp", "random num
 
 ### Acceptance criteria
 
-- [ ] `part.CFrame = CFrame.lookAt(part.Position, target.Position)` makes the part's `LookVector` point at the target. Reading `Orientation` back gives the same angles that setting them directly would.
-- [ ] `model:PivotTo(model:GetPivot() * CFrame.Angles(0, math.rad(90), 0))` turns the whole Model around its pivot, and its parts keep their offsets.
-- [ ] A CFrame tween from 0° to 350° about Y takes the short way round.
-- [ ] `Random.new(42)` gives the same sequence on every run and platform.
-- [ ] A saved world is byte-for-byte the same before and after a script reads and writes `CFrame` without changing anything.
+- [x] `part.CFrame = CFrame.lookAt(part.Position, target.Position)` makes the part's `LookVector` point at the target. Reading `Orientation` back gives the same angles that setting them directly would.
+- [x] `model:PivotTo(model:GetPivot() * CFrame.Angles(0, math.rad(90), 0))` turns the whole Model around its pivot, and its parts keep their offsets.
+- [x] A CFrame tween from 0° to 350° about Y takes the short way round.
+- [x] `Random.new(42)` gives the same sequence on every run and platform.
+- [x] A saved world is byte-for-byte the same before and after a script reads and writes `CFrame` without changing anything.
 
 ---
 

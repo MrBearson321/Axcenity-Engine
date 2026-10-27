@@ -453,6 +453,12 @@ fn write() -> Writer {
         } else {
             w.top(ApiKind::Library, global, global.to_owned(), library.doc);
         }
+        for constant in library.constants {
+            w.doc("\t", constant.doc);
+            w.line(&format!("\t{}: {}", constant.name, constant.ty));
+            let signature = format!("{global}.{}: {}", constant.name, constant.ty);
+            w.entry(ApiKind::Property, constant.name, signature, constant.doc);
+        }
         for function in library.functions {
             let doc = with_side(function.name, function.doc);
             w.doc("\t", &doc);

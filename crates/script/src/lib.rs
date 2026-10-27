@@ -35,6 +35,7 @@
 //!   new code runs against the same world.
 
 mod api;
+mod cframe;
 mod changes;
 mod client;
 mod console;
@@ -46,6 +47,7 @@ mod events;
 mod instance;
 mod localization;
 mod modules;
+mod random;
 mod remote;
 mod run_service;
 mod sandbox;
@@ -887,3 +889,6 @@ mod save_tests;
 
 #[cfg(test)]
 mod user_settings_tests;
+
+#[cfg(test)]
+mod cframe_tests;
