@@ -390,6 +390,7 @@ pub fn pivot_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, ml
         ClassName::MeshPart,
         ClassName::Seat,
         ClassName::VehicleSeat,
+        ClassName::DamageZone,
         ClassName::Model,
     ] {
         methods.push((class, "GetPivot", get_pivot.clone()));

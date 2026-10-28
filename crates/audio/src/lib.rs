@@ -320,6 +320,7 @@ fn emitter_position(world: &World, sound: InstanceId, fallback: [f32; 3]) -> [f3
                 | ClassName::MeshPart
                 | ClassName::Seat
                 | ClassName::VehicleSeat
+                | ClassName::DamageZone
                 | ClassName::Terrain
         ) && instance.property("Position").is_some()
         {

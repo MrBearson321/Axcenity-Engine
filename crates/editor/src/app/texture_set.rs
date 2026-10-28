@@ -108,7 +108,7 @@ impl EditorApp {
             return false;
         };
         match class {
-            ClassName::Part | ClassName::Seat | ClassName::VehicleSeat => {
+            ClassName::Part | ClassName::Seat | ClassName::VehicleSeat | ClassName::DamageZone => {
                 self.apply_part(id, set, moves, properties)
             }
             ClassName::MeshPart => self.apply_mesh(id, set, moves, properties),

@@ -111,6 +111,7 @@ impl EditorApp {
                         | ClassName::MeshPart
                         | ClassName::Seat
                         | ClassName::VehicleSeat
+                        | ClassName::DamageZone
                 )
             });
             // A character has one controller or the other. One that already
@@ -135,6 +136,22 @@ impl EditorApp {
         }
         if what == Insertable::NavigationAgent {
             self.insert_agent(near.or(self.selected));
+            return;
+        }
+        // A Health belongs to the Model the selection is, or is in.
+        if what == Insertable::Health {
+            let model = tree::model_of(&self.world, near.or(self.selected));
+            if model.is_none() {
+                self.output.warning(
+                    "A Health works inside a Model: select a character (or a part of one) \
+                     and insert it again, or move this one into a Model.",
+                );
+            }
+            self.insert_named(what, model, what.class().as_str(), Vec::new());
+            return;
+        }
+        if what == Insertable::HealthBar {
+            self.insert_health_bar(near.or(self.selected));
             return;
         }
         // The whole car is one undo step.
@@ -279,6 +296,7 @@ impl EditorApp {
                         | ClassName::MeshPart
                         | ClassName::Seat
                         | ClassName::VehicleSeat
+                        | ClassName::DamageZone
                         | ClassName::Model
                 )
             });
@@ -311,6 +329,7 @@ impl EditorApp {
                     | ClassName::MeshPart
                     | ClassName::Seat
                     | ClassName::VehicleSeat
+                    | ClassName::DamageZone
             )
         });
         let holder = if has_body {
@@ -366,6 +385,102 @@ impl EditorApp {
         let place = Place { parent, index: end };
         if self.place(id, Some(place), format!("Insert {name}")) {
             self.select_from_viewport(Some(id));
+        }
+    }
+    /// Insert > UI > Health bar: a billboard over the nearest Health's
+    /// character and a HUD bar, both bound to that Health, styled by
+    /// `health-bar.css` (made if no stylesheet has `.health-bar`). The
+    /// Instances and the stylesheet are one undo step.
+    fn insert_health_bar(&mut self, near: Option<InstanceId>) {
+        let position = self.insert_position();
+        let health = tree::nearest_health(&self.world, near, position);
+        let made = tree::health_bar(&mut self.world, health);
+        let mut moves = Vec::new();
+        let mut put = |world: &mut World, id: InstanceId, parent: InstanceId| {
+            let name = world
+                .get(id)
+                .map(|i| i.name().to_owned())
+                .unwrap_or_default();
+            let name = tree::unique_name(world, parent, &name);
+            world.set_name(id, &name).expect("just made");
+            let index = world.get(parent).map_or(0, |p| p.children().len());
+            let place = Place { parent, index };
+            if history::put(world, id, Some(place)).is_ok() {
+                moves.push(Move {
+                    id,
+                    before: None,
+                    after: Some(place),
+                });
+            }
+        };
+        if let Some((billboard, part)) = made.billboard {
+            put(&mut self.world, billboard, part);
+        }
+        let workspace = self.world.workspace();
+        put(&mut self.world, made.hud, workspace);
+        let texts = self.health_bar_styles().into_iter().collect();
+        self.history.record_files_and_tree(
+            &mut self.world,
+            "Insert Health bar".to_owned(),
+            texts,
+            moves,
+        );
+        self.history.seal();
+        match health {
+            Some(health) => {
+                let name = self.world.get(health).and_then(|h| h.parent());
+                let name = name
+                    .and_then(|model| self.world.get(model))
+                    .map_or("its Model", |model| model.name())
+                    .to_owned();
+                self.output.info(format!(
+                    "The health bars follow the Health in {name}. To follow another, set the \
+                     Value of the ObjectValue named Health inside each bar."
+                ));
+            }
+            None => self.output.warning(
+                "There's no Health in the Workspace, so the HUD bar follows nothing and no \
+                 billboard was made. Insert a Health into a character, then set the Value of \
+                 the ObjectValue named Health inside the bar.",
+            ),
+        }
+        self.select_from_viewport(Some(made.hud));
+    }
+    /// `health-bar.css` with the health bars' styles, made unless a
+    /// stylesheet already has a `.health-bar` rule. `None` when nothing was
+    /// made (or there's no project to make it in).
+    fn health_bar_styles(&mut self) -> Option<history::TextChange> {
+        let project = self.project.as_ref()?;
+        let selector = format!(".{}", tree::HEALTH_BAR_CLASS);
+        let styled = project
+            .stylesheets
+            .iter()
+            .any(|sheet| sheet.rule_end(&selector).is_some());
+        if styled {
+            return None;
+        }
+        let folder = project.folder.clone();
+        let source = tree::HEALTH_BAR_CSS;
+        match axcenity_project::create_stylesheet(&folder, tree::HEALTH_BAR_CLASS, source) {
+            Ok(path) => {
+                if let Some(project) = &mut self.project {
+                    project
+                        .stylesheet_texts
+                        .insert(path.clone(), source.to_owned());
+                }
+                self.refresh_stylesheet(&path, source);
+                self.tabs.open_in_background(&path, source);
+                Some(history::TextChange {
+                    path,
+                    before: None,
+                    after: Some(source.to_owned()),
+                })
+            }
+            Err(err) => {
+                self.output
+                    .error(format!("Could not make the health bar's stylesheet: {err}"));
+                None
+            }
         }
     }
     /// The Weld button: welds the selected parts (and the parts inside

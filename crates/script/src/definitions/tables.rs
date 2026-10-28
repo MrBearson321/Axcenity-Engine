@@ -1826,6 +1826,24 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
         },
     ),
     (
+        ClassName::Health,
+        Function {
+            name: "TakeDamage",
+            doc: "Takes `amount` from Health (never below 0), unless it's Invulnerable or already dead. Fires HealthChanged, then Damaged with `amount` and `source`, then Died if it reached 0. Starts the RegenDelay wait again.",
+            params: &[("amount", "number"), ("source", "Instance?")],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::Health,
+        Function {
+            name: "Heal",
+            doc: "Adds `amount` to Health, up to MaxHealth, and fires HealthChanged. Does nothing once it's dead (Health 0): set Health to bring it back.",
+            params: &[("amount", "number")],
+            returns: "()",
+        },
+    ),
+    (
         ClassName::Ragdoll,
         Function {
             name: "ApplyImpulse",

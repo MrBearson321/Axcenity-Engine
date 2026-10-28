@@ -345,6 +345,25 @@ impl EditorApp {
                         clicks.insert = Some(what);
                     }
                 }
+                for what in Insertable::HEALTH {
+                    let hint = if what == Insertable::Health {
+                        "Insert a Health into the selected character's Model: how much it \
+                         can take. Scripts call TakeDamage and Heal, and it fires Died once \
+                         at 0. Turn on FallDamage to hurt it when it lands hard."
+                    } else {
+                        "Insert a Damage Zone: a see-through part that takes DamagePerSecond \
+                         from every Health whose Model is inside it during Play."
+                    };
+                    let button = RibbonButton::new(theme::insert_icon(what), what.label());
+                    if ui
+                        .add_enabled(!playing, button)
+                        .on_hover_text(hint)
+                        .on_disabled_hover_text("Press Stop to edit.")
+                        .clicked()
+                    {
+                        clicks.insert = Some(what);
+                    }
+                }
                 for what in Insertable::SEATS {
                     let button = RibbonButton::new(theme::insert_icon(what), what.label());
                     if ui
@@ -514,6 +533,7 @@ impl EditorApp {
                         Insertable::ScrollingFrame => "Scroll",
                         Insertable::ProgressBar => "Progress",
                         Insertable::BillboardGui => "Billboard",
+                        Insertable::HealthBar => "Health Bar",
                         _ => what.label(),
                     };
                     let hover = match what {
@@ -533,6 +553,12 @@ impl EditorApp {
                         Insertable::BillboardGui => {
                             "Insert a BillboardGui into the selected part. It floats in the \
                              world and is drawn with the screen UI."
+                                .to_owned()
+                        }
+                        Insertable::HealthBar => {
+                            "Insert health bars: one floating over the nearest character with \
+                             a Health, and one at the top left of the screen. Both follow that \
+                             Health with no script, styled by health-bar.css."
                                 .to_owned()
                         }
                         _ => format!(

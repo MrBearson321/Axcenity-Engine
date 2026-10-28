@@ -1,0 +1,11 @@
+/* Insert > UI > Health bar. A ProgressBar with an ObjectValue named
+   Health inside it shows that Health out of its MaxHealth. */
+.health-bar {
+  background-color: #1d1d22;
+  border: 2px solid #0b0b0d;
+  border-radius: 5px;
+}
+.health-bar::fill {
+  background-color: #46c35a;
+  border-radius: 3px;
+}

@@ -2092,6 +2092,51 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "The pieces' file, which Generate writes: `<name>.fracture.glb` next to the MeshPart's model, or in `assets/models` for a Part. Empty until it's generated; the part can't shatter until then.",
     ),
     (
+        ClassName::Health,
+        "MaxHealth",
+        "The most Health it can have. Heal and regeneration stop here, and lowering it lowers a Health above it.",
+    ),
+    (
+        ClassName::Health,
+        "Health",
+        "How much is left, 0 to MaxHealth. Setting it fires HealthChanged (and Died, if it reaches 0). At 0 the Model is dead: damage and Heal do nothing, and it doesn't regenerate, until a script sets Health again.",
+    ),
+    (
+        ClassName::Health,
+        "RegenRate",
+        "Health a second won back once RegenDelay seconds pass without damage, up to MaxHealth. 0 never regenerates.",
+    ),
+    (
+        ClassName::Health,
+        "RegenDelay",
+        "Seconds without damage before it starts regenerating. Any damage, from TakeDamage, a DamageZone or a fall, starts the wait again.",
+    ),
+    (
+        ClassName::Health,
+        "Invulnerable",
+        "If true, TakeDamage, DamageZones and falls do nothing to it. Heal still heals.",
+    ),
+    (
+        ClassName::Health,
+        "FallDamage",
+        "If true, the character controller in its Model loses health when it lands faster than FallDamageThreshold: FallDamageScale for each stud a second over it. Off by default.",
+    ),
+    (
+        ClassName::Health,
+        "FallDamageThreshold",
+        "Studs a second a character can land at without damage. At the default Gravity, 60 is a fall of about 9 studs; a jump lands at about 53.",
+    ),
+    (
+        ClassName::Health,
+        "FallDamageScale",
+        "Health lost for each stud a second a landing is over FallDamageThreshold.",
+    ),
+    (
+        ClassName::DamageZone,
+        "DamagePerSecond",
+        "Health a second taken from every Health whose Model has a part inside the zone (once each, however many of its parts are in). The damage's source is the zone. 0 or less does nothing.",
+    ),
+    (
         ClassName::FirstPersonController,
         "EyeHeight",
         "How far above the character's feet its eyes are, in studs. The camera sits there during Play.",
@@ -3518,6 +3563,31 @@ pub(super) const EVENT_DOCS: &[(ClassName, &str, &str)] = &[
         "Fires when the character sits down (true and the Seat) or stands up (false and the Seat it left).",
     ),
     (
+        ClassName::ThirdPersonController,
+        "Landed",
+        "Fires when the character lands, with how fast it was falling in studs a second. A Health in its Model with FallDamage on takes its damage first.",
+    ),
+    (
+        ClassName::FirstPersonController,
+        "Landed",
+        "Fires when the character lands, with how fast it was falling in studs a second. A Health in its Model with FallDamage on takes its damage first.",
+    ),
+    (
+        ClassName::Health,
+        "HealthChanged",
+        "Fires whenever Health changes: damage, Heal, regeneration or a script setting it. The handler gets the new health and the old.",
+    ),
+    (
+        ClassName::Health,
+        "Damaged",
+        "Fires when it takes damage, after HealthChanged. The handler gets how much health it lost and what did it: the `source` given to TakeDamage, the DamageZone, or nil (a fall, or no source).",
+    ),
+    (
+        ClassName::Health,
+        "Died",
+        "Fires once when Health reaches 0, after HealthChanged, however many hits landed that frame. Nothing else happens to the Model: scripts decide what dying does. It can fire again only after a script sets Health above 0.",
+    ),
+    (
         ClassName::NavigationAgent,
         "PlayerSensed",
         "Fires when the agent starts seeing or hearing the player character. The handler gets the sense: \"Sight\" or \"Hearing\".",
@@ -3645,6 +3715,12 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::Ragdoll => {
             "A ragdoll for the skinned MeshPart it's in: a capsule Part per main bone, named after the bone, and a BallSocketConstraint per joint, which Build (in its Properties) makes from the skeleton with a humanoid preset's limits. While Enabled, physics moves the capsules and they pose the bones; otherwise they follow the animation and physics leaves them out."
+        }
+        ClassName::Health => {
+            "How much a Model can take: Health out of MaxHealth, put in any Model. TakeDamage, DamageZones and falls (with FallDamage on) lower it; Heal and regeneration (RegenRate, after RegenDelay seconds without damage) raise it. At 0 it fires Died once and the Model is left for scripts to handle."
+        }
+        ClassName::DamageZone => {
+            "A Part that hurts: every Health whose Model has a part inside it loses DamagePerSecond a second, with the zone as the source. Anchored, half see-through and walked through (CanCollide off) by default. Everything a Part has, and DamagePerSecond."
         }
         ClassName::Fracture => {
             "Breaks the Part or MeshPart it's in into pieces. Generate (in its Properties) cuts the part into Pieces convex pieces by Seed and Pattern and saves them as `<name>.fracture.glb`. During Play, something hitting the part faster than Threshold, or `Shatter`, replaces the part with its pieces, which fly from the point and fade out after DebrisLifetime."

@@ -170,6 +170,12 @@ struct Fall {
     /// Studs a second, up positive.
     velocity: f32,
     grounded: bool,
+    /// True once it has been in the air for a slice: jumped, walked off an
+    /// edge or fell without landing. Only such a fall fires `Landed`, so
+    /// settling onto the ground when Play starts doesn't.
+    airborne: bool,
+    /// How fast it was falling when it last landed, until `step` takes it.
+    landed: Option<f32>,
 }
 
 /// How a crouched character stood, to put back when it stands: each part's
@@ -272,6 +278,8 @@ pub struct Controllers {
     /// The controllers whose characters sit on a seat.
     seated: BTreeMap<InstanceId, seat::Seated>,
     seat_changes: Vec<SeatChange>,
+    /// Controllers that landed, with how fast they were falling (Phase 43).
+    landings: Vec<(InstanceId, f32)>,
     /// The controller that last received input, if it is still in the world.
     active: Option<InstanceId>,
 }
@@ -346,6 +354,7 @@ impl Controllers {
                 // lower gravity characters jump higher, as parts fly.
                 fall.velocity = (2.0 * GRAVITY * limits.jump_height).sqrt();
                 fall.grounded = false;
+                fall.airborne = true;
             }
             let mut speed = speed_of(world, id, input.run);
             if self.crouches.contains_key(&id) {
@@ -357,8 +366,18 @@ impl Controllers {
                 let (sx, sz) = (dx / slices, dz / slices);
                 move_slice(world, assets, &mut body, &limits, fall, sx, sz, dt / slices);
             }
+            if let Some(speed) = fall.landed.take() {
+                self.landings.push((id, speed));
+            }
         }
         self.view(world)
+    }
+
+    /// The controllers that landed since the last call, each with how fast
+    /// it was falling in studs a second. Hosts fire `Landed` with
+    /// `ScriptRuntime::fire_landed`, which also applies fall damage.
+    pub fn take_landings(&mut self) -> Vec<(InstanceId, f32)> {
+        std::mem::take(&mut self.landings)
     }
 
     /// The mode `Movement` names. Remembers a built-in one, and puts it back
@@ -524,6 +543,7 @@ pub fn body_parts(world: &World, holder: InstanceId) -> Vec<InstanceId> {
             | ClassName::MeshPart
             | ClassName::Seat
             | ClassName::VehicleSeat
+            | ClassName::DamageZone
     );
     if !character {
         return Vec::new();
@@ -852,6 +872,7 @@ fn move_slice(
             None => {
                 fall.grounded = false;
                 fall.velocity = 0.0;
+                fall.airborne = true;
             }
         }
     }
@@ -1071,10 +1092,17 @@ fn fly(
         match landing {
             Some(to) => {
                 body.shift(world, 0.0, to, 0.0);
+                if fall.airborne {
+                    fall.landed = Some(-fall.velocity);
+                }
                 fall.grounded = true;
+                fall.airborne = false;
                 fall.velocity = 0.0;
             }
-            None => body.shift(world, 0.0, dy, 0.0),
+            None => {
+                body.shift(world, 0.0, dy, 0.0);
+                fall.airborne = true;
+            }
         }
     }
 }

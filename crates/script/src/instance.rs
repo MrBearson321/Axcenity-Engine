@@ -294,6 +294,7 @@ fn set(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> mlua::Result
                 "{key} is read-only: it's where the constraint's attachments are now"
             )))
         }
+        "Health" if class == Some(ClassName::Health) => crate::health::set(lua, id, value),
         "Occupant" if class.is_some_and(ClassName::is_seat) => {
             Err(mlua::Error::runtime(crate::seat::OCCUPANT_READ_ONLY))
         }

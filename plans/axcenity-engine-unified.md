@@ -1398,10 +1398,10 @@ A **Ragdoll** Instance under a skinned Model.
 
 ### Acceptance criteria
 
-- [ ] Standing in a DamageZone lowers Health at its rate, and leaving starts regeneration after `RegenDelay`.
-- [ ] `Died` fires once at 0, even when several hits land in one frame.
-- [ ] A fall above the threshold damages the character in proportion to its speed.
-- [ ] The inserted health bars follow Health with no script.
+- [x] Standing in a DamageZone lowers Health at its rate, and leaving starts regeneration after `RegenDelay`.
+- [x] `Died` fires once at 0, even when several hits land in one frame.
+- [x] A fall above the threshold damages the character in proportion to its speed.
+- [x] The inserted health bars follow Health with no script.
 
 ---
 

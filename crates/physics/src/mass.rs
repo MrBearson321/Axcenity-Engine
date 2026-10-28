@@ -29,7 +29,11 @@ pub struct Mass {
 fn part(world: &World, assets: &Assets, id: InstanceId) -> Option<(MassProperties, Pose)> {
     if !matches!(
         world.get(id)?.class(),
-        ClassName::Part | ClassName::MeshPart | ClassName::Seat | ClassName::VehicleSeat
+        ClassName::Part
+            | ClassName::MeshPart
+            | ClassName::Seat
+            | ClassName::VehicleSeat
+            | ClassName::DamageZone
     ) {
         return None;
     }

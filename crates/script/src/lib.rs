@@ -56,6 +56,7 @@ mod definitions;
 mod errors;
 mod events;
 mod gui_service;
+mod health;
 mod http;
 mod input;
 mod instance;
@@ -194,6 +195,8 @@ pub struct ScriptRuntime {
     particle_emits: Vec<(InstanceId, u32)>,
     /// Shatters waiting for the game host's physics.
     shatters: Vec<Shatter>,
+    /// Every Health's regeneration wait, and their events waiting to fire.
+    health: health::Healths,
     /// Whether the error for change events that never stop has been shown,
     /// so it's shown once rather than every frame.
     reported_change_loop: bool,
@@ -242,6 +245,7 @@ impl ScriptRuntime {
             sound_actions: Vec::new(),
             particle_emits: Vec::new(),
             shatters: Vec::new(),
+            health: health::Healths::default(),
             reported_change_loop: false,
             saves,
             started: Vec::new(),
@@ -552,6 +556,58 @@ impl ScriptRuntime {
         }
     }
 
+    /// Frame step 1, after [`fire_seated`](Self::fire_seated): for each
+    /// character controller that landed this frame and how fast it was
+    /// falling, the Health in its Model takes fall damage (if its
+    /// `FallDamage` is on), then `Landed(fallSpeed)` fires, in Scripts and
+    /// then in LocalScripts (Phase 43).
+    pub fn fire_landed(&mut self, world: &mut World, landings: &[(InstanceId, f32)]) {
+        self.fire_changes(world);
+        for &(controller, speed) in landings {
+            let events = health::fall_damage(world, controller, f64::from(speed));
+            self.health.pending.extend(events);
+            self.fire_changes(world);
+            for side in [Side::Server, Side::Client] {
+                self.context(side)
+                    .fire_landed(world, controller, f64::from(speed));
+                self.collect(side);
+                self.fire_changes(world);
+            }
+        }
+    }
+
+    /// Frame-order step 4, after [`fire_breaks`](Self::fire_breaks) and
+    /// before `Heartbeat` (Phase 43): DamageZones damage the Healths with
+    /// parts inside them, Healths regenerate, their events fire, and health
+    /// bars (ProgressBars bound to a Health) show where they are now.
+    pub fn step_health(&mut self, world: &mut World, seconds: f64) {
+        self.fire_changes(world);
+        let assets = self.server.assets();
+        let events = self.health.step(world, &assets, seconds);
+        self.health.pending.extend(events);
+        self.fire_changes(world);
+        health::bind_bars(world);
+        self.fire_changes(world);
+    }
+
+    /// Fires the Health events scripts and the health step queued, on both
+    /// sides, noting damage for regeneration. Handlers that cause more fire
+    /// those too, for up to [`MAX_CHANGE_ROUNDS`] rounds.
+    fn fire_health_events(&mut self, world: &mut World) {
+        for _ in 0..MAX_CHANGE_ROUNDS {
+            if self.health.pending.is_empty() {
+                return;
+            }
+            let events = std::mem::take(&mut self.health.pending);
+            self.health.note(&events);
+            for side in [Side::Server, Side::Client] {
+                self.context(side).fire_health_events(world, &events);
+                self.collect(side);
+                self.fire_change_rounds(world);
+            }
+        }
+    }
+
     fn fire_touch_event(
         &mut self,
         world: &mut World,
@@ -704,6 +760,7 @@ impl ScriptRuntime {
     /// that are now where scripts run start.
     pub fn fire_changes(&mut self, world: &mut World) {
         self.fire_change_rounds(world);
+        self.fire_health_events(world);
         self.stop_destroyed_scripts(world);
         self.start_clones(world);
     }
@@ -928,6 +985,7 @@ impl ScriptRuntime {
         self.sound_actions.extend(context.take_sound_actions());
         self.particle_emits.extend(context.take_particle_emits());
         self.shatters.extend(context.take_shatters());
+        self.health.pending.extend(context.take_health_events());
         for (copy, original) in context.take_cloned_scripts() {
             // A clone of a clone that hasn't started yet has its code too.
             let code = self
@@ -1093,6 +1151,8 @@ mod assembly_tests;
 mod collection_tests;
 #[cfg(test)]
 mod data_tests;
+#[cfg(test)]
+mod health_tests;
 #[cfg(test)]
 mod joint_tests;
 #[cfg(test)]

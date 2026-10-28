@@ -319,6 +319,15 @@ fn fire_seated(scripts: &mut ScriptRuntime, world: &mut World, characters: &mut 
     }
 }
 
+/// Fires `Landed` on each controller whose character just landed, after
+/// fall damage (Phase 43).
+fn fire_landed(scripts: &mut ScriptRuntime, world: &mut World, characters: &mut Controllers) {
+    let landings = characters.take_landings();
+    if !landings.is_empty() {
+        scripts.fire_landed(world, &landings);
+    }
+}
+
 /// Fires `PlayerSensed` on each agent that has just started seeing or
 /// hearing the player character, with the sense's name.
 fn fire_sensed(scripts: &mut ScriptRuntime, world: &mut World, agents: &mut Agents) {
@@ -1105,6 +1114,7 @@ impl ApplicationHandler for App {
                 self.characters
                     .step(&mut self.world, &self.assets, motion, seconds);
                 fire_seated(&mut self.scripts, &mut self.world, &mut self.characters);
+                fire_landed(&mut self.scripts, &mut self.world, &mut self.characters);
                 // Then navigation agents, toward their destinations.
                 self.agents.step(&mut self.world, &self.assets, seconds);
                 for warning in self.agents.take_warnings() {
@@ -1148,6 +1158,10 @@ impl ApplicationHandler for App {
                 //    Then `Broken` and `Shattered`, for joints and parts
                 //    that broke.
                 self.scripts.fire_breaks(&mut self.world, &mut self.physics);
+                //    Then damage zones and regeneration, and health bars
+                //    follow their Health.
+                self.scripts
+                    .step_health(&mut self.world, f64::from(seconds));
                 self.scripts.heartbeat(&mut self.world, f64::from(seconds));
                 print_output(&mut self.scripts);
                 let heard = listener_of_view(self.shown_view());
@@ -1347,6 +1361,8 @@ mod destruction_tests;
 #[cfg(test)]
 mod physics_tests;
 
+#[cfg(test)]
+mod health_tests;
 #[cfg(test)]
 mod ragdoll_tests;
 #[cfg(test)]

@@ -1545,6 +1545,89 @@ declare extern type VehicleSeat extends Instance with
 	function GetMass(self): number
 end
 
+--- A Part that hurts: every Health whose Model has a part inside it loses DamagePerSecond a second, with the zone as the source. Anchored, half see-through and walked through (CanCollide off) by default. Everything a Part has, and DamagePerSecond.
+declare extern type DamageZone extends Instance with
+	--- If true, the part stays where it is. If false, it falls and collides with other parts.
+	Anchored: boolean
+	--- Block, Ball, Cylinder (along X) or Wedge.
+	Shape: EnumPartType | "Block" | "Ball" | "Cylinder" | "Wedge" | "Capsule"
+	--- Where the part's center is, in studs. Setting it on an unanchored part teleports it and stops it moving.
+	Position: Vector3
+	--- Rotation in degrees around X, Y and Z, applied Z first, then X, then Y.
+	Orientation: Vector3
+	--- The part's size in studs along X, Y and Z.
+	Size: Vector3
+	--- The part's color.
+	Color: Color3
+	--- Plastic, Metal, Glass (see-through) or Neon (glows). Setting it resets Metalness and Roughness.
+	Material: EnumMaterial | "Plastic" | "Metal" | "Glass" | "Neon" | "Ice" | "Rubber"
+	--- A material file in the project, such as "assets/materials/brick.material.json", drawn in place of Material, Metalness, Roughness and Emission; Color tints it and Transparency fades it. A SurfaceAppearance inside the part wins over it. Empty for none.
+	MaterialVariant: string
+	--- From 0 (not metal) to 1 (metal).
+	Metalness: number
+	--- From 0 (mirror-smooth) to 1 (matte).
+	Roughness: number
+	--- If false, the part casts no sun shadow. It's still shaded by other parts' shadows.
+	CastShadow: boolean
+	--- From 0 (as solid as its material) to 1 (invisible).
+	Transparency: number
+	--- If false, other parts pass through it. It still fires Touched. An unanchored part that can't collide falls through the floor.
+	CanCollide: boolean
+	--- If true and the part isn't anchored, workspace.GlobalWind pushes it, harder for parts with bigger faces.
+	WindAffected: boolean
+	--- The color the part glows in when Emission is above 0.
+	EmissiveColor: Color3
+	--- How brightly the part glows in EmissiveColor: 0 is no glow, 1 as bright as a white surface in full light, higher values bloom.
+	Emission: number
+	--- Studs one copy of a SurfaceAppearance's textures covers. 0 leaves the shape's own coordinates unscaled.
+	TileSize: number
+	--- The collision group it's in, `"Default"` at first. Parts in two groups set not to collide (the Collision Groups window, or `PhysicsService:CollisionGroupSetCollidable`) pass through each other and don't touch. A name that isn't registered counts as Default.
+	CollisionGroup: string
+	--- If false, scripts' raycasts, shape casts and overlap queries (`workspace:Raycast`, `GetPartsInPart`, ...) pass it by. It still collides.
+	CanQuery: boolean
+	--- If false, it fires no Touched or TouchEnded, and touching it fires neither on other parts. It still collides.
+	CanTouch: boolean
+	--- If true, the part adds no mass to an assembly it shares with other parts. A part on its own (every part, until welds exist) keeps its own mass.
+	Massless: boolean
+	--- Its own density, friction, elasticity and their weights (`PhysicalProperties.new(...)`), or nil for its Material's. Read `CurrentPhysicalProperties` for the ones in use.
+	CustomPhysicalProperties: PhysicalProperties?
+	--- How fast the part moves, in studs a second. Physics updates it as the part moves; setting it throws the part. Anchored parts don't move.
+	AssemblyLinearVelocity: Vector3
+	--- How fast the part spins, in radians a second around each world axis. Physics updates it; setting it spins the part.
+	AssemblyAngularVelocity: Vector3
+	--- Health a second taken from every Health whose Model has a part inside the zone (once each, however many of its parts are in). The damage's source is the zone. 0 or less does nothing.
+	DamagePerSecond: number
+	--- Its Position and Orientation as one CFrame. Setting it sets both; it isn't saved itself.
+	CFrame: CFrame
+	--- The mass of everything moving with it: the parts welded into its assembly, except Massless ones (a part alone keeps its own mass). Read-only.
+	AssemblyMass: number
+	--- Where its mass is centered, in the world: the middle of a block or ball. Read-only.
+	AssemblyCenterOfMass: Vector3
+	--- The physical properties in use: `CustomPhysicalProperties`, or its Material's when that's nil. Read-only.
+	CurrentPhysicalProperties: PhysicalProperties
+	--- Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.
+	Touched: Signal
+	--- Fires when another part stops touching this one: once they've been apart for a few physics steps, or at once when one of them can't touch the other any more (`CanTouch` off, or set not to collide). The handler gets the other part.
+	TouchEnded: Signal
+	[string]: any
+	--- The part, then the parts welded to it by an enabled WeldConstraint; with `recursive` true, every part in its assembly.
+	function GetConnectedParts(self, recursive: boolean?): {Instance}
+	--- The root of its assembly: an anchored part if there is one, then one that isn't Massless, then the largest. A part alone is its own root.
+	function GetRootPart(self): Instance
+	--- Where it turns and moves from: a part's own CFrame, or for a Model the centre of the box around its parts, unturned.
+	function GetPivot(self): CFrame
+	--- Moves and turns it so its pivot is at `target`. A Model's parts all move together and keep their places relative to each other.
+	function PivotTo(self, target: CFrame): ()
+	--- Pushes the part through its center of mass: its velocity changes by `impulse` divided by its assembly's mass (`AssemblyMass`, which is `GetMass()` for a part alone). Pushes in one frame add up. Anchored parts don't move.
+	function ApplyImpulse(self, impulse: Vector3): ()
+	--- Pushes the part at `position` in the world: it speeds up as `ApplyImpulse` would, and an impulse off its center of mass also spins it.
+	function ApplyImpulseAtPosition(self, impulse: Vector3, position: Vector3): ()
+	--- Spins the part: its `AssemblyAngularVelocity` changes by `impulse` (radians a second times inertia) through its inertia.
+	function ApplyAngularImpulse(self, impulse: Vector3): ()
+	--- Its density times its volume: a 1×1×1 Plastic block weighs 1. MeshParts weigh their collision shape.
+	function GetMass(self): number
+end
+
 --- Lua code that runs on the server, from a `.server.lua` file.
 declare extern type Script extends Instance with
 	[string]: any
@@ -2719,6 +2802,8 @@ declare extern type ThirdPersonController extends Instance with
 	CameraHeight: number
 	--- Fires when the character sits down (true and the Seat) or stands up (false and the Seat it left).
 	Seated: Signal
+	--- Fires when the character lands, with how fast it was falling in studs a second. A Health in its Model with FallDamage on takes its damage first.
+	Landed: Signal
 	[string]: any
 end
 
@@ -2750,6 +2835,8 @@ declare extern type FirstPersonController extends Instance with
 	EyeHeight: number
 	--- Fires when the character sits down (true and the Seat) or stands up (false and the Seat it left).
 	Seated: Signal
+	--- Fires when the character lands, with how fast it was falling in studs a second. A Health in its Model with FallDamage on takes its damage first.
+	Landed: Signal
 	[string]: any
 end
 
@@ -2906,6 +2993,37 @@ declare extern type Fracture extends Instance with
 	[string]: any
 	--- Replaces the part with its pieces before the next physics step, flying away from `point` (the part's middle if nil) at up to `force` ÷ the part's mass studs a second: that much for the nearest pieces, half for the farthest. Fires Shattered. Does nothing until Generate has made the pieces.
 	function Shatter(self, point: Vector3?, force: number?): ()
+end
+
+--- How much a Model can take: Health out of MaxHealth, put in any Model. TakeDamage, DamageZones and falls (with FallDamage on) lower it; Heal and regeneration (RegenRate, after RegenDelay seconds without damage) raise it. At 0 it fires Died once and the Model is left for scripts to handle.
+declare extern type Health extends Instance with
+	--- The most Health it can have. Heal and regeneration stop here, and lowering it lowers a Health above it.
+	MaxHealth: number
+	--- How much is left, 0 to MaxHealth. Setting it fires HealthChanged (and Died, if it reaches 0). At 0 the Model is dead: damage and Heal do nothing, and it doesn't regenerate, until a script sets Health again.
+	Health: number
+	--- Health a second won back once RegenDelay seconds pass without damage, up to MaxHealth. 0 never regenerates.
+	RegenRate: number
+	--- Seconds without damage before it starts regenerating. Any damage, from TakeDamage, a DamageZone or a fall, starts the wait again.
+	RegenDelay: number
+	--- If true, TakeDamage, DamageZones and falls do nothing to it. Heal still heals.
+	Invulnerable: boolean
+	--- If true, the character controller in its Model loses health when it lands faster than FallDamageThreshold: FallDamageScale for each stud a second over it. Off by default.
+	FallDamage: boolean
+	--- Studs a second a character can land at without damage. At the default Gravity, 60 is a fall of about 9 studs; a jump lands at about 53.
+	FallDamageThreshold: number
+	--- Health lost for each stud a second a landing is over FallDamageThreshold.
+	FallDamageScale: number
+	--- Fires whenever Health changes: damage, Heal, regeneration or a script setting it. The handler gets the new health and the old.
+	HealthChanged: Signal
+	--- Fires when it takes damage, after HealthChanged. The handler gets how much health it lost and what did it: the `source` given to TakeDamage, the DamageZone, or nil (a fall, or no source).
+	Damaged: Signal
+	--- Fires once when Health reaches 0, after HealthChanged, however many hits landed that frame. Nothing else happens to the Model: scripts decide what dying does. It can fire again only after a script sets Health above 0.
+	Died: Signal
+	[string]: any
+	--- Takes `amount` from Health (never below 0), unless it's Invulnerable or already dead. Fires HealthChanged, then Damaged with `amount` and `source`, then Died if it reached 0. Starts the RegenDelay wait again.
+	function TakeDamage(self, amount: number, source: Instance?): ()
+	--- Adds `amount` to Health, up to MaxHealth, and fires HealthChanged. Does nothing once it's dead (Health 0): set Health to bring it back.
+	function Heal(self, amount: number): ()
 end
 
 --- Holds `Part0` and `Part1` together where they were when it was made (or enabled). Parts welded together move as one body, an assembly: they fall and tumble together, and an anchored part anchors the whole assembly. `part:GetConnectedParts()` and `part:GetRootPart()` follow welds. Setting a welded part's Position or CFrame moves that part alone, and the weld holds it where it lands.
@@ -3388,7 +3506,7 @@ declare function require(module: Instance): any
 --- Creates Instances.
 declare extern type InstanceLibrary with
 	--- Creates an Instance of this class with default properties and no parent. Set `Parent` to put it in the world.
-	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Seat") -> Seat) & ((className: "VehicleSeat") -> VehicleSeat) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ReflectionProbe") -> ReflectionProbe) & ((className: "LightProbeVolume") -> LightProbeVolume) & ((className: "Atmosphere") -> Atmosphere) & ((className: "Clouds") -> Clouds) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "VehicleWheel") -> VehicleWheel) & ((className: "Ragdoll") -> Ragdoll) & ((className: "Fracture") -> Fracture) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "HingeConstraint") -> HingeConstraint) & ((className: "BallSocketConstraint") -> BallSocketConstraint) & ((className: "PrismaticConstraint") -> PrismaticConstraint) & ((className: "CylindricalConstraint") -> CylindricalConstraint) & ((className: "SpringConstraint") -> SpringConstraint) & ((className: "RopeConstraint") -> RopeConstraint) & ((className: "RodConstraint") -> RodConstraint) & ((className: "LinearVelocity") -> LinearVelocity) & ((className: "AngularVelocity") -> AngularVelocity) & ((className: "VectorForce") -> VectorForce) & ((className: "Torque") -> Torque) & ((className: "AlignPosition") -> AlignPosition) & ((className: "AlignOrientation") -> AlignOrientation) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
+	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Seat") -> Seat) & ((className: "VehicleSeat") -> VehicleSeat) & ((className: "DamageZone") -> DamageZone) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ReflectionProbe") -> ReflectionProbe) & ((className: "LightProbeVolume") -> LightProbeVolume) & ((className: "Atmosphere") -> Atmosphere) & ((className: "Clouds") -> Clouds) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "VehicleWheel") -> VehicleWheel) & ((className: "Ragdoll") -> Ragdoll) & ((className: "Fracture") -> Fracture) & ((className: "Health") -> Health) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "HingeConstraint") -> HingeConstraint) & ((className: "BallSocketConstraint") -> BallSocketConstraint) & ((className: "PrismaticConstraint") -> PrismaticConstraint) & ((className: "CylindricalConstraint") -> CylindricalConstraint) & ((className: "SpringConstraint") -> SpringConstraint) & ((className: "RopeConstraint") -> RopeConstraint) & ((className: "RodConstraint") -> RodConstraint) & ((className: "LinearVelocity") -> LinearVelocity) & ((className: "AngularVelocity") -> AngularVelocity) & ((className: "VectorForce") -> VectorForce) & ((className: "Torque") -> Torque) & ((className: "AlignPosition") -> AlignPosition) & ((className: "AlignOrientation") -> AlignOrientation) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
 end
 
 --- Creates Instances.

@@ -730,3 +730,37 @@ fn a_slot_keeps_the_game_ui_settings_and_loading_puts_them_back_on_the_world() {
     assert_eq!(world.ui_settings(), chosen);
     let _ = fs::remove_dir_all(&folder);
 }
+
+#[test]
+fn a_slot_captures_a_characters_health_and_puts_it_back() {
+    let folder = folder("health");
+    let mut world = World::new();
+    let character = world.create(ClassName::Model).unwrap();
+    world.set_name(character, "Character").unwrap();
+    world
+        .set_parent(character, Some(world.workspace()))
+        .unwrap();
+    let health = world.create(ClassName::Health).unwrap();
+    world.set_parent(health, Some(character)).unwrap();
+    for (name, value) in [
+        ("Health", Value::Number(37.5)),
+        ("MaxHealth", Value::Number(150.0)),
+        ("FallDamage", Value::Bool(true)),
+    ] {
+        world.set_property(health, name, value).unwrap();
+    }
+    let mut saves = Saves::new(Some(folder));
+    saves.save(&world, 1).unwrap();
+    world
+        .set_property(health, "Health", Value::Number(0.0))
+        .unwrap();
+    world
+        .set_property(health, "FallDamage", Value::Bool(false))
+        .unwrap();
+    saves.load(&mut world, 1).unwrap();
+    // The same Health, as it was saved.
+    let restored = world.get(health).unwrap();
+    assert_eq!(restored.property("Health"), Some(&Value::Number(37.5)));
+    assert_eq!(restored.property("MaxHealth"), Some(&Value::Number(150.0)));
+    assert_eq!(restored.property("FallDamage"), Some(&Value::Bool(true)));
+}

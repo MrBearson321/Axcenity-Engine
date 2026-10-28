@@ -1220,6 +1220,8 @@ mod data_table_tests;
 #[cfg(test)]
 mod fracture_tests;
 #[cfg(test)]
+mod health_tests;
+#[cfg(test)]
 mod hot_patch_tests;
 #[cfg(test)]
 mod ik_tests;

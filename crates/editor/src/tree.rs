@@ -5,7 +5,7 @@
 //! Pure functions of the world, so the rules are easy to test. The app does
 //! the changes, and records them for undo.
 
-use axcenity_core::{ClassName, Color3, InstanceId, PartType, Value, Vector3, World};
+use axcenity_core::{ClassName, Color3, InstanceId, PartType, UDim2, Value, Vector3, World};
 
 /// Something the toolbar or the Explorer's Insert menu can add.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -36,6 +36,9 @@ pub enum Insertable {
     Dropdown,
     ProgressBar,
     BillboardGui,
+    /// A ready-made health bar (see [`health_bar`]): a BillboardGui over
+    /// the nearest Health's character and a HUD bar, both bound to it.
+    HealthBar,
     Sound,
     PointLight,
     SpotLight,
@@ -64,6 +67,10 @@ pub enum Insertable {
     NavigationAgent,
     /// A place a character is put back at.
     Checkpoint,
+    /// How much the selected Model can take.
+    Health,
+    /// A see-through part that damages every Health inside it.
+    DamageZone,
     /// A part characters sit on.
     Seat,
     /// A ready-to-drive car: a Model with a chassis, a VehicleSeat welded
@@ -92,7 +99,7 @@ impl Insertable {
     /// The classes that group other Instances.
     pub const GROUPS: [Insertable; 2] = [Insertable::Model, Insertable::Folder];
     /// UI objects, for the toolbar's UI group and the Explorer's Insert menu.
-    pub const UI: [Insertable; 15] = [
+    pub const UI: [Insertable; 16] = [
         Insertable::ScreenGui,
         Insertable::Frame,
         Insertable::TextLabel,
@@ -108,6 +115,7 @@ impl Insertable {
         Insertable::Dropdown,
         Insertable::ProgressBar,
         Insertable::BillboardGui,
+        Insertable::HealthBar,
     ];
     pub const AUDIO: [Insertable; 1] = [Insertable::Sound];
     /// Lights shine from the part they are inside.
@@ -136,6 +144,8 @@ impl Insertable {
     pub const AGENTS: [Insertable; 1] = [Insertable::NavigationAgent];
     /// Checkpoints, which a game returns the player character to.
     pub const CHECKPOINTS: [Insertable; 1] = [Insertable::Checkpoint];
+    /// Health, and the zones that take it away.
+    pub const HEALTH: [Insertable; 2] = [Insertable::Health, Insertable::DamageZone];
     /// Seats, which a character that touches them sits on.
     pub const SEATS: [Insertable; 1] = [Insertable::Seat];
     /// A ready car, and the pieces to build one's own.
@@ -194,6 +204,7 @@ impl Insertable {
             Insertable::Dropdown => "Dropdown",
             Insertable::ProgressBar => "ProgressBar",
             Insertable::BillboardGui => "BillboardGui",
+            Insertable::HealthBar => "Health bar",
             Insertable::Sound => "Sound",
             Insertable::PointLight => "PointLight",
             Insertable::SpotLight => "SpotLight",
@@ -210,6 +221,8 @@ impl Insertable {
             Insertable::FirstPersonController => "First Person",
             Insertable::NavigationAgent => "Agent",
             Insertable::Checkpoint => "Checkpoint",
+            Insertable::Health => "Health",
+            Insertable::DamageZone => "Damage Zone",
             Insertable::Seat => "Seat",
             Insertable::Vehicle => "Vehicle",
             Insertable::VehicleSeat => "Vehicle Seat",
@@ -243,6 +256,7 @@ impl Insertable {
             Insertable::Dropdown => ClassName::Dropdown,
             Insertable::ProgressBar => ClassName::ProgressBar,
             Insertable::BillboardGui => ClassName::BillboardGui,
+            Insertable::HealthBar => ClassName::ProgressBar,
             Insertable::Sound => ClassName::Sound,
             Insertable::PointLight => ClassName::PointLight,
             Insertable::SpotLight => ClassName::SpotLight,
@@ -259,6 +273,8 @@ impl Insertable {
             Insertable::FirstPersonController => ClassName::FirstPersonController,
             Insertable::NavigationAgent => ClassName::NavigationAgent,
             Insertable::Checkpoint => ClassName::Checkpoint,
+            Insertable::Health => ClassName::Health,
+            Insertable::DamageZone => ClassName::DamageZone,
             Insertable::Seat => ClassName::Seat,
             Insertable::Vehicle => ClassName::Model,
             Insertable::VehicleSeat => ClassName::VehicleSeat,
@@ -386,6 +402,14 @@ pub fn create(world: &mut World, what: Insertable, position: Vector3) -> Instanc
             ("Size", Value::Vector3(Vector3::new(2.0, 1.0, 2.0))),
             ("Position", Value::Vector3(position)),
         ],
+        // Big enough to walk into, with its bottom on the ground.
+        Insertable::DamageZone => vec![
+            ("Size", Value::Vector3(Vector3::new(8.0, 4.0, 8.0))),
+            (
+                "Position",
+                Value::Vector3(Vector3::new(position.x, position.y + 2.0, position.z)),
+            ),
+        ],
         // Scales with the screen, laid out over all of it, so a UI made at
         // one size looks the same at any other.
         Insertable::ScreenGui => vec![("ScaleMode", Value::String("Scale".to_owned()))],
@@ -484,6 +508,191 @@ pub fn vehicle(world: &mut World, position: Vector3) -> InstanceId {
     car
 }
 
+/// The CSS class of the bars [`health_bar`] makes.
+pub const HEALTH_BAR_CLASS: &str = "health-bar";
+
+/// The stylesheet Insert > UI > Health bar adds, as `health-bar.css`, if
+/// no stylesheet has a `.health-bar` rule yet.
+pub const HEALTH_BAR_CSS: &str =
+    "/* Insert > UI > Health bar. A ProgressBar with an ObjectValue named
+   Health inside it shows that Health out of its MaxHealth. */
+.health-bar {
+  background-color: #1d1d22;
+  border: 2px solid #0b0b0d;
+  border-radius: 5px;
+}
+.health-bar::fill {
+  background-color: #46c35a;
+  border-radius: 3px;
+}
+";
+
+/// The Model `near` is, or is in: where a new Health goes.
+pub fn model_of(world: &World, near: Option<InstanceId>) -> Option<InstanceId> {
+    let mut at = near;
+    while let Some(id) = at {
+        let instance = world.get(id)?;
+        if instance.class() == ClassName::Model && is_saved(world, id) {
+            return Some(id);
+        }
+        at = instance.parent();
+    }
+    None
+}
+
+/// The Health a new health bar follows: the one in (or around) `near`'s
+/// Model, or else the Workspace's Health whose Model is nearest
+/// `position`. `None` when the Workspace has none.
+pub fn nearest_health(
+    world: &World,
+    near: Option<InstanceId>,
+    position: Vector3,
+) -> Option<InstanceId> {
+    let is_health = |id: InstanceId| {
+        world
+            .get(id)
+            .is_some_and(|instance| instance.class() == ClassName::Health)
+    };
+    let mut at = near;
+    while let Some(id) = at {
+        let instance = world.get(id)?;
+        if is_health(id) {
+            return Some(id);
+        }
+        if let Some(&health) = instance.children().iter().find(|&&child| is_health(child)) {
+            return Some(health);
+        }
+        at = instance.parent();
+    }
+    let distance = |health: InstanceId| {
+        let at = world
+            .get(health)
+            .and_then(|h| h.parent())
+            .and_then(|holder| body_part(world, holder))
+            .and_then(|part| world.get(part)?.property("Position")?.as_vector3())
+            .unwrap_or_default();
+        let (dx, dy, dz) = (at.x - position.x, at.y - position.y, at.z - position.z);
+        dx * dx + dy * dy + dz * dz
+    };
+    world
+        .descendants(world.workspace())
+        .into_iter()
+        .filter(|&id| is_health(id))
+        .min_by(|&a, &b| distance(a).total_cmp(&distance(b)))
+}
+
+/// The part a billboard over `holder` floats on: `holder` itself if it's a
+/// part, else its first part (a character's body).
+fn body_part(world: &World, holder: InstanceId) -> Option<InstanceId> {
+    let is_part = |id: InstanceId| {
+        world
+            .get(id)
+            .is_some_and(|instance| instance.class().is_base_part())
+    };
+    if is_part(holder) {
+        return Some(holder);
+    }
+    world
+        .descendants(holder)
+        .into_iter()
+        .find(|&id| is_part(id))
+}
+
+/// What [`health_bar`] made, with no parents yet: the billboard goes in
+/// `billboard.1` (`None` when there's no Health with a part to float
+/// over), the HUD ScreenGui in the Workspace.
+pub struct HealthBar {
+    pub billboard: Option<(InstanceId, InstanceId)>,
+    pub hud: InstanceId,
+}
+
+/// Insert > UI > Health bar: a BillboardGui two studs over the part of
+/// `health`'s Model, holding a bar, and a ScreenGui with a bar at the top
+/// left of the screen. Each bar has the class `health-bar` and an
+/// ObjectValue named `Health` pointing at `health` (empty without one), so
+/// it follows that Health with no script.
+pub fn health_bar(world: &mut World, health: Option<InstanceId>) -> HealthBar {
+    let make = |world: &mut World, class, name: &str, properties: Vec<(&str, Value)>| {
+        let id = world.create(class).expect("not a service");
+        world.set_name(id, name).expect("just made");
+        for (property, value) in properties {
+            world
+                .set_property(id, property, value)
+                .expect("the class has it");
+        }
+        id
+    };
+    let (shown, max) = health
+        .and_then(|id| world.get(id))
+        .map(|instance| {
+            let number = |name| instance.property(name).and_then(Value::as_number);
+            (
+                number("Health").unwrap_or(100.0),
+                number("MaxHealth").unwrap_or(100.0),
+            )
+        })
+        .unwrap_or((100.0, 100.0));
+    let bar = |world: &mut World, parent: InstanceId, size: UDim2, position: UDim2| {
+        let bar = make(
+            world,
+            ClassName::ProgressBar,
+            "HealthBar",
+            vec![
+                ("Class", Value::String(HEALTH_BAR_CLASS.to_owned())),
+                ("Size", Value::UDim2(size)),
+                ("Position", Value::UDim2(position)),
+                ("Value", Value::Number(shown)),
+                ("MaxValue", Value::Number(max)),
+            ],
+        );
+        world
+            .set_parent(bar, Some(parent))
+            .expect("a new UI element");
+        let binding = make(
+            world,
+            ClassName::ObjectValue,
+            "Health",
+            vec![("Value", Value::Instance(health))],
+        );
+        world.set_parent(binding, Some(bar)).expect("a new bar");
+    };
+    let holder = health
+        .and_then(|id| world.get(id)?.parent())
+        .and_then(|holder| body_part(world, holder));
+    let billboard = holder.map(|part| {
+        let billboard = make(
+            world,
+            ClassName::BillboardGui,
+            "HealthBillboard",
+            vec![
+                ("Size", Value::UDim2(UDim2::new(0.0, 120.0, 0.0, 14.0))),
+                ("StudsOffset", Value::Vector3(Vector3::new(0.0, 4.0, 0.0))),
+                ("MaxDistance", Value::Number(100.0)),
+            ],
+        );
+        bar(
+            world,
+            billboard,
+            UDim2::new(1.0, 0.0, 1.0, 0.0),
+            UDim2::default(),
+        );
+        (billboard, part)
+    });
+    let hud = make(
+        world,
+        ClassName::ScreenGui,
+        "HealthHud",
+        vec![("ScaleMode", Value::String("Scale".to_owned()))],
+    );
+    bar(
+        world,
+        hud,
+        UDim2::new(0.0, 260.0, 0.0, 22.0),
+        UDim2::new(0.0, 24.0, 0.0, 24.0),
+    );
+    HealthBar { billboard, hud }
+}
+
 /// Where a new `what` goes: into `near` if it's ReplicatedStorage, or a
 /// Model or Folder in a place that's saved (see [`is_saved`]), or for an
 /// Animation, a part or a ScreenGui or frame it can animate. Otherwise a
@@ -512,6 +721,7 @@ pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) 
                     | ClassName::MeshPart
                     | ClassName::Seat
                     | ClassName::VehicleSeat
+                    | ClassName::DamageZone
                     | ClassName::Model
             )
         );

@@ -107,6 +107,7 @@ pub fn can_animate(class: ClassName) -> bool {
             | ClassName::MeshPart
             | ClassName::Seat
             | ClassName::VehicleSeat
+            | ClassName::DamageZone
             | ClassName::Model
             | ClassName::ScreenGui
             | ClassName::Frame

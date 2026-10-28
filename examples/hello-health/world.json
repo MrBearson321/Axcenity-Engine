@@ -1,0 +1,127 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Position": [0, -0.5, 0],
+          "Size": [120, 1, 60],
+          "Color": [0.35, 0.37, 0.4],
+          "Anchored": true
+        }
+      },
+      {
+        "class": "Model",
+        "name": "Character",
+        "children": [
+          {
+            "class": "Part",
+            "name": "Body",
+            "properties": {
+              "Position": [0, 2.5, 0],
+              "Size": [2, 5, 1],
+              "Color": [0.2, 0.55, 0.9]
+            },
+            "children": [
+              {
+                "class": "BillboardGui",
+                "name": "HealthBillboard",
+                "properties": {
+                  "Size": [0, 120, 0, 14],
+                  "StudsOffset": [0, 4, 0],
+                  "MaxDistance": 100
+                },
+                "children": [
+                  {
+                    "class": "ProgressBar",
+                    "name": "HealthBar",
+                    "properties": {
+                      "Class": "health-bar",
+                      "Size": [1, 0, 1, 0],
+                      "Value": 100
+                    },
+                    "children": [
+                      {
+                        "class": "ObjectValue",
+                        "name": "Health",
+                        "properties": {
+                          "Value": ["Workspace", "Character", "Health"]
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "class": "ThirdPersonController",
+            "name": "ThirdPersonController"
+          },
+          {
+            "class": "Health",
+            "name": "Health",
+            "properties": {
+              "RegenRate": 10,
+              "RegenDelay": 2,
+              "FallDamage": true
+            }
+          }
+        ]
+      },
+      {
+        "class": "DamageZone",
+        "name": "Lava",
+        "properties": {
+          "Position": [14, 0.25, 0],
+          "Size": [8, 0.5, 8],
+          "Color": [0.85, 0.25, 0.05],
+          "EmissiveColor": [1, 0.35, 0.05],
+          "Emission": 1,
+          "Transparency": 0,
+          "DamagePerSecond": 20
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Tower",
+        "properties": {
+          "Position": [-16, 12, 0],
+          "Size": [6, 24, 6],
+          "Color": [0.55, 0.5, 0.45],
+          "Anchored": true
+        }
+      },
+      {
+        "class": "ScreenGui",
+        "name": "HealthHud",
+        "properties": {
+          "ScaleMode": "Scale"
+        },
+        "children": [
+          {
+            "class": "ProgressBar",
+            "name": "HealthBar",
+            "properties": {
+              "Class": "health-bar",
+              "Size": [0, 260, 0, 22],
+              "Position": [0, 24, 0, 24],
+              "Value": 100
+            },
+            "children": [
+              {
+                "class": "ObjectValue",
+                "name": "Health",
+                "properties": {
+                  "Value": ["Workspace", "Character", "Health"]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

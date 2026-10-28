@@ -58,6 +58,10 @@ pub enum ClassName {
     /// it, the Move action sets `Throttle` and `Steer`, and its
     /// VehicleWheels push, turn and hold the car.
     VehicleSeat,
+    /// A Part that hurts (Phase 43): every Health whose Model has a part
+    /// inside it loses `DamagePerSecond` a second. Anchored, see-through
+    /// and walked through by default.
+    DamageZone,
     /// Lua code that runs on the server. Its source lives in a
     /// `*.server.lua` file, not in a property.
     Script,
@@ -197,6 +201,11 @@ pub enum ClassName {
     /// `Threshold`, or `Shatter(point, force)`, replaces the part with its
     /// pieces, which fly from the point and fade after `DebrisLifetime`.
     Fracture,
+    /// How much a Model can take (Phase 43): `Health` out of `MaxHealth`,
+    /// lost to `TakeDamage`, damage zones and falls, won back by `Heal`
+    /// and by regenerating `RegenRate` a second once `RegenDelay` seconds
+    /// pass without damage. At 0 it fires `Died` once.
+    Health,
     /// Holds `Part0` and `Part1` together where they were when it was made
     /// or enabled. Welded unanchored parts move as one body: an assembly.
     WeldConstraint,
@@ -245,7 +254,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 81] = [
+    pub const ALL: [ClassName; 83] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -258,6 +267,7 @@ impl ClassName {
         ClassName::MeshPart,
         ClassName::Seat,
         ClassName::VehicleSeat,
+        ClassName::DamageZone,
         ClassName::Script,
         ClassName::LocalScript,
         ClassName::ModuleScript,
@@ -305,6 +315,7 @@ impl ClassName {
         ClassName::VehicleWheel,
         ClassName::Ragdoll,
         ClassName::Fracture,
+        ClassName::Health,
         ClassName::WeldConstraint,
         ClassName::HingeConstraint,
         ClassName::BallSocketConstraint,
@@ -342,6 +353,7 @@ impl ClassName {
             ClassName::Part => "Part",
             ClassName::Seat => "Seat",
             ClassName::VehicleSeat => "VehicleSeat",
+            ClassName::DamageZone => "DamageZone",
             ClassName::MeshPart => "MeshPart",
             ClassName::Script => "Script",
             ClassName::LocalScript => "LocalScript",
@@ -390,6 +402,7 @@ impl ClassName {
             ClassName::VehicleWheel => "VehicleWheel",
             ClassName::Ragdoll => "Ragdoll",
             ClassName::Fracture => "Fracture",
+            ClassName::Health => "Health",
             ClassName::WeldConstraint => "WeldConstraint",
             ClassName::HingeConstraint => "HingeConstraint",
             ClassName::BallSocketConstraint => "BallSocketConstraint",
@@ -435,7 +448,7 @@ impl ClassName {
         const LAYER: &[&str] = &["LayerCollector", "GuiBase2d"];
         match self {
             ClassName::Part | ClassName::MeshPart => PART,
-            ClassName::Seat => &["Part", "BasePart", "PVInstance"],
+            ClassName::Seat | ClassName::DamageZone => &["Part", "BasePart", "PVInstance"],
             ClassName::VehicleSeat => &["Seat", "Part", "BasePart", "PVInstance"],
             ClassName::Model => &["PVInstance"],
             ClassName::Script | ClassName::ModuleScript => &["LuaSourceContainer"],
@@ -455,12 +468,18 @@ impl ClassName {
         name == "Instance" || self.as_str() == name || self.superclasses().contains(&name)
     }
 
-    /// A Part, MeshPart, Seat or VehicleSeat: a solid in the world
-    /// (`BasePart`).
+    /// A Part, MeshPart, Seat, VehicleSeat or DamageZone: a solid in the
+    /// world (`BasePart`).
     pub fn is_base_part(self) -> bool {
+        matches!(self, ClassName::MeshPart) || self.is_part()
+    }
+
+    /// A Part or one of the classes that are Parts: Seat, VehicleSeat and
+    /// DamageZone. They have a `Shape`, a `Material` and the rest.
+    pub fn is_part(self) -> bool {
         matches!(
             self,
-            ClassName::Part | ClassName::MeshPart | ClassName::Seat | ClassName::VehicleSeat
+            ClassName::Part | ClassName::Seat | ClassName::VehicleSeat | ClassName::DamageZone
         )
     }
 
@@ -1169,7 +1188,7 @@ impl ClassName {
                 ("RollOffMinDistance", Value::Number(10.0)),
                 ("RollOffMaxDistance", Value::Number(150.0)),
             ],
-            ClassName::Part | ClassName::Seat | ClassName::VehicleSeat => {
+            ClassName::Part | ClassName::Seat | ClassName::VehicleSeat | ClassName::DamageZone => {
                 let material = Material::Plastic;
                 let preset = material.preset();
                 let mut properties = vec![
@@ -1218,6 +1237,22 @@ impl ClassName {
                         // none for the middle of the top face.
                         ("SeatOffset", Value::Instance(None)),
                     ]);
+                }
+                if self == ClassName::DamageZone {
+                    // Something to walk into, not onto, and see into.
+                    for (name, value) in [
+                        ("Anchored", Value::Bool(true)),
+                        ("CanCollide", Value::Bool(false)),
+                        ("Transparency", Value::Number(0.5)),
+                        ("Color", Value::Color3(Color3::new(0.85, 0.2, 0.15))),
+                        ("CastShadow", Value::Bool(false)),
+                    ] {
+                        if let Some(slot) = properties.iter_mut().find(|(n, _)| *n == name) {
+                            slot.1 = value;
+                        }
+                    }
+                    // Health a second taken from each Health inside it.
+                    properties.push(("DamagePerSecond", Value::Number(10.0)));
                 }
                 if self == ClassName::VehicleSeat {
                     properties.extend([
@@ -1447,6 +1482,24 @@ impl ClassName {
                 // The pieces' file, set by Generate, such as
                 // "assets/models/Pane.fracture.glb". Empty: not generated yet.
                 ("PiecesId", Value::String(String::new())),
+            ],
+            ClassName::Health => vec![
+                ("MaxHealth", Value::Number(100.0)),
+                // 0 to MaxHealth. At 0 the Model is dead: it fires Died once,
+                // and only setting Health brings it back.
+                ("Health", Value::Number(100.0)),
+                // Health a second won back once RegenDelay seconds pass
+                // without damage. 0 never regenerates.
+                ("RegenRate", Value::Number(1.0)),
+                ("RegenDelay", Value::Number(5.0)),
+                // On, nothing damages it; Heal still heals.
+                ("Invulnerable", Value::Bool(false)),
+                // On, a character landing faster than FallDamageThreshold
+                // studs a second loses FallDamageScale health for each stud
+                // a second over it.
+                ("FallDamage", Value::Bool(false)),
+                ("FallDamageThreshold", Value::Number(60.0)),
+                ("FallDamageScale", Value::Number(1.0)),
             ],
             ClassName::WeldConstraint => {
                 let mut properties = vec![
@@ -1729,7 +1782,14 @@ impl ClassName {
             | ClassName::ObjectValue => &[],
             // Fires with true and the Seat when the character sits, and
             // with false and the Seat it left when it stands.
-            ClassName::ThirdPersonController | ClassName::FirstPersonController => &["Seated"],
+            // `Landed` fires with how fast it was falling, in studs a
+            // second, as it lands.
+            ClassName::ThirdPersonController | ClassName::FirstPersonController => {
+                &["Seated", "Landed"]
+            }
+            // `HealthChanged` with the new health and the old, `Damaged`
+            // with how much and what did it (or nil), `Died` once at 0.
+            ClassName::Health => &["HealthChanged", "Damaged", "Died"],
             // Fires with "Sight" or "Hearing" when it starts seeing or
             // hearing the player character.
             ClassName::NavigationAgent => &["PlayerSensed"],
@@ -1757,9 +1817,11 @@ impl ClassName {
             // `GetMarkerReachedSignal(name)` hears one name of.
             ClassName::AnimationTrack => &["Stopped", "KeyframeReached"],
             // Fire on both parts when two parts start and stop touching.
-            ClassName::Part | ClassName::MeshPart | ClassName::Seat | ClassName::VehicleSeat => {
-                &["Touched", "TouchEnded"]
-            }
+            ClassName::Part
+            | ClassName::MeshPart
+            | ClassName::Seat
+            | ClassName::VehicleSeat
+            | ClassName::DamageZone => &["Touched", "TouchEnded"],
             // `OnServerEvent` fires in Scripts for each `FireServer`, and
             // `OnClientEvent` in LocalScripts for each `FireClient`.
             ClassName::RemoteEvent => &["OnServerEvent", "OnClientEvent"],

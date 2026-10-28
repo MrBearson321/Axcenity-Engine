@@ -761,6 +761,7 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
             .chain(Insertable::BREAKING)
             .chain(Insertable::ANIMATION)
             .chain(Insertable::CHARACTERS)
+            .chain(Insertable::HEALTH)
             .chain(Insertable::SEATS)
             .chain(Insertable::VEHICLES)
             .chain(Insertable::AGENTS)
@@ -827,7 +828,7 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
     let is_part = world.get(id).is_some_and(|instance| {
         matches!(
             instance.class(),
-            ClassName::Part | ClassName::Seat | ClassName::VehicleSeat
+            ClassName::Part | ClassName::Seat | ClassName::VehicleSeat | ClassName::DamageZone
         )
     });
     if is_part

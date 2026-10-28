@@ -365,6 +365,10 @@ impl Session {
             if !seats.is_empty() {
                 self.scripts.fire_seated(&mut self.world, &seats);
             }
+            let landings = self.characters.take_landings();
+            if !landings.is_empty() {
+                self.scripts.fire_landed(&mut self.world, &landings);
+            }
             // Then navigation agents, toward their destinations.
             self.agents
                 .step(&mut self.world, &self.assets, seconds as f32);
@@ -430,6 +434,7 @@ impl Session {
             self.scripts.fire_touch_ended(&mut self.world, &ends);
             self.scripts.fire_breaks(&mut self.world, &mut self.physics);
             if self.scripts.pause().is_none() {
+                self.scripts.step_health(&mut self.world, seconds);
                 self.scripts.heartbeat(&mut self.world, seconds);
             }
             self.forward_output(output);

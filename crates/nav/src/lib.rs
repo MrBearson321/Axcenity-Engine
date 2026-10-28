@@ -421,6 +421,7 @@ pub fn fingerprint(world: &World) -> u64 {
                 | ClassName::MeshPart
                 | ClassName::Seat
                 | ClassName::VehicleSeat
+                | ClassName::DamageZone
                 | ClassName::Terrain
         ) || skip.contains(&id)
         {
