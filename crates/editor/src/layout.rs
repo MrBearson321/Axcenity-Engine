@@ -40,6 +40,9 @@ pub enum Pane {
     Terrain,
     /// What the game costs during Play (`profiler.rs`).
     Profiler,
+    /// The SoundGroups with live levels, mute and solo (`mixer.rs`, Phase
+    /// 52).
+    Mixer,
     /// Missing files, invalid references, import failures, and broken
     /// dependencies (`asset_check.rs`). Starts closed; Check Assets opens it.
     AssetCheck,
@@ -66,7 +69,7 @@ pub enum Pane {
 
 impl Pane {
     /// The panels that can be closed and opened again, in menu order.
-    pub const CLOSABLE: [Pane; 15] = [
+    pub const CLOSABLE: [Pane; 16] = [
         Pane::Explorer,
         Pane::Properties,
         Pane::Console,
@@ -75,6 +78,7 @@ impl Pane {
         Pane::UiDesigner,
         Pane::Terrain,
         Pane::Profiler,
+        Pane::Mixer,
         Pane::AssetCheck,
         Pane::BehaviorTree,
         Pane::DataTable,
@@ -95,6 +99,7 @@ impl Pane {
             Pane::UiDesigner => "UI Designer",
             Pane::Terrain => "Terrain",
             Pane::Profiler => "Profiler",
+            Pane::Mixer => "Mixer",
             Pane::AssetCheck => "Asset Check",
             Pane::BehaviorTree => "Behavior Tree",
             Pane::DataTable => "Data Table",
@@ -117,6 +122,7 @@ impl Pane {
             Pane::UiDesigner => icons::LAYOUT,
             Pane::Terrain => icons::MOUNTAINS,
             Pane::Profiler => icons::GAUGE,
+            Pane::Mixer => icons::FADERS,
             Pane::AssetCheck => icons::LIST,
             Pane::BehaviorTree => icons::BRAIN,
             Pane::DataTable => icons::TABLE,
@@ -185,7 +191,7 @@ impl Layout {
             Pane::Explorer => Some(Pane::Properties),
             Pane::Properties => Some(Pane::Explorer),
             Pane::Console => Some(Pane::Assets),
-            Pane::Assets | Pane::Profiler | Pane::AssetCheck => Some(Pane::Console),
+            Pane::Assets | Pane::Profiler | Pane::Mixer | Pane::AssetCheck => Some(Pane::Console),
             // A tab beside the Scene, with room for a preview and a graph.
             Pane::Animation
             | Pane::UiDesigner
@@ -435,6 +441,7 @@ mod tests {
                     | Pane::Tags
                     | Pane::Levels
                     | Pane::Sequencer
+                    | Pane::Mixer
             ) {
                 assert!(!layout.is_open(pane), "{pane:?} starts closed");
                 continue;

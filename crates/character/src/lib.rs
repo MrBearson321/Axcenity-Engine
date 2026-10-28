@@ -692,6 +692,7 @@ pub fn body_parts(world: &World, holder: InstanceId) -> Vec<InstanceId> {
             | ClassName::Seat
             | ClassName::VehicleSeat
             | ClassName::DamageZone
+            | ClassName::ReverbZone
     );
     if !character {
         return Vec::new();

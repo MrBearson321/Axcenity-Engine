@@ -107,7 +107,11 @@ pub fn part_material_file(world: &World, id: InstanceId, assets: &Assets) -> Opt
     let instance = world.get(id)?;
     if !matches!(
         instance.class(),
-        ClassName::Part | ClassName::Seat | ClassName::VehicleSeat | ClassName::DamageZone
+        ClassName::Part
+            | ClassName::Seat
+            | ClassName::VehicleSeat
+            | ClassName::DamageZone
+            | ClassName::ReverbZone
     ) {
         return None;
     }

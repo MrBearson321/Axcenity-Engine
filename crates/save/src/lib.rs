@@ -19,7 +19,9 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use axcenity_core::{ClassName, InstanceId, UI_SETTING_PREFIX, Value, Vector3, World};
+use axcenity_core::{
+    ClassName, InstanceId, MASTER_VOLUME_SETTING, UI_SETTING_PREFIX, Value, Vector3, World,
+};
 use serde::{Deserialize, Serialize};
 
 pub use migrate::migrate;
@@ -231,6 +233,10 @@ impl Saves {
         for (name, value) in world.ui_settings().to_settings() {
             settings.insert(name, SavedValue(value));
         }
+        settings.insert(
+            MASTER_VOLUME_SETTING.to_owned(),
+            SavedValue(Value::Number(world.master_volume())),
+        );
         let file = SlotFile {
             version: SAVE_VERSION,
             player_data: to_properties(&self.player_data),
@@ -276,6 +282,12 @@ impl Saves {
             .ui_settings()
             .with_settings(settings.iter().map(|(name, value)| (name.as_str(), value)));
         world.set_ui_settings(ui);
+        if let Some(volume) = settings
+            .remove(MASTER_VOLUME_SETTING)
+            .and_then(|value| value.as_number())
+        {
+            world.set_master_volume(volume);
+        }
         settings.retain(|name, _| !name.starts_with(UI_SETTING_PREFIX));
         self.settings = settings;
         self.checkpoint = file.checkpoint.and_then(|saved| {

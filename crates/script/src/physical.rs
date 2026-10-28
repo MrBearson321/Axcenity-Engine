@@ -272,6 +272,7 @@ pub fn body_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, mlu
         ClassName::Seat,
         ClassName::VehicleSeat,
         ClassName::DamageZone,
+        ClassName::ReverbZone,
     ] {
         methods.push((class, "ApplyImpulse", apply_impulse.clone()));
         methods.push((class, "ApplyImpulseAtPosition", apply_at.clone()));

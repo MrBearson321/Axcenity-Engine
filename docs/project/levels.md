@@ -6,7 +6,7 @@ A game's levels (unified Phase 48). Code: `crates/project/src/levels.rs` (files)
 
 - `world.json` is the **start level**: the game starts there. Its name is the manifest's optional `start_level` (`"start_level": "Meadow"` in `axcenity.json`), `Start` when it has none. A project with only `world.json` has that one level and opens and plays as before.
 - Every other level is `levels/<name>.world.json`, a world file holding only its `workspace` (`project::write_level`). The folder is optional, so the format version is unchanged.
-- A level is its Workspace. ReplicatedStorage, Lighting, Players, StarterPlayer and Teams are the project's, saved in `world.json`, and stay the same from level to level. A level file's other sections are left unused.
+- A level is its Workspace. ReplicatedStorage, Lighting, Players, StarterPlayer, Teams and SoundService are the project's, saved in `world.json`, and stay the same from level to level. A level file's other sections are left unused.
 - Level names follow script names' file name rules (`project::check_level_name`), and differ from every other level's and the start level's, ignoring capitals.
 - File > Build Game packs `levels/` with the rest (`project::pack_game`), so a built game has every level.
 

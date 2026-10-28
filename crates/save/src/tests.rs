@@ -478,12 +478,17 @@ fn a_version_1_slot_loads_migrates_and_restores_the_same_player_world_checkpoint
     let mut current = Saves::new(Some(folder.clone()));
     play_the_v1_save(&level, &mut world, &mut current);
     current.save(&world, 2).unwrap();
-    // Apart from the game UI settings, which slots before them don't have
-    // (loading one keeps the player's).
+    // Apart from the game UI settings, the master volume and SoundService,
+    // which slots before them don't have (loading one keeps the player's).
     let mut saved = current.read(2).unwrap();
-    saved
-        .settings
-        .retain(|name, _| !name.starts_with(axcenity_core::UI_SETTING_PREFIX));
+    saved.settings.retain(|name, _| {
+        !name.starts_with(axcenity_core::UI_SETTING_PREFIX)
+            && name != axcenity_core::MASTER_VOLUME_SETTING
+    });
+    saved.world.services.remove("SoundService");
+    if let Some(checkpoint) = &mut saved.checkpoint {
+        checkpoint.capture.world.services.remove("SoundService");
+    }
     assert_eq!(saved, migrated);
 
     // Loading never rewrites the old file.
@@ -878,4 +883,62 @@ fn a_slot_keeps_the_levels_and_one_without_them_reads_as_none() {
     assert_eq!(loaded.levels.as_ref().unwrap().current, "Meadow");
     loaded.load(&mut world, 2).unwrap();
     assert_eq!(loaded.levels, saves.levels);
+}
+
+/// The Music and SFX groups under Master keep their volumes in a slot, and
+/// so does the master volume; loading puts them back (Phase 52). A slot
+/// from before SoundService was saved leaves the groups as they are.
+#[test]
+fn group_volumes_and_the_master_volume_persist_in_a_slot() {
+    let folder = folder("sound-groups");
+    let mut world = World::new();
+    let service = world.sound_service();
+    let group = |world: &mut World, name: &str, parent| {
+        let id = world.create(ClassName::SoundGroup).unwrap();
+        world.set_name(id, name).unwrap();
+        world.set_parent(id, Some(parent)).unwrap();
+        id
+    };
+    let master = group(&mut world, "Master", service);
+    let music = group(&mut world, "Music", master);
+    let sfx = group(&mut world, "SFX", master);
+    world
+        .set_property(music, "Volume", Value::Number(0.3))
+        .unwrap();
+    world
+        .set_property(sfx, "Volume", Value::Number(0.8))
+        .unwrap();
+    world.set_master_volume(0.6);
+    let mut saves = Saves::new(Some(folder.clone()));
+    saves.save(&world, 1).unwrap();
+
+    for id in [music, sfx] {
+        world
+            .set_property(id, "Volume", Value::Number(1.0))
+            .unwrap();
+    }
+    world.set_master_volume(1.0);
+    saves.load(&mut world, 1).unwrap();
+    let volume = |world: &World, id| world.get(id).unwrap().property("Volume").cloned();
+    assert_eq!(volume(&world, music), Some(Value::Number(0.3)));
+    assert_eq!(volume(&world, sfx), Some(Value::Number(0.8)));
+    assert_eq!(world.master_volume(), 0.6);
+    assert!(
+        saves.settings.is_empty(),
+        "the master volume is the world's"
+    );
+
+    // A slot from before keeps the live groups.
+    fs::write(
+        folder.join("slot-2.json"),
+        include_str!("fixtures/slot-v1.json"),
+    )
+    .unwrap();
+    let old = v1_level();
+    let mut world = old.world.clone();
+    let service = world.sound_service();
+    let master = group(&mut world, "Master", service);
+    saves.load(&mut world, 2).unwrap();
+    assert!(world.contains(master));
+    let _ = fs::remove_dir_all(&folder);
 }

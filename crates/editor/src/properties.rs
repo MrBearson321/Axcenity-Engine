@@ -1645,6 +1645,8 @@ fn enum_item_control(ui: &mut egui::Ui, name: &str, item: &EnumItem) -> Option<E
         "CollisionFidelity" => vec!["Box", "Hull", "PreciseConvexDecomposition"],
         // Which ProximityPrompts in reach show (Phase 44).
         "ProximityPromptExclusivity" => vec!["OnePerButton", "OneGlobally", "AlwaysShow"],
+        // The room a ReverbZone sounds like (Phase 52).
+        "ReverbType" => axcenity_audio::REVERB_TYPES.to_vec(),
         _ => {
             ui.label(format!("{}.{}", item.enum_name, item.item));
             return None;

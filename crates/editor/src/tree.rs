@@ -40,6 +40,14 @@ pub enum Insertable {
     /// the nearest Health's character and a HUD bar, both bound to it.
     HealthBar,
     Sound,
+    /// An audio bus (Phase 52): in the selected SoundGroup (a sub-bus), or
+    /// in SoundService.
+    SoundGroup,
+    /// A sound effect, in the selected Sound or SoundGroup, or SoundService.
+    SoundEffect(ClassName),
+    /// A see-through part whose reverb blends onto spatial Sounds while the
+    /// camera is inside it.
+    ReverbZone,
     PointLight,
     SpotLight,
     /// A reflection probe, in the selected part or a new invisible box.
@@ -138,7 +146,24 @@ impl Insertable {
         Insertable::BillboardGui,
         Insertable::HealthBar,
     ];
-    pub const AUDIO: [Insertable; 1] = [Insertable::Sound];
+    /// Sounds, the groups they play through, and zones that change how
+    /// they sound.
+    pub const AUDIO: [Insertable; 3] = [
+        Insertable::Sound,
+        Insertable::SoundGroup,
+        Insertable::ReverbZone,
+    ];
+    /// Effects on a Sound or SoundGroup (Phase 52).
+    pub const SOUND_EFFECTS: [Insertable; 8] = [
+        Insertable::SoundEffect(ClassName::ReverbSoundEffect),
+        Insertable::SoundEffect(ClassName::EqualizerSoundEffect),
+        Insertable::SoundEffect(ClassName::CompressorSoundEffect),
+        Insertable::SoundEffect(ClassName::EchoSoundEffect),
+        Insertable::SoundEffect(ClassName::DistortionSoundEffect),
+        Insertable::SoundEffect(ClassName::PitchShiftSoundEffect),
+        Insertable::SoundEffect(ClassName::LowPassSoundEffect),
+        Insertable::SoundEffect(ClassName::HighPassSoundEffect),
+    ];
     /// Lights shine from the part they are inside.
     pub const LIGHTS: [Insertable; 2] = [Insertable::PointLight, Insertable::SpotLight];
     /// Ribbon ▸ Lighting ▸ Reflections.
@@ -239,6 +264,17 @@ impl Insertable {
             Insertable::BillboardGui => "BillboardGui",
             Insertable::HealthBar => "Health bar",
             Insertable::Sound => "Sound",
+            Insertable::SoundGroup => "SoundGroup",
+            Insertable::SoundEffect(ClassName::ReverbSoundEffect) => "Reverb",
+            Insertable::SoundEffect(ClassName::EqualizerSoundEffect) => "Equalizer",
+            Insertable::SoundEffect(ClassName::CompressorSoundEffect) => "Compressor",
+            Insertable::SoundEffect(ClassName::EchoSoundEffect) => "Echo",
+            Insertable::SoundEffect(ClassName::DistortionSoundEffect) => "Distortion",
+            Insertable::SoundEffect(ClassName::PitchShiftSoundEffect) => "Pitch Shift",
+            Insertable::SoundEffect(ClassName::LowPassSoundEffect) => "Low Pass",
+            Insertable::SoundEffect(ClassName::HighPassSoundEffect) => "High Pass",
+            Insertable::SoundEffect(class) => class.as_str(),
+            Insertable::ReverbZone => "Reverb Zone",
             Insertable::PointLight => "PointLight",
             Insertable::SpotLight => "SpotLight",
             Insertable::ReflectionProbe => "Reflection Probe",
@@ -300,6 +336,9 @@ impl Insertable {
             Insertable::BillboardGui => ClassName::BillboardGui,
             Insertable::HealthBar => ClassName::ProgressBar,
             Insertable::Sound => ClassName::Sound,
+            Insertable::SoundGroup => ClassName::SoundGroup,
+            Insertable::SoundEffect(class) => class,
+            Insertable::ReverbZone => ClassName::ReverbZone,
             Insertable::PointLight => ClassName::PointLight,
             Insertable::SpotLight => ClassName::SpotLight,
             Insertable::ReflectionProbe => ClassName::ReflectionProbe,
@@ -453,6 +492,11 @@ pub fn create(world: &mut World, what: Insertable, position: Vector3) -> Instanc
             ("Size", Value::Vector3(Vector3::new(2.0, 1.0, 2.0))),
             ("Position", Value::Vector3(position)),
         ],
+        // A room to walk into, with its bottom on the ground.
+        Insertable::ReverbZone => vec![(
+            "Position",
+            Value::Vector3(Vector3::new(position.x, position.y + 6.0, position.z)),
+        )],
         // Big enough to walk into, with its bottom on the ground.
         Insertable::DamageZone => vec![
             ("Size", Value::Vector3(Vector3::new(8.0, 4.0, 8.0))),
@@ -787,13 +831,25 @@ pub fn health_bar(world: &mut World, health: Option<InstanceId>) -> HealthBar {
 /// RemoteEvent (or RemoteFunction, BindableEvent or BindableFunction) goes
 /// into ReplicatedStorage (where both sides find it, as in Roblox), and
 /// anything else into the Workspace. An Atmosphere or Clouds always goes
-/// into Lighting, and a Team into Teams.
+/// into Lighting, and a Team into Teams. A SoundGroup goes into the
+/// selected SoundGroup, and a sound effect into the selected Sound or
+/// SoundGroup; otherwise both go into SoundService.
 pub fn insert_parent(world: &World, near: Option<InstanceId>, what: Insertable) -> InstanceId {
     if matches!(what, Insertable::Atmosphere | Insertable::Clouds) {
         return world.lighting();
     }
     if what == Insertable::Team {
         return world.teams();
+    }
+    if matches!(what, Insertable::SoundGroup | Insertable::SoundEffect(_)) {
+        let holds = |id: &InstanceId| {
+            world.get(*id).is_some_and(|instance| {
+                instance.class() == ClassName::SoundGroup
+                    || (matches!(what, Insertable::SoundEffect(_))
+                        && instance.class() == ClassName::Sound)
+            }) && is_saved(world, *id)
+        };
+        return near.filter(holds).unwrap_or(world.sound_service());
     }
     let default = match what {
         Insertable::RemoteEvent | Insertable::Messenger(_) => world.replicated_storage(),
@@ -905,12 +961,13 @@ pub fn needs_screen_gui(world: &World, near: Option<InstanceId>, what: Insertabl
     what.is_ui_element() && !is_ui_container(world, insert_parent(world, near, what))
 }
 
-/// True if `id` is in the Workspace, ReplicatedStorage or Teams: the
+/// True if `id` is in the Workspace, ReplicatedStorage, Teams or SoundService: the
 /// places the world file saves what's inside.
 pub fn is_saved(world: &World, id: InstanceId) -> bool {
     world.is_descendant_of(id, world.workspace())
         || world.is_descendant_of(id, world.replicated_storage())
         || world.is_descendant_of(id, world.teams())
+        || world.is_descendant_of(id, world.sound_service())
 }
 
 /// A name that none of `parent`'s children has: `wanted` itself if it's

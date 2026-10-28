@@ -10,7 +10,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use axcenity_core::{UI_SETTING_NAMES, UI_SETTING_PREFIX, UiSettings};
+use axcenity_core::{MASTER_VOLUME_SETTING, UI_SETTING_NAMES, UI_SETTING_PREFIX, UiSettings};
 use axcenity_save::{SaveError, Saves, place_character, slot_number};
 use mlua::{FromLua, IntoLua, Lua, MetaMethod, UserData, UserDataMethods};
 
@@ -168,6 +168,21 @@ impl UserData for LuaSaveService {
                 if setting.starts_with(UI_SETTING_PREFIX) {
                     return set_ui_setting(lua, &setting, value);
                 }
+                if setting == MASTER_VOLUME_SETTING {
+                    let volume = match value {
+                        mlua::Value::Nil => 1.0,
+                        mlua::Value::Integer(n) => n as f64,
+                        mlua::Value::Number(n) if n.is_finite() => n,
+                        ref other => {
+                            return Err(mlua::Error::runtime(format!(
+                                "SetSetting(\"{setting}\", ...) needs a number from 0 to 1, not {}",
+                                type_name(lua, other)
+                            )));
+                        }
+                    };
+                    world_mut(lua)?.set_master_volume(volume);
+                    return Ok(());
+                }
                 set_value(lua, "SetSetting", name, value, |saves| &mut saves.settings)
             },
         );
@@ -176,6 +191,9 @@ impl UserData for LuaSaveService {
             if name.starts_with(UI_SETTING_PREFIX) {
                 let value = world(lua)?.ui_settings().get(&name);
                 return value.map_or(Ok(mlua::Value::Nil), |value| value_to_lua(lua, &value));
+            }
+            if name == MASTER_VOLUME_SETTING {
+                return world(lua)?.master_volume().into_lua(lua);
             }
             let value = saves(lua)?.borrow().settings.get(&name).cloned();
             match value {

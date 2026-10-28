@@ -38,6 +38,7 @@ mod input_settings;
 mod levels;
 mod material_files;
 mod material_tab;
+mod mixer;
 mod nav_overlay;
 mod prefabs;
 mod probes;
@@ -234,6 +235,8 @@ pub struct EditorApp {
     game_keys: GameKeys,
     /// What Play's frames cost, for the Profiler panel.
     profiler: Profiler,
+    /// The Mixer panel's meters, mute and solo.
+    mixer: crate::mixer::Mixer,
     /// The last asset check, for the Asset Check panel.
     asset_check: AssetCheck,
     /// The Tags panel's rename box.
@@ -397,6 +400,7 @@ impl egui_dock::TabViewer for DockViewer<'_> {
             Pane::UiDesigner => self.app.ui_designer_pane(ui, self.render_state),
             Pane::Terrain => self.app.terrain_pane(ui),
             Pane::Profiler => self.app.profiler.show(ui),
+            Pane::Mixer => self.app.mixer_pane(ui),
             Pane::AssetCheck => self.app.asset_check_pane(ui),
             Pane::BehaviorTree => self.app.behavior_tree_pane(ui),
             Pane::DataTable => self.app.data_table_pane(ui),
@@ -627,6 +631,7 @@ impl EditorApp {
             ui_warnings: Vec::new(),
             last_frame: None,
             profiler: Profiler::default(),
+            mixer: crate::mixer::Mixer::default(),
             asset_check: AssetCheck::default(),
             tags: crate::tags::TagsPanel::default(),
             tabs: ScriptTabs::default(),
@@ -1006,6 +1011,7 @@ impl EditorApp {
         // Profiler's readings freeze.
         if !self.playing() {
             self.profiler.stop();
+            self.mixer.stop();
         }
 
         let title = self.title();

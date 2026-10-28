@@ -121,9 +121,11 @@ impl SelectedLook {
     pub fn of(world: &World, id: InstanceId) -> Option<Self> {
         let instance = world.get(id)?;
         let mesh_id = match instance.class() {
-            ClassName::Part | ClassName::Seat | ClassName::VehicleSeat | ClassName::DamageZone => {
-                None
-            }
+            ClassName::Part
+            | ClassName::Seat
+            | ClassName::VehicleSeat
+            | ClassName::DamageZone
+            | ClassName::ReverbZone => None,
             ClassName::MeshPart => Some(instance.property("MeshId")?.as_str()?.to_owned()),
             _ => return None,
         };

@@ -245,9 +245,20 @@ impl EditorApp {
             RibbonGroup::Effects => ribbon::group(ui, "Effects", |ui| {
                 for what in Insertable::AUDIO {
                     let button = RibbonButton::new(theme::insert_icon(what), what.label());
+                    let hover = match what {
+                        Insertable::SoundGroup => {
+                            "Insert a SoundGroup (an audio bus) into the selected SoundGroup or \
+                             SoundService. Set a Sound's SoundGroup to play it through one."
+                        }
+                        Insertable::ReverbZone => {
+                            "Insert a Reverb Zone: while the camera is inside it, spatial \
+                             Sounds take on its reverb."
+                        }
+                        _ => "Insert a Sound into the selected part or the Workspace.",
+                    };
                     if ui
                         .add_enabled(!playing, button)
-                        .on_hover_text("Insert a Sound into the selected part or the Workspace.")
+                        .on_hover_text(hover)
                         .on_disabled_hover_text("Press Stop to edit.")
                         .clicked()
                     {

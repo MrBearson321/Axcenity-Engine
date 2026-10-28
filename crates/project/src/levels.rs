@@ -2,7 +2,7 @@
 //! level is `levels/<name>.world.json`, a world file of its own.
 //!
 //! A level is its Workspace. The services outside it (ReplicatedStorage,
-//! Lighting, Players, StarterPlayer, Teams) are the project's, saved in
+//! Lighting, Players, StarterPlayer, Teams, SoundService) are the project's, saved in
 //! `world.json`, and stay the same from level to level, so a level file
 //! only has a `workspace` section ([`write_level`]); any other section in
 //! one is left unused. The start level's name is the manifest's

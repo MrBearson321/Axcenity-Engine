@@ -113,6 +113,7 @@ impl EditorApp {
                         | ClassName::Seat
                         | ClassName::VehicleSeat
                         | ClassName::DamageZone
+                        | ClassName::ReverbZone
                 )
             });
             // A character has one controller or the other. One that already
@@ -357,6 +358,7 @@ impl EditorApp {
                         | ClassName::Seat
                         | ClassName::VehicleSeat
                         | ClassName::DamageZone
+                        | ClassName::ReverbZone
                         | ClassName::Model
                 )
             });
@@ -390,6 +392,7 @@ impl EditorApp {
                     | ClassName::Seat
                     | ClassName::VehicleSeat
                     | ClassName::DamageZone
+                    | ClassName::ReverbZone
             )
         });
         let holder = if has_body {

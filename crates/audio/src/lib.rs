@@ -12,18 +12,43 @@
 //! The host's camera is the listener ([`Listener`]). Kira pans it in stereo
 //! and turns it down with distance, from full at `RollOffMinDistance` to
 //! silent at `RollOffMaxDistance`.
+//!
+//! Buses (Phase 52): each SoundGroup is a Kira sub-track, inside its parent
+//! group's, at its `Volume`, through its effects ([`mix`], `effects`). Every
+//! Sound plays on a track of its own, inside its `SoundGroup`'s (or the main
+//! track), with its own effects; a spatial one's track also has the
+//! ReverbZone reverb, which blends in while the listener is inside a zone.
+//! Adding, removing or reordering groups or effects builds the group tracks
+//! again, and the Sounds on them carry on from where they were. The main
+//! track is at the world's master volume. The editor's Mixer reads each
+//! group's level ([`GameAudio::take_levels`]) and can mute and solo them
+//! ([`GameAudio::set_monitor`]).
+
+pub mod mix;
+
+mod effects;
 
 use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
+use std::sync::Arc;
+use std::time::Duration;
 
 use axcenity_assets::Assets;
 use axcenity_core::{ClassName, Instance, InstanceId, Value, Vector3, World};
+use kira::backend::Backend;
 use kira::listener::ListenerHandle;
 use kira::sound::PlaybackState;
 use kira::sound::static_sound::{StaticSoundData, StaticSoundHandle};
-use kira::track::{SpatialTrackBuilder, SpatialTrackDistances, SpatialTrackHandle};
+use kira::track::{
+    MainTrackBuilder, SpatialTrackBuilder, SpatialTrackDistances, SpatialTrackHandle, TrackBuilder,
+    TrackHandle,
+};
 use kira::{AudioManager, AudioManagerSettings, Decibels, DefaultBackend, Tween};
 use thiserror::Error;
+
+use effects::{AddEffects, EffectChain, Level, Meter, ZoneReverb};
+use mix::{Effect, EffectShape, Group, Reverb};
+pub use mix::{Monitor, REVERB_TYPES};
 
 /// Full volume within this many studs, unless a Sound says otherwise.
 const DEFAULT_MIN_DISTANCE: f64 = 10.0;
@@ -121,6 +146,18 @@ impl Listener {
 pub struct GameAudio {
     engine: Option<AudioEngine>,
     failed: bool,
+    /// The editor Mixer's mute and solo, kept for when the output opens.
+    monitor: Monitor,
+}
+
+/// How loud the mix has been since the levels were last taken: peak
+/// amplitudes, 1 being full scale.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Levels {
+    /// The main track, after the master volume.
+    pub master: f32,
+    /// Each SoundGroup's own output.
+    pub groups: HashMap<InstanceId, f32>,
 }
 
 impl GameAudio {
@@ -152,6 +189,7 @@ impl GameAudio {
         let Some(engine) = &mut self.engine else {
             return update;
         };
+        engine.monitor.clone_from(&self.monitor);
         engine.set_listener(listener);
         for action in actions {
             if let Err(err) = engine.apply(action, world, assets) {
@@ -174,6 +212,19 @@ impl GameAudio {
     /// editor's profiler.
     pub fn playing_count(&self) -> usize {
         self.engine.as_ref().map_or(0, AudioEngine::playing_count)
+    }
+
+    /// Mutes and solos SoundGroups from the next update on, as the editor's
+    /// Mixer asks. The world doesn't change.
+    pub fn set_monitor(&mut self, monitor: Monitor) {
+        self.monitor = monitor;
+    }
+
+    /// The peak levels since the last call (all 0 before the output opens).
+    pub fn take_levels(&mut self) -> Levels {
+        self.engine
+            .as_mut()
+            .map_or_else(Levels::default, AudioEngine::take_levels)
     }
 
     /// Decodes the sound file at `path` again after it changed on disk, so
@@ -221,6 +272,10 @@ struct SoundProperties {
     max_distance: f32,
     /// `Sound.Position`, before an ancestor part replaces it.
     position: [f32; 3],
+    /// The SoundGroup it plays through ([`mix::sound_group`]).
+    group: Option<InstanceId>,
+    /// Its own effects, in order.
+    effects: Vec<Effect>,
 }
 
 impl SoundProperties {
@@ -252,7 +307,23 @@ impl SoundProperties {
             min_distance,
             max_distance,
             position: vector(sound),
+            group: None,
+            effects: Vec::new(),
         }
+    }
+
+    /// The Sound `id` as it plays in `world`: with its place, its group
+    /// and its effects.
+    fn read(world: &World, id: InstanceId, sound: &Instance) -> Self {
+        let mut properties = Self::of(sound);
+        properties.position = emitter_position(world, id, properties.position);
+        properties.group = mix::sound_group(world, sound);
+        properties.effects = mix::effects(world, id);
+        properties
+    }
+
+    fn effect_shapes(&self) -> Vec<EffectShape> {
+        self.effects.iter().map(Effect::shape).collect()
     }
 }
 
@@ -343,28 +414,100 @@ fn sounds(world: &World) -> impl Iterator<Item = (InstanceId, &Instance)> {
 /// A sound that's playing or paused, with the settings it was last given.
 struct Playback {
     handle: StaticSoundHandle,
-    /// Set while `Spatial` is on. Dropping it removes the emitter track.
-    emitter: Option<SpatialTrackHandle>,
+    /// The Sound's own track. Dropping it removes the track.
+    track: SoundTrack,
+    /// The Sound's own effects, on its track.
+    chain: EffectChain,
+    /// The ReverbZone reverb, on a spatial Sound's track.
+    zone: Option<ZoneReverb>,
     settings: SoundProperties,
+    /// The Mixer's gain on it (0 while solo leaves its group out).
+    gain: f64,
+    /// The group tracks' generation it was played on, for a Sound in a group.
+    generation: u64,
+}
+
+/// A Sound's own track, kept for as long as it plays: dropping the handle
+/// removes the track.
+enum SoundTrack {
+    // Only held, never read.
+    Plain(#[allow(dead_code)] TrackHandle),
+    /// Moves with the emitter.
+    Spatial(SpatialTrackHandle),
+}
+
+/// One SoundGroup's track.
+struct Bus {
+    track: TrackHandle,
+    chain: EffectChain,
+    level: Arc<Level>,
+    /// The volume it was last set to, Mixer gain included.
+    volume: f64,
+}
+
+/// What the group tracks were built for: each group, the group it's in,
+/// and its effects' shapes.
+type BusShape = Vec<(InstanceId, Option<InstanceId>, Vec<EffectShape>)>;
+
+/// The ReverbZone reverb the spatial Sounds have now.
+struct ZoneMix {
+    /// The zone the listener is in.
+    zone: Option<InstanceId>,
+    reverb: Reverb,
+    /// How far the reverb is blended in, 0 to 1.
+    blend: f64,
+    /// The seconds the zone it's in (or last left) fades over.
+    fade_time: f64,
 }
 
 /// Audio state for one running game. Dropping it stops every sound and
-/// releases the platform audio device.
-pub struct AudioEngine {
-    manager: AudioManager<DefaultBackend>,
+/// releases the platform audio device. Tests run it on a backend of their
+/// own (`B`) to hear what it plays.
+pub struct AudioEngine<B: Backend = DefaultBackend> {
+    manager: AudioManager<B>,
     listener: ListenerHandle,
+    /// Where the listener is, to find the ReverbZone it's in.
+    listener_position: Vector3,
     sounds: HashMap<InstanceId, Playback>,
     decoded: HashMap<String, StaticSoundData>,
     /// Sounds that ended, or couldn't be played, while `Playing` was still
     /// true. They aren't started again until `Playing` goes false first,
     /// so a broken file is reported once, not every frame.
     settled: HashSet<InstanceId>,
+    buses: HashMap<InstanceId, Bus>,
+    bus_shape: BusShape,
+    /// Goes up each time the group tracks are built again.
+    generation: u64,
+    /// The SoundGroups as last read.
+    groups: Vec<Group>,
+    master_level: Arc<Level>,
+    master_volume: f64,
+    zone: ZoneMix,
+    monitor: Monitor,
 }
 
 impl AudioEngine {
     pub fn new() -> Result<Self, AudioError> {
-        let mut manager = AudioManager::<DefaultBackend>::new(AudioManagerSettings::default())
-            .map_err(|err| AudioError::Output(err.to_string()))?;
+        Self::with_backend(Default::default())
+    }
+}
+
+impl<B: Backend> AudioEngine<B>
+where
+    B::Settings: Default,
+    B::Error: std::fmt::Debug,
+{
+    /// Opens `B`'s output, with `settings`.
+    pub fn with_backend(settings: B::Settings) -> Result<Self, AudioError> {
+        let master_level = Arc::new(Level::default());
+        let mut main_track = MainTrackBuilder::new();
+        main_track.add(Meter(Arc::clone(&master_level)));
+        let mut manager = AudioManager::<B>::new(AudioManagerSettings {
+            main_track_builder: main_track,
+            backend_settings: settings,
+            ..AudioManagerSettings::default()
+        })
+        .map_err(|err| AudioError::Output(format!("{err:?}")))?;
         let listener = manager
             .add_listener(
                 mint::Vector3 {
@@ -385,10 +528,36 @@ impl AudioEngine {
         Ok(Self {
             manager,
             listener,
+            listener_position: Vector3::default(),
             sounds: HashMap::new(),
             decoded: HashMap::new(),
             settled: HashSet::new(),
+            buses: HashMap::new(),
+            bus_shape: Vec::new(),
+            generation: 0,
+            groups: Vec::new(),
+            master_level,
+            master_volume: 1.0,
+            zone: ZoneMix {
+                zone: None,
+                reverb: Reverb::preset("Room"),
+                blend: 0.0,
+                fade_time: 0.0,
+            },
+            monitor: Monitor::default(),
         })
+    }
+
+    /// The peak levels since the last call.
+    pub fn take_levels(&mut self) -> Levels {
+        Levels {
+            master: self.master_level.take(),
+            groups: self
+                .buses
+                .iter()
+                .map(|(&id, bus)| (id, bus.level.take()))
+                .collect(),
+        }
     }
 
     /// How many sounds are playing now: `Playing` and not yet at their end.
@@ -404,6 +573,8 @@ impl AudioEngine {
     /// Points the listener at `listener`. An unmoved camera is a no-op for
     /// what you hear, apart from the command itself.
     pub fn set_listener(&mut self, listener: Listener) {
+        let [x, y, z] = listener.position;
+        self.listener_position = Vector3::new(x, y, z);
         let tween = Tween::default();
         self.listener
             .set_position(mint_vec(listener.position), tween);
@@ -444,7 +615,7 @@ impl AudioEngine {
                 let mut settings = world
                     .get(instance)
                     .filter(|sound| sound.class() == ClassName::Sound)
-                    .map(SoundProperties::of)
+                    .map(|sound| SoundProperties::read(world, instance, sound))
                     .unwrap_or_else(|| SoundProperties {
                         sound_id: String::new(),
                         volume: 1.0,
@@ -455,12 +626,14 @@ impl AudioEngine {
                         min_distance: DEFAULT_MIN_DISTANCE as f32,
                         max_distance: DEFAULT_MAX_DISTANCE as f32,
                         position: [0.0, 0.0, 0.0],
+                        group: None,
+                        effects: Vec::new(),
                     });
                 settings.sound_id = sound_id;
                 settings.volume = volume;
                 settings.looped = looped;
                 settings.playing = true;
-                settings.position = emitter_position(world, instance, settings.position);
+                self.sync_mix(world);
                 self.play(instance, settings, assets)
             }
         }
@@ -483,9 +656,8 @@ impl AudioEngine {
                 self.stop(id);
                 continue;
             };
-            let mut wanted = SoundProperties::of(instance);
+            let mut wanted = SoundProperties::read(world, id, instance);
             wanted.playing = true;
-            wanted.position = emitter_position(world, id, wanted.position);
             self.sync_one(id, wanted, assets, &mut update);
         }
         update.errors
@@ -506,10 +678,128 @@ impl AudioEngine {
         }
         self.settled.retain(|&id| world.contains(id));
 
+        self.sync_mix(world);
         for (id, sound) in sounds(world) {
-            let mut wanted = SoundProperties::of(sound);
-            wanted.position = emitter_position(world, id, wanted.position);
+            let wanted = SoundProperties::read(world, id, sound);
             self.sync_one(id, wanted, assets, update);
+        }
+    }
+
+    /// Brings the buses, the master volume and the zone reverb in line
+    /// with `world`: builds the group tracks again when the groups or
+    /// their effects changed shape, else sets their volumes and effects.
+    fn sync_mix(&mut self, world: &World) {
+        let tween = Tween::default();
+        let master = world.master_volume();
+        if master != self.master_volume {
+            self.manager
+                .main_track()
+                .set_volume(decibels(master), tween);
+            self.master_volume = master;
+        }
+
+        self.groups = mix::groups(world);
+        let shape: BusShape = self
+            .groups
+            .iter()
+            .map(|group| {
+                let effects = group.effects.iter().map(Effect::shape).collect();
+                (group.id, group.parent, effects)
+            })
+            .collect();
+        if shape != self.bus_shape {
+            self.build_buses();
+            self.bus_shape = shape;
+        } else {
+            for group in &self.groups {
+                let volume = group.volume * self.monitor.group_gain(&self.groups, group.id);
+                if let Some(bus) = self.buses.get_mut(&group.id) {
+                    if volume != bus.volume {
+                        bus.track.set_volume(decibels(volume), tween);
+                        bus.volume = volume;
+                    }
+                    bus.chain.update(&group.effects);
+                }
+            }
+        }
+
+        self.sync_zone(world);
+    }
+
+    /// Builds every group track again, parents first. The old tracks go,
+    /// and the Sounds on them move to the new ones when they next sync.
+    fn build_buses(&mut self) {
+        self.buses.clear();
+        self.generation += 1;
+        for group in &self.groups {
+            let volume = group.volume * self.monitor.group_gain(&self.groups, group.id);
+            let mut builder = TrackBuilder::new()
+                .sub_track_capacity(256)
+                .volume(decibels(volume));
+            let chain = EffectChain::build(&mut builder, &group.effects);
+            let level = Arc::new(Level::default());
+            builder.add(Meter(Arc::clone(&level)));
+            let track = match group.parent.and_then(|parent| self.buses.get_mut(&parent)) {
+                Some(parent) => parent.track.add_sub_track(builder),
+                None => self.manager.add_sub_track(builder),
+            };
+            // Out of tracks: its Sounds play straight out.
+            if let Ok(track) = track {
+                self.buses.insert(
+                    group.id,
+                    Bus {
+                        track,
+                        chain,
+                        level,
+                        volume,
+                    },
+                );
+            }
+        }
+    }
+
+    /// Blends the reverb of the ReverbZone the listener is in onto every
+    /// spatial Sound, over the zone's `FadeTime`, and out again over it
+    /// when the listener leaves.
+    fn sync_zone(&mut self, world: &World) {
+        let zone = mix::zone_at(world, self.listener_position);
+        let same = match zone {
+            Some(zone) => self.zone.zone == Some(zone.id) && self.zone.reverb == zone.reverb,
+            None => self.zone.zone.is_none(),
+        };
+        if same {
+            return;
+        }
+        match zone {
+            Some(zone) => {
+                self.zone.zone = Some(zone.id);
+                self.zone.reverb = zone.reverb;
+                self.zone.blend = 1.0;
+                self.zone.fade_time = zone.fade_time;
+            }
+            None => {
+                self.zone.zone = None;
+                self.zone.blend = 0.0;
+            }
+        }
+        let tween = Tween {
+            duration: Duration::from_secs_f64(self.zone.fade_time),
+            ..Tween::default()
+        };
+        for playback in self.sounds.values_mut() {
+            if let Some(reverb) = &mut playback.zone {
+                reverb.set(self.zone.reverb, self.zone.blend, tween);
+            }
+        }
+    }
+
+    /// The generation a Sound in `group` plays on: the group tracks' now,
+    /// or 0 for a Sound that plays straight out.
+    fn generation_for(&self, group: Option<InstanceId>) -> u64 {
+        if group.is_some_and(|group| self.buses.contains_key(&group)) {
+            self.generation
+        } else {
+            0
         }
     }
 
@@ -523,6 +813,8 @@ impl AudioEngine {
         if !wanted.playing {
             self.settled.remove(&id);
         }
+        let generation = self.generation_for(wanted.group);
+        let gain = self.monitor.sound_gain(&self.groups, wanted.group);
         let Some(playback) = self.sounds.get_mut(&id) else {
             if wanted.playing
                 && !self.settled.contains(&id)
@@ -554,7 +846,10 @@ impl AudioEngine {
         }
         let route_changed = wanted.spatial != playback.settings.spatial
             || wanted.min_distance != playback.settings.min_distance
-            || wanted.max_distance != playback.settings.max_distance;
+            || wanted.max_distance != playback.settings.max_distance
+            || wanted.group != playback.settings.group
+            || wanted.effect_shapes() != playback.settings.effect_shapes()
+            || generation != playback.generation;
         if route_changed {
             let at = playback.handle.position();
             if let Err(err) = self.play(id, wanted, assets) {
@@ -571,9 +866,13 @@ impl AudioEngine {
 
         let tween = Tween::default();
         let old = &playback.settings;
-        if wanted.volume != old.volume {
-            playback.handle.set_volume(decibels(wanted.volume), tween);
+        if wanted.volume != old.volume || gain != playback.gain {
+            playback
+                .handle
+                .set_volume(decibels(wanted.volume * gain), tween);
+            playback.gain = gain;
         }
+        playback.chain.update(&wanted.effects);
         if wanted.speed != old.speed {
             playback.handle.set_playback_rate(wanted.speed, tween);
         }
@@ -588,7 +887,7 @@ impl AudioEngine {
             }
         }
         if wanted.position != old.position
-            && let Some(emitter) = &mut playback.emitter
+            && let SoundTrack::Spatial(emitter) = &mut playback.track
         {
             emitter.set_position(mint_vec(wanted.position), tween);
         }
@@ -612,9 +911,10 @@ impl AudioEngine {
             });
         }
 
+        let gain = self.monitor.sound_gain(&self.groups, settings.group);
         let data = self
             .sound_data(&sound_id, assets)?
-            .volume(decibels(settings.volume))
+            .volume(decibels(settings.volume * gain))
             .playback_rate(settings.speed)
             .loop_region(loop_region(settings.looped));
 
@@ -624,31 +924,53 @@ impl AudioEngine {
             sound_id: sound_id.clone(),
             message,
         };
-        if settings.spatial {
-            let mut track = self.emitter_track(&settings)?;
+        let generation = self.generation_for(settings.group);
+        let parent = settings.group.and_then(|group| self.buses.get_mut(&group));
+        let (handle, track, chain, zone) = if settings.spatial {
+            let mut builder = SpatialTrackBuilder::new()
+                .sound_capacity(4)
+                .distances(SpatialTrackDistances {
+                    min_distance: settings.min_distance,
+                    max_distance: settings.max_distance,
+                })
+                .spatialization_strength(SPATIALIZATION_STRENGTH);
+            let chain = EffectChain::build(&mut builder, &settings.effects);
+            let zone = ZoneReverb::build(&mut builder, self.zone.reverb, self.zone.blend);
+            let position = mint_vec(settings.position);
+            let mut track = match parent {
+                Some(bus) => bus
+                    .track
+                    .add_spatial_sub_track(&self.listener, position, builder),
+                None => self
+                    .manager
+                    .add_spatial_sub_track(&self.listener, position, builder),
+            }
+            .map_err(|err| failed(err.to_string()))?;
             let handle = track.play(data).map_err(|err| failed(err.to_string()))?;
-            self.sounds.insert(
-                instance,
-                Playback {
-                    handle,
-                    emitter: Some(track),
-                    settings,
-                },
-            );
+            (handle, SoundTrack::Spatial(track), chain, Some(zone))
         } else {
-            let handle = self
-                .manager
-                .play(data)
-                .map_err(|err| failed(err.to_string()))?;
-            self.sounds.insert(
-                instance,
-                Playback {
-                    handle,
-                    emitter: None,
-                    settings,
-                },
-            );
-        }
+            let mut builder = TrackBuilder::new().sound_capacity(4);
+            let chain = EffectChain::build(&mut builder, &settings.effects);
+            let mut track = match parent {
+                Some(bus) => bus.track.add_sub_track(builder),
+                None => self.manager.add_sub_track(builder),
+            }
+            .map_err(|err| failed(err.to_string()))?;
+            let handle = track.play(data).map_err(|err| failed(err.to_string()))?;
+            (handle, SoundTrack::Plain(track), chain, None)
+        };
+        self.sounds.insert(
+            instance,
+            Playback {
+                handle,
+                track,
+                chain,
+                zone,
+                settings,
+                gain,
+                generation,
+            },
+        );
         Ok(())
     }
 
@@ -676,30 +998,6 @@ impl AudioEngine {
         let data = decode_sound(sound_id, bytes)?;
         self.decoded.insert(sound_id.to_owned(), data.clone());
         Ok(data)
-    }
-
-    /// A track that pans and attenuates one Sound. One voice is enough;
-    /// playing the Sound again replaces it.
-    fn emitter_track(
-        &mut self,
-        settings: &SoundProperties,
-    ) -> Result<SpatialTrackHandle, AudioError> {
-        self.manager
-            .add_spatial_sub_track(
-                &self.listener,
-                mint_vec(settings.position),
-                SpatialTrackBuilder::new()
-                    .sound_capacity(4)
-                    .distances(SpatialTrackDistances {
-                        min_distance: settings.min_distance,
-                        max_distance: settings.max_distance,
-                    })
-                    .spatialization_strength(SPATIALIZATION_STRENGTH),
-            )
-            .map_err(|err| AudioError::Play {
-                sound_id: settings.sound_id.clone(),
-                message: err.to_string(),
-            })
     }
 
     fn stop(&mut self, instance: InstanceId) {
@@ -819,6 +1117,9 @@ fn quat_from_basis(x: [f32; 3], y: [f32; 3], z: [f32; 3]) -> mint::Quaternion<f3
         },
     }
 }
+
+#[cfg(test)]
+mod render_tests;
 
 #[cfg(test)]
 mod tests {

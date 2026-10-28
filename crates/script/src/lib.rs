@@ -41,6 +41,7 @@
 
 mod api;
 mod attachment;
+pub mod audio_settings;
 mod bindable;
 mod camera;
 mod cframe;
@@ -233,6 +234,8 @@ pub struct ScriptRuntime {
     level_loads: Vec<String>,
     /// Sequences played on either side (Phase 51).
     sequences: sequence::SharedSequences,
+    /// The default audio settings UI and volume sliders (Phase 52).
+    volume_sliders: audio_settings::VolumeSliders,
     /// Every script and ModuleScript started, in the order they first
     /// started, with the code they run now, so they can run again.
     started: Vec<Started>,
@@ -293,6 +296,7 @@ impl ScriptRuntime {
             levels,
             level_loads: Vec::new(),
             sequences,
+            volume_sliders: audio_settings::VolumeSliders::default(),
             started: Vec::new(),
             clones: Vec::new(),
             starting_clones: false,
@@ -753,6 +757,10 @@ impl ScriptRuntime {
                 .step(world, &assets, &mut camera, seconds)
         };
         self.after_sequences(world, stepped);
+        // Volume sliders follow the volumes scripts set, and set the ones
+        // the player dragged.
+        self.volume_sliders.step(world);
+        self.fire_changes(world);
     }
 
     /// Whether a Sequence with `LockPlayerInput` is playing (or paused):

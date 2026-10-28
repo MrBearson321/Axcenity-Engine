@@ -1656,9 +1656,9 @@ Live preview scrubs in the editor without entering Play. Blocks: "play cutscene"
 
 ### Acceptance criteria
 
-- [ ] Music and SFX groups under a Master group can be set separately from Lua and from the settings UI, and the values persist in a save slot.
-- [ ] Walking into a cave ReverbZone fades reverb in on footsteps and fades it out on leaving.
-- [ ] A low-pass on the Music group dulls the music while a pause menu is open, set from a script.
+- [x] Music and SFX groups under a Master group can be set separately from Lua and from the settings UI, and the values persist in a save slot.
+- [x] Walking into a cave ReverbZone fades reverb in on footsteps and fades it out on leaving.
+- [x] A low-pass on the Music group dulls the music while a pause menu is open, set from a script.
 
 ---
 

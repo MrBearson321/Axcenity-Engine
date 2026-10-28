@@ -764,6 +764,13 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
                 chosen = Some(RowCommand::Insert(what));
             }
         }
+        ui.menu_button("Sound effect", |ui| {
+            for what in Insertable::SOUND_EFFECTS {
+                if ui.button(insert_item(ui, what)).clicked() {
+                    chosen = Some(RowCommand::Insert(what));
+                }
+            }
+        });
         for what in Insertable::LIGHTS
             .into_iter()
             .chain(Insertable::PROBES)

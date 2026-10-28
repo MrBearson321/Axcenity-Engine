@@ -43,7 +43,11 @@ impl EditorApp {
                 .set_property(id, "MaterialVariant", Value::String(path.to_owned()));
             if matches!(
                 class,
-                ClassName::Part | ClassName::Seat | ClassName::VehicleSeat | ClassName::DamageZone
+                ClassName::Part
+                    | ClassName::Seat
+                    | ClassName::VehicleSeat
+                    | ClassName::DamageZone
+                    | ClassName::ReverbZone
             ) {
                 let _ =
                     self.world

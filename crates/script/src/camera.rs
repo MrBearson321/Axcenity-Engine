@@ -376,6 +376,7 @@ fn subject_frame(world: &World, id: InstanceId) -> Option<LuaCFrame> {
             | ClassName::Seat
             | ClassName::VehicleSeat
             | ClassName::DamageZone
+            | ClassName::ReverbZone
     ) {
         return None;
     }

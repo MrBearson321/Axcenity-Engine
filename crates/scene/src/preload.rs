@@ -92,7 +92,8 @@ pub fn asset_files(world: &World) -> Vec<AssetFile> {
             | ClassName::NegateOperation
             | ClassName::Seat
             | ClassName::VehicleSeat
-            | ClassName::DamageZone => {
+            | ClassName::DamageZone
+            | ClassName::ReverbZone => {
                 if let Some(path) = text("MaterialVariant") {
                     add(AssetFile::Material(path));
                 }

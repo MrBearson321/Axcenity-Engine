@@ -1,6 +1,8 @@
-//! World state in a save: every Instance in the Workspace and Lighting, as
-//! its class, its name and the properties that differ from its class's
-//! defaults, and the services' own properties.
+//! World state in a save: every Instance in the Workspace, Lighting and
+//! SoundService (its SoundGroups, Phase 52), as its class, its name and the
+//! properties that differ from its class's defaults, and the services' own
+//! properties. A slot saved before SoundService was kept leaves the live
+//! SoundGroups as they are.
 //!
 //! Restoring matches each saved Instance to a live one with the same parent,
 //! class and name (the second "Coin" to the second "Coin"), sets its
@@ -30,7 +32,19 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// The services whose contents are world state, in the order they're saved.
-const SERVICES: [ClassName; 2] = [ClassName::Workspace, ClassName::Lighting];
+const SERVICES: [ClassName; 3] = [
+    ClassName::Workspace,
+    ClassName::Lighting,
+    ClassName::SoundService,
+];
+
+/// The services a slot has: every one, except SoundService in a slot from
+/// before it was saved (its `services` have no entry for it).
+fn saved_services(state: &WorldState) -> impl Iterator<Item = ClassName> + '_ {
+    SERVICES.into_iter().filter(|class| {
+        *class != ClassName::SoundService || state.services.contains_key(class.as_str())
+    })
+}
 
 /// A property's name and its saved value.
 pub type Properties = BTreeMap<String, SavedValue>;
@@ -305,7 +319,7 @@ fn changed_properties(world: &World, id: InstanceId) -> Properties {
 pub fn restore(world: &mut World, state: &WorldState) -> Vec<Option<InstanceId>> {
     let mut restored = vec![None; state.instances.len()];
     let none = Properties::new();
-    for class in SERVICES {
+    for class in saved_services(state) {
         if let Some(service) = world.service(class) {
             let saved = state.services.get(class.as_str()).unwrap_or(&none);
             set_properties(world, service, saved);
@@ -325,7 +339,8 @@ pub fn restore(world: &mut World, state: &WorldState) -> Vec<Option<InstanceId>>
         }
     }
 
-    let stack: Vec<(InstanceId, SavedParent)> = SERVICES
+    let services: Vec<ClassName> = saved_services(state).collect();
+    let stack: Vec<(InstanceId, SavedParent)> = services
         .iter()
         .rev()
         .filter_map(|&class| {

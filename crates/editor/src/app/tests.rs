@@ -303,6 +303,41 @@ fn a_spawn_location_goes_on_the_ground_and_a_team_into_teams() {
     std::fs::remove_dir_all(folder).unwrap();
 }
 
+/// Phase 52: a SoundGroup goes into SoundService, or into the selected
+/// SoundGroup as a sub-bus; a sound effect into the selected group or
+/// Sound; a ReverbZone into the Workspace, standing on the ground. Each
+/// one is saved and can be edited.
+#[test]
+fn sound_groups_effects_and_reverb_zones_go_where_they_work() {
+    let folder = copy_of_example("hello-part", "audio-insert");
+    let mut app = EditorApp::new(Some(&folder));
+    app.insert(Insertable::SoundGroup, None);
+    let master = app.selected.unwrap();
+    assert_eq!(
+        app.world.get(master).unwrap().parent(),
+        Some(app.world.sound_service())
+    );
+    app.insert(Insertable::SoundGroup, app.selected);
+    let music = app.selected.unwrap();
+    assert_eq!(app.world.get(music).unwrap().parent(), Some(master));
+    app.insert(
+        Insertable::SoundEffect(ClassName::LowPassSoundEffect),
+        app.selected,
+    );
+    let muffle = app.selected.unwrap();
+    assert_eq!(app.world.get(muffle).unwrap().parent(), Some(music));
+    assert!(tree::check_editable(&app.world, muffle).is_ok());
+
+    app.insert(Insertable::ReverbZone, app.selected);
+    let zone = app.selected.unwrap();
+    let instance = app.world.get(zone).unwrap();
+    assert_eq!(instance.class(), ClassName::ReverbZone);
+    assert_eq!(instance.parent(), Some(app.world.workspace()));
+    assert_eq!(instance.property("CanCollide"), Some(&Value::Bool(false)));
+    drop(app);
+    std::fs::remove_dir_all(folder).unwrap();
+}
+
 #[test]
 fn the_whole_editor_draws_in_each_theme_and_density() {
     let snapshots = std::env::var_os("AXCENITY_SNAPSHOTS").map(PathBuf::from);
@@ -434,6 +469,7 @@ fn every_panel_fits_a_narrow_column_and_a_short_strip() {
                         Pane::UiDesigner => app.ui_designer_pane(ui, None),
                         Pane::Terrain => app.terrain_pane(ui),
                         Pane::Profiler => app.profiler.show(ui),
+                        Pane::Mixer => app.mixer_pane(ui),
                         Pane::AssetCheck => {
                             let _ = app.asset_check.show(ui, app.project.is_some(), true);
                         }

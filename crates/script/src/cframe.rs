@@ -393,6 +393,7 @@ pub fn pivot_methods(lua: &Lua) -> mlua::Result<Vec<(ClassName, &'static str, ml
         ClassName::Seat,
         ClassName::VehicleSeat,
         ClassName::DamageZone,
+        ClassName::ReverbZone,
         ClassName::Model,
         ClassName::Tool,
     ] {

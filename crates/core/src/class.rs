@@ -48,6 +48,9 @@ pub enum ClassName {
     StarterPlayerScripts,
     /// The service that holds the Teams (Phase 47).
     Teams,
+    /// The service that holds the SoundGroups (Phase 52): the game's
+    /// audio buses.
+    SoundService,
     /// A side players are on, in Teams: they spawn on the SpawnLocations
     /// of its `TeamColor`.
     Team,
@@ -75,6 +78,10 @@ pub enum ClassName {
     /// inside it loses `DamagePerSecond` a second. Anchored, see-through
     /// and walked through by default.
     DamageZone,
+    /// A Part the listener walks into (Phase 52): while the camera is
+    /// inside it, its `ReverbType` preset blends onto the spatial Sounds
+    /// over `FadeTime` seconds. Anchored, see-through and walked through.
+    ReverbZone,
     /// A Part characters spawn on (Phase 47): an `Enabled` one of their
     /// team's `TeamColor`, or a `Neutral` one, chosen at random. For
     /// `Duration` seconds after, a ForceField keeps them from harm.
@@ -139,6 +146,28 @@ pub enum ClassName {
     BillboardGui,
     /// Plays an audio file from the project.
     Sound,
+    /// An audio bus (Phase 52): the Sounds whose `SoundGroup` is it, and
+    /// the SoundGroups inside it, mixed at its `Volume` through its effects.
+    SoundGroup,
+    /// Inside a Sound or SoundGroup: makes it sound like a room (Phase 52).
+    ReverbSoundEffect,
+    /// Inside a Sound or SoundGroup: raises or lowers its lows, mids and
+    /// highs.
+    EqualizerSoundEffect,
+    /// Inside a Sound or SoundGroup: turns down what's louder than
+    /// `Threshold`.
+    CompressorSoundEffect,
+    /// Inside a Sound or SoundGroup: repeats it after `Delay` seconds.
+    EchoSoundEffect,
+    /// Inside a Sound or SoundGroup: overdrives it.
+    DistortionSoundEffect,
+    /// Inside a Sound or SoundGroup: raises or lowers its pitch without
+    /// changing its speed.
+    PitchShiftSoundEffect,
+    /// Inside a Sound or SoundGroup: lets through only what's below `Cutoff`.
+    LowPassSoundEffect,
+    /// Inside a Sound or SoundGroup: lets through only what's above `Cutoff`.
+    HighPassSoundEffect,
     /// Light that shines in every direction from just above its parent part.
     PointLight,
     /// Light that shines in a cone from just above its parent part.
@@ -306,7 +335,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 95] = [
+    pub const ALL: [ClassName; 106] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -322,6 +351,7 @@ impl ClassName {
         ClassName::Seat,
         ClassName::VehicleSeat,
         ClassName::DamageZone,
+        ClassName::ReverbZone,
         ClassName::SpawnLocation,
         ClassName::Script,
         ClassName::LocalScript,
@@ -349,6 +379,15 @@ impl ClassName {
         ClassName::ProgressBar,
         ClassName::BillboardGui,
         ClassName::Sound,
+        ClassName::SoundGroup,
+        ClassName::ReverbSoundEffect,
+        ClassName::EqualizerSoundEffect,
+        ClassName::CompressorSoundEffect,
+        ClassName::EchoSoundEffect,
+        ClassName::DistortionSoundEffect,
+        ClassName::PitchShiftSoundEffect,
+        ClassName::LowPassSoundEffect,
+        ClassName::HighPassSoundEffect,
         ClassName::PointLight,
         ClassName::SpotLight,
         ClassName::ReflectionProbe,
@@ -380,6 +419,7 @@ impl ClassName {
         ClassName::ForceField,
         ClassName::Teams,
         ClassName::Team,
+        ClassName::SoundService,
         ClassName::WeldConstraint,
         ClassName::HingeConstraint,
         ClassName::BallSocketConstraint,
@@ -415,11 +455,13 @@ impl ClassName {
             ClassName::StarterPlayer => "StarterPlayer",
             ClassName::StarterPlayerScripts => "StarterPlayerScripts",
             ClassName::Teams => "Teams",
+            ClassName::SoundService => "SoundService",
             ClassName::Team => "Team",
             ClassName::Part => "Part",
             ClassName::Seat => "Seat",
             ClassName::VehicleSeat => "VehicleSeat",
             ClassName::DamageZone => "DamageZone",
+            ClassName::ReverbZone => "ReverbZone",
             ClassName::SpawnLocation => "SpawnLocation",
             ClassName::MeshPart => "MeshPart",
             ClassName::UnionOperation => "UnionOperation",
@@ -450,6 +492,15 @@ impl ClassName {
             ClassName::ProgressBar => "ProgressBar",
             ClassName::BillboardGui => "BillboardGui",
             ClassName::Sound => "Sound",
+            ClassName::SoundGroup => "SoundGroup",
+            ClassName::ReverbSoundEffect => "ReverbSoundEffect",
+            ClassName::EqualizerSoundEffect => "EqualizerSoundEffect",
+            ClassName::CompressorSoundEffect => "CompressorSoundEffect",
+            ClassName::EchoSoundEffect => "EchoSoundEffect",
+            ClassName::DistortionSoundEffect => "DistortionSoundEffect",
+            ClassName::PitchShiftSoundEffect => "PitchShiftSoundEffect",
+            ClassName::LowPassSoundEffect => "LowPassSoundEffect",
+            ClassName::HighPassSoundEffect => "HighPassSoundEffect",
             ClassName::PointLight => "PointLight",
             ClassName::SpotLight => "SpotLight",
             ClassName::ReflectionProbe => "ReflectionProbe",
@@ -530,9 +581,10 @@ impl ClassName {
                 "BasePart",
                 "PVInstance",
             ],
-            ClassName::Seat | ClassName::DamageZone | ClassName::SpawnLocation => {
-                &["Part", "BasePart", "PVInstance"]
-            }
+            ClassName::Seat
+            | ClassName::DamageZone
+            | ClassName::ReverbZone
+            | ClassName::SpawnLocation => &["Part", "BasePart", "PVInstance"],
             ClassName::VehicleSeat => &["Seat", "Part", "BasePart", "PVInstance"],
             ClassName::Model => &["PVInstance"],
             ClassName::Tool => &["Model", "PVInstance"],
@@ -542,6 +594,7 @@ impl ClassName {
             ClassName::ScreenGui | ClassName::BillboardGui => LAYER,
             ClassName::PointLight | ClassName::SpotLight => &["Light"],
             class if class.is_joint() || class.is_mover() => &["Constraint"],
+            class if class.is_sound_effect() => &["SoundEffect"],
             class if class.is_value_object() => &["ValueBase"],
             class if class.is_screen_element() => GUI,
             _ => &[],
@@ -566,8 +619,8 @@ impl ClassName {
     }
 
     /// A Part or one of the classes that are Parts: NegateOperation, Seat,
-    /// VehicleSeat, DamageZone and SpawnLocation. They have a `Shape`, a
-    /// `Material` and the rest.
+    /// VehicleSeat, DamageZone, ReverbZone and SpawnLocation. They have a
+    /// `Shape`, a `Material` and the rest.
     pub fn is_part(self) -> bool {
         matches!(
             self,
@@ -576,7 +629,24 @@ impl ClassName {
                 | ClassName::Seat
                 | ClassName::VehicleSeat
                 | ClassName::DamageZone
+                | ClassName::ReverbZone
                 | ClassName::SpawnLocation
+        )
+    }
+
+    /// A sound effect (Phase 52), applied to the Sound or SoundGroup it's
+    /// inside, in `Priority` order.
+    pub fn is_sound_effect(self) -> bool {
+        matches!(
+            self,
+            ClassName::ReverbSoundEffect
+                | ClassName::EqualizerSoundEffect
+                | ClassName::CompressorSoundEffect
+                | ClassName::EchoSoundEffect
+                | ClassName::DistortionSoundEffect
+                | ClassName::PitchShiftSoundEffect
+                | ClassName::LowPassSoundEffect
+                | ClassName::HighPassSoundEffect
         )
     }
 
@@ -638,6 +708,7 @@ impl ClassName {
                 | ClassName::StarterPlayer
                 | ClassName::StarterPlayerScripts
                 | ClassName::Teams
+                | ClassName::SoundService
         )
     }
 
@@ -739,6 +810,7 @@ impl ClassName {
             | ClassName::ServerScriptService
             | ClassName::StarterPlayerScripts
             | ClassName::Teams
+            | ClassName::SoundService
             | ClassName::ForceField
             | ClassName::Script
             | ClassName::LocalScript
@@ -1324,12 +1396,78 @@ impl ClassName {
                 // RollOffMaxDistance. Ignored while Spatial is off.
                 ("RollOffMinDistance", Value::Number(10.0)),
                 ("RollOffMaxDistance", Value::Number(150.0)),
+                // The SoundGroup it plays through, or none for straight
+                // out.
+                ("SoundGroup", Value::Instance(None)),
             ],
+            ClassName::SoundGroup => vec![
+                // A multiplier, as Sound.Volume: 1 leaves what goes
+                // through it as it is, 0 silences it.
+                ("Volume", Value::Number(1.0)),
+                // On, the default audio settings UI has a slider for it.
+                ("UserAdjustable", Value::Bool(false)),
+            ],
+            ClassName::ReverbSoundEffect => sound_effect_properties([
+                // Seconds the tail takes to die away.
+                ("DecayTime", Value::Number(1.5)),
+                // 0 is a few echoes, 1 a smooth wash; also how bright it stays.
+                ("Density", Value::Number(1.0)),
+                // Decibels of the sound as it is, and of the reverb.
+                ("DryLevel", Value::Number(-6.0)),
+                ("WetLevel", Value::Number(0.0)),
+            ]),
+            ClassName::EqualizerSoundEffect => sound_effect_properties([
+                // Decibels for below MidRange's X, between, and above its Y.
+                ("LowGain", Value::Number(0.0)),
+                ("MidGain", Value::Number(0.0)),
+                ("HighGain", Value::Number(0.0)),
+                // The mids, in hertz: from X to Y.
+                ("MidRange", Value::Vector2(Vector2::new(400.0, 4000.0))),
+            ]),
+            ClassName::CompressorSoundEffect => sound_effect_properties([
+                // Decibels above which it turns the sound down,
+                ("Threshold", Value::Number(-40.0)),
+                // by this much: 4 lets through a quarter of what's above.
+                ("Ratio", Value::Number(40.0)),
+                // Seconds it takes to turn down, and back up.
+                ("Attack", Value::Number(0.1)),
+                ("Release", Value::Number(0.1)),
+                // Decibels it turns everything back up by after.
+                ("GainMakeup", Value::Number(0.0)),
+            ]),
+            ClassName::EchoSoundEffect => sound_effect_properties([
+                // Seconds between repeats.
+                ("Delay", Value::Number(1.0)),
+                // Decibels each repeat is quieter by (as a negative number).
+                ("Feedback", Value::Number(-3.0)),
+                ("DryLevel", Value::Number(0.0)),
+                ("WetLevel", Value::Number(0.0)),
+            ]),
+            // From 0 (clean) to 1 (fuzz).
+            ClassName::DistortionSoundEffect => {
+                sound_effect_properties([("Level", Value::Number(0.75))])
+            }
+            // How much higher: 2 is an octave up, 0.5 one down.
+            ClassName::PitchShiftSoundEffect => {
+                sound_effect_properties([("Octave", Value::Number(1.25))])
+            }
+            ClassName::LowPassSoundEffect => sound_effect_properties([
+                // Hertz: what's above it fades away.
+                ("Cutoff", Value::Number(1000.0)),
+                // From 0 to 1: how much it rings at Cutoff.
+                ("Resonance", Value::Number(0.0)),
+            ]),
+            ClassName::HighPassSoundEffect => sound_effect_properties([
+                // Hertz: what's below it fades away.
+                ("Cutoff", Value::Number(500.0)),
+                ("Resonance", Value::Number(0.0)),
+            ]),
             ClassName::Part
             | ClassName::NegateOperation
             | ClassName::Seat
             | ClassName::VehicleSeat
             | ClassName::DamageZone
+            | ClassName::ReverbZone
             | ClassName::SpawnLocation => {
                 let material = Material::Plastic;
                 let preset = material.preset();
@@ -1395,6 +1533,34 @@ impl ClassName {
                     }
                     // Health a second taken from each Health inside it.
                     properties.push(("DamagePerSecond", Value::Number(10.0)));
+                }
+                if self == ClassName::ReverbZone {
+                    // Something to walk into, not onto, and see into.
+                    for (name, value) in [
+                        ("Anchored", Value::Bool(true)),
+                        ("CanCollide", Value::Bool(false)),
+                        ("Transparency", Value::Number(0.8)),
+                        ("Color", Value::Color3(Color3::new(0.35, 0.55, 0.95))),
+                        ("CastShadow", Value::Bool(false)),
+                        ("Size", Value::Vector3(Vector3::new(20.0, 12.0, 20.0))),
+                    ] {
+                        if let Some(slot) = properties.iter_mut().find(|(n, _)| *n == name) {
+                            slot.1 = value;
+                        }
+                    }
+                    properties.extend([
+                        // The room it sounds like (`Enum.ReverbType`).
+                        (
+                            "ReverbType",
+                            Value::EnumItem(EnumItem {
+                                enum_name: "ReverbType".to_owned(),
+                                item: "Room".to_owned(),
+                            }),
+                        ),
+                        // Seconds the reverb takes to blend in on entering,
+                        // and out on leaving.
+                        ("FadeTime", Value::Number(1.0)),
+                    ]);
                 }
                 if self == ClassName::SpawnLocation {
                     // A pad to stand on.
@@ -2010,6 +2176,16 @@ impl ClassName {
             | ClassName::StarterPlayerScripts
             | ClassName::Teams
             | ClassName::Team
+            | ClassName::SoundService
+            | ClassName::SoundGroup
+            | ClassName::ReverbSoundEffect
+            | ClassName::EqualizerSoundEffect
+            | ClassName::CompressorSoundEffect
+            | ClassName::EchoSoundEffect
+            | ClassName::DistortionSoundEffect
+            | ClassName::PitchShiftSoundEffect
+            | ClassName::LowPassSoundEffect
+            | ClassName::HighPassSoundEffect
             | ClassName::ForceField
             | ClassName::Script
             | ClassName::LocalScript
@@ -2125,6 +2301,7 @@ impl ClassName {
             | ClassName::Seat
             | ClassName::VehicleSeat
             | ClassName::DamageZone
+            | ClassName::ReverbZone
             | ClassName::SpawnLocation => &["Touched", "TouchEnded"],
             // `OnServerEvent` fires in Scripts for each `FireServer`, and
             // `OnClientEvent` in LocalScripts for each `FireClient`.
@@ -2179,6 +2356,21 @@ fn widget_properties(
         // Layout doesn't change.
         ("Rotation", Value::Number(0.0)),
     ]
+}
+
+/// What every sound effect has (Phase 52), then its own `settings`.
+/// Effects with a higher `Priority` come first; equal ones keep their
+/// order among the children.
+fn sound_effect_properties<const N: usize>(
+    settings: [(&'static str, Value); N],
+) -> Vec<(&'static str, Value)> {
+    let mut properties = vec![
+        // Off, it's passed by as if it weren't there.
+        ("Enabled", Value::Bool(true)),
+        ("Priority", Value::Number(0.0)),
+    ];
+    properties.extend(settings);
+    properties
 }
 
 /// What every joint constraint has (Phase 36): the Attachments it joins,

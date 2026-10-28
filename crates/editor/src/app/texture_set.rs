@@ -108,9 +108,11 @@ impl EditorApp {
             return false;
         };
         match class {
-            ClassName::Part | ClassName::Seat | ClassName::VehicleSeat | ClassName::DamageZone => {
-                self.apply_part(id, set, moves, properties)
-            }
+            ClassName::Part
+            | ClassName::Seat
+            | ClassName::VehicleSeat
+            | ClassName::DamageZone
+            | ClassName::ReverbZone => self.apply_part(id, set, moves, properties),
             ClassName::MeshPart => self.apply_mesh(id, set, moves, properties),
             ClassName::Terrain => self.apply_terrain(id, set, properties),
             ClassName::TerrainLayer => {

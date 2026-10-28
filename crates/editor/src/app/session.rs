@@ -825,6 +825,9 @@ impl EditorApp {
         if let Some(cost) = session.cost() {
             self.profiler.record_game(cost, session.load());
         }
+        let levels = session.take_audio_levels();
+        self.mixer.record(&levels, seconds);
+        session.set_audio_monitor(self.mixer.monitor.clone());
         self.pending_emits.extend(session.take_particle_emits());
         match frame {
             Ok(Some(moved)) => self

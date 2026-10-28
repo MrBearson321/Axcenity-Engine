@@ -7,7 +7,7 @@ Which crate owns what, and what it may depend on. Read this before adding a crat
 | `core` | Instance tree, arena, properties, events, services | nothing engine-internal |
 | `assets` | the asset system: loading glTF/FBX models (with FBX skeletons, skin weights and takes, and levels of detail simplified by `meshopt`), posing them, reading project files (`Assets`) and importing models | nothing engine-internal; plain data out |
 | `anim` | animation: clip and animator controller files, state machines and blending, and `Animators`, which plays every Animator and poses its MeshPart | `assets`, `core` |
-| `audio` | Kira playback for project sounds: `GameAudio` applies queued `SoundAction`s, keeps playback in line with each Sound, and spatializes emitters against the camera | `assets`, `core` |
+| `audio` | Kira playback for project sounds: `GameAudio` applies queued `SoundAction`s, keeps playback in line with each Sound, and spatializes emitters against the camera; SoundGroup buses, sound effects and ReverbZones (Phase 52) | `assets`, `core` |
 | `blocks-runtime` | persisted block-script data, node graphs (the UI Event Graph, and the nodes behavior trees offer) and their one-way Lua translation: what games need to load block scripts and graphs | nothing engine-internal |
 | `blocks` | the block editor's side: re-exports `blocks-runtime` and adds `from_lua` (with its Luau reader), which turns code back into blocks | `blocks-runtime` (`core` and `script` only in tests) |
 | `render` | `wgpu` renderer | nothing engine-internal; takes a draw list |

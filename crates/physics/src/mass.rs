@@ -36,6 +36,7 @@ fn part(world: &World, assets: &Assets, id: InstanceId) -> Option<(MassPropertie
             | ClassName::Seat
             | ClassName::VehicleSeat
             | ClassName::DamageZone
+            | ClassName::ReverbZone
     ) {
         return None;
     }

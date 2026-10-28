@@ -894,6 +894,226 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "A spatial sound is silent from this many studs out. 150 by default. Kept at least as large as RollOffMinDistance.",
     ),
     (
+        ClassName::Sound,
+        "SoundGroup",
+        "The SoundGroup it plays through, so that group's Volume and effects (and its parent groups') apply to it. nil plays it straight out.",
+    ),
+    (
+        ClassName::SoundGroup,
+        "Volume",
+        "A multiplier on everything played through it, as Sound.Volume: 1 leaves it as it is, 0 silences it. A SoundGroup inside another is a sub-bus, so both apply.",
+    ),
+    (
+        ClassName::SoundGroup,
+        "UserAdjustable",
+        "If true, the default audio settings UI (the AudioSettings ScreenGui) has a volume slider for it.",
+    ),
+    (
+        ClassName::ReverbZone,
+        "ReverbType",
+        "The room it sounds like (`Enum.ReverbType`): Room (the default), StoneRoom, Hallway, Cave, ConcertHall, Arena or SewerPipe.",
+    ),
+    (
+        ClassName::ReverbZone,
+        "FadeTime",
+        "Seconds the reverb takes to blend in when the camera comes in, and out when it leaves. 1 by default.",
+    ),
+    (
+        ClassName::ReverbSoundEffect,
+        "Enabled",
+        "If false, the sound passes this effect by as if it weren't there. Changes apply while it plays.",
+    ),
+    (
+        ClassName::ReverbSoundEffect,
+        "Priority",
+        "Effects with a higher Priority are applied first; equal ones go in their order among the children. 0 by default.",
+    ),
+    (
+        ClassName::ReverbSoundEffect,
+        "DecayTime",
+        "Seconds the reverb's tail takes to die away, from 0.1 to 20. 1.5 by default.",
+    ),
+    (
+        ClassName::ReverbSoundEffect,
+        "Density",
+        "From 0 to 1: lower is darker and sparser, 1 (the default) a bright, smooth wash.",
+    ),
+    (
+        ClassName::ReverbSoundEffect,
+        "DryLevel",
+        "Decibels of the sound as it is, from -80 to 20. -6 by default.",
+    ),
+    (
+        ClassName::ReverbSoundEffect,
+        "WetLevel",
+        "Decibels of the reverb, from -80 to 20. 0 by default.",
+    ),
+    (
+        ClassName::EqualizerSoundEffect,
+        "Enabled",
+        "If false, the sound passes this effect by as if it weren't there. Changes apply while it plays.",
+    ),
+    (
+        ClassName::EqualizerSoundEffect,
+        "Priority",
+        "Effects with a higher Priority are applied first; equal ones go in their order among the children. 0 by default.",
+    ),
+    (
+        ClassName::EqualizerSoundEffect,
+        "LowGain",
+        "Decibels added below MidRange's X (negative turns them down), from -80 to 10.",
+    ),
+    (
+        ClassName::EqualizerSoundEffect,
+        "MidGain",
+        "Decibels added between MidRange's X and Y, from -80 to 10.",
+    ),
+    (
+        ClassName::EqualizerSoundEffect,
+        "HighGain",
+        "Decibels added above MidRange's Y, from -80 to 10.",
+    ),
+    (
+        ClassName::EqualizerSoundEffect,
+        "MidRange",
+        "The mids, in hertz: from X to Y. 400 to 4000 by default.",
+    ),
+    (
+        ClassName::CompressorSoundEffect,
+        "Enabled",
+        "If false, the sound passes this effect by as if it weren't there. Changes apply while it plays.",
+    ),
+    (
+        ClassName::CompressorSoundEffect,
+        "Priority",
+        "Effects with a higher Priority are applied first; equal ones go in their order among the children. 0 by default.",
+    ),
+    (
+        ClassName::CompressorSoundEffect,
+        "Threshold",
+        "Decibels, from -60 to 0, above which the sound is turned down. -40 by default.",
+    ),
+    (
+        ClassName::CompressorSoundEffect,
+        "Ratio",
+        "How much it's turned down above Threshold, from 1 (not at all) to 50: 4 lets through a quarter. 40 by default.",
+    ),
+    (
+        ClassName::CompressorSoundEffect,
+        "Attack",
+        "Seconds it takes to turn the sound down once it's over Threshold. 0.1 by default.",
+    ),
+    (
+        ClassName::CompressorSoundEffect,
+        "Release",
+        "Seconds it takes to turn back up once it's under. 0.1 by default.",
+    ),
+    (
+        ClassName::CompressorSoundEffect,
+        "GainMakeup",
+        "Decibels, from 0 to 30, everything is turned back up by after.",
+    ),
+    (
+        ClassName::EchoSoundEffect,
+        "Enabled",
+        "If false, the sound passes this effect by as if it weren't there. Changes apply while it plays.",
+    ),
+    (
+        ClassName::EchoSoundEffect,
+        "Priority",
+        "Effects with a higher Priority are applied first; equal ones go in their order among the children. 0 by default.",
+    ),
+    (
+        ClassName::EchoSoundEffect,
+        "Delay",
+        "Seconds between repeats, from 0.01 to 5. 1 by default.",
+    ),
+    (
+        ClassName::EchoSoundEffect,
+        "Feedback",
+        "Decibels each repeat is quieter than the one before, from -80 to 0. -3 by default.",
+    ),
+    (
+        ClassName::EchoSoundEffect,
+        "DryLevel",
+        "Decibels of the sound as it is, from -80 to 20.",
+    ),
+    (
+        ClassName::EchoSoundEffect,
+        "WetLevel",
+        "Decibels of the repeats, from -80 to 20.",
+    ),
+    (
+        ClassName::DistortionSoundEffect,
+        "Enabled",
+        "If false, the sound passes this effect by as if it weren't there. Changes apply while it plays.",
+    ),
+    (
+        ClassName::DistortionSoundEffect,
+        "Priority",
+        "Effects with a higher Priority are applied first; equal ones go in their order among the children. 0 by default.",
+    ),
+    (
+        ClassName::DistortionSoundEffect,
+        "Level",
+        "How much it's overdriven, from 0 (clean) to 1 (fuzz). 0.75 by default.",
+    ),
+    (
+        ClassName::PitchShiftSoundEffect,
+        "Enabled",
+        "If false, the sound passes this effect by as if it weren't there. Changes apply while it plays.",
+    ),
+    (
+        ClassName::PitchShiftSoundEffect,
+        "Priority",
+        "Effects with a higher Priority are applied first; equal ones go in their order among the children. 0 by default.",
+    ),
+    (
+        ClassName::PitchShiftSoundEffect,
+        "Octave",
+        "How much higher it sounds, from 0.5 (an octave down) to 2 (an octave up), at the same speed. 1.25 by default.",
+    ),
+    (
+        ClassName::LowPassSoundEffect,
+        "Enabled",
+        "If false, the sound passes this effect by as if it weren't there. Changes apply while it plays.",
+    ),
+    (
+        ClassName::LowPassSoundEffect,
+        "Priority",
+        "Effects with a higher Priority are applied first; equal ones go in their order among the children. 0 by default.",
+    ),
+    (
+        ClassName::LowPassSoundEffect,
+        "Cutoff",
+        "Hertz above which the sound fades away: lower is more muffled. 1000 by default.",
+    ),
+    (
+        ClassName::LowPassSoundEffect,
+        "Resonance",
+        "From 0 to 1: how much it rings at Cutoff. 0 by default.",
+    ),
+    (
+        ClassName::HighPassSoundEffect,
+        "Enabled",
+        "If false, the sound passes this effect by as if it weren't there. Changes apply while it plays.",
+    ),
+    (
+        ClassName::HighPassSoundEffect,
+        "Priority",
+        "Effects with a higher Priority are applied first; equal ones go in their order among the children. 0 by default.",
+    ),
+    (
+        ClassName::HighPassSoundEffect,
+        "Cutoff",
+        "Hertz below which the sound fades away: higher is thinner. 500 by default.",
+    ),
+    (
+        ClassName::HighPassSoundEffect,
+        "Resonance",
+        "From 0 to 1: how much it rings at Cutoff. 0 by default.",
+    ),
+    (
         ClassName::Workspace,
         "Gravity",
         "How hard unanchored parts and the characters are pulled down, in studs a second squared: 196.2 by default. Halve it and things fall slower and characters jump higher.",
@@ -4064,6 +4284,39 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
             "The service with what each player starts with: StarterPlayerScripts, and the StarterCharacter each character is a copy of."
         }
         ClassName::Teams => "The service that holds the Teams players can be on.",
+        ClassName::SoundService => {
+            "The service that holds the SoundGroups, the game's audio buses. Its groups' volumes are saved with the world in save slots. When a group is UserAdjustable, the game has an AudioSettings ScreenGui in the Workspace (made when it starts, hidden until a script sets its Enabled) with a slider for UserGameSettings.MasterVolume and one for each of those groups."
+        }
+        ClassName::SoundGroup => {
+            "An audio bus: the Sounds whose SoundGroup is it, and the SoundGroups inside it, are mixed together at its Volume, through the sound effects inside it. Put them in SoundService, such as Master with Music and SFX inside."
+        }
+        ClassName::ReverbSoundEffect => {
+            "Inside a Sound or SoundGroup: makes it sound like a room, with DecayTime, Density, DryLevel and WetLevel."
+        }
+        ClassName::EqualizerSoundEffect => {
+            "Inside a Sound or SoundGroup: raises or lowers its lows, mids and highs (LowGain, MidGain, HighGain, around MidRange)."
+        }
+        ClassName::CompressorSoundEffect => {
+            "Inside a Sound or SoundGroup: turns down what's louder than Threshold by Ratio, so loud and quiet sit closer together."
+        }
+        ClassName::EchoSoundEffect => {
+            "Inside a Sound or SoundGroup: repeats it every Delay seconds, each repeat Feedback decibels quieter."
+        }
+        ClassName::DistortionSoundEffect => {
+            "Inside a Sound or SoundGroup: overdrives it, by Level."
+        }
+        ClassName::PitchShiftSoundEffect => {
+            "Inside a Sound or SoundGroup: raises or lowers its pitch by Octave without changing its speed."
+        }
+        ClassName::LowPassSoundEffect => {
+            "Inside a Sound or SoundGroup: lets through only what's below Cutoff, so it sounds muffled, as through a wall or under a pause menu."
+        }
+        ClassName::HighPassSoundEffect => {
+            "Inside a Sound or SoundGroup: lets through only what's above Cutoff, so it sounds thin, as through a radio."
+        }
+        ClassName::ReverbZone => {
+            "A Part the camera walks into: while the camera is inside it, its ReverbType blends onto every spatial Sound over FadeTime seconds, and out again on leaving. Where zones overlap, the smallest wins. Anchored, mostly see-through and walked through (CanCollide off) by default. Everything a Part has, and ReverbType and FadeTime."
+        }
         ClassName::Team => {
             "A side players can be on, in Teams. Its players spawn on SpawnLocations of its TeamColor; players joining go on the AutoAssignable team with the fewest players. `GetPlayers` lists them."
         }

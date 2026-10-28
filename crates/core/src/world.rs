@@ -16,6 +16,10 @@ use crate::prefab::PrefabLink;
 use crate::strings::StringTable;
 use crate::terrain::TerrainData;
 use crate::ui_settings::UiSettings;
+
+/// The save-slot setting the master volume is kept under
+/// ([`World::master_volume`]).
+pub const MASTER_VOLUME_SETTING: &str = "Audio/MasterVolume";
 use crate::value::{Value, ValueKind};
 
 /// A handle to an Instance in a [`World`]. It stays valid until the Instance
@@ -229,6 +233,7 @@ pub struct World {
     server_script_service: InstanceId,
     starter_player_scripts: InstanceId,
     teams: InstanceId,
+    sound_service: InstanceId,
     changes: ChangeLog,
     /// Each Animator's live state (see [`AnimatorState`]), made the first
     /// time something asks for it.
@@ -248,13 +253,15 @@ pub struct World {
     ui_settings: UiSettings,
     /// The project's collision groups (see [`World::collision_groups`]).
     collision_groups: CollisionGroups,
+    /// The player's master volume (see [`World::master_volume`]).
+    master_volume: f64,
 }
 
 impl World {
     /// Creates a world with `game` and its services, in the order the
     /// Explorer shows them: `Workspace`, `Players`, `Lighting`, `ReplicatedStorage`,
     /// `ServerScriptService`, `StarterPlayer` (with `StarterPlayerScripts`
-    /// inside) and `Teams`.
+    /// inside), `Teams` and `SoundService`.
     pub fn new() -> Self {
         let mut instances = Arena::new();
         let mut game = Instance::new(ClassName::DataModel);
@@ -283,6 +290,7 @@ impl World {
         let starter_player = add_service(ClassName::StarterPlayer, root);
         let starter_player_scripts = add_service(ClassName::StarterPlayerScripts, starter_player);
         let teams = add_service(ClassName::Teams, root);
+        let sound_service = add_service(ClassName::SoundService, root);
 
         Self {
             instances,
@@ -294,6 +302,7 @@ impl World {
             server_script_service,
             starter_player_scripts,
             teams,
+            sound_service,
             changes: ChangeLog::default(),
             animators: HashMap::new(),
             property_animations: HashMap::new(),
@@ -303,6 +312,7 @@ impl World {
             language: String::new(),
             ui_settings: UiSettings::default(),
             collision_groups: CollisionGroups::default(),
+            master_volume: 1.0,
         }
     }
 
@@ -550,6 +560,26 @@ impl World {
         self.teams
     }
 
+    /// Holds the SoundGroups, the game's audio buses.
+    pub fn sound_service(&self) -> InstanceId {
+        self.sound_service
+    }
+
+    /// The player's master volume (`UserGameSettings.MasterVolume`): a
+    /// multiplier on everything the game plays, from 0 (silent) to 1 (as
+    /// mixed). Copies of the world (Play) start with it, and save slots
+    /// keep it.
+    pub fn master_volume(&self) -> f64 {
+        self.master_volume
+    }
+
+    /// Sets the master volume, kept from 0 to 1. Not a number leaves it.
+    pub fn set_master_volume(&mut self, volume: f64) {
+        if !volume.is_nan() {
+            self.master_volume = volume.clamp(0.0, 1.0);
+        }
+    }
+
     /// The service (or `game` itself) of class `class`, if `class` is one.
     pub fn service(&self, class: ClassName) -> Option<InstanceId> {
         let id = match class {
@@ -562,6 +592,7 @@ impl World {
             ClassName::StarterPlayer => self.get(self.starter_player_scripts)?.parent?,
             ClassName::StarterPlayerScripts => self.starter_player_scripts,
             ClassName::Teams => self.teams,
+            ClassName::SoundService => self.sound_service,
             _ => return None,
         };
         Some(id)

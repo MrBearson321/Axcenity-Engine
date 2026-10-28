@@ -51,6 +51,7 @@ fn new_world_has_game_and_its_services() {
             world.server_script_service(),
             starter_player,
             world.teams(),
+            world.sound_service(),
         ]
     );
     assert_eq!(

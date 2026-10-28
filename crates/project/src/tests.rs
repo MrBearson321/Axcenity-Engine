@@ -767,3 +767,54 @@ fn hello_strings_loads_its_table_and_a_built_game_keeps_it() {
     assert_eq!(load(&built).unwrap().world.strings(), world.strings());
     fs::remove_dir_all(built).unwrap();
 }
+
+/// SoundGroups in SoundService, with their effects, save with the world,
+/// and a Sound's `SoundGroup` points at the same group when it's opened
+/// (Phase 52). A world without groups has no `sound_service` at all.
+#[test]
+fn sound_groups_and_their_effects_save_with_the_world() {
+    let mut world = World::new();
+    assert!(!write_world(&world).contains("sound_service"));
+    let service = world.sound_service();
+    let master = world.create(ClassName::SoundGroup).unwrap();
+    world.set_name(master, "Master").unwrap();
+    world.set_parent(master, Some(service)).unwrap();
+    let music = world.create(ClassName::SoundGroup).unwrap();
+    world.set_name(music, "Music").unwrap();
+    world.set_parent(music, Some(master)).unwrap();
+    world
+        .set_property(music, "Volume", Value::Number(0.4))
+        .unwrap();
+    let muffle = world.create(ClassName::LowPassSoundEffect).unwrap();
+    world.set_parent(muffle, Some(music)).unwrap();
+    world
+        .set_property(muffle, "Enabled", Value::Bool(false))
+        .unwrap();
+    let theme = world.create(ClassName::Sound).unwrap();
+    world.set_parent(theme, Some(world.workspace())).unwrap();
+    world
+        .set_property(theme, "SoundGroup", Value::Instance(Some(music)))
+        .unwrap();
+
+    let text = write_world(&world);
+    let back = parse_world(&text).unwrap();
+    let master = back
+        .find_first_child(back.sound_service(), "Master")
+        .expect("Master comes back");
+    let music = back.find_first_child(master, "Music").unwrap();
+    assert_eq!(
+        back.get(music).unwrap().property("Volume"),
+        Some(&Value::Number(0.4))
+    );
+    let muffle = back
+        .find_first_child(music, "LowPassSoundEffect")
+        .and_then(|id| back.get(id))
+        .unwrap();
+    assert_eq!(muffle.property("Enabled"), Some(&Value::Bool(false)));
+    let theme = back.find_first_child(back.workspace(), "Sound").unwrap();
+    assert_eq!(
+        back.get(theme).unwrap().property("SoundGroup"),
+        Some(&Value::Instance(Some(music))),
+        "{text}"
+    );
+}

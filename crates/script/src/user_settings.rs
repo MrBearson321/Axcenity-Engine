@@ -2,6 +2,9 @@
 //! for LocalScripts (such as a settings menu). They belong to the player's
 //! computer, not to the game: the player saves them in its `graphics.json`,
 //! and the editor's Play starts from the editor's own Graphics settings.
+//! `MasterVolume` (Phase 52) is the exception: it's the world's
+//! ([`World::master_volume`](axcenity_core::World::master_volume)), kept
+//! in save slots.
 //!
 //! `GraphicsQuality` picks a preset, and each other property overrides one
 //! of the preset's values, as in the editor's Settings window. Reading one
@@ -16,6 +19,7 @@ use axcenity_render::{
 };
 use mlua::{FromLua, Lua, MetaMethod, UserData, UserDataFields, UserDataMethods};
 
+use crate::instance::{world, world_mut};
 use crate::types::{EnumType, LuaEnumItem, type_name};
 
 /// The graphics settings LocalScripts see and change, kept in the client
@@ -353,6 +357,22 @@ impl UserData for LuaUserGameSettings {
         fields.add_field_method_set("VolumetricFog", |lua, _, value: mlua::Value| {
             let chosen = bool_choice(lua, "VolumetricFog", value)?;
             change(lua, |settings, _| settings.volumetric_fog = chosen);
+            Ok(())
+        });
+
+        fields.add_field_method_get("MasterVolume", |lua, _| Ok(world(lua)?.master_volume()));
+        fields.add_field_method_set("MasterVolume", |lua, _, value: mlua::Value| {
+            let volume = match value {
+                mlua::Value::Integer(n) => n as f64,
+                mlua::Value::Number(n) if n.is_finite() => n,
+                ref other => {
+                    return Err(mlua::Error::runtime(format!(
+                        "UserGameSettings.MasterVolume must be a number from 0 to 1, not {}",
+                        type_name(lua, other)
+                    )));
+                }
+            };
+            world_mut(lua)?.set_master_volume(volume);
             Ok(())
         });
     }

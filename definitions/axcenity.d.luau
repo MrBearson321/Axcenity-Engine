@@ -393,7 +393,7 @@ declare extern type SaveService with
 	function SetPlayerData(self, name: string, value: any): ()
 	--- The player data kept under `name`, or nil.
 	function GetPlayerData(self, name: string): any
-	--- Keeps a game setting under `name`, such as `SaveService:SetSetting("Volume", 0.5)`, with the same values as SetPlayerData. Saved in slots, but not captured at checkpoints. The `UI/` names are the game UI settings (see GuiService).
+	--- Keeps a game setting under `name`, such as `SaveService:SetSetting("Volume", 0.5)`, with the same values as SetPlayerData. Saved in slots, but not captured at checkpoints. The `UI/` names are the game UI settings (see GuiService), and `Audio/MasterVolume` is `UserGameSettings.MasterVolume`.
 	function SetSetting(self, name: string, value: any): ()
 	--- The setting kept under `name`, or nil.
 	function GetSetting(self, name: string): any
@@ -465,6 +465,8 @@ declare extern type UserGameSettings with
 	RealtimeGI: boolean
 	--- An Atmosphere's fog lit by the sun with its shadows (sun shafts) and by lamps. On at Ultra, and off on a GPU without compute shaders.
 	VolumetricFog: boolean
+	--- A multiplier on everything the game plays, from 0 (silent) to 1 (as mixed, the default). Unlike the graphics settings it's the game's: save slots keep it (as the SaveService setting `Audio/MasterVolume`), and the default audio settings UI has a slider for it.
+	MasterVolume: number
 	--- How Lighting's Clouds are drawn: Low as a flat sheet, Medium, High and Ultra looked through in 16, 32 or 64 steps (High and Ultra with fine detail and light traced toward the sun). Every quality casts the same shadows.
 	CloudQuality: EnumCloudQuality
 end
@@ -991,6 +993,21 @@ declare extern type EnumHumanoidStateTypeItems with
 	Dead: EnumHumanoidStateType
 end
 
+--- One choice of `Enum.ReverbType`.
+declare extern type EnumReverbType extends EnumItem with
+end
+
+--- The choices of `Enum.ReverbType`.
+declare extern type EnumReverbTypeItems with
+	Room: EnumReverbType
+	StoneRoom: EnumReverbType
+	Hallway: EnumReverbType
+	Cave: EnumReverbType
+	ConcertHall: EnumReverbType
+	Arena: EnumReverbType
+	SewerPipe: EnumReverbType
+end
+
 --- Every enum, such as `Enum.Material`, `Enum.PartType` and `Enum.KeyCode`.
 declare extern type EnumLibrary with
 	Material: EnumMaterialItems
@@ -1023,6 +1040,7 @@ declare extern type EnumLibrary with
 	CollisionFidelity: EnumCollisionFidelityItems
 	ProximityPromptExclusivity: EnumProximityPromptExclusivityItems
 	HumanoidStateType: EnumHumanoidStateTypeItems
+	ReverbType: EnumReverbTypeItems
 end
 
 -- Instances -----------------------------------------------------------------
@@ -1134,6 +1152,8 @@ declare extern type DataModel extends Instance with
 	StarterPlayer: StarterPlayer
 	--- The service that holds the Teams players can be on.
 	Teams: Teams
+	--- The service that holds the SoundGroups, the game's audio buses. Its groups' volumes are saved with the world in save slots. When a group is UserAdjustable, the game has an AudioSettings ScreenGui in the Workspace (made when it starts, hidden until a script sets its Enabled) with a slider for UserGameSettings.MasterVolume and one for each of those groups.
+	SoundService: SoundService
 	--- Destroys Instances later (same as `game:GetService("Debris")`).
 	Debris: Debris
 	--- JSON and GUIDs (same as `game:GetService("HttpService")`).
@@ -1856,6 +1876,97 @@ declare extern type DamageZone extends Instance with
 	AssemblyAngularVelocity: Vector3
 	--- Health a second taken from every Health whose Model has a part inside the zone (once each, however many of its parts are in). The damage's source is the zone. 0 or less does nothing.
 	DamagePerSecond: number
+	--- Its Position and Orientation as one CFrame. Setting it sets both; it isn't saved itself.
+	CFrame: CFrame
+	--- The mass of everything moving with it: the parts welded into its assembly, except Massless ones (a part alone keeps its own mass). Read-only.
+	AssemblyMass: number
+	--- Where its mass is centered, in the world: the middle of a block or ball. Read-only.
+	AssemblyCenterOfMass: Vector3
+	--- The physical properties in use: `CustomPhysicalProperties`, or its Material's when that's nil. Read-only.
+	CurrentPhysicalProperties: PhysicalProperties
+	--- Fires when another part starts touching this one, once per new contact (not every frame while they touch). The handler gets the other part: `part.Touched:Connect(function(otherPart) ... end)`.
+	Touched: Signal
+	--- Fires when another part stops touching this one: once they've been apart for a few physics steps, or at once when one of them can't touch the other any more (`CanTouch` off, or set not to collide). The handler gets the other part.
+	TouchEnded: Signal
+	[string]: any
+	--- Joins the part and `parts` into one solid and returns it as a new UnionOperation (its Parent is nil), with this part's look and physics. NegateOperations among `parts` are cut out. The work runs in the background and the script waits for it. Errors, saying why, if a part isn't a closed solid (a Capsule, or a model with holes). `options.CollisionFidelity` sets the union's.
+	function UnionAsync(self, parts: {Instance}, options: {[string]: any}?): UnionOperation
+	--- Cuts every one of `parts` out of the part and returns what's left as a new UnionOperation (its Parent is nil), with this part's look and physics: a crater where a ball was. The work runs in the background and the script waits for it. Errors, saying why, if a part isn't a closed solid or nothing is left. `options.CollisionFidelity` sets the union's.
+	function SubtractAsync(self, parts: {Instance}, options: {[string]: any}?): UnionOperation
+	--- Keeps only where the part and all of `parts` overlap, as a new UnionOperation (its Parent is nil), with this part's look and physics. The work runs in the background and the script waits for it. Errors, saying why, if a part isn't a closed solid or they don't overlap. `options.CollisionFidelity` sets the union's.
+	function IntersectAsync(self, parts: {Instance}, options: {[string]: any}?): UnionOperation
+	--- The part, then the parts welded to it by an enabled WeldConstraint; with `recursive` true, every part in its assembly.
+	function GetConnectedParts(self, recursive: boolean?): {Instance}
+	--- The root of its assembly: an anchored part if there is one, then one that isn't Massless, then the largest. A part alone is its own root.
+	function GetRootPart(self): Instance
+	--- Where it turns and moves from: a part's own CFrame, or for a Model the centre of the box around its parts, unturned.
+	function GetPivot(self): CFrame
+	--- Moves and turns it so its pivot is at `target`. A Model's parts all move together and keep their places relative to each other.
+	function PivotTo(self, target: CFrame): ()
+	--- Pushes the part through its center of mass: its velocity changes by `impulse` divided by its assembly's mass (`AssemblyMass`, which is `GetMass()` for a part alone). Pushes in one frame add up. Anchored parts don't move.
+	function ApplyImpulse(self, impulse: Vector3): ()
+	--- Pushes the part at `position` in the world: it speeds up as `ApplyImpulse` would, and an impulse off its center of mass also spins it.
+	function ApplyImpulseAtPosition(self, impulse: Vector3, position: Vector3): ()
+	--- Spins the part: its `AssemblyAngularVelocity` changes by `impulse` (radians a second times inertia) through its inertia.
+	function ApplyAngularImpulse(self, impulse: Vector3): ()
+	--- Its density times its volume: a 1×1×1 Plastic block weighs 1. MeshParts weigh their collision shape.
+	function GetMass(self): number
+end
+
+--- A Part the camera walks into: while the camera is inside it, its ReverbType blends onto every spatial Sound over FadeTime seconds, and out again on leaving. Where zones overlap, the smallest wins. Anchored, mostly see-through and walked through (CanCollide off) by default. Everything a Part has, and ReverbType and FadeTime.
+declare extern type ReverbZone extends Instance with
+	--- If true, the part stays where it is. If false, it falls and collides with other parts.
+	Anchored: boolean
+	--- Block, Ball, Cylinder (along X) or Wedge.
+	Shape: EnumPartType | "Block" | "Ball" | "Cylinder" | "Wedge" | "Capsule"
+	--- Where the part's center is, in studs. Setting it on an unanchored part teleports it and stops it moving.
+	Position: Vector3
+	--- Rotation in degrees around X, Y and Z, applied Z first, then X, then Y.
+	Orientation: Vector3
+	--- The part's size in studs along X, Y and Z.
+	Size: Vector3
+	--- The part's color.
+	Color: Color3
+	--- Plastic, Metal, Glass (see-through) or Neon (glows). Setting it resets Metalness and Roughness.
+	Material: EnumMaterial | "Plastic" | "Metal" | "Glass" | "Neon" | "Ice" | "Rubber"
+	--- A material file in the project, such as "assets/materials/brick.material.json", drawn in place of Material, Metalness, Roughness and Emission; Color tints it and Transparency fades it. A SurfaceAppearance inside the part wins over it. Empty for none.
+	MaterialVariant: string
+	--- From 0 (not metal) to 1 (metal).
+	Metalness: number
+	--- From 0 (mirror-smooth) to 1 (matte).
+	Roughness: number
+	--- If false, the part casts no sun shadow. It's still shaded by other parts' shadows.
+	CastShadow: boolean
+	--- From 0 (as solid as its material) to 1 (invisible).
+	Transparency: number
+	--- If false, other parts pass through it. It still fires Touched. An unanchored part that can't collide falls through the floor.
+	CanCollide: boolean
+	--- If true and the part isn't anchored, workspace.GlobalWind pushes it, harder for parts with bigger faces.
+	WindAffected: boolean
+	--- The color the part glows in when Emission is above 0.
+	EmissiveColor: Color3
+	--- How brightly the part glows in EmissiveColor: 0 is no glow, 1 as bright as a white surface in full light, higher values bloom.
+	Emission: number
+	--- Studs one copy of a SurfaceAppearance's textures covers. 0 leaves the shape's own coordinates unscaled.
+	TileSize: number
+	--- The collision group it's in, `"Default"` at first. Parts in two groups set not to collide (the Collision Groups window, or `PhysicsService:CollisionGroupSetCollidable`) pass through each other and don't touch. A name that isn't registered counts as Default.
+	CollisionGroup: string
+	--- If false, scripts' raycasts, shape casts and overlap queries (`workspace:Raycast`, `GetPartsInPart`, ...) pass it by. It still collides.
+	CanQuery: boolean
+	--- If false, it fires no Touched or TouchEnded, and touching it fires neither on other parts. It still collides.
+	CanTouch: boolean
+	--- If true, the part adds no mass to an assembly it shares with other parts. A part on its own (every part, until welds exist) keeps its own mass.
+	Massless: boolean
+	--- Its own density, friction, elasticity and their weights (`PhysicalProperties.new(...)`), or nil for its Material's. Read `CurrentPhysicalProperties` for the ones in use.
+	CustomPhysicalProperties: PhysicalProperties?
+	--- How fast the part moves, in studs a second. Physics updates it as the part moves; setting it throws the part. Anchored parts don't move.
+	AssemblyLinearVelocity: Vector3
+	--- How fast the part spins, in radians a second around each world axis. Physics updates it; setting it spins the part.
+	AssemblyAngularVelocity: Vector3
+	--- The room it sounds like (`Enum.ReverbType`): Room (the default), StoneRoom, Hallway, Cave, ConcertHall, Arena or SewerPipe.
+	ReverbType: EnumReverbType | "Room" | "StoneRoom" | "Hallway" | "Cave" | "ConcertHall" | "Arena" | "SewerPipe"
+	--- Seconds the reverb takes to blend in when the camera comes in, and out when it leaves. 1 by default.
+	FadeTime: number
 	--- Its Position and Orientation as one CFrame. Setting it sets both; it isn't saved itself.
 	CFrame: CFrame
 	--- The mass of everything moving with it: the parts welded into its assembly, except Massless ones (a part alone keeps its own mass). Read-only.
@@ -2815,6 +2926,8 @@ declare extern type Sound extends Instance with
 	RollOffMinDistance: number
 	--- A spatial sound is silent from this many studs out. 150 by default. Kept at least as large as RollOffMinDistance.
 	RollOffMaxDistance: number
+	--- The SoundGroup it plays through, so that group's Volume and effects (and its parent groups') apply to it. nil plays it straight out.
+	SoundGroup: Instance?
 	--- Fires when the sound plays to its end. Looped sounds, and sounds stopped with Stop, don't fire it.
 	Ended: Signal
 	[string]: any
@@ -2826,6 +2939,133 @@ declare extern type Sound extends Instance with
 	function Pause(self): ()
 	--- Carries on playing a paused sound, or plays a stopped one from the start (sets Playing to true).
 	function Resume(self): ()
+end
+
+--- An audio bus: the Sounds whose SoundGroup is it, and the SoundGroups inside it, are mixed together at its Volume, through the sound effects inside it. Put them in SoundService, such as Master with Music and SFX inside.
+declare extern type SoundGroup extends Instance with
+	--- A multiplier on everything played through it, as Sound.Volume: 1 leaves it as it is, 0 silences it. A SoundGroup inside another is a sub-bus, so both apply.
+	Volume: number
+	--- If true, the default audio settings UI (the AudioSettings ScreenGui) has a volume slider for it.
+	UserAdjustable: boolean
+	[string]: any
+end
+
+--- Inside a Sound or SoundGroup: makes it sound like a room, with DecayTime, Density, DryLevel and WetLevel.
+declare extern type ReverbSoundEffect extends Instance with
+	--- If false, the sound passes this effect by as if it weren't there. Changes apply while it plays.
+	Enabled: boolean
+	--- Effects with a higher Priority are applied first; equal ones go in their order among the children. 0 by default.
+	Priority: number
+	--- Seconds the reverb's tail takes to die away, from 0.1 to 20. 1.5 by default.
+	DecayTime: number
+	--- From 0 to 1: lower is darker and sparser, 1 (the default) a bright, smooth wash.
+	Density: number
+	--- Decibels of the sound as it is, from -80 to 20. -6 by default.
+	DryLevel: number
+	--- Decibels of the reverb, from -80 to 20. 0 by default.
+	WetLevel: number
+	[string]: any
+end
+
+--- Inside a Sound or SoundGroup: raises or lowers its lows, mids and highs (LowGain, MidGain, HighGain, around MidRange).
+declare extern type EqualizerSoundEffect extends Instance with
+	--- If false, the sound passes this effect by as if it weren't there. Changes apply while it plays.
+	Enabled: boolean
+	--- Effects with a higher Priority are applied first; equal ones go in their order among the children. 0 by default.
+	Priority: number
+	--- Decibels added below MidRange's X (negative turns them down), from -80 to 10.
+	LowGain: number
+	--- Decibels added between MidRange's X and Y, from -80 to 10.
+	MidGain: number
+	--- Decibels added above MidRange's Y, from -80 to 10.
+	HighGain: number
+	--- The mids, in hertz: from X to Y. 400 to 4000 by default.
+	MidRange: Vector2
+	[string]: any
+end
+
+--- Inside a Sound or SoundGroup: turns down what's louder than Threshold by Ratio, so loud and quiet sit closer together.
+declare extern type CompressorSoundEffect extends Instance with
+	--- If false, the sound passes this effect by as if it weren't there. Changes apply while it plays.
+	Enabled: boolean
+	--- Effects with a higher Priority are applied first; equal ones go in their order among the children. 0 by default.
+	Priority: number
+	--- Decibels, from -60 to 0, above which the sound is turned down. -40 by default.
+	Threshold: number
+	--- How much it's turned down above Threshold, from 1 (not at all) to 50: 4 lets through a quarter. 40 by default.
+	Ratio: number
+	--- Seconds it takes to turn the sound down once it's over Threshold. 0.1 by default.
+	Attack: number
+	--- Seconds it takes to turn back up once it's under. 0.1 by default.
+	Release: number
+	--- Decibels, from 0 to 30, everything is turned back up by after.
+	GainMakeup: number
+	[string]: any
+end
+
+--- Inside a Sound or SoundGroup: repeats it every Delay seconds, each repeat Feedback decibels quieter.
+declare extern type EchoSoundEffect extends Instance with
+	--- If false, the sound passes this effect by as if it weren't there. Changes apply while it plays.
+	Enabled: boolean
+	--- Effects with a higher Priority are applied first; equal ones go in their order among the children. 0 by default.
+	Priority: number
+	--- Seconds between repeats, from 0.01 to 5. 1 by default.
+	Delay: number
+	--- Decibels each repeat is quieter than the one before, from -80 to 0. -3 by default.
+	Feedback: number
+	--- Decibels of the sound as it is, from -80 to 20.
+	DryLevel: number
+	--- Decibels of the repeats, from -80 to 20.
+	WetLevel: number
+	[string]: any
+end
+
+--- Inside a Sound or SoundGroup: overdrives it, by Level.
+declare extern type DistortionSoundEffect extends Instance with
+	--- If false, the sound passes this effect by as if it weren't there. Changes apply while it plays.
+	Enabled: boolean
+	--- Effects with a higher Priority are applied first; equal ones go in their order among the children. 0 by default.
+	Priority: number
+	--- How much it's overdriven, from 0 (clean) to 1 (fuzz). 0.75 by default.
+	Level: number
+	[string]: any
+end
+
+--- Inside a Sound or SoundGroup: raises or lowers its pitch by Octave without changing its speed.
+declare extern type PitchShiftSoundEffect extends Instance with
+	--- If false, the sound passes this effect by as if it weren't there. Changes apply while it plays.
+	Enabled: boolean
+	--- Effects with a higher Priority are applied first; equal ones go in their order among the children. 0 by default.
+	Priority: number
+	--- How much higher it sounds, from 0.5 (an octave down) to 2 (an octave up), at the same speed. 1.25 by default.
+	Octave: number
+	[string]: any
+end
+
+--- Inside a Sound or SoundGroup: lets through only what's below Cutoff, so it sounds muffled, as through a wall or under a pause menu.
+declare extern type LowPassSoundEffect extends Instance with
+	--- If false, the sound passes this effect by as if it weren't there. Changes apply while it plays.
+	Enabled: boolean
+	--- Effects with a higher Priority are applied first; equal ones go in their order among the children. 0 by default.
+	Priority: number
+	--- Hertz above which the sound fades away: lower is more muffled. 1000 by default.
+	Cutoff: number
+	--- From 0 to 1: how much it rings at Cutoff. 0 by default.
+	Resonance: number
+	[string]: any
+end
+
+--- Inside a Sound or SoundGroup: lets through only what's above Cutoff, so it sounds thin, as through a radio.
+declare extern type HighPassSoundEffect extends Instance with
+	--- If false, the sound passes this effect by as if it weren't there. Changes apply while it plays.
+	Enabled: boolean
+	--- Effects with a higher Priority are applied first; equal ones go in their order among the children. 0 by default.
+	Priority: number
+	--- Hertz below which the sound fades away: higher is thinner. 500 by default.
+	Cutoff: number
+	--- From 0 to 1: how much it rings at Cutoff. 0 by default.
+	Resonance: number
+	[string]: any
 end
 
 --- A light that shines in all directions from just above its parent part. Inserting one with no part selected also inserts an anchored lamp.
@@ -3621,6 +3861,11 @@ declare extern type Team extends Instance with
 	function GetPlayers(self): {Player}
 end
 
+--- The service that holds the SoundGroups, the game's audio buses. Its groups' volumes are saved with the world in save slots. When a group is UserAdjustable, the game has an AudioSettings ScreenGui in the Workspace (made when it starts, hidden until a script sets its Enabled) with a slider for UserGameSettings.MasterVolume and one for each of those groups.
+declare extern type SoundService extends Instance with
+	[string]: any
+end
+
 --- Holds `Part0` and `Part1` together where they were when it was made (or enabled). Parts welded together move as one body, an assembly: they fall and tumble together, and an anchored part anchors the whole assembly. `part:GetConnectedParts()` and `part:GetRootPart()` follow welds. Setting a welded part's Position or CFrame moves that part alone, and the weld holds it where it lands.
 declare extern type WeldConstraint extends Instance with
 	--- One of the two parts it holds together.
@@ -4101,7 +4346,7 @@ declare function require(module: Instance): any
 --- Creates Instances.
 declare extern type InstanceLibrary with
 	--- Creates an Instance of this class with default properties and no parent. Set `Parent` to put it in the world.
-	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "UnionOperation") -> UnionOperation) & ((className: "NegateOperation") -> NegateOperation) & ((className: "Seat") -> Seat) & ((className: "VehicleSeat") -> VehicleSeat) & ((className: "DamageZone") -> DamageZone) & ((className: "SpawnLocation") -> SpawnLocation) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ReflectionProbe") -> ReflectionProbe) & ((className: "LightProbeVolume") -> LightProbeVolume) & ((className: "Atmosphere") -> Atmosphere) & ((className: "Clouds") -> Clouds) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Sequence") -> Sequence) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "VehicleWheel") -> VehicleWheel) & ((className: "Ragdoll") -> Ragdoll) & ((className: "Fracture") -> Fracture) & ((className: "Health") -> Health) & ((className: "ProximityPrompt") -> ProximityPrompt) & ((className: "ClickDetector") -> ClickDetector) & ((className: "Tool") -> Tool) & ((className: "Inventory") -> Inventory) & ((className: "Humanoid") -> Humanoid) & ((className: "ForceField") -> ForceField) & ((className: "Team") -> Team) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "HingeConstraint") -> HingeConstraint) & ((className: "BallSocketConstraint") -> BallSocketConstraint) & ((className: "PrismaticConstraint") -> PrismaticConstraint) & ((className: "CylindricalConstraint") -> CylindricalConstraint) & ((className: "SpringConstraint") -> SpringConstraint) & ((className: "RopeConstraint") -> RopeConstraint) & ((className: "RodConstraint") -> RodConstraint) & ((className: "LinearVelocity") -> LinearVelocity) & ((className: "AngularVelocity") -> AngularVelocity) & ((className: "VectorForce") -> VectorForce) & ((className: "Torque") -> Torque) & ((className: "AlignPosition") -> AlignPosition) & ((className: "AlignOrientation") -> AlignOrientation) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
+	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "UnionOperation") -> UnionOperation) & ((className: "NegateOperation") -> NegateOperation) & ((className: "Seat") -> Seat) & ((className: "VehicleSeat") -> VehicleSeat) & ((className: "DamageZone") -> DamageZone) & ((className: "ReverbZone") -> ReverbZone) & ((className: "SpawnLocation") -> SpawnLocation) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "SoundGroup") -> SoundGroup) & ((className: "ReverbSoundEffect") -> ReverbSoundEffect) & ((className: "EqualizerSoundEffect") -> EqualizerSoundEffect) & ((className: "CompressorSoundEffect") -> CompressorSoundEffect) & ((className: "EchoSoundEffect") -> EchoSoundEffect) & ((className: "DistortionSoundEffect") -> DistortionSoundEffect) & ((className: "PitchShiftSoundEffect") -> PitchShiftSoundEffect) & ((className: "LowPassSoundEffect") -> LowPassSoundEffect) & ((className: "HighPassSoundEffect") -> HighPassSoundEffect) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ReflectionProbe") -> ReflectionProbe) & ((className: "LightProbeVolume") -> LightProbeVolume) & ((className: "Atmosphere") -> Atmosphere) & ((className: "Clouds") -> Clouds) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Sequence") -> Sequence) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "VehicleWheel") -> VehicleWheel) & ((className: "Ragdoll") -> Ragdoll) & ((className: "Fracture") -> Fracture) & ((className: "Health") -> Health) & ((className: "ProximityPrompt") -> ProximityPrompt) & ((className: "ClickDetector") -> ClickDetector) & ((className: "Tool") -> Tool) & ((className: "Inventory") -> Inventory) & ((className: "Humanoid") -> Humanoid) & ((className: "ForceField") -> ForceField) & ((className: "Team") -> Team) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "HingeConstraint") -> HingeConstraint) & ((className: "BallSocketConstraint") -> BallSocketConstraint) & ((className: "PrismaticConstraint") -> PrismaticConstraint) & ((className: "CylindricalConstraint") -> CylindricalConstraint) & ((className: "SpringConstraint") -> SpringConstraint) & ((className: "RopeConstraint") -> RopeConstraint) & ((className: "RodConstraint") -> RodConstraint) & ((className: "LinearVelocity") -> LinearVelocity) & ((className: "AngularVelocity") -> AngularVelocity) & ((className: "VectorForce") -> VectorForce) & ((className: "Torque") -> Torque) & ((className: "AlignPosition") -> AlignPosition) & ((className: "AlignOrientation") -> AlignOrientation) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
 end
 
 --- Creates Instances.

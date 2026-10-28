@@ -30,7 +30,8 @@
 //! written when a setting isn't its default or something is inside it.
 //! So are `players` (`CharacterAutoLoads`, `RespawnTime`,
 //! `LeaderboardEnabled`), `starter_player` (`StarterCharacter`) and `teams`
-//! (its Team children), in the same shape (Phase 47).
+//! (its Team children), in the same shape (Phase 47), and `sound_service`
+//! (its SoundGroups, with their effects, Phase 52).
 //!
 //! Property values are plain JSON. Their meaning comes from the class: the
 //! same `[0, 1, 0]` is a `Vector3` for `Position` and a `Color3` for `Color`,
@@ -136,6 +137,9 @@ struct WorldFile {
     starter_player: ServiceNode,
     #[serde(default)]
     teams: ServiceNode,
+    // Phase 52: the SoundGroups.
+    #[serde(default)]
+    sound_service: ServiceNode,
 }
 
 #[derive(Default, Deserialize)]
@@ -262,7 +266,11 @@ fn reference_json(world: &World, target: Option<InstanceId>, roots: &[InstanceId
 
 /// The Instances a world file's references start from: the services.
 fn world_roots(world: &World) -> Vec<InstanceId> {
-    vec![world.workspace(), world.replicated_storage()]
+    vec![
+        world.workspace(),
+        world.replicated_storage(),
+        world.sound_service(),
+    ]
 }
 
 /// Builds a [`World`] from the text of a world file.
@@ -283,6 +291,7 @@ pub fn parse_world(text: &str) -> Result<World, WorldError> {
         (world.players(), &file.players),
         (world.starter_player(), &file.starter_player),
         (world.teams(), &file.teams),
+        (world.sound_service(), &file.sound_service),
     ];
     for (service, node) in services {
         apply_properties(&mut world, service, &node.properties, &mut references)?;
@@ -774,6 +783,7 @@ pub fn write_world(world: &World) -> String {
         ("players", world.players()),
         ("starter_player", world.starter_player()),
         ("teams", world.teams()),
+        ("sound_service", world.sound_service()),
     ];
     for (key, service) in services {
         let changed = world.get(service).is_some_and(|instance| {

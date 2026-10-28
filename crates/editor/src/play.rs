@@ -232,6 +232,16 @@ impl Session {
         &self.world
     }
 
+    /// The audio's peak levels since the last call, for the Mixer panel.
+    pub fn take_audio_levels(&mut self) -> axcenity_audio::Levels {
+        self.audio.take_levels()
+    }
+
+    /// The Mixer panel's mute and solo, heard from the next frame on.
+    pub fn set_audio_monitor(&mut self, monitor: axcenity_audio::Monitor) {
+        self.audio.set_monitor(monitor);
+    }
+
     /// The game's world, for the Properties panel's edits during Play. The
     /// game's scripts see those changes at the next frame.
     pub fn world_mut(&mut self) -> &mut World {

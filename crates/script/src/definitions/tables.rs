@@ -1047,7 +1047,7 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
             },
             Function {
                 name: "SetSetting",
-                doc: "Keeps a game setting under `name`, such as `SaveService:SetSetting(\"Volume\", 0.5)`, with the same values as SetPlayerData. Saved in slots, but not captured at checkpoints. The `UI/` names are the game UI settings (see GuiService).",
+                doc: "Keeps a game setting under `name`, such as `SaveService:SetSetting(\"Volume\", 0.5)`, with the same values as SetPlayerData. Saved in slots, but not captured at checkpoints. The `UI/` names are the game UI settings (see GuiService), and `Audio/MasterVolume` is `UserGameSettings.MasterVolume`.",
                 params: &[("name", "string"), ("value", "any")],
                 returns: "()",
             },
@@ -1223,6 +1223,11 @@ pub(super) const VALUE_TYPES: &[ValueType] = &[
                 name: "VolumetricFog",
                 ty: "boolean",
                 doc: "An Atmosphere's fog lit by the sun with its shadows (sun shafts) and by lamps. On at Ultra, and off on a GPU without compute shaders.",
+            },
+            Field {
+                name: "MasterVolume",
+                ty: "number",
+                doc: "A multiplier on everything the game plays, from 0 (silent) to 1 (as mixed, the default). Unlike the graphics settings it's the game's: save slots keep it (as the SaveService setting `Audio/MasterVolume`), and the default audio settings UI has a slider for it.",
             },
             Field {
                 name: "CloudQuality",

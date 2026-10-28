@@ -709,6 +709,16 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::StarterPlayer => icons::USER_CIRCLE,
         ClassName::StarterPlayerScripts => icons::USER_GEAR,
         ClassName::Teams => icons::USERS_THREE,
+        ClassName::SoundService => icons::SPEAKER_HIFI,
+        ClassName::SoundGroup => icons::FADERS,
+        ClassName::ReverbSoundEffect => icons::WAVEFORM,
+        ClassName::EqualizerSoundEffect => icons::EQUALIZER,
+        ClassName::CompressorSoundEffect => icons::ARROWS_IN_LINE_VERTICAL,
+        ClassName::EchoSoundEffect => icons::REPEAT,
+        ClassName::DistortionSoundEffect => icons::WAVE_SQUARE,
+        ClassName::PitchShiftSoundEffect => icons::WAVE_SINE,
+        ClassName::LowPassSoundEffect | ClassName::HighPassSoundEffect => icons::FUNNEL,
+        ClassName::ReverbZone => icons::EAR,
         ClassName::Team => icons::FLAG_BANNER,
         ClassName::SpawnLocation => icons::MAP_PIN,
         ClassName::ForceField => icons::SHIELD,
@@ -851,6 +861,7 @@ pub fn class_color(class: ClassName, visuals: &egui::Visuals) -> Color32 {
         | ClassName::Seat
         | ClassName::VehicleSeat
         | ClassName::DamageZone
+        | ClassName::ReverbZone
         | ClassName::Model => pick((120, 160, 240), (40, 90, 190)),
         ClassName::Folder => pick((222, 182, 92), (160, 115, 10)),
         ClassName::SurfaceAppearance => pick((214, 130, 204), (150, 50, 140)),
@@ -868,7 +879,13 @@ pub fn class_color(class: ClassName, visuals: &egui::Visuals) -> Color32 {
         | ClassName::Dropdown
         | ClassName::ProgressBar
         | ClassName::BillboardGui => pick((125, 185, 240), (20, 105, 170)),
-        ClassName::Sound => pick((226, 162, 80), (165, 100, 10)),
+        class
+            if class == ClassName::Sound
+                || class == ClassName::SoundGroup
+                || class.is_sound_effect() =>
+        {
+            pick((226, 162, 80), (165, 100, 10))
+        }
         ClassName::PointLight
         | ClassName::SpotLight
         | ClassName::ReflectionProbe

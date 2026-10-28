@@ -1,0 +1,124 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Anchored": true,
+          "Position": [0, -0.5, 0],
+          "Size": [96, 1, 48],
+          "Color": [0.35, 0.38, 0.42]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "CaveRoof",
+        "properties": {
+          "Anchored": true,
+          "Position": [30, 14.5, 0],
+          "Size": [26, 1, 26],
+          "Color": [0.22, 0.2, 0.19]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "CaveBack",
+        "properties": {
+          "Anchored": true,
+          "Position": [43.5, 7, 0],
+          "Size": [1, 14, 26],
+          "Color": [0.22, 0.2, 0.19]
+        }
+      },
+      {
+        "class": "ReverbZone",
+        "name": "Cave",
+        "properties": {
+          "Position": [30, 7, 0],
+          "Size": [26, 14, 26],
+          "ReverbType": "ReverbType.Cave",
+          "FadeTime": 1
+        }
+      },
+      {
+        "class": "Sound",
+        "name": "Steps",
+        "properties": {
+          "SoundId": "assets/audio/chime.wav",
+          "Looped": true,
+          "Playing": true,
+          "PlaybackSpeed": 2.5,
+          "Volume": 0.5,
+          "Spatial": true,
+          "RollOffMinDistance": 4,
+          "RollOffMaxDistance": 40,
+          "SoundGroup": ["SoundService", "Master", "SFX"]
+        }
+      },
+      {
+        "class": "Sound",
+        "name": "Music",
+        "properties": {
+          "SoundId": "assets/audio/ambient-loop.wav",
+          "Looped": true,
+          "Playing": true,
+          "Volume": 0.6,
+          "SoundGroup": ["SoundService", "Master", "Music"]
+        }
+      },
+      {
+        "class": "ScreenGui",
+        "name": "PauseMenu",
+        "properties": {
+          "Enabled": false,
+          "ScaleMode": "Scale",
+          "DesignWidth": 1280,
+          "DesignHeight": 720
+        },
+        "children": [
+          {
+            "class": "TextLabel",
+            "name": "Paused",
+            "properties": {
+              "Position": [0, 440, 0, 140],
+              "Size": [0, 400, 0, 48],
+              "Text": "Paused. Press P to carry on.",
+              "TextSize": 28
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "players": {
+    "properties": {
+      "CharacterAutoLoads": false
+    }
+  },
+  "sound_service": {
+    "children": [
+      {
+        "class": "SoundGroup",
+        "name": "Master",
+        "children": [
+          {
+            "class": "SoundGroup",
+            "name": "Music",
+            "properties": {
+              "UserAdjustable": true
+            }
+          },
+          {
+            "class": "SoundGroup",
+            "name": "SFX",
+            "properties": {
+              "UserAdjustable": true
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

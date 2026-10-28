@@ -532,10 +532,11 @@ pub enum EnumType {
     CollisionFidelity,
     ProximityPromptExclusivity,
     HumanoidStateType,
+    ReverbType,
 }
 
 impl EnumType {
-    pub const ALL: [EnumType; 30] = [
+    pub const ALL: [EnumType; 31] = [
         EnumType::Material,
         EnumType::PartType,
         EnumType::KeyCode,
@@ -566,6 +567,7 @@ impl EnumType {
         EnumType::CollisionFidelity,
         EnumType::ProximityPromptExclusivity,
         EnumType::HumanoidStateType,
+        EnumType::ReverbType,
     ];
 
     pub fn name(self) -> &'static str {
@@ -600,6 +602,7 @@ impl EnumType {
             EnumType::CollisionFidelity => "CollisionFidelity",
             EnumType::ProximityPromptExclusivity => "ProximityPromptExclusivity",
             EnumType::HumanoidStateType => "HumanoidStateType",
+            EnumType::ReverbType => "ReverbType",
         }
     }
 
@@ -640,6 +643,8 @@ impl EnumType {
             // How a Fracture's pieces are spread (Phase 42).
             EnumType::FracturePattern => vec!["Uniform", "Impact"],
             EnumType::CollisionFidelity => vec!["Box", "Hull", "PreciseConvexDecomposition"],
+            // The room a ReverbZone sounds like (Phase 52).
+            EnumType::ReverbType => axcenity_audio::REVERB_TYPES.to_vec(),
             // Which ProximityPrompts in reach show (Phase 44).
             EnumType::ProximityPromptExclusivity => {
                 vec!["OnePerButton", "OneGlobally", "AlwaysShow"]
@@ -771,7 +776,8 @@ impl LuaEnumItem {
             | EnumType::FracturePattern
             | EnumType::CollisionFidelity
             | EnumType::ProximityPromptExclusivity
-            | EnumType::HumanoidStateType => None,
+            | EnumType::HumanoidStateType
+            | EnumType::ReverbType => None,
         }
     }
 }
