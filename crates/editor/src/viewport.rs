@@ -186,6 +186,9 @@ pub struct ViewportOutput {
     pub surface: Option<SurfacePick>,
     /// What drawing the scene took, for the Profiler.
     pub render: Option<RenderCost>,
+    /// Materials whose surface shaders didn't compile, each once, for the
+    /// Output window.
+    pub shader_errors: Vec<axcenity_render::ShaderError>,
 }
 
 /// A Terrain Studio brush, as the viewport shows it.
@@ -970,9 +973,11 @@ impl Viewport {
         draw_list.sprites = self.particles.sprites(world, assets);
         draw_list.ui = ui_layout.draw_items.clone();
         axcenity_scene::attach_ui_textures(&mut draw_list.ui, assets);
+        draw_list.time = shader_time(ui, &draw_list);
         if let Err(error) = target.renderer.render(&draw_list) {
             log::error!("could not render the viewport: {error:#}");
         }
+        let shader_errors = target.renderer.take_shader_errors();
         let render = RenderCost {
             cpu: render_started.elapsed(),
             items: draw_list.items.len(),
@@ -1126,6 +1131,7 @@ impl Viewport {
             terrain,
             surface,
             render: Some(render),
+            shader_errors,
         }
     }
 
@@ -1184,6 +1190,19 @@ pub fn ground_point(world: &World, terrain: InstanceId, ray: axcenity_scene::Ray
     let data = world.terrain(terrain)?;
     let distance = axcenity_terrain::raycast::raycast(data, &placement, ray.origin, ray.direction)?;
     Some(ray.at(distance))
+}
+
+/// Seconds since the editor started, for surface shaders that move. While
+/// `list` has any, frames keep being drawn.
+pub fn shader_time(ui: &egui::Ui, list: &axcenity_render::DrawList) -> f32 {
+    let moving = list
+        .items
+        .iter()
+        .any(|item| item.material.surface_shader.is_some());
+    if moving {
+        ui.ctx().request_repaint();
+    }
+    ui.input(|input| input.time) as f32
 }
 
 fn start_camera() -> FlyCamera {

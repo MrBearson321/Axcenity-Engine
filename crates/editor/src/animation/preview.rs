@@ -78,6 +78,8 @@ impl Canvas {
         if let Err(error) = target.renderer.render(list) {
             log::error!("could not render the animation preview: {error:#}");
         }
+        // The viewport reports shader errors, and the Material tab its own.
+        target.renderer.take_shader_errors();
         let whole = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
         ui.painter_at(rect)
             .image(target.texture_id, rect, whole, egui::Color32::WHITE);

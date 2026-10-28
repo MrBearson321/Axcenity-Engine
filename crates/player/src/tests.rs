@@ -1006,6 +1006,8 @@ fn check_example_renders(
     }
     let errors = assets.take_errors();
     assert!(errors.is_empty(), "{name}: {errors:?}");
+    let shader_errors = renderer.take_shader_errors();
+    assert!(shader_errors.is_empty(), "{name}: {shader_errors:?}");
     let pixels = renderer.read_pixels();
     if let Some(folder) = snapshots {
         let file = fs::File::create(folder.join(format!("example-{name}.png"))).unwrap();

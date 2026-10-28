@@ -20,8 +20,17 @@ use super::{
 };
 
 /// The shader for parts and models, and the shadow and sky passes: the
-/// sky's colors and the shared lighting, then `shader.wgsl`.
+/// sky's colors and the shared lighting, then `shader.wgsl` and the
+/// standard material's `surface` function.
 pub(super) const SCENE_SHADER: &str = concat!(
+    include_str!("../sky.wgsl"),
+    include_str!("../lighting.wgsl"),
+    include_str!("../shader.wgsl"),
+    include_str!("../surface.wgsl")
+);
+/// [`SCENE_SHADER`] without its `surface` function: a material's surface
+/// shader goes after it (`surface_shaders.rs`).
+pub(super) const SCENE_TEMPLATE: &str = concat!(
     include_str!("../sky.wgsl"),
     include_str!("../lighting.wgsl"),
     include_str!("../shader.wgsl")

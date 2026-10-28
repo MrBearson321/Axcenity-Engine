@@ -68,6 +68,8 @@ struct Frame {
     light_probes: vec4<u32>,
     // The light probe volumes drawn, smallest box first.
     volumes: array<Volume, MAX_VOLUMES>,
+    // x: seconds (`DrawList::time`), for surface shaders that move.
+    clock: vec4<f32>,
 }
 
 // The most light probe volumes drawn at once. Must match `MAX_VOLUMES` in

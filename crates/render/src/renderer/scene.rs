@@ -365,6 +365,7 @@ impl ScenePipeline {
             queue,
             sky_pipeline,
             item_pipelines,
+            surface_shaders: Default::default(),
             sprites,
             post,
             frame_targets,
@@ -513,6 +514,7 @@ impl ScenePipeline {
             self.terrain
                 .set_samples(&self.device, &self.frame_layout, samples);
             self.sprites.set_samples(&self.device, samples);
+            self.surface_shaders.clear_pipelines();
         }
         self.fit_targets();
         if self.graphics.texture_quality != old_quality {
@@ -1197,10 +1199,13 @@ impl ScenePipeline {
             });
             pass.set_bind_group(1, group, &[]);
         } else {
-            let pipeline = match (prepass, batch.double_sided) {
-                (false, _) => self.item_pipelines.of(batch),
-                (true, false) => &self.occlusion.prepass,
-                (true, true) => &self.occlusion.double_sided_prepass,
+            let surface = batch.shader.and_then(|key| self.surface_shaders.get(key));
+            let pipeline = match (prepass, batch.double_sided, surface) {
+                (false, _, Some(surface)) => surface.items.of(batch),
+                (false, _, None) => self.item_pipelines.of(batch),
+                (true, double_sided, Some(surface)) => surface.prepass(double_sided),
+                (true, false, None) => &self.occlusion.prepass,
+                (true, true, None) => &self.occlusion.double_sided_prepass,
             };
             let material = self
                 .materials
@@ -1611,6 +1616,11 @@ impl ScenePipeline {
                 }
             }
         }
+        for draw in draws {
+            if let Some(shader) = &draw.item.material.surface_shader {
+                self.prepare_surface_shader(shader);
+            }
+        }
         for item in &list.items {
             if let Some(surface) = &item.material.terrain {
                 for weights in &surface.weights {
@@ -1805,6 +1815,7 @@ impl ScenePipeline {
         self.sprites.forget(|key| self.textures.contains_key(&key));
         self.materials.retain(|_, cached| recent(cached.last_drawn));
         self.terrain.forget(frame);
+        self.surface_shaders.forget(frame);
     }
 
     /// Replaces the instance buffer with a bigger one if `count` won't fit.

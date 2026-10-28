@@ -731,7 +731,7 @@ impl EditorApp {
             Some(session) if self.overlays.agent_paths => session.agent_paths(),
             _ => Vec::new(),
         };
-        let output = egui::CentralPanel::default()
+        let mut output = egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show_inside(ui, |ui| match render_state {
                 Some(render_state) => {
@@ -791,6 +791,9 @@ impl EditorApp {
             .inner;
         if let Some(render) = output.render {
             self.profiler.record_render(render);
+        }
+        for error in output.shader_errors.drain(..) {
+            self.output.error(error.to_string());
         }
         output
     }

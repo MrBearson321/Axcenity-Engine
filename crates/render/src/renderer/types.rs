@@ -81,6 +81,8 @@ pub(super) struct FrameUniform {
     /// The light probe volumes drawn, smallest box first (see
     /// `light_probes.rs`).
     pub(super) volumes: [light_probes::VolumeRaw; light_probes::MAX_VOLUMES],
+    /// Seconds (`DrawList::time`), then unused.
+    pub(super) clock: [f32; 4],
 }
 
 /// The most point and spot lights drawn at once.
@@ -476,6 +478,10 @@ pub(super) struct Batch {
     /// Drawn without culling back faces ([`crate::Material::double_sided`]).
     pub(super) double_sided: bool,
     pub(super) casts_shadow: bool,
+    /// Its material's surface shader's key, drawn with that shader's
+    /// pipelines ([`surface_shaders::SurfaceShaders`]); `None` is the
+    /// standard material.
+    pub(super) shader: Option<u64>,
     pub(super) instances: Range<u32>,
 }
 
@@ -633,6 +639,8 @@ pub(super) struct ScenePipeline {
     pub(super) queue: wgpu::Queue,
     pub(super) sky_pipeline: wgpu::RenderPipeline,
     pub(super) item_pipelines: ItemPipelines,
+    /// Pipelines for materials' own surface shaders.
+    pub(super) surface_shaders: surface_shaders::SurfaceShaders,
     /// Camera-facing pictures, such as particles.
     pub(super) sprites: sprites::SpritePass,
     pub(super) post: PostPasses,

@@ -362,6 +362,7 @@ pub fn build_draw_list_posed(
             .collect(),
         reflection_probes,
         light_probe_volumes,
+        time: 0.0,
     }
 }
 
@@ -972,6 +973,7 @@ fn model_material(material: &ModelMaterial) -> Material {
         uv_offset: material.uv_offset,
         double_sided: material.double_sided,
         terrain: None,
+        surface_shader: None,
     }
 }
 

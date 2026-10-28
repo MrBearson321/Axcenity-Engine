@@ -30,7 +30,7 @@ pub use graphics::{
 };
 pub use renderer::{
     CullingBounds, FramePass, LIGHT_PROBE_BAKE_SIZE, PROBE_BAKE_SIZE, RenderStats, Renderer,
-    TextureRenderer,
+    ShaderError, SurfaceShader, TextureRenderer,
 };
 pub use tone_mapping::ToneMapping;
 

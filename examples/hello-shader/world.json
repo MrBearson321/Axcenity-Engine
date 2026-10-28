@@ -1,0 +1,46 @@
+{
+  "format_version": 1,
+  "workspace": {
+    "children": [
+      {
+        "class": "Part",
+        "name": "Floor",
+        "properties": {
+          "Anchored": true,
+          "Color": [0.42, 0.45, 0.5],
+          "Material": "Plastic",
+          "Position": [0, -1, 0],
+          "Roughness": 0.8,
+          "Shape": "Block",
+          "Size": [40, 1, 40]
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Conveyor",
+        "properties": {
+          "Anchored": true,
+          "Color": [1, 1, 1],
+          "MaterialVariant": "assets/materials/Conveyor.material.json",
+          "Position": [0, 0, 0],
+          "Shape": "Block",
+          "Size": [16, 1, 4],
+          "TileSize": 4
+        }
+      },
+      {
+        "class": "Part",
+        "name": "Crate",
+        "properties": {
+          "Anchored": true,
+          "Color": [0.62, 0.42, 0.24],
+          "Material": "Plastic",
+          "Position": [-3, 1.5, 0],
+          "Roughness": 0.7,
+          "Shape": "Block",
+          "Size": [2, 2, 2]
+        }
+      }
+    ]
+  }
+}

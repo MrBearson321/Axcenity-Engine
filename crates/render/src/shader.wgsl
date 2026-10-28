@@ -1,6 +1,8 @@
 // Parts and imported models: physically based materials with texture maps,
 // drawn into the HDR scene. Compiled after `lighting.wgsl`, which lights
 // each pixel (`light_surface`). Also the shadow pass's and the sky's entry points.
+// Followed by one `surface` function: surface.wgsl's, or a material's own
+// (renderer/surface_shaders.rs), so this file must not define one.
 
 // How the item's texture maps are read. Must match `MapsUniform` in
 // renderer/types.rs.
@@ -208,17 +210,17 @@ fn map_value(texel: vec4<f32>, mask: vec4<f32>, invert: f32) -> f32 {
     return mix(value, 1.0 - value, invert);
 }
 
-// The surface normal, tipped by the normal map if there is one.
-fn surface_normal(in: VertexOut) -> vec3<f32> {
-    let n = normalize(in.normal);
-    let texel = textureSample(normal_texture, material_sampler, in.uv).xyz;
+// The surface normal at `uv`, tipped by the normal map if there is one,
+// from the mesh's normal `n` (unit length) and `tangent`.
+fn surface_normal(n: vec3<f32>, tangent: vec4<f32>, uv: vec2<f32>) -> vec3<f32> {
+    let texel = textureSample(normal_texture, material_sampler, uv).xyz;
     // The tangent, made perpendicular to the normal.
-    let along = in.tangent.xyz - n * dot(n, in.tangent.xyz);
+    let along = tangent.xyz - n * dot(n, tangent.xyz);
     if maps.settings.x == 0.0 || dot(along, along) < 1e-12 {
         return n;
     }
     let t = normalize(along);
-    let b = cross(n, t) * in.tangent.w;
+    let b = cross(n, t) * tangent.w;
     var tipped = texel * 2.0 - 1.0;
     tipped = vec3<f32>(tipped.x, tipped.y * maps.settings.y, tipped.z);
     tipped = vec3<f32>(tipped.xy * maps.settings.x, max(tipped.z, 0.0));
@@ -229,49 +231,117 @@ fn surface_normal(in: VertexOut) -> vec3<f32> {
     return normalize(mapped);
 }
 
+// What a material's `surface` function is given about the pixel it shades.
+// Colors are linear light. Documented in docs/rendering/models.md.
+struct SurfaceInput {
+    // The texture coordinates, already tiled and offset by the material.
+    uv: vec2<f32>,
+    world_position: vec3<f32>,
+    // The mesh's normal (unit length, facing the camera), before the normal map.
+    normal: vec3<f32>,
+    // Along the texture's U; w is the side its V is on. Turned with `normal`.
+    tangent: vec4<f32>,
+    // Seconds, for surfaces that move (`DrawList::time`).
+    time: f32,
+    // The item's own values, before its maps: the part's color and
+    // opacity, metalness, roughness and glow.
+    color: vec3<f32>,
+    opacity: f32,
+    metalness: f32,
+    roughness: f32,
+    emissive: vec3<f32>,
+}
+
+// What a `surface` function gives back, lit by the scene's lights.
+struct Surface {
+    base_color: vec3<f32>,
+    metalness: f32,
+    roughness: f32,
+    // Unit length, in world space.
+    normal: vec3<f32>,
+    // Light given off, added after lighting.
+    emissive: vec3<f32>,
+    // Below the material's cutoff, the pixel is cut out. An item is only
+    // see-through when its material's opacity is below 1.
+    opacity: f32,
+}
+
+// The item's own material at `input`: its values times its maps, read at
+// `input.uv`. A custom surface can call it and change what it gives back.
+fn standard_surface(input: SurfaceInput) -> Surface {
+    let uv = input.uv;
+    let texel = textureSample(base_color_texture, material_sampler, uv);
+    let metalness_texel = textureSample(metalness_texture, material_sampler, uv);
+    let roughness_texel = textureSample(roughness_texture, material_sampler, uv);
+    let emissive_texel = textureSample(emissive_texture, material_sampler, uv);
+    let opacity_texel = textureSample(opacity_texture, material_sampler, uv);
+    let opacity_map = map_value(opacity_texel, maps.opacity, maps.invert.w);
+    var out: Surface;
+    out.base_color = input.color * texel.rgb;
+    out.metalness = input.metalness * map_value(metalness_texel, maps.metalness, maps.invert.x);
+    out.roughness = input.roughness * map_value(roughness_texel, maps.roughness, maps.invert.y);
+    out.normal = surface_normal(input.normal, input.tangent, uv);
+    out.emissive = input.emissive * emissive_texel.rgb;
+    out.opacity = input.opacity * mix(texel.a, opacity_map, maps.settings.w);
+    return out;
+}
+
+// An sRGB color (as a Part's `Color` is written) as linear light.
+fn srgb(color: vec3<f32>) -> vec3<f32> {
+    return select(pow((color + 0.055) / 1.055, vec3<f32>(2.4)), color / 12.92,
+        color <= vec3<f32>(0.04045));
+}
+
+// The pixel's surface: the material's `surface` function (appended after
+// this file, see renderer/surface_shaders.rs) at the pixel. Only
+// double-sided items show their backs, which are lit as fronts facing the
+// other way, so the normal and tangent are turned to face the camera.
+fn pixel_surface(in: VertexOut, facing: f32) -> Surface {
+    var input: SurfaceInput;
+    input.uv = in.uv;
+    input.world_position = in.world_position;
+    input.normal = normalize(in.normal) * facing;
+    input.tangent = in.tangent * facing;
+    input.time = frame.clock.x;
+    input.color = in.base_color.rgb;
+    input.opacity = in.base_color.a;
+    input.metalness = in.surface.x;
+    input.roughness = in.surface.y;
+    input.emissive = in.emissive;
+    return surface(input);
+}
+
 @fragment
 fn fs_main(in: VertexOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
     // Every texture is sampled before anything branches, as WGSL requires.
-    let texel = textureSample(base_color_texture, material_sampler, in.uv);
-    let metalness_texel = textureSample(metalness_texture, material_sampler, in.uv);
-    let roughness_texel = textureSample(roughness_texture, material_sampler, in.uv);
-    let occlusion_texel = textureSample(occlusion_texture, material_sampler, in.uv);
-    let emissive_texel = textureSample(emissive_texture, material_sampler, in.uv);
-    let opacity_texel = textureSample(opacity_texture, material_sampler, in.uv);
-    let specular_texel = textureSample(specular_texture, material_sampler, in.uv);
-    // Only double-sided items show their backs, which are lit as fronts
-    // facing the other way.
     let facing = select(-1.0, 1.0, front);
-    let n = surface_normal(in) * facing;
+    let shaded = pixel_surface(in, facing);
+    let occlusion_texel = textureSample(occlusion_texture, material_sampler, in.uv);
+    let specular_texel = textureSample(specular_texture, material_sampler, in.uv);
 
-    let base_color = in.base_color.rgb * texel.rgb;
-    let opacity_map = map_value(opacity_texel, maps.opacity, maps.invert.w);
-    let opacity = in.base_color.a * mix(texel.a, opacity_map, maps.settings.w);
     // Cut-out materials (leaves, fences) leave holes where the texture is clear.
-    if opacity < in.surface.z || dithered_out(in.fade, in.clip_position.xy) {
+    if shaded.opacity < in.surface.z || dithered_out(in.fade, in.clip_position.xy) {
         discard;
     }
-    let metalness = clamp(
-        in.surface.x * map_value(metalness_texel, maps.metalness, maps.invert.x), 0.0, 1.0);
+    let metalness = clamp(shaded.metalness, 0.0, 1.0);
     // Perfectly smooth surfaces make the highlight infinitely small, so keep a minimum.
-    let roughness = clamp(
-        in.surface.y * map_value(roughness_texel, maps.roughness, maps.invert.y), 0.04, 1.0);
+    let roughness = clamp(shaded.roughness, 0.04, 1.0);
     // The map's, and for solid items the screen-space ambient occlusion's.
     let solid = in.base_color.a >= 1.0;
     let occlusion = mix(
         1.0, map_value(occlusion_texel, maps.occlusion, maps.invert.z), maps.settings.z)
         * select(1.0, screen_occlusion(in.clip_position.xy), solid);
-    let emissive = in.emissive * emissive_texel.rgb;
     // Non-metals reflect about 4% of light, or as their specular map says.
     let dielectric = mix(vec3<f32>(0.04), 0.08 * specular_texel.rgb, maps.specular.x);
 
-    let color = light_surface(in.world_position, normalize(in.normal) * facing, n, in.clip_position.xy,
-        base_color, metalness, roughness, occlusion, dielectric, solid);
+    let color = light_surface(in.world_position, normalize(in.normal) * facing, shaded.normal,
+        in.clip_position.xy, shaded.base_color, metalness, roughness, occlusion, dielectric,
+        solid);
 
     // Solid items stay solid whatever the texture's alpha, so the window's
     // own alpha stays 1.
-    let alpha = select(opacity, 1.0, solid);
-    return vec4<f32>(color + emissive, alpha);
+    let alpha = select(clamp(shaded.opacity, 0.0, 1.0), 1.0, solid);
+    return vec4<f32>(color + shaded.emissive, alpha);
 }
 
 // Whether a fading item leaves out the pixel at `pixel`, in a fine pattern,
@@ -289,14 +359,12 @@ fn dithered_out(fade: f32, pixel: vec2<f32>) -> bool {
 // and view-space normals. Cut-out pixels are left out, as in `fs_main`.
 @fragment
 fn fs_prepass(in: VertexOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
-    let texel = textureSample(base_color_texture, material_sampler, in.uv);
-    let opacity_texel = textureSample(opacity_texture, material_sampler, in.uv);
-    let opacity_map = map_value(opacity_texel, maps.opacity, maps.invert.w);
-    let opacity = in.base_color.a * mix(texel.a, opacity_map, maps.settings.w);
-    if opacity < in.surface.z || dithered_out(in.fade, in.clip_position.xy) {
+    let facing = select(-1.0, 1.0, front);
+    let shaded = pixel_surface(in, facing);
+    if shaded.opacity < in.surface.z || dithered_out(in.fade, in.clip_position.xy) {
         discard;
     }
-    return prepass_normal(normalize(in.normal) * select(-1.0, 1.0, front));
+    return prepass_normal(normalize(in.normal) * facing);
 }
 
 // A full-screen triangle at the far plane, for drawing the sky.

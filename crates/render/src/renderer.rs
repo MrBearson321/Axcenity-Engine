@@ -38,6 +38,7 @@ use glyphon::{
 };
 pub use gpu_timer::FramePass;
 pub use probe_bake::{LIGHT_PROBE_BAKE_SIZE, PROBE_BAKE_SIZE};
+pub use surface_shaders::{ShaderError, SurfaceShader};
 
 mod culling;
 mod environment;
@@ -53,6 +54,7 @@ mod probes;
 mod realtime_gi;
 mod skinning;
 mod sprites;
+mod surface_shaders;
 mod terrain;
 pub(crate) mod text;
 mod texture_budget;
@@ -255,6 +257,12 @@ impl Renderer {
         &self.scene.graphics
     }
 
+    /// The materials' surface shaders that didn't compile since the last
+    /// call, each once. Their items draw in glowing magenta checks.
+    pub fn take_shader_errors(&mut self) -> Vec<ShaderError> {
+        self.scene.surface_shaders.take_errors()
+    }
+
     /// Draws one frame. `before_present` runs just before the frame is shown;
     /// windowing libraries use that moment to pace frames (for example
     /// `winit`'s `Window::pre_present_notify`).
@@ -396,6 +404,12 @@ impl TextureRenderer {
     /// The graphics values in use, and why any were lowered.
     pub fn graphics(&self) -> &EffectiveGraphics {
         &self.scene.graphics
+    }
+
+    /// The materials' surface shaders that didn't compile since the last
+    /// call, each once. Their items draw in glowing magenta checks.
+    pub fn take_shader_errors(&mut self) -> Vec<ShaderError> {
+        self.scene.surface_shaders.take_errors()
     }
 
     /// Reads the texture back to the CPU as rows of RGBA bytes. Slow: for

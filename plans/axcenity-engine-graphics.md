@@ -391,8 +391,8 @@ A material can supply a WGSL `surface` function that takes the standard inputs (
 
 ### Acceptance criteria
 
-- [ ] A custom shader that scrolls a texture over time draws in the viewport and in Play.
-- [ ] A syntax error is reported with the right line and doesn't stop the rest of the scene from drawing.
+- [x] A custom shader that scrolls a texture over time draws in the viewport and in Play.
+- [x] A syntax error is reported with the right line and doesn't stop the rest of the scene from drawing.
 
 ---
 

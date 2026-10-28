@@ -17,7 +17,7 @@ use super::tests::{
 };
 use super::*;
 
-const SIZE: (u32, u32) = (480, 270);
+pub(super) const SIZE: (u32, u32) = (480, 270);
 
 /// hello-graphics after its scripts' first second, with its assets and
 /// the player's starting camera.
@@ -49,7 +49,7 @@ fn frame(
 }
 
 /// How many pixels differ in color between two frames.
-fn changed_pixels(a: &[u8], b: &[u8]) -> usize {
+pub(super) fn changed_pixels(a: &[u8], b: &[u8]) -> usize {
     a.chunks(4)
         .zip(b.chunks(4))
         .filter(|(a, b)| a[..3] != b[..3])
@@ -58,7 +58,7 @@ fn changed_pixels(a: &[u8], b: &[u8]) -> usize {
 
 /// The pixels (by index, every second one each way) where each of `names`
 /// is the nearest part on screen.
-fn pixels_of(world: &World, camera: &FlyCamera, names: &[&str]) -> Vec<Vec<usize>> {
+pub(super) fn pixels_of(world: &World, camera: &FlyCamera, names: &[&str]) -> Vec<Vec<usize>> {
     let (width, height) = SIZE;
     let view = CameraView::new(camera.to_render_camera(), width as f32 / height as f32);
     let ids: Vec<_> = names
@@ -84,7 +84,7 @@ fn pixels_of(world: &World, camera: &FlyCamera, names: &[&str]) -> Vec<Vec<usize
 }
 
 /// The average red, green and blue of `pixels` at `at`, from 0 to 255.
-fn average(pixels: &[u8], at: &[usize]) -> [f64; 3] {
+pub(super) fn average(pixels: &[u8], at: &[usize]) -> [f64; 3] {
     let mut sum = [0.0; 3];
     for &pixel in at {
         for (channel, total) in sum.iter_mut().enumerate() {

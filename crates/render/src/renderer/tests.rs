@@ -15,6 +15,7 @@ mod point_and_contact_shadows;
 mod realtime_gi;
 mod reflection_probes;
 mod skinning;
+mod surface_shaders;
 mod texture_budget;
 
 #[test]
@@ -158,6 +159,7 @@ fn list_of(items: Vec<DrawItem>) -> DrawList {
         fonts: Vec::new(),
         reflection_probes: Vec::new(),
         light_probe_volumes: Vec::new(),
+        time: 0.0,
     }
 }
 
@@ -185,6 +187,7 @@ fn batch(mesh: MeshKey, transparent: bool, instances: Range<u32>) -> Batch {
         transparent,
         double_sided: false,
         casts_shadow: true,
+        shader: None,
         instances,
     }
 }

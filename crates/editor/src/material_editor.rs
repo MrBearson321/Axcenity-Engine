@@ -8,6 +8,12 @@
 //! own undo, used while the pointer is over the tab; dragging a slider or
 //! typing is one step however many frames it takes.
 //!
+//! The Shader section edits the material's surface shader (WGSL, see
+//! `docs/rendering/models.md`). Typing goes into a draft, which becomes the
+//! material's code once typing pauses for [`SHADER_PAUSE`] seconds or the
+//! box loses focus, so the scene isn't compiled again on every key. The
+//! code is checked with `naga` here, and its error shown on its line.
+//!
 //! Materials are written with the project's Save. Each edit is also handed
 //! to the app ([`MaterialStudio::take_changed`]), which gives it to the
 //! shared `Assets`, so every part using the material, or a material built
@@ -21,7 +27,7 @@ use axcenity_assets::{
 };
 use axcenity_core::{ClassName, Color3, InstanceId, PartType, Value, Vector3, World};
 use axcenity_render::glam::Vec3;
-use axcenity_render::{Camera, DrawList};
+use axcenity_render::{Camera, DrawList, ShaderError, SurfaceShader};
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
 
@@ -36,6 +42,23 @@ const STACK_BELOW: f32 = 620.0;
 const STACKED_PREVIEW_HEIGHT: f32 = 220.0;
 /// The size of the preview's sphere and cube, in studs.
 const PREVIEW_SIZE: f32 = 4.0;
+/// How long typing in the shader must pause before the code is used.
+const SHADER_PAUSE: f64 = 0.6;
+
+/// The code a new surface shader starts with: the material's own look,
+/// scrolling.
+pub const STARTER_SHADER: &str = "\
+// Works out each pixel's surface. `input` has the pixel's uv,
+// world_position, normal, tangent and time (in seconds), and the part's
+// color, opacity, metalness, roughness and emissive (colors are linear).
+// standard_surface(input) is this material's own look at input.uv.
+fn surface(input: SurfaceInput) -> Surface {
+    var moved = input;
+    // Scroll the maps a tenth of the texture each second.
+    moved.uv = input.uv + vec2<f32>(input.time * 0.1, 0.0);
+    return standard_surface(moved);
+}
+";
 
 /// One material file, as edited.
 #[derive(Debug)]
@@ -207,6 +230,23 @@ pub struct MaterialStudio {
     preview: MaterialPreview,
     /// The New material box's name, while it's open.
     naming: Option<String>,
+    /// The shader code being typed, before it's used.
+    shader_draft: Option<ShaderDraft>,
+    /// The last code checked, and what the check found.
+    shader_check: Option<(String, Result<(), ShaderError>)>,
+}
+
+/// Shader code being typed in the Material tab.
+#[derive(Debug)]
+struct ShaderDraft {
+    /// The material it's for.
+    path: String,
+    text: String,
+    /// The material's code when the draft started or was last used: when
+    /// the code changes otherwise (undo, a reload), the draft starts again.
+    from: String,
+    /// When it was last typed in (egui's time, in seconds).
+    typed_at: f64,
 }
 
 impl MaterialStudio {
@@ -348,6 +388,12 @@ impl MaterialStudio {
         true
     }
 
+    /// The error the Shader section last showed, if any.
+    #[cfg(test)]
+    pub fn shader_error(&self) -> Option<&ShaderError> {
+        self.shader_check.as_ref()?.1.as_ref().err()
+    }
+
     /// Ends the value being changed, so its next change is a new step.
     #[cfg(test)]
     pub fn finish_edit(&mut self) {
@@ -434,6 +480,8 @@ impl MaterialStudio {
                     .id_salt("material values")
                     .show(ui, |ui| {
                         values(ui, scene, &path, &file, chain.as_ref(), &mut changes);
+                        ui.add_space(6.0);
+                        self.shader_section(ui, &path, &file, chain.as_ref(), &mut changes);
                         ui.add_space(8.0);
                         let apply = ui
                             .add_enabled(
@@ -458,6 +506,132 @@ impl MaterialStudio {
             }
         }
         actions
+    }
+
+    /// The shader's code, with its line numbers and its first error.
+    fn shader_section(
+        &mut self,
+        ui: &mut egui::Ui,
+        path: &str,
+        file: &MaterialFile,
+        chain: Option<&MaterialChain>,
+        changes: &mut Vec<Change>,
+    ) {
+        let palette = theme::palette(ui.ctx());
+        let inherited = chain
+            .and_then(|chain| chain.merged.shader.clone())
+            .unwrap_or_default();
+        let code = file.shader.clone().unwrap_or_else(|| inherited.clone());
+        widgets::section_label(ui, "Shader");
+        responsive::toolbar(ui, |ui| {
+            value_label(ui, "Surface shader", file.shader.is_some());
+            if code.is_empty() {
+                if ui
+                    .button("Add shader")
+                    .on_hover_text("Work out the surface in WGSL, starting from an example")
+                    .clicked()
+                {
+                    changes.push((
+                        "shader",
+                        Box::new(|file| file.shader = Some(STARTER_SHADER.to_owned())),
+                    ));
+                }
+            } else if ui
+                .button("Remove shader")
+                .on_hover_text("Draw the standard surface")
+                .clicked()
+            {
+                let empty = (!inherited.is_empty()).then(String::new);
+                changes.push(("shader", Box::new(move |file| file.shader = empty)));
+            }
+            reset_button(ui, file.shader.is_some(), "shader", changes, |file| {
+                file.shader = None;
+            });
+        });
+        if code.is_empty() {
+            self.shader_draft = None;
+            self.shader_check = None;
+            return;
+        }
+
+        let now = ui.input(|input| input.time);
+        let draft = match &mut self.shader_draft {
+            Some(draft) if draft.path == path && draft.from == code => draft,
+            _ => self.shader_draft.insert(ShaderDraft {
+                path: path.to_owned(),
+                text: code.clone(),
+                from: code.clone(),
+                typed_at: now,
+            }),
+        };
+        let check = match &self.shader_check {
+            Some((checked, result)) if *checked == code => result.clone(),
+            _ => {
+                let result = SurfaceShader::new(path, &code).check();
+                self.shader_check = Some((code.clone(), result.clone()));
+                result
+            }
+        };
+        let error_line = check.as_ref().err().and_then(|error| error.line);
+        let lines = draft.text.split('\n').count();
+        let response = ui
+            .horizontal_top(|ui| {
+                ui.vertical(|ui| {
+                    // The box's own margin, so the numbers line up.
+                    ui.add_space(2.0);
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    for line in 1..=lines {
+                        let color = if error_line == Some(line as u32) {
+                            palette.error
+                        } else {
+                            palette.text_muted
+                        };
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(format!("{line:>3}"))
+                                    .monospace()
+                                    .color(color),
+                            )
+                            .selectable(false),
+                        );
+                    }
+                });
+                ui.add(
+                    egui::TextEdit::multiline(&mut draft.text)
+                        .code_editor()
+                        .desired_rows(8)
+                        .desired_width(ui.available_width()),
+                )
+            })
+            .inner;
+        if response.changed() {
+            draft.typed_at = now;
+        }
+        let waiting = draft.text != code;
+        if waiting && (response.lost_focus() || now - draft.typed_at >= SHADER_PAUSE) {
+            let text = draft.text.clone();
+            draft.from = text.clone();
+            changes.push(("shader", Box::new(move |file| file.shader = Some(text))));
+        } else if waiting {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_secs_f64(SHADER_PAUSE));
+        }
+        if file.shader.is_none() {
+            ui.label(
+                egui::RichText::new("From its base: typing here makes it this material's own.")
+                    .color(palette.text_secondary),
+            );
+        }
+        if let Err(error) = check {
+            let place = error
+                .line
+                .map_or(String::new(), |line| format!("Line {line}: "));
+            ui.colored_label(palette.error, format!("{place}{}", error.message));
+            ui.label(
+                egui::RichText::new("It draws in magenta checks until it's fixed.")
+                    .color(palette.text_secondary),
+            );
+        }
     }
 
     fn toolbar(
@@ -1254,7 +1428,8 @@ impl MaterialPreview {
             );
             return;
         };
-        let list = self.list(assets);
+        let mut list = self.list(assets);
+        list.time = crate::viewport::shader_time(ui, &list);
         self.canvas.paint(ui, rect, render_state, &list);
         if response.hovered() {
             ui.painter_at(rect).text(

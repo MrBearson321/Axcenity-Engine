@@ -444,6 +444,8 @@ struct App {
     cursor: UiCursor,
     /// When the previous frame was drawn, to measure how much time passed.
     last_frame: Option<Instant>,
+    /// Seconds of frames run, which moving surface shaders read.
+    shader_time: f32,
     /// Watches the project's assets with `--watch`; `None` otherwise, and
     /// always for a built game.
     watcher: Option<axcenity_project::Watcher>,
@@ -504,6 +506,7 @@ impl App {
             ui_sounds: Vec::new(),
             cursor: UiCursor::Default,
             last_frame: None,
+            shader_time: 0.0,
             watcher: None,
         }
     }
@@ -1214,6 +1217,8 @@ impl ApplicationHandler for App {
                     window.set_cursor(cursor_icon(self.cursor));
                 }
                 draw_list.sprites = self.particles.sprites(&self.world, &self.assets);
+                self.shader_time += seconds;
+                draw_list.time = self.shader_time;
                 if self.show_splash {
                     // The first drawn frame starts the splash clock.
                     self.splash.tick();
@@ -1240,6 +1245,12 @@ impl ApplicationHandler for App {
                     .render(&draw_list, || window.pre_present_notify());
                 if let Err(err) = rendered {
                     self.fail(event_loop, err);
+                }
+                // Materials whose shaders don't compile (drawn magenta).
+                if let Some(renderer) = &mut self.renderer {
+                    for error in renderer.take_shader_errors() {
+                        eprintln!("error: {error}");
+                    }
                 }
             }
             _ => {}
@@ -1293,6 +1304,9 @@ mod bench_tests;
 
 #[cfg(test)]
 mod skinning_tests;
+
+#[cfg(test)]
+mod shader_tests;
 
 #[cfg(test)]
 mod accessibility_tests;

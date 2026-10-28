@@ -424,4 +424,89 @@ mod tests {
         assert!(b > r + 40 && b > g + 20, "turned blue at once: {r} {g} {b}");
         let _ = std::fs::remove_dir_all(&folder);
     }
+
+    /// The surface shader the part `id` is drawn with in `list`.
+    fn shader_in(
+        world: &World,
+        id: InstanceId,
+        list: &DrawList,
+    ) -> Option<axcenity_render::SurfaceShader> {
+        let at = world
+            .get(id)?
+            .property("Position")
+            .and_then(Value::as_vector3)?;
+        let at = Vec3::new(at.x, at.y, at.z);
+        list.items
+            .iter()
+            .find(|item| item.transform.w_axis.truncate().distance(at) < 1e-3)?
+            .material
+            .surface_shader
+            .clone()
+    }
+
+    #[test]
+    fn a_shader_written_in_the_tab_draws_in_the_viewport_and_play_and_shows_its_error_line() {
+        use crate::material_editor::STARTER_SHADER;
+        let folder = copy_of_example("hello-touched", "material-shader");
+        let mut app = EditorApp::new(Some(&folder));
+        app.new_material("Belt");
+        let path = "assets/materials/Belt.material.json";
+        app.materials.edit("shader", |file| {
+            file.shader = Some(STARTER_SHADER.to_owned())
+        });
+        app.materials.finish_edit();
+        app.hand_over_materials();
+        assert!(app.save());
+        let written = axcenity_assets::read_material_file(&folder.join(path)).unwrap();
+        assert_eq!(written.shader.as_deref(), Some(STARTER_SHADER));
+
+        let pad = part(&app, "Pad");
+        app.use_material(path, "Belt", vec![pad]);
+        let list = axcenity_scene::build_draw_list(&app.world, &app.assets, camera());
+        let shader = shader_in(&app.world, pad, &list).expect("the viewport draws the shader");
+        assert_eq!(shader.code(), STARTER_SHADER);
+        assert_eq!(shader.material(), path);
+        assert_eq!(shader.check(), Ok(()));
+
+        app.play();
+        let game = app.play.as_ref().unwrap().world();
+        let list = axcenity_scene::build_draw_list(game, &app.assets, camera());
+        let in_play = shader_in(game, pad, &list).expect("Play draws the shader");
+        assert_eq!(in_play.key(), shader.key());
+        app.stop();
+
+        // A line loses its `;`: the tab shows the error where it's found,
+        // on the next statement's line (past a comment), and the parts draw
+        // the broken code (magenta).
+        let broken = STARTER_SHADER.replace("var moved = input;", "var moved = input");
+        let line = STARTER_SHADER
+            .lines()
+            .position(|line| line.contains("moved.uv ="))
+            .unwrap() as u32
+            + 1;
+        app.materials
+            .edit("shader", move |file| file.shader = Some(broken));
+        let ctx = crate::theme::test_context();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| app.material_pane(ui, None));
+        });
+        let error = app
+            .materials
+            .shader_error()
+            .expect("the tab shows the error");
+        assert_eq!(error.line, Some(line), "{error}");
+        let list = axcenity_scene::build_draw_list(&app.world, &app.assets, camera());
+        let drawn = shader_in(&app.world, pad, &list).unwrap();
+        assert_eq!(drawn.check().unwrap_err().line, Some(line));
+
+        // Fixed, the error goes.
+        assert!(app.materials.undo());
+        let file = &app.materials.current().unwrap().file;
+        assert_eq!(file.shader.as_deref(), Some(STARTER_SHADER));
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| app.material_pane(ui, None));
+        });
+        assert_eq!(app.materials.shader_error(), None);
+        let _ = std::fs::remove_dir_all(&folder);
+    }
 }

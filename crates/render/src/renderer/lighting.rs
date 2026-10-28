@@ -144,6 +144,7 @@ pub(super) fn frame_uniform(
         ],
         light_probes: [0; 4],
         volumes: Default::default(),
+        clock: [list.time, 0.0, 0.0, 0.0],
     }
 }
 
@@ -639,7 +640,13 @@ pub(super) fn plan_draws(
         .filter(|&index| draws[index].item.material.opacity > 0.0)
         .partition(|&index| draws[index].item.material.opacity < 1.0);
 
-    let sidedness = |draw: &Draw| (draw.item.material.double_sided, !draw.casts_shadow);
+    let sidedness = |draw: &Draw| {
+        (
+            shader_key(draw.item),
+            draw.item.material.double_sided,
+            !draw.casts_shadow,
+        )
+    };
     opaque.sort_by(|&a, &b| {
         keys[a]
             .cmp(&keys[b])
@@ -717,13 +724,15 @@ pub(super) fn plan_draws(
         let index = plan.instances.len() as u32;
         plan.instances.push(raw);
         let (double_sided, casts_shadow) = (item.material.double_sided, draw.casts_shadow);
+        let shader = shader_key(item);
         match plan.batches.last_mut() {
             Some(last)
                 if last.mesh == mesh
                     && last.material == material
                     && last.transparent == transparent
                     && last.double_sided == double_sided
-                    && last.casts_shadow == casts_shadow =>
+                    && last.casts_shadow == casts_shadow
+                    && last.shader == shader =>
             {
                 last.instances.end = index + 1;
             }
@@ -733,11 +742,22 @@ pub(super) fn plan_draws(
                 transparent,
                 double_sided,
                 casts_shadow,
+                shader,
                 instances: index..index + 1,
             }),
         }
     }
     plan
+}
+
+/// The key of the surface shader `item` is drawn with, or `None` for the
+/// standard material's. Terrain has its own shader.
+fn shader_key(item: &DrawItem) -> Option<u64> {
+    let material = &item.material;
+    if material.terrain.is_some() {
+        return None;
+    }
+    material.surface_shader.as_ref().map(|shader| shader.key())
 }
 
 /// The textures an item is drawn with, in binding order (see

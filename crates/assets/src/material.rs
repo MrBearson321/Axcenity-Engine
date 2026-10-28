@@ -69,6 +69,11 @@ pub struct MaterialFile {
     pub offset: Option<[f32; 2]>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub double_sided: Option<bool>,
+    /// WGSL code with a `surface` function that works out each pixel's
+    /// surface in place of the standard one (`docs/rendering/models.md`).
+    /// `""` is none, so an instance can go back to the standard surface.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shader: Option<String>,
 }
 
 /// A material file's texture maps, each `None` when the file leaves it
@@ -177,6 +182,7 @@ impl MaterialFile {
             tiling: self.tiling.or(base.tiling),
             offset: self.offset.or(base.offset),
             double_sided: self.double_sided.or(base.double_sided),
+            shader: self.shader.clone().or_else(|| base.shader.clone()),
         }
     }
 
@@ -218,6 +224,14 @@ impl MaterialFile {
             tiling: self.tiling.unwrap_or(default.tiling),
             offset: self.offset.unwrap_or(default.offset),
             double_sided: self.double_sided.unwrap_or(default.double_sided),
+            shader: self
+                .shader
+                .as_deref()
+                .filter(|code| !code.is_empty())
+                .map(|code| MaterialShader {
+                    file: String::new(),
+                    code: code.into(),
+                }),
         }
     }
 }
@@ -239,6 +253,18 @@ pub struct StandardMaterial {
     pub tiling: [f32; 2],
     pub offset: [f32; 2],
     pub double_sided: bool,
+    /// Its surface shader, if it has one.
+    pub shader: Option<MaterialShader>,
+}
+
+/// A material's surface shader: WGSL code with a `surface` function.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MaterialShader {
+    /// The material file the code is in (the material's own, or the base
+    /// it comes from), whose lines an error is reported on. Empty for a
+    /// material not read through [`Assets::material`](crate::Assets::material).
+    pub file: String,
+    pub code: std::sync::Arc<str>,
 }
 
 impl Default for StandardMaterial {
@@ -257,6 +283,7 @@ impl Default for StandardMaterial {
             tiling: [1.0, 1.0],
             offset: [0.0, 0.0],
             double_sided: false,
+            shader: None,
         }
     }
 }
@@ -428,8 +455,17 @@ pub(crate) fn resolve(
         .iter()
         .rev()
         .fold(MaterialFile::default(), |below, file| file.over(&below));
+    let mut material = merged.resolve();
+    if let Some(shader) = &mut material.shader
+        && let Some((file, _)) = files
+            .iter()
+            .zip(&chain)
+            .find(|(_, file)| file.shader.is_some())
+    {
+        shader.file = file.clone();
+    }
     Some(Resolved {
-        material: std::sync::Arc::new(merged.resolve()),
+        material: std::sync::Arc::new(material),
         files,
         broken,
         merged,
@@ -513,6 +549,13 @@ mod tests {
             tiling: Some([2.0, 3.0]),
             offset: Some([0.5, 0.25]),
             double_sided: Some(true),
+            shader: Some(
+                "fn surface(input: SurfaceInput) -> Surface {
+    return standard_surface(input);
+}
+"
+                .into(),
+            ),
         }
     }
 
@@ -703,6 +746,45 @@ mod tests {
             .unwrap();
         assert_eq!(orphan.metalness, 1.0);
         let _ = fs::remove_dir_all(folder);
+    }
+
+    #[test]
+    fn a_shader_comes_from_the_file_that_sets_it_and_an_empty_one_takes_it_away() {
+        let folder = project("shader");
+        let (base, instance, plain) = (
+            "assets/materials/water.material.json",
+            "assets/materials/murky.material.json",
+            "assets/materials/still.material.json",
+        );
+        let code = "fn surface(input: SurfaceInput) -> Surface {
+    return standard_surface(input);
+}
+";
+        write(
+            &folder,
+            base,
+            &MaterialFile {
+                shader: Some(code.to_owned()),
+                ..MaterialFile::default()
+            },
+        );
+        let based = |shader: Option<&str>| MaterialFile {
+            base: Some(base.to_owned()),
+            roughness: Some(0.9),
+            shader: shader.map(str::to_owned),
+            ..MaterialFile::default()
+        };
+        write(&folder, instance, &based(None));
+        write(&folder, plain, &based(Some("")));
+        let assets = Assets::new(&folder);
+        let shader = |path| assets.material(path).unwrap().shader.clone();
+        let from_base = shader(instance).unwrap();
+        assert_eq!(&*from_base.code, code);
+        assert_eq!(from_base.file, base, "its lines are the base's");
+        assert_eq!(shader(base).unwrap().file, base);
+        assert_eq!(shader(plain), None);
+        assert_eq!(StandardMaterial::default().shader, None);
+        let _ = fs::remove_dir_all(&folder);
     }
 
     #[test]

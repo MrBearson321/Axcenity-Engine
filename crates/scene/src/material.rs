@@ -6,7 +6,7 @@ use axcenity_assets::{
     StandardMaterial,
 };
 use axcenity_core::{ClassName, Instance, InstanceId, TextureChannel, Value, World};
-use axcenity_render::{Channel, ChannelMap, Material, NormalMap, TextureMaps};
+use axcenity_render::{Channel, ChannelMap, Material, NormalMap, SurfaceShader, TextureMaps};
 
 use crate::draw_list::{GLOW_BOOST, texture};
 
@@ -75,6 +75,10 @@ pub(crate) fn variant_material(standard: &StandardMaterial, assets: &Assets) -> 
         uv_offset: standard.offset,
         double_sided: standard.double_sided,
         terrain: None,
+        surface_shader: standard
+            .shader
+            .as_ref()
+            .map(|shader| SurfaceShader::new(&shader.file, &shader.code)),
     }
 }
 

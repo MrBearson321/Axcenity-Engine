@@ -40,6 +40,11 @@ pub struct DrawList {
     /// Grids of baked light, which light what's inside their boxes in place
     /// of the sky's diffuse light.
     pub light_probe_volumes: Vec<LightProbeVolume>,
+    /// Seconds since the caller started counting, which surface shaders
+    /// read to move ([`Material::surface_shader`]). Kept small (the player
+    /// and the editor count from when they started), as an `f32` loses
+    /// precision as it grows.
+    pub time: f32,
 }
 
 /// A box of the world lit by a grid of probes baked inside it, in place of
@@ -898,6 +903,11 @@ pub struct Material {
     /// For a terrain chunk: its blended layers, which replace everything
     /// above but `opacity` (terrain is always solid).
     pub terrain: Option<TerrainSurface>,
+    /// A WGSL `surface` function that works out the item's surface in
+    /// place of the standard one (a material file's shader). One with an
+    /// error draws in glowing magenta checks, and is reported once
+    /// ([`crate::TextureRenderer::take_shader_errors`]).
+    pub surface_shader: Option<crate::SurfaceShader>,
 }
 
 impl Default for Material {
@@ -916,6 +926,7 @@ impl Default for Material {
             uv_offset: [0.0, 0.0],
             double_sided: false,
             terrain: None,
+            surface_shader: None,
         }
     }
 }
