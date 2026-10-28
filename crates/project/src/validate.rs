@@ -135,6 +135,10 @@ pub enum Site {
     },
     /// A file that can't be loaded on its own.
     File { file: String },
+    /// The prefab a placed copy (or a variant's base, or a prefab nested in
+    /// another) is a copy of (Phase 49). It isn't a property, so it has no
+    /// fix but Ignore.
+    PrefabLink,
 }
 
 /// Everything the scan found. Empty means the project has none of those
@@ -250,6 +254,9 @@ impl Scan {
                 continue;
             };
             let owner = owner_name(world, id, prefab.map(|(file, _)| file));
+            if let Some(link) = instance.prefab() {
+                self.prefab_link(&owner, &link.path, prefab.is_some());
+            }
             for (property, kind) in refs(instance.class()) {
                 let Some(path) = string_prop(instance.property(property)) else {
                     continue;
@@ -314,10 +321,13 @@ impl Scan {
                 let Some(instance) = world.get(id) else {
                     continue;
                 };
+                let owner = owner_name(&world, id, Some(&file));
+                if let Some(link) = instance.prefab() {
+                    self.prefab_link(&owner, &link.path, false);
+                }
                 let Some(place) = prefab_place(&world, &roots, id) else {
                     continue;
                 };
-                let owner = owner_name(&world, id, Some(&file));
                 for (property, kind) in refs(instance.class()) {
                     let Some(path) = string_prop(instance.property(property)) else {
                         continue;
@@ -355,7 +365,10 @@ impl Scan {
             let mut world = World::new();
             let workspace = world.workspace();
             match parse_prefab(&text, &mut world, workspace) {
-                Ok(roots) => self.world(&world, Some((&path, &roots))),
+                Ok(roots) => {
+                    self.world(&world, Some((&path, &roots)));
+                    self.prefab_cycle(&path);
+                }
                 Err(err) => self.push_file(
                     FindingKind::ImportFailure,
                     path,
@@ -676,6 +689,66 @@ impl Scan {
                 }
             }
             AssetKind::Audio | AssetKind::Material | AssetKind::Prefab | AssetKind::Folder => {}
+        }
+    }
+
+    /// A copy's link to the prefab at `path`: the file must be a prefab
+    /// that's there. `from_asset` when a prefab file holds the copy (a
+    /// variant's base or a nested prefab).
+    fn prefab_link(&mut self, owner: &str, path: &str, from_asset: bool) {
+        let (kind, message) = match safe_path(path) {
+            None => (
+                FindingKind::InvalidReference,
+                format!("it is a copy of `{path}`, which is not a path inside the project"),
+            ),
+            Some(_) if !AssetKind::Prefab.matches(path) => (
+                FindingKind::InvalidReference,
+                format!("it is a copy of `{path}`, which isn't a prefab"),
+            ),
+            Some(relative) if !self.folder.join(&relative).is_file() => {
+                let what = if from_asset {
+                    "its base or nested prefab"
+                } else {
+                    "the prefab it is a copy of"
+                };
+                let kind = if from_asset {
+                    FindingKind::BrokenDependency
+                } else {
+                    FindingKind::MissingFile
+                };
+                (
+                    kind,
+                    format!("{what}, `{path}`, isn't there, so it stays as last saved"),
+                )
+            }
+            Some(_) => return,
+        };
+        self.push(
+            kind,
+            owner.to_owned(),
+            path.to_owned(),
+            message,
+            Site::PrefabLink,
+            None,
+        );
+    }
+
+    /// A prefab holding a copy of itself, through nesting or variants.
+    fn prefab_cycle(&mut self, path: &str) {
+        let folder = self.folder.clone();
+        let mut prefabs = crate::Prefabs::in_folder(&folder);
+        let _ = prefabs.source(path);
+        let cycles = prefabs
+            .take_problems()
+            .into_iter()
+            .any(|problem| matches!(&problem, crate::PrefabError::Cycle { path: p } if p == path));
+        if cycles {
+            self.push_file(
+                FindingKind::BrokenDependency,
+                path.to_owned(),
+                "it holds a copy of itself (through the prefabs nested in it or its base)"
+                    .to_owned(),
+            );
         }
     }
 
@@ -1155,6 +1228,57 @@ mod tests {
             .expect("broken dependency");
         assert!(broken.owner.contains("Door.prefab.json"), "{broken:?}");
         assert!(broken.path.contains("Open.anim.json"), "{broken:?}");
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn a_missing_base_or_nested_prefab_and_a_prefab_holding_itself_are_reported() {
+        let folder = scratch("prefab-links");
+        fs::create_dir_all(folder.join("assets/prefabs")).unwrap();
+        // A variant whose base is gone, and a Car that holds itself.
+        fs::write(
+            folder.join("assets/prefabs/Red Enemy.prefab.json"),
+            r#"{ "format_version": 1, "instances": [
+                 { "class": "Model", "name": "Enemy", "prefab": "assets/prefabs/Enemy.prefab.json" } ] }"#,
+        )
+        .unwrap();
+        fs::write(
+            folder.join("assets/prefabs/Car.prefab.json"),
+            r#"{ "format_version": 1, "instances": [
+                 { "class": "Model", "name": "Car", "children": [
+                   { "class": "Model", "name": "Car", "prefab": "assets/prefabs/Car.prefab.json" } ] } ] }"#,
+        )
+        .unwrap();
+        // A placed Wheel in the open world, whose prefab is gone too.
+        let mut world = World::new();
+        let wheel = world.create(ClassName::Part).unwrap();
+        world.set_name(wheel, "Wheel").unwrap();
+        world.set_parent(wheel, Some(world.workspace())).unwrap();
+        world
+            .set_prefab(
+                wheel,
+                Some(axcenity_core::prefab::PrefabLink::new(
+                    "assets/prefabs/Wheel.prefab.json",
+                    0,
+                )),
+            )
+            .unwrap();
+        let report = check_assets(&folder, &world);
+        let found = |kind, path: &str| {
+            report
+                .findings
+                .iter()
+                .find(|f| f.kind == kind && f.path.contains(path))
+                .unwrap_or_else(|| panic!("{path} in {:#?}", report.findings))
+        };
+        let base = found(FindingKind::BrokenDependency, "Enemy.prefab.json");
+        assert!(base.owner.contains("Red Enemy.prefab.json"), "{base:?}");
+        assert!(base.message.contains("base or nested prefab"), "{base:?}");
+        let placed = found(FindingKind::MissingFile, "Wheel.prefab.json");
+        assert_eq!(placed.owner, "Workspace.Wheel");
+        assert_eq!(placed.site, Site::PrefabLink);
+        let cycle = found(FindingKind::BrokenDependency, "Car.prefab.json");
+        assert!(cycle.message.contains("copy of itself"), "{cycle:?}");
         fs::remove_dir_all(folder).unwrap();
     }
 

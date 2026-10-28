@@ -63,6 +63,9 @@
 //! [`write_world`] saves every property and attribute, sorted by name, so
 //! saving the same world always produces the same text.
 
+use std::sync::Arc;
+
+use axcenity_core::prefab::{Overrides, PrefabLink, Segment, child_segments, overrides};
 use axcenity_core::{
     CFrame, ClassName, EnumItem, InstanceId, Material, PartType, ParticleType, TextureChannel,
     ToneMapping, Value, ValueKind, World,
@@ -156,8 +159,54 @@ struct InstanceNode {
     attributes: Map<String, Json>,
     #[serde(default)]
     tags: Vec<String>,
+    /// The prefab this is a placed copy of (Phase 49).
+    prefab: Option<String>,
+    /// Which of that prefab's top-level Instances, when it has several.
+    #[serde(default)]
+    prefab_index: usize,
+    /// Inside a copy: added by the copy, not from its prefab.
+    #[serde(default)]
+    added: bool,
+    /// Inside a copy: what it sets differently from its prefab.
+    #[serde(default)]
+    overrides: Vec<String>,
+    /// Inside a copy: the prefab's children it took out.
+    #[serde(default)]
+    removed: Vec<SegmentNode>,
     #[serde(default)]
     children: Vec<InstanceNode>,
+}
+
+/// A child of a prefab by name: `"Wheel"` is the first named Wheel,
+/// `["Wheel", 2]` the third.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum SegmentNode {
+    First(String),
+    Nth(String, usize),
+}
+
+impl SegmentNode {
+    fn segment(&self) -> Segment {
+        match self {
+            Self::First(name) => Segment::new(name.clone(), 0),
+            Self::Nth(name, nth) => Segment::new(name.clone(), *nth),
+        }
+    }
+}
+
+/// The overrides names that aren't properties: the Instance's attributes
+/// and tags are the copy's own.
+const ATTRIBUTES_OVERRIDE: &str = "attributes";
+const TAGS_OVERRIDE: &str = "tags";
+
+/// Where an Instance being read or written is, for prefab copies.
+#[derive(Clone, Copy)]
+enum Region<'a> {
+    /// Not inside a copy (or added to one).
+    Outside,
+    /// Part of a copy, with its overrides (`None`: it has none).
+    Inside(Option<&'a Overrides>),
 }
 
 /// An `ObjectValue` (or other Instance property) read from a file, waiting
@@ -238,7 +287,7 @@ pub fn parse_world(text: &str) -> Result<World, WorldError> {
     for (service, node) in services {
         apply_properties(&mut world, service, &node.properties, &mut references)?;
         for child in &node.children {
-            add_instance(&mut world, service, child, &mut references)?;
+            add_instance(&mut world, service, child, &mut references, None)?;
         }
     }
     let roots = world_roots(&world);
@@ -278,12 +327,12 @@ pub fn parse_prefab(
     let mut check = World::new();
     let workspace = check.workspace();
     for node in &file.instances {
-        add_instance(&mut check, workspace, node, &mut Vec::new())?;
+        add_instance(&mut check, workspace, node, &mut Vec::new(), None)?;
     }
     let mut added = Vec::new();
     let mut references = Vec::new();
     for node in &file.instances {
-        added.push(add_instance(world, parent, node, &mut references)?);
+        added.push(add_instance(world, parent, node, &mut references, None)?);
     }
     resolve(world, &added, references);
     Ok(added)
@@ -305,7 +354,7 @@ pub fn write_prefab(world: &World, ids: &[InstanceId]) -> String {
         .collect();
     for (i, &id) in ids.iter().enumerate() {
         out.push_str("    ");
-        write_instance(world, id, 2, &ids, &mut out);
+        write_instance(world, id, 2, &ids, Region::Outside, false, &mut out);
         if i + 1 < ids.len() {
             out.push(',');
         }
@@ -316,11 +365,13 @@ pub fn write_prefab(world: &World, ids: &[InstanceId]) -> String {
 }
 
 /// Creates the Instance described by `node` under `parent`, then its children.
+/// `region` is the overrides of `parent` when it is part of a prefab copy.
 fn add_instance(
     world: &mut World,
     parent: InstanceId,
     node: &InstanceNode,
     references: &mut Vec<Reference>,
+    region: Option<&mut Overrides>,
 ) -> Result<InstanceId, WorldError> {
     let parent_path = world.full_name(parent).expect("parent exists");
     let name = node.name.as_deref().unwrap_or(&node.class);
@@ -360,8 +411,52 @@ fn add_instance(
     for tag in &node.tags {
         world.add_tag(id, tag).expect("just created");
     }
+
+    // Prefab copies (Phase 49): this node's overrides go in its parent's,
+    // unless it was added to the copy; a link outside a copy starts one.
+    let segment = axcenity_core::prefab::segment_of(world, id).expect("it has a parent");
+    let mut starts = None;
+    let mut here = match region {
+        Some(parent) if node.added => {
+            parent.added.push(segment);
+            None
+        }
+        Some(parent) => Some(parent.children.entry(segment).or_default()),
+        None => None,
+    };
+    if here.is_none() && node.prefab.is_some() {
+        here = Some(starts.insert(Overrides::default()));
+    }
+    if let Some(here) = here.as_deref_mut() {
+        for name in &node.overrides {
+            match name.as_str() {
+                ATTRIBUTES_OVERRIDE => here.attributes = true,
+                TAGS_OVERRIDE => here.tags = true,
+                name if world.get(id).and_then(|i| i.property(name)).is_some() => {
+                    here.properties.insert(name.to_owned());
+                }
+                _ => {
+                    return Err(WorldError::UnknownProperty {
+                        path: world.full_name(id).unwrap_or_default(),
+                        class,
+                        property: name.clone(),
+                    });
+                }
+            }
+        }
+        here.removed
+            .extend(node.removed.iter().map(SegmentNode::segment));
+    }
     for child in &node.children {
-        add_instance(world, id, child, references)?;
+        add_instance(world, id, child, references, here.as_deref_mut())?;
+    }
+    if let Some(prefab) = &node.prefab {
+        let mut link = PrefabLink::new(prefab.clone(), node.prefab_index);
+        link.pending = starts.map(|mut overrides| {
+            overrides.prune();
+            Arc::new(overrides)
+        });
+        world.set_prefab(id, Some(link)).expect("just created");
     }
     Ok(id)
 }
@@ -649,12 +744,28 @@ fn four_numbers(json: &Json) -> Option<[f32; 4]> {
 pub fn write_world(world: &World) -> String {
     let mut out = format!("{{\n  \"format_version\": {WORLD_FORMAT_VERSION},\n  \"workspace\": ");
     let roots = world_roots(world);
-    write_instance(world, world.workspace(), 1, &roots, &mut out);
+    write_instance(
+        world,
+        world.workspace(),
+        1,
+        &roots,
+        Region::Outside,
+        false,
+        &mut out,
+    );
     // Left out when empty, so worlds without one look as they always have.
     let replicated = world.replicated_storage();
     if !saved_children(world, replicated).is_empty() {
         out.push_str(",\n  \"replicated_storage\": ");
-        write_instance(world, replicated, 1, &roots, &mut out);
+        write_instance(
+            world,
+            replicated,
+            1,
+            &roots,
+            Region::Outside,
+            false,
+            &mut out,
+        );
     }
     // Each left out while every setting is its default and nothing is
     // inside, for the same reason.
@@ -673,7 +784,7 @@ pub fn write_world(world: &World) -> String {
         });
         if changed || !saved_children(world, service).is_empty() {
             out.push_str(&format!(",\n  \"{key}\": "));
-            write_instance(world, service, 1, &roots, &mut out);
+            write_instance(world, service, 1, &roots, Region::Outside, false, &mut out);
         }
     }
     out.push_str("\n}\n");
@@ -685,7 +796,15 @@ pub fn write_world(world: &World) -> String {
 pub fn write_workspace_only(world: &World) -> String {
     let mut out = format!("{{\n  \"format_version\": {WORLD_FORMAT_VERSION},\n  \"workspace\": ");
     let roots = world_roots(world);
-    write_instance(world, world.workspace(), 1, &roots, &mut out);
+    write_instance(
+        world,
+        world.workspace(),
+        1,
+        &roots,
+        Region::Outside,
+        false,
+        &mut out,
+    );
     out.push_str("\n}\n");
     out
 }
@@ -711,12 +830,17 @@ fn saved_children(world: &World, id: InstanceId) -> Vec<InstanceId> {
 }
 
 /// Appends `id` as a JSON object whose closing brace is indented `depth`
-/// levels. References are written as paths from one of `roots`.
+/// levels. References are written as paths from one of `roots`. `region`
+/// says whether it is part of a prefab copy, and `added` that it was added
+/// to one.
+#[allow(clippy::too_many_arguments)]
 fn write_instance(
     world: &World,
     id: InstanceId,
     depth: usize,
     roots: &[InstanceId],
+    region: Region<'_>,
+    added: bool,
     out: &mut String,
 ) {
     let instance = world.get(id).expect("only live Instances are in the tree");
@@ -734,6 +858,42 @@ fn write_instance(
             "{indent}\"name\": {}",
             json_string(instance.name())
         ));
+    }
+
+    // Prefab copies (Phase 49): a link outside a copy starts one, whose
+    // overrides are written on the Instances they belong to.
+    let started;
+    let region = match (region, instance.prefab()) {
+        (Region::Outside, Some(_)) => {
+            started = overrides(world, id);
+            Region::Inside(Some(&started))
+        }
+        (region, _) => region,
+    };
+    if let Some(link) = instance.prefab() {
+        fields.push(format!("{indent}\"prefab\": {}", json_string(&link.path)));
+        if link.index > 0 {
+            fields.push(format!("{indent}\"prefab_index\": {}", link.index));
+        }
+    }
+    if added {
+        fields.push(format!("{indent}\"added\": true"));
+    }
+    if let Region::Inside(Some(here)) = region {
+        let mut names: Vec<String> = here.properties.iter().map(|n| json_string(n)).collect();
+        if here.attributes {
+            names.push(json_string(ATTRIBUTES_OVERRIDE));
+        }
+        if here.tags {
+            names.push(json_string(TAGS_OVERRIDE));
+        }
+        if !names.is_empty() {
+            fields.push(format!("{indent}\"overrides\": [{}]", names.join(", ")));
+        }
+        if !here.removed.is_empty() {
+            let removed: Vec<String> = here.removed.iter().map(segment_json).collect();
+            fields.push(format!("{indent}\"removed\": [{}]", removed.join(", ")));
+        }
     }
 
     // The Workspace leaves out its defaults (see the module docs).
@@ -787,10 +947,30 @@ fn write_instance(
 
     let children = saved_children(world, id);
     if !children.is_empty() {
+        let segments = child_segments(world, id);
         let mut text = format!("{indent}\"children\": [\n");
         for (i, &child) in children.iter().enumerate() {
+            let (inner, added) = match region {
+                Region::Outside => (Region::Outside, false),
+                Region::Inside(here) => {
+                    let segment = segments
+                        .iter()
+                        .find(|(_, id)| *id == child)
+                        .map(|(segment, _)| segment);
+                    let here = here.zip(segment);
+                    match here {
+                        Some((here, segment)) if here.added.contains(segment) => {
+                            (Region::Outside, true)
+                        }
+                        Some((here, segment)) => {
+                            (Region::Inside(here.children.get(segment)), false)
+                        }
+                        None => (Region::Inside(None), false),
+                    }
+                }
+            };
             text.push_str(&inner_indent);
-            write_instance(world, child, depth + 2, roots, &mut text);
+            write_instance(world, child, depth + 2, roots, inner, added, &mut text);
             if i + 1 < children.len() {
                 text.push(',');
             }
@@ -808,6 +988,14 @@ fn write_instance(
             fields.join(",\n"),
             "  ".repeat(depth)
         ));
+    }
+}
+
+/// A child of a prefab as the `removed` list writes it (see [`SegmentNode`]).
+fn segment_json(segment: &Segment) -> String {
+    match segment.nth {
+        0 => json_string(&segment.name),
+        nth => format!("[{}, {nth}]", json_string(&segment.name)),
     }
 }
 

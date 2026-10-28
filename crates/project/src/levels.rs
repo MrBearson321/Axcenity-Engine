@@ -94,6 +94,9 @@ pub fn read_level(folder: &Path, name: &str) -> Result<World, LoadError> {
     let path = folder.join(level_path(name));
     let text = read(&path)?;
     let mut world = parse_world(&text).map_err(|source| LoadError::World { path, source })?;
+    // A prefab that can't be read leaves its copies as saved.
+    let root = world.root();
+    crate::Prefabs::in_folder(folder).refresh(&mut world, root);
     let mut problems = Vec::new();
     load_terrains(folder, &mut world, &mut problems);
     match problems.into_iter().next() {
@@ -108,6 +111,9 @@ pub fn read_start_level(folder: &Path) -> Result<World, LoadError> {
     let path = folder.join(WORLD_FILE);
     let text = read(&path)?;
     let mut world = parse_world(&text).map_err(|source| LoadError::World { path, source })?;
+    // A prefab that can't be read leaves its copies as saved.
+    let root = world.root();
+    crate::Prefabs::in_folder(folder).refresh(&mut world, root);
     let mut problems = Vec::new();
     load_terrains(folder, &mut world, &mut problems);
     match problems.into_iter().next() {

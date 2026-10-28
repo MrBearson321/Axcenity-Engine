@@ -7,8 +7,6 @@ use std::path::Path;
 
 use axcenity_core::{ClassName, InstanceId, STARTER_CHARACTER, Value, World};
 
-use crate::world_file::parse_prefab;
-
 /// Reads the prefab `StarterPlayer.StarterCharacter` names (a path in the
 /// project `folder`) into StarterPlayer as a Model named
 /// [`STARTER_CHARACTER`]: the prefab's Model itself, or a new Model
@@ -30,10 +28,18 @@ pub fn load_starter_character(
     if path.is_empty() {
         return Ok(None);
     }
-    let text = std::fs::read_to_string(folder.join(&path))
-        .map_err(|err| format!("StarterCharacter `{path}` could not be read: {err}"))?;
-    let roots = parse_prefab(&text, world, starter_player)
-        .map_err(|err| format!("StarterCharacter `{path}` is not a prefab: {err}"))?;
+    let roots = crate::Prefabs::in_folder(folder)
+        .instantiate(&path, world, starter_player)
+        .map_err(|err| match err {
+            crate::PrefabError::Read { message, .. } => {
+                format!("StarterCharacter `{path}` could not be read: {message}")
+            }
+            err => format!("StarterCharacter `{path}` is not a prefab: {err}"),
+        })?;
+    // Characters are copies made for Play, not linked copies to save.
+    for &root in &roots {
+        let _ = world.set_prefab(root, None);
+    }
     let model = match roots.as_slice() {
         [model]
             if world

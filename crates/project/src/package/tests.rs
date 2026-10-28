@@ -153,6 +153,47 @@ fn a_prefab_brings_every_asset_it_uses_and_a_model_its_whole_folder() {
 }
 
 #[test]
+fn a_prefab_brings_its_base_and_the_prefabs_nested_in_it() {
+    let folder = empty_project("nested");
+    fs::create_dir_all(folder.join("assets/prefabs")).unwrap();
+    let write = |name: &str, text: &str| {
+        fs::write(folder.join("assets/prefabs").join(name), text).unwrap();
+    };
+    write(
+        "Wheel.prefab.json",
+        r#"{ "format_version": 1, "instances": [ { "class": "Part", "name": "Wheel" } ] }"#,
+    );
+    write(
+        "Car.prefab.json",
+        r#"{ "format_version": 1, "instances": [ { "class": "Model", "name": "Car", "children": [
+             { "class": "Part", "name": "Wheel", "prefab": "assets/prefabs/Wheel.prefab.json" } ] } ] }"#,
+    );
+    write(
+        "Red Car.prefab.json",
+        r#"{ "format_version": 1, "instances": [
+             { "class": "Model", "name": "Car", "prefab": "assets/prefabs/Car.prefab.json", "children": [
+               { "class": "Part", "name": "Wheel", "prefab": "assets/prefabs/Wheel.prefab.json" } ] } ] }"#,
+    );
+    let contents = package_contents(
+        &folder,
+        &["assets/prefabs/Red Car.prefab.json".to_owned()],
+        &[],
+    )
+    .unwrap();
+    let files: Vec<&str> = contents.files.keys().map(String::as_str).collect();
+    assert_eq!(
+        files,
+        [
+            "assets/prefabs/Car.prefab.json",
+            "assets/prefabs/Red Car.prefab.json",
+            "assets/prefabs/Wheel.prefab.json",
+        ]
+    );
+    assert!(contents.missing.is_empty());
+    let _ = fs::remove_dir_all(&folder);
+}
+
+#[test]
 fn a_package_reads_back_as_written_and_refuses_paths_outside_assets() {
     let package = noodle_package("round-trip");
     assert_eq!(package.manifest.name, "noodle");

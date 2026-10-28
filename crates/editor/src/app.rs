@@ -39,6 +39,7 @@ mod levels;
 mod material_files;
 mod material_tab;
 mod nav_overlay;
+mod prefabs;
 mod probes;
 mod session;
 mod settings;
@@ -1255,6 +1256,8 @@ mod navigation_tests;
 mod play_tests;
 #[cfg(test)]
 mod posing_tests;
+#[cfg(test)]
+mod prefab_tests;
 
 #[cfg(test)]
 mod level_tests;

@@ -84,7 +84,7 @@ impl Finding {
     /// Use, Locate… and Replace… can point it at another file.
     pub fn can_point_elsewhere(&self) -> bool {
         match self.site {
-            Site::File { .. } => false,
+            Site::File { .. } | Site::PrefabLink => false,
             Site::ModelTexture { .. } => true,
             _ => self.wants.is_some(),
         }
@@ -547,7 +547,7 @@ impl Planner<'_> {
                     .set_cell(row, column, Cell::Text(value.unwrap_or_default()))
                     .map_err(|_| format!("`{file}` changed since the check; check again"))
             }
-            Site::ModelTexture { .. } | Site::File { .. } => {
+            Site::ModelTexture { .. } | Site::File { .. } | Site::PrefabLink => {
                 Err("this problem has no reference to change".to_owned())
             }
         }

@@ -1564,10 +1564,10 @@ Blocks: "load level", "add level", "remove level".
 
 ### Acceptance criteria
 
-- [ ] Changing a Wheel prefab's colour updates the wheels inside every Car prefab copy in the world.
-- [ ] A Red Enemy variant keeps its red colour when the base Enemy's colour changes, but takes the base's new MaxHealth.
-- [ ] Apply overrides writes a placed copy's change into the prefab, and other copies pick it up.
-- [ ] Prefabs saved before this phase load unchanged.
+- [x] Changing a Wheel prefab's colour updates the wheels inside every Car prefab copy in the world.
+- [x] A Red Enemy variant keeps its red colour when the base Enemy's colour changes, but takes the base's new MaxHealth.
+- [x] Apply overrides writes a placed copy's change into the prefab, and other copies pick it up.
+- [x] Prefabs saved before this phase load unchanged.
 
 ---
 

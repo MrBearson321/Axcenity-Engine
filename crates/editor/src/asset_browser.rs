@@ -335,6 +335,8 @@ pub enum BrowserAction {
     RenamePrefab { path: String, name: String },
     /// Copy the prefab file at `path`.
     DuplicatePrefab { path: String },
+    /// Make a variant of the prefab at `path` (Phase 49).
+    NewVariant { path: String },
     /// Delete these project files (assets' own files, already confirmed),
     /// as one undo step named after `name`.
     DeleteAssets { name: String, files: Vec<String> },
@@ -763,6 +765,9 @@ impl AssetBrowser {
                     name,
                     error: None,
                 });
+            }
+            ItemMenu::NewVariant { path } => {
+                return Some(BrowserAction::NewVariant { path });
             }
             ItemMenu::Duplicate { path } => {
                 return Some(BrowserAction::DuplicatePrefab { path });
@@ -1291,6 +1296,17 @@ impl AssetBrowser {
                         menu = Some(ItemMenu::Duplicate { path: path.clone() });
                         ui.close();
                     }
+                    if ui
+                        .button(format!("{} New variant", icons::GIT_BRANCH))
+                        .on_hover_text(
+                            "Make a prefab built on this one, such as a Red Enemy from an \
+                             Enemy. Its changes are its own; the rest follows this prefab.",
+                        )
+                        .clicked()
+                    {
+                        menu = Some(ItemMenu::NewVariant { path: path.clone() });
+                        ui.close();
+                    }
                 }
                 if let Some(chosen) = delete_button(ui, &name, &deletable) {
                     menu = Some(chosen);
@@ -1365,6 +1381,9 @@ pub(super) enum ItemMenu {
         name: String,
     },
     Duplicate {
+        path: String,
+    },
+    NewVariant {
         path: String,
     },
     /// Delete the assets at `paths` (called `name`), once confirmed.

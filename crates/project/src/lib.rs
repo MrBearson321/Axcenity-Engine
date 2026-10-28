@@ -37,6 +37,7 @@ mod migrate_animation;
 mod migrate_physics;
 mod package;
 mod packed;
+mod prefabs;
 mod starter_character;
 mod terrain_files;
 mod validate;
@@ -87,6 +88,7 @@ pub use package::{
     write_package,
 };
 pub use packed::{PackError, pack_game, unpack_game};
+pub use prefabs::{PrefabError, Prefabs, applied_text, prefab_references, variant_text};
 pub use starter_character::load_starter_character;
 pub use terrain_files::{
     TERRAIN_FOLDER, data_folder, is_safe_folder, keep_terrain_folder, load_terrains,
@@ -350,6 +352,11 @@ pub enum LoadError {
     InputMap { path: PathBuf, message: String },
     #[error("the terrain in `{}` couldn't be loaded, so it's flat: {message}", path.display())]
     Terrain { path: PathBuf, message: String },
+    #[error("{source}, so its copies are as they were last saved")]
+    Prefab {
+        #[source]
+        source: PrefabError,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -491,6 +498,16 @@ pub(crate) fn load_project(
             }
         }
     }
+    // Copies of prefabs follow their files as they are now (Phase 49).
+    let mut prefabs = Prefabs::in_folder(folder);
+    let root = world.root();
+    prefabs.refresh(&mut world, root);
+    problems.extend(
+        prefabs
+            .take_problems()
+            .into_iter()
+            .map(|source| LoadError::Prefab { source }),
+    );
     strings::load_strings(folder, &mut world, &mut problems);
     collision_groups::load_collision_groups(folder, &mut world, &mut problems);
     let damaged_terrains =

@@ -208,15 +208,15 @@ impl EditorApp {
     }
 
     fn drop_prefab(&mut self, entry: &AssetEntry, spot: Spot) {
-        let text = match entry.prop() {
-            Some(prop) => prop.prefab.to_owned(),
-            None => match self.read_project_file(&entry.path) {
-                Some(text) => text,
-                None => return,
-            },
-        };
         let workspace = self.world.workspace();
-        let ids = match project::parse_prefab(&text, &mut self.world, workspace) {
+        // A project prefab is placed as a linked copy (Phase 49); a
+        // built-in prop has no file to follow.
+        let placed = match entry.prop() {
+            Some(prop) => project::parse_prefab(prop.prefab, &mut self.world, workspace)
+                .map_err(|err| err.to_string()),
+            None => self.instantiate_prefab(&entry.path, workspace),
+        };
+        let ids = match placed {
             Ok(ids) => ids,
             Err(err) => {
                 self.output
@@ -442,12 +442,12 @@ impl EditorApp {
         match project::write_script(&folder, &path, &text) {
             Ok(()) => {
                 self.toasts.success(format!("Saved the prefab `{path}`"));
-                self.output.info(format!("Saved the prefab `{path}`."));
-                let name = display_name(&path);
-                self.record_prefab(
-                    format!("Create {name}"),
-                    vec![prefab_diff(&path, None, Some(text))],
-                );
+                self.output.info(format!(
+                    "Saved the prefab `{path}`. What you saved is now a copy of it."
+                ));
+                // What was saved becomes a linked copy, in the same step.
+                let before = self.world.clone();
+                self.link_saved_prefab(&roots, &path, text, before);
             }
             Err(err) => self
                 .output
@@ -486,11 +486,32 @@ impl EditorApp {
         }
         self.output
             .info(format!("Renamed the prefab `{path}` to `{new_path}`."));
-        self.record_prefab(
+        // Its copies in the open world follow it (Phase 49).
+        let before = self.world.clone();
+        for id in self.world.descendants(self.world.root()) {
+            let Some(mut link) = self.world.get(id).and_then(|i| i.prefab()).cloned() else {
+                continue;
+            };
+            if link.path == path {
+                link.path = new_path.clone();
+                let _ = self.world.set_prefab(id, Some(link));
+            }
+        }
+        self.history.record_world_and_files(
+            &mut self.world,
             format!("Rename {name}"),
+            before,
             vec![
-                prefab_diff(path, Some(text.clone()), None),
-                prefab_diff(&new_path, None, Some(text)),
+                crate::history::TextChange {
+                    path: path.to_owned(),
+                    before: Some(text.clone()),
+                    after: None,
+                },
+                crate::history::TextChange {
+                    path: new_path,
+                    before: None,
+                    after: Some(text),
+                },
             ],
         );
     }
@@ -630,25 +651,6 @@ impl EditorApp {
                     .error("Could not import that file. Output says why.");
                 self.output
                     .error(format!("Could not import `{}`: {err}", file.display()));
-            }
-        }
-    }
-
-    /// The text of a file in the project, or `None` with the reason in Output.
-    fn read_project_file(&mut self, path: &str) -> Option<String> {
-        let bytes = match self.assets.read_file(path) {
-            Ok(bytes) => bytes,
-            Err(err) => {
-                self.output.error(format!("Could not read `{path}`: {err}"));
-                return None;
-            }
-        };
-        match String::from_utf8(bytes) {
-            Ok(text) => Some(text),
-            Err(_) => {
-                self.output
-                    .error(format!("Could not read `{path}`: it isn't a text file"));
-                None
             }
         }
     }

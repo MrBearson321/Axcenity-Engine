@@ -62,6 +62,11 @@ pub enum Edit {
     Attribute(String, Option<Value>),
     AddTag(String),
     RemoveTag(String),
+    /// Sets this overridden property of a placed prefab copy back to the
+    /// prefab's value (Phase 49).
+    RevertOverride(String),
+    /// Writes this overridden property into the copy's prefab.
+    ApplyOverride(String),
 }
 
 /// One group of properties in the panel, such as "Appearance".
@@ -586,11 +591,22 @@ pub fn show(
                     ui.end_row();
                 });
 
+                // In a placed prefab copy, what it sets differently (Phase 49).
+                let overridden = match playing {
+                    true => Default::default(),
+                    false => axcenity_core::prefab::place(world, id)
+                        .map(|place| place.here().properties)
+                        .unwrap_or_default(),
+                };
                 for group in sections(instance) {
                     section(ui, group.title, |ui| {
                         for (name, value) in group.properties {
                             let field = Field::Property(name);
-                            if let Some(keep) = field_name_with_pin(ui, name, pin(field)) {
+                            if overridden.contains(name) {
+                                if let Some(made) = override_name(ui, name) {
+                                    edit = Some(made);
+                                }
+                            } else if let Some(keep) = field_name_with_pin(ui, name, pin(field)) {
                                 edit = Some(Edit::Keep(field, keep));
                             }
                             let made = match value {
@@ -891,6 +907,49 @@ fn field_name_with_pin(ui: &mut egui::Ui, name: &str, pin: Option<bool>) -> Opti
         field_name(ui, name);
     });
     clicked
+}
+
+/// An overridden property's name in a placed prefab copy: bold, with a ↺
+/// that sets it back to the prefab's value, and Apply to prefab on a
+/// right-click.
+fn override_name(ui: &mut egui::Ui, name: &str) -> Option<Edit> {
+    let mut edit = None;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        let revert = crate::widgets::icon_button(
+            ui,
+            icons::ARROW_COUNTER_CLOCKWISE,
+            "Revert to the prefab's value",
+            false,
+        );
+        if revert.clicked() {
+            edit = Some(Edit::RevertOverride(name.to_owned()));
+        }
+        let palette = theme::palette(ui.ctx());
+        let label = ui
+            .add(
+                egui::Label::new(
+                    egui::RichText::new(name)
+                        .strong()
+                        .color(palette.text_strong),
+                )
+                .truncate()
+                .sense(egui::Sense::click()),
+            )
+            .on_hover_text(
+                "Overridden: this copy sets it differently from its prefab. Right-click to \
+                 apply it to the prefab.",
+            );
+        label.context_menu(|ui| {
+            if ui
+                .button(theme::with_icon(icons::UPLOAD_SIMPLE, "Apply to prefab"))
+                .clicked()
+            {
+                edit = Some(Edit::ApplyOverride(name.to_owned()));
+            }
+        });
+    });
+    edit
 }
 
 /// A property's name, in the left column.
@@ -1898,6 +1957,75 @@ mod physics_section_tests {
             used.width(),
             room.width()
         );
+        assert_eq!(edit, None);
+    }
+}
+
+#[cfg(test)]
+mod prefab_override_tests {
+    use std::sync::Arc;
+
+    use axcenity_core::prefab::{Overrides, PrefabLink, PrefabSource, sync};
+
+    use super::*;
+
+    /// A placed copy of a one-Part prefab whose Color it overrides draws
+    /// Color bold with a ↺ in a 260-point column, and other properties
+    /// plainly. With `AXCENITY_SNAPSHOTS` set it's saved as
+    /// `properties-prefab-override.png`.
+    #[test]
+    fn an_overridden_property_is_bold_with_a_revert_button() {
+        let mut source = World::new();
+        let original = source.create(ClassName::Part).unwrap();
+        source
+            .set_parent(original, Some(source.workspace()))
+            .unwrap();
+        let source = Arc::new(PrefabSource {
+            world: source,
+            roots: vec![original],
+        });
+        let mut world = World::new();
+        let part = world.copy_from(&source.world, original).unwrap();
+        world.set_parent(part, Some(world.workspace())).unwrap();
+        world
+            .set_prefab(
+                part,
+                Some(PrefabLink::new("assets/prefabs/Crate.prefab.json", 0)),
+            )
+            .unwrap();
+        sync(&mut world, part, &source, 0, &Overrides::default());
+        world
+            .set_property(part, "Color", Value::Color3(Color3::new(1.0, 0.0, 0.0)))
+            .unwrap();
+
+        let size = egui::vec2(260.0, 700.0);
+        let mut fit = None;
+        let mut edit = None;
+        let mut draw = |ctx: &egui::Context| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let room = ui.max_rect();
+                edit = show(ui, &world, Some(part), false, &[], 1, |_| {});
+                fit = Some((ui.min_rect(), room));
+            });
+        };
+        let ctx = theme::test_context();
+        for _ in 0..3 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                ..Default::default()
+            };
+            let _ = ctx.run(input, &mut draw);
+        }
+        if let Some(folder) = std::env::var_os("AXCENITY_SNAPSHOTS") {
+            crate::snapshot::snapshot(
+                &std::path::PathBuf::from(folder).join("properties-prefab-override.png"),
+                size,
+                vec![Vec::new(); 3],
+                &mut draw,
+            );
+        }
+        let (used, room) = fit.unwrap();
+        assert!(used.width() <= room.width() + 0.5);
         assert_eq!(edit, None);
     }
 }

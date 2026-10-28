@@ -12,6 +12,7 @@ use crate::animation::{AnimationTrackState, AnimatorState, PropertyAnimationStat
 use crate::arena::{Arena, Id};
 use crate::class::ClassName;
 use crate::collision_groups::CollisionGroups;
+use crate::prefab::PrefabLink;
 use crate::strings::StringTable;
 use crate::terrain::TerrainData;
 use crate::ui_settings::UiSettings;
@@ -33,6 +34,8 @@ pub struct Instance {
     attributes: BTreeMap<String, Value>,
     /// Tags (`CollectionService`), in the order they were added.
     tags: Vec<String>,
+    /// The prefab this Instance is a placed copy of (Phase 49).
+    prefab: Option<Box<PrefabLink>>,
 }
 
 impl Instance {
@@ -45,6 +48,7 @@ impl Instance {
             properties: class.default_properties().into_iter().collect(),
             attributes: BTreeMap::new(),
             tags: Vec::new(),
+            prefab: None,
         }
     }
 
@@ -98,6 +102,11 @@ impl Instance {
 
     pub fn has_tag(&self, tag: &str) -> bool {
         self.tags.iter().any(|t| t == tag)
+    }
+
+    /// The prefab this Instance is the root of a placed copy of, if any.
+    pub fn prefab(&self) -> Option<&PrefabLink> {
+        self.prefab.as_deref()
     }
 }
 
@@ -917,6 +926,18 @@ impl World {
                 name: name.to_owned(),
             });
         }
+        Ok(())
+    }
+
+    /// Makes `id` the root of a placed copy of a prefab, or (`None`) a plain
+    /// Instance again. Not a [`Change`]: scripts don't see prefab links.
+    pub fn set_prefab(
+        &mut self,
+        id: InstanceId,
+        link: Option<PrefabLink>,
+    ) -> Result<(), TreeError> {
+        let instance = self.instances.get_mut(id.0).ok_or(TreeError::Stale)?;
+        instance.prefab = link.map(Box::new);
         Ok(())
     }
 

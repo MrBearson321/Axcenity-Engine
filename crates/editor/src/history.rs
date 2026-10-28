@@ -48,6 +48,8 @@
 //! A Console command can change anything, so its step keeps the whole world
 //! from the other side of it ([`History::record_world`]); undo and redo swap
 //! it with the world. Copies keep every `InstanceId`, so older steps still work.
+//! Applying a prefab copy's overrides is such a step that also keeps the
+//! prefab file's text before and after ([`History::record_world_and_files`]).
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -290,8 +292,12 @@ enum StepKind {
         parts: Vec<(InstanceId, Annotations, Annotations)>,
     },
     /// The whole world from the other side of the step: before it while
-    /// the step can be undone, after it once it has been.
-    World(WorldCopy),
+    /// the step can be undone, after it once it has been. `texts` are
+    /// project files changed with it (a prefab file Apply overrides wrote).
+    World {
+        other: WorldCopy,
+        texts: Vec<TextChange>,
+    },
 }
 
 /// A whole world kept by a step. Its own type, to print as just its size in
@@ -845,7 +851,32 @@ impl History {
     /// it was; `world` is already changed.
     pub fn record_world(&mut self, world: &mut World, label: String, before: World) {
         self.seal();
-        self.push(world, label, StepKind::World(WorldCopy(Box::new(before))));
+        self.record_world_and_files(world, label, before, Vec::new());
+    }
+
+    /// [`record_world`](Self::record_world) with project files that
+    /// changed in the same action, such as a prefab whose overrides were
+    /// applied and every copy of it brought up to date (Phase 49).
+    pub fn record_world_and_files(
+        &mut self,
+        world: &mut World,
+        label: String,
+        before: World,
+        texts: Vec<TextChange>,
+    ) {
+        let texts = texts
+            .into_iter()
+            .filter(|text| text.before != text.after)
+            .collect();
+        self.seal();
+        self.push(
+            world,
+            label,
+            StepKind::World {
+                other: WorldCopy(Box::new(before)),
+                texts,
+            },
+        );
     }
 
     /// Adds a new step on top and returns its number. The undone steps can't
@@ -982,7 +1013,17 @@ impl History {
                     put_annotations(world, *id, before);
                 }
             }
-            StepKind::World(other) => std::mem::swap(world, &mut *other.0),
+            StepKind::World { other, texts } => {
+                std::mem::swap(world, &mut *other.0);
+                undone = texts
+                    .iter()
+                    .map(|text| TextChange {
+                        path: text.path.clone(),
+                        before: text.after.clone(),
+                        after: text.before.clone(),
+                    })
+                    .collect();
+            }
         }
         self.redo.push(step);
         Some(Restored {
@@ -1057,7 +1098,10 @@ impl History {
                     put_annotations(world, *id, after);
                 }
             }
-            StepKind::World(other) => std::mem::swap(world, &mut *other.0),
+            StepKind::World { other, texts } => {
+                std::mem::swap(world, &mut *other.0);
+                redone = texts.clone();
+            }
         }
         self.undo.push(step);
         Some(Restored {

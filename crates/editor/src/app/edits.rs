@@ -5,6 +5,7 @@
 //! and are not recorded. These are methods of [`super::EditorApp`].
 
 use super::*;
+use crate::prefab_menu::PrefabAction;
 
 impl EditorApp {
     /// Selects `id` (or nothing), from a click in the viewport. The Explorer
@@ -142,6 +143,16 @@ impl EditorApp {
             }
             Edit::BuildRagdoll => {
                 self.build_ragdoll(id);
+                return;
+            }
+            Edit::RevertOverride(property) => {
+                let property = property.clone();
+                self.prefab_action(PrefabAction::RevertProperty { id, property });
+                return;
+            }
+            Edit::ApplyOverride(property) => {
+                let property = property.clone();
+                self.prefab_action(PrefabAction::ApplyProperty { id, property });
                 return;
             }
             Edit::GenerateFracture => {
@@ -1181,6 +1192,8 @@ pub(super) fn set(world: &mut World, id: InstanceId, edit: Edit) -> anyhow::Resu
         | Edit::OpenClip
         | Edit::Animate
         | Edit::BuildRagdoll
+        | Edit::RevertOverride(_)
+        | Edit::ApplyOverride(_)
         | Edit::GenerateFracture
         | Edit::PreviewSound(_)
         | Edit::Keep(..)

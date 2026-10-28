@@ -6,6 +6,7 @@
 //! - [`StringTable`] is the project's UI text in each language, kept by the world.
 //! - [`CollisionGroups`] is the project's collision groups, kept by the world.
 //! - [`UiSettings`] is the player's game UI settings (text scale, contrast, motion), kept by the world.
+//! - [`prefab`] links placed copies to their prefab files and works out their overrides.
 //! - [`Value`] is a typed property value, such as a [`Vector3`] or [`Color3`].
 
 mod animation;
@@ -14,6 +15,7 @@ mod class;
 mod collision_groups;
 mod enums;
 pub mod input;
+pub mod prefab;
 mod strings;
 mod terrain;
 pub mod tool;

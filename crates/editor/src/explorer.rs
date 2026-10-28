@@ -137,6 +137,8 @@ pub enum Action {
     SaveMaterial(InstanceId),
     /// During Play, keep every change to `id` after Stop (see `play::kept`).
     KeepPlayChanges(InstanceId),
+    /// Apply, revert or unpack a placed prefab copy (Phase 49).
+    Prefab(crate::prefab_menu::PrefabAction),
 }
 
 /// Changes `selection` for a click. The last id is the primary one (Properties
@@ -661,7 +663,7 @@ fn play_row_menu(ui: &mut egui::Ui, name: &str) -> bool {
 }
 
 /// A choice in a row's right-click menu.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 enum RowCommand {
     Insert(Insertable),
     InsertScript(ClassName),
@@ -673,6 +675,8 @@ enum RowCommand {
     ExportPackage,
     /// Save a Part's look as a material file.
     SaveMaterial,
+    /// From the Prefab ▸ submenu of a placed copy.
+    Prefab(crate::prefab_menu::PrefabAction),
     Rename,
     Duplicate,
     Delete,
@@ -693,6 +697,7 @@ impl RowCommand {
             RowCommand::Animate => Some(Action::Animate(id)),
             RowCommand::ExportPackage => Some(Action::ExportPackage(id)),
             RowCommand::SaveMaterial => Some(Action::SaveMaterial(id)),
+            RowCommand::Prefab(action) => Some(Action::Prefab(action)),
             RowCommand::Duplicate => Some(Action::Duplicate(id)),
             RowCommand::Delete => Some(Action::Delete(id)),
         }
@@ -842,6 +847,9 @@ fn row_menu(ui: &mut egui::Ui, world: &World, id: InstanceId) -> Option<RowComma
             .clicked()
     {
         chosen = Some(RowCommand::SaveMaterial);
+    }
+    if let Some(action) = crate::prefab_menu::row_menu(ui, world, id) {
+        chosen = Some(RowCommand::Prefab(action));
     }
     ui.separator();
 

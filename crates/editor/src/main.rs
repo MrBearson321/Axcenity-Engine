@@ -39,6 +39,7 @@ mod node_graph;
 mod output;
 mod placing;
 mod play;
+mod prefab_menu;
 mod profiler;
 mod properties;
 mod props;

@@ -65,6 +65,7 @@ impl EditorApp {
             Action::Animate(id) => self.animate(id),
             Action::ExportPackage(id) => self.export_object_package_with_dialog(id),
             Action::SaveMaterial(id) => self.save_material(id),
+            Action::Prefab(action) => self.prefab_action(action),
             Action::KeepPlayChanges(_) => {}
         }
     }

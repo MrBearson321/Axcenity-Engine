@@ -256,6 +256,10 @@ pub(crate) fn world_needs(folder: &Path, world: &World) -> Vec<String> {
         let Some(instance) = world.get(id) else {
             continue;
         };
+        // A variant's base and the prefabs nested in it (Phase 49).
+        if let Some(link) = instance.prefab() {
+            needed.push(link.path.clone());
+        }
         for (property, kind) in refs(instance.class()) {
             let Some(path) = string_prop(instance.property(property)).filter(|p| !p.is_empty())
             else {
