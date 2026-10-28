@@ -530,10 +530,11 @@ pub enum EnumType {
     RaycastFilterType,
     FracturePattern,
     ProximityPromptExclusivity,
+    HumanoidStateType,
 }
 
 impl EnumType {
-    pub const ALL: [EnumType; 28] = [
+    pub const ALL: [EnumType; 29] = [
         EnumType::Material,
         EnumType::PartType,
         EnumType::KeyCode,
@@ -562,6 +563,7 @@ impl EnumType {
         EnumType::RaycastFilterType,
         EnumType::FracturePattern,
         EnumType::ProximityPromptExclusivity,
+        EnumType::HumanoidStateType,
     ];
 
     pub fn name(self) -> &'static str {
@@ -594,6 +596,7 @@ impl EnumType {
             EnumType::RaycastFilterType => "RaycastFilterType",
             EnumType::FracturePattern => "FracturePattern",
             EnumType::ProximityPromptExclusivity => "ProximityPromptExclusivity",
+            EnumType::HumanoidStateType => "HumanoidStateType",
         }
     }
 
@@ -637,6 +640,11 @@ impl EnumType {
             EnumType::ProximityPromptExclusivity => {
                 vec!["OnePerButton", "OneGlobally", "AlwaysShow"]
             }
+            // What a Humanoid's character is doing (Phase 46).
+            EnumType::HumanoidStateType => crate::humanoid::State::ALL
+                .iter()
+                .map(|state| state.name())
+                .collect(),
         }
     }
 
@@ -757,7 +765,8 @@ impl LuaEnumItem {
             | EnumType::OrientationAlignmentMode
             | EnumType::RaycastFilterType
             | EnumType::FracturePattern
-            | EnumType::ProximityPromptExclusivity => None,
+            | EnumType::ProximityPromptExclusivity
+            | EnumType::HumanoidStateType => None,
         }
     }
 }

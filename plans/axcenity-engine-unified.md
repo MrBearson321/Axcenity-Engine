@@ -1480,10 +1480,10 @@ Insert > **Character** makes a rigged character with a Humanoid, a third-person 
 
 ### Acceptance criteria
 
-- [ ] Setting `humanoid.WalkSpeed` changes the controller's `WalkSpeed`, and the reverse is true too. There's one value.
-- [ ] An NPC with a Humanoid and no controller input walks to a point with `MoveTo` and fires `MoveToFinished(true)`.
-- [ ] Killing a character with `RagdollOnDeath` ragdolls it and fires `Died` and `StateChanged(…, Dead)` once.
-- [ ] A Model with only the pieces and no Humanoid works the same.
+- [x] Setting `humanoid.WalkSpeed` changes the controller's `WalkSpeed`, and the reverse is true too. There's one value.
+- [x] An NPC with a Humanoid and no controller input walks to a point with `MoveTo` and fires `MoveToFinished(true)`.
+- [x] Killing a character with `RagdollOnDeath` ragdolls it and fires `Died` and `StateChanged(…, Dead)` once.
+- [x] A Model with only the pieces and no Humanoid works the same.
 
 ---
 

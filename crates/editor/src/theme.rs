@@ -720,6 +720,7 @@ pub fn class_icon(class: ClassName) -> &'static str {
         ClassName::ClickDetector => icons::CURSOR_CLICK,
         ClassName::Tool => icons::SWORD,
         ClassName::Inventory => icons::BACKPACK,
+        ClassName::Humanoid => icons::PERSON,
         ClassName::DamageZone => icons::FIRE,
         ClassName::Script => icons::FILE_CODE,
         ClassName::LocalScript => icons::CODE,
@@ -811,6 +812,7 @@ pub fn insert_icon(what: Insertable) -> &'static str {
     match what {
         Insertable::Part(shape) => part_icon(shape),
         Insertable::Vehicle => icons::CAR,
+        Insertable::Character => icons::PERSON_ARMS_SPREAD,
         Insertable::HealthBar => icons::HEARTBEAT,
         _ => class_icon(what.class()),
     }

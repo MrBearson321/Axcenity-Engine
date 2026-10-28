@@ -1889,6 +1889,78 @@ pub(super) const CLASS_METHODS: &[(ClassName, Function)] = &[
         },
     ),
     (
+        ClassName::Humanoid,
+        Function {
+            name: "MoveTo",
+            doc: "Walks the character to `position` along a path on the navigation mesh, by its controller's MoveDirection, and fires MoveToFinished(true) when it's there (within half a stud across the ground), or MoveToFinished(false) if there's no path, 8 seconds pass or it dies. With `part`, it walks to the place `position` was relative to the part, as the part moves. A new MoveTo, or Move, replaces it.",
+            params: &[("position", "Vector3"), ("part", "BasePart?")],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::Humanoid,
+        Function {
+            name: "Move",
+            doc: "Sets the controller's MoveDirection to `direction` across the ground (relative to where the camera looks if `relativeToCamera`, on the client), and stops any MoveTo. A zero vector stops.",
+            params: &[("direction", "Vector3"), ("relativeToCamera", "boolean?")],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::Humanoid,
+        Function {
+            name: "Jump",
+            doc: "Jumps once from the ground (the controller's Jump).",
+            params: &[],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::Humanoid,
+        Function {
+            name: "TakeDamage",
+            doc: "Its Health's TakeDamage(amount, source).",
+            params: &[("amount", "number"), ("source", "Instance?")],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::Humanoid,
+        Function {
+            name: "EquipTool",
+            doc: "Puts `tool` in the character's Inventory (an error if it's full) and in its hand.",
+            params: &[("tool", "Tool")],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::Humanoid,
+        Function {
+            name: "UnequipTools",
+            doc: "Puts away the Tool in hand (its Inventory's UnequipAll).",
+            params: &[],
+            returns: "()",
+        },
+    ),
+    (
+        ClassName::Humanoid,
+        Function {
+            name: "GetState",
+            doc: "The character's state, as of the last frame (Running before the first).",
+            params: &[],
+            returns: "EnumItem",
+        },
+    ),
+    (
+        ClassName::Humanoid,
+        Function {
+            name: "ChangeState",
+            doc: "Asks for a state: Running stands it up (off a Seat, out of PlatformStand, its Ragdolls off), Jumping jumps, Ragdoll turns its Ragdolls on, and Dead sets its Health to 0. The others follow the character and are an error.",
+            params: &[("state", "EnumItem")],
+            returns: "()",
+        },
+    ),
+    (
         ClassName::Health,
         Function {
             name: "Heal",
@@ -2681,6 +2753,94 @@ pub(super) const CLASS_FIELDS: &[(ClassName, Field)] = &[
             name: "CurrentState",
             ty: "string",
             doc: "The name of the state playing (read-only; use `Play` to change it). Empty until the animator first runs.",
+        },
+    ),
+    (
+        ClassName::Humanoid,
+        Field {
+            name: "WalkSpeed",
+            ty: "number",
+            doc: "Its controller's WalkSpeed.",
+        },
+    ),
+    (
+        ClassName::Humanoid,
+        Field {
+            name: "RunSpeed",
+            ty: "number",
+            doc: "Its controller's RunSpeed.",
+        },
+    ),
+    (
+        ClassName::Humanoid,
+        Field {
+            name: "JumpHeight",
+            ty: "number",
+            doc: "Its controller's JumpHeight.",
+        },
+    ),
+    (
+        ClassName::Humanoid,
+        Field {
+            name: "Sit",
+            ty: "boolean",
+            doc: "Its controller's Sit.",
+        },
+    ),
+    (
+        ClassName::Humanoid,
+        Field {
+            name: "PlatformStand",
+            ty: "boolean",
+            doc: "Its controller's PlatformStand.",
+        },
+    ),
+    (
+        ClassName::Humanoid,
+        Field {
+            name: "AutoRotate",
+            ty: "boolean",
+            doc: "Its controller's AutoRotate.",
+        },
+    ),
+    (
+        ClassName::Humanoid,
+        Field {
+            name: "MoveDirection",
+            ty: "Vector3",
+            doc: "Its controller's MoveDirection.",
+        },
+    ),
+    (
+        ClassName::Humanoid,
+        Field {
+            name: "Health",
+            ty: "number",
+            doc: "Its Health's Health; setting it fires HealthChanged (and Died at 0).",
+        },
+    ),
+    (
+        ClassName::Humanoid,
+        Field {
+            name: "MaxHealth",
+            ty: "number",
+            doc: "Its Health's MaxHealth.",
+        },
+    ),
+    (
+        ClassName::Humanoid,
+        Field {
+            name: "DisplayName",
+            ty: "string",
+            doc: "Its Health's DisplayName.",
+        },
+    ),
+    (
+        ClassName::Humanoid,
+        Field {
+            name: "HealthDisplayDistance",
+            ty: "number",
+            doc: "Its Health's HealthDisplayDistance.",
         },
     ),
     (

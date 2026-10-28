@@ -227,6 +227,12 @@ pub enum ClassName {
     /// hand (`Equipped`). The default hotbar shows them while
     /// `HotbarEnabled` is on.
     Inventory,
+    /// A Roblox-familiar front for a character (Phase 46), in its Model:
+    /// it finds (or makes) the Model's controller, Health, Inventory and
+    /// Animator, and its properties read and write theirs. It stores none
+    /// of its own but `BreakJointsOnDeath` and `RagdollOnDeath`. Fires
+    /// `MoveToFinished`, `StateChanged` and `Died`.
+    Humanoid,
     /// Holds `Part0` and `Part1` together where they were when it was made
     /// or enabled. Welded unanchored parts move as one body: an assembly.
     WeldConstraint,
@@ -275,7 +281,7 @@ pub enum ClassName {
 }
 
 impl ClassName {
-    pub const ALL: [ClassName; 87] = [
+    pub const ALL: [ClassName; 88] = [
         ClassName::DataModel,
         ClassName::Workspace,
         ClassName::Players,
@@ -341,6 +347,7 @@ impl ClassName {
         ClassName::ClickDetector,
         ClassName::Tool,
         ClassName::Inventory,
+        ClassName::Humanoid,
         ClassName::WeldConstraint,
         ClassName::HingeConstraint,
         ClassName::BallSocketConstraint,
@@ -432,6 +439,7 @@ impl ClassName {
             ClassName::ClickDetector => "ClickDetector",
             ClassName::Tool => "Tool",
             ClassName::Inventory => "Inventory",
+            ClassName::Humanoid => "Humanoid",
             ClassName::WeldConstraint => "WeldConstraint",
             ClassName::HingeConstraint => "HingeConstraint",
             ClassName::BallSocketConstraint => "BallSocketConstraint",
@@ -1530,6 +1538,12 @@ impl ClassName {
                 ("FallDamage", Value::Bool(false)),
                 ("FallDamageThreshold", Value::Number(60.0)),
                 ("FallDamageScale", Value::Number(1.0)),
+                // The name a game shows over the character (Phase 46).
+                // Empty is the Model's Name.
+                ("DisplayName", Value::String(String::new())),
+                // How far away, in studs, a game shows the character's
+                // health over it. 0 never.
+                ("HealthDisplayDistance", Value::Number(100.0)),
             ],
             ClassName::ProximityPrompt => vec![
                 // What it does, such as "Open", and to what, such as "Door".
@@ -1592,6 +1606,13 @@ impl ClassName {
                 // Off, the default hotbar doesn't show and its keys do
                 // nothing, for a game's own.
                 ("HotbarEnabled", Value::Bool(true)),
+            ],
+            ClassName::Humanoid => vec![
+                // On, dying breaks the Model's welds and joints (not its
+                // Ragdolls') and lets its parts fall.
+                ("BreakJointsOnDeath", Value::Bool(true)),
+                // On, dying turns on the Model's Ragdolls.
+                ("RagdollOnDeath", Value::Bool(false)),
             ],
             ClassName::WeldConstraint => {
                 let mut properties = vec![
@@ -1883,6 +1904,10 @@ impl ClassName {
             // `HealthChanged` with the new health and the old, `Damaged`
             // with how much and what did it (or nil), `Died` once at 0.
             ClassName::Health => &["HealthChanged", "Damaged", "Died"],
+            // `MoveToFinished(reached)` when a `MoveTo` ends, `StateChanged`
+            // with the old and new `Enum.HumanoidStateType`, and `Died`
+            // once when its Health reaches 0.
+            ClassName::Humanoid => &["MoveToFinished", "StateChanged", "Died"],
             // Each with the Player, but `PromptShown` and `PromptHidden`.
             ClassName::ProximityPrompt => &[
                 "Triggered",
@@ -2161,6 +2186,16 @@ fn movement_properties() -> Vec<(&'static str, Value)> {
         ("CrouchSpeedScale", Value::Number(0.5)),
         // True while it sits on a Seat. Set false to stand it up.
         ("Sit", Value::Bool(false)),
+        // Phase 46. Where a controller that doesn't receive input walks:
+        // a direction across the ground (its length up to 1 is how much of
+        // its speed). The player's controller walks it while no move key
+        // is held. Humanoid:Move and MoveTo set it.
+        ("MoveDirection", Value::Vector3(Vector3::new(0.0, 0.0, 0.0))),
+        // On, the controller neither moves nor jumps the character.
+        ("PlatformStand", Value::Bool(false)),
+        // On, the character turns to face the way it walks (a first-person
+        // one, the way the camera looks).
+        ("AutoRotate", Value::Bool(true)),
     ]
 }
 

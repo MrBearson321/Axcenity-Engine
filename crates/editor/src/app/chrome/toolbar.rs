@@ -397,6 +397,26 @@ impl EditorApp {
                         clicks.insert = Some(what);
                     }
                 }
+                for what in Insertable::HUMANOIDS {
+                    let hint = if what == Insertable::Character {
+                        "Insert a Character: six welded parts with a Humanoid, a \
+                         third-person controller, Health, Inventory and an Animator \
+                         with Idle, Walk, Run, Jump, Fall and Sit states."
+                    } else {
+                        "Insert a Humanoid into the selected character's Model: \
+                         Roblox-style properties and methods over its controller, \
+                         Health, Inventory and Animator."
+                    };
+                    let button = RibbonButton::new(theme::insert_icon(what), what.label());
+                    if ui
+                        .add_enabled(!playing, button)
+                        .on_hover_text(hint)
+                        .on_disabled_hover_text("Press Stop to edit.")
+                        .clicked()
+                    {
+                        clicks.insert = Some(what);
+                    }
+                }
                 for what in Insertable::TOOLS {
                     let hint = if what == Insertable::Tool {
                         "Insert a Tool: a Handle part with a Grip. During Play, a character \

@@ -59,6 +59,7 @@ mod events;
 mod gui_service;
 mod health;
 mod http;
+mod humanoid;
 mod input;
 mod instance;
 mod localization;
@@ -208,6 +209,8 @@ pub struct ScriptRuntime {
     /// The Tools in hand last fired, dropped Tools, and the hotbar's keys
     /// (Phase 45).
     tools: tool::Tools,
+    /// Humanoids' walks and states (Phase 46).
+    humanoids: humanoid::Humanoids,
     /// Whether the error for change events that never stop has been shown,
     /// so it's shown once rather than every frame.
     reported_change_loop: bool,
@@ -260,6 +263,7 @@ impl ScriptRuntime {
             prompts: prompt::Prompts::default(),
             clicks: click::Clicks::default(),
             tools: tool::Tools::default(),
+            humanoids: humanoid::Humanoids::default(),
             reported_change_loop: false,
             saves,
             started: Vec::new(),
@@ -714,6 +718,47 @@ impl ScriptRuntime {
                 self.collect(side);
                 self.fire_change_rounds(world);
             }
+            // Then the Humanoids of the Healths that died (Phase 46).
+            let died: Vec<InstanceId> = events.iter().filter_map(humanoid::died_health).collect();
+            for health in died {
+                let fired = self.humanoids.died(world, health);
+                self.fire_humanoid_events(world, &fired);
+            }
+        }
+    }
+
+    /// Frame step 1, after the character controllers and `Landed`
+    /// (Phase 46): every Humanoid in the Workspace makes the pieces it
+    /// lacks, walks its `MoveTo` on (by its controller's `MoveDirection`),
+    /// and fires `MoveToFinished`, `StateChanged` and `Died`, in Scripts
+    /// and then in LocalScripts; its Animator plays the matching state.
+    pub fn step_humanoids(
+        &mut self,
+        world: &mut World,
+        controllers: &axcenity_character::Controllers,
+        seconds: f64,
+    ) {
+        self.fire_changes(world);
+        let assets = self.server.assets();
+        let events = self.humanoids.step(world, &assets, controllers, seconds);
+        self.fire_humanoid_events(world, &events);
+        self.fire_changes(world);
+    }
+
+    /// Fires Humanoid events on both sides, after handing both the
+    /// Humanoids' states for `GetState`.
+    fn fire_humanoid_events(&mut self, world: &mut World, events: &[humanoid::HumanoidEvent]) {
+        for side in [Side::Server, Side::Client] {
+            self.context(side)
+                .set_humanoid_states(&self.humanoids.states);
+        }
+        if events.is_empty() {
+            return;
+        }
+        for side in [Side::Server, Side::Client] {
+            self.context(side).fire_humanoid_events(world, events);
+            self.collect(side);
+            self.fire_change_rounds(world);
         }
     }
 
@@ -1097,6 +1142,7 @@ impl ScriptRuntime {
         self.shatters.extend(context.take_shatters());
         self.health.pending.extend(context.take_health_events());
         self.tools.note(context.take_tool_changes());
+        self.humanoids.note(context.take_humanoid_requests());
         for (copy, original) in context.take_cloned_scripts() {
             // A clone of a clone that hasn't started yet has its code too.
             let code = self

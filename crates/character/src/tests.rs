@@ -1017,4 +1017,109 @@ fn a_ragdoll_s_bodies_are_not_the_character_and_a_ragdoll_that_s_on_holds_it() {
     let _ = controller;
 }
 
+/// Phase 46: a second character, after the first, that gets no input.
+fn npc(world: &mut World, x: f32) -> (InstanceId, InstanceId) {
+    let model = world.create(ClassName::Model).unwrap();
+    world.set_parent(model, Some(world.workspace())).unwrap();
+    let body = world.create(ClassName::Part).unwrap();
+    world.set_parent(body, Some(model)).unwrap();
+    world
+        .set_property(body, "Size", Value::Vector3(Vector3::new(2.0, 2.0, 2.0)))
+        .unwrap();
+    world
+        .set_property(body, "Position", Value::Vector3(Vector3::new(x, 1.0, 0.0)))
+        .unwrap();
+    let controller = world.create(ClassName::ThirdPersonController).unwrap();
+    world.set_parent(controller, Some(model)).unwrap();
+    (controller, body)
+}
+
+fn direct(world: &mut World, controller: InstanceId, x: f32, z: f32) {
+    world
+        .set_property(
+            controller,
+            "MoveDirection",
+            Value::Vector3(Vector3::new(x, 0.0, z)),
+        )
+        .unwrap();
+}
+
+#[test]
+fn a_character_without_input_walks_its_move_direction_and_turns_to_face_it() {
+    let (mut world, player_controller, player) = standing();
+    let (npc, body) = npc(&mut world, 10.0);
+    let mut controllers = Controllers::default();
+    run(&mut world, &mut controllers, MoveInput::default(), 10);
+    assert_eq!(pos(&world, body), Vector3::new(10.0, 1.0, 0.0), "it waits");
+    direct(&mut world, npc, 2.0, 0.0);
+    run(&mut world, &mut controllers, MoveInput::default(), 60);
+    let walked = pos(&world, body);
+    // Its length is kept to 1: WalkSpeed across.
+    assert!((walked.x - 26.0).abs() < 0.05, "{walked:?}");
+    assert!((orientation(&world, body).y + 90.0).abs() < 1e-3);
+    // The player's character stood still and didn't turn.
+    assert_eq!(pos(&world, player), Vector3::new(0.0, 1.0, 0.0));
+    assert_eq!(orientation(&world, player), Vector3::new(0.0, 0.0, 0.0));
+    // With no key held, the player's character walks its MoveDirection too.
+    direct(&mut world, npc, 0.0, 0.0);
+    direct(&mut world, player_controller, 0.0, 0.5);
+    run(&mut world, &mut controllers, MoveInput::default(), 60);
+    assert!((pos(&world, player).z - 8.0).abs() < 0.05);
+    assert!((pos(&world, body).x - walked.x).abs() < 1e-3, "it stopped");
+    // A key held wins over it.
+    run(&mut world, &mut controllers, forward(), 60);
+    assert!((pos(&world, player).z + 8.0).abs() < 0.05);
+}
+
+#[test]
+fn auto_rotate_off_or_platform_stand_on_keeps_the_character_as_it_is() {
+    let (mut world, controller, body) = standing();
+    world
+        .set_property(controller, "AutoRotate", Value::Bool(false))
+        .unwrap();
+    let right = MoveInput {
+        right: true,
+        ..MoveInput::default()
+    };
+    let mut controllers = Controllers::default();
+    run(&mut world, &mut controllers, right, 30);
+    assert!(pos(&world, body).x > 7.0);
+    assert_eq!(orientation(&world, body), Vector3::new(0.0, 0.0, 0.0));
+    world
+        .set_property(controller, "PlatformStand", Value::Bool(true))
+        .unwrap();
+    world
+        .set_property(controller, "Jump", Value::Bool(true))
+        .unwrap();
+    let at = pos(&world, body);
+    run(&mut world, &mut controllers, right, 30);
+    assert_eq!(pos(&world, body), at);
+}
+
+#[test]
+fn a_dead_character_is_left_to_physics() {
+    let (mut world, controller, body) = standing();
+    world
+        .set_property(body, "Anchored", Value::Bool(false))
+        .unwrap();
+    let mut controllers = Controllers::default();
+    run(&mut world, &mut controllers, MoveInput::default(), 1);
+    controllers.keep_kinematic(&mut world);
+    assert_eq!(
+        world.get(body).unwrap().property("Anchored"),
+        Some(&Value::Bool(true))
+    );
+    world
+        .set_property(body, "Anchored", Value::Bool(false))
+        .unwrap();
+    set_movement(&mut world, controller, DEAD);
+    run(&mut world, &mut controllers, forward(), 30);
+    controllers.keep_kinematic(&mut world);
+    assert_eq!(pos(&world, body), Vector3::new(0.0, 1.0, 0.0), "not walked");
+    assert_eq!(
+        world.get(body).unwrap().property("Anchored"),
+        Some(&Value::Bool(false))
+    );
+}
+
 mod seat;

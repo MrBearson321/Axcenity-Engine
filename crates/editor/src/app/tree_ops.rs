@@ -162,6 +162,36 @@ impl EditorApp {
             self.insert_named(what, model, what.class().as_str(), Vec::new());
             return;
         }
+        // So does a Humanoid; Play makes the pieces its Model lacks.
+        if what == Insertable::Humanoid {
+            let model = tree::model_of(&self.world, near.or(self.selected));
+            if model.is_none() {
+                self.output.warning(
+                    "A Humanoid works inside a character's Model: select the character \
+                     (or a part of it) and insert it again, or move this one into it.",
+                );
+            }
+            self.insert_named(what, model, what.class().as_str(), Vec::new());
+            return;
+        }
+        // The whole character is one undo step; its clips are files.
+        if what == Insertable::Character {
+            let parent = tree::insert_parent(&self.world, near, what);
+            let position = self.insert_position();
+            let state_machine = self.character_state_machine();
+            let character = tree::character(&mut self.world, position, &state_machine);
+            let name = tree::unique_name(&self.world, parent, "Character");
+            self.world.set_name(character, &name).expect("just made");
+            let index = self.world.get(parent).map_or(0, |p| p.children().len());
+            if self.place(
+                character,
+                Some(Place { parent, index }),
+                format!("Insert {name}"),
+            ) {
+                self.select_from_viewport(Some(character));
+            }
+            return;
+        }
         // The Tool and its Handle are one undo step.
         if what == Insertable::Tool {
             let parent = tree::insert_parent(&self.world, near, what);
@@ -416,6 +446,47 @@ impl EditorApp {
             self.select_from_viewport(Some(id));
         }
     }
+    /// The state machine Insert > Character's Animator plays:
+    /// `assets/animations/Character/Character.statemachine.json`, made the
+    /// first time with an empty clip for each of [`tree::CHARACTER_STATES`].
+    /// Empty (and a warning) when there's no project folder to write to.
+    fn character_state_machine(&mut self) -> String {
+        let Some(project) = self.project.as_ref().map(|project| project.folder.clone()) else {
+            self.output.warning(
+                "The Character's Animator has no state machine: save the project first, \
+                 then insert another to get its Idle, Walk, Run, Jump, Fall and Sit clips.",
+            );
+            return String::new();
+        };
+        let path = format!(
+            "{}/Character/Character{}",
+            axcenity_anim::ANIMATIONS_FOLDER,
+            axcenity_anim::STATE_MACHINE_EXTENSION
+        );
+        if project.join(&path).is_file() {
+            return path;
+        }
+        let clips: Vec<(String, axcenity_anim::ClipFile)> = tree::CHARACTER_STATES
+            .iter()
+            .map(|state| ((*state).to_owned(), axcenity_anim::ClipFile::new(1.0)))
+            .collect();
+        match crate::anim_import::write_animation(&project, "Character", &clips, true) {
+            Ok((_, Some(controller))) => {
+                self.output.info(format!(
+                    "Made the state machine `{controller}`, with an empty clip for each \
+                     state to replace with the character's own."
+                ));
+                controller
+            }
+            Ok((_, None)) => String::new(),
+            Err(err) => {
+                self.output
+                    .error(format!("Could not write the Character's clips: {err}"));
+                String::new()
+            }
+        }
+    }
+
     /// Insert > UI > Health bar: a billboard over the nearest Health's
     /// character and a HUD bar, both bound to that Health, styled by
     /// `health-bar.css` (made if no stylesheet has `.health-bar`). The

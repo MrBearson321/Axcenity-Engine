@@ -47,6 +47,10 @@ const MIN_CAMERA_DISTANCE: f32 = 0.5;
 /// zooming feels the same near the character and far from it.
 const ZOOM_PER_NOTCH: f32 = 0.2;
 const MIN_ZOOM_STEP: f32 = 1.0;
+/// The `Movement` of a dead character (Phase 46): a custom mode, so the
+/// controller doesn't move it, and [`Controllers::keep_kinematic`] leaves
+/// its parts to physics.
+pub const DEAD: &str = "Dead";
 /// The lowest a crouch squashes the character, in studs.
 const MIN_CROUCH_HEIGHT: f32 = 0.5;
 
@@ -282,13 +286,17 @@ pub struct Controllers {
     landings: Vec<(InstanceId, f32)>,
     /// The controller that last received input, if it is still in the world.
     active: Option<InstanceId>,
+    /// The turn of each controller's first part when it was first seen,
+    /// facing -Z (radians), for `AutoRotate`.
+    facing: BTreeMap<InstanceId, f32>,
 }
 
 impl Controllers {
     /// Moves the active character for `seconds` of time and updates its
     /// camera from `input`. Returns that camera, or `None` when no
-    /// controller has a body. Does not anchor; call [`Self::keep_kinematic`]
-    /// after scripts and before physics.
+    /// controller has a body. Other controllers walk their `MoveDirection`
+    /// (Phase 46). Does not anchor; call [`Self::keep_kinematic`] after
+    /// scripts and before physics.
     pub fn step(
         &mut self,
         world: &mut World,
@@ -305,8 +313,16 @@ impl Controllers {
         self.falls.retain(|id, _| world.get(*id).is_some());
         self.crouches.retain(|id, _| world.get(*id).is_some());
         self.built_in.retain(|id, _| world.get(*id).is_some());
+        self.facing.retain(|id, _| world.get(*id).is_some());
         let active = active_id(world);
         self.update_seats(world, assets, active, input.jump);
+        // Controllers without input move once something asks them to,
+        // and from then on keep falling and landing.
+        for id in controllers(world) {
+            if Some(id) != active && is_driver(world, id) && self.wants_to_move(world, id) {
+                self.move_character(world, assets, id, None, MoveInput::default(), dt);
+            }
+        }
         let Some(id) = active else {
             self.active = None;
             return None;
@@ -322,16 +338,41 @@ impl Controllers {
         if eye == Eye::Follow {
             zoom(world, id, input.zoom);
         }
+        let view = Some((orbit.yaw, eye));
+        self.move_character(world, assets, id, view, input, dt);
+        self.view(world)
+    }
+
+    /// Whether a controller that doesn't receive input has been asked to
+    /// move: a `MoveDirection` or a `Jump`, or it moved before.
+    fn wants_to_move(&self, world: &World, id: InstanceId) -> bool {
+        self.falls.contains_key(&id)
+            || move_direction(world, id).is_some()
+            || flag(world, id, "Jump")
+    }
+
+    /// One step of the character `id` drives: walk or run, jump and fall,
+    /// crouch, and turn. `view` is the camera's yaw and kind for the
+    /// controller that receives `input`; others walk their `MoveDirection`.
+    fn move_character(
+        &mut self,
+        world: &mut World,
+        assets: &Assets,
+        id: InstanceId,
+        view: Option<(f32, Eye)>,
+        input: MoveInput,
+        dt: f32,
+    ) {
         if self.seated.contains_key(&id) {
             // The seat holds it; the camera still turns and zooms.
-            return self.view(world);
+            return;
         }
-        if ragdolled(world, id) {
-            // Its Ragdoll is on (Phase 41): physics has the body, and it
-            // lands wherever it lies once the ragdoll lets go.
+        if ragdolled(world, id) || flag(world, id, "PlatformStand") {
+            // Its Ragdoll is on (Phase 41), or it's PlatformStanding: it
+            // isn't moved, and lands wherever it is once let go.
             take_jump(world, id);
             self.falls.remove(&id);
-            return self.view(world);
+            return;
         }
         if self.mode(world, id) == Mode::Custom {
             // Scripts and blocks move the character. A jump asked for now is
@@ -339,38 +380,122 @@ impl Controllers {
             // wherever the character was left.
             take_jump(world, id);
             self.falls.remove(&id);
-            return self.view(world);
+            return;
         }
-        // Taken first, so a request made in the air is used up, not kept for landing.
-        let jump = take_jump(world, id) || input.jump;
+        // Taken first, so a request made in the air is used up, not kept
+        // for landing. A controller without input that's moving for the
+        // first time settles first, and keeps the request for its next step.
+        let settling = view.is_none() && !self.falls.contains_key(&id);
+        let jump = (!settling && take_jump(world, id)) || input.jump;
         let crouch = wants_crouch(world, id) || input.crouch;
         set_crouch(world, assets, id, &mut self.crouches, crouch);
-        if let Some(mut body) = Body::read(world, id) {
-            let limits = Limits::read(world, id);
-            let fall = self.falls.entry(id).or_default();
-            if jump && fall.grounded {
-                // The same launch speed whatever the Workspace's Gravity:
-                // JumpHeight is how high it reaches at the default, so in
-                // lower gravity characters jump higher, as parts fly.
-                fall.velocity = (2.0 * GRAVITY * limits.jump_height).sqrt();
-                fall.grounded = false;
-                fall.airborne = true;
-            }
-            let mut speed = speed_of(world, id, input.run);
-            if self.crouches.contains_key(&id) {
-                speed *= crouch_speed_scale(world, id);
-            }
-            let (dx, dz) = wish(orbit.yaw, input, speed * dt);
-            let slices = (dx.hypot(dz) / MAX_SLICE).ceil().clamp(1.0, MAX_SLICES);
-            for _ in 0..slices as usize {
-                let (sx, sz) = (dx / slices, dz / slices);
-                move_slice(world, assets, &mut body, &limits, fall, sx, sz, dt / slices);
-            }
-            if let Some(speed) = fall.landed.take() {
-                self.landings.push((id, speed));
+        let Some(mut body) = Body::read(world, id) else {
+            return;
+        };
+        let limits = Limits::read(world, id);
+        let mut speed = speed_of(world, id, input.run);
+        if self.crouches.contains_key(&id) {
+            speed *= crouch_speed_scale(world, id);
+        }
+        let (mut dx, mut dz) = match view {
+            Some((yaw, _)) => wish(yaw, input, speed * dt),
+            None => (0.0, 0.0),
+        };
+        if dx == 0.0 && dz == 0.0 {
+            // No key held: the way scripts point it.
+            if let Some((x, z)) = move_direction(world, id) {
+                (dx, dz) = (x * speed * dt, z * speed * dt);
             }
         }
-        self.view(world)
+        if flag(world, id, "AutoRotate") {
+            let face = match view {
+                Some((yaw, Eye::Eyes)) => Some(yaw),
+                _ => heading(dx, dz).map(|(ux, uz)| (-ux).atan2(-uz)),
+            };
+            if let Some(face) = face
+                && self.turn(world, &body, id, face)
+                && let Some(turned) = Body::read(world, id)
+            {
+                body = turned;
+            }
+        }
+        let fall = self.falls.entry(id).or_default();
+        if jump && fall.grounded {
+            // The same launch speed whatever the Workspace's Gravity:
+            // JumpHeight is how high it reaches at the default, so in
+            // lower gravity characters jump higher, as parts fly.
+            fall.velocity = (2.0 * GRAVITY * limits.jump_height).sqrt();
+            fall.grounded = false;
+            fall.airborne = true;
+        }
+        let slices = (dx.hypot(dz) / MAX_SLICE).ceil().clamp(1.0, MAX_SLICES);
+        for _ in 0..slices as usize {
+            let (sx, sz) = (dx / slices, dz / slices);
+            move_slice(world, assets, &mut body, &limits, fall, sx, sz, dt / slices);
+        }
+        if let Some(speed) = fall.landed.take() {
+            self.landings.push((id, speed));
+        }
+    }
+
+    /// Turns the character `id` drives about the middle of its box, so it
+    /// faces `yaw` (radians; 0 faces -Z). Where it faces now is how far its
+    /// first part has turned since the controller first saw it, which was
+    /// facing -Z. True if it turned.
+    fn turn(&mut self, world: &mut World, body: &Body, id: InstanceId, yaw: f32) -> bool {
+        let Some(&first) = body.parts.first() else {
+            return false;
+        };
+        let Some(now) = world
+            .get(first)
+            .and_then(|part| part.property("Orientation"))
+            .and_then(Value::as_vector3)
+            .filter(|o| o.y.is_finite())
+            .map(|o| o.y.to_radians())
+        else {
+            return false;
+        };
+        let base = *self.facing.entry(id).or_insert(now);
+        let delta = wrap_angle(yaw - (now - base));
+        if delta.abs() < 1e-4 {
+            return false;
+        }
+        let (sin, cos) = delta.sin_cos();
+        for &part in &body.parts {
+            let Some(instance) = world.get(part) else {
+                continue;
+            };
+            let (Some(position), Some(orientation)) = (
+                instance.property("Position").and_then(Value::as_vector3),
+                instance.property("Orientation").and_then(Value::as_vector3),
+            ) else {
+                continue;
+            };
+            let (x, z) = (position.x - body.pivot_x, position.z - body.pivot_z);
+            let moved = Vector3::new(
+                body.pivot_x + x * cos + z * sin,
+                position.y,
+                body.pivot_z - x * sin + z * cos,
+            );
+            let turned = Vector3::new(
+                orientation.x,
+                wrap_angle((orientation.y.to_radians()) + delta).to_degrees(),
+                orientation.z,
+            );
+            let _ = world.set_property(part, "Position", Value::Vector3(moved));
+            let _ = world.set_property(part, "Orientation", Value::Vector3(turned));
+        }
+        true
+    }
+
+    /// How fast the character `id` drives is rising (up positive), in studs
+    /// a second, while it's in the air after a jump or off an edge; `None`
+    /// on the ground, before its first step, or while it isn't moved.
+    pub fn in_air(&self, id: InstanceId) -> Option<f32> {
+        self.falls
+            .get(&id)
+            .filter(|fall| !fall.grounded && fall.airborne)
+            .map(|fall| fall.velocity)
     }
 
     /// The controllers that landed since the last call, each with how fast
@@ -432,7 +557,8 @@ impl Controllers {
     /// to its seat.
     pub fn keep_kinematic(&self, world: &mut World) {
         for id in controllers(world) {
-            if self.seated.contains_key(&id) {
+            // A dead character (Phase 46) is left to physics.
+            if self.seated.contains_key(&id) || is_dead(world, id) {
                 continue;
             }
             for part in parts_of(world, id) {
@@ -664,6 +790,43 @@ fn speed_of(world: &World, id: InstanceId, run: bool) -> f32 {
         "WalkSpeed"
     };
     number(world, id, name).unwrap_or(0.0).max(0.0)
+}
+
+fn flag(world: &World, id: InstanceId, name: &str) -> bool {
+    world
+        .get(id)
+        .and_then(|instance| instance.property(name))
+        .and_then(Value::as_bool)
+        == Some(true)
+}
+
+/// `MoveDirection` across the ground, at most 1 long, or `None` when it's
+/// (nearly) zero.
+fn move_direction(world: &World, id: InstanceId) -> Option<(f32, f32)> {
+    let direction = world.get(id)?.property("MoveDirection")?.as_vector3()?;
+    let (x, z) = (direction.x, direction.z);
+    let length = x.hypot(z);
+    if !length.is_finite() || length < 1e-4 {
+        return None;
+    }
+    let scale = 1.0 / length.max(1.0);
+    Some((x * scale, z * scale))
+}
+
+/// Whether `Movement` is [`DEAD`], which the Humanoid sets as its
+/// character dies.
+fn is_dead(world: &World, id: InstanceId) -> bool {
+    world
+        .get(id)
+        .and_then(|instance| instance.property("Movement"))
+        .and_then(Value::as_str)
+        .is_some_and(|name| name.eq_ignore_ascii_case(DEAD))
+}
+
+/// An angle in radians, from -π to π.
+fn wrap_angle(angle: f32) -> f32 {
+    let turn = std::f32::consts::TAU;
+    angle - turn * ((angle + std::f32::consts::PI) / turn).floor()
 }
 
 /// True when a script or block set `Jump`. Sets it back to false.

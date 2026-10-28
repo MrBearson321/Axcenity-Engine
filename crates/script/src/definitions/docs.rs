@@ -1897,6 +1897,36 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "True while the character sits on a Seat (its Movement reads \"Seated\"). Set it false to stand the character up a little in front of the seat, as Jump does. Setting it true does nothing; use `seat:Sit(controller)`.",
     ),
     (
+        ClassName::ThirdPersonController,
+        "MoveDirection",
+        "Where the character walks while no move key is held for it, across the ground (Y is ignored); a length under 1 walks that much slower. A controller that doesn't receive input (an NPC's) walks it too. Humanoid:Move and MoveTo set it.",
+    ),
+    (
+        ClassName::ThirdPersonController,
+        "PlatformStand",
+        "If true, the controller neither moves nor jumps the character; it stays where it is until this is false again.",
+    ),
+    (
+        ClassName::ThirdPersonController,
+        "AutoRotate",
+        "If true, the character turns about the middle of its body to face the way it walks (a first-person one, the way the camera looks). It's taken to face -Z when Play starts.",
+    ),
+    (
+        ClassName::FirstPersonController,
+        "MoveDirection",
+        "Where the character walks while no move key is held for it, across the ground (Y is ignored); a length under 1 walks that much slower. A controller that doesn't receive input (an NPC's) walks it too. Humanoid:Move and MoveTo set it.",
+    ),
+    (
+        ClassName::FirstPersonController,
+        "PlatformStand",
+        "If true, the controller neither moves nor jumps the character; it stays where it is until this is false again.",
+    ),
+    (
+        ClassName::FirstPersonController,
+        "AutoRotate",
+        "If true, the character turns about the middle of its body to face the way it walks (a first-person one, the way the camera looks). It's taken to face -Z when Play starts.",
+    ),
+    (
         ClassName::Seat,
         "Occupant",
         "The character controller sitting on the seat, or nil. Read-only: `seat:Sit(controller)` sits one, and `controller.Sit = false` stands it up.",
@@ -2132,6 +2162,16 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         "Health lost for each stud a second a landing is over FallDamageThreshold.",
     ),
     (
+        ClassName::Health,
+        "DisplayName",
+        "The name a game shows over the character. Empty is the Model's Name. A Humanoid's DisplayName is this.",
+    ),
+    (
+        ClassName::Health,
+        "HealthDisplayDistance",
+        "How far away, in studs, a game shows the character's health over it; 0 never. A Humanoid's HealthDisplayDistance is this.",
+    ),
+    (
         ClassName::ProximityPrompt,
         "ActionText",
         "What it does, such as \"Open\", shown in the prompt before ObjectText.",
@@ -2230,6 +2270,16 @@ pub(super) const PROPERTY_DOCS: &[(ClassName, &str, &str)] = &[
         ClassName::Inventory,
         "HotbarEnabled",
         "If false, the default hotbar doesn't show and its number keys, wheel and bumpers do nothing, for a game that makes its own. Drop and Primary still work.",
+    ),
+    (
+        ClassName::Humanoid,
+        "BreakJointsOnDeath",
+        "If true, dying turns off the WeldConstraints and joints in the character (not its Ragdolls') and unanchors its parts, so they fall apart.",
+    ),
+    (
+        ClassName::Humanoid,
+        "RagdollOnDeath",
+        "If true, dying turns on every Ragdoll in the character.",
     ),
     (
         ClassName::DamageZone,
@@ -3685,7 +3735,22 @@ pub(super) const EVENT_DOCS: &[(ClassName, &str, &str)] = &[
     (
         ClassName::Health,
         "Died",
-        "Fires once when Health reaches 0, after HealthChanged, however many hits landed that frame. Nothing else happens to the Model: scripts decide what dying does. It can fire again only after a script sets Health above 0.",
+        "Fires once when Health reaches 0, after HealthChanged, however many hits landed that frame. Nothing else happens to the Model unless it has a Humanoid: scripts decide what dying does. It can fire again only after a script sets Health above 0.",
+    ),
+    (
+        ClassName::Humanoid,
+        "MoveToFinished",
+        "Fires when a MoveTo ends. The handler gets true if the character got there, or false if it couldn't (no path on the navigation mesh, 8 seconds passed, or it died).",
+    ),
+    (
+        ClassName::Humanoid,
+        "StateChanged",
+        "Fires when the character's state changes. The handler gets the old and new `Enum.HumanoidStateType`: Running, Jumping, Freefall, Landed (for the frame it lands), Seated, Ragdoll or Dead. Swimming is reserved.",
+    ),
+    (
+        ClassName::Humanoid,
+        "Died",
+        "Fires once when the character's Health reaches 0, after the Health's own Died and StateChanged to Dead. By then the controller has stopped and RagdollOnDeath and BreakJointsOnDeath are done.",
     ),
     (
         ClassName::ProximityPrompt,
@@ -3900,6 +3965,9 @@ pub(super) fn class_doc(class: ClassName) -> &'static str {
         }
         ClassName::Inventory => {
             "The Tools a character carries, put in the character's Model: up to Capacity Tools as its children, in hotbar order, and Equipped, the one in hand. The default hotbar shows them; number keys, the mouse wheel (while one is in hand) and the controller bumpers pick one. Styled in CSS as `Inventory` (the bar), `Tool` (each slot, `Tool:checked` in hand) and `Tool::key` (its number). Save slots keep it with the world."
+        }
+        ClassName::Humanoid => {
+            "A Roblox-familiar front for a character, in its Model. It finds the Model's character controller, Health, Inventory and Animator, making each one that's missing during Play, and its WalkSpeed, RunSpeed, JumpHeight, Sit, PlatformStand, AutoRotate and MoveDirection are the controller's, and Health, MaxHealth, DisplayName and HealthDisplayDistance the Health's: there's one value, so the pieces work the same with or without it. It stores only BreakJointsOnDeath and RagdollOnDeath. Its Animator plays its Idle, Walk, Run, Jump and Fall states, if it has them."
         }
         ClassName::DamageZone => {
             "A Part that hurts: every Health whose Model has a part inside it loses DamagePerSecond a second, with the zone as the source. Anchored, half see-through and walked through (CanCollide off) by default. Everything a Part has, and DamagePerSecond."

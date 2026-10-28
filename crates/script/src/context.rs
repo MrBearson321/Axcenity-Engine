@@ -55,6 +55,8 @@ impl Context {
         lua.set_app_data(crate::Shatters::default());
         lua.set_app_data(crate::health::HealthEvents::default());
         lua.set_app_data(crate::tool::ToolChanges::default());
+        lua.set_app_data(crate::humanoid::Requests::default());
+        lua.set_app_data(crate::humanoid::States::default());
         lua.set_app_data(crate::DebugRays::default());
         lua.set_app_data(Assets::default());
         lua.set_app_data(Outbox::default());
@@ -132,6 +134,10 @@ impl Context {
         methods.extend(
             crate::tool::methods(&lua)
                 .expect("creating Tool methods only fails when out of memory"),
+        );
+        methods.extend(
+            crate::humanoid::methods(&lua)
+                .expect("creating Humanoid methods only fails when out of memory"),
         );
         methods.push((
             axcenity_core::ClassName::DataModel,
@@ -610,6 +616,50 @@ impl Context {
             Some(mut queue) => std::mem::take(&mut queue.0),
             None => Vec::new(),
         }
+    }
+
+    /// What this side's scripts asked Humanoids' walks since the last call.
+    pub fn take_humanoid_requests(&self) -> Vec<crate::humanoid::Request> {
+        match self.lua.app_data_mut::<crate::humanoid::Requests>() {
+            Some(mut requests) => std::mem::take(&mut requests.0),
+            None => Vec::new(),
+        }
+    }
+
+    /// Each Humanoid's state, for `GetState`.
+    pub fn set_humanoid_states(&self, states: &crate::humanoid::States) {
+        self.lua.set_app_data(states.clone());
+    }
+
+    /// Fires each Humanoid event on its Humanoid, skipping Humanoids that
+    /// are gone.
+    pub fn fire_humanoid_events(
+        &self,
+        world: &mut World,
+        humanoid_events: &[crate::humanoid::HumanoidEvent],
+    ) {
+        use crate::humanoid::HumanoidEvent;
+        with_world(&self.lua, world, || {
+            for &event in humanoid_events {
+                let humanoid = event.humanoid();
+                if !instance::world(&self.lua).is_ok_and(|world| world.contains(humanoid)) {
+                    continue;
+                }
+                let owner = events::Owner::Instance(humanoid);
+                match event {
+                    HumanoidEvent::MoveToFinished { reached, .. } => {
+                        events::fire(&self.lua, owner, "MoveToFinished", reached);
+                    }
+                    HumanoidEvent::StateChanged { old, new, .. } => {
+                        let args = crate::humanoid::state_items(old, new);
+                        events::fire(&self.lua, owner, "StateChanged", args);
+                    }
+                    HumanoidEvent::Died { .. } => {
+                        events::fire(&self.lua, owner, "Died", ());
+                    }
+                }
+            }
+        });
     }
 
     /// What this side's scripts did to Inventories since the last call.

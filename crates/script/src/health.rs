@@ -156,13 +156,13 @@ pub fn health_of(world: &World, id: InstanceId) -> Option<InstanceId> {
     None
 }
 
-fn push(lua: &Lua, events: Vec<HealthEvent>) {
+pub(crate) fn push(lua: &Lua, events: Vec<HealthEvent>) {
     if let Some(mut queue) = lua.app_data_mut::<HealthEvents>() {
         queue.0.extend(events);
     }
 }
 
-fn amount_arg(lua: &Lua, value: mlua::Value, call: &str) -> mlua::Result<f64> {
+pub(crate) fn amount_arg(lua: &Lua, value: mlua::Value, call: &str) -> mlua::Result<f64> {
     match value {
         mlua::Value::Integer(n) => Ok(n as f64),
         mlua::Value::Number(n) if n.is_finite() => Ok(n),

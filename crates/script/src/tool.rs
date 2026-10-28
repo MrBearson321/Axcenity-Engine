@@ -664,13 +664,13 @@ fn in_inventory(world: &World, tool: InstanceId) -> bool {
     false
 }
 
-fn changes_mut(lua: &Lua) -> mlua::Result<mlua::AppDataRefMut<'_, ToolChanges>> {
+pub(crate) fn changes_mut(lua: &Lua) -> mlua::Result<mlua::AppDataRefMut<'_, ToolChanges>> {
     lua.app_data_mut::<ToolChanges>()
         .ok_or_else(|| mlua::Error::runtime("tools aren't set up on this side"))
 }
 
 /// The Tool argument of `call`.
-fn tool_arg(lua: &Lua, value: mlua::Value, call: &str) -> mlua::Result<InstanceId> {
+pub(crate) fn tool_arg(lua: &Lua, value: mlua::Value, call: &str) -> mlua::Result<InstanceId> {
     let not_tool = |value: &mlua::Value| {
         mlua::Error::runtime(format!(
             "{call} needs a Tool, not {}",

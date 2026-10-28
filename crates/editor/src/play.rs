@@ -395,6 +395,9 @@ impl Session {
             if !landings.is_empty() {
                 self.scripts.fire_landed(&mut self.world, &landings);
             }
+            // Then Humanoids: MoveTo, states and dying (Phase 46).
+            self.scripts
+                .step_humanoids(&mut self.world, &self.characters, seconds);
             // Then navigation agents, toward their destinations.
             self.agents
                 .step(&mut self.world, &self.assets, seconds as f32);

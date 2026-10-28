@@ -1146,6 +1146,9 @@ impl ApplicationHandler for App {
                     .step(&mut self.world, &self.assets, motion, seconds);
                 fire_seated(&mut self.scripts, &mut self.world, &mut self.characters);
                 fire_landed(&mut self.scripts, &mut self.world, &mut self.characters);
+                //    Then Humanoids: MoveTo, states and dying (Phase 46).
+                self.scripts
+                    .step_humanoids(&mut self.world, &self.characters, f64::from(seconds));
                 // Then navigation agents, toward their destinations.
                 self.agents.step(&mut self.world, &self.assets, seconds);
                 for warning in self.agents.take_warnings() {
@@ -1426,6 +1429,8 @@ mod physics_tests;
 
 #[cfg(test)]
 mod health_tests;
+#[cfg(test)]
+mod humanoid_tests;
 #[cfg(test)]
 mod prompt_tests;
 #[cfg(test)]

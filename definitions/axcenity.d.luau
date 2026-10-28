@@ -950,6 +950,22 @@ declare extern type EnumProximityPromptExclusivityItems with
 	AlwaysShow: EnumProximityPromptExclusivity
 end
 
+--- One choice of `Enum.HumanoidStateType`.
+declare extern type EnumHumanoidStateType extends EnumItem with
+end
+
+--- The choices of `Enum.HumanoidStateType`.
+declare extern type EnumHumanoidStateTypeItems with
+	Running: EnumHumanoidStateType
+	Jumping: EnumHumanoidStateType
+	Freefall: EnumHumanoidStateType
+	Landed: EnumHumanoidStateType
+	Seated: EnumHumanoidStateType
+	Swimming: EnumHumanoidStateType
+	Ragdoll: EnumHumanoidStateType
+	Dead: EnumHumanoidStateType
+end
+
 --- Every enum, such as `Enum.Material`, `Enum.PartType` and `Enum.KeyCode`.
 declare extern type EnumLibrary with
 	Material: EnumMaterialItems
@@ -980,6 +996,7 @@ declare extern type EnumLibrary with
 	RaycastFilterType: EnumRaycastFilterTypeItems
 	FracturePattern: EnumFracturePatternItems
 	ProximityPromptExclusivity: EnumProximityPromptExclusivityItems
+	HumanoidStateType: EnumHumanoidStateTypeItems
 end
 
 -- Instances -----------------------------------------------------------------
@@ -2804,6 +2821,12 @@ declare extern type ThirdPersonController extends Instance with
 	CrouchSpeedScale: number
 	--- True while the character sits on a Seat (its Movement reads "Seated"). Set it false to stand the character up a little in front of the seat, as Jump does. Setting it true does nothing; use `seat:Sit(controller)`.
 	Sit: boolean
+	--- Where the character walks while no move key is held for it, across the ground (Y is ignored); a length under 1 walks that much slower. A controller that doesn't receive input (an NPC's) walks it too. Humanoid:Move and MoveTo set it.
+	MoveDirection: Vector3
+	--- If true, the controller neither moves nor jumps the character; it stays where it is until this is false again.
+	PlatformStand: boolean
+	--- If true, the character turns about the middle of its body to face the way it walks (a first-person one, the way the camera looks). It's taken to face -Z when Play starts.
+	AutoRotate: boolean
 	--- How far behind the character the camera sits during Play, in studs. The mouse wheel zooms it between CameraMinZoomDistance and CameraMaxZoomDistance and keeps the zoom here.
 	CameraDistance: number
 	--- The closest the mouse wheel zooms the camera, in studs (at least 0.5). Set it to CameraMaxZoomDistance to lock the distance.
@@ -2843,6 +2866,12 @@ declare extern type FirstPersonController extends Instance with
 	CrouchSpeedScale: number
 	--- True while the character sits on a Seat (its Movement reads "Seated"). Set it false to stand the character up a little in front of the seat, as Jump does. Setting it true does nothing; use `seat:Sit(controller)`.
 	Sit: boolean
+	--- Where the character walks while no move key is held for it, across the ground (Y is ignored); a length under 1 walks that much slower. A controller that doesn't receive input (an NPC's) walks it too. Humanoid:Move and MoveTo set it.
+	MoveDirection: Vector3
+	--- If true, the controller neither moves nor jumps the character; it stays where it is until this is false again.
+	PlatformStand: boolean
+	--- If true, the character turns about the middle of its body to face the way it walks (a first-person one, the way the camera looks). It's taken to face -Z when Play starts.
+	AutoRotate: boolean
 	--- How far above the character's feet its eyes are, in studs. The camera sits there during Play.
 	EyeHeight: number
 	--- Fires when the character sits down (true and the Seat) or stands up (false and the Seat it left).
@@ -3025,11 +3054,15 @@ declare extern type Health extends Instance with
 	FallDamageThreshold: number
 	--- Health lost for each stud a second a landing is over FallDamageThreshold.
 	FallDamageScale: number
+	--- The name a game shows over the character. Empty is the Model's Name. A Humanoid's DisplayName is this.
+	DisplayName: string
+	--- How far away, in studs, a game shows the character's health over it; 0 never. A Humanoid's HealthDisplayDistance is this.
+	HealthDisplayDistance: number
 	--- Fires whenever Health changes: damage, Heal, regeneration or a script setting it. The handler gets the new health and the old.
 	HealthChanged: Signal
 	--- Fires when it takes damage, after HealthChanged. The handler gets how much health it lost and what did it: the `source` given to TakeDamage, the DamageZone, or nil (a fall, or no source).
 	Damaged: Signal
-	--- Fires once when Health reaches 0, after HealthChanged, however many hits landed that frame. Nothing else happens to the Model: scripts decide what dying does. It can fire again only after a script sets Health above 0.
+	--- Fires once when Health reaches 0, after HealthChanged, however many hits landed that frame. Nothing else happens to the Model unless it has a Humanoid: scripts decide what dying does. It can fire again only after a script sets Health above 0.
 	Died: Signal
 	[string]: any
 	--- Takes `amount` from Health (never below 0), unless it's Invulnerable or already dead. Fires HealthChanged, then Damaged with `amount` and `source`, then Died if it reached 0. Starts the RegenDelay wait again.
@@ -3140,6 +3173,59 @@ declare extern type Inventory extends Instance with
 	function Equip(self, tool: Tool): ()
 	--- Puts away the Tool in hand, if any, firing its Unequipped.
 	function UnequipAll(self): ()
+end
+
+--- A Roblox-familiar front for a character, in its Model. It finds the Model's character controller, Health, Inventory and Animator, making each one that's missing during Play, and its WalkSpeed, RunSpeed, JumpHeight, Sit, PlatformStand, AutoRotate and MoveDirection are the controller's, and Health, MaxHealth, DisplayName and HealthDisplayDistance the Health's: there's one value, so the pieces work the same with or without it. It stores only BreakJointsOnDeath and RagdollOnDeath. Its Animator plays its Idle, Walk, Run, Jump and Fall states, if it has them.
+declare extern type Humanoid extends Instance with
+	--- If true, dying turns off the WeldConstraints and joints in the character (not its Ragdolls') and unanchors its parts, so they fall apart.
+	BreakJointsOnDeath: boolean
+	--- If true, dying turns on every Ragdoll in the character.
+	RagdollOnDeath: boolean
+	--- Its controller's WalkSpeed.
+	WalkSpeed: number
+	--- Its controller's RunSpeed.
+	RunSpeed: number
+	--- Its controller's JumpHeight.
+	JumpHeight: number
+	--- Its controller's Sit.
+	Sit: boolean
+	--- Its controller's PlatformStand.
+	PlatformStand: boolean
+	--- Its controller's AutoRotate.
+	AutoRotate: boolean
+	--- Its controller's MoveDirection.
+	MoveDirection: Vector3
+	--- Its Health's Health; setting it fires HealthChanged (and Died at 0).
+	Health: number
+	--- Its Health's MaxHealth.
+	MaxHealth: number
+	--- Its Health's DisplayName.
+	DisplayName: string
+	--- Its Health's HealthDisplayDistance.
+	HealthDisplayDistance: number
+	--- Fires when a MoveTo ends. The handler gets true if the character got there, or false if it couldn't (no path on the navigation mesh, 8 seconds passed, or it died).
+	MoveToFinished: Signal
+	--- Fires when the character's state changes. The handler gets the old and new `Enum.HumanoidStateType`: Running, Jumping, Freefall, Landed (for the frame it lands), Seated, Ragdoll or Dead. Swimming is reserved.
+	StateChanged: Signal
+	--- Fires once when the character's Health reaches 0, after the Health's own Died and StateChanged to Dead. By then the controller has stopped and RagdollOnDeath and BreakJointsOnDeath are done.
+	Died: Signal
+	[string]: any
+	--- Walks the character to `position` along a path on the navigation mesh, by its controller's MoveDirection, and fires MoveToFinished(true) when it's there (within half a stud across the ground), or MoveToFinished(false) if there's no path, 8 seconds pass or it dies. With `part`, it walks to the place `position` was relative to the part, as the part moves. A new MoveTo, or Move, replaces it.
+	function MoveTo(self, position: Vector3, part: BasePart?): ()
+	--- Sets the controller's MoveDirection to `direction` across the ground (relative to where the camera looks if `relativeToCamera`, on the client), and stops any MoveTo. A zero vector stops.
+	function Move(self, direction: Vector3, relativeToCamera: boolean?): ()
+	--- Jumps once from the ground (the controller's Jump).
+	function Jump(self): ()
+	--- Its Health's TakeDamage(amount, source).
+	function TakeDamage(self, amount: number, source: Instance?): ()
+	--- Puts `tool` in the character's Inventory (an error if it's full) and in its hand.
+	function EquipTool(self, tool: Tool): ()
+	--- Puts away the Tool in hand (its Inventory's UnequipAll).
+	function UnequipTools(self): ()
+	--- The character's state, as of the last frame (Running before the first).
+	function GetState(self): EnumItem
+	--- Asks for a state: Running stands it up (off a Seat, out of PlatformStand, its Ragdolls off), Jumping jumps, Ragdoll turns its Ragdolls on, and Dead sets its Health to 0. The others follow the character and are an error.
+	function ChangeState(self, state: EnumItem): ()
 end
 
 --- Holds `Part0` and `Part1` together where they were when it was made (or enabled). Parts welded together move as one body, an assembly: they fall and tumble together, and an anchored part anchors the whole assembly. `part:GetConnectedParts()` and `part:GetRootPart()` follow welds. Setting a welded part's Position or CFrame moves that part alone, and the weld holds it where it lands.
@@ -3622,7 +3708,7 @@ declare function require(module: Instance): any
 --- Creates Instances.
 declare extern type InstanceLibrary with
 	--- Creates an Instance of this class with default properties and no parent. Set `Parent` to put it in the world.
-	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Seat") -> Seat) & ((className: "VehicleSeat") -> VehicleSeat) & ((className: "DamageZone") -> DamageZone) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ReflectionProbe") -> ReflectionProbe) & ((className: "LightProbeVolume") -> LightProbeVolume) & ((className: "Atmosphere") -> Atmosphere) & ((className: "Clouds") -> Clouds) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "VehicleWheel") -> VehicleWheel) & ((className: "Ragdoll") -> Ragdoll) & ((className: "Fracture") -> Fracture) & ((className: "Health") -> Health) & ((className: "ProximityPrompt") -> ProximityPrompt) & ((className: "ClickDetector") -> ClickDetector) & ((className: "Tool") -> Tool) & ((className: "Inventory") -> Inventory) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "HingeConstraint") -> HingeConstraint) & ((className: "BallSocketConstraint") -> BallSocketConstraint) & ((className: "PrismaticConstraint") -> PrismaticConstraint) & ((className: "CylindricalConstraint") -> CylindricalConstraint) & ((className: "SpringConstraint") -> SpringConstraint) & ((className: "RopeConstraint") -> RopeConstraint) & ((className: "RodConstraint") -> RodConstraint) & ((className: "LinearVelocity") -> LinearVelocity) & ((className: "AngularVelocity") -> AngularVelocity) & ((className: "VectorForce") -> VectorForce) & ((className: "Torque") -> Torque) & ((className: "AlignPosition") -> AlignPosition) & ((className: "AlignOrientation") -> AlignOrientation) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
+	new: ((className: "Part") -> Part) & ((className: "MeshPart") -> MeshPart) & ((className: "Seat") -> Seat) & ((className: "VehicleSeat") -> VehicleSeat) & ((className: "DamageZone") -> DamageZone) & ((className: "Script") -> Script) & ((className: "LocalScript") -> LocalScript) & ((className: "ModuleScript") -> ModuleScript) & ((className: "RemoteEvent") -> RemoteEvent) & ((className: "RemoteFunction") -> RemoteFunction) & ((className: "BindableEvent") -> BindableEvent) & ((className: "BindableFunction") -> BindableFunction) & ((className: "Model") -> Model) & ((className: "Folder") -> Folder) & ((className: "SurfaceAppearance") -> SurfaceAppearance) & ((className: "ScreenGui") -> ScreenGui) & ((className: "Frame") -> Frame) & ((className: "TextLabel") -> TextLabel) & ((className: "TextButton") -> TextButton) & ((className: "ImageLabel") -> ImageLabel) & ((className: "TextBox") -> TextBox) & ((className: "PageLayout") -> PageLayout) & ((className: "Table") -> Table) & ((className: "ScrollingFrame") -> ScrollingFrame) & ((className: "Slider") -> Slider) & ((className: "Toggle") -> Toggle) & ((className: "Dropdown") -> Dropdown) & ((className: "ProgressBar") -> ProgressBar) & ((className: "BillboardGui") -> BillboardGui) & ((className: "Sound") -> Sound) & ((className: "PointLight") -> PointLight) & ((className: "SpotLight") -> SpotLight) & ((className: "ReflectionProbe") -> ReflectionProbe) & ((className: "LightProbeVolume") -> LightProbeVolume) & ((className: "Atmosphere") -> Atmosphere) & ((className: "Clouds") -> Clouds) & ((className: "ParticleEmitter") -> ParticleEmitter) & ((className: "Animator") -> Animator) & ((className: "Animation") -> Animation) & ((className: "AnimationTrack") -> AnimationTrack) & ((className: "Terrain") -> Terrain) & ((className: "TerrainLayer") -> TerrainLayer) & ((className: "ThirdPersonController") -> ThirdPersonController) & ((className: "FirstPersonController") -> FirstPersonController) & ((className: "NavigationAgent") -> NavigationAgent) & ((className: "Checkpoint") -> Checkpoint) & ((className: "Camera") -> Camera) & ((className: "Attachment") -> Attachment) & ((className: "VehicleWheel") -> VehicleWheel) & ((className: "Ragdoll") -> Ragdoll) & ((className: "Fracture") -> Fracture) & ((className: "Health") -> Health) & ((className: "ProximityPrompt") -> ProximityPrompt) & ((className: "ClickDetector") -> ClickDetector) & ((className: "Tool") -> Tool) & ((className: "Inventory") -> Inventory) & ((className: "Humanoid") -> Humanoid) & ((className: "WeldConstraint") -> WeldConstraint) & ((className: "HingeConstraint") -> HingeConstraint) & ((className: "BallSocketConstraint") -> BallSocketConstraint) & ((className: "PrismaticConstraint") -> PrismaticConstraint) & ((className: "CylindricalConstraint") -> CylindricalConstraint) & ((className: "SpringConstraint") -> SpringConstraint) & ((className: "RopeConstraint") -> RopeConstraint) & ((className: "RodConstraint") -> RodConstraint) & ((className: "LinearVelocity") -> LinearVelocity) & ((className: "AngularVelocity") -> AngularVelocity) & ((className: "VectorForce") -> VectorForce) & ((className: "Torque") -> Torque) & ((className: "AlignPosition") -> AlignPosition) & ((className: "AlignOrientation") -> AlignOrientation) & ((className: "IntValue") -> IntValue) & ((className: "NumberValue") -> NumberValue) & ((className: "StringValue") -> StringValue) & ((className: "BoolValue") -> BoolValue) & ((className: "Vector3Value") -> Vector3Value) & ((className: "Color3Value") -> Color3Value) & ((className: "CFrameValue") -> CFrameValue) & ((className: "ObjectValue") -> ObjectValue) & ((className: string) -> Instance)
 end
 
 --- Creates Instances.

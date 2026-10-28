@@ -131,7 +131,15 @@ impl UserData for LuaInstance {
     }
 }
 
-fn get(lua: &Lua, id: InstanceId, key: &str) -> mlua::Result<mlua::Value> {
+pub(crate) fn get(lua: &Lua, id: InstanceId, key: &str) -> mlua::Result<mlua::Value> {
+    // A Humanoid's fields are its pieces' (Phase 46).
+    if crate::humanoid::is_field(key)
+        && world(lua)?
+            .get(id)
+            .is_some_and(|instance| instance.class() == ClassName::Humanoid)
+    {
+        return crate::humanoid::get(lua, id, key);
+    }
     let world = world(lua)?;
     let instance = world.get(id).ok_or_else(destroyed)?;
     match key {
@@ -213,7 +221,7 @@ fn get(lua: &Lua, id: InstanceId, key: &str) -> mlua::Result<mlua::Value> {
     Err(not_a_member(&world, id, key))
 }
 
-fn set(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> mlua::Result<()> {
+pub(crate) fn set(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> mlua::Result<()> {
     // `OnInvoke` and `OnServerInvoke` hold a function, not a property.
     let class = world(lua)?.get(id).map(|instance| instance.class());
     if let Some(class) = class
@@ -295,6 +303,9 @@ fn set(lua: &Lua, id: InstanceId, key: &str, value: mlua::Value) -> mlua::Result
             )))
         }
         "Health" if class == Some(ClassName::Health) => crate::health::set(lua, id, value),
+        key if class == Some(ClassName::Humanoid) && crate::humanoid::is_field(key) => {
+            crate::humanoid::set(lua, id, key, value)
+        }
         "Equipped" if class == Some(ClassName::Inventory) => {
             Err(mlua::Error::runtime(crate::tool::EQUIPPED_READ_ONLY))
         }

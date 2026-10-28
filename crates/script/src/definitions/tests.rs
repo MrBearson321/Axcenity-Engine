@@ -317,6 +317,11 @@ fn described_fields_and_methods_exist() {
         (ClassName::Health, "Instance.new('Health')"),
         (ClassName::Inventory, "Instance.new('Inventory')"),
         (ClassName::Tool, "Instance.new('Tool')"),
+        // Its fields are its Model's pieces'.
+        (
+            ClassName::Humanoid,
+            "(function() local h = Instance.new('Humanoid'); h.Parent = Instance.new('Model'); return h end)()",
+        ),
         (ClassName::DamageZone, "Instance.new('DamageZone')"),
         (ClassName::Animation, "Instance.new('Animation')"),
         (

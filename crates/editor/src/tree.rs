@@ -82,6 +82,12 @@ pub enum Insertable {
     Tool,
     /// The Tools the selected character carries.
     Inventory,
+    /// A Roblox-familiar front for the selected character's pieces.
+    Humanoid,
+    /// A ready character: a Model of six parts with a Humanoid, a
+    /// third-person controller, Health, Inventory and Animator (see
+    /// [`character`]).
+    Character,
     /// A ready-to-drive car: a Model with a chassis, a VehicleSeat welded
     /// on it, four VehicleWheels and a cylinder for each (see [`vehicle`]).
     Vehicle,
@@ -161,6 +167,8 @@ impl Insertable {
     /// part to click.
     pub const INTERACTION: [Insertable; 2] =
         [Insertable::ProximityPrompt, Insertable::ClickDetector];
+    /// A ready character, and the Humanoid that fronts one's pieces.
+    pub const HUMANOIDS: [Insertable; 2] = [Insertable::Character, Insertable::Humanoid];
     /// Tools, and the Inventory a character carries them in.
     pub const TOOLS: [Insertable; 2] = [Insertable::Tool, Insertable::Inventory];
     /// A ready car, and the pieces to build one's own.
@@ -243,6 +251,8 @@ impl Insertable {
             Insertable::ClickDetector => "Click Detector",
             Insertable::Tool => "Tool",
             Insertable::Inventory => "Inventory",
+            Insertable::Humanoid => "Humanoid",
+            Insertable::Character => "Character",
             Insertable::Vehicle => "Vehicle",
             Insertable::VehicleSeat => "Vehicle Seat",
             Insertable::VehicleWheel => "Wheel",
@@ -299,6 +309,8 @@ impl Insertable {
             Insertable::ClickDetector => ClassName::ClickDetector,
             Insertable::Tool => ClassName::Tool,
             Insertable::Inventory => ClassName::Inventory,
+            Insertable::Humanoid => ClassName::Humanoid,
+            Insertable::Character => ClassName::Model,
             Insertable::Vehicle => ClassName::Model,
             Insertable::VehicleSeat => ClassName::VehicleSeat,
             Insertable::VehicleWheel => ClassName::VehicleWheel,
@@ -529,6 +541,89 @@ pub fn vehicle(world: &mut World, position: Vector3) -> InstanceId {
         );
     }
     car
+}
+
+/// The Animator states Insert > Character's state machine has, each with an
+/// empty clip to replace with the character's own.
+pub const CHARACTER_STATES: [&str; 6] = ["Idle", "Walk", "Run", "Jump", "Fall", "Sit"];
+
+/// The character Insert > Character makes, with no parent yet: a Model
+/// named Character whose feet are at `position`, facing -Z, of six parts
+/// (Torso, Head, Left Arm, Right Arm, Left Leg and Right Leg, 5 studs tall)
+/// welded to the Torso, with a Humanoid, a ThirdPersonController, a Health,
+/// an Inventory and an Animator playing `state_machine` (empty for none).
+pub fn character(world: &mut World, position: Vector3, state_machine: &str) -> InstanceId {
+    let model = world.create(ClassName::Model).expect("not a service");
+    world.set_name(model, "Character").expect("just made");
+    let mut make = |class, name: &str, parent: InstanceId, properties: Vec<(&str, Value)>| {
+        let id = world.create(class).expect("not a service");
+        world.set_name(id, name).expect("just made");
+        for (property, value) in properties {
+            world
+                .set_property(id, property, value)
+                .expect("the class has it");
+        }
+        world.set_parent(id, Some(parent)).expect("a new Model");
+        id
+    };
+    let skin = Color3::new(0.96, 0.8, 0.41);
+    let shirt = Color3::new(0.29, 0.45, 0.78);
+    let trousers = Color3::new(0.2, 0.25, 0.35);
+    let part = |size: (f32, f32, f32), at: (f32, f32, f32), color: Color3| {
+        vec![
+            ("Size", Value::Vector3(Vector3::new(size.0, size.1, size.2))),
+            (
+                "Position",
+                Value::Vector3(Vector3::new(
+                    position.x + at.0,
+                    position.y + at.1,
+                    position.z + at.2,
+                )),
+            ),
+            ("Color", Value::Color3(color)),
+        ]
+    };
+    let torso = make(
+        ClassName::Part,
+        "Torso",
+        model,
+        part((2.0, 2.0, 1.0), (0.0, 3.0, 0.0), shirt),
+    );
+    let limbs = [
+        ("Head", (2.0, 1.0, 1.0), (0.0, 4.5, 0.0), skin),
+        ("Left Arm", (1.0, 2.0, 1.0), (-1.5, 3.0, 0.0), skin),
+        ("Right Arm", (1.0, 2.0, 1.0), (1.5, 3.0, 0.0), skin),
+        ("Left Leg", (1.0, 2.0, 1.0), (-0.5, 1.0, 0.0), trousers),
+        ("Right Leg", (1.0, 2.0, 1.0), (0.5, 1.0, 0.0), trousers),
+    ];
+    for (name, size, at, color) in limbs {
+        let limb = make(ClassName::Part, name, model, part(size, at, color));
+        make(
+            ClassName::WeldConstraint,
+            &format!("{name}Weld"),
+            torso,
+            vec![
+                ("Part0", Value::Instance(Some(torso))),
+                ("Part1", Value::Instance(Some(limb))),
+            ],
+        );
+    }
+    make(ClassName::Humanoid, "Humanoid", model, Vec::new());
+    make(
+        ClassName::ThirdPersonController,
+        "ThirdPersonController",
+        model,
+        Vec::new(),
+    );
+    make(ClassName::Health, "Health", model, Vec::new());
+    make(ClassName::Inventory, "Inventory", model, Vec::new());
+    make(
+        ClassName::Animator,
+        "Animator",
+        model,
+        vec![("StateMachine", Value::String(state_machine.to_owned()))],
+    );
+    model
 }
 
 /// The Tool Insert > Tool makes, with no parent yet: a Tool with a Handle
@@ -972,6 +1067,65 @@ pub fn can_be_prefab(world: &World, id: InstanceId) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn insert_character_makes_a_welded_five_stud_rig_with_every_piece() {
+        let mut world = World::new();
+        let at = Vector3::new(4.0, 0.0, -2.0);
+        let path = "assets/animations/Character/Character.statemachine.json";
+        let model = character(&mut world, at, path);
+        let names: Vec<(ClassName, String)> = world
+            .get(model)
+            .unwrap()
+            .children()
+            .iter()
+            .map(|&id| {
+                let child = world.get(id).unwrap();
+                (child.class(), child.name().to_owned())
+            })
+            .collect();
+        for class in [
+            ClassName::Humanoid,
+            ClassName::ThirdPersonController,
+            ClassName::Health,
+            ClassName::Inventory,
+            ClassName::Animator,
+        ] {
+            assert_eq!(
+                names.iter().filter(|(c, _)| *c == class).count(),
+                1,
+                "{class}"
+            );
+        }
+        let parts: Vec<InstanceId> = world
+            .descendants(model)
+            .into_iter()
+            .filter(|&id| world.get(id).unwrap().class() == ClassName::Part)
+            .collect();
+        assert_eq!(parts.len(), 6);
+        // A part named Right Arm, where Tools are held.
+        assert!(world.find_first_child(model, "Right Arm").is_some());
+        let (mut low, mut high) = (f32::INFINITY, f32::NEG_INFINITY);
+        for &part in &parts {
+            let instance = world.get(part).unwrap();
+            let position = instance.property("Position").unwrap().as_vector3().unwrap();
+            let size = instance.property("Size").unwrap().as_vector3().unwrap();
+            low = low.min(position.y - size.y / 2.0);
+            high = high.max(position.y + size.y / 2.0);
+        }
+        assert_eq!((low, high), (0.0, 5.0));
+        let welds = world
+            .descendants(model)
+            .into_iter()
+            .filter(|&id| world.get(id).unwrap().class() == ClassName::WeldConstraint)
+            .count();
+        assert_eq!(welds, 5);
+        let animator = world.find_first_child(model, "Animator").unwrap();
+        assert_eq!(
+            world.get(animator).unwrap().property("StateMachine"),
+            Some(&Value::String(path.to_owned()))
+        );
+    }
 
     fn child(world: &mut World, parent: InstanceId, class: ClassName, name: &str) -> InstanceId {
         let id = world.create(class).unwrap();
